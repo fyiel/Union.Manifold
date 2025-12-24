@@ -98,9 +98,20 @@ export const ErrorTypes = {
 }
 
 export function proxyImageUrl(imageUrl: string): string {
-  if (!imageUrl || imageUrl.startsWith("/") || imageUrl.startsWith("data:") || imageUrl.startsWith("blob:")) {
+  if (!imageUrl) return imageUrl
+  // already a relative path or data/blob URL served by the app
+  if (imageUrl.startsWith("/") || imageUrl.startsWith("data:") || imageUrl.startsWith("blob:") || imageUrl.startsWith("file://")) {
     return imageUrl
   }
+
+  // detect absolute Windows paths like C:\ or UNC paths starting with \\ and convert to file:// URL
+  try {
+    if (/^[A-Za-z]:\\\\/.test(imageUrl) || imageUrl.startsWith('\\\\')) {
+      // normalize backslashes to forward slashes and ensure proper file:// prefix
+      const normalized = imageUrl.replace(/\\\\/g, '/').replace(/\\/g, '/')
+      return `file://${encodeURI(normalized)}`
+    }
+  } catch {}
 
   try {
     const encodedUrl = encodeURIComponent(imageUrl)

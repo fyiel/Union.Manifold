@@ -40,6 +40,21 @@ export function GameDetailPage() {
         setGame(data)
         setSelectedImage(data.splash || data.image)
       } catch (err) {
+        // Try fallback: ask main process for installed manifest
+        try {
+          if (window.ucDownloads?.getInstalled) {
+            const manifest = await window.ucDownloads.getInstalled(appid)
+            if (manifest && manifest.metadata) {
+              // prefer a locally stored image when offline
+              const meta = manifest.metadata
+              const localImg = meta.localImage || meta.image
+              setGame(meta)
+              setSelectedImage(localImg || meta.splash || meta.image)
+              setError(null)
+              return
+            }
+          }
+        } catch {}
         setError(err instanceof Error ? err.message : "Failed to load game")
       } finally {
         setLoading(false)

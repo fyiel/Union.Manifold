@@ -89,6 +89,8 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(downloads))
   }, [downloads])
 
+  // Installed metadata is stored by the main process as a file inside the installed folder.
+
   useEffect(() => {
     if (!window.ucDownloads?.onUpdate) return
     return window.ucDownloads.onUpdate((update: DownloadUpdate) => {
@@ -119,7 +121,19 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
     })
   }, [])
 
+  // The main process writes installed manifests; renderer can call `window.ucDownloads.listInstalled()` when needed.
+
   const startGameDownload = useCallback(async (game: Game) => {
+    // save initial metadata to installing folder so it's available offline even before completion
+    try {
+      if (window.ucDownloads?.saveInstalledMetadata) {
+        // pass the full game object as metadata
+        await window.ucDownloads.saveInstalledMetadata(game.appid, game)
+      }
+    } catch (err) {
+      // ignore IPC failures
+    }
+
     const downloadToken = await requestDownloadToken(game.appid)
     if (hasCookieConsent()) {
       addDownloadedGameToHistory(game.appid)
@@ -136,7 +150,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
       }
       links = [linksResult.redirectUrl]
     } else {
-      const preferredHost = getPreferredDownloadHost()
+      const preferredHost = await getPreferredDownloadHost()
       const selected = selectHost(linksResult.hosts, preferredHost)
       links = selected.links
       selectedHost = selected.host || "rootz"
@@ -149,13 +163,20 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
     const baseName = safeGameFilename(game.name)
     const host = selectedHost
     const resolvedLinks = await Promise.all(links.map(async (link) => resolveDownloadUrl(host, link)))
-    const unresolved = resolvedLinks.find((entry) => !entry.resolved || !entry.url)
-    if (unresolved) {
+    // If host is rootz we need all links to be resolved via the Rootz API; for other hosts
+    // be more permissive and only skip entries that have no usable URL.
+    const unresolved = resolvedLinks.find((entry) => !entry || !entry.url)
+    if (unresolved && host === 'rootz') {
       throw new Error("Unable to resolve Rootz download links. Check your Rootz API settings.")
     }
+    // Filter out any completely unusable entries (no `url`). Keep entries even if `resolved` is false.
+    const usableLinks = resolvedLinks.filter((entry) => entry && entry.url).map((e) => e as any)
+    if (!usableLinks.length) {
+      throw new Error("No usable download links are available for this title.")
+    }
 
-    for (let index = 0; index < resolvedLinks.length; index++) {
-      const resolved = resolvedLinks[index]
+    for (let index = 0; index < usableLinks.length; index++) {
+      const resolved = usableLinks[index]
       const filename =
         resolved.filename ||
         inferFilenameFromUrl(

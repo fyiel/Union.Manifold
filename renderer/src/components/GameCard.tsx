@@ -1,9 +1,10 @@
-import { memo, useCallback, useState } from "react"
+import { memo, useCallback, useEffect, useState } from "react"
 import { Link } from "react-router-dom"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Calendar, HardDrive, Download, Eye, Wifi, Flame } from "lucide-react"
 import { formatNumber, hasOnlineMode, proxyImageUrl } from "@/lib/utils"
+import { useDownloads } from "@/context/downloads-context"
 import { apiUrl } from "@/lib/api"
 
 interface GameCardProps {
@@ -45,6 +46,37 @@ export const GameCard = memo(function GameCard({
   const isNSFW = game.genres.some((genre) => genre.toLowerCase() === "nsfw")
   const displayStats = initialStats || hoveredStats || { downloads: 0, views: 0 }
 
+  const { openPath } = useDownloads()
+  const [installedPath, setInstalledPath] = useState<string | null>(null)
+  const [previewImage, setPreviewImage] = useState<string | null>(null)
+
+  useEffect(() => {
+    let mounted = true
+    ;(async () => {
+      try {
+        if (window.ucDownloads?.getInstalled) {
+          const manifest = await window.ucDownloads.getInstalled(game.appid)
+          if (!mounted) return
+          if (manifest && manifest.metadata) {
+            // if manifest saved a local image, prefer it for display when offline
+            const localImg = manifest.metadata.localImage || manifest.metadata.image
+            if (localImg) {
+              setPreviewImage(localImg)
+            }
+          }
+          if (manifest && Array.isArray(manifest.files) && manifest.files.length) {
+            // prefer first file path for Open action
+            setInstalledPath(manifest.files[0].path || null)
+          }
+        }
+      } catch {}
+      if (mounted) setInstalledPath(null)
+    })()
+    return () => {
+      mounted = false
+    }
+  }, [game.appid])
+
   const fetchStatsOnHover = useCallback(async () => {
     if (initialStats && (initialStats.downloads > 0 || initialStats.views > 0)) {
       return
@@ -82,7 +114,7 @@ export const GameCard = memo(function GameCard({
         >
           <div className={`relative overflow-hidden ${isCompact ? "aspect-[4/5]" : "aspect-[3/4]"}`}>
             <img
-              src={proxyImageUrl(game.image) || "/banner.png"}
+              src={proxyImageUrl((typeof navigator !== 'undefined' && !navigator.onLine && previewImage) ? previewImage : game.image) || "/banner.png"}
               alt={game.name}
               className={`h-full w-full object-cover transition-all duration-500 group-hover:scale-105 group-hover:brightness-110 ${
                 isNSFW ? "blur-md" : ""
@@ -139,6 +171,20 @@ export const GameCard = memo(function GameCard({
                     <span className="font-semibold">{formatNumber(displayStats.downloads)}</span>
                   </div>
                 </div>
+                {installedPath && (
+                  <div className="mt-2 flex justify-end">
+                    <button
+                      onClick={(e) => {
+                        e.preventDefault()
+                        if (installedPath) openPath(installedPath)
+                      }}
+                      className="inline-flex items-center gap-2 rounded-full bg-primary/20 px-3 py-1 text-xs text-white hover:bg-primary/30"
+                    >
+                      <HardDrive className="h-4 w-4 text-white" />
+                      Open
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           </div>

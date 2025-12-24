@@ -1,6 +1,7 @@
 const { app, BrowserWindow, shell, ipcMain, dialog } = require('electron')
 const path = require('node:path')
 const fs = require('node:fs')
+const crypto = require('node:crypto')
 
 const isDev = !app.isPackaged
 const pendingDownloads = []
@@ -8,6 +9,8 @@ const activeDownloads = new Map()
 const downloadDirName = 'UnionCrax.Direct'
 const installingDirName = 'installing'
 const installedDirName = 'installed'
+const INSTALLED_MANIFEST = 'installed.json'
+const INSTALLED_INDEX = 'installed-index.json'
 const settingsPath = path.join(app.getPath('userData'), 'settings.json')
 let cachedSettings = null
 
@@ -93,6 +96,122 @@ function ensureSubdir(root, folder) {
   const target = path.join(root, folder)
   if (!fs.existsSync(target)) fs.mkdirSync(target, { recursive: true })
   return target
+}
+
+function readJsonFile(filePath) {
+  try {
+    const raw = fs.readFileSync(filePath, 'utf8')
+    return JSON.parse(raw)
+  } catch {
+    return null
+  }
+}
+
+function downloadToFile(url, destPath) {
+  return new Promise((resolve) => {
+    try {
+      const proto = url.startsWith('https') ? require('https') : require('http')
+      const req = proto.get(url, (res) => {
+        if (res.statusCode && res.statusCode >= 400) {
+          resolve(false)
+          return
+        }
+        const file = fs.createWriteStream(destPath)
+        res.pipe(file)
+        file.on('finish', () => file.close(() => resolve(true)))
+        file.on('error', () => resolve(false))
+      })
+      req.on('error', () => resolve(false))
+    } catch (err) {
+      resolve(false)
+    }
+  })
+}
+
+function updateInstalledIndex(installedRoot) {
+  try {
+    if (!fs.existsSync(installedRoot)) return
+    const entries = fs.readdirSync(installedRoot, { withFileTypes: true })
+    const index = []
+    for (const dirent of entries) {
+      if (!dirent.isDirectory()) continue
+      const folder = path.join(installedRoot, dirent.name)
+      const manifestPath = path.join(folder, INSTALLED_MANIFEST)
+      const manifest = readJsonFile(manifestPath)
+      if (manifest && manifest.appid) {
+        index.push({ appid: manifest.appid, name: manifest.name || dirent.name, folder: dirent.name, manifestPath: manifestPath })
+      }
+    }
+    uc_writeJsonSync(path.join(installedRoot, INSTALLED_INDEX), index)
+  } catch (err) {
+    console.error('[UC] updateInstalledIndex failed', err)
+  }
+}
+
+function uc_writeJsonSync(filePath, data) {
+  try {
+    fs.writeFileSync(filePath, JSON.stringify(data, null, 2))
+    return true
+  } catch (err) {
+    console.error('[UC] Failed to write json', filePath, err)
+    return false
+  }
+}
+
+function updateInstalledManifest(installedFolder, metadata, fileEntry) {
+  try {
+    const manifestPath = path.join(installedFolder, INSTALLED_MANIFEST)
+    let manifest = readJsonFile(manifestPath) || {}
+    manifest.appid = metadata.appid || manifest.appid
+    manifest.name = metadata.name || manifest.name
+    // keep a full copy of metadata for offline viewing
+    manifest.metadata = metadata || manifest.metadata
+    // compute and store a hash of the metadata for integrity/versioning
+    try {
+      if (manifest.metadata) {
+        manifest.metadataHash = computeObjectHash(manifest.metadata) || manifest.metadataHash
+      }
+    } catch (e) {
+      // ignore
+    }
+    manifest.files = manifest.files || []
+    if (fileEntry) {
+      const exists = manifest.files.find((f) => f.path === fileEntry.path)
+      if (!exists) manifest.files.push(fileEntry)
+    }
+    manifest.installedAt = manifest.installedAt || Date.now()
+    uc_writeJsonSync(manifestPath, manifest)
+    // update root installed index
+    try {
+      const installedRoot = path.dirname(installedFolder)
+      updateInstalledIndex(installedRoot)
+    } catch (e) {}
+  } catch (err) {
+    console.error('[UC] Failed to update installed manifest', err)
+  }
+}
+
+function computeFileChecksum(filePath) {
+  return new Promise((resolve) => {
+    try {
+      const hash = crypto.createHash('sha256')
+      const stream = fs.createReadStream(filePath)
+      stream.on('error', () => resolve(null))
+      stream.on('data', (chunk) => hash.update(chunk))
+      stream.on('end', () => resolve(hash.digest('hex')))
+    } catch (err) {
+      resolve(null)
+    }
+  })
+}
+
+function computeObjectHash(obj) {
+  try {
+    const raw = JSON.stringify(obj || {})
+    return crypto.createHash('sha256').update(raw).digest('hex')
+  } catch {
+    return null
+  }
 }
 
 function resolveUniquePath(dir, filename) {
@@ -317,6 +436,31 @@ function createWindow() {
         } catch (error) {
           console.error('[UC] Failed to move completed download:', error)
         }
+        // update installed manifest in the installed folder
+        try {
+          const metadata = { appid: entry?.appid || null, name: entry?.gameName || null }
+          // compute checksum of the file
+          ;(async () => {
+            try {
+              const checksum = finalPath ? await computeFileChecksum(finalPath) : null
+              const stats = finalPath && fs.existsSync(finalPath) ? fs.statSync(finalPath) : null
+              const fileEntry = {
+                path: finalPath,
+                name: path.basename(finalPath),
+                size: stats ? stats.size : 0,
+                checksum: checksum,
+                addedAt: Date.now(),
+              }
+              // If we have metadata saved earlier in installing folder, prefer that
+              // updateInstalledManifest will merge metadata and file entries
+              updateInstalledManifest(installedRoot, metadata, fileEntry)
+            } catch (err) {
+              console.error('[UC] Failed to write installed manifest (async):', err)
+            }
+          })()
+        } catch (err) {
+          console.error('[UC] Failed to write installed manifest:', err)
+        }
       }
       sendDownloadUpdate(win, {
         downloadId,
@@ -419,4 +563,102 @@ ipcMain.handle('uc:download-usage', async (_event, targetPath) => {
   const resolvedPath = typeof targetPath === 'string' && targetPath ? targetPath : ensureDownloadDir()
   const sizeBytes = await getDirectorySize(resolvedPath)
   return { ok: true, sizeBytes, path: resolvedPath }
+})
+
+// Save initial metadata for an installing download (renderer may call this when starting)
+ipcMain.handle('uc:installed-save', (_event, appid, metadata) => {
+  try {
+    const downloadRoot = ensureDownloadDir()
+    const folderName = safeFolderName((metadata && (metadata.name || metadata.gameName)) || appid || 'unknown')
+    const installingRoot = ensureSubdir(path.join(downloadRoot, installingDirName), folderName)
+    const manifestPath = path.join(installingRoot, INSTALLED_MANIFEST)
+    const manifest = readJsonFile(manifestPath) || {}
+    manifest.appid = appid
+    manifest.name = metadata?.name || metadata?.gameName || manifest.name
+    manifest.metadata = metadata
+    try {
+      manifest.metadataHash = computeObjectHash(metadata)
+    } catch {}
+    // mark as pending install
+    manifest.installedAt = manifest.installedAt || null
+    uc_writeJsonSync(manifestPath, manifest)
+    // attempt to download and save the remote image locally into the installing folder
+    (async () => {
+      try {
+        if (metadata && metadata.image && typeof metadata.image === 'string' && /^https?:\/\//.test(metadata.image)) {
+          const ext = (metadata.image.split('?')[0].split('.').pop() || 'png').slice(0, 8)
+          const imageName = `image.${ext}`
+          const imagePath = path.join(installingRoot, imageName)
+          const ok = await downloadToFile(metadata.image, imagePath)
+          if (ok) {
+            const checksum = await computeFileChecksum(imagePath)
+            // update manifest with local image path
+            const m = readJsonFile(manifestPath) || {}
+            m.metadata = m.metadata || {}
+            m.metadata.localImage = imagePath
+            if (checksum) m.metadata.imageChecksum = checksum
+            uc_writeJsonSync(manifestPath, m)
+            // also update root installed index if present
+            try { updateInstalledIndex(path.join(downloadRoot, installedDirName)) } catch {}
+          }
+        }
+      } catch (err) {
+        // ignore download failures
+      }
+    })()
+    return { ok: true }
+  } catch (err) {
+    console.error('[UC] installed-save failed', err)
+    return { ok: false }
+  }
+})
+
+// List installed manifests from installed folder
+ipcMain.handle('uc:installed-list', (_event) => {
+  try {
+    const downloadRoot = ensureDownloadDir()
+    const root = path.join(downloadRoot, installedDirName)
+    if (!fs.existsSync(root)) return []
+    const entries = fs.readdirSync(root, { withFileTypes: true })
+    const manifests = []
+    for (const dirent of entries) {
+      if (!dirent.isDirectory()) continue
+      const folder = path.join(root, dirent.name)
+      const manifestPath = path.join(folder, INSTALLED_MANIFEST)
+      const manifest = readJsonFile(manifestPath)
+      if (manifest && manifest.appid) {
+        manifests.push(manifest)
+      } else {
+        // try to infer from files
+        const files = fs.readdirSync(folder).filter((f) => f !== INSTALLED_MANIFEST)
+        if (files.length) {
+          manifests.push({ appid: dirent.name, name: dirent.name, files: files.map((f) => ({ name: f })) })
+        }
+      }
+    }
+    return manifests
+  } catch (err) {
+    console.error('[UC] installed-list failed', err)
+    return []
+  }
+})
+
+ipcMain.handle('uc:installed-get', (_event, appid) => {
+  try {
+    const downloadRoot = ensureDownloadDir()
+    const root = path.join(downloadRoot, installedDirName)
+    if (!fs.existsSync(root)) return null
+    const entries = fs.readdirSync(root, { withFileTypes: true })
+    for (const dirent of entries) {
+      if (!dirent.isDirectory()) continue
+      const folder = path.join(root, dirent.name)
+      const manifestPath = path.join(folder, INSTALLED_MANIFEST)
+      const manifest = readJsonFile(manifestPath)
+      if (manifest && manifest.appid === appid) return manifest
+    }
+    return null
+  } catch (err) {
+    console.error('[UC] installed-get failed', err)
+    return null
+  }
 })

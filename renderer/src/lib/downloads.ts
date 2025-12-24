@@ -21,7 +21,7 @@ const ROOTZ_API_BASE_STORAGE_KEY = "uc_direct_rootz_api_base"
 const ROOTZ_API_KEY_STORAGE_KEY = "uc_direct_rootz_api_key"
 const DOWNLOAD_HOST_STORAGE_KEY = "uc_direct_download_host"
 const ROOTZ_SIGNED_HOST = "signed-url.cloudflare.com"
-const SUPPORTED_DOWNLOAD_HOSTS: PreferredDownloadHost[] = ["rootz"]
+const SUPPORTED_DOWNLOAD_HOSTS: PreferredDownloadHost[] = ["rootz", "pixeldrain"]
 const PREFERRED_HOSTS: PreferredDownloadHost[] = ["rootz", "pixeldrain", "vikingfile"]
 
 function getRootzApiBase(): string {
@@ -150,7 +150,12 @@ export async function fetchDownloadLinks(appid: string, downloadToken: string): 
   const url = apiUrl(
     `/api/downloads/${encodeURIComponent(appid)}?fetchLinks=true&downloadToken=${encodeURIComponent(downloadToken)}`
   )
-  const response = await fetch(url, { redirect: "manual" })
+  const response = await fetch(url, {
+    redirect: "manual",
+    headers: {
+      "X-UC-Client": "unioncrax-direct",
+    },
+  })
   const contentType = response.headers.get("content-type") || ""
 
   if (!response.ok && contentType.includes("application/json")) {
@@ -186,18 +191,42 @@ function pickHostLinks(available: DownloadHosts, host: PreferredDownloadHost) {
   return []
 }
 
-export function getPreferredDownloadHost(): PreferredDownloadHost {
+export async function getPreferredDownloadHost(): Promise<PreferredDownloadHost> {
   if (typeof window === "undefined") return "rootz"
-  const stored = localStorage.getItem(DOWNLOAD_HOST_STORAGE_KEY)
-  if (stored && PREFERRED_HOSTS.includes(stored as PreferredDownloadHost)) {
-    return stored as PreferredDownloadHost
+  
+  // Try to get from electron settings first (synchronized with Settings UI)
+  if (window.ucSettings?.get) {
+    try {
+      const stored = await window.ucSettings.get('defaultMirrorHost')
+      if (stored && PREFERRED_HOSTS.includes(stored as PreferredDownloadHost)) {
+        return stored as PreferredDownloadHost
+      }
+    } catch (err) {
+      console.warn('[UC] Failed to get defaultMirrorHost from settings:', err)
+    }
   }
+  
+  // Fallback to localStorage for backwards compatibility
+  const legacy = localStorage.getItem(DOWNLOAD_HOST_STORAGE_KEY)
+  if (legacy && PREFERRED_HOSTS.includes(legacy as PreferredDownloadHost)) {
+    return legacy as PreferredDownloadHost
+  }
+  
   return "rootz"
 }
 
 export function setPreferredDownloadHost(host: PreferredDownloadHost) {
   if (typeof window === "undefined") return
   if (!PREFERRED_HOSTS.includes(host)) return
+  
+  // Save to electron settings (synchronized with Settings UI)
+  if (window.ucSettings?.set) {
+    window.ucSettings.set('defaultMirrorHost', host).catch((err: any) => {
+      console.warn('[UC] Failed to set defaultMirrorHost:', err)
+    })
+  }
+  
+  // Also keep localStorage for backwards compatibility
   localStorage.setItem(DOWNLOAD_HOST_STORAGE_KEY, host)
 }
 
@@ -307,6 +336,41 @@ export async function resolveRootzDownload(url: string): Promise<ResolvedDownloa
 export async function resolveDownloadUrl(host: string, url: string): Promise<ResolvedDownload> {
   if (host === "rootz") {
     return resolveRootzDownload(url)
+  }
+  if (host === "pixeldrain") {
+    return resolvePixeldrainDownload(url)
+  }
+  return { url, resolved: true }
+}
+
+async function resolvePixeldrainDownload(url: string): Promise<ResolvedDownload> {
+  if (!url) return { url, resolved: false }
+  try {
+    // Extract an ID from common pixeldrain URL forms like /u/<id> or /file/<id>
+    const m = url.match(/(?:pixeldrain\.com\/(?:u|file)\/)([A-Za-z0-9]+)/)
+    const id = m?.[1]
+    if (!id) return { url, resolved: true }
+
+    // Fetch metadata from Pixeldrain API
+    const apiUrl = `https://pixeldrain.com/api/file/${encodeURIComponent(id)}`
+    const resp = await fetch(apiUrl)
+    if (!resp.ok) {
+      // If API fails, fallback to a direct download endpoint
+      return { url: `https://pixeldrain.com/api/file/${encodeURIComponent(id)}/download`, resolved: true }
+    }
+    const data = await resp.json().catch(() => null)
+    if (data && typeof data === 'object') {
+      const filename = (data as any).name || undefined
+      const size = typeof (data as any).size === 'number' ? (data as any).size : undefined
+      return {
+        url: `https://pixeldrain.com/api/file/${encodeURIComponent(id)}/download`,
+        filename,
+        size,
+        resolved: true,
+      }
+    }
+  } catch (err) {
+    // ignore and fallback
   }
   return { url, resolved: true }
 }

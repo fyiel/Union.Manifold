@@ -10,6 +10,10 @@ contextBridge.exposeInMainWorld('ucDownloads', {
   setDownloadPath: (targetPath) => ipcRenderer.invoke('uc:download-path-set', targetPath),
   pickDownloadPath: () => ipcRenderer.invoke('uc:download-path-pick'),
   getDownloadUsage: (targetPath) => ipcRenderer.invoke('uc:download-usage', targetPath),
+  // Installed manifests (stored next to installed files)
+  saveInstalledMetadata: (appid, metadata) => ipcRenderer.invoke('uc:installed-save', appid, metadata),
+  listInstalled: () => ipcRenderer.invoke('uc:installed-list'),
+  getInstalled: (appid) => ipcRenderer.invoke('uc:installed-get', appid),
   onUpdate: (callback) => {
     const listener = (_event, data) => callback(data)
     ipcRenderer.on('uc:download-update', listener)

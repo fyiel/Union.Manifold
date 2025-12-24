@@ -35,7 +35,16 @@ declare global {
       setDownloadPath: (targetPath: string) => Promise<{ ok: boolean; path?: string }>
       pickDownloadPath: () => Promise<{ ok: boolean; path?: string }>
       getDownloadUsage: (targetPath?: string) => Promise<{ ok: boolean; sizeBytes: number; path: string }>
+      // Installed manifests written by the main process. Renderer can read/save installed metadata.
+      listInstalled: () => Promise<any[]>
+      getInstalled: (appid: string) => Promise<any | null>
+      saveInstalledMetadata: (appid: string, metadata: any) => Promise<{ ok: boolean }>
       onUpdate: (callback: (update: DownloadUpdatePayload) => void) => () => void
+    }
+    ucSettings?: {
+      get: (key: string) => Promise<any>
+      set: (key: string, value: any) => Promise<{ ok: boolean }>
+      onChanged: (callback: (data: { key: string; value: any }) => void) => () => void
     }
   }
 }
