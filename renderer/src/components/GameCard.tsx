@@ -1,8 +1,8 @@
-import { memo, useCallback, useEffect, useState } from "react"
+import { memo, useCallback, useEffect, useState, type MouseEvent } from "react"
 import { Link } from "react-router-dom"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Calendar, HardDrive, Download, Eye, Wifi, Flame } from "lucide-react"
+import { Calendar, HardDrive, Download, Eye, Wifi, Flame, Play } from "lucide-react"
 import { formatNumber, hasOnlineMode, proxyImageUrl } from "@/lib/utils"
 import { useDownloads } from "@/context/downloads-context"
 import { apiUrl } from "@/lib/api"
@@ -43,20 +43,27 @@ export const GameCard = memo(function GameCard({
   const [isLoadingStats, setIsLoadingStats] = useState(false)
   const isCompact = size === "compact"
 
-  const isNSFW = game.genres.some((genre) => genre.toLowerCase() === "nsfw")
+  const genres = Array.isArray(game.genres) ? game.genres : []
+  const isNSFW = genres.some((genre) => genre.toLowerCase() === "nsfw")
   const displayStats = initialStats || hoveredStats || { downloads: 0, views: 0 }
 
-  const { openPath } = useDownloads()
+  const { openPath, downloads } = useDownloads()
   const [installedPath, setInstalledPath] = useState<string | null>(null)
+  const [isInstalled, setIsInstalled] = useState(false)
   const [previewImage, setPreviewImage] = useState<string | null>(null)
 
   useEffect(() => {
     let mounted = true
     ;(async () => {
       try {
-        if (window.ucDownloads?.getInstalled) {
-          const manifest = await window.ucDownloads.getInstalled(game.appid)
+        if (mounted) {
+          setInstalledPath(null)
+          setIsInstalled(false)
+        }
+        if (window.ucDownloads?.getInstalledGlobal || window.ucDownloads?.getInstalled) {
+          const manifest = await (window.ucDownloads.getInstalledGlobal?.(game.appid) || window.ucDownloads.getInstalled(game.appid))
           if (!mounted) return
+          if (manifest) setIsInstalled(true)
           if (manifest && manifest.metadata) {
             // if manifest saved a local image, prefer it for display when offline
             const localImg = manifest.metadata.localImage || manifest.metadata.image
@@ -69,8 +76,12 @@ export const GameCard = memo(function GameCard({
             setInstalledPath(manifest.files[0].path || null)
           }
         }
-      } catch {}
-      if (mounted) setInstalledPath(null)
+      } catch {
+        if (mounted) {
+          setInstalledPath(null)
+          setIsInstalled(false)
+        }
+      }
     })()
     return () => {
       mounted = false
@@ -103,6 +114,74 @@ export const GameCard = memo(function GameCard({
     }
   }, [game.appid, initialStats, isLoadingStats])
 
+  const isQueued = downloads.some((item) => item.appid === game.appid && item.status === "queued")
+  const isInstalling = downloads.some(
+    (item) =>
+      item.appid === game.appid &&
+      ["downloading", "paused", "extracting", "installing"].includes(item.status)
+  )
+
+  const pickExe = (exes: Array<{ name: string; path: string }>) => {
+    if (!exes.length) return null
+    const nameToken = game.name.toLowerCase().replace(/[^a-z0-9]+/g, "")
+    const scored = exes.map((exe) => {
+      const lower = exe.name.toLowerCase()
+      const pathLower = exe.path.toLowerCase()
+      let score = 0
+      if (nameToken && (lower.includes(nameToken) || pathLower.includes(nameToken))) score += 5
+      if (lower.includes("launcher")) score += 3
+      if (lower.includes("game")) score += 2
+      if (lower.includes("setup") || lower.includes("uninstall")) score -= 3
+      return { exe, score }
+    })
+    scored.sort((a, b) => b.score - a.score)
+    return scored[0].exe
+  }
+
+  const getSavedExe = async () => {
+    if (!window.ucSettings?.get) return null
+    try {
+      return await window.ucSettings.get(`gameExe:${game.appid}`)
+    } catch {
+      return null
+    }
+  }
+
+  const setSavedExe = async (path: string | null) => {
+    if (!window.ucSettings?.set) return
+    try {
+      await window.ucSettings.set(`gameExe:${game.appid}`, path || null)
+    } catch {}
+  }
+
+  const handlePlayClick = async (event: MouseEvent) => {
+    event.preventDefault()
+    event.stopPropagation()
+    if (!window.ucDownloads?.listGameExecutables || !window.ucDownloads?.launchGameExecutable) {
+      if (installedPath) openPath(installedPath)
+      return
+    }
+    try {
+      const savedExe = await getSavedExe()
+      if (savedExe) {
+        const res = await window.ucDownloads.launchGameExecutable(savedExe)
+        if (res && res.ok) return
+        await setSavedExe(null)
+      }
+      const result = await window.ucDownloads.listGameExecutables(game.appid)
+      const exes = result?.exes || []
+      const pick = pickExe(exes)
+      if (pick) {
+        const res = await window.ucDownloads.launchGameExecutable(pick.path)
+        if (res && res.ok) {
+          await setSavedExe(pick.path)
+        }
+      }
+    } catch {
+      if (installedPath) openPath(installedPath)
+    }
+  }
+
   return (
     <div className="relative group/container">
       <Link to={`/game/${game.appid}`}>
@@ -126,7 +205,28 @@ export const GameCard = memo(function GameCard({
                 <div className="bg-red-600 text-white px-4 py-2 rounded-full text-sm font-bold">18+</div>
               </div>
             )}
+            {isInstalled && (
+              <div className="absolute inset-0 z-20 flex items-center justify-center">
+                <button
+                  onClick={handlePlayClick}
+                  className="group/play relative inline-flex items-center justify-center h-14 w-14 rounded-full bg-primary text-primary-foreground shadow-lg shadow-primary/40 transition-transform duration-300 hover:scale-110 hover:shadow-xl hover:shadow-primary/60"
+                >
+                  <span className="absolute inset-0 rounded-full opacity-0 transition-opacity duration-300 group-hover/play:opacity-100 bg-primary/20 blur-lg" />
+                  <span className="absolute -inset-2 rounded-full border border-primary/40 opacity-0 transition-opacity duration-300 group-hover/play:opacity-100" />
+                  <Play className="relative h-6 w-6" />
+                </button>
+              </div>
+            )}
             <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent opacity-60 group-hover:opacity-80 transition-opacity duration-300" />
+
+            {isQueued || isInstalling ? (
+              <div className="absolute top-3 left-3 z-20">
+                <div className="inline-flex items-center gap-2 rounded-full bg-sky-500/90 px-3 py-1.5 text-xs font-semibold text-white shadow-lg shadow-sky-500/40">
+                  <Download className="h-4 w-4" />
+                  {isQueued ? "Queued" : "Installing"}
+                </div>
+              </div>
+            ) : null}
 
             {isPopular && (
               <div className="absolute top-3 left-3 z-20">
@@ -138,7 +238,7 @@ export const GameCard = memo(function GameCard({
             )}
 
             {hasOnlineMode(game.source) && (
-              <div className={`absolute z-20 ${isPopular ? "top-14 left-3" : "top-3 left-3"}`}>
+              <div className={`absolute z-20 ${isPopular || isInstalling || isQueued ? "top-14 left-3" : "top-3 left-3"}`}>
                 <div className="inline-flex items-center gap-2 overflow-hidden rounded-full transition-all duration-300 ease-out bg-gradient-to-r from-emerald-600/90 to-green-600/90 backdrop-blur-sm px-3 py-1.5 shadow-lg shadow-emerald-500/50 group-hover/container:shadow-xl group-hover/container:shadow-emerald-500/70">
                   <Wifi className="flex-none h-5 w-5 text-white animate-pulse" />
                   <span className="text-sm font-bold text-white">Online</span>
@@ -147,7 +247,7 @@ export const GameCard = memo(function GameCard({
             )}
 
             {game.hasCoOp && (
-              <div className={`absolute z-20 ${isPopular || hasOnlineMode(game.source) ? "top-14 left-3" : "top-3 left-3"}`}>
+              <div className={`absolute z-20 ${isPopular || isInstalling || isQueued || hasOnlineMode(game.source) ? "top-14 left-3" : "top-3 left-3"}`}>
                 <div className="inline-flex items-center gap-2 overflow-hidden rounded-full transition-all duration-300 ease-out bg-gradient-to-r from-blue-600/90 to-cyan-600/90 backdrop-blur-sm px-3 py-1.5 shadow-lg shadow-blue-500/50 group-hover/container:shadow-xl group-hover/container:shadow-blue-500/70">
                   <Wifi className="flex-none h-5 w-5 text-white animate-pulse" />
                   <span className="text-sm font-bold text-white">Co-Op</span>
@@ -171,18 +271,9 @@ export const GameCard = memo(function GameCard({
                     <span className="font-semibold">{formatNumber(displayStats.downloads)}</span>
                   </div>
                 </div>
-                {installedPath && (
-                  <div className="mt-2 flex justify-end">
-                    <button
-                      onClick={(e) => {
-                        e.preventDefault()
-                        if (installedPath) openPath(installedPath)
-                      }}
-                      className="inline-flex items-center gap-2 rounded-full bg-primary/20 px-3 py-1 text-xs text-white hover:bg-primary/30"
-                    >
-                      <HardDrive className="h-4 w-4 text-white" />
-                      Open
-                    </button>
+                {isInstalled && (
+                  <div className="mt-2 flex justify-end text-xs text-white/80">
+                    Installed
                   </div>
                 )}
               </div>
@@ -205,7 +296,7 @@ export const GameCard = memo(function GameCard({
             </p>
 
             <div className={`flex flex-wrap gap-2 ${isCompact ? "mb-3" : "mb-4"}`}>
-              {game.genres.slice(0, isCompact ? 1 : 2).map((genre) => (
+              {genres.slice(0, isCompact ? 1 : 2).map((genre) => (
                 <Badge
                   key={genre}
                   variant="secondary"
@@ -216,14 +307,14 @@ export const GameCard = memo(function GameCard({
                   {genre}
                 </Badge>
               ))}
-              {game.genres.length > (isCompact ? 1 : 2) && (
+              {genres.length > (isCompact ? 1 : 2) && (
                 <Badge
                   variant="outline"
                   className={`text-xs rounded-full border-primary/30 text-primary ${
                     isCompact ? "px-2.5 py-0.5" : "px-3 py-1"
                   }`}
                 >
-                  +{game.genres.length - (isCompact ? 1 : 2)}
+                  +{genres.length - (isCompact ? 1 : 2)}
                 </Badge>
               )}
             </div>

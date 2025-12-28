@@ -7,7 +7,7 @@ export type DownloadLinksResult = {
   redirectUrl?: string
 }
 
-export type PreferredDownloadHost = "rootz" | "pixeldrain" | "vikingfile"
+export type PreferredDownloadHost = "rootz" | "pixeldrain"
 
 export type ResolvedDownload = {
   url: string
@@ -21,10 +21,12 @@ const ROOTZ_API_BASE_STORAGE_KEY = "uc_direct_rootz_api_base"
 const ROOTZ_API_KEY_STORAGE_KEY = "uc_direct_rootz_api_key"
 const DOWNLOAD_HOST_STORAGE_KEY = "uc_direct_download_host"
 const ROOTZ_SIGNED_HOST = "signed-url.cloudflare.com"
+let rootzAuthFailed = false
+// Supported download hosts
 const SUPPORTED_DOWNLOAD_HOSTS: PreferredDownloadHost[] = ["rootz", "pixeldrain"]
-const PREFERRED_HOSTS: PreferredDownloadHost[] = ["rootz", "pixeldrain", "vikingfile"]
+const PREFERRED_HOSTS: PreferredDownloadHost[] = ["rootz", "pixeldrain"]
 
-function getRootzApiBase(): string {
+export function getRootzApiBase(): string {
   if (typeof window === "undefined") {
     return import.meta.env.VITE_ROOTZ_API_BASE || ROOTZ_API_BASE_DEFAULT
   }
@@ -32,12 +34,33 @@ function getRootzApiBase(): string {
   return stored?.trim() || import.meta.env.VITE_ROOTZ_API_BASE || ROOTZ_API_BASE_DEFAULT
 }
 
-function getRootzApiKey(): string {
+export function getRootzApiKey(): string {
   if (typeof window === "undefined") {
     return import.meta.env.VITE_ROOTZ_API_KEY || ""
   }
   const stored = localStorage.getItem(ROOTZ_API_KEY_STORAGE_KEY)
   return stored?.trim() || import.meta.env.VITE_ROOTZ_API_KEY || ""
+}
+
+export function setRootzApiBase(value: string) {
+  if (typeof window === "undefined") return
+  const trimmed = value.trim().replace(/\/+$/, "")
+  if (trimmed) {
+    localStorage.setItem(ROOTZ_API_BASE_STORAGE_KEY, trimmed)
+  } else {
+    localStorage.removeItem(ROOTZ_API_BASE_STORAGE_KEY)
+  }
+}
+
+export function setRootzApiKey(value: string) {
+  if (typeof window === "undefined") return
+  const trimmed = value.trim()
+  rootzAuthFailed = false
+  if (trimmed) {
+    localStorage.setItem(ROOTZ_API_KEY_STORAGE_KEY, trimmed)
+  } else {
+    localStorage.removeItem(ROOTZ_API_KEY_STORAGE_KEY)
+  }
 }
 
 function rootzApiUrl(path: string): string {
@@ -50,6 +73,10 @@ function pickRootzPayload(value: unknown): Record<string, any> | null {
   if (!value || typeof value !== "object") return null
   const record = value as Record<string, any>
   return (record.data as Record<string, any>) || (record.file as Record<string, any>) || record
+}
+
+function asArray(value: unknown): any[] | null {
+  return Array.isArray(value) ? value : null
 }
 
 function firstString(...values: unknown[]) {
@@ -74,30 +101,109 @@ function normalizeRootzPayload(payload: Record<string, any> | null) {
   }
 }
 
-async function fetchRootzPayload(path: string) {
+async function fetchRootzPayload(path: string, opts?: { shortId?: string; fileId?: string }) {
   const apiKey = getRootzApiKey()
   const headers: Record<string, string> = {}
   if (apiKey) headers.Authorization = `Bearer ${apiKey}`
 
-  const response = await fetch(rootzApiUrl(path), { headers })
-  const data = await response.json().catch(() => null)
-  if (!response.ok) return null
-  if (data && typeof data === "object" && "success" in data && (data as { success?: boolean }).success !== true) {
+  // If we have an API key (from env or localStorage), call Rootz directly.
+  if (apiKey) {
+    const response = await fetch(rootzApiUrl(path), { headers })
+    if (response.status === 401 || response.status === 403) {
+      rootzAuthFailed = true
+      throw new Error("Rootz API key unauthorized. Update it in Settings.")
+    }
+    const data = await response.json().catch(() => null)
+    if (response.ok) {
+      if (data && typeof data === "object" && "success" in data && (data as { success?: boolean }).success !== true) {
+        return null
+      }
+      return pickRootzPayload(data)
+    }
+    // If direct Rootz call fails for other reasons, fall back to backend resolver.
+  }
+
+  // No client-side API key (or direct call failed): ask the UnionCrax backend to resolve Rootz URLs server-side.
+  try {
+    const response = await apiFetch("/api/rootz/resolve", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        path,
+        shortId: opts?.shortId || null,
+        fileId: opts?.fileId || null,
+      }),
+    })
+    const data = await response.json().catch(() => null)
+    if (!response.ok || !data?.success) return null
+    return pickRootzPayload(data.data)
+  } catch {
     return null
   }
-  return pickRootzPayload(data)
 }
 
 async function fetchRootzDownload(fileId: string) {
   if (!fileId) return null
-  const payload = await fetchRootzPayload(`/files/download/${encodeURIComponent(fileId)}`)
+  const payload = await fetchRootzPayload(`/files/download/${encodeURIComponent(fileId)}`, { fileId })
   return normalizeRootzPayload(payload)
 }
 
 async function fetchRootzByShortId(shortId: string) {
   if (!shortId) return null
-  const payload = await fetchRootzPayload(`/files/short/${encodeURIComponent(shortId)}`)
+  const payload = await fetchRootzPayload(`/files/short/${encodeURIComponent(shortId)}`, { shortId })
   return normalizeRootzPayload(payload)
+}
+
+async function fetchRootzFileIdFromShortId(shortId: string): Promise<string | null> {
+  const apiKey = getRootzApiKey()
+  if (!apiKey) return null
+  if (rootzAuthFailed) {
+    throw new Error("Rootz API key unauthorized. Update it in Settings.")
+  }
+  const headers: Record<string, string> = { Authorization: `Bearer ${apiKey}` }
+  const limit = 200
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 5000)
+
+  try {
+    let maxPages = 3
+    for (let page = 1; page <= maxPages; page++) {
+      try {
+        const url = rootzApiUrl(`/files/list?page=${page}&limit=${limit}`)
+        const response = await fetch(url, { headers, signal: controller.signal })
+        if (response.status === 401 || response.status === 403) {
+          rootzAuthFailed = true
+          throw new Error("Rootz API key unauthorized. Update it in Settings.")
+        }
+        const data = await response.json().catch(() => null)
+        if (!response.ok) return null
+        const items = asArray(data?.data)
+        if (!items || items.length === 0) return null
+        if (page === 1) {
+          const total = toNumber(data?.pagination?.total)
+          if (total && total > limit) {
+            const totalPages = Math.ceil(total / limit)
+            maxPages = Math.max(maxPages, Math.min(totalPages, 20))
+          }
+        }
+        const match = items.find((item) => {
+          const short = firstString(item?.short_id, item?.shortId, item?.shortID)
+          return short === shortId
+        })
+        const fileId = firstString(match?.id, match?.fileId)
+        if (fileId) return fileId
+        if (items.length < limit) return null
+      } catch (err) {
+        if (err instanceof Error && err.message.includes("unauthorized")) {
+          throw err
+        }
+        return null
+      }
+    }
+    return null
+  } finally {
+    clearTimeout(timeout)
+  }
 }
 
 function extractRootzShortId(url: string): string | null {
@@ -185,9 +291,6 @@ function pickHostLinks(available: DownloadHosts, host: PreferredDownloadHost) {
   if (host === "pixeldrain") {
     return available.pixeldrain || available["pixeldrain.com"] || []
   }
-  if (host === "vikingfile") {
-    return available.vikingfile || []
-  }
   return []
 }
 
@@ -238,10 +341,6 @@ export function selectHost(available: DownloadHosts, preferredHost?: PreferredDo
       return { host: preferred, links: preferredLinks }
     }
   }
-  const rootzLinks = pickHostLinks(available, "rootz")
-  if (rootzLinks.length) {
-    return { host: "rootz", links: rootzLinks }
-  }
   return { host: "", links: [] }
 }
 
@@ -254,6 +353,115 @@ export function inferFilenameFromUrl(url: string, fallback: string) {
   } catch {
     return fallback
   }
+}
+
+export function extractPixeldrainFileId(url: string): string | null {
+  try {
+    const parsed = new URL(url)
+    // standard short link: /u/FILE_ID
+    const uMatch = parsed.pathname.match(/\/u\/([^/?#]+)/)
+    if (uMatch?.[1]) return uMatch[1]
+    // sometimes the id is at the root like /FILE_ID
+    const parts = parsed.pathname.split("/").filter(Boolean)
+    if (parts.length === 1) return parts[0]
+    return null
+  } catch {
+    return null
+  }
+}
+
+export function isPixeldrainUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url)
+    return parsed.hostname.includes("pixeldrain.com")
+  } catch {
+    return false
+  }
+}
+
+async function resolvePixeldrainDownload(url: string): Promise<ResolvedDownload> {
+  if (!url) return { url, resolved: false }
+  const fileId = extractPixeldrainFileId(url)
+  if (!fileId) return { url, resolved: false }
+
+  const apiUrl = `https://pixeldrain.com/api/file/${encodeURIComponent(fileId)}`
+
+  try {
+    const res = await fetch(apiUrl, { method: "GET", redirect: "manual" })
+
+    // extract filename from content-disposition if present
+    const disposition = res.headers.get("content-disposition")
+    let filename: string | undefined
+    if (disposition) {
+      const match = disposition.match(/filename=?"?([^";]+)"?/) 
+      if (match?.[1]) filename = match[1]
+    }
+
+    const contentLength = res.headers.get("content-length")
+    const size = contentLength ? Number(contentLength) : undefined
+
+    const redirectLocation = res.headers.get("Location") || res.headers.get("location")
+    const finalUrl = redirectLocation || res.url || apiUrl
+
+    return { url: finalUrl, filename, size: Number.isFinite(size as number) ? size : undefined, resolved: true }
+  } catch (err) {
+    return { url, resolved: false }
+  }
+}
+
+export async function downloadFromPixeldrain(fileId: string, outputDir: string): Promise<string> {
+  if (!fileId) throw new Error("fileId required")
+  const url = `https://pixeldrain.com/api/file/${encodeURIComponent(fileId)}`
+
+  // Only perform file writes when Node fs is available (Electron main/preload)
+  let fs: any = null
+  let pathModule: any = null
+  if (typeof (globalThis as any).require === "function") {
+    try {
+      fs = (globalThis as any).require("fs")
+      pathModule = (globalThis as any).require("path")
+    } catch (e) {
+      // fall through
+    }
+  }
+  if (!fs || !pathModule) {
+    throw new Error("File system not available in this context. Run this from Electron main or a trusted preload.")
+  }
+
+  const res = await fetch(url)
+  if (!res.ok) throw new Error(`Download failed: ${res.status}`)
+
+  // determine filename
+  const disposition = res.headers.get("content-disposition")
+  let filename = fileId
+  if (disposition) {
+    const match = disposition.match(/filename=?"?([^";]+)"?/)
+    if (match?.[1]) filename = match[1]
+  } else {
+    try {
+      const inferred = inferFilenameFromUrl(res.url || url, fileId)
+      if (inferred) filename = inferred
+    } catch {}
+  }
+
+  const filePath = pathModule.join(outputDir, filename)
+
+  // prefer streaming to disk
+  const body: any = (res as any).body
+  if (body && typeof body.pipe === "function") {
+    const stream = fs.createWriteStream(filePath)
+    await new Promise<void>((resolve, reject) => {
+      body.pipe(stream)
+      stream.on("finish", () => resolve())
+      stream.on("error", (err: any) => reject(err))
+    })
+    return filePath
+  }
+
+  // fallback: buffer then write using Uint8Array to avoid Buffer type
+  const uint8 = new Uint8Array(await res.arrayBuffer())
+  await fs.promises.writeFile(filePath, uint8)
+  return filePath
 }
 
 export function extractRootzFileId(url: string): string | null {
@@ -281,6 +489,14 @@ export function isRootzUrl(url: string): boolean {
 export async function resolveRootzDownload(url: string): Promise<ResolvedDownload> {
   if (!url) return { url, resolved: false }
   if (isRootzSignedUrl(url)) return { url, resolved: true }
+  // Backend may return direct signed URLs (R2/Cloudflare) that are already downloadable.
+  if (!isRootzUrl(url)) {
+    return {
+      url,
+      filename: inferFilenameFromUrl(url, ""),
+      resolved: true,
+    }
+  }
 
   const fileId = extractRootzFileId(url)
   if (fileId) {
@@ -319,13 +535,16 @@ export async function resolveRootzDownload(url: string): Promise<ResolvedDownloa
       }
     }
 
-    const direct = await fetchRootzDownload(shortId)
-    if (direct?.url) {
-      return {
-        url: direct.url,
-        filename: direct.fileName,
-        size: direct.size,
-        resolved: true,
+    const resolvedFileId = await fetchRootzFileIdFromShortId(shortId)
+    if (resolvedFileId) {
+      const resolved = await fetchRootzDownload(resolvedFileId)
+      if (resolved?.url) {
+        return {
+          url: resolved.url,
+          filename: resolved.fileName,
+          size: resolved.size,
+          resolved: true,
+        }
       }
     }
   }
@@ -340,37 +559,6 @@ export async function resolveDownloadUrl(host: string, url: string): Promise<Res
   if (host === "pixeldrain") {
     return resolvePixeldrainDownload(url)
   }
-  return { url, resolved: true }
-}
-
-async function resolvePixeldrainDownload(url: string): Promise<ResolvedDownload> {
-  if (!url) return { url, resolved: false }
-  try {
-    // Extract an ID from common pixeldrain URL forms like /u/<id> or /file/<id>
-    const m = url.match(/(?:pixeldrain\.com\/(?:u|file)\/)([A-Za-z0-9]+)/)
-    const id = m?.[1]
-    if (!id) return { url, resolved: true }
-
-    // Fetch metadata from Pixeldrain API
-    const apiUrl = `https://pixeldrain.com/api/file/${encodeURIComponent(id)}`
-    const resp = await fetch(apiUrl)
-    if (!resp.ok) {
-      // If API fails, fallback to a direct download endpoint
-      return { url: `https://pixeldrain.com/api/file/${encodeURIComponent(id)}/download`, resolved: true }
-    }
-    const data = await resp.json().catch(() => null)
-    if (data && typeof data === 'object') {
-      const filename = (data as any).name || undefined
-      const size = typeof (data as any).size === 'number' ? (data as any).size : undefined
-      return {
-        url: `https://pixeldrain.com/api/file/${encodeURIComponent(id)}/download`,
-        filename,
-        size,
-        resolved: true,
-      }
-    }
-  } catch (err) {
-    // ignore and fallback
-  }
-  return { url, resolved: true }
+  // Other hosts are not supported; mark unresolved so upstream can handle fallback
+  return { url, resolved: false }
 }

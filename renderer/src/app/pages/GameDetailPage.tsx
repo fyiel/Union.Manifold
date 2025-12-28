@@ -14,7 +14,7 @@ import { AlertTriangle, Calendar, Download, Eye, Flame, HardDrive, ShieldCheck, 
 
 export function GameDetailPage() {
   const params = useParams()
-  const { startGameDownload } = useDownloads()
+  const { startGameDownload, downloads } = useDownloads()
   const { games, stats } = useGamesData()
   const [game, setGame] = useState<Game | null>(null)
   const [loading, setLoading] = useState(true)
@@ -24,6 +24,8 @@ export function GameDetailPage() {
   const [downloading, setDownloading] = useState(false)
   const [downloadError, setDownloadError] = useState<string | null>(null)
   const [selectedImage, setSelectedImage] = useState<string>("")
+  const [installedManifest, setInstalledManifest] = useState<any | null>(null)
+  const [installingManifest, setInstallingManifest] = useState<any | null>(null)
 
   const appid = params.id || ""
 
@@ -42,8 +44,8 @@ export function GameDetailPage() {
       } catch (err) {
         // Try fallback: ask main process for installed manifest
         try {
-          if (window.ucDownloads?.getInstalled) {
-            const manifest = await window.ucDownloads.getInstalled(appid)
+          if (window.ucDownloads?.getInstalledGlobal || window.ucDownloads?.getInstalled) {
+            const manifest = await (window.ucDownloads.getInstalledGlobal?.(appid) || window.ucDownloads.getInstalled(appid))
             if (manifest && manifest.metadata) {
               // prefer a locally stored image when offline
               const meta = manifest.metadata
@@ -65,6 +67,30 @@ export function GameDetailPage() {
       load()
     }
   }, [appid])
+
+  useEffect(() => {
+    if (!appid) return
+    let mounted = true
+    const loadStatus = async () => {
+      try {
+        const [installed, installing] = await Promise.all([
+          window.ucDownloads?.getInstalledGlobal?.(appid) || window.ucDownloads?.getInstalled?.(appid) || null,
+          window.ucDownloads?.getInstallingGlobal?.(appid) || window.ucDownloads?.getInstalling?.(appid) || null,
+        ])
+        if (!mounted) return
+        setInstalledManifest(installed)
+        setInstallingManifest(installing)
+      } catch {
+        if (!mounted) return
+        setInstalledManifest(null)
+        setInstallingManifest(null)
+      }
+    }
+    loadStatus()
+    return () => {
+      mounted = false
+    }
+  }, [appid, downloads])
 
   useEffect(() => {
     if (!appid) return
@@ -103,6 +129,7 @@ export function GameDetailPage() {
 
   const startDownload = async () => {
     if (!game) return
+    if (installedManifest || installingManifest) return
     setDownloadError(null)
     setDownloading(true)
     try {
@@ -113,6 +140,28 @@ export function GameDetailPage() {
     } finally {
       setDownloading(false)
     }
+  }
+
+  const launchInstalledGame = async () => {
+    if (!game) return
+    if (!window.ucDownloads?.listGameExecutables || !window.ucDownloads?.launchGameExecutable) return
+    try {
+      const savedExe = await getSavedExe()
+      if (savedExe) {
+        const res = await window.ucDownloads.launchGameExecutable(savedExe)
+        if (res && res.ok) return
+        await setSavedExe(null)
+      }
+      const result = await window.ucDownloads.listGameExecutables(game.appid)
+      const exes = result?.exes || []
+      const pick = pickExe(exes)
+      if (pick) {
+        const res = await window.ucDownloads.launchGameExecutable(pick.path)
+        if (res && res.ok) {
+          await setSavedExe(pick.path)
+        }
+      }
+    } catch {}
   }
   const popularAppIds = useMemo(() => {
     const withStats = games.filter((g) => {
@@ -162,6 +211,50 @@ export function GameDetailPage() {
   const effectiveDownloadCount = downloadCount || stats[game.appid]?.downloads || 0
   const effectiveViewCount = viewCount || stats[game.appid]?.views || 0
   const isPopular = popularAppIds.has(game.appid)
+  const isActiveDownload = downloads.some(
+    (item) =>
+      item.appid === game.appid &&
+      ["downloading", "paused", "extracting", "installing"].includes(item.status)
+  )
+  const isQueued = downloads.some((item) => item.appid === game.appid && item.status === "queued")
+  const isCancelled = downloads.some((item) => item.appid === game.appid && item.status === "cancelled")
+  const isInstalled = Boolean(installedManifest)
+  const isInstalling = (Boolean(installingManifest) && !isCancelled) || isActiveDownload || downloading
+  const actionLabel = isInstalled ? "Play" : isQueued ? "Queued" : isInstalling ? "Installing" : "Download Now"
+  const actionDisabled = isInstalling || isQueued
+
+  const pickExe = (exes: Array<{ name: string; path: string }>) => {
+    if (!exes.length) return null
+    const nameToken = game.name.toLowerCase().replace(/[^a-z0-9]+/g, "")
+    const scored = exes.map((exe) => {
+      const lower = exe.name.toLowerCase()
+      const pathLower = exe.path.toLowerCase()
+      let score = 0
+      if (nameToken && (lower.includes(nameToken) || pathLower.includes(nameToken))) score += 5
+      if (lower.includes("launcher")) score += 3
+      if (lower.includes("game")) score += 2
+      if (lower.includes("setup") || lower.includes("uninstall")) score -= 3
+      return { exe, score }
+    })
+    scored.sort((a, b) => b.score - a.score)
+    return scored[0].exe
+  }
+
+  const getSavedExe = async () => {
+    if (!window.ucSettings?.get) return null
+    try {
+      return await window.ucSettings.get(`gameExe:${game.appid}`)
+    } catch {
+      return null
+    }
+  }
+
+  const setSavedExe = async (path: string | null) => {
+    if (!window.ucSettings?.set) return
+    try {
+      await window.ucSettings.set(`gameExe:${game.appid}`, path || null)
+    } catch {}
+  }
 
   return (
     <div className="space-y-12">
@@ -307,11 +400,17 @@ export function GameDetailPage() {
                 <Button
                   size="lg"
                   className="w-full font-bold text-lg py-6 rounded-xl bg-primary hover:bg-primary/90 shadow-lg shadow-primary/25"
-                  onClick={startDownload}
-                  disabled={downloading}
+                  onClick={() => {
+                    if (isInstalled) {
+                      void launchInstalledGame()
+                    } else {
+                      void startDownload()
+                    }
+                  }}
+                  disabled={actionDisabled}
                 >
                   <Download className="mr-2 h-5 w-5" />
-                  {downloading ? "Preparing..." : "Download Now"}
+                  {actionLabel}
                 </Button>
 
                 {downloadError && (

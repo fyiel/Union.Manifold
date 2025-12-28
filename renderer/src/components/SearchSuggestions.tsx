@@ -154,8 +154,11 @@ export function SearchSuggestions({
   const shouldShowPopularGames = suggestions.popularGames.length > 0
   const shouldShowMatchingGames = value.trim() && suggestions.matchingGames.length > 0
 
+  const hasAnySuggestions =
+    shouldShowPopularGames || shouldShowMatchingGames || filteredGenres.length > 0 || recentSearches.length > 0
+
   return (
-    <Popover open={showSuggestions} onOpenChange={setShowSuggestions}>
+    <Popover open={showSuggestions}>
       <div className={`relative ${className}`}>
         <PopoverAnchor asChild>
           <div className="relative">
@@ -166,6 +169,7 @@ export function SearchSuggestions({
               value={value}
               onChange={(e) => onChange(e.target.value)}
               onFocus={handleInputFocus}
+              onMouseDown={() => setShowSuggestions(true)}
               onKeyDown={(e) => {
                 if (e.key === "Enter") {
                   onSubmit(e as any)
@@ -179,16 +183,35 @@ export function SearchSuggestions({
           </div>
         </PopoverAnchor>
 
-        {showSuggestions &&
-          (shouldShowPopularGames || shouldShowMatchingGames || filteredGenres.length > 0 || recentSearches.length > 0) && (
-            <PopoverContent
-              align="start"
-              side="bottom"
-              sideOffset={8}
-              onOpenAutoFocus={(e) => e.preventDefault()}
-              className="z-[1000] w-[var(--radix-popover-trigger-width)] max-h-80 overflow-y-auto rounded-3xl border-2 border-border/50 bg-card/95 p-0 backdrop-blur-sm shadow-xl"
-            >
-              {recentSearches.length > 0 && (
+        {showSuggestions && (
+          <PopoverContent
+            align="start"
+            side="bottom"
+            sideOffset={8}
+            onOpenAutoFocus={(e) => e.preventDefault()}
+            onEscapeKeyDown={() => setShowSuggestions(false)}
+            onInteractOutside={(e) => {
+              const target = e.target as Node
+              if (inputRef.current && inputRef.current.contains(target)) return
+              setShowSuggestions(false)
+            }}
+            className="z-[1000] w-[var(--radix-popover-trigger-width)] max-h-80 overflow-y-auto rounded-3xl border-2 border-border/50 bg-card/95 p-0 backdrop-blur-sm shadow-xl"
+          >
+            {!hasAnySuggestions && !value.trim() && (
+              <div className="p-4 text-sm text-muted-foreground text-center">
+                Start typing to see suggestions.
+              </div>
+            )}
+
+            {!hasAnySuggestions && value.trim() && (
+              <div className="p-4 text-sm text-muted-foreground text-center">
+                Searching suggestions...
+              </div>
+            )}
+
+            {hasAnySuggestions && (
+              <>
+                {recentSearches.length > 0 && (
                 <div className="p-3 border-b border-border/50">
                   <div className="flex items-center gap-2 mb-2">
                     <Clock className="h-4 w-4 text-muted-foreground" />
@@ -336,9 +359,15 @@ export function SearchSuggestions({
                   )}
                 </div>
               )}
-            </PopoverContent>
-          )}
+              </>
+            )}
+          </PopoverContent>
+        )}
       </div>
     </Popover>
   )
 }
+
+
+
+

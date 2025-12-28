@@ -1,100 +1,148 @@
-Retrieve a file
-Get a signed download URL for a file.
+Getting the Rootz file ID from a short ID
 
-Endpoint
-GET https://www.rootz.so/api/files/download/[fileId]
-Authentication
-No authentication required. Anyone with the file ID can download the file.
+Rootz stores two different identifiers for every uploaded file: a short ID and a file ID. The short ID (for example, dtGvw) is what appears in share URLs such as https://www.rootz.so/d/dtGvw. The download API, however, uses a UUID called the file ID. You cannot pass the short ID directly to the API; you need to look up the corresponding file ID first
+rootz.so
+.
 
-Request Examples
-Retrieve a signed download URL by providing the file ID. The URL expires in 1 hour.
-// Get download URL and file info
-const getDownloadUrl = async (fileId) => {
-  const response = await fetch(`https://www.rootz.so/api/files/download/${fileId}`);
-  const result = await response.json();
-  
-  if (result.success) {
-    console.log('Download URL (expires in 1 hour):', result.data.url);
-    console.log('File name:', result.data.fileName);
-    console.log('File size:', result.data.size, 'bytes');
-    console.log('MIME type:', result.data.mimeType);
-    console.log('Total downloads:', result.data.downloads);
-    return result.data;
-  } else {
-    throw new Error(result.error || 'Failed to get download URL');
-  }
-};
+Why the file ID matters
 
-// Download file to browser
-const downloadFileToBrowser = async (fileId) => {
-  const data = await getDownloadUrl(fileId);
-  
-  const link = document.createElement('a');
-  link.href = data.url;
-  link.download = data.fileName;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  
-  console.log('Download started:', data.fileName);
-};
+The signed‑download API endpoint is:
 
-// Download file in Node.js
-const downloadFileToNode = async (fileId, outputPath) => {
-  const data = await getDownloadUrl(fileId);
-  
-  const response = await fetch(data.url);
-  if (!response.ok) {
-    throw new Error(`Download failed: ${response.statusText}`);
-  }
-  
-  const buffer = await response.arrayBuffer();
-  const fs = require('fs');
-  fs.writeFileSync(outputPath, Buffer.from(buffer));
-  console.log(`Saved to ${outputPath} (${data.size} bytes)`);
-};
+GET https://www.rootz.so/api/files/download/{fileId}
 
-// Example usage
-const fileId = '550e8400-e29b-41d4-a716-446655440000';
 
-// In browser:
-downloadFileToBrowser(fileId)
-  .then(() => console.log('Download complete'))
-  .catch(err => console.error('Error:', err));
+fileId must be the file’s UUID. Calling this endpoint returns a signed Cloudflare link valid for one hour
+rootz.so
+. If you pass a short ID instead of the UUID, the API will return a File not found error. Therefore, before downloading, you need to determine the file ID that corresponds to your short ID.
 
-// In Node.js:
-downloadFileToNode(fileId, './downloaded-file.pdf')
-  .then(() => console.log('File saved'))
-  .catch(err => console.error('Error:', err));
-  Parameters
-Parameter	Type	Required	Description
-fileId	String (UUID)	Yes	The unique identifier of the file
-Response
-Returns a signed download URL that expires in 1 hour (3600 seconds).
+Getting the file ID
 
+There are two main ways to obtain the file ID:
+
+1. Capture it when you upload
+
+When you upload or remote‑upload a file through the API, the response includes both a shortId and an id field. For example, a successful upload response looks like this
+rootz.so
+:
 
 {
   "success": true,
   "data": {
-    "url": "https://signed-url.cloudflare.com/...",
+    "id": "550e8400-e29b-41d4-a716-446655440000",  // file ID (UUID)
+    "name": "document.pdf",
+    "size": 1048576,
+    "url": "https://signed-url.cloudflare.com/...", // temporary signed link
+    "shortId": "abc123"  // short ID
+  }
+}
+
+
+If you store the returned data.id value when uploading, you can later pass this UUID to the download API without any further lookup.
+
+2. Use the list endpoint to map short IDs to file IDs
+
+If you only know the short ID and did not record the file ID at upload time, call the list API to retrieve all files in your account:
+
+GET https://www.rootz.so/api/files/list?page=1&limit=50
+Authorization: Bearer YOUR_API_KEY
+
+
+This endpoint requires an API key. It returns an array of file objects. Each object includes both the id (UUID) and the short_id (share code)
+rootz.so
+:
+
+{
+  "success": true,
+  "data": [
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440000",  // file ID
+      "name": "document.pdf",
+      "size": 1048576,
+      "mime_type": "application/pdf",
+      "path": "user-id/document.pdf",
+      "short_id": "abc123",  // short ID
+      "folder_id": null,
+      "owner_id": "user-uuid",
+      "created_at": "2025-11-16T12:00:00.000Z",
+      "updated_at": "2025-11-16T12:00:00.000Z"
+    },
+    ...
+  ],
+  "pagination": { "page": 1, "limit": 50, "total": 156 }
+}
+
+
+You can scan this list for an entry whose short_id matches your short ID (e.g., dtGvw); its id property is the UUID you need. There is currently no documented API for converting a short ID to a UUID directly, so listing is the recommended approach when you only have the short code.
+
+Downloading the file via API
+
+Once you have the UUID, call the download endpoint. The response contains a signed temporary URL:
+
+GET https://www.rootz.so/api/files/download/550e8400-e29b-41d4-a716-446655440000
+
+Response:
+{
+  "success": true,
+  "data": {
+    "url": "https://signed-url.cloudflare.com/...",  // valid for 1 hour
     "fileName": "document.pdf",
     "size": 1048576,
     "mimeType": "application/pdf",
     "expiresIn": 3600,
-    "expiresAt": null,
     "downloads": 42,
-    "canDelete": false,
     "shortId": "abc123"
   }
 }
-Error Response
 
-{
-  "success": false,
-  "error": "File not found"
+
+Use the data.url value to download the file content. The signed URL grants read access without additional authentication and expires in one hour
+rootz.so
+.
+
+Implementing the lookup and download in an Electron app
+
+Electron applications have access to Node.js APIs, so you can use fetch or a library like axios to call Rootz endpoints. Below is a simplified example that shows how to translate a short ID into a file ID and download the file:
+
+const axios = require('axios');
+
+// Replace with your Rootz API key
+const API_KEY = 'YOUR_ROOTZ_API_KEY';
+
+async function getFileIdFromShortId(shortId) {
+  // Retrieve a paginated list of files (adjust page/limit if needed)
+  const listResponse = await axios.get('https://www.rootz.so/api/files/list?page=1&limit=200', {
+    headers: { Authorization: `Bearer ${API_KEY}` }
+  });
+
+  // Find the file whose short_id matches the short code
+  const file = listResponse.data.data.find(item => item.short_id === shortId);
+  if (!file) throw new Error(`File with shortId ${shortId} not found`);
+  return file.id;
 }
-Usage Notes
-The signed URL expires in 1 hour (3600 seconds)
-Each request to this endpoint counts as a download
-The actual file is downloaded from the signed URL, not this endpoint
-Downloads are tracked for analytics purposes
+
+async function getDownloadUrl(fileId) {
+  // Call the download API to get a temporary URL
+  const downloadResponse = await axios.get(`https://www.rootz.so/api/files/download/${fileId}`);
+  return downloadResponse.data.data.url;
+}
+
+async function downloadFileFromShortId(shortId) {
+  const fileId = await getFileIdFromShortId(shortId);
+  const signedUrl = await getDownloadUrl(fileId);
+  // Now you can download the file via the signed URL (e.g., using axios or built‑in fetch)
+  const fileResponse = await axios.get(signedUrl, { responseType: 'arraybuffer' });
+  // `fileResponse.data` contains the file’s binary data; save or display it as needed
+  return fileResponse.data;
+}
+
+// Example usage:
+downloadFileFromShortId('dtGvw')
+  .then(data => {
+    console.log('File downloaded, size:', data.byteLength);
+  })
+  .catch(err => {
+    console.error(err.message);
+  });
+
+
+In your Electron app, you can integrate this logic into a service module. The lookup function retrieves the UUID by scanning the list of your files; then the download function obtains a signed link. The final axios.get call downloads the binary content, which you can write to disk with Node’s fs module or display in the UI. If your application supports uploading, remember to store the id returned from the upload response to avoid listing files when downloading later.

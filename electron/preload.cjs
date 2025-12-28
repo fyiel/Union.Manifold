@@ -3,6 +3,8 @@ const { contextBridge, ipcRenderer } = require('electron')
 contextBridge.exposeInMainWorld('ucDownloads', {
   start: (payload) => ipcRenderer.invoke('uc:download-start', payload),
   cancel: (downloadId) => ipcRenderer.invoke('uc:download-cancel', downloadId),
+  pause: (downloadId) => ipcRenderer.invoke('uc:download-pause', downloadId),
+  resume: (downloadId) => ipcRenderer.invoke('uc:download-resume', downloadId),
   showInFolder: (targetPath) => ipcRenderer.invoke('uc:download-show', targetPath),
   openPath: (targetPath) => ipcRenderer.invoke('uc:download-open', targetPath),
   listDisks: () => ipcRenderer.invoke('uc:disk-list'),
@@ -14,8 +16,24 @@ contextBridge.exposeInMainWorld('ucDownloads', {
   saveInstalledMetadata: (appid, metadata) => ipcRenderer.invoke('uc:installed-save', appid, metadata),
   listInstalled: () => ipcRenderer.invoke('uc:installed-list'),
   getInstalled: (appid) => ipcRenderer.invoke('uc:installed-get', appid),
+  listInstalling: () => ipcRenderer.invoke('uc:installing-list'),
+  getInstalling: (appid) => ipcRenderer.invoke('uc:installing-get', appid),
+  listInstalledGlobal: () => ipcRenderer.invoke('uc:installed-list-global'),
+  getInstalledGlobal: (appid) => ipcRenderer.invoke('uc:installed-get-global', appid),
+  listInstallingGlobal: () => ipcRenderer.invoke('uc:installing-list-global'),
+  getInstallingGlobal: (appid) => ipcRenderer.invoke('uc:installing-get-global', appid),
+  listGameExecutables: (appid) => ipcRenderer.invoke('uc:game-exe-list', appid),
+  launchGameExecutable: (exePath) => ipcRenderer.invoke('uc:game-exe-launch', exePath),
+  deleteInstalled: (appid) => ipcRenderer.invoke('uc:installed-delete', appid),
+  deleteInstalling: (appid) => ipcRenderer.invoke('uc:installing-delete', appid),
   onUpdate: (callback) => {
-    const listener = (_event, data) => callback(data)
+    const listener = (_event, data) => {
+      try {
+        // Mirror updates to renderer devtools console for easier debugging
+        try { console.debug('[uc:download-update]', data) } catch (e) {}
+      } catch (e) {}
+      callback(data)
+    }
     ipcRenderer.on('uc:download-update', listener)
     return () => ipcRenderer.removeListener('uc:download-update', listener)
   }

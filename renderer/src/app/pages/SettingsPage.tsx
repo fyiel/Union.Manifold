@@ -2,8 +2,17 @@ import { useEffect, useMemo, useState } from "react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
+import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-type MirrorHost = 'pixeldrain' | 'vikingfile' | 'rootz'
+import {
+  getPreferredDownloadHost,
+  getRootzApiBase,
+  getRootzApiKey,
+  setPreferredDownloadHost,
+  setRootzApiBase,
+  setRootzApiKey,
+} from "@/lib/downloads"
+type MirrorHost = 'rootz' | 'pixeldrain'
 
 type MirrorHostTag = 'beta' | 'soon'
 
@@ -14,9 +23,8 @@ type MirrorHostInfo = {
 }
 
 const MIRROR_HOSTS: MirrorHostInfo[] = [
-  { key: 'pixeldrain', label: 'Pixeldrain', tag: 'beta' },
-  { key: 'vikingfile', label: 'VikingFile', tag: 'soon' },
-  { key: 'rootz', label: 'Rootz', tag: 'beta' }
+  { key: 'rootz', label: 'Rootz', tag: 'beta' },
+  { key: 'pixeldrain', label: 'Pixeldrain' }
 ]
 import { FolderOpen, HardDrive, Plus } from "lucide-react"
 
@@ -59,6 +67,9 @@ export function SettingsPage() {
   const [ucSizeBytes, setUcSizeBytes] = useState<number | null>(null)
   const [usageLoading, setUsageLoading] = useState(false)
   const [defaultHost, setDefaultHost] = useState<MirrorHost>('rootz')
+  const [rootzApiBase, setRootzApiBaseValue] = useState("")
+  const [rootzApiKey, setRootzApiKeyValue] = useState("")
+  const [hasRootzKey, setHasRootzKey] = useState(false)
 
   useEffect(() => {
     const load = async () => {
@@ -87,7 +98,7 @@ export function SettingsPage() {
     let mounted = true
     const loadDefault = async () => {
       try {
-        const v = (await window.ucSettings?.get?.('defaultMirrorHost')) || null
+        const v = await getPreferredDownloadHost()
         if (!mounted) return
         if (v && MIRROR_HOSTS.some((h) => h.key === v)) setDefaultHost(v as MirrorHost)
       } catch {
@@ -104,6 +115,16 @@ export function SettingsPage() {
     return () => {
       mounted = false
       if (typeof off === 'function') off()
+    }
+  }, [])
+
+  useEffect(() => {
+    try {
+      setRootzApiBaseValue(getRootzApiBase() || "")
+      const existingKey = getRootzApiKey()
+      setHasRootzKey(Boolean(existingKey))
+    } catch {
+      // ignore
     }
   }, [])
 
@@ -144,6 +165,7 @@ export function SettingsPage() {
 
   useEffect(() => {
     let active = true
+    let timer: number | null = null
 
     const loadUsage = async () => {
       if (!downloadPath || !window.ucDownloads?.getDownloadUsage) {
@@ -166,9 +188,11 @@ export function SettingsPage() {
     }
 
     loadUsage()
+    timer = window.setInterval(loadUsage, 5000)
 
     return () => {
       active = false
+      if (timer) window.clearInterval(timer)
     }
   }, [downloadPath])
 
@@ -303,6 +327,70 @@ export function SettingsPage() {
       <Card className="border-border/60">
         <CardContent className="p-6 space-y-6">
           <div>
+            <h2 className="text-lg font-semibold">Rootz (advanced)</h2>
+            <p className="text-sm text-muted-foreground">
+              Optional: set a Rootz API key if server-side resolution is unavailable.
+            </p>
+          </div>
+
+          <div className="space-y-3">
+            <label className="text-sm font-medium">API base URL</label>
+            <Input
+              value={rootzApiBase}
+              onChange={(e) => setRootzApiBaseValue(e.target.value)}
+              placeholder="https://www.rootz.so/api"
+            />
+          </div>
+
+          <div className="space-y-3">
+            <label className="text-sm font-medium">API key</label>
+            <Input
+              type="password"
+              value={rootzApiKey}
+              onChange={(e) => setRootzApiKeyValue(e.target.value)}
+              placeholder="Paste your Rootz API key"
+            />
+            {hasRootzKey && (
+              <p className="text-xs text-muted-foreground">Rootz API key is stored.</p>
+            )}
+            <p className="text-xs text-muted-foreground">
+              Stored locally on this device. Leave blank to keep the existing key.
+            </p>
+          </div>
+
+          <div className="flex flex-col gap-3 sm:flex-row">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setRootzApiBase(rootzApiBase)
+                if (rootzApiKey.trim()) {
+                  setRootzApiKey(rootzApiKey)
+                  setHasRootzKey(true)
+                  setRootzApiKeyValue("")
+                }
+              }}
+            >
+              Save Rootz settings
+            </Button>
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setRootzApiBase("")
+                setRootzApiKey("")
+                setRootzApiBaseValue("")
+                setRootzApiKeyValue("")
+                setHasRootzKey(false)
+              }}
+            >
+              Clear
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="border-border/60">
+        <CardContent className="p-6 space-y-6">
+          <div>
             <h2 className="text-lg font-semibold">Mirror host</h2>
             <p className="text-sm text-muted-foreground">Choose the default mirror host for downloads.</p>
           </div>
@@ -314,7 +402,7 @@ export function SettingsPage() {
               onValueChange={async (v) => {
                 setDefaultHost(v as MirrorHost)
                 try {
-                  if (window.ucSettings?.set) await window.ucSettings.set('defaultMirrorHost', v)
+                  setPreferredDownloadHost(v as MirrorHost)
                 } catch {}
               }}
             >

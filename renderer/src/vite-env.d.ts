@@ -2,7 +2,17 @@
 
 type DownloadUpdatePayload = {
   downloadId: string
-  status: "queued" | "downloading" | "paused" | "completed" | "failed" | "cancelled"
+  status:
+    | "queued"
+    | "downloading"
+    | "paused"
+    | "extracting"
+    | "installing"
+    | "completed"
+    | "extracted"
+    | "extract_failed"
+    | "failed"
+    | "cancelled"
   receivedBytes?: number
   totalBytes?: number
   speedBps?: number
@@ -13,6 +23,8 @@ type DownloadUpdatePayload = {
   gameName?: string | null
   url?: string
   error?: string | null
+  partIndex?: number
+  partTotal?: number
 }
 
 declare global {
@@ -24,8 +36,12 @@ declare global {
         filename?: string
         appid?: string
         gameName?: string
-      }) => Promise<{ ok: boolean }>
+        partIndex?: number
+        partTotal?: number
+      }) => Promise<{ ok: boolean; queued?: boolean; error?: string }>
       cancel: (downloadId: string) => Promise<{ ok: boolean }>
+      pause: (downloadId: string) => Promise<{ ok: boolean }>
+      resume: (downloadId: string) => Promise<{ ok: boolean }>
       showInFolder: (path: string) => Promise<{ ok: boolean }>
       openPath: (path: string) => Promise<{ ok: boolean }>
       listDisks: () => Promise<
@@ -38,6 +54,16 @@ declare global {
       // Installed manifests written by the main process. Renderer can read/save installed metadata.
       listInstalled: () => Promise<any[]>
       getInstalled: (appid: string) => Promise<any | null>
+      listInstalling: () => Promise<any[]>
+      getInstalling: (appid: string) => Promise<any | null>
+      listInstalledGlobal: () => Promise<any[]>
+      getInstalledGlobal: (appid: string) => Promise<any | null>
+      listInstallingGlobal: () => Promise<any[]>
+      getInstallingGlobal: (appid: string) => Promise<any | null>
+      listGameExecutables: (appid: string) => Promise<{ ok: boolean; folder?: string; exes: { name: string; path: string }[]; error?: string }>
+      launchGameExecutable: (exePath: string) => Promise<{ ok: boolean; error?: string }>
+      deleteInstalled: (appid: string) => Promise<{ ok: boolean }>
+      deleteInstalling: (appid: string) => Promise<{ ok: boolean }>
       saveInstalledMetadata: (appid: string, metadata: any) => Promise<{ ok: boolean }>
       onUpdate: (callback: (update: DownloadUpdatePayload) => void) => () => void
     }

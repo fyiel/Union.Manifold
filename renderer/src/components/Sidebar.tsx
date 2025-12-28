@@ -2,9 +2,9 @@ import { NavLink } from "react-router-dom"
 import { Download, Gamepad2, Library, Settings } from "lucide-react"
 
 const navItems = [
-  { label: "Launcher", to: "/", icon: Gamepad2 },
+  { label: "Browse", to: "/", icon: Gamepad2 },
   { label: "Library", to: "/library", icon: Library },
-  { label: "Downloads", to: "/downloads", icon: Download },
+  { label: "Activity", to: "/downloads", icon: Download },
   { label: "Settings", to: "/settings", icon: Settings },
 ]
 
@@ -45,9 +45,7 @@ export function Sidebar({ mobileOpen, onClose }: SidebarProps) {
             </NavLink>
           ))}
         </nav>
-        <div className="px-6 py-4 text-xs text-muted-foreground border-t border-sidebar-border">
-          Powered by UnionCrax backend
-        </div>
+        <div className="px-6 py-4 border-t border-sidebar-border" />
       </aside>
 
       {mobileOpen && (
@@ -83,9 +81,7 @@ export function Sidebar({ mobileOpen, onClose }: SidebarProps) {
                 </NavLink>
               ))}
             </nav>
-            <div className="px-2 py-3 text-xs text-muted-foreground border-t border-sidebar-border">
-              Powered by UnionCrax backend
-            </div>
+            <div className="px-2 py-3 border-t border-sidebar-border" />
           </div>
         </div>
       )}

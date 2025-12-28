@@ -1,9 +1,10 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react"
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react"
 import type { Game } from "@/lib/types"
 import {
   fetchDownloadLinks,
   inferFilenameFromUrl,
   getPreferredDownloadHost,
+  isPixeldrainUrl,
   isRootzUrl,
   requestDownloadToken,
   resolveDownloadUrl,
@@ -11,7 +12,17 @@ import {
 } from "@/lib/downloads"
 import { addDownloadedGameToHistory, hasCookieConsent } from "@/lib/user-history"
 
-export type DownloadStatus = "queued" | "downloading" | "paused" | "completed" | "failed" | "cancelled"
+export type DownloadStatus =
+  | "queued"
+  | "downloading"
+  | "paused"
+  | "extracting"
+  | "installing"
+  | "completed"
+  | "extracted"
+  | "extract_failed"
+  | "failed"
+  | "cancelled"
 
 export type DownloadItem = {
   id: string
@@ -20,6 +31,8 @@ export type DownloadItem = {
   host: string
   url: string
   filename: string
+  partIndex?: number
+  partTotal?: number
   status: DownloadStatus
   receivedBytes: number
   totalBytes: number
@@ -44,14 +57,21 @@ type DownloadUpdate = {
   gameName?: string | null
   url?: string
   error?: string | null
+  partIndex?: number
+  partTotal?: number
 }
 
 type DownloadsContextValue = {
   downloads: DownloadItem[]
   startGameDownload: (game: Game) => Promise<void>
   cancelDownload: (downloadId: string) => Promise<void>
+  cancelGroup: (appid: string) => Promise<void>
+  pauseDownload: (downloadId: string) => Promise<void>
+  resumeDownload: (downloadId: string) => Promise<void>
   showInFolder: (path: string) => Promise<void>
   openPath: (path: string) => Promise<void>
+  removeDownload: (downloadId: string) => void
+  clearByAppid: (appid: string) => void
   clearCompleted: () => void
 }
 
@@ -67,6 +87,15 @@ function safeGameFilename(name: string) {
   )
 }
 
+function parsePartIndexFromFilename(filename: string) {
+  const lower = filename.toLowerCase()
+  const partMatch = lower.match(/part\s*([0-9]{1,3})/)
+  const extMatch = lower.match(/\.([0-9]{3})$/)
+  if (partMatch?.[1]) return Number(partMatch[1])
+  if (extMatch?.[1]) return Number(extMatch[1])
+  return null
+}
+
 export function DownloadsProvider({ children }: { children: React.ReactNode }) {
   const [downloads, setDownloads] = useState<DownloadItem[]>(() => {
     if (typeof window === "undefined") return []
@@ -74,11 +103,26 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
       const raw = localStorage.getItem(STORAGE_KEY)
       if (!raw) return []
       const parsed = JSON.parse(raw) as DownloadItem[]
-      return parsed.map((item) =>
-        item.status === "downloading" || item.status === "queued"
-          ? { ...item, status: "failed", error: "App restarted" }
-          : item
-      )
+        // Remove any stored mock/demo/sample entries that were added during development.
+        // This will permanently purge them from `localStorage` on startup.
+        const mockFilterRegex = /mock installed|mock|demo|example|placeholder|test-download|fake|sample/i
+        const filtered = parsed.filter((item) => {
+          const combined = `${item.appid || ''} ${item.url || ''} ${item.filename || ''} ${item.gameName || ''} ${item.host || ''}`
+          return !mockFilterRegex.test(combined)
+        })
+
+        // If we removed items, persist the cleaned array back to localStorage to fully remove them.
+        if (filtered.length !== parsed.length) {
+          try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(filtered))
+          } catch {}
+        }
+
+        return filtered.map((item) =>
+          item.status === "downloading" || item.status === "queued" || item.status === "extracting" || item.status === "installing"
+            ? { ...item, status: "failed", error: "App restarted" }
+            : item
+        )
     } catch {
       return []
     }
@@ -89,11 +133,109 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(downloads))
   }, [downloads])
 
+  const downloadsRef = useRef(downloads)
+  useEffect(() => {
+    downloadsRef.current = downloads
+  }, [downloads])
+  const preparingRef = useRef(new Set<string>())
+  const sequenceLocksRef = useRef(new Set<string>())
+
   // Installed metadata is stored by the main process as a file inside the installed folder.
+
+  const resolveWithTimeout = useCallback(async (host: string, targetUrl: string) => {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 12000)
+    try {
+      const resolved = await resolveDownloadUrl(host, targetUrl)
+      clearTimeout(timeout)
+      return resolved
+    } catch (err) {
+      clearTimeout(timeout)
+      throw err
+    }
+  }, [])
+
+  const startNextQueuedPart = useCallback(
+    async () => {
+      if (sequenceLocksRef.current.size > 0) return
+      const hasActive = downloadsRef.current.some((item) =>
+        ["downloading", "paused", "extracting", "installing"].includes(item.status)
+      )
+      if (hasActive) return
+
+      const queued = downloadsRef.current
+        .filter((item) => item.status === "queued")
+        .sort((a, b) => {
+          if (a.startedAt !== b.startedAt) return a.startedAt - b.startedAt
+          const aKey = a.partIndex ?? 0
+          const bKey = b.partIndex ?? 0
+          return aKey - bKey
+        })
+      if (!queued.length) return
+      const next = queued[0]
+      sequenceLocksRef.current.add(next.appid)
+
+      try {
+        const resolved = await resolveWithTimeout(next.host, next.url)
+        if (!resolved || !resolved.url || (next.host === "rootz" && !resolved.resolved)) {
+          setDownloads((prev) =>
+            prev.map((item) =>
+              item.id === next.id
+                ? { ...item, status: "failed", error: "Rootz link could not be resolved." }
+                : item
+            )
+          )
+          return
+        }
+
+        const filename = resolved.filename || next.filename
+        setDownloads((prev) =>
+          prev.map((item) =>
+            item.id === next.id
+              ? { ...item, url: resolved.url, filename, totalBytes: resolved.size || 0, error: null }
+              : item
+          )
+        )
+
+        if (!window.ucDownloads?.start) {
+          setDownloads((prev) =>
+            prev.map((item) =>
+              item.id === next.id ? { ...item, status: "failed", error: "Downloads unavailable" } : item
+            )
+          )
+          return
+        }
+
+        const res = await window.ucDownloads.start({
+          downloadId: next.id,
+          url: resolved.url,
+          filename,
+          appid: next.appid,
+          gameName: next.gameName,
+          partIndex: next.partIndex,
+          partTotal: next.partTotal,
+        })
+        if (res && typeof res === "object" && "ok" in res && !res.ok) {
+          throw new Error((res as { error?: string }).error || "Failed to start download")
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Failed to start download"
+        setDownloads((prev) =>
+          prev.map((item) =>
+            item.id === next.id ? { ...item, status: "failed", error: message } : item
+          )
+        )
+      } finally {
+        sequenceLocksRef.current.delete(next.appid)
+      }
+    },
+    [resolveWithTimeout]
+  )
 
   useEffect(() => {
     if (!window.ucDownloads?.onUpdate) return
     return window.ucDownloads.onUpdate((update: DownloadUpdate) => {
+      let nextDownloads: DownloadItem[] | null = null
       setDownloads((prev) => {
         const idx = prev.findIndex((item) => item.id === update.downloadId)
         if (idx === -1) return prev
@@ -109,130 +251,246 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
           savePath: update.savePath ?? existing.savePath,
           url: update.url ?? existing.url,
           error: update.error ?? existing.error,
+          partIndex: update.partIndex ?? existing.partIndex,
+          partTotal: update.partTotal ?? existing.partTotal,
           completedAt:
-            update.status === "completed" || update.status === "failed" || update.status === "cancelled"
+            update.status === "completed" || update.status === "failed" || update.status === "cancelled" || update.status === "extracted"
               ? Date.now()
               : existing.completedAt,
         }
         const clone = [...prev]
         clone[idx] = next
+        nextDownloads = clone
+        downloadsRef.current = clone
         return clone
       })
+      if (update.status === "completed" || update.status === "extracted") {
+        queueMicrotask(() => {
+          void startNextQueuedPart()
+        })
+      }
     })
-  }, [])
+  }, [startNextQueuedPart])
 
   // The main process writes installed manifests; renderer can call `window.ucDownloads.listInstalled()` when needed.
 
   const startGameDownload = useCallback(async (game: Game) => {
-    // save initial metadata to installing folder so it's available offline even before completion
+    if (preparingRef.current.has(game.appid)) {
+      throw new Error("This game is already downloading.")
+    }
+    const existingActive = downloadsRef.current.filter(
+      (item) =>
+        item.appid === game.appid &&
+        ["queued", "downloading", "paused", "extracting", "installing"].includes(item.status)
+    )
+    if (existingActive.length > 0) {
+      throw new Error("This game is already downloading.")
+    }
+    preparingRef.current.add(game.appid)
+
     try {
-      if (window.ucDownloads?.saveInstalledMetadata) {
-        // pass the full game object as metadata
-        await window.ucDownloads.saveInstalledMetadata(game.appid, game)
-      }
-    } catch (err) {
-      // ignore IPC failures
-    }
-
-    const downloadToken = await requestDownloadToken(game.appid)
-    if (hasCookieConsent()) {
-      addDownloadedGameToHistory(game.appid)
-    }
-
-    const linksResult = await fetchDownloadLinks(game.appid, downloadToken)
-
-    let links: string[] = []
-    let selectedHost = "rootz"
-
-    if (linksResult.redirectUrl) {
-      if (!isRootzUrl(linksResult.redirectUrl)) {
-        throw new Error("This title does not have Rootz downloads yet.")
-      }
-      links = [linksResult.redirectUrl]
-    } else {
-      const preferredHost = await getPreferredDownloadHost()
-      const selected = selectHost(linksResult.hosts, preferredHost)
-      links = selected.links
-      selectedHost = selected.host || "rootz"
-    }
-
-    if (!links.length) {
-      throw new Error("No Rootz download links are available for this title.")
-    }
-
-    const baseName = safeGameFilename(game.name)
-    const host = selectedHost
-    const resolvedLinks = await Promise.all(links.map(async (link) => resolveDownloadUrl(host, link)))
-    // If host is rootz we need all links to be resolved via the Rootz API; for other hosts
-    // be more permissive and only skip entries that have no usable URL.
-    const unresolved = resolvedLinks.find((entry) => !entry || !entry.url)
-    if (unresolved && host === 'rootz') {
-      throw new Error("Unable to resolve Rootz download links. Check your Rootz API settings.")
-    }
-    // Filter out any completely unusable entries (no `url`). Keep entries even if `resolved` is false.
-    const usableLinks = resolvedLinks.filter((entry) => entry && entry.url).map((e) => e as any)
-    if (!usableLinks.length) {
-      throw new Error("No usable download links are available for this title.")
-    }
-
-    for (let index = 0; index < usableLinks.length; index++) {
-      const resolved = usableLinks[index]
-      const filename =
-        resolved.filename ||
-        inferFilenameFromUrl(
-          resolved.url,
-          `${baseName}${resolvedLinks.length > 1 ? `-part${index + 1}` : ""}`
-        )
-      const downloadId = `${game.appid}-${Date.now()}-${index}`
-
-      const newItem: DownloadItem = {
-        id: downloadId,
-        appid: game.appid,
-        gameName: game.name,
-        host,
-        url: resolved.url,
-        filename,
-        status: "queued",
-        receivedBytes: 0,
-        totalBytes: resolved.size || 0,
-        speedBps: 0,
-        etaSeconds: null,
-        startedAt: Date.now(),
+      // save initial metadata to installing folder so it's available offline even before completion
+      try {
+        if (window.ucDownloads?.saveInstalledMetadata) {
+          // pass the full game object as metadata
+          await window.ucDownloads.saveInstalledMetadata(game.appid, game)
+        }
+      } catch (err) {
+        // ignore IPC failures
       }
 
-      setDownloads((prev) => [newItem, ...prev])
+      const downloadToken = await requestDownloadToken(game.appid)
+      if (hasCookieConsent()) {
+        addDownloadedGameToHistory(game.appid)
+      }
 
-      if (window.ucDownloads?.start) {
-        try {
-          await window.ucDownloads.start({
-            downloadId,
-            url: resolved.url,
-            filename,
-            appid: game.appid,
-            gameName: game.name,
-          })
-        } catch (err) {
-          setDownloads((prev) =>
-            prev.map((item) =>
-              item.id === downloadId ? { ...item, status: "failed", error: "Failed to start download" } : item
-            )
-          )
+      const linksResult = await fetchDownloadLinks(game.appid, downloadToken)
+
+      let links: string[] = []
+      let selectedHost = "rootz"
+
+      if (linksResult.redirectUrl) {
+        // Accept redirect URLs (may be signed Rootz URLs)
+        const redirectUrl = linksResult.redirectUrl
+        links = [redirectUrl]
+        if (isPixeldrainUrl(redirectUrl)) {
+          selectedHost = "pixeldrain"
+        } else if (isRootzUrl(redirectUrl)) {
+          selectedHost = "rootz"
+        } else {
+          selectedHost = await getPreferredDownloadHost()
         }
       } else {
-        setDownloads((prev) =>
-          prev.map((item) =>
-            item.id === downloadId ? { ...item, status: "failed", error: "Downloads unavailable" } : item
-          )
-        )
+        const preferredHost = await getPreferredDownloadHost()
+        const selected = selectHost(linksResult.hosts, preferredHost)
+        
+        // If no links found at all
+        if (!selected.links.length) {
+          throw new Error(`No download links available for "${preferredHost}". This title may not be available on your selected host.`)
+        }
+        
+        // If preferred host wasn't available, warn user (but use the fallback)
+        if (selected.host !== preferredHost) {
+          console.warn(`[UC] Preferred host "${preferredHost}" not available, using "${selected.host}" instead`)
+        }
+        
+        links = selected.links
+        selectedHost = selected.host || "rootz"
       }
+
+      if (!links.length) {
+        throw new Error("No download links are available for this title. Please try again later or request the game to be uploaded to a supported host.")
+      }
+
+      const baseName = safeGameFilename(game.name)
+      const host = selectedHost
+      const batchId = `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`
+      const queue = links.map((sourceUrl, index) => {
+        const filenameFallback = inferFilenameFromUrl(
+          sourceUrl,
+          `${baseName}${links.length > 1 ? `-part${index + 1}` : ""}`
+        )
+        const downloadId = `${game.appid}-${batchId}-${index}`
+        const partIndex = parsePartIndexFromFilename(filenameFallback)
+        return { sourceUrl, filenameFallback, downloadId, index, partIndex }
+      })
+      const inferredTotalParts = Math.max(1, queue.length)
+      const parsedPartNumbers = queue
+        .map((item) => item.partIndex)
+        .filter((num): num is number => typeof num === "number" && Number.isFinite(num))
+      const totalParts = parsedPartNumbers.length
+        ? Math.max(...parsedPartNumbers, inferredTotalParts)
+        : inferredTotalParts
+      const newItems: DownloadItem[] = queue.map((item) => {
+        const partTotal = totalParts > 1 ? totalParts : undefined
+        const partIndex = partTotal ? item.partIndex ?? item.index + 1 : undefined
+        return {
+          id: item.downloadId,
+          appid: game.appid,
+          gameName: game.name,
+          host,
+          url: item.sourceUrl,
+          filename: item.filenameFallback,
+          partIndex,
+          partTotal,
+          status: "queued",
+          receivedBytes: 0,
+          totalBytes: 0,
+          speedBps: 0,
+          etaSeconds: null,
+          startedAt: Date.now(),
+        }
+      })
+
+      setDownloads((prev) => {
+        const cleared = prev.filter((item) => !(item.appid === game.appid && item.status === "cancelled"))
+        const next = [...newItems, ...cleared]
+        downloadsRef.current = next
+        return next
+      })
+
+      void startNextQueuedPart()
+    } catch (err) {
+      try {
+        await window.ucDownloads?.deleteInstalling?.(game.appid)
+      } catch {}
+      throw err
+    } finally {
+      preparingRef.current.delete(game.appid)
     }
-  }, [])
+  }, [startNextQueuedPart])
 
   const cancelDownload = useCallback(async (downloadId: string) => {
     if (window.ucDownloads?.cancel) {
       await window.ucDownloads.cancel(downloadId)
     }
+    setDownloads((prev) =>
+      prev.map((item) =>
+        item.id === downloadId ? { ...item, status: "cancelled", error: "Cancelled" } : item
+      )
+    )
+  }, [downloads])
+
+  const cancelGroup = useCallback(async (appid: string) => {
+    if (!appid) return
+    // cancel all downloads with matching appid
+    const toCancel = downloads.filter((d) => d.appid === appid).map((d) => d.id)
+    for (const id of toCancel) {
+      try {
+        if (window.ucDownloads?.cancel) await window.ucDownloads.cancel(id)
+      } catch (e) {}
+    }
+    setDownloads((prev) =>
+      prev.map((item) =>
+        item.appid === appid ? { ...item, status: "cancelled", error: "Cancelled" } : item
+      )
+    )
+  }, [downloads])
+
+  const pauseDownload = useCallback(async (downloadId: string) => {
+    if (window.ucDownloads?.pause) {
+      await window.ucDownloads.pause(downloadId)
+    }
   }, [])
+
+  const resumeDownload = useCallback(
+    async (downloadId: string) => {
+      const target = downloads.find((item) => item.id === downloadId)
+      if (!target) return
+
+      let ok = false
+      if (window.ucDownloads?.resume) {
+        try {
+          const res = await window.ucDownloads.resume(downloadId)
+          ok = Boolean(res && typeof res === "object" && "ok" in res ? (res as { ok?: boolean }).ok : res)
+        } catch {
+          ok = false
+        }
+      }
+
+      if (!ok && window.ucDownloads?.start) {
+        try {
+          await window.ucDownloads.start({
+            downloadId,
+            url: target.url,
+            filename: target.filename,
+            appid: target.appid,
+            gameName: target.gameName,
+            partIndex: target.partIndex,
+            partTotal: target.partTotal,
+          })
+          ok = true
+          setDownloads((prev) =>
+            prev.map((item) =>
+              item.id === downloadId
+                ? {
+                    ...item,
+                    status: "queued",
+                    receivedBytes: 0,
+                    totalBytes: 0,
+                    speedBps: 0,
+                    etaSeconds: null,
+                    error: null,
+                    startedAt: Date.now(),
+                  }
+                : item
+            )
+          )
+        } catch {
+          ok = false
+        }
+      }
+
+      if (!ok) {
+        setDownloads((prev) =>
+          prev.map((item) =>
+            item.id === downloadId ? { ...item, status: "failed", error: "Resume failed. Please try again." } : item
+          )
+        )
+      }
+    },
+    [downloads]
+  )
 
   const showInFolder = useCallback(async (path: string) => {
     if (window.ucDownloads?.showInFolder) {
@@ -248,13 +506,34 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
 
   const clearCompleted = useCallback(() => {
     setDownloads((prev) =>
-      prev.filter((item) => item.status !== "completed" && item.status !== "failed" && item.status !== "cancelled")
+      prev.filter(
+        (item) =>
+          !["completed", "extracted", "extract_failed", "failed", "cancelled"].includes(item.status)
+      )
     )
   }, [])
 
+  const clearByAppid = useCallback((appid: string) => {
+    if (!appid) return
+    setDownloads((prev) => prev.filter((item) => item.appid !== appid))
+  }, [])
+
   const value = useMemo(
-    () => ({ downloads, startGameDownload, cancelDownload, showInFolder, openPath, clearCompleted }),
-    [downloads, startGameDownload, cancelDownload, showInFolder, openPath, clearCompleted]
+    () => ({
+      downloads,
+      startGameDownload,
+      cancelDownload,
+      cancelGroup,
+      pauseDownload,
+      resumeDownload,
+      showInFolder,
+      openPath,
+      removeDownload: (downloadId: string) =>
+        setDownloads((prev) => prev.filter((item) => item.id !== downloadId)),
+      clearByAppid,
+      clearCompleted,
+    }),
+    [downloads, startGameDownload, cancelDownload, cancelGroup, pauseDownload, resumeDownload, showInFolder, openPath, clearByAppid, clearCompleted]
   )
 
   return <DownloadsContext.Provider value={value}>{children}</DownloadsContext.Provider>
