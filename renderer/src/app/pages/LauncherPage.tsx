@@ -1,6 +1,7 @@
 import { type FormEvent, useCallback, useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { GameCard } from "@/components/GameCard"
+import { GameCardCompact } from "@/components/GameCardCompact"
 import { GameCardSkeleton } from "@/components/GameCardSkeleton"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -16,8 +17,8 @@ import {
   PaginationNext,
   PaginationPrevious,
 } from "@/components/ui/pagination"
-import { apiUrl } from "@/lib/api"
-import { clearUserHistory } from "@/lib/user-history"
+import { apiFetch, apiUrl } from "@/lib/api"
+import { clearUserHistory, getRecentlyViewedGames, hasCookieConsent } from "@/lib/user-history"
 import { formatNumber, generateErrorCode, ErrorTypes } from "@/lib/utils"
 import { Hammer, SlidersHorizontal, Wifi, EyeOff, ArrowRight, Server } from "lucide-react"
 
@@ -53,11 +54,62 @@ export function LauncherPage() {
   const [refreshKey, setRefreshKey] = useState(0)
   const [gamesError, setGamesError] = useState<{ type: string; message: string; code: string } | null>(null)
   const [currentPage, setCurrentPage] = useState(1)
+  const [recentlyViewedIds, setRecentlyViewedIds] = useState<string[]>([])
+  const [recentHistoryItems, setRecentHistoryItems] = useState<Game[]>([])
+  const [historyAuthStatus, setHistoryAuthStatus] = useState<"unknown" | "authed" | "unauth">("unknown")
   const itemsPerPage = 20
 
   useEffect(() => {
     loadGames()
   }, [])
+
+  useEffect(() => {
+    if (!hasCookieConsent()) {
+      setRecentlyViewedIds([])
+      return
+    }
+    setRecentlyViewedIds(getRecentlyViewedGames(12))
+  }, [refreshKey])
+
+  useEffect(() => {
+    let ignore = false
+    const loadHistory = async () => {
+      try {
+        const res = await apiFetch("/api/view-history")
+        if (res.status === 401) {
+          if (!ignore) {
+            setHistoryAuthStatus("unauth")
+            setRecentHistoryItems([])
+          }
+          return
+        }
+        if (!res.ok) {
+          if (!ignore) {
+            setHistoryAuthStatus("unknown")
+            setRecentHistoryItems([])
+          }
+          return
+        }
+        const data = await res.json()
+        const items = Array.isArray(data?.items) ? data.items : []
+        if (!ignore) {
+          setHistoryAuthStatus("authed")
+          setRecentHistoryItems(items)
+        }
+      } catch {
+        if (!ignore) {
+          setHistoryAuthStatus("unknown")
+          setRecentHistoryItems([])
+        }
+      }
+    }
+
+    loadHistory()
+
+    return () => {
+      ignore = true
+    }
+  }, [refreshKey])
 
   const fetchGameStats = async (forceRefresh = false) => {
     try {
@@ -167,6 +219,20 @@ export function LauncherPage() {
     return sorted.slice(0, 8)
   }, [games, gameStats])
 
+  const recentlyViewedGames = useMemo(() => {
+    const isAuthed = historyAuthStatus === "authed"
+    const isUnauth = historyAuthStatus === "unauth"
+    const source = isAuthed
+      ? recentHistoryItems
+      : isUnauth && recentlyViewedIds.length
+        ? recentlyViewedIds
+            .map((appid) => games.find((game) => game.appid === appid))
+            .filter((game): game is Game => Boolean(game))
+        : []
+
+    return source.slice(0, 10)
+  }, [recentHistoryItems, recentlyViewedIds, games, historyAuthStatus])
+
   const featuredGames = useMemo(() => {
     return [...games].sort(() => Math.random() - 0.5)
   }, [games, refreshKey])
@@ -273,14 +339,14 @@ export function LauncherPage() {
       <section className="py-8 px-4 border-y border-border/50">
         <div className="container mx-auto max-w-4xl text-center">
           <div
-            className="inline-flex items-center gap-3 px-6 py-3 rounded-full bg-green-500/10 border border-green-500/30 text-green-600 hover:bg-green-500/15 transition-all cursor-pointer group"
+            className="inline-flex items-center gap-3 px-6 py-3 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-600 hover:bg-amber-500/15 transition-all cursor-pointer group"
             onClick={() => window.open("https://union-crax.xyz/request", "_blank", "noreferrer")}
           >
             <Hammer className="h-5 w-5" />
             <span className="text-base font-semibold">
-              Happy Christmas! Everyone gets 5 daily requests till 27 December.
+              Requests are back, but they will be processed slower.
             </span>
-            <span className="text-green-600 font-semibold">Request Now</span>
+            <span className="text-amber-700 font-semibold">Submit a request</span>
             <ArrowRight className="h-5 w-5 group-hover:translate-x-1 transition-transform" />
           </div>
         </div>
@@ -396,6 +462,63 @@ export function LauncherPage() {
           </div>
         </div>
       </section>
+
+      {recentlyViewedGames.length > 0 && (
+        <section className="py-12 sm:py-16 md:py-20 px-4">
+          <div className="container mx-auto max-w-7xl">
+            <div className="mb-10">
+              <h2 className="text-3xl sm:text-4xl md:text-5xl font-black text-foreground font-montserrat mb-3">
+                Recently Viewed
+              </h2>
+              <p className="text-base sm:text-lg text-muted-foreground">Jump back into games you opened recently</p>
+            </div>
+
+            <Carousel
+              opts={{
+                align: "start",
+                loop: false,
+                skipSnaps: false,
+                dragFree: true,
+              }}
+              className="w-full"
+            >
+              <CarouselContent className="-ml-2 md:-ml-4">
+                {recentlyViewedGames.map((game) => (
+                  <CarouselItem
+                    key={game.appid}
+                    className="pl-2 md:pl-4 basis-1/2 sm:basis-1/3 md:basis-1/4 lg:basis-1/5"
+                  >
+                    <GameCardCompact
+                      game={{
+                        appid: game.appid,
+                        name: game.name,
+                        image: game.image,
+                        genres: game.genres,
+                      }}
+                    />
+                  </CarouselItem>
+                ))}
+                <CarouselItem className="pl-2 md:pl-4 basis-1/2 sm:basis-1/3 md:basis-1/4 lg:basis-1/5">
+                  <button
+                    type="button"
+                    onClick={() => window.open(apiUrl("/view-history"), "_blank", "noopener")}
+                    className="group block h-full w-full text-left"
+                    aria-label="View more recently viewed games"
+                  >
+                    <div className="h-full rounded-2xl border border-dashed border-border/60 bg-card/60 p-4 flex flex-col items-center justify-center text-center transition hover:border-primary/50">
+                      <div className="text-sm font-semibold text-foreground">For more</div>
+                      <div className="text-xs text-muted-foreground mt-1">Visit view history</div>
+                      <div className="mt-3 text-xs text-primary group-hover:underline">/view-history</div>
+                    </div>
+                  </button>
+                </CarouselItem>
+              </CarouselContent>
+              <CarouselPrevious />
+              <CarouselNext />
+            </Carousel>
+          </div>
+        </section>
+      )}
 
       {gamesError && (
         <section className="py-6 px-4">

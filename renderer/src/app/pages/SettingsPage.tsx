@@ -2,15 +2,11 @@ import { useEffect, useMemo, useState } from "react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { apiUrl } from "@/lib/api"
 import {
   getPreferredDownloadHost,
-  getRootzApiBase,
-  getRootzApiKey,
   setPreferredDownloadHost,
-  setRootzApiBase,
-  setRootzApiKey,
 } from "@/lib/downloads"
 type MirrorHost = 'rootz' | 'pixeldrain'
 
@@ -26,7 +22,7 @@ const MIRROR_HOSTS: MirrorHostInfo[] = [
   { key: 'rootz', label: 'Rootz', tag: 'beta' },
   { key: 'pixeldrain', label: 'Pixeldrain' }
 ]
-import { FolderOpen, HardDrive, Plus } from "lucide-react"
+import { ExternalLink, FolderOpen, HardDrive, Plus } from "lucide-react"
 
 const downloadDirName = "UnionCrax.Direct"
 
@@ -67,9 +63,6 @@ export function SettingsPage() {
   const [ucSizeBytes, setUcSizeBytes] = useState<number | null>(null)
   const [usageLoading, setUsageLoading] = useState(false)
   const [defaultHost, setDefaultHost] = useState<MirrorHost>('rootz')
-  const [rootzApiBase, setRootzApiBaseValue] = useState("")
-  const [rootzApiKey, setRootzApiKeyValue] = useState("")
-  const [hasRootzKey, setHasRootzKey] = useState(false)
 
   useEffect(() => {
     const load = async () => {
@@ -115,16 +108,6 @@ export function SettingsPage() {
     return () => {
       mounted = false
       if (typeof off === 'function') off()
-    }
-  }, [])
-
-  useEffect(() => {
-    try {
-      setRootzApiBaseValue(getRootzApiBase() || "")
-      const existingKey = getRootzApiKey()
-      setHasRootzKey(Boolean(existingKey))
-    } catch {
-      // ignore
     }
   }, [])
 
@@ -218,11 +201,30 @@ export function SettingsPage() {
   }
 
   return (
-    <div className="space-y-8">
+    <div className="container mx-auto max-w-5xl space-y-8">
       <div className="flex items-center gap-3">
         <h1 className="text-2xl sm:text-3xl font-black font-montserrat">Settings</h1>
         <Badge className="rounded-full bg-primary/15 text-primary border-primary/20">UnionCrax.Direct</Badge>
       </div>
+
+      <Card className="border-border/60">
+        <CardContent className="p-6 space-y-4">
+          <div>
+            <h2 className="text-lg font-semibold">Account</h2>
+            <p className="text-sm text-muted-foreground">
+              Manage your Discord profile and requests on the web dashboard.
+            </p>
+          </div>
+          <Button
+            variant="outline"
+            className="gap-2"
+            onClick={() => window.open(apiUrl("/settings"), "_blank")}
+          >
+            <ExternalLink className="h-4 w-4" />
+            Manage account on web
+          </Button>
+        </CardContent>
+      </Card>
 
       <Card className="border-border/60">
         <CardContent className="p-6 space-y-6">
@@ -327,70 +329,6 @@ export function SettingsPage() {
       <Card className="border-border/60">
         <CardContent className="p-6 space-y-6">
           <div>
-            <h2 className="text-lg font-semibold">Rootz (advanced)</h2>
-            <p className="text-sm text-muted-foreground">
-              Optional: set a Rootz API key if server-side resolution is unavailable.
-            </p>
-          </div>
-
-          <div className="space-y-3">
-            <label className="text-sm font-medium">API base URL</label>
-            <Input
-              value={rootzApiBase}
-              onChange={(e) => setRootzApiBaseValue(e.target.value)}
-              placeholder="https://www.rootz.so/api"
-            />
-          </div>
-
-          <div className="space-y-3">
-            <label className="text-sm font-medium">API key</label>
-            <Input
-              type="password"
-              value={rootzApiKey}
-              onChange={(e) => setRootzApiKeyValue(e.target.value)}
-              placeholder="Paste your Rootz API key"
-            />
-            {hasRootzKey && (
-              <p className="text-xs text-muted-foreground">Rootz API key is stored.</p>
-            )}
-            <p className="text-xs text-muted-foreground">
-              Stored locally on this device. Leave blank to keep the existing key.
-            </p>
-          </div>
-
-          <div className="flex flex-col gap-3 sm:flex-row">
-            <Button
-              variant="outline"
-              onClick={() => {
-                setRootzApiBase(rootzApiBase)
-                if (rootzApiKey.trim()) {
-                  setRootzApiKey(rootzApiKey)
-                  setHasRootzKey(true)
-                  setRootzApiKeyValue("")
-                }
-              }}
-            >
-              Save Rootz settings
-            </Button>
-            <Button
-              variant="ghost"
-              onClick={() => {
-                setRootzApiBase("")
-                setRootzApiKey("")
-                setRootzApiBaseValue("")
-                setRootzApiKeyValue("")
-                setHasRootzKey(false)
-              }}
-            >
-              Clear
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card className="border-border/60">
-        <CardContent className="p-6 space-y-6">
-          <div>
             <h2 className="text-lg font-semibold">Mirror host</h2>
             <p className="text-sm text-muted-foreground">Choose the default mirror host for downloads.</p>
           </div>
@@ -428,6 +366,12 @@ export function SettingsPage() {
                 ))}
               </SelectContent>
             </Select>
+            {defaultHost === "rootz" && (
+              <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+                Download resuming is currently not supported for this host. Please do not close the app while
+                downloading with Rootz.
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>

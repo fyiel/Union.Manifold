@@ -67,13 +67,9 @@ export function getSimilarSuggestions(
   return suggestions
 }
 
-export function hasOnlineMode(source: string): boolean {
-  if (!source) return false
-
-  const onlineIndicators = ["online-fix", "ofme"]
-  const sourceLower = source.toLowerCase()
-
-  return onlineIndicators.some((indicator) => sourceLower.includes(indicator))
+// Online badge is now driven by the explicit co-op flag (set via admin)
+export function hasOnlineMode(hasCoOp?: boolean): boolean {
+  return Boolean(hasCoOp)
 }
 
 export function generateErrorCode(errorType: string, context?: string): string {
@@ -120,4 +116,51 @@ export function proxyImageUrl(imageUrl: string): string {
     console.error("Error encoding image URL for proxy:", error)
     return imageUrl
   }
+}
+
+type GameExecutable = { name: string; path: string }
+
+const ignoredEngineExePatterns = [
+  /^unitycrashhandler(64|32)?\.exe$/,
+  /^crashreportclient\.exe$/,
+  /^unrealcefsubprocess\.exe$/,
+  /^ue4prereqsetup(_x64|_x86)?\.exe$/,
+  /^ueprereqsetup(_x64|_x86)?\.exe$/,
+  /^ue5prereqsetup(_x64|_x86)?\.exe$/,
+  /^ue4editor\.exe$/,
+  /^ue5editor\.exe$/,
+  /^ue4game\.exe$/,
+  /^ue5game\.exe$/,
+]
+
+export function isIgnoredEngineExecutableName(name: string) {
+  const lower = name.toLowerCase()
+  return ignoredEngineExePatterns.some((pattern) => pattern.test(lower))
+}
+
+export function filterGameExecutables(exes: GameExecutable[]) {
+  return exes.filter((exe) => !isIgnoredEngineExecutableName(exe.name))
+}
+
+export function pickGameExecutable(exes: GameExecutable[], gameName: string) {
+  const candidates = filterGameExecutables(exes)
+  if (!candidates.length) return { pick: null, confident: false }
+
+  const nameToken = gameName.toLowerCase().replace(/[^a-z0-9]+/g, "")
+  const scored = candidates.map((exe) => {
+    const lower = exe.name.toLowerCase()
+    const pathLower = exe.path.toLowerCase()
+    let score = 0
+    if (nameToken && (lower.includes(nameToken) || pathLower.includes(nameToken))) score += 5
+    if (lower.includes("launcher")) score += 3
+    if (lower.includes("game")) score += 2
+    if (lower.includes("setup") || lower.includes("uninstall")) score -= 3
+    return { exe, score }
+  })
+  scored.sort((a, b) => b.score - a.score)
+
+  const top = scored[0]
+  const topScore = top?.score ?? 0
+  const confident = topScore >= 4 || (candidates.length === 1 && topScore >= 1)
+  return { pick: top ? top.exe : null, confident }
 }

@@ -5,8 +5,9 @@ import { useGamesData } from "@/hooks/use-games"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
-import { proxyImageUrl } from "@/lib/utils"
-import { Download, PauseCircle, XCircle } from "lucide-react"
+import { pickGameExecutable, proxyImageUrl } from "@/lib/utils"
+import { Download, PauseCircle, Play, XCircle } from "lucide-react"
+import { ExePickerModal } from "@/components/ExePickerModal"
 
 function formatBytes(bytes: number) {
   if (!bytes) return "0 B"
@@ -37,11 +38,43 @@ function formatEta(seconds: number | null) {
   return `${secs}s`
 }
 
-function renderSparkline(points: number[], color: string) {
-  const width = 260
+function renderBars(points: number[], color: string) {
+  const width = 600
   const height = 70
   if (!points.length) {
-    return <polyline points={`0,${height} ${width},${height}`} fill="none" stroke={color} strokeWidth="2" />
+    return <line x1="0" y1={height} x2={width} y2={height} stroke={color} strokeWidth="1" opacity="0.35" />
+  }
+  const max = Math.max(...points, 1)
+  const barSlot = width / Math.max(points.length, 1)
+  const barWidth = Math.max(1, barSlot * 0.22)
+  const offset = (barSlot - barWidth) / 2
+
+  return (
+    <>
+      {points.map((value, index) => {
+        const x = index * barSlot + offset
+        const barHeight = (value / max) * height
+        return (
+          <rect
+            key={`${color}-${index}`}
+            x={x}
+            y={height - barHeight}
+            width={barWidth}
+            height={barHeight}
+            fill={color}
+            opacity="0.85"
+          />
+        )
+      })}
+    </>
+  )
+}
+
+function renderLine(points: number[], color: string) {
+  const width = 600
+  const height = 70
+  if (!points.length) {
+    return <polyline points={`0,${height} ${width},${height}`} fill="none" stroke={color} strokeWidth="2" opacity="0.6" />
   }
   const max = Math.max(...points, 1)
   const path = points
@@ -51,7 +84,7 @@ function renderSparkline(points: number[], color: string) {
       return `${x},${y}`
     })
     .join(" ")
-  return <polyline points={path} fill="none" stroke={color} strokeWidth="2" />
+  return <polyline points={path} fill="none" stroke={color} strokeWidth="2" opacity="0.9" />
 }
 
 function computeGroupStats(
@@ -65,12 +98,21 @@ function computeGroupStats(
     partTotal?: number
   }>
 ) {
-  const overallTotalBytes = items.reduce((sum, item) => sum + (item.totalBytes || 0), 0)
   const overallReceivedBytes = items.reduce((sum, item) => sum + (item.receivedBytes || 0), 0)
+  const totalParts = getTotalParts(items)
+  const knownTotals = items.filter((item) => (item.totalBytes || 0) > 0)
+  const knownTotalBytes = knownTotals.reduce((sum, item) => sum + (item.totalBytes || 0), 0)
+  let overallTotalBytes = knownTotalBytes
+  if (totalParts > 1 && knownTotals.length > 0) {
+    const avgPartSize = knownTotalBytes / knownTotals.length
+    overallTotalBytes = Math.max(avgPartSize * totalParts, knownTotalBytes)
+  }
+  overallTotalBytes = Math.max(overallTotalBytes, overallReceivedBytes)
   const installingItems = items.filter((item) => item.status === "installing")
   const extractingItems = items.filter((item) => item.status === "extracting")
   const downloadingItems = items.filter((item) => item.status === "downloading" || item.status === "paused")
   const queuedOnly = items.every((item) => item.status === "queued")
+  const pausedOnly = items.every((item) => item.status === "paused")
   const activeItems = installingItems.length
     ? installingItems
     : extractingItems.length
@@ -83,12 +125,20 @@ function computeGroupStats(
   let totalBytes = activeItems.reduce((sum, item) => sum + (item.totalBytes || 0), 0)
   let receivedBytes = activeItems.reduce((sum, item) => sum + (item.receivedBytes || 0), 0)
   const speedBps = activeItems.reduce((sum, item) => sum + (item.speedBps || 0), 0)
-  const phase = queuedOnly ? "queued" : installingItems.length ? "installing" : extractingItems.length ? "extracting" : "downloading"
+  const phase = queuedOnly
+    ? "queued"
+    : pausedOnly
+      ? "paused"
+      : installingItems.length
+        ? "installing"
+        : extractingItems.length
+          ? "extracting"
+          : "downloading"
   if (overallTotalBytes > 0) {
     totalBytes = overallTotalBytes
     receivedBytes = Math.min(overallReceivedBytes, overallTotalBytes)
   }
-  const effectiveSpeed = phase === "extracting" || phase === "installing" ? 0 : speedBps
+  const effectiveSpeed = phase === "extracting" || phase === "installing" || phase === "paused" ? 0 : speedBps
   const etaSeconds = totalBytes > 0 && effectiveSpeed > 0 ? (totalBytes - receivedBytes) / effectiveSpeed : null
   const progress = totalBytes > 0 ? (receivedBytes / totalBytes) * 100 : 0
 
@@ -146,6 +196,7 @@ export function DownloadsPage() {
     cancelGroup,
     pauseDownload,
     resumeDownload,
+    resumeGroup,
     openPath,
     clearCompleted,
   } = useDownloads()
@@ -154,6 +205,11 @@ export function DownloadsPage() {
   const [networkHistory, setNetworkHistory] = useState<number[]>([])
   const [diskHistory, setDiskHistory] = useState<number[]>([])
   const [peakSpeed, setPeakSpeed] = useState(0)
+  const [exePickerOpen, setExePickerOpen] = useState(false)
+  const [exePickerTitle, setExePickerTitle] = useState("")
+  const [exePickerMessage, setExePickerMessage] = useState("")
+  const [exePickerAppId, setExePickerAppId] = useState<string | null>(null)
+  const [exePickerExes, setExePickerExes] = useState<Array<{ name: string; path: string }>>([])
   const primaryStatsRef = useRef<{
     totalBytes: number
     receivedBytes: number
@@ -247,8 +303,70 @@ export function DownloadsPage() {
     return primaryStats.receivedBytes / elapsed
   }, [primaryStats, networkHistory.length])
 
+  const getSavedExe = async (appid: string) => {
+    if (!window.ucSettings?.get) return null
+    try {
+      return await window.ucSettings.get(`gameExe:${appid}`)
+    } catch {
+      return null
+    }
+  }
+
+  const setSavedExe = async (appid: string, path: string | null) => {
+    if (!window.ucSettings?.set) return
+    try {
+      await window.ucSettings.set(`gameExe:${appid}`, path || null)
+    } catch {}
+  }
+
+  const openExePicker = (appid: string, gameName: string, exes: Array<{ name: string; path: string }>, message?: string) => {
+    setExePickerTitle("Select executable")
+    setExePickerMessage(message || `We couldn't confidently detect the correct exe for "${gameName}". Please choose the one to launch.`)
+    setExePickerAppId(appid)
+    setExePickerExes(exes)
+    setExePickerOpen(true)
+  }
+
+  const handleExePicked = async (path: string) => {
+    if (!exePickerAppId || !window.ucDownloads?.launchGameExecutable) return
+    const res = await window.ucDownloads.launchGameExecutable(exePickerAppId, path)
+    if (res && res.ok) {
+      await setSavedExe(exePickerAppId, path)
+      setExePickerOpen(false)
+    }
+  }
+
+  const handleLaunch = async (appid: string, gameName: string, fallbackPath?: string) => {
+    if (!appid) return
+    if (!window.ucDownloads?.listGameExecutables || !window.ucDownloads?.launchGameExecutable) {
+      if (fallbackPath) openPath(fallbackPath)
+      return
+    }
+    try {
+      const savedExe = await getSavedExe(appid)
+      if (savedExe) {
+        const res = await window.ucDownloads.launchGameExecutable(appid, savedExe)
+        if (res && res.ok) return
+        await setSavedExe(appid, null)
+      }
+      const result = await window.ucDownloads.listGameExecutables(appid)
+      const exes = result?.exes || []
+      const { pick, confident } = pickGameExecutable(exes, gameName)
+      if (pick && confident) {
+        const res = await window.ucDownloads.launchGameExecutable(appid, pick.path)
+        if (res && res.ok) {
+          await setSavedExe(appid, pick.path)
+          return
+        }
+      }
+      openExePicker(appid, gameName, exes)
+    } catch {
+      openExePicker(appid, gameName, [], `Unable to list executables for "${gameName}".`)
+    }
+  }
+
   return (
-    <div className="space-y-8">
+    <div className="container mx-auto max-w-7xl space-y-8">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl sm:text-3xl font-black font-montserrat">Activity</h1>
@@ -261,33 +379,45 @@ export function DownloadsPage() {
 
       {primaryGroup && primaryStats && (
         <section>
-          <div className="relative overflow-hidden rounded-2xl border border-border/60 bg-card/30">
+          <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-br from-slate-950 via-slate-950/95 to-slate-900/90 shadow-lg shadow-black/20">
             <div className="absolute inset-0">
               {primaryGame?.image && (
                 <img
                   src={proxyImageUrl(primaryGame.image)}
                   alt={primaryGroup[0]?.gameName || "Download"}
-                  className="h-full w-full object-cover opacity-40"
+                  className="h-full w-full scale-110 object-cover opacity-45 blur-2xl saturate-90"
                 />
               )}
-              <div className="absolute inset-0 bg-gradient-to-r from-background via-background/80 to-background/40" />
+              <div className="absolute inset-0 bg-gradient-to-br from-slate-950/75 via-slate-950/85 to-slate-900/80" />
             </div>
-
             <div className="relative z-10 space-y-6 p-6 lg:p-8">
                 <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
                   <div className="space-y-2">
                     <p className="text-xs uppercase tracking-wide text-muted-foreground">
                       {primaryStats?.phase === "queued"
                         ? "Queued"
-                        : primaryStats?.phase === "installing"
-                          ? "Now installing"
-                          : primaryStats?.phase === "extracting"
-                            ? "Now extracting"
-                            : "Now downloading"}
+                        : primaryStats?.phase === "paused"
+                          ? "Paused"
+                          : primaryStats?.phase === "installing"
+                            ? "Now installing"
+                            : primaryStats?.phase === "extracting"
+                              ? "Now extracting"
+                              : "Now downloading"}
                     </p>
-                    <h2 className="text-2xl sm:text-3xl font-black font-montserrat">
-                      {primaryGroup[0]?.gameName || "Unknown"}
-                    </h2>
+                    <div className="flex items-center gap-3">
+                      {primaryGame?.image && (
+                        <div className="h-10 w-16 overflow-hidden rounded-md border border-white/10 bg-slate-900/60">
+                          <img
+                            src={proxyImageUrl(primaryGame.image)}
+                            alt={primaryGroup[0]?.gameName || "Download"}
+                            className="h-full w-full object-cover"
+                          />
+                        </div>
+                      )}
+                      <h2 className="text-2xl sm:text-3xl font-black font-montserrat">
+                        {primaryGroup[0]?.gameName || "Unknown"}
+                      </h2>
+                    </div>
                     {primaryTotalParts > 1 && (
                       <div className="text-xs text-muted-foreground">
                         {(() => {
@@ -319,8 +449,8 @@ export function DownloadsPage() {
 
                 <div className="flex flex-col gap-3 sm:flex-row">
                   {primaryIsPaused ? (
-                    <Button variant="outline" onClick={() => primaryGroup && primaryGroup.forEach((it) => resumeDownload(it.id))} className="justify-center gap-2">
-                      <PauseCircle className="h-4 w-4" />
+                    <Button variant="outline" onClick={() => primaryGroup && resumeGroup(primaryGroup[0]?.appid)} className="justify-center gap-2">
+                      <Play className="h-4 w-4" />
                       Resume
                     </Button>
                   ) : (
@@ -354,6 +484,9 @@ export function DownloadsPage() {
                       if (primaryStats?.phase === "queued") {
                         return "Queued"
                       }
+                      if (primaryStats?.phase === "paused") {
+                        return "Paused"
+                      }
                       if (primaryStats?.phase === "installing" || primaryStats?.phase === "extracting") {
                         return primaryTotalParts > 1 ? `Installing part ${part} of ${primaryTotalParts}` : "Installing data"
                       }
@@ -364,7 +497,10 @@ export function DownloadsPage() {
                     {formatBytes(primaryStats.receivedBytes)} / {formatBytes(primaryStats.totalBytes)}
                   </span>
                 </div>
-                <Progress value={primaryStats.progress} className="h-2" />
+                <Progress
+                  value={primaryStats.progress}
+                  className="h-2 bg-slate-800/90 [&_[data-slot=progress-indicator]]:bg-primary/80"
+                />
                 {primaryStats.phase !== "downloading" && primaryStats.overallTotalBytes > 0 && (
                   <div className="text-xs text-muted-foreground">
                     Downloaded {formatBytes(primaryStats.overallReceivedBytes)} / {formatBytes(primaryStats.overallTotalBytes)}
@@ -372,26 +508,7 @@ export function DownloadsPage() {
                 )}
               </div>
 
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                <div className="rounded-xl border border-border/60 bg-background/70 p-4">
-                  <div className="text-xs text-muted-foreground">Current</div>
-                  <div className="text-lg font-semibold">{formatSpeed(currentShown)}</div>
-                </div>
-                <div className="rounded-xl border border-border/60 bg-background/70 p-4">
-                  <div className="text-xs text-muted-foreground">Peak</div>
-                  <div className="text-lg font-semibold">{formatSpeed(peakSpeed)}</div>
-                </div>
-                <div className="rounded-xl border border-border/60 bg-background/70 p-4">
-                  <div className="text-xs text-muted-foreground">Total</div>
-                  <div className="text-lg font-semibold">{formatBytes(primaryStats.receivedBytes)}</div>
-                </div>
-                <div className="rounded-xl border border-border/60 bg-background/70 p-4">
-                  <div className="text-xs text-muted-foreground">Disk usage</div>
-                  <div className="text-lg font-semibold">{formatSpeed(currentDisk)}</div>
-                </div>
-              </div>
-
-                <div className="rounded-2xl border border-border/60 bg-background/70 p-4">
+              <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-4">
                 <div className="flex items-center justify-between text-xs text-muted-foreground">
                   <span className="font-semibold text-foreground">Performance</span>
                   <div className="flex items-center gap-4">
@@ -405,10 +522,29 @@ export function DownloadsPage() {
                     </span>
                   </div>
                 </div>
-                <svg viewBox="0 0 260 70" className="mt-3 h-20 w-full">
-                  {renderSparkline(networkHistory, "rgb(56 189 248)")}
-                  {renderSparkline(diskHistory, "rgb(52 211 153)")}
+                <svg viewBox="0 0 600 70" className="mt-3 h-20 w-full">
+                  {renderBars(networkHistory, "rgb(56 189 248)")}
+                  {renderLine(diskHistory, "rgb(52 211 153)")}
                 </svg>
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                <div className="rounded-xl border border-white/10 bg-slate-950/60 p-4">
+                  <div className="text-xs text-muted-foreground">Current</div>
+                  <div className="text-lg font-semibold text-foreground">{formatSpeed(currentShown)}</div>
+                </div>
+                <div className="rounded-xl border border-white/10 bg-slate-950/60 p-4">
+                  <div className="text-xs text-muted-foreground">Peak</div>
+                  <div className="text-lg font-semibold text-foreground">{formatSpeed(peakSpeed)}</div>
+                </div>
+                <div className="rounded-xl border border-white/10 bg-slate-950/60 p-4">
+                  <div className="text-xs text-muted-foreground">Total</div>
+                  <div className="text-lg font-semibold text-foreground">{formatBytes(primaryStats.receivedBytes)}</div>
+                </div>
+                <div className="rounded-xl border border-white/10 bg-slate-950/60 p-4">
+                  <div className="text-xs text-muted-foreground">Disk usage</div>
+                  <div className="text-lg font-semibold text-foreground">{formatSpeed(currentDisk)}</div>
+                </div>
               </div>
             </div>
           </div>
@@ -596,22 +732,27 @@ export function DownloadsPage() {
                       <div className="text-xs text-muted-foreground">
                         {game?.version ? `${game.version}` : "Unknown version"} - {game?.source || "Unknown source"} - Completed {finishedAt ? new Date(finishedAt).toLocaleString() : ""}
                       </div>
+                      {game?.comment && (
+                        <div className="mt-2 text-xs text-amber-200/90">
+                          Important note: {game.comment}
+                        </div>
+                      )}
                     </div>
                   </div>
 
                   <div className="flex items-center gap-2">
-                    {items[0]?.savePath && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={(event) => {
-                          event.stopPropagation()
-                          openPath(items[0]?.savePath || "")
-                        }}
-                      >
-                        Open
-                      </Button>
-                    )}
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        if (appid) {
+                          void handleLaunch(appid, gameName, items[0]?.savePath)
+                        }
+                      }}
+                    >
+                      Launch
+                    </Button>
                   </div>
                 </div>
 
@@ -628,6 +769,14 @@ export function DownloadsPage() {
           )}
         </div>
       </section>
+      <ExePickerModal
+        open={exePickerOpen}
+        title={exePickerTitle}
+        message={exePickerMessage}
+        exes={exePickerExes}
+        onSelect={handleExePicked}
+        onClose={() => setExePickerOpen(false)}
+      />
     </div>
   )
 }

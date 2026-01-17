@@ -10,6 +10,7 @@ const activeDownloads = new Map()
 const downloadQueues = new Map()
 const globalDownloadQueue = []
 const activeExtractions = new Set()
+const runningGames = new Map()
 const downloadDirName = 'UnionCrax.Direct'
 const installingDirName = 'installing'
 const installedDirName = 'installed'
@@ -21,6 +22,99 @@ let cachedSettings = null
 function resolveIcon() {
   const asset = process.platform === 'win32' ? 'icon.ico' : 'icon.png'
   return path.join(__dirname, '..', 'assets', asset)
+}
+
+const DEFAULT_BASE_URL = 'https://union-crax.xyz'
+
+function normalizeBaseUrl(baseUrl) {
+  if (!baseUrl || typeof baseUrl !== 'string') return DEFAULT_BASE_URL
+  try {
+    const url = new URL(baseUrl)
+    return url.origin
+  } catch {
+    return DEFAULT_BASE_URL
+  }
+}
+
+function buildAuthUrl(baseUrl, nextPath) {
+  const origin = normalizeBaseUrl(baseUrl)
+  try {
+    const url = new URL('/api/discord/connect', origin)
+    if (nextPath) url.searchParams.set('next', nextPath)
+    return url.toString()
+  } catch {
+    return `${DEFAULT_BASE_URL}/api/discord/connect?next=${encodeURIComponent(nextPath || '/settings')}`
+  }
+}
+
+function parseAuthResult(urlString) {
+  try {
+    const url = new URL(urlString)
+    const connected = url.searchParams.get('discord_connected')
+    if (connected === 'true' || connected === '1') return { ok: true }
+    const error = url.searchParams.get('error')
+    if (error) return { ok: false, error }
+  } catch {
+    // ignore parse errors
+  }
+  return null
+}
+
+function openAuthWindow(parent, url) {
+  return new Promise((resolve) => {
+    let settled = false
+    const finish = (payload) => {
+      if (settled) return
+      settled = true
+      try {
+        if (authWin && !authWin.isDestroyed()) {
+          setTimeout(() => {
+            try {
+              if (authWin && !authWin.isDestroyed()) authWin.close()
+            } catch {}
+          }, 50)
+        }
+      } catch {}
+      resolve(payload)
+    }
+
+    const authWin = new BrowserWindow({
+      width: 520,
+      height: 720,
+      resizable: false,
+      minimizable: false,
+      maximizable: false,
+      parent,
+      modal: false,
+      show: false,
+      backgroundColor: '#0b0b0b',
+      webPreferences: {
+        contextIsolation: true,
+        nodeIntegration: false,
+        session: parent.webContents.session
+      },
+      icon: resolveIcon()
+    })
+
+    try {
+      authWin.setMenuBarVisibility(false)
+      authWin.setAutoHideMenuBar(true)
+    } catch {}
+
+    const handleUrl = (nextUrl) => {
+      const result = parseAuthResult(nextUrl)
+      if (result) finish(result)
+    }
+
+    authWin.webContents.on('did-navigate', (_event, nextUrl) => handleUrl(nextUrl))
+    authWin.webContents.on('did-redirect-navigation', (_event, nextUrl) => handleUrl(nextUrl))
+    authWin.webContents.on('did-fail-load', () => finish({ ok: false, error: 'load_failed' }))
+    authWin.webContents.on('render-process-gone', () => finish({ ok: false, error: 'render_gone' }))
+    authWin.once('ready-to-show', () => authWin.show())
+    authWin.on('closed', () => finish({ ok: false, error: 'closed' }))
+
+    authWin.loadURL(url)
+  })
 }
 
 function readSettings() {
@@ -40,6 +134,46 @@ function writeSettings(next) {
     fs.writeFileSync(settingsPath, JSON.stringify(next, null, 2))
   } catch (error) {
     console.error('[UC] Failed to write settings:', error)
+  }
+}
+
+async function getSessionCookies(session, baseUrl) {
+  try {
+    const origin = normalizeBaseUrl(baseUrl)
+    return await session.cookies.get({ url: origin })
+  } catch (e) {
+    return []
+  }
+}
+
+function buildCookieHeader(cookies) {
+  if (!Array.isArray(cookies) || cookies.length === 0) return ''
+  return cookies.map((c) => `${c.name}=${c.value}`).join('; ')
+}
+
+async function fetchWithSession(session, baseUrl, path, init) {
+  const origin = normalizeBaseUrl(baseUrl)
+  const url = new URL(path, origin).toString()
+  const cookies = await getSessionCookies(session, origin)
+  const cookieHeader = buildCookieHeader(cookies)
+  const headers = new Headers(init?.headers || {})
+  if (!headers.has('user-agent')) {
+    headers.set('User-Agent', `UnionCrax.Direct/${app.getVersion()}`)
+  }
+  if (typeof path === 'string' && path.startsWith('/api/downloads') && !headers.has('x-uc-client')) {
+    headers.set('X-UC-Client', 'unioncrax-direct')
+  }
+  if (cookieHeader) headers.set('Cookie', cookieHeader)
+  return fetch(url, { ...(init || {}), headers })
+}
+
+async function getDiscordSession(session, baseUrl) {
+  try {
+    const response = await fetchWithSession(session, baseUrl, '/api/discord/session', { method: 'GET' })
+    if (!response.ok) return { discordId: null }
+    return await response.json()
+  } catch {
+    return { discordId: null }
   }
 }
 
@@ -71,6 +205,64 @@ ipcMain.handle('uc:setting-set', (_event, key, value) => {
   }
 })
 
+ipcMain.handle('uc:auth-login', async (event, baseUrl) => {
+  const win = BrowserWindow.fromWebContents(event.sender)
+  if (!win || win.isDestroyed()) return { ok: false, error: 'no_window' }
+  const authUrl = buildAuthUrl(baseUrl, '/settings')
+  const result = await openAuthWindow(win, authUrl)
+  if (result?.ok) {
+    const sessionData = await getDiscordSession(win.webContents.session, baseUrl)
+    return { ok: true, ...sessionData }
+  }
+  return result || { ok: false, error: 'auth_failed' }
+})
+
+ipcMain.handle('uc:auth-session', async (event, baseUrl) => {
+  const win = BrowserWindow.fromWebContents(event.sender)
+  if (!win || win.isDestroyed()) return { discordId: null }
+  return getDiscordSession(win.webContents.session, baseUrl)
+})
+
+ipcMain.handle('uc:auth-logout', async (event, baseUrl) => {
+  const win = BrowserWindow.fromWebContents(event.sender)
+  const session = win && !win.isDestroyed() ? win.webContents.session : null
+  if (!session) return { ok: false, error: 'no_session' }
+  const origin = normalizeBaseUrl(baseUrl)
+  try {
+    const cookies = await getSessionCookies(session, origin)
+    await Promise.all(cookies.map((cookie) => session.cookies.remove(origin, cookie.name)))
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: 'logout_failed' }
+  }
+})
+
+ipcMain.handle('uc:auth-fetch', async (event, payload) => {
+  const win = BrowserWindow.fromWebContents(event.sender)
+  if (!win || win.isDestroyed()) {
+    return { ok: false, status: 0, statusText: 'no_window', headers: [], body: '' }
+  }
+
+  const baseUrl = payload?.baseUrl || DEFAULT_BASE_URL
+  const path = payload?.path || '/'
+  const init = payload?.init || {}
+
+  try {
+    const response = await fetchWithSession(win.webContents.session, baseUrl, path, init)
+    const arrayBuffer = await response.arrayBuffer()
+    const body = Buffer.from(arrayBuffer).toString('base64')
+    return {
+      ok: response.ok,
+      status: response.status,
+      statusText: response.statusText,
+      headers: Array.from(response.headers.entries()),
+      body,
+    }
+  } catch (error) {
+    return { ok: false, status: 0, statusText: 'fetch_failed', headers: [], body: '' }
+  }
+})
+
 function getDownloadRoot() {
   const settings = readSettings()
   if (settings.downloadPath && typeof settings.downloadPath === 'string') {
@@ -81,13 +273,34 @@ function getDownloadRoot() {
     }
     return normalized
   }
-  const root = app.getPath('downloads')
+  if (process.platform === 'win32') {
+    const drive = process.env.SystemDrive || 'C:'
+    return path.join(drive, downloadDirName)
+  }
+  const root = app.getPath('documents')
   return path.join(root, downloadDirName)
 }
 
 function ensureDownloadDir() {
-  const target = getDownloadRoot()
-  if (!fs.existsSync(target)) fs.mkdirSync(target, { recursive: true })
+  let target = getDownloadRoot()
+  try {
+    if (!fs.existsSync(target)) fs.mkdirSync(target, { recursive: true })
+  } catch (err) {
+    const fallback = path.join(app.getPath('documents'), downloadDirName)
+    try {
+      if (!fs.existsSync(fallback)) fs.mkdirSync(fallback, { recursive: true })
+      const settings = readSettings() || {}
+      if (!settings.downloadPath) {
+        settings.downloadPath = fallback
+        writeSettings(settings)
+      }
+      target = fallback
+    } catch (fallbackErr) {
+      console.error('[UC] Failed to create download folder:', fallbackErr)
+    }
+  }
+  ensureSubdir(target, installingDirName)
+  ensureSubdir(target, installedDirName)
   return target
 }
 
@@ -274,6 +487,24 @@ function updateInstalledManifest(installedFolder, metadata, fileEntry) {
   }
 }
 
+function buildResumeData(item, savePath) {
+  if (!item) return null
+  try {
+    return {
+      urlChain: item.getURLChain ? item.getURLChain() : [],
+      mimeType: item.getMimeType ? item.getMimeType() : '',
+      etag: item.getETag ? item.getETag() : '',
+      lastModified: item.getLastModifiedTime ? item.getLastModifiedTime() : '',
+      startTime: item.getStartTime ? item.getStartTime() : 0,
+      offset: item.getReceivedBytes ? item.getReceivedBytes() : 0,
+      totalBytes: item.getTotalBytes ? item.getTotalBytes() : 0,
+      savePath: savePath || (item.getSavePath ? item.getSavePath() : '')
+    }
+  } catch {
+    return null
+  }
+}
+
 function getInstallingMetadata(installingRoot, installedRoot, appid, gameName) {
   try {
     let meta = null
@@ -358,6 +589,10 @@ function listDownloadRoots() {
     }
   } catch {}
   try {
+    const root = getDownloadRoot()
+    if (root) roots.add(root)
+  } catch {}
+  try {
     const disks = listDisks()
     for (const disk of disks) {
       if (disk && disk.path) {
@@ -411,6 +646,48 @@ function findInstalledFolderByAppid(appid) {
     console.error('[UC] findInstalledFolderByAppid failed', err)
   }
   return null
+}
+
+function findInstallingFolderByAppid(appid) {
+  try {
+    if (!appid) return null
+    const roots = listDownloadRoots()
+    for (const root of roots) {
+      const installingRoot = path.join(root, installingDirName)
+      if (!fs.existsSync(installingRoot)) continue
+      const entries = fs.readdirSync(installingRoot, { withFileTypes: true })
+      for (const dirent of entries) {
+        if (!dirent.isDirectory()) continue
+        const folder = path.join(installingRoot, dirent.name)
+        const manifestPath = path.join(folder, INSTALLED_MANIFEST)
+        const manifest = readJsonFile(manifestPath)
+        if (manifest && manifest.appid === appid) return folder
+        if (dirent.name === appid) return folder
+      }
+    }
+  } catch (err) {
+    console.error('[UC] findInstallingFolderByAppid failed', err)
+  }
+  return null
+}
+
+function updateInstallingManifestStatus(appid, status, error) {
+  try {
+    if (!appid) return false
+    const folder = findInstallingFolderByAppid(appid)
+    if (!folder) return false
+    const manifestPath = path.join(folder, INSTALLED_MANIFEST)
+    const manifest = readJsonFile(manifestPath) || {}
+    manifest.appid = manifest.appid || appid
+    manifest.name = manifest.name || path.basename(folder)
+    manifest.installStatus = status
+    if (error) manifest.installError = String(error)
+    manifest.updatedAt = Date.now()
+    return uc_writeJsonSync(manifestPath, manifest)
+  } catch (err) {
+    console.error('[UC] updateInstallingManifestStatus failed', err)
+    return false
+  }
 }
 
 function listExecutables(rootDir, maxDepth, maxResults) {
@@ -850,6 +1127,56 @@ function sendDownloadUpdate(win, payload) {
   win.webContents.send('uc:download-update', payload)
 }
 
+function registerRunningGame(appid, exePath, proc) {
+  if (!proc || !proc.pid) return
+  const payload = {
+    appid: appid || null,
+    exePath: exePath || null,
+    pid: proc.pid,
+    startedAt: Date.now()
+  }
+  if (appid) runningGames.set(appid, payload)
+  if (exePath) runningGames.set(exePath, payload)
+  proc.on('exit', () => {
+    if (appid) runningGames.delete(appid)
+    if (exePath) runningGames.delete(exePath)
+  })
+}
+
+function getRunningGame(appid) {
+  if (!appid) return null
+  const byApp = runningGames.get(appid)
+  if (byApp) return byApp
+  return null
+}
+
+function killProcessTree(pid) {
+  return new Promise((resolve) => {
+    if (!pid) return resolve(false)
+    if (process.platform === 'win32') {
+      try {
+        const killer = child_process.spawn('taskkill', ['/PID', String(pid), '/T', '/F'], { windowsHide: true })
+        killer.on('close', (code) => resolve(code === 0))
+        killer.on('error', () => resolve(false))
+        return
+      } catch {
+        return resolve(false)
+      }
+    }
+    try {
+      process.kill(-pid, 'SIGTERM')
+      return resolve(true)
+    } catch {
+      try {
+        process.kill(pid, 'SIGTERM')
+        return resolve(true)
+      } catch {
+        return resolve(false)
+      }
+    }
+  })
+}
+
 function createWindow() {
   const iconPath = resolveIcon()
   const win = new BrowserWindow({
@@ -902,7 +1229,7 @@ function createWindow() {
     const partTotal = match?.partTotal
     const gameFolder = safeFolderName(match?.gameName || match?.appid || downloadId)
     const installingRoot = ensureSubdir(path.join(downloadRoot, installingDirName), gameFolder)
-    const savePath = path.join(installingRoot, filename)
+    const savePath = match?.savePath || path.join(installingRoot, filename)
     try {
       item.setSavePath(savePath)
     } catch {}
@@ -923,6 +1250,7 @@ function createWindow() {
       appid: match?.appid || null,
       gameName: match?.gameName || null,
       url,
+      resumeData: buildResumeData(item, savePath),
       partIndex,
       partTotal
     })
@@ -942,28 +1270,31 @@ function createWindow() {
       entry.state.speedBps = speedBps
       const remaining = total > 0 ? Math.max(0, total - received) : 0
       const etaSeconds = speedBps > 0 && remaining > 0 ? remaining / speedBps : null
-      sendDownloadUpdate(win, {
-        downloadId,
-        status: item.isPaused() ? 'paused' : 'downloading',
-        receivedBytes: received,
-        totalBytes: total,
-        speedBps,
-        etaSeconds,
-        filename: path.basename(entry.savePath || filename),
-        savePath: entry.savePath,
-        appid: entry.appid || null,
-        gameName: entry.gameName || null,
-        url,
-        partIndex: entry.partIndex,
-        partTotal: entry.partTotal
+        sendDownloadUpdate(win, {
+          downloadId,
+          status: item.isPaused() ? 'paused' : 'downloading',
+          receivedBytes: received,
+          totalBytes: total,
+          speedBps,
+          etaSeconds,
+          filename: path.basename(entry.savePath || filename),
+          savePath: entry.savePath,
+          appid: entry.appid || null,
+          gameName: entry.gameName || null,
+          url,
+          resumeData: buildResumeData(item, entry.savePath),
+          partIndex: entry.partIndex,
+          partTotal: entry.partTotal
+        })
       })
-    })
 
     item.once('done', async (_event, state) => {
       uc_log(`download done handler start — downloadId=${downloadId} state=${state} url=${url}`)
       const entry = activeDownloads.get(downloadId)
       activeDownloads.delete(downloadId)
       let finalPath = entry?.savePath
+      let extractionFailed = false
+      let extractionError = null
       if (state === 'completed' && entry?.savePath) {
         const folderName = safeFolderName(entry?.gameName || entry?.appid || downloadId)
         const installingRoot = path.join(downloadRoot, installingDirName, folderName)
@@ -1114,6 +1445,9 @@ function createWindow() {
               sendDownloadUpdate(win, { downloadId, status: 'extracted', extracted: extractedFiles, savePath: null, appid: entry?.appid || null })
             } else {
               uc_log(`extraction failed for ${archiveToExtract}: ${res && res.error ? res.error : 'unknown'}`)
+              extractionFailed = true
+              extractionError = res && res.error ? res.error : 'extract_failed'
+              updateInstallingManifestStatus(entry?.appid, 'failed', extractionError)
               sendDownloadUpdate(win, { downloadId, status: 'extract_failed', error: res && res.error ? res.error : 'unknown', savePath: finalPath, appid: entry?.appid || null })
             }
           }
@@ -1174,12 +1508,27 @@ function createWindow() {
             }
           }
         } catch (e) {
+          extractionFailed = true
+          extractionError = e && e.message ? e.message : 'extract_failed'
+          updateInstallingManifestStatus(entry?.appid, 'failed', extractionError)
           console.error('[UC] Extraction error:', e)
         }
       }
+      const terminalStatus = extractionFailed
+        ? 'failed'
+        : state === 'completed'
+          ? 'completed'
+          : state === 'cancelled'
+            ? 'cancelled'
+            : 'failed'
+      const terminalError = extractionFailed
+        ? extractionError || 'extract_failed'
+        : state === 'completed'
+          ? null
+          : state
       sendDownloadUpdate(win, {
         downloadId,
-        status: state === 'completed' ? 'completed' : state === 'cancelled' ? 'cancelled' : 'failed',
+        status: terminalStatus,
         receivedBytes: item.getReceivedBytes(),
         totalBytes: item.getTotalBytes(),
         speedBps: entry?.state.speedBps || 0,
@@ -1189,15 +1538,17 @@ function createWindow() {
         appid: entry?.appid || null,
         gameName: entry?.gameName || null,
         url,
-        error: state === 'completed' ? null : state,
+        error: terminalError,
         partIndex: entry?.partIndex,
         partTotal: entry?.partTotal
       })
+      if (entry?.appid && terminalStatus !== 'completed') {
+        updateInstallingManifestStatus(entry.appid, terminalStatus, terminalError)
+      }
       if (entry?.appid) {
-        if (state !== 'completed') {
-          const status = state === 'cancelled' ? 'cancelled' : 'failed'
-          flushQueuedDownloads(entry.appid, status, state)
-          flushQueuedGlobalDownloads(entry.appid, status, state)
+        if (terminalStatus !== 'completed') {
+          flushQueuedDownloads(entry.appid, terminalStatus, terminalError)
+          flushQueuedGlobalDownloads(entry.appid, terminalStatus, terminalError)
         }
       }
       startNextQueuedDownload()
@@ -1206,6 +1557,7 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  ensureDownloadDir()
   createWindow()
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
@@ -1278,6 +1630,7 @@ ipcMain.handle('uc:download-pause', (event, downloadId) => {
       appid: entry.appid || null,
       gameName: entry.gameName || null,
       url: entry.url,
+      resumeData: buildResumeData(entry.item, entry.savePath),
       partIndex: entry.partIndex,
       partTotal: entry.partTotal
     })
@@ -1304,11 +1657,54 @@ ipcMain.handle('uc:download-resume', (event, downloadId) => {
       appid: entry.appid || null,
       gameName: entry.gameName || null,
       url: entry.url,
+      resumeData: buildResumeData(entry.item, entry.savePath),
       partIndex: entry.partIndex,
       partTotal: entry.partTotal
     })
   } catch (e) {}
   return { ok: true }
+})
+
+ipcMain.handle('uc:download-resume-interrupted', (event, payload) => {
+  const win = BrowserWindow.fromWebContents(event.sender)
+  if (!win || win.isDestroyed()) return { ok: false }
+  if (!payload || !payload.resumeData) return { ok: false, error: 'missing-resume-data' }
+  const resume = payload.resumeData || {}
+  const savePath = resume.savePath || payload.savePath
+  if (!savePath || !fs.existsSync(savePath)) return { ok: false, error: 'missing-file' }
+  const urlChain = Array.isArray(resume.urlChain) && resume.urlChain.length
+    ? resume.urlChain
+    : payload.url
+      ? [payload.url]
+      : []
+  if (!urlChain.length) return { ok: false, error: 'missing-url' }
+
+  pendingDownloads.push({
+    url: urlChain[0],
+    downloadId: payload.downloadId,
+    filename: payload.filename || path.basename(savePath),
+    appid: payload.appid,
+    gameName: payload.gameName,
+    partIndex: payload.partIndex,
+    partTotal: payload.partTotal,
+    savePath
+  })
+
+  try {
+    win.webContents.session.createInterruptedDownload({
+      path: savePath,
+      urlChain,
+      mimeType: resume.mimeType || '',
+      offset: resume.offset || 0,
+      length: resume.totalBytes || 0,
+      lastModified: resume.lastModified || '',
+      eTag: resume.etag || '',
+      startTime: resume.startTime || 0
+    })
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: String(e) }
+  }
 })
 
 ipcMain.handle('uc:download-show', (_event, targetPath) => {
@@ -1372,6 +1768,7 @@ ipcMain.handle('uc:installed-save', (_event, appid, metadata) => {
     manifest.appid = appid
     manifest.name = metadata?.name || metadata?.gameName || manifest.name
     manifest.metadata = metadata
+    manifest.installStatus = 'installing'
     try {
       manifest.metadataHash = computeObjectHash(metadata)
     } catch {}
@@ -1405,6 +1802,16 @@ ipcMain.handle('uc:installed-save', (_event, appid, metadata) => {
     return { ok: true }
   } catch (err) {
     console.error('[UC] installed-save failed', err)
+    return { ok: false }
+  }
+})
+
+ipcMain.handle('uc:installing-status-set', (_event, appid, status, error) => {
+  try {
+    const ok = updateInstallingManifestStatus(appid, status, error)
+    return { ok }
+  } catch (err) {
+    console.error('[UC] installing-status-set failed', err)
     return { ok: false }
   }
 })
@@ -1577,17 +1984,55 @@ ipcMain.handle('uc:game-exe-list', (_event, appid) => {
   }
 })
 
-ipcMain.handle('uc:game-exe-launch', async (_event, exePath) => {
+ipcMain.handle('uc:game-exe-launch', async (_event, appid, exePath) => {
   try {
     if (!exePath || typeof exePath !== 'string') return { ok: false }
-    const res = await shell.openPath(exePath)
-    if (res && typeof res === 'string' && res.length > 0) {
-      return { ok: false, error: res }
+    try {
+      const proc = child_process.spawn(exePath, [], {
+        detached: true,
+        stdio: 'ignore',
+        windowsHide: false
+      })
+      proc.unref()
+      registerRunningGame(appid, exePath, proc)
+      return { ok: true, pid: proc.pid }
+    } catch (err) {
+      const res = await shell.openPath(exePath)
+      if (res && typeof res === 'string' && res.length > 0) {
+        return { ok: false, error: res }
+      }
+      return { ok: true }
     }
-    return { ok: true }
   } catch (err) {
     console.error('[UC] game-exe-launch failed', err)
     return { ok: false }
+  }
+})
+
+ipcMain.handle('uc:game-exe-running', (_event, appid) => {
+  try {
+    const running = getRunningGame(appid)
+    if (!running) return { ok: true, running: false }
+    return { ok: true, running: true, pid: running.pid, exePath: running.exePath }
+  } catch (err) {
+    console.error('[UC] game-exe-running failed', err)
+    return { ok: false, running: false }
+  }
+})
+
+ipcMain.handle('uc:game-exe-quit', async (_event, appid) => {
+  try {
+    const running = getRunningGame(appid)
+    if (!running) return { ok: true, stopped: false }
+    const stopped = await killProcessTree(running.pid)
+    if (stopped) {
+      if (running.appid) runningGames.delete(running.appid)
+      if (running.exePath) runningGames.delete(running.exePath)
+    }
+    return { ok: true, stopped }
+  } catch (err) {
+    console.error('[UC] game-exe-quit failed', err)
+    return { ok: false, stopped: false }
   }
 })
 

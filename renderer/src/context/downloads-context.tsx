@@ -8,6 +8,7 @@ import {
   isRootzUrl,
   requestDownloadToken,
   resolveDownloadUrl,
+  resolveDownloadSize,
   selectHost,
 } from "@/lib/downloads"
 import { addDownloadedGameToHistory, hasCookieConsent } from "@/lib/user-history"
@@ -39,6 +40,16 @@ export type DownloadItem = {
   speedBps: number
   etaSeconds: number | null
   savePath?: string
+  resumeData?: {
+    urlChain?: string[]
+    mimeType?: string
+    etag?: string
+    lastModified?: string
+    startTime?: number
+    offset?: number
+    totalBytes?: number
+    savePath?: string
+  }
   startedAt: number
   completedAt?: number
   error?: string | null
@@ -59,6 +70,7 @@ type DownloadUpdate = {
   error?: string | null
   partIndex?: number
   partTotal?: number
+  resumeData?: DownloadItem["resumeData"]
 }
 
 type DownloadsContextValue = {
@@ -68,6 +80,7 @@ type DownloadsContextValue = {
   cancelGroup: (appid: string) => Promise<void>
   pauseDownload: (downloadId: string) => Promise<void>
   resumeDownload: (downloadId: string) => Promise<void>
+  resumeGroup: (appid: string) => Promise<void>
   showInFolder: (path: string) => Promise<void>
   openPath: (path: string) => Promise<void>
   removeDownload: (downloadId: string) => void
@@ -119,8 +132,8 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         }
 
         return filtered.map((item) =>
-          item.status === "downloading" || item.status === "queued" || item.status === "extracting" || item.status === "installing"
-            ? { ...item, status: "failed", error: "App restarted" }
+          item.status === "downloading" || item.status === "extracting" || item.status === "installing"
+            ? { ...item, status: "paused", error: "App restarted" }
             : item
         )
     } catch {
@@ -155,6 +168,67 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
     }
   }, [])
 
+  const prefetchPartSizes = useCallback(
+    async (host: string, queue: Array<{ id: string; url: string }>) => {
+      if (!queue.length) return
+      const batchSize = 3
+      const applySizes = (sizeMap: Map<string, number>) => {
+        if (sizeMap.size === 0) return
+        setDownloads((prev) =>
+          prev.map((item) => {
+            const nextSize = sizeMap.get(item.id)
+            if (!nextSize) return item
+            if (item.totalBytes && item.totalBytes > 0) return item
+            return { ...item, totalBytes: nextSize }
+          })
+        )
+      }
+      const fetchSizes = async (items: Array<{ id: string; url: string }>) => {
+        const sizeMap = new Map<string, number>()
+        for (let i = 0; i < items.length; i += batchSize) {
+          const batch = items.slice(i, i + batchSize)
+          await Promise.all(
+            batch.map(async (entry) => {
+              try {
+                const size = await resolveDownloadSize(host, entry.url)
+                if (size && size > 0) {
+                  sizeMap.set(entry.id, size)
+                }
+              } catch {
+                // best effort only
+              }
+            })
+          )
+          if (host === "rootz") {
+            await new Promise((resolve) => setTimeout(resolve, 500))
+          }
+        }
+        return sizeMap
+      }
+
+      if (host === "rootz") {
+        setTimeout(() => {
+          void (async () => {
+            const [first, ...rest] = queue
+            if (first) {
+              const firstMap = await fetchSizes([first])
+              applySizes(firstMap)
+            }
+            if (rest.length) {
+              const restMap = await fetchSizes(rest)
+              applySizes(restMap)
+            }
+          })()
+        }, 500)
+        return
+      }
+
+      const sizeMap = await fetchSizes(queue)
+      applySizes(sizeMap)
+    },
+    []
+  )
+
   const startNextQueuedPart = useCallback(
     async () => {
       if (sequenceLocksRef.current.size > 0) return
@@ -185,6 +259,9 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
                 : item
             )
           )
+          if (next.appid) {
+            await window.ucDownloads?.setInstallingStatus?.(next.appid, "failed", "Rootz link could not be resolved.")
+          }
           return
         }
 
@@ -203,6 +280,9 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
               item.id === next.id ? { ...item, status: "failed", error: "Downloads unavailable" } : item
             )
           )
+          if (next.appid) {
+            await window.ucDownloads?.setInstallingStatus?.(next.appid, "failed", "Downloads unavailable")
+          }
           return
         }
 
@@ -225,6 +305,9 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
             item.id === next.id ? { ...item, status: "failed", error: message } : item
           )
         )
+        if (next.appid) {
+          await window.ucDownloads?.setInstallingStatus?.(next.appid, "failed", message)
+        }
       } finally {
         sequenceLocksRef.current.delete(next.appid)
       }
@@ -253,8 +336,13 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
           error: update.error ?? existing.error,
           partIndex: update.partIndex ?? existing.partIndex,
           partTotal: update.partTotal ?? existing.partTotal,
+          resumeData: update.resumeData ?? existing.resumeData,
           completedAt:
-            update.status === "completed" || update.status === "failed" || update.status === "cancelled" || update.status === "extracted"
+            update.status === "completed" ||
+            update.status === "failed" ||
+            update.status === "cancelled" ||
+            update.status === "extracted" ||
+            update.status === "extract_failed"
               ? Date.now()
               : existing.completedAt,
         }
@@ -389,6 +477,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         return next
       })
 
+      void prefetchPartSizes(host, queue.map((item) => ({ id: item.downloadId, url: item.sourceUrl })))
       void startNextQueuedPart()
     } catch (err) {
       try {
@@ -448,6 +537,41 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         }
       }
 
+      if (!ok && window.ucDownloads?.resumeInterrupted && target.resumeData?.offset) {
+        try {
+          const res = await window.ucDownloads.resumeInterrupted({
+            downloadId,
+            url: target.url,
+            filename: target.filename,
+            appid: target.appid,
+            gameName: target.gameName,
+            partIndex: target.partIndex,
+            partTotal: target.partTotal,
+            savePath: target.savePath,
+            resumeData: target.resumeData,
+          })
+          ok = Boolean(res && typeof res === "object" && "ok" in res ? (res as { ok?: boolean }).ok : res)
+        } catch {
+          ok = false
+        }
+        if (ok) {
+          setDownloads((prev) =>
+            prev.map((item) =>
+              item.id === downloadId
+                ? {
+                    ...item,
+                    status: "queued",
+                    speedBps: 0,
+                    etaSeconds: null,
+                    error: null,
+                    startedAt: Date.now(),
+                  }
+                : item
+            )
+          )
+        }
+      }
+
       if (!ok && window.ucDownloads?.start) {
         try {
           await window.ucDownloads.start({
@@ -467,7 +591,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
                     ...item,
                     status: "queued",
                     receivedBytes: 0,
-                    totalBytes: 0,
+                    totalBytes: item.totalBytes,
                     speedBps: 0,
                     etaSeconds: null,
                     error: null,
@@ -487,9 +611,57 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
             item.id === downloadId ? { ...item, status: "failed", error: "Resume failed. Please try again." } : item
           )
         )
+        if (target.appid) {
+          await window.ucDownloads?.setInstallingStatus?.(target.appid, "failed", "Resume failed. Please try again.")
+        }
       }
     },
     [downloads]
+  )
+
+  const resumeGroup = useCallback(
+    async (appid: string) => {
+      if (!appid) return
+      const current = downloadsRef.current.filter((item) => item.appid === appid)
+      const hasActive = current.some((item) =>
+        ["downloading", "extracting", "installing"].includes(item.status)
+      )
+      if (hasActive) return
+      const pausedWithProgress = current.find(
+        (item) => item.status === "paused" && (item.receivedBytes > 0 || item.totalBytes > 0)
+      )
+      if (pausedWithProgress) {
+        setDownloads((prev) => {
+          const next = prev.map((item) => {
+            if (item.appid !== appid) return item
+            if (item.id === pausedWithProgress.id) return item
+            if (item.status === "paused" && item.receivedBytes === 0) {
+              return { ...item, status: "queued" }
+            }
+            return item
+          })
+          downloadsRef.current = next
+          return next
+        })
+        await resumeDownload(pausedWithProgress.id)
+        return
+      }
+
+      setDownloads((prev) => {
+        const next = prev.map((item) => {
+          if (item.appid === appid && item.status === "paused") {
+            return { ...item, status: "queued" }
+          }
+          return item
+        })
+        downloadsRef.current = next
+        return next
+      })
+      queueMicrotask(() => {
+        void startNextQueuedPart()
+      })
+    },
+    [resumeDownload, startNextQueuedPart]
   )
 
   const showInFolder = useCallback(async (path: string) => {
@@ -526,6 +698,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
       cancelGroup,
       pauseDownload,
       resumeDownload,
+      resumeGroup,
       showInFolder,
       openPath,
       removeDownload: (downloadId: string) =>
@@ -533,7 +706,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
       clearByAppid,
       clearCompleted,
     }),
-    [downloads, startGameDownload, cancelDownload, cancelGroup, pauseDownload, resumeDownload, showInFolder, openPath, clearByAppid, clearCompleted]
+    [downloads, startGameDownload, cancelDownload, cancelGroup, pauseDownload, resumeDownload, resumeGroup, showInFolder, openPath, clearByAppid, clearCompleted]
   )
 
   return <DownloadsContext.Provider value={value}>{children}</DownloadsContext.Provider>

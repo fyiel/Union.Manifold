@@ -3,9 +3,10 @@ import { Link } from "react-router-dom"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Calendar, HardDrive, Download, Eye, Wifi, Flame, Play } from "lucide-react"
-import { formatNumber, hasOnlineMode, proxyImageUrl } from "@/lib/utils"
+import { formatNumber, hasOnlineMode, pickGameExecutable, proxyImageUrl } from "@/lib/utils"
 import { useDownloads } from "@/context/downloads-context"
 import { apiUrl } from "@/lib/api"
+import { ExePickerModal } from "@/components/ExePickerModal"
 
 interface GameCardProps {
   game: {
@@ -51,6 +52,8 @@ export const GameCard = memo(function GameCard({
   const [installedPath, setInstalledPath] = useState<string | null>(null)
   const [isInstalled, setIsInstalled] = useState(false)
   const [previewImage, setPreviewImage] = useState<string | null>(null)
+  const [exePickerOpen, setExePickerOpen] = useState(false)
+  const [exePickerExes, setExePickerExes] = useState<Array<{ name: string; path: string }>>([])
 
   useEffect(() => {
     let mounted = true
@@ -114,29 +117,13 @@ export const GameCard = memo(function GameCard({
     }
   }, [game.appid, initialStats, isLoadingStats])
 
-  const isQueued = downloads.some((item) => item.appid === game.appid && item.status === "queued")
-  const isInstalling = downloads.some(
-    (item) =>
-      item.appid === game.appid &&
-      ["downloading", "paused", "extracting", "installing"].includes(item.status)
+  const appDownloads = downloads.filter((item) => item.appid === game.appid)
+  const hasActive = appDownloads.some((item) =>
+    ["downloading", "paused", "extracting", "installing"].includes(item.status)
   )
-
-  const pickExe = (exes: Array<{ name: string; path: string }>) => {
-    if (!exes.length) return null
-    const nameToken = game.name.toLowerCase().replace(/[^a-z0-9]+/g, "")
-    const scored = exes.map((exe) => {
-      const lower = exe.name.toLowerCase()
-      const pathLower = exe.path.toLowerCase()
-      let score = 0
-      if (nameToken && (lower.includes(nameToken) || pathLower.includes(nameToken))) score += 5
-      if (lower.includes("launcher")) score += 3
-      if (lower.includes("game")) score += 2
-      if (lower.includes("setup") || lower.includes("uninstall")) score -= 3
-      return { exe, score }
-    })
-    scored.sort((a, b) => b.score - a.score)
-    return scored[0].exe
-  }
+  const isQueuedOnly = appDownloads.length > 0 && appDownloads.every((item) => item.status === "queued")
+  const isQueued = isQueuedOnly && !hasActive
+  const isInstalling = hasActive
 
   const getSavedExe = async () => {
     if (!window.ucSettings?.get) return null
@@ -154,6 +141,20 @@ export const GameCard = memo(function GameCard({
     } catch {}
   }
 
+  const openExePicker = (exes: Array<{ name: string; path: string }>) => {
+    setExePickerExes(exes)
+    setExePickerOpen(true)
+  }
+
+  const handleExePicked = async (path: string) => {
+    if (!window.ucDownloads?.launchGameExecutable) return
+    const res = await window.ucDownloads.launchGameExecutable(game.appid, path)
+    if (res && res.ok) {
+      await setSavedExe(path)
+      setExePickerOpen(false)
+    }
+  }
+
   const handlePlayClick = async (event: MouseEvent) => {
     event.preventDefault()
     event.stopPropagation()
@@ -164,19 +165,21 @@ export const GameCard = memo(function GameCard({
     try {
       const savedExe = await getSavedExe()
       if (savedExe) {
-        const res = await window.ucDownloads.launchGameExecutable(savedExe)
+        const res = await window.ucDownloads.launchGameExecutable(game.appid, savedExe)
         if (res && res.ok) return
         await setSavedExe(null)
       }
       const result = await window.ucDownloads.listGameExecutables(game.appid)
       const exes = result?.exes || []
-      const pick = pickExe(exes)
-      if (pick) {
-        const res = await window.ucDownloads.launchGameExecutable(pick.path)
+      const { pick, confident } = pickGameExecutable(exes, game.name)
+      if (pick && confident) {
+        const res = await window.ucDownloads.launchGameExecutable(game.appid, pick.path)
         if (res && res.ok) {
           await setSavedExe(pick.path)
+          return
         }
       }
+      openExePicker(exes)
     } catch {
       if (installedPath) openPath(installedPath)
     }
@@ -237,20 +240,11 @@ export const GameCard = memo(function GameCard({
               </div>
             )}
 
-            {hasOnlineMode(game.source) && (
+            {hasOnlineMode(game.hasCoOp) && (
               <div className={`absolute z-20 ${isPopular || isInstalling || isQueued ? "top-14 left-3" : "top-3 left-3"}`}>
                 <div className="inline-flex items-center gap-2 overflow-hidden rounded-full transition-all duration-300 ease-out bg-gradient-to-r from-emerald-600/90 to-green-600/90 backdrop-blur-sm px-3 py-1.5 shadow-lg shadow-emerald-500/50 group-hover/container:shadow-xl group-hover/container:shadow-emerald-500/70">
                   <Wifi className="flex-none h-5 w-5 text-white animate-pulse" />
                   <span className="text-sm font-bold text-white">Online</span>
-                </div>
-              </div>
-            )}
-
-            {game.hasCoOp && (
-              <div className={`absolute z-20 ${isPopular || isInstalling || isQueued || hasOnlineMode(game.source) ? "top-14 left-3" : "top-3 left-3"}`}>
-                <div className="inline-flex items-center gap-2 overflow-hidden rounded-full transition-all duration-300 ease-out bg-gradient-to-r from-blue-600/90 to-cyan-600/90 backdrop-blur-sm px-3 py-1.5 shadow-lg shadow-blue-500/50 group-hover/container:shadow-xl group-hover/container:shadow-blue-500/70">
-                  <Wifi className="flex-none h-5 w-5 text-white animate-pulse" />
-                  <span className="text-sm font-bold text-white">Co-Op</span>
                 </div>
               </div>
             )}
@@ -356,6 +350,14 @@ export const GameCard = memo(function GameCard({
           </CardContent>
         </Card>
       </Link>
+      <ExePickerModal
+        open={exePickerOpen}
+        title="Select executable"
+        message={`We couldn't confidently detect the correct exe for "${game.name}". Please choose the one to launch.`}
+        exes={exePickerExes}
+        onSelect={handleExePicked}
+        onClose={() => setExePickerOpen(false)}
+      />
     </div>
   )
 })
