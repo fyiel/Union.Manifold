@@ -5,6 +5,7 @@ contextBridge.exposeInMainWorld('ucDownloads', {
   cancel: (downloadId) => ipcRenderer.invoke('uc:download-cancel', downloadId),
   pause: (downloadId) => ipcRenderer.invoke('uc:download-pause', downloadId),
   resume: (downloadId) => ipcRenderer.invoke('uc:download-resume', downloadId),
+  resumeInterrupted: (payload) => ipcRenderer.invoke('uc:download-resume-interrupted', payload),
   showInFolder: (targetPath) => ipcRenderer.invoke('uc:download-show', targetPath),
   openPath: (targetPath) => ipcRenderer.invoke('uc:download-open', targetPath),
   listDisks: () => ipcRenderer.invoke('uc:disk-list'),
@@ -23,9 +24,12 @@ contextBridge.exposeInMainWorld('ucDownloads', {
   listInstallingGlobal: () => ipcRenderer.invoke('uc:installing-list-global'),
   getInstallingGlobal: (appid) => ipcRenderer.invoke('uc:installing-get-global', appid),
   listGameExecutables: (appid) => ipcRenderer.invoke('uc:game-exe-list', appid),
-  launchGameExecutable: (exePath) => ipcRenderer.invoke('uc:game-exe-launch', exePath),
+  launchGameExecutable: (appid, exePath) => ipcRenderer.invoke('uc:game-exe-launch', appid, exePath),
+  getRunningGame: (appid) => ipcRenderer.invoke('uc:game-exe-running', appid),
+  quitGameExecutable: (appid) => ipcRenderer.invoke('uc:game-exe-quit', appid),
   deleteInstalled: (appid) => ipcRenderer.invoke('uc:installed-delete', appid),
   deleteInstalling: (appid) => ipcRenderer.invoke('uc:installing-delete', appid),
+  setInstallingStatus: (appid, status, error) => ipcRenderer.invoke('uc:installing-status-set', appid, status, error),
   onUpdate: (callback) => {
     const listener = (_event, data) => {
       try {
@@ -47,4 +51,11 @@ contextBridge.exposeInMainWorld('ucSettings', {
     ipcRenderer.on('uc:setting-changed', listener)
     return () => ipcRenderer.removeListener('uc:setting-changed', listener)
   }
+})
+
+contextBridge.exposeInMainWorld('ucAuth', {
+  login: (baseUrl) => ipcRenderer.invoke('uc:auth-login', baseUrl),
+  logout: (baseUrl) => ipcRenderer.invoke('uc:auth-logout', baseUrl),
+  getSession: (baseUrl) => ipcRenderer.invoke('uc:auth-session', baseUrl),
+  fetch: (baseUrl, path, init) => ipcRenderer.invoke('uc:auth-fetch', { baseUrl, path, init })
 })

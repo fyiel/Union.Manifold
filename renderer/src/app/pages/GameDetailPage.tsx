@@ -4,17 +4,34 @@ import { useParams } from "react-router-dom"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { GameCard } from "@/components/GameCard"
+import { GameComments } from "@/components/GameComments"
 import { useDownloads } from "@/context/downloads-context"
 import { apiUrl } from "@/lib/api"
-import { formatNumber, hasOnlineMode, proxyImageUrl } from "@/lib/utils"
+import { formatNumber, hasOnlineMode, pickGameExecutable, proxyImageUrl } from "@/lib/utils"
 import type { Game } from "@/lib/types"
 import { useGamesData } from "@/hooks/use-games"
 import { addViewedGameToHistory, hasCookieConsent } from "@/lib/user-history"
-import { AlertTriangle, Calendar, Download, Eye, Flame, HardDrive, ShieldCheck, User, Wifi } from "lucide-react"
+import {
+  AlertTriangle,
+  Calendar,
+  ChevronLeft,
+  ChevronRight,
+  Download,
+  Eye,
+  Flame,
+  HardDrive,
+  RefreshCw,
+  ShieldCheck,
+  Square,
+  User,
+  Wifi,
+  X,
+} from "lucide-react"
+import { ExePickerModal } from "@/components/ExePickerModal"
 
 export function GameDetailPage() {
   const params = useParams()
-  const { startGameDownload, downloads } = useDownloads()
+  const { startGameDownload, resumeGroup, downloads, clearByAppid } = useDownloads()
   const { games, stats } = useGamesData()
   const [game, setGame] = useState<Game | null>(null)
   const [loading, setLoading] = useState(true)
@@ -26,6 +43,12 @@ export function GameDetailPage() {
   const [selectedImage, setSelectedImage] = useState<string>("")
   const [installedManifest, setInstalledManifest] = useState<any | null>(null)
   const [installingManifest, setInstallingManifest] = useState<any | null>(null)
+  const [exePickerOpen, setExePickerOpen] = useState(false)
+  const [exePickerExes, setExePickerExes] = useState<Array<{ name: string; path: string }>>([])
+  const [isGameRunning, setIsGameRunning] = useState(false)
+  const [stoppingGame, setStoppingGame] = useState(false)
+  const [lightboxOpen, setLightboxOpen] = useState(false)
+  const [lightboxIndex, setLightboxIndex] = useState(0)
 
   const appid = params.id || ""
 
@@ -127,9 +150,74 @@ export function GameDetailPage() {
       .catch(() => {})
   }, [appid])
 
+  useEffect(() => {
+    if (!appid || !window.ucDownloads?.getRunningGame) return
+    let mounted = true
+    const refresh = async () => {
+      try {
+        const res = await window.ucDownloads?.getRunningGame?.(appid)
+        if (!mounted) return
+        setIsGameRunning(Boolean(res && res.ok && res.running))
+      } catch {
+        if (!mounted) return
+        setIsGameRunning(false)
+      }
+    }
+    void refresh()
+    const timer = setInterval(refresh, 3000)
+    return () => {
+      mounted = false
+      clearInterval(timer)
+    }
+  }, [appid])
+
+  const openLightbox = (index: number) => {
+    setLightboxIndex(index)
+    setLightboxOpen(true)
+  }
+
+  const closeLightbox = () => {
+    setLightboxOpen(false)
+  }
+
+  const nextLightbox = () => {
+    if (!game?.screenshots || game.screenshots.length === 0) return
+    setLightboxIndex((prev) => (prev + 1) % game.screenshots.length)
+  }
+
+  const prevLightbox = () => {
+    if (!game?.screenshots || game.screenshots.length === 0) return
+    setLightboxIndex((prev) => (prev - 1 + game.screenshots.length) % game.screenshots.length)
+  }
+
+  useEffect(() => {
+    if (!lightboxOpen) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") closeLightbox()
+      if (e.key === "ArrowRight") nextLightbox()
+      if (e.key === "ArrowLeft") prevLightbox()
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [lightboxOpen])
+
   const startDownload = async () => {
     if (!game) return
-    if (installedManifest || installingManifest) return
+    const isCancelled = downloads.some((item) => item.appid === game.appid && item.status === "cancelled")
+    const hasFailedDownload = downloads.some(
+      (item) => item.appid === game.appid && ["failed", "extract_failed"].includes(item.status)
+    )
+    const hasFailedInstall = installingManifest?.installStatus === "failed"
+    if (installedManifest || (installingManifest && !isCancelled && !hasFailedInstall && !hasFailedDownload)) return
+    if (installingManifest && (isCancelled || hasFailedInstall)) {
+      try {
+        await window.ucDownloads?.deleteInstalling?.(game.appid)
+      } catch {}
+      setInstallingManifest(null)
+    }
+    if (hasFailedDownload) {
+      clearByAppid(game.appid)
+    }
     setDownloadError(null)
     setDownloading(true)
     try {
@@ -148,19 +236,25 @@ export function GameDetailPage() {
     try {
       const savedExe = await getSavedExe()
       if (savedExe) {
-        const res = await window.ucDownloads.launchGameExecutable(savedExe)
-        if (res && res.ok) return
+        const res = await window.ucDownloads.launchGameExecutable(game.appid, savedExe)
+        if (res && res.ok) {
+          setIsGameRunning(true)
+          return
+        }
         await setSavedExe(null)
       }
       const result = await window.ucDownloads.listGameExecutables(game.appid)
       const exes = result?.exes || []
-      const pick = pickExe(exes)
-      if (pick) {
-        const res = await window.ucDownloads.launchGameExecutable(pick.path)
+      const { pick, confident } = pickGameExecutable(exes, game.name)
+      if (pick && confident) {
+        const res = await window.ucDownloads.launchGameExecutable(game.appid, pick.path)
         if (res && res.ok) {
           await setSavedExe(pick.path)
+          setIsGameRunning(true)
+          return
         }
       }
+      openExePicker(exes)
     } catch {}
   }
   const popularAppIds = useMemo(() => {
@@ -211,34 +305,34 @@ export function GameDetailPage() {
   const effectiveDownloadCount = downloadCount || stats[game.appid]?.downloads || 0
   const effectiveViewCount = viewCount || stats[game.appid]?.views || 0
   const isPopular = popularAppIds.has(game.appid)
-  const isActiveDownload = downloads.some(
-    (item) =>
-      item.appid === game.appid &&
-      ["downloading", "paused", "extracting", "installing"].includes(item.status)
+  const appDownloads = downloads.filter((item) => item.appid === game.appid)
+  const isActiveDownload = appDownloads.some((item) =>
+    ["downloading", "paused", "extracting", "installing"].includes(item.status)
   )
-  const isQueued = downloads.some((item) => item.appid === game.appid && item.status === "queued")
+  const isActivelyDownloading = appDownloads.some((item) =>
+    ["downloading", "extracting", "installing"].includes(item.status)
+  )
+  const isPaused = appDownloads.some((item) => item.status === "paused") && !isActivelyDownloading
+  const isQueuedOnly = appDownloads.length > 0 && appDownloads.every((item) => item.status === "queued")
+  const isQueued = isQueuedOnly && !isActiveDownload
+  const failedDownload = appDownloads.find((item) => ["failed", "extract_failed"].includes(item.status))
+  const isFailed = Boolean(failedDownload) && !isActiveDownload && !isPaused && !isQueued
   const isCancelled = downloads.some((item) => item.appid === game.appid && item.status === "cancelled")
   const isInstalled = Boolean(installedManifest)
-  const isInstalling = (Boolean(installingManifest) && !isCancelled) || isActiveDownload || downloading
-  const actionLabel = isInstalled ? "Play" : isQueued ? "Queued" : isInstalling ? "Installing" : "Download Now"
-  const actionDisabled = isInstalling || isQueued
-
-  const pickExe = (exes: Array<{ name: string; path: string }>) => {
-    if (!exes.length) return null
-    const nameToken = game.name.toLowerCase().replace(/[^a-z0-9]+/g, "")
-    const scored = exes.map((exe) => {
-      const lower = exe.name.toLowerCase()
-      const pathLower = exe.path.toLowerCase()
-      let score = 0
-      if (nameToken && (lower.includes(nameToken) || pathLower.includes(nameToken))) score += 5
-      if (lower.includes("launcher")) score += 3
-      if (lower.includes("game")) score += 2
-      if (lower.includes("setup") || lower.includes("uninstall")) score -= 3
-      return { exe, score }
-    })
-    scored.sort((a, b) => b.score - a.score)
-    return scored[0].exe
-  }
+  const isInstalling =
+    (Boolean(installingManifest) && !isCancelled && !isPaused) || isActivelyDownloading || downloading
+  const actionLabel = isInstalled
+    ? "Play"
+    : isPaused
+      ? "Resume"
+      : isQueued
+        ? "Queued"
+        : isFailed
+          ? "Download failed"
+          : isInstalling
+            ? "Installing"
+            : "Download Now"
+  const actionDisabled = isInstalling || isQueued || isFailed
 
   const getSavedExe = async () => {
     if (!window.ucSettings?.get) return null
@@ -254,6 +348,31 @@ export function GameDetailPage() {
     try {
       await window.ucSettings.set(`gameExe:${game.appid}`, path || null)
     } catch {}
+  }
+
+  const openExePicker = (exes: Array<{ name: string; path: string }>) => {
+    setExePickerExes(exes)
+    setExePickerOpen(true)
+  }
+
+  const handleExePicked = async (path: string) => {
+    if (!window.ucDownloads?.launchGameExecutable) return
+    const res = await window.ucDownloads.launchGameExecutable(game.appid, path)
+    if (res && res.ok) {
+      await setSavedExe(path)
+      setExePickerOpen(false)
+      setIsGameRunning(true)
+    }
+  }
+
+  const stopRunningGame = async () => {
+    if (!window.ucDownloads?.quitGameExecutable) return
+    setStoppingGame(true)
+    try {
+      await window.ucDownloads.quitGameExecutable(game.appid)
+      setIsGameRunning(false)
+    } catch {}
+    setStoppingGame(false)
   }
 
   return (
@@ -282,20 +401,14 @@ export function GameDetailPage() {
                       {genre}
                     </Badge>
                   ))}
-                  {game.hasCoOp && (
-                    <Badge className="px-3 py-1 rounded-full bg-blue-500/20 border-blue-500/30 text-blue-400 font-semibold flex items-center gap-1.5">
-                      <Wifi className="h-3 w-3" />
-                      Co-op
-                    </Badge>
-                  )}
                   {isPopular && (
                     <Badge className="px-3 py-1 rounded-full bg-orange-500/20 border-orange-500/30 text-orange-400 font-semibold flex items-center gap-1.5">
                       <Flame className="h-3 w-3" />
                       Popular
                     </Badge>
                   )}
-                  {hasOnlineMode(game.source) && (
-                    <Badge className="px-3 py-1 rounded-full bg-emerald-500/20 border-emerald-500/30 text-emerald-300 font-semibold flex items-center gap-1.5">
+                  {hasOnlineMode(game.hasCoOp) && (
+                    <Badge className="px-3 py-1 rounded-full bg-emerald-500/20 border-emerald-500/30 text-emerald-400 font-semibold flex items-center gap-1.5">
                       <Wifi className="h-3 w-3" />
                       Online
                     </Badge>
@@ -312,46 +425,6 @@ export function GameDetailPage() {
               </div>
             </div>
 
-            {game.screenshots && game.screenshots.length > 0 && (
-              <div className="mt-8 space-y-4">
-                <h2 className="text-xl font-semibold text-foreground">Screenshots</h2>
-                <div className="flex gap-3 overflow-x-auto pb-2">
-                  <button
-                    onClick={() => setSelectedImage(game.splash || game.image)}
-                    className={`relative flex-shrink-0 w-32 h-20 rounded-xl overflow-hidden border-2 transition-all ${
-                      selectedImage === (game.splash || game.image)
-                        ? "border-primary shadow-lg shadow-primary/25"
-                        : "border-border/50 hover:border-primary/50"
-                    }`}
-                  >
-                    <img
-                      src={proxyImageUrl(game.splash || game.image) || "/banner.png"}
-                      alt="Main"
-                      className="h-full w-full object-cover"
-                    />
-                  </button>
-
-                  {game.screenshots.map((screenshot, index) => (
-                    <button
-                      key={screenshot}
-                      onClick={() => setSelectedImage(screenshot)}
-                      className={`relative flex-shrink-0 w-32 h-20 rounded-xl overflow-hidden border-2 transition-all ${
-                        selectedImage === screenshot
-                          ? "border-primary shadow-lg shadow-primary/25"
-                          : "border-border/50 hover:border-primary/50"
-                      }`}
-                    >
-                      <img
-                        src={proxyImageUrl(screenshot) || "/banner.png"}
-                        alt={`Screenshot ${index + 1}`}
-                        className="h-full w-full object-cover"
-                        loading="lazy"
-                      />
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
           </div>
         </div>
       </section>
@@ -366,6 +439,51 @@ export function GameDetailPage() {
                   {game.description}
                 </p>
               </div>
+
+              {game.screenshots && game.screenshots.length > 0 && (
+                <div className="p-6 rounded-2xl bg-card/30 border border-border/50">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-xl font-black text-foreground">Screenshots</h3>
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm text-muted-foreground">{game.screenshots.length} images</span>
+                      <Button variant="outline" size="sm" className="h-8 px-2" onClick={() => openLightbox(0)}>
+                        View All
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                    {game.screenshots.slice(0, 6).map((screenshot, index) => (
+                      <button
+                        key={`${screenshot}-${index}`}
+                        onClick={() => openLightbox(index)}
+                        className="relative w-full aspect-video rounded-lg overflow-hidden border border-border/60 hover:scale-[1.02] transition-transform"
+                        aria-label={`Open screenshot ${index + 1}`}
+                      >
+                        <img
+                          src={proxyImageUrl(screenshot) || "/banner.png"}
+                          alt={`Screenshot ${index + 1}`}
+                          className="h-full w-full object-cover"
+                          loading="lazy"
+                        />
+                      </button>
+                    ))}
+
+                    {game.screenshots.length > 6 && (
+                      <button
+                        onClick={() => openLightbox(6)}
+                        className="relative col-span-2 sm:col-auto w-full aspect-video rounded-lg overflow-hidden border border-border/60 flex items-center justify-center bg-background/50"
+                        aria-label="View more screenshots"
+                      >
+                        <div className="text-center">
+                          <div className="text-lg font-bold">+{game.screenshots.length - 6}</div>
+                          <div className="text-sm text-muted-foreground">more</div>
+                        </div>
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
 
               {game.dlc && game.dlc.length > 0 && (
                 <div className="p-8 rounded-2xl bg-card/30 border border-border/50">
@@ -403,6 +521,8 @@ export function GameDetailPage() {
                   onClick={() => {
                     if (isInstalled) {
                       void launchInstalledGame()
+                    } else if (isPaused) {
+                      void resumeGroup(game.appid)
                     } else {
                       void startDownload()
                     }
@@ -413,8 +533,32 @@ export function GameDetailPage() {
                   {actionLabel}
                 </Button>
 
-                {downloadError && (
-                  <div className="mt-3 text-xs text-destructive">{downloadError}</div>
+                {isFailed && (
+                  <Button
+                    variant="secondary"
+                    className="mt-3 w-full"
+                    onClick={() => void startDownload()}
+                    disabled={downloading}
+                  >
+                    <RefreshCw className="mr-2 h-4 w-4" />
+                    Retry
+                  </Button>
+                )}
+
+                {isGameRunning && (
+                  <Button
+                    variant="destructive"
+                    className="mt-3 w-full"
+                    onClick={() => void stopRunningGame()}
+                    disabled={stoppingGame}
+                  >
+                    <Square className="mr-2 h-4 w-4" />
+                    Quit Game
+                  </Button>
+                )}
+
+                {(downloadError || failedDownload?.error) && (
+                  <div className="mt-3 text-xs text-destructive">{downloadError || failedDownload?.error}</div>
                 )}
               </div>
 
@@ -494,6 +638,8 @@ export function GameDetailPage() {
         </div>
       </section>
 
+      <GameComments appid={game.appid} gameName={game.name} />
+
       {relatedGames.length > 0 && (
         <section className="py-16 px-4 bg-card/20">
           <div className="container mx-auto max-w-7xl">
@@ -513,6 +659,60 @@ export function GameDetailPage() {
           </div>
         </section>
       )}
+
+      {game.screenshots && lightboxOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/80 z-50" onClick={closeLightbox} aria-hidden="true" />
+
+          <button
+            className="absolute top-6 right-6 z-60 bg-background/60 rounded-full p-2"
+            onClick={closeLightbox}
+            aria-label="Close"
+          >
+            <X className="h-5 w-5 text-foreground" />
+          </button>
+
+          <button
+            onClick={prevLightbox}
+            className="absolute left-6 z-60 p-2 rounded-full bg-background/60"
+            aria-label="Previous"
+          >
+            <ChevronLeft className="h-6 w-6 text-foreground" />
+          </button>
+
+          <div className="relative z-60 max-w-[95vw] max-h-[88vh] flex items-center justify-center px-4 pointer-events-auto">
+            <div className="w-full h-full flex items-center justify-center">
+              <div className="w-full max-w-[1200px] max-h-[80vh] flex items-center justify-center">
+                <img
+                  src={proxyImageUrl(game.screenshots[lightboxIndex]) || "/banner.png"}
+                  alt={`Screenshot ${lightboxIndex + 1}`}
+                  className="max-w-full max-h-full object-contain mx-auto"
+                />
+              </div>
+            </div>
+          </div>
+
+          <button
+            onClick={nextLightbox}
+            className="absolute right-6 z-60 p-2 rounded-full bg-background/60"
+            aria-label="Next"
+          >
+            <ChevronRight className="h-6 w-6 text-foreground" />
+          </button>
+
+          <div className="absolute bottom-6 text-center text-sm text-muted-foreground z-60">
+            {`${lightboxIndex + 1} / ${game.screenshots.length}`}
+          </div>
+        </div>
+      )}
+      <ExePickerModal
+        open={exePickerOpen}
+        title="Select executable"
+        message={`We couldn't confidently detect the correct exe for "${game.name}". Please choose the one to launch.`}
+        exes={exePickerExes}
+        onSelect={handleExePicked}
+        onClose={() => setExePickerOpen(false)}
+      />
     </div>
   )
 }

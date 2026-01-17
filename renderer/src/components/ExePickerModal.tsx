@@ -1,15 +1,17 @@
 import { Button } from "@/components/ui/button"
+import { isIgnoredEngineExecutableName } from "@/lib/utils"
 
 type ExePickerModalProps = {
   open: boolean
   title: string
   message: string
   exes: Array<{ name: string; path: string }>
+  actionLabel?: string
   onSelect: (path: string) => void
   onClose: () => void
 }
 
-export function ExePickerModal({ open, title, message, exes, onSelect, onClose }: ExePickerModalProps) {
+export function ExePickerModal({ open, title, message, exes, actionLabel = "Launch", onSelect, onClose }: ExePickerModalProps) {
   if (!open) return null
 
   return (
@@ -21,17 +23,27 @@ export function ExePickerModal({ open, title, message, exes, onSelect, onClose }
 
         <div className="mt-4 max-h-72 space-y-2 overflow-y-auto">
           {exes.length ? (
-            exes.map((exe) => (
+            exes.map((exe) => {
+              const isIgnored = isIgnoredEngineExecutableName(exe.name)
+              return (
               <div key={exe.path} className="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/5 px-3 py-2">
                 <div className="min-w-0">
-                  <div className="truncate text-sm font-medium">{exe.name}</div>
+                  <div className="flex items-center gap-2 truncate text-sm font-medium">
+                    <span className="truncate">{exe.name}</span>
+                    {isIgnored ? (
+                      <span className="flex-none rounded-full border border-amber-400/40 bg-amber-400/10 px-2 py-0.5 text-[10px] font-semibold uppercase text-amber-200">
+                        Engine helper
+                      </span>
+                    ) : null}
+                  </div>
                   <div className="truncate text-xs text-slate-400">{exe.path}</div>
                 </div>
                 <Button size="sm" variant="secondary" onClick={() => onSelect(exe.path)}>
-                  Launch
+                  {actionLabel}
                 </Button>
               </div>
-            ))
+              )
+            })
           ) : (
             <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-sm text-slate-300">
               No executables found.

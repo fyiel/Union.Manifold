@@ -1,20 +1,6 @@
 const DEFAULT_BASE_URL = "https://union-crax.xyz"
-const STORAGE_KEY = "uc_direct_base_url"
-
 export function getApiBaseUrl(): string {
-  if (typeof window === "undefined") return DEFAULT_BASE_URL
-  const stored = localStorage.getItem(STORAGE_KEY)
-  return stored?.trim() || import.meta.env.VITE_UC_BASE_URL || DEFAULT_BASE_URL
-}
-
-export function setApiBaseUrl(value: string) {
-  if (typeof window === "undefined") return
-  const normalized = value.trim().replace(/\/+$/, "")
-  if (normalized) {
-    localStorage.setItem(STORAGE_KEY, normalized)
-  } else {
-    localStorage.removeItem(STORAGE_KEY)
-  }
+  return DEFAULT_BASE_URL
 }
 
 export function apiUrl(path: string): string {
@@ -24,7 +10,53 @@ export function apiUrl(path: string): string {
 }
 
 export async function apiFetch(path: string, init?: RequestInit) {
-  return fetch(apiUrl(path), init)
+  const nextInit: RequestInit = { ...(init || {}) }
+  if (!nextInit.credentials) {
+    nextInit.credentials = "include"
+  }
+
+  const canUseAuthFetch = typeof window !== "undefined" && Boolean(window.ucAuth?.fetch)
+  if (canUseAuthFetch) {
+    let body: string | null | undefined = nextInit.body as any
+    let headers = new Headers(nextInit.headers || {})
+
+    if (body instanceof URLSearchParams) {
+      if (!headers.has("content-type")) {
+        headers.set("content-type", "application/x-www-form-urlencoded;charset=UTF-8")
+      }
+      body = body.toString()
+    }
+
+    const hasSerializableBody = body == null || typeof body === "string"
+    if (hasSerializableBody) {
+      const serializedInit = {
+        ...nextInit,
+        headers: Object.fromEntries(headers.entries()),
+        body: body ?? null,
+      }
+
+      const result = await window.ucAuth!.fetch(getApiBaseUrl(), path, serializedInit)
+      const bytes = result.body ? base64ToUint8Array(result.body) : new Uint8Array()
+      return new Response(bytes, {
+        status: result.status || 0,
+        statusText: result.statusText || "",
+        headers: new Headers(result.headers || []),
+      })
+    }
+  }
+
+  return fetch(apiUrl(path), nextInit)
+}
+
+function base64ToUint8Array(base64: string): Uint8Array {
+  if (!base64) return new Uint8Array()
+  const binary = atob(base64)
+  const len = binary.length
+  const bytes = new Uint8Array(len)
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binary.charCodeAt(i)
+  }
+  return bytes
 }
 
 export async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {

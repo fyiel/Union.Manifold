@@ -1,7 +1,8 @@
-import { useMemo } from "react"
+import { useMemo, type MouseEvent } from "react"
 import { useNavigate } from "react-router-dom"
 import { useDownloads } from "@/context/downloads-context"
 import { Progress } from "@/components/ui/progress"
+import { PauseCircle, Play } from "lucide-react"
 
 const ACTIVE_STATUSES = ["downloading", "paused", "extracting", "installing"]
 
@@ -39,8 +40,22 @@ function formatPercent(value: number) {
   return `${Math.round(value)}%`
 }
 
+function estimateGroupTotals(items: Array<{ totalBytes: number; receivedBytes: number; filename: string; partTotal?: number }>) {
+  const receivedBytes = items.reduce((sum, item) => sum + (item.receivedBytes || 0), 0)
+  const knownTotals = items.filter((item) => (item.totalBytes || 0) > 0)
+  const knownTotalBytes = knownTotals.reduce((sum, item) => sum + (item.totalBytes || 0), 0)
+  const totalParts = getTotalParts(items)
+  let totalBytes = knownTotalBytes
+  if (totalParts > 1 && knownTotals.length > 0) {
+    const avgPartSize = knownTotalBytes / knownTotals.length
+    totalBytes = Math.max(avgPartSize * totalParts, knownTotalBytes)
+  }
+  totalBytes = Math.max(totalBytes, receivedBytes)
+  return { totalBytes, receivedBytes }
+}
+
 export function DownBar() {
-  const { downloads } = useDownloads()
+  const { downloads, pauseDownload, resumeGroup } = useDownloads()
   const navigate = useNavigate()
 
   const { primaryGroup, queuedGroup, queuedCount } = useMemo(() => {
@@ -66,8 +81,7 @@ export function DownBar() {
 
   const stats = useMemo(() => {
     if (!displayGroup) return null
-    const totalBytes = displayGroup.reduce((sum, item) => sum + (item.totalBytes || 0), 0)
-    const receivedBytes = displayGroup.reduce((sum, item) => sum + (item.receivedBytes || 0), 0)
+    const { totalBytes, receivedBytes } = estimateGroupTotals(displayGroup)
     const rawProgress = totalBytes > 0 ? (receivedBytes / totalBytes) * 100 : 0
     const progress = Math.max(0, Math.min(100, rawProgress))
     const downloading = displayGroup.find((item) => item.status === "downloading")
@@ -106,16 +120,20 @@ export function DownBar() {
 
   if (!displayGroup || !stats) {
     return (
-      <button
-        className="fixed bottom-0 left-0 right-0 z-30 border-t border-white/10 bg-slate-950/80 px-4 py-3 text-left text-sm text-slate-200 backdrop-blur-md transition hover:bg-slate-950/90"
+      <div
+        role="button"
+        tabIndex={0}
         onClick={handleClick}
-        type="button"
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") handleClick()
+        }}
+        className="fixed bottom-0 left-0 right-0 z-30 border-t border-border/60 bg-card/95 px-4 py-3 text-left text-sm text-foreground backdrop-blur-md transition hover:bg-card"
       >
         <div className="flex items-center justify-between">
           <span className="font-semibold">See activity</span>
-          <span className="text-xs text-slate-400">No active downloads</span>
+          <span className="text-xs text-muted-foreground">No active downloads</span>
         </div>
-      </button>
+      </div>
     )
   }
 
@@ -123,32 +141,66 @@ export function DownBar() {
     !displayGroup.some((item) => ["downloading", "extracting", "installing"].includes(item.status))
   const isQueuedOnly = displayGroup.every((item) => item.status === "queued")
   const displayName = displayGroup[0]?.gameName || "Download"
+  const displayHost = displayGroup[0]?.host || "unknown"
+  const handleToggle = (event: MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault()
+    event.stopPropagation()
+    if (isPaused) {
+      const appid = displayGroup[0]?.appid
+      if (appid) {
+        void resumeGroup(appid)
+      }
+      return
+    }
+    for (const item of downloads) {
+      if (item.status === "downloading") {
+        void pauseDownload(item.id)
+      }
+    }
+  }
 
   return (
-    <button
-      className="fixed bottom-0 left-0 right-0 z-30 border-t border-white/10 bg-slate-950/80 px-4 py-3 text-left text-sm text-slate-100 backdrop-blur-md transition hover:bg-slate-950/90"
+    <div
+      role="button"
+      tabIndex={0}
       onClick={handleClick}
-      type="button"
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") handleClick()
+      }}
+      className="fixed bottom-0 left-0 right-0 z-30 border-t border-border/60 bg-card/95 px-4 py-3 text-left text-sm text-foreground backdrop-blur-md transition hover:bg-card"
     >
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <span className="truncate font-semibold">{displayName}</span>
-            <span className="text-xs text-slate-400">
+            <span className="text-xs text-muted-foreground">
               {isPaused
                 ? `Downloads paused - ${queuedCount} queued`
                 : isQueuedOnly
                   ? `Queued • ${displayName}`
-                  : `${stats.phase} part ${stats.partInfo.partNum} of ${stats.partInfo.total}`}
+                  : stats.partInfo.total > 1
+                    ? `${stats.phase} part ${stats.partInfo.partNum} of ${stats.partInfo.total}`
+                    : `${stats.phase} ${displayName}`}
               {queuedCount > 0 && !isPaused && !isQueuedOnly ? ` • ${queuedCount} queued` : ""}
+              {displayHost ? ` • ${displayHost}` : ""}
             </span>
           </div>
           <div className="mt-2">
             <Progress value={stats.progress} className="h-1.5" />
           </div>
         </div>
-        <div className="text-xs text-slate-400">{formatPercent(stats.progress)}</div>
+        <div className="flex items-center gap-3">
+          <div className="text-xs text-muted-foreground">{formatPercent(stats.progress)}</div>
+          <button
+            type="button"
+            onClick={handleToggle}
+            className="flex h-8 w-8 items-center justify-center rounded-full border border-border/60 bg-card/60 text-foreground transition hover:bg-card"
+            aria-label={isPaused ? "Resume downloads" : "Pause downloads"}
+          >
+            {isPaused ? <Play className="h-4 w-4" /> : <PauseCircle className="h-4 w-4" />}
+          </button>
+        </div>
       </div>
-    </button>
+    </div>
   )
 }
