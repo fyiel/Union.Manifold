@@ -1050,8 +1050,10 @@ function run7zExtract(archivePath, destDir, onProgress) {
         const seven = require('7zip-bin')
         // try several known exports
         cmd = seven.path7za || seven.path7z || seven.path7zip || cmd
+        uc_log(`7zip binary resolved to: ${cmd}`)
       } catch (e) {
         // not available, use system `7z`
+        uc_log(`7zip-bin not available, using system 7z: ${String(e)}`)
       }
       const before = snapshotFiles(destDir)
       const args = ['x', archivePath, `-o${destDir}`, '-y']
