@@ -6,13 +6,29 @@ type ExePickerModalProps = {
   title: string
   message: string
   exes: Array<{ name: string; path: string }>
+  currentExePath?: string | null
   actionLabel?: string
   onSelect: (path: string) => void
   onClose: () => void
 }
 
-export function ExePickerModal({ open, title, message, exes, actionLabel = "Launch", onSelect, onClose }: ExePickerModalProps) {
+export function ExePickerModal({ open, title, message, exes, currentExePath, actionLabel = "Launch", onSelect, onClose }: ExePickerModalProps) {
   if (!open) return null
+
+  // Extract relative path by removing the base directory
+  const getRelativePath = (fullPath: string) => {
+    // Find the game folder name in the path (after "installed\\")
+    const match = fullPath.match(/installed[\\/]([^\\/]+)[\\/](.+)/)
+    if (match) {
+      return match[2] // Return the path after the game folder
+    }
+    // Fallback: just return the last two segments
+    const parts = fullPath.split(/[\\/]/)
+    if (parts.length >= 2) {
+      return parts.slice(-2).join('\\')
+    }
+    return fullPath
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
@@ -25,20 +41,33 @@ export function ExePickerModal({ open, title, message, exes, actionLabel = "Laun
           {exes.length ? (
             exes.map((exe) => {
               const isIgnored = isIgnoredEngineExecutableName(exe.name)
+              const isCurrent = currentExePath && exe.path === currentExePath
+              const relativePath = getRelativePath(exe.path)
               return (
-              <div key={exe.path} className="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/5 px-3 py-2">
+              <div 
+                key={exe.path} 
+                className={`flex items-center justify-between gap-3 rounded-xl border px-3 py-2 transition-colors ${
+                  isCurrent 
+                    ? 'border-primary/60 bg-primary/10' 
+                    : 'border-white/10 bg-white/5 hover:border-white/20'
+                }`}
+              >
                 <div className="min-w-0">
                   <div className="flex items-center gap-2 truncate text-sm font-medium">
-                    <span className="truncate">{exe.name}</span>
+                    <span className={`truncate ${isCurrent ? 'text-primary' : ''}`}>{exe.name}</span>
                     {isIgnored ? (
                       <span className="flex-none rounded-full border border-amber-400/40 bg-amber-400/10 px-2 py-0.5 text-[10px] font-semibold uppercase text-amber-200">
                         Engine helper
                       </span>
                     ) : null}
                   </div>
-                  <div className="truncate text-xs text-slate-400">{exe.path}</div>
+                  <div className={`truncate text-xs ${isCurrent ? 'text-primary/70' : 'text-slate-400'}`}>{relativePath}</div>
                 </div>
-                <Button size="sm" variant="secondary" onClick={() => onSelect(exe.path)}>
+                <Button 
+                  size="sm" 
+                  variant={isCurrent ? "default" : "secondary"} 
+                  onClick={() => onSelect(exe.path)}
+                >
                   {actionLabel}
                 </Button>
               </div>
