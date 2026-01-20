@@ -59,3 +59,20 @@ contextBridge.exposeInMainWorld('ucAuth', {
   getSession: (baseUrl) => ipcRenderer.invoke('uc:auth-session', baseUrl),
   fetch: (baseUrl, path, init) => ipcRenderer.invoke('uc:auth-fetch', { baseUrl, path, init })
 })
+
+contextBridge.exposeInMainWorld('ucUpdater', {
+  checkForUpdates: () => ipcRenderer.invoke('uc:check-for-updates'),
+  installUpdate: () => ipcRenderer.invoke('uc:install-update'),
+  getVersion: () => ipcRenderer.invoke('uc:get-version')
+})
+
+contextBridge.exposeInMainWorld('electron', {
+  ipcRenderer: {
+    on: (channel, func) => {
+      ipcRenderer.on(channel, func)
+    },
+    removeListener: (channel, func) => {
+      ipcRenderer.removeListener(channel, func)
+    }
+  }
+})

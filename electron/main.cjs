@@ -5,6 +5,7 @@ const fs = require('node:fs')
 const crypto = require('node:crypto')
 const child_process = require('node:child_process')
 
+const packageJson = require('../package.json')
 const isDev = !app.isPackaged
 const pendingDownloads = []
 const activeDownloads = new Map()
@@ -1611,6 +1612,11 @@ ipcMain.handle('uc:check-for-updates', async () => {
   } catch (err) {
     return { available: false, error: err.message }
   }
+})
+
+// IPC handler to get app version
+ipcMain.handle('uc:get-version', () => {
+  return packageJson.version
 })
 
 // IPC handler to install update
