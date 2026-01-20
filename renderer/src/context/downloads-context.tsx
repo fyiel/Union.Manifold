@@ -490,8 +490,14 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
   }, [startNextQueuedPart])
 
   const cancelDownload = useCallback(async (downloadId: string) => {
+    const download = downloads.find((d) => d.id === downloadId)
     if (window.ucDownloads?.cancel) {
       await window.ucDownloads.cancel(downloadId)
+    }
+    if (download?.appid && window.ucDownloads?.setInstallingStatus) {
+      try {
+        await window.ucDownloads.setInstallingStatus(download.appid, "cancelled", "Cancelled by user")
+      } catch {}
     }
     setDownloads((prev) =>
       prev.map((item) =>
@@ -508,6 +514,11 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
       try {
         if (window.ucDownloads?.cancel) await window.ucDownloads.cancel(id)
       } catch (e) {}
+    }
+    if (window.ucDownloads?.setInstallingStatus) {
+      try {
+        await window.ucDownloads.setInstallingStatus(appid, "cancelled", "Cancelled by user")
+      } catch {}
     }
     setDownloads((prev) =>
       prev.map((item) =>

@@ -59,7 +59,9 @@ export function DownBar() {
   const navigate = useNavigate()
 
   const { primaryGroup, queuedGroup, queuedCount } = useMemo(() => {
-    const grouped = downloads.reduce<Record<string, typeof downloads>>((acc, item) => {
+    // Filter out cancelled downloads
+    const activeDownloads = downloads.filter((item) => item.status !== "cancelled")
+    const grouped = activeDownloads.reduce<Record<string, typeof activeDownloads>>((acc, item) => {
       acc[item.appid] = acc[item.appid] || []
       acc[item.appid].push(item)
       return acc
@@ -73,7 +75,7 @@ export function DownBar() {
     return {
       primaryGroup: activeGroups[0] || null,
       queuedGroup: queuedGroups[0] || null,
-      queuedCount: downloads.filter((item) => item.status === "queued").length,
+      queuedCount: activeDownloads.filter((item) => item.status === "queued").length,
     }
   }, [downloads])
 
