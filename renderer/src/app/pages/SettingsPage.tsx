@@ -22,7 +22,7 @@ const MIRROR_HOSTS: MirrorHostInfo[] = [
   { key: 'rootz', label: 'Rootz', tag: 'beta' },
   { key: 'pixeldrain', label: 'Pixeldrain' }
 ]
-import { ExternalLink, FolderOpen, HardDrive, Plus } from "lucide-react"
+import { ExternalLink, FolderOpen, HardDrive, Plus, RefreshCw } from "lucide-react"
 
 const downloadDirName = "UnionCrax.Direct"
 
@@ -63,6 +63,16 @@ export function SettingsPage() {
   const [ucSizeBytes, setUcSizeBytes] = useState<number | null>(null)
   const [usageLoading, setUsageLoading] = useState(false)
   const [defaultHost, setDefaultHost] = useState<MirrorHost>('rootz')
+  const [checkingUpdate, setCheckingUpdate] = useState(false)
+  const [appVersion, setAppVersion] = useState<string>("")
+
+  useEffect(() => {
+    const loadVersion = async () => {
+      const version = await window.ucUpdater?.getVersion?.()
+      if (version) setAppVersion(version)
+    }
+    loadVersion()
+  }, [])
 
   useEffect(() => {
     const load = async () => {
@@ -199,7 +209,19 @@ export function SettingsPage() {
       setSelectedDiskId("custom")
     }
   }
+const handleCheckForUpdates = async () => {
+    if (checkingUpdate) return
+    setCheckingUpdate(true)
+    try {
+      await window.ucUpdater?.checkForUpdates()
+    } catch (err) {
+      console.error("[UC] Failed to check for updates:", err)
+    } finally {
+      setTimeout(() => setCheckingUpdate(false), 2000)
+    }
+  }
 
+  
   return (
     <div className="container mx-auto max-w-5xl space-y-8">
       <div className="flex items-center gap-3">
@@ -323,6 +345,30 @@ export function SettingsPage() {
               Open download folder
             </Button>
           </div>
+        </CardContent>
+      </Card>
+
+      <Card className="border-border/60">
+        <CardContent className="p-6 space-y-4">
+          <div>
+            <h2 className="text-lg font-semibold">Updates</h2>
+            <p className="text-sm text-muted-foreground">
+              Check for new versions of UnionCrax.Direct.
+            </p>
+          </div>
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-muted-foreground">Current version</span>
+            <span className="font-mono font-medium">{appVersion ? `v${appVersion}` : 'Loading...'}</span>
+          </div>
+          <Button
+            variant="outline"
+            className="gap-2"
+            onClick={handleCheckForUpdates}
+            disabled={checkingUpdate}
+          >
+            <RefreshCw className={`h-4 w-4 ${checkingUpdate ? 'animate-spin' : ''}`} />
+            {checkingUpdate ? 'Checking...' : 'Check for Updates'}
+          </Button>
         </CardContent>
       </Card>
 

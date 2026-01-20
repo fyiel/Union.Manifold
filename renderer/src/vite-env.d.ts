@@ -112,6 +112,17 @@ declare global {
         body?: string
       }>
     }
+    ucUpdater?: {
+      checkForUpdates: () => Promise<{ available: boolean; version?: string; message?: string; error?: string }>
+      installUpdate: () => void
+      getVersion: () => Promise<string>
+    }
+    electron?: {
+      ipcRenderer: {
+        on: (channel: string, func: (...args: any[]) => void) => void
+        removeListener: (channel: string, func: (...args: any[]) => void) => void
+      }
+    }
   }
 }
 
