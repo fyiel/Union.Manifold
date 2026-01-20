@@ -7,6 +7,7 @@ export function UpdateNotification() {
   const [updateDownloaded, setUpdateDownloaded] = useState(false)
   const [updateInfo, setUpdateInfo] = useState<{ version?: string } | null>(null)
   const [dismissed, setDismissed] = useState(false)
+  const [downloadProgress, setDownloadProgress] = useState<number | null>(null)
 
   useEffect(() => {
     if (!window.electron) return
@@ -14,19 +15,28 @@ export function UpdateNotification() {
     const handleUpdateAvailable = (_event: any, info: any) => {
       setUpdateAvailable(true)
       setUpdateInfo(info)
+      setDownloadProgress(null)
     }
 
     const handleUpdateDownloaded = (_event: any, info: any) => {
       setUpdateDownloaded(true)
       setUpdateInfo(info)
+      setDownloadProgress(100)
+    }
+
+    const handleDownloadProgress = (_event: any, progress: any) => {
+      const percent = typeof progress?.percent === "number" ? progress.percent : null
+      setDownloadProgress(percent)
     }
 
     window.electron.ipcRenderer.on('update-available', handleUpdateAvailable)
     window.electron.ipcRenderer.on('update-downloaded', handleUpdateDownloaded)
+    window.electron.ipcRenderer.on('update-download-progress', handleDownloadProgress)
 
     return () => {
       window.electron.ipcRenderer.removeListener('update-available', handleUpdateAvailable)
       window.electron.ipcRenderer.removeListener('update-downloaded', handleUpdateDownloaded)
+      window.electron.ipcRenderer.removeListener('update-download-progress', handleDownloadProgress)
     }
   }, [])
 
@@ -46,13 +56,18 @@ export function UpdateNotification() {
         </div>
         <div className="flex-1">
           <h3 className="font-semibold text-white">
-            {updateDownloaded ? "Update Ready" : "Update Available"}
+            {updateDownloaded
+              ? "Update Ready"
+              : downloadProgress != null
+                ? "Downloading Update"
+                : "Update Available"}
           </h3>
           <p className="mt-1 text-sm text-slate-300">
-            {updateDownloaded 
+            {updateDownloaded
               ? `Version ${updateInfo?.version || 'new version'} has been downloaded and is ready to install.`
-              : `Version ${updateInfo?.version || 'new version'} is available and downloading in the background.`
-            }
+              : downloadProgress != null
+                ? `Downloading version ${updateInfo?.version || 'new version'} (${downloadProgress.toFixed(0)}%).`
+                : `Version ${updateInfo?.version || 'new version'} is available. Download will start automatically.`}
           </p>
           {updateDownloaded && (
             <Button
