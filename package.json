@@ -1,9 +1,19 @@
 {
   "name": "unioncrax-direct",
-  "private": true,
   "version": "0.2.9",
+  "description": "Standalone Electron app for managing and launching games from UnionCrax",
   "type": "module",
   "main": "electron/main.cjs",
+  "author": "UnionCrax",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Union-Crax/UnionCrax.Direct.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Union-Crax/UnionCrax.Direct/issues"
+  },
+  "homepage": "https://github.com/Union-Crax/UnionCrax.Direct#readme",
   "scripts": {
     "setup": "node node_modules/electron/install.js",
     "dev": "concurrently -k \"pnpm:dev:renderer\" \"pnpm:dev:electron\"",
