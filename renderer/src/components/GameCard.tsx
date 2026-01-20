@@ -121,9 +121,10 @@ export const GameCard = memo(function GameCard({
   const hasActive = appDownloads.some((item) =>
     ["downloading", "paused", "extracting", "installing"].includes(item.status)
   )
+  const isCancelled = appDownloads.some((item) => item.status === "cancelled")
   const isQueuedOnly = appDownloads.length > 0 && appDownloads.every((item) => item.status === "queued")
   const isQueued = isQueuedOnly && !hasActive
-  const isInstalling = hasActive
+  const isInstalling = hasActive && !isCancelled
 
   const getSavedExe = async () => {
     if (!window.ucSettings?.get) return null
