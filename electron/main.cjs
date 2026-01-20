@@ -1569,6 +1569,7 @@ app.whenReady().then(() => {
   
   // Auto-updater configuration
   if (!isDev) {
+    autoUpdater.autoDownload = true
     autoUpdater.checkForUpdatesAndNotify()
     
     // Check for updates every hour
@@ -1588,6 +1589,18 @@ autoUpdater.on('update-available', (info) => {
   const windows = BrowserWindow.getAllWindows()
   windows.forEach(win => {
     win.webContents.send('update-available', info)
+  })
+  try {
+    autoUpdater.downloadUpdate()
+  } catch (err) {
+    console.error('[Update] Failed to start download:', err)
+  }
+})
+
+autoUpdater.on('download-progress', (progress) => {
+  const windows = BrowserWindow.getAllWindows()
+  windows.forEach(win => {
+    win.webContents.send('update-download-progress', progress)
   })
 })
 
