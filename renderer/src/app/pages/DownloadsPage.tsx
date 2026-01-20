@@ -199,6 +199,7 @@ export function DownloadsPage() {
     resumeGroup,
     openPath,
     clearCompleted,
+    clearByAppid,
   } = useDownloads()
   const navigate = useNavigate()
   const { games } = useGamesData()
@@ -235,7 +236,10 @@ export function DownloadsPage() {
     items.every((item) => item.status === "queued")
   )
   const completedGroups = Object.values(grouped).filter((items) =>
-    items.every((item) => ["completed", "extracted", "extract_failed", "failed"].includes(item.status))
+    items.every((item) => ["completed", "extracted"].includes(item.status))
+  )
+  const cancelledGroups = Object.values(grouped).filter((items) =>
+    items.every((item) => ["cancelled", "failed", "extract_failed"].includes(item.status))
   )
 
   const primaryGroup = activeGroups[0] || queuedGroups[0]
@@ -373,7 +377,7 @@ export function DownloadsPage() {
           <p className="text-sm text-muted-foreground">Track downloads, installs, and completed titles.</p>
         </div>
         <Button variant="outline" onClick={clearCompleted}>
-          Clear finished
+          Clear
         </Button>
       </div>
 
@@ -769,6 +773,82 @@ export function DownloadsPage() {
           )}
         </div>
       </section>
+
+      <section className="space-y-4">
+        <div className="flex items-center gap-2">
+          <XCircle className="h-5 w-5 text-destructive" />
+          <h2 className="text-xl font-black font-montserrat">Cancelled / Failed</h2>
+          <Badge variant="secondary" className="rounded-full">
+            {cancelledGroups.length}
+          </Badge>
+        </div>
+
+        {cancelledGroups.length === 0 && (
+          <div className="rounded-2xl border border-border/60 bg-card/60 p-6 text-sm text-muted-foreground">
+            Cancelled or failed downloads will appear here.
+          </div>
+        )}
+
+        <div className="space-y-4">
+          {cancelledGroups.map((items) => {
+            const gameName = items[0]?.gameName || "Unknown"
+            const appid = items[0]?.appid
+            const game = appid ? games.find((g) => g.appid === appid) : null
+            const status = items[0]?.status || "cancelled"
+            const statusLabel = status === "cancelled" ? "Cancelled" : status === "extract_failed" ? "Extract Failed" : "Failed"
+            const totalParts = getTotalParts(items)
+
+            return (
+              <div
+                key={`cancelled-${items[0].appid}-${gameName}`}
+                className="rounded-xl border border-destructive/40 bg-gradient-to-b from-slate-950/60 via-slate-950/40 to-slate-900/30 shadow-lg shadow-black/20"
+              >
+                <div className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex items-center gap-4">
+                    <div className="h-14 w-24 overflow-hidden rounded-md border border-border/50 bg-muted">
+                      {game?.image ? (
+                        <img
+                          src={proxyImageUrl(game.image)}
+                          alt={gameName}
+                          className="h-full w-full object-cover opacity-60"
+                        />
+                      ) : null}
+                    </div>
+                    <div>
+                      <h3 className="text-base font-semibold text-muted-foreground">{gameName}</h3>
+                      <div className="text-xs text-destructive">
+                        {statusLabel}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        if (appid) clearByAppid(appid)
+                      }}
+                    >
+                      Remove
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="border-t border-border/50 px-5 py-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+                    <span>{totalParts} {getPartsLabel(items)}</span>
+                    <Badge variant="outline" className="rounded-full border-destructive/40 text-destructive">
+                      {statusLabel}
+                    </Badge>
+                  </div>
+                </div>
+              </div>
+            )}
+          )}
+        </div>
+      </section>
+
       <ExePickerModal
         open={exePickerOpen}
         title={exePickerTitle}

@@ -2,6 +2,7 @@ import { Outlet } from "react-router-dom"
 import { DownBar } from "@/components/DownBar"
 import { TopBar } from "@/components/TopBar"
 import ScrollProgress from "@/components/ScrollProgress"
+import { UpdateNotification } from "@/components/UpdateNotification"
 
 export function AppLayout() {
   return (
@@ -12,6 +13,7 @@ export function AppLayout() {
         <Outlet />
       </main>
       <DownBar />
+      <UpdateNotification />
     </div>
   )
 }

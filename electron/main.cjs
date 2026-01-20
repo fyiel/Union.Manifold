@@ -1,4 +1,5 @@
 const { app, BrowserWindow, shell, ipcMain, dialog } = require('electron')
+const { autoUpdater } = require('electron-updater')
 const path = require('node:path')
 const fs = require('node:fs')
 const crypto = require('node:crypto')
@@ -1195,6 +1196,9 @@ function createWindow() {
     icon: iconPath
   })
 
+  // Hide the menu bar
+  win.setMenuBarVisibility(false)
+
   const defaultUserAgent = win.webContents.getUserAgent()
   win.webContents.setUserAgent(`${defaultUserAgent} UnionCrax.Direct/${app.getVersion()}`)
 
@@ -1561,9 +1565,57 @@ function createWindow() {
 app.whenReady().then(() => {
   ensureDownloadDir()
   createWindow()
+  
+  // Auto-updater configuration
+  if (!isDev) {
+    autoUpdater.checkForUpdatesAndNotify()
+    
+    // Check for updates every hour
+    setInterval(() => {
+      autoUpdater.checkForUpdatesAndNotify()
+    }, 60 * 60 * 1000)
+  }
+  
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
+})
+
+// Auto-updater event handlers
+autoUpdater.on('update-available', (info) => {
+  console.log('[Update] New version available:', info.version)
+  const windows = BrowserWindow.getAllWindows()
+  windows.forEach(win => {
+    win.webContents.send('update-available', info)
+  })
+})
+
+autoUpdater.on('update-downloaded', (info) => {
+  console.log('[Update] Update downloaded:', info.version)
+  const windows = BrowserWindow.getAllWindows()
+  windows.forEach(win => {
+    win.webContents.send('update-downloaded', info)
+  })
+})
+
+autoUpdater.on('error', (err) => {
+  console.error('[Update] Error:', err)
+})
+
+// IPC handler for manual update check
+ipcMain.handle('uc:check-for-updates', async () => {
+  if (isDev) return { available: false, message: 'Updates not available in dev mode' }
+  try {
+    const result = await autoUpdater.checkForUpdates()
+    return { available: true, version: result?.updateInfo?.version }
+  } catch (err) {
+    return { available: false, error: err.message }
+  }
+})
+
+// IPC handler to install update
+ipcMain.handle('uc:install-update', () => {
+  autoUpdater.quitAndInstall(false, true)
 })
 
 app.on('window-all-closed', () => {
