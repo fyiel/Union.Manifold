@@ -320,7 +320,7 @@ export function GameDetailPage() {
   const isCancelled = downloads.some((item) => item.appid === game.appid && item.status === "cancelled")
   const isInstalled = Boolean(installedManifest)
   const isInstalling =
-    (Boolean(installingManifest) && !isCancelled && !isPaused) || isActivelyDownloading || downloading
+    (Boolean(installingManifest) && !isCancelled && !isFailed && !isPaused) || (isActivelyDownloading && !isCancelled) || (downloading && !isCancelled)
   const actionLabel = isInstalled
     ? "Play"
     : isPaused

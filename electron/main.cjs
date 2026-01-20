@@ -1195,6 +1195,9 @@ function createWindow() {
     icon: iconPath
   })
 
+  // Hide the menu bar
+  win.setMenuBarVisibility(false)
+
   const defaultUserAgent = win.webContents.getUserAgent()
   win.webContents.setUserAgent(`${defaultUserAgent} UnionCrax.Direct/${app.getVersion()}`)
 

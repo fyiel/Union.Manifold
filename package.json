@@ -1,7 +1,7 @@
 {
   "name": "unioncrax-direct",
   "private": true,
-  "version": "0.1.6",
+  "version": "0.2.7",
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
@@ -34,6 +34,7 @@
     "clsx": "^2.1.1",
     "embla-carousel-react": "^8.5.1",
     "fuse.js": "^7.1.0",
+    "geist": "^1.5.1",
     "lucide-react": "^0.454.0",
     "react": "18.2.0",
     "react-dom": "18.2.0",

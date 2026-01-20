@@ -6,6 +6,7 @@ import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { SearchSuggestions } from "@/components/SearchSuggestions"
 import { DiscordAvatar } from "@/components/DiscordAvatar"
+import { BackButton } from "@/components/BackButton"
 import { useDiscordAccount } from "@/hooks/use-discord-account"
 import { apiFetch, apiUrl, getApiBaseUrl } from "@/lib/api"
 import {
@@ -147,6 +148,8 @@ export function TopBar() {
       <nav className="sticky top-0 z-40 w-full border-b border-border bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/60">
         <div className="container mx-auto max-w-7xl px-4">
           <div className="flex h-16 items-center gap-4">
+            <BackButton />
+            
             <NavLink to="/" className="flex items-center gap-2">
               <Hammer className="h-7 w-7 text-foreground" />
               <span className="font-black text-lg text-foreground font-montserrat">UnionCrax</span>
@@ -155,14 +158,28 @@ export function TopBar() {
 
             <div className="hidden lg:flex items-center gap-5">
               {siteNavItems.map((item) => (
-                <button
-                  key={item.label}
-                  type="button"
-                  onClick={() => openExternal(item.path)}
-                  className="cursor-pointer text-sm font-medium text-muted-foreground transition-colors hover:text-primary"
-                >
-                  {item.label}
-                </button>
+                item.label === "Home" ? (
+                  <NavLink
+                    key={item.label}
+                    to="/"
+                    className={({ isActive }) =>
+                      `cursor-pointer text-sm font-medium transition-colors ${
+                        isActive ? "text-primary" : "text-muted-foreground hover:text-primary"
+                      }`
+                    }
+                  >
+                    {item.label}
+                  </NavLink>
+                ) : (
+                  <button
+                    key={item.label}
+                    type="button"
+                    onClick={() => openExternal(item.path)}
+                    className="cursor-pointer text-sm font-medium text-muted-foreground transition-colors hover:text-primary"
+                  >
+                    {item.label}
+                  </button>
+                )
               ))}
               <Popover>
                 <PopoverTrigger asChild>
