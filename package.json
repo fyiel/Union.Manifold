@@ -84,6 +84,7 @@
     "files": [
       "assets/**/*",
       "electron/**/*",
+      "node_modules/**/*",
       "renderer/dist/**/*",
       "package.json"
     ],
