@@ -1,7 +1,7 @@
 {
   "name": "unioncrax-direct",
   "private": true,
-  "version": "0.2.7",
+  "version": "0.2.8",
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
@@ -32,6 +32,7 @@
     "@radix-ui/react-tooltip": "1.1.6",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "electron-updater": "^6.7.3",
     "embla-carousel-react": "^8.5.1",
     "fuse.js": "^7.1.0",
     "geist": "^1.5.1",
@@ -60,6 +61,13 @@
     "icon": "assets/icon.png",
     "appId": "xyz.unioncrax.direct",
     "productName": "UnionCrax.Direct",
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Union-Crax",
+        "repo": "UnionCrax.Direct"
+      }
+    ],
     "directories": {
       "output": "dist-packaged"
     },
@@ -75,14 +83,8 @@
     "win": {
       "target": [
         "nsis"
-      ]
-    },
-    "linux": {
-      "target": [
-        "AppImage"
       ],
-      "category": "Utility",
-      "icon": "assets/icon.png"
+      "publisherName": "UnionCrax"
     }
   }
 }
