@@ -1,4 +1,4 @@
-const { app, BrowserWindow, shell, ipcMain, dialog } = require('electron')
+const { app, BrowserWindow, shell, ipcMain, dialog, Tray, Menu, nativeImage } = require('electron')
 const { autoUpdater } = require('electron-updater')
 const path = require('node:path')
 const fs = require('node:fs')
@@ -26,7 +26,38 @@ function resolveIcon() {
   return path.join(__dirname, '..', 'assets', asset)
 }
 
+function createTray() {
+  const iconPath = resolveIcon()
+  tray = new Tray(iconPath)
+  const contextMenu = Menu.buildFromTemplate([
+    {
+      label: 'Show',
+      click: () => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.show()
+          mainWindow.focus()
+        }
+      }
+    },
+    {
+      label: 'Quit',
+      click: () => {
+        app.quit()
+      }
+    }
+  ])
+  tray.setContextMenu(contextMenu)
+  tray.on('double-click', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.show()
+      mainWindow.focus()
+    }
+  })
+}
+
 const DEFAULT_BASE_URL = 'https://union-crax.xyz'
+let tray = null
+let mainWindow = null
 
 function normalizeBaseUrl(baseUrl) {
   if (!baseUrl || typeof baseUrl !== 'string') return DEFAULT_BASE_URL
@@ -1183,7 +1214,7 @@ function killProcessTree(pid) {
 
 function createWindow() {
   const iconPath = resolveIcon()
-  const win = new BrowserWindow({
+  mainWindow = new BrowserWindow({
     width: 1100,
     height: 800,
     backgroundColor: '#121212',
@@ -1198,26 +1229,33 @@ function createWindow() {
   })
 
   // Hide the menu bar
-  win.setMenuBarVisibility(false)
+  mainWindow.setMenuBarVisibility(false)
 
-  const defaultUserAgent = win.webContents.getUserAgent()
-  win.webContents.setUserAgent(`${defaultUserAgent} UnionCrax.Direct/${app.getVersion()}`)
+  const defaultUserAgent = mainWindow.webContents.getUserAgent()
+  mainWindow.webContents.setUserAgent(`${defaultUserAgent} UnionCrax.Direct/${app.getVersion()}`)
 
   if (isDev) {
-    win.loadURL('http://localhost:5173')
-    win.webContents.openDevTools({ mode: 'detach' })
+    mainWindow.loadURL('http://localhost:5173')
+    mainWindow.webContents.openDevTools({ mode: 'detach' })
   } else {
-    win.loadFile(path.join(__dirname, '..', 'renderer', 'dist', 'index.html'))
+    mainWindow.loadFile(path.join(__dirname, '..', 'renderer', 'dist', 'index.html'))
   }
 
-  win.webContents.setWindowOpenHandler(({ url }) => {
+  mainWindow.on('close', (event) => {
+    if (!app.isQuitting) {
+      event.preventDefault()
+      mainWindow.hide()
+    }
+  })
+
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (url && (url.startsWith('http://') || url.startsWith('https://'))) {
       void shell.openExternal(url)
     }
     return { action: 'deny' }
   })
 
-  win.webContents.on('will-navigate', (event, url) => {
+  mainWindow.webContents.on('will-navigate', (event, url) => {
     if (!url) return
     if (url.startsWith('http://') || url.startsWith('https://')) {
       event.preventDefault()
@@ -1225,7 +1263,7 @@ function createWindow() {
     }
   })
 
-  win.webContents.session.on('will-download', (_event, item) => {
+  mainWindow.webContents.session.on('will-download', (_event, item) => {
     const downloadRoot = ensureDownloadDir()
     const url = item.getURL()
     const matchIndex = pendingDownloads.findIndex((entry) => entry.url === url)
@@ -1245,7 +1283,7 @@ function createWindow() {
     const state = { lastBytes: 0, lastTime: startedAt, speedBps: 0 }
     activeDownloads.set(downloadId, { item, state, appid: match?.appid, gameName: match?.gameName, url, savePath, partIndex, partTotal })
 
-    sendDownloadUpdate(win, {
+    sendDownloadUpdate(mainWindow, {
       downloadId,
       status: 'downloading',
       receivedBytes: 0,
@@ -1566,6 +1604,7 @@ function createWindow() {
 app.whenReady().then(() => {
   ensureDownloadDir()
   createWindow()
+  createTray()
   
   // Auto-updater configuration
   if (!isDev) {
@@ -1585,6 +1624,16 @@ app.whenReady().then(() => {
 
 // Auto-updater event handlers
 autoUpdater.on('update-available', (info) => {
+  const currentVersion = app.getVersion()
+  if (info.version === currentVersion) {
+    console.log('[Update] Already on latest version:', info.version)
+    const windows = BrowserWindow.getAllWindows()
+    windows.forEach(win => {
+      win.webContents.send('update-not-available', { message: 'Already on latest version' })
+    })
+    return
+  }
+  
   console.log('[Update] New version available:', info.version)
   const windows = BrowserWindow.getAllWindows()
   windows.forEach(win => {
@@ -1621,7 +1670,14 @@ ipcMain.handle('uc:check-for-updates', async () => {
   if (isDev) return { available: false, message: 'Updates not available in dev mode' }
   try {
     const result = await autoUpdater.checkForUpdates()
-    return { available: true, version: result?.updateInfo?.version }
+    const availableVersion = result?.updateInfo?.version
+    const currentVersion = app.getVersion()
+    
+    if (!availableVersion || availableVersion === currentVersion) {
+      return { available: false, message: 'Already on latest version' }
+    }
+    
+    return { available: true, version: availableVersion }
   } catch (err) {
     return { available: false, error: err.message }
   }
@@ -1638,7 +1694,11 @@ ipcMain.handle('uc:install-update', () => {
 })
 
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit()
+  if (process.platform === 'darwin') app.quit()
+})
+
+app.on('before-quit', () => {
+  app.isQuitting = true
 })
 
 ipcMain.handle('uc:download-start', (event, payload) => {

@@ -18,6 +18,11 @@ export function UpdateNotification() {
       setDownloadProgress(null)
     }
 
+    const handleUpdateNotAvailable = (_event: any, info: any) => {
+      // Don't show notification if already on latest version
+      console.log('[Update] Already on latest version')
+    }
+
     const handleUpdateDownloaded = (_event: any, info: any) => {
       setUpdateDownloaded(true)
       setUpdateInfo(info)
@@ -30,11 +35,13 @@ export function UpdateNotification() {
     }
 
     window.electron.ipcRenderer.on('update-available', handleUpdateAvailable)
+    window.electron.ipcRenderer.on('update-not-available', handleUpdateNotAvailable)
     window.electron.ipcRenderer.on('update-downloaded', handleUpdateDownloaded)
     window.electron.ipcRenderer.on('update-download-progress', handleDownloadProgress)
 
     return () => {
       window.electron.ipcRenderer.removeListener('update-available', handleUpdateAvailable)
+      window.electron.ipcRenderer.removeListener('update-not-available', handleUpdateNotAvailable)
       window.electron.ipcRenderer.removeListener('update-downloaded', handleUpdateDownloaded)
       window.electron.ipcRenderer.removeListener('update-download-progress', handleDownloadProgress)
     }
