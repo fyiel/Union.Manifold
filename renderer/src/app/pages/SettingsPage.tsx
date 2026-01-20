@@ -65,6 +65,7 @@ export function SettingsPage() {
   const [defaultHost, setDefaultHost] = useState<MirrorHost>('rootz')
   const [checkingUpdate, setCheckingUpdate] = useState(false)
   const [appVersion, setAppVersion] = useState<string>("")
+  const [updateCheckResult, setUpdateCheckResult] = useState<string | null>(null)
 
   useEffect(() => {
     const loadVersion = async () => {
@@ -212,12 +213,24 @@ export function SettingsPage() {
 const handleCheckForUpdates = async () => {
     if (checkingUpdate) return
     setCheckingUpdate(true)
+    setUpdateCheckResult(null)
     try {
-      await window.ucUpdater?.checkForUpdates()
+      const result = await window.ucUpdater?.checkForUpdates()
+      if (result?.available) {
+        setUpdateCheckResult(`Update available: v${result.version}`)
+      } else if (result?.message) {
+        setUpdateCheckResult(result.message)
+      } else {
+        setUpdateCheckResult("You're up to date!")
+      }
     } catch (err) {
       console.error("[UC] Failed to check for updates:", err)
+      setUpdateCheckResult("Failed to check for updates")
     } finally {
-      setTimeout(() => setCheckingUpdate(false), 2000)
+      setTimeout(() => {
+        setCheckingUpdate(false)
+        setTimeout(() => setUpdateCheckResult(null), 5000)
+      }, 1000)
     }
   }
 
@@ -360,6 +373,11 @@ const handleCheckForUpdates = async () => {
             <span className="text-muted-foreground">Current version</span>
             <span className="font-mono font-medium">{appVersion ? `v${appVersion}` : 'Loading...'}</span>
           </div>
+          {updateCheckResult && (
+            <div className="rounded-lg border border-primary/40 bg-primary/10 px-3 py-2 text-sm text-primary">
+              {updateCheckResult}
+            </div>
+          )}
           <Button
             variant="outline"
             className="gap-2"
