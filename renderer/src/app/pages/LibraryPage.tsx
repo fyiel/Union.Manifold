@@ -38,6 +38,10 @@ function manifestToGame(entry: LibraryEntry): Game | null {
       release_date: "",
       size: "",
       source: "local",
+      screenshots: [],
+      developer: "",
+      store: "",
+      dlc: [],
     }
   }
   return null
@@ -59,13 +63,31 @@ export function LibraryPage() {
   const [exePickerMessage, setExePickerMessage] = useState("")
   const [exePickerAppId, setExePickerAppId] = useState<string | null>(null)
   const [exePickerExes, setExePickerExes] = useState<Array<{ name: string; path: string }>>([])
+  const [exePickerCurrentPath, setExePickerCurrentPath] = useState<string | null>(null)
+  const [settingsPopupOpen, setSettingsPopupOpen] = useState(false)
+  const [settingsPopupGame, setSettingsPopupGame] = useState<Game | null>(null)
   const itemsPerPage = 8
   const [installedPage, setInstalledPage] = useState(1)
   const [installingPage, setInstallingPage] = useState(1)
   const hasLoadedRef = useRef(false)
 
+  const cancelledAppIds = useMemo(() => {
+    const ids = new Set<string>()
+    for (const item of downloads) {
+      if (item.status === "cancelled" && item.appid) ids.add(item.appid)
+    }
+    return ids
+  }, [downloads])
+
   const visibleInstalled = useMemo(() => installed.filter((game) => !hiddenAppIds.has(game.appid)), [installed, hiddenAppIds])
-  const visibleInstalling = useMemo(() => installing.filter((game) => !hiddenAppIds.has(game.appid)), [installing, hiddenAppIds])
+  const visibleInstalling = useMemo(() => {
+    return installing.filter((game) => {
+      if (hiddenAppIds.has(game.appid)) return false
+      // Filter out cancelled downloads
+      if (cancelledAppIds.has(game.appid)) return false
+      return true
+    })
+  }, [installing, hiddenAppIds, cancelledAppIds])
 
   const installedTotalPages = Math.max(1, Math.ceil(visibleInstalled.length / itemsPerPage))
   const installingTotalPages = Math.max(1, Math.ceil(visibleInstalling.length / itemsPerPage))
@@ -79,14 +101,6 @@ export function LibraryPage() {
     const start = (installingPage - 1) * itemsPerPage
     return visibleInstalling.slice(start, start + itemsPerPage)
   }, [visibleInstalling, installingPage, itemsPerPage])
-
-  const cancelledAppIds = useMemo(() => {
-    const ids = new Set<string>()
-    for (const item of downloads) {
-      if (item.status === "cancelled" && item.appid) ids.add(item.appid)
-    }
-    return ids
-  }, [downloads])
 
   const cancelledKey = useMemo(() => {
     if (!cancelledAppIds.size) return ""
@@ -208,7 +222,12 @@ export function LibraryPage() {
     return parts[parts.length - 1] || null
   }
 
-  const openExeSettings = async (game: Game) => {
+  const openExeSettings = (game: Game) => {
+    setSettingsPopupGame(game)
+    setSettingsPopupOpen(true)
+  }
+
+  const openExecutablePicker = async (game: Game) => {
     if (!window.ucDownloads?.listGameExecutables) return
     try {
       const [result, savedExe] = await Promise.all([
@@ -218,18 +237,20 @@ export function LibraryPage() {
       const exes = result?.exes || []
       const savedName = resolveBasename(savedExe)
       const message = savedName
-        ? `Select the exe to launch for "${game.name}". Current: ${savedName}`
+        ? `Select the exe to launch for "${game.name}".`
         : `Select the exe to launch for "${game.name}".`
       setExePickerTitle("Set launch executable")
       setExePickerMessage(message)
       setExePickerAppId(game.appid)
       setExePickerExes(exes)
+      setExePickerCurrentPath(savedExe)
       setExePickerOpen(true)
     } catch {
       setExePickerTitle("Set launch executable")
       setExePickerMessage(`Unable to list executables for "${game.name}".`)
       setExePickerAppId(null)
       setExePickerExes([])
+      setExePickerCurrentPath(null)
       setExePickerOpen(true)
     }
   }
@@ -237,7 +258,8 @@ export function LibraryPage() {
   const handleExePicked = async (path: string) => {
     if (!exePickerAppId) return
     await setSavedExe(exePickerAppId, path)
-    setExePickerOpen(false)
+    // Update the current path to reflect the new selection
+    setExePickerCurrentPath(path)
   }
 
   return (
@@ -291,7 +313,7 @@ export function LibraryPage() {
                         setPendingDeleteGame(game)
                         setPendingDeleteAction("installed")
                       }}
-                      className="h-8 w-8 rounded-full bg-black/60 text-white hover:bg-destructive hover:text-destructive-foreground"
+                      className="h-8 w-8 rounded-full bg-black/60 text-white hover:bg-white/20"
                       title="Delete installed game"
                     >
                       <Trash2 className="h-4 w-4" />
@@ -370,7 +392,7 @@ export function LibraryPage() {
                             setPendingDeleteGame(game)
                             setPendingDeleteAction("installing")
                           }}
-                          className="h-8 w-8 rounded-full bg-black/60 text-white hover:bg-amber-500/80 hover:text-white"
+                          className="h-8 w-8 rounded-full bg-black/60 text-white hover:bg-white/20"
                           title="Remove cancelled download"
                         >
                           <Trash2 className="h-4 w-4" />
@@ -394,7 +416,7 @@ export function LibraryPage() {
                             setPendingDeleteGame(game)
                             setPendingDeleteAction("installing")
                           }}
-                          className="h-8 w-8 rounded-full bg-black/60 text-white hover:bg-destructive hover:text-destructive-foreground"
+                          className="h-8 w-8 rounded-full bg-black/60 text-white hover:bg-white/20"
                           title="Remove failed download"
                         >
                           <Trash2 className="h-4 w-4" />
@@ -493,11 +515,43 @@ export function LibraryPage() {
           </div>
         </div>
       )}
+      {settingsPopupOpen && settingsPopupGame && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+          <div
+            className="absolute inset-0 bg-black/70"
+            onClick={() => setSettingsPopupOpen(false)}
+          />
+          <div className="relative w-full max-w-md rounded-2xl border border-border/60 bg-slate-950/95 p-5 text-white shadow-2xl">
+            <div className="text-lg font-semibold">Game Settings</div>
+            <p className="mt-1 text-sm text-slate-300">{settingsPopupGame.name}</p>
+            
+            <div className="mt-4 space-y-2">
+              <Button
+                variant="secondary"
+                className="w-full justify-start"
+                onClick={() => {
+                  void openExecutablePicker(settingsPopupGame)
+                }}
+              >
+                <Settings className="mr-2 h-4 w-4" />
+                Set Executable
+              </Button>
+            </div>
+
+            <div className="mt-4 flex justify-end">
+              <Button variant="ghost" onClick={() => setSettingsPopupOpen(false)}>
+                Close
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
       <ExePickerModal
         open={exePickerOpen}
         title={exePickerTitle}
         message={exePickerMessage}
         exes={exePickerExes}
+        currentExePath={exePickerCurrentPath}
         actionLabel="Set"
         onSelect={handleExePicked}
         onClose={() => setExePickerOpen(false)}

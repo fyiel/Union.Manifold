@@ -27,7 +27,7 @@ body {
     radial-gradient(900px 500px at 80% 30%, rgba(59, 130, 246, 0.12), transparent 55%),
     var(--bg);
   color: var(--text);
-  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+  font-family: "Geist", ui-sans-serif, system-ui, sans-serif;
 }
 
 a {
@@ -212,7 +212,7 @@ textarea {
   background: var(--panel2);
   color: var(--text);
   padding: 12px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-family: "Geist Mono", ui-monospace, Consolas, monospace;
   font-size: 12px;
 }
 
