@@ -471,7 +471,8 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
       })
 
       setDownloads((prev) => {
-        const cleared = prev.filter((item) => !(item.appid === game.appid && item.status === "cancelled"))
+        const staleStatuses: DownloadStatus[] = ["cancelled", "failed", "extract_failed"]
+        const cleared = prev.filter((item) => !(item.appid === game.appid && staleStatuses.includes(item.status)))
         const next = [...newItems, ...cleared]
         downloadsRef.current = next
         return next
