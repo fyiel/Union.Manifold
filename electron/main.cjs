@@ -28,7 +28,46 @@ const installedDirName = 'installed'
 const INSTALLED_MANIFEST = 'installed.json'
 const INSTALLED_INDEX = 'installed-index.json'
 const settingsPath = path.join(app.getPath('userData'), 'settings.json')
+const appLogsPath = path.join(app.getPath('userData'), 'app-logs.txt')
 let cachedSettings = null
+
+// === Global Logging System ===
+function ucLog(message, level = 'info') {
+  const timestamp = new Date().toISOString()
+  const levelTag = level.toUpperCase().padEnd(5)
+  const logLine = `[${timestamp}] [${levelTag}] ${message}\n`
+  try {
+    fs.appendFileSync(appLogsPath, logLine)
+  } catch (err) {
+    console.error('[UC] Failed to write log:', err)
+  }
+  const consoleMethod = level === 'error' ? console.error : level === 'warn' ? console.warn : console.log
+  consoleMethod(`[UC] [${level.toUpperCase()}]`, message)
+}
+
+function clearLogs() {
+  try {
+    fs.writeFileSync(appLogsPath, `[${new Date().toISOString()}] [INFO ] === App Log Started ===\n`)
+  } catch (err) {
+    console.error('[UC] Failed to clear logs:', err)
+  // === IPC Auto-Logging Wrapper ===
+  const originalHandle = ipcMain.handle.bind(ipcMain)
+  ipcMain.handle = (channel, handler) => {
+    return originalHandle(channel, async (...args) => {
+      try {
+        ucLog(`IPC: ${channel} called`)
+        const result = await handler(...args)
+        ucLog(`IPC: ${channel} success`)
+        return result
+      } catch (err) {
+        ucLog(`IPC: ${channel} failed: ${err.message}`, 'error')
+        throw err
+      }
+    })
+  }
+
+  }
+}
 
 function resolveIcon() {
   const asset = process.platform === 'win32' ? 'icon.ico' : 'icon.png'
@@ -262,10 +301,12 @@ async function getDiscordSession(session, baseUrl) {
 
 // IPC: simple settings get/set with broadcast when changed
 ipcMain.handle('uc:setting-get', (_event, key) => {
+  ucLog(`Setting get: ${key}`)
   try {
     const s = readSettings() || {}
     return s[key]
-  } catch {
+  } catch (err) {
+    ucLog(`Setting get failed for ${key}: ${err.message}`, 'error')
     return null
   }
 })
@@ -1690,18 +1731,24 @@ app.whenReady().then(() => {
   createWindow()
   createTray()
   
+  clearLogs()
+  ucLog(`App started. Version: ${app.getVersion()}`)
+  
   // Auto-updater configuration
   if (!isDev) {
+    ucLog(`App logs file: ${appLogsPath}`)
     autoUpdater.autoDownload = true
     autoUpdater.autoInstallOnAppQuit = true
-    console.log('[Update] Auto-updater initialized')
+    ucLog('Auto-updater initialized: autoDownload=true, autoInstallOnAppQuit=true')
     autoUpdater.checkForUpdatesAndNotify()
     
     // Check for updates every hour
     setInterval(() => {
-      console.log('[Update] Checking for updates...')
+      ucLog('Hourly update check triggered')
       autoUpdater.checkForUpdatesAndNotify()
     }, 60 * 60 * 1000)
+  } else {
+    ucLog('Running in DEV mode - auto-updater disabled')
   }
   
   app.on('activate', () => {
@@ -1710,10 +1757,16 @@ app.whenReady().then(() => {
 })
 
 // Auto-updater event handlers
+autoUpdater.on('checking-for-update', () => {
+  ucLog('Checking for updates...')
+})
+
 autoUpdater.on('update-available', (info) => {
   const currentVersion = app.getVersion()
+  ucLog(`Update available: v${info.version} (current: ${currentVersion})`)
+  
   if (info.version === currentVersion) {
-    console.log('[Update] Already on latest version:', info.version)
+    ucLog('Already on this version, ignoring', 'warn')
     const windows = BrowserWindow.getAllWindows()
     windows.forEach(win => {
       win.webContents.send('update-not-available', { message: 'Already on latest version' })
@@ -1721,16 +1774,19 @@ autoUpdater.on('update-available', (info) => {
     return
   }
   
-  console.log('[Update] New version available:', info.version, '- download should start automatically')
+  ucLog('Notifying renderer of update')
   const windows = BrowserWindow.getAllWindows()
   windows.forEach(win => {
     win.webContents.send('update-available', info)
   })
-  // autoDownload is enabled, so download should start automatically
+})
+
+autoUpdater.on('update-not-available', (info) => {
+  ucLog(`Already on latest version: ${app.getVersion()}`)
 })
 
 autoUpdater.on('download-progress', (progress) => {
-  console.log('[Update] Download progress:', progress.percent.toFixed(2) + '%')
+  ucLog(`Download progress: ${progress.percent.toFixed(1)}% (${(progress.bytesPerSecond / 1024 / 1024).toFixed(1)} MB/s)`)
   const windows = BrowserWindow.getAllWindows()
   windows.forEach(win => {
     win.webContents.send('update-download-progress', progress)
@@ -1738,7 +1794,7 @@ autoUpdater.on('download-progress', (progress) => {
 })
 
 autoUpdater.on('update-downloaded', (info) => {
-  console.log('[Update] Update downloaded successfully:', info.version)
+  ucLog(`Update downloaded: v${info.version}. Will install on quit or user request.`)
   const windows = BrowserWindow.getAllWindows()
   windows.forEach(win => {
     win.webContents.send('update-downloaded', info)
@@ -1746,35 +1802,33 @@ autoUpdater.on('update-downloaded', (info) => {
 })
 
 autoUpdater.on('error', (err) => {
-  console.error('[Update] Error:', err)
+  ucLog(`Updater error: ${err.message}`, 'error')
   const windows = BrowserWindow.getAllWindows()
   windows.forEach(win => {
     win.webContents.send('update-error', { message: err.message || 'Update failed' })
   })
 })
 
-autoUpdater.on('checking-for-update', () => {
-  console.log('[Update] Checking for updates...')
-})
-
-autoUpdater.on('update-not-available', (info) => {
-  console.log('[Update] No updates available')
-})
-
 // IPC handler for manual update check
 ipcMain.handle('uc:check-for-updates', async () => {
-  if (isDev) return { available: false, message: 'Updates not available in dev mode' }
+  if (isDev) {
+    return { available: false, message: 'Updates not available in dev mode' }
+  }
   try {
+    ucLog('Manual update check requested')
     const result = await autoUpdater.checkForUpdates()
     const availableVersion = result?.updateInfo?.version
     const currentVersion = app.getVersion()
     
     if (!availableVersion || availableVersion === currentVersion) {
+      ucLog(`No update available (current: ${currentVersion})`)
       return { available: false, message: 'Already on latest version' }
     }
     
+    ucLog(`Update found: v${availableVersion}`)
     return { available: true, version: availableVersion }
   } catch (err) {
+    ucLog(`Manual check failed: ${err.message}`, 'error')
     return { available: false, error: err.message }
   }
 })
@@ -1786,6 +1840,7 @@ ipcMain.handle('uc:get-version', () => {
 
 // IPC handler to install update
 ipcMain.handle('uc:install-update', () => {
+  ucLog('Install update triggered by user')
   autoUpdater.quitAndInstall(false, true)
 })
 
@@ -2291,3 +2346,4 @@ ipcMain.handle('uc:installing-delete', (_event, appid) => {
     return { ok: false }
   }
 })
+
