@@ -268,23 +268,30 @@ export function LibraryPage() {
 
   const handleOpenGameFiles = async (game: Game) => {
     try {
-      let folder = exePickerFolder
-      if (!folder && window.ucDownloads?.listGameExecutables) {
+      let folder: string | null = null
+      let discoveredExePath: string | null = null
+      if (window.ucDownloads?.listGameExecutables) {
         const result = await window.ucDownloads.listGameExecutables(game.appid)
         folder = result?.folder || null
-        setExePickerFolder(folder)
-        if (!exePickerCurrentPath && result?.exes?.[0]?.path) {
-          setExePickerCurrentPath(result.exes[0].path)
+        if (result?.exes?.[0]?.path) {
+          discoveredExePath = result.exes[0].path
         }
       }
 
       // Prefer the directory of the saved exe (or first discovered exe) if it lives inside the folder.
-      const exeDir = dirname(exePickerCurrentPath)
+      const preferredExePath = discoveredExePath
+      const exeDir = preferredExePath ? dirname(preferredExePath) : null
       const candidate = exeDir || null
       if (folder && candidate && candidate.toLowerCase().startsWith(folder.toLowerCase())) {
         folder = candidate
       } else if (!folder && candidate) {
         folder = candidate
+      } else if (folder && window.ucDownloads?.findGameSubfolder) {
+        // If no exe is set, check if there's a game subfolder to navigate to
+        const subfolder = await window.ucDownloads.findGameSubfolder(folder)
+        if (subfolder) {
+          folder = subfolder
+        }
       }
 
       if (folder && window.ucDownloads?.openPath) {
@@ -567,7 +574,7 @@ export function LibraryPage() {
             
             <div className="mt-4 space-y-2">
               <Button
-                variant="secondary"
+                variant="ghost"
                 className="w-full justify-start"
                 onClick={() => {
                   void openExecutablePicker(settingsPopupGame)

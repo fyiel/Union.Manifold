@@ -24,6 +24,7 @@ contextBridge.exposeInMainWorld('ucDownloads', {
   listInstallingGlobal: () => ipcRenderer.invoke('uc:installing-list-global'),
   getInstallingGlobal: (appid) => ipcRenderer.invoke('uc:installing-get-global', appid),
   listGameExecutables: (appid) => ipcRenderer.invoke('uc:game-exe-list', appid),
+  findGameSubfolder: (folder) => ipcRenderer.invoke('uc:game-subfolder-find', folder),
   launchGameExecutable: (appid, exePath) => ipcRenderer.invoke('uc:game-exe-launch', appid, exePath),
   getRunningGame: (appid) => ipcRenderer.invoke('uc:game-exe-running', appid),
   quitGameExecutable: (appid) => ipcRenderer.invoke('uc:game-exe-quit', appid),

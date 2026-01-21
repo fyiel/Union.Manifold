@@ -2268,6 +2268,27 @@ ipcMain.handle('uc:game-exe-list', (_event, appid) => {
   }
 })
 
+ipcMain.handle('uc:game-subfolder-find', (_event, folder) => {
+  try {
+    if (!folder || !fs.existsSync(folder)) return null
+    
+    // Check if folder only has installed.json and one subdirectory
+    const entries = fs.readdirSync(folder, { withFileTypes: true })
+    const subdirs = entries.filter(e => e.isDirectory())
+    const files = entries.filter(e => e.isFile())
+    
+    // If there's only installed.json and one subdirectory, return that subdirectory
+    if (files.length === 1 && files[0].name === INSTALLED_MANIFEST && subdirs.length === 1) {
+      return path.join(folder, subdirs[0].name)
+    }
+    
+    return null
+  } catch (err) {
+    console.error('[UC] game-subfolder-find failed', err)
+    return null
+  }
+})
+
 ipcMain.handle('uc:game-exe-launch', async (_event, appid, exePath) => {
   try {
     if (!exePath || typeof exePath !== 'string') return { ok: false }
