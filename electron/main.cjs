@@ -129,6 +129,23 @@ const FALLBACK_BASE_URL = 'http://unioncraxxyz-unioncraxfrontend-owcfti-9b02bb-1
 let tray = null
 let mainWindow = null
 
+const gotTheLock = app.requestSingleInstanceLock()
+if (!gotTheLock) {
+  app.quit()
+} else {
+  app.on('second-instance', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      try {
+        if (mainWindow.isMinimized()) mainWindow.restore()
+      } catch {}
+      mainWindow.show()
+      mainWindow.focus()
+    } else {
+      createWindow()
+    }
+  })
+}
+
 function normalizeBaseUrl(baseUrl) {
   if (!baseUrl || typeof baseUrl !== 'string') return DEFAULT_BASE_URL
   try {
