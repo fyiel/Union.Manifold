@@ -142,9 +142,25 @@ export function filterGameExecutables(exes: GameExecutable[]) {
   return exes.filter((exe) => !isIgnoredEngineExecutableName(exe.name))
 }
 
-export function pickGameExecutable(exes: GameExecutable[], gameName: string) {
+export function pickGameExecutable(exes: GameExecutable[], gameName: string, gameSource?: string) {
   const candidates = filterGameExecutables(exes)
   if (!candidates.length) return { pick: null, confident: false }
+
+  // Check if source contains uc-online or similar patterns
+  const isUcOnlineSource = gameSource?.toLowerCase().includes("uc-online") || 
+                           gameSource?.toLowerCase().includes("uconline") ||
+                           gameSource?.toLowerCase().includes("uc online")
+
+  // If uc-online source, prioritize uc-online.exe or uc-online64.exe
+  if (isUcOnlineSource) {
+    const ucOnlineExe = candidates.find((exe) => {
+      const lower = exe.name.toLowerCase()
+      return lower === "uc-online.exe" || lower === "uc-online64.exe"
+    })
+    if (ucOnlineExe) {
+      return { pick: ucOnlineExe, confident: true }
+    }
+  }
 
   const nameToken = gameName.toLowerCase().replace(/[^a-z0-9]+/g, "")
   const scored = candidates.map((exe) => {

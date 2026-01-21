@@ -212,7 +212,7 @@ export const GameCard = memo(function GameCard({
       }
       const result = await window.ucDownloads.listGameExecutables(game.appid)
       const exes = result?.exes || []
-      const { pick, confident } = pickGameExecutable(exes, game.name)
+      const { pick, confident } = pickGameExecutable(exes, game.name, game.source)
       if (pick && confident) {
         const res = await window.ucDownloads.launchGameExecutable(game.appid, pick.path)
         if (res && res.ok) {
