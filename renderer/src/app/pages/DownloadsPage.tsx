@@ -193,6 +193,7 @@ function getPartIndex(filename: string, index: number, total: number, partIndex?
 export function DownloadsPage() {
   const {
     downloads,
+    startGameDownload,
     cancelGroup,
     pauseDownload,
     resumeDownload,
@@ -211,6 +212,7 @@ export function DownloadsPage() {
   const [exePickerMessage, setExePickerMessage] = useState("")
   const [exePickerAppId, setExePickerAppId] = useState<string | null>(null)
   const [exePickerExes, setExePickerExes] = useState<Array<{ name: string; path: string }>>([])
+  const [retryingAppId, setRetryingAppId] = useState<string | null>(null)
   const primaryStatsRef = useRef<{
     totalBytes: number
     receivedBytes: number
@@ -329,6 +331,21 @@ export function DownloadsPage() {
     setExePickerAppId(appid)
     setExePickerExes(exes)
     setExePickerOpen(true)
+  }
+
+  const handleRetry = async (appid?: string) => {
+    if (!appid) return
+    const game = games.find((g) => g.appid === appid)
+    if (!game) return
+    setRetryingAppId(appid)
+    try {
+      clearByAppid(appid)
+      await startGameDownload(game)
+    } catch (err) {
+      console.error("[UC] Failed to retry download", err)
+    } finally {
+      setRetryingAppId((current) => (current === appid ? null : current))
+    }
   }
 
   const handleExePicked = async (path: string) => {
@@ -823,6 +840,15 @@ export function DownloadsPage() {
                   </div>
 
                   <div className="flex items-center gap-2">
+                    <Button
+                      size="sm"
+                      onClick={() => {
+                        void handleRetry(appid)
+                      }}
+                      disabled={retryingAppId === appid}
+                    >
+                      Retry
+                    </Button>
                     <Button
                       size="sm"
                       variant="outline"

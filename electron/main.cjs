@@ -7,6 +7,15 @@ const child_process = require('node:child_process')
 
 const packageJson = require('../package.json')
 const isDev = !app.isPackaged
+if (process.platform === 'win32') {
+  try {
+    app.setAppUserModelId(packageJson?.build?.appId || 'xyz.unioncrax.direct')
+  } catch {}
+}
+try {
+  if (typeof app.setName === 'function') app.setName('UnionCrax.Direct')
+  else app.name = 'UnionCrax.Direct'
+} catch {}
 const pendingDownloads = []
 const activeDownloads = new Map()
 const downloadQueues = new Map()
@@ -26,12 +35,23 @@ function resolveIcon() {
   return path.join(__dirname, '..', 'assets', asset)
 }
 
+function resolveTrayIcon() {
+  const asset = process.platform === 'win32' ? 'icon.ico' : 'icon.png'
+  const packagedPath = path.join(process.resourcesPath, 'assets', asset)
+  if (app.isPackaged && fs.existsSync(packagedPath)) return packagedPath
+  return resolveIcon()
+}
+
 function createTray() {
-  const iconPath = resolveIcon()
-  tray = new Tray(iconPath)
+  if (tray) return
+  const iconPath = resolveTrayIcon()
+  const image = nativeImage.createFromPath(iconPath)
+  tray = new Tray(image.isEmpty() ? resolveIcon() : image)
+  tray.setToolTip('UnionCrax.Direct')
+  tray.setTitle('UnionCrax.Direct')
   const contextMenu = Menu.buildFromTemplate([
     {
-      label: 'Show',
+      label: 'Show UnionCrax.Direct',
       click: () => {
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.show()
@@ -47,6 +67,16 @@ function createTray() {
     }
   ])
   tray.setContextMenu(contextMenu)
+  tray.on('click', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      if (mainWindow.isVisible()) {
+        mainWindow.hide()
+      } else {
+        mainWindow.show()
+        mainWindow.focus()
+      }
+    }
+  })
   tray.on('double-click', () => {
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.show()
@@ -1102,7 +1132,15 @@ function run7zExtract(archivePath, destDir, onProgress) {
       try {
         const seven = require('7zip-bin')
         // try several known exports
-        cmd = seven.path7za || seven.path7z || seven.path7zip || cmd
+        let resolvedPath = seven.path7za || seven.path7z || seven.path7zip || cmd
+        
+        // If packaged, the path might be inside the ASAR. Replace with unpacked path.
+        if (app.isPackaged && resolvedPath.includes('.asar')) {
+          resolvedPath = resolvedPath.replace(/\.asar[\\\/]/, '.asar.unpacked\\')
+          uc_log(`Adjusted 7zip path for packaged app: ${resolvedPath}`)
+        }
+        
+        cmd = resolvedPath
         uc_log(`7zip binary resolved to: ${cmd}`)
       } catch (e) {
         // not available, use system `7z`

@@ -14,7 +14,7 @@ import {
 import { useGamesData } from "@/hooks/use-games"
 import type { Game } from "@/lib/types"
 import { useDownloads } from "@/context/downloads-context"
-import { Settings, Trash2, AlertTriangle } from "lucide-react"
+import { Settings, Trash2, AlertTriangle, FolderOpen } from "lucide-react"
 import { ExePickerModal } from "@/components/ExePickerModal"
 
 type LibraryEntry = {
@@ -64,6 +64,7 @@ export function LibraryPage() {
   const [exePickerAppId, setExePickerAppId] = useState<string | null>(null)
   const [exePickerExes, setExePickerExes] = useState<Array<{ name: string; path: string }>>([])
   const [exePickerCurrentPath, setExePickerCurrentPath] = useState<string | null>(null)
+  const [exePickerFolder, setExePickerFolder] = useState<string | null>(null)
   const [settingsPopupOpen, setSettingsPopupOpen] = useState(false)
   const [settingsPopupGame, setSettingsPopupGame] = useState<Game | null>(null)
   const itemsPerPage = 8
@@ -216,6 +217,13 @@ export function LibraryPage() {
     } catch {}
   }
 
+  const dirname = (targetPath: string | null | undefined) => {
+    if (!targetPath) return null
+    const parts = targetPath.split(/[/\\]+/).filter(Boolean)
+    parts.pop()
+    return parts.length ? parts.join("\\") : null
+  }
+
   const resolveBasename = (targetPath: string | null) => {
     if (!targetPath) return null
     const parts = targetPath.split(/[\\/]/)
@@ -235,6 +243,7 @@ export function LibraryPage() {
         getSavedExe(game.appid),
       ])
       const exes = result?.exes || []
+      const folder = result?.folder || null
       const savedName = resolveBasename(savedExe)
       const message = savedName
         ? `Select the exe to launch for "${game.name}".`
@@ -244,6 +253,7 @@ export function LibraryPage() {
       setExePickerAppId(game.appid)
       setExePickerExes(exes)
       setExePickerCurrentPath(savedExe)
+      setExePickerFolder(folder)
       setExePickerOpen(true)
     } catch {
       setExePickerTitle("Set launch executable")
@@ -251,7 +261,37 @@ export function LibraryPage() {
       setExePickerAppId(null)
       setExePickerExes([])
       setExePickerCurrentPath(null)
+      setExePickerFolder(null)
       setExePickerOpen(true)
+    }
+  }
+
+  const handleOpenGameFiles = async (game: Game) => {
+    try {
+      let folder = exePickerFolder
+      if (!folder && window.ucDownloads?.listGameExecutables) {
+        const result = await window.ucDownloads.listGameExecutables(game.appid)
+        folder = result?.folder || null
+        setExePickerFolder(folder)
+        if (!exePickerCurrentPath && result?.exes?.[0]?.path) {
+          setExePickerCurrentPath(result.exes[0].path)
+        }
+      }
+
+      // Prefer the directory of the saved exe (or first discovered exe) if it lives inside the folder.
+      const exeDir = dirname(exePickerCurrentPath)
+      const candidate = exeDir || null
+      if (folder && candidate && candidate.toLowerCase().startsWith(folder.toLowerCase())) {
+        folder = candidate
+      } else if (!folder && candidate) {
+        folder = candidate
+      }
+
+      if (folder && window.ucDownloads?.openPath) {
+        await window.ucDownloads.openPath(folder)
+      }
+    } catch (err) {
+      console.error("[UC] Failed to open game files", err)
     }
   }
 
@@ -535,6 +575,18 @@ export function LibraryPage() {
               >
                 <Settings className="mr-2 h-4 w-4" />
                 Set Executable
+              </Button>
+              <Button
+                variant="ghost"
+                className="w-full justify-start"
+                onClick={() => {
+                  if (settingsPopupGame) {
+                    void handleOpenGameFiles(settingsPopupGame)
+                  }
+                }}
+              >
+                <FolderOpen className="mr-2 h-4 w-4" />
+                Open Game Files
               </Button>
             </div>
 

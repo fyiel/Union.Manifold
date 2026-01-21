@@ -1,6 +1,6 @@
 {
   "name": "unioncrax-direct",
-  "version": "0.2.17",
+  "version": "0.3.17",
   "description": "Standalone Electron app for managing and launching games from UnionCrax",
   "type": "module",
   "main": "electron/main.cjs",
@@ -68,7 +68,7 @@
     "wait-on": "^8.0.5"
   },
   "build": {
-    "icon": "assets/icon.png",
+    "icon": "assets/icon.ico",
     "appId": "xyz.unioncrax.direct",
     "productName": "UnionCrax.Direct",
     "publish": [
@@ -89,9 +89,10 @@
       "package.json"
     ],
     "asarUnpack": [
-      "node_modules/7zip-bin/**/*"
+      "node_modules/7zip-bin"
     ],
     "win": {
+      "icon": "assets/icon.ico",
       "target": [
         "nsis"
       ],
