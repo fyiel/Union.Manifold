@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
 import { pickGameExecutable, proxyImageUrl } from "@/lib/utils"
-import { Download, PauseCircle, Play, XCircle } from "lucide-react"
+import { Download, PauseCircle, Play, XCircle, Square } from "lucide-react"
 import { ExePickerModal } from "@/components/ExePickerModal"
 
 function formatBytes(bytes: number) {
@@ -213,6 +213,7 @@ export function DownloadsPage() {
   const [exePickerAppId, setExePickerAppId] = useState<string | null>(null)
   const [exePickerExes, setExePickerExes] = useState<Array<{ name: string; path: string }>>([])
   const [retryingAppId, setRetryingAppId] = useState<string | null>(null)
+  const [runningGames, setRunningGames] = useState<Array<{ appid: string; gameName: string; pid: number }>>([])
   const primaryStatsRef = useRef<{
     totalBytes: number
     receivedBytes: number
@@ -298,6 +299,44 @@ export function DownloadsPage() {
 
     return () => clearInterval(interval)
   }, [primaryGroup?.[0]?.appid])
+
+  useEffect(() => {
+    let mounted = true
+    const checkRunningGames = async () => {
+      if (!window.ucDownloads?.listInstalledGlobal || !window.ucDownloads?.getRunningGame) return
+      try {
+        const installed = await window.ucDownloads.listInstalledGlobal()
+        const running: Array<{ appid: string; gameName: string; pid: number }> = []
+        
+        for (const entry of installed) {
+          if (!entry?.appid) continue
+          const result = await window.ucDownloads.getRunningGame(entry.appid)
+          if (result?.ok && result.running && result.pid) {
+            const game = games.find((g) => g.appid === entry.appid)
+            running.push({
+              appid: entry.appid,
+              gameName: game?.name || entry.name || entry.appid,
+              pid: result.pid
+            })
+          }
+        }
+        
+        if (mounted) {
+          setRunningGames(running)
+        }
+      } catch (err) {
+        console.error('[UC] Failed to check running games:', err)
+      }
+    }
+    
+    void checkRunningGames()
+    const interval = setInterval(checkRunningGames, 3000)
+    
+    return () => {
+      mounted = false
+      clearInterval(interval)
+    }
+  }, [games])
 
   const currentNetwork = networkHistory[networkHistory.length - 1] ?? primaryStats?.speedBps ?? 0
   const currentDisk = diskHistory[diskHistory.length - 1] ?? 0
@@ -386,6 +425,18 @@ export function DownloadsPage() {
     }
   }
 
+  const handleQuitGame = async (appid: string) => {
+    if (!window.ucDownloads?.quitGameExecutable) return
+    try {
+      const result = await window.ucDownloads.quitGameExecutable(appid)
+      if (result?.ok && result.stopped) {
+        setRunningGames((prev) => prev.filter((g) => g.appid !== appid))
+      }
+    } catch (err) {
+      console.error('[UC] Failed to quit game:', err)
+    }
+  }
+
   return (
     <div className="container mx-auto max-w-7xl space-y-8">
       <div className="flex items-center justify-between">
@@ -397,6 +448,39 @@ export function DownloadsPage() {
           Clear
         </Button>
       </div>
+
+      {runningGames.length > 0 && (
+        <section className="space-y-4">
+          <h2 className="text-xl font-bold font-montserrat">Running Games</h2>
+          <div className="space-y-3">
+            {runningGames.map((game) => (
+              <div
+                key={game.appid}
+                className="flex items-center justify-between rounded-xl border border-border/60 bg-card/60 p-4 transition-all hover:bg-card"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-green-500/20">
+                    <Play className="h-5 w-5 text-green-500" />
+                  </div>
+                  <div>
+                    <div className="font-semibold">{game.gameName}</div>
+                    <div className="text-xs text-muted-foreground">Running • PID: {game.pid}</div>
+                  </div>
+                </div>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={() => handleQuitGame(game.appid)}
+                  className="gap-2"
+                >
+                  <Square className="h-4 w-4" />
+                  Quit
+                </Button>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {primaryGroup && primaryStats && (
         <section>
