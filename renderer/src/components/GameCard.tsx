@@ -2,7 +2,7 @@ import { memo, useCallback, useEffect, useState, type MouseEvent } from "react"
 import { Link } from "react-router-dom"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Calendar, HardDrive, Download, Eye, Wifi, Flame, Play } from "lucide-react"
+import { Calendar, HardDrive, Download, Eye, Wifi, Flame, Play, Square } from "lucide-react"
 import { formatNumber, hasOnlineMode, pickGameExecutable, proxyImageUrl } from "@/lib/utils"
 import { useDownloads } from "@/context/downloads-context"
 import { apiUrl } from "@/lib/api"
@@ -51,6 +51,7 @@ export const GameCard = memo(function GameCard({
   const { openPath, downloads } = useDownloads()
   const [installedPath, setInstalledPath] = useState<string | null>(null)
   const [isInstalled, setIsInstalled] = useState(false)
+  const [isRunning, setIsRunning] = useState(false)
   const [previewImage, setPreviewImage] = useState<string | null>(null)
   const [exePickerOpen, setExePickerOpen] = useState(false)
   const [exePickerExes, setExePickerExes] = useState<Array<{ name: string; path: string }>>([])
@@ -88,6 +89,27 @@ export const GameCard = memo(function GameCard({
     })()
     return () => {
       mounted = false
+    }
+  }, [game.appid])
+
+  useEffect(() => {
+    let mounted = true
+    const checkRunning = async () => {
+      if (!window.ucDownloads?.getRunningGame) return
+      try {
+        const result = await window.ucDownloads.getRunningGame(game.appid)
+        if (mounted && result?.ok) {
+          setIsRunning(result.running || false)
+        }
+      } catch {
+        if (mounted) setIsRunning(false)
+      }
+    }
+    void checkRunning()
+    const interval = setInterval(checkRunning, 2000)
+    return () => {
+      mounted = false
+      clearInterval(interval)
     }
   }, [game.appid])
 
@@ -152,6 +174,7 @@ export const GameCard = memo(function GameCard({
     const res = await window.ucDownloads.launchGameExecutable(game.appid, path)
     if (res && res.ok) {
       await setSavedExe(path)
+      setIsRunning(true)
       setExePickerOpen(false)
     }
   }
@@ -159,6 +182,20 @@ export const GameCard = memo(function GameCard({
   const handlePlayClick = async (event: MouseEvent) => {
     event.preventDefault()
     event.stopPropagation()
+    
+    // If game is running, stop it
+    if (isRunning && window.ucDownloads?.quitGameExecutable) {
+      try {
+        const result = await window.ucDownloads.quitGameExecutable(game.appid)
+        if (result?.ok && result.stopped) {
+          setIsRunning(false)
+        }
+      } catch (err) {
+        console.error('[UC] Failed to quit game:', err)
+      }
+      return
+    }
+    
     if (!window.ucDownloads?.listGameExecutables || !window.ucDownloads?.launchGameExecutable) {
       if (installedPath) openPath(installedPath)
       return
@@ -167,7 +204,10 @@ export const GameCard = memo(function GameCard({
       const savedExe = await getSavedExe()
       if (savedExe) {
         const res = await window.ucDownloads.launchGameExecutable(game.appid, savedExe)
-        if (res && res.ok) return
+        if (res && res.ok) {
+          setIsRunning(true)
+          return
+        }
         await setSavedExe(null)
       }
       const result = await window.ucDownloads.listGameExecutables(game.appid)
@@ -177,6 +217,7 @@ export const GameCard = memo(function GameCard({
         const res = await window.ucDownloads.launchGameExecutable(game.appid, pick.path)
         if (res && res.ok) {
           await setSavedExe(pick.path)
+          setIsRunning(true)
           return
         }
       }
@@ -213,11 +254,19 @@ export const GameCard = memo(function GameCard({
               <div className="absolute inset-0 z-20 flex items-center justify-center">
                 <button
                   onClick={handlePlayClick}
-                  className="group/play relative inline-flex items-center justify-center h-14 w-14 rounded-full bg-primary text-primary-foreground shadow-lg shadow-primary/40 transition-transform duration-300 hover:scale-110 hover:shadow-xl hover:shadow-primary/60"
+                  className={`group/play relative inline-flex items-center justify-center h-14 w-14 rounded-full shadow-lg transition-transform duration-300 hover:scale-110 hover:shadow-xl ${
+                    isRunning
+                      ? "bg-destructive text-destructive-foreground shadow-destructive/40 hover:shadow-destructive/60"
+                      : "bg-primary text-primary-foreground shadow-primary/40 hover:shadow-primary/60"
+                  }`}
                 >
-                  <span className="absolute inset-0 rounded-full opacity-0 transition-opacity duration-300 group-hover/play:opacity-100 bg-primary/20 blur-lg" />
-                  <span className="absolute -inset-2 rounded-full border border-primary/40 opacity-0 transition-opacity duration-300 group-hover/play:opacity-100" />
-                  <Play className="relative h-6 w-6" />
+                  <span className={`absolute inset-0 rounded-full opacity-0 transition-opacity duration-300 group-hover/play:opacity-100 blur-lg ${
+                    isRunning ? "bg-destructive/20" : "bg-primary/20"
+                  }`} />
+                  <span className={`absolute -inset-2 rounded-full border opacity-0 transition-opacity duration-300 group-hover/play:opacity-100 ${
+                    isRunning ? "border-destructive/40" : "border-primary/40"
+                  }`} />
+                  {isRunning ? <Square className="relative h-6 w-6" /> : <Play className="relative h-6 w-6" />}
                 </button>
               </div>
             )}
