@@ -1,6 +1,18 @@
 const DEFAULT_BASE_URL = "https://union-crax.xyz"
+const FALLBACK_BASE_URL = "http://unioncraxxyz-unioncraxfrontend-owcfti-9b02bb-104-152-210-106.traefik.me"
+
+let currentBaseUrl = DEFAULT_BASE_URL
+
 export function getApiBaseUrl(): string {
-  return DEFAULT_BASE_URL
+  return currentBaseUrl
+}
+
+export function setApiBaseUrl(url: string): void {
+  currentBaseUrl = url
+}
+
+export function getFallbackBaseUrl(): string {
+  return FALLBACK_BASE_URL
 }
 
 export function apiUrl(path: string): string {
@@ -35,17 +47,50 @@ export async function apiFetch(path: string, init?: RequestInit) {
         body: body ?? null,
       }
 
-      const result = await window.ucAuth!.fetch(getApiBaseUrl(), path, serializedInit)
-      const bytes = result.body ? base64ToUint8Array(result.body) : new Uint8Array()
-      return new Response(bytes, {
-        status: result.status || 0,
-        statusText: result.statusText || "",
-        headers: new Headers(result.headers || []),
-      })
+      try {
+        const result = await window.ucAuth!.fetch(getApiBaseUrl(), path, serializedInit)
+        const bytes = result.body ? base64ToUint8Array(result.body) : new Uint8Array()
+        return new Response(bytes, {
+          status: result.status || 0,
+          statusText: result.statusText || "",
+          headers: new Headers(result.headers || []),
+        })
+      } catch (error) {
+        // Try fallback URL if main URL fails
+        console.warn("[API] Main URL failed, trying fallback URL", error)
+        setApiBaseUrl(getFallbackBaseUrl())
+        try {
+          const fallbackResult = await window.ucAuth!.fetch(getFallbackBaseUrl(), path, serializedInit)
+          const bytes = fallbackResult.body ? base64ToUint8Array(fallbackResult.body) : new Uint8Array()
+          return new Response(bytes, {
+            status: fallbackResult.status || 0,
+            statusText: fallbackResult.statusText || "",
+            headers: new Headers(fallbackResult.headers || []),
+          })
+        } catch (fallbackError) {
+          console.error("[API] Fallback URL also failed", fallbackError)
+          throw fallbackError
+        }
+      }
     }
   }
 
-  return fetch(apiUrl(path), nextInit)
+  try {
+    const response = await fetch(apiUrl(path), nextInit)
+    return response
+  } catch (error) {
+    // Try fallback URL if main URL fails
+    console.warn("[API] Main URL failed, trying fallback URL", error)
+    setApiBaseUrl(getFallbackBaseUrl())
+    const fallbackUrl = `${getFallbackBaseUrl()}${path.startsWith("/") ? path : `/${path}`}`
+    try {
+      const fallbackResponse = await fetch(fallbackUrl, nextInit)
+      return fallbackResponse
+    } catch (fallbackError) {
+      console.error("[API] Fallback URL also failed", fallbackError)
+      throw fallbackError
+    }
+  }
 }
 
 function base64ToUint8Array(base64: string): Uint8Array {
