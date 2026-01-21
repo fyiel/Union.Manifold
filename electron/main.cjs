@@ -1089,28 +1089,21 @@ function run7zExtract(archivePath, destDir, onProgress) {
         uc_log(`7zip-bin not available, using system 7z: ${String(e)}`)
       }
       
-      // Verify the binary exists before attempting to spawn
-      if (cmd !== '7z' && !fs.existsSync(cmd)) {
-        const error = `7zip binary not found at: ${cmd}. This may indicate an issue with the app packaging or installation.`
-        uc_log(error)
-        resolve({ ok: false, error })
-        return
+      // Verify the binary exists before attempting to spawn (except for system '7z' which is assumed to be in PATH)
+      if (cmd !== '7z') {
+        if (!fs.existsSync(cmd)) {
+          const error = `7zip binary not found at: ${cmd}. This may indicate an issue with the app packaging or installation.`
+          uc_log(error)
+          resolve({ ok: false, error })
+          return
+        }
       }
       
       const before = snapshotFiles(destDir)
       const args = ['x', archivePath, `-o${destDir}`, '-y']
       uc_log(`spawning 7zip with command: ${cmd} ${args.join(' ')}`)
       
-      let proc
-      try {
-        proc = child_process.spawn(cmd, args, { windowsHide: true })
-      } catch (spawnError) {
-        const error = `Failed to spawn 7zip process: ${String(spawnError)}`
-        uc_log(error)
-        resolve({ ok: false, error })
-        return
-      }
-      
+      const proc = child_process.spawn(cmd, args, { windowsHide: true })
       let stdout = ''
       let stderr = ''
       let lastPercent = -1
