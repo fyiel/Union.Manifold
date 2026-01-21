@@ -57,11 +57,12 @@ export async function apiFetch(path: string, init?: RequestInit) {
         })
       } catch (error) {
         // Try fallback URL if main URL fails
-        console.warn("[API] Main URL failed, trying fallback URL", error)
-        setApiBaseUrl(getFallbackBaseUrl())
+        console.warn("[API] Main URL failed, trying fallback URL (HTTP - insecure)", error)
         try {
           const fallbackResult = await window.ucAuth!.fetch(getFallbackBaseUrl(), path, serializedInit)
           const bytes = fallbackResult.body ? base64ToUint8Array(fallbackResult.body) : new Uint8Array()
+          // Switch to fallback URL for subsequent requests if it works
+          setApiBaseUrl(getFallbackBaseUrl())
           return new Response(bytes, {
             status: fallbackResult.status || 0,
             statusText: fallbackResult.statusText || "",
@@ -80,11 +81,16 @@ export async function apiFetch(path: string, init?: RequestInit) {
     return response
   } catch (error) {
     // Try fallback URL if main URL fails
-    console.warn("[API] Main URL failed, trying fallback URL", error)
-    setApiBaseUrl(getFallbackBaseUrl())
-    const fallbackUrl = `${getFallbackBaseUrl()}${path.startsWith("/") ? path : `/${path}`}`
+    console.warn("[API] Main URL failed, trying fallback URL (HTTP - insecure)", error)
+    const fallbackOrigin = getFallbackBaseUrl().replace(/\/+$/, "")
+    const normalizedPath = path.startsWith("/") ? path : `/${path}`
+    const fallbackUrl = `${fallbackOrigin}${normalizedPath}`
     try {
       const fallbackResponse = await fetch(fallbackUrl, nextInit)
+      // Switch to fallback URL for subsequent requests if it works
+      if (fallbackResponse.ok) {
+        setApiBaseUrl(getFallbackBaseUrl())
+      }
       return fallbackResponse
     } catch (fallbackError) {
       console.error("[API] Fallback URL also failed", fallbackError)
