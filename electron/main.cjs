@@ -1088,9 +1088,29 @@ function run7zExtract(archivePath, destDir, onProgress) {
         // not available, use system `7z`
         uc_log(`7zip-bin not available, using system 7z: ${String(e)}`)
       }
+      
+      // Verify the binary exists before attempting to spawn
+      if (cmd !== '7z' && !fs.existsSync(cmd)) {
+        const error = `7zip binary not found at: ${cmd}. This may indicate an issue with the app packaging or installation.`
+        uc_log(error)
+        resolve({ ok: false, error })
+        return
+      }
+      
       const before = snapshotFiles(destDir)
       const args = ['x', archivePath, `-o${destDir}`, '-y']
-      const proc = child_process.spawn(cmd, args, { windowsHide: true })
+      uc_log(`spawning 7zip with command: ${cmd} ${args.join(' ')}`)
+      
+      let proc
+      try {
+        proc = child_process.spawn(cmd, args, { windowsHide: true })
+      } catch (spawnError) {
+        const error = `Failed to spawn 7zip process: ${String(spawnError)}`
+        uc_log(error)
+        resolve({ ok: false, error })
+        return
+      }
+      
       let stdout = ''
       let stderr = ''
       let lastPercent = -1
@@ -1142,7 +1162,9 @@ function run7zExtract(archivePath, destDir, onProgress) {
       })
       proc.on('close', (code) => {
         if (code !== 0) {
-          resolve({ ok: false, error: stderr || stdout })
+          const errorMsg = stderr || stdout || `7zip exited with code ${code}`
+          uc_log(`7zip extraction failed: ${errorMsg}`)
+          resolve({ ok: false, error: errorMsg })
           return
         }
         const after = snapshotFiles(destDir)
@@ -1150,7 +1172,11 @@ function run7zExtract(archivePath, destDir, onProgress) {
         for (const f of after) if (!before.has(f)) extracted.push(f)
         resolve({ ok: true, files: extracted })
       })
-      proc.on('error', (err) => resolve({ ok: false, error: String(err) }))
+      proc.on('error', (err) => {
+        const errorMsg = `7zip process error: ${String(err)}`
+        uc_log(errorMsg)
+        resolve({ ok: false, error: errorMsg })
+      })
     } catch (err) {
       resolve({ ok: false, error: String(err) })
     }
@@ -1158,8 +1184,15 @@ function run7zExtract(archivePath, destDir, onProgress) {
 }
 
 function sendDownloadUpdate(win, payload) {
-  if (!win || win.isDestroyed()) return
-  win.webContents.send('uc:download-update', payload)
+  if (!win || win.isDestroyed()) {
+    uc_log(`[sendDownloadUpdate] Skipping update - window is null or destroyed`)
+    return
+  }
+  try {
+    win.webContents.send('uc:download-update', payload)
+  } catch (error) {
+    uc_log(`[sendDownloadUpdate] Failed to send update: ${String(error)}`)
+  }
 }
 
 function registerRunningGame(appid, exePath, proc) {
@@ -1315,7 +1348,7 @@ function createWindow() {
       entry.state.speedBps = speedBps
       const remaining = total > 0 ? Math.max(0, total - received) : 0
       const etaSeconds = speedBps > 0 && remaining > 0 ? remaining / speedBps : null
-        sendDownloadUpdate(win, {
+        sendDownloadUpdate(mainWindow, {
           downloadId,
           status: item.isPaused() ? 'paused' : 'downloading',
           receivedBytes: received,
@@ -1393,9 +1426,9 @@ function createWindow() {
             try {
               const st = fs.existsSync(archiveToExtract) ? fs.statSync(archiveToExtract) : null
               const totalBytes = totalBytesOverride != null ? totalBytesOverride : st ? st.size : 0
-              sendDownloadUpdate(win, { downloadId, status: 'extracting', receivedBytes: 0, totalBytes, speedBps: 0, etaSeconds: null, filename: path.basename(archiveToExtract), savePath: archiveToExtract, appid: entry?.appid || null })
+              sendDownloadUpdate(mainWindow, { downloadId, status: 'extracting', receivedBytes: 0, totalBytes, speedBps: 0, etaSeconds: null, filename: path.basename(archiveToExtract), savePath: archiveToExtract, appid: entry?.appid || null })
             } catch (_) {
-              sendDownloadUpdate(win, { downloadId, status: 'extracting', receivedBytes: 0, totalBytes: 0, speedBps: 0, etaSeconds: null, filename: path.basename(archiveToExtract), savePath: archiveToExtract, appid: entry?.appid || null })
+              sendDownloadUpdate(mainWindow, { downloadId, status: 'extracting', receivedBytes: 0, totalBytes: 0, speedBps: 0, etaSeconds: null, filename: path.basename(archiveToExtract), savePath: archiveToExtract, appid: entry?.appid || null })
             }
             uc_log(`starting extraction of ${archiveToExtract} to ${installedFolder}`)
             let _lastBytes = 0
@@ -1418,7 +1451,7 @@ function createWindow() {
                       const st = fs.existsSync(archiveToExtract) ? fs.statSync(archiveToExtract) : null
                       const totalBytes = totalBytesOverride != null ? totalBytesOverride : st ? st.size : 0
                       const etaSeconds = speedBps > 0 ? Math.max(0, Math.round((totalBytes - size) / speedBps)) : null
-                      sendDownloadUpdate(win, { downloadId, status: 'extracting', receivedBytes: size, totalBytes, speedBps: Math.round(speedBps), etaSeconds, filename: path.basename(archiveToExtract), savePath: archiveToExtract, appid: entry?.appid || null })
+                      sendDownloadUpdate(mainWindow, { downloadId, status: 'extracting', receivedBytes: size, totalBytes, speedBps: Math.round(speedBps), etaSeconds, filename: path.basename(archiveToExtract), savePath: archiveToExtract, appid: entry?.appid || null })
                     } catch (e) {}
                   }).catch(() => {})
                 } catch (e) {}
@@ -1439,7 +1472,7 @@ function createWindow() {
                 _lastBytes = received
                 _lastTime = now
                 const etaSeconds = speedBps > 0 ? Math.max(0, Math.round((totalBytes - received) / speedBps)) : null
-                sendDownloadUpdate(win, { downloadId, status: 'extracting', receivedBytes: received, totalBytes, speedBps: Math.round(speedBps), etaSeconds, filename: path.basename(archiveToExtract), savePath: archiveToExtract, appid: entry?.appid || null })
+                sendDownloadUpdate(mainWindow, { downloadId, status: 'extracting', receivedBytes: received, totalBytes, speedBps: Math.round(speedBps), etaSeconds, filename: path.basename(archiveToExtract), savePath: archiveToExtract, appid: entry?.appid || null })
               } catch (e) {}
             })
             try { if (_pollTimer) clearInterval(_pollTimer) } catch (e) {}
@@ -1473,7 +1506,7 @@ function createWindow() {
               try {
                 const st2 = fs.existsSync(archiveToExtract) ? fs.statSync(archiveToExtract) : null
                 const totalBytes2 = totalBytesOverride != null ? totalBytesOverride : st2 ? st2.size : 0
-                if (totalBytes2 > 0) sendDownloadUpdate(win, { downloadId, status: 'extracting', receivedBytes: totalBytes2, totalBytes: totalBytes2, speedBps: 0, etaSeconds: 0, filename: path.basename(archiveToExtract), savePath: archiveToExtract, appid: entry?.appid || null })
+                if (totalBytes2 > 0) sendDownloadUpdate(mainWindow, { downloadId, status: 'extracting', receivedBytes: totalBytes2, totalBytes: totalBytes2, speedBps: 0, etaSeconds: 0, filename: path.basename(archiveToExtract), savePath: archiveToExtract, appid: entry?.appid || null })
               } catch (e) {}
               try {
                 if (partFiles && partFiles.length) {
@@ -1487,13 +1520,13 @@ function createWindow() {
               } catch (e) {}
               try { fs.rmdirSync(installingRoot, { recursive: true }) } catch (e) {}
 
-              sendDownloadUpdate(win, { downloadId, status: 'extracted', extracted: extractedFiles, savePath: null, appid: entry?.appid || null })
+              sendDownloadUpdate(mainWindow, { downloadId, status: 'extracted', extracted: extractedFiles, savePath: null, appid: entry?.appid || null })
             } else {
               uc_log(`extraction failed for ${archiveToExtract}: ${res && res.error ? res.error : 'unknown'}`)
               extractionFailed = true
               extractionError = res && res.error ? res.error : 'extract_failed'
               updateInstallingManifestStatus(entry?.appid, 'failed', extractionError)
-              sendDownloadUpdate(win, { downloadId, status: 'extract_failed', error: res && res.error ? res.error : 'unknown', savePath: finalPath, appid: entry?.appid || null })
+              sendDownloadUpdate(mainWindow, { downloadId, status: 'extract_failed', error: res && res.error ? res.error : 'unknown', savePath: finalPath, appid: entry?.appid || null })
             }
           }
 
@@ -1571,7 +1604,7 @@ function createWindow() {
         : state === 'completed'
           ? null
           : state
-      sendDownloadUpdate(win, {
+      sendDownloadUpdate(mainWindow, {
         downloadId,
         status: terminalStatus,
         receivedBytes: item.getReceivedBytes(),
