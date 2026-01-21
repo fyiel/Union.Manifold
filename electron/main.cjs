@@ -56,6 +56,7 @@ function createTray() {
 }
 
 const DEFAULT_BASE_URL = 'https://union-crax.xyz'
+const FALLBACK_BASE_URL = 'http://unioncraxxyz-unioncraxfrontend-owcfti-9b02bb-104-152-210-106.traefik.me'
 let tray = null
 let mainWindow = null
 
@@ -197,7 +198,26 @@ async function fetchWithSession(session, baseUrl, path, init) {
     headers.set('X-UC-Client', 'unioncrax-direct')
   }
   if (cookieHeader) headers.set('Cookie', cookieHeader)
-  return fetch(url, { ...(init || {}), headers })
+  
+  try {
+    return await fetch(url, { ...(init || {}), headers })
+  } catch (error) {
+    // Try fallback URL if main URL fails
+    console.warn('[UC] Main URL failed, trying fallback URL', error)
+    const fallbackOrigin = normalizeBaseUrl(FALLBACK_BASE_URL)
+    const fallbackUrl = new URL(path, fallbackOrigin).toString()
+    const fallbackCookies = await getSessionCookies(session, fallbackOrigin)
+    const fallbackCookieHeader = buildCookieHeader(fallbackCookies)
+    const fallbackHeaders = new Headers(init?.headers || {})
+    if (!fallbackHeaders.has('user-agent')) {
+      fallbackHeaders.set('User-Agent', `UnionCrax.Direct/${app.getVersion()}`)
+    }
+    if (typeof path === 'string' && path.startsWith('/api/downloads') && !fallbackHeaders.has('x-uc-client')) {
+      fallbackHeaders.set('X-UC-Client', 'unioncrax-direct')
+    }
+    if (fallbackCookieHeader) fallbackHeaders.set('Cookie', fallbackCookieHeader)
+    return await fetch(fallbackUrl, { ...(init || {}), headers: fallbackHeaders })
+  }
 }
 
 async function getDiscordSession(session, baseUrl) {
@@ -1635,10 +1655,13 @@ app.whenReady().then(() => {
   // Auto-updater configuration
   if (!isDev) {
     autoUpdater.autoDownload = true
+    autoUpdater.autoInstallOnAppQuit = true
+    console.log('[Update] Auto-updater initialized')
     autoUpdater.checkForUpdatesAndNotify()
     
     // Check for updates every hour
     setInterval(() => {
+      console.log('[Update] Checking for updates...')
       autoUpdater.checkForUpdatesAndNotify()
     }, 60 * 60 * 1000)
   }
@@ -1660,19 +1683,16 @@ autoUpdater.on('update-available', (info) => {
     return
   }
   
-  console.log('[Update] New version available:', info.version)
+  console.log('[Update] New version available:', info.version, '- download should start automatically')
   const windows = BrowserWindow.getAllWindows()
   windows.forEach(win => {
     win.webContents.send('update-available', info)
   })
-  try {
-    autoUpdater.downloadUpdate()
-  } catch (err) {
-    console.error('[Update] Failed to start download:', err)
-  }
+  // autoDownload is enabled, so download should start automatically
 })
 
 autoUpdater.on('download-progress', (progress) => {
+  console.log('[Update] Download progress:', progress.percent.toFixed(2) + '%')
   const windows = BrowserWindow.getAllWindows()
   windows.forEach(win => {
     win.webContents.send('update-download-progress', progress)
@@ -1680,7 +1700,7 @@ autoUpdater.on('download-progress', (progress) => {
 })
 
 autoUpdater.on('update-downloaded', (info) => {
-  console.log('[Update] Update downloaded:', info.version)
+  console.log('[Update] Update downloaded successfully:', info.version)
   const windows = BrowserWindow.getAllWindows()
   windows.forEach(win => {
     win.webContents.send('update-downloaded', info)
@@ -1689,6 +1709,18 @@ autoUpdater.on('update-downloaded', (info) => {
 
 autoUpdater.on('error', (err) => {
   console.error('[Update] Error:', err)
+  const windows = BrowserWindow.getAllWindows()
+  windows.forEach(win => {
+    win.webContents.send('update-error', { message: err.message || 'Update failed' })
+  })
+})
+
+autoUpdater.on('checking-for-update', () => {
+  console.log('[Update] Checking for updates...')
+})
+
+autoUpdater.on('update-not-available', (info) => {
+  console.log('[Update] No updates available')
 })
 
 // IPC handler for manual update check
