@@ -1,0 +1,6 @@
+ignoredBuiltDependencies:
+  - esbuild
+  - sharp
+
+onlyBuiltDependencies:
+  - electron
