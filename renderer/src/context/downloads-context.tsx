@@ -324,9 +324,19 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         const idx = prev.findIndex((item) => item.id === update.downloadId)
         if (idx === -1) return prev
         const existing = prev[idx]
+        
+        // Terminal states: don't allow reverting to non-terminal states
+        const terminalStates = ["completed", "extracted", "extract_failed", "failed", "cancelled"]
+        const isTerminal = terminalStates.includes(existing.status)
+        const nextStatus = update.status || existing.status
+        const isNextTerminal = terminalStates.includes(nextStatus)
+        
+        // If already in terminal state, only update if the new status is also terminal
+        const finalStatus = isTerminal && !isNextTerminal ? existing.status : nextStatus
+        
         const next: DownloadItem = {
           ...existing,
-          status: update.status || existing.status,
+          status: finalStatus,
           receivedBytes: update.receivedBytes ?? existing.receivedBytes,
           totalBytes: update.totalBytes ?? existing.totalBytes,
           speedBps: update.speedBps ?? existing.speedBps,
@@ -339,11 +349,11 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
           partTotal: update.partTotal ?? existing.partTotal,
           resumeData: update.resumeData ?? existing.resumeData,
           completedAt:
-            update.status === "completed" ||
-            update.status === "failed" ||
-            update.status === "cancelled" ||
-            update.status === "extracted" ||
-            update.status === "extract_failed"
+            finalStatus === "completed" ||
+            finalStatus === "failed" ||
+            finalStatus === "cancelled" ||
+            finalStatus === "extracted" ||
+            finalStatus === "extract_failed"
               ? Date.now()
               : existing.completedAt,
         }
