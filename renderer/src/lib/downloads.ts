@@ -20,7 +20,7 @@ const DOWNLOAD_HOST_STORAGE_KEY = "uc_direct_download_host"
 const ROOTZ_SIGNED_HOST = "signed-url.cloudflare.com"
 // Supported download hosts
 const SUPPORTED_DOWNLOAD_HOSTS: PreferredDownloadHost[] = ["rootz", "pixeldrain"]
-const PREFERRED_HOSTS: PreferredDownloadHost[] = ["rootz", "pixeldrain"]
+const PREFERRED_HOSTS: PreferredDownloadHost[] = ["pixeldrain", "rootz"]
 
 function sanitizeHosts(input: DownloadHosts | null | undefined): DownloadHosts {
   const hosts = input && typeof input === "object" ? input : {}
@@ -183,7 +183,7 @@ function pickHostLinks(available: DownloadHosts, host: PreferredDownloadHost) {
 }
 
 export async function getPreferredDownloadHost(): Promise<PreferredDownloadHost> {
-  if (typeof window === "undefined") return "rootz"
+  if (typeof window === "undefined") return "pixeldrain"
   
   // Try to get from electron settings first (synchronized with Settings UI)
   if (window.ucSettings?.get) {
@@ -203,7 +203,7 @@ export async function getPreferredDownloadHost(): Promise<PreferredDownloadHost>
     return legacy as PreferredDownloadHost
   }
   
-  return "rootz"
+  return "pixeldrain"
 }
 
 export function setPreferredDownloadHost(host: PreferredDownloadHost) {
@@ -222,7 +222,7 @@ export function setPreferredDownloadHost(host: PreferredDownloadHost) {
 }
 
 export function selectHost(available: DownloadHosts, preferredHost?: PreferredDownloadHost) {
-  const preferred = preferredHost && PREFERRED_HOSTS.includes(preferredHost) ? preferredHost : "rootz"
+  const preferred = preferredHost && PREFERRED_HOSTS.includes(preferredHost) ? preferredHost : "pixeldrain"
   if (SUPPORTED_DOWNLOAD_HOSTS.includes(preferred)) {
     const preferredLinks = pickHostLinks(available, preferred)
     if (preferredLinks.length) {

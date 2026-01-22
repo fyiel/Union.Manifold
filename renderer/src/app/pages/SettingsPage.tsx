@@ -20,8 +20,8 @@ type MirrorHostInfo = {
 }
 
 const MIRROR_HOSTS: MirrorHostInfo[] = [
-  { key: 'rootz', label: 'Rootz', tag: 'beta' },
-  { key: 'pixeldrain', label: 'Pixeldrain' }
+  { key: 'pixeldrain', label: 'Pixeldrain' },
+  { key: 'rootz', label: 'Rootz', tag: 'beta' }
 ]
 import { ExternalLink, FolderOpen, HardDrive, Plus, RefreshCw } from "lucide-react"
 
@@ -63,7 +63,7 @@ export function SettingsPage() {
   const [error, setError] = useState<string | null>(null)
   const [ucSizeBytes, setUcSizeBytes] = useState<number | null>(null)
   const [usageLoading, setUsageLoading] = useState(false)
-  const [defaultHost, setDefaultHost] = useState<MirrorHost>('rootz')
+  const [defaultHost, setDefaultHost] = useState<MirrorHost>('pixeldrain')
   const [checkingUpdate, setCheckingUpdate] = useState(false)
   const [appVersion, setAppVersion] = useState<string>("")
   const [updateCheckResult, setUpdateCheckResult] = useState<string | null>(null)

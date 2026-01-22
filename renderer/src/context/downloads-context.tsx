@@ -10,6 +10,7 @@ import {
   resolveDownloadUrl,
   resolveDownloadSize,
   selectHost,
+  type PreferredDownloadHost,
 } from "@/lib/downloads"
 import { addDownloadedGameToHistory, hasCookieConsent } from "@/lib/user-history"
 import { downloadLogger } from "@/lib/logger"
@@ -76,7 +77,7 @@ type DownloadUpdate = {
 
 type DownloadsContextValue = {
   downloads: DownloadItem[]
-  startGameDownload: (game: Game) => Promise<void>
+  startGameDownload: (game: Game, preferredHost?: PreferredDownloadHost) => Promise<void>
   cancelDownload: (downloadId: string) => Promise<void>
   cancelGroup: (appid: string) => Promise<void>
   pauseDownload: (downloadId: string) => Promise<void>
@@ -437,7 +438,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
 
   // The main process writes installed manifests; renderer can call `window.ucDownloads.listInstalled()` when needed.
 
-  const startGameDownload = useCallback(async (game: Game) => {
+  const startGameDownload = useCallback(async (game: Game, preferredHostOverride?: PreferredDownloadHost) => {
     if (preparingRef.current.has(game.appid)) {
       throw new Error("This game is already downloading.")
     }
@@ -469,8 +470,13 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
 
       const linksResult = await fetchDownloadLinks(game.appid, downloadToken)
 
+      const preferredHost =
+        preferredHostOverride === "pixeldrain" || preferredHostOverride === "rootz"
+          ? preferredHostOverride
+          : await getPreferredDownloadHost()
+
       let links: string[] = []
-      let selectedHost = "rootz"
+      let selectedHost = preferredHost
 
       if (linksResult.redirectUrl) {
         // Accept redirect URLs (may be signed Rootz URLs)
@@ -481,10 +487,9 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         } else if (isRootzUrl(redirectUrl)) {
           selectedHost = "rootz"
         } else {
-          selectedHost = await getPreferredDownloadHost()
+          selectedHost = preferredHost
         }
       } else {
-        const preferredHost = await getPreferredDownloadHost()
         const selected = selectHost(linksResult.hosts, preferredHost)
         
         // If no links found at all
@@ -498,7 +503,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         }
         
         links = selected.links
-        selectedHost = selected.host || "rootz"
+        selectedHost = selected.host || preferredHost
       }
 
       if (!links.length) {
