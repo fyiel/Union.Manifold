@@ -125,7 +125,6 @@ function createTray() {
 }
 
 const DEFAULT_BASE_URL = 'https://union-crax.xyz'
-const FALLBACK_BASE_URL = 'http://unioncraxxyz-unioncraxfrontend-owcfti-9b02bb-104-152-210-106.traefik.me'
 let tray = null
 let mainWindow = null
 
@@ -285,25 +284,7 @@ async function fetchWithSession(session, baseUrl, path, init) {
   }
   if (cookieHeader) headers.set('Cookie', cookieHeader)
   
-  try {
-    return await fetch(url, { ...(init || {}), headers })
-  } catch (error) {
-    // Try fallback URL if main URL fails
-    console.warn('[UC] Main URL failed, trying fallback URL', error)
-    const fallbackOrigin = normalizeBaseUrl(FALLBACK_BASE_URL)
-    const fallbackUrl = new URL(path, fallbackOrigin).toString()
-    const fallbackCookies = await getSessionCookies(session, fallbackOrigin)
-    const fallbackCookieHeader = buildCookieHeader(fallbackCookies)
-    const fallbackHeaders = new Headers(init?.headers || {})
-    if (!fallbackHeaders.has('user-agent')) {
-      fallbackHeaders.set('User-Agent', `UnionCrax.Direct/${app.getVersion()}`)
-    }
-    if (typeof path === 'string' && path.startsWith('/api/downloads') && !fallbackHeaders.has('x-uc-client')) {
-      fallbackHeaders.set('X-UC-Client', 'unioncrax-direct')
-    }
-    if (fallbackCookieHeader) fallbackHeaders.set('Cookie', fallbackCookieHeader)
-    return await fetch(fallbackUrl, { ...(init || {}), headers: fallbackHeaders })
-  }
+  return await fetch(url, { ...(init || {}), headers })
 }
 
 async function getDiscordSession(session, baseUrl) {
