@@ -38,7 +38,6 @@ const directNavItems = [
 
 const accountItems = [
   { label: "My profile", path: "/account" },
-  { label: "View history", path: "/view-history" },
   { label: "Liked", path: "/liked" },
   { label: "Wishlist", path: "/wishlist" },
   { label: "Public request feed", path: "/public-request-feed" },

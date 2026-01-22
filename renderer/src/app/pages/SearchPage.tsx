@@ -19,7 +19,7 @@ import {
   PaginationNext,
   PaginationPrevious,
 } from "@/components/ui/pagination"
-import { Filter, Wifi, X, SlidersHorizontal, RefreshCw, Heart, Star, Clock } from "lucide-react"
+import { Filter, Wifi, X, SlidersHorizontal, RefreshCw, Heart, Star } from "lucide-react"
 import { useDebounce } from "@/hooks/use-debounce"
 import { parseSize } from "@/lib/search-utils"
 import { hasOnlineMode, generateErrorCode, ErrorTypes } from "@/lib/utils"
@@ -599,7 +599,7 @@ export function SearchPage() {
             <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <CardTitle className="text-lg">Your Lists</CardTitle>
-                <p className="text-sm text-muted-foreground">Jump to wishlist, liked games, or view history.</p>
+                <p className="text-sm text-muted-foreground">Jump to wishlist or liked games.</p>
               </div>
               <div className="flex flex-wrap gap-2">
                 <Button asChild variant="outline" className="gap-2">
@@ -612,12 +612,6 @@ export function SearchPage() {
                   <a href={apiUrl("/liked")} target="_blank" rel="noreferrer">
                     <Heart className="h-4 w-4" />
                     Liked
-                  </a>
-                </Button>
-                <Button asChild variant="outline" className="gap-2">
-                  <a href={apiUrl("/view-history")} target="_blank" rel="noreferrer">
-                    <Clock className="h-4 w-4" />
-                    View history
                   </a>
                 </Button>
               </div>
