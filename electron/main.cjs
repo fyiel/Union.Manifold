@@ -1323,6 +1323,18 @@ function registerRunningGame(appid, exePath, proc) {
   })
 }
 
+function registerRunningGamePid(appid, exePath, pid) {
+  if (!pid) return
+  const payload = {
+    appid: appid || null,
+    exePath: exePath || null,
+    pid: Number(pid),
+    startedAt: Date.now()
+  }
+  if (appid) runningGames.set(appid, payload)
+  if (exePath) runningGames.set(exePath, payload)
+}
+
 function getRunningGame(appid) {
   if (!appid) return null
   const byApp = runningGames.get(appid)
@@ -1353,6 +1365,26 @@ function killProcessTree(pid) {
       } catch {
         return resolve(false)
       }
+    }
+  })
+}
+
+function killProcessTreeElevated(pid) {
+  return new Promise((resolve) => {
+    if (!pid || process.platform !== 'win32') return resolve(false)
+    try {
+      const psScript = `try { $p = Start-Process -FilePath 'taskkill' -ArgumentList '/PID', '${pid}', '/T', '/F' -Verb RunAs -Wait -PassThru -ErrorAction Stop; if ($p.ExitCode -eq 0) { exit 0 } else { exit 1 } } catch { exit 1 }`
+      const killer = child_process.spawn('powershell.exe', [
+        '-NoProfile',
+        '-ExecutionPolicy',
+        'Bypass',
+        '-Command',
+        psScript
+      ], { windowsHide: false, stdio: 'ignore' })
+      killer.on('close', (code) => resolve(code === 0))
+      killer.on('error', () => resolve(false))
+    } catch {
+      resolve(false)
     }
   })
 }
@@ -2417,17 +2449,42 @@ ipcMain.handle('uc:game-exe-launch-admin', async (_event, appid, exePath) => {
     if (!exePath || typeof exePath !== 'string') return { ok: false }
     ucLog(`Launching game as admin: ${appid} at ${exePath}`)
     try {
+      const safeExePath = exePath.replace(/'/g, "''")
+      const workingDir = path.dirname(exePath).replace(/'/g, "''")
+      const psScript = `try { $p = Start-Process -FilePath '${safeExePath}' -WorkingDirectory '${workingDir}' -Verb RunAs -WindowStyle Normal -PassThru -ErrorAction Stop; if ($p) { Write-Output \"STARTED:$($p.Id)\"; exit 0 } else { Write-Error 'START-FAILED'; exit 1 } } catch { Write-Error $_.Exception.Message; exit 1 }`
       const proc = child_process.spawn('powershell.exe', [
+        '-NoProfile',
+        '-ExecutionPolicy',
+        'Bypass',
         '-Command',
-        `Start-Process "${exePath}" -Verb RunAs`
+        psScript
       ], {
-        detached: true,
-        stdio: 'ignore',
-        windowsHide: true
+        detached: false,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: false
       })
-      proc.unref()
-      // Note: We can't reliably get PID of admin process, but we register the attempt
-      registerRunningGame(appid, exePath, proc)
+
+      proc.stdout?.on('data', (data) => {
+        const msg = String(data).trim()
+        if (msg) {
+          ucLog(`Game launch as admin stdout: ${appid} - ${msg}`)
+          const match = msg.match(/STARTED:(\d+)/)
+          if (match && match[1]) {
+            registerRunningGamePid(appid, exePath, Number(match[1]))
+          }
+        }
+      })
+      proc.stderr?.on('data', (data) => {
+        const msg = String(data).trim()
+        if (msg) ucLog(`Game launch as admin stderr: ${appid} - ${msg}`, 'error')
+      })
+      proc.on('error', (err) => {
+        ucLog(`Game launch as admin process error: ${appid} - ${err.message}`, 'error')
+      })
+      proc.on('exit', (code, signal) => {
+        ucLog(`Game launch as admin process exit: ${appid} - code=${code} signal=${signal}`, 'info')
+      })
+      // We register the elevated game PID once we receive STARTED:PID from PowerShell.
       ucLog(`Game launched as admin successfully: ${appid}`)
       return { ok: true, pid: proc.pid }
     } catch (err) {
@@ -2474,7 +2531,10 @@ ipcMain.handle('uc:game-exe-quit', async (_event, appid) => {
   try {
     const running = getRunningGame(appid)
     if (!running) return { ok: true, stopped: false }
-    const stopped = await killProcessTree(running.pid)
+    let stopped = await killProcessTree(running.pid)
+    if (!stopped) {
+      stopped = await killProcessTreeElevated(running.pid)
+    }
     if (stopped) {
       if (running.appid) runningGames.delete(running.appid)
       if (running.exePath) runningGames.delete(running.exePath)
