@@ -84,6 +84,7 @@ declare global {
       listGameExecutables: (appid: string) => Promise<{ ok: boolean; folder?: string; exes: { name: string; path: string }[]; error?: string }>
       findGameSubfolder: (folder: string) => Promise<string | null>
       launchGameExecutable: (appid: string, exePath: string) => Promise<{ ok: boolean; error?: string; pid?: number }>
+      launchGameExecutableAsAdmin: (appid: string, exePath: string) => Promise<{ ok: boolean; error?: string; pid?: number }>
       getRunningGame: (appid: string) => Promise<{ ok: boolean; running: boolean; pid?: number; exePath?: string }>
       quitGameExecutable: (appid: string) => Promise<{ ok: boolean; stopped?: boolean }>
       deleteInstalled: (appid: string) => Promise<{ ok: boolean }>

@@ -7,6 +7,7 @@ import { formatNumber, hasOnlineMode, pickGameExecutable, proxyImageUrl } from "
 import { useDownloads } from "@/context/downloads-context"
 import { apiUrl } from "@/lib/api"
 import { ExePickerModal } from "@/components/ExePickerModal"
+import { AdminPromptModal } from "@/components/AdminPromptModal"
 
 interface GameCardProps {
   game: {
@@ -55,6 +56,8 @@ export const GameCard = memo(function GameCard({
   const [previewImage, setPreviewImage] = useState<string | null>(null)
   const [exePickerOpen, setExePickerOpen] = useState(false)
   const [exePickerExes, setExePickerExes] = useState<Array<{ name: string; path: string }>>([])
+  const [adminPromptOpen, setAdminPromptOpen] = useState(false)
+  const [pendingExePath, setPendingExePath] = useState<string | null>(null)
 
   useEffect(() => {
     let mounted = true
@@ -164,18 +167,63 @@ export const GameCard = memo(function GameCard({
     } catch {}
   }
 
+  const getAdminPromptShown = async () => {
+    if (!window.ucSettings?.get) return false
+    try {
+      return await window.ucSettings.get('adminPromptShown')
+    } catch {
+      return false
+    }
+  }
+
+  const setAdminPromptShown = async () => {
+    if (!window.ucSettings?.set) return
+    try {
+      await window.ucSettings.set('adminPromptShown', true)
+    } catch {}
+  }
+
+  const getRunAsAdminEnabled = async () => {
+    if (!window.ucSettings?.get) return false
+    try {
+      return await window.ucSettings.get('runGamesAsAdmin')
+    } catch {
+      return false
+    }
+  }
+
   const openExePicker = (exes: Array<{ name: string; path: string }>) => {
     setExePickerExes(exes)
     setExePickerOpen(true)
   }
 
-  const handleExePicked = async (path: string) => {
-    if (!window.ucDownloads?.launchGameExecutable) return
-    const res = await window.ucDownloads.launchGameExecutable(game.appid, path)
+  const launchGame = async (path: string, asAdmin: boolean = false) => {
+    if (!window.ucDownloads) return
+    const launchFn = asAdmin 
+      ? window.ucDownloads.launchGameExecutableAsAdmin 
+      : window.ucDownloads.launchGameExecutable
+    
+    if (!launchFn) return
+    const res = await launchFn(game.appid, path)
     if (res && res.ok) {
       await setSavedExe(path)
       setIsRunning(true)
       setExePickerOpen(false)
+      setAdminPromptOpen(false)
+      setPendingExePath(null)
+    }
+  }
+
+  const handleExePicked = async (path: string) => {
+    setPendingExePath(path)
+    const promptShown = await getAdminPromptShown()
+    const runAsAdminEnabled = await getRunAsAdminEnabled()
+    
+    if (!promptShown) {
+      setAdminPromptOpen(true)
+      setExePickerOpen(false)
+    } else {
+      await launchGame(path, runAsAdminEnabled)
     }
   }
 
@@ -202,24 +250,26 @@ export const GameCard = memo(function GameCard({
     }
     try {
       const savedExe = await getSavedExe()
+      const runAsAdminEnabled = await getRunAsAdminEnabled()
+      
       if (savedExe) {
-        const res = await window.ucDownloads.launchGameExecutable(game.appid, savedExe)
-        if (res && res.ok) {
-          setIsRunning(true)
-          return
-        }
-        await setSavedExe(null)
+        await launchGame(savedExe, runAsAdminEnabled)
+        return
       }
+      
       const result = await window.ucDownloads.listGameExecutables(game.appid)
       const exes = result?.exes || []
       const { pick, confident } = pickGameExecutable(exes, game.name, game.source)
       if (pick && confident) {
-        const res = await window.ucDownloads.launchGameExecutable(game.appid, pick.path)
-        if (res && res.ok) {
-          await setSavedExe(pick.path)
-          setIsRunning(true)
-          return
+        setPendingExePath(pick.path)
+        const promptShown = await getAdminPromptShown()
+        
+        if (!promptShown) {
+          setAdminPromptOpen(true)
+        } else {
+          await launchGame(pick.path, runAsAdminEnabled)
         }
+        return
       }
       openExePicker(exes)
     } catch {
@@ -407,6 +457,28 @@ export const GameCard = memo(function GameCard({
         exes={exePickerExes}
         onSelect={handleExePicked}
         onClose={() => setExePickerOpen(false)}
+      />
+      <AdminPromptModal
+        open={adminPromptOpen}
+        gameName={game.name}
+        onRunAsAdmin={async () => {
+          if (pendingExePath) {
+            await window.ucSettings?.set?.('runGamesAsAdmin', true)
+            await setAdminPromptShown()
+            await launchGame(pendingExePath, true)
+          }
+        }}
+        onContinueWithoutAdmin={async () => {
+          if (pendingExePath) {
+            await window.ucSettings?.set?.('runGamesAsAdmin', false)
+            await setAdminPromptShown()
+            await launchGame(pendingExePath, false)
+          }
+        }}
+        onClose={() => {
+          setAdminPromptOpen(false)
+          setPendingExePath(null)
+        }}
       />
     </div>
   )

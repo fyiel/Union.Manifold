@@ -8,6 +8,7 @@ import { Progress } from "@/components/ui/progress"
 import { pickGameExecutable, proxyImageUrl } from "@/lib/utils"
 import { Download, PauseCircle, Play, XCircle, Square } from "lucide-react"
 import { ExePickerModal } from "@/components/ExePickerModal"
+import { AdminPromptModal } from "@/components/AdminPromptModal"
 
 function formatBytes(bytes: number) {
   if (!bytes) return "0 B"
@@ -214,6 +215,9 @@ export function DownloadsPage() {
   const [exePickerExes, setExePickerExes] = useState<Array<{ name: string; path: string }>>([])
   const [retryingAppId, setRetryingAppId] = useState<string | null>(null)
   const [runningGames, setRunningGames] = useState<Array<{ appid: string; gameName: string; pid: number }>>([])
+  const [adminPromptOpen, setAdminPromptOpen] = useState(false)
+  const [pendingExePath, setPendingExePath] = useState<string | null>(null)
+  const [pendingAppId, setPendingAppId] = useState<string | null>(null);
   const primaryStatsRef = useRef<{
     totalBytes: number
     receivedBytes: number
@@ -364,6 +368,31 @@ export function DownloadsPage() {
     } catch {}
   }
 
+  const getAdminPromptShown = async () => {
+    if (!window.ucSettings?.get) return false
+    try {
+      return await window.ucSettings.get('adminPromptShown')
+    } catch {
+      return false
+    }
+  }
+
+  const setAdminPromptShown = async () => {
+    if (!window.ucSettings?.set) return
+    try {
+      await window.ucSettings.set('adminPromptShown', true)
+    } catch {}
+  }
+
+  const getRunAsAdminEnabled = async () => {
+    if (!window.ucSettings?.get) return false
+    try {
+      return await window.ucSettings.get('runGamesAsAdmin')
+    } catch {
+      return false
+    }
+  }
+
   const openExePicker = (appid: string, gameName: string, exes: Array<{ name: string; path: string }>, message?: string) => {
     setExePickerTitle("Select executable")
     setExePickerMessage(message || `We couldn't confidently detect the correct exe for "${gameName}". Please choose the one to launch.`)
@@ -387,12 +416,35 @@ export function DownloadsPage() {
     }
   }
 
-  const handleExePicked = async (path: string) => {
-    if (!exePickerAppId || !window.ucDownloads?.launchGameExecutable) return
-    const res = await window.ucDownloads.launchGameExecutable(exePickerAppId, path)
+  const launchGame = async (appid: string, path: string, asAdmin: boolean = false) => {
+    if (!window.ucDownloads) return
+    const launchFn = asAdmin 
+      ? window.ucDownloads.launchGameExecutableAsAdmin 
+      : window.ucDownloads.launchGameExecutable
+    
+    if (!launchFn) return
+    const res = await launchFn(appid, path)
     if (res && res.ok) {
-      await setSavedExe(exePickerAppId, path)
+      await setSavedExe(appid, path)
       setExePickerOpen(false)
+      setAdminPromptOpen(false)
+      setPendingExePath(null)
+      setPendingAppId(null)
+    }
+  }
+
+  const handleExePicked = async (path: string) => {
+    if (!exePickerAppId) return
+    setPendingExePath(path)
+    setPendingAppId(exePickerAppId)
+    const promptShown = await getAdminPromptShown()
+    const runAsAdminEnabled = await getRunAsAdminEnabled()
+    
+    if (!promptShown) {
+      setAdminPromptOpen(true)
+      setExePickerOpen(false)
+    } else {
+      await launchGame(exePickerAppId, path, runAsAdminEnabled)
     }
   }
 
@@ -404,20 +456,27 @@ export function DownloadsPage() {
     }
     try {
       const savedExe = await getSavedExe(appid)
+      const runAsAdminEnabled = await getRunAsAdminEnabled()
+      
       if (savedExe) {
-        const res = await window.ucDownloads.launchGameExecutable(appid, savedExe)
-        if (res && res.ok) return
-        await setSavedExe(appid, null)
+        await launchGame(appid, savedExe, runAsAdminEnabled)
+        return
       }
+      
       const result = await window.ucDownloads.listGameExecutables(appid)
       const exes = result?.exes || []
       const { pick, confident } = pickGameExecutable(exes, gameName)
       if (pick && confident) {
-        const res = await window.ucDownloads.launchGameExecutable(appid, pick.path)
-        if (res && res.ok) {
-          await setSavedExe(appid, pick.path)
-          return
+        setPendingExePath(pick.path)
+        setPendingAppId(appid)
+        const promptShown = await getAdminPromptShown()
+        
+        if (!promptShown) {
+          setAdminPromptOpen(true)
+        } else {
+          await launchGame(appid, pick.path, runAsAdminEnabled)
         }
+        return
       }
       openExePicker(appid, gameName, exes)
     } catch {
@@ -966,6 +1025,29 @@ export function DownloadsPage() {
         exes={exePickerExes}
         onSelect={handleExePicked}
         onClose={() => setExePickerOpen(false)}
+      />
+      <AdminPromptModal
+        open={adminPromptOpen}
+        gameName={games.find((g) => g.appid === pendingAppId)?.name || "Game"}
+        onRunAsAdmin={async () => {
+          if (pendingExePath && pendingAppId) {
+            await window.ucSettings?.set?.('runGamesAsAdmin', true)
+            await setAdminPromptShown()
+            await launchGame(pendingAppId, pendingExePath, true)
+          }
+        }}
+        onContinueWithoutAdmin={async () => {
+          if (pendingExePath && pendingAppId) {
+            await window.ucSettings?.set?.('runGamesAsAdmin', false)
+            await setAdminPromptShown()
+            await launchGame(pendingAppId, pendingExePath, false)
+          }
+        }}
+        onClose={() => {
+          setAdminPromptOpen(false)
+          setPendingExePath(null)
+          setPendingAppId(null)
+        }}
       />
     </div>
   )

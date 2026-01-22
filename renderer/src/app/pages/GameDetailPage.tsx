@@ -28,6 +28,7 @@ import {
   X,
 } from "lucide-react"
 import { ExePickerModal } from "@/components/ExePickerModal"
+import { AdminPromptModal } from "@/components/AdminPromptModal"
 
 export function GameDetailPage() {
   const params = useParams()
@@ -49,6 +50,8 @@ export function GameDetailPage() {
   const [stoppingGame, setStoppingGame] = useState(false)
   const [lightboxOpen, setLightboxOpen] = useState(false)
   const [lightboxIndex, setLightboxIndex] = useState(0)
+  const [adminPromptOpen, setAdminPromptOpen] = useState(false)
+  const [pendingExePath, setPendingExePath] = useState<string | null>(null)
 
   const appid = params.id || ""
 
@@ -235,24 +238,26 @@ export function GameDetailPage() {
     if (!window.ucDownloads?.listGameExecutables || !window.ucDownloads?.launchGameExecutable) return
     try {
       const savedExe = await getSavedExe()
+      const runAsAdminEnabled = await getRunAsAdminEnabled()
+      
       if (savedExe) {
-        const res = await window.ucDownloads.launchGameExecutable(game.appid, savedExe)
-        if (res && res.ok) {
-          setIsGameRunning(true)
-          return
-        }
-        await setSavedExe(null)
+        await launchGame(savedExe, runAsAdminEnabled)
+        return
       }
+      
       const result = await window.ucDownloads.listGameExecutables(game.appid)
       const exes = result?.exes || []
       const { pick, confident } = pickGameExecutable(exes, game.name)
       if (pick && confident) {
-        const res = await window.ucDownloads.launchGameExecutable(game.appid, pick.path)
-        if (res && res.ok) {
-          await setSavedExe(pick.path)
-          setIsGameRunning(true)
-          return
+        setPendingExePath(pick.path)
+        const promptShown = await getAdminPromptShown()
+        
+        if (!promptShown) {
+          setAdminPromptOpen(true)
+        } else {
+          await launchGame(pick.path, runAsAdminEnabled)
         }
+        return
       }
       openExePicker(exes)
     } catch {}
@@ -350,18 +355,63 @@ export function GameDetailPage() {
     } catch {}
   }
 
+  const getAdminPromptShown = async () => {
+    if (!window.ucSettings?.get) return false
+    try {
+      return await window.ucSettings.get('adminPromptShown')
+    } catch {
+      return false
+    }
+  }
+
+  const setAdminPromptShown = async () => {
+    if (!window.ucSettings?.set) return
+    try {
+      await window.ucSettings.set('adminPromptShown', true)
+    } catch {}
+  }
+
+  const getRunAsAdminEnabled = async () => {
+    if (!window.ucSettings?.get) return false
+    try {
+      return await window.ucSettings.get('runGamesAsAdmin')
+    } catch {
+      return false
+    }
+  }
+
   const openExePicker = (exes: Array<{ name: string; path: string }>) => {
     setExePickerExes(exes)
     setExePickerOpen(true)
   }
 
-  const handleExePicked = async (path: string) => {
-    if (!window.ucDownloads?.launchGameExecutable) return
-    const res = await window.ucDownloads.launchGameExecutable(game.appid, path)
+  const launchGame = async (path: string, asAdmin: boolean = false) => {
+    if (!window.ucDownloads) return
+    const launchFn = asAdmin 
+      ? window.ucDownloads.launchGameExecutableAsAdmin 
+      : window.ucDownloads.launchGameExecutable
+    
+    if (!launchFn) return
+    const res = await launchFn(game.appid, path)
     if (res && res.ok) {
       await setSavedExe(path)
       setExePickerOpen(false)
+      setAdminPromptOpen(false)
+      setPendingExePath(null)
       setIsGameRunning(true)
+    }
+  }
+
+  const handleExePicked = async (path: string) => {
+    setPendingExePath(path)
+    const promptShown = await getAdminPromptShown()
+    const runAsAdminEnabled = await getRunAsAdminEnabled()
+    
+    if (!promptShown) {
+      setAdminPromptOpen(true)
+      setExePickerOpen(false)
+    } else {
+      await launchGame(path, runAsAdminEnabled)
     }
   }
 
@@ -712,6 +762,28 @@ export function GameDetailPage() {
         exes={exePickerExes}
         onSelect={handleExePicked}
         onClose={() => setExePickerOpen(false)}
+      />
+      <AdminPromptModal
+        open={adminPromptOpen}
+        gameName={game.name}
+        onRunAsAdmin={async () => {
+          if (pendingExePath) {
+            await window.ucSettings?.set?.('runGamesAsAdmin', true)
+            await setAdminPromptShown()
+            await launchGame(pendingExePath, true)
+          }
+        }}
+        onContinueWithoutAdmin={async () => {
+          if (pendingExePath) {
+            await window.ucSettings?.set?.('runGamesAsAdmin', false)
+            await setAdminPromptShown()
+            await launchGame(pendingExePath, false)
+          }
+        }}
+        onClose={() => {
+          setAdminPromptOpen(false)
+          setPendingExePath(null)
+        }}
       />
     </div>
   )
