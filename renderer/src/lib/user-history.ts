@@ -32,7 +32,7 @@ export function getUserHistory(): UserHistory {
       lastUpdated: typeof history.lastUpdated === "number" ? history.lastUpdated : Date.now(),
     }
   } catch (error) {
-    console.error("[UC] Error parsing user history:", error)
+    logger.error("Error parsing user history", { data: error })
     return getDefaultHistory()
   }
 }
@@ -54,7 +54,7 @@ export function saveUserHistory(history: UserHistory): void {
 
     document.cookie = `${HISTORY_COOKIE_NAME}=${encoded}; expires=${expiryDate.toUTCString()}; path=/; SameSite=Lax`
   } catch (error) {
-    console.error("[UC] Error saving user history:", error)
+    logger.error("Error saving user history", { data: error })
   }
 }
 

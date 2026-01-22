@@ -193,7 +193,7 @@ export async function getPreferredDownloadHost(): Promise<PreferredDownloadHost>
         return stored as PreferredDownloadHost
       }
     } catch (err) {
-      console.warn('[UC] Failed to get defaultMirrorHost from settings:', err)
+      downloadLogger.warn('Failed to get defaultMirrorHost from settings', { data: err })
     }
   }
   
@@ -213,7 +213,7 @@ export function setPreferredDownloadHost(host: PreferredDownloadHost) {
   // Save to electron settings (synchronized with Settings UI)
   if (window.ucSettings?.set) {
     window.ucSettings.set('defaultMirrorHost', host).catch((err: any) => {
-      console.warn('[UC] Failed to set defaultMirrorHost:', err)
+      downloadLogger.warn('Failed to set defaultMirrorHost', { data: err })
     })
   }
   

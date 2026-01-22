@@ -113,7 +113,8 @@ export function proxyImageUrl(imageUrl: string): string {
     const encodedUrl = encodeURIComponent(imageUrl)
     return apiUrl(`/api/images/${encodedUrl}`)
   } catch (error) {
-    console.error("Error encoding image URL for proxy:", error)
+    // Error encoding image URL - silently fail
+    return imageUrl
     return imageUrl
   }
 }

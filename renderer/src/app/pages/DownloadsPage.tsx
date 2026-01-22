@@ -325,7 +325,7 @@ export function DownloadsPage() {
           setRunningGames(running)
         }
       } catch (err) {
-        console.error('[UC] Failed to check running games:', err)
+        gameLogger.error('Failed to check running games', { data: err })
       }
     }
     
@@ -433,7 +433,7 @@ export function DownloadsPage() {
         setRunningGames((prev) => prev.filter((g) => g.appid !== appid))
       }
     } catch (err) {
-      console.error('[UC] Failed to quit game:', err)
+      gameLogger.error('Failed to quit game', { data: err })
     }
   }
 

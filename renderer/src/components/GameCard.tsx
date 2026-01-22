@@ -191,7 +191,7 @@ export const GameCard = memo(function GameCard({
           setIsRunning(false)
         }
       } catch (err) {
-        console.error('[UC] Failed to quit game:', err)
+        gameLogger.error('Failed to quit game', { data: err })
       }
       return
     }

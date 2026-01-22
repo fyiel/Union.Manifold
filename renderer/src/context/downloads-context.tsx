@@ -12,6 +12,7 @@ import {
   selectHost,
 } from "@/lib/downloads"
 import { addDownloadedGameToHistory, hasCookieConsent } from "@/lib/user-history"
+import { downloadLogger } from "@/lib/logger"
 
 export type DownloadStatus =
   | "queued"
@@ -419,7 +420,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         
         // If preferred host wasn't available, warn user (but use the fallback)
         if (selected.host !== preferredHost) {
-          console.warn(`[UC] Preferred host "${preferredHost}" not available, using "${selected.host}" instead`)
+          downloadLogger.warn(`Preferred host "${preferredHost}" not available, using "${selected.host}" instead`)
         }
         
         links = selected.links
