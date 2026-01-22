@@ -18,7 +18,6 @@ import {
   PaginationPrevious,
 } from "@/components/ui/pagination"
 import { apiUrl } from "@/lib/api"
-import { getRecentlyDownloadedGames, hasCookieConsent } from "@/lib/user-history"
 import { formatNumber, generateErrorCode, ErrorTypes } from "@/lib/utils"
 import { Hammer, SlidersHorizontal, Wifi, EyeOff, ArrowRight, Server } from "lucide-react"
 
@@ -54,7 +53,6 @@ export function LauncherPage() {
   const [refreshKey, setRefreshKey] = useState(0)
   const [gamesError, setGamesError] = useState<{ type: string; message: string; code: string } | null>(null)
   const [currentPage, setCurrentPage] = useState(1)
-  const [recentlyInstalledIds, setRecentlyInstalledIds] = useState<string[]>([])
   const [recentlyInstalledGames, setRecentlyInstalledGames] = useState<Game[]>([])
   const itemsPerPage = 20
 
@@ -63,21 +61,8 @@ export function LauncherPage() {
   }, [])
 
   useEffect(() => {
-    if (!hasCookieConsent()) {
-      setRecentlyInstalledIds([])
-      return
-    }
-    setRecentlyInstalledIds(getRecentlyDownloadedGames(12))
-  }, [refreshKey])
-
-  useEffect(() => {
     let ignore = false
     const loadInstalled = async () => {
-      if (recentlyInstalledIds.length === 0) {
-        setRecentlyInstalledGames([])
-        return
-      }
-
       const installedMap = new Map<string, Game>()
       try {
         if (typeof window !== "undefined") {
@@ -103,10 +88,10 @@ export function LauncherPage() {
         // ignore installed lookup failures
       }
 
-      const resolved = recentlyInstalledIds
-        .map((appid) => games.find((game) => game.appid === appid) || installedMap.get(appid))
-        .filter((game): game is Game => Boolean(game))
-        .slice(0, 10)
+      const installedGames = Array.from(installedMap.values())
+      // prefer most recently added if available
+      installedGames.sort((a: any, b: any) => (b.addedAt || 0) - (a.addedAt || 0))
+      const resolved = installedGames.slice(0, 10)
 
       if (!ignore) {
         setRecentlyInstalledGames(resolved)
@@ -118,7 +103,7 @@ export function LauncherPage() {
     return () => {
       ignore = true
     }
-  }, [recentlyInstalledIds, games])
+  }, [refreshKey])
 
   useEffect(() => {
     if (typeof window === "undefined") return
