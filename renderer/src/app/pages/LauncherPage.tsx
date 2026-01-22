@@ -89,10 +89,11 @@ export function LauncherPage() {
           for (const entry of installedList) {
             const meta = (entry && (entry.metadata || entry.game)) || entry
             if (meta && meta.appid) {
+              // Use remote image only; localImage is a file path that can't be used in web context
               installedMap.set(meta.appid, {
                 ...meta,
                 name: meta.name || meta.appid,
-                image: meta.localImage || meta.image || "/banner.png",
+                image: meta.image || "/banner.png",
                 genres: Array.isArray(meta.genres) ? meta.genres : [],
               })
             }

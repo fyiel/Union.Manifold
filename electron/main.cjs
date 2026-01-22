@@ -1633,6 +1633,16 @@ function createWindow() {
               } catch (e) {}
               try { fs.rmdirSync(installingRoot, { recursive: true }) } catch (e) {}
 
+              // Move extracted files from installing folder to installed folder
+              try {
+                const skipNames = new Set()
+                if (archiveToExtract) skipNames.add(path.basename(archiveToExtract))
+                migrateInstallingExtras(installingRoot, installedRoot, skipNames)
+                try { fs.rmdirSync(installingRoot, { recursive: true }) } catch (e) {}
+                uc_log(`moved extracted files to installed folder for ${entry?.appid}`)
+              } catch (e) {
+                uc_log(`failed to migrate extracted files: ${String(e)}`)
+              }
               sendDownloadUpdate(mainWindow, { downloadId, status: 'extracted', extracted: extractedFiles, savePath: null, appid: entry?.appid || null })
             } else {
               uc_log(`extraction failed for ${archiveToExtract}: ${res && res.error ? res.error : 'unknown'}`)
@@ -1733,6 +1743,7 @@ function createWindow() {
         partIndex: entry?.partIndex,
         partTotal: entry?.partTotal
       })
+      // Update manifest for failed downloads only - completed downloads are moved to installed folder
       if (entry?.appid && terminalStatus !== 'completed') {
         updateInstallingManifestStatus(entry.appid, terminalStatus, terminalError)
       }
