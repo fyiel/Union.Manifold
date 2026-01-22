@@ -357,6 +357,10 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         queueMicrotask(() => {
           void startNextQueuedPart()
         })
+        // Dispatch event so launcher page knows to refresh installed list
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("uc_game_installed", { detail: { appid: update.appid } }))
+        }
       }
     })
   }, [startNextQueuedPart])
