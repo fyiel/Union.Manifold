@@ -49,7 +49,7 @@ export function LogViewer() {
           View Logs
         </Button>
       </DialogTrigger>
-      <DialogContent className="max-w-4xl max-h-[80vh]">
+      <DialogContent className="max-w-2xl max-h-[60vh]">
         <DialogHeader>
           <DialogTitle>Application Logs</DialogTitle>
           <DialogDescription>
@@ -64,7 +64,7 @@ export function LogViewer() {
             Clear Logs
           </Button>
         </div>
-        <ScrollArea className="h-[500px] w-full rounded-md border p-4">
+        <ScrollArea className="h-[300px] w-full rounded-md border p-4">
           <pre className="text-xs font-mono whitespace-pre-wrap break-words">
             {logs || "No logs available"}
           </pre>

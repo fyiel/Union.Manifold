@@ -7,6 +7,7 @@ import { GameCard } from "@/components/GameCard"
 import { GameComments } from "@/components/GameComments"
 import { useDownloads } from "@/context/downloads-context"
 import { apiUrl } from "@/lib/api"
+import { getPreferredDownloadHost, setPreferredDownloadHost, type PreferredDownloadHost } from "@/lib/downloads"
 import { formatNumber, hasOnlineMode, pickGameExecutable, proxyImageUrl } from "@/lib/utils"
 import type { Game } from "@/lib/types"
 import { useGamesData } from "@/hooks/use-games"
@@ -29,6 +30,7 @@ import {
 } from "lucide-react"
 import { ExePickerModal } from "@/components/ExePickerModal"
 import { AdminPromptModal } from "@/components/AdminPromptModal"
+import { DownloadHostModal } from "@/components/DownloadHostModal"
 
 export function GameDetailPage() {
   const params = useParams()
@@ -52,6 +54,9 @@ export function GameDetailPage() {
   const [lightboxIndex, setLightboxIndex] = useState(0)
   const [adminPromptOpen, setAdminPromptOpen] = useState(false)
   const [pendingExePath, setPendingExePath] = useState<string | null>(null)
+  const [hostSelectorOpen, setHostSelectorOpen] = useState(false)
+  const [selectedHost, setSelectedHost] = useState<PreferredDownloadHost>("pixeldrain")
+  const [defaultHost, setDefaultHost] = useState<PreferredDownloadHost>("pixeldrain")
 
   const appid = params.id || ""
 
@@ -204,7 +209,22 @@ export function GameDetailPage() {
     return () => window.removeEventListener("keydown", onKey)
   }, [lightboxOpen])
 
-  const startDownload = async () => {
+  const openHostSelector = async () => {
+    const dontShowHostSelector = await window.ucSettings?.get?.('dontShowHostSelector')
+    if (dontShowHostSelector) {
+      const preferred = await getPreferredDownloadHost()
+      await startDownload(preferred)
+      return
+    }
+    setHostSelectorOpen(true)
+    try {
+      const preferred = await getPreferredDownloadHost()
+      setSelectedHost(preferred)
+      setDefaultHost(preferred)
+    } catch {}
+  }
+
+  const startDownload = async (preferredHost?: PreferredDownloadHost) => {
     if (!game) return
     const isCancelled = downloads.some((item) => item.appid === game.appid && item.status === "cancelled")
     const hasFailedDownload = downloads.some(
@@ -224,7 +244,7 @@ export function GameDetailPage() {
     setDownloadError(null)
     setDownloading(true)
     try {
-      await startGameDownload(game)
+      await startGameDownload(game, preferredHost)
       setDownloadCount((prev) => prev + 1)
     } catch (err) {
       setDownloadError(err instanceof Error ? err.message : "Failed to start download")
@@ -277,12 +297,12 @@ export function GameDetailPage() {
   }, [games, stats])
 
   const relatedGames = useMemo(() => {
-    if (!game) return []
+    if (!game || !game.genres) return []
     const currentGenres = new Set(game.genres.map((genre) => genre.toLowerCase()))
     const isCurrentNSFW = currentGenres.has("nsfw")
     const candidates = games.filter((g) => g.appid !== game.appid)
     const filtered = candidates.filter((g) => {
-      const genres = g.genres.map((genre) => genre.toLowerCase())
+      const genres = Array.isArray(g.genres) ? g.genres.map((genre) => genre.toLowerCase()) : []
       const isNsfw = genres.includes("nsfw")
       if (isCurrentNSFW && !isNsfw) return false
       if (!isCurrentNSFW && isNsfw) return false
@@ -574,7 +594,7 @@ export function GameDetailPage() {
                     } else if (isPaused) {
                       void resumeGroup(game.appid)
                     } else {
-                      void startDownload()
+                      void openHostSelector()
                     }
                   }}
                   disabled={actionDisabled}
@@ -587,7 +607,7 @@ export function GameDetailPage() {
                   <Button
                     variant="secondary"
                     className="mt-3 w-full"
-                    onClick={() => void startDownload()}
+                    onClick={() => void openHostSelector()}
                     disabled={downloading}
                   >
                     <RefreshCw className="mr-2 h-4 w-4" />
@@ -755,6 +775,23 @@ export function GameDetailPage() {
           </div>
         </div>
       )}
+      <DownloadHostModal
+        open={hostSelectorOpen}
+        selectedHost={selectedHost}
+        defaultHost={defaultHost}
+        onSelect={setSelectedHost}
+        onConfirm={async (dontShowAgain) => {
+          setHostSelectorOpen(false)
+          try {
+            setPreferredDownloadHost(selectedHost)
+            if (dontShowAgain) {
+              await window.ucSettings?.set?.('dontShowHostSelector', true)
+            }
+          } catch {}
+          await startDownload(selectedHost)
+        }}
+        onClose={() => setHostSelectorOpen(false)}
+      />
       <ExePickerModal
         open={exePickerOpen}
         title="Select executable"
