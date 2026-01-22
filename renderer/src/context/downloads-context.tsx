@@ -153,6 +153,44 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
   }, [downloads])
   const preparingRef = useRef(new Set<string>())
   const sequenceLocksRef = useRef(new Set<string>())
+  const reconcileLocksRef = useRef(new Set<string>())
+
+  const reconcileInstalledState = useCallback(
+    async (appid?: string | null) => {
+      if (!appid || !window.ucDownloads?.getInstalled) return
+      if (reconcileLocksRef.current.has(appid)) return
+      reconcileLocksRef.current.add(appid)
+      try {
+        const installed = await window.ucDownloads.getInstalled(appid)
+        if (!installed) return
+        setDownloads((prev) => {
+          let mutated = false
+          const next = prev.map((item) => {
+            if (item.appid !== appid) return item
+            if (["completed", "extracted"].includes(item.status)) return item
+            mutated = true
+            return {
+              ...item,
+              status: "completed",
+              error: null,
+              completedAt: Date.now(),
+              receivedBytes: item.totalBytes || item.receivedBytes,
+            }
+          })
+          if (mutated) downloadsRef.current = next
+          return next
+        })
+        try {
+          await window.ucDownloads.deleteInstalling?.(appid)
+        } catch {}
+      } catch {
+        // ignore
+      } finally {
+        reconcileLocksRef.current.delete(appid)
+      }
+    },
+    []
+  )
 
   // Installed metadata is stored by the main process as a file inside the installed folder.
 
@@ -372,8 +410,30 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
           window.dispatchEvent(new CustomEvent("uc_game_installed", { detail: { appid: update.appid } }))
         }
       }
+
+      if (update.appid && (update.status === "extracting" || update.status === "installing" || update.status === "completed" || update.status === "extracted")) {
+        queueMicrotask(() => {
+          void reconcileInstalledState(update.appid)
+        })
+      }
     })
   }, [startNextQueuedPart])
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const interval = setInterval(() => {
+      const appids = new Set(
+        downloadsRef.current
+          .filter((item) => ["extracting", "installing", "paused"].includes(item.status))
+          .map((item) => item.appid)
+          .filter(Boolean) as string[]
+      )
+      for (const appid of appids) {
+        void reconcileInstalledState(appid)
+      }
+    }, 8000)
+    return () => clearInterval(interval)
+  }, [reconcileInstalledState])
 
   // The main process writes installed manifests; renderer can call `window.ucDownloads.listInstalled()` when needed.
 

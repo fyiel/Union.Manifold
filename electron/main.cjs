@@ -1631,19 +1631,53 @@ function createWindow() {
                   try { fs.unlinkSync(archiveToExtract); uc_log(`deleted archive ${archiveToExtract} from installing folder`) } catch (e) { uc_log(`failed to delete archive: ${String(e)}`) }
                 }
               } catch (e) {}
-              try { fs.rmdirSync(installingRoot, { recursive: true }) } catch (e) {}
 
               // Move extracted files from installing folder to installed folder
               try {
                 const skipNames = new Set()
                 if (archiveToExtract) skipNames.add(path.basename(archiveToExtract))
                 migrateInstallingExtras(installingRoot, installedRoot, skipNames)
-                try { fs.rmdirSync(installingRoot, { recursive: true }) } catch (e) {}
                 uc_log(`moved extracted files to installed folder for ${entry?.appid}`)
               } catch (e) {
                 uc_log(`failed to migrate extracted files: ${String(e)}`)
               }
+
+              // Clean up installing folder and manifest after successful extraction
+              try {
+                try {
+                  if (entry?.appid) updateInstallingManifestStatus(entry.appid, 'completed', null)
+                } catch (e) {}
+                if (fs.existsSync(installingRoot)) {
+                  fs.rmSync(installingRoot, { recursive: true, force: true })
+                  uc_log(`deleted installing folder for ${entry?.appid}`)
+                }
+              } catch (e) {
+                uc_log(`failed to delete installing folder: ${String(e)}`)
+              }
+
               sendDownloadUpdate(mainWindow, { downloadId, status: 'extracted', extracted: extractedFiles, savePath: null, appid: entry?.appid || null })
+              try {
+                const stDone = archiveToExtract && fs.existsSync(archiveToExtract) ? fs.statSync(archiveToExtract) : null
+                const totalBytesDone = totalBytesOverride != null ? totalBytesOverride : stDone ? stDone.size : 0
+                sendDownloadUpdate(mainWindow, {
+                  downloadId,
+                  status: 'completed',
+                  receivedBytes: totalBytesDone,
+                  totalBytes: totalBytesDone,
+                  speedBps: 0,
+                  etaSeconds: 0,
+                  filename: archiveToExtract ? path.basename(archiveToExtract) : null,
+                  savePath: null,
+                  appid: entry?.appid || null,
+                  gameName: entry?.gameName || null,
+                  url: entry?.url || null,
+                  partIndex: entry?.partIndex,
+                  partTotal: entry?.partTotal
+                })
+                uc_log(`emitted final completed status for ${entry?.appid}`)
+              } catch (e) {
+                uc_log(`failed to emit final completed status: ${String(e)}`)
+              }
             } else {
               uc_log(`extraction failed for ${archiveToExtract}: ${res && res.error ? res.error : 'unknown'}`)
               extractionFailed = true
@@ -1682,8 +1716,22 @@ function createWindow() {
                 const basenameFinal = finalPath ? path.basename(finalPath) : null
                 if (basenameFinal) skipNames.add(basenameFinal)
                 migrateInstallingExtras(installingRoot, installedRoot, skipNames)
-                try { fs.rmdirSync(installingRoot, { recursive: true }) } catch (e) {}
-              } catch (e) {}
+              } catch (e) {
+                uc_log(`failed to migrate non-archive extras: ${String(e)}`)
+              }
+
+              // Clean up installing folder after moving to installed
+              try {
+                try {
+                  if (entry?.appid) updateInstallingManifestStatus(entry.appid, 'completed', null)
+                } catch (e) {}
+                if (fs.existsSync(installingRoot)) {
+                  fs.rmSync(installingRoot, { recursive: true, force: true })
+                  uc_log(`deleted installing folder for non-archive ${entry?.appid}`)
+                }
+              } catch (e) {
+                uc_log(`failed to delete installing folder for non-archive: ${String(e)}`)
+              }
 
               // update installed manifest in the installed folder
               try {
@@ -2221,7 +2269,11 @@ ipcMain.handle('uc:installing-list', (_event) => {
   try {
     const downloadRoot = ensureDownloadDir()
     const root = path.join(downloadRoot, installingDirName)
-    return listManifestsFromRoot(root, false)
+    const items = listManifestsFromRoot(root, false)
+    return items.filter((item) => {
+      const status = item && typeof item.installStatus === 'string' ? item.installStatus : null
+      return status !== 'completed' && status !== 'extracted'
+    })
   } catch (err) {
     console.error('[UC] installing-list failed', err)
     return []
@@ -2255,7 +2307,11 @@ ipcMain.handle('uc:installing-list-global', (_event) => {
     for (const root of roots) {
       const installingRoot = path.join(root, installingDirName)
       const items = listManifestsFromRoot(installingRoot, false)
-      for (const item of items) all.push(item)
+      for (const item of items) {
+        const status = item && typeof item.installStatus === 'string' ? item.installStatus : null
+        if (status === 'completed' || status === 'extracted') continue
+        all.push(item)
+      }
     }
     const seen = new Set()
     return all.filter((item) => {
@@ -2352,6 +2408,53 @@ ipcMain.handle('uc:game-exe-launch', async (_event, appid, exePath) => {
     }
   } catch (err) {
     ucLog(`Game launch error: ${appid} - ${err.message}`, 'error')
+    return { ok: false }
+  }
+})
+
+ipcMain.handle('uc:game-exe-launch-admin', async (_event, appid, exePath) => {
+  try {
+    if (!exePath || typeof exePath !== 'string') return { ok: false }
+    ucLog(`Launching game as admin: ${appid} at ${exePath}`)
+    try {
+      const proc = child_process.spawn('powershell.exe', [
+        '-Command',
+        `Start-Process "${exePath}" -Verb RunAs`
+      ], {
+        detached: true,
+        stdio: 'ignore',
+        windowsHide: true
+      })
+      proc.unref()
+      // Note: We can't reliably get PID of admin process, but we register the attempt
+      registerRunningGame(appid, exePath, proc)
+      ucLog(`Game launched as admin successfully: ${appid}`)
+      return { ok: true, pid: proc.pid }
+    } catch (err) {
+      ucLog(`Game launch as admin failed: ${appid} - ${err.message}`, 'error')
+      // Fallback to regular launch
+      try {
+        const proc = child_process.spawn(exePath, [], {
+          detached: true,
+          stdio: 'ignore',
+          windowsHide: false
+        })
+        proc.unref()
+        registerRunningGame(appid, exePath, proc)
+        ucLog(`Game launched with fallback: ${appid} (PID: ${proc.pid})`)
+        return { ok: true, pid: proc.pid }
+      } catch (fallbackErr) {
+        const res = await shell.openPath(exePath)
+        if (res && typeof res === 'string' && res.length > 0) {
+          ucLog(`Game launch fallback failed: ${appid} - ${res}`, 'error')
+          return { ok: false, error: res }
+        }
+        ucLog(`Game opened via shell: ${appid}`)
+        return { ok: true }
+      }
+    }
+  } catch (err) {
+    ucLog(`Game launch as admin error: ${appid} - ${err.message}`, 'error')
     return { ok: false }
   }
 })

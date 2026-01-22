@@ -67,6 +67,7 @@ export function SettingsPage() {
   const [checkingUpdate, setCheckingUpdate] = useState(false)
   const [appVersion, setAppVersion] = useState<string>("")
   const [updateCheckResult, setUpdateCheckResult] = useState<string | null>(null)
+  const [runGamesAsAdmin, setRunGamesAsAdmin] = useState(false)
 
   useEffect(() => {
     const loadVersion = async () => {
@@ -115,6 +116,31 @@ export function SettingsPage() {
       if (!data || !data.key) return
       if (data.key === 'defaultMirrorHost' && data.value && MIRROR_HOSTS.some((h) => h.key === data.value)) {
         setDefaultHost(data.value)
+      }
+    })
+    return () => {
+      mounted = false
+      if (typeof off === 'function') off()
+    }
+  }, [])
+
+  useEffect(() => {
+    let mounted = true
+    const loadAdminSetting = async () => {
+      try {
+        const value = await window.ucSettings?.get?.('runGamesAsAdmin')
+        if (mounted) {
+          setRunGamesAsAdmin(value || false)
+        }
+      } catch {
+        // ignore
+      }
+    }
+    loadAdminSetting()
+    const off = window.ucSettings?.onChanged?.((data: any) => {
+      if (!data || !data.key) return
+      if (data.key === 'runGamesAsAdmin') {
+        setRunGamesAsAdmin(data.value || false)
       }
     })
     return () => {
@@ -444,6 +470,51 @@ const handleCheckForUpdates = async () => {
       <Card className="border-border/60">
         <CardContent className="p-6 space-y-4">
           <div>
+            <h2 className="text-lg font-semibold">Game Launch</h2>
+            <p className="text-sm text-muted-foreground">
+              Configure how games are launched on your system.
+            </p>
+          </div>
+
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <label className="text-sm font-medium cursor-pointer">Run games as Administrator</label>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Automatically launch games with admin privileges
+                </p>
+              </div>
+              <button
+                onClick={async () => {
+                  const newValue = !runGamesAsAdmin
+                  setRunGamesAsAdmin(newValue)
+                  try {
+                    await window.ucSettings?.set?.('runGamesAsAdmin', newValue)
+                  } catch {}
+                }}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                  runGamesAsAdmin ? 'bg-primary' : 'bg-slate-700'
+                }`}
+                title="Toggle run games as admin"
+              >
+                <span
+                  className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                    runGamesAsAdmin ? 'translate-x-6' : 'translate-x-1'
+                  }`}
+                />
+              </button>
+            </div>
+
+            <div className="rounded-lg border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-xs text-blue-200">
+              The admin prompt appears only once on your first game launch.
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="border-border/60">
+        <CardContent className="p-6 space-y-4">
+          <div>
             <h2 className="text-lg font-semibold">Application Logs</h2>
             <p className="text-sm text-muted-foreground">
               View and manage application logs for debugging and troubleshooting.
@@ -455,3 +526,5 @@ const handleCheckForUpdates = async () => {
     </div>
   )
 }
+
+
