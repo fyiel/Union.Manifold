@@ -1009,6 +1009,7 @@ function startNextQueuedDownload(lastCompletedAppid) {
   if (!globalDownloadQueue.length) return
   
   // If we have a lastCompletedAppid, prioritize remaining parts of the same game
+  // Note: findIndex is O(n) but typical queue sizes are small (< 20 items)
   let nextIndex = 0
   if (lastCompletedAppid) {
     // Find the next download for the same appid (multi-part downloads)
@@ -1018,6 +1019,8 @@ function startNextQueuedDownload(lastCompletedAppid) {
   }
   
   const next = globalDownloadQueue.splice(nextIndex, 1)[0]
+  if (!next) return // Safety check in case queue was modified concurrently
+  
   const win = getWindowByWebContentsId(next.webContentsId)
   if (!win || win.isDestroyed()) return
   startDownloadNow(win, next.payload)
