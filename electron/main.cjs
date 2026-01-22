@@ -1004,10 +1004,20 @@ function startDownloadNow(win, payload) {
   return { ok: true }
 }
 
-function startNextQueuedDownload() {
+function startNextQueuedDownload(lastCompletedAppid) {
   if (hasAnyActiveOrPendingDownloads()) return
   if (!globalDownloadQueue.length) return
-  const next = globalDownloadQueue.shift()
+  
+  // If we have a lastCompletedAppid, prioritize remaining parts of the same game
+  let nextIndex = 0
+  if (lastCompletedAppid) {
+    // Find the next download for the same appid (multi-part downloads)
+    nextIndex = globalDownloadQueue.findIndex(entry => entry?.payload?.appid === lastCompletedAppid)
+    // If not found, default to first item (FIFO for different games)
+    if (nextIndex === -1) nextIndex = 0
+  }
+  
+  const next = globalDownloadQueue.splice(nextIndex, 1)[0]
   const win = getWindowByWebContentsId(next.webContentsId)
   if (!win || win.isDestroyed()) return
   startDownloadNow(win, next.payload)
@@ -1833,7 +1843,7 @@ function createWindow() {
           flushQueuedGlobalDownloads(entry.appid, terminalStatus, terminalError)
         }
       }
-      startNextQueuedDownload()
+      startNextQueuedDownload(entry?.appid)
     })
   })
 }
