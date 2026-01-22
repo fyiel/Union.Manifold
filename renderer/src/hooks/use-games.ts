@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 import { apiUrl } from "@/lib/api"
 import type { Game, GameStats } from "@/lib/types"
+import { gameLogger } from "@/lib/logger"
 
 type GamesDataState = {
   games: Game[]
@@ -40,7 +41,7 @@ async function readInstalledGames(): Promise<Game[]> {
         .filter(Boolean) as Game[]
     }
   } catch (err) {
-    console.error('[UC] readInstalledGames failed', err)
+    gameLogger.error('readInstalledGames failed', { data: err })
   }
   return []
 }

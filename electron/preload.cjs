@@ -67,6 +67,12 @@ contextBridge.exposeInMainWorld('ucUpdater', {
   getVersion: () => ipcRenderer.invoke('uc:get-version')
 })
 
+contextBridge.exposeInMainWorld('ucLogs', {
+  log: (level, message, data) => ipcRenderer.invoke('uc:log', level, message, data),
+  getLogs: () => ipcRenderer.invoke('uc:logs-get'),
+  clearLogs: () => ipcRenderer.invoke('uc:logs-clear')
+})
+
 contextBridge.exposeInMainWorld('electron', {
   ipcRenderer: {
     on: (channel, func) => {

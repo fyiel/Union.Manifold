@@ -8,6 +8,7 @@ import {
   getPreferredDownloadHost,
   setPreferredDownloadHost,
 } from "@/lib/downloads"
+import { LogViewer } from "@/components/LogViewer"
 type MirrorHost = 'rootz' | 'pixeldrain'
 
 type MirrorHostTag = 'beta' | 'soon'
@@ -437,6 +438,18 @@ const handleCheckForUpdates = async () => {
               </div>
             )}
           </div>
+        </CardContent>
+      </Card>
+
+      <Card className="border-border/60">
+        <CardContent className="p-6 space-y-4">
+          <div>
+            <h2 className="text-lg font-semibold">Application Logs</h2>
+            <p className="text-sm text-muted-foreground">
+              View and manage application logs for debugging and troubleshooting.
+            </p>
+          </div>
+          <LogViewer />
         </CardContent>
       </Card>
     </div>

@@ -118,6 +118,11 @@ declare global {
       installUpdate: () => void
       getVersion: () => Promise<string>
     }
+    ucLogs?: {
+      log: (level: string, message: string, data?: any) => Promise<void>
+      getLogs: () => Promise<string>
+      clearLogs: () => Promise<void>
+    }
     electron?: {
       ipcRenderer: {
         on: (channel: string, func: (...args: any[]) => void) => void

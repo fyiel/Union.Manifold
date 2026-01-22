@@ -32,42 +32,45 @@ const appLogsPath = path.join(app.getPath('userData'), 'app-logs.txt')
 let cachedSettings = null
 
 // === Global Logging System ===
-function ucLog(message, level = 'info') {
+function ucLog(message, level = 'info', data = null) {
   const timestamp = new Date().toISOString()
   const levelTag = level.toUpperCase().padEnd(5)
-  const logLine = `[${timestamp}] [${levelTag}] ${message}\n`
+  const dataStr = data ? ` | Data: ${JSON.stringify(data)}` : ''
+  const logLine = `[${timestamp}] [${levelTag}] ${message}${dataStr}\n`
   try {
     fs.appendFileSync(appLogsPath, logLine)
   } catch (err) {
     console.error('[UC] Failed to write log:', err)
   }
   const consoleMethod = level === 'error' ? console.error : level === 'warn' ? console.warn : console.log
-  consoleMethod(`[UC] [${level.toUpperCase()}]`, message)
+  consoleMethod(`[UC] [${level.toUpperCase()}]`, message, data || '')
+}
+
+function getLogs() {
+  try {
+    return fs.readFileSync(appLogsPath, 'utf8')
+  } catch (err) {
+    ucLog(`Failed to read logs: ${err.message}`, 'error')
+    return ''
+  }
 }
 
 function clearLogs() {
   try {
     fs.writeFileSync(appLogsPath, `[${new Date().toISOString()}] [INFO ] === App Log Started ===\n`)
+    ucLog('Logs cleared')
   } catch (err) {
     console.error('[UC] Failed to clear logs:', err)
-  // === IPC Auto-Logging Wrapper ===
-  const originalHandle = ipcMain.handle.bind(ipcMain)
-  ipcMain.handle = (channel, handler) => {
-    return originalHandle(channel, async (...args) => {
-      try {
-        ucLog(`IPC: ${channel} called`)
-        const result = await handler(...args)
-        ucLog(`IPC: ${channel} success`)
-        return result
-      } catch (err) {
-        ucLog(`IPC: ${channel} failed: ${err.message}`, 'error')
-        throw err
-      }
-    })
-  }
-
   }
 }
+
+// Initialize logging
+clearLogs()
+ucLog('UnionCrax.Direct starting...', 'info')
+ucLog(`Version: ${packageJson.version}`, 'info')
+ucLog(`Platform: ${process.platform} ${process.arch}`, 'info')
+ucLog(`Electron: ${process.versions.electron}`, 'info')
+ucLog(`Node: ${process.versions.node}`, 'info')
 
 function resolveIcon() {
   const asset = process.platform === 'win32' ? 'icon.ico' : 'icon.png'
@@ -252,7 +255,7 @@ function writeSettings(next) {
   try {
     fs.writeFileSync(settingsPath, JSON.stringify(next, null, 2))
   } catch (error) {
-    console.error('[UC] Failed to write settings:', error)
+    ucLog(`Failed to write settings: ${error.message}`, 'error')
   }
 }
 
@@ -320,22 +323,41 @@ ipcMain.handle('uc:setting-set', (_event, key, value) => {
         w.webContents.send('uc:setting-changed', { key, value })
       }
     }
+    ucLog(`Setting set: ${key}`)
     return { ok: true }
   } catch (err) {
     console.error('[UC] Failed to set setting', key, err)
+    ucLog(`Setting set failed for ${key}: ${err.message}`, 'error')
     return { ok: false }
   }
 })
 
+// IPC: Logging handlers
+ipcMain.handle('uc:log', async (_event, level, message, data) => {
+  ucLog(message, level, data)
+})
+
+ipcMain.handle('uc:logs-get', async () => {
+  return getLogs()
+})
+
+ipcMain.handle('uc:logs-clear', async () => {
+  clearLogs()
+  return { ok: true }
+})
+
 ipcMain.handle('uc:auth-login', async (event, baseUrl) => {
+  ucLog('Auth login initiated')
   const win = BrowserWindow.fromWebContents(event.sender)
   if (!win || win.isDestroyed()) return { ok: false, error: 'no_window' }
   const authUrl = buildAuthUrl(baseUrl, '/settings')
   const result = await openAuthWindow(win, authUrl)
   if (result?.ok) {
     const sessionData = await getDiscordSession(win.webContents.session, baseUrl)
+    ucLog('Auth login success')
     return { ok: true, ...sessionData }
   }
+  ucLog(`Auth login failed: ${result?.error || 'auth_failed'}`, 'warn')
   return result || { ok: false, error: 'auth_failed' }
 })
 
@@ -545,7 +567,7 @@ function updateInstalledIndex(installedRoot) {
     }
     uc_writeJsonSync(path.join(installedRoot, INSTALLED_INDEX), index)
   } catch (err) {
-    console.error('[UC] updateInstalledIndex failed', err)
+    ucLog(`updateInstalledIndex failed: ${err.message}`, 'error')
   }
 }
 
@@ -554,7 +576,7 @@ function uc_writeJsonSync(filePath, data) {
     fs.writeFileSync(filePath, JSON.stringify(data, null, 2))
     return true
   } catch (err) {
-    console.error('[UC] Failed to write json', filePath, err)
+    ucLog(`Failed to write json ${filePath}: ${err.message}`, 'error')
     return false
   }
 }
@@ -605,7 +627,7 @@ function updateInstalledManifest(installedFolder, metadata, fileEntry) {
       updateInstalledIndex(installedRoot)
     } catch (e) {}
   } catch (err) {
-    console.error('[UC] Failed to update installed manifest', err)
+    ucLog(`Failed to update installed manifest: ${err.message}`, 'error')
   }
 }
 
@@ -1336,6 +1358,7 @@ function killProcessTree(pid) {
 }
 
 function createWindow() {
+  ucLog('Creating main window')
   const iconPath = resolveIcon()
   mainWindow = new BrowserWindow({
     width: 1100,
@@ -1679,7 +1702,7 @@ function createWindow() {
           extractionFailed = true
           extractionError = e && e.message ? e.message : 'extract_failed'
           updateInstallingManifestStatus(entry?.appid, 'failed', extractionError)
-          console.error('[UC] Extraction error:', e)
+          ucLog(`Extraction error: ${e.message}`, 'error')
         }
       }
       const terminalStatus = extractionFailed
@@ -1853,14 +1876,20 @@ app.on('before-quit', () => {
 ipcMain.handle('uc:download-start', (event, payload) => {
   const win = BrowserWindow.fromWebContents(event.sender)
   if (!win || win.isDestroyed()) return { ok: false }
-  if (!payload || !payload.url || !payload.downloadId) return { ok: false }
+  if (!payload || !payload.url || !payload.downloadId) {
+    ucLog('Download start failed: invalid payload', 'warn')
+    return { ok: false }
+  }
   if (isDownloadIdKnown(payload.downloadId)) {
+    ucLog(`Download already exists: ${payload.downloadId}`, 'warn')
     return { ok: false, error: 'already-downloading' }
   }
 
   const appid = payload.appid
+  ucLog(`Download start: ${appid} (${payload.downloadId})`)
   if (hasAnyActiveOrPendingDownloads() || globalDownloadQueue.length > 0) {
     enqueueGlobalDownload(payload, win.webContents.id)
+    ucLog(`Download queued: ${appid}`)
     return { ok: true, queued: true }
   }
 
@@ -2290,6 +2319,7 @@ ipcMain.handle('uc:game-subfolder-find', (_event, folder) => {
 ipcMain.handle('uc:game-exe-launch', async (_event, appid, exePath) => {
   try {
     if (!exePath || typeof exePath !== 'string') return { ok: false }
+    ucLog(`Launching game: ${appid} at ${exePath}`)
     try {
       const proc = child_process.spawn(exePath, [], {
         detached: true,
@@ -2298,16 +2328,19 @@ ipcMain.handle('uc:game-exe-launch', async (_event, appid, exePath) => {
       })
       proc.unref()
       registerRunningGame(appid, exePath, proc)
+      ucLog(`Game launched successfully: ${appid} (PID: ${proc.pid})`)
       return { ok: true, pid: proc.pid }
     } catch (err) {
       const res = await shell.openPath(exePath)
       if (res && typeof res === 'string' && res.length > 0) {
+        ucLog(`Game launch failed: ${appid} - ${res}`, 'error')
         return { ok: false, error: res }
       }
+      ucLog(`Game opened via shell: ${appid}`)
       return { ok: true }
     }
   } catch (err) {
-    console.error('[UC] game-exe-launch failed', err)
+    ucLog(`Game launch error: ${appid} - ${err.message}`, 'error')
     return { ok: false }
   }
 })
@@ -2318,7 +2351,7 @@ ipcMain.handle('uc:game-exe-running', (_event, appid) => {
     if (!running) return { ok: true, running: false }
     return { ok: true, running: true, pid: running.pid, exePath: running.exePath }
   } catch (err) {
-    console.error('[UC] game-exe-running failed', err)
+    ucLog(`Game running check failed: ${appid} - ${err.message}`, 'error')
     return { ok: false, running: false }
   }
 })

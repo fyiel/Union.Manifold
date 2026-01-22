@@ -1,3 +1,5 @@
+import { apiLogger } from "./logger"
+
 const DEFAULT_BASE_URL = "https://union-crax.xyz"
 
 let currentBaseUrl = DEFAULT_BASE_URL
