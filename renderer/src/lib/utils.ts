@@ -147,6 +147,11 @@ export function pickGameExecutable(exes: GameExecutable[], gameName: string, gam
   const candidates = filterGameExecutables(exes)
   if (!candidates.length) return { pick: null, confident: false }
 
+  // If there's only 1 exe, assume it's the correct one
+  if (candidates.length === 1) {
+    return { pick: candidates[0], confident: true }
+  }
+
   // Check if source contains uc-online or similar patterns
   const isUcOnlineSource = gameSource?.toLowerCase().includes("uc-online") || 
                            gameSource?.toLowerCase().includes("uconline") ||
@@ -178,6 +183,6 @@ export function pickGameExecutable(exes: GameExecutable[], gameName: string, gam
 
   const top = scored[0]
   const topScore = top?.score ?? 0
-  const confident = topScore >= 4 || (candidates.length === 1 && topScore >= 1)
+  const confident = topScore >= 4
   return { pick: top ? top.exe : null, confident }
 }
