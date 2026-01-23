@@ -112,6 +112,7 @@ function computeGroupStats(
   const installingItems = items.filter((item) => item.status === "installing")
   const extractingItems = items.filter((item) => item.status === "extracting")
   const downloadingItems = items.filter((item) => item.status === "downloading" || item.status === "paused")
+  const queuedItems = items.filter((item) => item.status === "queued")
   const queuedOnly = items.every((item) => item.status === "queued")
   const pausedOnly = items.every((item) => item.status === "paused")
   const activeItems = installingItems.length
@@ -122,7 +123,13 @@ function computeGroupStats(
         ? downloadingItems
         : items
 
-  const primaryItem = downloadingItems[0] || activeItems[0] || items[0]
+  const primaryItem =
+    downloadingItems[0] ||
+    installingItems[0] ||
+    extractingItems[0] ||
+    queuedItems[0] ||
+    activeItems[0] ||
+    items[0]
   let totalBytes = activeItems.reduce((sum, item) => sum + (item.totalBytes || 0), 0)
   let receivedBytes = activeItems.reduce((sum, item) => sum + (item.receivedBytes || 0), 0)
   const speedBps = activeItems.reduce((sum, item) => sum + (item.speedBps || 0), 0)
@@ -236,9 +243,11 @@ export function DownloadsPage() {
     }, {})
   }, [downloads])
 
-  const activeGroups = Object.values(grouped).filter((items) =>
-    items.some((item) => ["downloading", "paused", "extracting", "installing"].includes(item.status))
-  )
+  const activeGroups = Object.values(grouped).filter((items) => {
+    const hasActive = items.some((item) => ["downloading", "paused", "extracting", "installing"].includes(item.status))
+    const hasCompletedAndQueued = items.some((item) => ["completed", "extracted"].includes(item.status)) && items.some((item) => item.status === "queued")
+    return hasActive || hasCompletedAndQueued
+  })
   const queuedGroups = Object.values(grouped).filter((items) =>
     items.every((item) => item.status === "queued")
   )
