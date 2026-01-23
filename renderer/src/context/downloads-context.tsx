@@ -271,9 +271,15 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
 
   const startNextQueuedPart = useCallback(
     async () => {
-      if (sequenceLocksRef.current.size > 0) return
+      console.log("=== startNextQueuedPart ===")
+      console.log("sequenceLocksRef.current.size:", sequenceLocksRef.current.size)
+      console.log("downloadsRef.current:", downloadsRef.current.map(d => ({ id: d.id, status: d.status, partIndex: d.partIndex, partTotal: d.partTotal })))
+      if (sequenceLocksRef.current.size > 0) {
+        console.log("sequenceLocks active, returning")
+        return
+      }
       const hasActive = downloadsRef.current.some((item) =>
-        ["downloading", "paused", "extracting", "installing"].includes(item.status)
+        ["downloading", "extracting", "installing"].includes(item.status)
       )
       if (hasActive) return
 
@@ -358,6 +364,9 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!window.ucDownloads?.onUpdate) return
     return window.ucDownloads.onUpdate((update: DownloadUpdate) => {
+      console.log("=== onUpdate received ===")
+      console.log("update.status:", update.status)
+      console.log("update.downloadId:", update.downloadId)
       let nextDownloads: DownloadItem[] | null = null
       setDownloads((prev) => {
         const idx = prev.findIndex((item) => item.id === update.downloadId)
@@ -375,7 +384,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         
         const next: DownloadItem = {
           ...existing,
-          status: finalStatus,
+          status: finalStatus as DownloadStatus,
           receivedBytes: update.receivedBytes ?? existing.receivedBytes,
           totalBytes: update.totalBytes ?? existing.totalBytes,
           speedBps: update.speedBps ?? existing.speedBps,
@@ -419,6 +428,18 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
       }
     })
   }, [startNextQueuedPart])
+
+  useEffect(() => {
+    const hasActive = downloads.some((item) =>
+      ["downloading", "extracting", "installing"].includes(item.status)
+    )
+    if (hasActive) return
+    const hasQueued = downloads.some((item) => item.status === "queued")
+    if (!hasQueued) return
+    queueMicrotask(() => {
+      void startNextQueuedPart()
+    })
+  }, [downloads, startNextQueuedPart])
 
   useEffect(() => {
     if (typeof window === "undefined") return
@@ -775,6 +796,10 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
           !["completed", "extracted", "extract_failed", "failed", "cancelled"].includes(item.status)
       )
     )
+    // Call startNextQueuedPart to start the next part after clearing completed
+    queueMicrotask(() => {
+      void startNextQueuedPart()
+    })
   }, [])
 
   const clearByAppid = useCallback((appid: string) => {

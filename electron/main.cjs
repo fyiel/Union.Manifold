@@ -17,6 +17,16 @@ try {
   else app.name = 'UnionCrax.Direct'
 } catch {}
 const pendingDownloads = []
+
+function normalizeDownloadUrl(rawUrl) {
+  if (!rawUrl || typeof rawUrl !== 'string') return rawUrl
+  try {
+    const parsed = new URL(rawUrl)
+    return `${parsed.origin}${parsed.pathname}`
+  } catch {
+    return rawUrl
+  }
+}
 const activeDownloads = new Map()
 const downloadQueues = new Map()
 const globalDownloadQueue = []
@@ -910,8 +920,10 @@ function getMultipartSetInfo(installingRoot, filePath, expectedParts) {
     if (!installingRoot || !filePath) return null
     const basePath = filePath.replace(/\.[0-9]{3}$/i, '')
     const baseName = path.basename(basePath)
+    uc_log(`getMultipartSetInfo: basePath=${basePath} baseName=${baseName} expectedParts=${expectedParts}`)
     if (!fs.existsSync(installingRoot)) return null
     const entries = fs.readdirSync(installingRoot)
+    uc_log(`getMultipartSetInfo: entries=${JSON.stringify(entries)}`)
     const partFiles = []
     const partNumbers = []
     for (const entry of entries) {
@@ -923,6 +935,7 @@ function getMultipartSetInfo(installingRoot, filePath, expectedParts) {
       partNumbers.push(num)
       partFiles.push(path.join(installingRoot, entry))
     }
+    uc_log(`getMultipartSetInfo: partNumbers=${JSON.stringify(partNumbers)}`)
     if (!partNumbers.length || !partNumbers.includes(1)) return null
     partNumbers.sort((a, b) => a - b)
     const max = partNumbers[partNumbers.length - 1]
@@ -930,7 +943,10 @@ function getMultipartSetInfo(installingRoot, filePath, expectedParts) {
     const totalExpected = expectedTotal || max
     if (!expectedTotal && max < 2) return { ready: false, basePath }
     for (let i = 1; i <= totalExpected; i++) {
-      if (!partNumbers.includes(i)) return { ready: false, basePath }
+      if (!partNumbers.includes(i)) {
+        uc_log(`getMultipartSetInfo: part ${i} missing`)
+        return { ready: false, basePath }
+      }
     }
     const totalBytes = partFiles.reduce((sum, p) => {
       try {
@@ -993,6 +1009,7 @@ function startDownloadNow(win, payload) {
   if (!win || win.isDestroyed()) return { ok: false }
   pendingDownloads.push({
     url: payload.url,
+    normalizedUrl: normalizeDownloadUrl(payload.url),
     downloadId: payload.downloadId,
     filename: payload.filename,
     appid: payload.appid,
@@ -1005,6 +1022,10 @@ function startDownloadNow(win, payload) {
 }
 
 function startNextQueuedDownload(lastCompletedAppid) {
+  uc_log(`=== startNextQueuedDownload ===`)
+  uc_log(`lastCompletedAppid: ${lastCompletedAppid}`)
+  uc_log(`hasAnyActiveOrPendingDownloads: ${hasAnyActiveOrPendingDownloads()}`)
+  uc_log(`globalDownloadQueue.length: ${globalDownloadQueue.length}`)
   if (hasAnyActiveOrPendingDownloads()) return
   if (!globalDownloadQueue.length) return
   
@@ -1056,6 +1077,31 @@ function flushQueuedDownloads(appid, status, error) {
       })
     } catch (e) {}
   }
+}
+
+function flushQueuedGlobalDownloads(appid, status, error) {
+  if (!appid || !globalDownloadQueue.length) return
+  const remaining = []
+  for (const entry of globalDownloadQueue) {
+    if (entry?.payload?.appid !== appid) {
+      remaining.push(entry)
+      continue
+    }
+    try {
+      const win = getWindowByWebContentsId(entry.webContentsId)
+      if (!win || win.isDestroyed()) continue
+      sendDownloadUpdate(win, {
+        downloadId: entry.payload.downloadId,
+        status,
+        error: error || null,
+        appid: entry.payload.appid || null,
+        gameName: entry.payload.gameName || null,
+        url: entry.payload.url
+      })
+    } catch (e) {}
+  }
+  globalDownloadQueue.length = 0
+  for (const entry of remaining) globalDownloadQueue.push(entry)
 }
 
 function setDownloadRoot(targetPath) {
@@ -1314,6 +1360,7 @@ function sendDownloadUpdate(win, payload) {
     return
   }
   try {
+    uc_log(`[sendDownloadUpdate] Sending: ${JSON.stringify(payload, (k, v) => k === 'etaSeconds' ? Number(v) : v, 2)}`)
     win.webContents.send('uc:download-update', payload)
   } catch (error) {
     uc_log(`[sendDownloadUpdate] Failed to send update: ${String(error)}`)
@@ -1457,10 +1504,19 @@ function createWindow() {
   mainWindow.webContents.session.on('will-download', (_event, item) => {
     const downloadRoot = ensureDownloadDir()
     const url = item.getURL()
-    const matchIndex = pendingDownloads.findIndex((entry) => entry.url === url)
+    const normalizedUrl = normalizeDownloadUrl(url)
+    const itemFilename = item.getFilename()
+    const matchIndex = pendingDownloads.findIndex((entry) =>
+      entry.url === url ||
+      (entry.normalizedUrl && entry.normalizedUrl === normalizedUrl) ||
+      (entry.filename && entry.filename === itemFilename)
+    )
     const match = matchIndex >= 0 ? pendingDownloads.splice(matchIndex, 1)[0] : null
     const downloadId = match?.downloadId || `${Date.now()}-${Math.random().toString(16).slice(2)}`
-    const filename = match?.filename || item.getFilename()
+    // Always use match.filename if available to ensure consistency with parser logic, even if server sends different Content-Disposition
+    const filename = match?.filename ? match.filename : itemFilename
+    uc_log(`will-download - url=${item.getURL()}`)
+    uc_log(`will-download - match.filename=${match?.filename}, item.getFilename()=${item.getFilename()}, final filename=${filename}`)
     const partIndex = match?.partIndex
     const partTotal = match?.partTotal
     const gameFolder = safeFolderName(match?.gameName || match?.appid || downloadId)
@@ -1472,6 +1528,7 @@ function createWindow() {
 
     const startedAt = Date.now()
     const state = { lastBytes: 0, lastTime: startedAt, speedBps: 0 }
+    uc_log(`activeDownloads.set - partIndex=${partIndex} partTotal=${partTotal}`)
     activeDownloads.set(downloadId, { item, state, appid: match?.appid, gameName: match?.gameName, url, savePath, partIndex, partTotal })
 
     sendDownloadUpdate(mainWindow, {
@@ -1570,6 +1627,7 @@ function createWindow() {
         try {
           const archExt = finalPath ? path.extname(finalPath).toLowerCase() : ''
           const installedFolder = installedRoot
+          uc_log(`entry.partIndex=${entry?.partIndex}, entry.partTotal=${entry?.partTotal}`)
           const isMultipart = Boolean(finalPath && isMultipartPartPath(finalPath))
           const maybeArchive = Boolean((archExt && ['.zip', '.7z', '.rar', '.tar', '.gz', '.tgz'].includes(archExt)) || isMultipart)
           const multipartInfo = isMultipart

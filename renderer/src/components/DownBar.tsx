@@ -60,22 +60,29 @@ export function DownBar() {
 
   const { primaryGroup, queuedGroup, queuedCount } = useMemo(() => {
     // Filter out cancelled downloads
-    const activeDownloads = downloads.filter((item) => item.status !== "cancelled")
-    const grouped = activeDownloads.reduce<Record<string, typeof activeDownloads>>((acc, item) => {
+    const visible = downloads.filter((item) => item.status !== "cancelled")
+    const grouped = visible.reduce<Record<string, typeof visible>>((acc, item) => {
       acc[item.appid] = acc[item.appid] || []
       acc[item.appid].push(item)
       return acc
     }, {})
-    const activeGroups = Object.values(grouped).filter((items) =>
-      items.some((item) => ACTIVE_STATUSES.includes(item.status))
-    )
-    const queuedGroups = Object.values(grouped).filter((items) =>
-      items.every((item) => item.status === "queued")
-    )
+    const byPriority = Object.values(grouped).sort((a, b) => {
+      const priority = (items: typeof visible) => {
+        if (items.some((i) => ACTIVE_STATUSES.includes(i.status))) return 0
+        if (items.some((i) => i.status === "queued")) return 1
+        if (items.some((i) => ["completed", "extracted"].includes(i.status))) return 2
+        return 3
+      }
+      return priority(a) - priority(b)
+    })
+    const activeGroups = byPriority.filter((items) => items.some((item) => ACTIVE_STATUSES.includes(item.status)))
+    const queuedGroups = byPriority.filter((items) => items.some((item) => item.status === "queued"))
+    const completedGroups = byPriority.filter((items) => items.some((item) => ["completed", "extracted"].includes(item.status)))
+    const primary = activeGroups[0] || queuedGroups[0] || completedGroups[0] || null
     return {
-      primaryGroup: activeGroups[0] || null,
+      primaryGroup: primary,
       queuedGroup: queuedGroups[0] || null,
-      queuedCount: activeDownloads.filter((item) => item.status === "queued").length,
+      queuedCount: visible.filter((item) => item.status === "queued").length,
     }
   }, [downloads])
 
@@ -90,7 +97,20 @@ export function DownBar() {
     const extracting = displayGroup.find((item) => item.status === "extracting")
     const installing = displayGroup.find((item) => item.status === "installing")
     const paused = displayGroup.find((item) => item.status === "paused")
-    const activeItem = downloading || extracting || installing || paused || displayGroup[0]
+    const completed = displayGroup.find((item) => item.status === "completed" || item.status === "extracted")
+    const fallbackLatest = displayGroup.reduce<typeof displayGroup[number] | null>((latest, item) => {
+      if (!latest) return item
+      const latestStarted = latest.startedAt || 0
+      const itemStarted = item.startedAt || 0
+      if (itemStarted > latestStarted) return item
+      if (itemStarted === latestStarted) {
+        const latestPart = latest.partIndex || 0
+        const itemPart = item.partIndex || 0
+        return itemPart > latestPart ? item : latest
+      }
+      return latest
+    }, null)
+    const activeItem = downloading || extracting || installing || paused || completed || fallbackLatest || displayGroup[0]
     const totalParts = getTotalParts(displayGroup)
     const partInfo = getPartIndex(
       activeItem?.filename || "",
@@ -104,6 +124,8 @@ export function DownBar() {
         ? "Installing"
         : downloading
           ? "Downloading"
+          : completed
+            ? "Completed"
           : paused
             ? "Paused"
             : "Queued"
