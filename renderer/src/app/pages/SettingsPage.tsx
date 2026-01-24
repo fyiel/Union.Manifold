@@ -68,6 +68,9 @@ export function SettingsPage() {
   const [appVersion, setAppVersion] = useState<string>("")
   const [updateCheckResult, setUpdateCheckResult] = useState<string | null>(null)
   const [runGamesAsAdmin, setRunGamesAsAdmin] = useState(false)
+  const [alwaysCreateDesktopShortcut, setAlwaysCreateDesktopShortcut] = useState(false)
+  const [clearingData, setClearingData] = useState(false)
+  const [showClearConfirm, setShowClearConfirm] = useState(false)
 
   useEffect(() => {
     const loadVersion = async () => {
@@ -141,6 +144,31 @@ export function SettingsPage() {
       if (!data || !data.key) return
       if (data.key === 'runGamesAsAdmin') {
         setRunGamesAsAdmin(data.value || false)
+      }
+    })
+    return () => {
+      mounted = false
+      if (typeof off === 'function') off()
+    }
+  }, [])
+
+  useEffect(() => {
+    let mounted = true
+    const loadShortcutSetting = async () => {
+      try {
+        const value = await window.ucSettings?.get?.('alwaysCreateDesktopShortcut')
+        if (mounted) {
+          setAlwaysCreateDesktopShortcut(value || false)
+        }
+      } catch {
+        // ignore
+      }
+    }
+    loadShortcutSetting()
+    const off = window.ucSettings?.onChanged?.((data: any) => {
+      if (!data || !data.key) return
+      if (data.key === 'alwaysCreateDesktopShortcut') {
+        setAlwaysCreateDesktopShortcut(data.value || false)
       }
     })
     return () => {
@@ -505,6 +533,34 @@ const handleCheckForUpdates = async () => {
               </button>
             </div>
 
+            <div className="flex items-center justify-between">
+              <div>
+                <label className="text-sm font-medium cursor-pointer">Always create desktop shortcuts</label>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Automatically create desktop shortcuts when launching games for the first time
+                </p>
+              </div>
+              <button
+                onClick={async () => {
+                  const newValue = !alwaysCreateDesktopShortcut
+                  setAlwaysCreateDesktopShortcut(newValue)
+                  try {
+                    await window.ucSettings?.set?.('alwaysCreateDesktopShortcut', newValue)
+                  } catch {}
+                }}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                  alwaysCreateDesktopShortcut ? 'bg-primary' : 'bg-slate-700'
+                }`}
+                title="Toggle always create desktop shortcuts"
+              >
+                <span
+                  className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                    alwaysCreateDesktopShortcut ? 'translate-x-6' : 'translate-x-1'
+                  }`}
+                />
+              </button>
+            </div>
+
             <div className="rounded-lg border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-xs text-blue-200">
               The admin prompt appears only once on your first game launch.
             </div>
@@ -521,6 +577,78 @@ const handleCheckForUpdates = async () => {
             </p>
           </div>
           <LogViewer />
+        </CardContent>
+      </Card>
+
+      <Card className="border-destructive/40">
+        <CardContent className="p-6 space-y-4">
+          <div>
+            <h2 className="text-lg font-semibold text-destructive">Danger Zone</h2>
+            <p className="text-sm text-muted-foreground">
+              Irreversible actions that will reset your application data.
+            </p>
+          </div>
+
+          <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-4 space-y-4">
+            <div>
+              <h3 className="text-sm font-semibold text-foreground mb-1">Clear All User Data</h3>
+              <p className="text-xs text-muted-foreground">
+                This will reset all settings to defaults, including download preferences, game launch settings, 
+                saved game executables, and desktop shortcut preferences. Your downloaded games and files will not be affected.
+              </p>
+            </div>
+
+            {!showClearConfirm ? (
+              <Button
+                variant="destructive"
+                onClick={() => setShowClearConfirm(true)}
+                disabled={clearingData}
+              >
+                Clear User Data
+              </Button>
+            ) : (
+              <div className="space-y-3">
+                <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+                  Are you sure? This action cannot be undone. Click "Confirm" to proceed or "Cancel" to abort.
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    variant="destructive"
+                    onClick={async () => {
+                      setClearingData(true)
+                      try {
+                        const result = await window.ucSettings?.clearAll?.()
+                        if (result?.ok) {
+                          // Reset all local state to defaults
+                          setRunGamesAsAdmin(false)
+                          setAlwaysCreateDesktopShortcut(false)
+                          setDefaultHost('pixeldrain')
+                          // Show success message briefly
+                          setTimeout(() => {
+                            setShowClearConfirm(false)
+                          }, 1500)
+                        }
+                      } catch (err) {
+                        console.error('Failed to clear user data:', err)
+                      } finally {
+                        setClearingData(false)
+                      }
+                    }}
+                    disabled={clearingData}
+                  >
+                    {clearingData ? 'Clearing...' : 'Confirm Clear Data'}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => setShowClearConfirm(false)}
+                    disabled={clearingData}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
         </CardContent>
       </Card>
     </div>

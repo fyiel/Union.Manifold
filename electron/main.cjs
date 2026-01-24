@@ -344,6 +344,26 @@ ipcMain.handle('uc:setting-set', (_event, key, value) => {
   }
 })
 
+ipcMain.handle('uc:setting-clear-all', () => {
+  ucLog('Clearing all user data and resetting to defaults')
+  try {
+    // Reset settings to empty object
+    writeSettings({})
+    // broadcast to all renderer windows that settings were cleared
+    for (const w of BrowserWindow.getAllWindows()) {
+      if (w && !w.isDestroyed()) {
+        w.webContents.send('uc:setting-changed', { key: '__CLEAR_ALL__', value: null })
+      }
+    }
+    ucLog('User data cleared successfully')
+    return { ok: true }
+  } catch (err) {
+    console.error('[UC] Failed to clear settings', err)
+    ucLog(`Failed to clear user data: ${err.message}`, 'error')
+    return { ok: false, error: err.message }
+  }
+})
+
 // IPC: Logging handlers
 ipcMain.handle('uc:log', async (_event, level, message, data) => {
   ucLog(message, level, data)
@@ -2800,3 +2820,113 @@ ipcMain.handle('uc:installing-delete', (_event, appid) => {
   }
 })
 
+ipcMain.handle('uc:delete-desktop-shortcut', async (_event, gameName) => {
+  try {
+    if (!gameName || typeof gameName !== 'string') {
+      ucLog('Invalid game name for shortcut deletion', 'error')
+      return { ok: false, error: 'Invalid game name' }
+    }
+
+    const desktopPath = app.getPath('desktop')
+    const shortcutName = `${gameName} - UC.lnk`
+    const shortcutPath = path.join(desktopPath, shortcutName)
+
+    if (!fs.existsSync(shortcutPath)) {
+      ucLog(`Desktop shortcut does not exist: ${shortcutPath}`)
+      return { ok: true, notFound: true }
+    }
+
+    fs.unlinkSync(shortcutPath)
+    ucLog(`Desktop shortcut deleted: ${shortcutPath}`)
+    return { ok: true }
+  } catch (err) {
+    ucLog(`Failed to delete desktop shortcut: ${err.message}`, 'error')
+    return { ok: false, error: err.message }
+  }
+})
+
+ipcMain.handle('uc:create-desktop-shortcut', async (_event, gameName, exePath) => {
+  try {
+    if (!gameName || !exePath || typeof gameName !== 'string' || typeof exePath !== 'string') {
+      ucLog('Invalid parameters for desktop shortcut creation', 'error')
+      return { ok: false, error: 'Invalid parameters' }
+    }
+
+    if (!fs.existsSync(exePath)) {
+      ucLog(`Executable not found for shortcut: ${exePath}`, 'error')
+      return { ok: false, error: 'Executable not found' }
+    }
+
+    const desktopPath = app.getPath('desktop')
+    const shortcutName = `${gameName} - UC.lnk`
+    const shortcutPath = path.join(desktopPath, shortcutName)
+
+    // Check if shortcut already exists
+    if (fs.existsSync(shortcutPath)) {
+      ucLog(`Desktop shortcut already exists: ${shortcutPath}`)
+      return { ok: true, existed: true }
+    }
+
+    // On Windows, create a .lnk shortcut using PowerShell
+    if (process.platform === 'win32') {
+      const safeExePath = exePath.replace(/'/g, "''")
+      const safeShortcutPath = shortcutPath.replace(/'/g, "''")
+      const workingDir = path.dirname(exePath).replace(/'/g, "''")
+      
+      const psScript = `
+        $WshShell = New-Object -ComObject WScript.Shell
+        $Shortcut = $WshShell.CreateShortcut('${safeShortcutPath}')
+        $Shortcut.TargetPath = '${safeExePath}'
+        $Shortcut.WorkingDirectory = '${workingDir}'
+        $Shortcut.Save()
+      `
+
+      return new Promise((resolve) => {
+        const proc = child_process.spawn('powershell.exe', [
+          '-NoProfile',
+          '-ExecutionPolicy',
+          'Bypass',
+          '-Command',
+          psScript
+        ], {
+          detached: false,
+          stdio: ['ignore', 'pipe', 'pipe'],
+          windowsHide: true
+        })
+
+        let stdout = ''
+        let stderr = ''
+
+        proc.stdout?.on('data', (data) => {
+          stdout += String(data)
+        })
+
+        proc.stderr?.on('data', (data) => {
+          stderr += String(data)
+        })
+
+        proc.on('close', (code) => {
+          if (code === 0 && fs.existsSync(shortcutPath)) {
+            ucLog(`Desktop shortcut created successfully: ${shortcutPath}`)
+            resolve({ ok: true })
+          } else {
+            ucLog(`Failed to create desktop shortcut: ${stderr || stdout}`, 'error')
+            resolve({ ok: false, error: stderr || stdout || 'Unknown error' })
+          }
+        })
+
+        proc.on('error', (err) => {
+          ucLog(`Desktop shortcut creation error: ${err.message}`, 'error')
+          resolve({ ok: false, error: err.message })
+        })
+      })
+    } else {
+      // For non-Windows platforms (future support)
+      ucLog('Desktop shortcuts are currently only supported on Windows', 'warn')
+      return { ok: false, error: 'Not supported on this platform' }
+    }
+  } catch (err) {
+    ucLog(`Desktop shortcut creation error: ${err.message}`, 'error')
+    return { ok: false, error: err.message }
+  }
+})
