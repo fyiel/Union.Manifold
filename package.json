@@ -1,6 +1,6 @@
 {
   "name": "unioncrax-direct",
-  "version": "0.5.26",
+  "version": "0.5.27",
   "description": "Standalone Electron app for managing and launching games from UnionCrax",
   "type": "module",
   "main": "electron/main.cjs",
@@ -42,7 +42,7 @@
     "@radix-ui/react-tooltip": "1.1.6",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
-    "electron-updater": "^6.7.3",
+    
     "embla-carousel-react": "^8.5.1",
     "fuse.js": "^7.1.0",
     "geist": "^1.5.1",

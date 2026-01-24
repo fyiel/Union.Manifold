@@ -1,12 +1,39 @@
 const { app, BrowserWindow, shell, ipcMain, dialog, Tray, Menu, nativeImage } = require('electron')
-const { autoUpdater } = require('electron-updater')
 const path = require('node:path')
 const fs = require('node:fs')
 const crypto = require('node:crypto')
 const child_process = require('node:child_process')
 
 const packageJson = require('../package.json')
+// When auto-updates are disabled, open the releases page instead
+const RELEASES_URL = 'https://github.com/Union-Crax/UnionCrax.Direct/releases/latest'
 const isDev = !app.isPackaged
+
+// Helper: compare semantic versions a vs b; returns 1 if a>b, -1 if a<b, 0 if equal
+function compareVersions(a, b) {
+  const pa = String(a || '').split('.').map((n) => parseInt(n || '0', 10))
+  const pb = String(b || '').split('.').map((n) => parseInt(n || '0', 10))
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const da = pa[i] || 0
+    const db = pb[i] || 0
+    if (da > db) return 1
+    if (da < db) return -1
+  }
+  return 0
+}
+
+// Helper: fetch latest release info from GitHub
+async function fetchLatestReleaseInfo() {
+  const resp = await fetch('https://api.github.com/repos/Union-Crax/UnionCrax.Direct/releases/latest', {
+    headers: { 'Accept': 'application/vnd.github+json' }
+  })
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+  const data = await resp.json()
+  const tag = (data && (data.tag_name || data.name)) || ''
+  const url = (data && data.html_url) || RELEASES_URL
+  const latest = String(tag).replace(/^v/i, '')
+  return { latest, url }
+}
 if (process.platform === 'win32') {
   try {
     app.setAppUserModelId(packageJson?.build?.appId || 'xyz.unioncrax.direct')
@@ -2014,21 +2041,43 @@ app.whenReady().then(() => {
   clearLogs()
   ucLog(`App started. Version: ${app.getVersion()}`)
   
-  // Auto-updater configuration
+  // Update behavior: auto-updater removed. Open releases page instead.
   if (!isDev) {
-    ucLog(`App logs file: ${appLogsPath}`)
-    autoUpdater.autoDownload = true
-    autoUpdater.autoInstallOnAppQuit = true
-    ucLog('Auto-updater initialized: autoDownload=true, autoInstallOnAppQuit=true')
-    autoUpdater.checkForUpdatesAndNotify()
-    
-    // Check for updates every hour
-    setInterval(() => {
-      ucLog('Hourly update check triggered')
-      autoUpdater.checkForUpdatesAndNotify()
-    }, 60 * 60 * 1000)
+    ucLog('Auto-updater disabled. Update checks will open GitHub releases page.')
   } else {
-    ucLog('Running in DEV mode - auto-updater disabled')
+    ucLog('DEV mode - update checks will open GitHub releases page.')
+  }
+  // Automatic check for new releases: query GitHub API and notify renderer
+  try {
+    const checkLatestRelease = async () => {
+      try {
+        const { latest, url } = await fetchLatestReleaseInfo()
+        const current = String(app.getVersion() || '')
+
+        if (latest && compareVersions(latest, current) === 1) {
+          const info = { version: latest, url }
+          ucLog(`New release available: v${latest} (current: ${current})`)
+          const windows = BrowserWindow.getAllWindows()
+          windows.forEach(win => {
+            try { win.webContents.send('update-available', info) } catch (e) {}
+          })
+        } else {
+          ucLog(`No new release. Current: v${current}`)
+          const windows = BrowserWindow.getAllWindows()
+          windows.forEach(win => {
+            try { win.webContents.send('update-not-available', { version: current }) } catch (e) {}
+          })
+        }
+      } catch (err) {
+        ucLog(`Release check error: ${err && err.message ? err.message : String(err)}`, 'warn')
+      }
+    }
+    // Initial check shortly after startup
+    setTimeout(() => { checkLatestRelease().catch(() => {}) }, 5000)
+    // Hourly checks
+    setInterval(() => { checkLatestRelease().catch(() => {}) }, 60 * 60 * 1000)
+  } catch (e) {
+    ucLog(`Failed to schedule release checks: ${e && e.message ? e.message : String(e)}`, 'warn')
   }
   
   app.on('activate', () => {
@@ -2036,171 +2085,58 @@ app.whenReady().then(() => {
   })
 })
 
-let updateStatus = {
-  status: 'idle', // idle, checking, available, downloading, downloaded, error
-  info: null,
-  progress: null,
-  error: null
-}
-
-// Auto-updater event handlers
-autoUpdater.on('checking-for-update', () => {
-  updateStatus.status = 'checking'
-  ucLog('Checking for updates...')
-})
-
-autoUpdater.on('update-available', (info) => {
-  const currentVersion = app.getVersion()
-  ucLog(`Update available: v${info.version} (current: ${currentVersion})`)
-  
-  if (info.version === currentVersion) {
-    ucLog('Already on this version, ignoring', 'warn')
-    updateStatus.status = 'idle'
-    const windows = BrowserWindow.getAllWindows()
-    windows.forEach(win => {
-      win.webContents.send('update-not-available', { message: 'Already on latest version' })
-    })
-    return
-  }
-  
-  updateStatus.status = 'available'
-  updateStatus.info = info
-  ucLog('Notifying renderer of update')
-  const windows = BrowserWindow.getAllWindows()
-  windows.forEach(win => {
-    win.webContents.send('update-available', info)
-  })
-})
-
-autoUpdater.on('update-not-available', (info) => {
-  updateStatus.status = 'idle'
-  ucLog(`Already on latest version: ${app.getVersion()}`)
-})
-
-autoUpdater.on('download-progress', (progress) => {
-  updateStatus.status = 'downloading'
-  updateStatus.progress = progress
-  ucLog(`Download progress: ${progress.percent.toFixed(1)}% (${(progress.bytesPerSecond / 1024 / 1024).toFixed(1)} MB/s)`)
-  const windows = BrowserWindow.getAllWindows()
-  windows.forEach(win => {
-    win.webContents.send('update-download-progress', progress)
-  })
-})
-
-autoUpdater.on('update-downloaded', (info) => {
-  updateStatus.status = 'downloaded'
-  updateStatus.info = info
-  ucLog(`Update downloaded: v${info.version}. Will install on quit or user request.`)
-  const windows = BrowserWindow.getAllWindows()
-  windows.forEach(win => {
-    win.webContents.send('update-downloaded', info)
-  })
-})
-
-autoUpdater.on('error', (err) => {
-  updateStatus.status = 'error'
-  updateStatus.error = err.message
-  ucLog(`Updater error: ${err.message}`, 'error')
-  const windows = BrowserWindow.getAllWindows()
-  windows.forEach(win => {
-    win.webContents.send('update-error', { message: err.message || 'Update failed' })
-  })
-})
-
-ipcMain.handle('uc:get-update-status', () => {
-  return updateStatus
-})
-
-// IPC handler for manual update check
+// Simplified update handlers: open GitHub Releases page instead of auto-updates
 ipcMain.handle('uc:check-for-updates', async () => {
-  if (isDev) {
-    return { available: false, message: 'Updates not available in dev mode' }
-  }
   try {
-    ucLog('Manual update check requested')
-    const result = await autoUpdater.checkForUpdates()
-    const availableVersion = result?.updateInfo?.version
-    const currentVersion = app.getVersion()
-    
-    if (!availableVersion || availableVersion === currentVersion) {
-      ucLog(`No update available (current: ${currentVersion})`)
-      return { available: false, message: 'Already on latest version' }
-    }
-    
-    ucLog(`Update found: v${availableVersion}`)
-    return { available: true, version: availableVersion }
-  } catch (err) {
-    ucLog(`Manual check failed: ${err.message}`, 'error')
-    return { available: false, error: err.message }
-  }
-})
-
-// IPC handler to retry update (clear cache and check again)
-ipcMain.handle('uc:update-retry', async () => {
-  ucLog('Retrying update...')
-  updateStatus.status = 'checking'
-  updateStatus.error = null
-  updateStatus.progress = null
-
-  // Broadcast status change
-  const windows = BrowserWindow.getAllWindows()
-  windows.forEach(win => {
-    win.webContents.send('update-available', updateStatus.info || {})
-  })
-
-  try {
-    // Try to clear electron-updater cache
-    if (autoUpdater.downloadedUpdateHelper) {
-      try {
-        await autoUpdater.downloadedUpdateHelper.clear()
-        ucLog('Cleared electron-updater cache via helper')
-      } catch (e) {
-        ucLog(`Failed to clear cache via helper: ${e.message}`, 'warn')
-      }
-    }
-
-    // Manual cleanup of pending folder
+    const current = String(app.getVersion() || '')
+    let latestInfo
     try {
-      const appName = app.name || 'UnionCrax.Direct'
-      const homedir = require('os').homedir()
-      let cacheDir
-      if (process.platform === 'win32') {
-        cacheDir = process.env.LOCALAPPDATA || path.join(homedir, 'AppData', 'Local')
-      } else if (process.platform === 'darwin') {
-        cacheDir = path.join(homedir, 'Library', 'Caches')
-      } else {
-        cacheDir = process.env.XDG_CACHE_HOME || path.join(homedir, '.cache')
-      }
-
-      const pendingDir = path.join(cacheDir, appName, 'pending')
-      if (fs.existsSync(pendingDir)) {
-        ucLog(`Deleting pending update folder: ${pendingDir}`)
-        fs.rmSync(pendingDir, { recursive: true, force: true })
-      }
+      latestInfo = await fetchLatestReleaseInfo()
     } catch (e) {
-      ucLog(`Failed to manually clean pending folder: ${e.message}`, 'warn')
+      ucLog(`Latest release fetch failed: ${e && e.message ? e.message : String(e)}`, 'warn')
+      // On fetch failure, do not open the page
+      return { ok: false, error: 'release_check_failed' }
     }
-
-    // Trigger check
-    if (!isDev) {
-      autoUpdater.checkForUpdatesAndNotify()
+    const { latest, url } = latestInfo
+    if (latest && compareVersions(latest, current) === 1) {
+      ucLog(`Opening releases page for updates: ${url} (current: v${current} -> latest: v${latest})`)
+      try { shell.openExternal(url) } catch (e) {}
+      return { ok: true, url, latest, current }
     }
-    return { ok: true }
+    ucLog(`Up to date. Current: v${current}`)
+    return { ok: false, upToDate: true, current }
   } catch (err) {
-    ucLog(`Retry failed: ${err.message}`, 'error')
+    ucLog(`Failed to open releases page: ${err.message}`, 'error')
     return { ok: false, error: err.message }
   }
 })
 
-// IPC handler to get app version
-ipcMain.handle('uc:get-version', () => {
-  return packageJson.version
+ipcMain.handle('uc:update-retry', async () => {
+  try {
+    const current = String(app.getVersion() || '')
+    let latestInfo
+    try {
+      latestInfo = await fetchLatestReleaseInfo()
+    } catch (e) {
+      ucLog(`Latest release fetch failed (retry): ${e && e.message ? e.message : String(e)}`, 'warn')
+      return { ok: false, error: 'release_check_failed' }
+    }
+    const { latest, url } = latestInfo
+    if (latest && compareVersions(latest, current) === 1) {
+      ucLog(`Opening releases page for update retry: ${url} (current: v${current} -> latest: v${latest})`)
+      try { shell.openExternal(url) } catch (e) {}
+      return { ok: true, url, latest, current }
+    }
+    ucLog(`Up to date. Current: v${current}`)
+    return { ok: false, upToDate: true, current }
+  } catch (err) {
+    ucLog(`Failed to open releases page: ${err.message}`, 'error')
+    return { ok: false, error: err.message }
+  }
 })
 
-// IPC handler to install update
-ipcMain.handle('uc:install-update', () => {
-  ucLog('Install update triggered by user')
-  autoUpdater.quitAndInstall(false, true)
+ipcMain.handle('uc:get-version', () => {
+  return packageJson.version
 })
 
 app.on('window-all-closed', () => {

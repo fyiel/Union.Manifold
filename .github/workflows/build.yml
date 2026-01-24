@@ -41,8 +41,6 @@ jobs:
           name: windows-installer
           path: |
             dist-packaged/*.exe
-            dist-packaged/*.exe.blockmap
-            dist-packaged/latest.yml
 
       - name: Create Release
         if: startsWith(github.ref, 'refs/tags/')
@@ -50,8 +48,6 @@ jobs:
         with:
           files: |
             dist-packaged/*.exe
-            dist-packaged/*.exe.blockmap
-            dist-packaged/latest.yml
           draft: false
           prerelease: false
         env:

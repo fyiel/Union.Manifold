@@ -10,7 +10,7 @@ A fast, standalone Electron desktop application for managing and launching games
 
 - **Fast Downloads**: Direct game downloads with pause/resume support
 - **Game Library**: Browse and manage your installed games
-- **Auto-Update**: Automatic update checks with one-click install
+- **Updates**: Quick check button opens Releases page
 - **Settings**: Customize download location and launch executables
 - **Search**: Quick game search with intelligent filtering
 - **History**: Track your recently played games
@@ -61,12 +61,9 @@ A fast, standalone Electron desktop application for managing and launching games
 
 ## Updates
 
-UnionCrax.Direct automatically checks for updates every hour. When a new version is available:
-- A notification appears in the top-right corner
-- Click **Download & Install** to update
-- App restarts with the new version
+UnionCrax.Direct lets you check for updates and opens the latest Releases page in your browser to download the newest installer.
 
-Manual check: Settings → **Check for Updates**
+Manual check: Settings → **Check for Updates** (opens Releases page)
 
 ## Configuration
 
@@ -126,13 +123,13 @@ For detailed development information, see [CONTRIBUTING.md](CONTRIBUTING.md).
 - **Desktop**: Electron 33 + Node.js
 - **Styling**: Tailwind CSS v4
 - **Build**: electron-builder (NSIS installer for Windows)
-- **Updates**: electron-updater (GitHub Releases)
+- **Updates**: Manual via GitHub Releases
 
 ### How It Works
 1. **Main Process**: Electron handles file operations, downloads, and game launching
 2. **Renderer Process**: React UI communicates with main process via IPC
 3. **Backend**: API calls to UnionCrax for game metadata and download links
-4. **Updates**: Checks GitHub Releases for new versions
+4. **Updates**: Opens GitHub Releases for new versions
 
 ## Project Structure
 
@@ -151,13 +148,13 @@ UnionCrax.Direct/
 └── assets/          # App icon
 ```
 
-## Releases & Auto-Updates
+## Releases
 
 ### How Releases Work
 - Tag a commit: `git tag vX.X.X`
 - GitHub Actions automatically builds the installer
 - Release appears on [GitHub Releases](https://github.com/Union-Crax/UnionCrax.Direct/releases)
-- All users automatically see the update notification
+- Users can click **Check for Updates** in the app to open the Releases page
 
 ### Version Scheme
 We use [Semantic Versioning](https://semver.org/):
@@ -173,7 +170,7 @@ For security vulnerabilities, please see [SECURITY.md](SECURITY.md).
 ### Security Highlights
 - No hardcoded secrets or API keys
 - HTTPS-only API communication
-- Auto-updates verified via GitHub Releases
+- Installer downloads verified via GitHub Releases
 - No telemetry or tracking
 
 ## License
