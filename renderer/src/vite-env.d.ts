@@ -118,6 +118,7 @@ declare global {
       checkForUpdates: () => Promise<{ available: boolean; version?: string; message?: string; error?: string }>
       installUpdate: () => void
       getVersion: () => Promise<string>
+      getUpdateStatus: () => Promise<any>
     }
     ucLogs?: {
       log: (level: string, message: string, data?: any) => Promise<void>
