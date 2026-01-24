@@ -235,8 +235,9 @@ export function GameDetailPage() {
       (item) => item.appid === game.appid && ["failed", "extract_failed"].includes(item.status)
     )
     const hasFailedInstall = installingManifest?.installStatus === "failed"
-    if (installedManifest || (installingManifest && !isCancelled && !hasFailedInstall && !hasFailedDownload)) return
-    if (installingManifest && (isCancelled || hasFailedInstall)) {
+    const hasCancelledInstall = installingManifest?.installStatus === "cancelled"
+    if (installedManifest || (installingManifest && !isCancelled && !hasFailedInstall && !hasCancelledInstall && !hasFailedDownload)) return
+    if (installingManifest && (isCancelled || hasFailedInstall || hasCancelledInstall)) {
       try {
         await window.ucDownloads?.deleteInstalling?.(game.appid)
       } catch {}
@@ -347,9 +348,10 @@ export function GameDetailPage() {
   const failedDownload = appDownloads.find((item) => ["failed", "extract_failed"].includes(item.status))
   const isFailed = Boolean(failedDownload) && !isActiveDownload && !isPaused && !isQueued
   const isCancelled = downloads.some((item) => item.appid === game.appid && item.status === "cancelled")
+  const hasCancelledManifest = installingManifest?.installStatus === "cancelled"
   const isInstalled = Boolean(installedManifest)
   const isInstalling =
-    (Boolean(installingManifest) && !isCancelled && !isFailed && !isPaused) || (isActivelyDownloading && !isCancelled) || (downloading && !isCancelled)
+    (Boolean(installingManifest) && !isCancelled && !hasCancelledManifest && !isFailed && !isPaused) || (isActivelyDownloading && !isCancelled) || (downloading && !isCancelled)
   const actionLabel = isInstalled
     ? "Play"
     : isPaused
