@@ -17,6 +17,8 @@ try {
   else app.name = 'UnionCrax.Direct'
 } catch {}
 const pendingDownloads = []
+let lastPixeldrainDownloadTime = 0
+const PIXELDRAIN_DELAY_MS = 2000 // 2 second delay between pixeldrain downloads to avoid rate limiting
 
 function normalizeDownloadUrl(rawUrl) {
   if (!rawUrl || typeof rawUrl !== 'string') return rawUrl
@@ -1005,8 +1007,69 @@ function enqueueGlobalDownload(payload, webContentsId) {
   return true
 }
 
-function startDownloadNow(win, payload) {
+async function visitPixeldrainViewerPage(fileId) {
+  // Visit the /u/{id} page to register a view and bypass hotlink protection
+  const viewerUrl = `https://pixeldrain.com/u/${fileId}`
+  try {
+    const https = require('https')
+    await new Promise((resolve, reject) => {
+      const req = https.get(viewerUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.5',
+          'Referer': 'https://pixeldrain.com/'
+        }
+      }, (res) => {
+        // Just consume the response, we don't need the data
+        res.on('data', () => {})
+        res.on('end', () => {
+          uc_log(`[Pixeldrain] Visited viewer page for ${fileId} to bypass hotlink protection (status: ${res.statusCode})`)
+          resolve()
+        })
+      })
+      req.on('error', (err) => {
+        uc_log(`[Pixeldrain] Failed to visit viewer page: ${err.message}`)
+        resolve() // Don't reject, just continue with download attempt
+      })
+      req.setTimeout(5000, () => {
+        req.destroy()
+        resolve()
+      })
+    })
+  } catch (err) {
+    uc_log(`[Pixeldrain] Error visiting viewer page: ${err.message}`)
+  }
+}
+
+async function startDownloadNow(win, payload) {
   if (!win || win.isDestroyed()) return { ok: false }
+  
+  // Check if this is a pixeldrain URL and if we need to delay
+  const isPixeldrain = payload.url && payload.url.includes('pixeldrain.com')
+  if (isPixeldrain) {
+    const timeSinceLastPixeldrain = Date.now() - lastPixeldrainDownloadTime
+    if (timeSinceLastPixeldrain < PIXELDRAIN_DELAY_MS) {
+      // Need to delay this download
+      const delayNeeded = PIXELDRAIN_DELAY_MS - timeSinceLastPixeldrain
+      uc_log(`Delaying pixeldrain download by ${delayNeeded}ms to avoid rate limiting`)
+      setTimeout(() => {
+        startDownloadNow(win, payload)
+      }, delayNeeded)
+      return { ok: true, delayed: true }
+    }
+    
+    // Extract file ID and visit viewer page to bypass hotlink protection
+    const fileIdMatch = payload.url.match(/pixeldrain\.com\/api\/file\/([^\/\?]+)/)
+    if (fileIdMatch && fileIdMatch[1]) {
+      await visitPixeldrainViewerPage(fileIdMatch[1])
+      // Small delay after visiting to ensure view is registered
+      await new Promise(resolve => setTimeout(resolve, 500))
+    }
+    
+    lastPixeldrainDownloadTime = Date.now()
+  }
+  
   pendingDownloads.push({
     url: payload.url,
     normalizedUrl: normalizeDownloadUrl(payload.url),
@@ -1500,6 +1563,20 @@ function createWindow() {
       void shell.openExternal(url)
     }
   })
+
+  // Add headers for Pixeldrain downloads to prevent 403 errors
+  mainWindow.webContents.session.webRequest.onBeforeSendHeaders(
+    { urls: ['https://pixeldrain.com/api/file/*'] },
+    (details, callback) => {
+      details.requestHeaders['Referer'] = 'https://pixeldrain.com/'
+      details.requestHeaders['Origin'] = 'https://pixeldrain.com'
+      // Keep existing User-Agent or add one
+      if (!details.requestHeaders['User-Agent']) {
+        details.requestHeaders['User-Agent'] = `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36`
+      }
+      callback({ requestHeaders: details.requestHeaders })
+    }
+  )
 
   mainWindow.webContents.session.on('will-download', (_event, item) => {
     const downloadRoot = ensureDownloadDir()

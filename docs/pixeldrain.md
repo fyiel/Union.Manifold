@@ -112,8 +112,54 @@ res.body.pipe(fs.createWriteStream(path))
 
 ⚠️ Notes & Limitations
 
-Only works for public Pixeldrain files
+- Only works for public Pixeldrain files
+- **Subject to Pixeldrain rate limits** - requires 2+ second delay between successive downloads
+- **Requires Referer and Origin headers** to prevent 403 errors (optional but recommended)
+- Use Electron's `session.webRequest.onBeforeSendHeaders` to add required headers
+- **Implement download delays** to avoid rate limiting when downloading multiple files
+- Endpoint may change in the future
 
-Subject to Pixeldrain rate limits
+## 🔐 Required Headers (Recommended)
 
-Endpoint may change in the future
+Pixeldrain may require proper headers to prevent 403 Forbidden errors:
+
+```js
+mainWindow.webContents.session.webRequest.onBeforeSendHeaders(
+  { urls: ['https://pixeldrain.com/api/file/*'] },
+  (details, callback) => {
+    details.requestHeaders['Referer'] = 'https://pixeldrain.com/'
+    details.requestHeaders['Origin'] = 'https://pixeldrain.com'
+    details.requestHeaders['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+    callback({ requestHeaders: details.requestHeaders })
+  }
+)
+```
+
+## ⏱️ Rate Limiting (Critical for Multi-Part Downloads)
+
+**Pixeldrain aggressively rate limits successive downloads.** When downloading multiple files (e.g., multi-part archives), you must add a delay between downloads:
+
+```js
+let lastPixeldrainDownloadTime = 0
+const PIXELDRAIN_DELAY_MS = 2000 // 2 seconds minimum
+
+function startPixeldrainDownload(url) {
+  const timeSinceLastDownload = Date.now() - lastPixeldrainDownloadTime
+  
+  if (timeSinceLastDownload < PIXELDRAIN_DELAY_MS) {
+    const delayNeeded = PIXELDRAIN_DELAY_MS - timeSinceLastDownload
+    setTimeout(() => {
+      startPixeldrainDownload(url)
+    }, delayNeeded)
+    return
+  }
+  
+  lastPixeldrainDownloadTime = Date.now()
+  // Start the download
+  win.webContents.downloadURL(url)
+}
+```
+
+**Without delay:** Downloads 2+ will fail immediately with `interrupted` status and `mimeType: "application/json"` (403 error page).
+
+**With delay:** All downloads succeed sequentially.
