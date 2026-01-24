@@ -2115,6 +2115,63 @@ ipcMain.handle('uc:check-for-updates', async () => {
   }
 })
 
+// IPC handler to retry update (clear cache and check again)
+ipcMain.handle('uc:update-retry', async () => {
+  ucLog('Retrying update...')
+  updateStatus.status = 'checking'
+  updateStatus.error = null
+  updateStatus.progress = null
+
+  // Broadcast status change
+  const windows = BrowserWindow.getAllWindows()
+  windows.forEach(win => {
+    win.webContents.send('update-available', updateStatus.info || {})
+  })
+
+  try {
+    // Try to clear electron-updater cache
+    if (autoUpdater.downloadedUpdateHelper) {
+      try {
+        await autoUpdater.downloadedUpdateHelper.clear()
+        ucLog('Cleared electron-updater cache via helper')
+      } catch (e) {
+        ucLog(`Failed to clear cache via helper: ${e.message}`, 'warn')
+      }
+    }
+
+    // Manual cleanup of pending folder
+    try {
+      const appName = app.name || 'UnionCrax.Direct'
+      const homedir = require('os').homedir()
+      let cacheDir
+      if (process.platform === 'win32') {
+        cacheDir = process.env.LOCALAPPDATA || path.join(homedir, 'AppData', 'Local')
+      } else if (process.platform === 'darwin') {
+        cacheDir = path.join(homedir, 'Library', 'Caches')
+      } else {
+        cacheDir = process.env.XDG_CACHE_HOME || path.join(homedir, '.cache')
+      }
+
+      const pendingDir = path.join(cacheDir, appName, 'pending')
+      if (fs.existsSync(pendingDir)) {
+        ucLog(`Deleting pending update folder: ${pendingDir}`)
+        fs.rmSync(pendingDir, { recursive: true, force: true })
+      }
+    } catch (e) {
+      ucLog(`Failed to manually clean pending folder: ${e.message}`, 'warn')
+    }
+
+    // Trigger check
+    if (!isDev) {
+      autoUpdater.checkForUpdatesAndNotify()
+    }
+    return { ok: true }
+  } catch (err) {
+    ucLog(`Retry failed: ${err.message}`, 'error')
+    return { ok: false, error: err.message }
+  }
+})
+
 // IPC handler to get app version
 ipcMain.handle('uc:get-version', () => {
   return packageJson.version

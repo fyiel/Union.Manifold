@@ -66,7 +66,8 @@ contextBridge.exposeInMainWorld('ucUpdater', {
   checkForUpdates: () => ipcRenderer.invoke('uc:check-for-updates'),
   installUpdate: () => ipcRenderer.invoke('uc:install-update'),
   getVersion: () => ipcRenderer.invoke('uc:get-version'),
-  getUpdateStatus: () => ipcRenderer.invoke('uc:get-update-status')
+  getUpdateStatus: () => ipcRenderer.invoke('uc:get-update-status'),
+  retryUpdate: () => ipcRenderer.invoke('uc:update-retry')
 })
 
 contextBridge.exposeInMainWorld('ucLogs', {

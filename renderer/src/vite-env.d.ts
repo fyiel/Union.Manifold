@@ -119,6 +119,7 @@ declare global {
       installUpdate: () => void
       getVersion: () => Promise<string>
       getUpdateStatus: () => Promise<any>
+      retryUpdate: () => Promise<{ ok: boolean; error?: string }>
     }
     ucLogs?: {
       log: (level: string, message: string, data?: any) => Promise<void>
