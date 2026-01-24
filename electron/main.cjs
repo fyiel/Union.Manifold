@@ -2016,8 +2016,16 @@ app.whenReady().then(() => {
   })
 })
 
+let updateStatus = {
+  status: 'idle', // idle, checking, available, downloading, downloaded, error
+  info: null,
+  progress: null,
+  error: null
+}
+
 // Auto-updater event handlers
 autoUpdater.on('checking-for-update', () => {
+  updateStatus.status = 'checking'
   ucLog('Checking for updates...')
 })
 
@@ -2027,6 +2035,7 @@ autoUpdater.on('update-available', (info) => {
   
   if (info.version === currentVersion) {
     ucLog('Already on this version, ignoring', 'warn')
+    updateStatus.status = 'idle'
     const windows = BrowserWindow.getAllWindows()
     windows.forEach(win => {
       win.webContents.send('update-not-available', { message: 'Already on latest version' })
@@ -2034,6 +2043,8 @@ autoUpdater.on('update-available', (info) => {
     return
   }
   
+  updateStatus.status = 'available'
+  updateStatus.info = info
   ucLog('Notifying renderer of update')
   const windows = BrowserWindow.getAllWindows()
   windows.forEach(win => {
@@ -2042,10 +2053,13 @@ autoUpdater.on('update-available', (info) => {
 })
 
 autoUpdater.on('update-not-available', (info) => {
+  updateStatus.status = 'idle'
   ucLog(`Already on latest version: ${app.getVersion()}`)
 })
 
 autoUpdater.on('download-progress', (progress) => {
+  updateStatus.status = 'downloading'
+  updateStatus.progress = progress
   ucLog(`Download progress: ${progress.percent.toFixed(1)}% (${(progress.bytesPerSecond / 1024 / 1024).toFixed(1)} MB/s)`)
   const windows = BrowserWindow.getAllWindows()
   windows.forEach(win => {
@@ -2054,6 +2068,8 @@ autoUpdater.on('download-progress', (progress) => {
 })
 
 autoUpdater.on('update-downloaded', (info) => {
+  updateStatus.status = 'downloaded'
+  updateStatus.info = info
   ucLog(`Update downloaded: v${info.version}. Will install on quit or user request.`)
   const windows = BrowserWindow.getAllWindows()
   windows.forEach(win => {
@@ -2062,11 +2078,17 @@ autoUpdater.on('update-downloaded', (info) => {
 })
 
 autoUpdater.on('error', (err) => {
+  updateStatus.status = 'error'
+  updateStatus.error = err.message
   ucLog(`Updater error: ${err.message}`, 'error')
   const windows = BrowserWindow.getAllWindows()
   windows.forEach(win => {
     win.webContents.send('update-error', { message: err.message || 'Update failed' })
   })
+})
+
+ipcMain.handle('uc:get-update-status', () => {
+  return updateStatus
 })
 
 // IPC handler for manual update check
@@ -2090,6 +2112,63 @@ ipcMain.handle('uc:check-for-updates', async () => {
   } catch (err) {
     ucLog(`Manual check failed: ${err.message}`, 'error')
     return { available: false, error: err.message }
+  }
+})
+
+// IPC handler to retry update (clear cache and check again)
+ipcMain.handle('uc:update-retry', async () => {
+  ucLog('Retrying update...')
+  updateStatus.status = 'checking'
+  updateStatus.error = null
+  updateStatus.progress = null
+
+  // Broadcast status change
+  const windows = BrowserWindow.getAllWindows()
+  windows.forEach(win => {
+    win.webContents.send('update-available', updateStatus.info || {})
+  })
+
+  try {
+    // Try to clear electron-updater cache
+    if (autoUpdater.downloadedUpdateHelper) {
+      try {
+        await autoUpdater.downloadedUpdateHelper.clear()
+        ucLog('Cleared electron-updater cache via helper')
+      } catch (e) {
+        ucLog(`Failed to clear cache via helper: ${e.message}`, 'warn')
+      }
+    }
+
+    // Manual cleanup of pending folder
+    try {
+      const appName = app.name || 'UnionCrax.Direct'
+      const homedir = require('os').homedir()
+      let cacheDir
+      if (process.platform === 'win32') {
+        cacheDir = process.env.LOCALAPPDATA || path.join(homedir, 'AppData', 'Local')
+      } else if (process.platform === 'darwin') {
+        cacheDir = path.join(homedir, 'Library', 'Caches')
+      } else {
+        cacheDir = process.env.XDG_CACHE_HOME || path.join(homedir, '.cache')
+      }
+
+      const pendingDir = path.join(cacheDir, appName, 'pending')
+      if (fs.existsSync(pendingDir)) {
+        ucLog(`Deleting pending update folder: ${pendingDir}`)
+        fs.rmSync(pendingDir, { recursive: true, force: true })
+      }
+    } catch (e) {
+      ucLog(`Failed to manually clean pending folder: ${e.message}`, 'warn')
+    }
+
+    // Trigger check
+    if (!isDev) {
+      autoUpdater.checkForUpdatesAndNotify()
+    }
+    return { ok: true }
+  } catch (err) {
+    ucLog(`Retry failed: ${err.message}`, 'error')
+    return { ok: false, error: err.message }
   }
 })
 
