@@ -86,6 +86,19 @@ export function UpdateNotification() {
     }
   }
 
+  const handleRetry = () => {
+    if (window.ucUpdater?.retryUpdate) {
+      setError(null)
+      setUpdateAvailable(false) // Temporarily hide while checking
+      window.ucUpdater.retryUpdate().then(res => {
+        if (!res.ok) {
+          setError(res.error || 'Retry failed')
+          setUpdateAvailable(true)
+        }
+      })
+    }
+  }
+
   if (dismissed || (!updateAvailable && !updateDownloaded && !error)) return null
 
   return (
@@ -124,6 +137,15 @@ export function UpdateNotification() {
               onClick={handleInstall}
             >
               Restart & Install
+            </Button>
+          )}
+          {error && (
+            <Button
+              size="sm"
+              className="mt-3 bg-red-600 hover:bg-red-700 text-white"
+              onClick={handleRetry}
+            >
+              Retry Download
             </Button>
           )}
         </div>
