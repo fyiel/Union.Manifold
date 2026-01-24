@@ -14,8 +14,9 @@ import {
 import { useGamesData } from "@/hooks/use-games"
 import type { Game } from "@/lib/types"
 import { useDownloads } from "@/context/downloads-context"
-import { Settings, Trash2, AlertTriangle, FolderOpen } from "lucide-react"
+import { Settings, Trash2, AlertTriangle, FolderOpen, ExternalLink } from "lucide-react"
 import { ExePickerModal } from "@/components/ExePickerModal"
+import { gameLogger } from "@/lib/logger"
 
 type LibraryEntry = {
   appid: string
@@ -170,6 +171,8 @@ export function LibraryPage() {
     setInstalled((prev) => prev.filter((item) => item.appid !== game.appid))
     try {
       await window.ucDownloads?.deleteInstalled?.(game.appid)
+      // Also delete the desktop shortcut if it exists
+      await window.ucDownloads?.deleteDesktopShortcut?.(game.name)
       clearByAppid(game.appid)
     } finally {
       setRefreshTick((tick) => tick + 1)
@@ -594,6 +597,28 @@ export function LibraryPage() {
               >
                 <FolderOpen className="mr-2 h-4 w-4" />
                 Open Game Files
+              </Button>
+              <Button
+                variant="ghost"
+                className="w-full justify-start"
+                onClick={async () => {
+                  if (settingsPopupGame) {
+                    const savedExe = await window.ucSettings?.get?.(`gameExe:${settingsPopupGame.appid}`)
+                    if (savedExe) {
+                      const result = await window.ucDownloads?.createDesktopShortcut?.(settingsPopupGame.name, savedExe)
+                      if (result?.ok) {
+                        gameLogger.info('Desktop shortcut created manually', { appid: settingsPopupGame.appid })
+                      } else if (result?.existed) {
+                        gameLogger.info('Desktop shortcut already exists', { appid: settingsPopupGame.appid })
+                      }
+                    } else {
+                      gameLogger.warn('No saved exe found for creating shortcut', { appid: settingsPopupGame.appid })
+                    }
+                  }
+                }}
+              >
+                <ExternalLink className="mr-2 h-4 w-4" />
+                Create Desktop Shortcut
               </Button>
             </div>
 

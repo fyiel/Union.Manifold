@@ -19,6 +19,7 @@ import {
   ChevronRight,
   Download,
   Eye,
+  ExternalLink,
   Flame,
   HardDrive,
   RefreshCw,
@@ -31,6 +32,8 @@ import {
 import { ExePickerModal } from "@/components/ExePickerModal"
 import { AdminPromptModal } from "@/components/AdminPromptModal"
 import { DownloadHostModal } from "@/components/DownloadHostModal"
+import { DesktopShortcutModal } from "@/components/DesktopShortcutModal"
+import { gameLogger } from "@/lib/logger"
 
 export function GameDetailPage() {
   const params = useParams()
@@ -54,6 +57,7 @@ export function GameDetailPage() {
   const [lightboxIndex, setLightboxIndex] = useState(0)
   const [adminPromptOpen, setAdminPromptOpen] = useState(false)
   const [pendingExePath, setPendingExePath] = useState<string | null>(null)
+  const [shortcutModalOpen, setShortcutModalOpen] = useState(false)
   const [hostSelectorOpen, setHostSelectorOpen] = useState(false)
   const [selectedHost, setSelectedHost] = useState<PreferredDownloadHost>("pixeldrain")
   const [defaultHost, setDefaultHost] = useState<PreferredDownloadHost>("pixeldrain")
@@ -400,6 +404,45 @@ export function GameDetailPage() {
     }
   }
 
+  const getShortcutAskedForGame = async () => {
+    if (!window.ucSettings?.get || !game) return false
+    try {
+      return await window.ucSettings.get(`shortcutAsked:${game.appid}`)
+    } catch {
+      return false
+    }
+  }
+
+  const setShortcutAskedForGame = async () => {
+    if (!window.ucSettings?.set || !game) return
+    try {
+      await window.ucSettings.set(`shortcutAsked:${game.appid}`, true)
+    } catch {}
+  }
+
+  const getAlwaysCreateShortcut = async () => {
+    if (!window.ucSettings?.get) return false
+    try {
+      return await window.ucSettings.get('alwaysCreateDesktopShortcut')
+    } catch {
+      return false
+    }
+  }
+
+  const createDesktopShortcut = async (exePath: string) => {
+    if (!window.ucDownloads?.createDesktopShortcut || !game) return
+    try {
+      const result = await window.ucDownloads.createDesktopShortcut(game.name, exePath)
+      if (result?.ok) {
+        gameLogger.info('Desktop shortcut created', { appid: game.appid })
+      } else {
+        gameLogger.error('Failed to create desktop shortcut', { data: result })
+      }
+    } catch (err) {
+      gameLogger.error('Error creating desktop shortcut', { data: err })
+    }
+  }
+
   const openExePicker = (exes: Array<{ name: string; path: string }>) => {
     setExePickerExes(exes)
     setExePickerOpen(true)
@@ -417,8 +460,34 @@ export function GameDetailPage() {
       await setSavedExe(path)
       setExePickerOpen(false)
       setAdminPromptOpen(false)
+      setShortcutModalOpen(false)
       setPendingExePath(null)
       setIsGameRunning(true)
+    }
+  }
+
+  const handleAdminDecision = async (path: string, asAdmin: boolean) => {
+    await setAdminPromptShown()
+    
+    // Check if we should show shortcut modal BEFORE launching
+    const alreadyAsked = await getShortcutAskedForGame()
+    const alwaysCreate = await getAlwaysCreateShortcut()
+    
+    if (alwaysCreate && !alreadyAsked) {
+      // Auto-create shortcut without asking, then launch
+      await createDesktopShortcut(path)
+      await setShortcutAskedForGame()
+      await launchGame(path, asAdmin)
+    } else if (!alreadyAsked && !alwaysCreate) {
+      // Show the shortcut prompt BEFORE launching
+      setPendingExePath(path)
+      setAdminPromptOpen(false)
+      setShortcutModalOpen(true)
+      // Store asAdmin preference for later
+      await window.ucSettings?.set?.('runGamesAsAdmin', asAdmin)
+    } else {
+      // No shortcut needed, just launch
+      await launchGame(path, asAdmin)
     }
   }
 
@@ -805,20 +874,40 @@ export function GameDetailPage() {
         gameName={game.name}
         onRunAsAdmin={async () => {
           if (pendingExePath) {
-            await window.ucSettings?.set?.('runGamesAsAdmin', true)
-            await setAdminPromptShown()
-            await launchGame(pendingExePath, true)
+            await handleAdminDecision(pendingExePath, true)
           }
         }}
         onContinueWithoutAdmin={async () => {
           if (pendingExePath) {
-            await window.ucSettings?.set?.('runGamesAsAdmin', false)
-            await setAdminPromptShown()
-            await launchGame(pendingExePath, false)
+            await handleAdminDecision(pendingExePath, false)
           }
         }}
         onClose={() => {
           setAdminPromptOpen(false)
+          setPendingExePath(null)
+        }}
+      />
+      <DesktopShortcutModal
+        open={shortcutModalOpen}
+        gameName={game.name}
+        onCreateShortcut={async () => {
+          if (pendingExePath) {
+            await createDesktopShortcut(pendingExePath)
+            await setShortcutAskedForGame()
+            const runAsAdmin = await getRunAsAdminEnabled()
+            await launchGame(pendingExePath, runAsAdmin)
+          }
+        }}
+        onSkip={async () => {
+          await setShortcutAskedForGame()
+          if (pendingExePath) {
+            const runAsAdmin = await getRunAsAdminEnabled()
+            await launchGame(pendingExePath, runAsAdmin)
+          }
+        }}
+        onClose={async () => {
+          await setShortcutAskedForGame()
+          setShortcutModalOpen(false)
           setPendingExePath(null)
         }}
       />

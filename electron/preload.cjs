@@ -32,6 +32,8 @@ contextBridge.exposeInMainWorld('ucDownloads', {
   deleteInstalled: (appid) => ipcRenderer.invoke('uc:installed-delete', appid),
   deleteInstalling: (appid) => ipcRenderer.invoke('uc:installing-delete', appid),
   setInstallingStatus: (appid, status, error) => ipcRenderer.invoke('uc:installing-status-set', appid, status, error),
+  createDesktopShortcut: (gameName, exePath) => ipcRenderer.invoke('uc:create-desktop-shortcut', gameName, exePath),
+  deleteDesktopShortcut: (gameName) => ipcRenderer.invoke('uc:delete-desktop-shortcut', gameName),
   onUpdate: (callback) => {
     const listener = (_event, data) => {
       try {
@@ -48,6 +50,7 @@ contextBridge.exposeInMainWorld('ucDownloads', {
 contextBridge.exposeInMainWorld('ucSettings', {
   get: (key) => ipcRenderer.invoke('uc:setting-get', key),
   set: (key, value) => ipcRenderer.invoke('uc:setting-set', key, value),
+  clearAll: () => ipcRenderer.invoke('uc:setting-clear-all'),
   onChanged: (callback) => {
     const listener = (_event, data) => callback(data)
     ipcRenderer.on('uc:setting-changed', listener)
