@@ -2551,7 +2551,7 @@ ipcMain.handle('uc:installing-list', (_event) => {
     const items = listManifestsFromRoot(root, false)
     return items.filter((item) => {
       const status = item && typeof item.installStatus === 'string' ? item.installStatus : null
-      return status !== 'completed' && status !== 'extracted'
+      return status !== 'completed' && status !== 'extracted' && status !== 'cancelled'
     })
   } catch (err) {
     console.error('[UC] installing-list failed', err)
@@ -2570,7 +2570,11 @@ ipcMain.handle('uc:installing-get', (_event, appid) => {
       const folder = path.join(root, dirent.name)
       const manifestPath = path.join(folder, INSTALLED_MANIFEST)
       const manifest = readJsonFile(manifestPath)
-      if (manifest && manifest.appid === appid) return manifest
+      if (manifest && manifest.appid === appid) {
+        const status = manifest.installStatus
+        if (status === 'cancelled' || status === 'completed' || status === 'extracted') return null
+        return manifest
+      }
     }
     return null
   } catch (err) {
@@ -2588,7 +2592,7 @@ ipcMain.handle('uc:installing-list-global', (_event) => {
       const items = listManifestsFromRoot(installingRoot, false)
       for (const item of items) {
         const status = item && typeof item.installStatus === 'string' ? item.installStatus : null
-        if (status === 'completed' || status === 'extracted') continue
+        if (status === 'completed' || status === 'extracted' || status === 'cancelled') continue
         all.push(item)
       }
     }
@@ -2619,7 +2623,11 @@ ipcMain.handle('uc:installing-get-global', (_event, appid) => {
         const folder = path.join(installingRoot, dirent.name)
         const manifestPath = path.join(folder, INSTALLED_MANIFEST)
         const manifest = readJsonFile(manifestPath)
-        if (manifest && manifest.appid === appid) return manifest
+        if (manifest && manifest.appid === appid) {
+          const status = manifest.installStatus
+          if (status === 'cancelled' || status === 'completed' || status === 'extracted') return null
+          return manifest
+        }
       }
     }
     return null
