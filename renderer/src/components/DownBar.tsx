@@ -77,8 +77,7 @@ export function DownBar() {
     })
     const activeGroups = byPriority.filter((items) => items.some((item) => ACTIVE_STATUSES.includes(item.status)))
     const queuedGroups = byPriority.filter((items) => items.some((item) => item.status === "queued"))
-    const completedGroups = byPriority.filter((items) => items.some((item) => ["completed", "extracted"].includes(item.status)))
-    const primary = activeGroups[0] || queuedGroups[0] || completedGroups[0] || null
+    const primary = activeGroups[0] || queuedGroups[0] || null
     return {
       primaryGroup: primary,
       queuedGroup: queuedGroups[0] || null,

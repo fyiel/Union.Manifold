@@ -21,6 +21,8 @@ const ROOTZ_SIGNED_HOST = "signed-url.cloudflare.com"
 // Supported download hosts
 const SUPPORTED_DOWNLOAD_HOSTS: PreferredDownloadHost[] = ["rootz", "pixeldrain"]
 const PREFERRED_HOSTS: PreferredDownloadHost[] = ["pixeldrain", "rootz"]
+const PIXELDRAIN_404_MESSAGE = "Pixeldrain returned 404. Please report the dead link so we can re-upload it."
+const ROOTZ_404_MESSAGE = "Rootz returned 404. Please report the dead link so we can re-upload it."
 
 function sanitizeHosts(input: DownloadHosts | null | undefined): DownloadHosts {
   const hosts = input && typeof input === "object" ? input : {}
@@ -63,8 +65,9 @@ function normalizeRootzPayload(payload: Record<string, any> | null) {
 
 async function fetchRootzPayload(path: string, opts?: { shortId?: string; fileId?: string }) {
   // Ask the UnionCrax backend to resolve Rootz URLs server-side.
+  let response: Response
   try {
-    const response = await apiFetch("/api/rootz/resolve", {
+    response = await apiFetch("/api/rootz/resolve", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -73,10 +76,20 @@ async function fetchRootzPayload(path: string, opts?: { shortId?: string; fileId
         fileId: opts?.fileId || null,
       }),
     })
+  } catch {
+    return null
+  }
+
+  if (response.status === 404) {
+    throw new Error(ROOTZ_404_MESSAGE)
+  }
+
+  try {
     const data = await response.json().catch(() => null)
     if (!response.ok || !data?.success) return null
     return pickRootzPayload(data.data)
-  } catch {
+  } catch (err) {
+    if (err instanceof Error && err.message === ROOTZ_404_MESSAGE) throw err
     return null
   }
 }
@@ -277,6 +290,10 @@ async function resolvePixeldrainDownload(url: string): Promise<ResolvedDownload>
   try {
     const res = await fetch(apiUrl, { method: "GET", redirect: "manual" })
 
+    if (res.status === 404) {
+      throw new Error(PIXELDRAIN_404_MESSAGE)
+    }
+
     // extract filename from content-disposition if present
     const disposition = res.headers.get("content-disposition")
     let filename: string | undefined
@@ -293,6 +310,9 @@ async function resolvePixeldrainDownload(url: string): Promise<ResolvedDownload>
 
     return { url: finalUrl, filename, size: Number.isFinite(size as number) ? size : undefined, resolved: true }
   } catch (err) {
+    if (err instanceof Error && err.message === PIXELDRAIN_404_MESSAGE) {
+      throw err
+    }
     return { url, resolved: false }
   }
 }
