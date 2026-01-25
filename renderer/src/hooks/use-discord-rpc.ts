@@ -3,6 +3,10 @@ import { useLocation } from "react-router-dom"
 import { useDownloads } from "@/context/downloads-context"
 
 const ACTIVE_STATUSES = new Set(["downloading", "extracting", "installing"])
+const WEB_BASE_URL = "https://union-crax.xyz"
+const DIRECT_URL = `${WEB_BASE_URL}/direct`
+
+const DOWNLOAD_BUTTON = { label: "Download UC.D", url: DIRECT_URL }
 
 function formatStatus(status: string) {
   switch (status) {
@@ -35,51 +39,70 @@ function getDownloadName(appid: string, downloads: Array<{ appid: string; gameNa
   return match?.gameName || null
 }
 
+function getOpenOnWebUrl(pathname: string) {
+  if (pathname.startsWith("/search")) return `${WEB_BASE_URL}/search`
+  if (pathname.startsWith("/library")) return `${WEB_BASE_URL}/`
+  if (pathname.startsWith("/downloads")) return `${WEB_BASE_URL}/direct`
+  if (pathname.startsWith("/settings")) return `${WEB_BASE_URL}/settings`
+  if (pathname.startsWith("/game/")) {
+    const appid = pathname.replace("/game/", "") || ""
+    return appid ? `${WEB_BASE_URL}/game/${appid}` : `${WEB_BASE_URL}/`
+  }
+  return `${WEB_BASE_URL}/`
+}
+
+function buildButtons(openUrl: string) {
+  return [{ label: "Open on web", url: openUrl }, DOWNLOAD_BUTTON]
+}
+
+function ensureDownloadButton(buttons: Array<{ label: string; url: string }>) {
+  if (buttons.some((button) => button.label === DOWNLOAD_BUTTON.label)) return buttons
+  return [...buttons, DOWNLOAD_BUTTON]
+}
+
 function buildRouteActivity(pathname: string, downloads: Array<{ appid: string; gameName?: string | null }>, overrides: Map<string, string>) {
   if (pathname.startsWith("/search")) {
     return {
       details: "Browsing search",
       state: "Looking for games",
-      buttons: [{ label: "Open on web", url: "https://union-crax.xyz/direct" }]
+      buttons: buildButtons(getOpenOnWebUrl(pathname))
     }
   }
   if (pathname.startsWith("/library")) {
     return {
       details: "Viewing library",
       state: "Checking installed games",
-      buttons: [{ label: "Open on web", url: "https://union-crax.xyz/direct" }]
+      buttons: buildButtons(getOpenOnWebUrl(pathname))
     }
   }
   if (pathname.startsWith("/downloads")) {
     return {
       details: "Managing downloads",
       state: "Downloads",
-      buttons: [{ label: "Open on web", url: "https://union-crax.xyz/direct" }]
+      buttons: buildButtons(getOpenOnWebUrl(pathname))
     }
   }
   if (pathname.startsWith("/settings")) {
     return {
       details: "Adjusting settings",
       state: "Configuring app",
-      buttons: [{ label: "Open on web", url: "https://union-crax.xyz/direct" }]
+      buttons: buildButtons(getOpenOnWebUrl(pathname))
     }
   }
   if (pathname.startsWith("/game/")) {
     const appid = pathname.replace("/game/", "") || ""
     const name = overrides.get(appid) || getStoredGameName(appid) || getDownloadName(appid, downloads)
     const details = appid ? `Viewing ${name || appid}` : "Viewing game"
-    const buttons = appid
-      ? [
-          { label: "Open on web", url: `https://union-crax.xyz/game/${appid}` },
-          { label: "Download UC.D", url: "https://union-crax.xyz/direct" }
-        ]
-      : [{ label: "Open on web", url: "https://union-crax.xyz/direct" }]
-    return { details, state: "Game details", buttons }
+    return {
+      details,
+      state: "Game details",
+      buttons: buildButtons(getOpenOnWebUrl(pathname))
+    }
   }
   return {
     details: "On launcher",
     state: "Home",
-    buttons: [{ label: "Open on web", url: "https://union-crax.xyz/direct" }]
+    buttons: buildButtons(getOpenOnWebUrl(pathname))
   }
 }
 
@@ -163,12 +186,9 @@ export function useDiscordRpcPresence() {
       startTimestampRef.current = Math.floor(Date.now() / 1000)
     }
 
-    const defaultButtons = [
-      { label: "Open on web", url: "https://union-crax.xyz/direct" },
-      { label: "Download UC.D", url: "https://union-crax.xyz/direct" }
-    ]
+    const defaultButtons = buildButtons(getOpenOnWebUrl(location.pathname))
     const customButtons = "buttons" in activity ? activity.buttons : undefined
-    const buttons = customButtons && customButtons.length > 0 ? customButtons : defaultButtons
+    const buttons = customButtons && customButtons.length > 0 ? ensureDownloadButton(customButtons) : defaultButtons
 
     window.ucRpc.setActivity({
       details: activity.details,
