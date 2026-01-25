@@ -3,6 +3,7 @@ const path = require('node:path')
 const fs = require('node:fs')
 const crypto = require('node:crypto')
 const child_process = require('node:child_process')
+const DiscordRPC = require('discord-rpc')
 
 const packageJson = require('../package.json')
 // When auto-updates are disabled, open the releases page instead
@@ -100,6 +101,131 @@ function clearLogs() {
     ucLog('Logs cleared')
   } catch (err) {
     console.error('[UC] Failed to clear logs:', err)
+  }
+}
+
+// === Discord Rich Presence ===
+let rpcClient = null
+let rpcReady = false
+let rpcEnabled = false
+const RPC_CLIENT_ID_DEFAULT = '1464971744199839928'
+let rpcClientId = RPC_CLIENT_ID_DEFAULT
+let rpcActiveClientId = null
+let rpcStartTimestamp = Math.floor(Date.now() / 1000)
+let rpcLastRendererActivity = null
+let rpcGameActivity = null
+let rpcCurrentActivity = null
+
+function normalizeRpcActivity(payload) {
+  if (!payload || typeof payload !== 'object') return null
+  const activity = {}
+  if (payload.details && typeof payload.details === 'string') activity.details = payload.details
+  if (payload.state && typeof payload.state === 'string') activity.state = payload.state
+  if (payload.startTimestamp && Number.isFinite(Number(payload.startTimestamp))) {
+    activity.startTimestamp = Number(payload.startTimestamp)
+  }
+  if (payload.endTimestamp && Number.isFinite(Number(payload.endTimestamp))) {
+    activity.endTimestamp = Number(payload.endTimestamp)
+  }
+  if (payload.largeImageKey && typeof payload.largeImageKey === 'string') activity.largeImageKey = payload.largeImageKey
+  if (payload.largeImageText && typeof payload.largeImageText === 'string') activity.largeImageText = payload.largeImageText
+  if (payload.smallImageKey && typeof payload.smallImageKey === 'string') activity.smallImageKey = payload.smallImageKey
+  if (payload.smallImageText && typeof payload.smallImageText === 'string') activity.smallImageText = payload.smallImageText
+  if (Array.isArray(payload.buttons)) activity.buttons = payload.buttons
+  return Object.keys(activity).length ? activity : null
+}
+
+async function applyRpcActivity(activity) {
+  if (!rpcClient || !rpcReady || !activity) return
+  try {
+    rpcCurrentActivity = activity
+    await rpcClient.setActivity(activity)
+  } catch (err) {
+    ucLog(`RPC setActivity failed: ${err?.message || String(err)}`, 'warn')
+  }
+}
+
+function clearRpcActivity() {
+  if (!rpcClient || !rpcReady) return
+  try {
+    rpcCurrentActivity = null
+    rpcClient.clearActivity()
+  } catch (err) {
+    ucLog(`RPC clearActivity failed: ${err?.message || String(err)}`, 'warn')
+  }
+}
+
+function shutdownRpcClient() {
+  if (!rpcClient) return
+  try { rpcClient.clearActivity() } catch {}
+  try { rpcClient.destroy() } catch {}
+  rpcClient = null
+  rpcReady = false
+  rpcCurrentActivity = null
+  rpcActiveClientId = null
+}
+
+async function ensureRpcClient() {
+  if (!rpcEnabled || !rpcClientId) return
+  if (rpcClient && rpcActiveClientId === rpcClientId) return
+  shutdownRpcClient()
+  try {
+    rpcClient = new DiscordRPC.Client({ transport: 'ipc' })
+    rpcActiveClientId = rpcClientId
+    rpcClient.on('ready', () => {
+      rpcReady = true
+      ucLog('Discord RPC connected')
+      const activity = rpcGameActivity || rpcLastRendererActivity || rpcCurrentActivity
+      if (activity) applyRpcActivity(activity)
+    })
+    rpcClient.on('disconnected', () => {
+      rpcReady = false
+      ucLog('Discord RPC disconnected', 'warn')
+    })
+    rpcClient.on('error', (err) => {
+      ucLog(`Discord RPC error: ${err?.message || String(err)}`, 'warn')
+    })
+    await rpcClient.login({ clientId: rpcClientId })
+  } catch (err) {
+    rpcReady = false
+    ucLog(`Discord RPC login failed: ${err?.message || String(err)}`, 'warn')
+  }
+}
+
+async function updateRpcSettings(nextSettings) {
+  const enabled = Boolean(nextSettings?.discordRpcEnabled)
+  rpcEnabled = enabled
+  rpcClientId = RPC_CLIENT_ID_DEFAULT
+
+  if (!rpcEnabled) {
+    shutdownRpcClient()
+    return
+  }
+  await ensureRpcClient()
+}
+
+async function setRendererRpcActivity(payload) {
+  const activity = normalizeRpcActivity(payload)
+  rpcLastRendererActivity = activity
+  if (!rpcGameActivity && activity) {
+    await applyRpcActivity(activity)
+  }
+}
+
+async function setGameRpcActivity(payload) {
+  const activity = normalizeRpcActivity(payload)
+  rpcGameActivity = activity
+  if (activity) {
+    await applyRpcActivity(activity)
+  }
+}
+
+function clearGameRpcActivity() {
+  rpcGameActivity = null
+  if (rpcLastRendererActivity) {
+    applyRpcActivity(rpcLastRendererActivity)
+  } else {
+    clearRpcActivity()
   }
 }
 
@@ -356,6 +482,9 @@ ipcMain.handle('uc:setting-set', (_event, key, value) => {
     const s = readSettings() || {}
     s[key] = value
     writeSettings(s)
+    if (key === 'discordRpcEnabled') {
+      updateRpcSettings(s).catch(() => {})
+    }
     // broadcast to all renderer windows
     for (const w of BrowserWindow.getAllWindows()) {
       if (w && !w.isDestroyed()) {
@@ -376,6 +505,7 @@ ipcMain.handle('uc:setting-clear-all', () => {
   try {
     // Reset settings to empty object
     writeSettings({})
+    updateRpcSettings({}).catch(() => {})
     // broadcast to all renderer windows that settings were cleared
     for (const w of BrowserWindow.getAllWindows()) {
       if (w && !w.isDestroyed()) {
@@ -403,6 +533,23 @@ ipcMain.handle('uc:logs-get', async () => {
 ipcMain.handle('uc:logs-clear', async () => {
   clearLogs()
   return { ok: true }
+})
+
+ipcMain.handle('uc:rpc-set-activity', async (_event, payload) => {
+  await ensureRpcClient()
+  await setRendererRpcActivity(payload)
+  return { ok: true }
+})
+
+ipcMain.handle('uc:rpc-clear', async () => {
+  rpcLastRendererActivity = null
+  if (rpcGameActivity) return { ok: true }
+  clearRpcActivity()
+  return { ok: true }
+})
+
+ipcMain.handle('uc:rpc-status', async () => {
+  return { ok: true, enabled: rpcEnabled, ready: rpcReady, clientId: rpcClientId }
 })
 
 ipcMain.handle('uc:auth-login', async (event, baseUrl) => {
@@ -1477,32 +1624,69 @@ function sendDownloadUpdate(win, payload) {
   }
 }
 
-function registerRunningGame(appid, exePath, proc) {
+function registerRunningGame(appid, exePath, proc, gameName) {
   if (!proc || !proc.pid) return
   const payload = {
     appid: appid || null,
     exePath: exePath || null,
+    gameName: gameName || null,
     pid: proc.pid,
     startedAt: Date.now()
   }
   if (appid) runningGames.set(appid, payload)
   if (exePath) runningGames.set(exePath, payload)
+  if (gameName || appid) {
+    const buttons = appid
+      ? [
+          { label: 'Open on web', url: `https://union-crax.xyz/game/${appid}` },
+          { label: 'Download UC.D', url: 'https://union-crax.xyz/direct' }
+        ]
+      : [
+          { label: 'Open on web', url: 'https://union-crax.xyz/direct' },
+          { label: 'Download UC.D', url: 'https://union-crax.xyz/direct' }
+        ]
+    setGameRpcActivity({
+      details: gameName || appid || 'Playing',
+      state: 'Playing',
+      startTimestamp: Math.floor(payload.startedAt / 1000),
+      buttons
+    }).catch(() => {})
+  }
   proc.on('exit', () => {
     if (appid) runningGames.delete(appid)
     if (exePath) runningGames.delete(exePath)
+    if (runningGames.size === 0) clearGameRpcActivity()
   })
 }
 
-function registerRunningGamePid(appid, exePath, pid) {
+function registerRunningGamePid(appid, exePath, pid, gameName) {
   if (!pid) return
   const payload = {
     appid: appid || null,
     exePath: exePath || null,
+    gameName: gameName || null,
     pid: Number(pid),
     startedAt: Date.now()
   }
   if (appid) runningGames.set(appid, payload)
   if (exePath) runningGames.set(exePath, payload)
+  if (gameName || appid) {
+    const buttons = appid
+      ? [
+          { label: 'Open on web', url: `https://union-crax.xyz/game/${appid}` },
+          { label: 'Download UC.D', url: 'https://union-crax.xyz/direct' }
+        ]
+      : [
+          { label: 'Open on web', url: 'https://union-crax.xyz/direct' },
+          { label: 'Download UC.D', url: 'https://union-crax.xyz/direct' }
+        ]
+    setGameRpcActivity({
+      details: gameName || appid || 'Playing',
+      state: 'Playing',
+      startTimestamp: Math.floor(payload.startedAt / 1000),
+      buttons
+    }).catch(() => {})
+  }
 }
 
 function getRunningGame(appid) {
@@ -1565,6 +1749,29 @@ function isProcessRunning(pid) {
       resolve(false)
     }
   })
+}
+
+async function pruneRunningGames() {
+  if (runningGames.size === 0) return
+  const seenPids = new Set()
+  const payloads = []
+  for (const payload of runningGames.values()) {
+    if (!payload || !payload.pid || seenPids.has(payload.pid)) continue
+    seenPids.add(payload.pid)
+    payloads.push(payload)
+  }
+
+  for (const payload of payloads) {
+    const alive = await isProcessRunning(payload.pid)
+    if (!alive) {
+      if (payload.appid) runningGames.delete(payload.appid)
+      if (payload.exePath) runningGames.delete(payload.exePath)
+    }
+  }
+
+  if (runningGames.size === 0 && rpcGameActivity) {
+    clearGameRpcActivity()
+  }
 }
 
 function killProcessTreeElevated(pid) {
@@ -2068,9 +2275,14 @@ app.whenReady().then(() => {
   ensureDownloadDir()
   createWindow()
   createTray()
+  updateRpcSettings(readSettings()).catch(() => {})
   
   clearLogs()
   ucLog(`App started. Version: ${app.getVersion()}`)
+
+  setInterval(() => {
+    pruneRunningGames().catch(() => {})
+  }, 15000)
   
   // Update behavior: auto-updater removed. Open releases page instead.
   if (!isDev) {
@@ -2176,6 +2388,7 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   app.isQuitting = true
+  shutdownRpcClient()
 })
 
 ipcMain.handle('uc:download-start', (event, payload) => {
@@ -2637,7 +2850,7 @@ ipcMain.handle('uc:game-subfolder-find', (_event, folder) => {
   }
 })
 
-ipcMain.handle('uc:game-exe-launch', async (_event, appid, exePath) => {
+ipcMain.handle('uc:game-exe-launch', async (_event, appid, exePath, gameName) => {
   try {
     if (!exePath || typeof exePath !== 'string') return { ok: false }
     ucLog(`Launching game: ${appid} at ${exePath}`)
@@ -2648,7 +2861,7 @@ ipcMain.handle('uc:game-exe-launch', async (_event, appid, exePath) => {
         windowsHide: false
       })
       proc.unref()
-      registerRunningGame(appid, exePath, proc)
+      registerRunningGame(appid, exePath, proc, gameName)
       ucLog(`Game launched successfully: ${appid} (PID: ${proc.pid})`)
       return { ok: true, pid: proc.pid }
     } catch (err) {
@@ -2666,7 +2879,7 @@ ipcMain.handle('uc:game-exe-launch', async (_event, appid, exePath) => {
   }
 })
 
-ipcMain.handle('uc:game-exe-launch-admin', async (_event, appid, exePath) => {
+ipcMain.handle('uc:game-exe-launch-admin', async (_event, appid, exePath, gameName) => {
   try {
     if (!exePath || typeof exePath !== 'string') return { ok: false }
     ucLog(`Launching game as admin: ${appid} at ${exePath}`)
@@ -2708,7 +2921,7 @@ ipcMain.handle('uc:game-exe-launch-admin', async (_event, appid, exePath) => {
             const match = msg.match(/STARTED:(\d+)/)
             if (match && match[1]) {
               launchedPid = Number(match[1])
-              registerRunningGamePid(appid, exePath, launchedPid)
+              registerRunningGamePid(appid, exePath, launchedPid, gameName)
               clearTimeout(timer)
               finish({ ok: true, pid: launchedPid })
             }
@@ -2745,7 +2958,7 @@ ipcMain.handle('uc:game-exe-launch-admin', async (_event, appid, exePath) => {
           windowsHide: false
         })
         proc.unref()
-        registerRunningGame(appid, exePath, proc)
+        registerRunningGame(appid, exePath, proc, gameName)
         ucLog(`Game launched with fallback: ${appid} (PID: ${proc.pid})`)
         return { ok: true, pid: proc.pid }
       } catch (fallbackErr) {
@@ -2796,6 +3009,7 @@ ipcMain.handle('uc:game-exe-quit', async (_event, appid) => {
     if (stopped) {
       if (running.appid) runningGames.delete(running.appid)
       if (running.exePath) runningGames.delete(running.exePath)
+      if (runningGames.size === 0) clearGameRpcActivity()
     }
     return { ok: true, stopped }
   } catch (err) {

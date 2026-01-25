@@ -25,8 +25,8 @@ contextBridge.exposeInMainWorld('ucDownloads', {
   getInstallingGlobal: (appid) => ipcRenderer.invoke('uc:installing-get-global', appid),
   listGameExecutables: (appid) => ipcRenderer.invoke('uc:game-exe-list', appid),
   findGameSubfolder: (folder) => ipcRenderer.invoke('uc:game-subfolder-find', folder),
-  launchGameExecutable: (appid, exePath) => ipcRenderer.invoke('uc:game-exe-launch', appid, exePath),
-  launchGameExecutableAsAdmin: (appid, exePath) => ipcRenderer.invoke('uc:game-exe-launch-admin', appid, exePath),
+  launchGameExecutable: (appid, exePath, gameName) => ipcRenderer.invoke('uc:game-exe-launch', appid, exePath, gameName),
+  launchGameExecutableAsAdmin: (appid, exePath, gameName) => ipcRenderer.invoke('uc:game-exe-launch-admin', appid, exePath, gameName),
   getRunningGame: (appid) => ipcRenderer.invoke('uc:game-exe-running', appid),
   quitGameExecutable: (appid) => ipcRenderer.invoke('uc:game-exe-quit', appid),
   deleteInstalled: (appid) => ipcRenderer.invoke('uc:installed-delete', appid),
@@ -74,6 +74,12 @@ contextBridge.exposeInMainWorld('ucLogs', {
   log: (level, message, data) => ipcRenderer.invoke('uc:log', level, message, data),
   getLogs: () => ipcRenderer.invoke('uc:logs-get'),
   clearLogs: () => ipcRenderer.invoke('uc:logs-clear')
+})
+
+contextBridge.exposeInMainWorld('ucRpc', {
+  setActivity: (payload) => ipcRenderer.invoke('uc:rpc-set-activity', payload),
+  clearActivity: () => ipcRenderer.invoke('uc:rpc-clear'),
+  getStatus: () => ipcRenderer.invoke('uc:rpc-status')
 })
 
 contextBridge.exposeInMainWorld('electron', {

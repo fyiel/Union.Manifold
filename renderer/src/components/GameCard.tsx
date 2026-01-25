@@ -246,7 +246,7 @@ export const GameCard = memo(function GameCard({
       : window.ucDownloads.launchGameExecutable
     
     if (!launchFn) return
-    const res = await launchFn(game.appid, path)
+    const res = await launchFn(game.appid, path, game.name)
     if (res && res.ok) {
       await setSavedExe(path)
       setIsRunning(true)
