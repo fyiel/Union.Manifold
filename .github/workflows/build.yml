@@ -39,7 +39,7 @@ jobs:
         run: pnpm install
 
       - name: Build application
-        run: pnpm run pack
+        run: pnpm run pack -- --publish=never
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           USE_HARD_LINKS: false
