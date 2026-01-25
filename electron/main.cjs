@@ -1539,6 +1539,34 @@ function killProcessTree(pid) {
   })
 }
 
+function isProcessRunning(pid) {
+  return new Promise((resolve) => {
+    if (!pid) return resolve(false)
+    try {
+      process.kill(pid, 0)
+      return resolve(true)
+    } catch (err) {
+      if (err && err.code === 'ESRCH') return resolve(false)
+      // On Windows, elevated processes may throw EPERM; fall back to tasklist.
+      if (process.platform !== 'win32') return resolve(true)
+    }
+
+    try {
+      const task = child_process.spawn('tasklist', ['/FI', `PID eq ${pid}`], { windowsHide: true })
+      let out = ''
+      task.stdout?.on('data', (data) => {
+        out += String(data)
+      })
+      task.on('close', () => {
+        resolve(out.includes(String(pid)))
+      })
+      task.on('error', () => resolve(false))
+    } catch {
+      resolve(false)
+    }
+  })
+}
+
 function killProcessTreeElevated(pid) {
   return new Promise((resolve) => {
     if (!pid || process.platform !== 'win32') return resolve(false)
@@ -1546,11 +1574,14 @@ function killProcessTreeElevated(pid) {
       const psScript = `try { $p = Start-Process -FilePath 'taskkill' -ArgumentList '/PID', '${pid}', '/T', '/F' -Verb RunAs -Wait -PassThru -ErrorAction Stop; if ($p.ExitCode -eq 0) { exit 0 } else { exit 1 } } catch { exit 1 }`
       const killer = child_process.spawn('powershell.exe', [
         '-NoProfile',
+        '-NonInteractive',
+        '-WindowStyle',
+        'Hidden',
         '-ExecutionPolicy',
         'Bypass',
         '-Command',
         psScript
-      ], { windowsHide: false, stdio: 'ignore' })
+      ], { windowsHide: true, stdio: 'ignore' })
       killer.on('close', (code) => resolve(code === 0))
       killer.on('error', () => resolve(false))
     } catch {
@@ -2645,6 +2676,9 @@ ipcMain.handle('uc:game-exe-launch-admin', async (_event, appid, exePath) => {
       const psScript = `try { $p = Start-Process -FilePath '${safeExePath}' -WorkingDirectory '${workingDir}' -Verb RunAs -WindowStyle Normal -PassThru -ErrorAction Stop; if ($p) { Write-Output \"STARTED:$($p.Id)\"; exit 0 } else { Write-Error 'START-FAILED'; exit 1 } } catch { Write-Error $_.Exception.Message; exit 1 }`
       const proc = child_process.spawn('powershell.exe', [
         '-NoProfile',
+        '-NonInteractive',
+        '-WindowStyle',
+        'Hidden',
         '-ExecutionPolicy',
         'Bypass',
         '-Command',
@@ -2652,32 +2686,55 @@ ipcMain.handle('uc:game-exe-launch-admin', async (_event, appid, exePath) => {
       ], {
         detached: false,
         stdio: ['ignore', 'pipe', 'pipe'],
-        windowsHide: false
+        windowsHide: true
+      })
+      const result = await new Promise((resolve) => {
+        let done = false
+        let launchedPid = null
+        const finish = (payload) => {
+          if (done) return
+          done = true
+          resolve(payload)
+        }
+
+        const timer = setTimeout(() => {
+          finish({ ok: false, error: 'launch-timeout' })
+        }, 12000)
+
+        proc.stdout?.on('data', (data) => {
+          const msg = String(data).trim()
+          if (msg) {
+            ucLog(`Game launch as admin stdout: ${appid} - ${msg}`)
+            const match = msg.match(/STARTED:(\d+)/)
+            if (match && match[1]) {
+              launchedPid = Number(match[1])
+              registerRunningGamePid(appid, exePath, launchedPid)
+              clearTimeout(timer)
+              finish({ ok: true, pid: launchedPid })
+            }
+          }
+        })
+        proc.stderr?.on('data', (data) => {
+          const msg = String(data).trim()
+          if (msg) ucLog(`Game launch as admin stderr: ${appid} - ${msg}`, 'error')
+        })
+        proc.on('error', (err) => {
+          clearTimeout(timer)
+          ucLog(`Game launch as admin process error: ${appid} - ${err.message}`, 'error')
+          finish({ ok: false, error: err.message })
+        })
+        proc.on('exit', (code, signal) => {
+          ucLog(`Game launch as admin process exit: ${appid} - code=${code} signal=${signal}`, 'info')
+          if (!done) {
+            clearTimeout(timer)
+            finish({ ok: false, error: 'launch-exit' })
+          }
+        })
       })
 
-      proc.stdout?.on('data', (data) => {
-        const msg = String(data).trim()
-        if (msg) {
-          ucLog(`Game launch as admin stdout: ${appid} - ${msg}`)
-          const match = msg.match(/STARTED:(\d+)/)
-          if (match && match[1]) {
-            registerRunningGamePid(appid, exePath, Number(match[1]))
-          }
-        }
-      })
-      proc.stderr?.on('data', (data) => {
-        const msg = String(data).trim()
-        if (msg) ucLog(`Game launch as admin stderr: ${appid} - ${msg}`, 'error')
-      })
-      proc.on('error', (err) => {
-        ucLog(`Game launch as admin process error: ${appid} - ${err.message}`, 'error')
-      })
-      proc.on('exit', (code, signal) => {
-        ucLog(`Game launch as admin process exit: ${appid} - code=${code} signal=${signal}`, 'info')
-      })
-      // We register the elevated game PID once we receive STARTED:PID from PowerShell.
+      if (!result.ok) throw new Error(result.error || 'launch-failed')
       ucLog(`Game launched as admin successfully: ${appid}`)
-      return { ok: true, pid: proc.pid }
+      return result
     } catch (err) {
       ucLog(`Game launch as admin failed: ${appid} - ${err.message}`, 'error')
       // Fallback to regular launch
@@ -2707,10 +2764,16 @@ ipcMain.handle('uc:game-exe-launch-admin', async (_event, appid, exePath) => {
   }
 })
 
-ipcMain.handle('uc:game-exe-running', (_event, appid) => {
+ipcMain.handle('uc:game-exe-running', async (_event, appid) => {
   try {
     const running = getRunningGame(appid)
     if (!running) return { ok: true, running: false }
+    const alive = await isProcessRunning(running.pid)
+    if (!alive) {
+      if (running.appid) runningGames.delete(running.appid)
+      if (running.exePath) runningGames.delete(running.exePath)
+      return { ok: true, running: false }
+    }
     return { ok: true, running: true, pid: running.pid, exePath: running.exePath }
   } catch (err) {
     ucLog(`Game running check failed: ${appid} - ${err.message}`, 'error')
@@ -2725,6 +2788,10 @@ ipcMain.handle('uc:game-exe-quit', async (_event, appid) => {
     let stopped = await killProcessTree(running.pid)
     if (!stopped) {
       stopped = await killProcessTreeElevated(running.pid)
+    }
+    if (!stopped) {
+      const alive = await isProcessRunning(running.pid)
+      if (!alive) stopped = true
     }
     if (stopped) {
       if (running.appid) runningGames.delete(running.appid)

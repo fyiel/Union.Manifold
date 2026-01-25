@@ -1,5 +1,24 @@
 # Changelog
 
+## Version 0.5.28 - Game Stop Reliability (Issue #9)
+
+### Fixes
+
+- **Accurate running state** (`electron/main.cjs`)
+  - Added a process-existence check to clear stale running entries
+  - `Stop` now reports success if the game already exited
+
+- **Admin launch & stop UX** (`electron/main.cjs`)
+  - Hidden PowerShell windows for admin launch/kill flows
+  - Admin launch now returns the elevated game PID (not the PowerShell PID)
+
+### User-Facing Improvements
+
+1. Closing a game properly clears the “running” state
+2. Stop button no longer flashes a terminal window
+
+---
+
 ## Version 0.5.25 - Desktop Shortcuts & Settings Management
 
 ### New Features
