@@ -1,5 +1,27 @@
 # Changelog
 
+## Version 0.6.30 - Linux Support (Beta)
+
+### New Features
+
+- **Linux game launching (beta)** (`electron/main.cjs`, `renderer/src/app/pages/SettingsPage.tsx`)
+  - Added launch modes: Auto / Native / Wine / Proton
+  - Added optional Wine + Proton path overrides in Settings
+
+- **Linux executable discovery** (`electron/main.cjs`, `renderer/src/lib/utils.ts`)
+  - Detects AppImage, shell scripts, ELF binaries, and common Linux launchers
+  - Improved executable scoring on Linux
+
+- **Linux desktop shortcuts** (`electron/main.cjs`)
+  - Generates .desktop files for installed games
+
+### Improvements
+
+- **OS-aware launch prompts** (`renderer/src/components/GameCard.tsx`, `renderer/src/app/pages/DownloadsPage.tsx`, `renderer/src/app/pages/GameDetailPage.tsx`)
+  - Admin prompt is now Windows-only
+
+---
+
 ## Version 0.6.29 - Linux Builds
 
 ### New Features
