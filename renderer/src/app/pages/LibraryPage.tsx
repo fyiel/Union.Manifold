@@ -68,6 +68,7 @@ export function LibraryPage() {
   const [exePickerFolder, setExePickerFolder] = useState<string | null>(null)
   const [settingsPopupOpen, setSettingsPopupOpen] = useState(false)
   const [settingsPopupGame, setSettingsPopupGame] = useState<Game | null>(null)
+  const [shortcutFeedback, setShortcutFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
   const itemsPerPage = 8
   const [installedPage, setInstalledPage] = useState(1)
   const [installingPage, setInstallingPage] = useState(1)
@@ -235,6 +236,7 @@ export function LibraryPage() {
 
   const openExeSettings = (game: Game) => {
     setSettingsPopupGame(game)
+    setShortcutFeedback(null)
     setSettingsPopupOpen(true)
   }
 
@@ -569,7 +571,10 @@ export function LibraryPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
           <div
             className="absolute inset-0 bg-black/70"
-            onClick={() => setSettingsPopupOpen(false)}
+            onClick={() => {
+              setSettingsPopupOpen(false)
+              setShortcutFeedback(null)
+            }}
           />
           <div className="relative w-full max-w-md rounded-2xl border border-border/60 bg-slate-950/95 p-5 text-white shadow-2xl">
             <div className="text-lg font-semibold">Game Settings</div>
@@ -603,17 +608,32 @@ export function LibraryPage() {
                 className="w-full justify-start"
                 onClick={async () => {
                   if (settingsPopupGame) {
-                    const savedExe = await window.ucSettings?.get?.(`gameExe:${settingsPopupGame.appid}`)
+                    setShortcutFeedback(null)
+                    let savedExe = await window.ucSettings?.get?.(`gameExe:${settingsPopupGame.appid}`)
+                    if (!savedExe && window.ucDownloads?.listGameExecutables) {
+                      try {
+                        const result = await window.ucDownloads.listGameExecutables(settingsPopupGame.appid)
+                        savedExe = result?.exes?.[0]?.path || null
+                      } catch {}
+                    }
+
                     if (savedExe) {
                       const result = await window.ucDownloads?.createDesktopShortcut?.(settingsPopupGame.name, savedExe)
                       if (result?.ok) {
                         gameLogger.info('Desktop shortcut created manually', { appid: settingsPopupGame.appid })
+                        setShortcutFeedback({ type: 'success', message: 'Desktop shortcut created.' })
                       } else if (result?.existed) {
                         gameLogger.info('Desktop shortcut already exists', { appid: settingsPopupGame.appid })
+                        setShortcutFeedback({ type: 'success', message: 'Desktop shortcut already exists.' })
+                      } else {
+                        setShortcutFeedback({ type: 'error', message: 'Failed to create desktop shortcut.' })
                       }
                     } else {
                       gameLogger.warn('No saved exe found for creating shortcut', { appid: settingsPopupGame.appid })
+                      setShortcutFeedback({ type: 'error', message: 'Select an executable first.' })
+                      void openExecutablePicker(settingsPopupGame)
                     }
+                    setTimeout(() => setShortcutFeedback(null), 3000)
                   }
                 }}
               >
@@ -622,8 +642,20 @@ export function LibraryPage() {
               </Button>
             </div>
 
+            {shortcutFeedback && (
+              <div className={`mt-3 text-xs ${shortcutFeedback.type === 'success' ? 'text-emerald-400' : 'text-destructive'}`}>
+                {shortcutFeedback.message}
+              </div>
+            )}
+
             <div className="mt-4 flex justify-end">
-              <Button variant="ghost" onClick={() => setSettingsPopupOpen(false)}>
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  setSettingsPopupOpen(false)
+                  setShortcutFeedback(null)
+                }}
+              >
                 Close
               </Button>
             </div>

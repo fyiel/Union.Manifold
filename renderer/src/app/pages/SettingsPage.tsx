@@ -75,9 +75,10 @@ export function SettingsPage() {
   const [linuxLaunchMode, setLinuxLaunchMode] = useState<'auto' | 'native' | 'wine' | 'proton'>('auto')
   const [linuxWinePath, setLinuxWinePath] = useState('')
   const [linuxProtonPath, setLinuxProtonPath] = useState('')
-  const [discordRpcEnabled, setDiscordRpcEnabled] = useState(false)
+  const [discordRpcEnabled, setDiscordRpcEnabled] = useState(true)
   const [clearingData, setClearingData] = useState(false)
   const [showClearConfirm, setShowClearConfirm] = useState(false)
+  const [clearDataFeedback, setClearDataFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
 
   useEffect(() => {
     const loadVersion = async () => {
@@ -229,7 +230,7 @@ export function SettingsPage() {
       try {
         const enabled = await window.ucSettings?.get?.('discordRpcEnabled')
         if (!mounted) return
-        setDiscordRpcEnabled(Boolean(enabled))
+        setDiscordRpcEnabled(enabled !== false)
       } catch {
         // ignore
       }
@@ -238,10 +239,10 @@ export function SettingsPage() {
     const off = window.ucSettings?.onChanged?.((data: any) => {
       if (!data || !data.key) return
       if (data.key === '__CLEAR_ALL__') {
-        setDiscordRpcEnabled(false)
+        setDiscordRpcEnabled(true)
         return
       }
-      if (data.key === 'discordRpcEnabled') setDiscordRpcEnabled(Boolean(data.value))
+      if (data.key === 'discordRpcEnabled') setDiscordRpcEnabled(data.value !== false)
     })
     return () => {
       mounted = false
@@ -426,9 +427,6 @@ const handleCheckForUpdates = async () => {
               </button>
             </div>
 
-            <p className="text-xs text-muted-foreground">
-              Discord application: UnionCrax.Direct.
-            </p>
           </div>
         </CardContent>
       </Card>
@@ -795,6 +793,7 @@ const handleCheckForUpdates = async () => {
                     variant="destructive"
                     onClick={async () => {
                       setClearingData(true)
+                      setClearDataFeedback(null)
                       try {
                         const result = await window.ucSettings?.clearAll?.()
                         if (result?.ok) {
@@ -802,14 +801,21 @@ const handleCheckForUpdates = async () => {
                           setRunGamesAsAdmin(false)
                           setAlwaysCreateDesktopShortcut(false)
                           setDefaultHost('pixeldrain')
-                          setDiscordRpcEnabled(false)
+                          setDiscordRpcEnabled(true)
+                          setClearDataFeedback({ type: 'success', message: 'User data cleared successfully.' })
                           // Show success message briefly
                           setTimeout(() => {
                             setShowClearConfirm(false)
                           }, 1500)
+                          setTimeout(() => {
+                            setClearDataFeedback(null)
+                          }, 3000)
+                        } else {
+                          setClearDataFeedback({ type: 'error', message: 'Failed to clear user data. Please try again.' })
                         }
                       } catch (err) {
                         console.error('Failed to clear user data:', err)
+                        setClearDataFeedback({ type: 'error', message: 'Failed to clear user data. Please try again.' })
                       } finally {
                         setClearingData(false)
                       }
@@ -826,6 +832,12 @@ const handleCheckForUpdates = async () => {
                     Cancel
                   </Button>
                 </div>
+              </div>
+            )}
+
+            {clearDataFeedback && (
+              <div className={`text-xs ${clearDataFeedback.type === 'success' ? 'text-emerald-400' : 'text-destructive'}`}>
+                {clearDataFeedback.message}
               </div>
             )}
           </div>
