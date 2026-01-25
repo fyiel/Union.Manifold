@@ -97,7 +97,11 @@
       "icon": "assets/icon.ico",
       "target": [
         "nsis",
-        "portable"
+        "portable",
+        {
+          "target": "zip",
+          "artifactName": "${productName}${version}Portable.${ext}"
+        }
       ],
       "publisherName": "UnionCrax",
       "artifactName": "${productName}.Setup.${version}.${ext}"
