@@ -4,7 +4,7 @@ A fast, standalone Electron desktop application for managing and launching games
 
 ![Version](https://img.shields.io/github/v/release/Union-Crax/UnionCrax.Direct?include_prereleases&style=flat-square)
 ![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)
-![Platform](https://img.shields.io/badge/platform-Windows-0078d4?style=flat-square)
+![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-0078d4?style=flat-square)
 
 ## Features
 
@@ -33,6 +33,15 @@ A fast, standalone Electron desktop application for managing and launching games
 ### Option 2: Portable (No Installation)
 1. Extract the downloaded ZIP
 2. Run `UnionCrax.Direct.exe` directly
+
+### Option 3: Linux (AppImage Script)
+Run the one-line installer (downloads the latest AppImage and creates a desktop entry):
+
+```bash
+curl -sSL https://union-crax.xyz/linux-installer.sh | bash
+```
+
+This installs the AppImage to `~/.local/share/UnionCrax.Direct` and adds a launcher in your applications menu.
 
 ## Usage
 
