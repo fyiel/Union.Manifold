@@ -1,5 +1,57 @@
 # Changelog
 
+## Version 0.6.31 - Enhanced Logging & UX Improvements
+
+### New Features
+
+- **Game details action menu** (`renderer/src/app/pages/GameDetailPage.tsx`)
+  - Added settings gear popover next to Play button with three actions
+  - Set Executable: Choose or change the game's launch executable
+  - Create Desktop Shortcut: Quickly create a desktop shortcut
+  - Open Game Files: Open the game's installation folder in file explorer
+  - Centralized executable picker with "set-only" mode for non-launch flows
+
+### Improvements
+
+- **Enhanced logging system** (`electron/main.cjs`)
+  - Added safer log serialization to prevent circular reference errors
+  - Process lifecycle logging: uncaught exceptions, unhandled rejections, app quit events
+  - Window lifecycle logging: crashes, unresponsive state, renderer process gone
+  - Renderer console logging: automatic capture of warnings and errors
+  - Extraction/download logs now mirrored to main app log
+  - Logs preserved on app ready (no longer cleared at startup)
+
+- **Application Logs modal overhaul** (`renderer/src/components/LogViewer.tsx`, `renderer/src/components/ui/scroll-area.tsx`)
+  - Wider, taller modal with stable layout on small screens
+  - Reliable vertical and horizontal scrolling for large log output
+  - Added copy-to-clipboard button for logs
+
+- **User action feedback** (`renderer/src/app/pages/SettingsPage.tsx`, `renderer/src/app/pages/GameDetailPage.tsx`, `renderer/src/app/pages/LibraryPage.tsx`)
+  - Success/error messages when clearing user data
+  - Feedback when creating desktop shortcuts across all pages
+  - Messages persist for 3 seconds with auto-clear
+
+- **Discord RPC web buttons now follow current page** (`renderer/src/hooks/use-discord-rpc.ts`)
+  - "Open on web" maps to the matching union-crax.xyz route (Search, Library, Settings, Game pages)
+  - "Download UC.D" is always shown and links to the Direct download page
+
+- **Library page shortcut consistency** (`renderer/src/app/pages/LibraryPage.tsx`)
+  - Auto-detects executables before prompting, matching game details behavior
+  - No longer asks to "set exe first" when executables can be found automatically
+
+- **Discord RPC enabled by default** (`electron/main.cjs`, `renderer/src/app/pages/SettingsPage.tsx`, `renderer/src/hooks/use-discord-rpc.ts`)
+  - Discord presence now enabled for new installations
+  - Settings defaults applied at read-time for backward compatibility
+
+### Fixes
+
+- **Version reporting** (`electron/main.cjs`)
+  - Fixed app version showing Electron runtime version instead of package version
+  - Added `getAppVersion()` helper using package.json version
+  - Corrects update check logic and version display in logs
+
+---
+
 ## Version 0.6.30 - Linux Support (Beta)
 
 ### New Features
