@@ -3,6 +3,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Input } from "@/components/ui/input"
 import { apiUrl } from "@/lib/api"
 import {
   getPreferredDownloadHost,
@@ -56,6 +57,8 @@ function joinPath(root: string, folder: string) {
 }
 
 export function SettingsPage() {
+  const isWindows = typeof navigator !== 'undefined' && /windows/i.test(navigator.userAgent)
+  const isLinux = typeof navigator !== 'undefined' && /linux/i.test(navigator.userAgent)
   const [disks, setDisks] = useState<DiskInfo[]>([])
   const [downloadPath, setDownloadPath] = useState("")
   const [selectedDiskId, setSelectedDiskId] = useState("")
@@ -69,6 +72,9 @@ export function SettingsPage() {
   const [updateCheckResult, setUpdateCheckResult] = useState<string | null>(null)
   const [runGamesAsAdmin, setRunGamesAsAdmin] = useState(false)
   const [alwaysCreateDesktopShortcut, setAlwaysCreateDesktopShortcut] = useState(false)
+  const [linuxLaunchMode, setLinuxLaunchMode] = useState<'auto' | 'native' | 'wine' | 'proton'>('auto')
+  const [linuxWinePath, setLinuxWinePath] = useState('')
+  const [linuxProtonPath, setLinuxProtonPath] = useState('')
   const [discordRpcEnabled, setDiscordRpcEnabled] = useState(false)
   const [clearingData, setClearingData] = useState(false)
   const [showClearConfirm, setShowClearConfirm] = useState(false)
@@ -121,6 +127,45 @@ export function SettingsPage() {
       if (data.key === 'defaultMirrorHost' && data.value && MIRROR_HOSTS.some((h) => h.key === data.value)) {
         setDefaultHost(data.value)
       }
+    })
+    return () => {
+      mounted = false
+      if (typeof off === 'function') off()
+    }
+  }, [])
+
+  useEffect(() => {
+    let mounted = true
+    const loadLinuxLaunchSettings = async () => {
+      try {
+        const mode = await window.ucSettings?.get?.('linuxLaunchMode')
+        const winePath = await window.ucSettings?.get?.('linuxWinePath')
+        const protonPath = await window.ucSettings?.get?.('linuxProtonPath')
+        if (!mounted) return
+        if (mode && ['auto', 'native', 'wine', 'proton'].includes(String(mode))) {
+          setLinuxLaunchMode(mode as 'auto' | 'native' | 'wine' | 'proton')
+        }
+        if (typeof winePath === 'string') setLinuxWinePath(winePath)
+        if (typeof protonPath === 'string') setLinuxProtonPath(protonPath)
+      } catch {
+        // ignore
+      }
+    }
+    loadLinuxLaunchSettings()
+    const off = window.ucSettings?.onChanged?.((data: any) => {
+      if (!data || !data.key) return
+      if (data.key === '__CLEAR_ALL__') {
+        setLinuxLaunchMode('auto')
+        setLinuxWinePath('')
+        setLinuxProtonPath('')
+        return
+      }
+      if (data.key === 'linuxLaunchMode' && data.value) {
+        const next = String(data.value)
+        if (['auto', 'native', 'wine', 'proton'].includes(next)) setLinuxLaunchMode(next as 'auto' | 'native' | 'wine' | 'proton')
+      }
+      if (data.key === 'linuxWinePath') setLinuxWinePath(data.value || '')
+      if (data.key === 'linuxProtonPath') setLinuxProtonPath(data.value || '')
     })
     return () => {
       mounted = false
@@ -577,33 +622,35 @@ const handleCheckForUpdates = async () => {
           </div>
 
           <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <label className="text-sm font-medium cursor-pointer">Run games as Administrator</label>
-                <p className="text-xs text-muted-foreground mt-1">
-                  Automatically launch games with admin privileges
-                </p>
-              </div>
-              <button
-                onClick={async () => {
-                  const newValue = !runGamesAsAdmin
-                  setRunGamesAsAdmin(newValue)
-                  try {
-                    await window.ucSettings?.set?.('runGamesAsAdmin', newValue)
-                  } catch {}
-                }}
-                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                  runGamesAsAdmin ? 'bg-primary' : 'bg-slate-700'
-                }`}
-                title="Toggle run games as admin"
-              >
-                <span
-                  className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                    runGamesAsAdmin ? 'translate-x-6' : 'translate-x-1'
+            {isWindows && (
+              <div className="flex items-center justify-between">
+                <div>
+                  <label className="text-sm font-medium cursor-pointer">Run games as Administrator</label>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Automatically launch games with admin privileges
+                  </p>
+                </div>
+                <button
+                  onClick={async () => {
+                    const newValue = !runGamesAsAdmin
+                    setRunGamesAsAdmin(newValue)
+                    try {
+                      await window.ucSettings?.set?.('runGamesAsAdmin', newValue)
+                    } catch {}
+                  }}
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                    runGamesAsAdmin ? 'bg-primary' : 'bg-slate-700'
                   }`}
-                />
-              </button>
-            </div>
+                  title="Toggle run games as admin"
+                >
+                  <span
+                    className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                      runGamesAsAdmin ? 'translate-x-6' : 'translate-x-1'
+                    }`}
+                  />
+                </button>
+              </div>
+            )}
 
             <div className="flex items-center justify-between">
               <div>
@@ -633,9 +680,69 @@ const handleCheckForUpdates = async () => {
               </button>
             </div>
 
-            <div className="rounded-lg border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-xs text-blue-200">
-              The admin prompt appears only once on your first game launch.
-            </div>
+            {isWindows && (
+              <div className="rounded-lg border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-xs text-blue-200">
+                The admin prompt appears only once on your first game launch.
+              </div>
+            )}
+
+            {isLinux && (
+              <div className="rounded-xl border border-border/60 bg-muted/30 p-4 space-y-3">
+                <div>
+                  <div className="text-sm font-semibold">Linux launch mode</div>
+                  <div className="text-xs text-muted-foreground">Choose how Windows games are started on Linux.</div>
+                </div>
+                <Select
+                  value={linuxLaunchMode}
+                  onValueChange={async (value) => {
+                    const next = value as 'auto' | 'native' | 'wine' | 'proton'
+                    setLinuxLaunchMode(next)
+                    try {
+                      await window.ucSettings?.set?.('linuxLaunchMode', next)
+                    } catch {}
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select a launch mode" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="auto">Auto (native or Wine)</SelectItem>
+                    <SelectItem value="native">Native only</SelectItem>
+                    <SelectItem value="wine">Wine</SelectItem>
+                    <SelectItem value="proton">Proton</SelectItem>
+                  </SelectContent>
+                </Select>
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-2">
+                    <label className="text-xs font-medium text-muted-foreground">Wine binary path (optional)</label>
+                    <Input
+                      value={linuxWinePath}
+                      onChange={(e) => setLinuxWinePath(e.target.value)}
+                      onBlur={async () => {
+                        try {
+                          await window.ucSettings?.set?.('linuxWinePath', linuxWinePath)
+                        } catch {}
+                      }}
+                      placeholder="wine"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-medium text-muted-foreground">Proton script path (optional)</label>
+                    <Input
+                      value={linuxProtonPath}
+                      onChange={(e) => setLinuxProtonPath(e.target.value)}
+                      onBlur={async () => {
+                        try {
+                          await window.ucSettings?.set?.('linuxProtonPath', linuxProtonPath)
+                        } catch {}
+                      }}
+                      placeholder="/home/user/.steam/steam/steamapps/common/Proton*/proton"
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>

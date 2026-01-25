@@ -147,6 +147,8 @@ export function pickGameExecutable(exes: GameExecutable[], gameName: string, gam
   const candidates = filterGameExecutables(exes)
   if (!candidates.length) return { pick: null, confident: false }
 
+  const isLinuxPlatform = typeof navigator !== 'undefined' && /linux/i.test(navigator.userAgent)
+
   // If there's only 1 exe, assume it's the correct one
   if (candidates.length === 1) {
     return { pick: candidates[0], confident: true }
@@ -177,6 +179,13 @@ export function pickGameExecutable(exes: GameExecutable[], gameName: string, gam
     if (lower.includes("launcher")) score += 3
     if (lower.includes("game")) score += 2
     if (lower.includes("setup") || lower.includes("uninstall")) score -= 3
+    if (isLinuxPlatform) {
+      if (lower.endsWith('.appimage')) score += 6
+      if (lower.endsWith('.sh') || lower.includes('run') || lower.includes('start')) score += 3
+      if (lower.endsWith('.x86_64') || lower.endsWith('.x86')) score += 4
+      if (lower.endsWith('.exe')) score += 1
+      if (lower.includes('installer')) score -= 2
+    }
     return { exe, score }
   })
   scored.sort((a, b) => b.score - a.score)
