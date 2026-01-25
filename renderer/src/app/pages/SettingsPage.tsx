@@ -69,6 +69,7 @@ export function SettingsPage() {
   const [updateCheckResult, setUpdateCheckResult] = useState<string | null>(null)
   const [runGamesAsAdmin, setRunGamesAsAdmin] = useState(false)
   const [alwaysCreateDesktopShortcut, setAlwaysCreateDesktopShortcut] = useState(false)
+  const [discordRpcEnabled, setDiscordRpcEnabled] = useState(false)
   const [clearingData, setClearingData] = useState(false)
   const [showClearConfirm, setShowClearConfirm] = useState(false)
 
@@ -170,6 +171,32 @@ export function SettingsPage() {
       if (data.key === 'alwaysCreateDesktopShortcut') {
         setAlwaysCreateDesktopShortcut(data.value || false)
       }
+    })
+    return () => {
+      mounted = false
+      if (typeof off === 'function') off()
+    }
+  }, [])
+
+  useEffect(() => {
+    let mounted = true
+    const loadRpcSettings = async () => {
+      try {
+        const enabled = await window.ucSettings?.get?.('discordRpcEnabled')
+        if (!mounted) return
+        setDiscordRpcEnabled(Boolean(enabled))
+      } catch {
+        // ignore
+      }
+    }
+    loadRpcSettings()
+    const off = window.ucSettings?.onChanged?.((data: any) => {
+      if (!data || !data.key) return
+      if (data.key === '__CLEAR_ALL__') {
+        setDiscordRpcEnabled(false)
+        return
+      }
+      if (data.key === 'discordRpcEnabled') setDiscordRpcEnabled(Boolean(data.value))
     })
     return () => {
       mounted = false
@@ -313,6 +340,51 @@ const handleCheckForUpdates = async () => {
             <ExternalLink className="h-4 w-4" />
             Manage account on web
           </Button>
+        </CardContent>
+      </Card>
+
+      <Card className="border-border/60">
+        <CardContent className="p-6 space-y-6">
+          <div>
+            <h2 className="text-lg font-semibold">Discord Rich Presence</h2>
+            <p className="text-sm text-muted-foreground">
+              Show your UnionCrax.Direct activity on Discord.
+            </p>
+          </div>
+
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <label className="text-sm font-medium cursor-pointer">Enable Discord RPC</label>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Requires the Discord desktop app running in the background.
+                </p>
+              </div>
+              <button
+                onClick={async () => {
+                  const newValue = !discordRpcEnabled
+                  setDiscordRpcEnabled(newValue)
+                  try {
+                    await window.ucSettings?.set?.('discordRpcEnabled', newValue)
+                  } catch {}
+                }}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                  discordRpcEnabled ? 'bg-primary' : 'bg-slate-700'
+                }`}
+                title="Toggle Discord Rich Presence"
+              >
+                <span
+                  className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                    discordRpcEnabled ? 'translate-x-6' : 'translate-x-1'
+                  }`}
+                />
+              </button>
+            </div>
+
+            <p className="text-xs text-muted-foreground">
+              Discord application: UnionCrax.Direct.
+            </p>
+          </div>
         </CardContent>
       </Card>
 
@@ -623,6 +695,7 @@ const handleCheckForUpdates = async () => {
                           setRunGamesAsAdmin(false)
                           setAlwaysCreateDesktopShortcut(false)
                           setDefaultHost('pixeldrain')
+                          setDiscordRpcEnabled(false)
                           // Show success message briefly
                           setTimeout(() => {
                             setShowClearConfirm(false)

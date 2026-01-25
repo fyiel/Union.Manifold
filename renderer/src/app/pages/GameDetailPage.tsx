@@ -64,6 +64,15 @@ export function GameDetailPage() {
 
   const appid = params.id || ""
 
+  const persistGameName = (id: string, name?: string | null) => {
+    if (!id || !name) return
+    try {
+      localStorage.setItem(`uc_game_name:${id}`, name)
+    } catch {
+      // ignore
+    }
+  }
+
   useEffect(() => {
     const load = async () => {
       try {
@@ -75,6 +84,8 @@ export function GameDetailPage() {
         }
         const data = await response.json()
         setGame(data)
+        persistGameName(appid, data?.name)
+        window.dispatchEvent(new CustomEvent("uc_game_name", { detail: { appid, name: data?.name } }))
         setSelectedImage(data.splash || data.image)
       } catch (err) {
         // Try fallback: ask main process for installed manifest
@@ -86,6 +97,8 @@ export function GameDetailPage() {
               const meta = manifest.metadata
               const localImg = meta.localImage || meta.image
               setGame(meta)
+              persistGameName(appid, meta?.name)
+              window.dispatchEvent(new CustomEvent("uc_game_name", { detail: { appid, name: meta?.name } }))
               setSelectedImage(localImg || meta.splash || meta.image)
               setError(null)
               return
@@ -457,7 +470,7 @@ export function GameDetailPage() {
       : window.ucDownloads.launchGameExecutable
     
     if (!launchFn) return
-    const res = await launchFn(game.appid, path)
+    const res = await launchFn(game.appid, path, game.name)
     if (res && res.ok) {
       await setSavedExe(path)
       setExePickerOpen(false)

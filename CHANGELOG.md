@@ -1,5 +1,32 @@
 # Changelog
 
+## Version 0.6.28 - Discord Rich Presence & Web Links
+
+### New Features
+
+- **Discord Rich Presence** (`electron/main.cjs`, `electron/preload.cjs`, `renderer/src/hooks/use-discord-rpc.ts`)
+  - IPC-backed presence updates with a settings toggle
+  - Activity shows downloads, queues, and page context
+  - Game launch updates presence with game name and start time
+
+- **RPC Web Buttons** (`electron/main.cjs`, `renderer/src/hooks/use-discord-rpc.ts`)
+  - “Open on web” for UnionCrax pages
+  - “Download UC.D” linking to the new Direct download page
+
+### Improvements
+
+- **Game name resolution for RPC** (`renderer/src/app/pages/GameDetailPage.tsx`)
+  - Cache game names locally to avoid showing app IDs
+  - Pushes name updates to the RPC hook
+
+### Technical Changes
+
+- Added `discord-rpc` dependency
+- Added RPC IPC handlers and cleanup on quit
+- Added periodic pruning for stale running game PIDs
+
+---
+
 ## Version 0.5.28 - Game Stop Reliability (Issue #9)
 
 ### Fixes

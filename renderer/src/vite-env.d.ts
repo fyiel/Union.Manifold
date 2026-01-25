@@ -83,8 +83,8 @@ declare global {
       getInstallingGlobal: (appid: string) => Promise<any | null>
       listGameExecutables: (appid: string) => Promise<{ ok: boolean; folder?: string; exes: { name: string; path: string }[]; error?: string }>
       findGameSubfolder: (folder: string) => Promise<string | null>
-      launchGameExecutable: (appid: string, exePath: string) => Promise<{ ok: boolean; error?: string; pid?: number }>
-      launchGameExecutableAsAdmin: (appid: string, exePath: string) => Promise<{ ok: boolean; error?: string; pid?: number }>
+      launchGameExecutable: (appid: string, exePath: string, gameName?: string) => Promise<{ ok: boolean; error?: string; pid?: number }>
+      launchGameExecutableAsAdmin: (appid: string, exePath: string, gameName?: string) => Promise<{ ok: boolean; error?: string; pid?: number }>
       getRunningGame: (appid: string) => Promise<{ ok: boolean; running: boolean; pid?: number; exePath?: string }>
       quitGameExecutable: (appid: string) => Promise<{ ok: boolean; stopped?: boolean }>
       deleteInstalled: (appid: string) => Promise<{ ok: boolean }>
@@ -96,6 +96,7 @@ declare global {
     ucSettings?: {
       get: (key: string) => Promise<any>
       set: (key: string, value: any) => Promise<{ ok: boolean }>
+      clearAll: () => Promise<{ ok: boolean }>
       onChanged: (callback: (data: { key: string; value: any }) => void) => () => void
     }
     ucAuth?: {
@@ -125,6 +126,21 @@ declare global {
       log: (level: string, message: string, data?: any) => Promise<void>
       getLogs: () => Promise<string>
       clearLogs: () => Promise<void>
+    }
+    ucRpc?: {
+      setActivity: (payload: {
+        details?: string
+        state?: string
+        startTimestamp?: number
+        endTimestamp?: number
+        largeImageKey?: string
+        largeImageText?: string
+        smallImageKey?: string
+        smallImageText?: string
+        buttons?: Array<{ label: string; url: string }>
+      }) => Promise<{ ok: boolean }>
+      clearActivity: () => Promise<{ ok: boolean }>
+      getStatus: () => Promise<{ ok: boolean; enabled: boolean; ready: boolean; clientId?: string | null }>
     }
     electron?: {
       ipcRenderer: {
