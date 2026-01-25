@@ -81,7 +81,8 @@
       }
     ],
     "directories": {
-      "output": "dist-packaged"
+      "output": "dist-packaged",
+      "buildResources": "assets"
     },
     "files": [
       "assets/**/*",
