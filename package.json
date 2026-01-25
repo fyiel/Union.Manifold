@@ -1,6 +1,6 @@
 {
   "name": "unioncrax-direct",
-  "version": "0.6.28",
+  "version": "0.6.29",
   "description": "Standalone Electron app for managing and launching games from UnionCrax",
   "type": "module",
   "main": "electron/main.cjs",
@@ -96,10 +96,16 @@
     "win": {
       "icon": "assets/icon.ico",
       "target": [
-        "nsis"
+        "nsis",
+        "portable"
       ],
       "publisherName": "UnionCrax",
       "artifactName": "${productName}.Setup.${version}.${ext}"
+    },
+
+    "linux": {
+      "target": ["AppImage"],
+      "icon": null
     }
   }
 }
