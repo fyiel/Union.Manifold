@@ -99,10 +99,7 @@
       "target": [
         "nsis",
         "portable",
-        {
-          "target": "zip",
-          "artifactName": "${productName}${version}Portable.${ext}"
-        }
+        "zip"
       ],
       "publisherName": "UnionCrax",
       "artifactName": "${productName}.Setup.${version}.${ext}"
