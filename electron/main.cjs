@@ -1040,6 +1040,22 @@ function updateInstallingManifestStatus(appid, status, error) {
   }
 }
 
+function isLinuxExecutableCandidate(entry, fullPath) {
+  if (!entry || !entry.isFile || !entry.isFile()) return false
+  const lower = entry.name.toLowerCase()
+  if (lower.endsWith('.desktop')) return false
+  if (lower.endsWith('.dll') || lower.endsWith('.so')) return false
+  if (lower.endsWith('.appimage') || lower.endsWith('.sh') || lower.endsWith('.run') || lower.endsWith('.bin')) return true
+  if (lower.endsWith('.x86_64') || lower.endsWith('.x86')) return true
+  if (lower.endsWith('.exe')) return true
+  try {
+    fs.accessSync(fullPath, fs.constants.X_OK)
+    return true
+  } catch {
+    return false
+  }
+}
+
 function listExecutables(rootDir, maxDepth, maxResults) {
   const results = []
   if (!rootDir || !fs.existsSync(rootDir)) return results
@@ -1062,7 +1078,14 @@ function listExecutables(rootDir, maxDepth, maxResults) {
         continue
       }
       if (!entry.isFile()) continue
-      if (entry.name.toLowerCase().endsWith('.exe')) {
+      if (process.platform === 'win32') {
+        if (entry.name.toLowerCase().endsWith('.exe')) {
+          results.push({ name: entry.name, path: fullPath })
+          if (results.length >= maxResults) break
+        }
+        continue
+      }
+      if (isLinuxExecutableCandidate(entry, fullPath)) {
         results.push({ name: entry.name, path: fullPath })
         if (results.length >= maxResults) break
       }
@@ -2850,15 +2873,53 @@ ipcMain.handle('uc:game-subfolder-find', (_event, folder) => {
   }
 })
 
+function normalizeRunnerPath(candidate, fallback) {
+  if (!candidate || typeof candidate !== 'string') return fallback
+  const trimmed = candidate.trim()
+  if (!trimmed) return fallback
+  if (path.isAbsolute(trimmed) && !fs.existsSync(trimmed)) return fallback
+  return trimmed
+}
+
+function resolveLaunchCommand(exePath) {
+  const cwd = path.dirname(exePath)
+  if (process.platform !== 'linux') {
+    return { command: exePath, args: [], cwd }
+  }
+
+  const settings = readSettings() || {}
+  const mode = String(settings.linuxLaunchMode || 'auto').toLowerCase()
+  const winePath = normalizeRunnerPath(settings.linuxWinePath, 'wine')
+  const protonPath = normalizeRunnerPath(settings.linuxProtonPath, 'proton')
+  const isExe = exePath.toLowerCase().endsWith('.exe')
+
+  if (mode === 'native') {
+    return { command: exePath, args: [], cwd }
+  }
+
+  if (isExe) {
+    if (mode === 'proton') {
+      return { command: protonPath, args: ['run', exePath], cwd }
+    }
+    if (mode === 'wine' || mode === 'auto') {
+      return { command: winePath, args: [exePath], cwd }
+    }
+  }
+
+  return { command: exePath, args: [], cwd }
+}
+
 ipcMain.handle('uc:game-exe-launch', async (_event, appid, exePath, gameName) => {
   try {
     if (!exePath || typeof exePath !== 'string') return { ok: false }
     ucLog(`Launching game: ${appid} at ${exePath}`)
     try {
-      const proc = child_process.spawn(exePath, [], {
+      const { command, args, cwd } = resolveLaunchCommand(exePath)
+      const proc = child_process.spawn(command, args, {
         detached: true,
         stdio: 'ignore',
-        windowsHide: false
+        windowsHide: false,
+        cwd
       })
       proc.unref()
       registerRunningGame(appid, exePath, proc, gameName)
@@ -2882,6 +2943,30 @@ ipcMain.handle('uc:game-exe-launch', async (_event, appid, exePath, gameName) =>
 ipcMain.handle('uc:game-exe-launch-admin', async (_event, appid, exePath, gameName) => {
   try {
     if (!exePath || typeof exePath !== 'string') return { ok: false }
+    if (process.platform !== 'win32') {
+      ucLog(`Launching game (non-admin fallback): ${appid} at ${exePath}`)
+      try {
+        const { command, args, cwd } = resolveLaunchCommand(exePath)
+        const proc = child_process.spawn(command, args, {
+          detached: true,
+          stdio: 'ignore',
+          windowsHide: false,
+          cwd
+        })
+        proc.unref()
+        registerRunningGame(appid, exePath, proc, gameName)
+        ucLog(`Game launched successfully: ${appid} (PID: ${proc.pid})`)
+        return { ok: true, pid: proc.pid }
+      } catch (err) {
+        const res = await shell.openPath(exePath)
+        if (res && typeof res === 'string' && res.length > 0) {
+          ucLog(`Game launch failed: ${appid} - ${res}`, 'error')
+          return { ok: false, error: res }
+        }
+        ucLog(`Game opened via shell: ${appid}`)
+        return { ok: true }
+      }
+    }
     ucLog(`Launching game as admin: ${appid} at ${exePath}`)
     try {
       const safeExePath = exePath.replace(/'/g, "''")
@@ -3045,6 +3130,17 @@ ipcMain.handle('uc:installing-delete', (_event, appid) => {
   }
 })
 
+function sanitizeDesktopFileName(name) {
+  if (!name || typeof name !== 'string') return 'UnionCrax-Game'
+  return name.replace(/[\\/:*?"<>|]+/g, '').trim() || 'UnionCrax-Game'
+}
+
+function buildDesktopExecLine(exePath) {
+  const { command, args } = resolveLaunchCommand(exePath)
+  const quote = (value) => `"${String(value).replace(/"/g, '\\"')}"`
+  return [command, ...args].map(quote).join(' ')
+}
+
 ipcMain.handle('uc:delete-desktop-shortcut', async (_event, gameName) => {
   try {
     if (!gameName || typeof gameName !== 'string') {
@@ -3053,7 +3149,9 @@ ipcMain.handle('uc:delete-desktop-shortcut', async (_event, gameName) => {
     }
 
     const desktopPath = app.getPath('desktop')
-    const shortcutName = `${gameName} - UC.lnk`
+    const shortcutName = process.platform === 'win32'
+      ? `${gameName} - UC.lnk`
+      : `${sanitizeDesktopFileName(gameName)} - UC.desktop`
     const shortcutPath = path.join(desktopPath, shortcutName)
 
     if (!fs.existsSync(shortcutPath)) {
@@ -3083,7 +3181,9 @@ ipcMain.handle('uc:create-desktop-shortcut', async (_event, gameName, exePath) =
     }
 
     const desktopPath = app.getPath('desktop')
-    const shortcutName = `${gameName} - UC.lnk`
+    const shortcutName = process.platform === 'win32'
+      ? `${gameName} - UC.lnk`
+      : `${sanitizeDesktopFileName(gameName)} - UC.desktop`
     const shortcutPath = path.join(desktopPath, shortcutName)
 
     // Check if shortcut already exists
@@ -3146,9 +3246,19 @@ ipcMain.handle('uc:create-desktop-shortcut', async (_event, gameName, exePath) =
         })
       })
     } else {
-      // For non-Windows platforms (future support)
-      ucLog('Desktop shortcuts are currently only supported on Windows', 'warn')
-      return { ok: false, error: 'Not supported on this platform' }
+      try {
+        const iconPath = resolveIcon()
+        const execLine = buildDesktopExecLine(exePath)
+        const workingDir = path.dirname(exePath)
+        const desktopEntry = `[Desktop Entry]\nType=Application\nName=${gameName}\nExec=${execLine}\nPath=${workingDir}\nIcon=${iconPath}\nTerminal=false\nCategories=Game;\n`;
+        fs.writeFileSync(shortcutPath, desktopEntry, 'utf8')
+        try { fs.chmodSync(shortcutPath, 0o755) } catch {}
+        ucLog(`Desktop shortcut created successfully: ${shortcutPath}`)
+        return { ok: true }
+      } catch (err) {
+        ucLog(`Desktop shortcut creation error: ${err.message}`, 'error')
+        return { ok: false, error: err.message }
+      }
     }
   } catch (err) {
     ucLog(`Desktop shortcut creation error: ${err.message}`, 'error')

@@ -36,6 +36,7 @@ import { DesktopShortcutModal } from "@/components/DesktopShortcutModal"
 import { gameLogger } from "@/lib/logger"
 
 export function GameDetailPage() {
+  const isWindows = typeof navigator !== 'undefined' && /windows/i.test(navigator.userAgent)
   const params = useParams()
   const { startGameDownload, resumeGroup, downloads, clearByAppid } = useDownloads()
   const { games, stats } = useGamesData()
@@ -291,7 +292,11 @@ export function GameDetailPage() {
         const promptShown = await getAdminPromptShown()
         
         if (!promptShown) {
-          setAdminPromptOpen(true)
+          if (isWindows) {
+            setAdminPromptOpen(true)
+          } else {
+            await launchGame(pick.path, false)
+          }
         } else {
           await launchGame(pick.path, runAsAdminEnabled)
         }
@@ -395,6 +400,7 @@ export function GameDetailPage() {
   }
 
   const getAdminPromptShown = async () => {
+    if (!isWindows) return true
     if (!window.ucSettings?.get) return false
     try {
       return await window.ucSettings.get('adminPromptShown')
@@ -411,6 +417,7 @@ export function GameDetailPage() {
   }
 
   const getRunAsAdminEnabled = async () => {
+    if (!isWindows) return false
     if (!window.ucSettings?.get) return false
     try {
       return await window.ucSettings.get('runGamesAsAdmin')
@@ -465,7 +472,7 @@ export function GameDetailPage() {
 
   const launchGame = async (path: string, asAdmin: boolean = false) => {
     if (!window.ucDownloads) return
-    const launchFn = asAdmin 
+    const launchFn = asAdmin && isWindows
       ? window.ucDownloads.launchGameExecutableAsAdmin 
       : window.ucDownloads.launchGameExecutable
     
@@ -482,6 +489,10 @@ export function GameDetailPage() {
   }
 
   const handleAdminDecision = async (path: string, asAdmin: boolean) => {
+    if (!isWindows) {
+      await launchGame(path, false)
+      return
+    }
     await setAdminPromptShown()
     
     // Check if we should show shortcut modal BEFORE launching
@@ -512,7 +523,11 @@ export function GameDetailPage() {
     const runAsAdminEnabled = await getRunAsAdminEnabled()
     
     if (!promptShown) {
-      setAdminPromptOpen(true)
+      if (isWindows) {
+        setAdminPromptOpen(true)
+      } else {
+        await launchGame(path, false)
+      }
       setExePickerOpen(false)
     } else {
       await launchGame(path, runAsAdminEnabled)

@@ -43,6 +43,7 @@ export const GameCard = memo(function GameCard({
   isPopular = false,
   size = "default",
 }: GameCardProps) {
+  const isWindows = typeof navigator !== 'undefined' && /windows/i.test(navigator.userAgent)
   const [hoveredStats, setHoveredStats] = useState<{ downloads: number; views: number } | null>(null)
   const [isLoadingStats, setIsLoadingStats] = useState(false)
   const isCompact = size === "compact"
@@ -171,6 +172,7 @@ export const GameCard = memo(function GameCard({
   }
 
   const getAdminPromptShown = async () => {
+    if (!isWindows) return true
     if (!window.ucSettings?.get) return false
     try {
       return await window.ucSettings.get('adminPromptShown')
@@ -187,6 +189,7 @@ export const GameCard = memo(function GameCard({
   }
 
   const getRunAsAdminEnabled = async () => {
+    if (!isWindows) return false
     if (!window.ucSettings?.get) return false
     try {
       return await window.ucSettings.get('runGamesAsAdmin')
@@ -241,7 +244,7 @@ export const GameCard = memo(function GameCard({
 
   const launchGame = async (path: string, asAdmin: boolean = false) => {
     if (!window.ucDownloads) return
-    const launchFn = asAdmin 
+    const launchFn = asAdmin && isWindows
       ? window.ucDownloads.launchGameExecutableAsAdmin 
       : window.ucDownloads.launchGameExecutable
     
@@ -258,6 +261,10 @@ export const GameCard = memo(function GameCard({
   }
 
   const handleAdminDecision = async (path: string, asAdmin: boolean) => {
+    if (!isWindows) {
+      await launchGame(path, false)
+      return
+    }
     await setAdminPromptShown()
     
     // Check if we should show shortcut modal BEFORE launching
@@ -288,7 +295,11 @@ export const GameCard = memo(function GameCard({
     const runAsAdminEnabled = await getRunAsAdminEnabled()
     
     if (!promptShown) {
-      setAdminPromptOpen(true)
+      if (isWindows) {
+        setAdminPromptOpen(true)
+      } else {
+        await launchGame(path, false)
+      }
       setExePickerOpen(false)
     } else {
       await launchGame(path, runAsAdminEnabled)
@@ -333,7 +344,11 @@ export const GameCard = memo(function GameCard({
         const promptShown = await getAdminPromptShown()
         
         if (!promptShown) {
-          setAdminPromptOpen(true)
+          if (isWindows) {
+            setAdminPromptOpen(true)
+          } else {
+            await launchGame(pick.path, false)
+          }
         } else {
           await launchGame(pick.path, runAsAdminEnabled)
         }

@@ -201,6 +201,7 @@ function getPartIndex(filename: string, index: number, total: number, partIndex?
 }
 
 export function DownloadsPage() {
+  const isWindows = typeof navigator !== 'undefined' && /windows/i.test(navigator.userAgent)
   const {
     downloads,
     startGameDownload,
@@ -381,6 +382,7 @@ export function DownloadsPage() {
   }
 
   const getAdminPromptShown = async () => {
+    if (!isWindows) return true
     if (!window.ucSettings?.get) return false
     try {
       return await window.ucSettings.get('adminPromptShown')
@@ -397,6 +399,7 @@ export function DownloadsPage() {
   }
 
   const getRunAsAdminEnabled = async () => {
+    if (!isWindows) return false
     if (!window.ucSettings?.get) return false
     try {
       return await window.ucSettings.get('runGamesAsAdmin')
@@ -471,7 +474,7 @@ export function DownloadsPage() {
 
   const launchGame = async (appid: string, path: string, asAdmin: boolean = false) => {
     if (!window.ucDownloads) return
-    const launchFn = asAdmin 
+    const launchFn = asAdmin && isWindows
       ? window.ucDownloads.launchGameExecutableAsAdmin 
       : window.ucDownloads.launchGameExecutable
     
@@ -488,6 +491,10 @@ export function DownloadsPage() {
   }
 
   const handleAdminDecision = async (appid: string, path: string, asAdmin: boolean) => {
+    if (!isWindows) {
+      await launchGame(appid, path, false)
+      return
+    }
     await setAdminPromptShown()
     
     // Check if we should show shortcut modal BEFORE launching
@@ -521,7 +528,11 @@ export function DownloadsPage() {
     const runAsAdminEnabled = await getRunAsAdminEnabled()
     
     if (!promptShown) {
-      setAdminPromptOpen(true)
+      if (isWindows) {
+        setAdminPromptOpen(true)
+      } else {
+        await launchGame(exePickerAppId, path, false)
+      }
       setExePickerOpen(false)
     } else {
       await launchGame(exePickerAppId, path, runAsAdminEnabled)
@@ -552,7 +563,11 @@ export function DownloadsPage() {
         const promptShown = await getAdminPromptShown()
         
         if (!promptShown) {
-          setAdminPromptOpen(true)
+          if (isWindows) {
+            setAdminPromptOpen(true)
+          } else {
+            await launchGame(appid, pick.path, false)
+          }
         } else {
           await launchGame(appid, pick.path, runAsAdminEnabled)
         }
