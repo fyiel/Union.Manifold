@@ -39,7 +39,7 @@ jobs:
         run: pnpm install
 
       - name: Build application
-        run: pnpm -s build && electron-builder --publish=never
+        run: pnpm -s build && pnpm exec electron-builder --publish=never
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           USE_HARD_LINKS: false
