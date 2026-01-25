@@ -24,16 +24,19 @@ import {
   HardDrive,
   RefreshCw,
   ShieldCheck,
+  Settings,
   Square,
   User,
   Wifi,
   X,
+  FolderOpen,
 } from "lucide-react"
 import { ExePickerModal } from "@/components/ExePickerModal"
 import { AdminPromptModal } from "@/components/AdminPromptModal"
 import { DownloadHostModal } from "@/components/DownloadHostModal"
 import { DesktopShortcutModal } from "@/components/DesktopShortcutModal"
 import { gameLogger } from "@/lib/logger"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 
 export function GameDetailPage() {
   const isWindows = typeof navigator !== 'undefined' && /windows/i.test(navigator.userAgent)
@@ -62,6 +65,13 @@ export function GameDetailPage() {
   const [hostSelectorOpen, setHostSelectorOpen] = useState(false)
   const [selectedHost, setSelectedHost] = useState<PreferredDownloadHost>("pixeldrain")
   const [defaultHost, setDefaultHost] = useState<PreferredDownloadHost>("pixeldrain")
+  const [exePickerTitle, setExePickerTitle] = useState("Select executable")
+  const [exePickerMessage, setExePickerMessage] = useState("We couldn't confidently detect the correct exe. Please choose the one to launch.")
+  const [exePickerCurrentPath, setExePickerCurrentPath] = useState<string | null>(null)
+  const [exePickerActionLabel, setExePickerActionLabel] = useState("Launch")
+  const [exePickerMode, setExePickerMode] = useState<"launch" | "set">("launch")
+  const [actionMenuOpen, setActionMenuOpen] = useState(false)
+  const [shortcutFeedback, setShortcutFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
 
   const appid = params.id || ""
 
@@ -302,7 +312,7 @@ export function GameDetailPage() {
         }
         return
       }
-      openExePicker(exes)
+      await openExePicker(exes, { mode: "launch", actionLabel: "Launch" })
     } catch {}
   }
   const popularAppIds = useMemo(() => {
@@ -451,6 +461,13 @@ export function GameDetailPage() {
     }
   }
 
+  const dirname = (targetPath: string | null | undefined) => {
+    if (!targetPath) return null
+    const parts = targetPath.split(/[/\\]+/).filter(Boolean)
+    parts.pop()
+    return parts.length ? parts.join("\\") : null
+  }
+
   const createDesktopShortcut = async (exePath: string) => {
     if (!window.ucDownloads?.createDesktopShortcut || !game) return
     try {
@@ -465,9 +482,125 @@ export function GameDetailPage() {
     }
   }
 
-  const openExePicker = (exes: Array<{ name: string; path: string }>) => {
+  const openExePicker = async (
+    exes: Array<{ name: string; path: string }>,
+    opts?: { title?: string; message?: string; actionLabel?: string; mode?: "launch" | "set"; currentPath?: string | null }
+  ) => {
+    const savedExe = await getSavedExe()
+    setExePickerTitle(opts?.title || "Select executable")
+    setExePickerMessage(opts?.message || `We couldn't confidently detect the correct exe for "${game?.name}". Please choose the one to launch.`)
+    setExePickerActionLabel(opts?.actionLabel || "Launch")
+    setExePickerMode(opts?.mode || "launch")
     setExePickerExes(exes)
+    setExePickerCurrentPath(opts?.currentPath ?? savedExe ?? null)
     setExePickerOpen(true)
+  }
+
+  const openExecutablePicker = async () => {
+    if (!game || !window.ucDownloads?.listGameExecutables) return
+    try {
+      const [result, savedExe] = await Promise.all([
+        window.ucDownloads.listGameExecutables(game.appid),
+        getSavedExe(),
+      ])
+      const exes = result?.exes || []
+      await openExePicker(exes, {
+        title: "Set launch executable",
+        message: exes.length
+          ? `Select the exe to launch for "${game.name}".`
+          : `No executables detected for "${game.name}" yet. Browse and pick the correct one.`,
+        actionLabel: "Set",
+        mode: "set",
+        currentPath: savedExe || null,
+      })
+    } catch {
+      await openExePicker([], {
+        title: "Set launch executable",
+        message: `Unable to list executables for "${game.name}".`,
+        actionLabel: "Set",
+        mode: "set",
+        currentPath: null,
+      })
+    }
+  }
+
+  const openGameFiles = async () => {
+    if (!game) return
+    try {
+      let folder: string | null = null
+      let discoveredExePath: string | null = null
+      if (window.ucDownloads?.listGameExecutables) {
+        const result = await window.ucDownloads.listGameExecutables(game.appid)
+        folder = result?.folder || null
+        if (result?.exes?.[0]?.path) {
+          discoveredExePath = result.exes[0].path
+        }
+      }
+
+      const savedExe = await getSavedExe()
+      const preferredExePath = savedExe || discoveredExePath
+      const exeDir = preferredExePath ? dirname(preferredExePath) : null
+      const candidate = exeDir || null
+      if (folder && candidate && candidate.toLowerCase().startsWith(folder.toLowerCase())) {
+        folder = candidate
+      } else if (!folder && candidate) {
+        folder = candidate
+      } else if (folder && window.ucDownloads?.findGameSubfolder) {
+        const subfolder = await window.ucDownloads.findGameSubfolder(folder)
+        if (subfolder) {
+          folder = subfolder
+        }
+      }
+
+      if (folder && window.ucDownloads?.openPath) {
+        await window.ucDownloads.openPath(folder)
+      }
+    } catch (err) {
+      console.error("[UC] Failed to open game files", err)
+    }
+  }
+
+  const handleCreateShortcut = async () => {
+    if (!game || !window.ucDownloads?.createDesktopShortcut) return
+    try {
+      setShortcutFeedback(null)
+      let targetExe = await getSavedExe()
+      let exes: Array<{ name: string; path: string }> = []
+      if (!targetExe && window.ucDownloads?.listGameExecutables) {
+        const result = await window.ucDownloads.listGameExecutables(game.appid)
+        exes = result?.exes || []
+        targetExe = exes[0]?.path || null
+      }
+
+      if (!targetExe) {
+        await openExePicker(exes, {
+          title: "Set launch executable",
+          message: `Select the exe before creating a shortcut for "${game.name}".`,
+          actionLabel: "Set",
+          mode: "set",
+          currentPath: null,
+        })
+        setShortcutFeedback({ type: 'error', message: 'Select an executable before creating a shortcut.' })
+        return
+      }
+
+      const res = await window.ucDownloads.createDesktopShortcut(game.name, targetExe)
+      if (res?.ok) {
+        gameLogger.info('Desktop shortcut created (details)', { appid: game.appid })
+        setShortcutFeedback({ type: 'success', message: 'Desktop shortcut created.' })
+      } else if (res?.existed) {
+        gameLogger.info('Desktop shortcut already exists', { appid: game.appid })
+        setShortcutFeedback({ type: 'success', message: 'Desktop shortcut already exists.' })
+      } else {
+        gameLogger.error('Failed to create desktop shortcut from details', { data: res })
+        setShortcutFeedback({ type: 'error', message: 'Failed to create desktop shortcut.' })
+      }
+      setTimeout(() => setShortcutFeedback(null), 3000)
+    } catch (err) {
+      gameLogger.error('Error creating desktop shortcut (details)', { data: err })
+      setShortcutFeedback({ type: 'error', message: 'Failed to create desktop shortcut.' })
+      setTimeout(() => setShortcutFeedback(null), 3000)
+    }
   }
 
   const launchGame = async (path: string, asAdmin: boolean = false) => {
@@ -519,6 +652,12 @@ export function GameDetailPage() {
 
   const handleExePicked = async (path: string) => {
     setPendingExePath(path)
+    if (exePickerMode === "set") {
+      await setSavedExe(path)
+      setExePickerCurrentPath(path)
+      setExePickerOpen(false)
+      return
+    }
     const promptShown = await getAdminPromptShown()
     const runAsAdminEnabled = await getRunAsAdminEnabled()
     
@@ -684,23 +823,79 @@ export function GameDetailPage() {
             </div>
             <div className="space-y-4">
               <div className="p-6 rounded-2xl bg-gradient-to-br from-primary/20 to-primary/5 border border-primary/30">
-                <Button
-                  size="lg"
-                  className="w-full font-bold text-lg py-6 rounded-xl bg-primary hover:bg-primary/90 shadow-lg shadow-primary/25"
-                  onClick={() => {
-                    if (isInstalled) {
-                      void launchInstalledGame()
-                    } else if (isPaused) {
-                      void resumeGroup(game.appid)
-                    } else {
-                      void openHostSelector()
-                    }
-                  }}
-                  disabled={actionDisabled}
-                >
-                  <Download className="mr-2 h-5 w-5" />
-                  {actionLabel}
-                </Button>
+                <div className="flex items-center gap-3">
+                  <Button
+                    size="lg"
+                    className="flex-1 font-bold text-lg py-6 rounded-xl bg-primary hover:bg-primary/90 shadow-lg shadow-primary/25"
+                    onClick={() => {
+                      if (isInstalled) {
+                        void launchInstalledGame()
+                      } else if (isPaused) {
+                        void resumeGroup(game.appid)
+                      } else {
+                        void openHostSelector()
+                      }
+                    }}
+                    disabled={actionDisabled}
+                  >
+                    <Download className="mr-2 h-5 w-5" />
+                    {actionLabel}
+                  </Button>
+
+                  <Popover open={actionMenuOpen} onOpenChange={setActionMenuOpen}>
+                    <PopoverTrigger asChild>
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        className="h-[52px] w-[52px] rounded-xl border-primary/40 bg-primary/10 text-primary hover:bg-primary/15"
+                        disabled={!installedManifest && !installingManifest}
+                        aria-label="Game actions"
+                      >
+                        <Settings className="h-5 w-5" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent align="end" className="w-64 bg-card/95 border border-primary/20 shadow-primary/30">
+                      <div className="space-y-2">
+                        <Button
+                          variant="ghost"
+                          className="w-full justify-start"
+                          onClick={() => {
+                            setActionMenuOpen(false)
+                            void openExecutablePicker()
+                          }}
+                          disabled={!installedManifest && !installingManifest}
+                        >
+                          <Settings className="mr-2 h-4 w-4" />
+                          Set Executable
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          className="w-full justify-start"
+                          onClick={() => {
+                            setActionMenuOpen(false)
+                            void handleCreateShortcut()
+                          }}
+                          disabled={!installedManifest && !installingManifest}
+                        >
+                          <ExternalLink className="mr-2 h-4 w-4" />
+                          Create Desktop Shortcut
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          className="w-full justify-start"
+                          onClick={() => {
+                            setActionMenuOpen(false)
+                            void openGameFiles()
+                          }}
+                          disabled={!installedManifest && !installingManifest}
+                        >
+                          <FolderOpen className="mr-2 h-4 w-4" />
+                          Open Game Files
+                        </Button>
+                      </div>
+                    </PopoverContent>
+                  </Popover>
+                </div>
 
                 {isFailed && (
                   <Button
@@ -712,6 +907,12 @@ export function GameDetailPage() {
                     <RefreshCw className="mr-2 h-4 w-4" />
                     Retry
                   </Button>
+                )}
+
+                {shortcutFeedback && (
+                  <div className={`mt-2 text-xs ${shortcutFeedback.type === 'success' ? 'text-emerald-400' : 'text-destructive'}`}>
+                    {shortcutFeedback.message}
+                  </div>
                 )}
 
                 {isGameRunning && (
@@ -893,9 +1094,11 @@ export function GameDetailPage() {
       />
       <ExePickerModal
         open={exePickerOpen}
-        title="Select executable"
-        message={`We couldn't confidently detect the correct exe for "${game.name}". Please choose the one to launch.`}
+        title={exePickerTitle}
+        message={exePickerMessage}
         exes={exePickerExes}
+        currentExePath={exePickerCurrentPath}
+        actionLabel={exePickerActionLabel}
         onSelect={handleExePicked}
         onClose={() => setExePickerOpen(false)}
       />

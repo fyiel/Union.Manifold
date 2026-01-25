@@ -72,6 +72,16 @@ const appLogsPath = path.join(app.getPath('userData'), 'app-logs.txt')
 const LOG_SESSION_ID = crypto.randomBytes(6).toString('hex')
 let cachedSettings = null
 
+function getAppVersion() {
+  return packageJson?.version || (typeof app.getVersion === 'function' ? app.getVersion() : null) || process.env.npm_package_version || '0.0.0'
+}
+
+function applySettingsDefaults(settings) {
+  const next = settings && typeof settings === 'object' ? { ...settings } : {}
+  if (typeof next.discordRpcEnabled !== 'boolean') next.discordRpcEnabled = true
+  return next
+}
+
 // === Global Logging System ===
 function safeStringify(value) {
   try {
@@ -268,7 +278,7 @@ async function ensureRpcClient() {
 }
 
 async function updateRpcSettings(nextSettings) {
-  const enabled = Boolean(nextSettings?.discordRpcEnabled)
+  const enabled = nextSettings?.discordRpcEnabled !== false
   rpcEnabled = enabled
   rpcClientId = RPC_CLIENT_ID_DEFAULT
 
@@ -488,6 +498,12 @@ function readSettings() {
   } catch {
     cachedSettings = {}
   }
+  const withDefaults = applySettingsDefaults(cachedSettings)
+  const defaultsApplied = JSON.stringify(withDefaults) !== JSON.stringify(cachedSettings)
+  cachedSettings = withDefaults
+  if (defaultsApplied) {
+    try { writeSettings(withDefaults) } catch {}
+  }
   return cachedSettings
 }
 
@@ -521,7 +537,7 @@ async function fetchWithSession(session, baseUrl, path, init) {
   const cookieHeader = buildCookieHeader(cookies)
   const headers = new Headers(init?.headers || {})
   if (!headers.has('user-agent')) {
-    headers.set('User-Agent', `UnionCrax.Direct/${app.getVersion()}`)
+    headers.set('User-Agent', `UnionCrax.Direct/${getAppVersion()}`)
   }
   if (typeof path === 'string' && path.startsWith('/api/downloads') && !headers.has('x-uc-client')) {
     headers.set('X-UC-Client', 'unioncrax-direct')
@@ -579,9 +595,10 @@ ipcMain.handle('uc:setting-set', (_event, key, value) => {
 ipcMain.handle('uc:setting-clear-all', () => {
   ucLog('Clearing all user data and resetting to defaults')
   try {
-    // Reset settings to empty object
-    writeSettings({})
-    updateRpcSettings({}).catch(() => {})
+    // Reset settings to defaults
+    const defaults = applySettingsDefaults({})
+    writeSettings(defaults)
+    updateRpcSettings(defaults).catch(() => {})
     // broadcast to all renderer windows that settings were cleared
     for (const w of BrowserWindow.getAllWindows()) {
       if (w && !w.isDestroyed()) {
@@ -1922,7 +1939,7 @@ function createWindow() {
   mainWindow.setMenuBarVisibility(false)
 
   const defaultUserAgent = mainWindow.webContents.getUserAgent()
-  mainWindow.webContents.setUserAgent(`${defaultUserAgent} UnionCrax.Direct/${app.getVersion()}`)
+  mainWindow.webContents.setUserAgent(`${defaultUserAgent} UnionCrax.Direct/${getAppVersion()}`)
 
   if (isDev) {
     mainWindow.loadURL('http://localhost:5173')
@@ -2381,7 +2398,7 @@ app.whenReady().then(() => {
   createTray()
   updateRpcSettings(readSettings()).catch(() => {})
 
-  ucLog(`App ready. Version: ${app.getVersion()}`)
+  ucLog(`App ready. Version: ${getAppVersion()}`)
 
   setInterval(() => {
     pruneRunningGames().catch(() => {})
@@ -2398,7 +2415,7 @@ app.whenReady().then(() => {
     const checkLatestRelease = async () => {
       try {
         const { latest, url } = await fetchLatestReleaseInfo()
-        const current = String(app.getVersion() || '')
+        const current = String(getAppVersion() || '')
 
         if (latest && compareVersions(latest, current) === 1) {
           const info = { version: latest, url }
@@ -2434,7 +2451,7 @@ app.whenReady().then(() => {
 // Simplified update handlers: open GitHub Releases page instead of auto-updates
 ipcMain.handle('uc:check-for-updates', async () => {
   try {
-    const current = String(app.getVersion() || '')
+    const current = String(getAppVersion() || '')
     let latestInfo
     try {
       latestInfo = await fetchLatestReleaseInfo()
@@ -2459,7 +2476,7 @@ ipcMain.handle('uc:check-for-updates', async () => {
 
 ipcMain.handle('uc:update-retry', async () => {
   try {
-    const current = String(app.getVersion() || '')
+    const current = String(getAppVersion() || '')
     let latestInfo
     try {
       latestInfo = await fetchLatestReleaseInfo()

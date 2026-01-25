@@ -86,7 +86,7 @@ function buildRouteActivity(pathname: string, downloads: Array<{ appid: string; 
 export function useDiscordRpcPresence() {
   const location = useLocation()
   const { downloads } = useDownloads()
-  const [enabled, setEnabled] = useState(false)
+  const [enabled, setEnabled] = useState(true)
   const [nameTick, setNameTick] = useState(0)
   const nameOverridesRef = useRef<Map<string, string>>(new Map())
   const lastActivityKeyRef = useRef<string>("")
@@ -98,7 +98,7 @@ export function useDiscordRpcPresence() {
       try {
         const nextEnabled = await window.ucSettings?.get?.("discordRpcEnabled")
         if (!mounted) return
-        setEnabled(Boolean(nextEnabled))
+        setEnabled(nextEnabled !== false)
       } catch {
         // ignore
       }
@@ -107,10 +107,10 @@ export function useDiscordRpcPresence() {
     const off = window.ucSettings?.onChanged?.((data: any) => {
       if (!data) return
       if (data.key === "__CLEAR_ALL__") {
-        setEnabled(false)
+        setEnabled(true)
         return
       }
-      if (data.key === "discordRpcEnabled") setEnabled(Boolean(data.value))
+      if (data.key === "discordRpcEnabled") setEnabled(data.value !== false)
     })
     return () => {
       mounted = false
