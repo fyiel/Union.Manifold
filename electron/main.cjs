@@ -69,13 +69,41 @@ const INSTALLED_MANIFEST = 'installed.json'
 const INSTALLED_INDEX = 'installed-index.json'
 const settingsPath = path.join(app.getPath('userData'), 'settings.json')
 const appLogsPath = path.join(app.getPath('userData'), 'app-logs.txt')
+const LOG_SESSION_ID = crypto.randomBytes(6).toString('hex')
 let cachedSettings = null
 
 // === Global Logging System ===
+function safeStringify(value) {
+  try {
+    const seen = new WeakSet()
+    return JSON.stringify(value, (key, val) => {
+      if (typeof val === 'bigint') return val.toString()
+      if (val instanceof Error) {
+        return { name: val.name, message: val.message, stack: val.stack }
+      }
+      if (val && typeof val === 'object') {
+        if (seen.has(val)) return '[Circular]'
+        seen.add(val)
+      }
+      return val
+    })
+  } catch (err) {
+    try { return String(value) } catch { return '[Unserializable]' }
+  }
+}
+
+function normalizeLogData(data) {
+  if (!data) return data
+  if (data instanceof Error) return { name: data.name, message: data.message, stack: data.stack }
+  if (data && typeof data === 'object' && data.name && data.message && data.stack) return data
+  return data
+}
+
 function ucLog(message, level = 'info', data = null) {
   const timestamp = new Date().toISOString()
   const levelTag = level.toUpperCase().padEnd(5)
-  const dataStr = data ? ` | Data: ${JSON.stringify(data)}` : ''
+  const normalized = normalizeLogData(data)
+  const dataStr = normalized ? ` | Data: ${safeStringify(normalized)}` : ''
   const logLine = `[${timestamp}] [${levelTag}] ${message}${dataStr}\n`
   try {
     fs.appendFileSync(appLogsPath, logLine)
@@ -97,11 +125,58 @@ function getLogs() {
 
 function clearLogs() {
   try {
-    fs.writeFileSync(appLogsPath, `[${new Date().toISOString()}] [INFO ] === App Log Started ===\n`)
+    fs.writeFileSync(appLogsPath, `[${new Date().toISOString()}] [INFO ] === App Log Started (session ${LOG_SESSION_ID}, pid ${process.pid}) ===\n`)
     ucLog('Logs cleared')
   } catch (err) {
     console.error('[UC] Failed to clear logs:', err)
   }
+}
+
+function attachWindowLogging(win, label = 'window') {
+  if (!win) return
+  const wc = win.webContents
+  ucLog(`Window created: ${label}`)
+  win.on('show', () => ucLog(`Window show: ${label}`))
+  win.on('hide', () => ucLog(`Window hide: ${label}`))
+  win.on('minimize', () => ucLog(`Window minimize: ${label}`))
+  win.on('restore', () => ucLog(`Window restore: ${label}`))
+  win.on('closed', () => ucLog(`Window closed: ${label}`))
+
+  wc.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+    ucLog(`Renderer failed to load: ${label}`, 'warn', { errorCode, errorDescription, validatedURL, isMainFrame })
+  })
+  wc.on('render-process-gone', (_event, details) => {
+    ucLog(`Renderer process gone: ${label}`, 'error', details)
+  })
+  wc.on('unresponsive', () => ucLog(`Window unresponsive: ${label}`, 'warn'))
+  wc.on('responsive', () => ucLog(`Window responsive: ${label}`))
+  wc.on('crashed', () => ucLog(`WebContents crashed: ${label}`, 'error'))
+  wc.on('console-message', (_event, level, message, line, sourceId) => {
+    if (level >= 1) {
+      const mappedLevel = level >= 2 ? 'error' : 'warn'
+      ucLog(`Renderer console (${label})`, mappedLevel, { level, message, line, sourceId })
+    }
+  })
+}
+
+function registerProcessLogging() {
+  process.on('uncaughtException', (err) => ucLog('Uncaught exception', 'error', err))
+  process.on('unhandledRejection', (reason) => ucLog('Unhandled rejection', 'error', reason))
+  process.on('warning', (warning) => ucLog('Process warning', 'warn', warning))
+  process.on('beforeExit', (code) => ucLog('Process beforeExit', 'info', { code }))
+  process.on('exit', (code) => ucLog('Process exit', 'info', { code }))
+
+  app.on('before-quit', () => {
+    app.isQuitting = true
+    ucLog('App before-quit')
+  })
+  app.on('will-quit', () => ucLog('App will-quit'))
+  app.on('quit', (_event, exitCode) => ucLog('App quit', 'info', { exitCode }))
+  app.on('window-all-closed', () => ucLog('All windows closed'))
+  app.on('activate', () => ucLog('App activate'))
+  app.on('render-process-gone', (_event, _webContents, details) => ucLog('Render process gone (app)', 'error', details))
+  app.on('child-process-gone', (_event, details) => ucLog('Child process gone', 'error', details))
+  app.on('gpu-process-crashed', (_event, killed) => ucLog('GPU process crashed', 'error', { killed }))
 }
 
 // === Discord Rich Presence ===
@@ -236,6 +311,7 @@ ucLog(`Version: ${packageJson.version}`, 'info')
 ucLog(`Platform: ${process.platform} ${process.arch}`, 'info')
 ucLog(`Electron: ${process.versions.electron}`, 'info')
 ucLog(`Node: ${process.versions.node}`, 'info')
+registerProcessLogging()
 
 function resolveIcon() {
   const asset = process.platform === 'win32' ? 'icon.ico' : 'icon.png'
@@ -799,6 +875,9 @@ function uc_log(msg) {
       console.log('[UC LOG FAILED]', e)
     }
     console.log('[UC]', msg)
+    try {
+      ucLog(`[extract] ${String(msg)}`, 'debug')
+    } catch (e) {}
   } catch (e) {
     console.log('[UC LOG ERROR]', e)
   }
@@ -1837,6 +1916,8 @@ function createWindow() {
     icon: iconPath
   })
 
+  attachWindowLogging(mainWindow, 'main')
+
   // Hide the menu bar
   mainWindow.setMenuBarVisibility(false)
 
@@ -2299,9 +2380,8 @@ app.whenReady().then(() => {
   createWindow()
   createTray()
   updateRpcSettings(readSettings()).catch(() => {})
-  
-  clearLogs()
-  ucLog(`App started. Version: ${app.getVersion()}`)
+
+  ucLog(`App ready. Version: ${app.getVersion()}`)
 
   setInterval(() => {
     pruneRunningGames().catch(() => {})
