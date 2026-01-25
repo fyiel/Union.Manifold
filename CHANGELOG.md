@@ -1,5 +1,20 @@
 # Changelog
 
+## Version 0.6.29 - Linux Builds
+
+### New Features
+
+- **Linux packaging (AppImage)** (`package.json`)
+  - Added `linux` target for electron-builder
+
+### CI/CD
+
+- **Cross-platform release builds** (`.github/workflows/build.yml`)
+  - Added Ubuntu build job alongside Windows
+  - Uploads Linux artifacts for tagged releases
+
+---
+
 ## Version 0.6.28 - Discord Rich Presence & Web Links
 
 ### New Features
