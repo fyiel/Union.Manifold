@@ -146,10 +146,22 @@ function attachWindowLogging(win, label = 'window') {
   if (!win) return
   const wc = win.webContents
   ucLog(`Window created: ${label}`)
-  win.on('show', () => ucLog(`Window show: ${label}`))
-  win.on('hide', () => ucLog(`Window hide: ${label}`))
-  win.on('minimize', () => ucLog(`Window minimize: ${label}`))
-  win.on('restore', () => ucLog(`Window restore: ${label}`))
+  win.on('show', () => {
+    ucLog(`Window show: ${label}`)
+    restoreRpcActivity()
+  })
+  win.on('hide', () => {
+    ucLog(`Window hide: ${label}`)
+    hideRpcActivity()
+  })
+  win.on('minimize', () => {
+    ucLog(`Window minimize: ${label}`)
+    hideRpcActivity()
+  })
+  win.on('restore', () => {
+    ucLog(`Window restore: ${label}`)
+    restoreRpcActivity()
+  })
   win.on('closed', () => ucLog(`Window closed: ${label}`))
 
   wc.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
@@ -200,6 +212,7 @@ let rpcStartTimestamp = Math.floor(Date.now() / 1000)
 let rpcLastRendererActivity = null
 let rpcGameActivity = null
 let rpcCurrentActivity = null
+let rpcWindowHidden = false
 
 function normalizeRpcActivity(payload) {
   if (!payload || typeof payload !== 'object') return null
@@ -221,7 +234,7 @@ function normalizeRpcActivity(payload) {
 }
 
 async function applyRpcActivity(activity) {
-  if (!rpcClient || !rpcReady || !activity) return
+  if (!rpcClient || !rpcReady || !activity || rpcWindowHidden) return
   try {
     rpcCurrentActivity = activity
     await rpcClient.setActivity(activity)
@@ -240,7 +253,19 @@ function clearRpcActivity() {
   }
 }
 
-function shutdownRpcClient() {
+function hideRpcActivity() {
+  rpcWindowHidden = true
+  clearRpcActivity()
+}
+
+function restoreRpcActivity() {
+  if (!rpcWindowHidden) return
+  rpcWindowHidden = false
+  const activity = rpcGameActivity || rpcLastRendererActivity || rpcCurrentActivity
+  if (activity) {
+    applyRpcActivity(activity)
+  }
+}
   if (!rpcClient) return
   try { rpcClient.clearActivity() } catch {}
   try { rpcClient.destroy() } catch {}
