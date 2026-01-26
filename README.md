@@ -24,17 +24,35 @@ A fast, standalone Electron desktop application for managing and launching games
 
 ## Installation
 
-### Option 1: Download Installer (Recommended)
+### Windows Installation Options
+
+#### Option 1: NSIS Installer (Recommended)
 1. Go to [Releases](https://github.com/Union-Crax/UnionCrax.Direct/releases)
-2. Download the latest `UnionCrax.Direct Setup X.X.X.exe`
-3. Run the installer
-4. Launch UnionCrax.Direct from Start Menu
+2. Download `UnionCrax.Direct Setup X.X.X.exe`
+3. Run the installer and choose installation directory
+4. Create desktop/Start Menu shortcuts
+5. Launch UnionCrax.Direct from Start Menu or desktop
 
-### Option 2: Portable (No Installation)
-1. Extract the downloaded ZIP
-2. Run `UnionCrax.Direct.exe` directly
+**Features**: Auto-uninstaller, Start Menu integration, customizable install location
 
-### Option 3: Linux (AppImage Script)
+#### Option 2: Portable Executable
+1. Go to [Releases](https://github.com/Union-Crax/UnionCrax.Direct/releases)
+2. Download `UnionCrax.Direct X.X.X.exe`
+3. Run directly - no installation needed
+4. Settings and data are stored alongside the executable
+
+**Features**: No installation, run from USB drives, easily movable
+
+#### Option 3: ZIP Archive
+1. Go to [Releases](https://github.com/Union-Crax/UnionCrax.Direct/releases)
+2. Download `UnionCrax.Direct-X.X.X-win.zip`
+3. Extract to your preferred location
+4. Run `UnionCrax.Direct.exe` from the extracted folder
+
+**Features**: Full control over installation location, easy manual updates
+
+### Linux Installation
+
 Run the one-line installer (downloads the latest AppImage and creates a desktop entry):
 
 ```bash
