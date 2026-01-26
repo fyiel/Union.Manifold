@@ -73,6 +73,7 @@
     "icon": "assets/icon.ico",
     "appId": "xyz.unioncrax.direct",
     "productName": "UnionCrax.Direct",
+    "npmRebuild": false,
     "publish": [
       {
         "provider": "github",
@@ -101,8 +102,7 @@
         "portable",
         "zip"
       ],
-      "publisherName": "UnionCrax",
-      "artifactName": "${productName}.${target}.${version}.${arch}.${ext}"
+      "publisherName": "UnionCrax"
     },
     "nsis": {
       "oneClick": false,
