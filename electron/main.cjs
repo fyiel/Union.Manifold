@@ -386,8 +386,20 @@ const gotTheLock = app.requestSingleInstanceLock()
 if (!gotTheLock) {
   app.quit()
 } else {
-  app.on('second-instance', () => {
-    if (mainWindow && !mainWindow.isDestroyed()) {
+  app.on('second-instance', (event, argv) => {
+    // Check if this second instance is from the setup/installer
+    // NSIS will re-run the app during installation
+    const isSetupRun = argv.some(arg => 
+      arg.toLowerCase().includes('setup') || 
+      arg.toLowerCase().includes('nsis') ||
+      arg.toLowerCase().includes('.exe')
+    )
+
+    if (isSetupRun) {
+      // If setup is being run, close the current app to allow proper update
+      ucLog('Setup detected during second-instance, closing app for update...')
+      app.quit()
+    } else if (mainWindow && !mainWindow.isDestroyed()) {
       try {
         if (mainWindow.isMinimized()) mainWindow.restore()
       } catch {}
