@@ -57,6 +57,24 @@ function normalizeDownloadUrl(rawUrl) {
     return rawUrl
   }
 }
+
+function extractPixeldrainFileIdFromUrl(rawUrl) {
+  if (!rawUrl || typeof rawUrl !== 'string') return null
+  try {
+    const parsed = new URL(rawUrl)
+    const apiMatch = parsed.pathname.match(/\/api\/file\/([^/?#]+)/)
+    if (apiMatch && apiMatch[1]) return apiMatch[1]
+    const fileMatch = parsed.pathname.match(/\/file\/([^/?#]+)/)
+    if (fileMatch && fileMatch[1]) return fileMatch[1]
+    const uMatch = parsed.pathname.match(/\/u\/([^/?#]+)/)
+    if (uMatch && uMatch[1]) return uMatch[1]
+    const parts = parsed.pathname.split('/').filter(Boolean)
+    if (parts.length === 1) return parts[0]
+    return null
+  } catch {
+    return null
+  }
+}
 const activeDownloads = new Map()
 const downloadQueues = new Map()
 const globalDownloadQueue = []
@@ -1400,31 +1418,7 @@ async function visitPixeldrainViewerPage(fileId) {
 async function startDownloadNow(win, payload) {
   if (!win || win.isDestroyed()) return { ok: false }
   
-  // Check if this is a pixeldrain URL and if we need to delay
-  const isPixeldrain = payload.url && payload.url.includes('pixeldrain.com')
-  if (isPixeldrain) {
-    const timeSinceLastPixeldrain = Date.now() - lastPixeldrainDownloadTime
-    if (timeSinceLastPixeldrain < PIXELDRAIN_DELAY_MS) {
-      // Need to delay this download
-      const delayNeeded = PIXELDRAIN_DELAY_MS - timeSinceLastPixeldrain
-      uc_log(`Delaying pixeldrain download by ${delayNeeded}ms to avoid rate limiting`)
-      setTimeout(() => {
-        startDownloadNow(win, payload)
-      }, delayNeeded)
-      return { ok: true, delayed: true }
-    }
-    
-    // Extract file ID and visit viewer page to bypass hotlink protection
-    const fileIdMatch = payload.url.match(/pixeldrain\.com\/api\/file\/([^\/\?]+)/)
-    if (fileIdMatch && fileIdMatch[1]) {
-      await visitPixeldrainViewerPage(fileIdMatch[1])
-      // Small delay after visiting to ensure view is registered
-      await new Promise(resolve => setTimeout(resolve, 500))
-    }
-    
-    lastPixeldrainDownloadTime = Date.now()
-  }
-  
+  // Add to pendingDownloads FIRST to prevent race conditions
   pendingDownloads.push({
     url: payload.url,
     normalizedUrl: normalizeDownloadUrl(payload.url),
@@ -1435,6 +1429,35 @@ async function startDownloadNow(win, payload) {
     partIndex: payload.partIndex,
     partTotal: payload.partTotal
   })
+  
+  // Check if this is a pixeldrain URL and if we need to delay
+  const isPixeldrain = payload.url && payload.url.includes('pixeldrain.com')
+  if (isPixeldrain) {
+    const timeSinceLastPixeldrain = Date.now() - lastPixeldrainDownloadTime
+    if (timeSinceLastPixeldrain < PIXELDRAIN_DELAY_MS) {
+      // Need to delay this download
+      const delayNeeded = PIXELDRAIN_DELAY_MS - timeSinceLastPixeldrain
+      uc_log(`Delaying pixeldrain download by ${delayNeeded}ms to avoid rate limiting`)
+      setTimeout(() => {
+        // Remove from pending before re-adding to avoid duplicates
+        const idx = pendingDownloads.findIndex(p => p.downloadId === payload.downloadId)
+        if (idx >= 0) pendingDownloads.splice(idx, 1)
+        startDownloadNow(win, payload)
+      }, delayNeeded)
+      return { ok: true, delayed: true }
+    }
+    
+    // Extract file ID and visit viewer page to bypass hotlink protection
+    const fileId = extractPixeldrainFileIdFromUrl(payload.url)
+    if (fileId) {
+      await visitPixeldrainViewerPage(fileId)
+      // Small delay after visiting to ensure view is registered
+      await new Promise(resolve => setTimeout(resolve, 500))
+    }
+    
+    lastPixeldrainDownloadTime = Date.now()
+  }
+  
   win.webContents.downloadURL(payload.url)
   return { ok: true }
 }
@@ -1474,6 +1497,17 @@ function isDownloadIdKnown(downloadId) {
   }
   if (globalDownloadQueue.some((entry) => entry.payload && entry.payload.downloadId === downloadId)) return true
   return false
+}
+
+function getKnownDownloadState(downloadId) {
+  if (!downloadId) return null
+  if (activeDownloads.has(downloadId)) return 'active'
+  if (pendingDownloads.some((entry) => entry.downloadId === downloadId)) return 'pending'
+  for (const queue of downloadQueues.values()) {
+    if (queue.some((entry) => entry.payload && entry.payload.downloadId === downloadId)) return 'queued'
+  }
+  if (globalDownloadQueue.some((entry) => entry.payload && entry.payload.downloadId === downloadId)) return 'queued'
+  return null
 }
 
 function flushQueuedDownloads(appid, status, error) {
@@ -2581,9 +2615,10 @@ ipcMain.handle('uc:download-start', (event, payload) => {
     ucLog('Download start failed: invalid payload', 'warn')
     return { ok: false }
   }
-  if (isDownloadIdKnown(payload.downloadId)) {
-    ucLog(`Download already exists: ${payload.downloadId}`, 'warn')
-    return { ok: false, error: 'already-downloading' }
+  const knownState = getKnownDownloadState(payload.downloadId)
+  if (knownState) {
+    ucLog(`Download already exists: ${payload.downloadId} (state=${knownState})`, 'warn')
+    return { ok: true, already: true, queued: knownState === 'queued', state: knownState }
   }
 
   const appid = payload.appid
