@@ -104,6 +104,13 @@
       "publisherName": "UnionCrax",
       "artifactName": "${productName}.Setup.${version}.${ext}"
     },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "UnionCrax.Direct"
+    },
 
     "linux": {
       "target": ["AppImage"],
