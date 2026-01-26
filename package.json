@@ -102,7 +102,7 @@
         "zip"
       ],
       "publisherName": "UnionCrax",
-      "artifactName": "${productName}.Setup.${version}.${ext}"
+      "artifactName": "${productName}.${target}.${version}.${arch}.${ext}"
     },
     "nsis": {
       "oneClick": false,
