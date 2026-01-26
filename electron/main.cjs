@@ -1604,8 +1604,11 @@ async function getDirectorySize(targetPath) {
         total += fileStats.size || 0
       } catch {
         // ignore unreadable entries
+      }
     }
   }
+
+  return total
 }
 
 function flushQueuedGlobalDownloads(appid, status, error) {
@@ -1632,10 +1635,6 @@ function flushQueuedGlobalDownloads(appid, status, error) {
   globalDownloadQueue.length = 0
   for (const entry of remaining) globalDownloadQueue.push(entry)
 }
-
-  return total
-}
-
 function snapshotFiles(rootDir) {
   const files = new Set()
   try {
@@ -1661,44 +1660,66 @@ function snapshotFiles(rootDir) {
   } catch (e) {}
   return files
 }
+function resolve7zipBinary() {
+  const candidates = []
+
+  try {
+    const seven = require('7zip-bin')
+    let resolvedPath = seven.path7za || seven.path7z || seven.path7zip || ''
+
+    if (resolvedPath) {
+      // If packaged, the path might sit inside the ASAR; prefer the unpacked location.
+      if (app.isPackaged && resolvedPath.includes('.asar')) {
+        resolvedPath = resolvedPath.replace(/\.asar([\\/])/, `.asar.unpacked$1`)
+        uc_log(`Adjusted 7zip path for packaged app: ${resolvedPath}`)
+      }
+      candidates.push(resolvedPath)
+    }
+  } catch (e) {
+    uc_log(`7zip-bin not available, will try system 7z: ${String(e)}`)
+  }
+
+  // System fallbacks (most distros ship 7z or 7za via p7zip-full)
+  if (process.platform === 'win32') {
+    candidates.push('7z.exe', '7za.exe', '7z')
+  } else {
+    candidates.push('7z', '7za')
+  }
+
+  for (const candidate of candidates) {
+    const looksLikePath = candidate.includes(path.sep) || candidate.includes('/') || candidate.includes('\\')
+    if (looksLikePath) {
+      if (fs.existsSync(candidate)) {
+        uc_log(`7zip binary resolved to: ${candidate}`)
+        return candidate
+      }
+      uc_log(`7zip candidate missing: ${candidate}`)
+      continue
+    }
+
+    // Command without a path; assume it is available on PATH and let spawn handle failures.
+    uc_log(`Using system 7zip command: ${candidate}`)
+    return candidate
+  }
+
+  return null
+}
 
 function run7zExtract(archivePath, destDir, onProgress) {
   return new Promise((resolve) => {
     try {
-      // prefer bundled 7z binary from 7zip-bin if available, otherwise fall back to system `7z`
-      let cmd = '7z'
-      try {
-        const seven = require('7zip-bin')
-        // try several known exports
-        let resolvedPath = seven.path7za || seven.path7z || seven.path7zip || cmd
-        
-        // If packaged, the path might be inside the ASAR. Replace with unpacked path.
-        if (app.isPackaged && resolvedPath.includes('.asar')) {
-          resolvedPath = resolvedPath.replace(/\.asar[\\\/]/, '.asar.unpacked\\')
-          uc_log(`Adjusted 7zip path for packaged app: ${resolvedPath}`)
-        }
-        
-        cmd = resolvedPath
-        uc_log(`7zip binary resolved to: ${cmd}`)
-      } catch (e) {
-        // not available, use system `7z`
-        uc_log(`7zip-bin not available, using system 7z: ${String(e)}`)
+      const cmd = resolve7zipBinary()
+      if (!cmd) {
+        const error = '7zip binary not found. Please install p7zip (7z) on this system or reinstall the app with bundled binaries.'
+        uc_log(error)
+        resolve({ ok: false, error })
+        return
       }
-      
-      // Verify the binary exists before attempting to spawn (except for system '7z' which is assumed to be in PATH)
-      if (cmd !== '7z') {
-        if (!fs.existsSync(cmd)) {
-          const error = `7zip binary not found at: ${cmd}. This may indicate an issue with the app packaging or installation.`
-          uc_log(error)
-          resolve({ ok: false, error })
-          return
-        }
-      }
-      
+
       const before = snapshotFiles(destDir)
       const args = ['x', archivePath, `-o${destDir}`, '-y']
       uc_log(`spawning 7zip with command: ${cmd} ${args.join(' ')}`)
-      
+
       const proc = child_process.spawn(cmd, args, { windowsHide: true })
       let stdout = ''
       let stderr = ''
