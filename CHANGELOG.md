@@ -1,5 +1,22 @@
 # Changelog
 
+## Version 0.6.32 - Installer Fixes
+
+### Fixes
+
+- **Setup executable stays in use after installation** (#12)
+  - Added proper NSIS installer configuration with `oneClick: false` and `allowToChangeInstallationDirectory`
+  - Fixed setup file remaining locked after installation
+  - Setup now properly installs to system directories instead of running from temp location
+  - Users can now delete the setup executable after installation
+
+- **App now closes when setup is re-run during update**
+  - Detects when setup installer is executed while app is running
+  - Gracefully closes running instance to allow installer to proceed
+  - Prevents file lock conflicts during updates and reinstalls
+
+---
+
 ## Version 0.6.31 - Enhanced Logging & UX Improvements
 
 ### New Features
