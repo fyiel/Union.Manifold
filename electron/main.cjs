@@ -413,12 +413,16 @@ if (!gotTheLock) {
 } else {
   app.on('second-instance', (event, argv) => {
     // Check if this second instance is from the setup/installer
-    // NSIS will re-run the app during installation
-    const isSetupRun = argv.some(arg => 
-      arg.toLowerCase().includes('setup') || 
-      arg.toLowerCase().includes('nsis') ||
-      arg.toLowerCase().includes('.exe')
-    )
+    let isSetupRun = false
+    if (argv && Array.isArray(argv)) {
+      for (const arg of argv) {
+        const lower = String(arg).toLowerCase()
+        if (lower.includes('setup') || lower.includes('nsis') || lower.includes('.exe')) {
+          isSetupRun = true
+          break
+        }
+      }
+    }
 
     if (isSetupRun) {
       // If setup is being run, close the current app to allow proper update
