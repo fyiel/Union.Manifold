@@ -259,6 +259,10 @@ export function inferFilenameFromUrl(url: string, fallback: string) {
 export function extractPixeldrainFileId(url: string): string | null {
   try {
     const parsed = new URL(url)
+    const apiMatch = parsed.pathname.match(/\/api\/file\/([^/?#]+)/)
+    if (apiMatch?.[1]) return apiMatch[1]
+    const fileMatch = parsed.pathname.match(/\/file\/([^/?#]+)/)
+    if (fileMatch?.[1]) return fileMatch[1]
     // standard short link: /u/FILE_ID
     const uMatch = parsed.pathname.match(/\/u\/([^/?#]+)/)
     if (uMatch?.[1]) return uMatch[1]
