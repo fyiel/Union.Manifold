@@ -15,6 +15,12 @@
   - Gracefully closes running instance to allow installer to proceed
   - Prevents file lock conflicts during updates and reinstalls
 
+- **Discord RPC hidden when app is minimized or in tray** (`electron/main.cjs`)
+  - Added window visibility tracking to Discord RPC system
+  - Automatically clears Discord RPC when window is minimized or hidden
+  - Restores Discord RPC when window is shown or restored
+  - Prevents Discord RPC from displaying outdated status when app is in background
+
 ---
 
 ## Version 0.6.31 - Enhanced Logging & UX Improvements
