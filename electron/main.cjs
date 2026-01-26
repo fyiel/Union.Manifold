@@ -266,6 +266,7 @@ function restoreRpcActivity() {
     applyRpcActivity(activity)
   }
 }
+function shutdownRpcClient() {
   if (!rpcClient) return
   try { rpcClient.clearActivity() } catch {}
   try { rpcClient.destroy() } catch {}
