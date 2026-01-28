@@ -4,12 +4,23 @@ const DEFAULT_BASE_URL = "https://union-crax.xyz"
 
 let currentBaseUrl = DEFAULT_BASE_URL
 
+// Load custom base URL from settings on initialization
+if (typeof window !== 'undefined' && window.ucSettings?.get) {
+  window.ucSettings.get('customBaseUrl').then((url: string | undefined) => {
+    if (url && url.trim()) {
+      currentBaseUrl = url.trim()
+    }
+  }).catch(() => {
+    // ignore
+  })
+}
+
 export function getApiBaseUrl(): string {
   return currentBaseUrl
 }
 
 export function setApiBaseUrl(url: string): void {
-  currentBaseUrl = url
+  currentBaseUrl = url || DEFAULT_BASE_URL
 }
 
 export function apiUrl(path: string): string {

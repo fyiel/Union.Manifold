@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Input } from "@/components/ui/input"
-import { apiUrl } from "@/lib/api"
+import { apiUrl, setApiBaseUrl, getApiBaseUrl } from "@/lib/api"
 import {
   getPreferredDownloadHost,
   setPreferredDownloadHost,
@@ -79,6 +79,9 @@ export function SettingsPage() {
   const [clearingData, setClearingData] = useState(false)
   const [showClearConfirm, setShowClearConfirm] = useState(false)
   const [clearDataFeedback, setClearDataFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
+  const [developerMode, setDeveloperMode] = useState(false)
+  const [customBaseUrl, setCustomBaseUrl] = useState('')
+  const [baseUrlInput, setBaseUrlInput] = useState('')
 
   useEffect(() => {
     const loadVersion = async () => {
@@ -243,6 +246,52 @@ export function SettingsPage() {
         return
       }
       if (data.key === 'discordRpcEnabled') setDiscordRpcEnabled(data.value !== false)
+    })
+    return () => {
+      mounted = false
+      if (typeof off === 'function') off()
+    }
+  }, [])
+
+  useEffect(() => {
+    let mounted = true
+    const loadDeveloperSettings = async () => {
+      try {
+        const devMode = await window.ucSettings?.get?.('developerMode')
+        const baseUrl = await window.ucSettings?.get?.('customBaseUrl')
+        if (!mounted) return
+        setDeveloperMode(devMode || false)
+        const url = (baseUrl || '').trim()
+        setCustomBaseUrl(url)
+        setBaseUrlInput(url)
+        if (url) {
+          setApiBaseUrl(url)
+        }
+      } catch {
+        // ignore
+      }
+    }
+    loadDeveloperSettings()
+    const off = window.ucSettings?.onChanged?.((data: any) => {
+      if (!data || !data.key) return
+      if (data.key === '__CLEAR_ALL__') {
+        setDeveloperMode(false)
+        setCustomBaseUrl('')
+        setBaseUrlInput('')
+        setApiBaseUrl('https://union-crax.xyz')
+        return
+      }
+      if (data.key === 'developerMode') {
+        setDeveloperMode(data.value || false)
+      }
+      if (data.key === 'customBaseUrl') {
+        const url = (data.value || '').trim()
+        setCustomBaseUrl(url)
+        setBaseUrlInput(url)
+        if (url) {
+          setApiBaseUrl(url)
+        }
+      }
     })
     return () => {
       mounted = false
@@ -802,6 +851,10 @@ const handleCheckForUpdates = async () => {
                           setAlwaysCreateDesktopShortcut(false)
                           setDefaultHost('pixeldrain')
                           setDiscordRpcEnabled(true)
+                          setDeveloperMode(false)
+                          setCustomBaseUrl('')
+                          setBaseUrlInput('')
+                          setApiBaseUrl('https://union-crax.xyz')
                           setClearDataFeedback({ type: 'success', message: 'User data cleared successfully.' })
                           // Show success message briefly
                           setTimeout(() => {
@@ -841,6 +894,109 @@ const handleCheckForUpdates = async () => {
               </div>
             )}
           </div>
+        </CardContent>
+      </Card>
+
+      <Card className="border-amber-500/40">
+        <CardContent className="p-6 space-y-4">
+          <div>
+            <h2 className="text-lg font-semibold text-amber-400">Developer Mode</h2>
+            <p className="text-sm text-muted-foreground">
+              Advanced settings for developers and power users.
+            </p>
+          </div>
+
+          <div className="flex items-center justify-between">
+            <div className="flex-1">
+              <div className="flex items-center gap-2">
+                <label htmlFor="developer-mode-toggle" className="text-sm font-medium">
+                  Enable Developer Mode
+                </label>
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">
+                Unlock advanced settings and customization options.
+              </p>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                id="developer-mode-toggle"
+                type="checkbox"
+                checked={developerMode}
+                onChange={async (e) => {
+                  const checked = e.target.checked
+                  setDeveloperMode(checked)
+                  await window.ucSettings?.set?.('developerMode', checked)
+                }}
+                className="sr-only peer"
+              />
+              <div className="w-11 h-6 bg-muted peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-ring rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
+            </label>
+          </div>
+
+          {developerMode && (
+            <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-4 space-y-4">
+              <div>
+                <div className="flex items-center gap-2 mb-1">
+                  <h3 className="text-sm font-semibold text-foreground">Custom API Base URL</h3>
+                  <Badge variant="destructive" className="text-[10px] px-1.5 py-0">DANGEROUS</Badge>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Override the default API base URL. Useful if you're proxying union-crax.xyz through your own domain 
+                  (e.g., to bypass school/workplace restrictions). Leave empty to use the default URL.
+                </p>
+              </div>
+
+              <div className="space-y-3">
+                <Input
+                  type="text"
+                  placeholder="https://union-crax.xyz"
+                  value={baseUrlInput}
+                  onChange={(e) => setBaseUrlInput(e.target.value)}
+                  className="bg-background"
+                />
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    onClick={async () => {
+                      const trimmed = baseUrlInput.trim()
+                      if (trimmed && !trimmed.startsWith('http://') && !trimmed.startsWith('https://')) {
+                        alert('Base URL must start with http:// or https://')
+                        return
+                      }
+                      setCustomBaseUrl(trimmed)
+                      await window.ucSettings?.set?.('customBaseUrl', trimmed)
+                      if (trimmed) {
+                        setApiBaseUrl(trimmed)
+                      } else {
+                        setApiBaseUrl('https://union-crax.xyz')
+                      }
+                    }}
+                  >
+                    Apply
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      setBaseUrlInput(customBaseUrl)
+                    }}
+                  >
+                    Reset
+                  </Button>
+                </div>
+                {customBaseUrl && (
+                  <div className="text-xs text-emerald-400">
+                    Current API base URL: {customBaseUrl}
+                  </div>
+                )}
+                {!customBaseUrl && (
+                  <div className="text-xs text-muted-foreground">
+                    Using default: https://union-crax.xyz
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>
