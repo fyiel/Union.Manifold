@@ -1,5 +1,28 @@
 # Changelog
 
+## Version 0.6.34 - Developer Mode & Custom Base URL
+
+### New Features
+
+- **Developer Mode** (`renderer/src/app/pages/SettingsPage.tsx`)
+  - Added new "Developer Mode" section at the bottom of settings page
+  - Toggle to enable/disable advanced developer features
+  - Settings persist across app restarts
+  - Amber-colored UI to indicate advanced/experimental nature
+
+- **Custom API Base URL** (`renderer/src/app/pages/SettingsPage.tsx`, `renderer/src/lib/api.ts`)
+  - New setting (visible only when Developer Mode is enabled)
+  - Allows overriding the default API base URL (union-crax.xyz)
+  - Useful for proxying through custom domains to bypass restrictions
+  - Marked with "DANGEROUS" badge for user awareness
+  - URL validation enforces http:// or https:// protocol
+  - Apply and Reset buttons for easy URL management
+  - Shows current active URL vs default
+  - Automatically loads custom URL on app startup
+  - Resets to default when clearing all user data
+
+---
+
 ## Version 0.6.32 - Installer Fixes
 
 ### Fixes
