@@ -938,7 +938,6 @@ const handleCheckForUpdates = async () => {
               <div>
                 <div className="flex items-center gap-2 mb-1">
                   <h3 className="text-sm font-semibold text-foreground">Custom API Base URL</h3>
-                  <Badge variant="destructive" className="text-[10px] px-1.5 py-0">DANGEROUS</Badge>
                 </div>
                 <p className="text-xs text-muted-foreground">
                   Override the default API base URL. Useful if you're proxying union-crax.xyz through your own domain 

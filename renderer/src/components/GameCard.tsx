@@ -4,7 +4,7 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Calendar, HardDrive, Download, Eye, Wifi, Flame, Play, Square } from "lucide-react"
 import { formatNumber, hasOnlineMode, pickGameExecutable, proxyImageUrl } from "@/lib/utils"
-import { useDownloads } from "@/context/downloads-context"
+import { useDownloads, useDownloadsSelector } from "@/context/downloads-context"
 import { apiUrl } from "@/lib/api"
 import { ExePickerModal } from "@/components/ExePickerModal"
 import { AdminPromptModal } from "@/components/AdminPromptModal"
@@ -52,11 +52,33 @@ export const GameCard = memo(function GameCard({
   const isNSFW = genres.some((genre) => genre.toLowerCase() === "nsfw")
   const displayStats = initialStats || hoveredStats || { downloads: 0, views: 0 }
 
-  const { openPath, downloads } = useDownloads()
+  const { openPath } = useDownloads()
+  const downloadState = useDownloadsSelector(
+    useCallback(
+      (items) => {
+        const appDownloads = items.filter((item) => item.appid === game.appid)
+        const hasActive = appDownloads.some((item) =>
+          ["downloading", "paused", "extracting", "installing"].includes(item.status)
+        )
+        const isCancelled = appDownloads.some((item) => item.status === "cancelled")
+        const isQueuedOnly = appDownloads.length > 0 && appDownloads.every((item) => item.status === "queued")
+        const isQueued = isQueuedOnly && !hasActive
+        const isInstalling = hasActive && !isCancelled
+        return { isQueued, isInstalling }
+      },
+      [game.appid]
+    ),
+    useCallback(
+      (prev, next) =>
+        prev.isQueued === next.isQueued && prev.isInstalling === next.isInstalling,
+      []
+    )
+  )
   const [installedPath, setInstalledPath] = useState<string | null>(null)
   const [isInstalled, setIsInstalled] = useState(false)
   const [isRunning, setIsRunning] = useState(false)
   const [previewImage, setPreviewImage] = useState<string | null>(null)
+  const [imageLoaded, setImageLoaded] = useState(false)
   const [exePickerOpen, setExePickerOpen] = useState(false)
   const [exePickerExes, setExePickerExes] = useState<Array<{ name: string; path: string }>>([])
   const [adminPromptOpen, setAdminPromptOpen] = useState(false)
@@ -100,6 +122,11 @@ export const GameCard = memo(function GameCard({
   }, [game.appid])
 
   useEffect(() => {
+    if (!isInstalled) {
+      setIsRunning(false)
+      return
+    }
+
     let mounted = true
     const checkRunning = async () => {
       if (!window.ucDownloads?.getRunningGame) return
@@ -113,12 +140,12 @@ export const GameCard = memo(function GameCard({
       }
     }
     void checkRunning()
-    const interval = setInterval(checkRunning, 2000)
+    const interval = setInterval(checkRunning, 5000)
     return () => {
       mounted = false
       clearInterval(interval)
     }
-  }, [game.appid])
+  }, [game.appid, isInstalled])
 
   const fetchStatsOnHover = useCallback(async () => {
     if (initialStats && (initialStats.downloads > 0 || initialStats.views > 0)) {
@@ -146,14 +173,7 @@ export const GameCard = memo(function GameCard({
     }
   }, [game.appid, initialStats, isLoadingStats])
 
-  const appDownloads = downloads.filter((item) => item.appid === game.appid)
-  const hasActive = appDownloads.some((item) =>
-    ["downloading", "paused", "extracting", "installing"].includes(item.status)
-  )
-  const isCancelled = appDownloads.some((item) => item.status === "cancelled")
-  const isQueuedOnly = appDownloads.length > 0 && appDownloads.every((item) => item.status === "queued")
-  const isQueued = isQueuedOnly && !hasActive
-  const isInstalling = hasActive && !isCancelled
+  const { isQueued, isInstalling } = downloadState
 
   const getSavedExe = async () => {
     if (!window.ucSettings?.get) return null
@@ -375,8 +395,9 @@ export const GameCard = memo(function GameCard({
               alt={game.name}
               className={`h-full w-full object-cover transition-all duration-500 group-hover:scale-105 group-hover:brightness-110 ${
                 isNSFW ? "blur-md" : ""
-              }`}
+              } ${imageLoaded ? "blur-none" : "blur-lg"}`}
               loading="lazy"
+              onLoad={() => setImageLoaded(true)}
             />
             {isNSFW && (
               <div className="absolute inset-0 bg-black/40 flex items-center justify-center">

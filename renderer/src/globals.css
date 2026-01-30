@@ -121,7 +121,7 @@
   }
   body {
     @apply bg-background text-foreground antialiased;
-    font-family: var(--font-sans);
+    font-family: 'Geist Mono', 'Geist', var(--font-sans), ui-sans-serif, system-ui, -apple-system, sans-serif;
     overflow-x: hidden;
   }
 
@@ -130,7 +130,8 @@
   }
 
   .font-montserrat {
-    font-family: var(--font-sans), system-ui, sans-serif;
+    font-family: 'Geist Mono', 'Geist', var(--font-sans), ui-sans-serif, system-ui, -apple-system, sans-serif;
+    font-weight: 900;
   }
 
   [data-slot="carousel"] {

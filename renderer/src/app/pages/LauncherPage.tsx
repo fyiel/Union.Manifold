@@ -1,4 +1,4 @@
-import { type FormEvent, useCallback, useEffect, useMemo, useState } from "react"
+import { type FormEvent, useCallback, useEffect, useMemo, useState, startTransition } from "react"
 import { useNavigate } from "react-router-dom"
 import { GameCard } from "@/components/GameCard"
 import { GameCardCompact } from "@/components/GameCardCompact"
@@ -19,7 +19,30 @@ import {
 } from "@/components/ui/pagination"
 import { apiUrl } from "@/lib/api"
 import { formatNumber, generateErrorCode, ErrorTypes } from "@/lib/utils"
-import { Hammer, SlidersHorizontal, Wifi, EyeOff, ArrowRight, Server } from "lucide-react"
+import { Hammer, SlidersHorizontal, Wifi, EyeOff, ArrowRight, Server, Search } from "lucide-react"
+
+const extractDeveloper = (description: string): string => {
+  const developerMatch = description.match(/(?:by|from|developer|dev|studio)\s+([^.,\n]+)/i)
+  return developerMatch ? developerMatch[1].trim() : "Unknown"
+}
+
+const normalizeSearchText = (text: string): string =>
+  text
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^\w\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+
+const shuffleGames = <T,>(items: T[]) => {
+  const result = [...items]
+  for (let i = result.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1))
+    ;[result[i], result[j]] = [result[j], result[i]]
+  }
+  return result
+}
 
 interface Game {
   appid: string
@@ -40,11 +63,6 @@ interface Game {
 export function LauncherPage() {
   const navigate = useNavigate()
 
-  const extractDeveloper = (description: string): string => {
-    const developerMatch = description.match(/(?:by|from|developer|dev|studio)\s+([^.,\n]+)/i)
-    return developerMatch ? developerMatch[1].trim() : "Unknown"
-  }
-
   const [games, setGames] = useState<Game[]>([])
   const [loading, setLoading] = useState(true)
   const [searchInput, setSearchInput] = useState("")
@@ -54,10 +72,35 @@ export function LauncherPage() {
   const [gamesError, setGamesError] = useState<{ type: string; message: string; code: string } | null>(null)
   const [currentPage, setCurrentPage] = useState(1)
   const [recentlyInstalledGames, setRecentlyInstalledGames] = useState<Game[]>([])
+  const [shortcutLabel, setShortcutLabel] = useState("Ctrl+K")
   const itemsPerPage = 20
+  const [statsCacheTime, setStatsCacheTime] = useState<number>(0)
+
+  useEffect(() => {
+    if (typeof navigator === "undefined") return
+    const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform)
+    setShortcutLabel(isMac ? "Cmd+K" : "Ctrl+K")
+  }, [])
 
   useEffect(() => {
     loadGames()
+  }, [])
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const handleHomeNav = () => {
+      document.getElementById("featured")?.scrollIntoView({ behavior: "smooth" })
+    }
+    const handleHomeHero = () => {
+      document.getElementById("hero")?.scrollIntoView({ behavior: "smooth" })
+    }
+
+    window.addEventListener("uc_home_nav", handleHomeNav)
+    window.addEventListener("uc_home_hero", handleHomeHero)
+    return () => {
+      window.removeEventListener("uc_home_nav", handleHomeNav)
+      window.removeEventListener("uc_home_hero", handleHomeHero)
+    }
   }, [])
 
   useEffect(() => {
@@ -120,7 +163,9 @@ export function LauncherPage() {
   const fetchGameStats = async (forceRefresh = false) => {
     try {
       if (!forceRefresh && Object.keys(gameStats).length > 0) {
-        return
+        const now = Date.now()
+        const recentCache = now - statsCacheTime < 30000
+        if (recentCache) return
       }
 
       const response = await fetch(apiUrl("/api/downloads/all"))
@@ -131,7 +176,10 @@ export function LauncherPage() {
 
       const data = await response.json()
       if (data && typeof data === "object") {
-        setGameStats(data)
+        startTransition(() => {
+          setGameStats(data)
+          setStatsCacheTime(Date.now())
+        })
       }
     } catch (error) {
       console.error("[UC] Error fetching game stats:", error)
@@ -157,13 +205,7 @@ export function LauncherPage() {
       const data = await response.json()
       return data.map((game: any) => ({
         ...game,
-        searchText: `${game.name} ${game.description} ${game.genres?.join(" ") || ""}`
-          .toLowerCase()
-          .normalize("NFD")
-          .replace(/[\u0300-\u036f]/g, "")
-          .replace(/[^\w\s]/g, " ")
-          .replace(/\s+/g, " ")
-          .trim(),
+        searchText: normalizeSearchText(`${game.name} ${game.description} ${game.genres?.join(" ") || ""}`),
         developer: game.developer && game.developer !== "Unknown" ? game.developer : extractDeveloper(game.description),
       }))
     } catch (error) {
@@ -183,7 +225,9 @@ export function LauncherPage() {
         setRefreshing(true)
       }
       const gamesData = await fetchGames()
-      setGames(gamesData)
+      startTransition(() => {
+        setGames(gamesData)
+      })
       if (gamesData.length > 0) {
         fetchGameStats(forceRefresh)
       }
@@ -205,13 +249,14 @@ export function LauncherPage() {
   }, [games])
 
   const popularReleases = useMemo(() => {
+    if (Object.keys(gameStats).length === 0) return []
     const gamesWithDownloads = games.filter((game) => {
       const stats = gameStats[game.appid]
       const isNSFW = Array.isArray(game.genres) && game.genres.some((genre) => genre.toLowerCase() === "nsfw")
       return stats && (stats.downloads > 0 || stats.views > 0) && !isNSFW
     })
 
-    const sorted = gamesWithDownloads.sort((a, b) => {
+    const sorted = [...gamesWithDownloads].sort((a, b) => {
       const statsA = gameStats[a.appid] || { downloads: 0, views: 0 }
       const statsB = gameStats[b.appid] || { downloads: 0, views: 0 }
 
@@ -225,8 +270,11 @@ export function LauncherPage() {
     return sorted.slice(0, 8)
   }, [games, gameStats])
 
+  const popularAppIds = useMemo(() => new Set(popularReleases.map((game) => game.appid)), [popularReleases])
+
   const featuredGames = useMemo(() => {
-    return [...games].sort(() => Math.random() - 0.5)
+    if (games.length === 0) return []
+    return refreshKey > 0 ? shuffleGames(games) : games
   }, [games, refreshKey])
 
   useEffect(() => {
@@ -286,27 +334,27 @@ export function LauncherPage() {
 
   return (
     <div className="min-h-screen bg-background">
-      <section className="relative py-32 px-4 text-center">
+      <section id="hero" className="relative py-20 sm:py-24 md:py-32 px-4 text-center">
         <div className="container mx-auto max-w-5xl">
           <div className="flex justify-center mb-8">
-            <div className="p-6 rounded-2xl bg-gradient-to-br from-primary/20 to-primary/5 border border-primary/30 shadow-lg shadow-primary/10">
-              <Hammer className="h-16 w-16 text-primary" />
+            <div className="p-4 sm:p-6 rounded-2xl bg-gradient-to-br from-primary/20 to-primary/5 border border-primary/30 shadow-lg shadow-primary/10">
+              <Hammer className="h-12 w-12 sm:h-16 sm:w-16 text-primary" />
             </div>
           </div>
-          <h1 className="text-5xl md:text-7xl font-black mb-8 text-foreground font-montserrat text-balance leading-tight">
+          <h1 className="text-4xl sm:text-5xl md:text-7xl font-black mb-6 sm:mb-8 text-foreground font-montserrat text-balance leading-tight">
             Free Games for{" "}
             <span className="bg-gradient-to-r from-primary via-purple-400 to-primary bg-clip-text text-transparent">
               Everyone
             </span>
           </h1>
-          <p className="text-xl md:text-2xl text-muted-foreground mb-12 max-w-3xl mx-auto leading-relaxed text-pretty">
+          <p className="text-base sm:text-xl md:text-2xl text-muted-foreground mb-8 sm:mb-12 max-w-3xl mx-auto leading-relaxed text-pretty">
             Join UnionCrax and fulfill all your gaming needs. No matter who you are, where you're from, or how much
             money you make - we make games accessible to everyone.
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
             <Button
               size="lg"
-              className="font-semibold text-lg px-8 py-6 rounded-xl bg-primary hover:bg-primary/90 shadow-lg shadow-primary/25"
+              className="font-semibold text-base sm:text-lg px-6 sm:px-8 py-5 sm:py-6 rounded-xl bg-primary hover:bg-primary/90 shadow-lg shadow-primary/25"
               onClick={() => document.getElementById("featured")?.scrollIntoView({ behavior: "smooth" })}
             >
               Browse Games
@@ -314,7 +362,7 @@ export function LauncherPage() {
             <Button
               size="lg"
               variant="outline"
-              className="font-semibold text-lg px-8 py-6 rounded-xl border-2 bg-transparent"
+              className="font-semibold text-base sm:text-lg px-6 sm:px-8 py-5 sm:py-6 rounded-xl border-2 bg-transparent"
               onClick={() => window.open("https://union-crax.xyz/discord", "_blank", "noreferrer")}
             >
               Join Discord
@@ -323,27 +371,33 @@ export function LauncherPage() {
         </div>
       </section>
 
+      {/* Announcement Banner */}
       <section className="py-8 px-4 border-y border-border/50">
         <div className="container mx-auto max-w-4xl text-center">
-          <div
-            className="inline-flex items-center gap-3 px-6 py-3 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-600 hover:bg-amber-500/15 transition-all cursor-pointer group"
-            onClick={() => window.open("https://union-crax.xyz/request", "_blank", "noreferrer")}
-          >
-            <Hammer className="h-5 w-5" />
-            <span className="text-base font-semibold">
-              Requests are back, but they will be processed slower.
+          <div className="inline-flex items-center gap-3 px-6 py-3 rounded-full bg-gradient-to-r from-orange-400/15 via-orange-300/15 to-orange-200/15 border border-orange-200/30 shadow-sm">
+            <Hammer className="h-5 w-5 text-orange-500" />
+            <span className="text-base font-semibold text-foreground/90">
+              UnionCrax.Direct is currently in beta —{" "}
+              <a
+                href="https://github.com/Union-Crax/UnionCrax.Direct/issues"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-bold text-orange-500 underline underline-offset-4 decoration-orange-300/30 hover:decoration-orange-500/60"
+              >
+                Report issues on GitHub
+              </a>
+              .
             </span>
-            <span className="text-amber-700 font-semibold">Submit a request</span>
-            <ArrowRight className="h-5 w-5 group-hover:translate-x-1 transition-transform" />
           </div>
         </div>
       </section>
 
-      <section className="py-20 px-4">
+      {/* Stats Section */}
+      <section className="py-12 sm:py-16 md:py-20 px-4">
         <div className="container mx-auto max-w-6xl">
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="group p-8 rounded-2xl bg-gradient-to-br from-card to-card/50 border border-border/50 hover:border-primary/30 transition-all space-y-3">
-              <div className="text-5xl font-black bg-gradient-to-br from-primary to-purple-400 bg-clip-text text-transparent font-montserrat">
+            <div className="group p-5 sm:p-8 rounded-2xl bg-gradient-to-br from-card to-card/50 border border-border/50 hover:border-primary/30 transition-all space-y-3">
+              <div className="text-3xl sm:text-4xl md:text-5xl font-black bg-gradient-to-br from-primary to-purple-400 bg-clip-text text-transparent font-montserrat">
                 {displayTotalSizeGB >= 1024 ? (
                   <AnimatedCounter value={displayTotalSizeTB} suffix="TB" />
                 ) : displayTotalSizeGB && displayTotalSizeGB > 0 ? (
@@ -365,8 +419,8 @@ export function LauncherPage() {
               </div>
             </div>
 
-            <div className="group p-8 rounded-2xl bg-gradient-to-br from-card to-card/50 border border-border/50 hover:border-primary/30 transition-all space-y-3">
-              <div className="text-5xl font-black bg-gradient-to-br from-primary to-purple-400 bg-clip-text text-transparent font-montserrat">
+            <div className="group p-5 sm:p-8 rounded-2xl bg-gradient-to-br from-card to-card/50 border border-border/50 hover:border-primary/30 transition-all space-y-3">
+              <div className="text-3xl sm:text-4xl md:text-5xl font-black bg-gradient-to-br from-primary to-purple-400 bg-clip-text text-transparent font-montserrat">
                 {stats.totalGames === 0 ? "?" : <AnimatedCounter value={stats.totalGames} format={formatNumber} />}
               </div>
               <div className="text-foreground/90 font-semibold">Games Available*</div>
@@ -375,8 +429,8 @@ export function LauncherPage() {
               </div>
             </div>
 
-            <div className="group p-8 rounded-2xl bg-gradient-to-br from-card to-card/50 border border-border/50 hover:border-primary/30 transition-all space-y-3">
-              <div className="text-5xl font-black bg-gradient-to-br from-primary to-purple-400 bg-clip-text text-transparent font-montserrat">
+            <div className="group p-5 sm:p-8 rounded-2xl bg-gradient-to-br from-card to-card/50 border border-border/50 hover:border-primary/30 transition-all space-y-3">
+              <div className="text-3xl sm:text-4xl md:text-5xl font-black bg-gradient-to-br from-primary to-purple-400 bg-clip-text text-transparent font-montserrat">
                 {stats.totalDownloads === 0 ? (
                   "?"
                 ) : (
@@ -386,8 +440,8 @@ export function LauncherPage() {
               <div className="text-foreground/90 font-semibold">Total Downloads</div>
             </div>
 
-            <div className="group p-8 rounded-2xl bg-gradient-to-br from-card to-card/50 border border-border/50 hover:border-primary/30 transition-all space-y-3">
-              <div className="text-5xl font-black bg-gradient-to-br from-primary to-purple-400 bg-clip-text text-transparent font-montserrat">
+            <div className="group p-5 sm:p-8 rounded-2xl bg-gradient-to-br from-card to-card/50 border border-border/50 hover:border-primary/30 transition-all space-y-3">
+              <div className="text-3xl sm:text-4xl md:text-5xl font-black bg-gradient-to-br from-primary to-purple-400 bg-clip-text text-transparent font-montserrat">
                 {stats.totalGames === 0 ? "0%" : <AnimatedCounter value={100} suffix="%" />}
               </div>
               <div className="text-foreground/90 font-semibold">Free Forever</div>
@@ -399,56 +453,26 @@ export function LauncherPage() {
         </div>
       </section>
 
-      <section className="py-10 px-4 border-y border-border/50 bg-card/30">
-        <div className="container mx-auto max-w-6xl">
-          <div className="flex flex-col gap-4">
-            <form onSubmit={handleSearchSubmit} className="relative max-w-3xl mx-auto w-full">
-              <SearchSuggestions
-                value={searchInput}
-                onChange={handleSearchChange}
-                onSubmit={handleSearchSubmit}
-                placeholder="Search for a game or genre..."
-                className="w-full h-14 text-lg rounded-xl"
-              />
-            </form>
-
-            <div className="flex items-center justify-center gap-3 flex-wrap">
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() =>
-                  navigate(`/search?nsfw=1${searchInput ? `&q=${encodeURIComponent(searchInput)}` : ""}`)
-                }
-                className="px-4 py-2 rounded-full flex items-center gap-2 hover:bg-primary/10 hover:border-primary/50"
-              >
-                <EyeOff className="h-4 w-4" />
-                <span>NSFW</span>
-              </Button>
-
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() =>
-                  navigate(`/search?online=1${searchInput ? `&q=${encodeURIComponent(searchInput)}` : ""}`)
-                }
-                className="px-4 py-2 rounded-full flex items-center gap-2 hover:bg-primary/10 hover:border-primary/50"
-              >
-                <Wifi className="h-4 w-4" />
-                <span>Online</span>
-              </Button>
-
-              <Button
-                variant="outline"
-                onClick={() => navigate("/search")}
-                className="px-4 py-2 rounded-full border-primary/30 hover:bg-primary/10"
-              >
-                <SlidersHorizontal className="h-4 w-4 mr-2" />
-                Advanced Search
-              </Button>
-            </div>
+      {/* Search Bar (clickable - opens global search popup) */}
+      <div id="home-search" className="py-8 px-4 border-y border-border/50 bg-card/30">
+        <div className="container mx-auto max-w-3xl">
+          <div
+            role="button"
+            tabIndex={0}
+            onClick={() => typeof window !== "undefined" && window.dispatchEvent(new Event("uc_open_search_popup"))}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault()
+                window.dispatchEvent(new Event("uc_open_search_popup"))
+              }
+            }}
+            className="w-full px-4 py-3 text-base rounded-xl border-2 cursor-pointer text-muted-foreground flex items-center gap-3 transition-colors hover:border-primary/50 border-input"
+          >
+            <Search className="h-5 w-5 flex-shrink-0" aria-hidden />
+            <span>Click to search ({shortcutLabel})</span>
           </div>
         </div>
-      </section>
+      </div>
 
       {recentlyInstalledGames.length > 0 && (
         <section className="py-12 sm:py-16 md:py-20 px-4">
@@ -529,7 +553,7 @@ export function LauncherPage() {
       )}
 
       {(loading || newReleases.length > 0) && (
-        <section className="py-20 px-4 overflow-visible">
+        <section className="py-12 sm:py-16 md:py-20 px-4 overflow-visible">
           <div className="container mx-auto max-w-7xl">
             {loading ? (
               <div className="mb-10">
@@ -538,8 +562,8 @@ export function LauncherPage() {
               </div>
             ) : (
               <div className="mb-10">
-                <h2 className="text-4xl md:text-5xl font-black text-foreground font-montserrat mb-3">Latest Games</h2>
-                <p className="text-lg text-muted-foreground">Recently added games to our collection</p>
+                <h2 className="text-3xl sm:text-4xl md:text-5xl font-black text-foreground font-montserrat mb-3">Latest Games</h2>
+                <p className="text-base sm:text-lg text-muted-foreground">Recently added games to our collection</p>
               </div>
             )}
 
@@ -579,7 +603,7 @@ export function LauncherPage() {
       )}
 
       {(loading || popularReleases.length > 0) && (
-        <section className="py-20 px-4 bg-card/20 overflow-visible">
+        <section className="py-12 sm:py-16 md:py-20 px-4 bg-card/20 overflow-visible">
           <div className="container mx-auto max-w-7xl">
             {loading ? (
               <div className="mb-10">
@@ -588,8 +612,8 @@ export function LauncherPage() {
               </div>
             ) : (
               <div className="mb-10">
-                <h2 className="text-4xl md:text-5xl font-black text-foreground font-montserrat mb-3">Most Popular</h2>
-                <p className="text-lg text-muted-foreground">Top downloads in our community</p>
+                <h2 className="text-3xl sm:text-4xl md:text-5xl font-black text-foreground font-montserrat mb-3">Most Popular</h2>
+                <p className="text-base sm:text-lg text-muted-foreground">Top downloads in our community</p>
               </div>
             )}
 
@@ -658,7 +682,7 @@ export function LauncherPage() {
 
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
             {paginatedFeaturedGames.map((game) => {
-              const isGamePopular = popularReleases.some((popularGame) => popularGame.appid === game.appid)
+              const isGamePopular = popularAppIds.has(game.appid)
 
               return <GameCard key={game.appid} game={game} stats={gameStats[game.appid]} isPopular={isGamePopular} />
             })}

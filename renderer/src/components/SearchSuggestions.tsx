@@ -9,8 +9,9 @@ import { Button } from "@/components/ui/button"
 import { Search, ChevronRight, ArrowRight, X } from "lucide-react"
 import { useDebounce } from "@/hooks/use-debounce"
 import { addSearchToHistory, getRecentSearches } from "@/lib/user-history"
-import { formatNumber, triggerHapticFeedback } from "@/lib/utils"
+import { formatNumber, triggerHapticFeedback, proxyImageUrl } from "@/lib/utils"
 import { apiFetch } from "@/lib/api"
+import { SearchResultSkeleton } from "@/components/SearchResultSkeleton"
 
 interface SearchSuggestionsProps {
   value: string
@@ -183,6 +184,22 @@ export function SearchSuggestions({
       document.removeEventListener("mousedown", handleClickOutside)
     }
   }, [showSuggestions, popup])
+
+  // Lock body scroll when popup is open
+  useEffect(() => {
+    if (!popup || !showSuggestions) return
+    const originalOverflow = document.body.style.overflow
+    const originalPaddingRight = document.body.style.paddingRight
+    const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth
+    
+    document.body.style.overflow = "hidden"
+    document.body.style.paddingRight = `${scrollbarWidth}px`
+    
+    return () => {
+      document.body.style.overflow = originalOverflow
+      document.body.style.paddingRight = originalPaddingRight
+    }
+  }, [popup, showSuggestions])
 
   useEffect(() => {
     if (!enableShortcut) return
@@ -486,7 +503,7 @@ export function SearchSuggestions({
             >
               <div className="h-12 w-12 flex-shrink-0 overflow-hidden rounded-lg bg-muted/40">
                 {game.image ? (
-                  <img src={game.image} alt={game.name} className="h-full w-full object-cover" />
+                  <img src={proxyImageUrl(game.image)} alt={game.name} className="h-full w-full object-cover" />
                 ) : (
                   <div className="h-full w-full bg-muted" />
                 )}
@@ -534,7 +551,7 @@ export function SearchSuggestions({
             >
               <div className="h-12 w-12 flex-shrink-0 overflow-hidden rounded-lg bg-muted/40">
                 {game.image ? (
-                  <img src={game.image} alt={game.name} className="h-full w-full object-cover" />
+                  <img src={proxyImageUrl(game.image)} alt={game.name} className="h-full w-full object-cover" />
                 ) : (
                   <div className="h-full w-full bg-muted" />
                 )}
@@ -603,132 +620,156 @@ export function SearchSuggestions({
         </div>
       )}
 
-      {trimmedValue.length === 0 && trendingGames.length > 0 && (
+      {trimmedValue.length === 0 && (browseLoading || trendingGames.length > 0) && (
         <div className="border-t border-border/60 p-3">
           <div className="text-xs uppercase tracking-wide text-muted-foreground mb-2">Trending (24h)</div>
-          <div className="space-y-1">
-            {trendingGames.map((game) => (
-              <button
-                key={`trending-${game.appid}`}
-                type="button"
-                className={`group w-full flex items-center gap-3 rounded-xl px-2 py-2 text-left transition-all duration-300 ease-out hover:bg-foreground/5 hover:-translate-y-0.5 ${
-                  activeItemKey === `trending-${game.appid}` ? "bg-foreground/5" : ""
-                }`}
-                id={`search-suggestion-trending-${game.appid}`}
-                role="option"
-                aria-selected={activeItemKey === `trending-${game.appid}`}
-                onClick={() => {
-                  triggerHapticFeedback("light")
-                  setShowSuggestions(false)
-                  navigate(`/game/${game.appid}`)
-                }}
-                onMouseEnter={() =>
-                  setActiveIndex(activeItems.findIndex((item) => item.key === `trending-${game.appid}`))
-                }
-              >
-                <div className="h-10 w-10 flex-shrink-0 overflow-hidden rounded-lg bg-muted/40">
-                  {game.image ? (
-                    <img src={game.image} alt={game.name} className="h-full w-full object-cover" />
-                  ) : (
-                    <div className="h-full w-full bg-muted" />
-                  )}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="text-sm font-semibold text-foreground line-clamp-1">{game.name}</div>
-                  <div className="text-xs text-muted-foreground">{formatNumber(game.downloads)} downloads</div>
-                </div>
-                <ChevronRight className="h-4 w-4 text-muted-foreground transition-transform duration-300 ease-out group-hover:translate-x-1.5" />
-              </button>
-            ))}
-          </div>
+          {browseLoading ? (
+            <div className="space-y-2">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <SearchResultSkeleton key={i} />
+              ))}
+            </div>
+          ) : (
+            <div className="space-y-1">
+              {trendingGames.map((game) => (
+                <button
+                  key={`trending-${game.appid}`}
+                  type="button"
+                  className={`group w-full flex items-center gap-3 rounded-xl px-2 py-2 text-left transition-all duration-300 ease-out hover:bg-foreground/5 hover:-translate-y-0.5 ${
+                    activeItemKey === `trending-${game.appid}` ? "bg-foreground/5" : ""
+                  }`}
+                  id={`search-suggestion-trending-${game.appid}`}
+                  role="option"
+                  aria-selected={activeItemKey === `trending-${game.appid}`}
+                  onClick={() => {
+                    triggerHapticFeedback("light")
+                    setShowSuggestions(false)
+                    navigate(`/game/${game.appid}`)
+                  }}
+                  onMouseEnter={() =>
+                    setActiveIndex(activeItems.findIndex((item) => item.key === `trending-${game.appid}`))
+                  }
+                >
+                  <div className="h-10 w-10 flex-shrink-0 overflow-hidden rounded-lg bg-muted/40">
+                    {game.image ? (
+                      <img src={proxyImageUrl(game.image)} alt={game.name} className="h-full w-full object-cover" />
+                    ) : (
+                      <div className="h-full w-full bg-muted" />
+                    )}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-semibold text-foreground line-clamp-1">{game.name}</div>
+                    <div className="text-xs text-muted-foreground">{formatNumber(game.downloads)} downloads</div>
+                  </div>
+                  <ChevronRight className="h-4 w-4 text-muted-foreground transition-transform duration-300 ease-out group-hover:translate-x-1.5" />
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
-      {trimmedValue.length === 0 && popularGames.length > 0 && (
+      {trimmedValue.length === 0 && (browseLoading || popularGames.length > 0) && (
         <div className="border-t border-border/60 p-3">
           <div className="text-xs uppercase tracking-wide text-muted-foreground mb-2">Popular games</div>
-          <div className="space-y-1">
-            {popularGames.map((game) => (
-              <button
-                key={`popular-${game.appid}`}
-                type="button"
-                className={`group w-full flex items-center gap-3 rounded-xl px-2 py-2 text-left transition-all duration-300 ease-out hover:bg-foreground/5 hover:-translate-y-0.5 ${
-                  activeItemKey === `popular-${game.appid}` ? "bg-foreground/5" : ""
-                }`}
-                id={`search-suggestion-popular-${game.appid}`}
-                role="option"
-                aria-selected={activeItemKey === `popular-${game.appid}`}
-                onClick={() => {
-                  triggerHapticFeedback("light")
-                  setShowSuggestions(false)
-                  navigate(`/game/${game.appid}`)
-                }}
-                onMouseEnter={() =>
-                  setActiveIndex(activeItems.findIndex((item) => item.key === `popular-${game.appid}`))
-                }
-              >
-                <div className="h-10 w-10 flex-shrink-0 overflow-hidden rounded-lg bg-muted/40">
-                  {game.image ? (
-                    <img src={game.image} alt={game.name} className="h-full w-full object-cover" />
-                  ) : (
-                    <div className="h-full w-full bg-muted" />
-                  )}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="text-sm font-semibold text-foreground line-clamp-1">{game.name}</div>
-                  <div className="text-xs text-muted-foreground">{formatNumber(game.downloads)} downloads</div>
-                </div>
-                <ChevronRight className="h-4 w-4 text-muted-foreground transition-transform duration-300 ease-out group-hover:translate-x-1.5" />
-              </button>
-            ))}
-          </div>
+          {browseLoading ? (
+            <div className="space-y-2">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <SearchResultSkeleton key={i} />
+              ))}
+            </div>
+          ) : (
+            <div className="space-y-1">
+              {popularGames.map((game) => (
+                <button
+                  key={`popular-${game.appid}`}
+                  type="button"
+                  className={`group w-full flex items-center gap-3 rounded-xl px-2 py-2 text-left transition-all duration-300 ease-out hover:bg-foreground/5 hover:-translate-y-0.5 ${
+                    activeItemKey === `popular-${game.appid}` ? "bg-foreground/5" : ""
+                  }`}
+                  id={`search-suggestion-popular-${game.appid}`}
+                  role="option"
+                  aria-selected={activeItemKey === `popular-${game.appid}`}
+                  onClick={() => {
+                    triggerHapticFeedback("light")
+                    setShowSuggestions(false)
+                    navigate(`/game/${game.appid}`)
+                  }}
+                  onMouseEnter={() =>
+                    setActiveIndex(activeItems.findIndex((item) => item.key === `popular-${game.appid}`))
+                  }
+                >
+                  <div className="h-10 w-10 flex-shrink-0 overflow-hidden rounded-lg bg-muted/40">
+                    {game.image ? (
+                      <img src={proxyImageUrl(game.image)} alt={game.name} className="h-full w-full object-cover" />
+                    ) : (
+                      <div className="h-full w-full bg-muted" />
+                    )}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-semibold text-foreground line-clamp-1">{game.name}</div>
+                    <div className="text-xs text-muted-foreground">{formatNumber(game.downloads)} downloads</div>
+                  </div>
+                  <ChevronRight className="h-4 w-4 text-muted-foreground transition-transform duration-300 ease-out group-hover:translate-x-1.5" />
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
-      {trimmedValue.length === 0 && recentlyAddedGames.length > 0 && (
+      {trimmedValue.length === 0 && (browseLoading || recentlyAddedGames.length > 0) && (
         <div className="border-t border-border/60 p-3">
           <div className="text-xs uppercase tracking-wide text-muted-foreground mb-2">Recently added</div>
-          <div className="space-y-1">
-            {recentlyAddedGames.map((game) => (
-              <button
-                key={`recently-added-${game.appid}`}
-                type="button"
-                className={`group w-full flex items-center gap-3 rounded-xl px-2 py-2 text-left transition-all duration-300 ease-out hover:bg-foreground/5 hover:-translate-y-0.5 ${
-                  activeItemKey === `recently-added-${game.appid}` ? "bg-foreground/5" : ""
-                }`}
-                id={`search-suggestion-recently-added-${game.appid}`}
-                role="option"
-                aria-selected={activeItemKey === `recently-added-${game.appid}`}
-                onClick={() => {
-                  triggerHapticFeedback("light")
-                  setShowSuggestions(false)
-                  navigate(`/game/${game.appid}`)
-                }}
-                onMouseEnter={() =>
-                  setActiveIndex(
-                    activeItems.findIndex((item) => item.key === `recently-added-${game.appid}`)
-                  )
-                }
-              >
-                <div className="h-10 w-10 flex-shrink-0 overflow-hidden rounded-lg bg-muted/40">
-                  {game.image ? (
-                    <img src={game.image} alt={game.name} className="h-full w-full object-cover" />
-                  ) : (
-                    <div className="h-full w-full bg-muted" />
-                  )}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="text-sm font-semibold text-foreground line-clamp-1">{game.name}</div>
-                  {game.update_time && (
-                    <div className="text-xs text-muted-foreground">
-                      Updated {new Date(game.update_time).toLocaleDateString()}
-                    </div>
-                  )}
-                </div>
-                <ChevronRight className="h-4 w-4 text-muted-foreground transition-transform duration-300 ease-out group-hover:translate-x-1.5" />
-              </button>
-            ))}
-          </div>
+          {browseLoading ? (
+            <div className="space-y-2">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <SearchResultSkeleton key={i} />
+              ))}
+            </div>
+          ) : (
+            <div className="space-y-1">
+              {recentlyAddedGames.map((game) => (
+                <button
+                  key={`recently-added-${game.appid}`}
+                  type="button"
+                  className={`group w-full flex items-center gap-3 rounded-xl px-2 py-2 text-left transition-all duration-300 ease-out hover:bg-foreground/5 hover:-translate-y-0.5 ${
+                    activeItemKey === `recently-added-${game.appid}` ? "bg-foreground/5" : ""
+                  }`}
+                  id={`search-suggestion-recently-added-${game.appid}`}
+                  role="option"
+                  aria-selected={activeItemKey === `recently-added-${game.appid}`}
+                  onClick={() => {
+                    triggerHapticFeedback("light")
+                    setShowSuggestions(false)
+                    navigate(`/game/${game.appid}`)
+                  }}
+                  onMouseEnter={() =>
+                    setActiveIndex(
+                      activeItems.findIndex((item) => item.key === `recently-added-${game.appid}`)
+                    )
+                  }
+                >
+                  <div className="h-10 w-10 flex-shrink-0 overflow-hidden rounded-lg bg-muted/40">
+                    {game.image ? (
+                      <img src={proxyImageUrl(game.image)} alt={game.name} className="h-full w-full object-cover" />
+                    ) : (
+                      <div className="h-full w-full bg-muted" />
+                    )}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-semibold text-foreground line-clamp-1">{game.name}</div>
+                    {game.update_time && (
+                      <div className="text-xs text-muted-foreground">
+                        Updated {new Date(game.update_time).toLocaleDateString()}
+                      </div>
+                    )}
+                  </div>
+                  <ChevronRight className="h-4 w-4 text-muted-foreground transition-transform duration-300 ease-out group-hover:translate-x-1.5" />
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </>
