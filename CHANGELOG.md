@@ -1,5 +1,70 @@
 # Changelog
 
+## Version 0.7.1 - Performance Improvements
+
+### Performance
+
+- **Deferred UI updates** (`renderer/src/app/pages/LauncherPage.tsx`)
+  - Use React `startTransition` when applying large game list and stats updates to keep the UI responsive.
+
+- **Stats caching & debouncing** (`renderer/src/app/pages/LauncherPage.tsx`)
+  - Cache game stats for short periods and avoid redundant API calls during rapid UI interactions.
+
+- **Image progressive loading (blur-up)** (`renderer/src/components/GameCard.tsx`)
+  - Added a blur-up effect and `loading="lazy"` for game artwork to improve perceived load times.
+
+- **Download state selector** (`renderer/src/context/downloads-context.tsx`)
+  - Introduced a lightweight external store and `useDownloadsSelector` to let `GameCard` subscribe to only the download fields it needs, reducing re-renders.
+
+- **Memoization & reduced work** (`renderer/src/app/pages/LauncherPage.tsx`, `renderer/src/components/GameCardCompact.tsx`)
+  - Memoized compact cards, avoided in-place sorts, and only shuffled featured lists on explicit refresh.
+
+- **Reduced polling frequency** (`renderer/src/components/GameCard.tsx`)
+  - Lowered running-state polling frequency and skip polling when not installed.
+
+These changes reduce UI jank, lower CPU usage during large updates, and make scrolling and interactions noticeably smoother.
+
+
+---
+
+## Version 0.7.0 - UI Alignment & Navigation Improvements
+
+### UI Improvements
+
+- **Home Page Redesign** (`renderer/src/app/pages/LauncherPage.tsx`)
+  - Updated hero section with responsive text sizing matching web version
+  - Refined announcement banner with gradient styling and updated links
+  - Improved stats section with responsive font sizes and spacing
+  - Adjusted section padding for better mobile/desktop consistency
+  - Simplified search bar UI - now shows "Click to search" with platform-specific shortcut hint
+  - Search bar opens global search popup (Ctrl+K / Cmd+K) instead of inline form
+
+- **Font System Overhaul** (`renderer/src/fonts.css`, `renderer/src/globals.css`)
+  - Migrated to Google Fonts CDN for Geist and Geist Mono (matches Next.js web version)
+  - Updated font stack with proper fallbacks
+  - Enhanced heading font weights for better visual hierarchy
+  - Applied Geist Mono as primary body font for consistent monospace aesthetic
+
+- **Navigation Behavior** (`renderer/src/components/TopBar.tsx`, `renderer/src/app/pages/LauncherPage.tsx`)
+  - Added smart scroll behavior - Home nav button scrolls to "All Games" section
+  - Logo click scrolls to hero section when on home page
+  - Smooth scrolling with proper event handling for both desktop and mobile
+  - Matches web version navigation patterns exactly
+
+- **Search Experience** (`renderer/src/components/SearchSuggestions.tsx`)
+  - Body scroll locking when search popup is open
+  - Compensates for scrollbar width to prevent layout shift
+  - Improved keyboard accessibility
+
+### Technical Changes
+
+- Synchronized all home page layouts and styling with union-crax.xyz web version
+- Added hero section ID for targeted scrolling
+- Implemented custom window events for navigation communication
+- Enhanced responsive breakpoints across all sections
+
+---
+
 ## Version 0.6.34 - Developer Mode & Custom Base URL
 
 ### New Features

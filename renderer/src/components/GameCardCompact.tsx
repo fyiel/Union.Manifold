@@ -1,7 +1,7 @@
 "use client"
 
 import { Link } from "react-router-dom"
-import { useEffect, useState } from "react"
+import { memo, useEffect, useState } from "react"
 import { proxyImageUrl } from "@/lib/utils"
 
 type CompactGame = {
@@ -11,7 +11,7 @@ type CompactGame = {
   genres: string[]
 }
 
-export function GameCardCompact({ game }: { game: CompactGame }) {
+export const GameCardCompact = memo(function GameCardCompact({ game }: { game: CompactGame }) {
   const [allowNsfwReveal, setAllowNsfwReveal] = useState(false)
   const isNSFW = game.genres?.some((genre) => genre.toLowerCase() === "nsfw")
 
@@ -47,6 +47,7 @@ export function GameCardCompact({ game }: { game: CompactGame }) {
           <img
             src={proxyImageUrl(game.image) || "/banner.png"}
             alt={game.name}
+            loading="lazy"
             className={`h-full w-full object-cover transition duration-500 group-hover:scale-105 ${
               isNSFW ? (allowNsfwReveal ? "blur-md group-hover:blur-none" : "blur-md") : ""
             }`}
@@ -70,4 +71,4 @@ export function GameCardCompact({ game }: { game: CompactGame }) {
       </div>
     </Link>
   )
-}
+})

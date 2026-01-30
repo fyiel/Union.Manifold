@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react"
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import type { Game } from "@/lib/types"
 import {
   fetchDownloadLinks,
@@ -91,6 +91,12 @@ type DownloadsContextValue = {
 }
 
 const DownloadsContext = createContext<DownloadsContextValue | null>(null)
+type DownloadsStore = {
+  subscribe: (listener: () => void) => () => void
+  getSnapshot: () => DownloadItem[]
+}
+
+const DownloadsStoreContext = createContext<DownloadsStore | null>(null)
 const STORAGE_KEY = "uc_direct_downloads"
 
 function safeGameFilename(name: string) {
@@ -151,6 +157,10 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
   const downloadsRef = useRef(downloads)
   useEffect(() => {
     downloadsRef.current = downloads
+  }, [downloads])
+  const listenersRef = useRef(new Set<() => void>())
+  useEffect(() => {
+    listenersRef.current.forEach((listener) => listener())
   }, [downloads])
   const preparingRef = useRef(new Set<string>())
   const sequenceLocksRef = useRef(new Set<string>())
@@ -807,6 +817,17 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
     setDownloads((prev) => prev.filter((item) => item.appid !== appid))
   }, [])
 
+  const store = useMemo<DownloadsStore>(
+    () => ({
+      subscribe: (listener: () => void) => {
+        listenersRef.current.add(listener)
+        return () => listenersRef.current.delete(listener)
+      },
+      getSnapshot: () => downloadsRef.current,
+    }),
+    []
+  )
+
   const value = useMemo(
     () => ({
       downloads,
@@ -826,7 +847,11 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
     [downloads, startGameDownload, cancelDownload, cancelGroup, pauseDownload, resumeDownload, resumeGroup, showInFolder, openPath, clearByAppid, clearCompleted]
   )
 
-  return <DownloadsContext.Provider value={value}>{children}</DownloadsContext.Provider>
+  return (
+    <DownloadsStoreContext.Provider value={store}>
+      <DownloadsContext.Provider value={value}>{children}</DownloadsContext.Provider>
+    </DownloadsStoreContext.Provider>
+  )
 }
 
 export function useDownloads() {
@@ -835,4 +860,27 @@ export function useDownloads() {
     throw new Error("useDownloads must be used within DownloadsProvider")
   }
   return context
+}
+
+export function useDownloadsSelector<T>(
+  selector: (downloads: DownloadItem[]) => T,
+  equalityFn: (prev: T, next: T) => boolean = Object.is
+) {
+  const store = useContext(DownloadsStoreContext)
+  if (!store) {
+    throw new Error("useDownloadsSelector must be used within DownloadsProvider")
+  }
+
+  const selectionRef = useRef<{ hasValue: boolean; value: T }>({ hasValue: false, value: undefined as T })
+
+  const getSnapshot = useCallback(() => {
+    const next = selector(store.getSnapshot())
+    if (selectionRef.current.hasValue && equalityFn(selectionRef.current.value, next)) {
+      return selectionRef.current.value
+    }
+    selectionRef.current = { hasValue: true, value: next }
+    return next
+  }, [store, selector, equalityFn])
+
+  return useSyncExternalStore(store.subscribe, getSnapshot, () => selector([]))
 }

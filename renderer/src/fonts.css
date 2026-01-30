@@ -1,4 +1,7 @@
-/* Geist Sans Variable Font */
+/* Import Geist + Geist Mono from CDN (matches Next.js Google Fonts) */
+@import url('https://fonts.googleapis.com/css2?family=Geist:wght@100..900&family=Geist+Mono:wght@100..900&display=swap');
+
+/* Geist Sans Variable Font (local fallback) */
 @font-face {
   font-family: 'Geist';
   src: url('/fonts/Geist-Variable.woff2') format('woff2-variations');
@@ -7,7 +10,7 @@
   font-display: swap;
 }
 
-/* Geist Mono Variable Font */
+/* Geist Mono Variable Font (local fallback) */
 @font-face {
   font-family: 'Geist Mono';
   src: url('/fonts/GeistMono-Variable.woff2') format('woff2-variations');

@@ -30,6 +30,7 @@ import {
   PaginationPrevious,
 } from "@/components/ui/pagination"
 import { apiFetch, apiUrl, getApiBaseUrl } from "@/lib/api"
+import { CommentSkeleton } from "@/components/CommentSkeleton"
 import {
   AlertTriangle,
   Check,
@@ -837,7 +838,11 @@ export function GameComments({ appid, gameName }: { appid: string; gameName: str
         </Card>
 
         {loading ? (
-          <div className="text-sm text-muted-foreground">Loading comments...</div>
+          <div className="space-y-4">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <CommentSkeleton key={i} />
+            ))}
+          </div>
         ) : comments.length === 0 ? (
           <div className="rounded-2xl border border-border/60 bg-card/40 p-6 text-sm text-muted-foreground">
             No comments yet. Be the first to share your thoughts.

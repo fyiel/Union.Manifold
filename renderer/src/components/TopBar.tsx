@@ -91,6 +91,28 @@ export function TopBar() {
     window.dispatchEvent(new Event("uc_open_search_popup"))
   }
 
+  const handleHomeNav = (e?: React.MouseEvent) => {
+    if (typeof window === "undefined") return
+    e?.preventDefault()
+    if (location.pathname === "/") {
+      window.dispatchEvent(new Event("uc_home_nav"))
+      return
+    }
+    navigate("/")
+    window.setTimeout(() => window.dispatchEvent(new Event("uc_home_nav")), 80)
+  }
+
+  const handleLogoNav = (e?: React.MouseEvent) => {
+    if (typeof window === "undefined") return
+    e?.preventDefault()
+    if (location.pathname === "/") {
+      window.dispatchEvent(new Event("uc_home_hero"))
+      return
+    }
+    navigate("/")
+    window.setTimeout(() => window.dispatchEvent(new Event("uc_home_hero")), 80)
+  }
+
   const openExternal = (path: string) => {
     if (typeof window === "undefined") return
     window.open(apiUrl(path), "_blank", "noopener")
@@ -149,7 +171,7 @@ export function TopBar() {
           <div className="flex h-16 items-center gap-4">
             <BackButton />
             
-            <NavLink to="/" className="flex items-center gap-2">
+            <NavLink to="/" className="flex items-center gap-2" onClick={handleLogoNav}>
               <Hammer className="h-7 w-7 text-foreground" />
               <span className="font-black text-lg text-foreground font-montserrat">UnionCrax</span>
               <Badge className="rounded-full bg-primary/15 text-primary border-primary/20">Direct</Badge>
@@ -161,6 +183,7 @@ export function TopBar() {
                   <NavLink
                     key={item.label}
                     to="/"
+                    onClick={handleHomeNav}
                     className={({ isActive }) =>
                       `cursor-pointer text-sm font-medium transition-colors ${
                         isActive ? "text-primary" : "text-muted-foreground hover:text-primary"
@@ -365,17 +388,31 @@ export function TopBar() {
                     <div className="space-y-2">
                       <div className="text-xs uppercase tracking-wide text-muted-foreground px-1">UnionCrax</div>
                       {siteNavItems.map((item) => (
-                        <button
-                          key={item.label}
-                          type="button"
-                          onClick={() => {
-                            openExternal(item.path)
-                            setMobileOpen(false)
-                          }}
-                          className="flex w-full cursor-pointer items-center justify-between rounded-xl px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-primary hover:bg-primary/10"
-                        >
-                          {item.label}
-                        </button>
+                        item.label === "Home" ? (
+                          <button
+                            key={item.label}
+                            type="button"
+                            onClick={() => {
+                              handleHomeNav()
+                              setMobileOpen(false)
+                            }}
+                            className="flex w-full cursor-pointer items-center justify-between rounded-xl px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-primary hover:bg-primary/10"
+                          >
+                            {item.label}
+                          </button>
+                        ) : (
+                          <button
+                            key={item.label}
+                            type="button"
+                            onClick={() => {
+                              openExternal(item.path)
+                              setMobileOpen(false)
+                            }}
+                            className="flex w-full cursor-pointer items-center justify-between rounded-xl px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-primary hover:bg-primary/10"
+                          >
+                            {item.label}
+                          </button>
+                        )
                       ))}
                     </div>
 
