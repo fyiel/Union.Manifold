@@ -98,7 +98,40 @@ Manual check: Settings → **Check for Updates** (opens Releases page)
 
 Use **Settings** → **Download Location** in the app to choose where games are installed.
 
+## Uninstall
+
+### Windows
+To uninstall UnionCrax.Direct from Windows:
+
+1. Open **Settings** → **Apps** → **Installed apps** (or **Control Panel** → **Programs and Features**)
+2. Search for **UnionCrax.Direct**
+3. Click **Uninstall** and follow the prompts
+4. The application and shortcuts will be completely removed
+
+Alternatively, if you installed the portable or ZIP version, simply delete the executable or folder.
+
+### Linux
+To uninstall UnionCrax.Direct from Linux:
+
+1. Run the installer again:
+   ```bash
+   curl -sSL https://union-crax.xyz/linux-installer.sh | bash
+   ```
+2. Select **Uninstall** when prompted
+3. The application and desktop entry will be completely removed
+
 ## Troubleshooting
+
+### Linux: App icon not showing
+If the app icon doesn't appear correctly on desktop shortcuts or in the application itself:
+
+1. **Reinstall the application** to update the desktop entry and cache:
+   ```bash
+   curl -sSL https://union-crax.xyz/linux-installer.sh | bash
+   ```
+2. Select **Reinstall** when prompted
+3. Restart your desktop environment or log out and log back in
+4. The icon should now display correctly
 
 ### App won't start
 - Verify Windows 10+ (64-bit)

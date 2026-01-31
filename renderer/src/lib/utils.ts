@@ -119,35 +119,119 @@ export function proxyImageUrl(imageUrl: string): string {
   }
 }
 
-type GameExecutable = { name: string; path: string }
+export type GameExecutable = { name: string; path: string; size?: number; depth?: number }
 
-const ignoredEngineExePatterns = [
-  /^unitycrashhandler(64|32)?\.exe$/,
-  /^crashreportclient\.exe$/,
-  /^unrealcefsubprocess\.exe$/,
-  /^ue4prereqsetup(_x64|_x86)?\.exe$/,
-  /^ueprereqsetup(_x64|_x86)?\.exe$/,
-  /^ue5prereqsetup(_x64|_x86)?\.exe$/,
-  /^ue4editor\.exe$/,
-  /^ue5editor\.exe$/,
-  /^ue4game\.exe$/,
-  /^ue5game\.exe$/,
-]
-
-export function isIgnoredEngineExecutableName(name: string) {
+export function isHelperExecutableName(name: string) {
   const lower = name.toLowerCase()
-  return ignoredEngineExePatterns.some((pattern) => pattern.test(lower))
+  return [
+    'crash',
+    'report',
+    'dump',
+    'helper',
+    'uninstall',
+    'setup',
+    'install',
+    'redist',
+    'updater',
+    'patch'
+  ].some((token) => lower.includes(token))
 }
 
 export function filterGameExecutables(exes: GameExecutable[]) {
-  return exes.filter((exe) => !isIgnoredEngineExecutableName(exe.name))
+  return exes
 }
 
-export function pickGameExecutable(exes: GameExecutable[], gameName: string, gameSource?: string) {
+const normalizeToken = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, "")
+
+export function getExecutableRelativePath(fullPath: string, baseFolder?: string | null) {
+  if (!baseFolder) return fullPath
+  const normalizedBase = baseFolder.replace(/[\\/]+$/, "")
+  if (!normalizedBase) return fullPath
+  const lowerFull = fullPath.toLowerCase()
+  const lowerBase = normalizedBase.toLowerCase()
+  if (lowerFull.startsWith(lowerBase)) {
+    const trimmed = fullPath.slice(normalizedBase.length).replace(/^[\\/]+/, "")
+    return trimmed || fullPath
+  }
+  return fullPath
+}
+
+export function scoreGameExecutable(exe: GameExecutable, gameName: string, baseFolder?: string | null) {
+  const nameLower = exe.name.toLowerCase()
+  const pathLower = exe.path.toLowerCase()
+  const gameToken = normalizeToken(gameName)
+  const tokens = gameName
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((t) => t.length >= 3)
+
+  let score = 0
+  const tags: string[] = []
+
+  if (gameToken && (nameLower.includes(gameToken) || pathLower.includes(gameToken))) {
+    score += 6
+    tags.push("name match")
+  }
+  if (tokens.some((t) => nameLower.includes(t) || pathLower.includes(t))) {
+    score += 3
+  }
+  if (nameLower.includes("game") || nameLower.includes("play")) {
+    score += 2
+  }
+  if (nameLower.includes("launcher") || nameLower.includes("start")) {
+    score -= 1
+  }
+  if (nameLower.includes("setup") || nameLower.includes("install") || nameLower.includes("uninstall") || nameLower.includes("redist")) {
+    score -= 6
+    tags.push("installer")
+  }
+  if (nameLower.includes("crash") || nameLower.includes("report") || nameLower.includes("dump") || nameLower.includes("helper")) {
+    score -= 6
+    tags.push("helper")
+  }
+  if (nameLower.includes("editor")) {
+    score -= 4
+    tags.push("editor")
+  }
+
+  if (typeof exe.depth === "number") {
+    score += Math.max(0, 4 - exe.depth)
+  } else if (baseFolder) {
+    const relative = getExecutableRelativePath(exe.path, baseFolder)
+    const depth = relative.split(/[\\/]/).length - 1
+    score += Math.max(0, 4 - depth)
+  }
+
+  if (typeof exe.size === "number" && exe.size > 0) {
+    if (exe.size >= 50 * 1024 * 1024) score += 2
+    else if (exe.size >= 10 * 1024 * 1024) score += 1
+  }
+
+  const helper = isHelperExecutableName(exe.name)
+  if (helper) score -= 2
+
+  return { score, tags, ignored: false }
+}
+
+export function rankGameExecutables(exes: GameExecutable[], gameName: string, baseFolder?: string | null) {
+  return [...exes]
+    .map((exe) => {
+      const scored = scoreGameExecutable(exe, gameName, baseFolder)
+      return { ...exe, ...scored }
+    })
+    .sort((a, b) => {
+      if (a.ignored !== b.ignored) return a.ignored ? 1 : -1
+      if (a.score !== b.score) return b.score - a.score
+      const depthA = typeof a.depth === "number" ? a.depth : 0
+      const depthB = typeof b.depth === "number" ? b.depth : 0
+      if (depthA !== depthB) return depthA - depthB
+      return a.name.localeCompare(b.name)
+    })
+}
+
+export function pickGameExecutable(exes: GameExecutable[], gameName: string, gameSource?: string, baseFolder?: string | null) {
   const candidates = filterGameExecutables(exes)
   if (!candidates.length) return { pick: null, confident: false }
-
-  const isLinuxPlatform = typeof navigator !== 'undefined' && /linux/i.test(navigator.userAgent)
 
   // If there's only 1 exe, assume it's the correct one
   if (candidates.length === 1) {
@@ -155,11 +239,10 @@ export function pickGameExecutable(exes: GameExecutable[], gameName: string, gam
   }
 
   // Check if source contains uc-online or similar patterns
-  const isUcOnlineSource = gameSource?.toLowerCase().includes("uc-online") || 
+  const isUcOnlineSource = gameSource?.toLowerCase().includes("uc-online") ||
                            gameSource?.toLowerCase().includes("uconline") ||
                            gameSource?.toLowerCase().includes("uc online")
 
-  // If uc-online source, prioritize uc-online.exe or uc-online64.exe
   if (isUcOnlineSource) {
     const ucOnlineExe = candidates.find((exe) => {
       const lower = exe.name.toLowerCase()
@@ -170,28 +253,9 @@ export function pickGameExecutable(exes: GameExecutable[], gameName: string, gam
     }
   }
 
-  const nameToken = gameName.toLowerCase().replace(/[^a-z0-9]+/g, "")
-  const scored = candidates.map((exe) => {
-    const lower = exe.name.toLowerCase()
-    const pathLower = exe.path.toLowerCase()
-    let score = 0
-    if (nameToken && (lower.includes(nameToken) || pathLower.includes(nameToken))) score += 5
-    if (lower.includes("launcher")) score += 3
-    if (lower.includes("game")) score += 2
-    if (lower.includes("setup") || lower.includes("uninstall")) score -= 3
-    if (isLinuxPlatform) {
-      if (lower.endsWith('.appimage')) score += 6
-      if (lower.endsWith('.sh') || lower.includes('run') || lower.includes('start')) score += 3
-      if (lower.endsWith('.x86_64') || lower.endsWith('.x86')) score += 4
-      if (lower.endsWith('.exe')) score += 1
-      if (lower.includes('installer')) score -= 2
-    }
-    return { exe, score }
-  })
-  scored.sort((a, b) => b.score - a.score)
-
-  const top = scored[0]
+  const ranked = rankGameExecutables(candidates, gameName, baseFolder)
+  const top = ranked[0]
   const topScore = top?.score ?? 0
-  const confident = topScore >= 4
-  return { pick: top ? top.exe : null, confident }
+  const confident = topScore >= 6
+  return { pick: top || null, confident }
 }

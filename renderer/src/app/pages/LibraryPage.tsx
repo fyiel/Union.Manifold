@@ -63,7 +63,7 @@ export function LibraryPage() {
   const [exePickerTitle, setExePickerTitle] = useState("")
   const [exePickerMessage, setExePickerMessage] = useState("")
   const [exePickerAppId, setExePickerAppId] = useState<string | null>(null)
-  const [exePickerExes, setExePickerExes] = useState<Array<{ name: string; path: string }>>([])
+  const [exePickerExes, setExePickerExes] = useState<Array<{ name: string; path: string; size?: number; depth?: number }>>([])
   const [exePickerCurrentPath, setExePickerCurrentPath] = useState<string | null>(null)
   const [exePickerFolder, setExePickerFolder] = useState<string | null>(null)
   const [settingsPopupOpen, setSettingsPopupOpen] = useState(false)
@@ -554,11 +554,13 @@ export function LibraryPage() {
                   setPendingDeleteGame(null)
                   setPendingDeleteAction(null)
                   if (!target) return
-                  if (action === "installing") {
-                    void handleDeleteInstalling(target)
-                  } else {
-                    void handleDeleteInstalled(target)
-                  }
+                  setTimeout(() => {
+                    if (action === "installing") {
+                      void handleDeleteInstalling(target)
+                    } else {
+                      void handleDeleteInstalled(target)
+                    }
+                  }, 0)
                 }}
               >
                 {pendingDeleteAction === "installing" ? "Remove" : "Delete"}
@@ -640,6 +642,21 @@ export function LibraryPage() {
                 <ExternalLink className="mr-2 h-4 w-4" />
                 Create Desktop Shortcut
               </Button>
+              <Button
+                variant="ghost"
+                className="w-full justify-start text-destructive hover:text-destructive"
+                onClick={() => {
+                  if (settingsPopupGame) {
+                    setSettingsPopupOpen(false)
+                    setShortcutFeedback(null)
+                    setPendingDeleteGame(settingsPopupGame)
+                    setPendingDeleteAction("installed")
+                  }
+                }}
+              >
+                <Trash2 className="mr-2 h-4 w-4" />
+                Delete Game
+              </Button>
             </div>
 
             {shortcutFeedback && (
@@ -669,6 +686,8 @@ export function LibraryPage() {
         exes={exePickerExes}
         currentExePath={exePickerCurrentPath}
         actionLabel="Set"
+        gameName={settingsPopupGame?.name}
+        baseFolder={exePickerFolder}
         onSelect={handleExePicked}
         onClose={() => setExePickerOpen(false)}
       />

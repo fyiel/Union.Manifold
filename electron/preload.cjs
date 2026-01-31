@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('ucDownloads', {
   setDownloadPath: (targetPath) => ipcRenderer.invoke('uc:download-path-set', targetPath),
   pickDownloadPath: () => ipcRenderer.invoke('uc:download-path-pick'),
   getDownloadUsage: (targetPath) => ipcRenderer.invoke('uc:download-usage', targetPath),
+  clearDownloadCache: () => ipcRenderer.invoke('uc:download-cache-clear'),
   // Installed manifests (stored next to installed files)
   saveInstalledMetadata: (appid, metadata) => ipcRenderer.invoke('uc:installed-save', appid, metadata),
   listInstalled: () => ipcRenderer.invoke('uc:installed-list'),
@@ -51,6 +52,9 @@ contextBridge.exposeInMainWorld('ucSettings', {
   get: (key) => ipcRenderer.invoke('uc:setting-get', key),
   set: (key, value) => ipcRenderer.invoke('uc:setting-set', key, value),
   clearAll: () => ipcRenderer.invoke('uc:setting-clear-all'),
+  exportSettings: () => ipcRenderer.invoke('uc:settings-export'),
+  importSettings: () => ipcRenderer.invoke('uc:settings-import'),
+  runNetworkTest: (baseUrl) => ipcRenderer.invoke('uc:network-test', baseUrl),
   onChanged: (callback) => {
     const listener = (_event, data) => callback(data)
     ipcRenderer.on('uc:setting-changed', listener)
@@ -73,7 +77,8 @@ contextBridge.exposeInMainWorld('ucUpdater', {
 contextBridge.exposeInMainWorld('ucLogs', {
   log: (level, message, data) => ipcRenderer.invoke('uc:log', level, message, data),
   getLogs: () => ipcRenderer.invoke('uc:logs-get'),
-  clearLogs: () => ipcRenderer.invoke('uc:logs-clear')
+  clearLogs: () => ipcRenderer.invoke('uc:logs-clear'),
+  openLogsFolder: () => ipcRenderer.invoke('uc:logs-open-folder')
 })
 
 contextBridge.exposeInMainWorld('ucRpc', {

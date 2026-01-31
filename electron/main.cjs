@@ -97,7 +97,22 @@ function getAppVersion() {
 function applySettingsDefaults(settings) {
   const next = settings && typeof settings === 'object' ? { ...settings } : {}
   if (typeof next.discordRpcEnabled !== 'boolean') next.discordRpcEnabled = true
+  if (typeof next.verboseDownloadLogging !== 'boolean') next.verboseDownloadLogging = false
   return next
+}
+
+function broadcastSettingsChanges(nextSettings, prevSettings) {
+  const next = nextSettings && typeof nextSettings === 'object' ? nextSettings : {}
+  const prev = prevSettings && typeof prevSettings === 'object' ? prevSettings : {}
+  const keys = new Set([...Object.keys(prev), ...Object.keys(next)])
+  for (const key of keys) {
+    if (next[key] === prev[key]) continue
+    for (const w of BrowserWindow.getAllWindows()) {
+      if (w && !w.isDestroyed()) {
+        w.webContents.send('uc:setting-changed', { key, value: next[key] })
+      }
+    }
+  }
 }
 
 // === Global Logging System ===
@@ -369,13 +384,19 @@ registerProcessLogging()
 
 function resolveIcon() {
   const asset = process.platform === 'win32' ? 'icon.ico' : 'icon.png'
+  
+  // For packaged apps, try to resolve from resources first
+  if (app.isPackaged) {
+    const packagedPath = path.join(process.resourcesPath, 'assets', asset)
+    if (fs.existsSync(packagedPath)) return packagedPath
+  }
+  
+  // Fallback to development path
   return path.join(__dirname, '..', 'assets', asset)
 }
 
 function resolveTrayIcon() {
-  const asset = process.platform === 'win32' ? 'icon.ico' : 'icon.png'
-  const packagedPath = path.join(process.resourcesPath, 'assets', asset)
-  if (app.isPackaged && fs.existsSync(packagedPath)) return packagedPath
+  // Use the same resolution logic as resolveIcon
   return resolveIcon()
 }
 
@@ -632,17 +653,13 @@ ipcMain.handle('uc:setting-get', (_event, key) => {
 ipcMain.handle('uc:setting-set', (_event, key, value) => {
   try {
     const s = readSettings() || {}
+    const prev = { ...s }
     s[key] = value
     writeSettings(s)
     if (key === 'discordRpcEnabled') {
       updateRpcSettings(s).catch(() => {})
     }
-    // broadcast to all renderer windows
-    for (const w of BrowserWindow.getAllWindows()) {
-      if (w && !w.isDestroyed()) {
-        w.webContents.send('uc:setting-changed', { key, value })
-      }
-    }
+    broadcastSettingsChanges(s, prev)
     ucLog(`Setting set: ${key}`)
     return { ok: true }
   } catch (err) {
@@ -674,8 +691,46 @@ ipcMain.handle('uc:setting-clear-all', () => {
   }
 })
 
+ipcMain.handle('uc:settings-export', async () => {
+  try {
+    const settings = readSettings() || {}
+    return { ok: true, data: JSON.stringify(settings, null, 2) }
+  } catch (err) {
+    return { ok: false, error: String(err) }
+  }
+})
+
+ipcMain.handle('uc:settings-import', async () => {
+  try {
+    const result = await dialog.showOpenDialog({
+      properties: ['openFile'],
+      filters: [{ name: 'JSON', extensions: ['json'] }]
+    })
+
+    if (result.canceled || !result.filePaths?.length) {
+      return { ok: false, error: 'cancelled' }
+    }
+
+    const filePath = result.filePaths[0]
+    const raw = fs.readFileSync(filePath, 'utf8')
+    const parsed = JSON.parse(raw)
+    const prev = readSettings() || {}
+    const next = applySettingsDefaults(parsed)
+    writeSettings(next)
+    updateRpcSettings(next).catch(() => {})
+    broadcastSettingsChanges(next, prev)
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, error: String(err) }
+  }
+})
+
 // IPC: Logging handlers
 ipcMain.handle('uc:log', async (_event, level, message, data) => {
+  try {
+    const settings = readSettings() || {}
+    if (level === 'debug' && !settings.verboseDownloadLogging) return { ok: true, skipped: true }
+  } catch {}
   ucLog(message, level, data)
 })
 
@@ -686,6 +741,49 @@ ipcMain.handle('uc:logs-get', async () => {
 ipcMain.handle('uc:logs-clear', async () => {
   clearLogs()
   return { ok: true }
+})
+
+ipcMain.handle('uc:logs-open-folder', async () => {
+  try {
+    const folder = path.dirname(appLogsPath)
+    await shell.openPath(folder)
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, error: String(err) }
+  }
+})
+
+async function probeUrl(url, timeoutMs = 6000) {
+  const start = Date.now()
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const res = await fetch(url, { method: 'GET', redirect: 'manual', signal: controller.signal })
+    clearTimeout(timeout)
+    return { url, ok: res.ok, status: res.status, elapsedMs: Date.now() - start }
+  } catch (err) {
+    clearTimeout(timeout)
+    const error = err && err.name === 'AbortError' ? 'timeout' : String(err)
+    return { url, ok: false, status: 0, error, elapsedMs: Date.now() - start }
+  }
+}
+
+ipcMain.handle('uc:network-test', async (_event, baseUrl) => {
+  try {
+    const origin = normalizeBaseUrl(baseUrl || DEFAULT_BASE_URL)
+    const targets = [
+      { label: 'API base', url: origin },
+      { label: 'API downloads', url: new URL('/api/downloads/all', origin).toString() },
+      { label: 'Pixeldrain', url: 'https://pixeldrain.com' },
+      { label: 'Rootz', url: 'https://rootz.so' }
+    ]
+    const results = await Promise.all(
+      targets.map(async (target) => ({ label: target.label, ...(await probeUrl(target.url)) }))
+    )
+    return { ok: true, results }
+  } catch (err) {
+    return { ok: false, error: String(err) }
+  }
 })
 
 ipcMain.handle('uc:rpc-set-activity', async (_event, payload) => {
@@ -766,6 +864,17 @@ ipcMain.handle('uc:auth-fetch', async (event, payload) => {
   }
 })
 
+function getDefaultDownloadRoot() {
+  // Windows: use the root of the system drive (e.g., C:\)
+  if (process.platform === 'win32') {
+    const systemDrive = process.env.SystemDrive || 'C:'
+    return path.join(systemDrive + '\\', downloadDirName)
+  }
+  // Linux/macOS: use the home directory
+  const home = app.getPath('home')
+  return path.join(home, downloadDirName)
+}
+
 function getDownloadRoot() {
   const settings = readSettings()
   if (settings.downloadPath && typeof settings.downloadPath === 'string') {
@@ -776,12 +885,7 @@ function getDownloadRoot() {
     }
     return normalized
   }
-  if (process.platform === 'win32') {
-    const drive = process.env.SystemDrive || 'C:'
-    return path.join(drive, downloadDirName)
-  }
-  const root = app.getPath('documents')
-  return path.join(root, downloadDirName)
+  return getDefaultDownloadRoot()
 }
 
 function ensureDownloadDir() {
@@ -789,7 +893,11 @@ function ensureDownloadDir() {
   try {
     if (!fs.existsSync(target)) fs.mkdirSync(target, { recursive: true })
   } catch (err) {
-    const fallback = path.join(app.getPath('documents'), downloadDirName)
+    // Fallback to default download location if primary fails
+    const fallbackRoot = process.platform === 'win32'
+      ? (process.env.SystemDrive || 'C:') + '\\'
+      : app.getPath('home')
+    const fallback = path.join(fallbackRoot, downloadDirName)
     try {
       if (!fs.existsSync(fallback)) fs.mkdirSync(fallback, { recursive: true })
       const settings = readSettings() || {}
@@ -809,16 +917,28 @@ function ensureDownloadDir() {
 
 function normalizeDownloadRoot(targetPath) {
   if (!targetPath || typeof targetPath !== 'string') return targetPath
-  const trimmed = targetPath.trim()
+  let trimmed = targetPath.trim()
   if (!trimmed) return trimmed
-  const normalized = trimmed.replace(/[\\/]+$/, '')
-  const baseName = path.basename(normalized)
+
+  trimmed = trimmed.replace(/[\\/]+$/, '')
+
+  const baseName = path.basename(trimmed)
   const lowerBase = baseName.toLowerCase()
+
+  if (lowerBase === installingDirName || lowerBase === installedDirName) {
+    trimmed = path.dirname(trimmed)
+  }
+
   const hasUnionName = lowerBase.includes('unioncrax.direct') || lowerBase.includes('unioncrax-direct')
   const hasAppSuffix = lowerBase.includes('unioncrax-direct.app') || lowerBase.endsWith('.app')
 
   if (hasUnionName && hasAppSuffix) {
-    return path.join(path.dirname(normalized), downloadDirName)
+    trimmed = path.dirname(trimmed)
+  }
+
+  const finalBase = path.basename(trimmed)
+  if (finalBase.toLowerCase() !== downloadDirName.toLowerCase()) {
+    return path.join(trimmed, downloadDirName)
   }
 
   return trimmed
@@ -840,9 +960,35 @@ function ensureSubdir(root, folder) {
   return target
 }
 
+function clearDownloadCache() {
+  if (activeDownloads.size > 0 || pendingDownloads.length > 0 || globalDownloadQueue.length > 0 || downloadQueues.size > 0) {
+    return { ok: false, error: 'downloads-active' }
+  }
+  try {
+    const downloadRoot = ensureDownloadDir()
+    const installingRoot = path.join(downloadRoot, installingDirName)
+    if (fs.existsSync(installingRoot)) {
+      fs.rmSync(installingRoot, { recursive: true, force: true })
+    }
+    ensureSubdir(downloadRoot, installingDirName)
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, error: String(err) }
+  }
+}
+
 function readJsonFile(filePath) {
   try {
     const raw = fs.readFileSync(filePath, 'utf8')
+    return JSON.parse(raw)
+  } catch {
+    return null
+  }
+}
+
+async function readJsonFileAsync(filePath) {
+  try {
+    const raw = await fs.promises.readFile(filePath, 'utf8')
     return JSON.parse(raw)
   } catch {
     return null
@@ -1131,6 +1277,28 @@ function deleteFolderByAppId(root, appid) {
   return false
 }
 
+async function deleteFolderByAppIdAsync(root, appid) {
+  try {
+    if (!root || !appid || !fs.existsSync(root)) return false
+    const entries = await fs.promises.readdir(root, { withFileTypes: true })
+    for (const dirent of entries) {
+      if (!dirent.isDirectory()) continue
+      const folder = path.join(root, dirent.name)
+      const manifestPath = path.join(folder, INSTALLED_MANIFEST)
+      const manifest = await readJsonFileAsync(manifestPath)
+      const match = (manifest && manifest.appid === appid) || dirent.name === appid
+      if (!match) continue
+      try {
+        await fs.promises.rm(folder, { recursive: true, force: true })
+      } catch (e) {}
+      return true
+    }
+  } catch (err) {
+    console.error('[UC] deleteFolderByAppIdAsync failed', err)
+  }
+  return false
+}
+
 function findInstalledFolderByAppid(appid) {
   try {
     if (!appid) return null
@@ -1216,7 +1384,7 @@ function listExecutables(rootDir, maxDepth, maxResults) {
   const results = []
   if (!rootDir || !fs.existsSync(rootDir)) return results
   const pending = [{ dir: rootDir, depth: 0 }]
-  while (pending.length && results.length < maxResults) {
+  while (pending.length) {
     const current = pending.pop()
     if (!current) continue
     let entries
@@ -1234,20 +1402,40 @@ function listExecutables(rootDir, maxDepth, maxResults) {
         continue
       }
       if (!entry.isFile()) continue
+
+      const lowerName = entry.name.toLowerCase()
+      const relative = path.relative(rootDir, fullPath)
+      const depth = relative.split(/[\\/]/).length - 1
+      let size = 0
+      try {
+        size = fs.statSync(fullPath).size
+      } catch {
+        size = 0
+      }
+
       if (process.platform === 'win32') {
-        if (entry.name.toLowerCase().endsWith('.exe')) {
-          results.push({ name: entry.name, path: fullPath })
-          if (results.length >= maxResults) break
+        if (lowerName.endsWith('.exe')) {
+          results.push({ name: entry.name, path: fullPath, depth, size })
         }
         continue
       }
       if (isLinuxExecutableCandidate(entry, fullPath)) {
-        results.push({ name: entry.name, path: fullPath })
-        if (results.length >= maxResults) break
+        results.push({ name: entry.name, path: fullPath, depth, size })
       }
     }
   }
-  return results
+
+  results.sort((a, b) => {
+    const depthA = typeof a.depth === 'number' ? a.depth : 0
+    const depthB = typeof b.depth === 'number' ? b.depth : 0
+    if (depthA !== depthB) return depthA - depthB
+    const sizeA = typeof a.size === 'number' ? a.size : 0
+    const sizeB = typeof b.size === 'number' ? b.size : 0
+    if (sizeA !== sizeB) return sizeB - sizeA
+    return String(a.name).localeCompare(String(b.name))
+  })
+
+  return results.slice(0, Math.max(1, maxResults || 50))
 }
 
 function computeFileChecksum(filePath) {
@@ -1586,18 +1774,25 @@ function listDisks() {
       }
     }
   } else {
-    const root = app.getPath('downloads')
-    try {
-      const stats = fs.statfsSync(root)
-      disks.push({
-        id: 'downloads',
-        name: 'Downloads',
-        path: root,
-        totalBytes: stats.blocks * stats.bsize,
-        freeBytes: stats.bavail * stats.bsize
-      })
-    } catch {
-      // ignore
+    // Linux/macOS: list home directory and common mount points
+    const home = app.getPath('home')
+    const candidates = [home, '/home', '/mnt', '/media']
+    for (const root of candidates) {
+      try {
+        if (!fs.existsSync(root)) continue
+        const stats = fs.statfsSync(root)
+        const id = root === home ? 'home' : root.replace(/\//g, '_')
+        const name = root === home ? 'Home' : root
+        disks.push({
+          id,
+          name,
+          path: root,
+          totalBytes: stats.blocks * stats.bsize,
+          freeBytes: stats.bavail * stats.bsize
+        })
+      } catch {
+        // ignore inaccessible paths
+      }
     }
   }
   return disks
@@ -2804,6 +2999,10 @@ ipcMain.handle('uc:download-usage', async (_event, targetPath) => {
   return { ok: true, sizeBytes, path: resolvedPath }
 })
 
+ipcMain.handle('uc:download-cache-clear', async () => {
+  return clearDownloadCache()
+})
+
 // Save initial metadata for an installing download (renderer may call this when starting)
 ipcMain.handle('uc:installed-save', (_event, appid, metadata) => {
   try {
@@ -3110,11 +3309,28 @@ ipcMain.handle('uc:game-exe-launch', async (_event, appid, exePath, gameName) =>
     ucLog(`Launching game: ${appid} at ${exePath}`)
     try {
       const { command, args, cwd } = resolveLaunchCommand(exePath)
+      
+      // Verbose logging
+      const settings = readSettings() || {}
+      if (settings.verboseDownloadLogging) {
+        ucLog(`  Working directory: ${cwd}`, 'info')
+        ucLog(`  Command: ${command}`, 'info')
+        ucLog(`  Args: ${JSON.stringify(args)}`, 'info')
+      }
+      
+      // Prepare environment - inherit all variables and ensure game directory is in PATH
+      const env = { ...process.env }
+      if (process.platform === 'win32') {
+        // Add game directory to PATH for DLL resolution
+        env.PATH = `${cwd};${env.PATH || ''}`
+      }
+      
       const proc = child_process.spawn(command, args, {
         detached: true,
         stdio: 'ignore',
         windowsHide: false,
-        cwd
+        cwd,
+        env
       })
       proc.unref()
       registerRunningGame(appid, exePath, proc, gameName)
@@ -3166,6 +3382,14 @@ ipcMain.handle('uc:game-exe-launch-admin', async (_event, appid, exePath, gameNa
     try {
       const safeExePath = exePath.replace(/'/g, "''")
       const workingDir = path.dirname(exePath).replace(/'/g, "''")
+      
+      // Verbose logging
+      const settings = readSettings() || {}
+      if (settings.verboseDownloadLogging) {
+        ucLog(`  Working directory (admin): ${workingDir}`, 'info')
+        ucLog(`  Executable (admin): ${safeExePath}`, 'info')
+      }
+      
       const psScript = `try { $p = Start-Process -FilePath '${safeExePath}' -WorkingDirectory '${workingDir}' -Verb RunAs -WindowStyle Normal -PassThru -ErrorAction Stop; if ($p) { Write-Output \"STARTED:$($p.Id)\"; exit 0 } else { Write-Error 'START-FAILED'; exit 1 } } catch { Write-Error $_.Exception.Message; exit 1 }`
       const proc = child_process.spawn('powershell.exe', [
         '-NoProfile',
@@ -3298,13 +3522,28 @@ ipcMain.handle('uc:game-exe-quit', async (_event, appid) => {
   }
 })
 
-ipcMain.handle('uc:installed-delete', (_event, appid) => {
+ipcMain.handle('uc:installed-delete', async (_event, appid) => {
   try {
-    const downloadRoot = ensureDownloadDir()
-    const root = path.join(downloadRoot, installedDirName)
-    const ok = deleteFolderByAppId(root, appid)
-    if (ok) {
-      try { updateInstalledIndex(root) } catch (e) {}
+    let ok = false
+    let updatedRoot = null
+    const roots = listDownloadRoots()
+    for (const baseRoot of roots) {
+      const root = path.join(baseRoot, installedDirName)
+      if (!fs.existsSync(root)) continue
+      if (await deleteFolderByAppIdAsync(root, appid)) {
+        ok = true
+        updatedRoot = root
+        break
+      }
+    }
+    if (!ok) {
+      const downloadRoot = ensureDownloadDir()
+      const root = path.join(downloadRoot, installedDirName)
+      ok = await deleteFolderByAppIdAsync(root, appid)
+      if (ok) updatedRoot = root
+    }
+    if (ok && updatedRoot) {
+      try { updateInstalledIndex(updatedRoot) } catch (e) {}
     }
     return { ok }
   } catch (err) {
@@ -3313,11 +3552,23 @@ ipcMain.handle('uc:installed-delete', (_event, appid) => {
   }
 })
 
-ipcMain.handle('uc:installing-delete', (_event, appid) => {
+ipcMain.handle('uc:installing-delete', async (_event, appid) => {
   try {
-    const downloadRoot = ensureDownloadDir()
-    const root = path.join(downloadRoot, installingDirName)
-    const ok = deleteFolderByAppId(root, appid)
+    let ok = false
+    const roots = listDownloadRoots()
+    for (const baseRoot of roots) {
+      const root = path.join(baseRoot, installingDirName)
+      if (!fs.existsSync(root)) continue
+      if (await deleteFolderByAppIdAsync(root, appid)) {
+        ok = true
+        break
+      }
+    }
+    if (!ok) {
+      const downloadRoot = ensureDownloadDir()
+      const root = path.join(downloadRoot, installingDirName)
+      ok = await deleteFolderByAppIdAsync(root, appid)
+    }
     return { ok }
   } catch (err) {
     console.error('[UC] installing-delete failed', err)
@@ -3333,6 +3584,17 @@ function sanitizeDesktopFileName(name) {
 function buildDesktopExecLine(exePath) {
   const { command, args } = resolveLaunchCommand(exePath)
   const quote = (value) => `"${String(value).replace(/"/g, '\\"')}"`
+  
+  // For Wine/Proton on Linux, we need to ensure the working directory is set via environment
+  // The Path= field in .desktop files should handle this, but we also wrap it to be safe
+  const workingDir = path.dirname(exePath)
+  
+  // If using Wine/Proton, prepend cd command to ensure working directory
+  if (process.platform === 'linux' && (command.includes('wine') || command.includes('proton'))) {
+    const fullCmd = [command, ...args].map(quote).join(' ')
+    return `sh -c 'cd "${workingDir.replace(/"/g, '\\"')}" && ${fullCmd}'`
+  }
+  
   return [command, ...args].map(quote).join(' ')
 }
 
@@ -3354,7 +3616,7 @@ ipcMain.handle('uc:delete-desktop-shortcut', async (_event, gameName) => {
       return { ok: true, notFound: true }
     }
 
-    fs.unlinkSync(shortcutPath)
+    await fs.promises.unlink(shortcutPath)
     ucLog(`Desktop shortcut deleted: ${shortcutPath}`)
     return { ok: true }
   } catch (err) {
@@ -3392,6 +3654,15 @@ ipcMain.handle('uc:create-desktop-shortcut', async (_event, gameName, exePath) =
       const safeExePath = exePath.replace(/'/g, "''")
       const safeShortcutPath = shortcutPath.replace(/'/g, "''")
       const workingDir = path.dirname(exePath).replace(/'/g, "''")
+      
+      // Log shortcut creation details
+      const settings = readSettings() || {}
+      if (settings.verboseDownloadLogging) {
+        ucLog(`Creating Windows shortcut:`, 'info')
+        ucLog(`  Target: ${exePath}`, 'info')
+        ucLog(`  Working Dir: ${workingDir}`, 'info')
+        ucLog(`  Shortcut Path: ${shortcutPath}`, 'info')
+      }
       
       const psScript = `
         $WshShell = New-Object -ComObject WScript.Shell

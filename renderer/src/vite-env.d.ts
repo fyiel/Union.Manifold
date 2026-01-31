@@ -72,6 +72,7 @@ declare global {
       setDownloadPath: (targetPath: string) => Promise<{ ok: boolean; path?: string }>
       pickDownloadPath: () => Promise<{ ok: boolean; path?: string }>
       getDownloadUsage: (targetPath?: string) => Promise<{ ok: boolean; sizeBytes: number; path: string }>
+      clearDownloadCache: () => Promise<{ ok: boolean; error?: string }>
       // Installed manifests written by the main process. Renderer can read/save installed metadata.
       listInstalled: () => Promise<any[]>
       getInstalled: (appid: string) => Promise<any | null>
@@ -81,7 +82,7 @@ declare global {
       getInstalledGlobal: (appid: string) => Promise<any | null>
       listInstallingGlobal: () => Promise<any[]>
       getInstallingGlobal: (appid: string) => Promise<any | null>
-      listGameExecutables: (appid: string) => Promise<{ ok: boolean; folder?: string; exes: { name: string; path: string }[]; error?: string }>
+      listGameExecutables: (appid: string) => Promise<{ ok: boolean; folder?: string; exes: { name: string; path: string; size?: number; depth?: number }[]; error?: string }>
       findGameSubfolder: (folder: string) => Promise<string | null>
       launchGameExecutable: (appid: string, exePath: string, gameName?: string) => Promise<{ ok: boolean; error?: string; pid?: number }>
       launchGameExecutableAsAdmin: (appid: string, exePath: string, gameName?: string) => Promise<{ ok: boolean; error?: string; pid?: number }>
@@ -91,12 +92,17 @@ declare global {
       deleteInstalling: (appid: string) => Promise<{ ok: boolean }>
       saveInstalledMetadata: (appid: string, metadata: any) => Promise<{ ok: boolean }>
       setInstallingStatus: (appid: string, status: string, error?: string | null) => Promise<{ ok: boolean }>
+      createDesktopShortcut: (gameName: string, exePath: string) => Promise<{ ok: boolean; error?: string }>
+      deleteDesktopShortcut: (gameName: string) => Promise<{ ok: boolean; error?: string }>
       onUpdate: (callback: (update: DownloadUpdatePayload) => void) => () => void
     }
     ucSettings?: {
       get: (key: string) => Promise<any>
       set: (key: string, value: any) => Promise<{ ok: boolean }>
       clearAll: () => Promise<{ ok: boolean }>
+      exportSettings: () => Promise<{ ok: boolean; data?: string; error?: string }>
+      importSettings: () => Promise<{ ok: boolean; error?: string }>
+      runNetworkTest: (baseUrl?: string) => Promise<{ ok: boolean; results?: Array<{ label: string; url: string; ok: boolean; status: number; elapsedMs: number; error?: string }>; error?: string }>
       onChanged: (callback: (data: { key: string; value: any }) => void) => () => void
     }
     ucAuth?: {
@@ -126,6 +132,7 @@ declare global {
       log: (level: string, message: string, data?: any) => Promise<void>
       getLogs: () => Promise<string>
       clearLogs: () => Promise<void>
+      openLogsFolder: () => Promise<{ ok: boolean; error?: string }>
     }
     ucRpc?: {
       setActivity: (payload: {

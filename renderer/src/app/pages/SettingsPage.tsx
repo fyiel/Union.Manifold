@@ -48,14 +48,6 @@ function formatBytes(bytes: number) {
   return `${value.toFixed(value >= 10 || index === 0 ? 0 : 1)} ${units[index]}`
 }
 
-function joinPath(root: string, folder: string) {
-  if (root.endsWith("/") || root.endsWith("\\")) {
-    return `${root}${folder}`
-  }
-  const separator = root.includes("\\") ? "\\" : "/"
-  return `${root}${separator}${folder}`
-}
-
 export function SettingsPage() {
   const isWindows = typeof navigator !== 'undefined' && /windows/i.test(navigator.userAgent)
   const isLinux = typeof navigator !== 'undefined' && /linux/i.test(navigator.userAgent)
@@ -82,6 +74,13 @@ export function SettingsPage() {
   const [developerMode, setDeveloperMode] = useState(false)
   const [customBaseUrl, setCustomBaseUrl] = useState('')
   const [baseUrlInput, setBaseUrlInput] = useState('')
+  const [copyingDiagnostics, setCopyingDiagnostics] = useState(false)
+  const [diagnosticsFeedback, setDiagnosticsFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
+  const [verboseDownloadLogging, setVerboseDownloadLogging] = useState(false)
+  const [networkTesting, setNetworkTesting] = useState(false)
+  const [networkResults, setNetworkResults] = useState<Array<{ label: string; url: string; ok: boolean; status: number; elapsedMs: number; error?: string }> | null>(null)
+  const [devActionFeedback, setDevActionFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
+  const [clearingDownloadCache, setClearingDownloadCache] = useState(false)
 
   useEffect(() => {
     const loadVersion = async () => {
@@ -259,11 +258,13 @@ export function SettingsPage() {
       try {
         const devMode = await window.ucSettings?.get?.('developerMode')
         const baseUrl = await window.ucSettings?.get?.('customBaseUrl')
+        const verbose = await window.ucSettings?.get?.('verboseDownloadLogging')
         if (!mounted) return
         setDeveloperMode(devMode || false)
         const url = (baseUrl || '').trim()
         setCustomBaseUrl(url)
         setBaseUrlInput(url)
+        setVerboseDownloadLogging(Boolean(verbose))
         if (url) {
           setApiBaseUrl(url)
         }
@@ -279,6 +280,7 @@ export function SettingsPage() {
         setCustomBaseUrl('')
         setBaseUrlInput('')
         setApiBaseUrl('https://union-crax.xyz')
+        setVerboseDownloadLogging(false)
         return
       }
       if (data.key === 'developerMode') {
@@ -291,6 +293,9 @@ export function SettingsPage() {
         if (url) {
           setApiBaseUrl(url)
         }
+      }
+      if (data.key === 'verboseDownloadLogging') {
+        setVerboseDownloadLogging(Boolean(data.value))
       }
     })
     return () => {
@@ -372,8 +377,7 @@ export function SettingsPage() {
     const disk = disks.find((item) => item.id === diskId)
     if (!disk || !window.ucDownloads?.setDownloadPath) return
 
-    const targetPath = joinPath(disk.path, downloadDirName)
-    const result = await window.ucDownloads.setDownloadPath(targetPath)
+    const result = await window.ucDownloads.setDownloadPath(disk.path)
     if (result?.ok && result.path) {
       setDownloadPath(result.path)
     }
@@ -387,7 +391,7 @@ export function SettingsPage() {
       setSelectedDiskId("custom")
     }
   }
-const handleCheckForUpdates = async () => {
+  const handleCheckForUpdates = async () => {
     if (checkingUpdate) return
     setCheckingUpdate(true)
     setUpdateCheckResult(null)
@@ -408,6 +412,139 @@ const handleCheckForUpdates = async () => {
         setCheckingUpdate(false)
         setTimeout(() => setUpdateCheckResult(null), 5000)
       }, 1000)
+    }
+  }
+
+  const handleCopyDiagnostics = async () => {
+    if (copyingDiagnostics) return
+    setCopyingDiagnostics(true)
+    setDiagnosticsFeedback(null)
+    try {
+      const version = await window.ucUpdater?.getVersion?.()
+      const downloadPathResult = await window.ucDownloads?.getDownloadPath?.()
+      const downloadPathValue = downloadPathResult?.path || downloadPath || 'unknown'
+      const baseUrlValue = customBaseUrl || 'https://union-crax.xyz'
+      const platformValue = typeof navigator !== 'undefined' ? navigator.platform : 'unknown'
+      const userAgentValue = typeof navigator !== 'undefined' ? navigator.userAgent : 'unknown'
+
+      const diagnostics = [
+        `Version: ${version || 'unknown'}`,
+        `Platform: ${platformValue}`,
+        `User Agent: ${userAgentValue}`,
+        `API Base URL: ${baseUrlValue}`,
+        `Download Path: ${downloadPathValue}`,
+        `Developer Mode: ${developerMode ? 'enabled' : 'disabled'}`,
+        `Verbose Download Logging: ${verboseDownloadLogging ? 'enabled' : 'disabled'}`,
+      ].join('\n')
+
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(diagnostics)
+        setDiagnosticsFeedback({ type: 'success', message: 'Diagnostics copied to clipboard.' })
+      } else {
+        setDiagnosticsFeedback({ type: 'error', message: 'Clipboard API unavailable.' })
+      }
+    } catch (err) {
+      setDiagnosticsFeedback({ type: 'error', message: 'Failed to copy diagnostics.' })
+    } finally {
+      setCopyingDiagnostics(false)
+      setTimeout(() => setDiagnosticsFeedback(null), 3000)
+    }
+  }
+
+  const handleRunNetworkTest = async () => {
+    if (networkTesting) return
+    setNetworkTesting(true)
+    setNetworkResults(null)
+    setDevActionFeedback(null)
+    try {
+      const baseUrlValue = customBaseUrl || 'https://union-crax.xyz'
+      const result = await window.ucSettings?.runNetworkTest?.(baseUrlValue)
+      if (result?.ok && Array.isArray(result.results)) {
+        setNetworkResults(result.results)
+        setDevActionFeedback({ type: 'success', message: 'Network test completed.' })
+      } else {
+        setDevActionFeedback({ type: 'error', message: result?.error || 'Network test failed.' })
+      }
+    } catch (err) {
+      setDevActionFeedback({ type: 'error', message: 'Network test failed.' })
+    } finally {
+      setNetworkTesting(false)
+      setTimeout(() => setDevActionFeedback(null), 4000)
+    }
+  }
+
+  const handleClearDownloadCache = async () => {
+    if (clearingDownloadCache) return
+    setClearingDownloadCache(true)
+    setDevActionFeedback(null)
+    try {
+      const result = await window.ucDownloads?.clearDownloadCache?.()
+      if (result?.ok) {
+        setDevActionFeedback({ type: 'success', message: 'Download cache cleared.' })
+      } else if (result?.error === 'downloads-active') {
+        setDevActionFeedback({ type: 'error', message: 'Stop active downloads before clearing cache.' })
+      } else {
+        setDevActionFeedback({ type: 'error', message: result?.error || 'Failed to clear download cache.' })
+      }
+    } catch (err) {
+      setDevActionFeedback({ type: 'error', message: 'Failed to clear download cache.' })
+    } finally {
+      setClearingDownloadCache(false)
+      setTimeout(() => setDevActionFeedback(null), 4000)
+    }
+  }
+
+  const handleExportSettings = async () => {
+    setDevActionFeedback(null)
+    try {
+      const result = await window.ucSettings?.exportSettings?.()
+      if (!result?.ok || !result.data) {
+        setDevActionFeedback({ type: 'error', message: result?.error || 'Failed to export settings.' })
+        return
+      }
+      const blob = new Blob([result.data], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const anchor = document.createElement('a')
+      anchor.href = url
+      anchor.download = `unioncrax-direct-settings-${Date.now()}.json`
+      anchor.click()
+      URL.revokeObjectURL(url)
+      setDevActionFeedback({ type: 'success', message: 'Settings exported.' })
+      setTimeout(() => setDevActionFeedback(null), 4000)
+    } catch (err) {
+      setDevActionFeedback({ type: 'error', message: 'Failed to export settings.' })
+    }
+  }
+
+  const handleImportSettings = async () => {
+    setDevActionFeedback(null)
+    try {
+      const result = await window.ucSettings?.importSettings?.()
+      if (result?.ok) {
+        setDevActionFeedback({ type: 'success', message: 'Settings imported.' })
+      } else if (result?.error && result.error !== 'cancelled') {
+        setDevActionFeedback({ type: 'error', message: result.error || 'Failed to import settings.' })
+      }
+    } catch (err) {
+      setDevActionFeedback({ type: 'error', message: 'Failed to import settings.' })
+    } finally {
+      setTimeout(() => setDevActionFeedback(null), 4000)
+    }
+  }
+
+  const handleOpenLogsFolder = async () => {
+    setDevActionFeedback(null)
+    try {
+      const result = await (window.ucLogs as any)?.openLogsFolder?.()
+      if (result?.ok) {
+        setDevActionFeedback({ type: 'success', message: 'Opened logs folder.' })
+      } else {
+        setDevActionFeedback({ type: 'error', message: result?.error || 'Failed to open logs folder.' })
+      }
+    } catch (err) {
+      setDevActionFeedback({ type: 'error', message: 'Failed to open logs folder.' })
+    } finally {
+      setTimeout(() => setDevActionFeedback(null), 4000)
     }
   }
 
@@ -496,7 +633,7 @@ const handleCheckForUpdates = async () => {
           )}
 
           <div className="space-y-3">
-            <label className="text-sm font-medium">Download drive</label>
+            <label className="text-sm font-medium">Download location</label>
             <Select value={selectedDiskId} onValueChange={handleDiskSelect}>
               <SelectTrigger className="h-12">
                 <SelectValue placeholder={loading ? "Loading drives..." : "Select a drive"} />
@@ -565,7 +702,7 @@ const handleCheckForUpdates = async () => {
           <div className="flex flex-col sm:flex-row gap-3">
             <Button variant="outline" className="gap-2" onClick={handleAddDrive}>
               <Plus className="h-4 w-4" />
-              Add Drive
+              Choose folder
             </Button>
             <Button
               variant="ghost"
@@ -794,18 +931,6 @@ const handleCheckForUpdates = async () => {
         </CardContent>
       </Card>
 
-      <Card className="border-border/60">
-        <CardContent className="p-6 space-y-4">
-          <div>
-            <h2 className="text-lg font-semibold">Application Logs</h2>
-            <p className="text-sm text-muted-foreground">
-              View and manage application logs for debugging and troubleshooting.
-            </p>
-          </div>
-          <LogViewer />
-        </CardContent>
-      </Card>
-
       <Card className="border-destructive/40">
         <CardContent className="p-6 space-y-4">
           <div>
@@ -855,6 +980,7 @@ const handleCheckForUpdates = async () => {
                           setCustomBaseUrl('')
                           setBaseUrlInput('')
                           setApiBaseUrl('https://union-crax.xyz')
+                          setVerboseDownloadLogging(false)
                           setClearDataFeedback({ type: 'success', message: 'User data cleared successfully.' })
                           // Show success message briefly
                           setTimeout(() => {
@@ -934,7 +1060,7 @@ const handleCheckForUpdates = async () => {
           </div>
 
           {developerMode && (
-            <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-4 space-y-4">
+            <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-4 space-y-6">
               <div>
                 <div className="flex items-center gap-2 mb-1">
                   <h3 className="text-sm font-semibold text-foreground">Custom API Base URL</h3>
@@ -994,6 +1120,135 @@ const handleCheckForUpdates = async () => {
                   </div>
                 )}
               </div>
+
+              <div className="border-t border-amber-500/20 pt-4 space-y-3">
+                <div>
+                  <h3 className="text-sm font-semibold text-foreground">Verbose download logging</h3>
+                  <p className="text-xs text-muted-foreground">
+                    Enable extra download logs for troubleshooting.
+                  </p>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-muted-foreground">Debug-level download logs</span>
+                  <button
+                    onClick={async () => {
+                      const next = !verboseDownloadLogging
+                      setVerboseDownloadLogging(next)
+                      try {
+                        await window.ucSettings?.set?.('verboseDownloadLogging', next)
+                      } catch {}
+                    }}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                      verboseDownloadLogging ? 'bg-primary' : 'bg-slate-700'
+                    }`}
+                    title="Toggle verbose download logging"
+                  >
+                    <span
+                      className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                        verboseDownloadLogging ? 'translate-x-6' : 'translate-x-1'
+                      }`}
+                    />
+                  </button>
+                </div>
+              </div>
+
+              <div className="border-t border-amber-500/20 pt-4 space-y-3">
+                <div>
+                  <h3 className="text-sm font-semibold text-foreground">Network test</h3>
+                  <p className="text-xs text-muted-foreground">
+                    Check connectivity to the API and download mirrors.
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button size="sm" variant="outline" onClick={handleRunNetworkTest} disabled={networkTesting}>
+                    {networkTesting ? 'Testing...' : 'Run network test'}
+                  </Button>
+                </div>
+                {networkResults && (
+                  <div className="space-y-2 text-xs">
+                    {networkResults.map((result) => (
+                      <div key={result.url} className="flex flex-col gap-1 rounded-md border border-border/60 px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="font-medium text-foreground">{result.label}</div>
+                        <div className={result.ok ? 'text-emerald-400' : 'text-destructive'}>
+                          {result.ok ? `OK (${result.status})` : `Failed (${result.error || result.status})`}
+                        </div>
+                        <div className="text-muted-foreground">{result.elapsedMs} ms</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="border-t border-amber-500/20 pt-4 space-y-3">
+                <div>
+                  <h3 className="text-sm font-semibold text-foreground">Download cache</h3>
+                  <p className="text-xs text-muted-foreground">
+                    Clear temporary installing files and cached download parts.
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button size="sm" variant="outline" onClick={handleClearDownloadCache} disabled={clearingDownloadCache}>
+                    {clearingDownloadCache ? 'Clearing...' : 'Clear download cache'}
+                  </Button>
+                </div>
+              </div>
+
+              <div className="border-t border-amber-500/20 pt-4 space-y-3">
+                <div>
+                  <h3 className="text-sm font-semibold text-foreground">Settings JSON</h3>
+                  <p className="text-xs text-muted-foreground">
+                    Export or import your app settings.
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button size="sm" variant="outline" onClick={handleExportSettings}>
+                    Export settings
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={handleImportSettings}>
+                    Import settings
+                  </Button>
+                </div>
+              </div>
+
+              <div className="border-t border-amber-500/20 pt-4 space-y-3">
+                <div>
+                  <h3 className="text-sm font-semibold text-foreground">Diagnostics</h3>
+                  <p className="text-xs text-muted-foreground">
+                    Copy system and app details for debugging reports.
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button size="sm" variant="outline" onClick={handleCopyDiagnostics} disabled={copyingDiagnostics}>
+                    {copyingDiagnostics ? 'Copying...' : 'Copy diagnostics'}
+                  </Button>
+                </div>
+                {diagnosticsFeedback && (
+                  <div className={`text-xs ${diagnosticsFeedback.type === 'success' ? 'text-emerald-400' : 'text-destructive'}`}>
+                    {diagnosticsFeedback.message}
+                  </div>
+                )}
+              </div>
+
+              <div className="border-t border-amber-500/20 pt-4 space-y-3">
+                <div>
+                  <h3 className="text-sm font-semibold text-foreground">Application Logs</h3>
+                  <p className="text-xs text-muted-foreground">
+                    View and manage application logs for debugging and troubleshooting.
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button size="sm" variant="outline" onClick={handleOpenLogsFolder}>
+                    Open logs folder
+                  </Button>
+                  <LogViewer />
+                </div>
+              </div>
+
+              {devActionFeedback && (
+                <div className={`text-xs ${devActionFeedback.type === 'success' ? 'text-emerald-400' : 'text-destructive'}`}>
+                  {devActionFeedback.message}
+                </div>
+              )}
             </div>
           )}
         </CardContent>
