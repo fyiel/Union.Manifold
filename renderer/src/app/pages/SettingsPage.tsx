@@ -498,21 +498,15 @@ export function SettingsPage() {
     setDevActionFeedback(null)
     try {
       const result = await window.ucSettings?.exportSettings?.()
-      if (!result?.ok || !result.data) {
-        setDevActionFeedback({ type: 'error', message: result?.error || 'Failed to export settings.' })
-        return
+      if (result?.ok) {
+        setDevActionFeedback({ type: 'success', message: 'Settings exported.' })
+      } else if (result?.error && result.error !== 'cancelled') {
+        setDevActionFeedback({ type: 'error', message: result.error || 'Failed to export settings.' })
       }
-      const blob = new Blob([result.data], { type: 'application/json' })
-      const url = URL.createObjectURL(blob)
-      const anchor = document.createElement('a')
-      anchor.href = url
-      anchor.download = `unioncrax-direct-settings-${Date.now()}.json`
-      anchor.click()
-      URL.revokeObjectURL(url)
-      setDevActionFeedback({ type: 'success', message: 'Settings exported.' })
-      setTimeout(() => setDevActionFeedback(null), 4000)
     } catch (err) {
       setDevActionFeedback({ type: 'error', message: 'Failed to export settings.' })
+    } finally {
+      setTimeout(() => setDevActionFeedback(null), 4000)
     }
   }
 
