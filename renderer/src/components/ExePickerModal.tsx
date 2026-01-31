@@ -1,6 +1,6 @@
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { GameExecutable, getExecutableRelativePath, isHelperExecutableName, rankGameExecutables } from "@/lib/utils"
+import { GameExecutable, getExecutableRelativePath, rankGameExecutables } from "@/lib/utils"
 import { useMemo, useState } from "react"
 
 type ExePickerModalProps = {
@@ -20,7 +20,6 @@ export function ExePickerModal({ open, title, message, exes, gameName, baseFolde
   if (!open) return null
 
   const [search, setSearch] = useState("")
-  const [showHelpers, setShowHelpers] = useState(false)
 
   const dedupedExes = useMemo(() => {
     const seen = new Set<string>()
@@ -44,17 +43,14 @@ export function ExePickerModal({ open, title, message, exes, gameName, baseFolde
     exe.score === arr[0].score && exe.path === arr[0].path && exe.name === arr[0].name
   ) : null
 
-  const helperCount = useMemo(() => ranked.filter((exe) => isHelperExecutableName(exe.name)).length, [ranked])
-
   const visible = useMemo(() => {
     const needle = search.trim().toLowerCase()
     return ranked.filter((exe) => {
       if (recommended && exe.path === recommended.path && exe.name === recommended.name) return false
-      if (!showHelpers && isHelperExecutableName(exe.name)) return false
       if (!needle) return true
       return exe.name.toLowerCase().includes(needle) || exe.path.toLowerCase().includes(needle)
     })
-  }, [ranked, search, showHelpers, recommended])
+  }, [ranked, search, recommended])
 
   const getRelativePath = (fullPath: string) => {
     if (baseFolder) return getExecutableRelativePath(fullPath, baseFolder)
@@ -78,14 +74,6 @@ export function ExePickerModal({ open, title, message, exes, gameName, baseFolde
               placeholder="Search exe name or path..."
               className="h-9 flex-1 rounded-xl bg-white/5"
             />
-            <Button
-              type="button"
-              size="sm"
-              variant={showHelpers ? "default" : "secondary"}
-              onClick={() => setShowHelpers((prev) => !prev)}
-            >
-              {showHelpers ? "Hide helpers" : `Show helpers (${helperCount} hidden)`}
-            </Button>
           </div>
 
           {recommended && ranked.length > 1 ? (
@@ -106,7 +94,6 @@ export function ExePickerModal({ open, title, message, exes, gameName, baseFolde
           <div className="max-h-72 space-y-2 overflow-y-auto">
             {visible.length ? (
               visible.map((exe) => {
-                const isIgnored = isHelperExecutableName(exe.name)
                 const isCurrent = currentExePath && exe.path === currentExePath
                 const relativePath = getRelativePath(exe.path)
                 const isRecommended = recommended && ranked.length > 1 && exe.path === recommended.path
@@ -125,11 +112,6 @@ export function ExePickerModal({ open, title, message, exes, gameName, baseFolde
                         {isRecommended ? (
                           <span className="flex-none rounded-full border border-primary/40 bg-primary/10 px-2 py-0.5 text-[10px] font-semibold uppercase text-primary/90">
                             Recommended
-                          </span>
-                        ) : null}
-                        {isIgnored ? (
-                          <span className="flex-none rounded-full border border-amber-400/40 bg-amber-400/10 px-2 py-0.5 text-[10px] font-semibold uppercase text-amber-200">
-                            Helper
                           </span>
                         ) : null}
                       </div>
