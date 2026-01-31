@@ -1,5 +1,52 @@
 # Changelog
 
+## Version 0.7.2 - 2026-01-31
+
+### Highlights
+
+- Developer & diagnostics: added settings export/import, network test, and an easy way to open the app logs folder from the UI.
+- Download manager reliability: improved download root handling, added download-cache clearing, and clearer debug logging options.
+- Executable detection: richer exe discovery with size/depth scoring and a redesigned exe picker with recommendations and search.
+
+---
+
+### New Features
+
+- **Settings export & import** (`electron/main.cjs`, `electron/preload.cjs`, `renderer/src/app/pages/SettingsPage.tsx`) — export current JSON settings and import from a file.
+- **Network test** (`electron/main.cjs`, `renderer/src/app/pages/SettingsPage.tsx`) — probe API and mirror endpoints and show timing/status results.
+- **Open logs folder** (`electron/main.cjs`, `electron/preload.cjs`, `renderer/src/app/pages/SettingsPage.tsx`) — open the app logs directory from Settings.
+- **Download cache clear** (`electron/main.cjs`, `renderer/src/app/pages/SettingsPage.tsx`) — remove temporary installing parts when no downloads are active.
+
+### Improvements
+
+- **Settings sync**: added `uc:setting-changed` broadcasts so renderer windows are notified when settings change (`electron/main.cjs`).
+- **Verbose download logging**: new developer toggle to enable debug-level download logs for troubleshooting (`electron/main.cjs`, `renderer/src/app/pages/SettingsPage.tsx`).
+- **Download root handling**: prefer the system `Downloads` folder, improved normalization of chosen download paths, and better fallback behavior (`electron/main.cjs`).
+- **Executable discovery**: `listGameExecutables` now returns `size` and `depth`; ranking/scoring was added and the `ExePickerModal` was redesigned to recommend and search executables (`renderer/src/lib/utils.ts`, `renderer/src/components/ExePickerModal.tsx`).
+- **Exe picker UX**: recommended item, helper toggles, relative path display and search make selecting the correct exe easier (`renderer/src/components/ExePickerModal.tsx`, `renderer/src/app/pages/*`).
+- **Game launch robustness**: spawn environment now ensures working directory is in `PATH` on Windows for DLL resolution and includes optional verbose logging of launch details (`electron/main.cjs`).
+- **Installed/Installing cleanup**: deletion handlers search all download roots (global + per-root) before removing installing/installed folders, improving multi-root support (`electron/main.cjs`).
+- **Executable listing**: `listExecutables` now returns richer entries and sorts candidates by depth/size to pick more appropriate executables (`electron/main.cjs`, `renderer/src/lib/utils.ts`).
+
+### Fixes
+
+- Fixed several edge cases around download folder creation and fallbacks when creating directories (`electron/main.cjs`).
+- Avoid logging debug-level download messages unless `verboseDownloadLogging` is enabled (`electron/main.cjs`).
+- Ensure desktop shortcut and launch flows log useful context when verbose logging is enabled (`electron/main.cjs`).
+
+### Files touched (selected)
+
+- [electron/main.cjs](electron/main.cjs)
+- [electron/preload.cjs](electron/preload.cjs)
+- [renderer/src/lib/utils.ts](renderer/src/lib/utils.ts)
+- [renderer/src/components/ExePickerModal.tsx](renderer/src/components/ExePickerModal.tsx)
+- [renderer/src/app/pages/SettingsPage.tsx](renderer/src/app/pages/SettingsPage.tsx)
+- [renderer/src/app/pages/DownloadsPage.tsx](renderer/src/app/pages/DownloadsPage.tsx)
+- [renderer/src/app/pages/GameDetailPage.tsx](renderer/src/app/pages/GameDetailPage.tsx)
+- [renderer/src/components/GameCard.tsx](renderer/src/components/GameCard.tsx)
+
+---
+
 ## Version 0.7.1 - Performance Improvements
 
 ### Performance

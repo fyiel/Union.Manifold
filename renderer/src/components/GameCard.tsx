@@ -80,7 +80,8 @@ export const GameCard = memo(function GameCard({
   const [previewImage, setPreviewImage] = useState<string | null>(null)
   const [imageLoaded, setImageLoaded] = useState(false)
   const [exePickerOpen, setExePickerOpen] = useState(false)
-  const [exePickerExes, setExePickerExes] = useState<Array<{ name: string; path: string }>>([])
+  const [exePickerExes, setExePickerExes] = useState<Array<{ name: string; path: string; size?: number; depth?: number }>>([])
+  const [exePickerFolder, setExePickerFolder] = useState<string | null>(null)
   const [adminPromptOpen, setAdminPromptOpen] = useState(false)
   const [pendingExePath, setPendingExePath] = useState<string | null>(null)
   const [shortcutModalOpen, setShortcutModalOpen] = useState(false)
@@ -257,8 +258,9 @@ export const GameCard = memo(function GameCard({
     }
   }
 
-  const openExePicker = (exes: Array<{ name: string; path: string }>) => {
+  const openExePicker = (exes: Array<{ name: string; path: string; size?: number; depth?: number }>, folder?: string | null) => {
     setExePickerExes(exes)
+    setExePickerFolder(folder || null)
     setExePickerOpen(true)
   }
 
@@ -358,7 +360,8 @@ export const GameCard = memo(function GameCard({
       
       const result = await window.ucDownloads.listGameExecutables(game.appid)
       const exes = result?.exes || []
-      const { pick, confident } = pickGameExecutable(exes, game.name, game.source)
+      const folder = result?.folder || null
+      const { pick, confident } = pickGameExecutable(exes, game.name, game.source, folder)
       if (pick && confident) {
         setPendingExePath(pick.path)
         const promptShown = await getAdminPromptShown()
@@ -374,7 +377,7 @@ export const GameCard = memo(function GameCard({
         }
         return
       }
-      openExePicker(exes)
+      openExePicker(exes, folder)
     } catch {
       if (installedPath) openPath(installedPath)
     }
@@ -559,6 +562,8 @@ export const GameCard = memo(function GameCard({
         title="Select executable"
         message={`We couldn't confidently detect the correct exe for "${game.name}". Please choose the one to launch.`}
         exes={exePickerExes}
+        gameName={game.name}
+        baseFolder={exePickerFolder}
         onSelect={handleExePicked}
         onClose={() => setExePickerOpen(false)}
       />

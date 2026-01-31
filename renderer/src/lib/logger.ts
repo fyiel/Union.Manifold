@@ -9,6 +9,7 @@ interface LogOptions {
   level?: LogLevel
   context?: string
   data?: any
+  appid?: string
 }
 
 class Logger {

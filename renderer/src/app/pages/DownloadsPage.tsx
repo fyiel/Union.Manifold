@@ -96,7 +96,7 @@ function computeGroupStats(
     totalBytes: number
     receivedBytes: number
     speedBps: number
-    filename?: string
+    filename: string
     partIndex?: number
     partTotal?: number
   }>
@@ -222,7 +222,9 @@ export function DownloadsPage() {
   const [exePickerTitle, setExePickerTitle] = useState("")
   const [exePickerMessage, setExePickerMessage] = useState("")
   const [exePickerAppId, setExePickerAppId] = useState<string | null>(null)
-  const [exePickerExes, setExePickerExes] = useState<Array<{ name: string; path: string }>>([])
+  const [exePickerGameName, setExePickerGameName] = useState<string | null>(null)
+  const [exePickerFolder, setExePickerFolder] = useState<string | null>(null)
+  const [exePickerExes, setExePickerExes] = useState<Array<{ name: string; path: string; size?: number; depth?: number }>>([])
   const [retryingAppId, setRetryingAppId] = useState<string | null>(null)
   const [runningGames, setRunningGames] = useState<Array<{ appid: string; gameName: string; pid: number }>>([])
   const [adminPromptOpen, setAdminPromptOpen] = useState(false)
@@ -449,10 +451,12 @@ export function DownloadsPage() {
     }
   }
 
-  const openExePicker = (appid: string, gameName: string, exes: Array<{ name: string; path: string }>, message?: string) => {
+  const openExePicker = (appid: string, gameName: string, exes: Array<{ name: string; path: string; size?: number; depth?: number }>, folder?: string | null, message?: string) => {
     setExePickerTitle("Select executable")
     setExePickerMessage(message || `We couldn't confidently detect the correct exe for "${gameName}". Please choose the one to launch.`)
     setExePickerAppId(appid)
+    setExePickerGameName(gameName)
+    setExePickerFolder(folder || null)
     setExePickerExes(exes)
     setExePickerOpen(true)
   }
@@ -556,7 +560,8 @@ export function DownloadsPage() {
       
       const result = await window.ucDownloads.listGameExecutables(appid)
       const exes = result?.exes || []
-      const { pick, confident } = pickGameExecutable(exes, gameName)
+      const folder = result?.folder || null
+      const { pick, confident } = pickGameExecutable(exes, gameName, undefined, folder)
       if (pick && confident) {
         setPendingExePath(pick.path)
         setPendingAppId(appid)
@@ -573,9 +578,9 @@ export function DownloadsPage() {
         }
         return
       }
-      openExePicker(appid, gameName, exes)
+      openExePicker(appid, gameName, exes, folder)
     } catch {
-      openExePicker(appid, gameName, [], `Unable to list executables for "${gameName}".`)
+      openExePicker(appid, gameName, [], null, `Unable to list executables for "${gameName}".`)
     }
   }
 
@@ -1118,6 +1123,8 @@ export function DownloadsPage() {
         title={exePickerTitle}
         message={exePickerMessage}
         exes={exePickerExes}
+        gameName={exePickerGameName || undefined}
+        baseFolder={exePickerFolder}
         onSelect={handleExePicked}
         onClose={() => setExePickerOpen(false)}
       />

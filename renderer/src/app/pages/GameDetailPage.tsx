@@ -26,6 +26,7 @@ import {
   ShieldCheck,
   Settings,
   Square,
+  Trash2,
   User,
   Wifi,
   X,
@@ -54,7 +55,7 @@ export function GameDetailPage() {
   const [installedManifest, setInstalledManifest] = useState<any | null>(null)
   const [installingManifest, setInstallingManifest] = useState<any | null>(null)
   const [exePickerOpen, setExePickerOpen] = useState(false)
-  const [exePickerExes, setExePickerExes] = useState<Array<{ name: string; path: string }>>([])
+  const [exePickerExes, setExePickerExes] = useState<Array<{ name: string; path: string; size?: number; depth?: number }>>([])
   const [isGameRunning, setIsGameRunning] = useState(false)
   const [stoppingGame, setStoppingGame] = useState(false)
   const [lightboxOpen, setLightboxOpen] = useState(false)
@@ -69,9 +70,11 @@ export function GameDetailPage() {
   const [exePickerMessage, setExePickerMessage] = useState("We couldn't confidently detect the correct exe. Please choose the one to launch.")
   const [exePickerCurrentPath, setExePickerCurrentPath] = useState<string | null>(null)
   const [exePickerActionLabel, setExePickerActionLabel] = useState("Launch")
+  const [exePickerFolder, setExePickerFolder] = useState<string | null>(null)
   const [exePickerMode, setExePickerMode] = useState<"launch" | "set">("launch")
   const [actionMenuOpen, setActionMenuOpen] = useState(false)
   const [shortcutFeedback, setShortcutFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
+  const [pendingDeleteAction, setPendingDeleteAction] = useState<"installed" | "installing" | null>(null)
 
   const appid = params.id || ""
 
@@ -296,7 +299,8 @@ export function GameDetailPage() {
       
       const result = await window.ucDownloads.listGameExecutables(game.appid)
       const exes = result?.exes || []
-      const { pick, confident } = pickGameExecutable(exes, game.name)
+      const folder = result?.folder || null
+      const { pick, confident } = pickGameExecutable(exes, game.name, game.source, folder)
       if (pick && confident) {
         setPendingExePath(pick.path)
         const promptShown = await getAdminPromptShown()
@@ -312,7 +316,7 @@ export function GameDetailPage() {
         }
         return
       }
-      await openExePicker(exes, { mode: "launch", actionLabel: "Launch" })
+      await openExePicker(exes, { mode: "launch", actionLabel: "Launch", folder })
     } catch {}
   }
   const popularAppIds = useMemo(() => {
@@ -378,20 +382,23 @@ export function GameDetailPage() {
   const isCancelled = downloads.some((item) => item.appid === game.appid && item.status === "cancelled")
   const hasCancelledManifest = installingManifest?.installStatus === "cancelled"
   const isInstalled = Boolean(installedManifest)
+  const showActionMenu = isInstalled
   const isInstalling =
     (Boolean(installingManifest) && !isCancelled && !hasCancelledManifest && !isFailed && !isPaused) || (isActivelyDownloading && !isCancelled) || (downloading && !isCancelled)
-  const actionLabel = isInstalled
-    ? "Play"
-    : isPaused
-      ? "Resume"
-      : isQueued
-        ? "Queued"
-        : isFailed
-          ? "Download failed"
-          : isInstalling
-            ? "Installing"
-            : "Download Now"
-  const actionDisabled = isInstalling || isQueued || isFailed
+  const actionLabel = isGameRunning
+    ? "Quit"
+    : isInstalled
+      ? "Play"
+      : isPaused
+        ? "Resume"
+        : isQueued
+          ? "Queued"
+          : isFailed
+            ? "Download failed"
+            : isInstalling
+              ? "Installing"
+              : "Download Now"
+  const actionDisabled = !isGameRunning && (isInstalling || isQueued || isFailed)
 
   const getSavedExe = async () => {
     if (!window.ucSettings?.get) return null
@@ -483,8 +490,8 @@ export function GameDetailPage() {
   }
 
   const openExePicker = async (
-    exes: Array<{ name: string; path: string }>,
-    opts?: { title?: string; message?: string; actionLabel?: string; mode?: "launch" | "set"; currentPath?: string | null }
+    exes: Array<{ name: string; path: string; size?: number; depth?: number }>,
+    opts?: { title?: string; message?: string; actionLabel?: string; mode?: "launch" | "set"; currentPath?: string | null; folder?: string | null }
   ) => {
     const savedExe = await getSavedExe()
     setExePickerTitle(opts?.title || "Select executable")
@@ -493,6 +500,7 @@ export function GameDetailPage() {
     setExePickerMode(opts?.mode || "launch")
     setExePickerExes(exes)
     setExePickerCurrentPath(opts?.currentPath ?? savedExe ?? null)
+    setExePickerFolder(opts?.folder ?? null)
     setExePickerOpen(true)
   }
 
@@ -565,11 +573,13 @@ export function GameDetailPage() {
     try {
       setShortcutFeedback(null)
       let targetExe = await getSavedExe()
-      let exes: Array<{ name: string; path: string }> = []
+      let exes: Array<{ name: string; path: string; size?: number; depth?: number }> = []
+      let folder: string | null = null
+
       if (!targetExe && window.ucDownloads?.listGameExecutables) {
         const result = await window.ucDownloads.listGameExecutables(game.appid)
         exes = result?.exes || []
-        targetExe = exes[0]?.path || null
+        folder = result?.folder || null
       }
 
       if (!targetExe) {
@@ -577,6 +587,7 @@ export function GameDetailPage() {
           title: "Set launch executable",
           message: `Select the exe before creating a shortcut for "${game.name}".`,
           actionLabel: "Set",
+          folder,
           mode: "set",
           currentPath: null,
         })
@@ -600,6 +611,34 @@ export function GameDetailPage() {
       gameLogger.error('Error creating desktop shortcut (details)', { data: err })
       setShortcutFeedback({ type: 'error', message: 'Failed to create desktop shortcut.' })
       setTimeout(() => setShortcutFeedback(null), 3000)
+    }
+  }
+
+  const handleDeleteGame = () => {
+    if (!game) return
+    if (isInstalling) {
+      setPendingDeleteAction("installing")
+      return
+    }
+    setPendingDeleteAction("installed")
+  }
+
+  const runDeleteGame = async (action: "installed" | "installing") => {
+    if (!game) return
+    try {
+      if (action === "installing") {
+        await window.ucDownloads?.deleteInstalling?.(game.appid)
+        setInstallingManifest(null)
+      }
+      if (action === "installed") {
+        await window.ucDownloads?.deleteInstalled?.(game.appid)
+        await window.ucDownloads?.deleteDesktopShortcut?.(game.name)
+        setInstalledManifest(null)
+      }
+      clearByAppid(game.appid)
+      setIsGameRunning(false)
+    } catch {
+      // swallow
     }
   }
 
@@ -655,7 +694,7 @@ export function GameDetailPage() {
     if (exePickerMode === "set") {
       await setSavedExe(path)
       setExePickerCurrentPath(path)
-      setExePickerOpen(false)
+      // Do NOT close the modal, match Library behavior
       return
     }
     const promptShown = await getAdminPromptShown()
@@ -826,9 +865,15 @@ export function GameDetailPage() {
                 <div className="flex items-center gap-3">
                   <Button
                     size="lg"
-                    className="flex-1 font-bold text-lg py-6 rounded-xl bg-primary hover:bg-primary/90 shadow-lg shadow-primary/25"
+                    className={`flex-1 font-bold text-lg py-6 rounded-xl shadow-lg ${
+                      isGameRunning
+                        ? "bg-destructive hover:bg-destructive/90 shadow-destructive/25"
+                        : "bg-primary hover:bg-primary/90 shadow-primary/25"
+                    }`}
                     onClick={() => {
-                      if (isInstalled) {
+                      if (isGameRunning) {
+                        void stopRunningGame()
+                      } else if (isInstalled) {
                         void launchInstalledGame()
                       } else if (isPaused) {
                         void resumeGroup(game.appid)
@@ -836,65 +881,72 @@ export function GameDetailPage() {
                         void openHostSelector()
                       }
                     }}
-                    disabled={actionDisabled}
+                    disabled={actionDisabled || (isGameRunning && stoppingGame)}
                   >
-                    <Download className="mr-2 h-5 w-5" />
+                    {isGameRunning ? <Square className="mr-2 h-5 w-5" /> : <Download className="mr-2 h-5 w-5" />}
                     {actionLabel}
                   </Button>
 
-                  <Popover open={actionMenuOpen} onOpenChange={setActionMenuOpen}>
-                    <PopoverTrigger asChild>
-                      <Button
-                        variant="outline"
-                        size="icon"
-                        className="h-[52px] w-[52px] rounded-xl border-primary/40 bg-primary/10 text-primary hover:bg-primary/15"
-                        disabled={!installedManifest && !installingManifest}
-                        aria-label="Game actions"
-                      >
-                        <Settings className="h-5 w-5" />
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent align="end" className="w-64 bg-card/95 border border-primary/20 shadow-primary/30">
-                      <div className="space-y-2">
+                  {showActionMenu ? (
+                    <Popover open={actionMenuOpen} onOpenChange={setActionMenuOpen}>
+                      <PopoverTrigger asChild>
                         <Button
-                          variant="ghost"
-                          className="w-full justify-start"
+                          variant="outline"
+                          size="icon"
+                          className="h-[52px] w-[52px] rounded-xl border-primary/40 bg-primary/10 text-primary hover:bg-primary/15"
+                          aria-label="Game actions"
+                        >
+                          <Settings className="h-5 w-5" />
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent align="end" className="w-56 rounded-2xl p-2">
+                        <button
+                          type="button"
                           onClick={() => {
-                            setActionMenuOpen(false)
                             void openExecutablePicker()
                           }}
-                          disabled={!installedManifest && !installingManifest}
+                          className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-muted-foreground transition-colors hover:text-primary hover:bg-primary/10"
                         >
                           <Settings className="mr-2 h-4 w-4" />
                           Set Executable
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          className="w-full justify-start"
+                        </button>
+                        <button
+                          type="button"
                           onClick={() => {
                             setActionMenuOpen(false)
                             void handleCreateShortcut()
                           }}
-                          disabled={!installedManifest && !installingManifest}
+                          className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-muted-foreground transition-colors hover:text-primary hover:bg-primary/10"
                         >
                           <ExternalLink className="mr-2 h-4 w-4" />
                           Create Desktop Shortcut
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          className="w-full justify-start"
+                        </button>
+                        <button
+                          type="button"
                           onClick={() => {
                             setActionMenuOpen(false)
                             void openGameFiles()
                           }}
-                          disabled={!installedManifest && !installingManifest}
+                          className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-muted-foreground transition-colors hover:text-primary hover:bg-primary/10"
                         >
                           <FolderOpen className="mr-2 h-4 w-4" />
                           Open Game Files
-                        </Button>
-                      </div>
-                    </PopoverContent>
-                  </Popover>
+                        </button>
+                        <div className="my-1 h-px bg-border/60" />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setActionMenuOpen(false)
+                            void handleDeleteGame()
+                          }}
+                          className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-destructive transition-colors hover:bg-destructive/10"
+                        >
+                          <Trash2 className="mr-2 h-4 w-4" />
+                          Delete Game
+                        </button>
+                      </PopoverContent>
+                    </Popover>
+                  ) : null}
                 </div>
 
                 {isFailed && (
@@ -913,18 +965,6 @@ export function GameDetailPage() {
                   <div className={`mt-2 text-xs ${shortcutFeedback.type === 'success' ? 'text-emerald-400' : 'text-destructive'}`}>
                     {shortcutFeedback.message}
                   </div>
-                )}
-
-                {isGameRunning && (
-                  <Button
-                    variant="destructive"
-                    className="mt-3 w-full"
-                    onClick={() => void stopRunningGame()}
-                    disabled={stoppingGame}
-                  >
-                    <Square className="mr-2 h-4 w-4" />
-                    Quit Game
-                  </Button>
                 )}
 
                 {(downloadError || failedDownload?.error) && (
@@ -1092,6 +1132,42 @@ export function GameDetailPage() {
         }}
         onClose={() => setHostSelectorOpen(false)}
       />
+      {pendingDeleteAction && game && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+          <div
+            className="absolute inset-0 bg-black/70"
+            onClick={() => setPendingDeleteAction(null)}
+          />
+          <div className="relative w-full max-w-md rounded-2xl border border-border/60 bg-slate-950/95 p-5 text-white shadow-2xl">
+            <div className="flex items-center gap-2 text-lg font-semibold">
+              <AlertTriangle className="h-5 w-5 text-destructive" />
+              {pendingDeleteAction === "installing" ? "Remove download" : "Delete game"}
+            </div>
+            <p className="mt-2 text-sm text-slate-300">
+              {pendingDeleteAction === "installing"
+                ? `Remove "${game.name}" from the installing list? This will delete any downloaded data.`
+                : `Delete "${game.name}" permanently? This removes the installed files from disk.`}
+            </p>
+            <div className="mt-4 flex justify-end gap-2">
+              <Button variant="ghost" onClick={() => setPendingDeleteAction(null)}>
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={() => {
+                  const action = pendingDeleteAction
+                  setPendingDeleteAction(null)
+                  setTimeout(() => {
+                    void runDeleteGame(action)
+                  }, 0)
+                }}
+              >
+                {pendingDeleteAction === "installing" ? "Remove" : "Delete"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
       <ExePickerModal
         open={exePickerOpen}
         title={exePickerTitle}
@@ -1099,6 +1175,8 @@ export function GameDetailPage() {
         exes={exePickerExes}
         currentExePath={exePickerCurrentPath}
         actionLabel={exePickerActionLabel}
+        gameName={game?.name}
+        baseFolder={exePickerFolder}
         onSelect={handleExePicked}
         onClose={() => setExePickerOpen(false)}
       />
