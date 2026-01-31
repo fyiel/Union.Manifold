@@ -694,7 +694,20 @@ ipcMain.handle('uc:setting-clear-all', () => {
 ipcMain.handle('uc:settings-export', async () => {
   try {
     const settings = readSettings() || {}
-    return { ok: true, data: JSON.stringify(settings, null, 2) }
+    const defaultName = `unioncrax-direct-settings-${Date.now()}.json`
+    const docsPath = app.getPath('documents') || app.getPath('downloads')
+    const result = await dialog.showSaveDialog({
+      title: 'Export Settings',
+      defaultPath: path.join(docsPath, defaultName),
+      filters: [{ name: 'JSON', extensions: ['json'] }]
+    })
+
+    if (result.canceled || !result.filePath) {
+      return { ok: false, error: 'cancelled' }
+    }
+
+    fs.writeFileSync(result.filePath, JSON.stringify(settings, null, 2), 'utf8')
+    return { ok: true, path: result.filePath }
   } catch (err) {
     return { ok: false, error: String(err) }
   }
