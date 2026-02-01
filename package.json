@@ -48,15 +48,15 @@
     "fuse.js": "^7.1.0",
     "geist": "^1.5.1",
     "lucide-react": "^0.454.0",
-    "react": "18.2.0",
-    "react-dom": "18.2.0",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
     "react-router-dom": "^7.0.2",
     "tailwind-merge": "^2.5.5"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.1.9",
-    "@types/react": "^19.2.2",
-    "@types/react-dom": "^19.2.2",
+    "@types/react": "^19.2.3",
+    "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^4.7.0",
     "concurrently": "^9.2.1",
     "electron": "^33.4.11",
@@ -115,6 +115,13 @@
     "linux": {
       "target": ["AppImage"],
       "icon": "assets/icons"
+    }
+  },
+  "pnpm": {
+    "overrides": {
+      "react-server-dom-webpack": "19.2.3",
+      "react-server-dom-parcel": "19.2.3",
+      "react-server-dom-turbopack": "19.2.3"
     }
   }
 }
