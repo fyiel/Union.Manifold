@@ -1,32 +1,32 @@
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useState, type ChangeEvent } from "react"
+import { FolderOpen, HardDrive, Image as ImageIcon, LogIn, LogOut, Plus, RefreshCw, UserRound } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Input } from "@/components/ui/input"
-import { apiUrl, setApiBaseUrl, getApiBaseUrl } from "@/lib/api"
+import { Textarea } from "@/components/ui/textarea"
+import { Switch } from "@/components/ui/switch"
+import { DiscordAvatar } from "@/components/DiscordAvatar"
+import { apiFetch, apiUrl, setApiBaseUrl, getApiBaseUrl } from "@/lib/api"
 import {
   getPreferredDownloadHost,
   setPreferredDownloadHost,
 } from "@/lib/downloads"
 import { LogViewer } from "@/components/LogViewer"
-type MirrorHost = 'rootz' | 'pixeldrain'
-
-type MirrorHostTag = 'beta' | 'soon'
-
-type MirrorHostInfo = {
-  key: MirrorHost
-  label: string
-  tag?: MirrorHostTag
-}
-
-const MIRROR_HOSTS: MirrorHostInfo[] = [
-  { key: 'pixeldrain', label: 'Pixeldrain' },
-  { key: 'rootz', label: 'Rootz', tag: 'beta' }
-]
-import { ExternalLink, FolderOpen, HardDrive, Plus, RefreshCw } from "lucide-react"
-
-const downloadDirName = "UnionCrax.Direct"
+import { useDiscordAccount } from "@/hooks/use-discord-account"
+import {
+  SETTINGS_KEYS,
+  IMAGE_CONSTRAINTS,
+  TEXT_CONSTRAINTS,
+  APP_INFO,
+  MIRROR_HOSTS,
+  DOWNLOAD_SPEED_PRESETS,
+  DEFAULT_DOWNLOAD_SPEED_PRESET,
+  type MirrorHost,
+  type MirrorHostInfo,
+  type DownloadSpeedPreset,
+} from "@/lib/settings-constants"
 
 type DiskInfo = {
   id: string
@@ -51,6 +51,7 @@ function formatBytes(bytes: number) {
 export function SettingsPage() {
   const isWindows = typeof navigator !== 'undefined' && /windows/i.test(navigator.userAgent)
   const isLinux = typeof navigator !== 'undefined' && /linux/i.test(navigator.userAgent)
+  const { user: accountUser, loading: accountLoading, refresh: refreshAccount } = useDiscordAccount()
   const [disks, setDisks] = useState<DiskInfo[]>([])
   const [downloadPath, setDownloadPath] = useState("")
   const [selectedDiskId, setSelectedDiskId] = useState("")
@@ -59,6 +60,7 @@ export function SettingsPage() {
   const [ucSizeBytes, setUcSizeBytes] = useState<number | null>(null)
   const [usageLoading, setUsageLoading] = useState(false)
   const [defaultHost, setDefaultHost] = useState<MirrorHost>('pixeldrain')
+  const [downloadSpeedPreset, setDownloadSpeedPreset] = useState<DownloadSpeedPreset>(DEFAULT_DOWNLOAD_SPEED_PRESET)
   const [checkingUpdate, setCheckingUpdate] = useState(false)
   const [appVersion, setAppVersion] = useState<string>("")
   const [updateCheckResult, setUpdateCheckResult] = useState<string | null>(null)
@@ -81,6 +83,20 @@ export function SettingsPage() {
   const [networkResults, setNetworkResults] = useState<Array<{ label: string; url: string; ok: boolean; status: number; elapsedMs: number; error?: string }> | null>(null)
   const [devActionFeedback, setDevActionFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
   const [clearingDownloadCache, setClearingDownloadCache] = useState(false)
+  const [accountSummaryLoaded, setAccountSummaryLoaded] = useState(false)
+  const [accountError, setAccountError] = useState<string | null>(null)
+  const [accountRefreshing, setAccountRefreshing] = useState(false)
+  const [loggingIn, setLoggingIn] = useState(false)
+  const [loggingOut, setLoggingOut] = useState(false)
+  const [showMika, setShowMika] = useState(true)
+  const [showNsfw, setShowNsfw] = useState(false)
+  const [showPublicProfile, setShowPublicProfile] = useState(true)
+  const [avatarPreview, setAvatarPreview] = useState<string | null>(null)
+  const [bannerPreview, setBannerPreview] = useState<string | null>(null)
+  const [bioDraft, setBioDraft] = useState("")
+  const [bioSaving, setBioSaving] = useState(false)
+  const [bioSaved, setBioSaved] = useState(false)
+  const [accountCounts, setAccountCounts] = useState<{ wishlist: number; favorites: number; viewHistory: number; searchHistory: number } | null>(null)
 
   useEffect(() => {
     const loadVersion = async () => {
@@ -129,6 +145,32 @@ export function SettingsPage() {
       if (!data || !data.key) return
       if (data.key === 'defaultMirrorHost' && data.value && MIRROR_HOSTS.some((h) => h.key === data.value)) {
         setDefaultHost(data.value)
+      }
+    })
+    return () => {
+      mounted = false
+      if (typeof off === 'function') off()
+    }
+  }, [])
+
+  useEffect(() => {
+    let mounted = true
+    const loadSpeedPreset = async () => {
+      try {
+        const preset = await window.ucSettings?.get?.('downloadSpeedPreset')
+        if (!mounted) return
+        if (preset && DOWNLOAD_SPEED_PRESETS.some((p) => p.key === preset)) {
+          setDownloadSpeedPreset(preset as DownloadSpeedPreset)
+        }
+      } catch {
+        // ignore
+      }
+    }
+    loadSpeedPreset()
+    const off = window.ucSettings?.onChanged?.((data: any) => {
+      if (!data || !data.key) return
+      if (data.key === 'downloadSpeedPreset' && data.value && DOWNLOAD_SPEED_PRESETS.some((p) => p.key === data.value)) {
+        setDownloadSpeedPreset(data.value as DownloadSpeedPreset)
       }
     })
     return () => {
@@ -304,11 +346,15 @@ export function SettingsPage() {
     }
   }, [])
 
-  const selectedDisk = useMemo(() => disks.find((disk) => disk.id === selectedDiskId) || null, [disks, selectedDiskId])
-  const diskForUsage = useMemo(() => {
+  const selectedDisk = useMemo((): DiskInfo | null => {
+    const found = disks.find((d: DiskInfo) => d.id === selectedDiskId)
+    return found || null
+  }, [disks, selectedDiskId])
+  const diskForUsage = useMemo((): DiskInfo | null => {
     if (selectedDisk) return selectedDisk
     if (!downloadPath) return null
-    return disks.find((disk) => downloadPath.startsWith(disk.path)) || null
+    const found = disks.find((d: DiskInfo) => downloadPath.startsWith(d.path))
+    return found || null
   }, [selectedDisk, downloadPath, disks])
 
   const usagePercent = useMemo(() => {
@@ -374,7 +420,7 @@ export function SettingsPage() {
 
   const handleDiskSelect = async (diskId: string) => {
     setSelectedDiskId(diskId)
-    const disk = disks.find((item) => item.id === diskId)
+    const disk = disks.find((item: DiskInfo) => item.id === diskId)
     if (!disk || !window.ucDownloads?.setDownloadPath) return
 
     const result = await window.ucDownloads.setDownloadPath(disk.path)
@@ -542,7 +588,374 @@ export function SettingsPage() {
     }
   }
 
-  
+  useEffect(() => {
+    const syncPreferences = () => {
+      try {
+        setShowMika(localStorage.getItem(SETTINGS_KEYS.MIKA) !== "1")
+        setShowNsfw(localStorage.getItem(SETTINGS_KEYS.NSFW) === "1")
+        setShowPublicProfile(localStorage.getItem(SETTINGS_KEYS.PUBLIC_PROFILE) !== "0")
+      } catch {
+        // ignore
+      }
+    }
+
+    const syncImages = () => {
+      try {
+        setAvatarPreview(localStorage.getItem(SETTINGS_KEYS.AVATAR))
+        setBannerPreview(localStorage.getItem(SETTINGS_KEYS.BANNER))
+      } catch {
+        // ignore
+      }
+    }
+
+    syncPreferences()
+    syncImages()
+
+    const onStorage = (event: StorageEvent) => {
+      if ([SETTINGS_KEYS.MIKA, SETTINGS_KEYS.NSFW, SETTINGS_KEYS.PUBLIC_PROFILE, SETTINGS_KEYS.AVATAR, SETTINGS_KEYS.BANNER].includes(event.key as any)) {
+        syncPreferences()
+        syncImages()
+      }
+    }
+    const onPreferenceChange = () => syncPreferences()
+    const onImageChange = () => syncImages()
+
+    window.addEventListener("storage", onStorage)
+    window.addEventListener("uc_mika_pref", onPreferenceChange)
+    window.addEventListener("uc_nsfw_pref", onPreferenceChange)
+    window.addEventListener("uc_profile_avatar", onImageChange)
+    window.addEventListener("uc_profile_banner", onImageChange)
+
+    return () => {
+      window.removeEventListener("storage", onStorage)
+      window.removeEventListener("uc_mika_pref", onPreferenceChange)
+      window.removeEventListener("uc_nsfw_pref", onPreferenceChange)
+      window.removeEventListener("uc_profile_avatar", onImageChange)
+      window.removeEventListener("uc_profile_banner", onImageChange)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!accountUser) return
+    setBioDraft(accountUser.bio ?? "")
+    setBioSaved(false)
+  }, [accountUser])
+
+  useEffect(() => {
+    if (accountUser) return
+    setAccountSummaryLoaded(false)
+    setAccountCounts(null)
+  }, [accountUser])
+
+  const loadAccountSummary = async (retrySession = true) => {
+    if (!accountUser) return
+    setAccountError(null)
+    try {
+      let res = await apiFetch("/api/account/summary")
+      if (res.status === 401 && retrySession) {
+        const sessionRes = await apiFetch("/api/comments/session", { method: "POST" })
+        if (sessionRes.ok) {
+          res = await apiFetch("/api/account/summary")
+        }
+      }
+      if (!res.ok) {
+        setAccountError("Unable to load account settings.")
+        return
+      }
+      const data = await res.json()
+      const prefs = data?.preferences || {}
+      if (typeof prefs.showMika === "boolean") {
+        setShowMika(prefs.showMika)
+        try {
+          localStorage.setItem(SETTINGS_KEYS.MIKA, prefs.showMika ? "0" : "1")
+        } catch {}
+        window.dispatchEvent(new Event("uc_mika_pref"))
+      }
+      if (typeof prefs.showNsfw === "boolean") {
+        setShowNsfw(prefs.showNsfw)
+        try {
+          localStorage.setItem(SETTINGS_KEYS.NSFW, prefs.showNsfw ? "1" : "0")
+        } catch {}
+        window.dispatchEvent(new Event("uc_nsfw_pref"))
+      }
+      if (typeof prefs.showPublicProfile === "boolean") {
+        setShowPublicProfile(prefs.showPublicProfile)
+        try {
+          localStorage.setItem(SETTINGS_KEYS.PUBLIC_PROFILE, prefs.showPublicProfile ? "1" : "0")
+        } catch {}
+      }
+
+      const summaryUser = data?.user
+      if (summaryUser?.customAvatarUrl && !avatarPreview) {
+        setAvatarPreview(summaryUser.customAvatarUrl)
+      }
+      if (summaryUser?.customBannerUrl && !bannerPreview) {
+        setBannerPreview(summaryUser.customBannerUrl)
+      }
+      if (summaryUser?.bio !== undefined) {
+        setBioDraft(summaryUser.bio ?? "")
+        setBioSaved(false)
+      }
+
+      setAccountCounts({
+        wishlist: Array.isArray(data?.wishlist) ? data.wishlist.length : 0,
+        favorites: Array.isArray(data?.favorites) ? data.favorites.length : 0,
+        viewHistory: Array.isArray(data?.viewHistory) ? data.viewHistory.length : 0,
+        searchHistory: Array.isArray(data?.searchHistory) ? data.searchHistory.length : 0,
+      })
+      setAccountSummaryLoaded(true)
+    } catch {
+      setAccountError("Unable to load account settings.")
+    }
+  }
+
+  useEffect(() => {
+    if (!accountUser || accountSummaryLoaded) return
+    void loadAccountSummary()
+  }, [accountUser, accountSummaryLoaded])
+
+  const refreshAccountSummary = async () => {
+    if (!accountUser) return
+    setAccountRefreshing(true)
+    await refreshAccount().catch(() => {})
+    await loadAccountSummary().catch(() => {})
+    setAccountRefreshing(false)
+  }
+
+  const handleAccountLogin = async () => {
+    setLoggingIn(true)
+    try {
+      if (window.ucAuth?.login) {
+        const result = await window.ucAuth.login(getApiBaseUrl())
+        if (result?.ok) {
+          await apiFetch("/api/comments/session", { method: "POST" })
+          await refreshAccount().catch(() => {})
+          await loadAccountSummary().catch(() => {})
+        }
+      } else {
+        window.open(apiUrl("/api/discord/connect?next=/settings"), "_blank")
+      }
+    } finally {
+      setLoggingIn(false)
+    }
+  }
+
+  const handleAccountLogout = async () => {
+    setLoggingOut(true)
+    try {
+      await apiFetch("/api/comments/session", { method: "DELETE" })
+      await window.ucAuth?.logout?.(getApiBaseUrl())
+      try {
+        localStorage.removeItem("discord_id")
+        localStorage.removeItem(SETTINGS_KEYS.AVATAR)
+        localStorage.removeItem(SETTINGS_KEYS.BANNER)
+      } catch {}
+      window.dispatchEvent(new Event("uc_discord_logout"))
+      setAccountSummaryLoaded(false)
+      setAccountCounts(null)
+      setAvatarPreview(null)
+      setBannerPreview(null)
+      setBioDraft("")
+      setBioSaved(false)
+    } catch {
+      // keep current state if logout fails
+    } finally {
+      await refreshAccount().catch(() => {})
+      setLoggingOut(false)
+    }
+  }
+
+  const updateMikaVisibility = (checked: boolean) => {
+    setShowMika(checked)
+    try {
+      localStorage.setItem(SETTINGS_KEYS.MIKA, checked ? "0" : "1")
+    } catch {}
+    window.dispatchEvent(new Event("uc_mika_pref"))
+    apiFetch("/api/account/preferences", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ showMika: checked }),
+    }).catch(() => {})
+  }
+
+  const updateNsfwVisibility = (checked: boolean) => {
+    setShowNsfw(checked)
+    try {
+      localStorage.setItem(SETTINGS_KEYS.NSFW, checked ? "1" : "0")
+    } catch {}
+    window.dispatchEvent(new Event("uc_nsfw_pref"))
+    apiFetch("/api/account/preferences", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ showNsfw: checked }),
+    }).catch(() => {})
+  }
+
+  const updatePublicProfileVisibility = (checked: boolean) => {
+    setShowPublicProfile(checked)
+    try {
+      localStorage.setItem(SETTINGS_KEYS.PUBLIC_PROFILE, checked ? "1" : "0")
+    } catch {}
+    apiFetch("/api/account/preferences", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ showPublicProfile: checked }),
+    }).catch(() => {})
+  }
+
+  const createImageFromFile = (file: File): Promise<HTMLImageElement> => {
+    return new Promise((resolve, reject) => {
+      const img = new Image()
+      const objectUrl = URL.createObjectURL(file)
+      img.onload = () => {
+        URL.revokeObjectURL(objectUrl)
+        resolve(img)
+      }
+      img.onerror = (err) => {
+        URL.revokeObjectURL(objectUrl)
+        reject(err)
+      }
+      img.src = objectUrl
+    })
+  }
+
+  const resizeImage = (img: HTMLImageElement, type: "avatar" | "banner") => {
+    if (type === "avatar") {
+      const side = Math.min(img.width, img.height)
+      const target = Math.min(IMAGE_CONSTRAINTS.AVATAR_MAX_SIZE, side)
+      const sx = (img.width - side) / 2
+      const sy = (img.height - side) / 2
+      const canvas = document.createElement("canvas")
+      canvas.width = target
+      canvas.height = target
+      const ctx = canvas.getContext("2d")
+      if (!ctx) return null
+      ctx.drawImage(img, sx, sy, side, side, 0, 0, target, target)
+      return canvas
+    }
+
+    const scale = Math.min(IMAGE_CONSTRAINTS.BANNER_MAX_WIDTH / img.width, IMAGE_CONSTRAINTS.BANNER_MAX_HEIGHT / img.height, 1)
+    const targetWidth = Math.max(1, Math.round(img.width * scale))
+    const targetHeight = Math.max(1, Math.round(img.height * scale))
+    const canvas = document.createElement("canvas")
+    canvas.width = targetWidth
+    canvas.height = targetHeight
+    const ctx = canvas.getContext("2d")
+    if (!ctx) return null
+    ctx.drawImage(img, 0, 0, targetWidth, targetHeight)
+    return canvas
+  }
+
+  const compressImage = async (file: File, type: "avatar" | "banner") => {
+    const img = await createImageFromFile(file)
+    const canvas = resizeImage(img, type)
+    if (!canvas) return null
+    return canvas.toDataURL("image/webp", IMAGE_CONSTRAINTS.QUALITY)
+  }
+
+  const updateProfileImage = (file: File | null, type: "avatar" | "banner") => {
+    const key = type === "avatar" ? SETTINGS_KEYS.AVATAR : SETTINGS_KEYS.BANNER
+    if (!file) return
+
+    const run = async () => {
+      const result = await compressImage(file, type)
+      if (!result) return
+
+      if (type === "avatar") {
+        setAvatarPreview(result)
+      } else {
+        setBannerPreview(result)
+      }
+
+      try {
+        localStorage.setItem(key, result)
+      } catch {}
+
+      try {
+        const payload = type === "avatar"
+          ? { customAvatarUrl: result, customBannerUrl: bannerPreview }
+          : { customAvatarUrl: avatarPreview, customBannerUrl: result }
+        await apiFetch("/api/account/profile-images", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        })
+        await refreshAccount().catch(() => {})
+      } catch (error) {
+        console.error("[UC] Error saving profile image:", error)
+      }
+
+      window.dispatchEvent(new Event(type === "avatar" ? "uc_profile_avatar" : "uc_profile_banner"))
+    }
+    void run()
+  }
+
+  const clearProfileImage = (type: "avatar" | "banner") => {
+    const key = type === "avatar" ? SETTINGS_KEYS.AVATAR : SETTINGS_KEYS.BANNER
+    if (type === "avatar") {
+      setAvatarPreview(null)
+    } else {
+      setBannerPreview(null)
+    }
+    try {
+      localStorage.removeItem(key)
+    } catch {}
+
+    try {
+      const payload = type === "avatar"
+        ? { customAvatarUrl: null, customBannerUrl: bannerPreview }
+        : { customAvatarUrl: avatarPreview, customBannerUrl: null }
+      apiFetch("/api/account/profile-images", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      }).catch(() => {})
+      refreshAccount().catch(() => {})
+    } catch {}
+
+    window.dispatchEvent(new Event(type === "avatar" ? "uc_profile_avatar" : "uc_profile_banner"))
+  }
+
+  const handleAvatarSelect = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0] || null
+    if (file) updateProfileImage(file, "avatar")
+    event.target.value = ""
+  }
+
+  const handleBannerSelect = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0] || null
+    if (file) updateProfileImage(file, "banner")
+    event.target.value = ""
+  }
+
+  const saveBio = async () => {
+    if (!accountUser) return
+    setBioSaving(true)
+    setBioSaved(false)
+    try {
+      const res = await apiFetch("/api/account/bio", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ bio: bioDraft.trim().slice(0, TEXT_CONSTRAINTS.MAX_BIO_LENGTH) }),
+      })
+      if (res.ok) {
+        setBioSaved(true)
+        await refreshAccount().catch(() => {})
+      }
+    } catch {
+      // ignore
+    } finally {
+      setBioSaving(false)
+    }
+  }
+
+  const accountLabel = accountUser ? accountUser.displayName || accountUser.username : "Account"
+  const accountAvatarUrl = avatarPreview || accountUser?.customAvatarUrl || accountUser?.avatarUrl || null
+  const accountBannerUrl = bannerPreview || accountUser?.customBannerUrl || null
+  const showAccountControls = Boolean(accountUser)
+  const accountBusy = accountLoading || loggingIn || loggingOut || accountRefreshing
+  const accountStats = accountCounts || { wishlist: 0, favorites: 0, viewHistory: 0, searchHistory: 0 }
+
   return (
     <div className="container mx-auto max-w-5xl space-y-8">
       <div className="flex items-center gap-3">
@@ -551,21 +964,221 @@ export function SettingsPage() {
       </div>
 
       <Card className="border-border/60">
-        <CardContent className="p-6 space-y-4">
-          <div>
-            <h2 className="text-lg font-semibold">Account</h2>
-            <p className="text-sm text-muted-foreground">
-              Manage your Discord profile and requests on the web dashboard.
-            </p>
+        <CardContent className="p-6 space-y-6">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <h2 className="text-lg font-semibold">Account</h2>
+              <p className="text-sm text-muted-foreground">
+                Manage your Discord profile and preferences right inside the app.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {showAccountControls ? (
+                <>
+                  <Button
+                    variant="outline"
+                    className="gap-2"
+                    onClick={refreshAccountSummary}
+                    disabled={accountBusy}
+                  >
+                    <RefreshCw className={`h-4 w-4 ${accountRefreshing ? "animate-spin" : ""}`} />
+                    {accountRefreshing ? "Refreshing..." : "Refresh"}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="gap-2"
+                    onClick={handleAccountLogout}
+                    disabled={accountBusy}
+                  >
+                    <LogOut className="h-4 w-4" />
+                    {loggingOut ? "Signing out..." : "Logout"}
+                  </Button>
+                </>
+              ) : (
+                <Button className="gap-2" onClick={handleAccountLogin} disabled={accountBusy}>
+                  <LogIn className="h-4 w-4" />
+                  {loggingIn ? "Connecting..." : "Login with Discord"}
+                </Button>
+              )}
+            </div>
           </div>
-          <Button
-            variant="outline"
-            className="gap-2"
-            onClick={() => window.open(apiUrl("/settings"), "_blank")}
-          >
-            <ExternalLink className="h-4 w-4" />
-            Manage account on web
-          </Button>
+
+          {accountError && (
+            <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+              {accountError}
+            </div>
+          )}
+
+          <div className="flex items-center gap-4">
+            <DiscordAvatar avatarUrl={accountAvatarUrl} alt="Account avatar" className="h-12 w-12 rounded-full" />
+            <div>
+              <div className="text-sm font-semibold text-foreground">{accountLabel}</div>
+              <div className="text-xs text-muted-foreground">Discord account</div>
+            </div>
+          </div>
+
+          {showAccountControls && (
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="rounded-xl border border-border/60 bg-card/50 p-4 space-y-3">
+                <div className="flex items-center gap-2 text-sm font-semibold">
+                  <ImageIcon className="h-4 w-4 text-primary" />
+                  Profile appearance
+                </div>
+                <div className="rounded-lg border border-border/60 bg-muted/20 overflow-hidden">
+                  {accountBannerUrl ? (
+                    <img src={accountBannerUrl} alt="Profile banner" className="h-24 w-full object-cover" />
+                  ) : (
+                    <div className="h-24 w-full flex items-center justify-center text-xs text-muted-foreground">
+                      No banner uploaded
+                    </div>
+                  )}
+                </div>
+                <div className="flex items-center gap-3">
+                  <DiscordAvatar avatarUrl={accountAvatarUrl} alt="Profile avatar" className="h-10 w-10 rounded-full" />
+                  <div>
+                    <div className="text-sm font-medium">Avatar</div>
+                    <div className="text-xs text-muted-foreground">Square image, auto-cropped.</div>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <label className="inline-flex">
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={handleAvatarSelect}
+                      className="hidden"
+                      disabled={accountBusy}
+                    />
+                    <Button type="button" variant="outline" className="gap-2" disabled={accountBusy}>
+                      Upload avatar
+                    </Button>
+                  </label>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className="gap-2"
+                    onClick={() => clearProfileImage("avatar")}
+                    disabled={accountBusy}
+                  >
+                    Clear avatar
+                  </Button>
+                  <label className="inline-flex">
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={handleBannerSelect}
+                      className="hidden"
+                      disabled={accountBusy}
+                    />
+                    <Button type="button" variant="outline" className="gap-2" disabled={accountBusy}>
+                      Upload banner
+                    </Button>
+                  </label>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className="gap-2"
+                    onClick={() => clearProfileImage("banner")}
+                    disabled={accountBusy}
+                  >
+                    Clear banner
+                  </Button>
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-border/60 bg-card/50 p-4 space-y-4">
+                <div className="flex items-center gap-2 text-sm font-semibold">
+                  <UserRound className="h-4 w-4 text-primary" />
+                  Preferences
+                </div>
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-medium">Show NSFW tags</div>
+                      <div className="text-xs text-muted-foreground">Reveal adult titles in browse & search.</div>
+                    </div>
+                    <Switch checked={showNsfw} onCheckedChange={updateNsfwVisibility} />
+                  </div>
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-medium">Show Mika art</div>
+                      <div className="text-xs text-muted-foreground">Hide the Mika mascot artwork.</div>
+                    </div>
+                    <Switch checked={showMika} onCheckedChange={updateMikaVisibility} />
+                  </div>
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-medium">Public profile</div>
+                      <div className="text-xs text-muted-foreground">Let others view your profile page.</div>
+                    </div>
+                    <Switch checked={showPublicProfile} onCheckedChange={updatePublicProfileVisibility} />
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-border/60 bg-card/50 p-4 space-y-3 md:col-span-2">
+                <div className="text-sm font-semibold">Profile bio</div>
+                <Textarea
+                  value={bioDraft}
+                  onChange={(event) => {
+                    const next = event.target.value.slice(0, TEXT_CONSTRAINTS.MAX_BIO_LENGTH)
+                    setBioDraft(next)
+                    setBioSaved(false)
+                  }}
+                  maxLength={TEXT_CONSTRAINTS.MAX_BIO_LENGTH}
+                  rows={4}
+                  placeholder={showAccountControls ? "Share something about you..." : "Login to edit your bio"}
+                  disabled={!showAccountControls || accountBusy}
+                />
+                <div className="flex items-center justify-between text-xs text-muted-foreground">
+                  <span>{bioDraft.length}/{TEXT_CONSTRAINTS.MAX_BIO_LENGTH} characters</span>
+                  {bioSaved ? <span className="text-primary">Saved</span> : null}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="gap-2"
+                    onClick={saveBio}
+                    disabled={!showAccountControls || bioSaving || accountBusy}
+                  >
+                    {bioSaving ? "Saving..." : "Save bio"}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className="gap-2"
+                    onClick={() => setBioDraft(accountUser?.bio ?? "")}
+                    disabled={!showAccountControls || accountBusy}
+                  >
+                    Reset
+                  </Button>
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-border/60 bg-card/50 p-4 space-y-2 md:col-span-2">
+                <div className="text-sm font-semibold">Account overview</div>
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  <div className="rounded-lg border border-border/60 bg-background/60 p-3">
+                    <div className="text-xs text-muted-foreground">Wishlist</div>
+                    <div className="text-lg font-semibold">{accountStats.wishlist}</div>
+                  </div>
+                  <div className="rounded-lg border border-border/60 bg-background/60 p-3">
+                    <div className="text-xs text-muted-foreground">Favorites</div>
+                    <div className="text-lg font-semibold">{accountStats.favorites}</div>
+                  </div>
+                  <div className="rounded-lg border border-border/60 bg-background/60 p-3">
+                    <div className="text-xs text-muted-foreground">View history</div>
+                    <div className="text-lg font-semibold">{accountStats.viewHistory}</div>
+                  </div>
+                  <div className="rounded-lg border border-border/60 bg-background/60 p-3">
+                    <div className="text-xs text-muted-foreground">Search history</div>
+                    <div className="text-lg font-semibold">{accountStats.searchHistory}</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -791,7 +1404,56 @@ export function SettingsPage() {
       </Card>
 
       <Card className="border-border/60">
-        <CardContent className="p-6 space-y-4">
+        <CardContent className="p-6 space-y-6">
+          <div>
+            <h2 className="text-lg font-semibold">Download Speed Limit</h2>
+            <p className="text-sm text-muted-foreground">Control maximum download speed to prevent network congestion.</p>
+          </div>
+
+          <div className="space-y-3">
+            <label className="text-sm font-medium">Speed preset</label>
+            <Select
+              value={downloadSpeedPreset}
+              onValueChange={async (v) => {
+                setDownloadSpeedPreset(v as DownloadSpeedPreset)
+                try {
+                  await window.ucSettings?.set?.('downloadSpeedPreset', v)
+                } catch {}
+              }}
+            >
+              <SelectTrigger className="h-12">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {DOWNLOAD_SPEED_PRESETS.map((preset) => {
+                  const displaySpeed = preset.bytesPerSecond === 0 ? 'Unlimited' : `${formatBytes(preset.bytesPerSecond)}/s`
+                  return (
+                    <SelectItem key={preset.key} value={preset.key}>
+                      <div className="flex items-center gap-3">
+                        <span>{preset.label}</span>
+                        <span className="text-xs text-muted-foreground">({displaySpeed})</span>
+                      </div>
+                    </SelectItem>
+                  )
+                })}
+              </SelectContent>
+            </Select>
+            <div className="rounded-lg border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-xs text-blue-200">
+              <p className="font-semibold mb-1">Speed Presets:</p>
+              <ul className="space-y-1 text-blue-100">
+                <li>• <strong>High (Max Speed):</strong> Downloads as fast as possible (unlimited)</li>
+                <li>• <strong>Normal (Not Prioritized):</strong> 10 MB/s - Balanced download speed</li>
+                <li>• <strong>Slow:</strong> 5 MB/s - Moderate speed limit</li>
+                <li>• <strong>Ultra Slow:</strong> 1 MB/s - Conservative speed limit</li>
+                <li>• <strong>Turtle Mode:</strong> 256 KB/s - Minimum speed for background downloads</li>
+              </ul>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="border-border/60">
+        <CardContent className="p-6 space-y-6">
           <div>
             <h2 className="text-lg font-semibold">Game Launch</h2>
             <p className="text-sm text-muted-foreground">
