@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from "react"
-import { useSearchParams } from "react-router-dom"
+import { useNavigate, useSearchParams } from "react-router-dom"
 import { GameCard } from "@/components/GameCard"
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -27,7 +27,7 @@ import { addSearchToHistory } from "@/lib/user-history"
 import { APIErrorBoundary } from "@/components/error-boundary"
 import { GamesGridSkeleton } from "@/components/api-fallback"
 import { ErrorMessage } from "@/components/ErrorMessage"
-import { apiFetch, apiUrl } from "@/lib/api"
+import { apiFetch } from "@/lib/api"
 
 interface Game {
   appid: string
@@ -57,6 +57,7 @@ interface Filters {
 }
 
 export function SearchPage() {
+  const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const [isFiltersOpen, setIsFiltersOpen] = useState(false)
   const [developerQuery, setDeveloperQuery] = useState("")
@@ -602,17 +603,13 @@ export function SearchPage() {
                 <p className="text-sm text-muted-foreground">Jump to wishlist or liked games.</p>
               </div>
               <div className="flex flex-wrap gap-2">
-                <Button asChild variant="outline" className="gap-2">
-                  <a href={apiUrl("/wishlist")} target="_blank" rel="noreferrer">
-                    <Star className="h-4 w-4" />
-                    Wishlist
-                  </a>
+                <Button variant="outline" className="gap-2" onClick={() => navigate("/wishlist")}>
+                  <Star className="h-4 w-4" />
+                  Wishlist
                 </Button>
-                <Button asChild variant="outline" className="gap-2">
-                  <a href={apiUrl("/liked")} target="_blank" rel="noreferrer">
-                    <Heart className="h-4 w-4" />
-                    Liked
-                  </a>
+                <Button variant="outline" className="gap-2" onClick={() => navigate("/liked")}>
+                  <Heart className="h-4 w-4" />
+                  Liked
                 </Button>
               </div>
             </CardHeader>

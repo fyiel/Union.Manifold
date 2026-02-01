@@ -8,6 +8,9 @@ export type DiscordAccount = {
   username: string
   displayName: string | null
   avatarUrl: string | null
+  customAvatarUrl?: string | null
+  customBannerUrl?: string | null
+  bio?: string | null
 }
 
 type DiscordAccountState = {
@@ -65,6 +68,30 @@ export function useDiscordAccount(): DiscordAccountState {
   const refresh = useCallback(async () => {
     setLoading(true)
     try {
+      const summaryRes = await apiFetch("/api/account/summary")
+      if (summaryRes.ok) {
+        const summary = await summaryRes.json()
+        const nextUser = summary?.user ?? null
+        setUser(nextUser)
+        if (typeof window !== "undefined") {
+          try {
+            if (nextUser?.customAvatarUrl) {
+              localStorage.setItem("uc_profile_avatar", nextUser.customAvatarUrl)
+            } else {
+              localStorage.removeItem("uc_profile_avatar")
+            }
+            if (nextUser?.customBannerUrl) {
+              localStorage.setItem("uc_profile_banner", nextUser.customBannerUrl)
+            } else {
+              localStorage.removeItem("uc_profile_banner")
+            }
+          } catch {
+            // ignore storage errors
+          }
+        }
+        return
+      }
+
       const res = await apiFetch("/api/comments/me")
       if (!res.ok) {
         const fallback = await fetchFallbackAccount()

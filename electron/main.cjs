@@ -447,6 +447,24 @@ const DEFAULT_BASE_URL = 'https://union-crax.xyz'
 let tray = null
 let mainWindow = null
 
+// Download speed limit constants (in bytes per second)
+const DOWNLOAD_SPEED_PRESETS = {
+  'unlimited': 0,
+  'high': 10 * 1024 * 1024,      // 10 MB/s
+  'normal': 5 * 1024 * 1024,      // 5 MB/s
+  'slow': 1 * 1024 * 1024,        // 1 MB/s
+  'ultra_slow': 256 * 1024        // 256 KB/s
+}
+
+const DEFAULT_SPEED_PRESET = 'unlimited'
+
+// Helper function to get current download speed limit in bytes per second
+function getDownloadSpeedLimit() {
+  const settings = cachedSettings || readSettings()
+  const preset = settings?.downloadSpeedPreset || DEFAULT_SPEED_PRESET
+  return DOWNLOAD_SPEED_PRESETS[preset] || 0
+}
+
 const gotTheLock = app.requestSingleInstanceLock()
 if (!gotTheLock) {
   app.quit()
@@ -2349,6 +2367,45 @@ function createWindow() {
       entry.state.lastBytes = received
       entry.state.lastTime = now
       entry.state.speedBps = speedBps
+      
+      // Apply speed limit
+      const speedLimit = getDownloadSpeedLimit()
+      if (speedLimit > 0 && speedBps > speedLimit) {
+        // Speed exceeds limit, pause the download temporarily
+        if (!item.isPaused()) {
+          try {
+            item.pause()
+          } catch (e) {
+            ucLog(`Failed to pause download for speed limiting: ${String(e)}`)
+          }
+        }
+        // Schedule resume after a delay
+        if (!entry.speedLimitResumeTimer) {
+          entry.speedLimitResumeTimer = setTimeout(() => {
+            try {
+              if (!item.isPaused() || item.getState() === 'cancelled') {
+                delete entry.speedLimitResumeTimer
+                return
+              }
+              item.resume()
+              delete entry.speedLimitResumeTimer
+            } catch (e) {
+              ucLog(`Failed to resume download after speed limit: ${String(e)}`)
+              delete entry.speedLimitResumeTimer
+            }
+          }, 100)
+        }
+      } else if (item.isPaused() && entry.speedLimitResumeTimer) {
+        // Speed is within limit and we have a pending resume timer
+        clearTimeout(entry.speedLimitResumeTimer)
+        delete entry.speedLimitResumeTimer
+        try {
+          item.resume()
+        } catch (e) {
+          ucLog(`Failed to resume download: ${String(e)}`)
+        }
+      }
+      
       const remaining = total > 0 ? Math.max(0, total - received) : 0
       const etaSeconds = speedBps > 0 && remaining > 0 ? remaining / speedBps : null
         sendDownloadUpdate(mainWindow, {
@@ -2372,6 +2429,11 @@ function createWindow() {
     item.once('done', async (_event, state) => {
       uc_log(`download done handler start — downloadId=${downloadId} state=${state} url=${url}`)
       const entry = activeDownloads.get(downloadId)
+      // Clean up speed limit timer if it exists
+      if (entry && entry.speedLimitResumeTimer) {
+        clearTimeout(entry.speedLimitResumeTimer)
+        delete entry.speedLimitResumeTimer
+      }
       activeDownloads.delete(downloadId)
       let finalPath = entry?.savePath
       let extractionFailed = false
@@ -2843,6 +2905,11 @@ ipcMain.handle('uc:download-start', (event, payload) => {
 ipcMain.handle('uc:download-cancel', (_event, downloadId) => {
   const entry = activeDownloads.get(downloadId)
   if (entry) {
+    // Clean up speed limit timer
+    if (entry.speedLimitResumeTimer) {
+      clearTimeout(entry.speedLimitResumeTimer)
+      delete entry.speedLimitResumeTimer
+    }
     try {
       entry.item.cancel()
     } catch {}
