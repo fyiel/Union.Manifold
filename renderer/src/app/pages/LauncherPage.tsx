@@ -8,6 +8,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { SearchSuggestions } from "@/components/SearchSuggestions"
 import { ErrorMessage } from "@/components/ErrorMessage"
 import { AnimatedCounter } from "@/components/AnimatedCounter"
+import { OfflineBanner } from "@/components/OfflineBanner"
 import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious } from "@/components/ui/carousel"
 import {
   Pagination,
@@ -19,6 +20,7 @@ import {
 } from "@/components/ui/pagination"
 import { apiUrl } from "@/lib/api"
 import { formatNumber, generateErrorCode, ErrorTypes } from "@/lib/utils"
+import { useOnlineStatus } from "@/hooks/use-online-status"
 import { Hammer, SlidersHorizontal, Wifi, EyeOff, ArrowRight, Server, Search } from "lucide-react"
 
 const extractDeveloper = (description: string): string => {
@@ -62,6 +64,7 @@ interface Game {
 
 export function LauncherPage() {
   const navigate = useNavigate()
+  const isOnline = useOnlineStatus()
 
   const [games, setGames] = useState<Game[]>([])
   const [loading, setLoading] = useState(true)
@@ -85,6 +88,15 @@ export function LauncherPage() {
   useEffect(() => {
     loadGames()
   }, [])
+
+  // Auto-retry when coming back online
+  useEffect(() => {
+    if (isOnline && games.length === 0 && !loading) {
+      setGamesError(null)
+      setLoading(true)
+      loadGames(true)
+    }
+  }, [isOnline])
 
   useEffect(() => {
     if (typeof window === "undefined") return
@@ -187,6 +199,12 @@ export function LauncherPage() {
   }
 
   const fetchGames = async (): Promise<Game[]> => {
+    // Check offline before attempting fetch
+    if (typeof navigator !== "undefined" && !navigator.onLine) {
+      // Don't set an error — we'll show the offline banner instead
+      return []
+    }
+
     try {
       const response = await fetch(apiUrl("/api/games"))
 
@@ -210,6 +228,10 @@ export function LauncherPage() {
       }))
     } catch (error) {
       console.error("Error fetching games:", error)
+      // Only show error if we're actually online — offline state is handled by the banner
+      if (typeof navigator !== "undefined" && !navigator.onLine) {
+        return []
+      }
       setGamesError({
         type: "games",
         message: "Unable to load games. Please try again or contact support if the issue persists.",
@@ -533,7 +555,32 @@ export function LauncherPage() {
         </section>
       )}
 
-      {gamesError && (
+      {!isOnline && games.length === 0 && !loading && (
+        <OfflineBanner
+          onRetry={() => {
+            setGamesError(null)
+            setLoading(true)
+            loadGames(true)
+          }}
+        />
+      )}
+
+      {!isOnline && games.length > 0 && (
+        <section className="py-4 px-4">
+          <div className="container mx-auto max-w-4xl">
+            <OfflineBanner
+              variant="compact"
+              onRetry={() => {
+                setGamesError(null)
+                setLoading(true)
+                loadGames(true)
+              }}
+            />
+          </div>
+        </section>
+      )}
+
+      {gamesError && isOnline && (
         <section className="py-6 px-4">
           <div className="container mx-auto max-w-4xl">
             <div className="mb-6">
@@ -735,7 +782,21 @@ export function LauncherPage() {
             </div>
           )}
 
-          {featuredGames.length === 0 && !loading && (
+          {featuredGames.length === 0 && !loading && !isOnline && (
+            <div className="text-center py-20">
+              <div className="max-w-xl mx-auto">
+                <OfflineBanner
+                  onRetry={() => {
+                    setGamesError(null)
+                    setLoading(true)
+                    loadGames(true)
+                  }}
+                />
+              </div>
+            </div>
+          )}
+
+          {featuredGames.length === 0 && !loading && isOnline && (
             <div className="text-center py-20">
               <div className="max-w-xl mx-auto">
                 <ErrorMessage

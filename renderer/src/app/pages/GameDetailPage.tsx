@@ -12,6 +12,8 @@ import { formatNumber, hasOnlineMode, pickGameExecutable, proxyImageUrl } from "
 import type { Game } from "@/lib/types"
 import { useGamesData } from "@/hooks/use-games"
 import { addViewedGameToHistory, hasCookieConsent } from "@/lib/user-history"
+import { useOnlineStatus } from "@/hooks/use-online-status"
+import { OfflineBanner } from "@/components/OfflineBanner"
 import {
   AlertTriangle,
   Calendar,
@@ -41,6 +43,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 
 export function GameDetailPage() {
   const isWindows = typeof navigator !== 'undefined' && /windows/i.test(navigator.userAgent)
+  const isOnline = useOnlineStatus()
   const params = useParams()
   const { startGameDownload, resumeGroup, downloads, clearByAppid } = useDownloads()
   const { games, stats } = useGamesData()
@@ -357,6 +360,16 @@ export function GameDetailPage() {
   }
 
   if (error || !game) {
+    if (!isOnline) {
+      return (
+        <div className="space-y-4">
+          <OfflineBanner variant="compact" />
+          <div className="rounded-2xl border border-muted/40 bg-muted/10 px-4 py-3 text-sm text-muted-foreground">
+            This game isn't available offline. Check your Library for installed games.
+          </div>
+        </div>
+      )
+    }
     return (
       <div className="rounded-2xl border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
         {error || "Unable to load this game."}

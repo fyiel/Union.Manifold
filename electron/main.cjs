@@ -3132,6 +3132,116 @@ ipcMain.handle('uc:installed-save', (_event, appid, metadata) => {
   }
 })
 
+// Add an external game (downloaded outside UC.Direct or from the web version)
+ipcMain.handle('uc:add-external-game', async (_event, appid, metadata, gamePath) => {
+  try {
+    if (!appid || !metadata || !gamePath) {
+      return { ok: false, error: 'Missing required parameters' }
+    }
+
+    // Validate the path exists
+    if (!fs.existsSync(gamePath)) {
+      return { ok: false, error: 'The selected folder does not exist' }
+    }
+
+    const downloadRoot = ensureDownloadDir()
+    const folderName = safeFolderName((metadata && (metadata.name || metadata.gameName)) || appid || 'external')
+    const installedRoot = path.join(downloadRoot, installedDirName)
+    if (!fs.existsSync(installedRoot)) {
+      fs.mkdirSync(installedRoot, { recursive: true })
+    }
+
+    const gameFolder = path.join(installedRoot, folderName)
+    if (!fs.existsSync(gameFolder)) {
+      fs.mkdirSync(gameFolder, { recursive: true })
+    }
+
+    const manifestPath = path.join(gameFolder, INSTALLED_MANIFEST)
+    const manifest = {
+      appid: appid,
+      name: metadata.name || metadata.gameName || appid,
+      metadata: metadata,
+      installStatus: 'installed',
+      installedAt: Date.now(),
+      addedAt: Date.now(),
+      externalPath: gamePath,
+      isExternal: true,
+    }
+
+    // Compute metadata hash
+    try {
+      manifest.metadataHash = computeObjectHash(metadata)
+    } catch {}
+
+    uc_writeJsonSync(manifestPath, manifest)
+
+    // Create a symlink or junction to the external game folder so exe discovery works
+    const linkPath = path.join(gameFolder, 'game')
+    try {
+      // Remove existing link/dir if present
+      if (fs.existsSync(linkPath)) {
+        const stat = fs.lstatSync(linkPath)
+        if (stat.isSymbolicLink() || stat.isDirectory()) {
+          try { fs.unlinkSync(linkPath) } catch { try { fs.rmdirSync(linkPath) } catch {} }
+        }
+      }
+      // Use junction on Windows (no admin needed), symlink on others
+      if (process.platform === 'win32') {
+        fs.symlinkSync(gamePath, linkPath, 'junction')
+      } else {
+        fs.symlinkSync(gamePath, linkPath, 'dir')
+      }
+    } catch (linkErr) {
+      console.warn('[UC] Could not create link to external game folder:', linkErr.message)
+      // Not fatal — the externalPath in manifest can still be used
+    }
+
+    // Attempt to download and save the remote image locally
+    try {
+      if (metadata && metadata.image && typeof metadata.image === 'string' && /^https?:\/\//.test(metadata.image)) {
+        const ext = (metadata.image.split('?')[0].split('.').pop() || 'png').slice(0, 8)
+        const imageName = `image.${ext}`
+        const imagePath = path.join(gameFolder, imageName)
+        const ok = await downloadToFile(metadata.image, imagePath)
+        if (ok) {
+          const m = readJsonFile(manifestPath) || {}
+          m.metadata = m.metadata || {}
+          m.metadata.localImage = imagePath
+          uc_writeJsonSync(manifestPath, m)
+        }
+      }
+    } catch (imgErr) {
+      console.warn('[UC] Could not download image for external game:', imgErr.message)
+    }
+
+    // Update installed index
+    try { updateInstalledIndex(installedRoot) } catch {}
+
+    return { ok: true }
+  } catch (err) {
+    console.error('[UC] add-external-game failed', err)
+    return { ok: false, error: err.message || 'Failed to add external game' }
+  }
+})
+
+// Pick folder dialog for external game
+ipcMain.handle('uc:pick-external-game-folder', async () => {
+  try {
+    const result = await dialog.showOpenDialog({
+      title: 'Select Game Folder',
+      properties: ['openDirectory'],
+      buttonLabel: 'Select Folder'
+    })
+    if (result.canceled || !result.filePaths || result.filePaths.length === 0) {
+      return null
+    }
+    return result.filePaths[0]
+  } catch (err) {
+    console.error('[UC] pick-external-game-folder failed', err)
+    return null
+  }
+})
+
 ipcMain.handle('uc:installing-status-set', (_event, appid, status, error) => {
   try {
     const ok = updateInstallingManifestStatus(appid, status, error)

@@ -27,7 +27,9 @@ import { addSearchToHistory } from "@/lib/user-history"
 import { APIErrorBoundary } from "@/components/error-boundary"
 import { GamesGridSkeleton } from "@/components/api-fallback"
 import { ErrorMessage } from "@/components/ErrorMessage"
+import { OfflineBanner } from "@/components/OfflineBanner"
 import { apiFetch } from "@/lib/api"
+import { useOnlineStatus } from "@/hooks/use-online-status"
 
 interface Game {
   appid: string
@@ -61,6 +63,7 @@ export function SearchPage() {
   const [searchParams] = useSearchParams()
   const [isFiltersOpen, setIsFiltersOpen] = useState(false)
   const [developerQuery, setDeveloperQuery] = useState("")
+  const isOnline = useOnlineStatus()
 
   const normalizeSort = useCallback((value: string | null) => {
     const allowed = new Set([
@@ -157,6 +160,11 @@ export function SearchPage() {
   }
 
   const fetchGames = async (): Promise<{ items: Game[]; total: number }> => {
+    // Don't attempt API calls when offline
+    if (typeof navigator !== "undefined" && !navigator.onLine) {
+      return { items: [], total: 0 }
+    }
+
     try {
       const params = new URLSearchParams()
       if (appliedFilters.searchTerm) params.set("q", appliedFilters.searchTerm)
@@ -992,7 +1000,32 @@ export function SearchPage() {
         </div>
 
         <div>
-          {gamesError && (
+          {!isOnline && games.length === 0 && !loading && (
+            <div className="mb-6">
+              <OfflineBanner
+                onRetry={() => {
+                  setGamesError(null)
+                  setLoading(true)
+                  loadGames()
+                }}
+              />
+            </div>
+          )}
+
+          {!isOnline && (games.length > 0 || loading) && (
+            <div className="mb-6">
+              <OfflineBanner
+                variant="compact"
+                onRetry={() => {
+                  setGamesError(null)
+                  setLoading(true)
+                  loadGames()
+                }}
+              />
+            </div>
+          )}
+
+          {gamesError && isOnline && (
             <div className="mb-6">
               <div className="mb-6">
                 <ErrorMessage
