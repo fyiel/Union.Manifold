@@ -1,5 +1,53 @@
 # Changelog
 
+## Version 0.8.0 - 2026-02-07
+
+### Highlights
+
+Introducing the **External Games System** — you can now add any game from your PC to UnionCrax Direct, even if it's not in the UC catalog. Use the **+** button in the bottom bar to point at any game folder, optionally match it to a UC title, or keep it fully custom. Once added, external games appear in your library with play, shortcut, and settings support just like regular installs.
+
+A full **metadata editor** lets you set the name, description, developer, genres, and pick local images for both the card thumbnail and the detail page banner. Games that matched a UC catalog entry show a subtle blur on details to signal the metadata came from a different source, while fully custom entries display your info as-is with an "Externally Added" badge.
+
+---
+
+### New Features
+
+- **Add External Games** — plus button in the bottom bar opens a modal to select any game folder on your PC. Auto-detects executables and optionally matches against the UC catalog via image lookup.
+- **Edit Game Metadata modal** — full editor for external game details: name, description, developer, version, size, genres, card image, and banner image. Accessible from the game detail page and the library card settings.
+- **Image file picker** — native file dialog to pick local images (jpg, png, gif, webp, bmp) for card art and banners.
+- **Metadata persistence** — metadata updates are saved into the installed manifest and survive app restarts.
+- **Edit Details in Library** — external games show an "Edit Details" option in the library card settings popup, with context-aware "Unlink Game" labeling.
+- **Conditional detail blur** — UC-matched external games show blurred stats/details (since catalog data may not match the actual installed version), while fully custom entries do not.
+- **"Externally Added" badge** — yellow badge in the hero section for all external games.
+
+### Improvements
+
+- **Hover-to-change image previews** — card and banner image slots sit side-by-side in the editor; hover to reveal a "Change" overlay, click to pick a new file.
+- **Local image path support** — `proxyImageUrl` now correctly converts Windows paths to `file:///` URLs instead of routing them through the remote image proxy.
+- **External games skip API fetch** — games with `external-` IDs load directly from the local manifest, eliminating 404 network errors.
+- **Desktop shortcut exe auto-detection** — "Create Desktop Shortcut" now runs auto-detection before falling back to the exe picker.
+
+### Fixes
+
+- Fixed `proxyImageUrl` regex that failed to detect single-backslash Windows paths, causing local images to be sent to the remote proxy and return 403s.
+- Fixed `DownBar.tsx` missing opening JSX Fragment tag causing a build error.
+- Fixed nested `<button>` inside `<button>` hydration error in the metadata modal image clear buttons.
+- Fixed external games triggering repeated 404 API fetches on the game detail page.
+- Fixed `AddGameModal` closing prematurely and the bottom bar plus button navigating away instead of opening the modal.
+
+### Files touched
+
+- [electron/main.cjs](electron/main.cjs)
+- [electron/preload.cjs](electron/preload.cjs)
+- [renderer/src/vite-env.d.ts](renderer/src/vite-env.d.ts)
+- [renderer/src/lib/utils.ts](renderer/src/lib/utils.ts)
+- [renderer/src/components/EditGameMetadataModal.tsx](renderer/src/components/EditGameMetadataModal.tsx)
+- [renderer/src/components/DownBar.tsx](renderer/src/components/DownBar.tsx)
+- [renderer/src/app/pages/GameDetailPage.tsx](renderer/src/app/pages/GameDetailPage.tsx)
+- [renderer/src/app/pages/LibraryPage.tsx](renderer/src/app/pages/LibraryPage.tsx)
+
+---
+
 ## Version 0.7.2 - 2026-01-31
 
 ### Highlights

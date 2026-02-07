@@ -103,7 +103,7 @@ export function SearchPage() {
 
   const [draftFilters, setDraftFilters] = useState<Filters>({
     searchTerm: searchParams.get("q") || "",
-    genres: searchParams.get("nsfw") === "1" ? ["nsfw"] : [],
+    genres: [],
     developers: [],
     sizeRange: [0, 500],
     sortBy: normalizeSort(searchParams.get("sort")),
@@ -113,7 +113,7 @@ export function SearchPage() {
 
   const [appliedFilters, setAppliedFilters] = useState<Filters>({
     searchTerm: searchParams.get("q") || "",
-    genres: searchParams.get("nsfw") === "1" ? ["nsfw"] : [],
+    genres: [],
     developers: [],
     sizeRange: [0, 500],
     sortBy: normalizeSort(searchParams.get("sort")),
@@ -169,20 +169,15 @@ export function SearchPage() {
       const params = new URLSearchParams()
       if (appliedFilters.searchTerm) params.set("q", appliedFilters.searchTerm)
 
-      const baseGenres = appliedFilters.genres
-      const nsfwGenre = "nsfw"
-      const genreFilters = appliedFilters.nsfwOnly && !baseGenres.some((g) => String(g).toLowerCase() === nsfwGenre)
-        ? [...baseGenres, nsfwGenre]
-        : baseGenres
-
-      genreFilters.forEach((g) => params.append("genres", g))
+      appliedFilters.genres.forEach((g) => params.append("genres", g))
       appliedFilters.developers.forEach((d) => params.append("developers", d))
       if (appliedFilters.online) params.set("online", "true")
 
-      if (appliedFilters.sortBy) params.set("sort", appliedFilters.sortBy)
+      const allowNsfw = Boolean(appliedFilters.nsfwOnly)
+      params.set("nsfw", allowNsfw ? "true" : "false")
+      // NSFW mode controls inclusion via the API; it does not force an NSFW-only filter.
 
-      const wantsNsfw = appliedFilters.nsfwOnly || genreFilters.some((g) => String(g).toLowerCase() === "nsfw")
-      if (wantsNsfw) params.set("nsfw", "true")
+      if (appliedFilters.sortBy) params.set("sort", appliedFilters.sortBy)
 
       params.set("page", currentPage.toString())
       params.set("limit", itemsPerPage.toString())
@@ -333,7 +328,7 @@ export function SearchPage() {
 
   const filterOptions = useMemo(() => {
     return {
-      allGenres: meta.genres,
+      allGenres: meta.genres.filter((genre) => String(genre).toLowerCase() !== "nsfw"),
       allDevelopers: meta.developers.filter((developer) => isValidDeveloperName(developer)),
     }
   }, [meta])
@@ -353,12 +348,6 @@ export function SearchPage() {
 
     if (appliedFilters.online) {
       filtered = filtered.filter((game) => hasOnlineMode(game.hasCoOp))
-    }
-
-    if (appliedFilters.nsfwOnly) {
-      filtered = filtered.filter(
-        (game) => Array.isArray(game.genres) && game.genres.some((g) => String(g).toLowerCase() === "nsfw")
-      )
     }
 
     if (appliedFilters.sortBy !== "random") {
@@ -672,11 +661,11 @@ export function SearchPage() {
                         </div>
 
                         <div className="space-y-2">
-                          <label className="text-sm font-medium">NSFW Only</label>
+                          <label className="text-sm font-medium">NSFW Mode</label>
                           <div className="flex items-center justify-between gap-3 rounded-xl border border-border/60 bg-background/40 px-4 py-3">
                             <div className="space-y-0.5">
                               <p className="text-sm font-semibold text-foreground">Show NSFW games</p>
-                              <p className="text-xs text-muted-foreground">Only shows games tagged as NSFW.</p>
+                              <p className="text-xs text-muted-foreground">Includes NSFW titles in results.</p>
                             </div>
                             <Switch
                               checked={Boolean(draftFilters.nsfwOnly)}
@@ -950,7 +939,7 @@ export function SearchPage() {
                     </Badge>
                   )}
 
-                  {appliedFilters.genres.map((genre) => (
+                  {appliedFilters.genres.filter((genre) => String(genre).toLowerCase() !== "nsfw").map((genre) => (
                     <Badge
                       key={genre}
                       variant="outline"

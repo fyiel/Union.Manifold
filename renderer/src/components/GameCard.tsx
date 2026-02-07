@@ -49,7 +49,9 @@ export const GameCard = memo(function GameCard({
   const isCompact = size === "compact"
 
   const genres = Array.isArray(game.genres) ? game.genres : []
+  const displayGenres = genres.filter((genre) => String(genre).toLowerCase() !== "nsfw")
   const isNSFW = genres.some((genre) => genre.toLowerCase() === "nsfw")
+  const [allowNsfwReveal, setAllowNsfwReveal] = useState(false)
   const displayStats = initialStats || hoveredStats || { downloads: 0, views: 0 }
 
   const { openPath } = useDownloads()
@@ -85,6 +87,28 @@ export const GameCard = memo(function GameCard({
   const [adminPromptOpen, setAdminPromptOpen] = useState(false)
   const [pendingExePath, setPendingExePath] = useState<string | null>(null)
   const [shortcutModalOpen, setShortcutModalOpen] = useState(false)
+
+  // Sync NSFW reveal preference from localStorage
+  useEffect(() => {
+    const syncPreference = () => {
+      try {
+        setAllowNsfwReveal(localStorage.getItem("uc_show_nsfw") === "1")
+      } catch {
+        setAllowNsfwReveal(false)
+      }
+    }
+    syncPreference()
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === "uc_show_nsfw") syncPreference()
+    }
+    const onPreferenceChange = () => syncPreference()
+    window.addEventListener("storage", onStorage)
+    window.addEventListener("uc_nsfw_pref", onPreferenceChange)
+    return () => {
+      window.removeEventListener("storage", onStorage)
+      window.removeEventListener("uc_nsfw_pref", onPreferenceChange)
+    }
+  }, [])
 
   useEffect(() => {
     let mounted = true
@@ -397,13 +421,19 @@ export const GameCard = memo(function GameCard({
               src={proxyImageUrl((typeof navigator !== 'undefined' && !navigator.onLine && previewImage) ? previewImage : game.image) || "/banner.png"}
               alt={game.name}
               className={`h-full w-full object-cover transition-all duration-500 group-hover:scale-105 group-hover:brightness-110 ${
-                isNSFW ? "blur-md" : ""
-              } ${imageLoaded ? "blur-none" : "blur-lg"}`}
+                isNSFW
+                  ? (allowNsfwReveal ? "blur-md group-hover:blur-none" : "blur-md")
+                  : (imageLoaded ? "" : "blur-lg")
+              }`}
               loading="lazy"
               onLoad={() => setImageLoaded(true)}
             />
-            {isNSFW && (
-              <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
+            {isNSFW && !isInstalled && (
+              <div
+                className={`absolute inset-0 bg-black/40 flex items-center justify-center transition-opacity duration-300 ${
+                  allowNsfwReveal ? "group-hover:opacity-0" : ""
+                }`}
+              >
                 <div className="bg-red-600 text-white px-4 py-2 rounded-full text-sm font-bold">18+</div>
               </div>
             )}
@@ -497,7 +527,7 @@ export const GameCard = memo(function GameCard({
             </p>
 
             <div className={`flex flex-wrap gap-2 ${isCompact ? "mb-3" : "mb-4"}`}>
-              {genres.slice(0, isCompact ? 1 : 2).map((genre) => (
+              {displayGenres.slice(0, isCompact ? 1 : 2).map((genre) => (
                 <Badge
                   key={genre}
                   variant="secondary"
@@ -508,14 +538,14 @@ export const GameCard = memo(function GameCard({
                   {genre}
                 </Badge>
               ))}
-              {genres.length > (isCompact ? 1 : 2) && (
+              {displayGenres.length > (isCompact ? 1 : 2) && (
                 <Badge
                   variant="outline"
                   className={`text-xs rounded-full border-primary/30 text-primary ${
                     isCompact ? "px-2.5 py-0.5" : "px-3 py-1"
                   }`}
                 >
-                  +{genres.length - (isCompact ? 1 : 2)}
+                  +{displayGenres.length - (isCompact ? 1 : 2)}
                 </Badge>
               )}
             </div>

@@ -1426,7 +1426,9 @@ function listExecutables(rootDir, maxDepth, maxResults) {
     }
     for (const entry of entries) {
       const fullPath = path.join(current.dir, entry.name)
-      if (entry.isDirectory()) {
+      // Follow symlinks and junctions (readdirSync withFileTypes reports them as symlinks, not dirs)
+      const isDir = entry.isDirectory() || (entry.isSymbolicLink() && (() => { try { return fs.statSync(fullPath).isDirectory() } catch { return false } })())
+      if (isDir) {
         if (current.depth < maxDepth) {
           pending.push({ dir: fullPath, depth: current.depth + 1 })
         }
@@ -3132,6 +3134,60 @@ ipcMain.handle('uc:installed-save', (_event, appid, metadata) => {
   }
 })
 
+// Update metadata for an already-installed game (used by Edit Details for external games)
+ipcMain.handle('uc:installed-update-metadata', async (_event, appid, updates) => {
+  try {
+    if (!appid || !updates) return { ok: false, error: 'Missing parameters' }
+    const roots = listDownloadRoots()
+    for (const baseRoot of roots) {
+      const root = path.join(baseRoot, installedDirName)
+      if (!fs.existsSync(root)) continue
+      const entries = fs.readdirSync(root, { withFileTypes: true })
+      for (const dirent of entries) {
+        if (!dirent.isDirectory()) continue
+        const folder = path.join(root, dirent.name)
+        const manifestPath = path.join(folder, INSTALLED_MANIFEST)
+        const manifest = readJsonFile(manifestPath)
+        if (!manifest || manifest.appid !== appid) continue
+
+        // Merge updates into metadata
+        manifest.metadata = manifest.metadata || {}
+        for (const key of Object.keys(updates)) {
+          if (updates[key] !== undefined) {
+            manifest.metadata[key] = updates[key]
+          }
+        }
+        // Also update top-level name if changed
+        if (updates.name) manifest.name = updates.name
+
+        try { manifest.metadataHash = computeObjectHash(manifest.metadata) } catch {}
+        uc_writeJsonSync(manifestPath, manifest)
+
+        // If image URL changed, download & cache the new image
+        if (updates.image && typeof updates.image === 'string' && /^https?:\/\//.test(updates.image)) {
+          try {
+            const ext = (updates.image.split('?')[0].split('.').pop() || 'png').slice(0, 8)
+            const imageName = `image.${ext}`
+            const imagePath = path.join(folder, imageName)
+            const ok = await downloadToFile(updates.image, imagePath)
+            if (ok) {
+              manifest.metadata.localImage = imagePath
+              uc_writeJsonSync(manifestPath, manifest)
+            }
+          } catch {}
+        }
+
+        try { updateInstalledIndex(root) } catch {}
+        return { ok: true }
+      }
+    }
+    return { ok: false, error: 'Game not found in installed manifests' }
+  } catch (err) {
+    console.error('[UC] installed-update-metadata failed', err)
+    return { ok: false, error: err.message || 'Failed to update metadata' }
+  }
+})
+
 // Add an external game (downloaded outside UC.Direct or from the web version)
 ipcMain.handle('uc:add-external-game', async (_event, appid, metadata, gamePath) => {
   try {
@@ -3238,6 +3294,28 @@ ipcMain.handle('uc:pick-external-game-folder', async () => {
     return result.filePaths[0]
   } catch (err) {
     console.error('[UC] pick-external-game-folder failed', err)
+    return null
+  }
+})
+
+// Pick an image file for game metadata
+ipcMain.handle('uc:pick-image', async () => {
+  try {
+    const result = await dialog.showOpenDialog({
+      title: 'Select Image',
+      properties: ['openFile'],
+      filters: [
+        { name: 'Images', extensions: ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'] },
+        { name: 'All Files', extensions: ['*'] }
+      ],
+      buttonLabel: 'Select Image'
+    })
+    if (result.canceled || !result.filePaths || result.filePaths.length === 0) {
+      return null
+    }
+    return result.filePaths[0]
+  } catch (err) {
+    console.error('[UC] pick-image failed', err)
     return null
   }
 })
@@ -3428,7 +3506,19 @@ ipcMain.handle('uc:game-exe-list', (_event, appid) => {
   try {
     const folder = findInstalledFolderByAppid(appid)
     if (!folder) return { ok: false, error: 'not-found', exes: [] }
-    const exes = listExecutables(folder, 4, 50)
+    let exes = listExecutables(folder, 4, 50)
+    // For external games, if no exes found via junction, try the externalPath directly
+    if (exes.length === 0) {
+      try {
+        const manifestPath = path.join(folder, INSTALLED_MANIFEST)
+        const manifest = readJsonFile(manifestPath)
+        const extPath = manifest?.externalPath || (manifest?.metadata?.externalPath)
+        if (extPath && fs.existsSync(extPath)) {
+          exes = listExecutables(extPath, 4, 50)
+          return { ok: true, folder: extPath, exes }
+        }
+      } catch {}
+    }
     return { ok: true, folder, exes }
   } catch (err) {
     console.error('[UC] game-exe-list failed', err)

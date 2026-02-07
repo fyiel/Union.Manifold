@@ -102,10 +102,10 @@ export function proxyImageUrl(imageUrl: string): string {
 
   // detect absolute Windows paths like C:\ or UNC paths starting with \\ and convert to file:// URL
   try {
-    if (/^[A-Za-z]:\\\\/.test(imageUrl) || imageUrl.startsWith('\\\\')) {
+    if (/^[A-Za-z]:\\/.test(imageUrl) || imageUrl.startsWith('\\')) {
       // normalize backslashes to forward slashes and ensure proper file:// prefix
-      const normalized = imageUrl.replace(/\\\\/g, '/').replace(/\\/g, '/')
-      return `file://${encodeURI(normalized)}`
+      const normalized = imageUrl.replace(/\\/g, '/')
+      return `file:///${encodeURI(normalized)}`
     }
   } catch {}
 

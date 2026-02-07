@@ -71,11 +71,11 @@ export function AddGameModal({ open, onOpenChange }: AddGameModalProps) {
 
     setSearching(true)
     try {
-      const response = await fetch(apiUrl(`/api/games/search?q=${encodeURIComponent(name.trim())}`))
+      const response = await fetch(apiUrl(`/api/games/suggestions?q=${encodeURIComponent(name.trim())}&limit=5&nsfw=true`))
       if (!response.ok) throw new Error("Search failed")
       const data = await response.json()
 
-      const results: MatchedGame[] = (Array.isArray(data) ? data : data.results || [])
+      const results: MatchedGame[] = (Array.isArray(data?.items) ? data.items : Array.isArray(data) ? data : data.results || [])
         .slice(0, 5)
         .map((game: any) => ({
           appid: game.appid,
@@ -190,9 +190,6 @@ export function AddGameModal({ open, onOpenChange }: AddGameModalProps) {
         setSuccess(true)
         // Dispatch event so library refreshes
         window.dispatchEvent(new Event("uc_game_installed"))
-        setTimeout(() => {
-          onOpenChange(false)
-        }, 1200)
       } else {
         setError(result?.error || "Failed to add game. Please try again.")
       }
