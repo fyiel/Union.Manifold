@@ -80,8 +80,9 @@ export function SearchSuggestions({
         return
       }
       try {
+        // Always include NSFW titles in suggestions; UI will blur/reveal based on preference.
         const res = await apiFetch(
-          `/api/games/suggestions?q=${encodeURIComponent(debouncedValue)}&limit=20&scope=${encodeURIComponent(searchScope)}&nsfw=${showNsfw}`,
+          `/api/games/suggestions?q=${encodeURIComponent(debouncedValue)}&limit=20&scope=${encodeURIComponent(searchScope)}&nsfw=true`,
         )
         if (!res.ok) return
         const data = await res.json()
@@ -106,7 +107,7 @@ export function SearchSuggestions({
       if (browseLoading) return
       setBrowseLoading(true)
       try {
-        const res = await apiFetch(`/api/games/browse?limit=6&nsfw=${showNsfw}`)
+        const res = await apiFetch(`/api/games/browse?limit=6&nsfw=true`)
         if (!res.ok) return
         const data = await res.json()
         if (ignore) return
@@ -263,26 +264,8 @@ export function SearchSuggestions({
 
   const showPanel = showSuggestions
 
-  const filteredResults = useMemo(() => {
-    return showNsfw
-      ? results
-      : results.filter((game) => {
-          const genres = Array.isArray(game?.genres) ? game.genres : []
-          return !genres.some((g: any) => String(g).toLowerCase() === "nsfw")
-        })
-  }, [results, showNsfw])
-
-  const filteredDidYouMean = useMemo(() => {
-    return showNsfw
-      ? didYouMeanResults
-      : didYouMeanResults.filter((game) => {
-          const genres = Array.isArray(game?.genres) ? game.genres : []
-          return !genres.some((g: any) => String(g).toLowerCase() === "nsfw")
-        })
-  }, [didYouMeanResults, showNsfw])
-
-  const hasResults = filteredResults.length > 0
-  const searchResults = { items: filteredResults, total: resultsTotal || filteredResults.length }
+  const hasResults = results.length > 0
+  const searchResults = { items: results, total: resultsTotal || results.length }
 
   useEffect(() => {
     if (showPanel && popup) {
@@ -322,14 +305,14 @@ export function SearchSuggestions({
   const activeItems = useMemo(() => {
     if (!isQueryTooShort && trimmedValue.length >= 2) {
       if (hasResults) {
-        return filteredResults.map((game) => ({
+        return results.map((game) => ({
           key: `result-${game.appid}`,
           type: "game" as const,
           game,
         }))
       }
-      if (filteredDidYouMean.length > 0) {
-        return filteredDidYouMean.map((game) => ({
+      if (didYouMeanResults.length > 0) {
+        return didYouMeanResults.map((game) => ({
           key: `didyoumean-${game.appid}`,
           type: "game" as const,
           game,
@@ -337,7 +320,7 @@ export function SearchSuggestions({
       }
     }
     return browseItems
-  }, [browseItems, filteredDidYouMean, filteredResults, hasResults, isQueryTooShort, trimmedValue.length])
+  }, [browseItems, didYouMeanResults, results, hasResults, isQueryTooShort, trimmedValue.length])
 
   const activeItemKey = activeItems[activeIndex]?.key
   const activeItemId = activeItemKey ? `search-suggestion-${activeItemKey}` : undefined
@@ -503,7 +486,11 @@ export function SearchSuggestions({
             >
               <div className="h-12 w-12 flex-shrink-0 overflow-hidden rounded-lg bg-muted/40">
                 {game.image ? (
-                  <img src={proxyImageUrl(game.image)} alt={game.name} className="h-full w-full object-cover" />
+                  <img
+                    src={proxyImageUrl(game.image)}
+                    alt={game.name}
+                    className={`h-full w-full object-cover ${Array.isArray(game.genres) && game.genres.some((g: string) => g.toLowerCase() === "nsfw") ? (showNsfw ? "blur-sm group-hover:blur-none" : "blur-sm") : ""}`}
+                  />
                 ) : (
                   <div className="h-full w-full bg-muted" />
                 )}
@@ -527,10 +514,10 @@ export function SearchSuggestions({
         <div className="px-4 py-6 text-sm text-muted-foreground">No results found.</div>
       )}
 
-      {!isQueryTooShort && trimmedValue.length >= 2 && !hasResults && filteredDidYouMean.length > 0 && (
+      {!isQueryTooShort && trimmedValue.length >= 2 && !hasResults && didYouMeanResults.length > 0 && (
         <div className="p-2" role="listbox" id={resultsListId}>
           <div className="px-2 pt-2 text-xs uppercase tracking-wide text-muted-foreground">Did you mean</div>
-          {filteredDidYouMean.map((game) => (
+          {didYouMeanResults.map((game) => (
             <button
               key={`didyoumean-${game.appid}`}
               type="button"
@@ -551,7 +538,11 @@ export function SearchSuggestions({
             >
               <div className="h-12 w-12 flex-shrink-0 overflow-hidden rounded-lg bg-muted/40">
                 {game.image ? (
-                  <img src={proxyImageUrl(game.image)} alt={game.name} className="h-full w-full object-cover" />
+                  <img
+                    src={proxyImageUrl(game.image)}
+                    alt={game.name}
+                    className={`h-full w-full object-cover ${Array.isArray(game.genres) && game.genres.some((g: string) => g.toLowerCase() === "nsfw") ? (showNsfw ? "blur-sm group-hover:blur-none" : "blur-sm") : ""}`}
+                  />
                 ) : (
                   <div className="h-full w-full bg-muted" />
                 )}
@@ -652,7 +643,11 @@ export function SearchSuggestions({
                 >
                   <div className="h-10 w-10 flex-shrink-0 overflow-hidden rounded-lg bg-muted/40">
                     {game.image ? (
-                      <img src={proxyImageUrl(game.image)} alt={game.name} className="h-full w-full object-cover" />
+                      <img
+                        src={proxyImageUrl(game.image)}
+                        alt={game.name}
+                        className={`h-full w-full object-cover ${Array.isArray(game.genres) && game.genres.some((g: string) => g.toLowerCase() === "nsfw") ? (showNsfw ? "blur-sm group-hover:blur-none" : "blur-sm") : ""}`}
+                      />
                     ) : (
                       <div className="h-full w-full bg-muted" />
                     )}
@@ -701,7 +696,11 @@ export function SearchSuggestions({
                 >
                   <div className="h-10 w-10 flex-shrink-0 overflow-hidden rounded-lg bg-muted/40">
                     {game.image ? (
-                      <img src={proxyImageUrl(game.image)} alt={game.name} className="h-full w-full object-cover" />
+                      <img
+                        src={proxyImageUrl(game.image)}
+                        alt={game.name}
+                        className={`h-full w-full object-cover ${Array.isArray(game.genres) && game.genres.some((g: string) => g.toLowerCase() === "nsfw") ? (showNsfw ? "blur-sm group-hover:blur-none" : "blur-sm") : ""}`}
+                      />
                     ) : (
                       <div className="h-full w-full bg-muted" />
                     )}
@@ -752,7 +751,11 @@ export function SearchSuggestions({
                 >
                   <div className="h-10 w-10 flex-shrink-0 overflow-hidden rounded-lg bg-muted/40">
                     {game.image ? (
-                      <img src={proxyImageUrl(game.image)} alt={game.name} className="h-full w-full object-cover" />
+                      <img
+                        src={proxyImageUrl(game.image)}
+                        alt={game.name}
+                        className={`h-full w-full object-cover ${Array.isArray(game.genres) && game.genres.some((g: string) => g.toLowerCase() === "nsfw") ? (showNsfw ? "blur-sm group-hover:blur-none" : "blur-sm") : ""}`}
+                      />
                     ) : (
                       <div className="h-full w-full bg-muted" />
                     )}

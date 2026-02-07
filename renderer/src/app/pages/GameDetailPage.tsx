@@ -29,15 +29,18 @@ import {
   Settings,
   Square,
   Trash2,
+  Unlink2,
   User,
   Wifi,
   X,
   FolderOpen,
+  Info,
 } from "lucide-react"
 import { ExePickerModal } from "@/components/ExePickerModal"
 import { AdminPromptModal } from "@/components/AdminPromptModal"
 import { DownloadHostModal } from "@/components/DownloadHostModal"
 import { DesktopShortcutModal } from "@/components/DesktopShortcutModal"
+import { EditGameMetadataModal } from "@/components/EditGameMetadataModal"
 import { gameLogger } from "@/lib/logger"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 
@@ -78,6 +81,7 @@ export function GameDetailPage() {
   const [actionMenuOpen, setActionMenuOpen] = useState(false)
   const [shortcutFeedback, setShortcutFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
   const [pendingDeleteAction, setPendingDeleteAction] = useState<"installed" | "installing" | null>(null)
+  const [editMetadataOpen, setEditMetadataOpen] = useState(false)
 
   const appid = params.id || ""
 
@@ -95,15 +99,25 @@ export function GameDetailPage() {
       try {
         setLoading(true)
         setError(null)
-        const response = await fetch(apiUrl(`/api/games/${encodeURIComponent(appid)}`))
-        if (!response.ok) {
-          throw new Error(`Unable to load game (${response.status})`)
+
+        // External games don't exist on the API — load directly from local manifest
+        const isExternalId = appid.startsWith('external-')
+
+        if (!isExternalId) {
+          const response = await fetch(apiUrl(`/api/games/${encodeURIComponent(appid)}`))
+          if (!response.ok) {
+            throw new Error(`Unable to load game (${response.status})`)
+          }
+          const data = await response.json()
+          setGame(data)
+          persistGameName(appid, data?.name)
+          window.dispatchEvent(new CustomEvent("uc_game_name", { detail: { appid, name: data?.name } }))
+          setSelectedImage(data.splash || data.image)
+          return
         }
-        const data = await response.json()
-        setGame(data)
-        persistGameName(appid, data?.name)
-        window.dispatchEvent(new CustomEvent("uc_game_name", { detail: { appid, name: data?.name } }))
-        setSelectedImage(data.splash || data.image)
+
+        // For external (or offline fallback), load from installed manifest
+        throw new Error('load from manifest')
       } catch (err) {
         // Try fallback: ask main process for installed manifest
         try {
@@ -122,7 +136,10 @@ export function GameDetailPage() {
             }
           }
         } catch {}
-        setError(err instanceof Error ? err.message : "Failed to load game")
+        // Don't show error for external games that simply need manifest
+        if (!appid.startsWith('external-')) {
+          setError(err instanceof Error ? err.message : "Failed to load game")
+        }
       } finally {
         setLoading(false)
       }
@@ -380,6 +397,8 @@ export function GameDetailPage() {
   const effectiveDownloadCount = downloadCount || stats[game.appid]?.downloads || 0
   const effectiveViewCount = viewCount || stats[game.appid]?.views || 0
   const isPopular = popularAppIds.has(game.appid)
+  const isExternalGame = Boolean(installedManifest?.isExternal)
+  const isUCMatched = isExternalGame && game.source !== "external"
   const appDownloads = downloads.filter((item) => item.appid === game.appid)
   const isActiveDownload = appDownloads.some((item) =>
     ["downloading", "paused", "extracting", "installing"].includes(item.status)
@@ -593,6 +612,12 @@ export function GameDetailPage() {
         const result = await window.ucDownloads.listGameExecutables(game.appid)
         exes = result?.exes || []
         folder = result?.folder || null
+
+        // Try auto-detection before asking the user
+        const { pick, confident } = pickGameExecutable(exes, game.name, game.source, folder)
+        if (pick && confident) {
+          targetExe = pick.path
+        }
       }
 
       if (!targetExe) {
@@ -773,6 +798,12 @@ export function GameDetailPage() {
                       Online
                     </Badge>
                   )}
+                  {isExternalGame && (
+                    <Badge className="px-3 py-1 rounded-full bg-yellow-500/20 border-yellow-500/30 text-yellow-400 font-semibold flex items-center gap-1.5">
+                      <Info className="h-3 w-3" />
+                      Externally Added
+                    </Badge>
+                  )}
                 </div>
 
                 <h1 className="text-4xl md:text-6xl font-black text-foreground font-montserrat mb-3 text-balance">
@@ -878,7 +909,7 @@ export function GameDetailPage() {
                 <div className="flex items-center gap-3">
                   <Button
                     size="lg"
-                    className={`flex-1 font-bold text-lg py-6 rounded-xl shadow-lg ${
+                    className={`flex-1 font-bold text-lg py-6 rounded-xl shadow-lg transition-all duration-200 ${
                       isGameRunning
                         ? "bg-destructive hover:bg-destructive/90 shadow-destructive/25"
                         : "bg-primary hover:bg-primary/90 shadow-primary/25"
@@ -945,6 +976,19 @@ export function GameDetailPage() {
                           <FolderOpen className="mr-2 h-4 w-4" />
                           Open Game Files
                         </button>
+                        {isExternalGame && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setActionMenuOpen(false)
+                              setEditMetadataOpen(true)
+                            }}
+                            className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-muted-foreground transition-colors hover:text-primary hover:bg-primary/10"
+                          >
+                            <Settings className="mr-2 h-4 w-4" />
+                            Edit Details
+                          </button>
+                        )}
                         <div className="my-1 h-px bg-border/60" />
                         <button
                           type="button"
@@ -954,8 +998,17 @@ export function GameDetailPage() {
                           }}
                           className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-destructive transition-colors hover:bg-destructive/10"
                         >
-                          <Trash2 className="mr-2 h-4 w-4" />
-                          Delete Game
+                          {installedManifest?.isExternal ? (
+                            <>
+                              <Unlink2 className="mr-2 h-4 w-4" />
+                              Unlink Game
+                            </>
+                          ) : (
+                            <>
+                              <Trash2 className="mr-2 h-4 w-4" />
+                              Delete Game
+                            </>
+                          )}
                         </button>
                       </PopoverContent>
                     </Popover>
@@ -985,7 +1038,7 @@ export function GameDetailPage() {
                 )}
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className={`grid grid-cols-2 gap-3${isUCMatched ? ' opacity-40 blur-[2px] pointer-events-none select-none' : ''}`}>
                 <div className="p-4 rounded-xl bg-card/30 border border-border/50 text-center">
                   <Download className="h-5 w-5 text-primary mx-auto mb-2" />
                   <div className="text-2xl font-black text-foreground font-montserrat">
@@ -1004,9 +1057,29 @@ export function GameDetailPage() {
               </div>
 
               <div className="p-6 rounded-2xl bg-card/30 border border-border/50 space-y-4">
-                <h3 className="font-black text-foreground font-montserrat">Details</h3>
+                <div className="flex items-center justify-between">
+                  <h3 className="font-black text-foreground font-montserrat">Details</h3>
+                  {isExternalGame && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 px-2.5 text-xs text-primary hover:text-primary hover:bg-primary/10"
+                      onClick={() => setEditMetadataOpen(true)}
+                    >
+                      <Settings className="mr-1.5 h-3 w-3" />
+                      Edit
+                    </Button>
+                  )}
+                </div>
 
-                <div className="space-y-3 text-sm">
+                {isUCMatched && (
+                  <div className="flex items-start gap-2 rounded-lg bg-yellow-500/10 border border-yellow-500/20 px-3 py-2 text-xs text-yellow-400">
+                    <Info className="h-3.5 w-3.5 flex-shrink-0 mt-0.5" />
+                    <span>Matched from UC catalog — details may not reflect your installed version.</span>
+                  </div>
+                )}
+
+                <div className={`space-y-3 text-sm${isUCMatched ? ' opacity-50 blur-[1.5px] select-none' : ''}`}>
                   <div className="flex items-center justify-between">
                     <span className="text-muted-foreground flex items-center gap-2">
                       <Calendar className="h-4 w-4" />
@@ -1154,12 +1227,18 @@ export function GameDetailPage() {
           <div className="relative w-full max-w-md rounded-2xl border border-border/60 bg-slate-950/95 p-5 text-white shadow-2xl">
             <div className="flex items-center gap-2 text-lg font-semibold">
               <AlertTriangle className="h-5 w-5 text-destructive" />
-              {pendingDeleteAction === "installing" ? "Remove download" : "Delete game"}
+              {pendingDeleteAction === "installing"
+                ? "Remove download"
+                : installedManifest?.isExternal
+                  ? "Unlink game"
+                  : "Delete game"}
             </div>
             <p className="mt-2 text-sm text-slate-300">
               {pendingDeleteAction === "installing"
                 ? `Remove "${game.name}" from the installing list? This will delete any downloaded data.`
-                : `Delete "${game.name}" permanently? This removes the installed files from disk.`}
+                : installedManifest?.isExternal
+                  ? `Unlink "${game.name}" from UnionCrax? This only removes it from your library \u2014 your game files won't be touched.`
+                  : `Delete "${game.name}" permanently? This removes the installed files from disk.`}
             </p>
             <div className="mt-4 flex justify-end gap-2">
               <Button variant="ghost" onClick={() => setPendingDeleteAction(null)}>
@@ -1175,7 +1254,7 @@ export function GameDetailPage() {
                   }, 0)
                 }}
               >
-                {pendingDeleteAction === "installing" ? "Remove" : "Delete"}
+                {pendingDeleteAction === "installing" ? "Remove" : installedManifest?.isExternal ? "Unlink" : "Delete"}
               </Button>
             </div>
           </div>
@@ -1235,6 +1314,24 @@ export function GameDetailPage() {
           setPendingExePath(null)
         }}
       />
+      {isExternalGame && game && (
+        <EditGameMetadataModal
+          open={editMetadataOpen}
+          onOpenChange={setEditMetadataOpen}
+          game={game}
+          onSaved={(updates) => {
+            // Update in-memory game state with new metadata
+            setGame((prev) => prev ? { ...prev, ...updates } as Game : prev)
+            // Update selected image (banner) if splash/banner was updated
+            if (updates.splash) {
+              setSelectedImage(proxyImageUrl(updates.splash))
+            } else if (updates.image && !updates.splash) {
+              // If only card image updated, use it as fallback for banner
+              setSelectedImage(proxyImageUrl(updates.image))
+            }
+          }}
+        />
+      )}
     </div>
   )
 }

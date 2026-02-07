@@ -95,7 +95,9 @@ declare global {
       createDesktopShortcut: (gameName: string, exePath: string) => Promise<{ ok: boolean; error?: string }>
       deleteDesktopShortcut: (gameName: string) => Promise<{ ok: boolean; error?: string }>
       addExternalGame: (appid: string, metadata: any, gamePath: string) => Promise<{ ok: boolean; error?: string }>
+      updateInstalledMetadata: (appid: string, updates: Record<string, any>) => Promise<{ ok: boolean; error?: string }>
       pickExternalGameFolder: () => Promise<string | null>
+      pickImage: () => Promise<string | null>
       onUpdate: (callback: (update: DownloadUpdatePayload) => void) => () => void
     }
     ucSettings?: {

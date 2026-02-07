@@ -16,6 +16,8 @@ export interface Game {
   dlc: string[]
   update_time?: string
   hasCoOp?: boolean
+  isExternal?: boolean
+  externalPath?: string
 }
 
 export type GameStats = Record<string, { downloads: number; views: number }>

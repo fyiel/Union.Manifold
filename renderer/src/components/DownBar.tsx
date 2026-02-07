@@ -140,11 +140,13 @@ export function DownBar() {
   }, [displayGroup])
 
   const handleClick = () => {
+    if (addGameOpen) return
     navigate("/downloads")
   }
 
   if (!displayGroup || !stats) {
     return (
+      <>
       <div
         role="button"
         tabIndex={0}
@@ -163,6 +165,9 @@ export function DownBar() {
               onClick={(e) => {
                 e.preventDefault()
                 e.stopPropagation()
+                if (e.nativeEvent) {
+                  e.nativeEvent.stopImmediatePropagation()
+                }
                 setAddGameOpen(true)
               }}
               className="flex h-7 w-7 items-center justify-center rounded-full border border-border/60 bg-primary/10 text-primary transition hover:bg-primary/20"
@@ -173,8 +178,9 @@ export function DownBar() {
             </button>
           </div>
         </div>
-        <AddGameModal open={addGameOpen} onOpenChange={setAddGameOpen} />
       </div>
+      <AddGameModal open={addGameOpen} onOpenChange={setAddGameOpen} />
+      </>
     )
   }
 
@@ -201,6 +207,7 @@ export function DownBar() {
   }
 
   return (
+    <>
     <div
       role="button"
       tabIndex={0}
@@ -245,6 +252,9 @@ export function DownBar() {
             onClick={(e) => {
               e.preventDefault()
               e.stopPropagation()
+              if (e.nativeEvent) {
+                e.nativeEvent.stopImmediatePropagation()
+              }
               setAddGameOpen(true)
             }}
             className="flex h-8 w-8 items-center justify-center rounded-full border border-border/60 bg-primary/10 text-primary transition hover:bg-primary/20"
@@ -255,7 +265,8 @@ export function DownBar() {
           </button>
         </div>
       </div>
-      <AddGameModal open={addGameOpen} onOpenChange={setAddGameOpen} />
     </div>
+    <AddGameModal open={addGameOpen} onOpenChange={setAddGameOpen} />
+    </>
   )
 }

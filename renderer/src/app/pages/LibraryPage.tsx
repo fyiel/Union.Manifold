@@ -14,8 +14,9 @@ import {
 import { useGamesData } from "@/hooks/use-games"
 import type { Game } from "@/lib/types"
 import { useDownloads } from "@/context/downloads-context"
-import { Settings, Trash2, AlertTriangle, FolderOpen, ExternalLink } from "lucide-react"
+import { Settings, Trash2, AlertTriangle, FolderOpen, ExternalLink, Unlink2, Pencil } from "lucide-react"
 import { ExePickerModal } from "@/components/ExePickerModal"
+import { EditGameMetadataModal } from "@/components/EditGameMetadataModal"
 import { gameLogger } from "@/lib/logger"
 
 type LibraryEntry = {
@@ -28,7 +29,12 @@ type LibraryEntry = {
 
 function manifestToGame(entry: LibraryEntry): Game | null {
   const meta = entry && (entry.metadata as Game | undefined)
-  if (meta && meta.appid) return meta
+  if (meta && meta.appid) {
+    // Propagate isExternal/externalPath from the parent manifest or from metadata
+    const isExternal = Boolean((entry as any).isExternal || meta.isExternal)
+    const externalPath = (entry as any).externalPath || meta.externalPath || undefined
+    return { ...meta, isExternal, externalPath }
+  }
   if (entry && entry.appid) {
     return {
       appid: entry.appid,
@@ -43,6 +49,8 @@ function manifestToGame(entry: LibraryEntry): Game | null {
       developer: "",
       store: "",
       dlc: [],
+      isExternal: Boolean((entry as any).isExternal),
+      externalPath: (entry as any).externalPath || undefined,
     }
   }
   return null
@@ -69,6 +77,7 @@ export function LibraryPage() {
   const [settingsPopupOpen, setSettingsPopupOpen] = useState(false)
   const [settingsPopupGame, setSettingsPopupGame] = useState<Game | null>(null)
   const [shortcutFeedback, setShortcutFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
+  const [editMetadataOpen, setEditMetadataOpen] = useState(false)
   const itemsPerPage = 8
   const [installedPage, setInstalledPage] = useState(1)
   const [installingPage, setInstallingPage] = useState(1)
@@ -366,9 +375,9 @@ export function LibraryPage() {
                         setPendingDeleteAction("installed")
                       }}
                       className="h-8 w-8 rounded-full bg-black/60 text-white hover:bg-white/20"
-                      title="Delete installed game"
+                      title={game.isExternal ? "Unlink game from UnionCrax" : "Delete installed game"}
                     >
-                      <Trash2 className="h-4 w-4" />
+                      {game.isExternal ? <Unlink2 className="h-4 w-4" /> : <Trash2 className="h-4 w-4" />}
                     </Button>
                   </div>
                 </div>
@@ -529,12 +538,18 @@ export function LibraryPage() {
           <div className="relative w-full max-w-md rounded-2xl border border-border/60 bg-slate-950/95 p-5 text-white shadow-2xl">
             <div className="flex items-center gap-2 text-lg font-semibold">
               <AlertTriangle className="h-5 w-5 text-destructive" />
-              {pendingDeleteAction === "installing" ? "Remove download" : "Delete game"}
+              {pendingDeleteAction === "installing"
+                ? "Remove download"
+                : pendingDeleteGame.isExternal
+                  ? "Unlink game"
+                  : "Delete game"}
             </div>
             <p className="mt-2 text-sm text-slate-300">
               {pendingDeleteAction === "installing"
                 ? `Remove "${pendingDeleteGame.name}" from the installing list? This will delete any downloaded data.`
-                : `Delete "${pendingDeleteGame.name}" permanently? This removes the installed files from disk.`}
+                : pendingDeleteGame.isExternal
+                  ? `Unlink "${pendingDeleteGame.name}" from UnionCrax? This only removes it from your library — your game files won't be touched.`
+                  : `Delete "${pendingDeleteGame.name}" permanently? This removes the installed files from disk.`}
             </p>
             <div className="mt-4 flex justify-end gap-2">
               <Button
@@ -563,7 +578,7 @@ export function LibraryPage() {
                   }, 0)
                 }}
               >
-                {pendingDeleteAction === "installing" ? "Remove" : "Delete"}
+                {pendingDeleteAction === "installing" ? "Remove" : pendingDeleteGame?.isExternal ? "Unlink" : "Delete"}
               </Button>
             </div>
           </div>
@@ -642,6 +657,20 @@ export function LibraryPage() {
                 <ExternalLink className="mr-2 h-4 w-4" />
                 Create Desktop Shortcut
               </Button>
+              {settingsPopupGame?.isExternal && (
+                <Button
+                  variant="ghost"
+                  className="w-full justify-start"
+                  onClick={() => {
+                    setSettingsPopupOpen(false)
+                    setShortcutFeedback(null)
+                    setEditMetadataOpen(true)
+                  }}
+                >
+                  <Pencil className="mr-2 h-4 w-4" />
+                  Edit Details
+                </Button>
+              )}
               <Button
                 variant="ghost"
                 className="w-full justify-start text-destructive hover:text-destructive"
@@ -655,7 +684,7 @@ export function LibraryPage() {
                 }}
               >
                 <Trash2 className="mr-2 h-4 w-4" />
-                Delete Game
+                {settingsPopupGame?.isExternal ? "Unlink Game" : "Delete Game"}
               </Button>
             </div>
 
@@ -691,6 +720,20 @@ export function LibraryPage() {
         onSelect={handleExePicked}
         onClose={() => setExePickerOpen(false)}
       />
+      {settingsPopupGame && (
+        <EditGameMetadataModal
+          open={editMetadataOpen}
+          onOpenChange={setEditMetadataOpen}
+          game={settingsPopupGame}
+          onSaved={(updates) => {
+            setInstalled((prev) =>
+              prev.map((g) =>
+                g.appid === settingsPopupGame.appid ? { ...g, ...updates } : g
+              )
+            )
+          }}
+        />
+      )}
     </div>
   )
 }
