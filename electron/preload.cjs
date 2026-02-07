@@ -35,6 +35,8 @@ contextBridge.exposeInMainWorld('ucDownloads', {
   setInstallingStatus: (appid, status, error) => ipcRenderer.invoke('uc:installing-status-set', appid, status, error),
   createDesktopShortcut: (gameName, exePath) => ipcRenderer.invoke('uc:create-desktop-shortcut', gameName, exePath),
   deleteDesktopShortcut: (gameName) => ipcRenderer.invoke('uc:delete-desktop-shortcut', gameName),
+  addExternalGame: (appid, metadata, gamePath) => ipcRenderer.invoke('uc:add-external-game', appid, metadata, gamePath),
+  pickExternalGameFolder: () => ipcRenderer.invoke('uc:pick-external-game-folder'),
   onUpdate: (callback) => {
     const listener = (_event, data) => {
       try {

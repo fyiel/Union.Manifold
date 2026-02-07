@@ -1,8 +1,9 @@
-import { useMemo, type MouseEvent } from "react"
+import { useMemo, useState, type MouseEvent } from "react"
 import { useNavigate } from "react-router-dom"
 import { useDownloads } from "@/context/downloads-context"
 import { Progress } from "@/components/ui/progress"
-import { PauseCircle, Play } from "lucide-react"
+import { PauseCircle, Play, Plus } from "lucide-react"
+import { AddGameModal } from "@/components/AddGameModal"
 
 const ACTIVE_STATUSES = ["downloading", "paused", "extracting", "installing"]
 
@@ -57,6 +58,7 @@ function estimateGroupTotals(items: Array<{ totalBytes: number; receivedBytes: n
 export function DownBar() {
   const { downloads, pauseDownload, resumeGroup } = useDownloads()
   const navigate = useNavigate()
+  const [addGameOpen, setAddGameOpen] = useState(false)
 
   const { primaryGroup, queuedGroup, queuedCount } = useMemo(() => {
     // Filter out cancelled downloads
@@ -154,8 +156,24 @@ export function DownBar() {
       >
         <div className="flex items-center justify-between">
           <span className="font-semibold">See activity</span>
-          <span className="text-xs text-muted-foreground">No active downloads</span>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-muted-foreground">No active downloads</span>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
+                setAddGameOpen(true)
+              }}
+              className="flex h-7 w-7 items-center justify-center rounded-full border border-border/60 bg-primary/10 text-primary transition hover:bg-primary/20"
+              aria-label="Add external game"
+              title="Add a game manually"
+            >
+              <Plus className="h-3.5 w-3.5" />
+            </button>
+          </div>
         </div>
+        <AddGameModal open={addGameOpen} onOpenChange={setAddGameOpen} />
       </div>
     )
   }
@@ -222,8 +240,22 @@ export function DownBar() {
           >
             {isPaused ? <Play className="h-4 w-4" /> : <PauseCircle className="h-4 w-4" />}
           </button>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              setAddGameOpen(true)
+            }}
+            className="flex h-8 w-8 items-center justify-center rounded-full border border-border/60 bg-primary/10 text-primary transition hover:bg-primary/20"
+            aria-label="Add external game"
+            title="Add a game manually"
+          >
+            <Plus className="h-4 w-4" />
+          </button>
         </div>
       </div>
+      <AddGameModal open={addGameOpen} onOpenChange={setAddGameOpen} />
     </div>
   )
 }
