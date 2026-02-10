@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState, type ChangeEvent } from "react"
-import { FolderOpen, HardDrive, Image as ImageIcon, LogIn, LogOut, Plus, RefreshCw, UserRound } from "lucide-react"
+import { useEffect, useMemo, useState } from "react"
+import { FolderOpen, HardDrive, LogIn, LogOut, Plus, RefreshCw, UserRound } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -17,15 +17,11 @@ import { LogViewer } from "@/components/LogViewer"
 import { useDiscordAccount } from "@/hooks/use-discord-account"
 import {
   SETTINGS_KEYS,
-  IMAGE_CONSTRAINTS,
   TEXT_CONSTRAINTS,
   APP_INFO,
   MIRROR_HOSTS,
-  DOWNLOAD_SPEED_PRESETS,
-  DEFAULT_DOWNLOAD_SPEED_PRESET,
   type MirrorHost,
   type MirrorHostInfo,
-  type DownloadSpeedPreset,
 } from "@/lib/settings-constants"
 
 type DiskInfo = {
@@ -51,7 +47,7 @@ function formatBytes(bytes: number) {
 export function SettingsPage() {
   const isWindows = typeof navigator !== 'undefined' && /windows/i.test(navigator.userAgent)
   const isLinux = typeof navigator !== 'undefined' && /linux/i.test(navigator.userAgent)
-  const { user: accountUser, loading: accountLoading, refresh: refreshAccount } = useDiscordAccount()
+  const { user: accountUser, loading: accountLoading, authenticated, refresh: refreshAccount } = useDiscordAccount()
   const [disks, setDisks] = useState<DiskInfo[]>([])
   const [downloadPath, setDownloadPath] = useState("")
   const [selectedDiskId, setSelectedDiskId] = useState("")
@@ -60,7 +56,6 @@ export function SettingsPage() {
   const [ucSizeBytes, setUcSizeBytes] = useState<number | null>(null)
   const [usageLoading, setUsageLoading] = useState(false)
   const [defaultHost, setDefaultHost] = useState<MirrorHost>('pixeldrain')
-  const [downloadSpeedPreset, setDownloadSpeedPreset] = useState<DownloadSpeedPreset>(DEFAULT_DOWNLOAD_SPEED_PRESET)
   const [checkingUpdate, setCheckingUpdate] = useState(false)
   const [appVersion, setAppVersion] = useState<string>("")
   const [updateCheckResult, setUpdateCheckResult] = useState<string | null>(null)
@@ -91,8 +86,6 @@ export function SettingsPage() {
   const [showMika, setShowMika] = useState(true)
   const [showNsfw, setShowNsfw] = useState(false)
   const [showPublicProfile, setShowPublicProfile] = useState(true)
-  const [avatarPreview, setAvatarPreview] = useState<string | null>(null)
-  const [bannerPreview, setBannerPreview] = useState<string | null>(null)
   const [bioDraft, setBioDraft] = useState("")
   const [bioSaving, setBioSaving] = useState(false)
   const [bioSaved, setBioSaved] = useState(false)
@@ -145,32 +138,6 @@ export function SettingsPage() {
       if (!data || !data.key) return
       if (data.key === 'defaultMirrorHost' && data.value && MIRROR_HOSTS.some((h) => h.key === data.value)) {
         setDefaultHost(data.value)
-      }
-    })
-    return () => {
-      mounted = false
-      if (typeof off === 'function') off()
-    }
-  }, [])
-
-  useEffect(() => {
-    let mounted = true
-    const loadSpeedPreset = async () => {
-      try {
-        const preset = await window.ucSettings?.get?.('downloadSpeedPreset')
-        if (!mounted) return
-        if (preset && DOWNLOAD_SPEED_PRESETS.some((p) => p.key === preset)) {
-          setDownloadSpeedPreset(preset as DownloadSpeedPreset)
-        }
-      } catch {
-        // ignore
-      }
-    }
-    loadSpeedPreset()
-    const off = window.ucSettings?.onChanged?.((data: any) => {
-      if (!data || !data.key) return
-      if (data.key === 'downloadSpeedPreset' && data.value && DOWNLOAD_SPEED_PRESETS.some((p) => p.key === data.value)) {
-        setDownloadSpeedPreset(data.value as DownloadSpeedPreset)
       }
     })
     return () => {
@@ -599,56 +566,41 @@ export function SettingsPage() {
       }
     }
 
-    const syncImages = () => {
-      try {
-        setAvatarPreview(localStorage.getItem(SETTINGS_KEYS.AVATAR))
-        setBannerPreview(localStorage.getItem(SETTINGS_KEYS.BANNER))
-      } catch {
-        // ignore
-      }
-    }
-
     syncPreferences()
-    syncImages()
 
     const onStorage = (event: StorageEvent) => {
-      if ([SETTINGS_KEYS.MIKA, SETTINGS_KEYS.NSFW, SETTINGS_KEYS.PUBLIC_PROFILE, SETTINGS_KEYS.AVATAR, SETTINGS_KEYS.BANNER].includes(event.key as any)) {
+      if ([SETTINGS_KEYS.MIKA, SETTINGS_KEYS.NSFW, SETTINGS_KEYS.PUBLIC_PROFILE].includes(event.key as any)) {
         syncPreferences()
-        syncImages()
       }
     }
     const onPreferenceChange = () => syncPreferences()
-    const onImageChange = () => syncImages()
 
     window.addEventListener("storage", onStorage)
     window.addEventListener("uc_mika_pref", onPreferenceChange)
     window.addEventListener("uc_nsfw_pref", onPreferenceChange)
-    window.addEventListener("uc_profile_avatar", onImageChange)
-    window.addEventListener("uc_profile_banner", onImageChange)
 
     return () => {
       window.removeEventListener("storage", onStorage)
       window.removeEventListener("uc_mika_pref", onPreferenceChange)
       window.removeEventListener("uc_nsfw_pref", onPreferenceChange)
-      window.removeEventListener("uc_profile_avatar", onImageChange)
-      window.removeEventListener("uc_profile_banner", onImageChange)
     }
   }, [])
 
   useEffect(() => {
-    if (!accountUser) return
+    if (!accountUser || !authenticated) return
     setBioDraft(accountUser.bio ?? "")
     setBioSaved(false)
-  }, [accountUser])
+  }, [accountUser, authenticated])
 
   useEffect(() => {
-    if (accountUser) return
+    if (accountUser && authenticated) return
     setAccountSummaryLoaded(false)
     setAccountCounts(null)
-  }, [accountUser])
+    setAccountError(null)
+  }, [accountUser, authenticated])
 
   const loadAccountSummary = async (retrySession = true) => {
-    if (!accountUser) return
+    if (!accountUser || !authenticated) return
     setAccountError(null)
     try {
       let res = await apiFetch("/api/account/summary")
@@ -686,12 +638,6 @@ export function SettingsPage() {
       }
 
       const summaryUser = data?.user
-      if (summaryUser?.customAvatarUrl && !avatarPreview) {
-        setAvatarPreview(summaryUser.customAvatarUrl)
-      }
-      if (summaryUser?.customBannerUrl && !bannerPreview) {
-        setBannerPreview(summaryUser.customBannerUrl)
-      }
       if (summaryUser?.bio !== undefined) {
         setBioDraft(summaryUser.bio ?? "")
         setBioSaved(false)
@@ -710,12 +656,12 @@ export function SettingsPage() {
   }
 
   useEffect(() => {
-    if (!accountUser || accountSummaryLoaded) return
+    if (!accountUser || !authenticated || accountSummaryLoaded) return
     void loadAccountSummary()
-  }, [accountUser, accountSummaryLoaded])
+  }, [accountUser, authenticated, accountSummaryLoaded])
 
   const refreshAccountSummary = async () => {
-    if (!accountUser) return
+    if (!accountUser || !authenticated) return
     setAccountRefreshing(true)
     await refreshAccount().catch(() => {})
     await loadAccountSummary().catch(() => {})
@@ -747,14 +693,10 @@ export function SettingsPage() {
       await window.ucAuth?.logout?.(getApiBaseUrl())
       try {
         localStorage.removeItem("discord_id")
-        localStorage.removeItem(SETTINGS_KEYS.AVATAR)
-        localStorage.removeItem(SETTINGS_KEYS.BANNER)
       } catch {}
       window.dispatchEvent(new Event("uc_discord_logout"))
       setAccountSummaryLoaded(false)
       setAccountCounts(null)
-      setAvatarPreview(null)
-      setBannerPreview(null)
       setBioDraft("")
       setBioSaved(false)
     } catch {
@@ -803,131 +745,6 @@ export function SettingsPage() {
     }).catch(() => {})
   }
 
-  const createImageFromFile = (file: File): Promise<HTMLImageElement> => {
-    return new Promise((resolve, reject) => {
-      const img = new Image()
-      const objectUrl = URL.createObjectURL(file)
-      img.onload = () => {
-        URL.revokeObjectURL(objectUrl)
-        resolve(img)
-      }
-      img.onerror = (err) => {
-        URL.revokeObjectURL(objectUrl)
-        reject(err)
-      }
-      img.src = objectUrl
-    })
-  }
-
-  const resizeImage = (img: HTMLImageElement, type: "avatar" | "banner") => {
-    if (type === "avatar") {
-      const side = Math.min(img.width, img.height)
-      const target = Math.min(IMAGE_CONSTRAINTS.AVATAR_MAX_SIZE, side)
-      const sx = (img.width - side) / 2
-      const sy = (img.height - side) / 2
-      const canvas = document.createElement("canvas")
-      canvas.width = target
-      canvas.height = target
-      const ctx = canvas.getContext("2d")
-      if (!ctx) return null
-      ctx.drawImage(img, sx, sy, side, side, 0, 0, target, target)
-      return canvas
-    }
-
-    const scale = Math.min(IMAGE_CONSTRAINTS.BANNER_MAX_WIDTH / img.width, IMAGE_CONSTRAINTS.BANNER_MAX_HEIGHT / img.height, 1)
-    const targetWidth = Math.max(1, Math.round(img.width * scale))
-    const targetHeight = Math.max(1, Math.round(img.height * scale))
-    const canvas = document.createElement("canvas")
-    canvas.width = targetWidth
-    canvas.height = targetHeight
-    const ctx = canvas.getContext("2d")
-    if (!ctx) return null
-    ctx.drawImage(img, 0, 0, targetWidth, targetHeight)
-    return canvas
-  }
-
-  const compressImage = async (file: File, type: "avatar" | "banner") => {
-    const img = await createImageFromFile(file)
-    const canvas = resizeImage(img, type)
-    if (!canvas) return null
-    return canvas.toDataURL("image/webp", IMAGE_CONSTRAINTS.QUALITY)
-  }
-
-  const updateProfileImage = (file: File | null, type: "avatar" | "banner") => {
-    const key = type === "avatar" ? SETTINGS_KEYS.AVATAR : SETTINGS_KEYS.BANNER
-    if (!file) return
-
-    const run = async () => {
-      const result = await compressImage(file, type)
-      if (!result) return
-
-      if (type === "avatar") {
-        setAvatarPreview(result)
-      } else {
-        setBannerPreview(result)
-      }
-
-      try {
-        localStorage.setItem(key, result)
-      } catch {}
-
-      try {
-        const payload = type === "avatar"
-          ? { customAvatarUrl: result, customBannerUrl: bannerPreview }
-          : { customAvatarUrl: avatarPreview, customBannerUrl: result }
-        await apiFetch("/api/account/profile-images", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        })
-        await refreshAccount().catch(() => {})
-      } catch (error) {
-        console.error("[UC] Error saving profile image:", error)
-      }
-
-      window.dispatchEvent(new Event(type === "avatar" ? "uc_profile_avatar" : "uc_profile_banner"))
-    }
-    void run()
-  }
-
-  const clearProfileImage = (type: "avatar" | "banner") => {
-    const key = type === "avatar" ? SETTINGS_KEYS.AVATAR : SETTINGS_KEYS.BANNER
-    if (type === "avatar") {
-      setAvatarPreview(null)
-    } else {
-      setBannerPreview(null)
-    }
-    try {
-      localStorage.removeItem(key)
-    } catch {}
-
-    try {
-      const payload = type === "avatar"
-        ? { customAvatarUrl: null, customBannerUrl: bannerPreview }
-        : { customAvatarUrl: avatarPreview, customBannerUrl: null }
-      apiFetch("/api/account/profile-images", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      }).catch(() => {})
-      refreshAccount().catch(() => {})
-    } catch {}
-
-    window.dispatchEvent(new Event(type === "avatar" ? "uc_profile_avatar" : "uc_profile_banner"))
-  }
-
-  const handleAvatarSelect = (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0] || null
-    if (file) updateProfileImage(file, "avatar")
-    event.target.value = ""
-  }
-
-  const handleBannerSelect = (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0] || null
-    if (file) updateProfileImage(file, "banner")
-    event.target.value = ""
-  }
-
   const saveBio = async () => {
     if (!accountUser) return
     setBioSaving(true)
@@ -950,9 +767,8 @@ export function SettingsPage() {
   }
 
   const accountLabel = accountUser ? accountUser.displayName || accountUser.username : "Account"
-  const accountAvatarUrl = avatarPreview || accountUser?.customAvatarUrl || accountUser?.avatarUrl || null
-  const accountBannerUrl = bannerPreview || accountUser?.customBannerUrl || null
-  const showAccountControls = Boolean(accountUser)
+  const accountAvatarUrl = accountUser?.avatarUrl || null
+  const showAccountControls = Boolean(accountUser && authenticated)
   const accountBusy = accountLoading || loggingIn || loggingOut || accountRefreshing
   const accountStats = accountCounts || { wishlist: 0, favorites: 0, viewHistory: 0, searchHistory: 0 }
 
@@ -1019,73 +835,6 @@ export function SettingsPage() {
 
           {showAccountControls && (
             <div className="grid gap-4 md:grid-cols-2">
-              <div className="rounded-xl border border-border/60 bg-card/50 p-4 space-y-3">
-                <div className="flex items-center gap-2 text-sm font-semibold">
-                  <ImageIcon className="h-4 w-4 text-primary" />
-                  Profile appearance
-                </div>
-                <div className="rounded-lg border border-border/60 bg-muted/20 overflow-hidden">
-                  {accountBannerUrl ? (
-                    <img src={accountBannerUrl} alt="Profile banner" className="h-24 w-full object-cover" />
-                  ) : (
-                    <div className="h-24 w-full flex items-center justify-center text-xs text-muted-foreground">
-                      No banner uploaded
-                    </div>
-                  )}
-                </div>
-                <div className="flex items-center gap-3">
-                  <DiscordAvatar avatarUrl={accountAvatarUrl} alt="Profile avatar" className="h-10 w-10 rounded-full" />
-                  <div>
-                    <div className="text-sm font-medium">Avatar</div>
-                    <div className="text-xs text-muted-foreground">Square image, auto-cropped.</div>
-                  </div>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <label className="inline-flex">
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={handleAvatarSelect}
-                      className="hidden"
-                      disabled={accountBusy}
-                    />
-                    <Button type="button" variant="outline" className="gap-2" disabled={accountBusy}>
-                      Upload avatar
-                    </Button>
-                  </label>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    className="gap-2"
-                    onClick={() => clearProfileImage("avatar")}
-                    disabled={accountBusy}
-                  >
-                    Clear avatar
-                  </Button>
-                  <label className="inline-flex">
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={handleBannerSelect}
-                      className="hidden"
-                      disabled={accountBusy}
-                    />
-                    <Button type="button" variant="outline" className="gap-2" disabled={accountBusy}>
-                      Upload banner
-                    </Button>
-                  </label>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    className="gap-2"
-                    onClick={() => clearProfileImage("banner")}
-                    disabled={accountBusy}
-                  >
-                    Clear banner
-                  </Button>
-                </div>
-              </div>
-
               <div className="rounded-xl border border-border/60 bg-card/50 p-4 space-y-4">
                 <div className="flex items-center gap-2 text-sm font-semibold">
                   <UserRound className="h-4 w-4 text-primary" />
@@ -1094,8 +843,8 @@ export function SettingsPage() {
                 <div className="space-y-3">
                   <div className="flex items-center justify-between gap-3">
                     <div>
-                      <div className="text-sm font-medium">Show NSFW tags</div>
-                      <div className="text-xs text-muted-foreground">Reveal adult titles in browse & search.</div>
+                      <div className="text-sm font-medium">NSFW hover reveal</div>
+                      <div className="text-xs text-muted-foreground">Allow NSFW covers to unblur on hover.</div>
                     </div>
                     <Switch checked={showNsfw} onCheckedChange={updateNsfwVisibility} />
                   </div>
@@ -1399,55 +1148,6 @@ export function SettingsPage() {
                 downloading with Rootz.
               </div>
             )}
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card className="border-border/60">
-        <CardContent className="p-6 space-y-6">
-          <div>
-            <h2 className="text-lg font-semibold">Download Speed Limit</h2>
-            <p className="text-sm text-muted-foreground">Control maximum download speed to prevent network congestion.</p>
-          </div>
-
-          <div className="space-y-3">
-            <label className="text-sm font-medium">Speed preset</label>
-            <Select
-              value={downloadSpeedPreset}
-              onValueChange={async (v) => {
-                setDownloadSpeedPreset(v as DownloadSpeedPreset)
-                try {
-                  await window.ucSettings?.set?.('downloadSpeedPreset', v)
-                } catch {}
-              }}
-            >
-              <SelectTrigger className="h-12">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {DOWNLOAD_SPEED_PRESETS.map((preset) => {
-                  const displaySpeed = preset.bytesPerSecond === 0 ? 'Unlimited' : `${formatBytes(preset.bytesPerSecond)}/s`
-                  return (
-                    <SelectItem key={preset.key} value={preset.key}>
-                      <div className="flex items-center gap-3">
-                        <span>{preset.label}</span>
-                        <span className="text-xs text-muted-foreground">({displaySpeed})</span>
-                      </div>
-                    </SelectItem>
-                  )
-                })}
-              </SelectContent>
-            </Select>
-            <div className="rounded-lg border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-xs text-blue-200">
-              <p className="font-semibold mb-1">Speed Presets:</p>
-              <ul className="space-y-1 text-blue-100">
-                <li>• <strong>High (Max Speed):</strong> Downloads as fast as possible (unlimited)</li>
-                <li>• <strong>Normal (Not Prioritized):</strong> 10 MB/s - Balanced download speed</li>
-                <li>• <strong>Slow:</strong> 5 MB/s - Moderate speed limit</li>
-                <li>• <strong>Ultra Slow:</strong> 1 MB/s - Conservative speed limit</li>
-                <li>• <strong>Turtle Mode:</strong> 256 KB/s - Minimum speed for background downloads</li>
-              </ul>
-            </div>
           </div>
         </CardContent>
       </Card>

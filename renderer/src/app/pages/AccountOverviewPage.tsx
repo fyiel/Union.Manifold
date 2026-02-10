@@ -3,13 +3,10 @@ import { useNavigate } from "react-router-dom"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
-import { DiscordAvatar } from "@/components/DiscordAvatar"
 import { apiFetch, apiUrl, getApiBaseUrl } from "@/lib/api"
 import { useDiscordAccount } from "@/hooks/use-discord-account"
 import { LogIn, MessageCircle, RefreshCw, Shield, Star, Heart, Clock } from "lucide-react"
 
-const AVATAR_KEY = "uc_profile_avatar"
-const BANNER_KEY = "uc_profile_banner"
 
 type RecentComment = {
   id: string
@@ -21,7 +18,7 @@ type RecentComment = {
 
 export function AccountOverviewPage() {
   const navigate = useNavigate()
-  const { user: accountUser, loading: accountLoading, refresh } = useDiscordAccount()
+  const { user: accountUser, loading: accountLoading, authenticated, refresh } = useDiscordAccount()
   const [summaryLoading, setSummaryLoading] = useState(true)
   const [summaryError, setSummaryError] = useState<string | null>(null)
   const [summary, setSummary] = useState<any | null>(null)
@@ -30,36 +27,7 @@ export function AccountOverviewPage() {
   const [recentError, setRecentError] = useState<string | null>(null)
   const [loggingIn, setLoggingIn] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
-  const [avatarPreview, setAvatarPreview] = useState<string | null>(null)
-  const [bannerPreview, setBannerPreview] = useState<string | null>(null)
-
-  useEffect(() => {
-    const syncImages = () => {
-      try {
-        setAvatarPreview(localStorage.getItem(AVATAR_KEY))
-        setBannerPreview(localStorage.getItem(BANNER_KEY))
-      } catch {
-        // ignore
-      }
-    }
-
-    syncImages()
-
-    const onStorage = (event: StorageEvent) => {
-      if (event.key === AVATAR_KEY || event.key === BANNER_KEY) syncImages()
-    }
-    const onPreferenceChange = () => syncImages()
-
-    window.addEventListener("storage", onStorage)
-    window.addEventListener("uc_profile_avatar", onPreferenceChange)
-    window.addEventListener("uc_profile_banner", onPreferenceChange)
-
-    return () => {
-      window.removeEventListener("storage", onStorage)
-      window.removeEventListener("uc_profile_avatar", onPreferenceChange)
-      window.removeEventListener("uc_profile_banner", onPreferenceChange)
-    }
-  }, [])
+  const hasSession = Boolean(accountUser && authenticated)
 
   const loadSummary = useCallback(async (retrySession = true) => {
     setSummaryError(null)
@@ -114,10 +82,18 @@ export function AccountOverviewPage() {
   }, [])
 
   useEffect(() => {
-    if (!accountUser) return
+    if (!accountUser || !authenticated) return
     void loadSummary()
     void loadRecentComments()
-  }, [accountUser, loadSummary, loadRecentComments])
+  }, [accountUser, authenticated, loadSummary, loadRecentComments])
+
+  useEffect(() => {
+    if (hasSession) return
+    setSummary(null)
+    setSummaryError(null)
+    setRecentComments([])
+    setRecentError(null)
+  }, [hasSession])
 
   const handleLogin = async () => {
     setLoggingIn(true)
@@ -146,9 +122,6 @@ export function AccountOverviewPage() {
     setRefreshing(false)
   }
 
-  const profileAvatar = avatarPreview || accountUser?.customAvatarUrl || accountUser?.avatarUrl || null
-  const profileBanner = bannerPreview || accountUser?.customBannerUrl || null
-  const showProfileHeader = Boolean(profileAvatar || profileBanner)
 
   const overviewStats = useMemo(() => {
     const wishlist = Array.isArray(summary?.wishlist) ? summary.wishlist.length : 0
@@ -173,7 +146,7 @@ export function AccountOverviewPage() {
           </p>
         </div>
 
-        {!accountUser && !accountLoading && (
+        {!hasSession && !accountLoading && (
           <Card className="border-2 border-border/50 shadow-xl bg-card/60 backdrop-blur-sm rounded-2xl">
             <CardContent className="py-12 text-center space-y-4">
               <p className="text-lg font-semibold text-foreground">Login to continue.</p>
@@ -188,26 +161,7 @@ export function AccountOverviewPage() {
           </Card>
         )}
 
-        {showProfileHeader && (
-          <Card className="border-2 border-border/50 shadow-xl bg-card/60 backdrop-blur-sm rounded-2xl overflow-hidden mb-8">
-            {profileBanner ? (
-              <div className="relative h-36 md:h-44 bg-gradient-to-br from-primary/20 via-primary/10 to-transparent">
-                <img src={profileBanner} alt="Profile banner" className="h-full w-full object-cover" />
-              </div>
-            ) : null}
-            <CardContent className="flex flex-col md:flex-row md:items-center gap-4 py-6">
-              {profileAvatar ? (
-                <DiscordAvatar avatarUrl={profileAvatar} alt="Profile avatar" className="h-20 w-20 rounded-full" />
-              ) : null}
-              <div>
-                <p className="text-lg font-semibold text-foreground">Profile appearance</p>
-                <p className="text-sm text-muted-foreground">Update your banner or avatar in settings.</p>
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
-        {accountUser && (
+        {hasSession && (
           <div className="space-y-8">
             <Card className="border-2 border-border/50 shadow-xl bg-card/60 backdrop-blur-sm rounded-2xl">
               <CardHeader className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">

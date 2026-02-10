@@ -8,20 +8,20 @@ export type DiscordAccount = {
   username: string
   displayName: string | null
   avatarUrl: string | null
-  customAvatarUrl?: string | null
-  customBannerUrl?: string | null
   bio?: string | null
 }
 
 type DiscordAccountState = {
   user: DiscordAccount | null
   loading: boolean
+  authenticated: boolean
   refresh: () => Promise<void>
 }
 
 export function useDiscordAccount(): DiscordAccountState {
   const [user, setUser] = useState<DiscordAccount | null>(null)
   const [loading, setLoading] = useState(true)
+  const [authenticated, setAuthenticated] = useState(false)
 
   const fetchFallbackAccount = useCallback(async () => {
     let discordId: string | null = null
@@ -73,22 +73,7 @@ export function useDiscordAccount(): DiscordAccountState {
         const summary = await summaryRes.json()
         const nextUser = summary?.user ?? null
         setUser(nextUser)
-        if (typeof window !== "undefined") {
-          try {
-            if (nextUser?.customAvatarUrl) {
-              localStorage.setItem("uc_profile_avatar", nextUser.customAvatarUrl)
-            } else {
-              localStorage.removeItem("uc_profile_avatar")
-            }
-            if (nextUser?.customBannerUrl) {
-              localStorage.setItem("uc_profile_banner", nextUser.customBannerUrl)
-            } else {
-              localStorage.removeItem("uc_profile_banner")
-            }
-          } catch {
-            // ignore storage errors
-          }
-        }
+        setAuthenticated(Boolean(nextUser))
         return
       }
 
@@ -96,13 +81,16 @@ export function useDiscordAccount(): DiscordAccountState {
       if (!res.ok) {
         const fallback = await fetchFallbackAccount()
         setUser(fallback)
+        setAuthenticated(false)
         return
       }
       const data = await res.json()
       setUser(data?.user ?? null)
+      setAuthenticated(true)
     } catch {
       const fallback = await fetchFallbackAccount()
       setUser(fallback)
+      setAuthenticated(false)
     } finally {
       setLoading(false)
     }
@@ -132,6 +120,7 @@ export function useDiscordAccount(): DiscordAccountState {
   useEffect(() => {
     const handleLogout = () => {
       setUser(null)
+      setAuthenticated(false)
       setLoading(false)
     }
 
@@ -139,5 +128,5 @@ export function useDiscordAccount(): DiscordAccountState {
     return () => window.removeEventListener("uc_discord_logout", handleLogout)
   }, [])
 
-  return { user, loading, refresh }
+  return { user, loading, authenticated, refresh }
 }
