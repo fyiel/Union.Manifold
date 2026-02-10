@@ -57,9 +57,15 @@ export async function apiFetch(path: string, init?: RequestInit) {
 
       const result = await window.ucAuth!.fetch(getApiBaseUrl(), path, serializedInit)
       const bytes = result.body ? base64ToUint8Array(result.body) : new Uint8Array()
+      // Response status must be in [200, 599]. A status of 0 means a network
+      // error (DNS failure, server unreachable, CORS block, etc.).  Map it to
+      // 503 so the Response object can be constructed and normal error handling
+      // runs instead of throwing an uncaught RangeError.
+      const rawStatus = result.status || 0
+      const safeStatus = rawStatus >= 200 && rawStatus <= 599 ? rawStatus : 503
       return new Response(bytes, {
-        status: result.status || 0,
-        statusText: result.statusText || "",
+        status: safeStatus,
+        statusText: result.statusText || (safeStatus !== rawStatus ? "Network Error" : ""),
         headers: new Headers(result.headers || []),
       })
     }

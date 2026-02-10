@@ -1,5 +1,41 @@
 # Changelog
 
+## Version 0.8.1 - 2026-02-10
+
+### Highlights
+
+Account and preference handling were tightened up across the app. Discord session detection now gates account screens correctly, NSFW toggles are labeled based on actual behavior, and app settings can sync across devices when you sign in.
+
+---
+
+### Improvements
+
+- **Account reliability** — account overview and settings now load only when a real session exists, avoiding false "unable to load" errors.
+- **Preferences sync** — app preferences (mirror host, RPC, launch settings, developer mode, custom base URL, verbose logging) sync across devices when logged in.
+- **NSFW wording cleanup** — labels now describe hover-reveal behavior and NSFW-only filters more accurately.
+- **Custom profile image removal** — all remaining avatar/banner customization UI and storage hooks are removed in Direct.
+- **API fetch stability** — auth fetches now map network errors to a safe status code to avoid crashes.
+
+### Fixes
+
+- Removed stale settings paths and legacy UI around download speed limits.
+- Download pause/resume now clears any pending speed-limit timers to prevent unintended auto-resume.
+
+### Files touched (selected)
+
+- [electron/main.cjs](electron/main.cjs)
+- [renderer/src/app/Layout.tsx](renderer/src/app/Layout.tsx)
+- [renderer/src/app/pages/AccountOverviewPage.tsx](renderer/src/app/pages/AccountOverviewPage.tsx)
+- [renderer/src/app/pages/SettingsPage.tsx](renderer/src/app/pages/SettingsPage.tsx)
+- [renderer/src/app/pages/SearchPage.tsx](renderer/src/app/pages/SearchPage.tsx)
+- [renderer/src/components/TopBar.tsx](renderer/src/components/TopBar.tsx)
+- [renderer/src/hooks/use-app-preferences-sync.ts](renderer/src/hooks/use-app-preferences-sync.ts)
+- [renderer/src/hooks/use-discord-account.ts](renderer/src/hooks/use-discord-account.ts)
+- [renderer/src/lib/api.ts](renderer/src/lib/api.ts)
+- [renderer/src/lib/settings-constants.ts](renderer/src/lib/settings-constants.ts)
+
+---
+
 ## Version 0.8.0 - 2026-02-07
 
 ### Highlights

@@ -4,9 +4,11 @@ import { TopBar } from "@/components/TopBar"
 import ScrollProgress from "@/components/ScrollProgress"
 import { UpdateNotification } from "@/components/UpdateNotification"
 import { useDiscordRpcPresence } from "@/hooks/use-discord-rpc"
+import { useAppPreferencesSync } from "@/hooks/use-app-preferences-sync"
 
 export function AppLayout() {
   useDiscordRpcPresence()
+  useAppPreferencesSync()
   return (
     <div className="min-h-screen bg-background text-foreground">
       <ScrollProgress />

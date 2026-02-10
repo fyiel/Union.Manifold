@@ -53,7 +53,6 @@ export function TopBar() {
   const [mobileOpen, setMobileOpen] = useState(false)
   const [loggingOut, setLoggingOut] = useState(false)
   const [loggingIn, setLoggingIn] = useState(false)
-  const [customAvatar, setCustomAvatar] = useState<string | null>(null)
   const { user: accountUser, loading: accountLoading, refresh } = useDiscordAccount()
 
   useEffect(() => {
@@ -62,30 +61,6 @@ export function TopBar() {
     }
   }, [initialQuery, location.pathname])
 
-  useEffect(() => {
-    const syncAvatar = () => {
-      try {
-        setCustomAvatar(localStorage.getItem("uc_profile_avatar"))
-      } catch {
-        // ignore
-      }
-    }
-
-    syncAvatar()
-
-    const onStorage = (e: StorageEvent) => {
-      if (e.key === "uc_profile_avatar") syncAvatar()
-    }
-    const onPreferenceChange = () => syncAvatar()
-
-    window.addEventListener("storage", onStorage)
-    window.addEventListener("uc_profile_avatar", onPreferenceChange)
-
-    return () => {
-      window.removeEventListener("storage", onStorage)
-      window.removeEventListener("uc_profile_avatar", onPreferenceChange)
-    }
-  }, [])
 
   const handleSearchShortcut = () => {
     if (typeof window === "undefined") return
@@ -120,7 +95,7 @@ export function TopBar() {
   }
 
   const accountLabel = accountUser ? accountUser.displayName || accountUser.username : "Account"
-  const avatarUrl = customAvatar || accountUser?.avatarUrl
+  const avatarUrl = accountUser?.avatarUrl
   const showAccountLoading = accountLoading
 
   const handleLogin = async () => {
