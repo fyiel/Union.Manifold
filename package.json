@@ -1,6 +1,6 @@
 {
   "name": "unioncrax-direct",
-  "version": "0.8.1",
+  "version": "0.8.2",
   "description": "Standalone Electron app for managing and launching games from UnionCrax",
   "type": "module",
   "main": "electron/main.cjs",
@@ -106,11 +106,9 @@
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "UnionCrax.Direct",
-      "include": "build/installer.nsh"
+      "shortcutName": "UnionCrax.Direct"
     },
 
     "linux": {
