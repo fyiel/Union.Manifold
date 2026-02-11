@@ -109,7 +109,8 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "UnionCrax.Direct"
+      "shortcutName": "UnionCrax.Direct",
+      "deleteAppFolder": false
     },
 
     "linux": {

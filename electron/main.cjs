@@ -470,11 +470,29 @@ if (!gotTheLock) {
       app.quit()
     } else if (mainWindow && !mainWindow.isDestroyed()) {
       try {
-        if (mainWindow.isMinimized()) mainWindow.restore()
-      } catch {}
-      mainWindow.show()
-      mainWindow.focus()
+        // Bring the app to focus
+        if (mainWindow.isMinimized()) {
+          mainWindow.restore()
+        }
+        // Always show the window
+        mainWindow.show()
+        // Use setImmediate to ensure the window is fully ready before focusing
+        setImmediate(() => {
+          try {
+            mainWindow.focus()
+          } catch (e) {
+            ucLog(`Failed to focus window: ${e && e.message ? e.message : String(e)}`, 'warn')
+          }
+        })
+      } catch (e) {
+        ucLog(`Error handling second-instance: ${e && e.message ? e.message : String(e)}`, 'warn')
+        // If something goes wrong, try creating a new window
+        if (!BrowserWindow.getAllWindows().some(w => !w.isDestroyed())) {
+          createWindow()
+        }
+      }
     } else {
+      // If there's no valid window, create one
       createWindow()
     }
   })
@@ -1397,8 +1415,9 @@ function listExecutables(rootDir, maxDepth, maxResults) {
   const results = []
   if (!rootDir || !fs.existsSync(rootDir)) return results
   const pending = [{ dir: rootDir, depth: 0 }]
+  const visitedPaths = new Set()
   while (pending.length) {
-    const current = pending.pop()
+    const current = pending.shift() // BFS: process shallowest directories first
     if (!current) continue
     let entries
     try {
@@ -1408,15 +1427,24 @@ function listExecutables(rootDir, maxDepth, maxResults) {
     }
     for (const entry of entries) {
       const fullPath = path.join(current.dir, entry.name)
+
+      // Avoid revisiting paths (symlink loops, junctions)
+      const normalizedPath = fullPath.toLowerCase()
+      if (visitedPaths.has(normalizedPath)) continue
+      visitedPaths.add(normalizedPath)
+
       // Follow symlinks and junctions (readdirSync withFileTypes reports them as symlinks, not dirs)
       const isDir = entry.isDirectory() || (entry.isSymbolicLink() && (() => { try { return fs.statSync(fullPath).isDirectory() } catch { return false } })())
       if (isDir) {
+        // Skip known junk directories
+        const dirLower = entry.name.toLowerCase()
+        if (['_redist', '__redist', '_commonredist', 'directx', '$pluginsdir', '__support', 'mono', '.mono'].includes(dirLower)) continue
         if (current.depth < maxDepth) {
           pending.push({ dir: fullPath, depth: current.depth + 1 })
         }
         continue
       }
-      if (!entry.isFile()) continue
+      if (!entry.isFile() && !entry.isSymbolicLink()) continue
 
       const lowerName = entry.name.toLowerCase()
       const relative = path.relative(rootDir, fullPath)
@@ -1548,7 +1576,10 @@ function hasQueuedDownloadsForApp(appid) {
 }
 
 function hasAnyActiveOrPendingDownloads() {
-  return activeDownloads.size > 0 || pendingDownloads.length > 0
+  if (activeDownloads.size > 0) return true
+  // Only count non-stale pending entries
+  const now = Date.now()
+  return pendingDownloads.some((entry) => !entry._addedAt || (now - entry._addedAt) < 60000)
 }
 
 function hasActiveOrPendingDownloadsForApp(appid) {
@@ -1556,7 +1587,14 @@ function hasActiveOrPendingDownloadsForApp(appid) {
   for (const entry of activeDownloads.values()) {
     if (entry && entry.appid === appid) return true
   }
-  return pendingDownloads.some((entry) => entry.appid === appid)
+  // Only count pending entries that are recent (< 60s old) to avoid stale entries blocking
+  const now = Date.now()
+  return pendingDownloads.some((entry) => {
+    if (entry.appid !== appid) return false
+    // If the pending entry has been sitting for more than 60s, it's stale — ignore it
+    if (entry._addedAt && (now - entry._addedAt) > 60000) return false
+    return true
+  })
 }
 
 function hasActiveDownloadsForApp(appid) {
@@ -1630,7 +1668,8 @@ async function startDownloadNow(win, payload) {
     appid: payload.appid,
     gameName: payload.gameName,
     partIndex: payload.partIndex,
-    partTotal: payload.partTotal
+    partTotal: payload.partTotal,
+    _addedAt: Date.now()
   })
   
   // Check if this is a pixeldrain URL and if we need to delay
@@ -1694,7 +1733,8 @@ function startNextQueuedDownload(lastCompletedAppid) {
 function isDownloadIdKnown(downloadId) {
   if (!downloadId) return false
   if (activeDownloads.has(downloadId)) return true
-  if (pendingDownloads.some((entry) => entry.downloadId === downloadId)) return true
+  const now = Date.now()
+  if (pendingDownloads.some((entry) => entry.downloadId === downloadId && (!entry._addedAt || (now - entry._addedAt) < 30000))) return true
   for (const queue of downloadQueues.values()) {
     if (queue.some((entry) => entry.payload && entry.payload.downloadId === downloadId)) return true
   }
@@ -1705,7 +1745,19 @@ function isDownloadIdKnown(downloadId) {
 function getKnownDownloadState(downloadId) {
   if (!downloadId) return null
   if (activeDownloads.has(downloadId)) return 'active'
-  if (pendingDownloads.some((entry) => entry.downloadId === downloadId)) return 'pending'
+  const now = Date.now()
+  const pendingIdx = pendingDownloads.findIndex((entry) => entry.downloadId === downloadId)
+  if (pendingIdx >= 0) {
+    const entry = pendingDownloads[pendingIdx]
+    // If pending entry is stale (>30s without will-download firing), clean it up
+    if (entry._addedAt && (now - entry._addedAt) > 30000) {
+      pendingDownloads.splice(pendingIdx, 1)
+      ucLog(`Cleaned stale pending entry in getKnownDownloadState: ${downloadId}`)
+      // Fall through to return null so the download can be retried
+    } else {
+      return 'pending'
+    }
+  }
   for (const queue of downloadQueues.values()) {
     if (queue.some((entry) => entry.payload && entry.payload.downloadId === downloadId)) return 'queued'
   }
@@ -1855,30 +1907,6 @@ async function getDirectorySize(targetPath) {
   return total
 }
 
-function flushQueuedGlobalDownloads(appid, status, error) {
-  if (!appid || !globalDownloadQueue.length) return
-  const remaining = []
-  for (const entry of globalDownloadQueue) {
-    if (entry?.payload?.appid !== appid) {
-      remaining.push(entry)
-      continue
-    }
-    try {
-      const win = getWindowByWebContentsId(entry.webContentsId)
-      if (!win || win.isDestroyed()) continue
-      sendDownloadUpdate(win, {
-        downloadId: entry.payload.downloadId,
-        status,
-        error: error || null,
-        appid: entry.payload.appid || null,
-        gameName: entry.payload.gameName || null,
-        url: entry.payload.url
-      })
-    } catch (e) {}
-  }
-  globalDownloadQueue.length = 0
-  for (const entry of remaining) globalDownloadQueue.push(entry)
-}
 function snapshotFiles(rootDir) {
   const files = new Set()
   try {
@@ -2355,13 +2383,15 @@ function createWindow() {
       entry.state.speedBps = speedBps
       
       const remaining = total > 0 ? Math.max(0, total - received) : 0
-      const etaSeconds = speedBps > 0 && remaining > 0 ? remaining / speedBps : null
+      // When download is fully received, zero out speed so the UI doesn't show stale bars
+      const finalSpeed = (total > 0 && received >= total) ? 0 : speedBps
+      const etaSeconds = finalSpeed > 0 && remaining > 0 ? remaining / finalSpeed : null
         sendDownloadUpdate(mainWindow, {
           downloadId,
           status: item.isPaused() ? 'paused' : 'downloading',
           receivedBytes: received,
           totalBytes: total,
-          speedBps,
+          speedBps: finalSpeed,
           etaSeconds,
           filename: path.basename(entry.savePath || filename),
           savePath: entry.savePath,
@@ -2376,7 +2406,15 @@ function createWindow() {
 
     item.once('done', async (_event, state) => {
       uc_log(`download done handler start — downloadId=${downloadId} state=${state} url=${url}`)
+      const entry = activeDownloads.get(downloadId)
       activeDownloads.delete(downloadId)
+      // Safety: also remove this downloadId from pendingDownloads in case will-download
+      // didn't match it (URL normalization mismatch, redirects, etc.)
+      const pendingIdx = pendingDownloads.findIndex(p => p.downloadId === downloadId)
+      if (pendingIdx >= 0) {
+        uc_log(`cleaning stale pendingDownloads entry for ${downloadId}`)
+        pendingDownloads.splice(pendingIdx, 1)
+      }
       let finalPath = entry?.savePath
       let extractionFailed = false
       let extractionError = null
@@ -2675,7 +2713,7 @@ function createWindow() {
         status: terminalStatus,
         receivedBytes: item.getReceivedBytes(),
         totalBytes: item.getTotalBytes(),
-        speedBps: entry?.state.speedBps || 0,
+        speedBps: 0,
         etaSeconds: 0,
         filename: path.basename(finalPath || entry?.savePath || filename),
         savePath: finalPath,
@@ -2711,6 +2749,39 @@ app.whenReady().then(() => {
 
   setInterval(() => {
     pruneRunningGames().catch(() => {})
+  }, 15000)
+  
+  // Periodically clean stale pending downloads (entries where will-download never fired)
+  setInterval(() => {
+    const now = Date.now()
+    const staleThreshold = 45000 // 45 seconds
+    let cleaned = false
+    for (let i = pendingDownloads.length - 1; i >= 0; i--) {
+      const entry = pendingDownloads[i]
+      if (entry._addedAt && (now - entry._addedAt) > staleThreshold) {
+        ucLog(`Cleaning stale pending download: ${entry.downloadId} (age: ${Math.round((now - entry._addedAt) / 1000)}s)`)
+        pendingDownloads.splice(i, 1)
+        // Notify renderer that this download failed so it doesn't stay stuck
+        const windows = BrowserWindow.getAllWindows()
+        for (const win of windows) {
+          try {
+            sendDownloadUpdate(win, {
+              downloadId: entry.downloadId,
+              status: 'failed',
+              error: 'Download timed out waiting for server response',
+              speedBps: 0,
+              etaSeconds: null,
+              filename: entry.filename || '',
+            })
+          } catch (e) {}
+        }
+        cleaned = true
+      }
+    }
+    // If we cleaned stale entries, try to start queued downloads that may have been blocked
+    if (cleaned && globalDownloadQueue.length > 0 && !hasAnyActiveOrPendingDownloads()) {
+      startNextQueuedDownload(null)
+    }
   }, 15000)
   
   // Update behavior: auto-updater removed. Open releases page instead.
@@ -3461,7 +3532,26 @@ ipcMain.handle('uc:game-exe-list', (_event, appid) => {
   try {
     const folder = findInstalledFolderByAppid(appid)
     if (!folder) return { ok: false, error: 'not-found', exes: [] }
-    let exes = listExecutables(folder, 4, 50)
+
+    // Try listing from the game folder — use depth 6 to handle deeply nested structures
+    let exes = listExecutables(folder, 6, 100)
+    let effectiveFolder = folder
+
+    // If no exes found, check if there's a single subfolder wrapper (common after extraction)
+    if (exes.length === 0) {
+      try {
+        const entries = fs.readdirSync(folder, { withFileTypes: true })
+        const subdirs = entries.filter(e => e.isDirectory())
+        const files = entries.filter(e => e.isFile())
+        // If there's only installed.json and one subdirectory, scan inside that
+        if (subdirs.length === 1 && files.every(f => f.name === INSTALLED_MANIFEST)) {
+          const subPath = path.join(folder, subdirs[0].name)
+          exes = listExecutables(subPath, 6, 100)
+          if (exes.length > 0) effectiveFolder = subPath
+        }
+      } catch {}
+    }
+
     // For external games, if no exes found via junction, try the externalPath directly
     if (exes.length === 0) {
       try {
@@ -3469,12 +3559,13 @@ ipcMain.handle('uc:game-exe-list', (_event, appid) => {
         const manifest = readJsonFile(manifestPath)
         const extPath = manifest?.externalPath || (manifest?.metadata?.externalPath)
         if (extPath && fs.existsSync(extPath)) {
-          exes = listExecutables(extPath, 4, 50)
+          exes = listExecutables(extPath, 6, 100)
           return { ok: true, folder: extPath, exes }
         }
       } catch {}
     }
-    return { ok: true, folder, exes }
+
+    return { ok: true, folder: effectiveFolder, exes }
   } catch (err) {
     console.error('[UC] game-exe-list failed', err)
     return { ok: false, error: 'failed', exes: [] }
@@ -3499,6 +3590,26 @@ ipcMain.handle('uc:game-subfolder-find', (_event, folder) => {
   } catch (err) {
     console.error('[UC] game-subfolder-find failed', err)
     return null
+  }
+})
+
+ipcMain.handle('uc:game-browse-exe', async (_event, defaultPath) => {
+  try {
+    const win = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0]
+    const filters = process.platform === 'win32'
+      ? [{ name: 'Executables', extensions: ['exe'] }, { name: 'All files', extensions: ['*'] }]
+      : [{ name: 'All files', extensions: ['*'] }]
+    const result = await dialog.showOpenDialog(win, {
+      title: 'Select game executable',
+      defaultPath: defaultPath || undefined,
+      filters,
+      properties: ['openFile'],
+    })
+    if (result.canceled || !result.filePaths?.length) return { ok: false }
+    return { ok: true, path: result.filePaths[0] }
+  } catch (err) {
+    console.error('[UC] game-browse-exe failed', err)
+    return { ok: false, error: String(err) }
   }
 })
 
