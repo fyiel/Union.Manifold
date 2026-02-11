@@ -179,12 +179,16 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
           const next = prev.map((item) => {
             if (item.appid !== appid) return item
             if (["completed", "extracted"].includes(item.status)) return item
+            // Do NOT force-complete items that are still actively being processed
+            if (["extracting", "installing", "downloading"].includes(item.status)) return item
             mutated = true
             return {
               ...item,
-              status: "completed",
+              status: "completed" as DownloadStatus,
               error: null,
               completedAt: Date.now(),
+              speedBps: 0,
+              etaSeconds: null,
               receivedBytes: item.totalBytes || item.receivedBytes,
             }
           })
@@ -281,11 +285,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
 
   const startNextQueuedPart = useCallback(
     async () => {
-      console.log("=== startNextQueuedPart ===")
-      console.log("sequenceLocksRef.current.size:", sequenceLocksRef.current.size)
-      console.log("downloadsRef.current:", downloadsRef.current.map(d => ({ id: d.id, status: d.status, partIndex: d.partIndex, partTotal: d.partTotal })))
       if (sequenceLocksRef.current.size > 0) {
-        console.log("sequenceLocks active, returning")
         return
       }
       const hasActive = downloadsRef.current.some((item) =>
@@ -354,6 +354,19 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         if (res && typeof res === "object" && "ok" in res && !res.ok) {
           throw new Error((res as { error?: string }).error || "Failed to start download")
         }
+        // If main process says this download was queued or already exists,
+        // mark the renderer item as "downloading" to break the retry loop.
+        // The main process will send real status updates (via onUpdate) once it begins processing.
+        const resObj = res as Record<string, unknown> | undefined
+        if (resObj && (resObj.already || resObj.queued)) {
+          setDownloads((prev) =>
+            prev.map((item) =>
+              item.id === next.id && item.status === "queued"
+                ? { ...item, status: "downloading" as DownloadStatus }
+                : item
+            )
+          )
+        }
       } catch (err) {
         const message = err instanceof Error ? err.message : "Failed to start download"
         setDownloads((prev) =>
@@ -374,31 +387,34 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!window.ucDownloads?.onUpdate) return
     return window.ucDownloads.onUpdate((update: DownloadUpdate) => {
-      console.log("=== onUpdate received ===")
-      console.log("update.status:", update.status)
-      console.log("update.downloadId:", update.downloadId)
       let nextDownloads: DownloadItem[] | null = null
       setDownloads((prev) => {
         const idx = prev.findIndex((item) => item.id === update.downloadId)
         if (idx === -1) return prev
         const existing = prev[idx]
         
-        // Terminal states: don't allow reverting to non-terminal states
-        const terminalStates = ["completed", "extracted", "extract_failed", "failed", "cancelled"]
+        // Terminal states: once an item reaches one of these, don't let it regress
+        // to "downloading" or "queued". However, we MUST allow state transitions
+        // that the main process explicitly sends (e.g. extracting → extracted → completed).
+        const terminalStates = ["completed", "extract_failed", "failed", "cancelled"]
         const isTerminal = terminalStates.includes(existing.status)
         const nextStatus = update.status || existing.status
-        const isNextTerminal = terminalStates.includes(nextStatus)
         
-        // If already in terminal state, only update if the new status is also terminal
-        const finalStatus = isTerminal && !isNextTerminal ? existing.status : nextStatus
+        // Only truly block if item is in a hard-terminal state (completed/failed/cancelled)
+        // AND the incoming status is a step backwards (downloading/queued/paused)
+        const regressiveStates = ["downloading", "queued", "paused"]
+        const finalStatus = isTerminal && regressiveStates.includes(nextStatus) ? existing.status : nextStatus
+        
+        // When entering a terminal or idle state, always zero out speed
+        const isEnteringTerminal = terminalStates.includes(finalStatus) || finalStatus === "extracted"
         
         const next: DownloadItem = {
           ...existing,
           status: finalStatus as DownloadStatus,
           receivedBytes: update.receivedBytes ?? existing.receivedBytes,
           totalBytes: update.totalBytes ?? existing.totalBytes,
-          speedBps: update.speedBps ?? existing.speedBps,
-          etaSeconds: update.etaSeconds ?? existing.etaSeconds,
+          speedBps: isEnteringTerminal ? 0 : (update.speedBps ?? existing.speedBps),
+          etaSeconds: isEnteringTerminal ? null : (update.etaSeconds ?? existing.etaSeconds),
           filename: update.filename ?? existing.filename,
           savePath: update.savePath ?? existing.savePath,
           url: update.url ?? existing.url,
@@ -431,7 +447,10 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         }
       }
 
-      if (update.appid && (update.status === "extracting" || update.status === "installing" || update.status === "completed" || update.status === "extracted")) {
+      // Only reconcile installed state AFTER extraction/install is fully done.
+      // Do NOT reconcile while extracting/installing — the installed manifest may already
+      // exist on disk before extraction finishes, which causes premature "completed" status.
+      if (update.appid && (update.status === "completed" || update.status === "extracted")) {
         queueMicrotask(() => {
           void reconcileInstalledState(update.appid)
         })

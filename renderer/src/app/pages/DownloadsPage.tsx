@@ -41,6 +41,12 @@ function formatEta(seconds: number | null) {
   return `${secs}s`
 }
 
+// Module-level persistence for chart data (survives page navigation unmount/remount)
+let _persistedNetworkHistory: number[] = []
+let _persistedDiskHistory: number[] = []
+let _persistedPeakSpeed = 0
+let _persistedForAppId: string | null = null
+
 function renderBars(points: number[], color: string) {
   const width = 600
   const height = 70
@@ -215,31 +221,6 @@ export function DownloadsPage() {
   } = useDownloads()
   const navigate = useNavigate()
   const { games } = useGamesData()
-  const [networkHistory, setNetworkHistory] = useState<number[]>([])
-  const [diskHistory, setDiskHistory] = useState<number[]>([])
-  const [peakSpeed, setPeakSpeed] = useState(0)
-  const [exePickerOpen, setExePickerOpen] = useState(false)
-  const [exePickerTitle, setExePickerTitle] = useState("")
-  const [exePickerMessage, setExePickerMessage] = useState("")
-  const [exePickerAppId, setExePickerAppId] = useState<string | null>(null)
-  const [exePickerGameName, setExePickerGameName] = useState<string | null>(null)
-  const [exePickerFolder, setExePickerFolder] = useState<string | null>(null)
-  const [exePickerExes, setExePickerExes] = useState<Array<{ name: string; path: string; size?: number; depth?: number }>>([])
-  const [retryingAppId, setRetryingAppId] = useState<string | null>(null)
-  const [runningGames, setRunningGames] = useState<Array<{ appid: string; gameName: string; pid: number }>>([])
-  const [adminPromptOpen, setAdminPromptOpen] = useState(false)
-  const [pendingExePath, setPendingExePath] = useState<string | null>(null)
-  const [pendingAppId, setPendingAppId] = useState<string | null>(null);
-  const [shortcutModalOpen, setShortcutModalOpen] = useState(false)
-  const primaryStatsRef = useRef<{
-    totalBytes: number
-    receivedBytes: number
-    speedBps: number
-    etaSeconds: number | null
-    progress: number
-  } | null>(null)
-  const lastSampleRef = useRef<{ time: number; received: number } | null>(null)
-  const startTimeRef = useRef<number | null>(null)
 
   const grouped = useMemo(() => {
     return downloads.reduce<Record<string, typeof downloads>>((acc, item) => {
@@ -269,6 +250,39 @@ export function DownloadsPage() {
   const primaryIsInstalling = primaryGroup ? primaryGroup.some((it) => it.status === 'installing' || it.status === 'extracting') : false
   const primaryIsPaused = primaryGroup ? primaryGroup.some((it) => it.status === 'paused') : false
 
+  const currentAppId = primaryGroup?.[0]?.appid ?? null
+  const [networkHistory, setNetworkHistory] = useState<number[]>(
+    _persistedForAppId === currentAppId ? _persistedNetworkHistory : []
+  )
+  const [diskHistory, setDiskHistory] = useState<number[]>(
+    _persistedForAppId === currentAppId ? _persistedDiskHistory : []
+  )
+  const [peakSpeed, setPeakSpeed] = useState(
+    _persistedForAppId === currentAppId ? _persistedPeakSpeed : 0
+  )
+  const [exePickerOpen, setExePickerOpen] = useState(false)
+  const [exePickerTitle, setExePickerTitle] = useState("")
+  const [exePickerMessage, setExePickerMessage] = useState("")
+  const [exePickerAppId, setExePickerAppId] = useState<string | null>(null)
+  const [exePickerGameName, setExePickerGameName] = useState<string | null>(null)
+  const [exePickerFolder, setExePickerFolder] = useState<string | null>(null)
+  const [exePickerExes, setExePickerExes] = useState<Array<{ name: string; path: string; size?: number; depth?: number }>>([])
+  const [retryingAppId, setRetryingAppId] = useState<string | null>(null)
+  const [runningGames, setRunningGames] = useState<Array<{ appid: string; gameName: string; pid: number }>>([])
+  const [adminPromptOpen, setAdminPromptOpen] = useState(false)
+  const [pendingExePath, setPendingExePath] = useState<string | null>(null)
+  const [pendingAppId, setPendingAppId] = useState<string | null>(null);
+  const [shortcutModalOpen, setShortcutModalOpen] = useState(false)
+  const primaryStatsRef = useRef<{
+    totalBytes: number
+    receivedBytes: number
+    speedBps: number
+    etaSeconds: number | null
+    progress: number
+  } | null>(null)
+  const lastSampleRef = useRef<{ time: number; received: number } | null>(null)
+  const startTimeRef = useRef<number | null>(null)
+
   const primaryStats = useMemo(() => {
     if (!primaryGroup) return null
     return computeGroupStats(primaryGroup)
@@ -287,17 +301,27 @@ export function DownloadsPage() {
       setNetworkHistory([])
       setDiskHistory([])
       setPeakSpeed(0)
-      lastSampleRef.current = null
-      startTimeRef.current = null
-      return
+    _persistedNetworkHistory = []
+    _persistedDiskHistory = []
+    _persistedPeakSpeed = 0
+    _persistedForAppId = null
+    lastSampleRef.current = null
+    startTimeRef.current = null
+    return
+  }
+
+    const appId = primaryGroup?.[0]?.appid ?? null
+    // Restore persisted chart data if same download is still active
+    if (_persistedForAppId === appId && _persistedNetworkHistory.length > 0) {
+      setNetworkHistory(_persistedNetworkHistory)
+      setDiskHistory(_persistedDiskHistory)
+      setPeakSpeed(_persistedPeakSpeed)
+    } else {
+      setNetworkHistory([])
+      setDiskHistory([])
+      setPeakSpeed(0)
     }
-
-    setNetworkHistory([])
-    setDiskHistory([])
-    setPeakSpeed(0)
-    lastSampleRef.current = { time: Date.now(), received: primaryStats.receivedBytes }
-    startTimeRef.current = Date.now()
-
+    _persistedForAppId = appId
     const interval = setInterval(() => {
       const stats = primaryStatsRef.current
       if (!stats) return
@@ -311,9 +335,27 @@ export function DownloadsPage() {
         diskSpeed = Math.max(0, deltaBytes / deltaTime)
       }
       lastSampleRef.current = { time: now, received: stats.receivedBytes }
-      setNetworkHistory((prev) => [...prev, networkSpeed].slice(-60))
-      setDiskHistory((prev) => [...prev, diskSpeed].slice(-60))
-      setPeakSpeed((prev) => Math.max(prev, networkSpeed))
+
+      // If download is complete and speed is zero, stop adding data points
+      if (stats.progress >= 99.9 && networkSpeed === 0 && diskSpeed === 0) {
+        return
+      }
+
+      setNetworkHistory((prev) => {
+        const next = [...prev, networkSpeed].slice(-60)
+        _persistedNetworkHistory = next
+        return next
+      })
+      setDiskHistory((prev) => {
+        const next = [...prev, diskSpeed].slice(-60)
+        _persistedDiskHistory = next
+        return next
+      })
+      setPeakSpeed((prev) => {
+        const next = Math.max(prev, networkSpeed)
+        _persistedPeakSpeed = next
+        return next
+      })
     }, 1000)
 
     return () => clearInterval(interval)

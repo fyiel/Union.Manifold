@@ -138,7 +138,24 @@ export function isHelperExecutableName(name: string) {
 }
 
 export function filterGameExecutables(exes: GameExecutable[]) {
-  return exes
+  // Remove obvious junk: redistributables, crash handlers, uninstallers
+  const junkPatterns = [
+    /^vc_?redist/i, /^dxsetup/i, /^dxwebsetup/i, /^dotnet/i,
+    /^unins\d{3}/i, /^uninstall/i,
+    /^crashreport/i, /^bugreport/i, /^senddump/i,
+    /^ue4prereqsetup/i, /^UE4-preq/i,
+    /^(?:directx|oalinst|physx)/i,
+  ]
+
+  return exes.filter((exe) => {
+    const lower = exe.name.toLowerCase()
+    // Filter known junk patterns
+    if (junkPatterns.some((p) => p.test(lower))) return false
+    // Filter exes inside redist/support subdirectories
+    const pathLower = (exe.path || "").toLowerCase()
+    if (/[\\/](?:_?redist|__support|_commonredist|directx|vcredist)[\\/]/i.test(pathLower)) return false
+    return true
+  })
 }
 
 const normalizeToken = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, "")
@@ -230,10 +247,20 @@ export function rankGameExecutables(exes: GameExecutable[], gameName: string, ba
 }
 
 export function pickGameExecutable(exes: GameExecutable[], gameName: string, gameSource?: string, baseFolder?: string | null) {
-  const candidates = filterGameExecutables(exes)
+  // Deduplicate by normalised path first
+  const seen = new Set<string>()
+  const unique: GameExecutable[] = []
+  for (const exe of exes) {
+    const key = (exe.path || "").toLowerCase().replace(/\//g, "\\")
+    if (seen.has(key)) continue
+    seen.add(key)
+    unique.push(exe)
+  }
+
+  const candidates = filterGameExecutables(unique)
   if (!candidates.length) return { pick: null, confident: false }
 
-  // If there's only 1 exe, assume it's the correct one
+  // If there's only 1 real candidate, assume it's the correct one
   if (candidates.length === 1) {
     return { pick: candidates[0], confident: true }
   }
