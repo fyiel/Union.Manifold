@@ -110,7 +110,7 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "UnionCrax.Direct",
-      "deleteAppFolder": false
+      "include": "build/installer.nsh"
     },
 
     "linux": {
