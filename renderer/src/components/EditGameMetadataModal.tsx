@@ -121,7 +121,7 @@ export function EditGameMetadataModal({ open, onOpenChange, game, onSaved }: Edi
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg max-h-[85vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-lg max-h-[85vh] overflow-y-auto rounded-2xl border-border/60 bg-card/95 shadow-2xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Save className="h-5 w-5 text-primary" />

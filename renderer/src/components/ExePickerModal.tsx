@@ -106,10 +106,10 @@ export function ExePickerModal({ open, title, message, exes, gameName, baseFolde
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
-      <div className="absolute inset-0 bg-black/70" onClick={onClose} />
-      <div className="relative w-full max-w-lg rounded-2xl border border-border/60 bg-slate-950/95 p-5 text-white shadow-2xl">
+      <div className="absolute inset-0 bg-background/40 backdrop-blur-sm animate-in fade-in duration-300 ease-out" onClick={onClose} />
+      <div className="relative w-full max-w-lg overflow-hidden rounded-2xl border border-border/60 bg-card/95 p-5 text-foreground shadow-2xl animate-in slide-in-from-top-4 duration-300 ease-out">
         <div className="text-lg font-semibold">{title}</div>
-        <p className="mt-1 text-sm text-slate-300">{message}</p>
+        <p className="mt-1 text-sm text-muted-foreground">{message}</p>
 
         <div className="mt-4 space-y-3">
           {/* Search bar — only show when there are enough exes to warrant searching */}
@@ -120,7 +120,7 @@ export function ExePickerModal({ open, title, message, exes, gameName, baseFolde
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
                 placeholder="Search exe name or path..."
-                className="h-9 flex-1 rounded-xl bg-white/5"
+                className="h-9 flex-1 rounded-xl bg-background/70"
               />
             </div>
           )}
@@ -153,7 +153,7 @@ export function ExePickerModal({ open, title, message, exes, gameName, baseFolde
                     className={`flex items-center justify-between gap-3 rounded-xl border px-3 py-2 transition-colors ${
                       isCurrent
                         ? "border-primary/60 bg-primary/10"
-                        : "border-white/10 bg-white/5 hover:border-white/20"
+                        : "border-border/60 bg-background/70 hover:border-foreground/30 hover:bg-foreground/5"
                     }`}
                   >
                     <div className="min-w-0 flex-1">
@@ -165,9 +165,9 @@ export function ExePickerModal({ open, title, message, exes, gameName, baseFolde
                           </span>
                         ) : null}
                       </div>
-                      <div className={`truncate text-xs ${isCurrent ? "text-primary/70" : "text-slate-400"}`}>{relativePath}</div>
+                      <div className={`truncate text-xs ${isCurrent ? "text-primary/70" : "text-muted-foreground"}`}>{relativePath}</div>
                       {typeof exe.size === "number" && exe.size > 0 ? (
-                        <div className="text-[10px] text-slate-500">{formatFileSize(exe.size)}</div>
+                        <div className="text-[10px] text-muted-foreground">{formatFileSize(exe.size)}</div>
                       ) : null}
                     </div>
                     <Button
@@ -181,13 +181,13 @@ export function ExePickerModal({ open, title, message, exes, gameName, baseFolde
                 )
               })
             ) : hasExes && search.trim() ? (
-              <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-sm text-slate-300">
+              <div className="rounded-xl border border-border/60 bg-background/70 px-3 py-3 text-sm text-muted-foreground">
                 No executables matching &quot;{search.trim()}&quot;.
               </div>
             ) : !hasExes ? (
-              <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-4 text-center text-sm text-slate-300">
+              <div className="rounded-xl border border-border/60 bg-background/70 px-3 py-4 text-center text-sm text-muted-foreground">
                 <p>No executables found in this game folder.</p>
-                <p className="mt-1 text-xs text-slate-500">The game may still be extracting, or the folder structure is unusual.</p>
+                <p className="mt-1 text-xs text-muted-foreground">The game may still be extracting, or the folder structure is unusual.</p>
               </div>
             ) : null}
           </div>

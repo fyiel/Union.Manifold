@@ -225,10 +225,10 @@ export function DownBar() {
               {isPaused
                 ? `Downloads paused - ${queuedCount} queued`
                 : isQueuedOnly
-                  ? `Queued • ${displayName}`
+                  ? "Queued"
                   : stats.partInfo.total > 1
                     ? `${stats.phase} part ${stats.partInfo.partNum} of ${stats.partInfo.total}`
-                    : `${stats.phase} ${displayName}`}
+                    : stats.phase}
               {queuedCount > 0 && !isPaused && !isQueuedOnly ? ` • ${queuedCount} queued` : ""}
               {displayHost ? ` • ${displayHost}` : ""}
             </span>

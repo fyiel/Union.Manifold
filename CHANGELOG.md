@@ -1,5 +1,34 @@
 # Changelog
 
+## Version 0.9.1 - 2026-02-12
+
+### Features
+
+- **Version selector in downloads** — users can now choose which version to download when multiple archived versions are available. The selected version label is displayed throughout the download flow (in the downloads page, active downloads, completed downloads) so users always know which version they're downloading.
+- **Installed version tracking** — downloaded version is now persisted to the install manifest and displayed on the game detail page as "Installed version". When a newer version is available on the API, both "Installed version" and "Latest version" are shown separately, making it easy to see if an update is available at a glance.
+- **Version info in downloads activity** — the downloads page now shows the version label for each download:
+  - Primary active download hero section displays version
+  - Queued download groups show version label before part count
+  - Completed downloads show the downloaded version (from the DownloadItem) instead of always showing the latest API version
+  - Failed/cancelled downloads show version in the status line
+
+### Fixes
+
+- **Download cancel not working** — when clicking cancel during a multi-part download, the download continued after cancellation with the file growing in the downloads folder. Root cause: the cancel handler only checked `activeDownloads` and queues but never checked `pendingDownloads` (the limbo state between Electron's `downloadURL()` and `will-download` firing). Fixed by checking all 5 states (active, pending, app queues, global queue, and newly added `cancelledDownloadIds` tracking set). Also fixed pixeldrain delay race condition where a delayed download couldn't be cancelled during its timeout period. Now immediately cancels downloads that were cancelled while pending.
+- **Verbose download logs missing** — when "Verbose download logging" was enabled in settings, download progress wasn't being logged. `sendDownloadUpdate` was logging every single progress tick (hundreds/second) via `uc_log`, creating duplicate/concatenated output. Fixed logging to distinguish between settings: when verbose is OFF, only log state transitions (started, completed, cancelled, failed); when ON, log compact summaries per update (ID, status, bytes, speed, filename). Prevents log flooding while keeping useful diagnostics available.
+- **"Don't show this again" toggle simplified** — removed the per-download "don't show this again" toggle from the link checker modal. Modal now always shows before download unless "Skip link availability check" is disabled in Settings. This ensures users always see link status before committing to a download, unless they explicitly opt out via settings. Removed `dontShowAgain` from DownloadConfig type and related `dontShowHostSelector` bypass logic.
+
+### Files touched
+
+- [electron/main.cjs](electron/main.cjs)
+- [renderer/src/lib/downloads.ts](renderer/src/lib/downloads.ts)
+- [renderer/src/context/downloads-context.tsx](renderer/src/context/downloads-context.tsx)
+- [renderer/src/components/DownloadCheckModal.tsx](renderer/src/components/DownloadCheckModal.tsx)
+- [renderer/src/app/pages/GameDetailPage.tsx](renderer/src/app/pages/GameDetailPage.tsx)
+- [renderer/src/app/pages/DownloadsPage.tsx](renderer/src/app/pages/DownloadsPage.tsx)
+- [renderer/src/app/pages/SettingsPage.tsx](renderer/src/app/pages/SettingsPage.tsx)
+- [renderer/src/app/pages/LibraryPage.tsx](renderer/src/app/pages/LibraryPage.tsx)
+
 ## Version 0.9.0 - 2026-02-12
 
 ### Features

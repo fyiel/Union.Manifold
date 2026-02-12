@@ -202,7 +202,7 @@ export function AddGameModal({ open, onOpenChange }: AddGameModalProps) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="sm:max-w-lg rounded-2xl border-border/60 bg-card/95 shadow-2xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Plus className="h-5 w-5 text-primary" />
@@ -254,7 +254,7 @@ export function AddGameModal({ open, onOpenChange }: AddGameModalProps) {
 
               {/* Search Results Dropdown */}
               {showResults && matchResults.length > 0 && (
-                <div className="rounded-lg border border-border bg-card shadow-lg overflow-hidden">
+                <div className="overflow-hidden rounded-2xl border border-border/60 bg-card/95 shadow-2xl">
                   <div className="px-3 py-2 text-xs text-muted-foreground border-b border-border/50">
                     Matches from UC catalog
                   </div>
