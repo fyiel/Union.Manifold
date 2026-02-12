@@ -1179,26 +1179,6 @@ export function SettingsPage() {
                 />
               </button>
             </div>
-
-            <div className="flex items-center justify-between">
-              <div>
-                <label className="text-sm font-medium cursor-pointer">Reset "don't show again" preferences</label>
-                <p className="text-xs text-muted-foreground mt-1">
-                  Re-enable the download host selector dialog before downloads
-                </p>
-              </div>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={async () => {
-                  try {
-                    await window.ucSettings?.set?.('dontShowHostSelector', false)
-                  } catch {}
-                }}
-              >
-                Reset
-              </Button>
-            </div>
           </div>
         </CardContent>
       </Card>

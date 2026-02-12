@@ -54,8 +54,8 @@ export type GameVersion = {
 export type DownloadConfig = {
   host: PreferredDownloadHost
   versionId?: string
+  versionLabel?: string
   partOverrides?: Record<number, { host: string; url: string }>
-  dontShowAgain: boolean
 }
 
 const DOWNLOAD_HOST_STORAGE_KEY = "uc_direct_download_host"

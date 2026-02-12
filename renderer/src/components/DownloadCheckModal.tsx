@@ -39,16 +39,16 @@ type Props = {
   game: Game | null
   downloadToken: string | null
   defaultHost: PreferredDownloadHost
+  onCheckingChange?: (checking: boolean) => void
   onConfirm: (config: DownloadConfig) => void
   onClose: () => void
 }
 
 type Phase = "loading" | "ready" | "unavailable" | "error"
 
-export function DownloadCheckModal({ open, game, downloadToken, defaultHost, onConfirm, onClose }: Props) {
+export function DownloadCheckModal({ open, game, downloadToken, defaultHost, onCheckingChange, onConfirm, onClose }: Props) {
   const [phase, setPhase] = useState<Phase>("loading")
   const [selectedHost, setSelectedHost] = useState<PreferredDownloadHost>(defaultHost)
-  const [dontShowAgain, setDontShowAgain] = useState(false)
   const [errorMsg, setErrorMsg] = useState("")
   const [versions, setVersions] = useState<GameVersion[]>([])
   const [selectedVersion, setSelectedVersion] = useState<string | undefined>(undefined)
@@ -60,7 +60,6 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, onC
     if (!open) return
     setPhase("loading")
     setSelectedHost(defaultHost)
-    setDontShowAgain(false)
     setErrorMsg("")
     setVersions([])
     setSelectedVersion(undefined)
@@ -139,6 +138,10 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, onC
     }
   }, [open, game, downloadToken]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  useEffect(() => {
+    onCheckingChange?.(Boolean(open && downloadToken && phase === "loading"))
+  }, [open, downloadToken, phase, onCheckingChange])
+
   const handleVersionChange = (versionId: string) => {
     setSelectedVersion(versionId)
     void runCheck(versionId)
@@ -187,13 +190,13 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, onC
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
-      <div className="absolute inset-0 bg-black/70" onClick={onClose} />
-      <div className="relative w-full max-w-lg rounded-2xl border border-border/60 bg-slate-950/95 p-5 text-white shadow-2xl">
+      <div className="absolute inset-0 bg-background/40 backdrop-blur-sm animate-in fade-in duration-300 ease-out" onClick={onClose} />
+      <div className="relative w-full max-w-lg overflow-hidden rounded-2xl border border-border/60 bg-card/95 p-5 text-foreground shadow-2xl animate-in slide-in-from-top-4 duration-300 ease-out">
         {/* ── Loading Phase ── */}
         {phase === "loading" && (
           <div className="flex flex-col items-center gap-3 py-8">
             <Loader2 className="h-8 w-8 animate-spin text-primary" />
-            <p className="text-sm text-slate-300">Checking link availability…</p>
+            <p className="text-sm text-muted-foreground">Checking link availability…</p>
           </div>
         )}
 
@@ -204,7 +207,7 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, onC
               <ShieldAlert className="h-5 w-5 text-destructive" />
               Availability check failed
             </div>
-            <p className="text-sm text-slate-300">
+            <p className="text-sm text-muted-foreground">
               {errorMsg || "Could not verify link availability. You can still try downloading."}
             </p>
             <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
@@ -217,7 +220,6 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, onC
                     host: selectedHost,
                     versionId: selectedVersion,
                     partOverrides: {},
-                    dontShowAgain: false,
                   })
                 }
               >
@@ -234,8 +236,8 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, onC
               <CircleX className="h-5 w-5 text-destructive" />
               Game not available
             </div>
-            <p className="text-sm text-slate-300">
-              All download links for <span className="font-medium text-white">{game?.name}</span> are
+            <p className="text-sm text-muted-foreground">
+              All download links for <span className="font-medium text-foreground">{game?.name}</span> are
               currently dead on every host. The game cannot be downloaded right now.
             </p>
             {availability && availability.fullyDeadParts.length > 0 && (
@@ -243,7 +245,7 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, onC
                 Dead parts: {availability.fullyDeadParts.map((p) => `Part ${p}`).join(", ")}
               </div>
             )}
-            <div className="rounded-lg border border-slate-500/30 bg-slate-500/10 px-3 py-2 text-xs text-slate-200">
+            <div className="rounded-lg border border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
               Please <strong>report the dead link</strong> on the game page, or try{" "}
               <strong>downloading from the website</strong> where more hosts may be available.
             </div>
@@ -259,14 +261,14 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, onC
         {phase === "ready" && (
           <div className="space-y-4">
             <div className="text-lg font-semibold">Download options</div>
-            <p className="text-sm text-slate-300">
-              Choose a host {versions.length > 1 ? "and version " : ""}for this download.
+            <p className="text-sm text-muted-foreground">
+              Choose a host {versions.length > 0 ? "and version " : ""}for this download.
             </p>
 
             {/* Version selector */}
-            {versions.length > 1 && (
+            {versions.length > 0 && (
               <div className="space-y-1.5">
-                <label className="text-sm font-medium text-slate-200">Version</label>
+                <label className="text-sm font-medium text-foreground">Version</label>
                 <Select value={selectedVersion || ""} onValueChange={handleVersionChange}>
                   <SelectTrigger className="h-10 w-full">
                     <SelectValue placeholder="Select version" />
@@ -281,6 +283,11 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, onC
                               current
                             </span>
                           )}
+                          {v.date && (
+                            <span className="ml-auto text-[10px] text-muted-foreground">
+                              {new Date(v.date).toLocaleDateString()}
+                            </span>
+                          )}
                         </div>
                       </SelectItem>
                     ))}
@@ -291,7 +298,7 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, onC
 
             {/* Host selector + health */}
             <div className="space-y-1.5">
-              <label className="text-sm font-medium text-slate-200">Host</label>
+              <label className="text-sm font-medium text-foreground">Host</label>
               <Select value={selectedHost} onValueChange={(v) => {
                 setSelectedHost(v as PreferredDownloadHost)
                 setPartOverrides({}) // reset overrides when host changes
@@ -336,13 +343,13 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, onC
                               ) : (
                                 <AlertTriangle className="h-3.5 w-3.5 text-amber-400" />
                               )}
-                              <span className="text-slate-400">
+                              <span className="text-muted-foreground">
                                 {alive}/{total}
                               </span>
                             </span>
                           )}
                           {hasAvailData && noParts && (
-                            <span className="ml-auto text-xs text-slate-500">
+                            <span className="ml-auto text-xs text-muted-foreground">
                               unavailable
                             </span>
                           )}
@@ -400,7 +407,7 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, onC
                           {!isOverridden && filteredAliveOn.length > 0 && (
                             <button
                               onClick={() => applyAlternative(p.part, selectedHost)}
-                              className="flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 hover:bg-blue-500/30 transition-colors"
+                              className="flex items-center gap-1 rounded-full border border-border/60 bg-background/70 px-2 py-0.5 text-[10px] font-medium text-foreground transition-colors hover:bg-foreground/5"
                             >
                               <ArrowRightLeft className="h-2.5 w-2.5" />
                               Use {hostLabel(filteredAliveOn[0])}
@@ -439,26 +446,6 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, onC
               </div>
             )}
 
-            {/* Don't show again toggle */}
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => setDontShowAgain(!dontShowAgain)}
-                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-                  dontShowAgain ? "bg-primary" : "bg-slate-700"
-                }`}
-                title="Don't show this dialog again"
-              >
-                <span
-                  className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${
-                    dontShowAgain ? "translate-x-4" : "translate-x-1"
-                  }`}
-                />
-              </button>
-              <label className="text-sm text-slate-300 cursor-pointer select-none" onClick={() => setDontShowAgain(!dontShowAgain)}>
-                Don't show this again
-              </label>
-            </div>
-
             {/* Actions */}
             <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
               <Button variant="ghost" onClick={onClose}>
@@ -466,14 +453,15 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, onC
               </Button>
               <Button
                 disabled={hasDeadParts && !allPartsHandled}
-                onClick={() =>
+                onClick={() => {
+                  const selectedVersionObj = versions.find((v) => v.id === selectedVersion)
                   onConfirm({
                     host: selectedHost,
                     versionId: selectedVersion,
+                    versionLabel: selectedVersionObj?.label,
                     partOverrides: Object.keys(partOverrides).length > 0 ? partOverrides : undefined,
-                    dontShowAgain,
                   })
-                }
+                }}
               >
                 {hasDeadParts && !allPartsHandled
                   ? "Resolve dead parts first"

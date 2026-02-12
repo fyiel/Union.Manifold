@@ -38,6 +38,7 @@ export type DownloadItem = {
   filename: string
   partIndex?: number
   partTotal?: number
+  versionLabel?: string
   status: DownloadStatus
   receivedBytes: number
   totalBytes: number
@@ -508,8 +509,12 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
       // save initial metadata to installing folder so it's available offline even before completion
       try {
         if (window.ucDownloads?.saveInstalledMetadata) {
-          // pass the full game object as metadata
-          await window.ucDownloads.saveInstalledMetadata(game.appid, game)
+          // pass the full game object as metadata, with downloadedVersion from config
+          const metadataWithVersion = {
+            ...game,
+            downloadedVersion: config?.versionLabel || game.version || undefined,
+          }
+          await window.ucDownloads.saveInstalledMetadata(game.appid, metadataWithVersion)
         }
       } catch (err) {
         // ignore IPC failures
@@ -597,6 +602,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
           filename: item.filenameFallback,
           partIndex,
           partTotal,
+          versionLabel: config?.versionLabel || game.version,
           status: "queued",
           receivedBytes: 0,
           totalBytes: 0,

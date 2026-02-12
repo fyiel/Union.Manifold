@@ -13,7 +13,7 @@ type DesktopShortcutModalProps = {
 export function DesktopShortcutModal({ open, gameName, onCreateShortcut, onSkip, onClose }: DesktopShortcutModalProps) {
   return (
     <Dialog open={open} onOpenChange={(isOpen) => !isOpen && onClose()}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-md rounded-2xl border-border/60 bg-card/95 shadow-2xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <ExternalLink className="h-5 w-5 text-primary" />

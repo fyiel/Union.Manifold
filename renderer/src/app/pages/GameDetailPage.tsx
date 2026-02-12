@@ -35,6 +35,7 @@ import {
   X,
   FolderOpen,
   Info,
+  Loader2,
 } from "lucide-react"
 import { ExePickerModal } from "@/components/ExePickerModal"
 import { AdminPromptModal } from "@/components/AdminPromptModal"
@@ -73,6 +74,7 @@ export function GameDetailPage() {
   const [selectedHost, setSelectedHost] = useState<PreferredDownloadHost>("pixeldrain")
   const [defaultHost, setDefaultHost] = useState<PreferredDownloadHost>("pixeldrain")
   const [downloadToken, setDownloadToken] = useState<string | null>(null)
+  const [isCheckingLinks, setIsCheckingLinks] = useState(false)
   const [exePickerTitle, setExePickerTitle] = useState("Select executable")
   const [exePickerMessage, setExePickerMessage] = useState("We couldn't confidently detect the correct exe. Please choose the one to launch.")
   const [exePickerCurrentPath, setExePickerCurrentPath] = useState<string | null>(null)
@@ -271,14 +273,6 @@ export function GameDetailPage() {
   const openHostSelector = async () => {
     if (!game) return
     const skipLinkCheck = await window.ucSettings?.get?.('skipLinkCheck')
-    const dontShowHostSelector = await window.ucSettings?.get?.('dontShowHostSelector')
-
-    // If user opted out of the modal, go straight to download
-    if (dontShowHostSelector) {
-      const preferred = await getPreferredDownloadHost()
-      await startDownload(preferred)
-      return
-    }
 
     // If user wants to skip just the link check, show a simpler flow
     // Otherwise run the full availability check modal
@@ -290,22 +284,25 @@ export function GameDetailPage() {
       if (skipLinkCheck) {
         // Skip availability check but still show host selector
         setDownloadToken(null)
+        setIsCheckingLinks(false)
         setHostSelectorOpen(true)
         return
       }
 
       // Acquire download token for availability check
+      setIsCheckingLinks(true)
       const token = await requestDownloadToken(game.appid)
       setDownloadToken(token)
       setHostSelectorOpen(true)
     } catch (err) {
       // If token fails, fall back to old behavior (just download)
+      setIsCheckingLinks(false)
       const preferred = await getPreferredDownloadHost()
       await startDownload(preferred)
     }
   }
 
-  const startDownload = async (preferredHost?: PreferredDownloadHost) => {
+  const startDownload = async (preferredHost?: PreferredDownloadHost, config?: DownloadConfig) => {
     if (!game) return
     const isCancelled = downloads.some((item) => item.appid === game.appid && item.status === "cancelled")
     const hasFailedDownload = downloads.some(
@@ -326,7 +323,7 @@ export function GameDetailPage() {
     setDownloadError(null)
     setDownloading(true)
     try {
-      await startGameDownload(game, preferredHost)
+      await startGameDownload(game, preferredHost, config)
       setDownloadCount((prev) => prev + 1)
     } catch (err) {
       setDownloadError(err instanceof Error ? err.message : "Failed to start download")
@@ -449,6 +446,8 @@ export function GameDetailPage() {
     (Boolean(installingManifest) && !isCancelled && !hasCancelledManifest && !isFailed && !isPaused) || (isActivelyDownloading && !isCancelled) || (downloading && !isCancelled)
   const actionLabel = isGameRunning
     ? "Quit"
+    : isCheckingLinks
+      ? "Checking..."
     : isInstalled
       ? "Play"
       : isPaused
@@ -460,7 +459,7 @@ export function GameDetailPage() {
             : isInstalling
               ? "Installing"
               : "Download Now"
-  const actionDisabled = !isGameRunning && (isInstalling || isQueued || isFailed)
+  const actionDisabled = !isGameRunning && (isCheckingLinks || isInstalling || isQueued || isFailed)
 
   const getSavedExe = async () => {
     if (!window.ucSettings?.get) return null
@@ -957,7 +956,13 @@ export function GameDetailPage() {
                     }}
                     disabled={actionDisabled || (isGameRunning && stoppingGame)}
                   >
-                    {isGameRunning ? <Square className="mr-2 h-5 w-5" /> : <Download className="mr-2 h-5 w-5" />}
+                    {isGameRunning ? (
+                      <Square className="mr-2 h-5 w-5" />
+                    ) : isCheckingLinks ? (
+                      <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                    ) : (
+                      <Download className="mr-2 h-5 w-5" />
+                    )}
                     {actionLabel}
                   </Button>
 
@@ -1131,11 +1136,30 @@ export function GameDetailPage() {
                     <span className="font-semibold text-foreground">{game.size || "Unknown"}</span>
                   </div>
 
-                  {game.version && (
-                    <div className="flex items-center justify-between">
-                      <span className="text-muted-foreground">Version</span>
-                      <span className="font-semibold text-foreground">{game.version}</span>
-                    </div>
+                  {(game.version || installedManifest?.metadata?.downloadedVersion || installedManifest?.metadata?.version) && (
+                    <>
+                      {(installedManifest?.metadata?.downloadedVersion || installedManifest?.metadata?.version) ? (
+                        <>
+                          <div className="flex items-center justify-between">
+                            <span className="text-muted-foreground">Installed version</span>
+                            <span className="font-semibold text-foreground">
+                              {installedManifest?.metadata?.downloadedVersion || installedManifest?.metadata?.version}
+                            </span>
+                          </div>
+                          {game.version && game.version !== (installedManifest?.metadata?.downloadedVersion || installedManifest?.metadata?.version) && (
+                            <div className="flex items-center justify-between">
+                              <span className="text-muted-foreground">Latest version</span>
+                              <span className="font-semibold text-foreground">{game.version}</span>
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <div className="flex items-center justify-between">
+                          <span className="text-muted-foreground">Version</span>
+                          <span className="font-semibold text-foreground">{game.version}</span>
+                        </div>
+                      )}
+                    </>
                   )}
 
                   {game.update_time && (
@@ -1236,20 +1260,20 @@ export function GameDetailPage() {
         game={game}
         downloadToken={downloadToken}
         defaultHost={defaultHost}
+        onCheckingChange={setIsCheckingLinks}
         onConfirm={async (config: DownloadConfig) => {
           setHostSelectorOpen(false)
           setDownloadToken(null)
+          setIsCheckingLinks(false)
           try {
             setPreferredDownloadHost(config.host)
-            if (config.dontShowAgain) {
-              await window.ucSettings?.set?.('dontShowHostSelector', true)
-            }
           } catch {}
-          await startDownload(config.host)
+          await startDownload(config.host, config)
         }}
         onClose={() => {
           setHostSelectorOpen(false)
           setDownloadToken(null)
+          setIsCheckingLinks(false)
         }}
       />
       {pendingDeleteAction && game && (

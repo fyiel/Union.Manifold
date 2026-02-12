@@ -699,17 +699,6 @@ export function DownloadsPage() {
             <div className="relative z-10 space-y-6 p-6 lg:p-8">
                 <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
                   <div className="space-y-2">
-                    <p className="text-xs uppercase tracking-wide text-muted-foreground">
-                      {primaryStats?.phase === "queued"
-                        ? "Queued"
-                        : primaryStats?.phase === "paused"
-                          ? "Paused"
-                          : primaryStats?.phase === "installing"
-                            ? "Now installing"
-                            : primaryStats?.phase === "extracting"
-                              ? "Now extracting"
-                              : "Now downloading"}
-                    </p>
                     <div className="flex items-center gap-3">
                       {primaryGame?.image && (
                         <div className="h-10 w-16 overflow-hidden rounded-md border border-white/10 bg-slate-900/60">
@@ -724,6 +713,22 @@ export function DownloadsPage() {
                         {primaryGroup[0]?.gameName || "Unknown"}
                       </h2>
                     </div>
+                    <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                      {primaryStats?.phase === "queued"
+                        ? "Queued"
+                        : primaryStats?.phase === "paused"
+                          ? "Paused"
+                          : primaryStats?.phase === "installing"
+                            ? "Installing"
+                            : primaryStats?.phase === "extracting"
+                              ? "Extracting"
+                              : "Downloading"}
+                    </p>
+                    {primaryGroup[0]?.versionLabel && (
+                      <div className="text-xs text-muted-foreground">
+                        Version {primaryGroup[0].versionLabel}
+                      </div>
+                    )}
                     {primaryTotalParts > 1 && (
                       <div className="text-xs text-muted-foreground">
                         {(() => {
@@ -916,9 +921,14 @@ export function DownloadsPage() {
                       ) : null}
                     </div>
                     <div className="min-w-0">
-                      <div className="text-xs uppercase tracking-wide text-muted-foreground">{groupStatus}</div>
                       <h3 className="truncate text-base font-semibold">{gameName}</h3>
                       <div className="text-xs text-muted-foreground">
+                        {groupStatus && (
+                          <span>{groupStatus} · </span>
+                        )}
+                        {items[0]?.versionLabel && (
+                          <span>{items[0].versionLabel} · </span>
+                        )}
                         {totalParts} {getPartsLabel(items)}
                         {overallTotalBytes > 0 && (
                           <span>
@@ -1036,7 +1046,7 @@ export function DownloadsPage() {
                     <div>
                       <h3 className="text-base font-semibold">{gameName}</h3>
                       <div className="text-xs text-muted-foreground">
-                        {game?.version ? `${game.version}` : "Unknown version"} - {game?.source || "Unknown source"} - Completed {finishedAt ? new Date(finishedAt).toLocaleString() : ""}
+                        {items[0]?.versionLabel || game?.version || "Unknown version"} - {game?.source || "Unknown source"} - Completed {finishedAt ? new Date(finishedAt).toLocaleString() : ""}
                       </div>
                       {game?.comment && (
                         <div className="mt-2 text-xs text-amber-200/90">
@@ -1119,7 +1129,7 @@ export function DownloadsPage() {
                     <div>
                       <h3 className="text-base font-semibold text-muted-foreground">{gameName}</h3>
                       <div className="text-xs text-destructive">
-                        {statusLabel}
+                        {statusLabel}{items[0]?.versionLabel ? ` · ${items[0].versionLabel}` : ""}
                       </div>
                     </div>
                   </div>

@@ -78,6 +78,7 @@ function extractPixeldrainFileIdFromUrl(rawUrl) {
 const activeDownloads = new Map()
 const downloadQueues = new Map()
 const globalDownloadQueue = []
+const cancelledDownloadIds = new Set()
 const activeExtractions = new Set()
 const runningGames = new Map()
 const downloadDirName = 'UnionCrax.Direct'
@@ -1659,6 +1660,12 @@ async function visitPixeldrainViewerPage(fileId) {
 async function startDownloadNow(win, payload) {
   if (!win || win.isDestroyed()) return { ok: false }
   
+  // If this download was already cancelled (e.g. by user during pixeldrain delay), bail out
+  if (cancelledDownloadIds.has(payload.downloadId)) {
+    ucLog(`startDownloadNow: skipping cancelled download ${payload.downloadId}`)
+    return { ok: false, cancelled: true }
+  }
+  
   // Add to pendingDownloads FIRST to prevent race conditions
   pendingDownloads.push({
     url: payload.url,
@@ -1684,6 +1691,11 @@ async function startDownloadNow(win, payload) {
         // Remove from pending before re-adding to avoid duplicates
         const idx = pendingDownloads.findIndex(p => p.downloadId === payload.downloadId)
         if (idx >= 0) pendingDownloads.splice(idx, 1)
+        // Check if cancelled during the delay
+        if (cancelledDownloadIds.has(payload.downloadId)) {
+          ucLog(`Pixeldrain delayed download was cancelled: ${payload.downloadId}`)
+          return
+        }
         startDownloadNow(win, payload)
       }, delayNeeded)
       return { ok: true, delayed: true }
@@ -2067,14 +2079,22 @@ function run7zExtract(archivePath, destDir, onProgress) {
 
 function sendDownloadUpdate(win, payload) {
   if (!win || win.isDestroyed()) {
-    uc_log(`[sendDownloadUpdate] Skipping update - window is null or destroyed`)
+    ucLog(`[Download] Skipping update - window is null or destroyed`, 'warn')
     return
   }
   try {
-    uc_log(`[sendDownloadUpdate] Sending: ${JSON.stringify(payload, (k, v) => k === 'etaSeconds' ? Number(v) : v, 2)}`)
+    const settings = readSettings() || {}
+    const isProgressUpdate = payload.status === 'downloading' || payload.status === 'paused'
+    if (settings.verboseDownloadLogging) {
+      // Verbose mode: log full JSON for every update
+      ucLog(`[Download] ${payload.downloadId} | ${payload.status} | ${payload.receivedBytes || 0}/${payload.totalBytes || 0} | ${Math.round(payload.speedBps || 0)} B/s | ${payload.filename || ''}`)
+    } else if (!isProgressUpdate) {
+      // Non-verbose: only log state changes (started, completed, cancelled, failed, extracting, etc.)
+      ucLog(`[Download] ${payload.downloadId} → ${payload.status}${payload.error ? ' (' + payload.error + ')' : ''} | ${payload.filename || ''} | appid=${payload.appid || 'unknown'}`)
+    }
     win.webContents.send('uc:download-update', payload)
   } catch (error) {
-    uc_log(`[sendDownloadUpdate] Failed to send update: ${String(error)}`)
+    ucLog(`[Download] Failed to send update: ${String(error)}`, 'error')
   }
 }
 
@@ -2331,6 +2351,14 @@ function createWindow() {
     )
     const match = matchIndex >= 0 ? pendingDownloads.splice(matchIndex, 1)[0] : null
     const downloadId = match?.downloadId || `${Date.now()}-${Math.random().toString(16).slice(2)}`
+
+    // If this download was cancelled while it was pending, cancel it immediately
+    if (cancelledDownloadIds.has(downloadId)) {
+      ucLog(`will-download: immediately cancelling download that was cancelled while pending: ${downloadId}`)
+      try { item.cancel() } catch {}
+      return
+    }
+
     // Always use match.filename if available to ensure consistency with parser logic, even if server sends different Content-Disposition
     const filename = match?.filename ? match.filename : itemFilename
     uc_log(`will-download - url=${item.getURL()}`)
@@ -2916,6 +2944,12 @@ ipcMain.handle('uc:download-start', (event, payload) => {
 })
 
 ipcMain.handle('uc:download-cancel', (_event, downloadId) => {
+  if (!downloadId) return { ok: false }
+  // Track this ID as cancelled so delayed/pending downloads can't resurrect
+  cancelledDownloadIds.add(downloadId)
+  // Auto-clean after 5 minutes to avoid memory leak
+  setTimeout(() => cancelledDownloadIds.delete(downloadId), 5 * 60 * 1000)
+
   const entry = activeDownloads.get(downloadId)
   if (entry) {
     // Clean up speed limit timer
@@ -2926,23 +2960,34 @@ ipcMain.handle('uc:download-cancel', (_event, downloadId) => {
     try {
       entry.item.cancel()
     } catch {}
+    ucLog(`Download cancelled (active): ${downloadId}`)
     return { ok: true }
   }
-  if (downloadId) {
-    for (const [appid, queue] of downloadQueues.entries()) {
-      const idx = queue.findIndex((item) => item.payload && item.payload.downloadId === downloadId)
-      if (idx >= 0) {
-        queue.splice(idx, 1)
-        if (!queue.length) downloadQueues.delete(appid)
-        return { ok: true }
-      }
-    }
-    const idx = globalDownloadQueue.findIndex((item) => item.payload && item.payload.downloadId === downloadId)
+  // Check pendingDownloads (between downloadURL() call and will-download firing)
+  const pendingIdx = pendingDownloads.findIndex((p) => p.downloadId === downloadId)
+  if (pendingIdx >= 0) {
+    pendingDownloads.splice(pendingIdx, 1)
+    ucLog(`Download cancelled (pending): ${downloadId}`)
+    return { ok: true }
+  }
+  // Check per-app download queues
+  for (const [appid, queue] of downloadQueues.entries()) {
+    const idx = queue.findIndex((item) => item.payload && item.payload.downloadId === downloadId)
     if (idx >= 0) {
-      globalDownloadQueue.splice(idx, 1)
+      queue.splice(idx, 1)
+      if (!queue.length) downloadQueues.delete(appid)
+      ucLog(`Download cancelled (app queue): ${downloadId}`)
       return { ok: true }
     }
   }
+  // Check global download queue
+  const idx = globalDownloadQueue.findIndex((item) => item.payload && item.payload.downloadId === downloadId)
+  if (idx >= 0) {
+    globalDownloadQueue.splice(idx, 1)
+    ucLog(`Download cancelled (global queue): ${downloadId}`)
+    return { ok: true }
+  }
+  ucLog(`Download cancel: ${downloadId} not found in any queue`, 'warn')
   return { ok: false }
 })
 
