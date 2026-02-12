@@ -1,5 +1,38 @@
 # Changelog
 
+## Version 0.9.0 - 2026-02-12
+
+### Features
+
+- **Automatic link availability checker** — before downloading, the app now verifies that all download links are alive via server-side HEAD checks. A modal displays per-host health with color-coded indicators (🟢 all alive, 🟡 some dead, 🔴 all dead) and shows exact part counts (e.g. "7/15 parts alive"). Prevents wasted time on games with dead links by catching issues before download starts.
+- **Smart cross-host fallback** — when multi-part games have dead parts on your selected host, the modal shows exactly which parts are dead and offers one-click "Use Pixeldrain" / "Use Rootz" buttons to download individual dead parts from an alternative host where they're alive. Fully transparent about what's dead and where to get it.
+- **Per-part status indicators** — each downloadable link shows a live status dot (🟢 alive, 🔴 dead) updated during the download check, so you can see at a glance which specific parts are problematic before commitment.
+- **Dead parts messaging** — when a part is dead on every available host, the modal clearly states "dead on all hosts" and suggests reporting the broken link on the game page or trying the website (which may have more mirrors). For unavailable games, shows a prominent message encouraging users to report dead links.
+- **Version selector in modal** — games with multiple archived versions now show a dropdown to choose specific versions to download, making it easy to grab older builds without navigating away from the download flow.
+- **"Don't show this again" toggle** — the availability check modal includes a checkbox to skip the dialog on future downloads, going straight to your preferred host while still protecting against obviously dead games (fully unavailable titles still show the error).
+- **Settings: Skip link checks entirely** — new toggle in Settings → Download checks to disable availability checking completely for users who prefer to download without verification.
+- **Settings: Reset "don't show again"** — new button to re-enable the availability check dialog after opting out.
+
+### Backend
+
+- **New endpoint `POST /api/downloads/check-availability`** — server-side link health checker that HEAD-checks all URLs in parallel (12s timeout per link), returns per-host availability with actual part numbers, cross-host alternatives for dead parts (showing which OTHER hosts have each dead part alive), and a `gameAvailable` flag. Correctly handles legacy data by assigning sequential part numbers to NULL entries.
+- **Fixed part numbering bug** — when part column is NULL (legacy games), backend now assigns sequential 1-based part numbers per host instead of always using "Part 1", preventing display confusion.
+
+### Fixes
+
+- **"Don't show this again" not working** — the setting previously required both `skipLinkCheck` AND `dontShowHostSelector` to be true, now correctly uses `dontShowHostSelector` alone to skip the modal while still serving fully-dead games as errors.
+- **Missing `fetchDownloadLinks` export** — re-added the original `fetchDownloadLinks` function alongside new `fetchDownloadLinksForVersion` to prevent crashes in components still using the original function signature.
+
+### Files touched
+
+- [package.json](package.json)
+- [renderer/src/components/DownloadCheckModal.tsx](renderer/src/components/DownloadCheckModal.tsx) (new)
+- [renderer/src/lib/downloads.ts](renderer/src/lib/downloads.ts)
+- [renderer/src/app/pages/GameDetailPage.tsx](renderer/src/app/pages/GameDetailPage.tsx)
+- [renderer/src/context/downloads-context.tsx](renderer/src/context/downloads-context.tsx)
+- [renderer/src/app/pages/SettingsPage.tsx](renderer/src/app/pages/SettingsPage.tsx)
+- [renderer/src/components/DownloadHostModal.tsx](renderer/src/components/DownloadHostModal.tsx) (deleted)
+
 ## Version 0.8.3 - 2026-02-12
 
 ### Fixes
