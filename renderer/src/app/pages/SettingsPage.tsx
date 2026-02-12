@@ -89,6 +89,7 @@ export function SettingsPage() {
   const [bioDraft, setBioDraft] = useState("")
   const [bioSaving, setBioSaving] = useState(false)
   const [bioSaved, setBioSaved] = useState(false)
+  const [skipLinkCheck, setSkipLinkCheck] = useState(false)
 
   useEffect(() => {
     const loadVersion = async () => {
@@ -305,6 +306,26 @@ export function SettingsPage() {
       if (data.key === 'verboseDownloadLogging') {
         setVerboseDownloadLogging(Boolean(data.value))
       }
+    })
+    return () => {
+      mounted = false
+      if (typeof off === 'function') off()
+    }
+  }, [])
+
+  useEffect(() => {
+    let mounted = true
+    const loadSkipLinkCheck = async () => {
+      try {
+        const value = await window.ucSettings?.get?.('skipLinkCheck')
+        if (mounted) setSkipLinkCheck(Boolean(value))
+      } catch {}
+    }
+    loadSkipLinkCheck()
+    const off = window.ucSettings?.onChanged?.((data: any) => {
+      if (!data || !data.key) return
+      if (data.key === 'skipLinkCheck') setSkipLinkCheck(Boolean(data.value))
+      if (data.key === '__CLEAR_ALL__') setSkipLinkCheck(false)
     })
     return () => {
       mounted = false
@@ -1118,6 +1139,66 @@ export function SettingsPage() {
                 downloading with Rootz.
               </div>
             )}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="border-border/60">
+        <CardContent className="p-6 space-y-6">
+          <div>
+            <h2 className="text-lg font-semibold">Download checks</h2>
+            <p className="text-sm text-muted-foreground">Configure pre-download link verification.</p>
+          </div>
+
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <label className="text-sm font-medium cursor-pointer">Skip link availability check</label>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Download immediately without checking if links are alive first
+                </p>
+              </div>
+              <button
+                onClick={async () => {
+                  const current = await window.ucSettings?.get?.('skipLinkCheck')
+                  const newValue = !current
+                  setSkipLinkCheck(newValue)
+                  try {
+                    await window.ucSettings?.set?.('skipLinkCheck', newValue)
+                  } catch {}
+                }}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                  skipLinkCheck ? 'bg-primary' : 'bg-slate-700'
+                }`}
+                title="Toggle skip link check"
+              >
+                <span
+                  className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                    skipLinkCheck ? 'translate-x-6' : 'translate-x-1'
+                  }`}
+                />
+              </button>
+            </div>
+
+            <div className="flex items-center justify-between">
+              <div>
+                <label className="text-sm font-medium cursor-pointer">Reset "don't show again" preferences</label>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Re-enable the download host selector dialog before downloads
+                </p>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={async () => {
+                  try {
+                    await window.ucSettings?.set?.('dontShowHostSelector', false)
+                  } catch {}
+                }}
+              >
+                Reset
+              </Button>
+            </div>
           </div>
         </CardContent>
       </Card>

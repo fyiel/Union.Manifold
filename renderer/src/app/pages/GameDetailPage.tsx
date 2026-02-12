@@ -7,7 +7,7 @@ import { GameCard } from "@/components/GameCard"
 import { GameComments } from "@/components/GameComments"
 import { useDownloads } from "@/context/downloads-context"
 import { apiUrl, apiFetch } from "@/lib/api"
-import { getPreferredDownloadHost, setPreferredDownloadHost, type PreferredDownloadHost } from "@/lib/downloads"
+import { getPreferredDownloadHost, setPreferredDownloadHost, requestDownloadToken, type PreferredDownloadHost, type DownloadConfig } from "@/lib/downloads"
 import { formatNumber, hasOnlineMode, pickGameExecutable, proxyImageUrl } from "@/lib/utils"
 import type { Game } from "@/lib/types"
 import { useGamesData } from "@/hooks/use-games"
@@ -38,7 +38,7 @@ import {
 } from "lucide-react"
 import { ExePickerModal } from "@/components/ExePickerModal"
 import { AdminPromptModal } from "@/components/AdminPromptModal"
-import { DownloadHostModal } from "@/components/DownloadHostModal"
+import { DownloadCheckModal } from "@/components/DownloadCheckModal"
 import { DesktopShortcutModal } from "@/components/DesktopShortcutModal"
 import { EditGameMetadataModal } from "@/components/EditGameMetadataModal"
 import { gameLogger } from "@/lib/logger"
@@ -72,6 +72,7 @@ export function GameDetailPage() {
   const [hostSelectorOpen, setHostSelectorOpen] = useState(false)
   const [selectedHost, setSelectedHost] = useState<PreferredDownloadHost>("pixeldrain")
   const [defaultHost, setDefaultHost] = useState<PreferredDownloadHost>("pixeldrain")
+  const [downloadToken, setDownloadToken] = useState<string | null>(null)
   const [exePickerTitle, setExePickerTitle] = useState("Select executable")
   const [exePickerMessage, setExePickerMessage] = useState("We couldn't confidently detect the correct exe. Please choose the one to launch.")
   const [exePickerCurrentPath, setExePickerCurrentPath] = useState<string | null>(null)
@@ -268,18 +269,40 @@ export function GameDetailPage() {
   }, [lightboxOpen])
 
   const openHostSelector = async () => {
+    if (!game) return
+    const skipLinkCheck = await window.ucSettings?.get?.('skipLinkCheck')
     const dontShowHostSelector = await window.ucSettings?.get?.('dontShowHostSelector')
+
+    // If user opted out of the modal, go straight to download
     if (dontShowHostSelector) {
       const preferred = await getPreferredDownloadHost()
       await startDownload(preferred)
       return
     }
-    setHostSelectorOpen(true)
+
+    // If user wants to skip just the link check, show a simpler flow
+    // Otherwise run the full availability check modal
     try {
       const preferred = await getPreferredDownloadHost()
       setSelectedHost(preferred)
       setDefaultHost(preferred)
-    } catch {}
+
+      if (skipLinkCheck) {
+        // Skip availability check but still show host selector
+        setDownloadToken(null)
+        setHostSelectorOpen(true)
+        return
+      }
+
+      // Acquire download token for availability check
+      const token = await requestDownloadToken(game.appid)
+      setDownloadToken(token)
+      setHostSelectorOpen(true)
+    } catch (err) {
+      // If token fails, fall back to old behavior (just download)
+      const preferred = await getPreferredDownloadHost()
+      await startDownload(preferred)
+    }
   }
 
   const startDownload = async (preferredHost?: PreferredDownloadHost) => {
@@ -1208,22 +1231,26 @@ export function GameDetailPage() {
           </div>
         </div>
       )}
-      <DownloadHostModal
+      <DownloadCheckModal
         open={hostSelectorOpen}
-        selectedHost={selectedHost}
+        game={game}
+        downloadToken={downloadToken}
         defaultHost={defaultHost}
-        onSelect={setSelectedHost}
-        onConfirm={async (dontShowAgain) => {
+        onConfirm={async (config: DownloadConfig) => {
           setHostSelectorOpen(false)
+          setDownloadToken(null)
           try {
-            setPreferredDownloadHost(selectedHost)
-            if (dontShowAgain) {
+            setPreferredDownloadHost(config.host)
+            if (config.dontShowAgain) {
               await window.ucSettings?.set?.('dontShowHostSelector', true)
             }
           } catch {}
-          await startDownload(selectedHost)
+          await startDownload(config.host)
         }}
-        onClose={() => setHostSelectorOpen(false)}
+        onClose={() => {
+          setHostSelectorOpen(false)
+          setDownloadToken(null)
+        }}
       />
       {pendingDeleteAction && game && (
         <div className="fixed inset-0 z-50 flex items-center justify-center px-4">

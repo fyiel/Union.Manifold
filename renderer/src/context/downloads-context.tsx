@@ -2,6 +2,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import type { Game } from "@/lib/types"
 import {
   fetchDownloadLinks,
+  fetchDownloadLinksForVersion,
   inferFilenameFromUrl,
   getPreferredDownloadHost,
   isPixeldrainUrl,
@@ -10,6 +11,7 @@ import {
   resolveDownloadUrl,
   resolveDownloadSize,
   selectHost,
+  type DownloadConfig,
   type PreferredDownloadHost,
 } from "@/lib/downloads"
 import { addDownloadedGameToHistory, hasCookieConsent } from "@/lib/user-history"
@@ -77,7 +79,7 @@ type DownloadUpdate = {
 
 type DownloadsContextValue = {
   downloads: DownloadItem[]
-  startGameDownload: (game: Game, preferredHost?: PreferredDownloadHost) => Promise<void>
+  startGameDownload: (game: Game, preferredHost?: PreferredDownloadHost, config?: DownloadConfig) => Promise<void>
   cancelDownload: (downloadId: string) => Promise<void>
   cancelGroup: (appid: string) => Promise<void>
   pauseDownload: (downloadId: string) => Promise<void>
@@ -488,7 +490,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
 
   // The main process writes installed manifests; renderer can call `window.ucDownloads.listInstalled()` when needed.
 
-  const startGameDownload = useCallback(async (game: Game, preferredHostOverride?: PreferredDownloadHost) => {
+  const startGameDownload = useCallback(async (game: Game, preferredHostOverride?: PreferredDownloadHost, config?: DownloadConfig) => {
     if (preparingRef.current.has(game.appid)) {
       throw new Error("This game is already downloading.")
     }
@@ -518,7 +520,11 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         addDownloadedGameToHistory(game.appid)
       }
 
-      const linksResult = await fetchDownloadLinks(game.appid, downloadToken)
+      // Use version-specific fetch if a versionId was provided via config
+      const versionId = config?.versionId
+      const linksResult = versionId
+        ? await fetchDownloadLinksForVersion(game.appid, downloadToken, versionId)
+        : await fetchDownloadLinks(game.appid, downloadToken)
 
       const preferredHost =
         preferredHostOverride === "pixeldrain" || preferredHostOverride === "rootz"

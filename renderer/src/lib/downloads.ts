@@ -16,6 +16,48 @@ export type ResolvedDownload = {
   resolved: boolean
 }
 
+// ── Link availability check types ──
+
+export type PartStatus = {
+  part: number
+  status: "alive" | "dead" | "error"
+}
+
+export type HostAvailability = {
+  parts: PartStatus[]
+  allAlive: boolean
+  totalParts: number
+  aliveParts: number
+}
+
+export type AlternativeInfo = {
+  deadOn: string[]
+  aliveOn: string[]
+}
+
+export type AvailabilityResult = {
+  appid: string
+  hosts: Record<string, HostAvailability>
+  alternatives: Record<string, AlternativeInfo>
+  gameAvailable: boolean
+  fullyDeadParts: number[]
+}
+
+export type GameVersion = {
+  id: string
+  label: string
+  date?: string
+  host_count?: number
+  is_current?: boolean
+}
+
+export type DownloadConfig = {
+  host: PreferredDownloadHost
+  versionId?: string
+  partOverrides?: Record<number, { host: string; url: string }>
+  dontShowAgain: boolean
+}
+
 const DOWNLOAD_HOST_STORAGE_KEY = "uc_direct_download_host"
 const ROOTZ_SIGNED_HOST = "signed-url.cloudflare.com"
 // Supported download hosts
@@ -152,9 +194,97 @@ export async function requestDownloadToken(appid: string) {
   return data.downloadToken as string
 }
 
+export async function fetchGameVersions(
+  appid: string,
+  downloadToken: string
+): Promise<GameVersion[]> {
+  try {
+    const response = await apiFetch(
+      `/api/downloads/versions/${encodeURIComponent(appid)}?downloadToken=${encodeURIComponent(downloadToken)}`,
+      { headers: { "X-UC-Client": "unioncrax-direct" } }
+    )
+    if (!response.ok) return []
+    const data = await response.json()
+    if (data && Array.isArray(data.versions)) {
+      return data.versions.map((v: any) => ({
+        id: String(v.id || "current"),
+        label: String(v.label || "Unknown"),
+        date: v.date || v.archived_at || undefined,
+        host_count: v.host_count || 0,
+        is_current: Boolean(v.is_current),
+      }))
+    }
+    return []
+  } catch {
+    return []
+  }
+}
+
+export async function checkAvailability(
+  appid: string,
+  downloadToken: string,
+  versionId?: string
+): Promise<AvailabilityResult> {
+  const body: Record<string, string> = { appid, downloadToken }
+  if (versionId) body.versionId = versionId
+
+  const response = await apiFetch("/api/downloads/check-availability", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-UC-Client": "unioncrax-direct",
+    },
+    body: JSON.stringify(body),
+  })
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => null)
+    throw new Error(err?.error || `Availability check failed: ${response.status}`)
+  }
+
+  return response.json()
+}
+
 export async function fetchDownloadLinks(appid: string, downloadToken: string): Promise<DownloadLinksResult> {
   const url = apiUrl(
     `/api/downloads/${encodeURIComponent(appid)}?fetchLinks=true&downloadToken=${encodeURIComponent(downloadToken)}`
+  )
+  const response = await fetch(url, {
+    redirect: "manual",
+    headers: {
+      "X-UC-Client": "unioncrax-direct",
+    },
+  })
+  const contentType = response.headers.get("content-type") || ""
+
+  if (!response.ok && contentType.includes("application/json")) {
+    const errorPayload = await response.json().catch(() => null)
+    if (errorPayload?.error) {
+      throw new Error(errorPayload.error)
+    }
+  }
+
+  if (response.status >= 300 && response.status < 400) {
+    const redirectUrl = response.headers.get("Location") || response.headers.get("location") || response.url
+    return { hosts: {}, redirectUrl: redirectUrl || undefined }
+  }
+
+  if (contentType.includes("application/json")) {
+    const data = await response.json()
+    const hosts = sanitizeHosts((data?.hosts as DownloadHosts) || {})
+    return { hosts }
+  }
+
+  return { hosts: {}, redirectUrl: response.url }
+}
+
+export async function fetchDownloadLinksForVersion(
+  appid: string,
+  downloadToken: string,
+  versionId: string
+): Promise<DownloadLinksResult> {
+  const url = apiUrl(
+    `/api/downloads/versions/${encodeURIComponent(appid)}?versionId=${encodeURIComponent(versionId)}&downloadToken=${encodeURIComponent(downloadToken)}`
   )
   const response = await fetch(url, {
     redirect: "manual",
