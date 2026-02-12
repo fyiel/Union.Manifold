@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { GameCard } from "@/components/GameCard"
 import { GameComments } from "@/components/GameComments"
 import { useDownloads } from "@/context/downloads-context"
-import { apiUrl } from "@/lib/api"
+import { apiUrl, apiFetch } from "@/lib/api"
 import { getPreferredDownloadHost, setPreferredDownloadHost, type PreferredDownloadHost } from "@/lib/downloads"
 import { formatNumber, hasOnlineMode, pickGameExecutable, proxyImageUrl } from "@/lib/utils"
 import type { Game } from "@/lib/types"
@@ -207,6 +207,13 @@ export function GameDetailPage() {
         if (hasCookieConsent()) addViewedGameToHistory(appid)
       })
       .catch(() => {})
+
+    // Sync view to user's account history (for cross-device sync)
+    apiFetch("/api/view-history", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ appid }),
+    }).catch(() => {})
   }, [appid])
 
   useEffect(() => {

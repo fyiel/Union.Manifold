@@ -1,5 +1,21 @@
 # Changelog
 
+## Version 0.8.3 - 2026-02-12
+
+### Fixes
+
+- **Comment endpoints returning 404** — fixed incorrect API endpoint URLs for comment operations. Pin, like, and report endpoints were calling wrong URLs with incorrect request methods. Pin now correctly uses `PATCH /api/comments/{appid}` with `{ id, pinned }` body. Like now uses `POST/DELETE /api/comments/like` with `{ appid, commentId }` body. Report now uses `POST /api/comments/report` with `{ appid, commentId, reason }` body.
+- **View history not syncing between app and web** — Direct app was only recording anonymous view counts but not syncing to user's personal view history. Now calls `/api/view-history` POST alongside the anonymous `/api/views/{appid}` call, matching the web app behavior for cross-device history sync.
+- **Removed account stats from settings page** — removed the "Account overview" card showing wishlist, favorites, view history, and search history counts as this data was not useful and cluttered the settings interface.
+
+### Files touched
+
+- [package.json](package.json)
+- [renderer/src/components/GameComments.tsx](renderer/src/components/GameComments.tsx)
+- [renderer/src/app/pages/GameDetailPage.tsx](renderer/src/app/pages/GameDetailPage.tsx)
+- [renderer/src/app/pages/SettingsPage.tsx](renderer/src/app/pages/SettingsPage.tsx)
+- [renderer/src/lib/api.ts](renderer/src/lib/api.ts)
+
 ## Version 0.8.2 - 2026-02-11
 
 ### Fixes
