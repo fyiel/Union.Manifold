@@ -89,7 +89,6 @@ export function SettingsPage() {
   const [bioDraft, setBioDraft] = useState("")
   const [bioSaving, setBioSaving] = useState(false)
   const [bioSaved, setBioSaved] = useState(false)
-  const [accountCounts, setAccountCounts] = useState<{ wishlist: number; favorites: number; viewHistory: number; searchHistory: number } | null>(null)
 
   useEffect(() => {
     const loadVersion = async () => {
@@ -595,7 +594,6 @@ export function SettingsPage() {
   useEffect(() => {
     if (accountUser && authenticated) return
     setAccountSummaryLoaded(false)
-    setAccountCounts(null)
     setAccountError(null)
   }, [accountUser, authenticated])
 
@@ -643,12 +641,6 @@ export function SettingsPage() {
         setBioSaved(false)
       }
 
-      setAccountCounts({
-        wishlist: Array.isArray(data?.wishlist) ? data.wishlist.length : 0,
-        favorites: Array.isArray(data?.favorites) ? data.favorites.length : 0,
-        viewHistory: Array.isArray(data?.viewHistory) ? data.viewHistory.length : 0,
-        searchHistory: Array.isArray(data?.searchHistory) ? data.searchHistory.length : 0,
-      })
       setAccountSummaryLoaded(true)
     } catch {
       setAccountError("Unable to load account settings.")
@@ -696,7 +688,6 @@ export function SettingsPage() {
       } catch {}
       window.dispatchEvent(new Event("uc_discord_logout"))
       setAccountSummaryLoaded(false)
-      setAccountCounts(null)
       setBioDraft("")
       setBioSaved(false)
     } catch {
@@ -770,7 +761,6 @@ export function SettingsPage() {
   const accountAvatarUrl = accountUser?.avatarUrl || null
   const showAccountControls = Boolean(accountUser && authenticated)
   const accountBusy = accountLoading || loggingIn || loggingOut || accountRefreshing
-  const accountStats = accountCounts || { wishlist: 0, favorites: 0, viewHistory: 0, searchHistory: 0 }
 
   return (
     <div className="container mx-auto max-w-5xl space-y-8">
@@ -905,27 +895,7 @@ export function SettingsPage() {
                 </div>
               </div>
 
-              <div className="rounded-xl border border-border/60 bg-card/50 p-4 space-y-2 md:col-span-2">
-                <div className="text-sm font-semibold">Account overview</div>
-                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                  <div className="rounded-lg border border-border/60 bg-background/60 p-3">
-                    <div className="text-xs text-muted-foreground">Wishlist</div>
-                    <div className="text-lg font-semibold">{accountStats.wishlist}</div>
-                  </div>
-                  <div className="rounded-lg border border-border/60 bg-background/60 p-3">
-                    <div className="text-xs text-muted-foreground">Favorites</div>
-                    <div className="text-lg font-semibold">{accountStats.favorites}</div>
-                  </div>
-                  <div className="rounded-lg border border-border/60 bg-background/60 p-3">
-                    <div className="text-xs text-muted-foreground">View history</div>
-                    <div className="text-lg font-semibold">{accountStats.viewHistory}</div>
-                  </div>
-                  <div className="rounded-lg border border-border/60 bg-background/60 p-3">
-                    <div className="text-xs text-muted-foreground">Search history</div>
-                    <div className="text-lg font-semibold">{accountStats.searchHistory}</div>
-                  </div>
-                </div>
-              </div>
+
             </div>
           )}
         </CardContent>

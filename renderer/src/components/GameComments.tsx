@@ -474,10 +474,10 @@ export function GameComments({ appid, gameName }: { appid: string; gameName: str
     setPinning(id)
     setError(null)
     try {
-      const res = await apiFetch(`/api/comments/${appid}/pin`, {
-        method: "POST",
+      const res = await apiFetch(`/api/comments/${appid}`, {
+        method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ commentId: id, pinned: nextPinned }),
+        body: JSON.stringify({ id, pinned: nextPinned }),
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
@@ -495,10 +495,10 @@ export function GameComments({ appid, gameName }: { appid: string; gameName: str
     setLikingId(id)
     setError(null)
     try {
-      const res = await apiFetch(`/api/comments/${appid}/like`, {
-        method: "POST",
+      const res = await apiFetch(`/api/comments/like`, {
+        method: liked ? "DELETE" : "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ commentId: id, liked: !liked }),
+        body: JSON.stringify({ appid, commentId: id }),
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
@@ -539,10 +539,10 @@ export function GameComments({ appid, gameName }: { appid: string; gameName: str
     setReportSubmitting(true)
     setError(null)
     try {
-      const res = await apiFetch(`/api/comments/${appid}/report`, {
+      const res = await apiFetch(`/api/comments/report`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ commentId: reportingId, reason: trimmed }),
+        body: JSON.stringify({ appid, commentId: reportingId, reason: trimmed }),
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
