@@ -22,7 +22,7 @@ export const APP_INFO = {
 
 // Mirror host configuration
 export type MirrorHost = 'rootz' | 'pixeldrain'
-export type MirrorHostTag = 'beta' | 'soon'
+export type MirrorHostTag = 'beta' | 'soon' | 'retiring'
 
 export interface MirrorHostInfo {
   key: MirrorHost
@@ -32,5 +32,5 @@ export interface MirrorHostInfo {
 
 export const MIRROR_HOSTS: MirrorHostInfo[] = [
   { key: 'pixeldrain', label: 'Pixeldrain' },
-  { key: 'rootz', label: 'Rootz', tag: 'beta' },
+  { key: 'rootz', label: 'Rootz', tag: 'retiring' },
 ]
