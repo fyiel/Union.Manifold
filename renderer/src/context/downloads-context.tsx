@@ -11,6 +11,7 @@ import {
   resolveDownloadUrl,
   resolveDownloadSize,
   selectHost,
+  SUPPORTED_DOWNLOAD_HOSTS,
   type DownloadConfig,
   type PreferredDownloadHost,
 } from "@/lib/downloads"
@@ -310,16 +311,17 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
 
       try {
         const resolved = await resolveWithTimeout(next.host, next.url)
-        if (!resolved || !resolved.url || (next.host === "rootz" && !resolved.resolved)) {
+        if (!resolved || !resolved.url || !resolved.resolved) {
+          const hostLabel = next.host.charAt(0).toUpperCase() + next.host.slice(1)
           setDownloads((prev) =>
             prev.map((item) =>
               item.id === next.id
-                ? { ...item, status: "failed", error: "Rootz link could not be resolved." }
+                ? { ...item, status: "failed", error: `${hostLabel} link could not be resolved.` }
                 : item
             )
           )
           if (next.appid) {
-            await window.ucDownloads?.setInstallingStatus?.(next.appid, "failed", "Rootz link could not be resolved.")
+            await window.ucDownloads?.setInstallingStatus?.(next.appid, "failed", `${hostLabel} link could not be resolved.`)
           }
           return
         }
@@ -532,8 +534,8 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         : await fetchDownloadLinks(game.appid, downloadToken)
 
       const preferredHost =
-        preferredHostOverride === "pixeldrain" || preferredHostOverride === "rootz"
-          ? preferredHostOverride
+        SUPPORTED_DOWNLOAD_HOSTS.includes(preferredHostOverride as PreferredDownloadHost)
+          ? (preferredHostOverride as PreferredDownloadHost)
           : await getPreferredDownloadHost()
 
       let links: string[] = []

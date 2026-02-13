@@ -27,6 +27,8 @@ type HostOption = {
 
 const HOST_OPTIONS: HostOption[] = [
   { key: "pixeldrain", label: "Pixeldrain" },
+  { key: "fileq", label: "FileQ", tag: "soon" },
+  { key: "datavaults", label: "DataVaults", tag: "soon" },
   { key: "rootz", label: "Rootz", tag: "retiring" },
 ]
 
