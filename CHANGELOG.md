@@ -1,5 +1,24 @@
 # Changelog
 
+## Version 0.9.2 - 2026-02-13
+
+### Features
+
+- **FileQ & DataVaults hosts visible (coming soon)** — FileQ and DataVaults now appear in the host selector and network tests, marked as "soon". Download support for these hosts will be enabled in a future update once mirrors are populated.
+
+### Fixes & Improvements
+
+- **Generalized download resolution errors** — resolution failure messages are no longer Rootz-specific and will report the failing host name for clearer diagnostics.
+- **Preferred host handling** — preferred-host override logic now uses the exported supported-hosts list instead of hardcoded checks, making it future-proof for added hosts.
+- **Network tests extended** — the built-in network test now probes FileQ and DataVaults endpoints as part of mirror diagnostics.
+
+### Files touched (UnionCrax.Direct)
+
+- `renderer/src/lib/downloads.ts`
+- `renderer/src/components/DownloadCheckModal.tsx`
+- `renderer/src/context/downloads-context.tsx`
+- `electron/main.cjs`
+
 ## Version 0.9.1 - 2026-02-12
 
 ### Features

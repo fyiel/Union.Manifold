@@ -7,7 +7,7 @@ export type DownloadLinksResult = {
   redirectUrl?: string
 }
 
-export type PreferredDownloadHost = "rootz" | "pixeldrain"
+export type PreferredDownloadHost = "pixeldrain" | "fileq" | "datavaults" | "rootz"
 
 export type ResolvedDownload = {
   url: string
@@ -60,8 +60,8 @@ export type DownloadConfig = {
 
 const DOWNLOAD_HOST_STORAGE_KEY = "uc_direct_download_host"
 const ROOTZ_SIGNED_HOST = "signed-url.cloudflare.com"
-// Supported download hosts
-const SUPPORTED_DOWNLOAD_HOSTS: PreferredDownloadHost[] = ["rootz", "pixeldrain"]
+// Supported download hosts (fileq & datavaults coming soon)
+export const SUPPORTED_DOWNLOAD_HOSTS: PreferredDownloadHost[] = ["pixeldrain", "rootz"]
 const PREFERRED_HOSTS: PreferredDownloadHost[] = ["pixeldrain", "rootz"]
 const PIXELDRAIN_404_MESSAGE = "Pixeldrain returned 404. Please report the dead link so we can re-upload it."
 const ROOTZ_404_MESSAGE = "Rootz returned 404. Please report the dead link so we can re-upload it."
@@ -322,6 +322,7 @@ function pickHostLinks(available: DownloadHosts, host: PreferredDownloadHost) {
   if (host === "pixeldrain") {
     return available.pixeldrain || available["pixeldrain.com"] || []
   }
+  // fileq/datavaults download support coming soon
   return []
 }
 
@@ -588,7 +589,7 @@ export async function resolveDownloadUrl(host: string, url: string): Promise<Res
   if (host === "pixeldrain") {
     return resolvePixeldrainDownload(url)
   }
-  // Other hosts are not supported; mark unresolved so upstream can handle fallback
+  // Other hosts (fileq, datavaults) not yet supported for downloads
   return { url, resolved: false }
 }
 

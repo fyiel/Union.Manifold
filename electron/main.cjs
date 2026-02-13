@@ -807,6 +807,8 @@ ipcMain.handle('uc:network-test', async (_event, baseUrl) => {
       { label: 'API base', url: origin },
       { label: 'API downloads', url: new URL('/api/downloads/all', origin).toString() },
       { label: 'Pixeldrain', url: 'https://pixeldrain.com' },
+      { label: 'FileQ', url: 'https://fileq.net' },
+      { label: 'DataVaults', url: 'https://datavaults.co' },
       { label: 'Rootz', url: 'https://rootz.so' }
     ]
     const results = await Promise.all(
