@@ -1122,7 +1122,7 @@ export function SettingsPage() {
                       {h.tag ? (
                         <span
                           className={`ml-2 inline-block text-[10px] font-medium px-2 py-0.5 rounded-full ${
-                            h.tag === 'beta' ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-800'
+                            h.tag === 'beta' ? 'bg-amber-100 text-amber-800' : h.tag === 'retiring' ? 'bg-red-100 text-red-800' : 'bg-slate-100 text-slate-800'
                           }`}
                         >
                           {h.tag}
