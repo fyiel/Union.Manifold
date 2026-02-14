@@ -303,8 +303,8 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, def
               Choose a host {versions.length > 0 ? "and version " : ""}for this download.
             </p>
 
-            {/* Version selector */}
-            {versions.length > 0 && (
+            {/* Version selector (only when multiple versions) */}
+            {versions.length > 1 && (
               <div className="space-y-1.5">
                 <label className="text-sm font-medium text-foreground">Version</label>
                 <Select value={selectedVersion || ""} onValueChange={handleVersionChange}>
@@ -331,21 +331,24 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, def
                     ))}
                   </SelectContent>
                 </Select>
-                {/* Version metadata strip */}
-                {(() => {
-                  const sel = versions.find((v) => v.id === selectedVersion)
-                  const meta = sel?.metadata
-                  if (!meta || (!meta.size && !meta.source && !meta.comment)) return null
-                  return (
-                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-border/40 bg-muted/20 px-3 py-1.5 text-xs text-muted-foreground mt-1.5">
-                      {meta.size && <span><strong className="text-foreground/70">Size:</strong> {meta.size}</span>}
-                      {meta.source && <span><strong className="text-foreground/70">Source:</strong> {meta.source}</span>}
-                      {meta.comment && <span className="text-amber-300/80"><strong className="text-amber-400/80">Note:</strong> {meta.comment}</span>}
-                    </div>
-                  )
-                })()}
               </div>
             )}
+
+            {/* Version metadata strip (shown even for single version) */}
+            {(() => {
+              const sel = versions.length > 0
+                ? versions.find((v) => v.id === selectedVersion) || versions[0]
+                : null
+              const meta = sel?.metadata
+              if (!meta || (!meta.size && !meta.source && !meta.comment)) return null
+              return (
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-border/40 bg-muted/20 px-3 py-1.5 text-xs text-muted-foreground">
+                  {meta.size && <span><strong className="text-foreground/70">Size:</strong> {meta.size}</span>}
+                  {meta.source && <span><strong className="text-foreground/70">Source:</strong> {meta.source}</span>}
+                  {meta.comment && <span className="text-amber-300/80"><strong className="text-amber-400/80">Note:</strong> {meta.comment}</span>}
+                </div>
+              )
+            })()}
 
             {/* Host selector + health */}
             <div className="space-y-1.5">
