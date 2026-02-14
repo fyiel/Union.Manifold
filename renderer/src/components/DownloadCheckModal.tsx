@@ -330,6 +330,19 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, onC
                     ))}
                   </SelectContent>
                 </Select>
+                {/* Version metadata strip */}
+                {(() => {
+                  const sel = versions.find((v) => v.id === selectedVersion)
+                  const meta = sel?.metadata
+                  if (!meta || (!meta.size && !meta.source && !meta.comment)) return null
+                  return (
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-border/40 bg-muted/20 px-3 py-1.5 text-xs text-muted-foreground mt-1.5">
+                      {meta.size && <span><strong className="text-foreground/70">Size:</strong> {meta.size}</span>}
+                      {meta.source && <span><strong className="text-foreground/70">Source:</strong> {meta.source}</span>}
+                      {meta.comment && <span className="text-amber-300/80"><strong className="text-amber-400/80">Note:</strong> {meta.comment}</span>}
+                    </div>
+                  )
+                })()}
               </div>
             )}
 

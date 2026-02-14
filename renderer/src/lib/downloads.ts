@@ -50,6 +50,14 @@ export type GameVersion = {
   date?: string
   host_count?: number
   is_current?: boolean
+  metadata?: {
+    size?: string
+    source?: string
+    comment?: string
+    genres?: string[]
+    hasCoOp?: boolean
+    dlc?: string[]
+  }
 }
 
 export type DownloadConfig = {
@@ -213,6 +221,7 @@ export async function fetchGameVersions(
         date: v.date || v.archived_at || undefined,
         host_count: v.host_count || 0,
         is_current: Boolean(v.is_current),
+        metadata: v.metadata || undefined,
       }))
     }
     return []
