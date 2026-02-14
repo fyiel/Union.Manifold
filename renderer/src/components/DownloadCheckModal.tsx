@@ -42,6 +42,7 @@ type Props = {
   game: Game | null
   downloadToken: string | null
   defaultHost: PreferredDownloadHost
+  defaultVersionId?: string
   onCheckingChange?: (checking: boolean) => void
   onConfirm: (config: DownloadConfig) => void
   onClose: () => void
@@ -49,7 +50,7 @@ type Props = {
 
 type Phase = "loading" | "ready" | "unavailable" | "error"
 
-export function DownloadCheckModal({ open, game, downloadToken, defaultHost, onCheckingChange, onConfirm, onClose }: Props) {
+export function DownloadCheckModal({ open, game, downloadToken, defaultHost, defaultVersionId, onCheckingChange, onConfirm, onClose }: Props) {
   const [phase, setPhase] = useState<Phase>("loading")
   const [selectedHost, setSelectedHost] = useState<PreferredDownloadHost>(defaultHost)
   const [errorMsg, setErrorMsg] = useState("")
@@ -67,7 +68,7 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, onC
     setSelectedHost(defaultHost)
     setErrorMsg("")
     setVersions([])
-    setSelectedVersion(undefined)
+    setSelectedVersion(defaultVersionId || undefined)
     setAvailability(null)
     setPartOverrides({})
     setDeadLinksReported(false)
@@ -90,7 +91,7 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, onC
 
         if (versionList.length > 0 && versions.length === 0) {
           setVersions(versionList)
-          if (!versionId) {
+          if (!versionId && !selectedVersion) {
             const current = versionList.find((v) => v.is_current)
             if (current) setSelectedVersion(current.id)
           }
@@ -138,7 +139,7 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, onC
 
   useEffect(() => {
     if (open && game && downloadToken) {
-      void runCheck(selectedVersion)
+      void runCheck(defaultVersionId || selectedVersion)
     } else if (open && game && !downloadToken) {
       // Skip link check mode — show host picker immediately
       setPhase("ready")
