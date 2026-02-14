@@ -1,4 +1,5 @@
 import { apiFetch, apiUrl } from "@/lib/api"
+import { downloadLogger } from "@/lib/logger"
 
 export type DownloadHosts = Record<string, string[]>
 
