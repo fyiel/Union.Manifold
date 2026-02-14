@@ -63,8 +63,8 @@ const ROOTZ_SIGNED_HOST = "signed-url.cloudflare.com"
 // Supported download hosts (fileq & datavaults coming soon)
 export const SUPPORTED_DOWNLOAD_HOSTS: PreferredDownloadHost[] = ["pixeldrain", "rootz"]
 const PREFERRED_HOSTS: PreferredDownloadHost[] = ["pixeldrain", "rootz"]
-const PIXELDRAIN_404_MESSAGE = "Pixeldrain returned 404. Please report the dead link so we can re-upload it."
-const ROOTZ_404_MESSAGE = "Rootz returned 404. Please report the dead link so we can re-upload it."
+const PIXELDRAIN_404_MESSAGE = "Pixeldrain returned 404. The link appears to be dead."
+const ROOTZ_404_MESSAGE = "Rootz returned 404. The link appears to be dead."
 
 function sanitizeHosts(input: DownloadHosts | null | undefined): DownloadHosts {
   const hosts = input && typeof input === "object" ? input : {}

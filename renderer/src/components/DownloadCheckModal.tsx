@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import {
@@ -10,6 +10,7 @@ import {
   type PreferredDownloadHost,
 } from "@/lib/downloads"
 import type { Game } from "@/lib/types"
+import { apiFetch } from "@/lib/api"
 import {
   AlertTriangle,
   CheckCircle2,
@@ -56,6 +57,8 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, onC
   const [selectedVersion, setSelectedVersion] = useState<string | undefined>(undefined)
   const [availability, setAvailability] = useState<AvailabilityResult | null>(null)
   const [partOverrides, setPartOverrides] = useState<Record<number, { host: string; url: string }>>({})
+  const [deadLinksReported, setDeadLinksReported] = useState(false)
+  const reportSentRef = useRef(false)
 
   // Reset state when modal opens
   useEffect(() => {
@@ -67,6 +70,8 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, onC
     setSelectedVersion(undefined)
     setAvailability(null)
     setPartOverrides({})
+    setDeadLinksReported(false)
+    reportSentRef.current = false
   }, [open, defaultHost])
 
   // Fetch versions + run availability check
@@ -143,6 +148,32 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, onC
   useEffect(() => {
     onCheckingChange?.(Boolean(open && downloadToken && phase === "loading"))
   }, [open, downloadToken, phase, onCheckingChange])
+
+  // Auto-report dead links when game is fully unavailable
+  useEffect(() => {
+    if (phase !== "unavailable" || !availability || !game || reportSentRef.current) return
+    const deadLines: string[] = []
+    for (const [h, hostData] of Object.entries(availability.hosts)) {
+      if (h.toLowerCase().includes('rootz')) continue
+      const deadParts = hostData.parts.filter((p) => p.status === 'dead')
+      if (deadParts.length === 0) continue
+      deadLines.push(`${h}: all ${hostData.totalParts} parts dead`)
+    }
+    if (deadLines.length > 0) {
+      reportSentRef.current = true
+      setDeadLinksReported(true)
+      apiFetch('/api/reports/dead-links', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          appid: game.appid,
+          gameName: game.name,
+          deadLinks: `Dead links found:\n${deadLines.join('\n')}`,
+          fingerprint: crypto.randomUUID?.() ?? undefined,
+        }),
+      }).catch(() => {})
+    }
+  }, [phase, availability, game])
 
   const handleVersionChange = (versionId: string) => {
     setSelectedVersion(versionId)
@@ -248,9 +279,13 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, onC
               </div>
             )}
             <div className="rounded-lg border border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-              Please <strong>report the dead link</strong> on the game page, or try{" "}
-              <strong>downloading from the website</strong> where more hosts may be available.
+              Please try <strong>downloading from the website</strong> where more hosts may be available.
             </div>
+            {deadLinksReported && (
+              <p className="text-[11px] text-muted-foreground/60 text-center">
+                We detected dead links and have reported it for you.
+              </p>
+            )}
             <div className="flex justify-end">
               <Button variant="ghost" onClick={onClose}>
                 Close
@@ -434,8 +469,7 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, onC
                   return filteredAlive.length === 0
                 }) && (
                   <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-200">
-                    Some parts are dead on every host. Please{" "}
-                    <strong>report the dead link</strong> on the game page, or try{" "}
+                    Some parts are dead on every host. Please try{" "}
                     <strong>downloading from the website</strong> where more hosts may be available.
                   </div>
                 )}
@@ -450,6 +484,13 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, onC
               </div>
             )}
 
+            {/* Dead links reported notice */}
+            {deadLinksReported && (
+              <p className="text-[11px] text-muted-foreground/60 text-center">
+                We detected dead links and have reported it for you.
+              </p>
+            )}
+
             {/* Actions */}
             <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
               <Button variant="ghost" onClick={onClose}>
@@ -458,6 +499,35 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, onC
               <Button
                 disabled={hasDeadParts && !allPartsHandled}
                 onClick={() => {
+                  // Auto-report dead links (excluding rootz) on download confirm
+                  if (!reportSentRef.current && availability && selectedHost !== 'rootz') {
+                    const deadLines: string[] = []
+                    for (const [h, hostData] of Object.entries(availability.hosts)) {
+                      if (h.toLowerCase().includes('rootz')) continue
+                      const deadParts = hostData.parts.filter((p) => p.status === 'dead')
+                      if (deadParts.length === 0) continue
+                      if (deadParts.length === hostData.totalParts) {
+                        deadLines.push(`${h}: all ${hostData.totalParts} parts dead`)
+                      } else {
+                        deadLines.push(`${h}: part${deadParts.length > 1 ? 's' : ''} ${deadParts.map((p) => p.part).join(', ')} dead`)
+                      }
+                    }
+                    if (deadLines.length > 0) {
+                      reportSentRef.current = true
+                      setDeadLinksReported(true)
+                      apiFetch('/api/reports/dead-links', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          appid: game?.appid,
+                          gameName: game?.name,
+                          deadLinks: `Dead links found:\n${deadLines.join('\n')}`,
+                          fingerprint: crypto.randomUUID?.() ?? undefined,
+                        }),
+                      }).catch(() => {})
+                    }
+                  }
+
                   const selectedVersionObj = versions.find((v) => v.id === selectedVersion)
                   onConfirm({
                     host: selectedHost,
