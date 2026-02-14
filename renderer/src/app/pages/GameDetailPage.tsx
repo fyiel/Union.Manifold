@@ -1,5 +1,5 @@
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useCallback, useMemo, useState } from "react"
 import { useParams } from "react-router-dom"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -7,7 +7,7 @@ import { GameCard } from "@/components/GameCard"
 import { GameComments } from "@/components/GameComments"
 import { useDownloads } from "@/context/downloads-context"
 import { apiUrl, apiFetch } from "@/lib/api"
-import { getPreferredDownloadHost, setPreferredDownloadHost, requestDownloadToken, type PreferredDownloadHost, type DownloadConfig } from "@/lib/downloads"
+import { getPreferredDownloadHost, setPreferredDownloadHost, requestDownloadToken, fetchGameVersionsMeta, type PreferredDownloadHost, type DownloadConfig, type GameVersion } from "@/lib/downloads"
 import { formatNumber, hasOnlineMode, pickGameExecutable, proxyImageUrl } from "@/lib/utils"
 import type { Game } from "@/lib/types"
 import { useGamesData } from "@/hooks/use-games"
@@ -24,6 +24,7 @@ import {
   ExternalLink,
   Flame,
   HardDrive,
+  History,
   RefreshCw,
   ShieldCheck,
   Settings,
@@ -85,6 +86,10 @@ export function GameDetailPage() {
   const [shortcutFeedback, setShortcutFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
   const [pendingDeleteAction, setPendingDeleteAction] = useState<"installed" | "installing" | null>(null)
   const [editMetadataOpen, setEditMetadataOpen] = useState(false)
+
+  // Version switcher state
+  const [downloadVersions, setDownloadVersions] = useState<GameVersion[]>([])
+  const [selectedPageVersionId, setSelectedPageVersionId] = useState<string | null>(null)
 
   const appid = params.id || ""
 
@@ -218,6 +223,73 @@ export function GameDetailPage() {
       body: JSON.stringify({ appid }),
     }).catch(() => {})
   }, [appid])
+
+  // Fetch version list (public metadata, no token needed)
+  useEffect(() => {
+    if (!game?.appid || game.appid.startsWith('external-')) return
+    let mounted = true
+    fetchGameVersionsMeta(game.appid).then((list) => {
+      if (!mounted) return
+      setDownloadVersions(list)
+      if (list.length > 0 && !selectedPageVersionId) {
+        setSelectedPageVersionId(String(list[0].id || 'current'))
+      }
+    })
+    return () => { mounted = false }
+  }, [game?.appid])
+
+  // Derive displayed game data based on selected version's metadata
+  const selectedVersion = useMemo(() => {
+    if (!selectedPageVersionId || downloadVersions.length === 0) return null
+    return downloadVersions.find((v) => String(v.id) === String(selectedPageVersionId)) || null
+  }, [selectedPageVersionId, downloadVersions])
+
+  const selectedVersionMeta = selectedVersion?.metadata || null
+
+  const displayedGame = useMemo(() => {
+    if (!game) return null
+    if (!selectedVersion) return game
+
+    const isCurrent = selectedVersion.is_current === true
+    const meta: Record<string, any> = selectedVersionMeta || {}
+
+    if (isCurrent) {
+      return {
+        ...game,
+        size: meta.size || game.size || '',
+        source: meta.source || game.source || '',
+        comment: meta.comment ?? game.comment ?? '',
+        genres: Array.isArray(meta.genres) && meta.genres.length > 0 ? meta.genres : (game.genres || []),
+        hasCoOp: meta.hasCoOp !== undefined ? meta.hasCoOp : (game.hasCoOp ?? false),
+        dlc: Array.isArray(meta.dlc) && meta.dlc.length > 0 ? meta.dlc : (game.dlc || []),
+      }
+    }
+
+    // Archived version: use ONLY stored metadata
+    return {
+      ...game,
+      size: meta.size || '',
+      source: meta.source || '',
+      comment: meta.comment || '',
+      genres: Array.isArray(meta.genres) ? meta.genres : [],
+      hasCoOp: typeof meta.hasCoOp === 'boolean' ? meta.hasCoOp : false,
+      dlc: Array.isArray(meta.dlc) ? meta.dlc : [],
+    }
+  }, [game, selectedVersion, selectedVersionMeta])
+
+  const handleVersionSelect = useCallback((versionId: string) => {
+    setSelectedPageVersionId(versionId)
+  }, [])
+
+  const formatVersionDate = (dateStr: string) => {
+    if (!dateStr) return null
+    try {
+      const date = new Date(dateStr)
+      return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+    } catch {
+      return null
+    }
+  }
 
   useEffect(() => {
     if (!appid || !window.ucDownloads?.getRunningGame) return
@@ -806,7 +878,7 @@ export function GameDetailPage() {
 
               <div className="absolute bottom-0 left-0 right-0 p-8">
                 <div className="flex flex-wrap gap-2 mb-4">
-                  {game.genres?.map((genre) => (
+                  {displayedGame?.genres?.map((genre) => (
                     <Badge
                       key={genre}
                       variant={genre.toLowerCase() === "nsfw" ? "destructive" : "default"}
@@ -821,7 +893,7 @@ export function GameDetailPage() {
                       Popular
                     </Badge>
                   )}
-                  {hasOnlineMode(game.hasCoOp) && (
+                  {hasOnlineMode(displayedGame?.hasCoOp) && (
                     <Badge className="px-3 py-1 rounded-full bg-emerald-500/20 border-emerald-500/30 text-emerald-400 font-semibold flex items-center gap-1.5">
                       <Wifi className="h-3 w-3" />
                       Online
@@ -848,6 +920,50 @@ export function GameDetailPage() {
           </div>
         </div>
       </section>
+
+      {/* Version Switcher Tab Bar */}
+      {downloadVersions.length > 1 && (
+        <section className="container mx-auto px-4 pt-2 -mt-6 pb-0">
+          <div className="max-w-6xl mx-auto">
+            <div className="flex items-center gap-3 overflow-x-auto scrollbar-hide pb-1">
+              <div className="flex items-center gap-1.5 text-sm text-muted-foreground shrink-0 mr-1">
+                <History className="h-4 w-4" />
+                <span className="font-semibold text-xs uppercase tracking-wider">Versions</span>
+              </div>
+              {downloadVersions.map((v) => {
+                const isSelected = String(v.id) === String(selectedPageVersionId)
+                const meta = v.metadata || {}
+                return (
+                  <button
+                    key={String(v.id)}
+                    onClick={() => handleVersionSelect(String(v.id))}
+                    className={`
+                      relative shrink-0 flex items-center gap-2 px-4 py-2 rounded-full text-sm font-semibold
+                      transition-all duration-200 border
+                      ${isSelected
+                        ? "bg-primary text-primary-foreground border-primary shadow-lg shadow-primary/25"
+                        : "bg-card/50 text-muted-foreground border-border/50 hover:bg-card hover:text-foreground hover:border-border"
+                      }
+                    `}
+                  >
+                    <span className="truncate max-w-[160px]">{v.label}</span>
+                    {meta.size && (
+                      <span className={`text-[10px] font-medium ${isSelected ? "text-primary-foreground/70" : "text-muted-foreground/60"}`}>
+                        {meta.size}
+                      </span>
+                    )}
+                    {v.date && (
+                      <span className={`text-[10px] tabular-nums ${isSelected ? "text-primary-foreground/60" : "text-muted-foreground/50"}`}>
+                        {formatVersionDate(v.date)}
+                      </span>
+                    )}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        </section>
+      )}
 
       <section className="container mx-auto px-4 py-12">
         <div className="max-w-6xl mx-auto">
@@ -905,13 +1021,13 @@ export function GameDetailPage() {
                 </div>
               )}
 
-              {game.dlc && game.dlc.length > 0 && (
+              {displayedGame?.dlc && displayedGame.dlc.length > 0 && (
                 <div className="p-8 rounded-2xl bg-card/30 border border-border/50">
                   <h2 className="text-2xl font-black text-foreground font-montserrat mb-4">
-                    Included DLC ({game.dlc.length})
+                    Included DLC ({displayedGame.dlc.length})
                   </h2>
                   <ul className="space-y-2">
-                    {game.dlc.map((dlc, index) => (
+                    {displayedGame.dlc.map((dlc, index) => (
                       <li key={`${dlc}-${index}`} className="flex items-center gap-2 text-muted-foreground">
                         <span className="h-1.5 w-1.5 rounded-full bg-primary" />
                         {dlc}
@@ -921,13 +1037,13 @@ export function GameDetailPage() {
                 </div>
               )}
 
-              {game.comment && (
+              {displayedGame?.comment && (
                 <div className="p-6 rounded-2xl bg-primary/10 border border-primary/20">
                   <div className="flex items-start gap-3">
                     <AlertTriangle className="h-5 w-5 text-primary flex-shrink-0 mt-0.5" />
                     <div>
                       <h3 className="font-semibold text-foreground mb-1">Important Note</h3>
-                      <p className="text-sm text-muted-foreground">{game.comment}</p>
+                      <p className="text-sm text-muted-foreground">{displayedGame.comment}</p>
                     </div>
                   </div>
                 </div>
@@ -1133,7 +1249,7 @@ export function GameDetailPage() {
                       <HardDrive className="h-4 w-4" />
                       Size
                     </span>
-                    <span className="font-semibold text-foreground">{game.size || "Unknown"}</span>
+                    <span className="font-semibold text-foreground">{displayedGame?.size || "Unknown"}</span>
                   </div>
 
                   {(game.version || installedManifest?.metadata?.downloadedVersion || installedManifest?.metadata?.version) && (
@@ -1179,7 +1295,7 @@ export function GameDetailPage() {
                       <ShieldCheck className="h-4 w-4" />
                       Source
                     </span>
-                    <span className="font-semibold text-foreground">{game.source || "Unknown"}</span>
+                    <span className="font-semibold text-foreground">{displayedGame?.source || "Unknown"}</span>
                   </div>
                 </div>
               </div>
@@ -1260,6 +1376,7 @@ export function GameDetailPage() {
         game={game}
         downloadToken={downloadToken}
         defaultHost={defaultHost}
+        defaultVersionId={selectedPageVersionId || undefined}
         onCheckingChange={setIsCheckingLinks}
         onConfirm={async (config: DownloadConfig) => {
           setHostSelectorOpen(false)

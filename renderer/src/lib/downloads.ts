@@ -230,6 +230,36 @@ export async function fetchGameVersions(
   }
 }
 
+/**
+ * Fetch version list with metadata only (no download token required).
+ * Used by the game detail page to show version tabs before the user clicks download.
+ */
+export async function fetchGameVersionsMeta(
+  appid: string
+): Promise<GameVersion[]> {
+  try {
+    const response = await apiFetch(
+      `/api/downloads/versions/${encodeURIComponent(appid)}?meta=true`,
+      { headers: { "X-UC-Client": "unioncrax-direct" } }
+    )
+    if (!response.ok) return []
+    const data = await response.json()
+    if (data && Array.isArray(data.versions)) {
+      return data.versions.map((v: any) => ({
+        id: String(v.id || "current"),
+        label: String(v.label || "Unknown"),
+        date: v.date || v.archived_at || undefined,
+        host_count: v.host_count || 0,
+        is_current: Boolean(v.is_current),
+        metadata: v.metadata || undefined,
+      }))
+    }
+    return []
+  } catch {
+    return []
+  }
+}
+
 export async function checkAvailability(
   appid: string,
   downloadToken: string,
