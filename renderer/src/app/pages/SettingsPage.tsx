@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Switch } from "@/components/ui/switch"
 import { DiscordAvatar } from "@/components/DiscordAvatar"
-import { apiFetch, apiUrl, setApiBaseUrl, getApiBaseUrl } from "@/lib/api"
+import { apiFetch, apiUrl, getApiBaseUrl } from "@/lib/api"
 import {
   getPreferredDownloadHost,
   setPreferredDownloadHost,
@@ -74,8 +74,6 @@ export function SettingsPage() {
   const [showClearConfirm, setShowClearConfirm] = useState(false)
   const [clearDataFeedback, setClearDataFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
   const [developerMode, setDeveloperMode] = useState(false)
-  const [customBaseUrl, setCustomBaseUrl] = useState('')
-  const [baseUrlInput, setBaseUrlInput] = useState('')
   const [copyingDiagnostics, setCopyingDiagnostics] = useState(false)
   const [diagnosticsFeedback, setDiagnosticsFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
   const [verboseDownloadLogging, setVerboseDownloadLogging] = useState(false)
@@ -287,20 +285,10 @@ export function SettingsPage() {
     const loadDeveloperSettings = async () => {
       try {
         const devMode = await window.ucSettings?.get?.('developerMode')
-        const baseUrl = await window.ucSettings?.get?.('customBaseUrl')
         const verbose = await window.ucSettings?.get?.('verboseDownloadLogging')
         if (!mounted) return
         setDeveloperMode(devMode || false)
-        const url = (baseUrl || '').trim()
-        setCustomBaseUrl(url)
-        setBaseUrlInput(url)
         setVerboseDownloadLogging(Boolean(verbose))
-        // Only use custom URL if developer mode is enabled AND a custom URL is set
-        if (devMode && url) {
-          setApiBaseUrl(url)
-        } else {
-          setApiBaseUrl('https://union-crax.xyz')
-        }
       } catch {
         // ignore
       }
@@ -310,22 +298,11 @@ export function SettingsPage() {
       if (!data || !data.key) return
       if (data.key === '__CLEAR_ALL__') {
         setDeveloperMode(false)
-        setCustomBaseUrl('')
-        setBaseUrlInput('')
-        setApiBaseUrl('https://union-crax.xyz')
         setVerboseDownloadLogging(false)
         return
       }
       if (data.key === 'developerMode') {
         setDeveloperMode(data.value || false)
-      }
-      if (data.key === 'customBaseUrl') {
-        const url = (data.value || '').trim()
-        setCustomBaseUrl(url)
-        setBaseUrlInput(url)
-        if (url) {
-          setApiBaseUrl(url)
-        }
       }
       if (data.key === 'verboseDownloadLogging') {
         setVerboseDownloadLogging(Boolean(data.value))
@@ -480,7 +457,6 @@ export function SettingsPage() {
       const version = await window.ucUpdater?.getVersion?.()
       const downloadPathResult = await window.ucDownloads?.getDownloadPath?.()
       const downloadPathValue = downloadPathResult?.path || downloadPath || 'unknown'
-      const baseUrlValue = customBaseUrl || 'https://union-crax.xyz'
       const platformValue = typeof navigator !== 'undefined' ? navigator.platform : 'unknown'
       const userAgentValue = typeof navigator !== 'undefined' ? navigator.userAgent : 'unknown'
 
@@ -488,7 +464,6 @@ export function SettingsPage() {
         `Version: ${version || 'unknown'}`,
         `Platform: ${platformValue}`,
         `User Agent: ${userAgentValue}`,
-        `API Base URL: ${baseUrlValue}`,
         `Download Path: ${downloadPathValue}`,
         `Developer Mode: ${developerMode ? 'enabled' : 'disabled'}`,
         `Verbose Download Logging: ${verboseDownloadLogging ? 'enabled' : 'disabled'}`,
@@ -514,8 +489,7 @@ export function SettingsPage() {
     setNetworkResults(null)
     setDevActionFeedback(null)
     try {
-      const baseUrlValue = customBaseUrl || 'https://union-crax.xyz'
-      const result = await window.ucSettings?.runNetworkTest?.(baseUrlValue)
+      const result = await window.ucSettings?.runNetworkTest?.(getApiBaseUrl())
       if (result?.ok && Array.isArray(result.results)) {
         setNetworkResults(result.results)
         setDevActionFeedback({ type: 'success', message: 'Network test completed.' })
@@ -1556,9 +1530,6 @@ export function SettingsPage() {
                           setDefaultHost('pixeldrain')
                           setDiscordRpcEnabled(true)
                           setDeveloperMode(false)
-                          setCustomBaseUrl('')
-                          setBaseUrlInput('')
-                          setApiBaseUrl('https://union-crax.xyz')
                           setVerboseDownloadLogging(false)
                           setClearDataFeedback({ type: 'success', message: 'User data cleared successfully.' })
                           // Show success message briefly
@@ -1631,22 +1602,6 @@ export function SettingsPage() {
                   const checked = e.target.checked
                   setDeveloperMode(checked)
                   await window.ucSettings?.set?.('developerMode', checked)
-                  
-                  // When toggling developer mode, switch between default and custom URL
-                  // but preserve the custom URL setting in storage for when dev mode is re-enabled
-                  if (!checked) {
-                    // Disabling: revert to default URL (don't clear the stored custom URL)
-                    setApiBaseUrl('https://union-crax.xyz')
-                  } else {
-                    // Enabling: apply stored custom URL if it exists, otherwise use default
-                    const storedUrl = await window.ucSettings?.get?.('customBaseUrl')
-                    if (storedUrl) {
-                      setApiBaseUrl(storedUrl)
-                      setCustomBaseUrl(storedUrl)
-                    } else {
-                      setApiBaseUrl('https://union-crax.xyz')
-                    }
-                  }
                 }}
                 className="sr-only peer"
               />
@@ -1656,70 +1611,7 @@ export function SettingsPage() {
 
           {developerMode && (
             <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-4 space-y-6">
-              <div>
-                <div className="flex items-center gap-2 mb-1">
-                  <h3 className="text-sm font-semibold text-foreground">Custom API Base URL</h3>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  Override the default API base URL. Useful if you're proxying union-crax.xyz through your own domain 
-                  (e.g., to bypass school/workplace restrictions). Leave empty to use the default URL.
-                </p>
-              </div>
-
               <div className="space-y-3">
-                <Input
-                  type="text"
-                  placeholder="https://union-crax.xyz"
-                  value={baseUrlInput}
-                  onChange={(e) => setBaseUrlInput(e.target.value)}
-                  className="bg-background"
-                />
-                <div className="flex gap-2">
-                  <Button
-                    size="sm"
-                    onClick={async () => {
-                      const trimmed = baseUrlInput.trim()
-                      if (trimmed && !trimmed.startsWith('http://') && !trimmed.startsWith('https://')) {
-                        alert('Base URL must start with http:// or https://')
-                        return
-                      }
-                      setCustomBaseUrl(trimmed)
-                      await window.ucSettings?.set?.('customBaseUrl', trimmed)
-                      if (trimmed) {
-                        setApiBaseUrl(trimmed)
-                      } else {
-                        setApiBaseUrl('https://union-crax.xyz')
-                      }
-                    }}
-                  >
-                    Apply
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={async () => {
-                      setCustomBaseUrl('')
-                      setBaseUrlInput('https://union-crax.xyz')
-                      await window.ucSettings?.set?.('customBaseUrl', '')
-                      setApiBaseUrl('https://union-crax.xyz')
-                    }}
-                  >
-                    Reset
-                  </Button>
-                </div>
-                {customBaseUrl && (
-                  <div className="text-xs text-emerald-400">
-                    Current API base URL: {customBaseUrl}
-                  </div>
-                )}
-                {!customBaseUrl && (
-                  <div className="text-xs text-muted-foreground">
-                    Using default: https://union-crax.xyz
-                  </div>
-                )}
-              </div>
-
-              <div className="border-t border-amber-500/20 pt-4 space-y-3">
                 <div>
                   <h3 className="text-sm font-semibold text-foreground">Verbose download logging</h3>
                   <p className="text-xs text-muted-foreground">
