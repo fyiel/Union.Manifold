@@ -398,7 +398,7 @@ export function SearchPage() {
       for (let i = shuffled.length - 1; i > 0; i--) {
         random = (random * 9301 + 49297) % 233280
         const j = Math.floor((random / 233280) * (i + 1))
-        ;[shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]]
+          ;[shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]]
       }
       return shuffled
     }
@@ -570,7 +570,7 @@ export function SearchPage() {
   }, [developerQuery, filterOptions.allDevelopers])
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className={`min-h-screen bg-background ${loading ? "min-h-[200vh]" : ""}`}>
       <div className="container mx-auto max-w-7xl px-3 sm:px-4 py-6 sm:py-8">
         <div className="mb-6 sm:mb-8 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
           <div>
@@ -699,11 +699,10 @@ export function SearchPage() {
                                 <button
                                   key={genre}
                                   type="button"
-                                  className={`text-left px-3 py-2 rounded-lg text-sm transition-colors ${
-                                    draftFilters.genres.includes(genre)
-                                      ? "bg-primary text-primary-foreground"
-                                      : "hover:bg-muted"
-                                  }`}
+                                  className={`text-left px-3 py-2 rounded-lg text-sm transition-colors ${draftFilters.genres.includes(genre)
+                                    ? "bg-primary text-primary-foreground"
+                                    : "hover:bg-muted"
+                                    }`}
                                   onClick={() => toggleDraftGenre(genre)}
                                 >
                                   {genre}
@@ -726,11 +725,10 @@ export function SearchPage() {
                                 <button
                                   key={developer}
                                   type="button"
-                                  className={`text-left px-3 py-2 rounded-lg text-sm transition-colors ${
-                                    draftFilters.developers.includes(developer)
-                                      ? "bg-primary text-primary-foreground"
-                                      : "hover:bg-muted"
-                                  }`}
+                                  className={`text-left px-3 py-2 rounded-lg text-sm transition-colors ${draftFilters.developers.includes(developer)
+                                    ? "bg-primary text-primary-foreground"
+                                    : "hover:bg-muted"
+                                    }`}
                                   onClick={() => toggleDraftDeveloper(developer)}
                                 >
                                   {developer}

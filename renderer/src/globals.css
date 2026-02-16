@@ -119,6 +119,7 @@
   * {
     @apply border-border outline-ring/50;
   }
+
   body {
     @apply bg-background text-foreground antialiased;
     font-family: 'Geist Mono', 'Geist', var(--font-sans), ui-sans-serif, system-ui, -apple-system, sans-serif;
@@ -140,26 +141,28 @@
 
   html {
     scroll-behavior: smooth;
+    scrollbar-gutter: stable;
   }
 
   ::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
+    width: 10px;
+    height: 10px;
   }
 
   ::-webkit-scrollbar-track {
     background: oklch(0.118 0.024 264.376);
-    border-radius: 4px;
+    border-radius: 5px;
   }
 
   ::-webkit-scrollbar-thumb {
-    background: oklch(0.627 0.195 293.498);
-    border-radius: 4px;
+    background: oklch(0.627 0.195 293.498 / 0.8);
+    border-radius: 5px;
+    border: 2px solid oklch(0.118 0.024 264.376);
     transition: background-color 0.2s ease;
   }
 
   ::-webkit-scrollbar-thumb:hover {
-    background: oklch(0.7 0.22 293.498);
+    background: oklch(0.627 0.195 293.498);
   }
 
   ::-webkit-scrollbar-corner {

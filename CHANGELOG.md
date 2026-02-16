@@ -1,5 +1,24 @@
 # Changelog
 
+## Version 1.0.1 - 2026-02-16
+
+### Fixes & Improvements
+
+- **Removed noisy settings logs** — removed `Setting get: ...` messages from application logs that were cluttering output on every preference access.
+- **Download queue state fix** — Resolved a bug where pausing the current download would inadvertently trigger the next queued game to start download.
+- **Scoped pause controls** — The global pause button in the download bar is now correctly scoped to the active game group, preventing it from incorrectly pausing unrelated downloads.
+- **TypeScript type safety fixes** — resolved multiple build errors in the downloads context:
+  - Added missing `versionLabel` to the main process `start()` IPC payload type in `vite-env.d.ts`.
+  - Fixed host selection type mismatch in `downloads-context.tsx` by correctly casting the resolved download host to `PreferredDownloadHost`.
+  - Fixed state narrowing issues where `"queued"` status was being widened to `string` during object spreads in `resumeGroup`.
+
+### Files touched (UnionCrax.Direct)
+
+- `electron/main.cjs`
+- `renderer/src/context/downloads-context.tsx`
+- `renderer/src/components/DownBar.tsx`
+- `renderer/src/vite-env.d.ts`
+
 ## Version 1.0.0 - 2026-02-16
 
 ### Features
