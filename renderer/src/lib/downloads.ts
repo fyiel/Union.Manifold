@@ -15,6 +15,7 @@ export type ResolvedDownload = {
   filename?: string
   size?: number
   resolved: boolean
+  authHeader?: string
 }
 
 // ── Link availability check types ──
@@ -69,11 +70,12 @@ export type DownloadConfig = {
 
 const DOWNLOAD_HOST_STORAGE_KEY = "uc_direct_download_host"
 const ROOTZ_SIGNED_HOST = "signed-url.cloudflare.com"
-// Supported download hosts (fileq & datavaults coming soon)
-export const SUPPORTED_DOWNLOAD_HOSTS: PreferredDownloadHost[] = ["pixeldrain", "rootz"]
-const PREFERRED_HOSTS: PreferredDownloadHost[] = ["pixeldrain", "rootz"]
+export const SUPPORTED_DOWNLOAD_HOSTS: PreferredDownloadHost[] = ["pixeldrain", "fileq", "datavaults", "rootz"]
+const PREFERRED_HOSTS: PreferredDownloadHost[] = ["pixeldrain", "fileq", "datavaults", "rootz"]
 const PIXELDRAIN_404_MESSAGE = "Pixeldrain returned 404. The link appears to be dead."
 const ROOTZ_404_MESSAGE = "Rootz returned 404. The link appears to be dead."
+const FILEQ_404_MESSAGE = "FileQ returned 404. The link appears to be dead."
+const DATAVAULTS_404_MESSAGE = "DataVaults returned 404. The link appears to be dead."
 
 function sanitizeHosts(input: DownloadHosts | null | undefined): DownloadHosts {
   const hosts = input && typeof input === "object" ? input : {}
@@ -362,7 +364,12 @@ function pickHostLinks(available: DownloadHosts, host: PreferredDownloadHost) {
   if (host === "pixeldrain") {
     return available.pixeldrain || available["pixeldrain.com"] || []
   }
-  // fileq/datavaults download support coming soon
+  if (host === "fileq") {
+    return available.fileq || available["fileq.net"] || []
+  }
+  if (host === "datavaults") {
+    return available.datavaults || available["datavaults.co"] || []
+  }
   return []
 }
 
@@ -460,35 +467,72 @@ async function resolvePixeldrainDownload(url: string): Promise<ResolvedDownload>
   const fileId = extractPixeldrainFileId(url)
   if (!fileId) return { url, resolved: false }
 
-  const apiUrl = `https://pixeldrain.com/api/file/${encodeURIComponent(fileId)}`
+  // Use the /file/{id}?download endpoint for proper Content-Disposition headers.
+  // Byte-range requests are supported by pixeldrain, so resume works automatically.
+  const downloadUrl = `https://pixeldrain.com/api/file/${encodeURIComponent(fileId)}?download`
 
+  // Try server-side authenticated resolution first for faster speeds (no rate limits)
   try {
-    const res = await fetch(apiUrl, { method: "GET", redirect: "manual" })
+    const serverRes = await apiFetch("/api/pixeldrain/resolve", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fileId, url }),
+    })
 
-    if (res.status === 404) {
-      throw new Error(PIXELDRAIN_404_MESSAGE)
+    if (serverRes.ok) {
+      const data = await serverRes.json().catch(() => null)
+      if (data?.success && data?.data?.url) {
+        const result = data.data as Record<string, any>
+        return {
+          url: result.url,
+          filename: firstString(result.filename),
+          size: toNumber(result.size),
+          resolved: true,
+          authHeader: typeof result.authHeader === "string" ? result.authHeader : undefined,
+        }
+      }
     }
 
-    // extract filename from content-disposition if present
-    const disposition = res.headers.get("content-disposition")
-    let filename: string | undefined
-    if (disposition) {
-      const match = disposition.match(/filename=?"?([^";]+)"?/) 
-      if (match?.[1]) filename = match[1]
+    // Only treat 404 as dead file if the response is from our actual route (has JSON body with success: false)
+    if (serverRes.status === 404) {
+      const body = await serverRes.json().catch(() => null)
+      if (body && body.success === false) {
+        throw new Error(PIXELDRAIN_404_MESSAGE)
+      }
+      // Otherwise it's a generic 404 (route doesn't exist on server) — fall through to client-side
     }
 
-    const contentLength = res.headers.get("content-length")
-    const size = contentLength ? Number(contentLength) : undefined
+    // Server returned non-ok but not a confirmed dead file (e.g. 503 = no API key, or route not deployed) — fall through
+  } catch (err) {
+    if (err instanceof Error && err.message === PIXELDRAIN_404_MESSAGE) throw err
+    downloadLogger.warn("Pixeldrain server resolve failed, falling back to client-side", { data: err })
+  }
 
-    const redirectLocation = res.headers.get("Location") || res.headers.get("location")
-    const finalUrl = redirectLocation || res.url || apiUrl
+  // Fallback: client-side resolution (unauthenticated, may have speed limits)
+  try {
+    const info = await fetchPixeldrainInfo(fileId)
 
-    return { url: finalUrl, filename, size: Number.isFinite(size as number) ? size : undefined, resolved: true }
+    if (info === null) {
+      // Info endpoint failed — file may be dead, but try HEAD on the download URL to confirm
+      const headRes = await fetch(downloadUrl, { method: "HEAD" }).catch(() => null)
+      if (headRes?.status === 404) {
+        throw new Error(PIXELDRAIN_404_MESSAGE)
+      }
+      // Even without metadata, return the download URL — Electron will handle it
+      return { url: downloadUrl, resolved: true }
+    }
+
+    return {
+      url: downloadUrl,
+      filename: info.name,
+      size: info.size,
+      resolved: true,
+    }
   } catch (err) {
     if (err instanceof Error && err.message === PIXELDRAIN_404_MESSAGE) {
       throw err
     }
-    return { url, resolved: false }
+    return { url: downloadUrl, resolved: true }
   }
 }
 
@@ -546,6 +590,97 @@ export async function downloadFromPixeldrain(fileId: string, outputDir: string):
   await fs.promises.writeFile(filePath, uint8)
   return filePath
 }
+
+// ── FileQ download resolution ──
+
+export function extractFileQFileCode(url: string): string | null {
+  try {
+    const parsed = new URL(url)
+    if (!parsed.hostname.includes("fileq.net")) return null
+    const parts = parsed.pathname.split("/").filter(Boolean)
+    if (parts[0] === "api" || parts[0] === "pages") return null
+    return parts[0] || null
+  } catch {
+    return null
+  }
+}
+
+export function isFileQUrl(url: string): boolean {
+  try {
+    return new URL(url).hostname.includes("fileq.net")
+  } catch {
+    return false
+  }
+}
+
+export async function resolveFileQDownload(url: string): Promise<ResolvedDownload> {
+  if (!url) return { url, resolved: false }
+  const fileCode = extractFileQFileCode(url)
+  if (!fileCode) return { url, resolved: false }
+
+  try {
+    // Ask the UnionCrax backend to resolve the FileQ URL server-side.
+    // The backend performs an XFileSharing form POST to obtain a signed CDN URL.
+    const response = await apiFetch("/api/fileq/resolve", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fileCode, url }),
+    })
+
+    if (response.status === 404) {
+      throw new Error(FILEQ_404_MESSAGE)
+    }
+
+    const data = await response.json().catch(() => null)
+    if (!response.ok || !data?.success || !data?.data?.url) {
+      downloadLogger.warn("FileQ resolve failed", { data: { status: response.status, body: data } })
+      return { url, resolved: false }
+    }
+
+    const result = data.data as Record<string, any>
+    return {
+      url: result.url,
+      filename: firstString(result.filename),
+      size: toNumber(result.size),
+      resolved: true,
+    }
+  } catch (err) {
+    if (err instanceof Error && err.message === FILEQ_404_MESSAGE) throw err
+    downloadLogger.warn("FileQ resolve error", { data: err })
+    return { url, resolved: false }
+  }
+}
+
+// ── DataVaults download resolution ──
+
+export function extractDataVaultsFileCode(url: string): string | null {
+  try {
+    const parsed = new URL(url)
+    if (!parsed.hostname.includes("datavaults.co")) return null
+    const parts = parsed.pathname.split("/").filter(Boolean)
+    if (parts[0] === "api" || parts[0] === "pages") return null
+    return parts[0] || null
+  } catch {
+    return null
+  }
+}
+
+export function isDataVaultsUrl(url: string): boolean {
+  try {
+    return new URL(url).hostname.includes("datavaults.co")
+  } catch {
+    return false
+  }
+}
+
+export async function resolveDataVaultsDownload(url: string): Promise<ResolvedDownload> {
+  // DataVaults does not currently support direct downloads (no premium access,
+  // free downloads require captcha). Return unresolved so the fallback host logic
+  // can pick a different host.
+  return { url, resolved: false }
+}
+
+// ── Rootz download resolution ──
 
 export function extractRootzFileId(url: string): string | null {
   try {
@@ -629,7 +764,12 @@ export async function resolveDownloadUrl(host: string, url: string): Promise<Res
   if (host === "pixeldrain") {
     return resolvePixeldrainDownload(url)
   }
-  // Other hosts (fileq, datavaults) not yet supported for downloads
+  if (host === "fileq") {
+    return resolveFileQDownload(url)
+  }
+  if (host === "datavaults") {
+    return resolveDataVaultsDownload(url)
+  }
   return { url, resolved: false }
 }
 
@@ -657,6 +797,14 @@ export async function resolveDownloadSize(host: string, url: string): Promise<nu
   }
   if (host === "rootz") {
     const resolved = await resolveRootzDownload(url)
+    return resolved?.size ?? null
+  }
+  if (host === "fileq") {
+    const resolved = await resolveFileQDownload(url)
+    return resolved?.size ?? null
+  }
+  if (host === "datavaults") {
+    const resolved = await resolveDataVaultsDownload(url)
     return resolved?.size ?? null
   }
   return null

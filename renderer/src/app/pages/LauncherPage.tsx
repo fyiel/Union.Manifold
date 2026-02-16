@@ -73,6 +73,8 @@ export function LauncherPage() {
   const [gameStats, setGameStats] = useState<Record<string, { downloads: number; views: number }>>({})
   const [refreshKey, setRefreshKey] = useState(0)
   const [gamesError, setGamesError] = useState<{ type: string; message: string; code: string } | null>(null)
+  const [hasLoadedGames, setHasLoadedGames] = useState(false)
+  const [emptyStateReady, setEmptyStateReady] = useState(false)
   const [currentPage, setCurrentPage] = useState(1)
   const [recentlyInstalledGames, setRecentlyInstalledGames] = useState<Game[]>([])
   const [shortcutLabel, setShortcutLabel] = useState("Ctrl+K")
@@ -88,6 +90,17 @@ export function LauncherPage() {
   useEffect(() => {
     loadGames()
   }, [])
+
+  useEffect(() => {
+    if (loading) {
+      setEmptyStateReady(false)
+      return
+    }
+    const timer = window.setTimeout(() => {
+      setEmptyStateReady(true)
+    }, 400)
+    return () => window.clearTimeout(timer)
+  }, [loading])
 
   // Auto-retry when coming back online
   useEffect(() => {
@@ -249,6 +262,7 @@ export function LauncherPage() {
       const gamesData = await fetchGames()
       startTransition(() => {
         setGames(gamesData)
+        setHasLoadedGames(true)
       })
       if (gamesData.length > 0) {
         fetchGameStats(forceRefresh)
@@ -580,7 +594,7 @@ export function LauncherPage() {
         </section>
       )}
 
-      {gamesError && isOnline && (
+      {gamesError && isOnline && !loading && (
         <section className="py-6 px-4">
           <div className="container mx-auto max-w-4xl">
             <div className="mb-6">
@@ -796,7 +810,7 @@ export function LauncherPage() {
             </div>
           )}
 
-          {featuredGames.length === 0 && !loading && isOnline && (
+          {featuredGames.length === 0 && hasLoadedGames && emptyStateReady && !loading && isOnline && (
             <div className="text-center py-20">
               <div className="max-w-xl mx-auto">
                 <ErrorMessage

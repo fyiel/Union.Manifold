@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
-import { FolderOpen, HardDrive, LogIn, LogOut, Plus, RefreshCw, UserRound } from "lucide-react"
+import { ChevronDown, FolderOpen, HardDrive, LogIn, LogOut, Plus, RefreshCw, UserRound } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -65,6 +65,11 @@ export function SettingsPage() {
   const [linuxWinePath, setLinuxWinePath] = useState('')
   const [linuxProtonPath, setLinuxProtonPath] = useState('')
   const [discordRpcEnabled, setDiscordRpcEnabled] = useState(true)
+  const [showRpcAdvanced, setShowRpcAdvanced] = useState(false)
+  const [rpcHideNsfw, setRpcHideNsfw] = useState(true)
+  const [rpcShowGameName, setRpcShowGameName] = useState(true)
+  const [rpcShowStatus, setRpcShowStatus] = useState(true)
+  const [rpcShowButtons, setRpcShowButtons] = useState(true)
   const [clearingData, setClearingData] = useState(false)
   const [showClearConfirm, setShowClearConfirm] = useState(false)
   const [clearDataFeedback, setClearDataFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
@@ -240,8 +245,16 @@ export function SettingsPage() {
     const loadRpcSettings = async () => {
       try {
         const enabled = await window.ucSettings?.get?.('discordRpcEnabled')
+        const hideNsfw = await window.ucSettings?.get?.('rpcHideNsfw')
+        const showGameName = await window.ucSettings?.get?.('rpcShowGameName')
+        const showStatus = await window.ucSettings?.get?.('rpcShowStatus')
+        const showButtons = await window.ucSettings?.get?.('rpcShowButtons')
         if (!mounted) return
         setDiscordRpcEnabled(enabled !== false)
+        setRpcHideNsfw(hideNsfw !== false)
+        setRpcShowGameName(showGameName !== false)
+        setRpcShowStatus(showStatus !== false)
+        setRpcShowButtons(showButtons !== false)
       } catch {
         // ignore
       }
@@ -251,9 +264,17 @@ export function SettingsPage() {
       if (!data || !data.key) return
       if (data.key === '__CLEAR_ALL__') {
         setDiscordRpcEnabled(true)
+        setRpcHideNsfw(true)
+        setRpcShowGameName(true)
+        setRpcShowStatus(true)
+        setRpcShowButtons(true)
         return
       }
       if (data.key === 'discordRpcEnabled') setDiscordRpcEnabled(data.value !== false)
+      if (data.key === 'rpcHideNsfw') setRpcHideNsfw(data.value !== false)
+      if (data.key === 'rpcShowGameName') setRpcShowGameName(data.value !== false)
+      if (data.key === 'rpcShowStatus') setRpcShowStatus(data.value !== false)
+      if (data.key === 'rpcShowButtons') setRpcShowButtons(data.value !== false)
     })
     return () => {
       mounted = false
@@ -274,8 +295,11 @@ export function SettingsPage() {
         setCustomBaseUrl(url)
         setBaseUrlInput(url)
         setVerboseDownloadLogging(Boolean(verbose))
-        if (url) {
+        // Only use custom URL if developer mode is enabled AND a custom URL is set
+        if (devMode && url) {
           setApiBaseUrl(url)
+        } else {
+          setApiBaseUrl('https://union-crax.xyz')
         }
       } catch {
         // ignore
@@ -655,6 +679,32 @@ export function SettingsPage() {
           localStorage.setItem(SETTINGS_KEYS.PUBLIC_PROFILE, prefs.showPublicProfile ? "1" : "0")
         } catch {}
       }
+      
+      // Load RPC preferences from account
+      if (typeof prefs.rpcHideNsfw === "boolean") {
+        setRpcHideNsfw(prefs.rpcHideNsfw)
+        try {
+          await window.ucSettings?.set?.('rpcHideNsfw', prefs.rpcHideNsfw)
+        } catch {}
+      }
+      if (typeof prefs.rpcShowGameName === "boolean") {
+        setRpcShowGameName(prefs.rpcShowGameName)
+        try {
+          await window.ucSettings?.set?.('rpcShowGameName', prefs.rpcShowGameName)
+        } catch {}
+      }
+      if (typeof prefs.rpcShowStatus === "boolean") {
+        setRpcShowStatus(prefs.rpcShowStatus)
+        try {
+          await window.ucSettings?.set?.('rpcShowStatus', prefs.rpcShowStatus)
+        } catch {}
+      }
+      if (typeof prefs.rpcShowButtons === "boolean") {
+        setRpcShowButtons(prefs.rpcShowButtons)
+        try {
+          await window.ucSettings?.set?.('rpcShowButtons', prefs.rpcShowButtons)
+        } catch {}
+      }
 
       const summaryUser = data?.user
       if (summaryUser?.bio !== undefined) {
@@ -754,6 +804,42 @@ export function SettingsPage() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ showPublicProfile: checked }),
+    }).catch(() => {})
+  }
+
+  const updateRpcHideNsfw = (checked: boolean) => {
+    window.ucSettings?.set?.('rpcHideNsfw', checked).catch(() => {})
+    apiFetch("/api/account/preferences", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rpcHideNsfw: checked }),
+    }).catch(() => {})
+  }
+
+  const updateRpcShowGameName = (checked: boolean) => {
+    window.ucSettings?.set?.('rpcShowGameName', checked).catch(() => {})
+    apiFetch("/api/account/preferences", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rpcShowGameName: checked }),
+    }).catch(() => {})
+  }
+
+  const updateRpcShowStatus = (checked: boolean) => {
+    window.ucSettings?.set?.('rpcShowStatus', checked).catch(() => {})
+    apiFetch("/api/account/preferences", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rpcShowStatus: checked }),
+    }).catch(() => {})
+  }
+
+  const updateRpcShowButtons = (checked: boolean) => {
+    window.ucSettings?.set?.('rpcShowButtons', checked).catch(() => {})
+    apiFetch("/api/account/preferences", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rpcShowButtons: checked }),
     }).catch(() => {})
   }
 
@@ -960,6 +1046,112 @@ export function SettingsPage() {
               </button>
             </div>
 
+            <button
+              onClick={() => setShowRpcAdvanced(!showRpcAdvanced)}
+              className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors mt-4"
+            >
+              <ChevronDown className={`h-4 w-4 transition-transform ${
+                showRpcAdvanced ? 'rotate-180' : ''
+              }`} />
+              Advanced options
+            </button>
+
+            {showRpcAdvanced && discordRpcEnabled && (
+              <div className="mt-4 space-y-3 rounded-lg border border-border/60 bg-card/50 p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-sm font-medium">Hide NSFW content</div>
+                    <div className="text-xs text-muted-foreground">Don't show RPC when viewing or downloading NSFW games</div>
+                  </div>
+                  <button
+                    onClick={() => {
+                      const newValue = !rpcHideNsfw
+                      setRpcHideNsfw(newValue)
+                      updateRpcHideNsfw(newValue)
+                    }}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                      rpcHideNsfw ? 'bg-primary' : 'bg-slate-700'
+                    }`}
+                  >
+                    <span
+                      className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                        rpcHideNsfw ? 'translate-x-6' : 'translate-x-1'
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-sm font-medium">Show game name</div>
+                    <div className="text-xs text-muted-foreground">Display the game title in your status</div>
+                  </div>
+                  <button
+                    onClick={() => {
+                      const newValue = !rpcShowGameName
+                      setRpcShowGameName(newValue)
+                      updateRpcShowGameName(newValue)
+                    }}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                      rpcShowGameName ? 'bg-primary' : 'bg-slate-700'
+                    }`}
+                  >
+                    <span
+                      className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                        rpcShowGameName ? 'translate-x-6' : 'translate-x-1'
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-sm font-medium">Show activity status</div>
+                    <div className="text-xs text-muted-foreground">Display what you're doing (downloading, playing, browsing)</div>
+                  </div>
+                  <button
+                    onClick={() => {
+                      const newValue = !rpcShowStatus
+                      setRpcShowStatus(newValue)
+                      updateRpcShowStatus(newValue)
+                    }}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                      rpcShowStatus ? 'bg-primary' : 'bg-slate-700'
+                    }`}
+                  >
+                    <span
+                      className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                        rpcShowStatus ? 'translate-x-6' : 'translate-x-1'
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-sm font-medium">Show buttons</div>
+                    <div className="text-xs text-muted-foreground">Display "Open on web" and "Download UC.D" buttons</div>
+                  </div>
+                  <button
+                    onClick={() => {
+                      const newValue = !rpcShowButtons
+                      setRpcShowButtons(newValue)
+                      updateRpcShowButtons(newValue)
+                    }}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                      rpcShowButtons ? 'bg-primary' : 'bg-slate-700'
+                    }`}
+                  >
+                    <span
+                      className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                        rpcShowButtons ? 'translate-x-6' : 'translate-x-1'
+                      }`}
+                    />
+                  </button>
+                </div>
+              </div>
+            )}
+
           </div>
         </CardContent>
       </Card>
@@ -1133,10 +1325,10 @@ export function SettingsPage() {
                 ))}
               </SelectContent>
             </Select>
-            {defaultHost === "rootz" && (
+            {MIRROR_HOSTS.find((h) => h.key === defaultHost)?.supportsResume === false && (
               <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
                 Download resuming is currently not supported for this host. Please do not close the app while
-                downloading with Rootz.
+                downloading with {MIRROR_HOSTS.find((h) => h.key === defaultHost)?.label || defaultHost}.
               </div>
             )}
           </div>
@@ -1439,6 +1631,22 @@ export function SettingsPage() {
                   const checked = e.target.checked
                   setDeveloperMode(checked)
                   await window.ucSettings?.set?.('developerMode', checked)
+                  
+                  // When toggling developer mode, switch between default and custom URL
+                  // but preserve the custom URL setting in storage for when dev mode is re-enabled
+                  if (!checked) {
+                    // Disabling: revert to default URL (don't clear the stored custom URL)
+                    setApiBaseUrl('https://union-crax.xyz')
+                  } else {
+                    // Enabling: apply stored custom URL if it exists, otherwise use default
+                    const storedUrl = await window.ucSettings?.get?.('customBaseUrl')
+                    if (storedUrl) {
+                      setApiBaseUrl(storedUrl)
+                      setCustomBaseUrl(storedUrl)
+                    } else {
+                      setApiBaseUrl('https://union-crax.xyz')
+                    }
+                  }
                 }}
                 className="sr-only peer"
               />
@@ -1489,8 +1697,11 @@ export function SettingsPage() {
                   <Button
                     size="sm"
                     variant="outline"
-                    onClick={() => {
-                      setBaseUrlInput(customBaseUrl)
+                    onClick={async () => {
+                      setCustomBaseUrl('')
+                      setBaseUrlInput('https://union-crax.xyz')
+                      await window.ucSettings?.set?.('customBaseUrl', '')
+                      setApiBaseUrl('https://union-crax.xyz')
                     }}
                   >
                     Reset

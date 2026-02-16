@@ -1,5 +1,46 @@
 # Changelog
 
+## Version 1.0.0 - 2026-02-16
+
+### Features
+
+- **Download resume actually works across app restarts** — previously, closing the app and resuming a download would restart it from byte 0, even for 10 GB files. The entire three-level resume system has been overhauled:
+  - **Partial file preservation** — Chromium deletes partial download files when it cancels DownloadItems during app quit. The app now creates instant hardlinks (`.ucresume` backup files) in `before-quit` so the downloaded data survives. On next launch, resume handlers automatically restore the backup if the original was deleted.
+  - **Level 3 resume with fresh URL** — when the stored URL chain has expired (CDN links rotate), the app re-resolves a fresh URL and now uses `createInterruptedDownload` with the actual file offset from disk instead of calling `downloadURL()` from byte 0. This sends a proper `Range` header so the server returns only the remaining bytes.
+  - **`savePath` propagation** — the download start payload now carries `savePath` through to `pendingDownloads`, so `will-download` reuses the existing partial file path instead of generating a new one.
+  - **URL chain matching fix** — `will-download` now matches against the full stored `urlChain` array, fixing a bug where redirect chains caused the pending download entry to be missed.
+  - **Backup cleanup** — `.ucresume` files are automatically cleaned up when downloads complete, are cancelled by the user, or when the original file is still present.
+
+- **Discord Rich Presence advanced options** — added collapsible advanced settings for Discord RPC customization:
+  - **Hide NSFW content** — option to mask NSFW game names as "****" when viewing or downloading NSFW games (automatically detects games with "nsfw" genre while keeping the RPC activity visible)
+  - **Show game name** - toggle display of game titles in your status
+  - **Show activity status** — control whether your current activity (downloading, playing, browsing) is shown
+  - **Show buttons** — control visibility of "Open on web" and "Download UC.D" buttons
+
+- **New improved version selector & Version management** — enhanced version selection and management system
+
+### Fixes & Improvements
+
+- **Developer mode settings behavior** — disabling Developer Mode now reverts the API base URL to the default (union-crax.xyz) while preserving the custom URL setting. Re-enabling Developer Mode reapplies the previously saved custom URL. The Reset button now permanently clears the custom URL setting and returns to the default URL for fresh use.
+- **Game launching from Downloads page** — fixed issue where launching downloaded games from the Downloads page would show the app ID instead of the game name in Discord Rich Presence. The launch function now properly looks up the game name from the games data before passing it to the main process.
+- **Discord RPC settings sync to account** — advanced Discord RPC settings (Hide NSFW, Show game name, Show status, Show buttons) are saved to the user's account database and automatically restored when logging into different devices or reinstalling the app.
+- **Loading animation during game fetch** — fixed brief flash of "No games available" error message during initial game loading. Added loading state management with debounce to ensure loading skeleton remains visible until games are fully loaded from the database.
+- **Files touched (UnionCrax.Direct)**
+- `electron/main.cjs`
+- `electron/preload.cjs`
+- `renderer/src/context/downloads-context.tsx`
+- `renderer/src/vite-env.d.ts`
+- `renderer/src/app/pages/SettingsPage.tsx`
+- `renderer/src/hooks/use-discord-rpc.ts`
+- `renderer/src/app/pages/GameDetailPage.tsx`
+- `renderer/src/app/pages/DownloadsPage.tsx`
+- `renderer/src/components/GameCard.tsx`
+- `renderer/src/app/pages/LauncherPage.tsx`
+
+### Files touched (union-crax.xyz)
+
+- `app/api/account/preferences/route.ts`
+
 ## Version 0.9.2 - 2026-02-13
 
 ### Features

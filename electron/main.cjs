@@ -47,6 +47,8 @@ try {
 const pendingDownloads = []
 let lastPixeldrainDownloadTime = 0
 const PIXELDRAIN_DELAY_MS = 2000 // 2 second delay between pixeldrain downloads to avoid rate limiting
+// Map of pixeldrain file IDs to auth headers for authenticated downloads
+const pixeldrainAuthHeaders = new Map()
 
 function normalizeDownloadUrl(rawUrl) {
   if (!rawUrl || typeof rawUrl !== 'string') return rawUrl
@@ -994,6 +996,29 @@ function ensureSubdir(root, folder) {
   return target
 }
 
+// Iterate game folders including versioned subdirs (gamename/versions/*)
+function* iterateGameFolders(root) {
+  if (!root || !fs.existsSync(root)) return
+  let entries
+  try { entries = fs.readdirSync(root, { withFileTypes: true }) } catch { return }
+  for (const dirent of entries) {
+    if (!dirent.isDirectory()) continue
+    const folder = path.join(root, dirent.name)
+    yield { folder, name: dirent.name, isVersioned: false }
+    // Also check versioned subdirs
+    const versionsDir = path.join(folder, 'versions')
+    try {
+      if (fs.existsSync(versionsDir)) {
+        const vEntries = fs.readdirSync(versionsDir, { withFileTypes: true })
+        for (const vDirent of vEntries) {
+          if (!vDirent.isDirectory()) continue
+          yield { folder: path.join(versionsDir, vDirent.name), name: vDirent.name, isVersioned: true, parentFolder: folder }
+        }
+      }
+    } catch {}
+  }
+}
+
 function clearDownloadCache() {
   if (activeDownloads.size > 0 || pendingDownloads.length > 0 || globalDownloadQueue.length > 0 || downloadQueues.size > 0) {
     return { ok: false, error: 'downloads-active' }
@@ -1093,15 +1118,14 @@ async function fetchPixeldrainInfo(fileId) {
 function updateInstalledIndex(installedRoot) {
   try {
     if (!fs.existsSync(installedRoot)) return
-    const entries = fs.readdirSync(installedRoot, { withFileTypes: true })
     const index = []
-    for (const dirent of entries) {
-      if (!dirent.isDirectory()) continue
-      const folder = path.join(installedRoot, dirent.name)
+    const seenAppids = new Set()
+    for (const { folder, name } of iterateGameFolders(installedRoot)) {
       const manifestPath = path.join(folder, INSTALLED_MANIFEST)
       const manifest = readJsonFile(manifestPath)
-      if (manifest && manifest.appid) {
-        index.push({ appid: manifest.appid, name: manifest.name || dirent.name, folder: dirent.name, manifestPath: manifestPath })
+      if (manifest && manifest.appid && !seenAppids.has(manifest.appid)) {
+        seenAppids.add(manifest.appid)
+        index.push({ appid: manifest.appid, name: manifest.name || name, folder: path.relative(installedRoot, folder), manifestPath: manifestPath })
       }
     }
     uc_writeJsonSync(path.join(installedRoot, INSTALLED_INDEX), index)
@@ -1141,6 +1165,10 @@ function uc_log(msg) {
 }
 
 function updateInstalledManifest(installedFolder, metadata, fileEntry) {
+  return updateInstalledManifestBulk(installedFolder, metadata, fileEntry ? [fileEntry] : [])
+}
+
+function updateInstalledManifestBulk(installedFolder, metadata, fileEntries) {
   try {
     const manifestPath = path.join(installedFolder, INSTALLED_MANIFEST)
     let manifest = readJsonFile(manifestPath) || {}
@@ -1157,9 +1185,15 @@ function updateInstalledManifest(installedFolder, metadata, fileEntry) {
       // ignore
     }
     manifest.files = manifest.files || []
-    if (fileEntry) {
-      const exists = manifest.files.find((f) => f.path === fileEntry.path)
-      if (!exists) manifest.files.push(fileEntry)
+    if (Array.isArray(fileEntries) && fileEntries.length > 0) {
+      const existingPaths = new Set(manifest.files.map((f) => f.path))
+      for (const entry of fileEntries) {
+        if (!entry || !entry.path) continue
+        if (!existingPaths.has(entry.path)) {
+          manifest.files.push(entry)
+          existingPaths.add(entry.path)
+        }
+      }
     }
     manifest.installedAt = manifest.installedAt || Date.now()
     uc_writeJsonSync(manifestPath, manifest)
@@ -1189,6 +1223,39 @@ function buildResumeData(item, savePath) {
   } catch {
     return null
   }
+}
+
+const RESUME_BACKUP_EXT = '.ucresume'
+
+/**
+ * Restore a partial download file that was preserved during app quit.
+ * When Electron quits, Chromium cancels all active DownloadItems and deletes
+ * their partial files from disk. To survive this, before-quit creates a hardlink
+ * (.ucresume) to the same file data. This function checks for that backup and
+ * restores it if the original was deleted.
+ * @param {string} savePath - the original file path
+ * @returns {boolean} true if the file exists (either originally or after restore)
+ */
+function restorePreservedFile(savePath) {
+  if (!savePath) return false
+  const backupPath = savePath + RESUME_BACKUP_EXT
+  if (fs.existsSync(savePath)) {
+    // Original still exists — clean up the backup if present
+    if (fs.existsSync(backupPath)) {
+      try { fs.unlinkSync(backupPath) } catch {}
+    }
+    return true
+  }
+  if (fs.existsSync(backupPath)) {
+    try {
+      fs.renameSync(backupPath, savePath)
+      ucLog(`Restored preserved partial download: ${savePath}`, 'info')
+      return true
+    } catch (e) {
+      ucLog(`Failed to restore preserved partial download: ${e.message}`, 'warn')
+    }
+  }
+  return false
 }
 
 function getInstallingMetadata(installingRoot, installedRoot, appid, gameName) {
@@ -1238,24 +1305,50 @@ function migrateInstallingExtras(installingRoot, installedRoot, skipNames) {
   }
 }
 
+function manifestRichness(m) {
+  if (!m) return 0
+  let s = 0
+  if (m.metadata) s += 4
+  if (m.source && m.source !== 'local') s += 3
+  if (m.name && m.name !== m.appid) s += 1
+  if (m.description) s += 1
+  if (m.image && m.image !== '/banner.png') s += 1
+  if (m.release_date) s += 1
+  if (m.size) s += 1
+  if (m.genres && m.genres.length > 0) s += 1
+  if (m.developer) s += 1
+  return s
+}
+
 function listManifestsFromRoot(root, allowFallback) {
   try {
     if (!fs.existsSync(root)) return []
-    const entries = fs.readdirSync(root, { withFileTypes: true })
     const manifests = []
-    for (const dirent of entries) {
-      if (!dirent.isDirectory()) continue
-      const folder = path.join(root, dirent.name)
+    const seenAppids = new Map() // appid -> index in manifests
+    for (const { folder, name, isVersioned } of iterateGameFolders(root)) {
       const manifestPath = path.join(folder, INSTALLED_MANIFEST)
       const manifest = readJsonFile(manifestPath)
       if (manifest && manifest.appid) {
-        manifests.push(manifest)
+        if (!seenAppids.has(manifest.appid)) {
+          seenAppids.set(manifest.appid, manifests.length)
+          manifests.push(manifest)
+        } else {
+          // Replace if the new manifest has richer metadata
+          const idx = seenAppids.get(manifest.appid)
+          if (manifestRichness(manifest) > manifestRichness(manifests[idx])) {
+            manifests[idx] = manifest
+          }
+        }
         continue
       }
-      if (allowFallback) {
+      if (allowFallback && !isVersioned) {
+        // Skip fallback for folders that have a versions/ subdir — those will be handled by versioned entries
+        const versionsDir = path.join(folder, 'versions')
+        try { if (fs.existsSync(versionsDir)) continue } catch {}
         const files = fs.readdirSync(folder).filter((f) => f !== INSTALLED_MANIFEST)
-        if (files.length) {
-          manifests.push({ appid: dirent.name, name: dirent.name, files: files.map((f) => ({ name: f })) })
+        if (files.length && !seenAppids.has(name)) {
+          seenAppids.set(name, manifests.length)
+          manifests.push({ appid: name, name: name, files: files.map((f) => ({ name: f })) })
         }
       }
     }
@@ -1292,16 +1385,15 @@ function listDownloadRoots() {
 function deleteFolderByAppId(root, appid) {
   try {
     if (!root || !appid || !fs.existsSync(root)) return false
-    const entries = fs.readdirSync(root, { withFileTypes: true })
-    for (const dirent of entries) {
-      if (!dirent.isDirectory()) continue
-      const folder = path.join(root, dirent.name)
+    for (const { folder, name, isVersioned, parentFolder } of iterateGameFolders(root)) {
       const manifestPath = path.join(folder, INSTALLED_MANIFEST)
       const manifest = readJsonFile(manifestPath)
-      const match = (manifest && manifest.appid === appid) || dirent.name === appid
+      const match = (manifest && manifest.appid === appid) || name === appid
       if (!match) continue
+      // For versioned folders, delete the parent game folder (all versions)
+      const toDelete = isVersioned && parentFolder ? parentFolder : folder
       try {
-        fs.rmSync(folder, { recursive: true, force: true })
+        fs.rmSync(toDelete, { recursive: true, force: true })
       } catch (e) {}
       return true
     }
@@ -1314,16 +1406,15 @@ function deleteFolderByAppId(root, appid) {
 async function deleteFolderByAppIdAsync(root, appid) {
   try {
     if (!root || !appid || !fs.existsSync(root)) return false
-    const entries = await fs.promises.readdir(root, { withFileTypes: true })
-    for (const dirent of entries) {
-      if (!dirent.isDirectory()) continue
-      const folder = path.join(root, dirent.name)
+    for (const { folder, name, isVersioned, parentFolder } of iterateGameFolders(root)) {
       const manifestPath = path.join(folder, INSTALLED_MANIFEST)
-      const manifest = await readJsonFileAsync(manifestPath)
-      const match = (manifest && manifest.appid === appid) || dirent.name === appid
+      const manifest = readJsonFile(manifestPath)
+      const match = (manifest && manifest.appid === appid) || name === appid
       if (!match) continue
+      // For versioned folders, delete the parent game folder (all versions)
+      const toDelete = isVersioned && parentFolder ? parentFolder : folder
       try {
-        await fs.promises.rm(folder, { recursive: true, force: true })
+        await fs.promises.rm(toDelete, { recursive: true, force: true })
       } catch (e) {}
       return true
     }
@@ -1339,19 +1430,37 @@ function findInstalledFolderByAppid(appid) {
     const roots = listDownloadRoots()
     for (const root of roots) {
       const installedRoot = path.join(root, installedDirName)
-      if (!fs.existsSync(installedRoot)) continue
-      const entries = fs.readdirSync(installedRoot, { withFileTypes: true })
-      for (const dirent of entries) {
-        if (!dirent.isDirectory()) continue
-        const folder = path.join(installedRoot, dirent.name)
+      for (const { folder, name } of iterateGameFolders(installedRoot)) {
         const manifestPath = path.join(folder, INSTALLED_MANIFEST)
         const manifest = readJsonFile(manifestPath)
         if (manifest && manifest.appid === appid) return folder
-        if (dirent.name === appid) return folder
+        if (name === appid) return folder
       }
     }
   } catch (err) {
     console.error('[UC] findInstalledFolderByAppid failed', err)
+  }
+  return null
+}
+
+function findInstalledFolderByAppidVersion(appid, versionLabel) {
+  try {
+    if (!appid || !versionLabel) return null
+    const target = String(versionLabel).trim()
+    if (!target) return null
+    const roots = listDownloadRoots()
+    for (const root of roots) {
+      const installedRoot = path.join(root, installedDirName)
+      for (const { folder } of iterateGameFolders(installedRoot)) {
+        const manifestPath = path.join(folder, INSTALLED_MANIFEST)
+        const manifest = readJsonFile(manifestPath)
+        if (!manifest || manifest.appid !== appid) continue
+        const label = manifest?.metadata?.downloadedVersion || manifest?.metadata?.version || manifest?.version || null
+        if (label && String(label) === target) return folder
+      }
+    }
+  } catch (err) {
+    console.error('[UC] findInstalledFolderByAppidVersion failed', err)
   }
   return null
 }
@@ -1362,15 +1471,11 @@ function findInstallingFolderByAppid(appid) {
     const roots = listDownloadRoots()
     for (const root of roots) {
       const installingRoot = path.join(root, installingDirName)
-      if (!fs.existsSync(installingRoot)) continue
-      const entries = fs.readdirSync(installingRoot, { withFileTypes: true })
-      for (const dirent of entries) {
-        if (!dirent.isDirectory()) continue
-        const folder = path.join(installingRoot, dirent.name)
+      for (const { folder, name } of iterateGameFolders(installingRoot)) {
         const manifestPath = path.join(folder, INSTALLED_MANIFEST)
         const manifest = readJsonFile(manifestPath)
         if (manifest && manifest.appid === appid) return folder
-        if (dirent.name === appid) return folder
+        if (name === appid) return folder
       }
     }
   } catch (err) {
@@ -1678,42 +1783,62 @@ async function startDownloadNow(win, payload) {
     gameName: payload.gameName,
     partIndex: payload.partIndex,
     partTotal: payload.partTotal,
+    authHeader: payload.authHeader,
+    savePath: payload.savePath,
+    versionLabel: payload.versionLabel || null,
     _addedAt: Date.now()
   })
   
   // Check if this is a pixeldrain URL and if we need to delay
   const isPixeldrain = payload.url && payload.url.includes('pixeldrain.com')
+  const hasAuth = Boolean(payload.authHeader)
+
   if (isPixeldrain) {
-    const timeSinceLastPixeldrain = Date.now() - lastPixeldrainDownloadTime
-    if (timeSinceLastPixeldrain < PIXELDRAIN_DELAY_MS) {
-      // Need to delay this download
-      const delayNeeded = PIXELDRAIN_DELAY_MS - timeSinceLastPixeldrain
-      uc_log(`Delaying pixeldrain download by ${delayNeeded}ms to avoid rate limiting`)
-      setTimeout(() => {
-        // Remove from pending before re-adding to avoid duplicates
-        const idx = pendingDownloads.findIndex(p => p.downloadId === payload.downloadId)
-        if (idx >= 0) pendingDownloads.splice(idx, 1)
-        // Check if cancelled during the delay
-        if (cancelledDownloadIds.has(payload.downloadId)) {
-          ucLog(`Pixeldrain delayed download was cancelled: ${payload.downloadId}`)
-          return
-        }
-        startDownloadNow(win, payload)
-      }, delayNeeded)
-      return { ok: true, delayed: true }
+    // Register auth header for the onBeforeSendHeaders interceptor
+    if (hasAuth) {
+      const fileId = extractPixeldrainFileIdFromUrl(payload.url)
+      if (fileId) {
+        pixeldrainAuthHeaders.set(fileId, payload.authHeader)
+      }
     }
-    
-    // Extract file ID and visit viewer page to bypass hotlink protection
-    const fileId = extractPixeldrainFileIdFromUrl(payload.url)
-    if (fileId) {
-      await visitPixeldrainViewerPage(fileId)
-      // Small delay after visiting to ensure view is registered
-      await new Promise(resolve => setTimeout(resolve, 500))
+
+    if (!hasAuth) {
+      // Unauthenticated: apply delay and visit viewer page (existing behavior)
+      const timeSinceLastPixeldrain = Date.now() - lastPixeldrainDownloadTime
+      if (timeSinceLastPixeldrain < PIXELDRAIN_DELAY_MS) {
+        // Need to delay this download
+        const delayNeeded = PIXELDRAIN_DELAY_MS - timeSinceLastPixeldrain
+        uc_log(`Delaying pixeldrain download by ${delayNeeded}ms to avoid rate limiting`)
+        setTimeout(() => {
+          // Remove from pending before re-adding to avoid duplicates
+          const idx = pendingDownloads.findIndex(p => p.downloadId === payload.downloadId)
+          if (idx >= 0) pendingDownloads.splice(idx, 1)
+          // Check if cancelled during the delay
+          if (cancelledDownloadIds.has(payload.downloadId)) {
+            ucLog(`Pixeldrain delayed download was cancelled: ${payload.downloadId}`)
+            return
+          }
+          startDownloadNow(win, payload)
+        }, delayNeeded)
+        return { ok: true, delayed: true }
+      }
+      
+      // Extract file ID and visit viewer page to bypass hotlink protection
+      const fileId = extractPixeldrainFileIdFromUrl(payload.url)
+      if (fileId) {
+        await visitPixeldrainViewerPage(fileId)
+        // Small delay after visiting to ensure view is registered
+        await new Promise(resolve => setTimeout(resolve, 500))
+      }
+      
+      lastPixeldrainDownloadTime = Date.now()
+    } else {
+      // Authenticated: skip viewer page visit and delay entirely
+      uc_log(`Pixeldrain download authenticated — skipping viewer page visit and delay`)
     }
-    
-    lastPixeldrainDownloadTime = Date.now()
   }
   
+  uc_log(`startDownloadNow: calling downloadURL — downloadId=${payload.downloadId} url=${payload.url}`)
   win.webContents.downloadURL(payload.url)
   return { ok: true }
 }
@@ -2100,7 +2225,7 @@ function sendDownloadUpdate(win, payload) {
   }
 }
 
-function registerRunningGame(appid, exePath, proc, gameName) {
+function registerRunningGame(appid, exePath, proc, gameName, showGameName = true) {
   if (!proc || !proc.pid) return
   const payload = {
     appid: appid || null,
@@ -2121,8 +2246,9 @@ function registerRunningGame(appid, exePath, proc, gameName) {
           { label: 'Open on web', url: 'https://union-crax.xyz/direct' },
           { label: 'Download UC.D', url: 'https://union-crax.xyz/direct' }
         ]
+    const displayName = showGameName ? (gameName || appid) : 'A game'
     setGameRpcActivity({
-      details: gameName || appid || 'Playing',
+      details: `Playing ${displayName}`,
       state: 'Playing',
       startTimestamp: Math.floor(payload.startedAt / 1000),
       buttons
@@ -2135,7 +2261,7 @@ function registerRunningGame(appid, exePath, proc, gameName) {
   })
 }
 
-function registerRunningGamePid(appid, exePath, pid, gameName) {
+function registerRunningGamePid(appid, exePath, pid, gameName, showGameName = true) {
   if (!pid) return
   const payload = {
     appid: appid || null,
@@ -2156,8 +2282,9 @@ function registerRunningGamePid(appid, exePath, pid, gameName) {
           { label: 'Open on web', url: 'https://union-crax.xyz/direct' },
           { label: 'Download UC.D', url: 'https://union-crax.xyz/direct' }
         ]
+    const displayName = showGameName ? (gameName || appid) : 'A game'
     setGameRpcActivity({
-      details: gameName || appid || 'Playing',
+      details: `Playing ${displayName}`,
       state: 'Playing',
       startTimestamp: Math.floor(payload.startedAt / 1000),
       buttons
@@ -2337,6 +2464,16 @@ function createWindow() {
       if (!details.requestHeaders['User-Agent']) {
         details.requestHeaders['User-Agent'] = `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36`
       }
+      // Inject Authorization header if we have one for this pixeldrain file
+      if (!details.requestHeaders['Authorization']) {
+        try {
+          const parsed = new URL(details.url)
+          const fileIdMatch = parsed.pathname.match(/\/api\/file\/([^/?#]+)/)
+          if (fileIdMatch?.[1] && pixeldrainAuthHeaders.has(fileIdMatch[1])) {
+            details.requestHeaders['Authorization'] = pixeldrainAuthHeaders.get(fileIdMatch[1])
+          }
+        } catch {}
+      }
       callback({ requestHeaders: details.requestHeaders })
     }
   )
@@ -2349,7 +2486,8 @@ function createWindow() {
     const matchIndex = pendingDownloads.findIndex((entry) =>
       entry.url === url ||
       (entry.normalizedUrl && entry.normalizedUrl === normalizedUrl) ||
-      (entry.filename && entry.filename === itemFilename)
+      (entry.filename && entry.filename === itemFilename) ||
+      (Array.isArray(entry.urlChain) && entry.urlChain.includes(url))
     )
     const match = matchIndex >= 0 ? pendingDownloads.splice(matchIndex, 1)[0] : null
     const downloadId = match?.downloadId || `${Date.now()}-${Math.random().toString(16).slice(2)}`
@@ -2368,7 +2506,9 @@ function createWindow() {
     const partIndex = match?.partIndex
     const partTotal = match?.partTotal
     const gameFolder = safeFolderName(match?.gameName || match?.appid || downloadId)
-    const installingRoot = ensureSubdir(path.join(downloadRoot, installingDirName), gameFolder)
+    const versionSlug = match?.versionLabel ? safeFolderName(match.versionLabel) : null
+    const actualFolder = versionSlug ? path.join(gameFolder, 'versions', versionSlug) : gameFolder
+    const installingRoot = ensureSubdir(path.join(downloadRoot, installingDirName), actualFolder)
     const savePath = match?.savePath || path.join(installingRoot, filename)
     try {
       item.setSavePath(savePath)
@@ -2378,13 +2518,24 @@ function createWindow() {
     const state = { lastBytes: 0, lastTime: startedAt, speedBps: 0 }
     uc_log(`activeDownloads.set - partIndex=${partIndex} partTotal=${partTotal}`)
     activeDownloads.set(downloadId, {
-      item, state, appid: match?.appid, gameName: match?.gameName, url, savePath, partIndex, partTotal,
+      item, state, appid: match?.appid, gameName: match?.gameName, url, savePath, partIndex, partTotal, versionLabel: match?.versionLabel || null,
     })
+
+    // For interrupted downloads (created by createInterruptedDownload), the item starts
+    // in 'interrupted' state and requires an explicit resume() call to begin downloading.
+    const isInterruptedResume = item.getState() === 'interrupted' || (item.isPaused() && match?.savePath)
+    const initialReceivedBytes = item.getReceivedBytes() || 0
+
+    if (isInterruptedResume) {
+      uc_log(`will-download: interrupted download detected, calling item.resume() — offset=${initialReceivedBytes}`)
+      // Initialize speed tracking from the offset so delta calculations are correct
+      state.lastBytes = initialReceivedBytes
+    }
 
     sendDownloadUpdate(mainWindow, {
       downloadId,
       status: 'downloading',
-      receivedBytes: 0,
+      receivedBytes: initialReceivedBytes,
       totalBytes: item.getTotalBytes(),
       speedBps: 0,
       etaSeconds: null,
@@ -2397,6 +2548,13 @@ function createWindow() {
       partIndex,
       partTotal
     })
+
+    // Resume interrupted downloads AFTER registering in activeDownloads and sending initial update
+    if (isInterruptedResume) {
+      try { item.resume() } catch (e) {
+        uc_log(`will-download: resume() failed: ${e}`)
+      }
+    }
 
     item.on('updated', () => {
       const entry = activeDownloads.get(downloadId)
@@ -2436,8 +2594,31 @@ function createWindow() {
 
     item.once('done', async (_event, state) => {
       uc_log(`download done handler start — downloadId=${downloadId} state=${state} url=${url}`)
+
+      // When the app is quitting, Electron cancels all active/paused DownloadItems and fires
+      // done with state='cancelled'. Don't propagate this to the renderer — the download
+      // was not cancelled by the user. On next startup the renderer will restore it as 'paused'.
+      if (app.isQuitting && state === 'cancelled') {
+        uc_log(`download done during quit — suppressing cancelled status for ${downloadId}`)
+        activeDownloads.delete(downloadId)
+        return
+      }
+
+      // Clean up .ucresume backup file if present (no longer needed)
       const entry = activeDownloads.get(downloadId)
+      if (entry?.savePath) {
+        const backupPath = entry.savePath + RESUME_BACKUP_EXT
+        if (fs.existsSync(backupPath)) {
+          try { fs.unlinkSync(backupPath) } catch {}
+        }
+      }
+
       activeDownloads.delete(downloadId)
+      // Clean up pixeldrain auth header for this file
+      try {
+        const fileId = extractPixeldrainFileIdFromUrl(url)
+        if (fileId) pixeldrainAuthHeaders.delete(fileId)
+      } catch {}
       // Safety: also remove this downloadId from pendingDownloads in case will-download
       // didn't match it (URL normalization mismatch, redirects, etc.)
       const pendingIdx = pendingDownloads.findIndex(p => p.downloadId === downloadId)
@@ -2450,8 +2631,10 @@ function createWindow() {
       let extractionError = null
       if (state === 'completed' && entry?.savePath) {
         const folderName = safeFolderName(entry?.gameName || entry?.appid || downloadId)
-        const installingRoot = path.join(downloadRoot, installingDirName, folderName)
-        const installedRoot = ensureSubdir(path.join(downloadRoot, installedDirName), folderName)
+        const versionSlug = entry?.versionLabel ? safeFolderName(entry.versionLabel) : null
+        const actualFolder = versionSlug ? path.join(folderName, 'versions', versionSlug) : folderName
+        const installingRoot = path.join(downloadRoot, installingDirName, actualFolder)
+        const installedRoot = ensureSubdir(path.join(downloadRoot, installedDirName), actualFolder)
         const metadataForInstall = getInstallingMetadata(installingRoot, installedRoot, entry?.appid, entry?.gameName)
 
         // If this was a Pixeldrain URL and filename lacks an extension, try to get original name first
@@ -2556,20 +2739,30 @@ function createWindow() {
             if (extractionKeyOverride) activeExtractions.delete(extractionKeyOverride)
             if (res && res.ok) {
               const extractedFiles = res.files || []
+              const fileEntries = []
               for (const ef of extractedFiles) {
                 try {
                   const stats = fs.existsSync(ef) ? fs.statSync(ef) : null
-                  const checksum = ef ? await computeFileChecksum(ef) : null
+                  // Skip checksum calculation for now to prevent stalling the main process during extraction.
+                  // Checksums are slow (especially on many small files) and block the completion event.
                   const fileEntry = {
                     path: ef,
                     name: path.basename(ef),
                     size: stats ? stats.size : 0,
-                    checksum: checksum,
+                    checksum: null,
                     addedAt: Date.now(),
                   }
-                  updateInstalledManifest(installedRoot, metadataForInstall, fileEntry)
+                  fileEntries.push(fileEntry)
                 } catch (e) {}
               }
+
+              // Update the manifest in a single bulk operation
+              if (fileEntries.length > 0) {
+                updateInstalledManifestBulk(installedRoot, metadataForInstall, fileEntries)
+              } else {
+                updateInstalledManifest(installedRoot, metadataForInstall, null)
+              }
+
               try {
                 const skipNames = new Set()
                 if (archiveToExtract) skipNames.add(path.basename(archiveToExtract))
@@ -2919,6 +3112,26 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   app.isQuitting = true
   shutdownRpcClient()
+
+  // Preserve partial download files before Chromium deletes them.
+  // When Electron quits it cancels all active/paused DownloadItems, and Chromium's
+  // cancel handler deletes the partially-written file from disk. Creating a hardlink
+  // is instant (no data copy, even for 10 GB files) — the hardlink survives the
+  // original's deletion because both point to the same inode on disk.
+  for (const [downloadId, entry] of activeDownloads) {
+    if (entry.savePath) {
+      try {
+        const backupPath = entry.savePath + RESUME_BACKUP_EXT
+        if (fs.existsSync(entry.savePath)) {
+          if (fs.existsSync(backupPath)) { try { fs.unlinkSync(backupPath) } catch {} }
+          fs.linkSync(entry.savePath, backupPath)
+          ucLog(`Preserved partial download via hardlink: ${backupPath} (downloadId=${downloadId})`)
+        }
+      } catch (e) {
+        ucLog(`Failed to preserve partial download ${entry.savePath}: ${e.message}`, 'warn')
+      }
+    }
+  }
 })
 
 ipcMain.handle('uc:download-start', (event, payload) => {
@@ -3068,13 +3281,20 @@ ipcMain.handle('uc:download-resume-interrupted', (event, payload) => {
   if (!payload || !payload.resumeData) return { ok: false, error: 'missing-resume-data' }
   const resume = payload.resumeData || {}
   const savePath = resume.savePath || payload.savePath
-  if (!savePath || !fs.existsSync(savePath)) return { ok: false, error: 'missing-file' }
+  // Attempt to restore the partial file if Chromium deleted it during a previous quit
+  if (!savePath || !restorePreservedFile(savePath)) return { ok: false, error: 'missing-file' }
   const urlChain = Array.isArray(resume.urlChain) && resume.urlChain.length
     ? resume.urlChain
     : payload.url
       ? [payload.url]
       : []
   if (!urlChain.length) return { ok: false, error: 'missing-url' }
+
+  // Register auth header for pixeldrain authenticated downloads
+  if (payload.authHeader && urlChain[0] && urlChain[0].includes('pixeldrain.com')) {
+    const fileId = extractPixeldrainFileIdFromUrl(urlChain[0])
+    if (fileId) pixeldrainAuthHeaders.set(fileId, payload.authHeader)
+  }
 
   pendingDownloads.push({
     url: urlChain[0],
@@ -3084,21 +3304,104 @@ ipcMain.handle('uc:download-resume-interrupted', (event, payload) => {
     gameName: payload.gameName,
     partIndex: payload.partIndex,
     partTotal: payload.partTotal,
+    urlChain,
+    authHeader: payload.authHeader,
     savePath
   })
+
+  // Use the actual file size on disk as the offset — the stored resumeData.offset
+  // can be stale if the app was closed before localStorage caught up to the actual
+  // bytes written to disk (updates arrive ~1/sec, disk writes are continuous).
+  let actualOffset = resume.offset || 0
+  try {
+    const stat = fs.statSync(savePath)
+    if (stat.size > 0) {
+      if (stat.size !== actualOffset) {
+        ucLog(`resume-interrupted: correcting offset ${actualOffset} → ${stat.size} (actual file size)`, 'info')
+      }
+      actualOffset = stat.size
+    }
+  } catch {}
 
   try {
     win.webContents.session.createInterruptedDownload({
       path: savePath,
       urlChain,
       mimeType: resume.mimeType || '',
-      offset: resume.offset || 0,
+      offset: actualOffset,
       length: resume.totalBytes || 0,
       lastModified: resume.lastModified || '',
       eTag: resume.etag || '',
       startTime: resume.startTime || 0
     })
-    return { ok: true }
+    return { ok: true, actualOffset }
+  } catch (e) {
+    return { ok: false, error: String(e) }
+  }
+})
+
+// Level 3 resume: re-resolve produced a fresh URL but we still have a partial file on disk.
+// Use createInterruptedDownload with the fresh URL + actual file offset so the download
+// resumes from where it left off instead of restarting from byte 0.
+ipcMain.handle('uc:download-resume-with-fresh-url', (event, payload) => {
+  const win = BrowserWindow.fromWebContents(event.sender)
+  if (!win || win.isDestroyed()) return { ok: false }
+  if (!payload || !payload.url) return { ok: false, error: 'missing-url' }
+
+  const savePath = payload.savePath
+  // Attempt to restore the partial file if Chromium deleted it during a previous quit
+  if (!savePath || !restorePreservedFile(savePath)) {
+    // No partial file on disk — caller should fall back to a from-scratch download
+    return { ok: false, error: 'missing-file' }
+  }
+
+  let actualOffset = 0
+  try {
+    const stat = fs.statSync(savePath)
+    actualOffset = stat.size
+  } catch {}
+
+  if (actualOffset <= 0) {
+    return { ok: false, error: 'empty-file' }
+  }
+
+  ucLog(`resume-with-fresh-url: downloadId=${payload.downloadId} url=${payload.url} offset=${actualOffset} savePath=${savePath}`, 'info')
+
+  // Register auth header for pixeldrain authenticated downloads
+  if (payload.authHeader && payload.url.includes('pixeldrain.com')) {
+    const fileId = extractPixeldrainFileIdFromUrl(payload.url)
+    if (fileId) pixeldrainAuthHeaders.set(fileId, payload.authHeader)
+  }
+
+  pendingDownloads.push({
+    url: payload.url,
+    normalizedUrl: normalizeDownloadUrl(payload.url),
+    downloadId: payload.downloadId,
+    filename: payload.filename || path.basename(savePath),
+    appid: payload.appid,
+    gameName: payload.gameName,
+    partIndex: payload.partIndex,
+    partTotal: payload.partTotal,
+    authHeader: payload.authHeader,
+    savePath,
+    urlChain: [payload.url]
+  })
+
+  try {
+    // Use createInterruptedDownload with the fresh URL. We intentionally pass empty
+    // eTag/lastModified because this is a brand-new URL — stale metadata from the
+    // original session would cause the server to reject the Range request.
+    win.webContents.session.createInterruptedDownload({
+      path: savePath,
+      urlChain: [payload.url],
+      mimeType: '',
+      offset: actualOffset,
+      length: payload.totalBytes || 0,
+      lastModified: '',
+      eTag: '',
+      startTime: Date.now()
+    })
+    return { ok: true, actualOffset }
   } catch (e) {
     return { ok: false, error: String(e) }
   }
@@ -3163,7 +3466,10 @@ ipcMain.handle('uc:installed-save', (_event, appid, metadata) => {
   try {
     const downloadRoot = ensureDownloadDir()
     const folderName = safeFolderName((metadata && (metadata.name || metadata.gameName)) || appid || 'unknown')
-    const installingRoot = ensureSubdir(path.join(downloadRoot, installingDirName), folderName)
+    const versionLabel = metadata?.downloadedVersion
+    const versionSlug = versionLabel ? safeFolderName(versionLabel) : null
+    const actualFolder = versionSlug ? path.join(folderName, 'versions', versionSlug) : folderName
+    const installingRoot = ensureSubdir(path.join(downloadRoot, installingDirName), actualFolder)
     const manifestPath = path.join(installingRoot, INSTALLED_MANIFEST)
     const manifest = readJsonFile(manifestPath) || {}
     manifest.appid = appid
@@ -3214,11 +3520,7 @@ ipcMain.handle('uc:installed-update-metadata', async (_event, appid, updates) =>
     const roots = listDownloadRoots()
     for (const baseRoot of roots) {
       const root = path.join(baseRoot, installedDirName)
-      if (!fs.existsSync(root)) continue
-      const entries = fs.readdirSync(root, { withFileTypes: true })
-      for (const dirent of entries) {
-        if (!dirent.isDirectory()) continue
-        const folder = path.join(root, dirent.name)
+      for (const { folder } of iterateGameFolders(root)) {
         const manifestPath = path.join(folder, INSTALLED_MANIFEST)
         const manifest = readJsonFile(manifestPath)
         if (!manifest || manifest.appid !== appid) continue
@@ -3419,11 +3721,7 @@ ipcMain.handle('uc:installed-get', (_event, appid) => {
   try {
     const downloadRoot = ensureDownloadDir()
     const root = path.join(downloadRoot, installedDirName)
-    if (!fs.existsSync(root)) return null
-    const entries = fs.readdirSync(root, { withFileTypes: true })
-    for (const dirent of entries) {
-      if (!dirent.isDirectory()) continue
-      const folder = path.join(root, dirent.name)
+    for (const { folder } of iterateGameFolders(root)) {
       const manifestPath = path.join(folder, INSTALLED_MANIFEST)
       const manifest = readJsonFile(manifestPath)
       if (manifest && manifest.appid === appid) return manifest
@@ -3435,23 +3733,47 @@ ipcMain.handle('uc:installed-get', (_event, appid) => {
   }
 })
 
+ipcMain.handle('uc:installed-list-by-appid', (_event, appid) => {
+  try {
+    if (!appid) return []
+    const roots = listDownloadRoots()
+    const items = []
+    const seen = new Set()
+    for (const root of roots) {
+      const installedRoot = path.join(root, installedDirName)
+      for (const { folder } of iterateGameFolders(installedRoot)) {
+        const manifestPath = path.join(folder, INSTALLED_MANIFEST)
+        const manifest = readJsonFile(manifestPath)
+        if (!manifest || manifest.appid !== appid) continue
+        if (seen.has(manifestPath)) continue
+        seen.add(manifestPath)
+        items.push({ ...manifest, installedFolder: folder })
+      }
+    }
+    return items
+  } catch (err) {
+    console.error('[UC] installed-list-by-appid failed', err)
+    return []
+  }
+})
+
 ipcMain.handle('uc:installed-list-global', (_event) => {
   try {
     const roots = listDownloadRoots()
-    const all = []
+    const bestByAppid = new Map() // appid -> manifest (keep richest)
     for (const root of roots) {
       const installedRoot = path.join(root, installedDirName)
       const items = listManifestsFromRoot(installedRoot, true)
-      for (const item of items) all.push(item)
+      for (const item of items) {
+        const key = item && item.appid ? item.appid : null
+        if (!key) continue
+        const existing = bestByAppid.get(key)
+        if (!existing || manifestRichness(item) > manifestRichness(existing)) {
+          bestByAppid.set(key, item)
+        }
+      }
     }
-    const seen = new Set()
-    return all.filter((item) => {
-      const key = item && item.appid ? item.appid : null
-      if (!key) return false
-      if (seen.has(key)) return false
-      seen.add(key)
-      return true
-    })
+    return Array.from(bestByAppid.values())
   } catch (err) {
     console.error('[UC] installed-list-global failed', err)
     return []
@@ -3464,11 +3786,7 @@ ipcMain.handle('uc:installed-get-global', (_event, appid) => {
     const roots = listDownloadRoots()
     for (const root of roots) {
       const installedRoot = path.join(root, installedDirName)
-      if (!fs.existsSync(installedRoot)) continue
-      const entries = fs.readdirSync(installedRoot, { withFileTypes: true })
-      for (const dirent of entries) {
-        if (!dirent.isDirectory()) continue
-        const folder = path.join(installedRoot, dirent.name)
+      for (const { folder } of iterateGameFolders(installedRoot)) {
         const manifestPath = path.join(folder, INSTALLED_MANIFEST)
         const manifest = readJsonFile(manifestPath)
         if (manifest && manifest.appid === appid) return manifest
@@ -3501,11 +3819,7 @@ ipcMain.handle('uc:installing-get', (_event, appid) => {
   try {
     const downloadRoot = ensureDownloadDir()
     const root = path.join(downloadRoot, installingDirName)
-    if (!fs.existsSync(root)) return null
-    const entries = fs.readdirSync(root, { withFileTypes: true })
-    for (const dirent of entries) {
-      if (!dirent.isDirectory()) continue
-      const folder = path.join(root, dirent.name)
+    for (const { folder } of iterateGameFolders(root)) {
       const manifestPath = path.join(folder, INSTALLED_MANIFEST)
       const manifest = readJsonFile(manifestPath)
       if (manifest && manifest.appid === appid) {
@@ -3524,24 +3838,22 @@ ipcMain.handle('uc:installing-get', (_event, appid) => {
 ipcMain.handle('uc:installing-list-global', (_event) => {
   try {
     const roots = listDownloadRoots()
-    const all = []
+    const bestByAppid = new Map() // appid -> manifest (keep richest)
     for (const root of roots) {
       const installingRoot = path.join(root, installingDirName)
       const items = listManifestsFromRoot(installingRoot, false)
       for (const item of items) {
         const status = item && typeof item.installStatus === 'string' ? item.installStatus : null
         if (status === 'completed' || status === 'extracted' || status === 'cancelled') continue
-        all.push(item)
+        const key = item && item.appid ? item.appid : null
+        if (!key) continue
+        const existing = bestByAppid.get(key)
+        if (!existing || manifestRichness(item) > manifestRichness(existing)) {
+          bestByAppid.set(key, item)
+        }
       }
     }
-    const seen = new Set()
-    return all.filter((item) => {
-      const key = item && item.appid ? item.appid : null
-      if (!key) return false
-      if (seen.has(key)) return false
-      seen.add(key)
-      return true
-    })
+    return Array.from(bestByAppid.values())
   } catch (err) {
     console.error('[UC] installing-list-global failed', err)
     return []
@@ -3554,11 +3866,7 @@ ipcMain.handle('uc:installing-get-global', (_event, appid) => {
     const roots = listDownloadRoots()
     for (const root of roots) {
       const installingRoot = path.join(root, installingDirName)
-      if (!fs.existsSync(installingRoot)) continue
-      const entries = fs.readdirSync(installingRoot, { withFileTypes: true })
-      for (const dirent of entries) {
-        if (!dirent.isDirectory()) continue
-        const folder = path.join(installingRoot, dirent.name)
+      for (const { folder } of iterateGameFolders(installingRoot)) {
         const manifestPath = path.join(folder, INSTALLED_MANIFEST)
         const manifest = readJsonFile(manifestPath)
         if (manifest && manifest.appid === appid) {
@@ -3575,24 +3883,27 @@ ipcMain.handle('uc:installing-get-global', (_event, appid) => {
   }
 })
 
-ipcMain.handle('uc:game-exe-list', (_event, appid) => {
+ipcMain.handle('uc:game-exe-list', (_event, appid, versionLabel) => {
   try {
-    const folder = findInstalledFolderByAppid(appid)
-    if (!folder) return { ok: false, error: 'not-found', exes: [] }
+    const folder = versionLabel
+      ? findInstalledFolderByAppidVersion(appid, versionLabel)
+      : findInstalledFolderByAppid(appid)
+    const resolvedFolder = folder || findInstalledFolderByAppid(appid)
+    if (!resolvedFolder) return { ok: false, error: 'not-found', exes: [] }
 
     // Try listing from the game folder — use depth 6 to handle deeply nested structures
-    let exes = listExecutables(folder, 6, 100)
-    let effectiveFolder = folder
+    let exes = listExecutables(resolvedFolder, 6, 100)
+    let effectiveFolder = resolvedFolder
 
     // If no exes found, check if there's a single subfolder wrapper (common after extraction)
     if (exes.length === 0) {
       try {
-        const entries = fs.readdirSync(folder, { withFileTypes: true })
+        const entries = fs.readdirSync(resolvedFolder, { withFileTypes: true })
         const subdirs = entries.filter(e => e.isDirectory())
         const files = entries.filter(e => e.isFile())
         // If there's only installed.json and one subdirectory, scan inside that
         if (subdirs.length === 1 && files.every(f => f.name === INSTALLED_MANIFEST)) {
-          const subPath = path.join(folder, subdirs[0].name)
+          const subPath = path.join(resolvedFolder, subdirs[0].name)
           exes = listExecutables(subPath, 6, 100)
           if (exes.length > 0) effectiveFolder = subPath
         }
@@ -3602,7 +3913,7 @@ ipcMain.handle('uc:game-exe-list', (_event, appid) => {
     // For external games, if no exes found via junction, try the externalPath directly
     if (exes.length === 0) {
       try {
-        const manifestPath = path.join(folder, INSTALLED_MANIFEST)
+        const manifestPath = path.join(resolvedFolder, INSTALLED_MANIFEST)
         const manifest = readJsonFile(manifestPath)
         const extPath = manifest?.externalPath || (manifest?.metadata?.externalPath)
         if (extPath && fs.existsSync(extPath)) {
@@ -3696,7 +4007,7 @@ function resolveLaunchCommand(exePath) {
   return { command: exePath, args: [], cwd }
 }
 
-ipcMain.handle('uc:game-exe-launch', async (_event, appid, exePath, gameName) => {
+ipcMain.handle('uc:game-exe-launch', async (_event, appid, exePath, gameName, showGameName) => {
   try {
     if (!exePath || typeof exePath !== 'string') return { ok: false }
     ucLog(`Launching game: ${appid} at ${exePath}`)
@@ -3711,12 +4022,32 @@ ipcMain.handle('uc:game-exe-launch', async (_event, appid, exePath, gameName) =>
         ucLog(`  Args: ${JSON.stringify(args)}`, 'info')
       }
       
-      // Prepare environment - inherit all variables and ensure game directory is in PATH
-      const env = { ...process.env }
+      // Windows: launch via a persistent cmd.exe wrapper.
+      // Many games that fail to launch via direct spawn work when launched this way,
+      // and cmd.exe stays alive while the game runs, giving us a stable PID to track/quit.
       if (process.platform === 'win32') {
-        // Add game directory to PATH for DLL resolution
+        const env = { ...process.env }
         env.PATH = `${cwd};${env.PATH || ''}`
+
+        const quoteForCmd = (value) => `"${String(value).replace(/"/g, '""')}"`
+        const cmdLine = [quoteForCmd(command), ...(Array.isArray(args) ? args.map(quoteForCmd) : [])].join(' ')
+
+        const proc = child_process.spawn('cmd.exe', ['/d', '/s', '/c', cmdLine], {
+          detached: true,
+          stdio: 'ignore',
+          windowsHide: true,
+          cwd,
+          env
+        })
+        proc.unref()
+        registerRunningGame(appid, exePath, proc, gameName, showGameName)
+        ucLog(`Game launched successfully: ${appid} (PID: ${proc.pid})`)
+        return { ok: true, pid: proc.pid }
       }
+      
+      // Non-Windows path
+      const env = { ...process.env }
+      env.PATH = `${cwd};${env.PATH || ''}`
       
       const proc = child_process.spawn(command, args, {
         detached: true,
@@ -3726,7 +4057,7 @@ ipcMain.handle('uc:game-exe-launch', async (_event, appid, exePath, gameName) =>
         env
       })
       proc.unref()
-      registerRunningGame(appid, exePath, proc, gameName)
+      registerRunningGame(appid, exePath, proc, gameName, showGameName)
       ucLog(`Game launched successfully: ${appid} (PID: ${proc.pid})`)
       return { ok: true, pid: proc.pid }
     } catch (err) {
@@ -3744,21 +4075,27 @@ ipcMain.handle('uc:game-exe-launch', async (_event, appid, exePath, gameName) =>
   }
 })
 
-ipcMain.handle('uc:game-exe-launch-admin', async (_event, appid, exePath, gameName) => {
+ipcMain.handle('uc:game-exe-launch-admin', async (_event, appid, exePath, gameName, showGameName) => {
   try {
     if (!exePath || typeof exePath !== 'string') return { ok: false }
     if (process.platform !== 'win32') {
       ucLog(`Launching game (non-admin fallback): ${appid} at ${exePath}`)
       try {
         const { command, args, cwd } = resolveLaunchCommand(exePath)
+        
+        // Prepare environment - inherit all variables and ensure game directory is in PATH
+        const env = { ...process.env }
+        env.PATH = `${cwd};${env.PATH || ''}`
+        
         const proc = child_process.spawn(command, args, {
           detached: true,
           stdio: 'ignore',
           windowsHide: false,
-          cwd
+          cwd,
+          env
         })
         proc.unref()
-        registerRunningGame(appid, exePath, proc, gameName)
+        registerRunningGame(appid, exePath, proc, gameName, showGameName)
         ucLog(`Game launched successfully: ${appid} (PID: ${proc.pid})`)
         return { ok: true, pid: proc.pid }
       } catch (err) {
@@ -3773,17 +4110,21 @@ ipcMain.handle('uc:game-exe-launch-admin', async (_event, appid, exePath, gameNa
     }
     ucLog(`Launching game as admin: ${appid} at ${exePath}`)
     try {
-      const safeExePath = exePath.replace(/'/g, "''")
-      const workingDir = path.dirname(exePath).replace(/'/g, "''")
+      const workingDir = path.dirname(exePath)
       
       // Verbose logging
       const settings = readSettings() || {}
       if (settings.verboseDownloadLogging) {
         ucLog(`  Working directory (admin): ${workingDir}`, 'info')
-        ucLog(`  Executable (admin): ${safeExePath}`, 'info')
+        ucLog(`  Executable (admin): ${exePath}`, 'info')
       }
       
-      const psScript = `try { $p = Start-Process -FilePath '${safeExePath}' -WorkingDirectory '${workingDir}' -Verb RunAs -WindowStyle Normal -PassThru -ErrorAction Stop; if ($p) { Write-Output \"STARTED:$($p.Id)\"; exit 0 } else { Write-Error 'START-FAILED'; exit 1 } } catch { Write-Error $_.Exception.Message; exit 1 }`
+      // Launch via cmd.exe as admin so the wrapper PID can be tracked and quit can kill the whole tree.
+      const safeWorkingDir = String(workingDir).replace(/'/g, "''")
+      const safeExePath = String(exePath).replace(/'/g, "''")
+      const cmdLine = `set "PATH=${safeWorkingDir};%PATH%" && "${safeExePath}"`
+
+      const psScript = `try { $p = Start-Process -FilePath 'cmd.exe' -ArgumentList @('/d','/s','/c', '${cmdLine}') -WorkingDirectory '${safeWorkingDir}' -Verb RunAs -WindowStyle Hidden -PassThru -ErrorAction Stop; if ($p) { Write-Output \"STARTED:$($p.Id)\"; exit 0 } else { Write-Error 'START-FAILED'; exit 1 } } catch { Write-Error $_.Exception.Message; exit 1 }`
       const proc = child_process.spawn('powershell.exe', [
         '-NoProfile',
         '-NonInteractive',
@@ -3818,7 +4159,7 @@ ipcMain.handle('uc:game-exe-launch-admin', async (_event, appid, exePath, gameNa
             const match = msg.match(/STARTED:(\d+)/)
             if (match && match[1]) {
               launchedPid = Number(match[1])
-              registerRunningGamePid(appid, exePath, launchedPid, gameName)
+              registerRunningGamePid(appid, exePath, launchedPid, gameName, showGameName)
               clearTimeout(timer)
               finish({ ok: true, pid: launchedPid })
             }
@@ -3849,13 +4190,21 @@ ipcMain.handle('uc:game-exe-launch-admin', async (_event, appid, exePath, gameNa
       ucLog(`Game launch as admin failed: ${appid} - ${err.message}`, 'error')
       // Fallback to regular launch
       try {
+        const cwd = path.dirname(exePath)
+        
+        // Prepare environment - inherit all variables and ensure game directory is in PATH
+        const env = { ...process.env }
+        env.PATH = `${cwd};${env.PATH || ''}`
+        
         const proc = child_process.spawn(exePath, [], {
           detached: true,
           stdio: 'ignore',
-          windowsHide: false
+          windowsHide: false,
+          cwd,
+          env
         })
         proc.unref()
-        registerRunningGame(appid, exePath, proc, gameName)
+        registerRunningGame(appid, exePath, proc, gameName, showGameName)
         ucLog(`Game launched with fallback: ${appid} (PID: ${proc.pid})`)
         return { ok: true, pid: proc.pid }
       } catch (fallbackErr) {

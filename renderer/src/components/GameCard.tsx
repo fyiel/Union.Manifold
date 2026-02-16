@@ -200,19 +200,32 @@ export const GameCard = memo(function GameCard({
 
   const { isQueued, isInstalling } = downloadState
 
-  const getSavedExe = async () => {
+  const getExeKey = (versionLabel?: string | null) =>
+    versionLabel ? `gameExe:${game.appid}:${versionLabel}` : `gameExe:${game.appid}`
+
+  const getSavedExe = async (versionLabel?: string | null, allowLegacyFallback: boolean = true) => {
     if (!window.ucSettings?.get) return null
     try {
-      return await window.ucSettings.get(`gameExe:${game.appid}`)
+      const key = getExeKey(versionLabel)
+      const versioned = await window.ucSettings.get(key)
+      if (versioned) return versioned
+      if (versionLabel && allowLegacyFallback) {
+        return await window.ucSettings.get(`gameExe:${game.appid}`)
+      }
+      return versioned
     } catch {
       return null
     }
   }
 
-  const setSavedExe = async (path: string | null) => {
+  const setSavedExe = async (path: string | null, versionLabel?: string | null) => {
     if (!window.ucSettings?.set) return
     try {
-      await window.ucSettings.set(`gameExe:${game.appid}`, path || null)
+      const key = getExeKey(versionLabel)
+      await window.ucSettings.set(key, path || null)
+      if (!versionLabel) {
+        await window.ucSettings.set(`gameExe:${game.appid}`, path || null)
+      }
     } catch {}
   }
 
@@ -271,6 +284,9 @@ export const GameCard = memo(function GameCard({
   const createDesktopShortcut = async (exePath: string) => {
     if (!window.ucDownloads?.createDesktopShortcut) return
     try {
+      try {
+        await window.ucDownloads?.deleteDesktopShortcut?.(game.name)
+      } catch {}
       const result = await window.ucDownloads.createDesktopShortcut(game.name, exePath)
       if (result?.ok) {
         gameLogger.info('Desktop shortcut created', { appid: game.appid })
@@ -280,6 +296,36 @@ export const GameCard = memo(function GameCard({
     } catch (err) {
       gameLogger.error('Error creating desktop shortcut', { data: err })
     }
+  }
+
+  const getInstalledVersionLabels = async () => {
+    try {
+      if (!window.ucDownloads?.listInstalledByAppid) return []
+      const list = await window.ucDownloads.listInstalledByAppid(game.appid)
+      const labels = (Array.isArray(list) ? list : [])
+        .map((manifest) => manifest?.metadata?.downloadedVersion || manifest?.metadata?.version || manifest?.version)
+        .filter(Boolean)
+        .map((label) => String(label))
+      return Array.from(new Set(labels))
+    } catch {
+      return []
+    }
+  }
+
+  const resolveCardVersionLabel = async () => {
+    const labels = await getInstalledVersionLabels()
+    if (labels.length === 1) return labels[0]
+    return game.version || null
+  }
+
+  const listGameExecutablesWithFallback = async () => {
+    if (!window.ucDownloads?.listGameExecutables) return null
+    const preferredLabel = await resolveCardVersionLabel()
+    let result = await window.ucDownloads.listGameExecutables(game.appid, preferredLabel || null)
+    if (!result?.ok || !result.exes?.length) {
+      result = await window.ucDownloads.listGameExecutables(game.appid)
+    }
+    return result
   }
 
   const openExePicker = (exes: Array<{ name: string; path: string; size?: number; depth?: number }>, folder?: string | null) => {
@@ -295,9 +341,11 @@ export const GameCard = memo(function GameCard({
       : window.ucDownloads.launchGameExecutable
     
     if (!launchFn) return
-    const res = await launchFn(game.appid, path, game.name)
+    const showGameName = await window.ucSettings?.get?.('rpcShowGameName') ?? true
+    const res = await launchFn(game.appid, path, game.name, showGameName)
     if (res && res.ok) {
-      await setSavedExe(path)
+      const preferredLabel = await resolveCardVersionLabel()
+      await setSavedExe(path, preferredLabel)
       setIsRunning(true)
       setExePickerOpen(false)
       setAdminPromptOpen(false)
@@ -374,7 +422,10 @@ export const GameCard = memo(function GameCard({
       return
     }
     try {
-      const savedExe = await getSavedExe()
+      const preferredLabel = await resolveCardVersionLabel()
+      const installedLabels = await getInstalledVersionLabels()
+      const allowLegacyFallback = installedLabels.length <= 1
+      const savedExe = await getSavedExe(preferredLabel, allowLegacyFallback)
       const runAsAdminEnabled = await getRunAsAdminEnabled()
       
       if (savedExe) {
@@ -382,7 +433,11 @@ export const GameCard = memo(function GameCard({
         return
       }
       
-      const result = await window.ucDownloads.listGameExecutables(game.appid)
+      const result = await listGameExecutablesWithFallback()
+      if (!result) {
+        if (installedPath) openPath(installedPath)
+        return
+      }
       const exes = result?.exes || []
       const folder = result?.folder || null
       const { pick, confident } = pickGameExecutable(exes, game.name, game.source, folder)

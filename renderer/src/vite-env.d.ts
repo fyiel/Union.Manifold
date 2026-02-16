@@ -48,6 +48,8 @@ declare global {
         gameName?: string
         partIndex?: number
         partTotal?: number
+        authHeader?: string
+        savePath?: string
       }) => Promise<{ ok: boolean; queued?: boolean; error?: string }>
       cancel: (downloadId: string) => Promise<{ ok: boolean }>
       pause: (downloadId: string) => Promise<{ ok: boolean }>
@@ -62,7 +64,20 @@ declare global {
         partTotal?: number
         savePath?: string
         resumeData?: DownloadUpdatePayload["resumeData"]
+        authHeader?: string
       }) => Promise<{ ok: boolean; error?: string }>
+      resumeWithFreshUrl: (payload: {
+        downloadId: string
+        url: string
+        filename?: string
+        appid?: string
+        gameName?: string
+        partIndex?: number
+        partTotal?: number
+        savePath?: string
+        totalBytes?: number
+        authHeader?: string
+      }) => Promise<{ ok: boolean; actualOffset?: number; error?: string }>
       showInFolder: (path: string) => Promise<{ ok: boolean }>
       openPath: (path: string) => Promise<{ ok: boolean }>
       listDisks: () => Promise<
@@ -76,16 +91,17 @@ declare global {
       // Installed manifests written by the main process. Renderer can read/save installed metadata.
       listInstalled: () => Promise<any[]>
       getInstalled: (appid: string) => Promise<any | null>
+      listInstalledByAppid: (appid: string) => Promise<any[]>
       listInstalling: () => Promise<any[]>
       getInstalling: (appid: string) => Promise<any | null>
       listInstalledGlobal: () => Promise<any[]>
       getInstalledGlobal: (appid: string) => Promise<any | null>
       listInstallingGlobal: () => Promise<any[]>
       getInstallingGlobal: (appid: string) => Promise<any | null>
-      listGameExecutables: (appid: string) => Promise<{ ok: boolean; folder?: string; exes: { name: string; path: string; size?: number; depth?: number }[]; error?: string }>
+      listGameExecutables: (appid: string, versionLabel?: string | null) => Promise<{ ok: boolean; folder?: string; exes: { name: string; path: string; size?: number; depth?: number }[]; error?: string }>
       findGameSubfolder: (folder: string) => Promise<string | null>
-      launchGameExecutable: (appid: string, exePath: string, gameName?: string) => Promise<{ ok: boolean; error?: string; pid?: number }>
-      launchGameExecutableAsAdmin: (appid: string, exePath: string, gameName?: string) => Promise<{ ok: boolean; error?: string; pid?: number }>
+      launchGameExecutable: (appid: string, exePath: string, gameName?: string, showGameName?: boolean) => Promise<{ ok: boolean; error?: string; pid?: number }>
+      launchGameExecutableAsAdmin: (appid: string, exePath: string, gameName?: string, showGameName?: boolean) => Promise<{ ok: boolean; error?: string; pid?: number }>
       getRunningGame: (appid: string) => Promise<{ ok: boolean; running: boolean; pid?: number; exePath?: string }>
       quitGameExecutable: (appid: string) => Promise<{ ok: boolean; stopped?: boolean }>
       deleteInstalled: (appid: string) => Promise<{ ok: boolean }>

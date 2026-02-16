@@ -36,10 +36,12 @@ export type DownloadItem = {
   gameName: string
   host: string
   url: string
+  originalUrl?: string
   filename: string
   partIndex?: number
   partTotal?: number
   versionLabel?: string
+  authHeader?: string
   status: DownloadStatus
   receivedBytes: number
   totalBytes: number
@@ -128,26 +130,21 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
       const raw = localStorage.getItem(STORAGE_KEY)
       if (!raw) return []
       const parsed = JSON.parse(raw) as DownloadItem[]
-        // Remove any stored mock/demo/sample entries that were added during development.
-        // This will permanently purge them from `localStorage` on startup.
-        const mockFilterRegex = /mock installed|mock|demo|example|placeholder|test-download|fake|sample/i
-        const filtered = parsed.filter((item) => {
-          const combined = `${item.appid || ''} ${item.url || ''} ${item.filename || ''} ${item.gameName || ''} ${item.host || ''}`
-          return !mockFilterRegex.test(combined)
-        })
 
-        // If we removed items, persist the cleaned array back to localStorage to fully remove them.
-        if (filtered.length !== parsed.length) {
-          try {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(filtered))
-          } catch {}
-        }
-
-        return filtered.map((item) =>
+        const restored = parsed.map((item) =>
           item.status === "downloading" || item.status === "extracting" || item.status === "installing"
-            ? { ...item, status: "paused", error: "App restarted" }
+            ? { ...item, status: "paused" as DownloadStatus, error: "App restarted" }
             : item
         )
+
+        // Log restored downloads so they're visible in app logs
+        if (restored.length > 0) {
+          downloadLogger.info(`Restored ${restored.length} download(s) from localStorage`, {
+            data: restored.map((item) => ({ id: item.id, appid: item.appid, gameName: item.gameName, status: item.status, host: item.host }))
+          })
+        }
+
+        return restored
     } catch {
       return []
     }
@@ -183,8 +180,15 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
           const next = prev.map((item) => {
             if (item.appid !== appid) return item
             if (["completed", "extracted"].includes(item.status)) return item
-            // Do NOT force-complete items that are still actively being processed
-            if (["extracting", "installing", "downloading"].includes(item.status)) return item
+            
+            // Allow force-completing items that are at 100% even if in active states.
+            // This fixes the "stuck at 100%" UI bug where the main process finishes 
+            // but the renderer doesn't receive/process the completion event.
+            if (["extracting", "installing", "downloading"].includes(item.status)) {
+              const isFinished = item.totalBytes > 0 && item.receivedBytes >= item.totalBytes
+              if (!isFinished) return item
+            }
+
             mutated = true
             return {
               ...item,
@@ -330,7 +334,15 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         setDownloads((prev) =>
           prev.map((item) =>
             item.id === next.id
-              ? { ...item, url: resolved.url, filename, totalBytes: resolved.size || 0, error: null }
+              ? {
+                  ...item,
+                  url: resolved.url,
+                  originalUrl: item.originalUrl || next.url,
+                  filename,
+                  totalBytes: resolved.size || 0,
+                  authHeader: resolved.authHeader,
+                  error: null,
+                }
               : item
           )
         )
@@ -355,6 +367,8 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
           gameName: next.gameName,
           partIndex: next.partIndex,
           partTotal: next.partTotal,
+          authHeader: resolved.authHeader,
+          versionLabel: next.versionLabel || undefined,
         })
         if (res && typeof res === "object" && "ok" in res && !res.ok) {
           throw new Error((res as { error?: string }).error || "Failed to start download")
@@ -470,6 +484,17 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
     if (hasActive) return
     const hasQueued = downloads.some((item) => item.status === "queued")
     if (!hasQueued) return
+
+    // Don't auto-start queued parts when a sibling in the same group is paused.
+    // The queue should only advance on completion, not when the user pauses.
+    const queuedAppids = new Set(
+      downloads.filter((item) => item.status === "queued").map((item) => item.appid)
+    )
+    const hasPausedSibling = downloads.some(
+      (item) => item.status === "paused" && queuedAppids.has(item.appid)
+    )
+    if (hasPausedSibling) return
+
     queueMicrotask(() => {
       void startNextQueuedPart()
     })
@@ -495,7 +520,8 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
 
   const startGameDownload = useCallback(async (game: Game, preferredHostOverride?: PreferredDownloadHost, config?: DownloadConfig) => {
     if (preparingRef.current.has(game.appid)) {
-      throw new Error("This game is already downloading.")
+      downloadLogger.warn(`startGameDownload skipped: already preparing ${game.appid}`)
+      return
     }
     const existingActive = downloadsRef.current.filter(
       (item) =>
@@ -503,7 +529,8 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         ["queued", "downloading", "paused", "extracting", "installing"].includes(item.status)
     )
     if (existingActive.length > 0) {
-      throw new Error("This game is already downloading.")
+      downloadLogger.warn(`startGameDownload skipped: active items exist for ${game.appid}`)
+      return
     }
     preparingRef.current.add(game.appid)
 
@@ -676,6 +703,18 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
     if (window.ucDownloads?.pause) {
       await window.ucDownloads.pause(downloadId)
     }
+    // Also pause any queued siblings in the same appid group so the queue
+    // doesn't auto-start the next part while the user has paused.
+    const target = downloadsRef.current.find((item) => item.id === downloadId)
+    if (target?.appid) {
+      setDownloads((prev) =>
+        prev.map((item) =>
+          item.appid === target.appid && item.id !== downloadId && item.status === "queued"
+            ? { ...item, status: "paused" as DownloadStatus, error: null }
+            : item
+        )
+      )
+    }
   }, [])
 
   const resumeDownload = useCallback(
@@ -683,18 +722,25 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
       const target = downloads.find((item) => item.id === downloadId)
       if (!target) return
 
+      downloadLogger.info("Resume attempt", { data: { downloadId, host: target.host, status: target.status, hasResumeData: Boolean(target.resumeData?.offset) } })
+
       let ok = false
+
+      // Level 1: Try Electron's in-memory DownloadItem.resume()
       if (window.ucDownloads?.resume) {
         try {
           const res = await window.ucDownloads.resume(downloadId)
           ok = Boolean(res && typeof res === "object" && "ok" in res ? (res as { ok?: boolean }).ok : res)
+          downloadLogger.info("Resume Level 1 (in-memory)", { data: { ok } })
         } catch {
           ok = false
         }
       }
 
+      // Level 2: Try resuming from interrupted state (createInterruptedDownload)
       if (!ok && window.ucDownloads?.resumeInterrupted && target.resumeData?.offset) {
         try {
+          downloadLogger.info("Resume Level 2 (interrupted)", { data: { offset: target.resumeData.offset, savePath: target.savePath } })
           const res = await window.ucDownloads.resumeInterrupted({
             downloadId,
             url: target.url,
@@ -705,18 +751,25 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
             partTotal: target.partTotal,
             savePath: target.savePath,
             resumeData: target.resumeData,
+            authHeader: target.authHeader,
           })
           ok = Boolean(res && typeof res === "object" && "ok" in res ? (res as { ok?: boolean }).ok : res)
+          // The main process returns the actual file-size-based offset which may differ
+          // from the stale stored resumeData.offset (localStorage updates lag behind disk writes).
+          const actualOffset = (res as { actualOffset?: number })?.actualOffset
+          downloadLogger.info("Resume Level 2 result", { data: { ok, actualOffset, storedOffset: target.resumeData.offset } })
         } catch {
           ok = false
         }
         if (ok) {
+          // createInterruptedDownload triggers will-download which sends status updates.
+          // Set to "downloading" (not "queued") to prevent auto-start from re-processing this item.
           setDownloads((prev) =>
             prev.map((item) =>
               item.id === downloadId
                 ? {
                     ...item,
-                    status: "queued",
+                    status: "downloading" as DownloadStatus,
                     speedBps: 0,
                     etaSeconds: null,
                     error: null,
@@ -728,26 +781,19 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         }
       }
 
+      // Level 3: Re-resolve the URL and resume from the partial file on disk.
+      // Instead of restarting from byte 0, we use createInterruptedDownload with the
+      // fresh URL + actual file offset so the download continues where it left off.
       if (!ok && window.ucDownloads?.start) {
         try {
-          await window.ucDownloads.start({
-            downloadId,
-            url: target.url,
-            filename: target.filename,
-            appid: target.appid,
-            gameName: target.gameName,
-            partIndex: target.partIndex,
-            partTotal: target.partTotal,
-          })
-          ok = true
+          // Set to "downloading" so onUpdate callbacks from the main process are not blocked
+          // by terminal state protection. Preserve receivedBytes to avoid clearing the UI progress.
           setDownloads((prev) =>
             prev.map((item) =>
               item.id === downloadId
                 ? {
                     ...item,
-                    status: "queued",
-                    receivedBytes: 0,
-                    totalBytes: item.totalBytes,
+                    status: "downloading" as DownloadStatus,
                     speedBps: 0,
                     etaSeconds: null,
                     error: null,
@@ -756,7 +802,75 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
                 : item
             )
           )
-        } catch {
+
+          // Re-resolve using the original (pre-resolve) URL to get a fresh download URL.
+          // CDN URLs (e.g. FileQ signed links) expire, so we need a fresh one.
+          const resolveUrl = target.originalUrl || target.url
+          downloadLogger.info("Resume Level 3 (re-resolve)", { data: { host: target.host, resolveUrl } })
+          const resolved = await resolveDownloadUrl(target.host, resolveUrl)
+          downloadLogger.info("Resume Level 3 resolved", { data: { resolvedUrl: resolved?.url, resolvedOk: resolved?.resolved, hasAuth: Boolean(resolved?.authHeader) } })
+          const freshUrl = resolved?.resolved ? resolved.url : target.url
+          const freshAuth = resolved?.authHeader || target.authHeader
+
+          // Try resuming from the partial file on disk using the fresh URL.
+          // This sends a Range request so we don't re-download bytes we already have.
+          let resumedFromDisk = false
+          if (window.ucDownloads.resumeWithFreshUrl && target.savePath) {
+            try {
+              const resumeRes = await window.ucDownloads.resumeWithFreshUrl({
+                downloadId,
+                url: freshUrl,
+                filename: resolved?.filename || target.filename,
+                appid: target.appid,
+                gameName: target.gameName,
+                partIndex: target.partIndex,
+                partTotal: target.partTotal,
+                savePath: target.savePath,
+                totalBytes: resolved?.size || target.totalBytes,
+                authHeader: freshAuth,
+              })
+              downloadLogger.info("Resume Level 3 resumeWithFreshUrl result", { data: resumeRes })
+              if (resumeRes && typeof resumeRes === "object" && resumeRes.ok) {
+                resumedFromDisk = true
+                ok = true
+              }
+            } catch (e) {
+              downloadLogger.warn("Resume Level 3 resumeWithFreshUrl failed, falling back to fresh start", { data: e })
+            }
+          }
+
+          // Fallback: if no partial file exists or resumeWithFreshUrl failed, start fresh
+          if (!resumedFromDisk) {
+            const res = await window.ucDownloads.start({
+              downloadId,
+              url: freshUrl,
+              filename: resolved?.filename || target.filename,
+              appid: target.appid,
+              gameName: target.gameName,
+              partIndex: target.partIndex,
+              partTotal: target.partTotal,
+              authHeader: freshAuth,
+              savePath: target.savePath,
+            } as Parameters<typeof window.ucDownloads.start>[0])
+            downloadLogger.info("Resume Level 3 start result", { data: res })
+            ok = true
+          }
+
+          setDownloads((prev) =>
+            prev.map((item) =>
+              item.id === downloadId
+                ? {
+                    ...item,
+                    url: freshUrl,
+                    authHeader: freshAuth,
+                    status: "downloading",
+                    totalBytes: resolved?.size || item.totalBytes,
+                  }
+                : item
+            )
+          )
+        } catch (err) {
+          downloadLogger.warn("Resume Level 3 failed", { data: err })
           ok = false
         }
       }
@@ -783,10 +897,17 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         ["downloading", "extracting", "installing"].includes(item.status)
       )
       if (hasActive) return
-      const pausedWithProgress = current.find(
-        (item) => item.status === "paused" && (item.receivedBytes > 0 || item.totalBytes > 0)
-      )
+      // Prefer resuming the part that actually has downloaded bytes, not just pre-fetched totalBytes
+      const pausedWithProgress = current
+        .filter((item) => item.status === "paused")
+        .sort((a, b) => (b.receivedBytes || 0) - (a.receivedBytes || 0))
+        .find((item) => item.receivedBytes > 0 || item.totalBytes > 0)
       if (pausedWithProgress) {
+        // Resume the part with progress first. Do NOT re-queue siblings yet —
+        // wait until the resumed download is actually running to avoid the
+        // auto-start effect picking them up during the async resolve gap.
+        await resumeDownload(pausedWithProgress.id)
+        // Now that the resumed download is active (or failed), re-queue remaining paused siblings
         setDownloads((prev) => {
           const next = prev.map((item) => {
             if (item.appid !== appid) return item
@@ -799,7 +920,6 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
           downloadsRef.current = next
           return next
         })
-        await resumeDownload(pausedWithProgress.id)
         return
       }
 

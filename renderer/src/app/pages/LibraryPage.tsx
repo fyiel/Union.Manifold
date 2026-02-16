@@ -56,6 +56,39 @@ function manifestToGame(entry: LibraryEntry): Game | null {
   return null
 }
 
+function scoreLibraryGame(game: Game): number {
+  let score = 0
+  if (game.source && game.source !== "local") score += 3
+  if (game.name && game.name !== game.appid) score += 1
+  if (game.description) score += 1
+  if (game.image && game.image !== "/banner.png") score += 1
+  if (game.release_date) score += 1
+  if (game.size) score += 1
+  if (game.genres && game.genres.length > 0) score += 1
+  if (game.screenshots && game.screenshots.length > 0) score += 1
+  if (game.developer) score += 1
+  if (game.store) score += 1
+  return score
+}
+
+function dedupeLibraryGames(games: Game[]): Game[] {
+  const map = new Map<string, Game>()
+  for (const game of games) {
+    if (!game?.appid) continue
+    const existing = map.get(game.appid)
+    if (!existing) {
+      map.set(game.appid, game)
+      continue
+    }
+    const existingScore = scoreLibraryGame(existing)
+    const nextScore = scoreLibraryGame(game)
+    if (nextScore > existingScore) {
+      map.set(game.appid, game)
+    }
+  }
+  return Array.from(map.values())
+}
+
 export function LibraryPage() {
   const { stats, loading: statsLoading } = useGamesData()
   const { downloads, clearByAppid } = useDownloads()
@@ -71,6 +104,8 @@ export function LibraryPage() {
   const [exePickerTitle, setExePickerTitle] = useState("")
   const [exePickerMessage, setExePickerMessage] = useState("")
   const [exePickerAppId, setExePickerAppId] = useState<string | null>(null)
+  const [exePickerVersionLabel, setExePickerVersionLabel] = useState<string | null>(null)
+  const [exePickerAllowLegacyFallback, setExePickerAllowLegacyFallback] = useState(true)
   const [exePickerExes, setExePickerExes] = useState<Array<{ name: string; path: string; size?: number; depth?: number }>>([])
   const [exePickerCurrentPath, setExePickerCurrentPath] = useState<string | null>(null)
   const [exePickerFolder, setExePickerFolder] = useState<string | null>(null)
@@ -145,13 +180,17 @@ export function LibraryPage() {
           window.ucDownloads?.listInstallingGlobal?.() || window.ucDownloads?.listInstalling?.() || [],
         ])
         if (!mounted) return
-        const installedGames = installedList
-          .map((entry: LibraryEntry) => manifestToGame(entry))
-          .filter(Boolean) as Game[]
+        const installedGames = dedupeLibraryGames(
+          installedList
+            .map((entry: LibraryEntry) => manifestToGame(entry))
+            .filter(Boolean) as Game[]
+        )
         const installingMetaMap: Record<string, { status?: string; error?: string }> = {}
-        const installingGames = installingList
-          .map((entry: LibraryEntry) => manifestToGame(entry))
-          .filter(Boolean) as Game[]
+        const installingGames = dedupeLibraryGames(
+          installingList
+            .map((entry: LibraryEntry) => manifestToGame(entry))
+            .filter(Boolean) as Game[]
+        )
         for (const entry of installingList as LibraryEntry[]) {
           if (!entry?.appid) continue
           installingMetaMap[entry.appid] = { status: entry.installStatus, error: entry.installError }
@@ -214,20 +253,58 @@ export function LibraryPage() {
     }
   }
 
-  const getSavedExe = async (appid: string) => {
+  const getSavedExe = async (appid: string, versionLabel?: string | null, allowLegacyFallback: boolean = true) => {
     if (!window.ucSettings?.get) return null
     try {
-      return await window.ucSettings.get(`gameExe:${appid}`)
+      if (versionLabel) {
+        const versioned = await window.ucSettings.get(`gameExe:${appid}:${versionLabel}`)
+        if (versioned) return versioned
+      }
+      if (allowLegacyFallback) {
+        return await window.ucSettings.get(`gameExe:${appid}`)
+      }
+      return null
     } catch {
       return null
     }
   }
 
-  const setSavedExe = async (appid: string, path: string | null) => {
+  const setSavedExe = async (appid: string, path: string | null, versionLabel?: string | null, allowLegacyFallback: boolean = true) => {
     if (!window.ucSettings?.set) return
     try {
-      await window.ucSettings.set(`gameExe:${appid}`, path || null)
+      if (versionLabel) {
+        await window.ucSettings.set(`gameExe:${appid}:${versionLabel}`, path || null)
+      }
+      if (allowLegacyFallback) {
+        await window.ucSettings.set(`gameExe:${appid}`, path || null)
+      }
     } catch {}
+  }
+
+  const getInstalledVersionLabels = async (appid: string) => {
+    try {
+      if (!window.ucDownloads?.listInstalledByAppid) return []
+      const list = await window.ucDownloads.listInstalledByAppid(appid)
+      const labels = (Array.isArray(list) ? list : [])
+        .map((manifest) => manifest?.metadata?.downloadedVersion || manifest?.metadata?.version || manifest?.version)
+        .filter(Boolean)
+        .map((label) => String(label))
+      return Array.from(new Set(labels))
+    } catch {
+      return []
+    }
+  }
+
+  const resolveLibraryVersionLabel = async (game: Game) => {
+    const labels = await getInstalledVersionLabels(game.appid)
+    if (labels.length === 1) return { label: labels[0], allowLegacyFallback: true }
+    if (labels.length > 1) {
+      if (game.version && labels.includes(game.version)) {
+        return { label: game.version, allowLegacyFallback: false }
+      }
+      return { label: labels[0], allowLegacyFallback: false }
+    }
+    return { label: game.version || null, allowLegacyFallback: true }
   }
 
   const dirname = (targetPath: string | null | undefined) => {
@@ -252,9 +329,10 @@ export function LibraryPage() {
   const openExecutablePicker = async (game: Game) => {
     if (!window.ucDownloads?.listGameExecutables) return
     try {
+      const resolved = await resolveLibraryVersionLabel(game)
       const [result, savedExe] = await Promise.all([
-        window.ucDownloads.listGameExecutables(game.appid),
-        getSavedExe(game.appid),
+        window.ucDownloads.listGameExecutables(game.appid, resolved.label),
+        getSavedExe(game.appid, resolved.label, resolved.allowLegacyFallback),
       ])
       const exes = result?.exes || []
       const folder = result?.folder || null
@@ -265,6 +343,8 @@ export function LibraryPage() {
       setExePickerTitle("Set launch executable")
       setExePickerMessage(message)
       setExePickerAppId(game.appid)
+      setExePickerVersionLabel(resolved.label)
+      setExePickerAllowLegacyFallback(resolved.allowLegacyFallback)
       setExePickerExes(exes)
       setExePickerCurrentPath(savedExe)
       setExePickerFolder(folder)
@@ -273,6 +353,8 @@ export function LibraryPage() {
       setExePickerTitle("Set launch executable")
       setExePickerMessage(`Unable to list executables for "${game.name}".`)
       setExePickerAppId(null)
+      setExePickerVersionLabel(null)
+      setExePickerAllowLegacyFallback(true)
       setExePickerExes([])
       setExePickerCurrentPath(null)
       setExePickerFolder(null)
@@ -284,8 +366,9 @@ export function LibraryPage() {
     try {
       let folder: string | null = null
       let discoveredExePath: string | null = null
+      const resolved = await resolveLibraryVersionLabel(game)
       if (window.ucDownloads?.listGameExecutables) {
-        const result = await window.ucDownloads.listGameExecutables(game.appid)
+        const result = await window.ucDownloads.listGameExecutables(game.appid, resolved.label)
         folder = result?.folder || null
         if (result?.exes?.[0]?.path) {
           discoveredExePath = result.exes[0].path
@@ -318,7 +401,7 @@ export function LibraryPage() {
 
   const handleExePicked = async (path: string) => {
     if (!exePickerAppId) return
-    await setSavedExe(exePickerAppId, path)
+    await setSavedExe(exePickerAppId, path, exePickerVersionLabel, exePickerAllowLegacyFallback)
     // Update the current path to reflect the new selection
     setExePickerCurrentPath(path)
   }
@@ -626,22 +709,21 @@ export function LibraryPage() {
                 onClick={async () => {
                   if (settingsPopupGame) {
                     setShortcutFeedback(null)
-                    let savedExe = await window.ucSettings?.get?.(`gameExe:${settingsPopupGame.appid}`)
+                    const resolved = await resolveLibraryVersionLabel(settingsPopupGame)
+                    let savedExe = await getSavedExe(settingsPopupGame.appid, resolved.label, resolved.allowLegacyFallback)
                     if (!savedExe && window.ucDownloads?.listGameExecutables) {
                       try {
-                        const result = await window.ucDownloads.listGameExecutables(settingsPopupGame.appid)
+                        const result = await window.ucDownloads.listGameExecutables(settingsPopupGame.appid, resolved.label)
                         savedExe = result?.exes?.[0]?.path || null
                       } catch {}
                     }
 
                     if (savedExe) {
+                      try { await window.ucDownloads?.deleteDesktopShortcut?.(settingsPopupGame.name) } catch {}
                       const result = await window.ucDownloads?.createDesktopShortcut?.(settingsPopupGame.name, savedExe)
                       if (result?.ok) {
                         gameLogger.info('Desktop shortcut created manually', { appid: settingsPopupGame.appid })
                         setShortcutFeedback({ type: 'success', message: 'Desktop shortcut created.' })
-                      } else if (result?.existed) {
-                        gameLogger.info('Desktop shortcut already exists', { appid: settingsPopupGame.appid })
-                        setShortcutFeedback({ type: 'success', message: 'Desktop shortcut already exists.' })
                       } else {
                         setShortcutFeedback({ type: 'error', message: 'Failed to create desktop shortcut.' })
                       }
