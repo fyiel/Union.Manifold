@@ -1,4 +1,4 @@
-import { type FormEvent, useCallback, useEffect, useMemo, useState, startTransition } from "react"
+import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState, startTransition } from "react"
 import { useNavigate } from "react-router-dom"
 import { GameCard } from "@/components/GameCard"
 import { GameCardCompact } from "@/components/GameCardCompact"
@@ -66,6 +66,25 @@ export function LauncherPage() {
   const navigate = useNavigate()
   const isOnline = useOnlineStatus()
 
+  class GamesFetchError extends Error {
+    status?: number
+    constructor(message: string, status?: number) {
+      super(message)
+      this.name = "GamesFetchError"
+      this.status = status
+    }
+  }
+
+  const isTransientGamesFetchError = (error: unknown): boolean => {
+    // TypeError is the common fetch() exception for network errors.
+    if (error instanceof TypeError) return true
+    const status = error instanceof GamesFetchError ? error.status : undefined
+    // Treat common upstream/startup statuses as transient (DB warming up, gateway unavailable, etc.).
+    return status === 429 || status === 500 || status === 502 || status === 503 || status === 504
+  }
+
+  const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms))
+
   const [games, setGames] = useState<Game[]>([])
   const [loading, setLoading] = useState(true)
   const [searchInput, setSearchInput] = useState("")
@@ -80,6 +99,8 @@ export function LauncherPage() {
   const [shortcutLabel, setShortcutLabel] = useState("Ctrl+K")
   const itemsPerPage = 20
   const [statsCacheTime, setStatsCacheTime] = useState<number>(0)
+
+  const activeLoadIdRef = useRef(0)
 
   useEffect(() => {
     if (typeof navigator === "undefined") return
@@ -218,65 +239,79 @@ export function LauncherPage() {
       return []
     }
 
-    try {
-      const response = await fetch(apiUrl("/api/games"))
+    const response = await fetch(apiUrl("/api/games"))
 
-      if (!response.ok) {
-        const errorCode = generateErrorCode(ErrorTypes.GAME_FETCH, "launcher")
-
-        setGamesError({
-          type: "games",
-          message: `Unable to load games (Status: ${response.status}). Please try again or contact support if the issue persists.`,
-          code: errorCode,
-        })
-
-        throw new Error(`API route failed: ${response.status}`)
-      }
-
-      const data = await response.json()
-      return data.map((game: any) => ({
-        ...game,
-        searchText: normalizeSearchText(`${game.name} ${game.description} ${game.genres?.join(" ") || ""}`),
-        developer: game.developer && game.developer !== "Unknown" ? game.developer : extractDeveloper(game.description),
-      }))
-    } catch (error) {
-      console.error("Error fetching games:", error)
-      // Only show error if we're actually online — offline state is handled by the banner
-      if (typeof navigator !== "undefined" && !navigator.onLine) {
-        return []
-      }
-      setGamesError({
-        type: "games",
-        message: "Unable to load games. Please try again or contact support if the issue persists.",
-        code: generateErrorCode(ErrorTypes.GAME_FETCH, "launcher"),
-      })
-      return []
+    if (!response.ok) {
+      throw new GamesFetchError(`API route failed: ${response.status}`, response.status)
     }
+
+    const data = await response.json()
+    return data.map((game: any) => ({
+      ...game,
+      searchText: normalizeSearchText(`${game.name} ${game.description} ${game.genres?.join(" ") || ""}`),
+      developer: game.developer && game.developer !== "Unknown" ? game.developer : extractDeveloper(game.description),
+    }))
   }
 
   const loadGames = async (forceRefresh = false) => {
-    try {
-      if (forceRefresh) {
-        setRefreshing(true)
+    const loadId = ++activeLoadIdRef.current
+    const isInitialLoad = !hasLoadedGames && games.length === 0
+    const maxAttempts = isInitialLoad ? 12 : 2
+
+    // While the DB/API is warming up, keep the skeleton visible rather than flashing empty/error states.
+    if (isInitialLoad) setLoading(true)
+    if (forceRefresh) setRefreshing(true)
+    setGamesError(null)
+
+    for (let attempt = 0; attempt <= maxAttempts; attempt++) {
+      try {
+        const gamesData = await fetchGames()
+        if (loadId !== activeLoadIdRef.current) return
+
+        startTransition(() => {
+          setGames(gamesData)
+          setHasLoadedGames(true)
+        })
+
+        if (gamesData.length > 0) {
+          fetchGameStats(forceRefresh)
+        }
+
+        setLoading(false)
+        setRefreshing(false)
+        return
+      } catch (error) {
+        if (loadId !== activeLoadIdRef.current) return
+
+        // If we went offline mid-load, stop retrying and let the offline UI handle it.
+        if (typeof navigator !== "undefined" && !navigator.onLine) {
+          setLoading(false)
+          setRefreshing(false)
+          return
+        }
+
+        const transient = isOnline && isTransientGamesFetchError(error)
+        const hasMoreAttempts = attempt < maxAttempts
+
+        if (transient && hasMoreAttempts) {
+          const delayMs = Math.min(8000, 500 * Math.pow(2, attempt))
+          await sleep(delayMs)
+          continue
+        }
+
+        console.error("Error loading games:", error)
+        setGamesError({
+          type: "games",
+          message:
+            error instanceof GamesFetchError && error.status
+              ? `Unable to load games (Status: ${error.status}). Please try again or contact support if the issue persists.`
+              : "Unable to load games. Please try again or contact support if the issue persists.",
+          code: generateErrorCode(ErrorTypes.GAME_FETCH, "launcher"),
+        })
+        setLoading(false)
+        setRefreshing(false)
+        return
       }
-      const gamesData = await fetchGames()
-      startTransition(() => {
-        setGames(gamesData)
-        setHasLoadedGames(true)
-      })
-      if (gamesData.length > 0) {
-        fetchGameStats(forceRefresh)
-      }
-    } catch (error) {
-      console.error("Error loading games:", error)
-      setGamesError({
-        type: "games",
-        message: "Unable to load games. Please try again or contact support if the issue persists.",
-        code: generateErrorCode(ErrorTypes.GAME_FETCH, "launcher"),
-      })
-    } finally {
-      setLoading(false)
-      setRefreshing(false)
     }
   }
 
