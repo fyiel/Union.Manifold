@@ -8,6 +8,23 @@ const DIRECT_URL = `${WEB_BASE_URL}/direct`
 
 const DOWNLOAD_BUTTON = { label: "Download UC.D", url: DIRECT_URL }
 
+function isGameNSFW(genres: string[] | undefined): boolean {
+  if (!Array.isArray(genres)) return false
+  return genres.some((genre) => String(genre).toLowerCase() === "nsfw")
+}
+
+function getGameGenres(appid: string): string[] | null {
+  if (!appid) return null
+  try {
+    const raw = localStorage.getItem(`uc_game_genres:${appid}`)
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed : null
+  } catch {
+    return null
+  }
+}
+
 function formatStatus(status: string) {
   switch (status) {
     case "downloading":
@@ -60,48 +77,60 @@ function ensureDownloadButton(buttons: Array<{ label: string; url: string }>) {
   return [...buttons, DOWNLOAD_BUTTON]
 }
 
-function buildRouteActivity(pathname: string, downloads: Array<{ appid: string; gameName?: string | null }>, overrides: Map<string, string>) {
+function buildRouteActivity(
+  pathname: string, 
+  downloads: Array<{ appid: string; gameName?: string | null }>, 
+  overrides: Map<string, string>,
+  showGameName: boolean = true,
+  showStatus: boolean = true,
+  maskGameName: boolean = false
+) {
   if (pathname.startsWith("/search")) {
     return {
-      details: "Browsing search",
-      state: "Looking for games",
+      details: showStatus ? "Browsing search" : "UnionCrax.Direct",
+      state: showStatus ? "Looking for games" : undefined,
       buttons: buildButtons(getOpenOnWebUrl(pathname))
     }
   }
   if (pathname.startsWith("/library")) {
     return {
-      details: "Viewing library",
-      state: "Checking installed games",
+      details: showStatus ? "Viewing library" : "UnionCrax.Direct",
+      state: showStatus ? "Checking installed games" : undefined,
       buttons: buildButtons(getOpenOnWebUrl(pathname))
     }
   }
   if (pathname.startsWith("/downloads")) {
     return {
-      details: "Managing downloads",
-      state: "Downloads",
+      details: showStatus ? "Managing downloads" : "UnionCrax.Direct",
+      state: showStatus ? "Downloads" : undefined,
       buttons: buildButtons(getOpenOnWebUrl(pathname))
     }
   }
   if (pathname.startsWith("/settings")) {
     return {
-      details: "Adjusting settings",
-      state: "Configuring app",
+      details: showStatus ? "Adjusting settings" : "UnionCrax.Direct",
+      state: showStatus ? "Configuring app" : undefined,
       buttons: buildButtons(getOpenOnWebUrl(pathname))
     }
   }
   if (pathname.startsWith("/game/")) {
     const appid = pathname.replace("/game/", "") || ""
-    const name = overrides.get(appid) || getStoredGameName(appid) || getDownloadName(appid, downloads)
-    const details = appid ? `Viewing ${name || appid}` : "Viewing game"
+    let name = showGameName ? (overrides.get(appid) || getStoredGameName(appid) || getDownloadName(appid, downloads)) : null
+    if (maskGameName) {
+      name = "****"
+    }
+    const details = showStatus 
+      ? (appid ? `Viewing ${name || "A game"}` : "Viewing game")
+      : (name || "UnionCrax.Direct")
     return {
       details,
-      state: "Game details",
+      state: showStatus ? "Game details" : undefined,
       buttons: buildButtons(getOpenOnWebUrl(pathname))
     }
   }
   return {
-    details: "On launcher",
-    state: "Home",
+    details: showStatus ? "On launcher" : "UnionCrax.Direct",
+    state: showStatus ? "Home" : undefined,
     buttons: buildButtons(getOpenOnWebUrl(pathname))
   }
 }
@@ -110,18 +139,29 @@ export function useDiscordRpcPresence() {
   const location = useLocation()
   const { downloads } = useDownloads()
   const [enabled, setEnabled] = useState(true)
+  const [rpcHideNsfw, setRpcHideNsfw] = useState(true)
+  const [rpcShowGameName, setRpcShowGameName] = useState(true)
+  const [rpcShowStatus, setRpcShowStatus] = useState(true)
+  const [rpcShowButtons, setRpcShowButtons] = useState(true)
   const [nameTick, setNameTick] = useState(0)
   const nameOverridesRef = useRef<Map<string, string>>(new Map())
   const lastActivityKeyRef = useRef<string>("")
-  const startTimestampRef = useRef<number>(Math.floor(Date.now() / 1000))
 
   useEffect(() => {
     let mounted = true
     const load = async () => {
       try {
         const nextEnabled = await window.ucSettings?.get?.("discordRpcEnabled")
+        const hideNsfw = await window.ucSettings?.get?.("rpcHideNsfw")
+        const showGameName = await window.ucSettings?.get?.("rpcShowGameName")
+        const showStatus = await window.ucSettings?.get?.("rpcShowStatus")
+        const showButtons = await window.ucSettings?.get?.("rpcShowButtons")
         if (!mounted) return
         setEnabled(nextEnabled !== false)
+        setRpcHideNsfw(hideNsfw !== false)
+        setRpcShowGameName(showGameName !== false)
+        setRpcShowStatus(showStatus !== false)
+        setRpcShowButtons(showButtons !== false)
       } catch {
         // ignore
       }
@@ -131,9 +171,17 @@ export function useDiscordRpcPresence() {
       if (!data) return
       if (data.key === "__CLEAR_ALL__") {
         setEnabled(true)
+        setRpcHideNsfw(true)
+        setRpcShowGameName(true)
+        setRpcShowStatus(true)
+        setRpcShowButtons(true)
         return
       }
       if (data.key === "discordRpcEnabled") setEnabled(data.value !== false)
+      if (data.key === "rpcHideNsfw") setRpcHideNsfw(data.value !== false)
+      if (data.key === "rpcShowGameName") setRpcShowGameName(data.value !== false)
+      if (data.key === "rpcShowStatus") setRpcShowStatus(data.value !== false)
+      if (data.key === "rpcShowButtons") setRpcShowButtons(data.value !== false)
     })
     return () => {
       mounted = false
@@ -143,9 +191,15 @@ export function useDiscordRpcPresence() {
 
   useEffect(() => {
     const handleName = (event: Event) => {
-      const detail = (event as CustomEvent<{ appid?: string; name?: string }>).detail
+      const detail = (event as CustomEvent<{ appid?: string; name?: string; genres?: string[] }>).detail
       if (!detail?.appid || !detail?.name) return
       nameOverridesRef.current.set(detail.appid, detail.name)
+      // Store genres for NSFW detection
+      if (detail.genres) {
+        try {
+          localStorage.setItem(`uc_game_genres:${detail.appid}`, JSON.stringify(detail.genres))
+        } catch {}
+      }
       setNameTick((prev) => prev + 1)
     }
     window.addEventListener("uc_game_name", handleName)
@@ -155,23 +209,54 @@ export function useDiscordRpcPresence() {
   const activity = useMemo(() => {
     const activeDownload = downloads.find((item) => ACTIVE_STATUSES.has(item.status))
     if (activeDownload) {
-      const title = activeDownload.gameName || activeDownload.appid || "Game"
+      // Check if the downloading game is NSFW
+      let title = rpcShowGameName ? (activeDownload.gameName || activeDownload.appid || "A game") : "A game"
+      if (rpcHideNsfw && activeDownload.appid) {
+        const genres = getGameGenres(activeDownload.appid)
+        if (isGameNSFW(genres || undefined)) {
+          title = "****" // Mask NSFW game name
+        }
+      }
+      
       const progress = activeDownload.totalBytes > 0
         ? Math.min(100, Math.max(0, Math.round((activeDownload.receivedBytes / activeDownload.totalBytes) * 100)))
         : null
-      return {
-        details: `${formatStatus(activeDownload.status)} ${title}`,
-        state: activeDownload.status === "downloading" && activeDownload.etaSeconds
+      
+      const details = rpcShowStatus 
+        ? `${formatStatus(activeDownload.status)} ${title}`
+        : title
+      
+      const state = rpcShowStatus
+        ? (activeDownload.status === "downloading" && activeDownload.etaSeconds
           ? `ETA ${Math.ceil(activeDownload.etaSeconds / 60)}m • ${progress ?? 0}%`
-          : progress !== null ? `${progress}%` : formatStatus(activeDownload.status)
+          : progress !== null ? `${progress}%` : formatStatus(activeDownload.status))
+        : (progress !== null ? `${progress}%` : undefined)
+      
+      return {
+        details,
+        state
       }
     }
     const queuedCount = downloads.filter((item) => item.status === "queued").length
     if (queuedCount > 0) {
-      return { details: "Queued downloads", state: `${queuedCount} queued` }
+      return { 
+        details: rpcShowStatus ? "Queued downloads" : "Downloads", 
+        state: rpcShowStatus ? `${queuedCount} queued` : undefined
+      }
     }
-    return buildRouteActivity(location.pathname, downloads, nameOverridesRef.current)
-  }, [downloads, location.pathname, nameTick])
+    
+    // Check if currently viewing an NSFW game
+    if (rpcHideNsfw && location.pathname.startsWith("/game/")) {
+      const appid = location.pathname.replace("/game/", "")
+      const genres = getGameGenres(appid)
+      if (isGameNSFW(genres || undefined)) {
+        // Return masked activity for NSFW game
+        return buildRouteActivity(location.pathname, downloads, nameOverridesRef.current, false, rpcShowStatus, true)
+      }
+    }
+    
+    return buildRouteActivity(location.pathname, downloads, nameOverridesRef.current, rpcShowGameName, rpcShowStatus, false)
+  }, [downloads, location.pathname, nameTick, rpcShowGameName, rpcShowStatus, rpcHideNsfw])
 
   useEffect(() => {
     if (!window.ucRpc?.setActivity) return
@@ -183,18 +268,23 @@ export function useDiscordRpcPresence() {
     const nextKey = `${activity.details || ""}|${activity.state || ""}`
     if (lastActivityKeyRef.current !== nextKey) {
       lastActivityKeyRef.current = nextKey
-      startTimestampRef.current = Math.floor(Date.now() / 1000)
     }
 
     const defaultButtons = buildButtons(getOpenOnWebUrl(location.pathname))
     const customButtons = "buttons" in activity ? activity.buttons : undefined
-    const buttons = customButtons && customButtons.length > 0 ? ensureDownloadButton(customButtons) : defaultButtons
+    const buttons = rpcShowButtons 
+      ? (customButtons && customButtons.length > 0 ? ensureDownloadButton(customButtons) : defaultButtons)
+      : undefined
 
-    window.ucRpc.setActivity({
+    const payload: any = {
       details: activity.details,
-      state: activity.state,
-      startTimestamp: startTimestampRef.current,
-      buttons
-    })
-  }, [activity, enabled])
+      state: activity.state
+    }
+    
+    if (buttons) {
+      payload.buttons = buttons
+    }
+
+    window.ucRpc.setActivity(payload)
+  }, [activity, enabled, rpcShowButtons, location.pathname])
 }

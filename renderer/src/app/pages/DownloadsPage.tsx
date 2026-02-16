@@ -525,7 +525,10 @@ export function DownloadsPage() {
       : window.ucDownloads.launchGameExecutable
     
     if (!launchFn) return
-    const res = await launchFn(appid, path)
+    const game = games.find((g) => g.appid === appid)
+    const gameName = game?.name || appid
+    const showGameName = await window.ucSettings?.get?.('rpcShowGameName') ?? true
+    const res = await launchFn(appid, path, gameName, showGameName)
     if (res && res.ok) {
       await setSavedExe(appid, path)
       setExePickerOpen(false)

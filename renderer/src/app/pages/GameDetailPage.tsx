@@ -37,12 +37,14 @@ import {
   FolderOpen,
   Info,
   Loader2,
+  Play,
 } from "lucide-react"
 import { ExePickerModal } from "@/components/ExePickerModal"
 import { AdminPromptModal } from "@/components/AdminPromptModal"
 import { DownloadCheckModal } from "@/components/DownloadCheckModal"
 import { DesktopShortcutModal } from "@/components/DesktopShortcutModal"
 import { EditGameMetadataModal } from "@/components/EditGameMetadataModal"
+import { VersionConflictModal } from "@/components/VersionConflictModal"
 import { gameLogger } from "@/lib/logger"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 
@@ -61,6 +63,7 @@ export function GameDetailPage() {
   const [downloadError, setDownloadError] = useState<string | null>(null)
   const [selectedImage, setSelectedImage] = useState<string>("")
   const [installedManifest, setInstalledManifest] = useState<any | null>(null)
+  const [installedVersions, setInstalledVersions] = useState<any[]>([])
   const [installingManifest, setInstallingManifest] = useState<any | null>(null)
   const [exePickerOpen, setExePickerOpen] = useState(false)
   const [exePickerExes, setExePickerExes] = useState<Array<{ name: string; path: string; size?: number; depth?: number }>>([])
@@ -86,6 +89,8 @@ export function GameDetailPage() {
   const [shortcutFeedback, setShortcutFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
   const [pendingDeleteAction, setPendingDeleteAction] = useState<"installed" | "installing" | null>(null)
   const [editMetadataOpen, setEditMetadataOpen] = useState(false)
+  const [versionConflictOpen, setVersionConflictOpen] = useState(false)
+  const [overwriteOnDownload, setOverwriteOnDownload] = useState(false)
 
   // Version switcher state
   const [downloadVersions, setDownloadVersions] = useState<GameVersion[]>([])
@@ -119,7 +124,7 @@ export function GameDetailPage() {
           const data = await response.json()
           setGame(data)
           persistGameName(appid, data?.name)
-          window.dispatchEvent(new CustomEvent("uc_game_name", { detail: { appid, name: data?.name } }))
+          window.dispatchEvent(new CustomEvent("uc_game_name", { detail: { appid, name: data?.name, genres: data?.genres } }))
           setSelectedImage(data.splash || data.image)
           return
         }
@@ -137,7 +142,7 @@ export function GameDetailPage() {
               const localImg = meta.localImage || meta.image
               setGame(meta)
               persistGameName(appid, meta?.name)
-              window.dispatchEvent(new CustomEvent("uc_game_name", { detail: { appid, name: meta?.name } }))
+              window.dispatchEvent(new CustomEvent("uc_game_name", { detail: { appid, name: meta?.name, genres: meta?.genres } }))
               setSelectedImage(localImg || meta.splash || meta.image)
               setError(null)
               return
@@ -181,6 +186,27 @@ export function GameDetailPage() {
       mounted = false
     }
   }, [appid, downloads])
+
+  useEffect(() => {
+    if (!appid) return
+    let mounted = true
+    const loadInstalledVersions = async () => {
+      try {
+        if (window.ucDownloads?.listInstalledByAppid) {
+          const list = await window.ucDownloads.listInstalledByAppid(appid)
+          if (!mounted) return
+          setInstalledVersions(Array.isArray(list) ? list : [])
+          return
+        }
+      } catch {}
+      if (!mounted) return
+      setInstalledVersions(installedManifest ? [installedManifest] : [])
+    }
+    loadInstalledVersions()
+    return () => {
+      mounted = false
+    }
+  }, [appid, downloads, installedManifest])
 
   useEffect(() => {
     if (!appid) return
@@ -243,6 +269,9 @@ export function GameDetailPage() {
     if (!selectedPageVersionId || downloadVersions.length === 0) return null
     return downloadVersions.find((v) => String(v.id) === String(selectedPageVersionId)) || null
   }, [selectedPageVersionId, downloadVersions])
+
+  const selectedVersionKey = selectedVersion?.id ? String(selectedVersion.id) : null
+  const selectedVersionLabel = selectedVersion?.label || null
 
   const selectedVersionMeta = selectedVersion?.metadata || null
 
@@ -374,7 +403,7 @@ export function GameDetailPage() {
     }
   }
 
-  const startDownload = async (preferredHost?: PreferredDownloadHost, config?: DownloadConfig) => {
+  const startDownload = async (preferredHost?: PreferredDownloadHost, config?: DownloadConfig, force?: boolean) => {
     if (!game) return
     const isCancelled = downloads.some((item) => item.appid === game.appid && item.status === "cancelled")
     const hasFailedDownload = downloads.some(
@@ -382,14 +411,25 @@ export function GameDetailPage() {
     )
     const hasFailedInstall = installingManifest?.installStatus === "failed"
     const hasCancelledInstall = installingManifest?.installStatus === "cancelled"
-    if (installedManifest || (installingManifest && !isCancelled && !hasFailedInstall && !hasCancelledInstall && !hasFailedDownload)) return
-    if (installingManifest && (isCancelled || hasFailedInstall || hasCancelledInstall)) {
+    // Check if this is a stale installing manifest (no corresponding download items)
+    const hasActiveItems = downloads.some(
+      (item) => item.appid === game.appid && ["queued", "downloading", "paused", "extracting", "installing"].includes(item.status)
+    )
+    // Block re-download when items are already active/queued (even if installingManifest hasn't loaded yet)
+    if (!force && (installedManifest || (hasActiveItems && !isCancelled && !hasFailedInstall && !hasCancelledInstall && !hasFailedDownload))) return
+    // When force-downloading (version switch), clear ALL old download items for this appid
+    // to prevent "part 1 of 2" display bugs from stale completed items
+    if (force) {
+      clearByAppid(game.appid)
+    }
+    // Clean up stale or failed installing manifests before allowing re-download
+    if (installingManifest && (!hasActiveItems || isCancelled || hasFailedInstall || hasCancelledInstall || force)) {
       try {
         await window.ucDownloads?.deleteInstalling?.(game.appid)
       } catch {}
       setInstallingManifest(null)
     }
-    if (hasFailedDownload) {
+    if (hasFailedDownload && !force) {
       clearByAppid(game.appid)
     }
     setDownloadError(null)
@@ -408,7 +448,7 @@ export function GameDetailPage() {
     if (!game) return
     if (!window.ucDownloads?.listGameExecutables || !window.ucDownloads?.launchGameExecutable) return
     try {
-      const savedExe = await getSavedExe()
+      const savedExe = await getSavedExe(selectedVersionKey, selectedVersionLabel, installedVersionLabels.length <= 1)
       const runAsAdminEnabled = await getRunAsAdminEnabled()
       
       if (savedExe) {
@@ -416,7 +456,7 @@ export function GameDetailPage() {
         return
       }
       
-      const result = await window.ucDownloads.listGameExecutables(game.appid)
+      const result = await window.ucDownloads.listGameExecutables(game.appid, selectedVersionLabel)
       const exes = result?.exes || []
       const folder = result?.folder || null
       const { pick, confident } = pickGameExecutable(exes, game.name, game.source, folder)
@@ -467,6 +507,28 @@ export function GameDetailPage() {
     return filtered.slice(0, 4)
   }, [game, games])
 
+  // Determine if the currently selected page version matches any installed version
+  // (must be called before early returns to maintain hook order)
+  const installedVersionLabels = useMemo(() => {
+    const labels = installedVersions
+      .map((manifest) => manifest?.metadata?.downloadedVersion || manifest?.metadata?.version || manifest?.version)
+      .filter(Boolean)
+      .map((label) => String(label))
+    return Array.from(new Set(labels))
+  }, [installedVersions])
+  const installedVersionSummary = useMemo(() => {
+    if (!installedVersionLabels.length) return null
+    if (installedVersionLabels.length === 1) return installedVersionLabels[0]
+    return `${installedVersionLabels.length} versions`
+  }, [installedVersionLabels])
+  const hasInstalledVersions = installedVersions.length > 0 || Boolean(installedManifest)
+  const isSelectedVersionInstalled = useMemo(() => {
+    if (!hasInstalledVersions) return false
+    if (!selectedVersion) return true
+    if (!installedVersionLabels.length) return Boolean(selectedVersion.is_current)
+    return installedVersionLabels.includes(selectedVersion.label)
+  }, [hasInstalledVersions, selectedVersion, installedVersionLabels])
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
@@ -512,40 +574,76 @@ export function GameDetailPage() {
   const isFailed = Boolean(failedDownload) && !isActiveDownload && !isPaused && !isQueued
   const isCancelled = downloads.some((item) => item.appid === game.appid && item.status === "cancelled")
   const hasCancelledManifest = installingManifest?.installStatus === "cancelled"
-  const isInstalled = Boolean(installedManifest)
+  const isInstalled = hasInstalledVersions
   const showActionMenu = isInstalled
+  // Only treat as "installing" from manifest if there are corresponding download items.
+  // If the manifest exists but no download items remain (e.g. items were lost), it's a stale
+  // manifest and the user should be able to retry the download.
+  const hasDownloadItems = appDownloads.length > 0
   const isInstalling =
-    (Boolean(installingManifest) && !isCancelled && !hasCancelledManifest && !isFailed && !isPaused) || (isActivelyDownloading && !isCancelled) || (downloading && !isCancelled)
+    (Boolean(installingManifest) && hasDownloadItems && !isCancelled && !hasCancelledManifest && !isFailed && !isPaused) || (isActivelyDownloading && !isCancelled) || (downloading && !isCancelled)
   const actionLabel = isGameRunning
     ? "Quit"
     : isCheckingLinks
       ? "Checking..."
-    : isInstalled
+    : isSelectedVersionInstalled
       ? "Play"
-      : isPaused
-        ? "Resume"
-        : isQueued
-          ? "Queued"
-          : isFailed
-            ? "Download failed"
-            : isInstalling
-              ? "Installing"
-              : "Download Now"
+      : isInstalled && !isSelectedVersionInstalled
+        ? "Download Now"
+        : isPaused
+          ? "Resume"
+          : isQueued
+            ? "Queued"
+            : isFailed
+              ? "Download failed"
+              : isInstalling
+                ? "Installing"
+                : "Download Now"
   const actionDisabled = !isGameRunning && (isCheckingLinks || isInstalling || isQueued || isFailed)
 
-  const getSavedExe = async () => {
+  const getExeKeys = (versionKey?: string | null, versionLabel?: string | null, allowLegacyFallback: boolean = true) => {
+    const keys: string[] = []
+    if (versionKey) keys.push(`gameExe:${game.appid}:v:${versionKey}`)
+    if (versionLabel) keys.push(`gameExe:${game.appid}:${versionLabel}`)
+    if (allowLegacyFallback) keys.push(`gameExe:${game.appid}`)
+    return keys
+  }
+
+  const getSavedExe = async (
+    versionKey?: string | null,
+    versionLabel?: string | null,
+    allowLegacyFallback: boolean = true
+  ) => {
     if (!window.ucSettings?.get) return null
     try {
-      return await window.ucSettings.get(`gameExe:${game.appid}`)
+      const keys = getExeKeys(versionKey, versionLabel, allowLegacyFallback)
+      for (const key of keys) {
+        const value = await window.ucSettings.get(key)
+        if (value) return value
+      }
+      return null
     } catch {
       return null
     }
   }
 
-  const setSavedExe = async (path: string | null) => {
+  const setSavedExe = async (
+    path: string | null,
+    versionKey?: string | null,
+    versionLabel?: string | null,
+    allowLegacyFallback: boolean = true
+  ) => {
     if (!window.ucSettings?.set) return
     try {
-      await window.ucSettings.set(`gameExe:${game.appid}`, path || null)
+      if (versionKey) {
+        await window.ucSettings.set(`gameExe:${game.appid}:v:${versionKey}`, path || null)
+      }
+      if (versionLabel) {
+        await window.ucSettings.set(`gameExe:${game.appid}:${versionLabel}`, path || null)
+      }
+      if (allowLegacyFallback) {
+        await window.ucSettings.set(`gameExe:${game.appid}`, path || null)
+      }
     } catch {}
   }
 
@@ -609,16 +707,21 @@ export function GameDetailPage() {
   }
 
   const createDesktopShortcut = async (exePath: string) => {
-    if (!window.ucDownloads?.createDesktopShortcut || !game) return
+    if (!window.ucDownloads?.createDesktopShortcut || !game) return null
     try {
+      try {
+        await window.ucDownloads?.deleteDesktopShortcut?.(game.name)
+      } catch {}
       const result = await window.ucDownloads.createDesktopShortcut(game.name, exePath)
       if (result?.ok) {
         gameLogger.info('Desktop shortcut created', { appid: game.appid })
       } else {
         gameLogger.error('Failed to create desktop shortcut', { data: result })
       }
+      return result
     } catch (err) {
       gameLogger.error('Error creating desktop shortcut', { data: err })
+      return null
     }
   }
 
@@ -626,7 +729,7 @@ export function GameDetailPage() {
     exes: Array<{ name: string; path: string; size?: number; depth?: number }>,
     opts?: { title?: string; message?: string; actionLabel?: string; mode?: "launch" | "set"; currentPath?: string | null; folder?: string | null }
   ) => {
-    const savedExe = await getSavedExe()
+    const savedExe = await getSavedExe(selectedVersionKey, selectedVersionLabel, installedVersionLabels.length <= 1)
     setExePickerTitle(opts?.title || "Select executable")
     setExePickerMessage(opts?.message || `We couldn't confidently detect the correct exe for "${game?.name}". Please choose the one to launch.`)
     setExePickerActionLabel(opts?.actionLabel || "Launch")
@@ -641,8 +744,8 @@ export function GameDetailPage() {
     if (!game || !window.ucDownloads?.listGameExecutables) return
     try {
       const [result, savedExe] = await Promise.all([
-        window.ucDownloads.listGameExecutables(game.appid),
-        getSavedExe(),
+        window.ucDownloads.listGameExecutables(game.appid, selectedVersionLabel),
+        getSavedExe(selectedVersionKey, selectedVersionLabel, installedVersionLabels.length <= 1),
       ])
       const exes = result?.exes || []
       await openExePicker(exes, {
@@ -671,14 +774,14 @@ export function GameDetailPage() {
       let folder: string | null = null
       let discoveredExePath: string | null = null
       if (window.ucDownloads?.listGameExecutables) {
-        const result = await window.ucDownloads.listGameExecutables(game.appid)
+        const result = await window.ucDownloads.listGameExecutables(game.appid, selectedVersionLabel)
         folder = result?.folder || null
         if (result?.exes?.[0]?.path) {
           discoveredExePath = result.exes[0].path
         }
       }
 
-      const savedExe = await getSavedExe()
+      const savedExe = await getSavedExe(selectedVersionKey, selectedVersionLabel, installedVersionLabels.length <= 1)
       const preferredExePath = savedExe || discoveredExePath
       const exeDir = preferredExePath ? dirname(preferredExePath) : null
       const candidate = exeDir || null
@@ -705,12 +808,12 @@ export function GameDetailPage() {
     if (!game || !window.ucDownloads?.createDesktopShortcut) return
     try {
       setShortcutFeedback(null)
-      let targetExe = await getSavedExe()
+      let targetExe = await getSavedExe(selectedVersionKey, selectedVersionLabel, installedVersionLabels.length <= 1)
       let exes: Array<{ name: string; path: string; size?: number; depth?: number }> = []
       let folder: string | null = null
 
       if (!targetExe && window.ucDownloads?.listGameExecutables) {
-        const result = await window.ucDownloads.listGameExecutables(game.appid)
+        const result = await window.ucDownloads.listGameExecutables(game.appid, selectedVersionLabel)
         exes = result?.exes || []
         folder = result?.folder || null
 
@@ -734,13 +837,10 @@ export function GameDetailPage() {
         return
       }
 
-      const res = await window.ucDownloads.createDesktopShortcut(game.name, targetExe)
+      const res = await createDesktopShortcut(targetExe)
       if (res?.ok) {
         gameLogger.info('Desktop shortcut created (details)', { appid: game.appid })
         setShortcutFeedback({ type: 'success', message: 'Desktop shortcut created.' })
-      } else if (res?.existed) {
-        gameLogger.info('Desktop shortcut already exists', { appid: game.appid })
-        setShortcutFeedback({ type: 'success', message: 'Desktop shortcut already exists.' })
       } else {
         gameLogger.error('Failed to create desktop shortcut from details', { data: res })
         setShortcutFeedback({ type: 'error', message: 'Failed to create desktop shortcut.' })
@@ -788,9 +888,10 @@ export function GameDetailPage() {
       : window.ucDownloads.launchGameExecutable
     
     if (!launchFn) return
-    const res = await launchFn(game.appid, path, game.name)
+    const showGameName = await window.ucSettings?.get?.('rpcShowGameName') ?? true
+    const res = await launchFn(game.appid, path, game.name, showGameName)
     if (res && res.ok) {
-      await setSavedExe(path)
+      await setSavedExe(path, selectedVersionKey, selectedVersionLabel, installedVersionLabels.length <= 1)
       setExePickerOpen(false)
       setAdminPromptOpen(false)
       setShortcutModalOpen(false)
@@ -831,7 +932,7 @@ export function GameDetailPage() {
   const handleExePicked = async (path: string) => {
     setPendingExePath(path)
     if (exePickerMode === "set") {
-      await setSavedExe(path)
+      await setSavedExe(path, selectedVersionKey, selectedVersionLabel, installedVersionLabels.length <= 1)
       setExePickerCurrentPath(path)
       // Do NOT close the modal, match Library behavior
       return
@@ -1062,8 +1163,10 @@ export function GameDetailPage() {
                     onClick={() => {
                       if (isGameRunning) {
                         void stopRunningGame()
-                      } else if (isInstalled) {
+                      } else if (isInstalled && isSelectedVersionInstalled) {
                         void launchInstalledGame()
+                      } else if (isInstalled && !isSelectedVersionInstalled) {
+                        setVersionConflictOpen(true)
                       } else if (isPaused) {
                         void resumeGroup(game.appid)
                       } else {
@@ -1076,6 +1179,8 @@ export function GameDetailPage() {
                       <Square className="mr-2 h-5 w-5" />
                     ) : isCheckingLinks ? (
                       <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                    ) : isSelectedVersionInstalled ? (
+                      <Play className="mr-2 h-5 w-5" />
                     ) : (
                       <Download className="mr-2 h-5 w-5" />
                     )}
@@ -1252,17 +1357,35 @@ export function GameDetailPage() {
                     <span className="font-semibold text-foreground">{displayedGame?.size || "Unknown"}</span>
                   </div>
 
-                  {(game.version || installedManifest?.metadata?.downloadedVersion || installedManifest?.metadata?.version) && (
+                  {(game.version || installedVersionLabels.length > 0) && (
                     <>
-                      {(installedManifest?.metadata?.downloadedVersion || installedManifest?.metadata?.version) ? (
+                      {installedVersionLabels.length > 0 ? (
                         <>
                           <div className="flex items-center justify-between">
-                            <span className="text-muted-foreground">Installed version</span>
-                            <span className="font-semibold text-foreground">
-                              {installedManifest?.metadata?.downloadedVersion || installedManifest?.metadata?.version}
-                            </span>
+                            <span className="text-muted-foreground">Installed version(s)</span>
+                            <Popover>
+                              <PopoverTrigger asChild>
+                                <button
+                                  type="button"
+                                  className="inline-flex items-center gap-2 rounded-full border border-border/60 bg-background/60 px-3 py-1 text-xs font-semibold text-foreground hover:bg-background/80"
+                                >
+                                  {installedVersionSummary || "Installed"}
+                                  <ChevronRight className="h-3.5 w-3.5" />
+                                </button>
+                              </PopoverTrigger>
+                              <PopoverContent align="end" className="w-56 rounded-2xl p-3">
+                                <div className="text-xs font-semibold text-muted-foreground mb-2">Installed versions</div>
+                                <div className="space-y-1">
+                                  {installedVersionLabels.map((label) => (
+                                    <div key={label} className="text-sm text-foreground">
+                                      {label}
+                                    </div>
+                                  ))}
+                                </div>
+                              </PopoverContent>
+                            </Popover>
                           </div>
-                          {game.version && game.version !== (installedManifest?.metadata?.downloadedVersion || installedManifest?.metadata?.version) && (
+                          {game.version && !installedVersionLabels.includes(game.version) && (
                             <div className="flex items-center justify-between">
                               <span className="text-muted-foreground">Latest version</span>
                               <span className="font-semibold text-foreground">{game.version}</span>
@@ -1371,6 +1494,27 @@ export function GameDetailPage() {
           </div>
         </div>
       )}
+      <VersionConflictModal
+        open={versionConflictOpen}
+        installedVersionLabel={installedVersionSummary || "Unknown"}
+        selectedVersionLabel={selectedVersion?.label || "selected"}
+        onInstallSideBySide={() => {
+          setVersionConflictOpen(false)
+          setOverwriteOnDownload(false)
+          void openHostSelector()
+        }}
+        onOverwrite={async () => {
+          setVersionConflictOpen(false)
+          setOverwriteOnDownload(true)
+          // Delete the current installation first
+          try {
+            await window.ucDownloads?.deleteInstalled?.(game.appid)
+            setInstalledManifest(null)
+          } catch {}
+          void openHostSelector()
+        }}
+        onClose={() => setVersionConflictOpen(false)}
+      />
       <DownloadCheckModal
         open={hostSelectorOpen}
         game={game}
@@ -1385,7 +1529,9 @@ export function GameDetailPage() {
           try {
             setPreferredDownloadHost(config.host)
           } catch {}
-          await startDownload(config.host, config)
+          const shouldForce = overwriteOnDownload || (isInstalled && !isSelectedVersionInstalled)
+          await startDownload(config.host, config, shouldForce)
+          setOverwriteOnDownload(false)
         }}
         onClose={() => {
           setHostSelectorOpen(false)

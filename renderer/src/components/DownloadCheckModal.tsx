@@ -24,13 +24,14 @@ type HostOption = {
   key: PreferredDownloadHost
   label: string
   tag?: "beta" | "soon" | "retiring"
+  supportsResume?: boolean
 }
 
 const HOST_OPTIONS: HostOption[] = [
-  { key: "pixeldrain", label: "Pixeldrain" },
-  { key: "fileq", label: "FileQ", tag: "soon" },
-  { key: "datavaults", label: "DataVaults", tag: "soon" },
-  { key: "rootz", label: "Rootz", tag: "retiring" },
+  { key: "pixeldrain", label: "Pixeldrain", supportsResume: true },
+  { key: "fileq", label: "FileQ", supportsResume: false },
+  { key: "datavaults", label: "DataVaults", tag: "soon", supportsResume: false },
+  { key: "rootz", label: "Rootz", tag: "retiring", supportsResume: false },
 ]
 
 function hostLabel(key: string): string {
@@ -170,7 +171,6 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, def
           appid: game.appid,
           gameName: game.name,
           deadLinks: `Dead links found:\n${deadLines.join('\n')}`,
-          fingerprint: crypto.randomUUID?.() ?? undefined,
         }),
       }).catch(() => {})
     }
@@ -417,11 +417,11 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, def
               </Select>
             </div>
 
-            {/* Rootz Beta Warning */}
-            {selectedHost === "rootz" && (
+            {/* Host resume warning */}
+            {HOST_OPTIONS.find((h) => h.key === selectedHost)?.supportsResume === false && (
               <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
                 Download resuming is currently not supported for this host. Please do not close
-                the app while downloading with Rootz.
+                the app while downloading with {hostLabel(selectedHost)}.
               </div>
             )}
 
@@ -539,7 +539,6 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, def
                           appid: game?.appid,
                           gameName: game?.name,
                           deadLinks: `Dead links found:\n${deadLines.join('\n')}`,
-                          fingerprint: crypto.randomUUID?.() ?? undefined,
                         }),
                       }).catch(() => {})
                     }
