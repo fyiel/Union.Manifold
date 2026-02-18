@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
+import { MyRequests } from "@/components/MyRequests"
 import { apiFetch, apiUrl, getApiBaseUrl } from "@/lib/api"
 import { useDiscordAccount } from "@/hooks/use-discord-account"
 import { LogIn, MessageCircle, RefreshCw, Shield, Star, Heart, Clock } from "lucide-react"
@@ -265,6 +266,31 @@ export function AccountOverviewPage() {
             </Card>
           </div>
         )}
+
+        <div className="mt-8">
+          {accountLoading ? (
+            <Card className="border-2 border-border/50 shadow-xl bg-card/60 backdrop-blur-sm rounded-2xl">
+              <CardHeader className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                <Skeleton className="h-6 w-40" />
+                <Skeleton className="h-9 w-32" />
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid gap-4 md:grid-cols-2">
+                  <Skeleton className="h-44 w-full rounded-2xl" />
+                  <Skeleton className="h-44 w-full rounded-2xl" />
+                </div>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <Skeleton className="h-44 w-full rounded-2xl" />
+                  <Skeleton className="h-44 w-full rounded-2xl" />
+                </div>
+              </CardContent>
+            </Card>
+          ) : hasSession ? (
+            <MyRequests title="Your Requests" showUnauthedHelp={false} />
+          ) : (
+            <MyRequests title="Your Requests" showUnauthedHelp match="ip" />
+          )}
+        </div>
       </div>
     </div>
   )
