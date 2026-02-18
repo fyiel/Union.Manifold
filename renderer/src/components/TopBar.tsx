@@ -12,6 +12,7 @@ import { apiFetch, apiUrl, getApiBaseUrl } from "@/lib/api"
 import {
   ChevronDown,
   Hammer,
+  LogIn,
   LogOut,
   Menu,
   Search,
@@ -97,6 +98,10 @@ export function TopBar() {
   const accountLabel = accountUser ? accountUser.displayName || accountUser.username : "Account"
   const avatarUrl = accountUser?.avatarUrl
   const showAccountLoading = accountLoading
+  const accountSubtitle = accountUser ? "Discord account" : "Login to continue"
+  const accountActionLabel = accountUser
+    ? (loggingOut ? "Signing out..." : "Logout")
+    : (loggingIn ? "Connecting..." : "Log in")
 
   const handleLogin = async () => {
     const baseUrl = getApiBaseUrl()
@@ -109,7 +114,7 @@ export function TopBar() {
     try {
       const result = await window.ucAuth.login(baseUrl)
       if (result?.ok) {
-        await refresh()
+        await refresh(true)
       }
     } catch {
       // ignore login errors
@@ -217,7 +222,11 @@ export function TopBar() {
                 <Search className="h-5 w-5" />
               </Button>
 
-              {accountUser ? (
+              {showAccountLoading ? (
+                <div className="h-9 w-9 rounded-full border border-border/60 flex items-center justify-center bg-card/70">
+                  <UserRound className="h-5 w-5" />
+                </div>
+              ) : (
                 <Popover>
                   <PopoverTrigger
                     className="flex items-center justify-center rounded-full outline-hidden ring-offset-background focus-visible:ring-2 focus-visible:ring-primary/60"
@@ -234,7 +243,7 @@ export function TopBar() {
                   <PopoverContent align="end" className="w-56 rounded-2xl p-2">
                     <div className="px-3 pb-2">
                       <div className="text-sm font-semibold text-foreground">{accountLabel}</div>
-                      <div className="text-xs text-muted-foreground">Discord account</div>
+                      <div className="text-xs text-muted-foreground">{accountSubtitle}</div>
                     </div>
                     {accountNavItems.map((item) => (
                       <button
@@ -257,28 +266,19 @@ export function TopBar() {
                     </button>
                     <button
                       type="button"
-                      onClick={handleLogout}
-                      disabled={loggingOut}
-                      className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-destructive transition-colors hover:bg-destructive/10 disabled:opacity-60"
+                      onClick={accountUser ? handleLogout : handleLogin}
+                      disabled={accountUser ? loggingOut : loggingIn}
+                      className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors disabled:opacity-60 ${
+                        accountUser
+                          ? "text-destructive hover:bg-destructive/10"
+                          : "text-primary hover:bg-primary/10"
+                      }`}
                     >
-                      <LogOut className="h-4 w-4" />
-                      {loggingOut ? "Signing out..." : "Logout"}
+                      {accountUser ? <LogOut className="h-4 w-4" /> : <LogIn className="h-4 w-4" />}
+                      {accountActionLabel}
                     </button>
                   </PopoverContent>
                 </Popover>
-              ) : showAccountLoading ? (
-                <div className="h-9 w-9 rounded-full border border-border/60 flex items-center justify-center bg-card/70">
-                  <UserRound className="h-5 w-5" />
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  onClick={handleLogin}
-                  className="inline-flex items-center rounded-full border border-primary/40 bg-primary/10 px-4 py-1.5 text-sm font-semibold text-primary shadow-sm transition-colors hover:bg-primary/20 disabled:opacity-60"
-                  disabled={loggingIn}
-                >
-                  {loggingIn ? "Connecting..." : "Login with Discord"}
-                </button>
               )}
             </div>
 
