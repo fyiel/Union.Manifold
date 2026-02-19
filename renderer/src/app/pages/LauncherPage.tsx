@@ -321,22 +321,39 @@ export function LauncherPage() {
 
   const popularReleases = useMemo(() => {
     if (Object.keys(gameStats).length === 0) return []
-    const gamesWithDownloads = games.filter((game) => {
-      const stats = gameStats[game.appid]
-      const isNSFW = Array.isArray(game.genres) && game.genres.some((genre) => genre.toLowerCase() === "nsfw")
-      return stats && (stats.downloads > 0 || stats.views > 0) && !isNSFW
-    })
 
-    const sorted = [...gamesWithDownloads].sort((a, b) => {
-      const statsA = gameStats[a.appid] || { downloads: 0, views: 0 }
-      const statsB = gameStats[b.appid] || { downloads: 0, views: 0 }
+    const getDaysDiff = (dateStr?: string) => {
+      if (!dateStr) return 999
+      const date = new Date(dateStr)
+      if (isNaN(date.getTime())) return 999
+      const now = new Date()
+      const diffTime = Math.abs(now.getTime() - date.getTime())
+      return Math.ceil(diffTime / (1000 * 60 * 60 * 24))
+    }
 
-      if (statsA.downloads !== statsB.downloads) {
-        return statsB.downloads - statsA.downloads
+    const isRecent = (dateStr?: string, days = 30) => getDaysDiff(dateStr) <= days
+
+    const calculateScore = (game: Game) => {
+      const stats = gameStats[game.appid] || { downloads: 0, views: 0 }
+      let score = (stats.downloads * 2) + (stats.views * 0.5)
+
+      if (isRecent(game.release_date, 30)) {
+        score += 500
       }
 
-      return statsB.views - statsA.views
+      if (isRecent(game.update_time, 14)) {
+        score += 300
+      }
+
+      return score
+    }
+
+    const candidates = games.filter((game) => {
+       const isNSFW = Array.isArray(game.genres) && game.genres.some((genre) => genre?.toLowerCase() === "nsfw")
+       return !isNSFW
     })
+
+    const sorted = [...candidates].sort((a, b) => calculateScore(b) - calculateScore(a))
 
     return sorted.slice(0, 8)
   }, [games, gameStats])
@@ -698,26 +715,32 @@ export function LauncherPage() {
       )}
 
       {(loading || popularReleases.length > 0) && (
-        <section className="py-12 sm:py-16 md:py-20 px-4 bg-card/20 overflow-visible">
-          <div className="container mx-auto max-w-7xl">
+        <section className="relative py-16 sm:py-20 md:py-24 px-4 overflow-hidden">
+          <div className="absolute inset-0 bg-gradient-to-b from-primary/10 via-background/50 to-background pointer-events-none -z-10" />
+          <div className="container relative z-10 mx-auto max-w-7xl">
             {loading ? (
-              <>
-                <div className="mb-10">
-                  <Skeleton className="h-10 w-48 mb-3 bg-muted/40" />
-                  <Skeleton className="h-5 w-80 bg-muted/30" />
+              <div className="mb-12">
+                <Skeleton className="h-12 w-64 mb-4 bg-muted/20" />
+                <Skeleton className="h-6 w-96 bg-muted/10" />
+              </div>
+            ) : (
+              <div className="mb-12 flex flex-col md:flex-row md:items-end justify-between gap-4">
+                <div>
+                  <h2 className="text-4xl sm:text-5xl md:text-6xl font-black bg-gradient-to-r from-white to-white/50 bg-clip-text text-transparent font-montserrat mb-3 tracking-tight">
+                    Most Popular
+                  </h2>
+                  <p className="text-lg sm:text-xl text-muted-foreground font-medium">Top trending downloads in our community</p>
                 </div>
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+              </div>
+            )}
+            
+            {loading ? (
+               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                   {Array.from({ length: 4 }).map((_, index) => (
                     <GameCardSkeleton key={`skeleton-popular-${index}`} />
                   ))}
-                </div>
-              </>
+               </div>
             ) : (
-              <>
-                <div className="mb-10">
-                  <h2 className="text-3xl sm:text-4xl md:text-5xl font-black text-foreground font-montserrat mb-3">Most Popular</h2>
-                  <p className="text-base sm:text-lg text-muted-foreground">Top downloads in our community</p>
-                </div>
                 <Carousel
                   opts={{
                     align: "start",
@@ -727,7 +750,7 @@ export function LauncherPage() {
                   }}
                   className="w-full"
                 >
-                  <CarouselContent className="-ml-2 md:-ml-4">
+                  <CarouselContent className="-ml-2 md:-ml-4 pb-10">
                     {popularReleases.map((game) => (
                       <CarouselItem
                         key={game.appid}
@@ -737,10 +760,9 @@ export function LauncherPage() {
                       </CarouselItem>
                     ))}
                   </CarouselContent>
-                  <CarouselPrevious />
-                  <CarouselNext />
+                  <CarouselPrevious className="left-0 -translate-x-1/2 bg-black/50 hover:bg-black/80 border-white/10 text-white backdrop-blur-md" />
+                  <CarouselNext className="right-0 translate-x-1/2 bg-black/50 hover:bg-black/80 border-white/10 text-white backdrop-blur-md" />
                 </Carousel>
-              </>
             )}
           </div>
         </section>

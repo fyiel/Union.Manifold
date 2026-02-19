@@ -463,182 +463,126 @@ export const GameCard = memo(function GameCard({
   }
 
   return (
-    <div className="relative group/container">
-      <Link to={`/game/${game.appid}`}>
+    <div className="relative group/container h-full">
+      <Link to={`/game/${game.appid}`} className="block h-full">
         <Card
-          className={`group overflow-hidden transition-all duration-500 hover:scale-[1.02] hover:shadow-2xl hover:shadow-primary/20 bg-card/95 backdrop-blur-sm border-2 border-border/50 hover:border-primary/50 flex flex-col h-full ${
-            isCompact ? "rounded-2xl" : "rounded-3xl"
+          className={`group relative h-full overflow-hidden border border-white/10 bg-black/40 backdrop-blur-md transition-all duration-500 hover:-translate-y-1 hover:shadow-[0_0_30px_rgba(var(--primary),0.15)] hover:border-primary/50 flex flex-col gap-0 py-0 ${
+            isCompact ? "rounded-xl" : "rounded-2xl"
           }`}
           onMouseEnter={fetchStatsOnHover}
         >
-          <div className={`relative overflow-hidden ${isCompact ? "aspect-[4/5]" : "aspect-[3/4]"}`}>
+          {/* Image Section */}
+          <div className={`relative w-full overflow-hidden ${isCompact ? "aspect-[4/5]" : "aspect-[3/4]"}`}>
+            <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent z-10 opacity-70 transition-opacity duration-300 group-hover:opacity-50" />
+            
             <img
               src={proxyImageUrl((typeof navigator !== 'undefined' && !navigator.onLine && previewImage) ? previewImage : game.image) || "/banner.png"}
               alt={game.name}
-              className={`h-full w-full object-cover transition-all duration-500 group-hover:scale-105 group-hover:brightness-110 ${
+              className={`h-full w-full object-cover transition-all duration-700 ease-in-out group-hover:scale-110 ${
                 isNSFW
-                  ? (allowNsfwReveal ? "blur-md group-hover:blur-none" : "blur-md")
+                  ? (allowNsfwReveal ? "blur-md group-hover:blur-none" : "blur-xl brightness-50")
                   : (imageLoaded ? "" : "blur-lg")
               }`}
               loading="lazy"
               onLoad={() => setImageLoaded(true)}
             />
-            {isNSFW && !isInstalled && (
-              <div
-                className={`absolute inset-0 bg-black/40 flex items-center justify-center transition-opacity duration-300 ${
-                  allowNsfwReveal ? "group-hover:opacity-0" : ""
-                }`}
-              >
-                <div className="bg-red-600 text-white px-4 py-2 rounded-full text-sm font-bold">18+</div>
+
+            {/* NSFW Overlay */}
+            {isNSFW && !isInstalled && !allowNsfwReveal && (
+              <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+                 <Badge variant="destructive" className="text-xs px-3 py-1">18+ NSFW</Badge>
               </div>
             )}
+
+            {/* Play Button Overlay */}
             {isInstalled && (
-              <div className="absolute inset-0 z-20 flex items-center justify-center">
+              <div className="absolute inset-0 z-30 flex items-center justify-center">
                 <button
                   onClick={handlePlayClick}
-                  className={`group/play relative inline-flex items-center justify-center h-14 w-14 rounded-full shadow-lg transition-transform duration-300 hover:scale-110 hover:shadow-xl ${
+                  className={`group/play relative inline-flex items-center justify-center h-14 w-14 rounded-full shadow-[0_0_20px_rgba(var(--primary),0.5)] transition-transform duration-300 hover:scale-110 hover:shadow-[0_0_30px_rgba(var(--primary),0.7)] ${
                     isRunning
-                      ? "bg-destructive text-destructive-foreground shadow-destructive/40 hover:shadow-destructive/60"
-                      : "bg-primary text-primary-foreground shadow-primary/40 hover:shadow-primary/60"
+                      ? "bg-red-600 text-white shadow-red-500/40"
+                      : "bg-primary text-primary-foreground"
                   }`}
                 >
                   <span className={`absolute inset-0 rounded-full opacity-0 transition-opacity duration-300 group-hover/play:opacity-100 blur-lg ${
-                    isRunning ? "bg-destructive/20" : "bg-primary/20"
+                    isRunning ? "bg-red-500/40" : "bg-primary/40"
                   }`} />
-                  <span className={`absolute -inset-2 rounded-full border opacity-0 transition-opacity duration-300 group-hover/play:opacity-100 ${
-                    isRunning ? "border-destructive/40" : "border-primary/40"
-                  }`} />
-                  {isRunning ? <Square className="relative h-6 w-6" /> : <Play className="relative h-6 w-6" />}
+                  {isRunning ? <Square className="relative h-6 w-6 fill-current" /> : <Play className="relative h-6 w-6 fill-current ml-1" />}
                 </button>
               </div>
             )}
-            <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent opacity-60 group-hover:opacity-80 transition-opacity duration-300" />
 
-            {isQueued || isInstalling ? (
-              <div className="absolute top-3 left-3 z-20">
-                <div className="inline-flex items-center gap-2 rounded-full bg-sky-500/90 px-3 py-1.5 text-xs font-semibold text-white shadow-lg shadow-sky-500/40">
-                  <Download className="h-4 w-4" />
-                  {isQueued ? "Queued" : "Installing"}
-                </div>
-              </div>
-            ) : null}
-
-            {isPopular && (
-              <div className="absolute top-3 left-3 z-20">
-                <div className="inline-flex items-center gap-2 overflow-hidden rounded-full transition-all duration-300 ease-out bg-gradient-to-r from-orange-600/90 to-red-600/90 backdrop-blur-sm px-3 py-1.5 shadow-lg shadow-orange-500/50 group-hover/container:shadow-xl group-hover/container:shadow-orange-500/70">
-                  <Flame className="flex-none h-5 w-5 text-white animate-pulse" />
-                  <span className="text-sm font-bold text-white">Popular</span>
-                </div>
-              </div>
-            )}
-
-            {hasOnlineMode(game.hasCoOp) && (
-              <div className={`absolute z-20 ${isPopular || isInstalling || isQueued ? "top-14 left-3" : "top-3 left-3"}`}>
-                <div className="inline-flex items-center gap-2 overflow-hidden rounded-full transition-all duration-300 ease-out bg-gradient-to-r from-emerald-600/90 to-green-600/90 backdrop-blur-sm px-3 py-1.5 shadow-lg shadow-emerald-500/50 group-hover/container:shadow-xl group-hover/container:shadow-emerald-500/70">
-                  <Wifi className="flex-none h-5 w-5 text-white animate-pulse" />
-                  <span className="text-sm font-bold text-white">Online</span>
-                </div>
-              </div>
-            )}
-
-            <div className="absolute bottom-3 left-3 right-3 opacity-0 group-hover:opacity-100 transition-all duration-300 transform translate-y-2 group-hover:translate-y-0">
-              <div className="flex flex-col gap-2 bg-black/80 backdrop-blur-md rounded-2xl p-3 border border-white/10">
-                <div className="flex items-center justify-between text-white text-sm">
-                  <div className="flex items-center gap-2">
-                    <div className="bg-primary/20 rounded-lg p-1.5">
-                      <Eye className="h-4 w-4 text-primary" />
-                    </div>
-                    <span className="font-semibold">{formatNumber(displayStats.views)}</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <div className="bg-primary/20 rounded-lg p-1.5">
-                      <Download className="h-4 w-4 text-primary" />
-                    </div>
-                    <span className="font-semibold">{formatNumber(displayStats.downloads)}</span>
-                  </div>
-                </div>
-                {isInstalled && (
-                  <div className="mt-2 flex justify-end text-xs text-white/80">
-                    Installed
-                  </div>
+            {/* Status Badges */}
+            <div className="absolute top-3 left-3 z-30 flex flex-col gap-2">
+                {(isQueued || isInstalling) && (
+                  <Badge className="bg-sky-500 text-white border-none shadow-lg shadow-sky-500/40 animate-pulse">
+                     <Download className="w-3 h-3 mr-1" />
+                     {isQueued ? "Queued" : "Installing"}
+                  </Badge>
                 )}
-              </div>
+                
+                {isPopular && (
+                  <Badge className="bg-primary/90 hover:bg-primary text-primary-foreground backdrop-blur-md shadow-[0_0_15px_rgba(var(--primary),0.4)] border-0 px-2 py-0.5 text-xs font-bold uppercase tracking-wider animate-in fade-in zoom-in duration-300">
+                    <Flame className="w-3 h-3 mr-1 fill-current" /> Popular
+                  </Badge>
+                )}
+                
+                {hasOnlineMode(game.hasCoOp) && (
+                  <Badge variant="online" className="px-2 py-0.5 text-xs font-semibold flex items-center gap-1">
+                    <Wifi className="w-3 h-3 mr-1 text-green-400" />
+                    <span className="text-white">Online</span>
+                  </Badge>
+                )}
+            </div>
+
+            {/* Hover Stats Overlay */}
+            <div className="absolute bottom-0 left-0 right-0 z-20 p-4 translate-y-full transition-transform duration-300 ease-out group-hover:translate-y-0 bg-gradient-to-t from-black/90 via-black/60 to-transparent pt-10">
+                <div className="flex items-center justify-between text-xs font-medium text-white/90">
+                  <div className="flex items-center gap-1.5 bg-black/40 rounded-full px-2 py-1 backdrop-blur-sm border border-white/10">
+                    <Download className="w-3.5 h-3.5 text-primary" />
+                    <span>{formatNumber(displayStats.downloads)}</span>
+                  </div>
+                  <div className="flex items-center gap-1.5 bg-black/40 rounded-full px-2 py-1 backdrop-blur-sm border border-white/10">
+                    <Eye className="w-3.5 h-3.5 text-blue-400" />
+                    <span>{formatNumber(displayStats.views)}</span>
+                  </div>
+                </div>
             </div>
           </div>
-          <CardContent className={`${isCompact ? "p-4" : "p-6"} flex-1 flex flex-col`}>
-            <h3
-              className={`font-bold line-clamp-1 text-card-foreground font-montserrat group-hover:text-primary transition-colors duration-300 ${
-                isCompact ? "text-lg mb-1" : "text-xl mb-2"
-              }`}
-            >
-              {game.name}
-            </h3>
-            <p
-              className={`text-muted-foreground leading-relaxed flex-1 ${
-                isCompact ? "text-xs mb-3 line-clamp-1" : "text-sm mb-4 line-clamp-2"
-              }`}
-            >
-              {game.description}
-            </p>
 
-            <div className={`flex flex-wrap gap-2 ${isCompact ? "mb-3" : "mb-4"}`}>
-              {displayGenres.slice(0, isCompact ? 1 : 2).map((genre) => (
-                <Badge
-                  key={genre}
-                  variant="secondary"
-                  className={`text-xs rounded-full bg-primary/10 text-primary border-primary/20 hover:bg-primary/20 transition-colors ${
-                    isCompact ? "px-2.5 py-0.5" : "px-3 py-1"
-                  }`}
-                >
-                  {genre}
-                </Badge>
-              ))}
-              {displayGenres.length > (isCompact ? 1 : 2) && (
-                <Badge
-                  variant="outline"
-                  className={`text-xs rounded-full border-primary/30 text-primary ${
-                    isCompact ? "px-2.5 py-0.5" : "px-3 py-1"
-                  }`}
-                >
-                  +{displayGenres.length - (isCompact ? 1 : 2)}
-                </Badge>
-              )}
-            </div>
-
-            <div
-              className={`flex items-center justify-between text-muted-foreground border-t border-border/50 ${
-                isCompact ? "pt-2 text-xs" : "pt-3 text-sm"
-              }`}
-            >
-              <div className="flex items-center gap-2">
-                <div className="bg-primary/10 rounded-lg p-1.5">
-                  <Calendar className="h-3.5 w-3.5 text-primary" />
-                </div>
-                <span className="font-medium">
-                  {(() => {
-                    const year = new Date(game.release_date).getFullYear()
-                    return isNaN(year) ? "Unknown" : year
-                  })()}
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="bg-primary/10 rounded-lg p-1.5">
-                  <HardDrive className="h-3.5 w-3.5 text-primary" />
-                </div>
-                <span className="font-medium">{game.size}</span>
-              </div>
-            </div>
-
-            <div className={isCompact ? "mt-2" : "mt-3"}>
-              <Badge
-                variant="outline"
-                className={`text-xs rounded-full border-primary/30 text-primary bg-primary/5 ${
-                  isCompact ? "px-2.5 py-0.5" : "px-3 py-1"
+          {/* Content Section */}
+          <CardContent className={`${isCompact ? "p-3" : "p-4"} flex-1 flex flex-col space-y-2 relative z-20 bg-background/5`}>
+            <div className="space-y-1">
+              <h3
+                className={`font-bold leading-tight line-clamp-1 text-white group-hover:text-primary transition-colors duration-300 ${
+                  isCompact ? "text-base" : "text-lg"
                 }`}
               >
-                {game.source}
-              </Badge>
+                {game.name}
+              </h3>
+              <div className="flex flex-wrap gap-1.5 h-5 overflow-hidden">
+                 {displayGenres.slice(0, 2).map((genre) => (
+                  <span 
+                    key={genre} 
+                    className="text-[10px] uppercase font-bold tracking-wider text-white/50 bg-white/5 px-1.5 py-0.5 rounded-sm whitespace-nowrap"
+                  >
+                    {genre}
+                  </span>
+                 ))}
+              </div>
             </div>
+
+             <div className="flex items-center justify-between text-xs text-white/60 pt-2 border-t border-white/5 mt-auto">
+                <div className="flex items-center gap-1.5">
+                  <Calendar className="w-3.5 h-3.5" />
+                  <span>{game.release_date?.split("-")[0] || "N/A"}</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <HardDrive className="w-3.5 h-3.5" />
+                  <span>{game.size}</span>
+                </div>
+             </div>
           </CardContent>
         </Card>
       </Link>
