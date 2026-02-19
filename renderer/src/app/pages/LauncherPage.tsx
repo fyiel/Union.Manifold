@@ -259,8 +259,12 @@ export function LauncherPage() {
     const maxAttempts = isInitialLoad ? 12 : 2
 
     // While the DB/API is warming up, keep the skeleton visible rather than flashing empty/error states.
+    let refreshStart: number | null = null
     if (isInitialLoad) setLoading(true)
-    if (forceRefresh) setRefreshing(true)
+    if (forceRefresh) {
+      setRefreshing(true)
+      refreshStart = Date.now()
+    }
     setGamesError(null)
 
     for (let attempt = 0; attempt <= maxAttempts; attempt++) {
@@ -278,7 +282,17 @@ export function LauncherPage() {
         }
 
         setLoading(false)
-        setRefreshing(false)
+        if (refreshStart !== null) {
+          const elapsed = Date.now() - refreshStart
+          const minDuration = 500 // ms
+          if (elapsed < minDuration) {
+            setTimeout(() => setRefreshing(false), minDuration - elapsed)
+          } else {
+            setRefreshing(false)
+          }
+        } else {
+          setRefreshing(false)
+        }
         return
       } catch (error) {
         if (loadId !== activeLoadIdRef.current) return
@@ -804,11 +818,17 @@ export function LauncherPage() {
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
-                {paginatedFeaturedGames.map((game) => {
-                  const isGamePopular = popularAppIds.has(game.appid)
+                {(loading || refreshing) ? (
+                  Array.from({ length: itemsPerPage }).map((_, i) => (
+                    <GameCardSkeleton key={`skeleton-all-${i}`} />
+                  ))
+                ) : (
+                  paginatedFeaturedGames.map((game) => {
+                    const isGamePopular = popularAppIds.has(game.appid)
 
-                  return <GameCard key={game.appid} game={game} stats={gameStats[game.appid]} isPopular={isGamePopular} />
-                })}
+                    return <GameCard key={game.appid} game={game} stats={gameStats[game.appid]} isPopular={isGamePopular} />
+                  })
+                )}
               </div>
             </>
           )}
