@@ -41,6 +41,7 @@ import {
 } from "lucide-react"
 import { ExePickerModal } from "@/components/ExePickerModal"
 import { AdminPromptModal } from "@/components/AdminPromptModal"
+import { LinuxExperiences } from "@/components/LinuxExperiences"
 import { DownloadCheckModal } from "@/components/DownloadCheckModal"
 import { DesktopShortcutModal } from "@/components/DesktopShortcutModal"
 import { EditGameMetadataModal } from "@/components/EditGameMetadataModal"
@@ -93,11 +94,40 @@ export function GameDetailPage() {
   const [versionConflictOpen, setVersionConflictOpen] = useState(false)
   const [overwriteOnDownload, setOverwriteOnDownload] = useState(false)
 
+  // ProtonDB state
+  const [protonData, setProtonData] = useState<any>(null)
+  const [protonLoading, setProtonLoading] = useState(false)
+
   // Version switcher state
   const [downloadVersions, setDownloadVersions] = useState<GameVersion[]>([])
   const [selectedPageVersionId, setSelectedPageVersionId] = useState<string | null>(null)
 
   const appid = params.id || ""
+
+  // Fetch ProtonDB summary for this game (proxied through the web API)
+  useEffect(() => {
+    if (!game?.appid) return
+    let cancelled = false
+    setProtonLoading(true)
+
+    apiFetch(`/api/protondb/${game.appid}`)
+      .then(async (res) => {
+        if (!res.ok) return { success: false }
+        return await res.json()
+      })
+      .then((data) => {
+        if (cancelled) return
+        setProtonData(data)
+      })
+      .catch(() => {
+        if (!cancelled) setProtonData({ success: false })
+      })
+      .finally(() => {
+        if (!cancelled) setProtonLoading(false)
+      })
+
+    return () => { cancelled = true }
+  }, [game?.appid])
 
   const persistGameName = (id: string, name?: string | null) => {
     if (!id || !name) return
@@ -1010,6 +1040,25 @@ export function GameDetailPage() {
                       Externally Added
                     </Badge>
                   )}
+                  {!protonLoading && protonData && protonData.success ? (
+                    <Badge
+                      className="px-3 py-1 rounded-full bg-sky-500/20 border-sky-500/30 text-sky-400 font-semibold flex items-center gap-1.5 backdrop-blur-md shadow-lg cursor-pointer"
+                      onClick={() => window.open(protonData.url || `https://www.protondb.com/app/${game.appid}`, "_blank")}
+                      title="ProtonDB — Linux compatibility rating"
+                    >
+                      <ShieldCheck className="h-3 w-3" />
+                      Linux: {protonData.rating ? protonData.rating.charAt(0).toUpperCase() + protonData.rating.slice(1) : "Rated"}
+                    </Badge>
+                  ) : !protonLoading && protonData && !protonData.success ? (
+                    <Badge
+                      className="px-3 py-1 rounded-full bg-sky-500/20 border-sky-500/30 text-sky-400 font-semibold flex items-center gap-1.5 backdrop-blur-md shadow-lg cursor-pointer"
+                      onClick={() => window.open("https://www.protondb.com/", "_blank")}
+                      title="ProtonDB — Linux compatibility rating not available"
+                    >
+                      <ShieldCheck className="h-3 w-3" />
+                      Linux: N/A
+                    </Badge>
+                  ) : null}
                 </div>
 
                 <div className="space-y-1">
@@ -1082,6 +1131,9 @@ export function GameDetailPage() {
                   {game.description}
                 </p>
               </div>
+
+              {/* Linux Experiences (community submissions) */}
+              <LinuxExperiences appid={game.appid} />
 
               {game.screenshots && game.screenshots.length > 0 && (
                 <div className="p-6 rounded-2xl bg-black/40 border border-white/10 backdrop-blur-md shadow-xl">
