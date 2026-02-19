@@ -1118,16 +1118,30 @@ export function SearchPage() {
                 {filteredGames.length === 0 && games.length === 0 && (
                   <div className="text-center py-12 sm:py-20">
                     <div className="max-w-xl mx-auto">
-                      <ErrorMessage
-                        title="Games Loading Issue"
-                        message="We couldn't load any games. Please try again or contact support if the issue persists."
-                        errorCode={generateErrorCode(ErrorTypes.SEARCH_FETCH, "search-page-empty")}
-                        retry={() => {
-                          setGamesError(null)
-                          setLoading(true)
-                          loadGames()
-                        }}
-                      />
+                      {gamesError ? (
+                        <ErrorMessage
+                          title="Games Loading Issue"
+                          message="We couldn't load any games. Please try again or contact support if the issue persists."
+                          errorCode={gamesError.code}
+                          retry={() => {
+                            setGamesError(null)
+                            setLoading(true)
+                            loadGames()
+                          }}
+                        />
+                      ) : (
+                        <div className="flex flex-col items-center gap-4">
+                          <div className="p-4 rounded-full bg-muted">
+                            <Filter className="h-8 w-8 text-muted-foreground" />
+                          </div>
+                          <div>
+                            <h3 className="text-lg sm:text-xl font-semibold text-foreground mb-2">No games found</h3>
+                            <p className="text-sm sm:text-base text-muted-foreground">
+                              No games match your search criteria. Try adjusting your filters or search terms.
+                            </p>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}
