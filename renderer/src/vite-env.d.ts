@@ -187,6 +187,23 @@ declare global {
       checkTool: (toolName: string) => Promise<{ ok: boolean; available: boolean; path?: string; error?: string }>
       getSteamPath: () => Promise<{ ok: boolean; path?: string; error?: string }>
     }
+    ucVR?: {
+      detectSteamVR: () => Promise<{ ok: boolean; found: boolean; dir?: string | null; vrserver?: string | null; startup?: string | null; error?: string }>
+      detectOpenXR: () => Promise<{ ok: boolean; found: boolean; path?: string | null; error?: string }>
+      launchSteamVR: () => Promise<{ ok: boolean; method?: string; error?: string }>
+      pickRuntimeJson: () => Promise<{ ok: boolean; path?: string; cancelled?: boolean; error?: string }>
+      pickSteamVRDir: () => Promise<{ ok: boolean; path?: string; cancelled?: boolean; error?: string }>
+      getSettings: () => Promise<{
+        ok: boolean
+        vrEnabled?: boolean
+        vrSteamVrPath?: string
+        vrXrRuntimeJson?: string
+        vrSteamVrRuntime?: string
+        vrExtraEnv?: string
+        vrAutoLaunchSteamVr?: boolean
+        error?: string
+      }>
+    }
   }
 }
 
