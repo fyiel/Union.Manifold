@@ -1048,7 +1048,15 @@ export function GameDetailPage() {
                       Externally Added
                     </Badge>
                   )}
-                  {!protonLoading && protonData && protonData.success ? (
+                  {protonLoading ? (
+                    <Badge
+                      variant="online"
+                      className="px-3 py-1 rounded-full text-sky-400 border-sky-500/30 font-semibold flex items-center gap-1.5 backdrop-blur-md shadow-lg"
+                    >
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                      Linux: Loading...
+                    </Badge>
+                  ) : protonData && protonData.success ? (
                     <Badge
                       variant="online"
                       className={cn(
@@ -1061,7 +1069,7 @@ export function GameDetailPage() {
                       <ShieldCheck className="h-3 w-3" />
                       Linux: {protonData.rating ? protonData.rating.charAt(0).toUpperCase() + protonData.rating.slice(1) : "Rated"}
                     </Badge>
-                  ) : !protonLoading && protonData && !protonData.success ? (
+                  ) : protonData && !protonData.success ? (
                     <Badge
                       variant="online"
                       className="px-3 py-1 rounded-full text-sky-400 border-sky-500/30 font-semibold flex items-center gap-1.5 backdrop-blur-md shadow-lg cursor-pointer transition-all hover:bg-black/80"
