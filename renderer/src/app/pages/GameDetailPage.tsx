@@ -8,12 +8,13 @@ import { GameComments } from "@/components/GameComments"
 import { useDownloads } from "@/context/downloads-context"
 import { apiUrl, apiFetch } from "@/lib/api"
 import { getPreferredDownloadHost, setPreferredDownloadHost, requestDownloadToken, fetchGameVersionsMeta, type PreferredDownloadHost, type DownloadConfig, type GameVersion } from "@/lib/downloads"
-import { formatNumber, hasOnlineMode, pickGameExecutable, proxyImageUrl, cn } from "@/lib/utils"
+import { formatNumber, hasOnlineMode, pickGameExecutable, proxyImageUrl, cn, generateErrorCode, ErrorTypes } from "@/lib/utils"
 import type { Game } from "@/lib/types"
 import { useGamesData } from "@/hooks/use-games"
 import { addViewedGameToHistory, hasCookieConsent } from "@/lib/user-history"
 import { useOnlineStatus } from "@/hooks/use-online-status"
 import { OfflineBanner } from "@/components/OfflineBanner"
+import { RateLimitError } from "@/components/RateLimitError"
 import {
   AlertTriangle,
   Calendar,
@@ -67,6 +68,7 @@ export function GameDetailPage() {
   const [game, setGame] = useState<Game | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [rateLimit, setRateLimit] = useState<{ message: string; code: string } | null>(null)
   const [downloadCount, setDownloadCount] = useState(0)
   const [viewCount, setViewCount] = useState(0)
   const [downloading, setDownloading] = useState(false)
@@ -112,6 +114,14 @@ export function GameDetailPage() {
 
   const appid = params.id || ""
 
+  const handleRateLimit = useCallback((context?: string) => {
+    const contextSuffix = context ? `:${context}` : ""
+    setRateLimit({
+      message: "Ye be firin' the cannons too fast, matey! Give it a moment and try again.",
+      code: generateErrorCode(ErrorTypes.GAME_FETCH, `game-detail${contextSuffix}`),
+    })
+  }, [])
+
   // Fetch ProtonDB summary for this game (proxied through the web API)
   useEffect(() => {
     if (!game?.appid) return
@@ -120,6 +130,10 @@ export function GameDetailPage() {
 
     apiFetch(`/api/protondb/${game.appid}`)
       .then(async (res) => {
+        if (res.status === 429) {
+          handleRateLimit("protondb")
+          return { success: false }
+        }
         if (!res.ok) return { success: false }
         return await res.json()
       })
@@ -135,7 +149,7 @@ export function GameDetailPage() {
       })
 
     return () => { cancelled = true }
-  }, [game?.appid])
+  }, [game?.appid, handleRateLimit])
 
   const persistGameName = (id: string, name?: string | null) => {
     if (!id || !name) return
@@ -151,12 +165,17 @@ export function GameDetailPage() {
       try {
         setLoading(true)
         setError(null)
+        setRateLimit(null)
 
         // External games don't exist on the API — load directly from local manifest
         const isExternalId = appid.startsWith('external-')
 
         if (!isExternalId) {
           const response = await fetch(apiUrl(`/api/games/${encodeURIComponent(appid)}`))
+          if (response.status === 429) {
+            handleRateLimit("game")
+            return
+          }
           if (!response.ok) {
             throw new Error(`Unable to load game (${response.status})`)
           }
@@ -200,7 +219,7 @@ export function GameDetailPage() {
     if (appid) {
       load()
     }
-  }, [appid])
+  }, [appid, handleRateLimit])
 
   useEffect(() => {
     if (!appid) return
@@ -253,11 +272,19 @@ export function GameDetailPage() {
     const fetchCounts = async () => {
       try {
         const downloadsRes = await fetch(apiUrl(`/api/downloads/count/${encodeURIComponent(appid)}`))
+        if (downloadsRes.status === 429) {
+          handleRateLimit("downloads-count")
+          return
+        }
         if (downloadsRes.ok) {
           const data = await downloadsRes.json()
           if (data.success) setDownloadCount(data.downloads || 0)
         }
         const viewsRes = await fetch(apiUrl(`/api/views/${encodeURIComponent(appid)}`))
+        if (viewsRes.status === 429) {
+          handleRateLimit("views-count")
+          return
+        }
         if (viewsRes.ok) {
           const data = await viewsRes.json()
           if (data.success) setViewCount(data.viewCount || 0)
@@ -268,26 +295,48 @@ export function GameDetailPage() {
     }
 
     fetchCounts()
-  }, [appid])
+  }, [appid, handleRateLimit])
 
   useEffect(() => {
     if (!appid) return
-    fetch(apiUrl(`/api/views/${encodeURIComponent(appid)}`), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-    })
-      .then(() => {
-        if (hasCookieConsent()) addViewedGameToHistory(appid)
-      })
-      .catch(() => {})
+    let cancelled = false
+    const run = async () => {
+      try {
+        const res = await fetch(apiUrl(`/api/views/${encodeURIComponent(appid)}`), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+        })
+        if (cancelled) return
+        if (res.status === 429) {
+          handleRateLimit("views-post")
+          return
+        }
+        if (res.ok) {
+          if (hasCookieConsent()) addViewedGameToHistory(appid)
+        }
+      } catch {
+        // ignore
+      }
 
-    // Sync view to user's account history (for cross-device sync)
-    apiFetch("/api/view-history", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ appid }),
-    }).catch(() => {})
-  }, [appid])
+      try {
+        const historyRes = await apiFetch("/api/view-history", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ appid }),
+        })
+        if (cancelled) return
+        if (historyRes.status === 429) {
+          handleRateLimit("view-history")
+        }
+      } catch {
+        // ignore
+      }
+    }
+    void run()
+    return () => {
+      cancelled = true
+    }
+  }, [appid, handleRateLimit])
 
   // Fetch version list (public metadata, no token needed)
   useEffect(() => {
@@ -567,6 +616,16 @@ export function GameDetailPage() {
     if (!installedVersionLabels.length) return Boolean(selectedVersion.is_current)
     return installedVersionLabels.includes(selectedVersion.label)
   }, [hasInstalledVersions, selectedVersion, installedVersionLabels])
+
+  if (rateLimit && isOnline) {
+    return (
+      <RateLimitError
+        message={rateLimit.message}
+        errorCode={rateLimit.code}
+        retry={() => window.location.reload()}
+      />
+    )
+  }
 
   if (loading) {
     return (
@@ -1506,7 +1565,7 @@ export function GameDetailPage() {
         </div>
       </section>
 
-      <GameComments appid={game.appid} gameName={game.name} />
+      <GameComments appid={game.appid} gameName={game.name} onRateLimit={(code) => handleRateLimit(code)} />
 
       {relatedGames.length > 0 && (
         <section className="py-16 px-4 bg-black/20">

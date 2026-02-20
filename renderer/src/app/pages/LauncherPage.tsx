@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { SearchSuggestions } from "@/components/SearchSuggestions"
 import { ErrorMessage } from "@/components/ErrorMessage"
+import { RateLimitError } from "@/components/RateLimitError"
 import { AnimatedCounter } from "@/components/AnimatedCounter"
 import { OfflineBanner } from "@/components/OfflineBanner"
 import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious } from "@/components/ui/carousel"
@@ -216,6 +217,15 @@ export function LauncherPage() {
 
       const response = await fetch(apiUrl("/api/downloads/all"))
 
+      if (response.status === 429) {
+        setGamesError({
+          type: "rate-limit",
+          message: "Ye be firin' the cannons too fast, matey! Give the crew a moment to reload before ye try again.",
+          code: generateErrorCode(ErrorTypes.DOWNLOADS_FETCH, "launcher-stats"),
+        })
+        return
+      }
+
       if (!response.ok) {
         throw new Error(`Stats API route failed: ${response.status}`)
       }
@@ -314,19 +324,42 @@ export function LauncherPage() {
         }
 
         console.error("Error loading games:", error)
-        setGamesError({
-          type: "games",
-          message:
-            error instanceof GamesFetchError && error.status
-              ? `Unable to load games (Status: ${error.status}). Please try again or contact support if the issue persists.`
-              : "Unable to load games. Please try again or contact support if the issue persists.",
-          code: generateErrorCode(ErrorTypes.GAME_FETCH, "launcher"),
-        })
+
+        if (error instanceof GamesFetchError && error.status === 429) {
+          setGamesError({
+            type: "rate-limit",
+            message: "Ye be firin' the cannons too fast, matey! Give the crew a moment to reload before ye try again.",
+            code: generateErrorCode(ErrorTypes.GAME_FETCH, "launcher"),
+          })
+        } else {
+          setGamesError({
+            type: "games",
+            message:
+              error instanceof GamesFetchError && error.status
+                ? `Unable to load games (Status: ${error.status}). Please try again or contact support if the issue persists.`
+                : "Unable to load games. Please try again or contact support if the issue persists.",
+            code: generateErrorCode(ErrorTypes.GAME_FETCH, "launcher"),
+          })
+        }
         setLoading(false)
         setRefreshing(false)
         return
       }
     }
+  }
+
+  if (gamesError?.type === "rate-limit" && isOnline && !loading) {
+    return (
+      <RateLimitError
+        message={gamesError.message}
+        errorCode={gamesError.code}
+        retry={() => {
+          setGamesError(null)
+          setLoading(true)
+          loadGames(true)
+        }}
+      />
+    )
   }
 
   const newReleases = useMemo(() => {
