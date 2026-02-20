@@ -900,12 +900,10 @@ ipcMain.handle('uc:auth-fetch', async (event, payload) => {
 })
 
 function getDefaultDownloadRoot() {
-  // Windows: use the root of the system drive (e.g., C:\)
   if (process.platform === 'win32') {
     const systemDrive = process.env.SystemDrive || 'C:'
-    return path.join(systemDrive + '\\', downloadDirName)
+    return path.join(`${systemDrive}\`, downloadDirName)
   }
-  // Linux/macOS: use the home directory
   const home = app.getPath('home')
   return path.join(home, downloadDirName)
 }
@@ -928,9 +926,9 @@ function ensureDownloadDir() {
   try {
     if (!fs.existsSync(target)) fs.mkdirSync(target, { recursive: true })
   } catch (err) {
-    // Fallback to default download location if primary fails
+    // Fallback to system drive (Windows) or home directory (others)
     const fallbackRoot = process.platform === 'win32'
-      ? (process.env.SystemDrive || 'C:') + '\\'
+      ? `${process.env.SystemDrive || 'C:'}\`
       : app.getPath('home')
     const fallback = path.join(fallbackRoot, downloadDirName)
     try {
@@ -2254,9 +2252,22 @@ function registerRunningGame(appid, exePath, proc, gameName, showGameName = true
     }).catch(() => { })
   }
   proc.on('exit', () => {
+    const elapsed = Date.now() - payload.startedAt
     if (appid) runningGames.delete(appid)
     if (exePath) runningGames.delete(exePath)
     if (runningGames.size === 0) clearGameRpcActivity()
+    // If the game exited very quickly it likely failed to start (wrong exe, missing admin, etc.)
+    // Notify the renderer so it can show a helpful message
+    if (elapsed < 5000) {
+      ucLog(`Game quick-exit detected: ${appid} (elapsed=${elapsed}ms)`, 'warn')
+      for (const win of BrowserWindow.getAllWindows()) {
+        try {
+          if (!win.isDestroyed()) {
+            win.webContents.send('uc:game-quick-exit', { appid: appid || null, exePath: exePath || null, elapsed })
+          }
+        } catch {}
+      }
+    }
   })
 }
 
@@ -3922,7 +3933,11 @@ ipcMain.handle('uc:game-exe-list', (_event, appid, versionLabel) => {
       } catch { }
     }
 
-    return { ok: true, folder: effectiveFolder, exes }
+    // gameRoot is always the top-level game folder (independent of version)
+    // Used as the defaultPath for the native browse dialog so it opens at a useful location
+    // rather than deep inside a version subfolder
+    const gameRoot = findInstalledFolderByAppid(appid) || effectiveFolder
+    return { ok: true, folder: effectiveFolder, gameRoot, exes }
   } catch (err) {
     console.error('[UC] game-exe-list failed', err)
     return { ok: false, error: 'failed', exes: [] }
@@ -4576,20 +4591,18 @@ ipcMain.handle('uc:game-exe-launch', async (_event, appid, exePath, gameName, sh
         ucLog(`  Args: ${JSON.stringify(args)}`, 'info')
       }
 
-      // Windows: launch via a persistent cmd.exe wrapper.
-      // Many games that fail to launch via direct spawn work when launched this way,
-      // and cmd.exe stays alive while the game runs, giving us a stable PID to track/quit.
+      // Windows (non-admin): spawn the exe directly so we track the actual game process.
+      // A cmd.exe wrapper was used here previously, but GUI applications detach from cmd.exe
+      // immediately, causing cmd.exe to exit in <100 ms and falsely triggering the quick-exit
+      // detection even when the game launched fine.
       if (process.platform === 'win32') {
         const env = { ...process.env }
         env.PATH = `${cwd};${env.PATH || ''}`
 
-        const quoteForCmd = (value) => `"${String(value).replace(/"/g, '""')}"`
-        const cmdLine = [quoteForCmd(command), ...(Array.isArray(args) ? args.map(quoteForCmd) : [])].join(' ')
-
-        const proc = child_process.spawn('cmd.exe', ['/d', '/s', '/c', cmdLine], {
+        const proc = child_process.spawn(command, args.length ? args : [], {
           detached: true,
           stdio: 'ignore',
-          windowsHide: true,
+          windowsHide: false,
           cwd,
           env
         })
@@ -4743,34 +4756,9 @@ ipcMain.handle('uc:game-exe-launch-admin', async (_event, appid, exePath, gameNa
       return result
     } catch (err) {
       ucLog(`Game launch as admin failed: ${appid} - ${err.message}`, 'error')
-      // Fallback to regular launch
-      try {
-        const cwd = path.dirname(exePath)
-
-        // Prepare environment - inherit all variables and ensure game directory is in PATH
-        const env = { ...process.env }
-        env.PATH = `${cwd};${env.PATH || ''}`
-
-        const proc = child_process.spawn(exePath, [], {
-          detached: true,
-          stdio: 'ignore',
-          windowsHide: false,
-          cwd,
-          env
-        })
-        proc.unref()
-        registerRunningGame(appid, exePath, proc, gameName, showGameName)
-        ucLog(`Game launched with fallback: ${appid} (PID: ${proc.pid})`)
-        return { ok: true, pid: proc.pid }
-      } catch (fallbackErr) {
-        const res = await shell.openPath(exePath)
-        if (res && typeof res === 'string' && res.length > 0) {
-          ucLog(`Game launch fallback failed: ${appid} - ${res}`, 'error')
-          return { ok: false, error: res }
-        }
-        ucLog(`Game opened via shell: ${appid}`)
-        return { ok: true }
-      }
+      // Don't silently fall back to a non-admin launch — the caller chose admin intentionally.
+      // If UAC was declined the user gets a clean failure rather than a confusing silent launch.
+      return { ok: false, error: err.message }
     }
   } catch (err) {
     ucLog(`Game launch as admin error: ${appid} - ${err.message}`, 'error')

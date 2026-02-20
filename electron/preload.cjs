@@ -52,6 +52,11 @@ contextBridge.exposeInMainWorld('ucDownloads', {
     }
     ipcRenderer.on('uc:download-update', listener)
     return () => ipcRenderer.removeListener('uc:download-update', listener)
+  },
+  onGameQuickExit: (callback) => {
+    const listener = (_event, data) => callback(data)
+    ipcRenderer.on('uc:game-quick-exit', listener)
+    return () => ipcRenderer.removeListener('uc:game-quick-exit', listener)
   }
 })
 
