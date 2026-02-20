@@ -72,7 +72,7 @@ export const GameCard = memo(function GameCard({
       [game.appid]
     ),
     useCallback(
-      (prev, next) =>
+      (prev: { isQueued: boolean; isInstalling: boolean }, next: { isQueued: boolean; isInstalling: boolean }) =>
         prev.isQueued === next.isQueued && prev.isInstalling === next.isInstalling,
       []
     )
@@ -117,35 +117,35 @@ export const GameCard = memo(function GameCard({
 
   useEffect(() => {
     let mounted = true
-    ;(async () => {
-      try {
-        if (mounted) {
-          setInstalledPath(null)
-          setIsInstalled(false)
-        }
-        if (window.ucDownloads?.getInstalledGlobal || window.ucDownloads?.getInstalled) {
-          const manifest = await (window.ucDownloads.getInstalledGlobal?.(game.appid) || window.ucDownloads.getInstalled(game.appid))
-          if (!mounted) return
-          if (manifest) setIsInstalled(true)
-          if (manifest && manifest.metadata) {
-            // if manifest saved a local image, prefer it for display when offline
-            const localImg = manifest.metadata.localImage || manifest.metadata.image
-            if (localImg) {
-              setPreviewImage(localImg)
+      ; (async () => {
+        try {
+          if (mounted) {
+            setInstalledPath(null)
+            setIsInstalled(false)
+          }
+          if (window.ucDownloads?.getInstalledGlobal || window.ucDownloads?.getInstalled) {
+            const manifest = await (window.ucDownloads.getInstalledGlobal?.(game.appid) || window.ucDownloads.getInstalled(game.appid))
+            if (!mounted) return
+            if (manifest) setIsInstalled(true)
+            if (manifest && manifest.metadata) {
+              // if manifest saved a local image, prefer it for display when offline
+              const localImg = manifest.metadata.localImage || manifest.metadata.image
+              if (localImg) {
+                setPreviewImage(localImg)
+              }
+            }
+            if (manifest && Array.isArray(manifest.files) && manifest.files.length) {
+              // prefer first file path for Open action
+              setInstalledPath(manifest.files[0].path || null)
             }
           }
-          if (manifest && Array.isArray(manifest.files) && manifest.files.length) {
-            // prefer first file path for Open action
-            setInstalledPath(manifest.files[0].path || null)
+        } catch {
+          if (mounted) {
+            setInstalledPath(null)
+            setIsInstalled(false)
           }
         }
-      } catch {
-        if (mounted) {
-          setInstalledPath(null)
-          setIsInstalled(false)
-        }
-      }
-    })()
+      })()
     return () => {
       mounted = false
     }
@@ -181,7 +181,7 @@ export const GameCard = memo(function GameCard({
   useEffect(() => {
     if (isRunning || !(gameJustLaunchedRef.current > Date.now())) return
     gameJustLaunchedRef.current = 0
-    try { gameQuickExitUnsubRef.current?.() } catch {}
+    try { gameQuickExitUnsubRef.current?.() } catch { }
     gameQuickExitUnsubRef.current = null
     void (async () => {
       const adminEnabled = Boolean(await getRunAsAdminEnabled().catch(() => false))
@@ -244,7 +244,7 @@ export const GameCard = memo(function GameCard({
       if (!versionLabel) {
         await window.ucSettings.set(`gameExe:${game.appid}`, path || null)
       }
-    } catch {}
+    } catch { }
   }
 
   const getAdminPromptShown = async () => {
@@ -261,7 +261,7 @@ export const GameCard = memo(function GameCard({
     if (!window.ucSettings?.set) return
     try {
       await window.ucSettings.set('adminPromptShown', true)
-    } catch {}
+    } catch { }
   }
 
   const getRunAsAdminEnabled = async () => {
@@ -287,7 +287,7 @@ export const GameCard = memo(function GameCard({
     if (!window.ucSettings?.set) return
     try {
       await window.ucSettings.set(`shortcutAsked:${game.appid}`, true)
-    } catch {}
+    } catch { }
   }
 
   const getAlwaysCreateShortcut = async () => {
@@ -304,7 +304,7 @@ export const GameCard = memo(function GameCard({
     try {
       try {
         await window.ucDownloads?.deleteDesktopShortcut?.(game.name)
-      } catch {}
+      } catch { }
       const result = await window.ucDownloads.createDesktopShortcut(game.name, exePath)
       if (result?.ok) {
         gameLogger.info('Desktop shortcut created', { appid: game.appid })
@@ -355,9 +355,9 @@ export const GameCard = memo(function GameCard({
   const launchGame = async (path: string, asAdmin: boolean = false) => {
     if (!window.ucDownloads) return
     const launchFn = asAdmin && isWindows
-      ? window.ucDownloads.launchGameExecutableAsAdmin 
+      ? window.ucDownloads.launchGameExecutableAsAdmin
       : window.ucDownloads.launchGameExecutable
-    
+
     if (!launchFn) return
     const showGameName = await window.ucSettings?.get?.('rpcShowGameName') ?? true
     const res = await launchFn(game.appid, path, game.name, showGameName)
@@ -381,12 +381,12 @@ export const GameCard = memo(function GameCard({
         setGameStartFailedOpen(true)
       }
 
-      try { gameQuickExitUnsubRef.current?.() } catch {}
+      try { gameQuickExitUnsubRef.current?.() } catch { }
       gameQuickExitUnsubRef.current = window.ucDownloads?.onGameQuickExit?.((data) => {
         if (data?.appid !== game.appid) return
         if (!(gameJustLaunchedRef.current > Date.now())) return
         gameJustLaunchedRef.current = 0
-        try { gameQuickExitUnsubRef.current?.() } catch {}
+        try { gameQuickExitUnsubRef.current?.() } catch { }
         gameQuickExitUnsubRef.current = null
         void showStartFailedModal()
       }) ?? null
@@ -399,11 +399,11 @@ export const GameCard = memo(function GameCard({
       return
     }
     await setAdminPromptShown()
-    
+
     // Check if we should show shortcut modal BEFORE launching
     const alreadyAsked = await getShortcutAskedForGame()
     const alwaysCreate = await getAlwaysCreateShortcut()
-    
+
     if (alwaysCreate && !alreadyAsked) {
       // Auto-create shortcut without asking, then launch
       await createDesktopShortcut(path)
@@ -426,7 +426,7 @@ export const GameCard = memo(function GameCard({
     setPendingExePath(path)
     const promptShown = await getAdminPromptShown()
     const runAsAdminEnabled = await getRunAsAdminEnabled()
-    
+
     if (!promptShown) {
       if (isWindows) {
         setAdminPromptOpen(true)
@@ -442,12 +442,12 @@ export const GameCard = memo(function GameCard({
   const handlePlayClick = async (event: MouseEvent) => {
     event.preventDefault()
     event.stopPropagation()
-    
+
     // If game is running, stop it
     if (isRunning && window.ucDownloads?.quitGameExecutable) {
       try {
         gameJustLaunchedRef.current = 0
-        try { gameQuickExitUnsubRef.current?.() } catch {}
+        try { gameQuickExitUnsubRef.current?.() } catch { }
         gameQuickExitUnsubRef.current = null
         const result = await window.ucDownloads.quitGameExecutable(game.appid)
         if (result?.ok && result.stopped) {
@@ -458,7 +458,7 @@ export const GameCard = memo(function GameCard({
       }
       return
     }
-    
+
     if (!window.ucDownloads?.listGameExecutables || !window.ucDownloads?.launchGameExecutable) {
       if (installedPath) openPath(installedPath)
       return
@@ -469,12 +469,12 @@ export const GameCard = memo(function GameCard({
       const allowLegacyFallback = installedLabels.length <= 1
       const savedExe = await getSavedExe(preferredLabel, allowLegacyFallback)
       const runAsAdminEnabled = await getRunAsAdminEnabled()
-      
+
       if (savedExe) {
         await launchGame(savedExe, runAsAdminEnabled)
         return
       }
-      
+
       const result = await listGameExecutablesWithFallback()
       if (!result) {
         if (installedPath) openPath(installedPath)
@@ -487,7 +487,7 @@ export const GameCard = memo(function GameCard({
       if (pick && confident) {
         setPendingExePath(pick.path)
         const promptShown = await getAdminPromptShown()
-        
+
         if (!promptShown) {
           if (isWindows) {
             setAdminPromptOpen(true)
@@ -509,23 +509,21 @@ export const GameCard = memo(function GameCard({
     <div className="relative group/container h-full">
       <Link to={`/game/${game.appid}`} className="block h-full">
         <Card
-          className={`group relative h-full overflow-hidden border border-white/10 bg-black/40 backdrop-blur-md transition-all duration-500 hover:-translate-y-1 hover:shadow-[0_0_30px_rgba(var(--primary),0.15)] hover:border-primary/50 flex flex-col gap-0 py-0 ${
-            isCompact ? "rounded-xl" : "rounded-2xl"
-          }`}
+          className={`group relative h-full overflow-hidden border border-white/10 bg-black/40 backdrop-blur-md transition-all duration-500 hover:-translate-y-1 hover:shadow-[0_0_30px_rgba(var(--primary),0.15)] hover:border-primary/50 flex flex-col gap-0 py-0 ${isCompact ? "rounded-xl" : "rounded-2xl"
+            }`}
           onMouseEnter={fetchStatsOnHover}
         >
           {/* Image Section */}
           <div className={`relative w-full overflow-hidden ${isCompact ? "aspect-[4/5]" : "aspect-[3/4]"}`}>
             <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent z-10 opacity-70 transition-opacity duration-300 group-hover:opacity-50" />
-            
+
             <img
-              src={proxyImageUrl((typeof navigator !== 'undefined' && !navigator.onLine && previewImage) ? previewImage : game.image) || "/banner.png"}
+              src={proxyImageUrl((typeof navigator !== 'undefined' && !navigator.onLine && previewImage) ? previewImage : game.image) || "./banner.png"}
               alt={game.name}
-              className={`h-full w-full object-cover transition-all duration-700 ease-in-out group-hover:scale-110 ${
-                isNSFW
-                  ? (allowNsfwReveal ? "blur-md group-hover:blur-none" : "blur-xl brightness-50")
-                  : (imageLoaded ? "" : "blur-lg")
-              }`}
+              className={`h-full w-full object-cover transition-all duration-700 ease-in-out group-hover:scale-110 ${isNSFW
+                ? (allowNsfwReveal ? "blur-md group-hover:blur-none" : "blur-xl brightness-50")
+                : (imageLoaded ? "" : "blur-lg")
+                }`}
               loading="lazy"
               onLoad={() => setImageLoaded(true)}
             />
@@ -533,9 +531,8 @@ export const GameCard = memo(function GameCard({
             {/* NSFW Overlay */}
             {isNSFW && (
               <div
-                className={`absolute inset-0 z-20 flex items-center justify-center bg-black/40 transition-opacity duration-300 ${
-                  allowNsfwReveal ? "group-hover:opacity-0" : ""
-                }`}
+                className={`absolute inset-0 z-20 flex items-center justify-center bg-black/40 transition-opacity duration-300 ${allowNsfwReveal ? "group-hover:opacity-0" : ""
+                  }`}
               >
                 <div className="bg-red-600 text-white px-3 py-1 rounded-full text-xs font-bold">18+</div>
               </div>
@@ -546,15 +543,13 @@ export const GameCard = memo(function GameCard({
               <div className="absolute inset-0 z-30 flex items-center justify-center">
                 <button
                   onClick={handlePlayClick}
-                  className={`group/play relative inline-flex items-center justify-center h-14 w-14 rounded-full shadow-[0_0_20px_rgba(var(--primary),0.5)] transition-transform duration-300 hover:scale-110 hover:shadow-[0_0_30px_rgba(var(--primary),0.7)] ${
-                    isRunning
-                      ? "bg-red-600 text-white shadow-red-500/40"
-                      : "bg-primary text-primary-foreground"
-                  }`}
+                  className={`group/play relative inline-flex items-center justify-center h-14 w-14 rounded-full shadow-[0_0_20px_rgba(var(--primary),0.5)] transition-transform duration-300 hover:scale-110 hover:shadow-[0_0_30px_rgba(var(--primary),0.7)] ${isRunning
+                    ? "bg-red-600 text-white shadow-red-500/40"
+                    : "bg-primary text-primary-foreground"
+                    }`}
                 >
-                  <span className={`absolute inset-0 rounded-full opacity-0 transition-opacity duration-300 group-hover/play:opacity-100 blur-lg ${
-                    isRunning ? "bg-red-500/40" : "bg-primary/40"
-                  }`} />
+                  <span className={`absolute inset-0 rounded-full opacity-0 transition-opacity duration-300 group-hover/play:opacity-100 blur-lg ${isRunning ? "bg-red-500/40" : "bg-primary/40"
+                    }`} />
                   {isRunning ? <Square className="relative h-6 w-6 fill-current" /> : <Play className="relative h-6 w-6 fill-current ml-1" />}
                 </button>
               </div>
@@ -562,39 +557,39 @@ export const GameCard = memo(function GameCard({
 
             {/* Status Badges */}
             <div className="absolute top-3 left-3 z-30 flex flex-col gap-2">
-                {(isQueued || isInstalling) && (
-                  <Badge className="bg-sky-500 text-white border-none shadow-lg shadow-sky-500/40 animate-pulse">
-                     <Download className="w-3 h-3 mr-1" />
-                     {isQueued ? "Queued" : "Installing"}
-                  </Badge>
-                )}
-                
-                {isPopular && (
-                  <Badge className="bg-primary/90 hover:bg-primary text-primary-foreground backdrop-blur-md shadow-[0_0_15px_rgba(var(--primary),0.4)] border-0 px-2 py-0.5 text-xs font-bold uppercase tracking-wider animate-in fade-in zoom-in duration-300">
-                    <Flame className="w-3 h-3 mr-1 fill-current" /> Popular
-                  </Badge>
-                )}
-                
-                {hasOnlineMode(game.hasCoOp) && (
-                  <Badge variant="online" className="px-2 py-0.5 text-xs font-semibold flex items-center gap-1">
-                    <Wifi className="w-3 h-3 mr-1 text-green-400" />
-                    <span className="text-white">Online</span>
-                  </Badge>
-                )}
+              {(isQueued || isInstalling) && (
+                <Badge className="bg-sky-500 text-white border-none shadow-lg shadow-sky-500/40 animate-pulse">
+                  <Download className="w-3 h-3 mr-1" />
+                  {isQueued ? "Queued" : "Installing"}
+                </Badge>
+              )}
+
+              {isPopular && (
+                <Badge className="bg-primary/90 hover:bg-primary text-primary-foreground backdrop-blur-md shadow-[0_0_15px_rgba(var(--primary),0.4)] border-0 px-2 py-0.5 text-xs font-bold uppercase tracking-wider animate-in fade-in zoom-in duration-300">
+                  <Flame className="w-3 h-3 mr-1 fill-current" /> Popular
+                </Badge>
+              )}
+
+              {hasOnlineMode(game.hasCoOp) && (
+                <Badge variant="online" className="px-2 py-0.5 text-xs font-semibold flex items-center gap-1">
+                  <Wifi className="w-3 h-3 mr-1 text-green-400" />
+                  <span className="text-white">Online</span>
+                </Badge>
+              )}
             </div>
 
             {/* Hover Stats Overlay */}
             <div className="absolute bottom-0 left-0 right-0 z-20 p-4 translate-y-full transition-transform duration-300 ease-out group-hover:translate-y-0 bg-gradient-to-t from-black/90 via-black/60 to-transparent pt-10">
-                <div className="flex items-center justify-between text-xs font-medium text-white/90">
-                  <div className="flex items-center gap-1.5 bg-black/40 rounded-full px-2 py-1 backdrop-blur-sm border border-white/10">
-                    <Download className="w-3.5 h-3.5 text-primary" />
-                    <span>{formatNumber(displayStats.downloads)}</span>
-                  </div>
-                  <div className="flex items-center gap-1.5 bg-black/40 rounded-full px-2 py-1 backdrop-blur-sm border border-white/10">
-                    <Eye className="w-3.5 h-3.5 text-blue-400" />
-                    <span>{formatNumber(displayStats.views)}</span>
-                  </div>
+              <div className="flex items-center justify-between text-xs font-medium text-white/90">
+                <div className="flex items-center gap-1.5 bg-black/40 rounded-full px-2 py-1 backdrop-blur-sm border border-white/10">
+                  <Download className="w-3.5 h-3.5 text-primary" />
+                  <span>{formatNumber(displayStats.downloads)}</span>
                 </div>
+                <div className="flex items-center gap-1.5 bg-black/40 rounded-full px-2 py-1 backdrop-blur-sm border border-white/10">
+                  <Eye className="w-3.5 h-3.5 text-blue-400" />
+                  <span>{formatNumber(displayStats.views)}</span>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -602,34 +597,33 @@ export const GameCard = memo(function GameCard({
           <CardContent className={`${isCompact ? "p-3" : "p-4"} flex-1 flex flex-col space-y-2 relative z-20 bg-background/5`}>
             <div className="space-y-1">
               <h3
-                className={`font-bold leading-tight line-clamp-1 text-white group-hover:text-primary transition-colors duration-300 ${
-                  isCompact ? "text-base" : "text-lg"
-                }`}
+                className={`font-bold leading-tight line-clamp-1 text-white group-hover:text-primary transition-colors duration-300 ${isCompact ? "text-base" : "text-lg"
+                  }`}
               >
                 {game.name}
               </h3>
               <div className="flex flex-wrap gap-1.5 h-5 overflow-hidden">
-                 {displayGenres.slice(0, 2).map((genre) => (
-                  <span 
-                    key={genre} 
+                {displayGenres.slice(0, 2).map((genre) => (
+                  <span
+                    key={genre}
                     className="text-[10px] uppercase font-bold tracking-wider text-white/50 bg-white/5 px-1.5 py-0.5 rounded-sm whitespace-nowrap"
                   >
                     {genre}
                   </span>
-                 ))}
+                ))}
               </div>
             </div>
 
-             <div className="flex items-center justify-between text-xs text-white/60 pt-2 border-t border-white/5 mt-auto">
-                <div className="flex items-center gap-1.5">
-                  <Calendar className="w-3.5 h-3.5" />
-                  <span>{game.release_date?.split("-")[0] || "N/A"}</span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <HardDrive className="w-3.5 h-3.5" />
-                  <span>{game.size}</span>
-                </div>
-             </div>
+            <div className="flex items-center justify-between text-xs text-white/60 pt-2 border-t border-white/5 mt-auto">
+              <div className="flex items-center gap-1.5">
+                <Calendar className="w-3.5 h-3.5" />
+                <span>{game.release_date?.split("-")[0] || "N/A"}</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <HardDrive className="w-3.5 h-3.5" />
+                <span>{game.size}</span>
+              </div>
+            </div>
           </CardContent>
         </Card>
       </Link>
@@ -693,7 +687,7 @@ export const GameCard = memo(function GameCard({
         onEnableAdmin={async () => {
           try {
             await window.ucSettings?.set?.('runGamesAsAdmin', true)
-          } catch {}
+          } catch { }
           setGameStartFailedOpen(false)
         }}
         onClose={() => setGameStartFailedOpen(false)}

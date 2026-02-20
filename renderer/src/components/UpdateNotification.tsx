@@ -16,18 +16,18 @@ export function UpdateNotification() {
     const onNotAvailable = () => {
       // no-op
     }
-    window.electron.ipcRenderer.on('update-available', onAvailable)
-    window.electron.ipcRenderer.on('update-not-available', onNotAvailable)
+    window.electron?.ipcRenderer?.on('update-available', onAvailable)
+    window.electron?.ipcRenderer?.on('update-not-available', onNotAvailable)
     return () => {
-      window.electron.ipcRenderer.removeListener('update-available', onAvailable)
-      window.electron.ipcRenderer.removeListener('update-not-available', onNotAvailable)
+      window.electron?.ipcRenderer?.removeListener('update-available', onAvailable)
+      window.electron?.ipcRenderer?.removeListener('update-not-available', onNotAvailable)
     }
   }, [])
 
   const openReleases = async () => {
     setOpened(false)
     const res = await window.ucUpdater?.checkForUpdates()
-    if (res?.ok) setOpened(true)
+    if (res && !res.error) setOpened(true)
   }
 
   if (!available) return null

@@ -168,7 +168,7 @@ export function LauncherPage() {
               installedMap.set(meta.appid, {
                 ...meta,
                 name: meta.name || meta.appid,
-                image: meta.image || "/banner.png",
+                image: meta.image || "./banner.png",
                 genres: Array.isArray(meta.genres) ? meta.genres : [],
               })
             }
@@ -396,8 +396,8 @@ export function LauncherPage() {
     }
 
     const candidates = games.filter((game) => {
-       const isNSFW = Array.isArray(game.genres) && game.genres.some((genre) => genre?.toLowerCase() === "nsfw")
-       return !isNSFW
+      const isNSFW = Array.isArray(game.genres) && game.genres.some((genre) => genre?.toLowerCase() === "nsfw")
+      return !isNSFW
     })
 
     const sorted = [...candidates].sort((a, b) => calculateScore(b) - calculateScore(a))
@@ -780,36 +780,36 @@ export function LauncherPage() {
                 </div>
               </div>
             )}
-            
+
             {loading ? (
-               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                  {Array.from({ length: 4 }).map((_, index) => (
-                    <GameCardSkeleton key={`skeleton-popular-${index}`} />
-                  ))}
-               </div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                {Array.from({ length: 4 }).map((_, index) => (
+                  <GameCardSkeleton key={`skeleton-popular-${index}`} />
+                ))}
+              </div>
             ) : (
-                <Carousel
-                  opts={{
-                    align: "start",
-                    loop: false,
-                    skipSnaps: false,
-                    dragFree: true,
-                  }}
-                  className="w-full"
-                >
-                  <CarouselContent className="-ml-2 md:-ml-4 pb-10">
-                    {popularReleases.map((game) => (
-                      <CarouselItem
-                        key={game.appid}
-                        className="pl-2 md:pl-4 basis-full sm:basis-1/2 md:basis-1/3 lg:basis-1/3 xl:basis-1/4"
-                      >
-                        <GameCard game={game} stats={gameStats[game.appid]} isPopular />
-                      </CarouselItem>
-                    ))}
-                  </CarouselContent>
-                  <CarouselPrevious className="left-0 -translate-x-1/2 bg-black/50 hover:bg-black/80 border-white/10 text-white backdrop-blur-md" />
-                  <CarouselNext className="right-0 translate-x-1/2 bg-black/50 hover:bg-black/80 border-white/10 text-white backdrop-blur-md" />
-                </Carousel>
+              <Carousel
+                opts={{
+                  align: "start",
+                  loop: false,
+                  skipSnaps: false,
+                  dragFree: true,
+                }}
+                className="w-full"
+              >
+                <CarouselContent className="-ml-2 md:-ml-4 pb-10">
+                  {popularReleases.map((game) => (
+                    <CarouselItem
+                      key={game.appid}
+                      className="pl-2 md:pl-4 basis-full sm:basis-1/2 md:basis-1/3 lg:basis-1/3 xl:basis-1/4"
+                    >
+                      <GameCard game={game} stats={gameStats[game.appid]} isPopular />
+                    </CarouselItem>
+                  ))}
+                </CarouselContent>
+                <CarouselPrevious className="left-0 -translate-x-1/2 bg-black/50 hover:bg-black/80 border-white/10 text-white backdrop-blur-md" />
+                <CarouselNext className="right-0 translate-x-1/2 bg-black/50 hover:bg-black/80 border-white/10 text-white backdrop-blur-md" />
+              </Carousel>
             )}
           </div>
         </section>

@@ -1,3 +1,5 @@
+import { apiLogger as logger } from "./logger"
+
 interface UserHistory {
   searches: string[]
   viewedGames: string[]

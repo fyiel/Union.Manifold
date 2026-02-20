@@ -26,7 +26,7 @@ export async function apiFetch(path: string, init?: RequestInit) {
 
   const canUseAuthFetch = typeof window !== "undefined" && Boolean(window.ucAuth?.fetch)
   if (canUseAuthFetch) {
-    let body: string | null | undefined = nextInit.body as any
+    let body: any = nextInit.body
     let headers = new Headers(nextInit.headers || {})
 
     if (body instanceof URLSearchParams) {
@@ -52,7 +52,7 @@ export async function apiFetch(path: string, init?: RequestInit) {
       // runs instead of throwing an uncaught RangeError.
       const rawStatus = result.status || 0
       const safeStatus = rawStatus >= 200 && rawStatus <= 599 ? rawStatus : 503
-      return new Response(bytes, {
+      return new Response(bytes as any, {
         status: safeStatus,
         statusText: result.statusText || (safeStatus !== rawStatus ? "Network Error" : ""),
         headers: new Headers(result.headers || []),
@@ -84,7 +84,7 @@ export async function fetchJson<T>(path: string, init?: RequestInit): Promise<T>
       if (body && typeof body === "object" && "error" in body) {
         detail = String((body as { error?: string }).error || detail)
       }
-    } catch {}
+    } catch { }
     throw new Error(detail)
   }
   return response.json() as Promise<T>
