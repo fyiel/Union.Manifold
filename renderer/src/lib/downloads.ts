@@ -1,7 +1,8 @@
 import { apiFetch, apiUrl } from "@/lib/api"
 import { downloadLogger } from "@/lib/logger"
 
-export type DownloadHosts = Record<string, string[]>
+export type DownloadHostEntry = { url: string; part: number | null }
+export type DownloadHosts = Record<string, DownloadHostEntry[]>
 
 export type DownloadLinksResult = {
   hosts: DownloadHosts
@@ -77,13 +78,22 @@ const ROOTZ_404_MESSAGE = "Rootz returned 404. The link appears to be dead."
 const FILEQ_404_MESSAGE = "FileQ returned 404. The link appears to be dead."
 const DATAVAULTS_404_MESSAGE = "DataVaults returned 404. The link appears to be dead."
 
-function sanitizeHosts(input: DownloadHosts | null | undefined): DownloadHosts {
+/**
+ * Normalise host entries from API — handles both legacy string[] and new {url,part}[] shapes.
+ */
+function sanitizeHosts(input: Record<string, any[]> | null | undefined): DownloadHosts {
   const hosts = input && typeof input === "object" ? input : {}
   const cleaned: DownloadHosts = {}
   for (const [key, value] of Object.entries(hosts)) {
     const lower = key.toLowerCase()
     if (lower.includes("vikingfile")) continue
-    cleaned[key] = Array.isArray(value) ? value : []
+    if (!Array.isArray(value)) { cleaned[key] = []; continue }
+    cleaned[key] = value.map((entry, i) => {
+      if (typeof entry === "string") return { url: entry, part: null }
+      if (entry && typeof entry === "object" && typeof entry.url === "string")
+        return { url: entry.url, part: typeof entry.part === "number" ? entry.part : null }
+      return { url: String(entry), part: null }
+    })
   }
   return cleaned
 }
@@ -313,7 +323,7 @@ export async function fetchDownloadLinks(appid: string, downloadToken: string): 
 
   if (contentType.includes("application/json")) {
     const data = await response.json()
-    const hosts = sanitizeHosts((data?.hosts as DownloadHosts) || {})
+    const hosts = sanitizeHosts(data?.hosts || {})
     return { hosts }
   }
 
@@ -350,7 +360,7 @@ export async function fetchDownloadLinksForVersion(
 
   if (contentType.includes("application/json")) {
     const data = await response.json()
-    const hosts = sanitizeHosts((data?.hosts as DownloadHosts) || {})
+    const hosts = sanitizeHosts(data?.hosts || {})
     return { hosts }
   }
 
@@ -412,7 +422,7 @@ export function setPreferredDownloadHost(host: PreferredDownloadHost) {
   localStorage.setItem(DOWNLOAD_HOST_STORAGE_KEY, host)
 }
 
-export function selectHost(available: DownloadHosts, preferredHost?: PreferredDownloadHost) {
+export function selectHost(available: DownloadHosts, preferredHost?: PreferredDownloadHost): { host: string; links: DownloadHostEntry[] } {
   const preferred = preferredHost && PREFERRED_HOSTS.includes(preferredHost) ? preferredHost : "pixeldrain"
   if (SUPPORTED_DOWNLOAD_HOSTS.includes(preferred)) {
     const preferredLinks = pickHostLinks(available, preferred)
