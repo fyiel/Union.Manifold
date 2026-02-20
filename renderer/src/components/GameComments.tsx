@@ -63,7 +63,8 @@ type ThreadCommentPayload = {
   parentId?: string | null
   likeCount?: number
   likedByMe?: boolean
-  author: CommentUser
+  deletedBy?: string | null
+  author: CommentUser | null
   replies?: ThreadCommentPayload[]
 }
 
@@ -75,7 +76,8 @@ type GameComment = {
   parentId: string | null
   likeCount: number
   likedByMe: boolean
-  author: CommentUser
+  deletedBy: string | null
+  author: CommentUser | null
   replies: GameComment[]
 }
 
@@ -84,6 +86,8 @@ const normalizeComment = (comment: ThreadCommentPayload): GameComment => ({
   parentId: comment.parentId ?? null,
   likeCount: Number(comment.likeCount ?? 0),
   likedByMe: Boolean(comment.likedByMe ?? false),
+  deletedBy: comment.deletedBy ?? null,
+  author: comment.author ?? null,
   replies: (comment.replies ?? []).map(normalizeComment),
 })
 
@@ -158,7 +162,7 @@ const updateCommentInTree = (
 }
 
 type SortMode = "pinned" | "newest" | "oldest" | "liked"
-type FilterMode = "all" | "pinned"
+type FilterMode = "all" | "pinned" | "deleted"
 
 const sortThread = (
   thread: GameComment[],
@@ -168,12 +172,21 @@ const sortThread = (
 ): GameComment[] => {
   if (thread.length === 0) return thread
   let base = [...thread]
-  if (depth === 0 && filterMode === "pinned") {
-    base = base.filter((comment) => comment.pinned)
+  if (depth === 0) {
+    if (filterMode === "pinned") {
+      base = base.filter((comment) => comment.pinned)
+    } else if (filterMode === "deleted") {
+      base = base.filter((comment) => Boolean(comment.deletedBy))
+    }
   }
 
   const sorted = base.sort((a, b) => {
     if (depth === 0) {
+      // Deleted comments sink to bottom
+      if (Boolean(a.deletedBy) !== Boolean(b.deletedBy)) {
+        return a.deletedBy ? 1 : -1
+      }
+
       if (sortMode === "pinned") {
         if (Number(Boolean(a.pinned)) !== Number(Boolean(b.pinned))) {
           return Number(Boolean(b.pinned)) - Number(Boolean(a.pinned))
@@ -232,6 +245,7 @@ export function GameComments({
   const [likingId, setLikingId] = useState<string | null>(null)
   const [sortMode, setSortMode] = useState<SortMode>("pinned")
   const [filterMode, setFilterMode] = useState<FilterMode>("all")
+  const [revealedDeletedIds, setRevealedDeletedIds] = useState<Set<string>>(new Set())
   const itemsPerPage = 10
 
   const remaining = useMemo(() => 1000 - body.length, [body.length])
@@ -474,7 +488,18 @@ export function GameComments({
       if (!res.ok) {
         throw new Error(data?.error || "Failed to delete comment")
       }
-      setComments((prev) => removeCommentFromTree(prev, id))
+      // Mark comment as deleted instead of removing it (so replies remain visible)
+      const deletedBy = data?.deletedBy || "user"
+      setComments((prev) =>
+        updateCommentInTree(prev, id, (comment) => ({
+          ...comment,
+          deletedBy,
+          author: null,
+          likeCount: 0,
+          likedByMe: false,
+          pinned: false,
+        }))
+      )
       setActiveReplyParent((current) => (current === id ? null : current))
     } catch (e: any) {
       setError(e?.message || "Failed to delete comment")
@@ -588,7 +613,92 @@ export function GameComments({
     const isExpanded = expandedReplies.has(comment.id)
     const isHighlighted = highlightedCommentId === comment.id
     const isPinned = Boolean(comment.pinned)
+    const isDeleted = Boolean(comment.deletedBy)
+    const isContentRevealed = revealedDeletedIds.has(comment.id)
     const authorRole = comment.author?.discordId && STAFF_ROLES[comment.author.discordId]
+
+    const toggleRevealDeleted = () => {
+      setRevealedDeletedIds((prev) => {
+        const next = new Set(prev)
+        if (next.has(comment.id)) {
+          next.delete(comment.id)
+        } else {
+          next.add(comment.id)
+        }
+        return next
+      })
+    }
+
+    if (isDeleted) {
+      const deletedLabel = comment.deletedBy === "moderator"
+        ? "Comment was deleted by moderator"
+        : "Comment was deleted by user"
+
+      return (
+        <div
+          key={comment.id}
+          id={`comment-${comment.id}`}
+          className={`rounded-2xl border border-border/40 bg-card/20 p-4 sm:p-5 transition-shadow ${
+            depth > 0 ? "ml-4 sm:ml-10" : ""
+          } ${isHighlighted ? "shadow-lg shadow-primary/30" : ""}`}
+        >
+          <div className="flex items-start gap-3">
+            <div className="h-10 w-10 rounded-full bg-muted/30 flex items-center justify-center shrink-0">
+              <Trash2 className="h-5 w-5 text-muted-foreground/50" />
+            </div>
+            <div className="flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-sm text-muted-foreground italic">{deletedLabel}</span>
+              </div>
+
+              {isContentRevealed ? (
+                <div className="mt-2">
+                  <p className="text-sm text-muted-foreground/70 whitespace-pre-wrap leading-relaxed italic">
+                    {comment.body}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={toggleRevealDeleted}
+                    className="mt-2 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    Hide content
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={toggleRevealDeleted}
+                  className="mt-2 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  Click to view deleted message
+                </button>
+              )}
+
+              {hasReplies && (
+                <div className="mt-4">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 px-2 text-xs"
+                    onClick={() => toggleReplies(comment.id)}
+                  >
+                    <ChevronDown
+                      className={`h-4 w-4 mr-1 transition-transform ${isExpanded ? "rotate-180" : ""}`}
+                    />
+                    {isExpanded ? "Hide" : "Show"} {comment.replies.length} replies
+                  </Button>
+                  {isExpanded && (
+                    <div className="mt-3 space-y-3">
+                      {comment.replies.map((reply) => renderComment(reply, depth + 1))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )
+    }
 
     return (
       <div
@@ -788,8 +898,9 @@ export function GameComments({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All</SelectItem>
-                <SelectItem value="pinned">Pinned only</SelectItem>
+                <SelectItem value="all">Show All</SelectItem>
+                <SelectItem value="pinned">Pinned Only</SelectItem>
+                <SelectItem value="deleted">Deleted Only</SelectItem>
               </SelectContent>
             </Select>
           </div>
