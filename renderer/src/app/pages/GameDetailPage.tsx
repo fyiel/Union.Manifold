@@ -8,7 +8,7 @@ import { GameComments } from "@/components/GameComments"
 import { useDownloads } from "@/context/downloads-context"
 import { apiUrl, apiFetch } from "@/lib/api"
 import { getPreferredDownloadHost, setPreferredDownloadHost, requestDownloadToken, fetchGameVersionsMeta, type PreferredDownloadHost, type DownloadConfig, type GameVersion } from "@/lib/downloads"
-import { formatNumber, hasOnlineMode, pickGameExecutable, proxyImageUrl } from "@/lib/utils"
+import { formatNumber, hasOnlineMode, pickGameExecutable, proxyImageUrl, cn } from "@/lib/utils"
 import type { Game } from "@/lib/types"
 import { useGamesData } from "@/hooks/use-games"
 import { addViewedGameToHistory, hasCookieConsent } from "@/lib/user-history"
@@ -49,6 +49,14 @@ import { VersionConflictModal } from "@/components/VersionConflictModal"
 import { gameLogger } from "@/lib/logger"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { GamePageSkeleton } from "@/components/GamePageSkeleton"
+
+const PROTON_RANK_COLORS: Record<string, string> = {
+  platinum: "text-[#b3e5fc] border-[#b3e5fc]/30",
+  gold: "text-[#ffd700] border-[#ffd700]/30",
+  silver: "text-[#c0c0c0] border-[#c0c0c0]/30",
+  bronze: "text-[#cd7f32] border-[#cd7f32]/30",
+  borked: "text-[#f44336] border-[#f44336]/30",
+}
 
 export function GameDetailPage() {
   const isWindows = typeof navigator !== 'undefined' && /windows/i.test(navigator.userAgent)
@@ -1042,7 +1050,11 @@ export function GameDetailPage() {
                   )}
                   {!protonLoading && protonData && protonData.success ? (
                     <Badge
-                      className="px-3 py-1 rounded-full bg-sky-500/20 border-sky-500/30 text-sky-400 font-semibold flex items-center gap-1.5 backdrop-blur-md shadow-lg cursor-pointer"
+                      variant="online"
+                      className={cn(
+                        "px-3 py-1 rounded-full font-semibold flex items-center gap-1.5 backdrop-blur-md shadow-lg cursor-pointer transition-all hover:bg-black/80",
+                        PROTON_RANK_COLORS[protonData.rating?.toLowerCase()] || "text-sky-400 border-sky-500/30"
+                      )}
                       onClick={() => window.open(protonData.url || `https://www.protondb.com/app/${game.appid}`, "_blank")}
                       title="ProtonDB — Linux compatibility rating"
                     >
@@ -1051,7 +1063,8 @@ export function GameDetailPage() {
                     </Badge>
                   ) : !protonLoading && protonData && !protonData.success ? (
                     <Badge
-                      className="px-3 py-1 rounded-full bg-sky-500/20 border-sky-500/30 text-sky-400 font-semibold flex items-center gap-1.5 backdrop-blur-md shadow-lg cursor-pointer"
+                      variant="online"
+                      className="px-3 py-1 rounded-full text-sky-400 border-sky-500/30 font-semibold flex items-center gap-1.5 backdrop-blur-md shadow-lg cursor-pointer transition-all hover:bg-black/80"
                       onClick={() => window.open("https://www.protondb.com/", "_blank")}
                       title="ProtonDB — Linux compatibility rating not available"
                     >
