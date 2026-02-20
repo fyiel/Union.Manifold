@@ -902,7 +902,7 @@ ipcMain.handle('uc:auth-fetch', async (event, payload) => {
 function getDefaultDownloadRoot() {
   if (process.platform === 'win32') {
     const systemDrive = process.env.SystemDrive || 'C:'
-    return path.join(`${systemDrive}\`, downloadDirName)
+    return path.join(`${systemDrive}\\`, downloadDirName)
   }
   const home = app.getPath('home')
   return path.join(home, downloadDirName)
@@ -928,7 +928,7 @@ function ensureDownloadDir() {
   } catch (err) {
     // Fallback to system drive (Windows) or home directory (others)
     const fallbackRoot = process.platform === 'win32'
-      ? `${process.env.SystemDrive || 'C:'}\`
+      ? `${process.env.SystemDrive || 'C:'}\\`
       : app.getPath('home')
     const fallback = path.join(fallbackRoot, downloadDirName)
     try {
@@ -1051,11 +1051,23 @@ async function readJsonFileAsync(filePath) {
   }
 }
 
-function downloadToFile(url, destPath) {
+const IMAGE_DOWNLOAD_HEADERS = {
+  'User-Agent': 'UnionCrax.Direct/1.0',
+  'Accept': 'image/*',
+}
+
+function downloadToFile(url, destPath, options = {}, depth = 0) {
   return new Promise((resolve) => {
     try {
       const proto = url.startsWith('https') ? require('https') : require('http')
-      const req = proto.get(url, (res) => {
+      const headers = options.headers || {}
+      const req = proto.get(url, { headers }, (res) => {
+        if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers?.location && depth < 3) {
+          const nextUrl = new URL(res.headers.location, url).toString()
+          res.resume()
+          downloadToFile(nextUrl, destPath, options, depth + 1).then(resolve)
+          return
+        }
         if (res.statusCode && res.statusCode >= 400) {
           resolve(false)
           return
@@ -1070,6 +1082,105 @@ function downloadToFile(url, destPath) {
       resolve(false)
     }
   })
+}
+
+function hashString(value) {
+  try {
+    return crypto.createHash('sha1').update(String(value || '')).digest('hex')
+  } catch {
+    return null
+  }
+}
+
+function getUrlExtension(url, fallback = 'jpg') {
+  try {
+    const parsed = new URL(url)
+    const ext = path.extname(parsed.pathname || '').replace('.', '').toLowerCase()
+    if (ext && /^[a-z0-9]{1,6}$/.test(ext)) return ext
+  } catch { }
+  return fallback
+}
+
+async function cacheRemoteImage(url, targetFolder, baseName) {
+  if (!url || typeof url !== 'string' || !/^https?:\/\//i.test(url)) return null
+  const ext = getUrlExtension(url)
+  const filename = `${baseName}.${ext}`
+  const destPath = path.join(targetFolder, filename)
+  if (fs.existsSync(destPath)) return destPath
+  const ok = await downloadToFile(url, destPath, { headers: IMAGE_DOWNLOAD_HEADERS })
+  return ok ? destPath : null
+}
+
+async function cacheRemoteScreenshots(urls, targetFolder) {
+  if (!Array.isArray(urls) || urls.length === 0) return null
+  const shotsFolder = ensureSubdir(targetFolder, 'screenshots')
+  const results = []
+  for (const url of urls) {
+    if (!url || typeof url !== 'string' || !/^https?:\/\//i.test(url)) {
+      results.push(null)
+      continue
+    }
+    const hash = hashString(url)
+    const ext = getUrlExtension(url)
+    const filename = `shot-${(hash || 'unknown').slice(0, 12)}.${ext}`
+    const destPath = path.join(shotsFolder, filename)
+    if (!fs.existsSync(destPath)) {
+      const ok = await downloadToFile(url, destPath, { headers: IMAGE_DOWNLOAD_HEADERS })
+      if (!ok) {
+        results.push(null)
+        continue
+      }
+    }
+    results.push(destPath)
+  }
+  return results
+}
+
+async function cacheMetadataAssets(metadata, targetFolder, manifestPath, downloadRoot) {
+  if (!metadata || typeof metadata !== 'object') return false
+  let updated = false
+  const nextMeta = { ...metadata }
+
+  const localImage = await cacheRemoteImage(metadata.image, targetFolder, 'image')
+  if (localImage) {
+    nextMeta.localImage = localImage
+    updated = true
+  }
+
+  const localSplash = await cacheRemoteImage(metadata.splash, targetFolder, 'splash')
+  if (localSplash) {
+    nextMeta.localSplash = localSplash
+    updated = true
+  }
+
+  if (Array.isArray(metadata.screenshots) && metadata.screenshots.length > 0) {
+    const localScreenshots = await cacheRemoteScreenshots(metadata.screenshots, targetFolder)
+    if (localScreenshots && localScreenshots.some(Boolean)) {
+      nextMeta.localScreenshots = localScreenshots
+      updated = true
+    }
+  }
+
+  if (!updated || !manifestPath) return updated
+  try {
+    const manifest = readJsonFile(manifestPath) || {}
+    manifest.metadata = { ...(manifest.metadata || {}), ...nextMeta }
+    try { manifest.metadataHash = computeObjectHash(manifest.metadata) } catch { }
+    uc_writeJsonSync(manifestPath, manifest)
+    if (downloadRoot) {
+      try { updateInstalledIndex(path.join(downloadRoot, installedDirName)) } catch { }
+    }
+  } catch { }
+  return updated
+}
+
+function needsMediaCache(metadata) {
+  if (!metadata || typeof metadata !== 'object') return false
+  const hasRemoteImage = typeof metadata.image === 'string' && /^https?:\/\//i.test(metadata.image)
+  const hasRemoteSplash = typeof metadata.splash === 'string' && /^https?:\/\//i.test(metadata.splash)
+  const hasRemoteScreens = Array.isArray(metadata.screenshots) && metadata.screenshots.some((s) => typeof s === 'string' && /^https?:\/\//i.test(s))
+  const hasLocalScreens = Array.isArray(metadata.localScreenshots) && metadata.localScreenshots.some(Boolean)
+  return (hasRemoteImage && !metadata.localImage) || (hasRemoteSplash && !metadata.localSplash) || (hasRemoteScreens && !hasLocalScreens)
 }
 
 async function fetchPixeldrainInfo(fileId) {
@@ -1268,11 +1379,27 @@ function getInstallingMetadata(installingRoot, installedRoot, appid, gameName) {
     }
     if (!meta.appid) meta.appid = appid || null
     if (!meta.name) meta.name = gameName || appid || null
-    if (meta.localImage && installedRoot) {
-      meta.localImage = path.join(installedRoot, path.basename(meta.localImage))
+    const remapLocalPath = (value) => {
+      if (!value || !installedRoot || !installingRoot) return value
+      const rel = path.relative(installingRoot, value)
+      if (!rel || rel.startsWith('..')) return path.join(installedRoot, path.basename(value))
+      return path.join(installedRoot, rel)
     }
-    if (meta.metadata && meta.metadata.localImage && installedRoot) {
-      meta.metadata.localImage = path.join(installedRoot, path.basename(meta.metadata.localImage))
+
+    if (meta.localImage) meta.localImage = remapLocalPath(meta.localImage)
+    if (meta.localSplash) meta.localSplash = remapLocalPath(meta.localSplash)
+    if (Array.isArray(meta.localScreenshots)) {
+      meta.localScreenshots = meta.localScreenshots.map((p) => remapLocalPath(p))
+    }
+
+    if (meta.metadata && meta.metadata.localImage) {
+      meta.metadata.localImage = remapLocalPath(meta.metadata.localImage)
+    }
+    if (meta.metadata && meta.metadata.localSplash) {
+      meta.metadata.localSplash = remapLocalPath(meta.metadata.localSplash)
+    }
+    if (meta.metadata && Array.isArray(meta.metadata.localScreenshots)) {
+      meta.metadata.localScreenshots = meta.metadata.localScreenshots.map((p) => remapLocalPath(p))
     }
     return meta
   } catch (err) {
@@ -3492,27 +3619,23 @@ ipcMain.handle('uc:installed-save', (_event, appid, metadata) => {
     // mark as pending install
     manifest.installedAt = manifest.installedAt || null
     uc_writeJsonSync(manifestPath, manifest);
-    // attempt to download and save the remote image locally into the installing folder
-    (async () => {
+    // attempt to download and save remote media locally into the installing folder
+    ;(async () => {
       try {
-        if (metadata && metadata.image && typeof metadata.image === 'string' && /^https?:\/\//.test(metadata.image)) {
-          const ext = (metadata.image.split('?')[0].split('.').pop() || 'png').slice(0, 8)
-          const imageName = `image.${ext}`
-          const imagePath = path.join(installingRoot, imageName)
-          const ok = await downloadToFile(metadata.image, imagePath)
-          if (ok) {
+        const updated = await cacheMetadataAssets(metadata, installingRoot, manifestPath, downloadRoot)
+        if (updated) {
+          const imagePath = readJsonFile(manifestPath)?.metadata?.localImage
+          if (imagePath) {
             const checksum = await computeFileChecksum(imagePath)
-            // update manifest with local image path
-            const m = readJsonFile(manifestPath) || {}
-            m.metadata = m.metadata || {}
-            m.metadata.localImage = imagePath
-            if (checksum) m.metadata.imageChecksum = checksum
-            uc_writeJsonSync(manifestPath, m);
-            // also update root installed index if present
-            try { updateInstalledIndex(path.join(downloadRoot, installedDirName)) } catch { }
+            if (checksum) {
+              const m = readJsonFile(manifestPath) || {}
+              m.metadata = m.metadata || {}
+              m.metadata.imageChecksum = checksum
+              uc_writeJsonSync(manifestPath, m)
+            }
           }
         }
-      } catch (err) {
+      } catch {
         // ignore download failures
       }
     })()
@@ -3548,19 +3671,10 @@ ipcMain.handle('uc:installed-update-metadata', async (_event, appid, updates) =>
         try { manifest.metadataHash = computeObjectHash(manifest.metadata) } catch { }
         uc_writeJsonSync(manifestPath, manifest)
 
-        // If image URL changed, download & cache the new image
-        if (updates.image && typeof updates.image === 'string' && /^https?:\/\//.test(updates.image)) {
-          try {
-            const ext = (updates.image.split('?')[0].split('.').pop() || 'png').slice(0, 8)
-            const imageName = `image.${ext}`
-            const imagePath = path.join(folder, imageName)
-            const ok = await downloadToFile(updates.image, imagePath)
-            if (ok) {
-              manifest.metadata.localImage = imagePath
-              uc_writeJsonSync(manifestPath, manifest)
-            }
-          } catch { }
-        }
+        // Cache image/splash/screenshots if present in metadata updates
+        try {
+          await cacheMetadataAssets(manifest.metadata, folder, manifestPath, baseRoot)
+        } catch { }
 
         try { updateInstalledIndex(root) } catch { }
         return { ok: true }
@@ -3637,22 +3751,11 @@ ipcMain.handle('uc:add-external-game', async (_event, appid, metadata, gamePath)
       // Not fatal — the externalPath in manifest can still be used
     }
 
-    // Attempt to download and save the remote image locally
+    // Attempt to download and save remote media locally
     try {
-      if (metadata && metadata.image && typeof metadata.image === 'string' && /^https?:\/\//.test(metadata.image)) {
-        const ext = (metadata.image.split('?')[0].split('.').pop() || 'png').slice(0, 8)
-        const imageName = `image.${ext}`
-        const imagePath = path.join(gameFolder, imageName)
-        const ok = await downloadToFile(metadata.image, imagePath)
-        if (ok) {
-          const m = readJsonFile(manifestPath) || {}
-          m.metadata = m.metadata || {}
-          m.metadata.localImage = imagePath
-          uc_writeJsonSync(manifestPath, m)
-        }
-      }
+      await cacheMetadataAssets(metadata, gameFolder, manifestPath, downloadRoot)
     } catch (imgErr) {
-      console.warn('[UC] Could not download image for external game:', imgErr.message)
+      console.warn('[UC] Could not download media for external game:', imgErr.message)
     }
 
     // Update installed index
@@ -3734,7 +3837,16 @@ ipcMain.handle('uc:installed-get', (_event, appid) => {
     for (const { folder } of iterateGameFolders(root)) {
       const manifestPath = path.join(folder, INSTALLED_MANIFEST)
       const manifest = readJsonFile(manifestPath)
-      if (manifest && manifest.appid === appid) return manifest
+      if (manifest && manifest.appid === appid) {
+        if (needsMediaCache(manifest.metadata || manifest)) {
+          ;(async () => {
+            try {
+              await cacheMetadataAssets(manifest.metadata || manifest, folder, manifestPath, downloadRoot)
+            } catch { }
+          })()
+        }
+        return manifest
+      }
     }
     return null
   } catch (err) {
@@ -3799,7 +3911,16 @@ ipcMain.handle('uc:installed-get-global', (_event, appid) => {
       for (const { folder } of iterateGameFolders(installedRoot)) {
         const manifestPath = path.join(folder, INSTALLED_MANIFEST)
         const manifest = readJsonFile(manifestPath)
-        if (manifest && manifest.appid === appid) return manifest
+        if (manifest && manifest.appid === appid) {
+          if (needsMediaCache(manifest.metadata || manifest)) {
+            ;(async () => {
+              try {
+                await cacheMetadataAssets(manifest.metadata || manifest, folder, manifestPath, root)
+              } catch { }
+            })()
+          }
+          return manifest
+        }
       }
     }
     return null

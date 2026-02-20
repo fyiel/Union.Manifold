@@ -531,9 +531,13 @@ export const GameCard = memo(function GameCard({
             />
 
             {/* NSFW Overlay */}
-            {isNSFW && !isInstalled && !allowNsfwReveal && (
-              <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-                 <Badge variant="destructive" className="text-xs px-3 py-1">18+ NSFW</Badge>
+            {isNSFW && (
+              <div
+                className={`absolute inset-0 z-20 flex items-center justify-center bg-black/40 transition-opacity duration-300 ${
+                  allowNsfwReveal ? "group-hover:opacity-0" : ""
+                }`}
+              >
+                <div className="bg-red-600 text-white px-3 py-1 rounded-full text-xs font-bold">18+</div>
               </div>
             )}
 
