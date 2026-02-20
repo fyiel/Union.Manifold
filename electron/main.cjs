@@ -4243,8 +4243,21 @@ ipcMain.handle('uc:linux-create-prefix', async (_event, prefixPath, arch) => {
     if (arch === '32' || arch === 'win32') env.WINEARCH = 'win32'
     else env.WINEARCH = 'win64'
     ucLog(`Creating WINEPREFIX at ${prefixPath} (arch=${env.WINEARCH})`)
+
+    // Determine the correct wineboot executable corresponding to the configured winePath.
+    const winebootPath = (() => {
+      if (!winePath || typeof winePath !== 'string') return 'wineboot'
+      // If winePath looks like a filesystem path (absolute or contains a path separator),
+      // use the same directory and replace the basename with "wineboot".
+      if (path.isAbsolute(winePath) || winePath.includes('/') || winePath.includes('\\')) {
+        return path.join(path.dirname(winePath), 'wineboot')
+      }
+      // For bare command names (e.g. "wine", "wine64"), just call "wineboot"
+      return 'wineboot'
+    })()
+
     // wineboot -i initializes the prefix
-    const result = await runLinuxTool(winePath.replace(/wine$/, 'wineboot').replace(/wine64$/, 'wineboot'), ['-i'], env, { captureOutput: true })
+    const result = await runLinuxTool(winebootPath, ['-i'], env, { captureOutput: true })
     return result
   } catch (err) {
     ucLog(`create-prefix failed: ${err.message}`, 'error')
