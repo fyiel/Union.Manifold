@@ -10,6 +10,29 @@ export const SETTINGS_KEYS = {
   PUBLIC_PROFILE: 'uc_public_profile',
 } as const
 
+/**
+ * Electron store (ucSettings) keys for Linux gaming configuration.
+ * These are persisted in the main process settings.json file.
+ */
+export const LINUX_SETTINGS_KEYS = {
+  /** Launch mode: 'auto' | 'native' | 'wine' | 'proton' */
+  LAUNCH_MODE: 'linuxLaunchMode',
+  /** Path to the wine binary (e.g. /usr/bin/wine or wine) */
+  WINE_PATH: 'linuxWinePath',
+  /** Path to the Proton script (e.g. ~/.steam/steam/steamapps/common/Proton 9.0/proton) */
+  PROTON_PATH: 'linuxProtonPath',
+  /** WINEPREFIX directory path */
+  WINE_PREFIX: 'linuxWinePrefix',
+  /** Proton prefix directory (STEAM_COMPAT_DATA_PATH) */
+  PROTON_PREFIX: 'linuxProtonPrefix',
+  /** Steam install path (STEAM_COMPAT_CLIENT_INSTALL_PATH) */
+  STEAM_PATH: 'linuxSteamPath',
+  /** Extra environment variables (newline-separated KEY=VALUE pairs) */
+  EXTRA_ENV: 'linuxExtraEnv',
+  /** WINEPREFIX architecture: 'win64' | 'win32' */
+  PREFIX_ARCH: 'linuxPrefixArch',
+} as const
+
 // Text constraints
 export const TEXT_CONSTRAINTS = {
   MAX_BIO_LENGTH: 240,

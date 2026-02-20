@@ -104,3 +104,16 @@ contextBridge.exposeInMainWorld('electron', {
     }
   }
 })
+
+contextBridge.exposeInMainWorld('ucLinux', {
+  detectProton: () => ipcRenderer.invoke('uc:linux-detect-proton'),
+  detectWine: () => ipcRenderer.invoke('uc:linux-detect-wine'),
+  runWinecfg: () => ipcRenderer.invoke('uc:linux-winecfg'),
+  runWinetricks: (packages) => ipcRenderer.invoke('uc:linux-winetricks', packages),
+  runProtontricks: (appId, packages) => ipcRenderer.invoke('uc:linux-protontricks', appId, packages),
+  createPrefix: (prefixPath, arch) => ipcRenderer.invoke('uc:linux-create-prefix', prefixPath, arch),
+  pickPrefixDir: () => ipcRenderer.invoke('uc:linux-pick-prefix-dir'),
+  pickBinary: () => ipcRenderer.invoke('uc:linux-pick-binary'),
+  checkTool: (toolName) => ipcRenderer.invoke('uc:linux-check-tool', toolName),
+  getSteamPath: () => ipcRenderer.invoke('uc:linux-steam-path'),
+})
