@@ -200,7 +200,15 @@ const sortThread = (
   }))
 }
 
-export function GameComments({ appid, gameName }: { appid: string; gameName: string }) {
+export function GameComments({
+  appid,
+  gameName,
+  onRateLimit,
+}: {
+  appid: string
+  gameName: string
+  onRateLimit?: (code: string) => void
+}) {
   const [user, setUser] = useState<CommentUser | null>(null)
   const [comments, setComments] = useState<GameComment[]>([])
   const [loading, setLoading] = useState(true)
@@ -281,6 +289,11 @@ export function GameComments({ appid, gameName }: { appid: string; gameName: str
         apiFetch("/api/comments/me"),
         apiFetch(`/api/comments/${appid}`),
       ])
+
+      if (meRes.status === 429 || listRes.status === 429) {
+        onRateLimit?.("429-COMMENTS")
+        return
+      }
 
       if (meRes.ok) {
         const meData = await meRes.json()
