@@ -131,20 +131,20 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
       if (!raw) return []
       const parsed = JSON.parse(raw) as DownloadItem[]
 
-        const restored = parsed.map((item) =>
-          item.status === "downloading" || item.status === "extracting" || item.status === "installing"
-            ? { ...item, status: "paused" as DownloadStatus, error: "App restarted" }
-            : item
-        )
+      const restored = parsed.map((item) =>
+        item.status === "downloading" || item.status === "extracting" || item.status === "installing"
+          ? { ...item, status: "paused" as DownloadStatus, error: "App restarted" }
+          : item
+      )
 
-        // Log restored downloads so they're visible in app logs
-        if (restored.length > 0) {
-          downloadLogger.info(`Restored ${restored.length} download(s) from localStorage`, {
-            data: restored.map((item) => ({ id: item.id, appid: item.appid, gameName: item.gameName, status: item.status, host: item.host }))
-          })
-        }
+      // Log restored downloads so they're visible in app logs
+      if (restored.length > 0) {
+        downloadLogger.info(`Restored ${restored.length} download(s) from localStorage`, {
+          data: restored.map((item) => ({ id: item.id, appid: item.appid, gameName: item.gameName, status: item.status, host: item.host }))
+        })
+      }
 
-        return restored
+      return restored
     } catch {
       return []
     }
@@ -180,7 +180,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
           const next = prev.map((item) => {
             if (item.appid !== appid) return item
             if (["completed", "extracted"].includes(item.status)) return item
-            
+
             // Allow force-completing items that are at 100% even if in active states.
             // This fixes the "stuck at 100%" UI bug where the main process finishes 
             // but the renderer doesn't receive/process the completion event.
@@ -205,7 +205,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         })
         try {
           await window.ucDownloads.deleteInstalling?.(appid)
-        } catch {}
+        } catch { }
       } catch {
         // ignore
       } finally {
@@ -335,14 +335,14 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
           prev.map((item) =>
             item.id === next.id
               ? {
-                  ...item,
-                  url: resolved.url,
-                  originalUrl: item.originalUrl || next.url,
-                  filename,
-                  totalBytes: resolved.size || 0,
-                  authHeader: resolved.authHeader,
-                  error: null,
-                }
+                ...item,
+                url: resolved.url,
+                originalUrl: item.originalUrl || next.url,
+                filename,
+                totalBytes: resolved.size || 0,
+                authHeader: resolved.authHeader,
+                error: null,
+              }
               : item
           )
         )
@@ -411,22 +411,22 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         const idx = prev.findIndex((item) => item.id === update.downloadId)
         if (idx === -1) return prev
         const existing = prev[idx]
-        
+
         // Terminal states: once an item reaches one of these, don't let it regress
         // to "downloading" or "queued". However, we MUST allow state transitions
         // that the main process explicitly sends (e.g. extracting → extracted → completed).
         const terminalStates = ["completed", "extract_failed", "failed", "cancelled"]
         const isTerminal = terminalStates.includes(existing.status)
         const nextStatus = update.status || existing.status
-        
+
         // Only truly block if item is in a hard-terminal state (completed/failed/cancelled)
         // AND the incoming status is a step backwards (downloading/queued/paused)
         const regressiveStates = ["downloading", "queued", "paused"]
         const finalStatus = isTerminal && regressiveStates.includes(nextStatus) ? existing.status : nextStatus
-        
+
         // When entering a terminal or idle state, always zero out speed
         const isEnteringTerminal = terminalStates.includes(finalStatus) || finalStatus === "extracted"
-        
+
         const next: DownloadItem = {
           ...existing,
           status: finalStatus as DownloadStatus,
@@ -443,10 +443,10 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
           resumeData: update.resumeData ?? existing.resumeData,
           completedAt:
             finalStatus === "completed" ||
-            finalStatus === "failed" ||
-            finalStatus === "cancelled" ||
-            finalStatus === "extracted" ||
-            finalStatus === "extract_failed"
+              finalStatus === "failed" ||
+              finalStatus === "cancelled" ||
+              finalStatus === "extracted" ||
+              finalStatus === "extract_failed"
               ? Date.now()
               : existing.completedAt,
         }
@@ -485,15 +485,12 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
     const hasQueued = downloads.some((item) => item.status === "queued")
     if (!hasQueued) return
 
-    // Don't auto-start queued parts when a sibling in the same group is paused.
-    // The queue should only advance on completion, not when the user pauses.
-    const queuedAppids = new Set(
-      downloads.filter((item) => item.status === "queued").map((item) => item.appid)
+    // Don't auto-start ANY queued item when the user has paused downloads.
+    // A paused download anywhere means the user wants everything held.
+    const hasPausedDownload = downloads.some(
+      (item) => item.status === "paused"
     )
-    const hasPausedSibling = downloads.some(
-      (item) => item.status === "paused" && queuedAppids.has(item.appid)
-    )
-    if (hasPausedSibling) return
+    if (hasPausedDownload) return
 
     queueMicrotask(() => {
       void startNextQueuedPart()
@@ -581,19 +578,19 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         }
       } else {
         const selected = selectHost(linksResult.hosts, preferredHost)
-        
+
         // If no links found at all
         if (!selected.links.length) {
           throw new Error(`No download links available for "${preferredHost}". This title may not be available on your selected host.`)
         }
-        
+
         // If preferred host wasn't available, warn user (but use the fallback)
         if (selected.host !== preferredHost) {
           downloadLogger.warn(`Preferred host "${preferredHost}" not available, using "${selected.host}" instead`)
         }
-        
+
         links = selected.links
-        selectedHost = selected.host || preferredHost
+        selectedHost = (selected.host || preferredHost) as PreferredDownloadHost
       }
 
       if (!links.length) {
@@ -654,7 +651,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
     } catch (err) {
       try {
         await window.ucDownloads?.deleteInstalling?.(game.appid)
-      } catch {}
+      } catch { }
       throw err
     } finally {
       preparingRef.current.delete(game.appid)
@@ -669,7 +666,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
     if (download?.appid && window.ucDownloads?.setInstallingStatus) {
       try {
         await window.ucDownloads.setInstallingStatus(download.appid, "cancelled", "Cancelled by user")
-      } catch {}
+      } catch { }
     }
     setDownloads((prev) =>
       prev.map((item) =>
@@ -685,12 +682,12 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
     for (const id of toCancel) {
       try {
         if (window.ucDownloads?.cancel) await window.ucDownloads.cancel(id)
-      } catch (e) {}
+      } catch (e) { }
     }
     if (window.ucDownloads?.setInstallingStatus) {
       try {
         await window.ucDownloads.setInstallingStatus(appid, "cancelled", "Cancelled by user")
-      } catch {}
+      } catch { }
     }
     setDownloads((prev) =>
       prev.map((item) =>
@@ -768,13 +765,13 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
             prev.map((item) =>
               item.id === downloadId
                 ? {
-                    ...item,
-                    status: "downloading" as DownloadStatus,
-                    speedBps: 0,
-                    etaSeconds: null,
-                    error: null,
-                    startedAt: Date.now(),
-                  }
+                  ...item,
+                  status: "downloading" as DownloadStatus,
+                  speedBps: 0,
+                  etaSeconds: null,
+                  error: null,
+                  startedAt: Date.now(),
+                }
                 : item
             )
           )
@@ -792,13 +789,13 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
             prev.map((item) =>
               item.id === downloadId
                 ? {
-                    ...item,
-                    status: "downloading" as DownloadStatus,
-                    speedBps: 0,
-                    etaSeconds: null,
-                    error: null,
-                    startedAt: Date.now(),
-                  }
+                  ...item,
+                  status: "downloading" as DownloadStatus,
+                  speedBps: 0,
+                  etaSeconds: null,
+                  error: null,
+                  startedAt: Date.now(),
+                }
                 : item
             )
           )
@@ -860,12 +857,12 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
             prev.map((item) =>
               item.id === downloadId
                 ? {
-                    ...item,
-                    url: freshUrl,
-                    authHeader: freshAuth,
-                    status: "downloading",
-                    totalBytes: resolved?.size || item.totalBytes,
-                  }
+                  ...item,
+                  url: freshUrl,
+                  authHeader: freshAuth,
+                  status: "downloading",
+                  totalBytes: resolved?.size || item.totalBytes,
+                }
                 : item
             )
           )
@@ -913,7 +910,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
             if (item.appid !== appid) return item
             if (item.id === pausedWithProgress.id) return item
             if (item.status === "paused" && item.receivedBytes === 0) {
-              return { ...item, status: "queued" }
+              return { ...item, status: "queued" as DownloadStatus }
             }
             return item
           })
@@ -926,7 +923,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
       setDownloads((prev) => {
         const next = prev.map((item) => {
           if (item.appid === appid && item.status === "paused") {
-            return { ...item, status: "queued" }
+            return { ...item, status: "queued" as DownloadStatus }
           }
           return item
         })

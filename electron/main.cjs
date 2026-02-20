@@ -38,12 +38,12 @@ async function fetchLatestReleaseInfo() {
 if (process.platform === 'win32') {
   try {
     app.setAppUserModelId(packageJson?.build?.appId || 'xyz.unioncrax.direct')
-  } catch {}
+  } catch { }
 }
 try {
   if (typeof app.setName === 'function') app.setName('UnionCrax.Direct')
   else app.name = 'UnionCrax.Direct'
-} catch {}
+} catch { }
 const pendingDownloads = []
 let lastPixeldrainDownloadTime = 0
 const PIXELDRAIN_DELAY_MS = 2000 // 2 second delay between pixeldrain downloads to avoid rate limiting
@@ -304,8 +304,8 @@ function restoreRpcActivity() {
 }
 function shutdownRpcClient() {
   if (!rpcClient) return
-  try { rpcClient.clearActivity() } catch {}
-  try { rpcClient.destroy() } catch {}
+  try { rpcClient.clearActivity() } catch { }
+  try { rpcClient.destroy() } catch { }
   rpcClient = null
   rpcReady = false
   rpcCurrentActivity = null
@@ -387,13 +387,13 @@ registerProcessLogging()
 
 function resolveIcon() {
   const asset = process.platform === 'win32' ? 'icon.ico' : 'icon.png'
-  
+
   // For packaged apps, try to resolve from resources first
   if (app.isPackaged) {
     const packagedPath = path.join(process.resourcesPath, 'assets', asset)
     if (fs.existsSync(packagedPath)) return packagedPath
   }
-  
+
   // Fallback to development path
   return path.join(__dirname, '..', 'assets', asset)
 }
@@ -546,10 +546,10 @@ function openAuthWindow(parent, url) {
           setTimeout(() => {
             try {
               if (authWin && !authWin.isDestroyed()) authWin.close()
-            } catch {}
+            } catch { }
           }, 50)
         }
-      } catch {}
+      } catch { }
       resolve(payload)
     }
 
@@ -574,7 +574,7 @@ function openAuthWindow(parent, url) {
     try {
       authWin.setMenuBarVisibility(false)
       authWin.setAutoHideMenuBar(true)
-    } catch {}
+    } catch { }
 
     const handleUrl = (nextUrl) => {
       const result = parseAuthResult(nextUrl)
@@ -604,7 +604,7 @@ function readSettings() {
   const defaultsApplied = JSON.stringify(withDefaults) !== JSON.stringify(cachedSettings)
   cachedSettings = withDefaults
   if (defaultsApplied) {
-    try { writeSettings(withDefaults) } catch {}
+    try { writeSettings(withDefaults) } catch { }
   }
   return cachedSettings
 }
@@ -645,7 +645,7 @@ async function fetchWithSession(session, baseUrl, path, init) {
     headers.set('X-UC-Client', 'unioncrax-direct')
   }
   if (cookieHeader) headers.set('Cookie', cookieHeader)
-  
+
   return await fetch(url, { ...(init || {}), headers })
 }
 
@@ -661,7 +661,6 @@ async function getDiscordSession(session, baseUrl) {
 
 // IPC: simple settings get/set with broadcast when changed
 ipcMain.handle('uc:setting-get', (_event, key) => {
-  ucLog(`Setting get: ${key}`)
   try {
     const s = readSettings() || {}
     return s[key]
@@ -678,7 +677,7 @@ ipcMain.handle('uc:setting-set', (_event, key, value) => {
     s[key] = value
     writeSettings(s)
     if (key === 'discordRpcEnabled') {
-      updateRpcSettings(s).catch(() => {})
+      updateRpcSettings(s).catch(() => { })
     }
     broadcastSettingsChanges(s, prev)
     ucLog(`Setting set: ${key}`)
@@ -696,7 +695,7 @@ ipcMain.handle('uc:setting-clear-all', () => {
     // Reset settings to defaults
     const defaults = applySettingsDefaults({})
     writeSettings(defaults)
-    updateRpcSettings(defaults).catch(() => {})
+    updateRpcSettings(defaults).catch(() => { })
     // broadcast to all renderer windows that settings were cleared
     for (const w of BrowserWindow.getAllWindows()) {
       if (w && !w.isDestroyed()) {
@@ -751,7 +750,7 @@ ipcMain.handle('uc:settings-import', async () => {
     const prev = readSettings() || {}
     const next = applySettingsDefaults(parsed)
     writeSettings(next)
-    updateRpcSettings(next).catch(() => {})
+    updateRpcSettings(next).catch(() => { })
     broadcastSettingsChanges(next, prev)
     return { ok: true }
   } catch (err) {
@@ -764,7 +763,7 @@ ipcMain.handle('uc:log', async (_event, level, message, data) => {
   try {
     const settings = readSettings() || {}
     if (level === 'debug' && !settings.verboseDownloadLogging) return { ok: true, skipped: true }
-  } catch {}
+  } catch { }
   ucLog(message, level, data)
 })
 
@@ -1015,7 +1014,7 @@ function* iterateGameFolders(root) {
           yield { folder: path.join(versionsDir, vDirent.name), name: vDirent.name, isVersioned: true, parentFolder: folder }
         }
       }
-    } catch {}
+    } catch { }
   }
 }
 
@@ -1158,7 +1157,7 @@ function uc_log(msg) {
     console.log('[UC]', msg)
     try {
       ucLog(`[extract] ${String(msg)}`, 'debug')
-    } catch (e) {}
+    } catch (e) { }
   } catch (e) {
     console.log('[UC LOG ERROR]', e)
   }
@@ -1201,7 +1200,7 @@ function updateInstalledManifestBulk(installedFolder, metadata, fileEntries) {
     try {
       const installedRoot = path.dirname(installedFolder)
       updateInstalledIndex(installedRoot)
-    } catch (e) {}
+    } catch (e) { }
   } catch (err) {
     ucLog(`Failed to update installed manifest: ${err.message}`, 'error')
   }
@@ -1242,7 +1241,7 @@ function restorePreservedFile(savePath) {
   if (fs.existsSync(savePath)) {
     // Original still exists — clean up the backup if present
     if (fs.existsSync(backupPath)) {
-      try { fs.unlinkSync(backupPath) } catch {}
+      try { fs.unlinkSync(backupPath) } catch { }
     }
     return true
   }
@@ -1295,7 +1294,7 @@ function migrateInstallingExtras(installingRoot, installedRoot, skipNames) {
       const src = path.join(installingRoot, itemName)
       const dest = resolveUniquePath(installedRoot, itemName)
       try { fs.renameSync(src, dest) } catch (err) {
-        try { const data = fs.readFileSync(src); fs.writeFileSync(dest, data); try { fs.unlinkSync(src) } catch (e) {} } catch (e) {
+        try { const data = fs.readFileSync(src); fs.writeFileSync(dest, data); try { fs.unlinkSync(src) } catch (e) { } } catch (e) {
           console.warn('[UC] Failed to move item from installing to installed:', src, e)
         }
       }
@@ -1344,7 +1343,7 @@ function listManifestsFromRoot(root, allowFallback) {
       if (allowFallback && !isVersioned) {
         // Skip fallback for folders that have a versions/ subdir — those will be handled by versioned entries
         const versionsDir = path.join(folder, 'versions')
-        try { if (fs.existsSync(versionsDir)) continue } catch {}
+        try { if (fs.existsSync(versionsDir)) continue } catch { }
         const files = fs.readdirSync(folder).filter((f) => f !== INSTALLED_MANIFEST)
         if (files.length && !seenAppids.has(name)) {
           seenAppids.set(name, manifests.length)
@@ -1366,11 +1365,11 @@ function listDownloadRoots() {
     if (settings.downloadPath && typeof settings.downloadPath === 'string') {
       roots.add(normalizeDownloadRoot(settings.downloadPath))
     }
-  } catch {}
+  } catch { }
   try {
     const root = getDownloadRoot()
     if (root) roots.add(root)
-  } catch {}
+  } catch { }
   try {
     const disks = listDisks()
     for (const disk of disks) {
@@ -1378,7 +1377,7 @@ function listDownloadRoots() {
         roots.add(path.join(disk.path, downloadDirName))
       }
     }
-  } catch {}
+  } catch { }
   return Array.from(roots).filter((root) => root && fs.existsSync(root))
 }
 
@@ -1394,7 +1393,7 @@ function deleteFolderByAppId(root, appid) {
       const toDelete = isVersioned && parentFolder ? parentFolder : folder
       try {
         fs.rmSync(toDelete, { recursive: true, force: true })
-      } catch (e) {}
+      } catch (e) { }
       return true
     }
   } catch (err) {
@@ -1415,7 +1414,7 @@ async function deleteFolderByAppIdAsync(root, appid) {
       const toDelete = isVersioned && parentFolder ? parentFolder : folder
       try {
         await fs.promises.rm(toDelete, { recursive: true, force: true })
-      } catch (e) {}
+      } catch (e) { }
       return true
     }
   } catch (err) {
@@ -1744,7 +1743,7 @@ async function visitPixeldrainViewerPage(fileId) {
         }
       }, (res) => {
         // Just consume the response, we don't need the data
-        res.on('data', () => {})
+        res.on('data', () => { })
         res.on('end', () => {
           uc_log(`[Pixeldrain] Visited viewer page for ${fileId} to bypass hotlink protection (status: ${res.statusCode})`)
           resolve()
@@ -1766,13 +1765,13 @@ async function visitPixeldrainViewerPage(fileId) {
 
 async function startDownloadNow(win, payload) {
   if (!win || win.isDestroyed()) return { ok: false }
-  
+
   // If this download was already cancelled (e.g. by user during pixeldrain delay), bail out
   if (cancelledDownloadIds.has(payload.downloadId)) {
     ucLog(`startDownloadNow: skipping cancelled download ${payload.downloadId}`)
     return { ok: false, cancelled: true }
   }
-  
+
   // Add to pendingDownloads FIRST to prevent race conditions
   pendingDownloads.push({
     url: payload.url,
@@ -1788,7 +1787,7 @@ async function startDownloadNow(win, payload) {
     versionLabel: payload.versionLabel || null,
     _addedAt: Date.now()
   })
-  
+
   // Check if this is a pixeldrain URL and if we need to delay
   const isPixeldrain = payload.url && payload.url.includes('pixeldrain.com')
   const hasAuth = Boolean(payload.authHeader)
@@ -1822,7 +1821,7 @@ async function startDownloadNow(win, payload) {
         }, delayNeeded)
         return { ok: true, delayed: true }
       }
-      
+
       // Extract file ID and visit viewer page to bypass hotlink protection
       const fileId = extractPixeldrainFileIdFromUrl(payload.url)
       if (fileId) {
@@ -1830,14 +1829,14 @@ async function startDownloadNow(win, payload) {
         // Small delay after visiting to ensure view is registered
         await new Promise(resolve => setTimeout(resolve, 500))
       }
-      
+
       lastPixeldrainDownloadTime = Date.now()
     } else {
       // Authenticated: skip viewer page visit and delay entirely
       uc_log(`Pixeldrain download authenticated — skipping viewer page visit and delay`)
     }
   }
-  
+
   uc_log(`startDownloadNow: calling downloadURL — downloadId=${payload.downloadId} url=${payload.url}`)
   win.webContents.downloadURL(payload.url)
   return { ok: true }
@@ -1850,7 +1849,7 @@ function startNextQueuedDownload(lastCompletedAppid) {
   uc_log(`globalDownloadQueue.length: ${globalDownloadQueue.length}`)
   if (hasAnyActiveOrPendingDownloads()) return
   if (!globalDownloadQueue.length) return
-  
+
   // If we have a lastCompletedAppid, prioritize remaining parts of the same game
   // Note: findIndex is O(n) but typical queue sizes are small (< 20 items)
   let nextIndex = 0
@@ -1860,10 +1859,10 @@ function startNextQueuedDownload(lastCompletedAppid) {
     // If not found, default to first item (FIFO for different games)
     if (nextIndex === -1) nextIndex = 0
   }
-  
+
   const next = globalDownloadQueue.splice(nextIndex, 1)[0]
   if (!next) return // Safety check in case queue was modified concurrently
-  
+
   const win = getWindowByWebContentsId(next.webContentsId)
   if (!win || win.isDestroyed()) return
   startDownloadNow(win, next.payload)
@@ -1921,7 +1920,7 @@ function flushQueuedDownloads(appid, status, error) {
         gameName: entry.payload.gameName || null,
         url: entry.payload.url
       })
-    } catch (e) {}
+    } catch (e) { }
   }
 }
 
@@ -1944,7 +1943,7 @@ function flushQueuedGlobalDownloads(appid, status, error) {
         gameName: entry.payload.gameName || null,
         url: entry.payload.url
       })
-    } catch (e) {}
+    } catch (e) { }
   }
   globalDownloadQueue.length = 0
   for (const entry of remaining) globalDownloadQueue.push(entry)
@@ -2068,7 +2067,7 @@ function snapshotFiles(rootDir) {
         if (e.isFile()) files.add(full)
       }
     }
-  } catch (e) {}
+  } catch (e) { }
   return files
 }
 function resolve7zipBinary() {
@@ -2146,10 +2145,10 @@ function run7zExtract(archivePath, destDir, onProgress) {
               lastEmit = now
               try {
                 onProgress({ percent: p })
-              } catch (e) {}
+              } catch (e) { }
             }
           }
-        } catch (e) {}
+        } catch (e) { }
       }
 
       proc.stdout && proc.stdout.on('data', (d) => {
@@ -2239,20 +2238,20 @@ function registerRunningGame(appid, exePath, proc, gameName, showGameName = true
   if (gameName || appid) {
     const buttons = appid
       ? [
-          { label: 'Open on web', url: `https://union-crax.xyz/game/${appid}` },
-          { label: 'Download UC.D', url: 'https://union-crax.xyz/direct' }
-        ]
+        { label: 'Open on web', url: `https://union-crax.xyz/game/${appid}` },
+        { label: 'Download UC.D', url: 'https://union-crax.xyz/direct' }
+      ]
       : [
-          { label: 'Open on web', url: 'https://union-crax.xyz/direct' },
-          { label: 'Download UC.D', url: 'https://union-crax.xyz/direct' }
-        ]
+        { label: 'Open on web', url: 'https://union-crax.xyz/direct' },
+        { label: 'Download UC.D', url: 'https://union-crax.xyz/direct' }
+      ]
     const displayName = showGameName ? (gameName || appid) : 'A game'
     setGameRpcActivity({
       details: `Playing ${displayName}`,
       state: 'Playing',
       startTimestamp: Math.floor(payload.startedAt / 1000),
       buttons
-    }).catch(() => {})
+    }).catch(() => { })
   }
   proc.on('exit', () => {
     if (appid) runningGames.delete(appid)
@@ -2275,20 +2274,20 @@ function registerRunningGamePid(appid, exePath, pid, gameName, showGameName = tr
   if (gameName || appid) {
     const buttons = appid
       ? [
-          { label: 'Open on web', url: `https://union-crax.xyz/game/${appid}` },
-          { label: 'Download UC.D', url: 'https://union-crax.xyz/direct' }
-        ]
+        { label: 'Open on web', url: `https://union-crax.xyz/game/${appid}` },
+        { label: 'Download UC.D', url: 'https://union-crax.xyz/direct' }
+      ]
       : [
-          { label: 'Open on web', url: 'https://union-crax.xyz/direct' },
-          { label: 'Download UC.D', url: 'https://union-crax.xyz/direct' }
-        ]
+        { label: 'Open on web', url: 'https://union-crax.xyz/direct' },
+        { label: 'Download UC.D', url: 'https://union-crax.xyz/direct' }
+      ]
     const displayName = showGameName ? (gameName || appid) : 'A game'
     setGameRpcActivity({
       details: `Playing ${displayName}`,
       state: 'Playing',
       startTimestamp: Math.floor(payload.startedAt / 1000),
       buttons
-    }).catch(() => {})
+    }).catch(() => { })
   }
 }
 
@@ -2472,7 +2471,7 @@ function createWindow() {
           if (fileIdMatch?.[1] && pixeldrainAuthHeaders.has(fileIdMatch[1])) {
             details.requestHeaders['Authorization'] = pixeldrainAuthHeaders.get(fileIdMatch[1])
           }
-        } catch {}
+        } catch { }
       }
       callback({ requestHeaders: details.requestHeaders })
     }
@@ -2495,7 +2494,7 @@ function createWindow() {
     // If this download was cancelled while it was pending, cancel it immediately
     if (cancelledDownloadIds.has(downloadId)) {
       ucLog(`will-download: immediately cancelling download that was cancelled while pending: ${downloadId}`)
-      try { item.cancel() } catch {}
+      try { item.cancel() } catch { }
       return
     }
 
@@ -2512,7 +2511,7 @@ function createWindow() {
     const savePath = match?.savePath || path.join(installingRoot, filename)
     try {
       item.setSavePath(savePath)
-    } catch {}
+    } catch { }
 
     const startedAt = Date.now()
     const state = { lastBytes: 0, lastTime: startedAt, speedBps: 0 }
@@ -2569,28 +2568,28 @@ function createWindow() {
       entry.state.lastBytes = received
       entry.state.lastTime = now
       entry.state.speedBps = speedBps
-      
+
       const remaining = total > 0 ? Math.max(0, total - received) : 0
       // When download is fully received, zero out speed so the UI doesn't show stale bars
       const finalSpeed = (total > 0 && received >= total) ? 0 : speedBps
       const etaSeconds = finalSpeed > 0 && remaining > 0 ? remaining / finalSpeed : null
-        sendDownloadUpdate(mainWindow, {
-          downloadId,
-          status: item.isPaused() ? 'paused' : 'downloading',
-          receivedBytes: received,
-          totalBytes: total,
-          speedBps: finalSpeed,
-          etaSeconds,
-          filename: path.basename(entry.savePath || filename),
-          savePath: entry.savePath,
-          appid: entry.appid || null,
-          gameName: entry.gameName || null,
-          url,
-          resumeData: buildResumeData(item, entry.savePath),
-          partIndex: entry.partIndex,
-          partTotal: entry.partTotal
-        })
+      sendDownloadUpdate(mainWindow, {
+        downloadId,
+        status: item.isPaused() ? 'paused' : 'downloading',
+        receivedBytes: received,
+        totalBytes: total,
+        speedBps: finalSpeed,
+        etaSeconds,
+        filename: path.basename(entry.savePath || filename),
+        savePath: entry.savePath,
+        appid: entry.appid || null,
+        gameName: entry.gameName || null,
+        url,
+        resumeData: buildResumeData(item, entry.savePath),
+        partIndex: entry.partIndex,
+        partTotal: entry.partTotal
       })
+    })
 
     item.once('done', async (_event, state) => {
       uc_log(`download done handler start — downloadId=${downloadId} state=${state} url=${url}`)
@@ -2609,7 +2608,7 @@ function createWindow() {
       if (entry?.savePath) {
         const backupPath = entry.savePath + RESUME_BACKUP_EXT
         if (fs.existsSync(backupPath)) {
-          try { fs.unlinkSync(backupPath) } catch {}
+          try { fs.unlinkSync(backupPath) } catch { }
         }
       }
 
@@ -2618,7 +2617,7 @@ function createWindow() {
       try {
         const fileId = extractPixeldrainFileIdFromUrl(url)
         if (fileId) pixeldrainAuthHeaders.delete(fileId)
-      } catch {}
+      } catch { }
       // Safety: also remove this downloadId from pendingDownloads in case will-download
       // didn't match it (URL normalization mismatch, redirects, etc.)
       const pendingIdx = pendingDownloads.findIndex(p => p.downloadId === downloadId)
@@ -2658,7 +2657,7 @@ function createWindow() {
                       uc_log(`failed to rename installing file: ${String(e)}`)
                     }
                   }
-                } catch (e) {}
+                } catch (e) { }
               }
             }
           }
@@ -2711,11 +2710,11 @@ function createWindow() {
                       const totalBytes = totalBytesOverride != null ? totalBytesOverride : st ? st.size : 0
                       const etaSeconds = speedBps > 0 ? Math.max(0, Math.round((totalBytes - size) / speedBps)) : null
                       sendDownloadUpdate(mainWindow, { downloadId, status: 'extracting', receivedBytes: size, totalBytes, speedBps: Math.round(speedBps), etaSeconds, filename: path.basename(archiveToExtract), savePath: archiveToExtract, appid: entry?.appid || null })
-                    } catch (e) {}
-                  }).catch(() => {})
-                } catch (e) {}
+                    } catch (e) { }
+                  }).catch(() => { })
+                } catch (e) { }
               }, 500)
-            } catch (e) {}
+            } catch (e) { }
 
             const res = await run7zExtract(archiveToExtract, installedFolder, ({ percent }) => {
               try {
@@ -2732,9 +2731,9 @@ function createWindow() {
                 _lastTime = now
                 const etaSeconds = speedBps > 0 ? Math.max(0, Math.round((totalBytes - received) / speedBps)) : null
                 sendDownloadUpdate(mainWindow, { downloadId, status: 'extracting', receivedBytes: received, totalBytes, speedBps: Math.round(speedBps), etaSeconds, filename: path.basename(archiveToExtract), savePath: archiveToExtract, appid: entry?.appid || null })
-              } catch (e) {}
+              } catch (e) { }
             })
-            try { if (_pollTimer) clearInterval(_pollTimer) } catch (e) {}
+            try { if (_pollTimer) clearInterval(_pollTimer) } catch (e) { }
             uc_log(`extraction result for ${archiveToExtract}: ${JSON.stringify(res && { ok: res.ok, error: res.error, files: (res.files || []).slice(0, 10) })}`)
             if (extractionKeyOverride) activeExtractions.delete(extractionKeyOverride)
             if (res && res.ok) {
@@ -2753,7 +2752,7 @@ function createWindow() {
                     addedAt: Date.now(),
                   }
                   fileEntries.push(fileEntry)
-                } catch (e) {}
+                } catch (e) { }
               }
 
               // Update the manifest in a single bulk operation
@@ -2770,23 +2769,23 @@ function createWindow() {
                   for (const part of partFiles) skipNames.add(path.basename(part))
                 }
                 migrateInstallingExtras(installingRoot, installedRoot, skipNames)
-              } catch (e) {}
+              } catch (e) { }
               uc_log(`extraction success - files: ${extractedFiles.length}`)
               try {
                 const st2 = fs.existsSync(archiveToExtract) ? fs.statSync(archiveToExtract) : null
                 const totalBytes2 = totalBytesOverride != null ? totalBytesOverride : st2 ? st2.size : 0
                 if (totalBytes2 > 0) sendDownloadUpdate(mainWindow, { downloadId, status: 'extracting', receivedBytes: totalBytes2, totalBytes: totalBytes2, speedBps: 0, etaSeconds: 0, filename: path.basename(archiveToExtract), savePath: archiveToExtract, appid: entry?.appid || null })
-              } catch (e) {}
+              } catch (e) { }
               try {
                 if (partFiles && partFiles.length) {
                   for (const part of partFiles) {
-                    try { if (fs.existsSync(part)) fs.unlinkSync(part) } catch (e) {}
+                    try { if (fs.existsSync(part)) fs.unlinkSync(part) } catch (e) { }
                   }
                   uc_log(`deleted multipart parts for ${archiveToExtract}`)
                 } else if (fs.existsSync(archiveToExtract)) {
                   try { fs.unlinkSync(archiveToExtract); uc_log(`deleted archive ${archiveToExtract} from installing folder`) } catch (e) { uc_log(`failed to delete archive: ${String(e)}`) }
                 }
-              } catch (e) {}
+              } catch (e) { }
 
               // Move extracted files from installing folder to installed folder
               try {
@@ -2802,7 +2801,7 @@ function createWindow() {
               try {
                 try {
                   if (entry?.appid) updateInstallingManifestStatus(entry.appid, 'completed', null)
-                } catch (e) {}
+                } catch (e) { }
                 if (fs.existsSync(installingRoot)) {
                   fs.rmSync(installingRoot, { recursive: true, force: true })
                   uc_log(`deleted installing folder for ${entry?.appid}`)
@@ -2880,7 +2879,7 @@ function createWindow() {
               try {
                 try {
                   if (entry?.appid) updateInstallingManifestStatus(entry.appid, 'completed', null)
-                } catch (e) {}
+                } catch (e) { }
                 if (fs.existsSync(installingRoot)) {
                   fs.rmSync(installingRoot, { recursive: true, force: true })
                   uc_log(`deleted installing folder for non-archive ${entry?.appid}`)
@@ -2891,7 +2890,7 @@ function createWindow() {
 
               // update installed manifest in the installed folder
               try {
-                ;(async () => {
+                ; (async () => {
                   try {
                     const checksum = finalPath ? await computeFileChecksum(finalPath) : null
                     const stats = finalPath && fs.existsSync(finalPath) ? fs.statSync(finalPath) : null
@@ -2966,14 +2965,14 @@ app.whenReady().then(() => {
   ensureDownloadDir()
   createWindow()
   createTray()
-  updateRpcSettings(readSettings()).catch(() => {})
+  updateRpcSettings(readSettings()).catch(() => { })
 
   ucLog(`App ready. Version: ${getAppVersion()}`)
 
   setInterval(() => {
-    pruneRunningGames().catch(() => {})
+    pruneRunningGames().catch(() => { })
   }, 15000)
-  
+
   // Periodically clean stale pending downloads (entries where will-download never fired)
   setInterval(() => {
     const now = Date.now()
@@ -2996,7 +2995,7 @@ app.whenReady().then(() => {
               etaSeconds: null,
               filename: entry.filename || '',
             })
-          } catch (e) {}
+          } catch (e) { }
         }
         cleaned = true
       }
@@ -3006,7 +3005,7 @@ app.whenReady().then(() => {
       startNextQueuedDownload(null)
     }
   }, 15000)
-  
+
   // Update behavior: auto-updater removed. Open releases page instead.
   if (!isDev) {
     ucLog('Auto-updater disabled. Update checks will open GitHub releases page.')
@@ -3025,13 +3024,13 @@ app.whenReady().then(() => {
           ucLog(`New release available: v${latest} (current: ${current})`)
           const windows = BrowserWindow.getAllWindows()
           windows.forEach(win => {
-            try { win.webContents.send('update-available', info) } catch (e) {}
+            try { win.webContents.send('update-available', info) } catch (e) { }
           })
         } else {
           ucLog(`No new release. Current: v${current}`)
           const windows = BrowserWindow.getAllWindows()
           windows.forEach(win => {
-            try { win.webContents.send('update-not-available', { version: current }) } catch (e) {}
+            try { win.webContents.send('update-not-available', { version: current }) } catch (e) { }
           })
         }
       } catch (err) {
@@ -3039,13 +3038,13 @@ app.whenReady().then(() => {
       }
     }
     // Initial check shortly after startup
-    setTimeout(() => { checkLatestRelease().catch(() => {}) }, 5000)
+    setTimeout(() => { checkLatestRelease().catch(() => { }) }, 5000)
     // Hourly checks
-    setInterval(() => { checkLatestRelease().catch(() => {}) }, 60 * 60 * 1000)
+    setInterval(() => { checkLatestRelease().catch(() => { }) }, 60 * 60 * 1000)
   } catch (e) {
     ucLog(`Failed to schedule release checks: ${e && e.message ? e.message : String(e)}`, 'warn')
   }
-  
+
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
@@ -3066,7 +3065,7 @@ ipcMain.handle('uc:check-for-updates', async () => {
     const { latest, url } = latestInfo
     if (latest && compareVersions(latest, current) === 1) {
       ucLog(`Opening releases page for updates: ${url} (current: v${current} -> latest: v${latest})`)
-      try { shell.openExternal(url) } catch (e) {}
+      try { shell.openExternal(url) } catch (e) { }
       return { ok: true, url, latest, current }
     }
     ucLog(`Up to date. Current: v${current}`)
@@ -3090,7 +3089,7 @@ ipcMain.handle('uc:update-retry', async () => {
     const { latest, url } = latestInfo
     if (latest && compareVersions(latest, current) === 1) {
       ucLog(`Opening releases page for update retry: ${url} (current: v${current} -> latest: v${latest})`)
-      try { shell.openExternal(url) } catch (e) {}
+      try { shell.openExternal(url) } catch (e) { }
       return { ok: true, url, latest, current }
     }
     ucLog(`Up to date. Current: v${current}`)
@@ -3123,7 +3122,7 @@ app.on('before-quit', () => {
       try {
         const backupPath = entry.savePath + RESUME_BACKUP_EXT
         if (fs.existsSync(entry.savePath)) {
-          if (fs.existsSync(backupPath)) { try { fs.unlinkSync(backupPath) } catch {} }
+          if (fs.existsSync(backupPath)) { try { fs.unlinkSync(backupPath) } catch { } }
           fs.linkSync(entry.savePath, backupPath)
           ucLog(`Preserved partial download via hardlink: ${backupPath} (downloadId=${downloadId})`)
         }
@@ -3174,7 +3173,7 @@ ipcMain.handle('uc:download-cancel', (_event, downloadId) => {
     }
     try {
       entry.item.cancel()
-    } catch {}
+    } catch { }
     ucLog(`Download cancelled (active): ${downloadId}`)
     return { ok: true }
   }
@@ -3235,7 +3234,7 @@ ipcMain.handle('uc:download-pause', (event, downloadId) => {
       partIndex: entry.partIndex,
       partTotal: entry.partTotal
     })
-  } catch (e) {}
+  } catch (e) { }
   return { ok: true }
 })
 
@@ -3271,7 +3270,7 @@ ipcMain.handle('uc:download-resume', (event, downloadId) => {
       partIndex: entry.partIndex,
       partTotal: entry.partTotal
     })
-  } catch (e) {}
+  } catch (e) { }
   return { ok: true }
 })
 
@@ -3321,7 +3320,7 @@ ipcMain.handle('uc:download-resume-interrupted', (event, payload) => {
       }
       actualOffset = stat.size
     }
-  } catch {}
+  } catch { }
 
   try {
     win.webContents.session.createInterruptedDownload({
@@ -3359,7 +3358,7 @@ ipcMain.handle('uc:download-resume-with-fresh-url', (event, payload) => {
   try {
     const stat = fs.statSync(savePath)
     actualOffset = stat.size
-  } catch {}
+  } catch { }
 
   if (actualOffset <= 0) {
     return { ok: false, error: 'empty-file' }
@@ -3478,7 +3477,7 @@ ipcMain.handle('uc:installed-save', (_event, appid, metadata) => {
     manifest.installStatus = 'installing'
     try {
       manifest.metadataHash = computeObjectHash(metadata)
-    } catch {}
+    } catch { }
     // mark as pending install
     manifest.installedAt = manifest.installedAt || null
     uc_writeJsonSync(manifestPath, manifest);
@@ -3499,7 +3498,7 @@ ipcMain.handle('uc:installed-save', (_event, appid, metadata) => {
             if (checksum) m.metadata.imageChecksum = checksum
             uc_writeJsonSync(manifestPath, m);
             // also update root installed index if present
-            try { updateInstalledIndex(path.join(downloadRoot, installedDirName)) } catch {}
+            try { updateInstalledIndex(path.join(downloadRoot, installedDirName)) } catch { }
           }
         }
       } catch (err) {
@@ -3535,7 +3534,7 @@ ipcMain.handle('uc:installed-update-metadata', async (_event, appid, updates) =>
         // Also update top-level name if changed
         if (updates.name) manifest.name = updates.name
 
-        try { manifest.metadataHash = computeObjectHash(manifest.metadata) } catch {}
+        try { manifest.metadataHash = computeObjectHash(manifest.metadata) } catch { }
         uc_writeJsonSync(manifestPath, manifest)
 
         // If image URL changed, download & cache the new image
@@ -3549,10 +3548,10 @@ ipcMain.handle('uc:installed-update-metadata', async (_event, appid, updates) =>
               manifest.metadata.localImage = imagePath
               uc_writeJsonSync(manifestPath, manifest)
             }
-          } catch {}
+          } catch { }
         }
 
-        try { updateInstalledIndex(root) } catch {}
+        try { updateInstalledIndex(root) } catch { }
         return { ok: true }
       }
     }
@@ -3602,7 +3601,7 @@ ipcMain.handle('uc:add-external-game', async (_event, appid, metadata, gamePath)
     // Compute metadata hash
     try {
       manifest.metadataHash = computeObjectHash(metadata)
-    } catch {}
+    } catch { }
 
     uc_writeJsonSync(manifestPath, manifest)
 
@@ -3613,7 +3612,7 @@ ipcMain.handle('uc:add-external-game', async (_event, appid, metadata, gamePath)
       if (fs.existsSync(linkPath)) {
         const stat = fs.lstatSync(linkPath)
         if (stat.isSymbolicLink() || stat.isDirectory()) {
-          try { fs.unlinkSync(linkPath) } catch { try { fs.rmdirSync(linkPath) } catch {} }
+          try { fs.unlinkSync(linkPath) } catch { try { fs.rmdirSync(linkPath) } catch { } }
         }
       }
       // Use junction on Windows (no admin needed), symlink on others
@@ -3646,7 +3645,7 @@ ipcMain.handle('uc:add-external-game', async (_event, appid, metadata, gamePath)
     }
 
     // Update installed index
-    try { updateInstalledIndex(installedRoot) } catch {}
+    try { updateInstalledIndex(installedRoot) } catch { }
 
     return { ok: true }
   } catch (err) {
@@ -3907,7 +3906,7 @@ ipcMain.handle('uc:game-exe-list', (_event, appid, versionLabel) => {
           exes = listExecutables(subPath, 6, 100)
           if (exes.length > 0) effectiveFolder = subPath
         }
-      } catch {}
+      } catch { }
     }
 
     // For external games, if no exes found via junction, try the externalPath directly
@@ -3920,7 +3919,7 @@ ipcMain.handle('uc:game-exe-list', (_event, appid, versionLabel) => {
           exes = listExecutables(extPath, 6, 100)
           return { ok: true, folder: extPath, exes }
         }
-      } catch {}
+      } catch { }
     }
 
     return { ok: true, folder: effectiveFolder, exes }
@@ -3933,17 +3932,17 @@ ipcMain.handle('uc:game-exe-list', (_event, appid, versionLabel) => {
 ipcMain.handle('uc:game-subfolder-find', (_event, folder) => {
   try {
     if (!folder || !fs.existsSync(folder)) return null
-    
+
     // Check if folder only has installed.json and one subdirectory
     const entries = fs.readdirSync(folder, { withFileTypes: true })
     const subdirs = entries.filter(e => e.isDirectory())
     const files = entries.filter(e => e.isFile())
-    
+
     // If there's only installed.json and one subdirectory, return that subdirectory
     if (files.length === 1 && files[0].name === INSTALLED_MANIFEST && subdirs.length === 1) {
       return path.join(folder, subdirs[0].name)
     }
-    
+
     return null
   } catch (err) {
     console.error('[UC] game-subfolder-find failed', err)
@@ -4546,7 +4545,7 @@ ipcMain.handle('uc:game-exe-launch', async (_event, appid, exePath, gameName, sh
     ucLog(`Launching game: ${appid} at ${exePath}`)
     try {
       const { command, args, cwd } = resolveLaunchCommand(exePath)
-      
+
       // Verbose logging
       const settings = readSettings() || {}
       if (settings.verboseDownloadLogging) {
@@ -4554,7 +4553,7 @@ ipcMain.handle('uc:game-exe-launch', async (_event, appid, exePath, gameName, sh
         ucLog(`  Command: ${command}`, 'info')
         ucLog(`  Args: ${JSON.stringify(args)}`, 'info')
       }
-      
+
       // Windows: launch via a persistent cmd.exe wrapper.
       // Many games that fail to launch via direct spawn work when launched this way,
       // and cmd.exe stays alive while the game runs, giving us a stable PID to track/quit.
@@ -4577,11 +4576,18 @@ ipcMain.handle('uc:game-exe-launch', async (_event, appid, exePath, gameName, sh
         ucLog(`Game launched successfully: ${appid} (PID: ${proc.pid})`)
         return { ok: true, pid: proc.pid }
       }
+
       
       // Non-Windows path (Linux/macOS) — apply Wine/Proton and VR env vars
       const env = buildVRGameEnv(buildLinuxGameEnv(process.env))
       env.PATH = `${cwd}:${env.PATH || ''}`
-      
+
+
+      // Non-Windows path
+      const env = { ...process.env }
+      env.PATH = `${cwd};${env.PATH || ''}`
+
+
       const proc = child_process.spawn(command, args, {
         detached: true,
         stdio: 'ignore',
@@ -4620,6 +4626,12 @@ ipcMain.handle('uc:game-exe-launch-admin', async (_event, appid, exePath, gameNa
         const env = buildVRGameEnv(buildLinuxGameEnv(process.env))
         env.PATH = `${cwd}:${env.PATH || ''}`
         
+
+
+        // Prepare environment - inherit all variables and ensure game directory is in PATH
+        const env = { ...process.env }
+        env.PATH = `${cwd};${env.PATH || ''}`
+
         const proc = child_process.spawn(command, args, {
           detached: true,
           stdio: 'ignore',
@@ -4644,14 +4656,14 @@ ipcMain.handle('uc:game-exe-launch-admin', async (_event, appid, exePath, gameNa
     ucLog(`Launching game as admin: ${appid} at ${exePath}`)
     try {
       const workingDir = path.dirname(exePath)
-      
+
       // Verbose logging
       const settings = readSettings() || {}
       if (settings.verboseDownloadLogging) {
         ucLog(`  Working directory (admin): ${workingDir}`, 'info')
         ucLog(`  Executable (admin): ${exePath}`, 'info')
       }
-      
+
       // Launch via cmd.exe as admin so the wrapper PID can be tracked and quit can kill the whole tree.
       const safeWorkingDir = String(workingDir).replace(/'/g, "''")
       const safeExePath = String(exePath).replace(/'/g, "''")
@@ -4724,11 +4736,11 @@ ipcMain.handle('uc:game-exe-launch-admin', async (_event, appid, exePath, gameNa
       // Fallback to regular launch
       try {
         const cwd = path.dirname(exePath)
-        
+
         // Prepare environment - inherit all variables and ensure game directory is in PATH
         const env = { ...process.env }
         env.PATH = `${cwd};${env.PATH || ''}`
-        
+
         const proc = child_process.spawn(exePath, [], {
           detached: true,
           stdio: 'ignore',
@@ -4818,7 +4830,7 @@ ipcMain.handle('uc:installed-delete', async (_event, appid) => {
       if (ok) updatedRoot = root
     }
     if (ok && updatedRoot) {
-      try { updateInstalledIndex(updatedRoot) } catch (e) {}
+      try { updateInstalledIndex(updatedRoot) } catch (e) { }
     }
     return { ok }
   } catch (err) {
@@ -4859,17 +4871,17 @@ function sanitizeDesktopFileName(name) {
 function buildDesktopExecLine(exePath) {
   const { command, args } = resolveLaunchCommand(exePath)
   const quote = (value) => `"${String(value).replace(/"/g, '\\"')}"`
-  
+
   // For Wine/Proton on Linux, we need to ensure the working directory is set via environment
   // The Path= field in .desktop files should handle this, but we also wrap it to be safe
   const workingDir = path.dirname(exePath)
-  
+
   // If using Wine/Proton, prepend cd command to ensure working directory
   if (process.platform === 'linux' && (command.includes('wine') || command.includes('proton'))) {
     const fullCmd = [command, ...args].map(quote).join(' ')
     return `sh -c 'cd "${workingDir.replace(/"/g, '\\"')}" && ${fullCmd}'`
   }
-  
+
   return [command, ...args].map(quote).join(' ')
 }
 
@@ -4929,7 +4941,7 @@ ipcMain.handle('uc:create-desktop-shortcut', async (_event, gameName, exePath) =
       const safeExePath = exePath.replace(/'/g, "''")
       const safeShortcutPath = shortcutPath.replace(/'/g, "''")
       const workingDir = path.dirname(exePath).replace(/'/g, "''")
-      
+
       // Log shortcut creation details
       const settings = readSettings() || {}
       if (settings.verboseDownloadLogging) {
@@ -4938,7 +4950,7 @@ ipcMain.handle('uc:create-desktop-shortcut', async (_event, gameName, exePath) =
         ucLog(`  Working Dir: ${workingDir}`, 'info')
         ucLog(`  Shortcut Path: ${shortcutPath}`, 'info')
       }
-      
+
       const psScript = `
         $WshShell = New-Object -ComObject WScript.Shell
         $Shortcut = $WshShell.CreateShortcut('${safeShortcutPath}')
@@ -4993,7 +5005,7 @@ ipcMain.handle('uc:create-desktop-shortcut', async (_event, gameName, exePath) =
         const workingDir = path.dirname(exePath)
         const desktopEntry = `[Desktop Entry]\nType=Application\nName=${gameName}\nExec=${execLine}\nPath=${workingDir}\nIcon=${iconPath}\nTerminal=false\nCategories=Game;\n`;
         fs.writeFileSync(shortcutPath, desktopEntry, 'utf8')
-        try { fs.chmodSync(shortcutPath, 0o755) } catch {}
+        try { fs.chmodSync(shortcutPath, 0o755) } catch { }
         ucLog(`Desktop shortcut created successfully: ${shortcutPath}`)
         return { ok: true }
       } catch (err) {

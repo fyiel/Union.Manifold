@@ -127,9 +127,9 @@ export function DownBar() {
           ? "Downloading"
           : completed
             ? "Completed"
-          : paused
-            ? "Paused"
-            : "Queued"
+            : paused
+              ? "Paused"
+              : "Queued"
     return {
       totalBytes,
       receivedBytes,
@@ -147,39 +147,39 @@ export function DownBar() {
   if (!displayGroup || !stats) {
     return (
       <>
-      <div
-        role="button"
-        tabIndex={0}
-        onClick={handleClick}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") handleClick()
-        }}
-        className="fixed bottom-0 left-0 right-0 z-30 border-t border-border/60 bg-card/95 px-4 py-3 text-left text-sm text-foreground backdrop-blur-md transition hover:bg-card"
-      >
-        <div className="flex items-center justify-between">
-          <span className="font-semibold">See activity</span>
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-muted-foreground">No active downloads</span>
-            <button
-              type="button"
-              onClick={(e) => {
-                e.preventDefault()
-                e.stopPropagation()
-                if (e.nativeEvent) {
-                  e.nativeEvent.stopImmediatePropagation()
-                }
-                setAddGameOpen(true)
-              }}
-              className="flex h-7 w-7 items-center justify-center rounded-full border border-border/60 bg-primary/10 text-primary transition hover:bg-primary/20"
-              aria-label="Add external game"
-              title="Add a game manually"
-            >
-              <Plus className="h-3.5 w-3.5" />
-            </button>
+        <div
+          role="button"
+          tabIndex={0}
+          onClick={handleClick}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") handleClick()
+          }}
+          className="fixed bottom-0 left-0 right-0 z-30 border-t border-border/60 bg-card/95 px-4 py-3 text-left text-sm text-foreground backdrop-blur-md transition hover:bg-card"
+        >
+          <div className="flex items-center justify-between">
+            <span className="font-semibold">See activity</span>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-muted-foreground">No active downloads</span>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  if (e.nativeEvent) {
+                    e.nativeEvent.stopImmediatePropagation()
+                  }
+                  setAddGameOpen(true)
+                }}
+                className="flex h-7 w-7 items-center justify-center rounded-full border border-border/60 bg-primary/10 text-primary transition hover:bg-primary/20"
+                aria-label="Add external game"
+                title="Add a game manually"
+              >
+                <Plus className="h-3.5 w-3.5" />
+              </button>
+            </div>
           </div>
         </div>
-      </div>
-      <AddGameModal open={addGameOpen} onOpenChange={setAddGameOpen} />
+        <AddGameModal open={addGameOpen} onOpenChange={setAddGameOpen} />
       </>
     )
   }
@@ -200,7 +200,7 @@ export function DownBar() {
       return
     }
     for (const item of downloads) {
-      if (item.status === "downloading") {
+      if (item.status === "downloading" && item.appid === displayGroup[0]?.appid) {
         void pauseDownload(item.id)
       }
     }
@@ -208,65 +208,65 @@ export function DownBar() {
 
   return (
     <>
-    <div
-      role="button"
-      tabIndex={0}
-      onClick={handleClick}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") handleClick()
-      }}
-      className="fixed bottom-0 left-0 right-0 z-30 border-t border-border/60 bg-card/95 px-4 py-3 text-left text-sm text-foreground backdrop-blur-md transition hover:bg-card"
-    >
-      <div className="flex items-center justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <span className="truncate font-semibold">{displayName}</span>
-            <span className="text-xs text-muted-foreground">
-              {isPaused
-                ? `Downloads paused - ${queuedCount} queued`
-                : isQueuedOnly
-                  ? "Queued"
-                  : stats.partInfo.total > 1
-                    ? `${stats.phase} part ${stats.partInfo.partNum} of ${stats.partInfo.total}`
-                    : stats.phase}
-              {queuedCount > 0 && !isPaused && !isQueuedOnly ? ` • ${queuedCount} queued` : ""}
-              {displayHost ? ` • ${displayHost}` : ""}
-            </span>
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={handleClick}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") handleClick()
+        }}
+        className="fixed bottom-0 left-0 right-0 z-30 border-t border-border/60 bg-card/95 px-4 py-3 text-left text-sm text-foreground backdrop-blur-md transition hover:bg-card"
+      >
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <span className="truncate font-semibold">{displayName}</span>
+              <span className="text-xs text-muted-foreground">
+                {isPaused
+                  ? `Downloads paused - ${queuedCount} queued`
+                  : isQueuedOnly
+                    ? "Queued"
+                    : stats.partInfo.total > 1
+                      ? `${stats.phase} part ${stats.partInfo.partNum} of ${stats.partInfo.total}`
+                      : stats.phase}
+                {queuedCount > 0 && !isPaused && !isQueuedOnly ? ` • ${queuedCount} queued` : ""}
+                {displayHost ? ` • ${displayHost}` : ""}
+              </span>
+            </div>
+            <div className="mt-2">
+              <Progress value={stats.progress} className="h-1.5" />
+            </div>
           </div>
-          <div className="mt-2">
-            <Progress value={stats.progress} className="h-1.5" />
+          <div className="flex items-center gap-3">
+            <div className="text-xs text-muted-foreground">{formatPercent(stats.progress)}</div>
+            <button
+              type="button"
+              onClick={handleToggle}
+              className="flex h-8 w-8 items-center justify-center rounded-full border border-border/60 bg-card/60 text-foreground transition hover:bg-card"
+              aria-label={isPaused ? "Resume downloads" : "Pause downloads"}
+            >
+              {isPaused ? <Play className="h-4 w-4" /> : <PauseCircle className="h-4 w-4" />}
+            </button>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
+                if (e.nativeEvent) {
+                  e.nativeEvent.stopImmediatePropagation()
+                }
+                setAddGameOpen(true)
+              }}
+              className="flex h-8 w-8 items-center justify-center rounded-full border border-border/60 bg-primary/10 text-primary transition hover:bg-primary/20"
+              aria-label="Add external game"
+              title="Add a game manually"
+            >
+              <Plus className="h-4 w-4" />
+            </button>
           </div>
-        </div>
-        <div className="flex items-center gap-3">
-          <div className="text-xs text-muted-foreground">{formatPercent(stats.progress)}</div>
-          <button
-            type="button"
-            onClick={handleToggle}
-            className="flex h-8 w-8 items-center justify-center rounded-full border border-border/60 bg-card/60 text-foreground transition hover:bg-card"
-            aria-label={isPaused ? "Resume downloads" : "Pause downloads"}
-          >
-            {isPaused ? <Play className="h-4 w-4" /> : <PauseCircle className="h-4 w-4" />}
-          </button>
-          <button
-            type="button"
-            onClick={(e) => {
-              e.preventDefault()
-              e.stopPropagation()
-              if (e.nativeEvent) {
-                e.nativeEvent.stopImmediatePropagation()
-              }
-              setAddGameOpen(true)
-            }}
-            className="flex h-8 w-8 items-center justify-center rounded-full border border-border/60 bg-primary/10 text-primary transition hover:bg-primary/20"
-            aria-label="Add external game"
-            title="Add a game manually"
-          >
-            <Plus className="h-4 w-4" />
-          </button>
         </div>
       </div>
-    </div>
-    <AddGameModal open={addGameOpen} onOpenChange={setAddGameOpen} />
+      <AddGameModal open={addGameOpen} onOpenChange={setAddGameOpen} />
     </>
   )
 }

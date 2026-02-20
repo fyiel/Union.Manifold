@@ -8,7 +8,7 @@ import { GameComments } from "@/components/GameComments"
 import { useDownloads } from "@/context/downloads-context"
 import { apiUrl, apiFetch } from "@/lib/api"
 import { getPreferredDownloadHost, setPreferredDownloadHost, requestDownloadToken, fetchGameVersionsMeta, type PreferredDownloadHost, type DownloadConfig, type GameVersion } from "@/lib/downloads"
-import { formatNumber, hasOnlineMode, pickGameExecutable, proxyImageUrl } from "@/lib/utils"
+import { formatNumber, hasOnlineMode, pickGameExecutable, proxyImageUrl, cn } from "@/lib/utils"
 import type { Game } from "@/lib/types"
 import { useGamesData } from "@/hooks/use-games"
 import { addViewedGameToHistory, hasCookieConsent } from "@/lib/user-history"
@@ -41,12 +41,22 @@ import {
 } from "lucide-react"
 import { ExePickerModal } from "@/components/ExePickerModal"
 import { AdminPromptModal } from "@/components/AdminPromptModal"
+import { LinuxExperiences } from "@/components/LinuxExperiences"
 import { DownloadCheckModal } from "@/components/DownloadCheckModal"
 import { DesktopShortcutModal } from "@/components/DesktopShortcutModal"
 import { EditGameMetadataModal } from "@/components/EditGameMetadataModal"
 import { VersionConflictModal } from "@/components/VersionConflictModal"
 import { gameLogger } from "@/lib/logger"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { GamePageSkeleton } from "@/components/GamePageSkeleton"
+
+const PROTON_RANK_COLORS: Record<string, string> = {
+  platinum: "text-[#b3e5fc] border-[#b3e5fc]/30",
+  gold: "text-[#ffd700] border-[#ffd700]/30",
+  silver: "text-[#c0c0c0] border-[#c0c0c0]/30",
+  bronze: "text-[#cd7f32] border-[#cd7f32]/30",
+  borked: "text-[#f44336] border-[#f44336]/30",
+}
 
 export function GameDetailPage() {
   const isWindows = typeof navigator !== 'undefined' && /windows/i.test(navigator.userAgent)
@@ -92,11 +102,40 @@ export function GameDetailPage() {
   const [versionConflictOpen, setVersionConflictOpen] = useState(false)
   const [overwriteOnDownload, setOverwriteOnDownload] = useState(false)
 
+  // ProtonDB state
+  const [protonData, setProtonData] = useState<any>(null)
+  const [protonLoading, setProtonLoading] = useState(false)
+
   // Version switcher state
   const [downloadVersions, setDownloadVersions] = useState<GameVersion[]>([])
   const [selectedPageVersionId, setSelectedPageVersionId] = useState<string | null>(null)
 
   const appid = params.id || ""
+
+  // Fetch ProtonDB summary for this game (proxied through the web API)
+  useEffect(() => {
+    if (!game?.appid) return
+    let cancelled = false
+    setProtonLoading(true)
+
+    apiFetch(`/api/protondb/${game.appid}`)
+      .then(async (res) => {
+        if (!res.ok) return { success: false }
+        return await res.json()
+      })
+      .then((data) => {
+        if (cancelled) return
+        setProtonData(data)
+      })
+      .catch(() => {
+        if (!cancelled) setProtonData({ success: false })
+      })
+      .finally(() => {
+        if (!cancelled) setProtonLoading(false)
+      })
+
+    return () => { cancelled = true }
+  }, [game?.appid])
 
   const persistGameName = (id: string, name?: string | null) => {
     if (!id || !name) return
@@ -531,8 +570,8 @@ export function GameDetailPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-20">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+      <div className="min-h-screen bg-background pb-12">
+        <GamePageSkeleton />
       </div>
     )
   }
@@ -964,57 +1003,94 @@ export function GameDetailPage() {
 
   return (
     <div className="space-y-12">
-      <section className="relative">
+      <section className="relative pt-6">
         <div className="container mx-auto px-4">
           <div className="max-w-6xl mx-auto">
-            <div className="relative rounded-3xl overflow-hidden border border-border/50 bg-card/30 backdrop-blur-sm">
+            <div className="relative rounded-3xl overflow-hidden border border-white/10 bg-black/40 backdrop-blur-md shadow-2xl shadow-black/50">
               <div className="relative aspect-video">
                 <img
                   src={proxyImageUrl(selectedImage || game.splash || game.image) || "/banner.png"}
                   alt={game.name}
                   className="h-full w-full object-cover"
                 />
-                <div className="absolute inset-0 bg-gradient-to-t from-background via-background/50 to-transparent" />
+                <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent" />
               </div>
 
-              <div className="absolute bottom-0 left-0 right-0 p-8">
-                <div className="flex flex-wrap gap-2 mb-4">
+              <div className="absolute bottom-0 left-0 right-0 p-8 space-y-4">
+                <div className="flex flex-wrap gap-2">
                   {displayedGame?.genres?.map((genre) => (
                     <Badge
                       key={genre}
                       variant={genre.toLowerCase() === "nsfw" ? "destructive" : "default"}
-                      className="px-3 py-1 rounded-full bg-primary/20 border-primary/30 text-primary font-semibold"
+                      className={`px-3 py-1 rounded-full font-semibold backdrop-blur-md border shadow-lg ${genre.toLowerCase() === "nsfw"
+                        ? "bg-red-500/20 border-red-500/30 text-red-400"
+                        : "bg-white/10 border-white/10 text-white hover:bg-white/20"
+                        }`}
                     >
                       {genre}
                     </Badge>
                   ))}
                   {isPopular && (
-                    <Badge className="px-3 py-1 rounded-full bg-orange-500/20 border-orange-500/30 text-orange-400 font-semibold flex items-center gap-1.5">
+                    <Badge className="px-3 py-1 rounded-full bg-orange-500/20 border-orange-500/30 text-orange-400 font-semibold flex items-center gap-1.5 backdrop-blur-md shadow-lg animate-pulse">
                       <Flame className="h-3 w-3" />
                       Popular
                     </Badge>
                   )}
                   {hasOnlineMode(displayedGame?.hasCoOp) && (
-                    <Badge className="px-3 py-1 rounded-full bg-emerald-500/20 border-emerald-500/30 text-emerald-400 font-semibold flex items-center gap-1.5">
+                    <Badge className="px-3 py-1 rounded-full bg-emerald-500/20 border-emerald-500/30 text-emerald-400 font-semibold flex items-center gap-1.5 backdrop-blur-md shadow-lg">
                       <Wifi className="h-3 w-3" />
                       Online
                     </Badge>
                   )}
                   {isExternalGame && (
-                    <Badge className="px-3 py-1 rounded-full bg-yellow-500/20 border-yellow-500/30 text-yellow-400 font-semibold flex items-center gap-1.5">
+                    <Badge className="px-3 py-1 rounded-full bg-yellow-500/20 border-yellow-500/30 text-yellow-400 font-semibold flex items-center gap-1.5 backdrop-blur-md shadow-lg">
                       <Info className="h-3 w-3" />
                       Externally Added
                     </Badge>
                   )}
+                  {protonLoading ? (
+                    <Badge
+                      variant="online"
+                      className="px-3 py-1 rounded-full text-sky-400 border-sky-500/30 font-semibold flex items-center gap-1.5 backdrop-blur-md shadow-lg"
+                    >
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                      Linux: Loading...
+                    </Badge>
+                  ) : protonData && protonData.success ? (
+                    <Badge
+                      variant="online"
+                      className={cn(
+                        "px-3 py-1 rounded-full font-semibold flex items-center gap-1.5 backdrop-blur-md shadow-lg cursor-pointer transition-all hover:bg-black/80",
+                        PROTON_RANK_COLORS[protonData.rating?.toLowerCase()] || "text-sky-400 border-sky-500/30"
+                      )}
+                      onClick={() => window.open(protonData.url || `https://www.protondb.com/app/${game.appid}`, "_blank")}
+                      title="ProtonDB — Linux compatibility rating"
+                    >
+                      <ShieldCheck className="h-3 w-3" />
+                      Linux: {protonData.rating ? protonData.rating.charAt(0).toUpperCase() + protonData.rating.slice(1) : "Rated"}
+                    </Badge>
+                  ) : protonData && !protonData.success ? (
+                    <Badge
+                      variant="online"
+                      className="px-3 py-1 rounded-full text-sky-400 border-sky-500/30 font-semibold flex items-center gap-1.5 backdrop-blur-md shadow-lg cursor-pointer transition-all hover:bg-black/80"
+                      onClick={() => window.open("https://www.protondb.com/", "_blank")}
+                      title="ProtonDB — Linux compatibility rating not available"
+                    >
+                      <ShieldCheck className="h-3 w-3" />
+                      Linux: N/A
+                    </Badge>
+                  ) : null}
                 </div>
 
-                <h1 className="text-4xl md:text-6xl font-black text-foreground font-montserrat mb-3 text-balance">
-                  {game.name}
-                </h1>
-                <p className="text-lg text-muted-foreground flex items-center gap-2">
-                  <User className="h-4 w-4" />
-                  {game.developer || "Unknown Developer"}
-                </p>
+                <div className="space-y-1">
+                  <h1 className="text-4xl md:text-6xl font-black text-white font-montserrat tracking-tight drop-shadow-lg">
+                    {game.name}
+                  </h1>
+                  <p className="text-lg text-white/80 flex items-center gap-2 font-medium drop-shadow-md">
+                    <User className="h-4 w-4" />
+                    {game.developer || "Unknown Developer"}
+                  </p>
+                </div>
               </div>
             </div>
 
@@ -1024,10 +1100,10 @@ export function GameDetailPage() {
 
       {/* Version Switcher Tab Bar */}
       {downloadVersions.length > 1 && (
-        <section className="container mx-auto px-4 pt-2 -mt-6 pb-0">
+        <section className="container mx-auto px-4 -mt-2 pb-0">
           <div className="max-w-6xl mx-auto">
             <div className="flex items-center gap-3 overflow-x-auto scrollbar-hide pb-1">
-              <div className="flex items-center gap-1.5 text-sm text-muted-foreground shrink-0 mr-1">
+              <div className="flex items-center gap-1.5 text-sm text-gray-400 shrink-0 mr-1">
                 <History className="h-4 w-4" />
                 <span className="font-semibold text-xs uppercase tracking-wider">Versions</span>
               </div>
@@ -1043,7 +1119,7 @@ export function GameDetailPage() {
                       transition-all duration-200 border
                       ${isSelected
                         ? "bg-primary text-primary-foreground border-primary shadow-lg shadow-primary/25"
-                        : "bg-card/50 text-muted-foreground border-border/50 hover:bg-card hover:text-foreground hover:border-border"
+                        : "bg-white/5 text-gray-400 border-white/10 hover:bg-white/10 hover:text-white"
                       }
                     `}
                   >
@@ -1070,20 +1146,23 @@ export function GameDetailPage() {
         <div className="max-w-6xl mx-auto">
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             <div className="lg:col-span-2 space-y-8">
-              <div className="p-8 rounded-2xl bg-card/30 border border-border/50">
-                <h2 className="text-2xl font-black text-foreground font-montserrat mb-4">About This Game</h2>
-                <p className="text-base text-muted-foreground leading-relaxed whitespace-pre-wrap">
+              <div className="p-8 rounded-2xl bg-black/40 border border-white/10 backdrop-blur-md shadow-xl">
+                <h2 className="text-2xl font-black text-white font-montserrat mb-4 tracking-tight">About This Game</h2>
+                <p className="text-base text-gray-300 leading-relaxed whitespace-pre-wrap">
                   {game.description}
                 </p>
               </div>
 
+              {/* Linux Experiences (community submissions) */}
+              <LinuxExperiences appid={game.appid} />
+
               {game.screenshots && game.screenshots.length > 0 && (
-                <div className="p-6 rounded-2xl bg-card/30 border border-border/50">
+                <div className="p-6 rounded-2xl bg-black/40 border border-white/10 backdrop-blur-md shadow-xl">
                   <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-xl font-black text-foreground">Screenshots</h3>
+                    <h3 className="text-xl font-black text-white font-montserrat">Screenshots</h3>
                     <div className="flex items-center gap-2">
-                      <span className="text-sm text-muted-foreground">{game.screenshots.length} images</span>
-                      <Button variant="outline" size="sm" className="h-8 px-2" onClick={() => openLightbox(0)}>
+                      <span className="text-sm text-gray-400">{game.screenshots.length} images</span>
+                      <Button variant="outline" size="sm" className="h-8 px-2 border-white/20 bg-white/5 hover:bg-white/10 text-white" onClick={() => openLightbox(0)}>
                         View All
                       </Button>
                     </div>
@@ -1094,7 +1173,7 @@ export function GameDetailPage() {
                       <button
                         key={`${screenshot}-${index}`}
                         onClick={() => openLightbox(index)}
-                        className="relative w-full aspect-video rounded-lg overflow-hidden border border-border/60 hover:scale-[1.02] transition-transform"
+                        className="relative w-full aspect-video rounded-lg overflow-hidden border border-white/10 hover:border-primary/50 hover:scale-[1.02] transition-transform shadow-md"
                         aria-label={`Open screenshot ${index + 1}`}
                       >
                         <img
@@ -1123,14 +1202,14 @@ export function GameDetailPage() {
               )}
 
               {displayedGame?.dlc && displayedGame.dlc.length > 0 && (
-                <div className="p-8 rounded-2xl bg-card/30 border border-border/50">
-                  <h2 className="text-2xl font-black text-foreground font-montserrat mb-4">
+                <div className="p-8 rounded-2xl bg-black/40 border border-white/10 backdrop-blur-md shadow-xl">
+                  <h2 className="text-2xl font-black text-white font-montserrat mb-4 tracking-tight">
                     Included DLC ({displayedGame.dlc.length})
                   </h2>
-                  <ul className="space-y-2">
+                  <ul className="space-y-2 max-h-[400px] overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-white/20 hover:scrollbar-thumb-white/40">
                     {displayedGame.dlc.map((dlc, index) => (
-                      <li key={`${dlc}-${index}`} className="flex items-center gap-2 text-muted-foreground">
-                        <span className="h-1.5 w-1.5 rounded-full bg-primary" />
+                      <li key={`${dlc}-${index}`} className="flex items-center gap-2 text-gray-300 bg-white/5 p-2 rounded-lg border border-white/5">
+                        <span className="h-1.5 w-1.5 rounded-full bg-primary flex-shrink-0" />
                         {dlc}
                       </li>
                     ))}
@@ -1151,7 +1230,7 @@ export function GameDetailPage() {
               )}
             </div>
             <div className="space-y-4">
-              <div className="p-6 rounded-2xl bg-gradient-to-br from-primary/20 to-primary/5 border border-primary/30">
+              <div className="p-6 rounded-2xl bg-black/40 border border-white/10 backdrop-blur-md shadow-xl">
                 <div className="flex items-center gap-3">
                   <Button
                     size="lg"
@@ -1199,13 +1278,13 @@ export function GameDetailPage() {
                           <Settings className="h-5 w-5" />
                         </Button>
                       </PopoverTrigger>
-                      <PopoverContent align="end" className="w-56 rounded-2xl p-2">
+                      <PopoverContent align="end" className="w-56 rounded-2xl p-2 bg-zinc-950 border-white/10 text-white shadow-xl">
                         <button
                           type="button"
                           onClick={() => {
                             void openExecutablePicker()
                           }}
-                          className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-muted-foreground transition-colors hover:text-primary hover:bg-primary/10"
+                          className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-gray-400 transition-colors hover:text-white hover:bg-white/10"
                         >
                           <Settings className="mr-2 h-4 w-4" />
                           Set Executable
@@ -1216,7 +1295,7 @@ export function GameDetailPage() {
                             setActionMenuOpen(false)
                             void handleCreateShortcut()
                           }}
-                          className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-muted-foreground transition-colors hover:text-primary hover:bg-primary/10"
+                          className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-gray-400 transition-colors hover:text-white hover:bg-white/10"
                         >
                           <ExternalLink className="mr-2 h-4 w-4" />
                           Create Desktop Shortcut
@@ -1227,7 +1306,7 @@ export function GameDetailPage() {
                             setActionMenuOpen(false)
                             void openGameFiles()
                           }}
-                          className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-muted-foreground transition-colors hover:text-primary hover:bg-primary/10"
+                          className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-gray-400 transition-colors hover:text-white hover:bg-white/10"
                         >
                           <FolderOpen className="mr-2 h-4 w-4" />
                           Open Game Files
@@ -1239,13 +1318,13 @@ export function GameDetailPage() {
                               setActionMenuOpen(false)
                               setEditMetadataOpen(true)
                             }}
-                            className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-muted-foreground transition-colors hover:text-primary hover:bg-primary/10"
+                            className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-gray-400 transition-colors hover:text-white hover:bg-white/10"
                           >
                             <Settings className="mr-2 h-4 w-4" />
                             Edit Details
                           </button>
                         )}
-                        <div className="my-1 h-px bg-border/60" />
+                        <div className="my-1 h-px bg-white/10" />
                         <button
                           type="button"
                           onClick={() => {
@@ -1295,26 +1374,26 @@ export function GameDetailPage() {
               </div>
 
               <div className={`grid grid-cols-2 gap-3${isUCMatched ? ' opacity-40 blur-[2px] pointer-events-none select-none' : ''}`}>
-                <div className="p-4 rounded-xl bg-card/30 border border-border/50 text-center">
+                <div className="p-4 rounded-xl bg-black/40 border border-white/10 backdrop-blur-md text-center shadow-lg">
                   <Download className="h-5 w-5 text-primary mx-auto mb-2" />
-                  <div className="text-2xl font-black text-foreground font-montserrat">
+                  <div className="text-2xl font-black text-white font-montserrat">
                     {formatNumber(effectiveDownloadCount)}
                   </div>
-                  <div className="text-xs text-muted-foreground">Downloads</div>
+                  <div className="text-xs text-gray-400">Downloads</div>
                 </div>
 
-                <div className="p-4 rounded-xl bg-card/30 border border-border/50 text-center">
-                  <Eye className="h-5 w-5 text-primary mx-auto mb-2" />
-                  <div className="text-2xl font-black text-foreground font-montserrat">
+                <div className="p-4 rounded-xl bg-black/40 border border-white/10 backdrop-blur-md text-center shadow-lg">
+                  <Eye className="h-5 w-5 text-blue-400 mx-auto mb-2" />
+                  <div className="text-2xl font-black text-white font-montserrat">
                     {formatNumber(effectiveViewCount)}
                   </div>
-                  <div className="text-xs text-muted-foreground">Views</div>
+                  <div className="text-xs text-gray-400">Views</div>
                 </div>
               </div>
 
-              <div className="p-6 rounded-2xl bg-card/30 border border-border/50 space-y-4">
+              <div className="p-6 rounded-2xl bg-black/40 border border-white/10 backdrop-blur-md shadow-xl space-y-4">
                 <div className="flex items-center justify-between">
-                  <h3 className="font-black text-foreground font-montserrat">Details</h3>
+                  <h3 className="font-black text-white font-montserrat">Details</h3>
                   {isExternalGame && (
                     <Button
                       variant="ghost"
@@ -1337,11 +1416,11 @@ export function GameDetailPage() {
 
                 <div className={`space-y-3 text-sm${isUCMatched ? ' opacity-50 blur-[1.5px] select-none' : ''}`}>
                   <div className="flex items-center justify-between">
-                    <span className="text-muted-foreground flex items-center gap-2">
+                    <span className="text-gray-400 flex items-center gap-2">
                       <Calendar className="h-4 w-4" />
                       Released
                     </span>
-                    <span className="font-semibold text-foreground">
+                    <span className="font-semibold text-white">
                       {(() => {
                         const date = new Date(game.release_date)
                         return isNaN(date.getTime()) ? game.release_date : date.toLocaleDateString()
@@ -1350,11 +1429,11 @@ export function GameDetailPage() {
                   </div>
 
                   <div className="flex items-center justify-between">
-                    <span className="text-muted-foreground flex items-center gap-2">
+                    <span className="text-gray-400 flex items-center gap-2">
                       <HardDrive className="h-4 w-4" />
                       Size
                     </span>
-                    <span className="font-semibold text-foreground">{displayedGame?.size || "Unknown"}</span>
+                    <span className="font-semibold text-white">{displayedGame?.size || "Unknown"}</span>
                   </div>
 
                   {(game.version || installedVersionLabels.length > 0) && (
@@ -1362,22 +1441,22 @@ export function GameDetailPage() {
                       {installedVersionLabels.length > 0 ? (
                         <>
                           <div className="flex items-center justify-between">
-                            <span className="text-muted-foreground">Installed version(s)</span>
+                            <span className="text-gray-400">Installed version(s)</span>
                             <Popover>
                               <PopoverTrigger asChild>
                                 <button
                                   type="button"
-                                  className="inline-flex items-center gap-2 rounded-full border border-border/60 bg-background/60 px-3 py-1 text-xs font-semibold text-foreground hover:bg-background/80"
+                                  className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold text-white hover:bg-white/10 transition-colors"
                                 >
                                   {installedVersionSummary || "Installed"}
                                   <ChevronRight className="h-3.5 w-3.5" />
                                 </button>
                               </PopoverTrigger>
-                              <PopoverContent align="end" className="w-56 rounded-2xl p-3">
-                                <div className="text-xs font-semibold text-muted-foreground mb-2">Installed versions</div>
+                              <PopoverContent align="end" className="w-56 rounded-2xl p-3 bg-zinc-900 border-white/10 text-white shadow-xl">
+                                <div className="text-xs font-semibold text-gray-400 mb-2">Installed versions</div>
                                 <div className="space-y-1">
                                   {installedVersionLabels.map((label) => (
-                                    <div key={label} className="text-sm text-foreground">
+                                    <div key={label} className="text-sm text-white">
                                       {label}
                                     </div>
                                   ))}
@@ -1387,15 +1466,15 @@ export function GameDetailPage() {
                           </div>
                           {game.version && !installedVersionLabels.includes(game.version) && (
                             <div className="flex items-center justify-between">
-                              <span className="text-muted-foreground">Latest version</span>
-                              <span className="font-semibold text-foreground">{game.version}</span>
+                              <span className="text-gray-400">Latest version</span>
+                              <span className="font-semibold text-white">{game.version}</span>
                             </div>
                           )}
                         </>
                       ) : (
                         <div className="flex items-center justify-between">
-                          <span className="text-muted-foreground">Version</span>
-                          <span className="font-semibold text-foreground">{game.version}</span>
+                          <span className="text-gray-400">Version</span>
+                          <span className="font-semibold text-white">{game.version}</span>
                         </div>
                       )}
                     </>
@@ -1403,8 +1482,8 @@ export function GameDetailPage() {
 
                   {game.update_time && (
                     <div className="flex items-center justify-between">
-                      <span className="text-muted-foreground">Updated</span>
-                      <span className="font-semibold text-foreground">
+                      <span className="text-gray-400">Updated</span>
+                      <span className="font-semibold text-white">
                         {(() => {
                           const date = new Date(game.update_time)
                           return isNaN(date.getTime()) ? game.update_time : date.toLocaleDateString()
@@ -1414,11 +1493,11 @@ export function GameDetailPage() {
                   )}
 
                   <div className="flex items-center justify-between">
-                    <span className="text-muted-foreground flex items-center gap-2">
+                    <span className="text-gray-400 flex items-center gap-2">
                       <ShieldCheck className="h-4 w-4" />
                       Source
                     </span>
-                    <span className="font-semibold text-foreground">{displayedGame?.source || "Unknown"}</span>
+                    <span className="font-semibold text-white">{displayedGame?.source || "Unknown"}</span>
                   </div>
                 </div>
               </div>
@@ -1430,9 +1509,9 @@ export function GameDetailPage() {
       <GameComments appid={game.appid} gameName={game.name} />
 
       {relatedGames.length > 0 && (
-        <section className="py-16 px-4 bg-card/20">
+        <section className="py-16 px-4 bg-black/20">
           <div className="container mx-auto max-w-7xl">
-            <h2 className="text-3xl md:text-4xl font-black text-foreground font-montserrat mb-8">
+            <h2 className="text-3xl md:text-4xl font-black text-white font-montserrat mb-8">
               You May Also Like
             </h2>
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">

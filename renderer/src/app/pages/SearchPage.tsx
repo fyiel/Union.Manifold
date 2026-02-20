@@ -398,7 +398,7 @@ export function SearchPage() {
       for (let i = shuffled.length - 1; i > 0; i--) {
         random = (random * 9301 + 49297) % 233280
         const j = Math.floor((random / 233280) * (i + 1))
-        ;[shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]]
+          ;[shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]]
       }
       return shuffled
     }
@@ -570,7 +570,7 @@ export function SearchPage() {
   }, [developerQuery, filterOptions.allDevelopers])
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className={`min-h-screen bg-background ${loading ? "min-h-[200vh]" : ""}`}>
       <div className="container mx-auto max-w-7xl px-3 sm:px-4 py-6 sm:py-8">
         <div className="mb-6 sm:mb-8 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
           <div>
@@ -699,11 +699,10 @@ export function SearchPage() {
                                 <button
                                   key={genre}
                                   type="button"
-                                  className={`text-left px-3 py-2 rounded-lg text-sm transition-colors ${
-                                    draftFilters.genres.includes(genre)
-                                      ? "bg-primary text-primary-foreground"
-                                      : "hover:bg-muted"
-                                  }`}
+                                  className={`text-left px-3 py-2 rounded-lg text-sm transition-colors ${draftFilters.genres.includes(genre)
+                                    ? "bg-primary text-primary-foreground"
+                                    : "hover:bg-muted"
+                                    }`}
                                   onClick={() => toggleDraftGenre(genre)}
                                 >
                                   {genre}
@@ -726,11 +725,10 @@ export function SearchPage() {
                                 <button
                                   key={developer}
                                   type="button"
-                                  className={`text-left px-3 py-2 rounded-lg text-sm transition-colors ${
-                                    draftFilters.developers.includes(developer)
-                                      ? "bg-primary text-primary-foreground"
-                                      : "hover:bg-muted"
-                                  }`}
+                                  className={`text-left px-3 py-2 rounded-lg text-sm transition-colors ${draftFilters.developers.includes(developer)
+                                    ? "bg-primary text-primary-foreground"
+                                    : "hover:bg-muted"
+                                    }`}
                                   onClick={() => toggleDraftDeveloper(developer)}
                                 >
                                   {developer}
@@ -1120,16 +1118,30 @@ export function SearchPage() {
                 {filteredGames.length === 0 && games.length === 0 && (
                   <div className="text-center py-12 sm:py-20">
                     <div className="max-w-xl mx-auto">
-                      <ErrorMessage
-                        title="Games Loading Issue"
-                        message="We couldn't load any games. Please try again or contact support if the issue persists."
-                        errorCode={generateErrorCode(ErrorTypes.SEARCH_FETCH, "search-page-empty")}
-                        retry={() => {
-                          setGamesError(null)
-                          setLoading(true)
-                          loadGames()
-                        }}
-                      />
+                      {gamesError ? (
+                        <ErrorMessage
+                          title="Games Loading Issue"
+                          message="We couldn't load any games. Please try again or contact support if the issue persists."
+                          errorCode={gamesError.code}
+                          retry={() => {
+                            setGamesError(null)
+                            setLoading(true)
+                            loadGames()
+                          }}
+                        />
+                      ) : (
+                        <div className="flex flex-col items-center gap-4">
+                          <div className="p-4 rounded-full bg-muted">
+                            <Filter className="h-8 w-8 text-muted-foreground" />
+                          </div>
+                          <div>
+                            <h3 className="text-lg sm:text-xl font-semibold text-foreground mb-2">No games found</h3>
+                            <p className="text-sm sm:text-base text-muted-foreground">
+                              No games match your search criteria. Try adjusting your filters or search terms.
+                            </p>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}
