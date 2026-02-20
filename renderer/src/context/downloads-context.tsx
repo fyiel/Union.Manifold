@@ -132,11 +132,20 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
       if (!raw) return []
       const parsed = JSON.parse(raw) as DownloadItem[]
 
-      const restored = parsed.map((item) =>
-        item.status === "downloading" || item.status === "extracting" || item.status === "installing"
-          ? { ...item, status: "paused" as DownloadStatus, error: "App restarted" }
-          : item
-      )
+      const coerceUrl = (url: unknown): string => {
+        if (typeof url === "string") return url
+        // DownloadHostEntry object persisted by old builds: { url: string; part: number|null }
+        if (url && typeof url === "object" && typeof (url as any).url === "string") return (url as any).url
+        return String(url ?? "")
+      }
+
+      const restored = parsed.map((item) => {
+        // Sanitize url in case it was persisted as a DownloadHostEntry object from an older build
+        const safeItem = typeof item.url !== "string" ? { ...item, url: coerceUrl(item.url) } : item
+        return safeItem.status === "downloading" || safeItem.status === "extracting" || safeItem.status === "installing"
+          ? { ...safeItem, status: "paused" as DownloadStatus, error: "App restarted" }
+          : safeItem
+      })
 
       // Log restored downloads so they're visible in app logs
       if (restored.length > 0) {

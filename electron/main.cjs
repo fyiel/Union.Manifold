@@ -1891,6 +1891,19 @@ async function visitPixeldrainViewerPage(fileId) {
 async function startDownloadNow(win, payload) {
   if (!win || win.isDestroyed()) return { ok: false }
 
+  // Defensive coerce: renderer may pass a DownloadHostEntry object ({url, part})
+  // instead of a plain string when running an old build against the new API format.
+  if (payload && payload.url && typeof payload.url !== 'string') {
+    const extracted = (payload.url && typeof payload.url.url === 'string') ? payload.url.url : String(payload.url)
+    ucLog(`startDownloadNow: coercing non-string url to string (was ${typeof payload.url})`, 'warn')
+    payload = { ...payload, url: extracted }
+  }
+
+  if (!payload || typeof payload.url !== 'string' || !payload.url) {
+    ucLog(`startDownloadNow: invalid url in payload`, 'warn')
+    return { ok: false, error: 'invalid-url' }
+  }
+
   // If this download was already cancelled (e.g. by user during pixeldrain delay), bail out
   if (cancelledDownloadIds.has(payload.downloadId)) {
     ucLog(`startDownloadNow: skipping cancelled download ${payload.downloadId}`)
@@ -3274,7 +3287,13 @@ app.on('before-quit', () => {
 ipcMain.handle('uc:download-start', (event, payload) => {
   const win = BrowserWindow.fromWebContents(event.sender)
   if (!win || win.isDestroyed()) return { ok: false }
-  if (!payload || !payload.url || !payload.downloadId) {
+  // Coerce DownloadHostEntry objects to string URL (safety net for old renderer builds)
+  if (payload && payload.url && typeof payload.url !== 'string') {
+    const extracted = (typeof payload.url.url === 'string') ? payload.url.url : String(payload.url)
+    ucLog('uc:download-start: coercing non-string url', 'warn')
+    payload = { ...payload, url: extracted }
+  }
+  if (!payload || !payload.url || typeof payload.url !== 'string' || !payload.downloadId) {
     ucLog('Download start failed: invalid payload', 'warn')
     return { ok: false }
   }
@@ -3483,7 +3502,13 @@ ipcMain.handle('uc:download-resume-interrupted', (event, payload) => {
 ipcMain.handle('uc:download-resume-with-fresh-url', (event, payload) => {
   const win = BrowserWindow.fromWebContents(event.sender)
   if (!win || win.isDestroyed()) return { ok: false }
-  if (!payload || !payload.url) return { ok: false, error: 'missing-url' }
+  // Coerce DownloadHostEntry objects to string URL (safety net for old renderer builds)
+  if (payload && payload.url && typeof payload.url !== 'string') {
+    const extracted = (typeof payload.url.url === 'string') ? payload.url.url : String(payload.url)
+    ucLog('uc:download-resume-with-fresh-url: coercing non-string url', 'warn')
+    payload = { ...payload, url: extracted }
+  }
+  if (!payload || !payload.url || typeof payload.url !== 'string') return { ok: false, error: 'missing-url' }
 
   const savePath = payload.savePath
   // Attempt to restore the partial file if Chromium deleted it during a previous quit
