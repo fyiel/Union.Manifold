@@ -2213,7 +2213,7 @@ export function SettingsPage() {
                   <button
                     type="button"
                     onClick={async () => {
-                      setVrXrRuntimeJson(vrOpenXrDetected.path!)
+                      setVrXrRuntimeJson(vrOpenXrDetected.path)
                       await window.ucSettings?.set?.('vrXrRuntimeJson', vrOpenXrDetected.path).catch(() => {})
                     }}
                     className="text-[10px] px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20 transition-colors"
