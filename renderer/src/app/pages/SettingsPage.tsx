@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
-import { ChevronDown, FolderOpen, HardDrive, LogIn, LogOut, Plus, RefreshCw, UserRound, Terminal, Cpu, FlaskConical } from "lucide-react"
+import { ArrowDownToLine, ChevronDown, FolderOpen, Gamepad2, HardDrive, LogIn, LogOut, Plus, RefreshCw, Settings2, UserRound, Terminal, Cpu, FlaskConical } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -119,6 +119,7 @@ export function SettingsPage() {
   const [bioSaving, setBioSaving] = useState(false)
   const [bioSaved, setBioSaved] = useState(false)
   const [skipLinkCheck, setSkipLinkCheck] = useState(false)
+  const [activeSection, setActiveSection] = useState<'account' | 'downloads' | 'game-launch' | 'advanced'>('account')
 
   useEffect(() => {
     const loadVersion = async () => {
@@ -1154,12 +1155,67 @@ export function SettingsPage() {
   const showAccountControls = Boolean(accountUser && authenticated)
   const accountBusy = accountLoading || loggingIn || loggingOut || accountRefreshing
 
+  const NAV_ITEMS = [
+    { id: 'account' as const, label: 'Account', icon: UserRound, description: 'Profile & preferences' },
+    { id: 'downloads' as const, label: 'Downloads', icon: ArrowDownToLine, description: 'Storage & mirrors' },
+    { id: 'game-launch' as const, label: 'Game Launch', icon: Gamepad2, description: 'Launch & compatibility' },
+    { id: 'advanced' as const, label: 'Advanced', icon: Settings2, description: 'Dev tools & danger zone' },
+  ]
+
   return (
-    <div className="container mx-auto max-w-5xl space-y-8">
-      <div className="flex items-center gap-3">
+    <div className="container mx-auto max-w-6xl">
+      {/* Page header */}
+      <div className="flex items-center gap-3 mb-8">
         <h1 className="text-2xl sm:text-3xl font-black font-montserrat">Settings</h1>
         <Badge className="rounded-full bg-primary/15 text-primary border-primary/20">UnionCrax.Direct</Badge>
+        {appVersion && <span className="text-xs text-muted-foreground font-mono ml-auto">v{appVersion}</span>}
       </div>
+
+      <div className="flex gap-6 items-start">
+
+        {/* ─── Sidebar Nav ─── */}
+        <aside className="w-52 shrink-0 sticky top-0 self-start">
+          <nav className="space-y-0.5">
+            {NAV_ITEMS.map((item) => (
+              <button
+                key={item.id}
+                onClick={() => setActiveSection(item.id)}
+                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all text-left ${
+                  activeSection === item.id
+                    ? 'bg-primary/15 text-primary'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-muted/40'
+                }`}
+              >
+                <item.icon className={`h-4 w-4 shrink-0 ${activeSection === item.id ? 'text-primary' : ''}`} />
+                <div>
+                  <div className="leading-tight">{item.label}</div>
+                  <div className="text-[11px] font-normal opacity-70 leading-tight mt-0.5">{item.description}</div>
+                </div>
+              </button>
+            ))}
+          </nav>
+          <div className="mt-6 px-3">
+            <div className="h-px bg-border/60 mb-4" />
+            <button
+              onClick={handleCheckForUpdates}
+              disabled={checkingUpdate}
+              className="w-full flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors py-1 disabled:opacity-60"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${checkingUpdate ? 'animate-spin' : ''}`} />
+              {checkingUpdate ? 'Checking...' : 'Check for updates'}
+            </button>
+            {updateCheckResult && (
+              <div className="mt-2 text-[11px] text-primary">{updateCheckResult}</div>
+            )}
+          </div>
+        </aside>
+
+        {/* ─── Main content ─── */}
+        <main className="flex-1 min-w-0 space-y-4">
+
+          {/* ====== ACCOUNT ====== */}
+          {activeSection === 'account' && (
+            <>
 
       <Card className="border-border/60">
         <CardContent className="p-6 space-y-6">
@@ -1441,6 +1497,13 @@ export function SettingsPage() {
         </CardContent>
       </Card>
 
+            </>
+          )}
+
+          {/* ====== DOWNLOADS ====== */}
+          {activeSection === 'downloads' && (
+            <>
+
       <Card className="border-border/60">
         <CardContent className="p-6 space-y-6">
           <div>
@@ -1659,6 +1722,13 @@ export function SettingsPage() {
           </div>
         </CardContent>
       </Card>
+
+            </>
+          )}
+
+          {/* ====== GAME LAUNCH ====== */}
+          {activeSection === 'game-launch' && (
+            <>
 
       <Card className="border-border/60">
         <CardContent className="p-6 space-y-6">
@@ -2262,6 +2332,13 @@ export function SettingsPage() {
         </CardContent>
       </Card>
 
+            </>
+          )}
+
+          {/* ====== ADVANCED ====== */}
+          {activeSection === 'advanced' && (
+            <>
+
       <Card className="border-destructive/40">
         <CardContent className="p-6 space-y-4">
           <div>
@@ -2521,6 +2598,12 @@ export function SettingsPage() {
           )}
         </CardContent>
       </Card>
+
+            </>
+          )}
+
+        </main>
+      </div>
     </div>
   )
 }
