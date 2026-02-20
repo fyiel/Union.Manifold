@@ -4006,6 +4006,561 @@ function resolveLaunchCommand(exePath) {
   return { command: exePath, args: [], cwd }
 }
 
+// ============================================================
+// Linux Gaming Helpers
+// ============================================================
+
+/**
+ * Build the environment object for Wine/Proton launches, merging in
+ * WINEPREFIX, STEAM_COMPAT_DATA_PATH, STEAM_COMPAT_CLIENT_INSTALL_PATH,
+ * and any user-defined extra env vars from settings.
+ */
+function buildLinuxGameEnv(baseEnv) {
+  const settings = readSettings() || {}
+  const env = { ...(baseEnv || process.env) }
+
+  // WINEPREFIX
+  const winePrefix = typeof settings.linuxWinePrefix === 'string' ? settings.linuxWinePrefix.trim() : ''
+  if (winePrefix) env.WINEPREFIX = winePrefix
+
+  // Proton prefix (STEAM_COMPAT_DATA_PATH)
+  const protonPrefix = typeof settings.linuxProtonPrefix === 'string' ? settings.linuxProtonPrefix.trim() : ''
+  if (protonPrefix) {
+    env.STEAM_COMPAT_DATA_PATH = protonPrefix
+    // STEAM_COMPAT_CLIENT_INSTALL_PATH is needed by some Proton builds
+    if (!env.STEAM_COMPAT_CLIENT_INSTALL_PATH) {
+      const steamPath = typeof settings.linuxSteamPath === 'string' ? settings.linuxSteamPath.trim() : ''
+      if (steamPath) env.STEAM_COMPAT_CLIENT_INSTALL_PATH = steamPath
+    }
+  }
+
+  // Extra environment variables (stored as "KEY=VALUE\nKEY2=VALUE2")
+  const extraEnv = typeof settings.linuxExtraEnv === 'string' ? settings.linuxExtraEnv.trim() : ''
+  if (extraEnv) {
+    for (const line of extraEnv.split('\n')) {
+      const trimmed = line.trim()
+      if (!trimmed || trimmed.startsWith('#')) continue
+      const eqIdx = trimmed.indexOf('=')
+      if (eqIdx < 1) continue
+      const key = trimmed.slice(0, eqIdx).trim()
+      const value = trimmed.slice(eqIdx + 1).trim()
+      if (key) env[key] = value
+    }
+  }
+
+  return env
+}
+
+/**
+ * Detect installed Proton versions from common Steam library paths.
+ * Returns an array of { label, path } objects.
+ */
+function detectProtonVersions() {
+  const results = []
+  const home = app.getPath('home')
+  const steamRoots = [
+    path.join(home, '.steam', 'steam'),
+    path.join(home, '.local', 'share', 'Steam'),
+    '/usr/share/steam',
+  ]
+
+  for (const steamRoot of steamRoots) {
+    const commonDir = path.join(steamRoot, 'steamapps', 'common')
+    if (!fs.existsSync(commonDir)) continue
+    try {
+      const entries = fs.readdirSync(commonDir, { withFileTypes: true })
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue
+        const lower = entry.name.toLowerCase()
+        if (!lower.startsWith('proton')) continue
+        const protonScript = path.join(commonDir, entry.name, 'proton')
+        if (fs.existsSync(protonScript)) {
+          results.push({ label: entry.name, path: protonScript })
+        }
+      }
+    } catch {}
+  }
+
+  return results
+}
+
+/**
+ * Detect common Wine installations on the system.
+ */
+function detectWineVersions() {
+  const results = []
+  const candidates = [
+    { label: 'System wine', path: 'wine' },
+    { label: 'System wine64', path: 'wine64' },
+  ]
+
+  // Check /usr/bin and /usr/local/bin
+  const binDirs = ['/usr/bin', '/usr/local/bin', '/opt/wine/bin', '/opt/wine-staging/bin', '/opt/wine-tkg/bin']
+  for (const dir of binDirs) {
+    for (const name of ['wine', 'wine64', 'wine-stable', 'wine-staging']) {
+      const full = path.join(dir, name)
+      if (fs.existsSync(full)) {
+        const label = `${name} (${dir})`
+        if (!results.some(r => r.path === full)) {
+          results.push({ label, path: full })
+        }
+      }
+    }
+  }
+
+  // Deduplicate against candidates
+  for (const c of candidates) {
+    if (!results.some(r => r.path === c.path)) {
+      results.push(c)
+    }
+  }
+
+  return results
+}
+
+/**
+ * Run a Linux tool (winetricks, protontricks, winecfg, etc.) with the
+ * appropriate environment variables applied.
+ */
+function runLinuxTool(toolCmd, toolArgs, env, opts) {
+  return new Promise((resolve) => {
+    try {
+      const proc = child_process.spawn(toolCmd, toolArgs || [], {
+        detached: true,
+        stdio: opts && opts.captureOutput ? ['ignore', 'pipe', 'pipe'] : 'ignore',
+        env: env || process.env,
+        cwd: opts && opts.cwd ? opts.cwd : undefined,
+      })
+
+      if (opts && opts.captureOutput) {
+        let stdout = ''
+        let stderr = ''
+        proc.stdout && proc.stdout.on('data', (d) => { stdout += String(d) })
+        proc.stderr && proc.stderr.on('data', (d) => { stderr += String(d) })
+        proc.on('close', (code) => resolve({ ok: code === 0, code, stdout, stderr }))
+        proc.on('error', (err) => resolve({ ok: false, error: err.message }))
+      } else {
+        proc.unref()
+        resolve({ ok: true, pid: proc.pid })
+        proc.on('error', () => {})
+      }
+    } catch (err) {
+      resolve({ ok: false, error: err.message })
+    }
+  })
+}
+
+// IPC: Detect Proton versions
+ipcMain.handle('uc:linux-detect-proton', () => {
+  try {
+    if (process.platform !== 'linux') return { ok: false, error: 'not-linux', versions: [] }
+    const versions = detectProtonVersions()
+    return { ok: true, versions }
+  } catch (err) {
+    return { ok: false, error: err.message, versions: [] }
+  }
+})
+
+// IPC: Detect Wine versions
+ipcMain.handle('uc:linux-detect-wine', () => {
+  try {
+    if (process.platform !== 'linux') return { ok: false, error: 'not-linux', versions: [] }
+    const versions = detectWineVersions()
+    return { ok: true, versions }
+  } catch (err) {
+    return { ok: false, error: err.message, versions: [] }
+  }
+})
+
+// IPC: Run winecfg
+ipcMain.handle('uc:linux-winecfg', async () => {
+  try {
+    if (process.platform !== 'linux') return { ok: false, error: 'not-linux' }
+    const settings = readSettings() || {}
+    const winePath = normalizeRunnerPath(settings.linuxWinePath, 'wine')
+    const wineDir = path.isAbsolute(winePath) ? path.dirname(winePath) : null
+    let winecfgCmd = 'winecfg'
+    if (wineDir) {
+      const candidate = path.join(wineDir, 'winecfg')
+      try {
+        fs.accessSync(candidate, fs.constants.X_OK)
+        winecfgCmd = candidate
+      } catch {
+        // If the candidate is not accessible/executable, fall back to the default 'winecfg'
+      }
+    }
+    const env = buildLinuxGameEnv(process.env)
+    ucLog(`Running winecfg: ${winecfgCmd}`)
+    const result = await runLinuxTool(winecfgCmd, [], env, {})
+    return result
+  } catch (err) {
+    ucLog(`winecfg failed: ${err.message}`, 'error')
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Run winetricks
+ipcMain.handle('uc:linux-winetricks', async (_event, packages) => {
+  try {
+    if (process.platform !== 'linux') return { ok: false, error: 'not-linux' }
+    const env = buildLinuxGameEnv(process.env)
+    const args = Array.isArray(packages) && packages.length > 0 ? packages : []
+    ucLog(`Running winetricks: ${args.join(' ')}`)
+    const result = await runLinuxTool('winetricks', args, env, {})
+    return result
+  } catch (err) {
+    ucLog(`winetricks failed: ${err.message}`, 'error')
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Run protontricks
+ipcMain.handle('uc:linux-protontricks', async (_event, appId, packages) => {
+  try {
+    if (process.platform !== 'linux') return { ok: false, error: 'not-linux' }
+    const env = buildLinuxGameEnv(process.env)
+    const args = []
+    if (appId) args.push(String(appId))
+    if (Array.isArray(packages) && packages.length > 0) args.push(...packages)
+    ucLog(`Running protontricks: ${args.join(' ')}`)
+    const result = await runLinuxTool('protontricks', args, env, {})
+    return result
+  } catch (err) {
+    ucLog(`protontricks failed: ${err.message}`, 'error')
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Create a new WINEPREFIX
+ipcMain.handle('uc:linux-create-prefix', async (_event, prefixPath, arch) => {
+  try {
+    if (process.platform !== 'linux') return { ok: false, error: 'not-linux' }
+    if (!prefixPath || typeof prefixPath !== 'string') return { ok: false, error: 'invalid-path' }
+    const settings = readSettings() || {}
+    const winePath = normalizeRunnerPath(settings.linuxWinePath, 'wine')
+    const env = buildLinuxGameEnv(process.env)
+    env.WINEPREFIX = prefixPath
+    if (arch === '32' || arch === 'win32') env.WINEARCH = 'win32'
+    else env.WINEARCH = 'win64'
+    ucLog(`Creating WINEPREFIX at ${prefixPath} (arch=${env.WINEARCH})`)
+
+    // Determine the correct wineboot executable corresponding to the configured winePath.
+    const winebootPath = (() => {
+      if (!winePath || typeof winePath !== 'string') return 'wineboot'
+      // If winePath looks like a filesystem path (absolute or contains a path separator),
+      // use the same directory and replace the basename with "wineboot".
+      if (path.isAbsolute(winePath) || winePath.includes('/') || winePath.includes('\\')) {
+        return path.join(path.dirname(winePath), 'wineboot')
+      }
+      // For bare command names (e.g. "wine", "wine64"), just call "wineboot"
+      return 'wineboot'
+    })()
+
+    // wineboot -i initializes the prefix
+    const result = await runLinuxTool(winebootPath, ['-i'], env, { captureOutput: true })
+    return result
+  } catch (err) {
+    ucLog(`create-prefix failed: ${err.message}`, 'error')
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Pick a directory for WINEPREFIX or Proton prefix
+ipcMain.handle('uc:linux-pick-prefix-dir', async () => {
+  try {
+    const result = await dialog.showOpenDialog({
+      title: 'Select Prefix Directory',
+      properties: ['openDirectory', 'createDirectory'],
+    })
+    if (result.canceled || !result.filePaths?.length) return { ok: false, cancelled: true }
+    return { ok: true, path: result.filePaths[0] }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Pick a file (for wine/proton binary)
+ipcMain.handle('uc:linux-pick-binary', async () => {
+  try {
+    const result = await dialog.showOpenDialog({
+      title: 'Select Binary',
+      properties: ['openFile'],
+    })
+    if (result.canceled || !result.filePaths?.length) return { ok: false, cancelled: true }
+    return { ok: true, path: result.filePaths[0] }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Check if a tool is available on PATH
+ipcMain.handle('uc:linux-check-tool', async (_event, toolName) => {
+  try {
+    if (process.platform !== 'linux') return { ok: false, available: false }
+    const result = await new Promise((resolve) => {
+      const proc = child_process.spawn('which', [toolName], { stdio: ['ignore', 'pipe', 'ignore'] })
+      let out = ''
+      proc.stdout && proc.stdout.on('data', (d) => { out += String(d) })
+      proc.on('close', (code) => resolve({ available: code === 0, path: out.trim() }))
+      proc.on('error', () => resolve({ available: false }))
+    })
+    return { ok: true, ...result }
+  } catch (err) {
+    return { ok: false, available: false, error: err.message }
+  }
+})
+
+// IPC: Get Steam install path (for Proton)
+ipcMain.handle('uc:linux-steam-path', () => {
+  try {
+    if (process.platform !== 'linux') return { ok: false, error: 'not-linux' }
+    const home = app.getPath('home')
+    const candidates = [
+      path.join(home, '.steam', 'steam'),
+      path.join(home, '.local', 'share', 'Steam'),
+    ]
+    for (const c of candidates) {
+      if (fs.existsSync(c)) return { ok: true, path: c }
+    }
+    return { ok: false, error: 'not-found' }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
+// ============================================================
+// SteamVR / OpenXR / VR Helpers
+// ============================================================
+
+/**
+ * Detect SteamVR installation paths on Linux and Windows.
+ * Returns the SteamVR directory and the vrserver executable if found.
+ */
+function detectSteamVR() {
+  const home = process.platform !== 'win32' ? app.getPath('home') : null
+  const candidates = []
+
+  if (process.platform === 'linux') {
+    candidates.push(
+      path.join(home, '.steam', 'steam', 'steamapps', 'common', 'SteamVR'),
+      path.join(home, '.local', 'share', 'Steam', 'steamapps', 'common', 'SteamVR'),
+    )
+  } else if (process.platform === 'win32') {
+    // Common Steam install locations on Windows
+    const drives = ['C', 'D', 'E']
+    for (const d of drives) {
+      candidates.push(
+        `${d}:\\Program Files (x86)\\Steam\\steamapps\\common\\SteamVR`,
+        `${d}:\\Steam\\steamapps\\common\\SteamVR`,
+      )
+    }
+    // Also check registry-based Steam path via env
+    const steamPath = process.env.STEAM_PATH || process.env.SteamPath
+    if (steamPath) candidates.push(path.join(steamPath, 'steamapps', 'common', 'SteamVR'))
+  } else if (process.platform === 'darwin') {
+    candidates.push(
+      path.join(home, 'Library', 'Application Support', 'Steam', 'steamapps', 'common', 'SteamVR'),
+    )
+  }
+
+  for (const dir of candidates) {
+    if (!fs.existsSync(dir)) continue
+    // Find the vrserver executable
+    const vrserverCandidates = [
+      path.join(dir, 'bin', 'linux64', 'vrserver'),
+      path.join(dir, 'bin', 'win64', 'vrserver.exe'),
+      path.join(dir, 'bin', 'osx64', 'vrserver'),
+    ]
+    const vrserver = vrserverCandidates.find(p => fs.existsSync(p)) || null
+    // Find the vrstartup script
+    const startupCandidates = [
+      path.join(dir, 'bin', 'linux64', 'vrstartup.sh'),
+      path.join(dir, 'bin', 'win64', 'vrstartup.exe'),
+    ]
+    const startup = startupCandidates.find(p => fs.existsSync(p)) || null
+    return { found: true, dir, vrserver, startup }
+  }
+  return { found: false, dir: null, vrserver: null, startup: null }
+}
+
+/**
+ * Detect OpenXR runtime JSON files on Linux.
+ * Returns the active runtime JSON path if found.
+ */
+function detectOpenXRRuntime() {
+  if (process.platform !== 'linux') return null
+  const home = app.getPath('home')
+  const candidates = [
+    // SteamVR OpenXR runtime
+    path.join(home, '.steam', 'steam', 'steamapps', 'common', 'SteamVR', 'steamxr_linux64.json'),
+    path.join(home, '.local', 'share', 'Steam', 'steamapps', 'common', 'SteamVR', 'steamxr_linux64.json'),
+    // Monado
+    '/usr/share/openxr/1/openxr_monado.json',
+    '/usr/local/share/openxr/1/openxr_monado.json',
+    // WiVRn
+    path.join(home, '.config', 'openxr', '1', 'active_runtime.json'),
+    // System active runtime
+    '/etc/xdg/openxr/1/active_runtime.json',
+  ]
+  for (const c of candidates) {
+    if (fs.existsSync(c)) return c
+  }
+  return null
+}
+
+/**
+ * Build environment variables for VR game launches.
+ * Merges SteamVR-specific env vars from settings.
+ */
+function buildVRGameEnv(baseEnv) {
+  const settings = readSettings() || {}
+  const env = { ...(baseEnv || process.env) }
+
+  // XR_RUNTIME_JSON — OpenXR runtime
+  const xrRuntime = typeof settings.vrXrRuntimeJson === 'string' ? settings.vrXrRuntimeJson.trim() : ''
+  if (xrRuntime) env.XR_RUNTIME_JSON = xrRuntime
+
+  // STEAM_VR_RUNTIME — SteamVR runtime path
+  const steamVrRuntime = typeof settings.vrSteamVrRuntime === 'string' ? settings.vrSteamVrRuntime.trim() : ''
+  if (steamVrRuntime) env.STEAM_VR_RUNTIME = steamVrRuntime
+
+  // VR-specific extra env vars
+  const vrExtraEnv = typeof settings.vrExtraEnv === 'string' ? settings.vrExtraEnv.trim() : ''
+  if (vrExtraEnv) {
+    for (const line of vrExtraEnv.split('\n')) {
+      const trimmed = line.trim()
+      if (!trimmed || trimmed.startsWith('#')) continue
+      const eqIdx = trimmed.indexOf('=')
+      if (eqIdx < 1) continue
+      const key = trimmed.slice(0, eqIdx).trim()
+      const value = trimmed.slice(eqIdx + 1).trim()
+      if (key) env[key] = value
+    }
+  }
+
+  return env
+}
+
+// IPC: Detect SteamVR
+ipcMain.handle('uc:vr-detect-steamvr', () => {
+  try {
+    const result = detectSteamVR()
+    return { ok: true, ...result }
+  } catch (err) {
+    return { ok: false, error: err.message, found: false }
+  }
+})
+
+// IPC: Detect OpenXR runtime
+ipcMain.handle('uc:vr-detect-openxr', () => {
+  try {
+    const runtimePath = detectOpenXRRuntime()
+    return { ok: true, found: Boolean(runtimePath), path: runtimePath }
+  } catch (err) {
+    return { ok: false, error: err.message, found: false }
+  }
+})
+
+// IPC: Launch SteamVR
+ipcMain.handle('uc:vr-launch-steamvr', async () => {
+  try {
+    const settings = readSettings() || {}
+    const steamVrDir = typeof settings.vrSteamVrPath === 'string' && settings.vrSteamVrPath.trim()
+      ? settings.vrSteamVrPath.trim()
+      : detectSteamVR().dir
+
+    if (!steamVrDir) return { ok: false, error: 'SteamVR not found. Set the SteamVR path in settings.' }
+
+    const env = buildVRGameEnv(buildLinuxGameEnv(process.env))
+
+    // Try to launch via Steam URL first (most reliable)
+    if (process.platform === 'linux' || process.platform === 'darwin') {
+      try {
+        const proc = child_process.spawn('steam', ['steam://rungameid/250820'], {
+          detached: true,
+          stdio: 'ignore',
+          env,
+        })
+        proc.unref()
+        ucLog('SteamVR launched via steam:// URL')
+        return { ok: true, method: 'steam-url' }
+      } catch {}
+    }
+
+    // Fallback: launch vrserver directly
+    const vrInfo = detectSteamVR()
+    const startup = vrInfo.startup
+    if (startup && fs.existsSync(startup)) {
+      const proc = child_process.spawn(startup, [], {
+        detached: true,
+        stdio: 'ignore',
+        cwd: path.dirname(startup),
+        env,
+      })
+      proc.unref()
+      ucLog(`SteamVR launched via startup script: ${startup}`)
+      return { ok: true, method: 'startup-script' }
+    }
+
+    // Last resort: shell.openExternal
+    await shell.openExternal('steam://rungameid/250820')
+    return { ok: true, method: 'shell-open' }
+  } catch (err) {
+    ucLog(`SteamVR launch failed: ${err.message}`, 'error')
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Pick a file for XR runtime JSON or SteamVR path
+ipcMain.handle('uc:vr-pick-runtime-json', async () => {
+  try {
+    const result = await dialog.showOpenDialog({
+      title: 'Select OpenXR Runtime JSON',
+      properties: ['openFile'],
+      filters: [
+        { name: 'JSON files', extensions: ['json'] },
+        { name: 'All files', extensions: ['*'] },
+      ],
+    })
+    if (result.canceled || !result.filePaths?.length) return { ok: false, cancelled: true }
+    return { ok: true, path: result.filePaths[0] }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Pick SteamVR directory
+ipcMain.handle('uc:vr-pick-steamvr-dir', async () => {
+  try {
+    const result = await dialog.showOpenDialog({
+      title: 'Select SteamVR Directory',
+      properties: ['openDirectory'],
+    })
+    if (result.canceled || !result.filePaths?.length) return { ok: false, cancelled: true }
+    return { ok: true, path: result.filePaths[0] }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Check if a VR game should use VR mode (based on settings)
+ipcMain.handle('uc:vr-get-settings', () => {
+  try {
+    const settings = readSettings() || {}
+    return {
+      ok: true,
+      vrEnabled: Boolean(settings.vrEnabled),
+      vrSteamVrPath: settings.vrSteamVrPath || '',
+      vrXrRuntimeJson: settings.vrXrRuntimeJson || '',
+      vrSteamVrRuntime: settings.vrSteamVrRuntime || '',
+      vrExtraEnv: settings.vrExtraEnv || '',
+      vrAutoLaunchSteamVr: Boolean(settings.vrAutoLaunchSteamVr),
+    }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
 ipcMain.handle('uc:game-exe-launch', async (_event, appid, exePath, gameName, showGameName) => {
   try {
     if (!exePath || typeof exePath !== 'string') return { ok: false }
@@ -4044,9 +4599,10 @@ ipcMain.handle('uc:game-exe-launch', async (_event, appid, exePath, gameName, sh
         return { ok: true, pid: proc.pid }
       }
 
-      // Non-Windows path
-      const env = { ...process.env }
-      env.PATH = `${cwd};${env.PATH || ''}`
+      
+      // Non-Windows path (Linux/macOS) — apply Wine/Proton and VR env vars
+      const env = buildVRGameEnv(buildLinuxGameEnv(process.env))
+      env.PATH = `${cwd}:${env.PATH || ''}`
 
       const proc = child_process.spawn(command, args, {
         detached: true,
@@ -4081,6 +4637,12 @@ ipcMain.handle('uc:game-exe-launch-admin', async (_event, appid, exePath, gameNa
       ucLog(`Launching game (non-admin fallback): ${appid} at ${exePath}`)
       try {
         const { command, args, cwd } = resolveLaunchCommand(exePath)
+        
+        // Prepare environment - inherit all variables, apply Wine/Proton and VR env, ensure game directory is in PATH
+        const env = buildVRGameEnv(buildLinuxGameEnv(process.env))
+        env.PATH = `${cwd}:${env.PATH || ''}`
+        
+
 
         // Prepare environment - inherit all variables and ensure game directory is in PATH
         const env = { ...process.env }
