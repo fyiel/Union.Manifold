@@ -225,16 +225,6 @@ We use [Semantic Versioning](https://semver.org/):
 - Minor: New features (backward compatible)
 - Patch: Bug fixes
 
-## Security
-
-For security vulnerabilities, please see [SECURITY.md](SECURITY.md).
-
-### Security Highlights
-- No hardcoded secrets or API keys
-- HTTPS-only API communication
-- Installer downloads verified via GitHub Releases
-- No telemetry or tracking
-
 ## License
 
 This project is licensed under the MIT License - see [LICENSE](LICENSE) for details.
