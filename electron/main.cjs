@@ -4582,12 +4582,6 @@ ipcMain.handle('uc:game-exe-launch', async (_event, appid, exePath, gameName, sh
       const env = buildVRGameEnv(buildLinuxGameEnv(process.env))
       env.PATH = `${cwd}:${env.PATH || ''}`
 
-
-      // Non-Windows path
-      const env = { ...process.env }
-      env.PATH = `${cwd};${env.PATH || ''}`
-
-
       const proc = child_process.spawn(command, args, {
         detached: true,
         stdio: 'ignore',
