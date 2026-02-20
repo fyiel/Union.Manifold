@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react"
-import { apiFetch, setApiBaseUrl } from "@/lib/api"
+import { apiFetch } from "@/lib/api"
 import { getPreferredDownloadHost, setPreferredDownloadHost, type PreferredDownloadHost } from "@/lib/downloads"
 import { useDiscordAccount } from "@/hooks/use-discord-account"
 
@@ -11,7 +11,6 @@ type AppPreferences = {
   linuxLaunchMode?: "auto" | "native" | "wine" | "proton"
   developerMode?: boolean
   verboseDownloadLogging?: boolean
-  customBaseUrl?: string
 }
 
 const ALLOWED_KEYS = new Set<keyof AppPreferences>([
@@ -22,7 +21,6 @@ const ALLOWED_KEYS = new Set<keyof AppPreferences>([
   "linuxLaunchMode",
   "developerMode",
   "verboseDownloadLogging",
-  "customBaseUrl",
 ])
 
 function normalizePreferences(input: unknown): AppPreferences {
@@ -50,9 +48,6 @@ function normalizePreferences(input: unknown): AppPreferences {
   }
   if (typeof record.verboseDownloadLogging === "boolean") {
     prefs.verboseDownloadLogging = record.verboseDownloadLogging
-  }
-  if (typeof record.customBaseUrl === "string") {
-    prefs.customBaseUrl = record.customBaseUrl
   }
 
   const linuxLaunchMode = record.linuxLaunchMode
@@ -105,22 +100,12 @@ async function readLocalPreferences(): Promise<AppPreferences> {
     if (typeof verbose === "boolean") prefs.verboseDownloadLogging = verbose
   } catch {}
 
-  try {
-    const baseUrl = await window.ucSettings.get("customBaseUrl")
-    if (typeof baseUrl === "string") prefs.customBaseUrl = baseUrl
-  } catch {}
-
   return prefs
 }
 
 async function applyPreferences(prefs: AppPreferences) {
   if (prefs.defaultMirrorHost) {
     setPreferredDownloadHost(prefs.defaultMirrorHost)
-  }
-
-  if (typeof prefs.customBaseUrl === "string") {
-    const trimmed = prefs.customBaseUrl.trim()
-    setApiBaseUrl(trimmed || "https://union-crax.xyz")
   }
 
   if (typeof window === "undefined" || !window.ucSettings?.set) return

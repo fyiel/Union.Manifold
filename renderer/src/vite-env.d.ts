@@ -3,16 +3,16 @@
 type DownloadUpdatePayload = {
   downloadId: string
   status:
-    | "queued"
-    | "downloading"
-    | "paused"
-    | "extracting"
-    | "installing"
-    | "completed"
-    | "extracted"
-    | "extract_failed"
-    | "failed"
-    | "cancelled"
+  | "queued"
+  | "downloading"
+  | "paused"
+  | "extracting"
+  | "installing"
+  | "completed"
+  | "extracted"
+  | "extract_failed"
+  | "failed"
+  | "cancelled"
   receivedBytes?: number
   totalBytes?: number
   speedBps?: number
@@ -50,6 +50,7 @@ declare global {
         partTotal?: number
         authHeader?: string
         savePath?: string
+        versionLabel?: string
       }) => Promise<{ ok: boolean; queued?: boolean; error?: string }>
       cancel: (downloadId: string) => Promise<{ ok: boolean }>
       pause: (downloadId: string) => Promise<{ ok: boolean }>
@@ -207,4 +208,4 @@ declare global {
   }
 }
 
-export {}
+export { }

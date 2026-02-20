@@ -41,7 +41,7 @@ const shuffleGames = <T,>(items: T[]) => {
   const result = [...items]
   for (let i = result.length - 1; i > 0; i -= 1) {
     const j = Math.floor(Math.random() * (i + 1))
-    ;[result[i], result[j]] = [result[j], result[i]]
+      ;[result[i], result[j]] = [result[j], result[i]]
   }
   return result
 }
@@ -259,8 +259,12 @@ export function LauncherPage() {
     const maxAttempts = isInitialLoad ? 12 : 2
 
     // While the DB/API is warming up, keep the skeleton visible rather than flashing empty/error states.
+    let refreshStart: number | null = null
     if (isInitialLoad) setLoading(true)
-    if (forceRefresh) setRefreshing(true)
+    if (forceRefresh) {
+      setRefreshing(true)
+      refreshStart = Date.now()
+    }
     setGamesError(null)
 
     for (let attempt = 0; attempt <= maxAttempts; attempt++) {
@@ -278,7 +282,17 @@ export function LauncherPage() {
         }
 
         setLoading(false)
-        setRefreshing(false)
+        if (refreshStart !== null) {
+          const elapsed = Date.now() - refreshStart
+          const minDuration = 500 // ms
+          if (elapsed < minDuration) {
+            setTimeout(() => setRefreshing(false), minDuration - elapsed)
+          } else {
+            setRefreshing(false)
+          }
+        } else {
+          setRefreshing(false)
+        }
         return
       } catch (error) {
         if (loadId !== activeLoadIdRef.current) return
@@ -321,22 +335,39 @@ export function LauncherPage() {
 
   const popularReleases = useMemo(() => {
     if (Object.keys(gameStats).length === 0) return []
-    const gamesWithDownloads = games.filter((game) => {
-      const stats = gameStats[game.appid]
-      const isNSFW = Array.isArray(game.genres) && game.genres.some((genre) => genre.toLowerCase() === "nsfw")
-      return stats && (stats.downloads > 0 || stats.views > 0) && !isNSFW
-    })
 
-    const sorted = [...gamesWithDownloads].sort((a, b) => {
-      const statsA = gameStats[a.appid] || { downloads: 0, views: 0 }
-      const statsB = gameStats[b.appid] || { downloads: 0, views: 0 }
+    const getDaysDiff = (dateStr?: string) => {
+      if (!dateStr) return 999
+      const date = new Date(dateStr)
+      if (isNaN(date.getTime())) return 999
+      const now = new Date()
+      const diffTime = Math.abs(now.getTime() - date.getTime())
+      return Math.ceil(diffTime / (1000 * 60 * 60 * 24))
+    }
 
-      if (statsA.downloads !== statsB.downloads) {
-        return statsB.downloads - statsA.downloads
+    const isRecent = (dateStr?: string, days = 30) => getDaysDiff(dateStr) <= days
+
+    const calculateScore = (game: Game) => {
+      const stats = gameStats[game.appid] || { downloads: 0, views: 0 }
+      let score = (stats.downloads * 2) + (stats.views * 0.5)
+
+      if (isRecent(game.release_date, 30)) {
+        score += 500
       }
 
-      return statsB.views - statsA.views
+      if (isRecent(game.update_time, 14)) {
+        score += 300
+      }
+
+      return score
+    }
+
+    const candidates = games.filter((game) => {
+       const isNSFW = Array.isArray(game.genres) && game.genres.some((genre) => genre?.toLowerCase() === "nsfw")
+       return !isNSFW
     })
+
+    const sorted = [...candidates].sort((a, b) => calculateScore(b) - calculateScore(a))
 
     return sorted.slice(0, 8)
   }, [games, gameStats])
@@ -652,37 +683,34 @@ export function LauncherPage() {
         <section className="py-12 sm:py-16 md:py-20 px-4 overflow-visible">
           <div className="container mx-auto max-w-7xl">
             {loading ? (
-              <div className="mb-10">
-                <Skeleton className="h-10 w-48 mb-3 bg-muted/40" />
-                <Skeleton className="h-5 w-80 bg-muted/30" />
-              </div>
+              <>
+                <div className="mb-10">
+                  <Skeleton className="h-10 w-48 mb-3 bg-muted/40" />
+                  <Skeleton className="h-5 w-80 bg-muted/30" />
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                  {Array.from({ length: 4 }).map((_, index) => (
+                    <GameCardSkeleton key={`skeleton-latest-${index}`} />
+                  ))}
+                </div>
+              </>
             ) : (
-              <div className="mb-10">
-                <h2 className="text-3xl sm:text-4xl md:text-5xl font-black text-foreground font-montserrat mb-3">Latest Games</h2>
-                <p className="text-base sm:text-lg text-muted-foreground">Recently added games to our collection</p>
-              </div>
-            )}
-
-            <Carousel
-              opts={{
-                align: "start",
-                loop: false,
-                skipSnaps: false,
-                dragFree: true,
-              }}
-              className="w-full"
-            >
-              <CarouselContent className="-ml-2 md:-ml-4">
-                {loading
-                  ? Array.from({ length: 8 }).map((_, index) => (
-                      <CarouselItem
-                        key={index}
-                        className="pl-2 md:pl-4 basis-full sm:basis-1/2 md:basis-1/3 lg:basis-1/3 xl:basis-1/4"
-                      >
-                        <GameCardSkeleton />
-                      </CarouselItem>
-                    ))
-                  : newReleases.map((game) => (
+              <>
+                <div className="mb-10">
+                  <h2 className="text-3xl sm:text-4xl md:text-5xl font-black text-foreground font-montserrat mb-3">Latest Games</h2>
+                  <p className="text-base sm:text-lg text-muted-foreground">Recently added games to our collection</p>
+                </div>
+                <Carousel
+                  opts={{
+                    align: "start",
+                    loop: false,
+                    skipSnaps: false,
+                    dragFree: true,
+                  }}
+                  className="w-full"
+                >
+                  <CarouselContent className="-ml-2 md:-ml-4">
+                    {newReleases.map((game) => (
                       <CarouselItem
                         key={game.appid}
                         className="pl-2 md:pl-4 basis-full sm:basis-1/2 md:basis-1/3 lg:basis-1/3 xl:basis-1/4"
@@ -690,49 +718,54 @@ export function LauncherPage() {
                         <GameCard game={game} stats={gameStats[game.appid]} />
                       </CarouselItem>
                     ))}
-              </CarouselContent>
-              <CarouselPrevious />
-              <CarouselNext />
-            </Carousel>
+                  </CarouselContent>
+                  <CarouselPrevious />
+                  <CarouselNext />
+                </Carousel>
+              </>
+            )}
           </div>
         </section>
       )}
 
       {(loading || popularReleases.length > 0) && (
-        <section className="py-12 sm:py-16 md:py-20 px-4 bg-card/20 overflow-visible">
-          <div className="container mx-auto max-w-7xl">
+        <section className="relative py-16 sm:py-20 md:py-24 px-4 overflow-hidden">
+          <div className="absolute inset-0 bg-gradient-to-b from-primary/10 via-background/50 to-background pointer-events-none -z-10" />
+          <div className="container relative z-10 mx-auto max-w-7xl">
             {loading ? (
-              <div className="mb-10">
-                <Skeleton className="h-10 w-48 mb-3 bg-muted/40" />
-                <Skeleton className="h-5 w-80 bg-muted/30" />
+              <div className="mb-12">
+                <Skeleton className="h-12 w-64 mb-4 bg-muted/20" />
+                <Skeleton className="h-6 w-96 bg-muted/10" />
               </div>
             ) : (
-              <div className="mb-10">
-                <h2 className="text-3xl sm:text-4xl md:text-5xl font-black text-foreground font-montserrat mb-3">Most Popular</h2>
-                <p className="text-base sm:text-lg text-muted-foreground">Top downloads in our community</p>
+              <div className="mb-12 flex flex-col md:flex-row md:items-end justify-between gap-4">
+                <div>
+                  <h2 className="text-4xl sm:text-5xl md:text-6xl font-black bg-gradient-to-r from-white to-white/50 bg-clip-text text-transparent font-montserrat mb-3 tracking-tight">
+                    Most Popular
+                  </h2>
+                  <p className="text-lg sm:text-xl text-muted-foreground font-medium">Top trending downloads in our community</p>
+                </div>
               </div>
             )}
-
-            <Carousel
-              opts={{
-                align: "start",
-                loop: false,
-                skipSnaps: false,
-                dragFree: true,
-              }}
-              className="w-full"
-            >
-              <CarouselContent className="-ml-2 md:-ml-4">
-                {loading
-                  ? Array.from({ length: 8 }).map((_, index) => (
-                      <CarouselItem
-                        key={index}
-                        className="pl-2 md:pl-4 basis-full sm:basis-1/2 md:basis-1/3 lg:basis-1/3 xl:basis-1/4"
-                      >
-                        <GameCardSkeleton />
-                      </CarouselItem>
-                    ))
-                  : popularReleases.map((game) => (
+            
+            {loading ? (
+               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                  {Array.from({ length: 4 }).map((_, index) => (
+                    <GameCardSkeleton key={`skeleton-popular-${index}`} />
+                  ))}
+               </div>
+            ) : (
+                <Carousel
+                  opts={{
+                    align: "start",
+                    loop: false,
+                    skipSnaps: false,
+                    dragFree: true,
+                  }}
+                  className="w-full"
+                >
+                  <CarouselContent className="-ml-2 md:-ml-4 pb-10">
+                    {popularReleases.map((game) => (
                       <CarouselItem
                         key={game.appid}
                         className="pl-2 md:pl-4 basis-full sm:basis-1/2 md:basis-1/3 lg:basis-1/3 xl:basis-1/4"
@@ -740,10 +773,11 @@ export function LauncherPage() {
                         <GameCard game={game} stats={gameStats[game.appid]} isPopular />
                       </CarouselItem>
                     ))}
-              </CarouselContent>
-              <CarouselPrevious />
-              <CarouselNext />
-            </Carousel>
+                  </CarouselContent>
+                  <CarouselPrevious className="left-0 -translate-x-1/2 bg-black/50 hover:bg-black/80 border-white/10 text-white backdrop-blur-md" />
+                  <CarouselNext className="right-0 translate-x-1/2 bg-black/50 hover:bg-black/80 border-white/10 text-white backdrop-blur-md" />
+                </Carousel>
+            )}
           </div>
         </section>
       )}
@@ -751,38 +785,53 @@ export function LauncherPage() {
       <section id="featured" className="py-16 px-4">
         <div className="container mx-auto max-w-7xl">
           {loading ? (
-            <div className="mb-10">
-              <Skeleton className="h-10 w-56 mb-3 bg-muted/40" />
-              <Skeleton className="h-5 w-96 bg-muted/30" />
-            </div>
-          ) : (
-            <div className="mb-10 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-              <div>
-                <h2 className="text-4xl md:text-5xl font-black text-foreground font-montserrat mb-3">All Games</h2>
-                <p className="text-lg text-muted-foreground">Browse our complete collection</p>
+            <>
+              <div className="mb-10">
+                <Skeleton className="h-10 w-56 mb-3 bg-muted/40" />
+                <Skeleton className="h-5 w-96 bg-muted/30" />
               </div>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  setRefreshKey((prev) => prev + 1)
-                  loadGames(true)
-                }}
-                disabled={refreshing}
-                className="rounded-full px-6"
-              >
-                {refreshing ? "Refreshing..." : "Refresh Games"}
-              </Button>
-            </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
+                {Array.from({ length: 20 }).map((_, i) => (
+                  <GameCardSkeleton key={`skeleton-all-${i}`} />
+                ))}
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="mb-10 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                <div>
+                  <h2 className="text-4xl md:text-5xl font-black text-foreground font-montserrat mb-3">All Games</h2>
+                  <p className="text-lg text-muted-foreground">Browse our complete collection</p>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setRefreshKey((prev) => prev + 1)
+                    loadGames(true)
+                  }}
+                  disabled={refreshing}
+                  className="rounded-full px-6"
+                >
+                  {refreshing ? "Refreshing..." : "Refresh Games"}
+                </Button>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
+                {(loading || refreshing) ? (
+                  Array.from({ length: itemsPerPage }).map((_, i) => (
+                    <GameCardSkeleton key={`skeleton-all-${i}`} />
+                  ))
+                ) : (
+                  paginatedFeaturedGames.map((game) => {
+                    const isGamePopular = popularAppIds.has(game.appid)
+
+                    return <GameCard key={game.appid} game={game} stats={gameStats[game.appid]} isPopular={isGamePopular} />
+                  })
+                )}
+              </div>
+            </>
           )}
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
-            {paginatedFeaturedGames.map((game) => {
-              const isGamePopular = popularAppIds.has(game.appid)
-
-              return <GameCard key={game.appid} game={game} stats={gameStats[game.appid]} isPopular={isGamePopular} />
-            })}
-          </div>
 
           {totalPages > 1 && (
             <div className="mt-8">

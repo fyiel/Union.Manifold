@@ -18,7 +18,6 @@
 
 html,
 body {
-  height: 100%;
   margin: 0;
 }
 
@@ -215,4 +214,3 @@ textarea {
   font-family: "Geist Mono", ui-monospace, Consolas, monospace;
   font-size: 12px;
 }
-

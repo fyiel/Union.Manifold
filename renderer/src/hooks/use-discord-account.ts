@@ -15,13 +15,40 @@ type DiscordAccountState = {
   user: DiscordAccount | null
   loading: boolean
   authenticated: boolean
-  refresh: () => Promise<void>
+  refresh: (forceAccountFetch?: boolean) => Promise<void>
 }
 
 export function useDiscordAccount(): DiscordAccountState {
   const [user, setUser] = useState<DiscordAccount | null>(null)
   const [loading, setLoading] = useState(true)
   const [authenticated, setAuthenticated] = useState(false)
+
+  const hasLoginHint = () => {
+    if (typeof window === "undefined") return false
+    try {
+      return Boolean(localStorage.getItem("discord_id"))
+    } catch {
+      return false
+    }
+  }
+
+  const getAuthState = () => {
+    if (typeof window === "undefined") return null
+    try {
+      return sessionStorage.getItem("uc_auth_state")
+    } catch {
+      return null
+    }
+  }
+
+  const setAuthState = (state: "logged_in" | "logged_out") => {
+    if (typeof window === "undefined") return
+    try {
+      sessionStorage.setItem("uc_auth_state", state)
+    } catch {
+      // ignore storage errors
+    }
+  }
 
   const fetchFallbackAccount = useCallback(async () => {
     let discordId: string | null = null
@@ -65,7 +92,16 @@ export function useDiscordAccount(): DiscordAccountState {
     } as DiscordAccount
   }, [])
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (forceAccountFetch = false) => {
+    const authState = getAuthState()
+    const hasHint = hasLoginHint()
+    if (!forceAccountFetch && !hasHint && authState === "logged_out") {
+      setUser(null)
+      setAuthenticated(false)
+      setLoading(false)
+      return
+    }
+
     setLoading(true)
     try {
       const summaryRes = await apiFetch("/api/account/summary")
@@ -74,6 +110,7 @@ export function useDiscordAccount(): DiscordAccountState {
         const nextUser = summary?.user ?? null
         setUser(nextUser)
         setAuthenticated(Boolean(nextUser))
+        setAuthState(nextUser ? "logged_in" : "logged_out")
         return
       }
 
@@ -82,15 +119,19 @@ export function useDiscordAccount(): DiscordAccountState {
         const fallback = await fetchFallbackAccount()
         setUser(fallback)
         setAuthenticated(false)
+        setAuthState(fallback ? "logged_in" : "logged_out")
         return
       }
       const data = await res.json()
-      setUser(data?.user ?? null)
-      setAuthenticated(true)
+      const nextUser = data?.user ?? null
+      setUser(nextUser)
+      setAuthenticated(Boolean(nextUser))
+      setAuthState(nextUser ? "logged_in" : "logged_out")
     } catch {
       const fallback = await fetchFallbackAccount()
       setUser(fallback)
       setAuthenticated(false)
+      setAuthState(fallback ? "logged_in" : "logged_out")
     } finally {
       setLoading(false)
     }
@@ -122,6 +163,7 @@ export function useDiscordAccount(): DiscordAccountState {
       setUser(null)
       setAuthenticated(false)
       setLoading(false)
+      setAuthState("logged_out")
     }
 
     window.addEventListener("uc_discord_logout", handleLogout)
