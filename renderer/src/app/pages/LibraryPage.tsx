@@ -3,6 +3,7 @@ import { GameCard } from "@/components/GameCard"
 import { GameCardSkeleton } from "@/components/GameCardSkeleton"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import {
   Pagination,
   PaginationContent,
@@ -320,12 +321,6 @@ export function LibraryPage() {
     return parts[parts.length - 1] || null
   }
 
-  const openExeSettings = (game: Game) => {
-    setSettingsPopupGame(game)
-    setShortcutFeedback(null)
-    setSettingsPopupOpen(true)
-  }
-
   const openExecutablePicker = async (game: Game) => {
     if (!window.ucDownloads?.listGameExecutables) return
     try {
@@ -335,7 +330,7 @@ export function LibraryPage() {
         getSavedExe(game.appid, resolved.label, resolved.allowLegacyFallback),
       ])
       const exes = result?.exes || []
-      const folder = result?.folder || null
+      const folder = result?.gameRoot || result?.folder || null
       const savedName = resolveBasename(savedExe)
       const message = savedName
         ? `Select the exe to launch for "${game.name}".`
@@ -369,7 +364,7 @@ export function LibraryPage() {
       const resolved = await resolveLibraryVersionLabel(game)
       if (window.ucDownloads?.listGameExecutables) {
         const result = await window.ucDownloads.listGameExecutables(game.appid, resolved.label)
-        folder = result?.folder || null
+        folder = result?.gameRoot || result?.folder || null
         if (result?.exes?.[0]?.path) {
           discoveredExePath = result.exes[0].path
         }
@@ -433,19 +428,135 @@ export function LibraryPage() {
                 <div key={game.appid} className="relative">
                   <GameCard game={game} stats={stats[game.appid]} size="compact" />
                   <div className="absolute top-2 left-2 z-20">
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      onClick={(event) => {
-                        event.preventDefault()
-                        event.stopPropagation()
-                        void openExeSettings(game)
+                    <Popover
+                      open={settingsPopupOpen && settingsPopupGame?.appid === game.appid}
+                      onOpenChange={(open) => {
+                        if (open) {
+                          setSettingsPopupGame(game)
+                          setShortcutFeedback(null)
+                          setSettingsPopupOpen(true)
+                        } else {
+                          setSettingsPopupOpen(false)
+                          setShortcutFeedback(null)
+                        }
                       }}
-                      className="h-8 w-8 rounded-full bg-black/60 text-white hover:bg-white/20"
-                      title="Change launch executable"
                     >
-                      <Settings className="h-4 w-4" />
-                    </Button>
+                      <PopoverTrigger asChild>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          onClick={(event) => {
+                            event.stopPropagation()
+                          }}
+                          className="h-8 w-8 rounded-full bg-black/60 text-white hover:bg-white/20"
+                          title="Game actions"
+                        >
+                          <Settings className="h-4 w-4" />
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent align="start" className="w-56 rounded-2xl p-2 bg-zinc-950 border-white/10 text-white shadow-xl">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSettingsPopupOpen(false)
+                            void openExecutablePicker(game)
+                          }}
+                          className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-gray-400 transition-colors hover:text-white hover:bg-white/10"
+                        >
+                          <Settings className="mr-2 h-4 w-4" />
+                          Set Executable
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSettingsPopupOpen(false)
+                            void handleOpenGameFiles(game)
+                          }}
+                          className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-gray-400 transition-colors hover:text-white hover:bg-white/10"
+                        >
+                          <FolderOpen className="mr-2 h-4 w-4" />
+                          Open Game Files
+                        </button>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            if (!settingsPopupGame) return
+                            setShortcutFeedback(null)
+                            const resolved = await resolveLibraryVersionLabel(settingsPopupGame)
+                            let savedExe = await getSavedExe(settingsPopupGame.appid, resolved.label, resolved.allowLegacyFallback)
+                            if (!savedExe && window.ucDownloads?.listGameExecutables) {
+                              try {
+                                const result = await window.ucDownloads.listGameExecutables(settingsPopupGame.appid, resolved.label)
+                                savedExe = result?.exes?.[0]?.path || null
+                              } catch {}
+                            }
+
+                            if (savedExe) {
+                              try { await window.ucDownloads?.deleteDesktopShortcut?.(settingsPopupGame.name) } catch {}
+                              const result = await window.ucDownloads?.createDesktopShortcut?.(settingsPopupGame.name, savedExe)
+                              if (result?.ok) {
+                                gameLogger.info('Desktop shortcut created manually', { appid: settingsPopupGame.appid })
+                                setShortcutFeedback({ type: 'success', message: 'Desktop shortcut created.' })
+                              } else {
+                                setShortcutFeedback({ type: 'error', message: 'Failed to create desktop shortcut.' })
+                              }
+                            } else {
+                              gameLogger.warn('No saved exe found for creating shortcut', { appid: settingsPopupGame.appid })
+                              setShortcutFeedback({ type: 'error', message: 'Select an executable first.' })
+                              void openExecutablePicker(settingsPopupGame)
+                              setSettingsPopupOpen(false)
+                            }
+                            setTimeout(() => setShortcutFeedback(null), 3000)
+                          }}
+                          className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-gray-400 transition-colors hover:text-white hover:bg-white/10"
+                        >
+                          <ExternalLink className="mr-2 h-4 w-4" />
+                          Create Desktop Shortcut
+                        </button>
+                        {settingsPopupGame?.isExternal && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSettingsPopupOpen(false)
+                              setShortcutFeedback(null)
+                              setEditMetadataOpen(true)
+                            }}
+                            className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-gray-400 transition-colors hover:text-white hover:bg-white/10"
+                          >
+                            <Pencil className="mr-2 h-4 w-4" />
+                            Edit Details
+                          </button>
+                        )}
+                        <div className="my-1 h-px bg-white/10" />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSettingsPopupOpen(false)
+                            setShortcutFeedback(null)
+                            setPendingDeleteGame(game)
+                            setPendingDeleteAction("installed")
+                          }}
+                          className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-destructive transition-colors hover:bg-destructive/10"
+                        >
+                          {game.isExternal ? (
+                            <>
+                              <Unlink2 className="mr-2 h-4 w-4" />
+                              Unlink Game
+                            </>
+                          ) : (
+                            <>
+                              <Trash2 className="mr-2 h-4 w-4" />
+                              Delete Game
+                            </>
+                          )}
+                        </button>
+                        {shortcutFeedback && settingsPopupGame?.appid === game.appid && (
+                          <div className={`mt-2 text-xs ${shortcutFeedback.type === 'success' ? 'text-emerald-400' : 'text-destructive'}`}>
+                            {shortcutFeedback.message}
+                          </div>
+                        )}
+                      </PopoverContent>
+                    </Popover>
                   </div>
                   <div className="absolute top-2 right-2 z-20">
                     <Button
@@ -662,129 +773,6 @@ export function LibraryPage() {
                 }}
               >
                 {pendingDeleteAction === "installing" ? "Remove" : pendingDeleteGame?.isExternal ? "Unlink" : "Delete"}
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
-      {settingsPopupOpen && settingsPopupGame && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
-          <div
-            className="absolute inset-0 bg-black/70"
-            onClick={() => {
-              setSettingsPopupOpen(false)
-              setShortcutFeedback(null)
-            }}
-          />
-          <div className="relative w-full max-w-md rounded-2xl border border-border/60 bg-slate-950/95 p-5 text-white shadow-2xl">
-            <div className="text-lg font-semibold">Game Settings</div>
-            <p className="mt-1 text-sm text-slate-300">{settingsPopupGame.name}</p>
-            
-            <div className="mt-4 space-y-2">
-              <Button
-                variant="ghost"
-                className="w-full justify-start"
-                onClick={() => {
-                  void openExecutablePicker(settingsPopupGame)
-                }}
-              >
-                <Settings className="mr-2 h-4 w-4" />
-                Set Executable
-              </Button>
-              <Button
-                variant="ghost"
-                className="w-full justify-start"
-                onClick={() => {
-                  if (settingsPopupGame) {
-                    void handleOpenGameFiles(settingsPopupGame)
-                  }
-                }}
-              >
-                <FolderOpen className="mr-2 h-4 w-4" />
-                Open Game Files
-              </Button>
-              <Button
-                variant="ghost"
-                className="w-full justify-start"
-                onClick={async () => {
-                  if (settingsPopupGame) {
-                    setShortcutFeedback(null)
-                    const resolved = await resolveLibraryVersionLabel(settingsPopupGame)
-                    let savedExe = await getSavedExe(settingsPopupGame.appid, resolved.label, resolved.allowLegacyFallback)
-                    if (!savedExe && window.ucDownloads?.listGameExecutables) {
-                      try {
-                        const result = await window.ucDownloads.listGameExecutables(settingsPopupGame.appid, resolved.label)
-                        savedExe = result?.exes?.[0]?.path || null
-                      } catch {}
-                    }
-
-                    if (savedExe) {
-                      try { await window.ucDownloads?.deleteDesktopShortcut?.(settingsPopupGame.name) } catch {}
-                      const result = await window.ucDownloads?.createDesktopShortcut?.(settingsPopupGame.name, savedExe)
-                      if (result?.ok) {
-                        gameLogger.info('Desktop shortcut created manually', { appid: settingsPopupGame.appid })
-                        setShortcutFeedback({ type: 'success', message: 'Desktop shortcut created.' })
-                      } else {
-                        setShortcutFeedback({ type: 'error', message: 'Failed to create desktop shortcut.' })
-                      }
-                    } else {
-                      gameLogger.warn('No saved exe found for creating shortcut', { appid: settingsPopupGame.appid })
-                      setShortcutFeedback({ type: 'error', message: 'Select an executable first.' })
-                      void openExecutablePicker(settingsPopupGame)
-                    }
-                    setTimeout(() => setShortcutFeedback(null), 3000)
-                  }
-                }}
-              >
-                <ExternalLink className="mr-2 h-4 w-4" />
-                Create Desktop Shortcut
-              </Button>
-              {settingsPopupGame?.isExternal && (
-                <Button
-                  variant="ghost"
-                  className="w-full justify-start"
-                  onClick={() => {
-                    setSettingsPopupOpen(false)
-                    setShortcutFeedback(null)
-                    setEditMetadataOpen(true)
-                  }}
-                >
-                  <Pencil className="mr-2 h-4 w-4" />
-                  Edit Details
-                </Button>
-              )}
-              <Button
-                variant="ghost"
-                className="w-full justify-start text-destructive hover:text-destructive"
-                onClick={() => {
-                  if (settingsPopupGame) {
-                    setSettingsPopupOpen(false)
-                    setShortcutFeedback(null)
-                    setPendingDeleteGame(settingsPopupGame)
-                    setPendingDeleteAction("installed")
-                  }
-                }}
-              >
-                <Trash2 className="mr-2 h-4 w-4" />
-                {settingsPopupGame?.isExternal ? "Unlink Game" : "Delete Game"}
-              </Button>
-            </div>
-
-            {shortcutFeedback && (
-              <div className={`mt-3 text-xs ${shortcutFeedback.type === 'success' ? 'text-emerald-400' : 'text-destructive'}`}>
-                {shortcutFeedback.message}
-              </div>
-            )}
-
-            <div className="mt-4 flex justify-end">
-              <Button
-                variant="ghost"
-                onClick={() => {
-                  setSettingsPopupOpen(false)
-                  setShortcutFeedback(null)
-                }}
-              >
-                Close
               </Button>
             </div>
           </div>

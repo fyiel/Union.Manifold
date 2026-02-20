@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useState, type MouseEvent } from "react"
+import { memo, useCallback, useEffect, useRef, useState, type MouseEvent } from "react"
 import { Link } from "react-router-dom"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -9,6 +9,7 @@ import { apiUrl } from "@/lib/api"
 import { ExePickerModal } from "@/components/ExePickerModal"
 import { AdminPromptModal } from "@/components/AdminPromptModal"
 import { DesktopShortcutModal } from "@/components/DesktopShortcutModal"
+import { GameLaunchFailedModal } from "@/components/GameLaunchFailedModal"
 import { gameLogger } from "@/lib/logger"
 
 interface GameCardProps {
@@ -87,6 +88,10 @@ export const GameCard = memo(function GameCard({
   const [adminPromptOpen, setAdminPromptOpen] = useState(false)
   const [pendingExePath, setPendingExePath] = useState<string | null>(null)
   const [shortcutModalOpen, setShortcutModalOpen] = useState(false)
+  const [gameStartFailedOpen, setGameStartFailedOpen] = useState(false)
+  const [gameStartFailedAdminEnabled, setGameStartFailedAdminEnabled] = useState(false)
+  const gameJustLaunchedRef = useRef<number>(0)
+  const gameQuickExitUnsubRef = useRef<(() => void) | null>(null)
 
   // Sync NSFW reveal preference from localStorage
   useEffect(() => {
@@ -171,6 +176,19 @@ export const GameCard = memo(function GameCard({
       clearInterval(interval)
     }
   }, [game.appid, isInstalled])
+
+  // If the running state flips to false within the quick-exit window, show the modal
+  useEffect(() => {
+    if (isRunning || !(gameJustLaunchedRef.current > Date.now())) return
+    gameJustLaunchedRef.current = 0
+    try { gameQuickExitUnsubRef.current?.() } catch {}
+    gameQuickExitUnsubRef.current = null
+    void (async () => {
+      const adminEnabled = Boolean(await getRunAsAdminEnabled().catch(() => false))
+      setGameStartFailedAdminEnabled(adminEnabled)
+      setGameStartFailedOpen(true)
+    })()
+  }, [isRunning])
 
   const fetchStatsOnHover = useCallback(async () => {
     if (initialStats && (initialStats.downloads > 0 || initialStats.views > 0)) {
@@ -351,6 +369,27 @@ export const GameCard = memo(function GameCard({
       setAdminPromptOpen(false)
       setShortcutModalOpen(false)
       setPendingExePath(null)
+      setGameStartFailedOpen(false)
+
+      // Quick-exit detection window: 12 seconds after launch
+      gameJustLaunchedRef.current = Date.now() + 12000
+
+      const showStartFailedModal = async () => {
+        setIsRunning(false)
+        const adminEnabled = Boolean(await getRunAsAdminEnabled().catch(() => false))
+        setGameStartFailedAdminEnabled(adminEnabled)
+        setGameStartFailedOpen(true)
+      }
+
+      try { gameQuickExitUnsubRef.current?.() } catch {}
+      gameQuickExitUnsubRef.current = window.ucDownloads?.onGameQuickExit?.((data) => {
+        if (data?.appid !== game.appid) return
+        if (!(gameJustLaunchedRef.current > Date.now())) return
+        gameJustLaunchedRef.current = 0
+        try { gameQuickExitUnsubRef.current?.() } catch {}
+        gameQuickExitUnsubRef.current = null
+        void showStartFailedModal()
+      }) ?? null
     }
   }
 
@@ -407,6 +446,9 @@ export const GameCard = memo(function GameCard({
     // If game is running, stop it
     if (isRunning && window.ucDownloads?.quitGameExecutable) {
       try {
+        gameJustLaunchedRef.current = 0
+        try { gameQuickExitUnsubRef.current?.() } catch {}
+        gameQuickExitUnsubRef.current = null
         const result = await window.ucDownloads.quitGameExecutable(game.appid)
         if (result?.ok && result.stopped) {
           setIsRunning(false)
@@ -440,6 +482,7 @@ export const GameCard = memo(function GameCard({
       }
       const exes = result?.exes || []
       const folder = result?.folder || null
+      const browseFolder = result?.gameRoot || folder
       const { pick, confident } = pickGameExecutable(exes, game.name, game.source, folder)
       if (pick && confident) {
         setPendingExePath(pick.path)
@@ -456,7 +499,7 @@ export const GameCard = memo(function GameCard({
         }
         return
       }
-      openExePicker(exes, folder)
+      openExePicker(exes, browseFolder)
     } catch {
       if (installedPath) openPath(installedPath)
     }
@@ -637,6 +680,19 @@ export const GameCard = memo(function GameCard({
           setShortcutModalOpen(false)
           setPendingExePath(null)
         }}
+      />
+      <GameLaunchFailedModal
+        open={gameStartFailedOpen}
+        gameName={game.name}
+        isWindows={isWindows}
+        adminAlreadyEnabled={gameStartFailedAdminEnabled}
+        onEnableAdmin={async () => {
+          try {
+            await window.ucSettings?.set?.('runGamesAsAdmin', true)
+          } catch {}
+          setGameStartFailedOpen(false)
+        }}
+        onClose={() => setGameStartFailedOpen(false)}
       />
     </div>
   )

@@ -1,5 +1,5 @@
 
-import { useEffect, useCallback, useMemo, useState } from "react"
+import { useEffect, useCallback, useMemo, useRef, useState } from "react"
 import { useParams } from "react-router-dom"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -42,6 +42,7 @@ import {
 } from "lucide-react"
 import { ExePickerModal } from "@/components/ExePickerModal"
 import { AdminPromptModal } from "@/components/AdminPromptModal"
+import { GameLaunchFailedModal } from "@/components/GameLaunchFailedModal"
 import { LinuxExperiences } from "@/components/LinuxExperiences"
 import { DownloadCheckModal } from "@/components/DownloadCheckModal"
 import { DesktopShortcutModal } from "@/components/DesktopShortcutModal"
@@ -103,6 +104,12 @@ export function GameDetailPage() {
   const [editMetadataOpen, setEditMetadataOpen] = useState(false)
   const [versionConflictOpen, setVersionConflictOpen] = useState(false)
   const [overwriteOnDownload, setOverwriteOnDownload] = useState(false)
+  const [gameStartFailedOpen, setGameStartFailedOpen] = useState(false)
+  const [gameStartFailedAdminEnabled, setGameStartFailedAdminEnabled] = useState(false)
+  // Ref to track whether a game was just launched (cleared on manual quit)
+  // Stores the expiry timestamp of the quick-exit detection window (0 = not watching)
+  const gameJustLaunchedRef = useRef<number>(0)
+  const gameQuickExitUnsubRef = useRef<(() => void) | null>(null)
 
   // ProtonDB state
   const [protonData, setProtonData] = useState<any>(null)
@@ -429,6 +436,20 @@ export function GameDetailPage() {
     }
   }, [appid])
 
+  // When isGameRunning flips to false within the quick-exit window, show the modal
+  useEffect(() => {
+    if (isGameRunning || !(gameJustLaunchedRef.current > Date.now())) return
+    gameJustLaunchedRef.current = 0
+    try { gameQuickExitUnsubRef.current?.() } catch {}
+    gameQuickExitUnsubRef.current = null
+    void (async () => {
+      const adminEnabled = Boolean(await getRunAsAdminEnabled().catch(() => false))
+      setGameStartFailedAdminEnabled(adminEnabled)
+      setGameStartFailedOpen(true)
+    })()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isGameRunning])
+
   const openLightbox = (index: number) => {
     setLightboxIndex(index)
     setLightboxOpen(true)
@@ -547,6 +568,9 @@ export function GameDetailPage() {
       const result = await window.ucDownloads.listGameExecutables(game.appid, selectedVersionLabel)
       const exes = result?.exes || []
       const folder = result?.folder || null
+      // Use the top-level game root as browse default so the native dialog doesn't open
+      // deep inside a version subfolder (e.g. versions/latest_b537082)
+      const browseFolder = result?.gameRoot || folder
       const { pick, confident } = pickGameExecutable(exes, game.name, game.source, folder)
       if (pick && confident) {
         setPendingExePath(pick.path)
@@ -563,7 +587,7 @@ export function GameDetailPage() {
         }
         return
       }
-      await openExePicker(exes, { mode: "launch", actionLabel: "Launch", folder })
+      await openExePicker(exes, { mode: "launch", actionLabel: "Launch", folder: browseFolder })
     } catch {}
   }
   const popularAppIds = useMemo(() => {
@@ -612,8 +636,11 @@ export function GameDetailPage() {
   const hasInstalledVersions = installedVersions.length > 0 || Boolean(installedManifest)
   const isSelectedVersionInstalled = useMemo(() => {
     if (!hasInstalledVersions) return false
-    if (!selectedVersion) return true
-    if (!installedVersionLabels.length) return Boolean(selectedVersion.is_current)
+    if (!selectedVersion) return true // no version selected yet → treat as current → Play
+    // The current/latest version is always "installed" when the game is installed at all
+    if (selectedVersion.is_current) return true
+    // For archived versions: check whether we have that specific version's label installed
+    if (!installedVersionLabels.length) return false
     return installedVersionLabels.includes(selectedVersion.label)
   }, [hasInstalledVersions, selectedVersion, installedVersionLabels])
 
@@ -854,6 +881,7 @@ export function GameDetailPage() {
         actionLabel: "Set",
         mode: "set",
         currentPath: savedExe || null,
+        folder: result?.gameRoot || result?.folder || null,
       })
     } catch {
       await openExePicker([], {
@@ -995,6 +1023,31 @@ export function GameDetailPage() {
       setShortcutModalOpen(false)
       setPendingExePath(null)
       setIsGameRunning(true)
+      setGameStartFailedOpen(false)
+
+      // Quick-exit detection window: 12 seconds after launch.
+      // If the game exits within this window (detected via IPC event or polling), show the modal.
+      // Games that exit normally after 12+ seconds won't trigger it.
+      gameJustLaunchedRef.current = Date.now() + 12000
+
+      const showStartFailedModal = async () => {
+        setIsGameRunning(false)
+        const adminEnabled = Boolean(await getRunAsAdminEnabled().catch(() => false))
+        setGameStartFailedAdminEnabled(adminEnabled)
+        setGameStartFailedOpen(true)
+      }
+
+      // Fast path: IPC event from main process when it detects a quick exit
+      try { gameQuickExitUnsubRef.current?.() } catch {}
+      gameQuickExitUnsubRef.current = window.ucDownloads?.onGameQuickExit?.((data) => {
+        if (data?.appid !== game.appid) return
+        if (!(gameJustLaunchedRef.current > Date.now())) return
+        gameJustLaunchedRef.current = 0
+        try { gameQuickExitUnsubRef.current?.() } catch {}
+        gameQuickExitUnsubRef.current = null
+        void showStartFailedModal()
+      }) ?? null
+      // Fallback: the isGameRunning useEffect below detects exits within the 12 s window
     }
   }
 
@@ -1052,6 +1105,10 @@ export function GameDetailPage() {
 
   const stopRunningGame = async () => {
     if (!window.ucDownloads?.quitGameExecutable) return
+    // Clear the launch tracking so the quick-exit modal doesn't appear on manual quit
+    gameJustLaunchedRef.current = 0
+    try { gameQuickExitUnsubRef.current?.() } catch {}
+    gameQuickExitUnsubRef.current = null
     setStoppingGame(true)
     try {
       await window.ucDownloads.quitGameExecutable(game.appid)
@@ -1791,6 +1848,19 @@ export function GameDetailPage() {
           }}
         />
       )}
+      <GameLaunchFailedModal
+        open={gameStartFailedOpen}
+        gameName={game.name}
+        isWindows={isWindows}
+        adminAlreadyEnabled={gameStartFailedAdminEnabled}
+        onEnableAdmin={async () => {
+          try {
+            await window.ucSettings?.set?.('runGamesAsAdmin', true)
+          } catch {}
+          setGameStartFailedOpen(false)
+        }}
+        onClose={() => setGameStartFailedOpen(false)}
+      />
     </div>
   )
 }

@@ -99,7 +99,7 @@ declare global {
       getInstalledGlobal: (appid: string) => Promise<any | null>
       listInstallingGlobal: () => Promise<any[]>
       getInstallingGlobal: (appid: string) => Promise<any | null>
-      listGameExecutables: (appid: string, versionLabel?: string | null) => Promise<{ ok: boolean; folder?: string; exes: { name: string; path: string; size?: number; depth?: number }[]; error?: string }>
+      listGameExecutables: (appid: string, versionLabel?: string | null) => Promise<{ ok: boolean; folder?: string; gameRoot?: string; exes: { name: string; path: string; size?: number; depth?: number }[]; error?: string }>
       findGameSubfolder: (folder: string) => Promise<string | null>
       launchGameExecutable: (appid: string, exePath: string, gameName?: string, showGameName?: boolean) => Promise<{ ok: boolean; error?: string; pid?: number }>
       launchGameExecutableAsAdmin: (appid: string, exePath: string, gameName?: string, showGameName?: boolean) => Promise<{ ok: boolean; error?: string; pid?: number }>
@@ -115,7 +115,9 @@ declare global {
       updateInstalledMetadata: (appid: string, updates: Record<string, any>) => Promise<{ ok: boolean; error?: string }>
       pickExternalGameFolder: () => Promise<string | null>
       pickImage: () => Promise<string | null>
+      browseForGameExe: (defaultPath?: string) => Promise<{ ok: boolean; path?: string }>
       onUpdate: (callback: (update: DownloadUpdatePayload) => void) => () => void
+      onGameQuickExit: (callback: (data: { appid: string | null; exePath: string | null; elapsed: number }) => void) => () => void
     }
     ucSettings?: {
       get: (key: string) => Promise<any>

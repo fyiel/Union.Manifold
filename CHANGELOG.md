@@ -1,5 +1,28 @@
 # Changelog
 
+## Version 1.1.1 - 2026-02-20
+
+### Fixes & Improvements
+
+- **Fixed exe picker opening in wrong folder** — the exe picker browse dialog was opening inside the version-specific subfolder (e.g. `versions/latest_b537082/`) instead of the game's root folder. The `listGameExecutables` IPC now returns a separate `gameRoot` field pointing to the top-level game folder, which is used as the default path for both the launch flow and the gear-icon exe picker.
+- **Fixed Play/Download Now button flickering** — resolved a logic error in `isSelectedVersionInstalled` where the button would briefly flash "Download Now" then change back to "Play", even when the game was fully installed. Current versions are now always treated as installed.
+- **Added game launch failure detection and modal** — when a game exits within 12 seconds of launch (indicating a failed start), a helpful modal now appears suggesting to:
+  - Check that the correct executable is selected via the gear icon
+  - Enable "Launch as Administrator" (Windows only, shown only if not already enabled)
+  - The modal displays the actual game name being launched instead of a hardcoded example
+- **Improved launch tracking** — replaced hardcoded 5-second timeout with a timestamp-based 12-second detection window, so normal game exits that take longer won't falsely trigger the failure modal. The window automatically expires after 12 seconds.
+- **Fixed admin launch UX** — when a user declines a UAC prompt, the launcher now correctly fails rather than silently falling back to a non-admin launch, giving clear feedback that admin privileges are required.
+- **Fixed false quick-exit modal on Windows** — removed the cmd.exe wrapper from non-admin Windows launches, which was causing all GUI games to immediately trigger the "couldn't start" modal (cmd.exe exits quickly when launching GUI apps). Games now launch directly and are tracked correctly.
+- **Improved IPC listener cleanup** — launch tracking listeners are now properly subscribed and unsubscribed, eliminating listener leaks across multiple game launches.
+
+### Files touched (UnionCrax.Direct)
+
+- `electron/main.cjs`
+- `renderer/src/app/pages/GameDetailPage.tsx`
+- `renderer/src/components/GameLaunchFailedModal.tsx`
+- `renderer/src/vite-env.d.ts`
+- `electron/preload.cjs`
+
 ## Version 1.1.0 - 2026-02-20
 
 ### Features
