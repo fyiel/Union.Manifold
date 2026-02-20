@@ -104,3 +104,25 @@ contextBridge.exposeInMainWorld('electron', {
     }
   }
 })
+
+contextBridge.exposeInMainWorld('ucLinux', {
+  detectProton: () => ipcRenderer.invoke('uc:linux-detect-proton'),
+  detectWine: () => ipcRenderer.invoke('uc:linux-detect-wine'),
+  runWinecfg: () => ipcRenderer.invoke('uc:linux-winecfg'),
+  runWinetricks: (packages) => ipcRenderer.invoke('uc:linux-winetricks', packages),
+  runProtontricks: (appId, packages) => ipcRenderer.invoke('uc:linux-protontricks', appId, packages),
+  createPrefix: (prefixPath, arch) => ipcRenderer.invoke('uc:linux-create-prefix', prefixPath, arch),
+  pickPrefixDir: () => ipcRenderer.invoke('uc:linux-pick-prefix-dir'),
+  pickBinary: () => ipcRenderer.invoke('uc:linux-pick-binary'),
+  checkTool: (toolName) => ipcRenderer.invoke('uc:linux-check-tool', toolName),
+  getSteamPath: () => ipcRenderer.invoke('uc:linux-steam-path'),
+})
+
+contextBridge.exposeInMainWorld('ucVR', {
+  detectSteamVR: () => ipcRenderer.invoke('uc:vr-detect-steamvr'),
+  detectOpenXR: () => ipcRenderer.invoke('uc:vr-detect-openxr'),
+  launchSteamVR: () => ipcRenderer.invoke('uc:vr-launch-steamvr'),
+  pickRuntimeJson: () => ipcRenderer.invoke('uc:vr-pick-runtime-json'),
+  pickSteamVRDir: () => ipcRenderer.invoke('uc:vr-pick-steamvr-dir'),
+  getSettings: () => ipcRenderer.invoke('uc:vr-get-settings'),
+})

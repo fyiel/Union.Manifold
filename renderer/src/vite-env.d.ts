@@ -176,6 +176,35 @@ declare global {
         removeListener: (channel: string, func: (...args: any[]) => void) => void
       }
     }
+    ucLinux?: {
+      detectProton: () => Promise<{ ok: boolean; versions: Array<{ label: string; path: string }>; error?: string }>
+      detectWine: () => Promise<{ ok: boolean; versions: Array<{ label: string; path: string }>; error?: string }>
+      runWinecfg: () => Promise<{ ok: boolean; pid?: number; error?: string }>
+      runWinetricks: (packages?: string[]) => Promise<{ ok: boolean; pid?: number; error?: string }>
+      runProtontricks: (appId?: string, packages?: string[]) => Promise<{ ok: boolean; pid?: number; error?: string }>
+      createPrefix: (prefixPath: string, arch?: '32' | '64' | 'win32' | 'win64') => Promise<{ ok: boolean; code?: number; stdout?: string; stderr?: string; error?: string }>
+      pickPrefixDir: () => Promise<{ ok: boolean; path?: string; cancelled?: boolean; error?: string }>
+      pickBinary: () => Promise<{ ok: boolean; path?: string; cancelled?: boolean; error?: string }>
+      checkTool: (toolName: string) => Promise<{ ok: boolean; available: boolean; path?: string; error?: string }>
+      getSteamPath: () => Promise<{ ok: boolean; path?: string; error?: string }>
+    }
+    ucVR?: {
+      detectSteamVR: () => Promise<{ ok: boolean; found: boolean; dir?: string | null; vrserver?: string | null; startup?: string | null; error?: string }>
+      detectOpenXR: () => Promise<{ ok: boolean; found: boolean; path?: string | null; error?: string }>
+      launchSteamVR: () => Promise<{ ok: boolean; method?: string; error?: string }>
+      pickRuntimeJson: () => Promise<{ ok: boolean; path?: string; cancelled?: boolean; error?: string }>
+      pickSteamVRDir: () => Promise<{ ok: boolean; path?: string; cancelled?: boolean; error?: string }>
+      getSettings: () => Promise<{
+        ok: boolean
+        vrEnabled?: boolean
+        vrSteamVrPath?: string
+        vrXrRuntimeJson?: string
+        vrSteamVrRuntime?: string
+        vrExtraEnv?: string
+        vrAutoLaunchSteamVr?: boolean
+        error?: string
+      }>
+    }
   }
 }
 
