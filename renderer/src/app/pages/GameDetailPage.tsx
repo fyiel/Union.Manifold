@@ -253,6 +253,15 @@ export function GameDetailPage() {
   }, [appid, downloads])
 
   useEffect(() => {
+    if (!installedManifest?.metadata || !game) return
+    const meta = installedManifest.metadata
+    const localHero = meta.localSplash || meta.localImage
+    if (!localHero) return
+    const isDefaultSelected = !selectedImage || selectedImage === game.splash || selectedImage === game.image
+    if (isDefaultSelected) setSelectedImage(localHero)
+  }, [installedManifest, game, selectedImage])
+
+  useEffect(() => {
     if (!appid) return
     let mounted = true
     const loadInstalledVersions = async () => {
@@ -460,13 +469,13 @@ export function GameDetailPage() {
   }
 
   const nextLightbox = () => {
-    if (!game?.screenshots || game.screenshots.length === 0) return
-    setLightboxIndex((prev) => (prev + 1) % game.screenshots.length)
+    if (!resolvedScreenshots.length) return
+    setLightboxIndex((prev) => (prev + 1) % resolvedScreenshots.length)
   }
 
   const prevLightbox = () => {
-    if (!game?.screenshots || game.screenshots.length === 0) return
-    setLightboxIndex((prev) => (prev - 1 + game.screenshots.length) % game.screenshots.length)
+    if (!resolvedScreenshots.length) return
+    setLightboxIndex((prev) => (prev - 1 + resolvedScreenshots.length) % resolvedScreenshots.length)
   }
 
   useEffect(() => {
@@ -644,6 +653,14 @@ export function GameDetailPage() {
     return installedVersionLabels.includes(selectedVersion.label)
   }, [hasInstalledVersions, selectedVersion, installedVersionLabels])
 
+  const installedMeta = installedManifest?.metadata || null
+  const localScreenshots = Array.isArray(installedMeta?.localScreenshots) ? installedMeta.localScreenshots : []
+  const resolvedScreenshots = useMemo(() => {
+    if (!game?.screenshots || game.screenshots.length === 0) return []
+    if (!localScreenshots.length) return game.screenshots
+    return game.screenshots.map((shot, index) => localScreenshots[index] || shot)
+  }, [game?.screenshots, localScreenshots])
+
   if (rateLimit && isOnline) {
     return (
       <RateLimitError
@@ -685,6 +702,7 @@ export function GameDetailPage() {
   const isPopular = popularAppIds.has(game.appid)
   const isExternalGame = Boolean(installedManifest?.isExternal)
   const isUCMatched = isExternalGame && game.source !== "external"
+  const heroImage = selectedImage || installedMeta?.localSplash || installedMeta?.localImage || game.splash || game.image
   const appDownloads = downloads.filter((item) => item.appid === game.appid)
   const isActiveDownload = appDownloads.some((item) =>
     ["downloading", "paused", "extracting", "installing"].includes(item.status)
@@ -1125,7 +1143,7 @@ export function GameDetailPage() {
             <div className="relative rounded-3xl overflow-hidden border border-white/10 bg-black/40 backdrop-blur-md shadow-2xl shadow-black/50">
               <div className="relative aspect-video">
                 <img
-                  src={proxyImageUrl(selectedImage || game.splash || game.image) || "/banner.png"}
+                  src={proxyImageUrl(heroImage || "") || "/banner.png"}
                   alt={game.name}
                   className="h-full w-full object-cover"
                 />
@@ -1272,12 +1290,12 @@ export function GameDetailPage() {
               {/* Linux Experiences (community submissions) */}
               <LinuxExperiences appid={game.appid} />
 
-              {game.screenshots && game.screenshots.length > 0 && (
+              {resolvedScreenshots.length > 0 && (
                 <div className="p-6 rounded-2xl bg-black/40 border border-white/10 backdrop-blur-md shadow-xl">
                   <div className="flex items-center justify-between mb-4">
                     <h3 className="text-xl font-black text-white font-montserrat">Screenshots</h3>
                     <div className="flex items-center gap-2">
-                      <span className="text-sm text-gray-400">{game.screenshots.length} images</span>
+                      <span className="text-sm text-gray-400">{resolvedScreenshots.length} images</span>
                       <Button variant="outline" size="sm" className="h-8 px-2 border-white/20 bg-white/5 hover:bg-white/10 text-white" onClick={() => openLightbox(0)}>
                         View All
                       </Button>
@@ -1285,7 +1303,7 @@ export function GameDetailPage() {
                   </div>
 
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                    {game.screenshots.slice(0, 6).map((screenshot, index) => (
+                    {resolvedScreenshots.slice(0, 6).map((screenshot, index) => (
                       <button
                         key={`${screenshot}-${index}`}
                         onClick={() => openLightbox(index)}
@@ -1301,14 +1319,14 @@ export function GameDetailPage() {
                       </button>
                     ))}
 
-                    {game.screenshots.length > 6 && (
+                    {resolvedScreenshots.length > 6 && (
                       <button
                         onClick={() => openLightbox(6)}
                         className="relative col-span-2 sm:col-auto w-full aspect-video rounded-lg overflow-hidden border border-border/60 flex items-center justify-center bg-background/50"
                         aria-label="View more screenshots"
                       >
                         <div className="text-center">
-                          <div className="text-lg font-bold">+{game.screenshots.length - 6}</div>
+                          <div className="text-lg font-bold">+{resolvedScreenshots.length - 6}</div>
                           <div className="text-sm text-muted-foreground">more</div>
                         </div>
                       </button>
@@ -1644,7 +1662,7 @@ export function GameDetailPage() {
         </section>
       )}
 
-      {game.screenshots && lightboxOpen && (
+      {resolvedScreenshots.length > 0 && lightboxOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
           <div className="absolute inset-0 bg-black/80 z-50" onClick={closeLightbox} aria-hidden="true" />
 
@@ -1668,7 +1686,7 @@ export function GameDetailPage() {
             <div className="w-full h-full flex items-center justify-center">
               <div className="w-full max-w-[1200px] max-h-[80vh] flex items-center justify-center">
                 <img
-                  src={proxyImageUrl(game.screenshots[lightboxIndex]) || "/banner.png"}
+                  src={proxyImageUrl(resolvedScreenshots[lightboxIndex]) || "/banner.png"}
                   alt={`Screenshot ${lightboxIndex + 1}`}
                   className="max-w-full max-h-full object-contain mx-auto"
                 />
@@ -1685,7 +1703,7 @@ export function GameDetailPage() {
           </button>
 
           <div className="absolute bottom-6 text-center text-sm text-muted-foreground z-60">
-            {`${lightboxIndex + 1} / ${game.screenshots.length}`}
+            {`${lightboxIndex + 1} / ${resolvedScreenshots.length}`}
           </div>
         </div>
       )}

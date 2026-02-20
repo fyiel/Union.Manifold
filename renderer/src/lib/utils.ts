@@ -109,12 +109,17 @@ export function proxyImageUrl(imageUrl: string): string {
     }
   } catch {}
 
+  // Electron can load remote images directly — no need to proxy through union-crax.xyz
+  // This avoids 403s from the remote proxy and is faster (no double hop)
+  if (imageUrl.startsWith("http://") || imageUrl.startsWith("https://")) {
+    return imageUrl
+  }
+
   try {
     const encodedUrl = encodeURIComponent(imageUrl)
     return apiUrl(`/api/images/${encodedUrl}`)
   } catch (error) {
     // Error encoding image URL - silently fail
-    return imageUrl
     return imageUrl
   }
 }
