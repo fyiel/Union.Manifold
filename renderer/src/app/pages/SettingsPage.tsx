@@ -78,6 +78,18 @@ export function SettingsPage() {
   const [linuxToolAvailability, setLinuxToolAvailability] = useState<Record<string, boolean>>({})
   const [showLinuxAdvanced, setShowLinuxAdvanced] = useState(false)
   const [linuxPrefixArch, setLinuxPrefixArch] = useState<'win64' | 'win32'>('win64')
+  // SteamVR / VR settings
+  const [vrEnabled, setVrEnabled] = useState(false)
+  const [vrSteamVrPath, setVrSteamVrPath] = useState('')
+  const [vrXrRuntimeJson, setVrXrRuntimeJson] = useState('')
+  const [vrSteamVrRuntime, setVrSteamVrRuntime] = useState('')
+  const [vrExtraEnv, setVrExtraEnv] = useState('')
+  const [vrAutoLaunchSteamVr, setVrAutoLaunchSteamVr] = useState(false)
+  const [vrDetected, setVrDetected] = useState<{ found: boolean; dir?: string | null } | null>(null)
+  const [vrOpenXrDetected, setVrOpenXrDetected] = useState<{ found: boolean; path?: string | null } | null>(null)
+  const [vrToolFeedback, setVrToolFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
+  const [vrToolRunning, setVrToolRunning] = useState(false)
+  const [showVrAdvanced, setShowVrAdvanced] = useState(false)
   const [discordRpcEnabled, setDiscordRpcEnabled] = useState(true)
   const [showRpcAdvanced, setShowRpcAdvanced] = useState(false)
   const [rpcHideNsfw, setRpcHideNsfw] = useState(true)
@@ -222,6 +234,82 @@ export function SettingsPage() {
       mounted = false
       if (typeof off === 'function') off()
     }
+  }, [])
+
+  // Load VR settings
+  useEffect(() => {
+    let mounted = true
+    const loadVrSettings = async () => {
+      try {
+        const settings = await window.ucVR?.getSettings?.()
+        if (!mounted || !settings?.ok) return
+        setVrEnabled(Boolean(settings.vrEnabled))
+        setVrSteamVrPath(settings.vrSteamVrPath || '')
+        setVrXrRuntimeJson(settings.vrXrRuntimeJson || '')
+        setVrSteamVrRuntime(settings.vrSteamVrRuntime || '')
+        setVrExtraEnv(settings.vrExtraEnv || '')
+        setVrAutoLaunchSteamVr(Boolean(settings.vrAutoLaunchSteamVr))
+      } catch {}
+    }
+    loadVrSettings()
+    const off = window.ucSettings?.onChanged?.((data: any) => {
+      if (!data || !data.key) return
+      if (data.key === '__CLEAR_ALL__') {
+        setVrEnabled(false)
+        setVrSteamVrPath('')
+        setVrXrRuntimeJson('')
+        setVrSteamVrRuntime('')
+        setVrExtraEnv('')
+        setVrAutoLaunchSteamVr(false)
+        return
+      }
+      if (data.key === 'vrEnabled') setVrEnabled(Boolean(data.value))
+      if (data.key === 'vrSteamVrPath') setVrSteamVrPath(data.value || '')
+      if (data.key === 'vrXrRuntimeJson') setVrXrRuntimeJson(data.value || '')
+      if (data.key === 'vrSteamVrRuntime') setVrSteamVrRuntime(data.value || '')
+      if (data.key === 'vrExtraEnv') setVrExtraEnv(data.value || '')
+      if (data.key === 'vrAutoLaunchSteamVr') setVrAutoLaunchSteamVr(Boolean(data.value))
+    })
+    return () => {
+      mounted = false
+      if (typeof off === 'function') off()
+    }
+  }, [])
+
+  // Detect SteamVR and OpenXR on startup
+  useEffect(() => {
+    let mounted = true
+    const detect = async () => {
+      try {
+        const [steamVrResult, openXrResult] = await Promise.allSettled([
+          window.ucVR?.detectSteamVR?.(),
+          window.ucVR?.detectOpenXR?.(),
+        ])
+        if (!mounted) return
+        if (steamVrResult.status === 'fulfilled' && steamVrResult.value?.ok) {
+          setVrDetected({ found: steamVrResult.value.found, dir: steamVrResult.value.dir })
+          // Auto-fill SteamVR path if not set
+          if (steamVrResult.value.found && steamVrResult.value.dir) {
+            const stored = await window.ucSettings?.get?.('vrSteamVrPath')
+            if (!stored && mounted) {
+              setVrSteamVrPath(steamVrResult.value.dir)
+            }
+          }
+        }
+        if (openXrResult.status === 'fulfilled' && openXrResult.value?.ok) {
+          setVrOpenXrDetected({ found: openXrResult.value.found, path: openXrResult.value.path })
+          // Auto-fill XR runtime JSON if not set
+          if (openXrResult.value.found && openXrResult.value.path) {
+            const stored = await window.ucSettings?.get?.('vrXrRuntimeJson')
+            if (!stored && mounted) {
+              setVrXrRuntimeJson(openXrResult.value.path)
+            }
+          }
+        }
+      } catch {}
+    }
+    detect()
+    return () => { mounted = false }
   }, [])
 
   // Detect Linux tools when on Linux
@@ -1045,6 +1133,45 @@ export function SettingsPage() {
     if (result?.ok && result.path) {
       setLinuxProtonPath(result.path)
       await window.ucSettings?.set?.('linuxProtonPath', result.path).catch(() => {})
+    }
+  }
+
+  // VR helpers
+  const vrToolFeedbackShow = (type: 'success' | 'error', message: string) => {
+    setVrToolFeedback({ type, message })
+    setTimeout(() => setVrToolFeedback(null), 4000)
+  }
+
+  const handleLaunchSteamVR = async () => {
+    if (vrToolRunning) return
+    setVrToolRunning(true)
+    try {
+      const result = await window.ucVR?.launchSteamVR?.()
+      if (result?.ok) {
+        vrToolFeedbackShow('success', 'SteamVR launched.')
+      } else {
+        vrToolFeedbackShow('error', result?.error || 'Failed to launch SteamVR.')
+      }
+    } catch {
+      vrToolFeedbackShow('error', 'Failed to launch SteamVR.')
+    } finally {
+      setVrToolRunning(false)
+    }
+  }
+
+  const handlePickSteamVRDir = async () => {
+    const result = await window.ucVR?.pickSteamVRDir?.()
+    if (result?.ok && result.path) {
+      setVrSteamVrPath(result.path)
+      await window.ucSettings?.set?.('vrSteamVrPath', result.path).catch(() => {})
+    }
+  }
+
+  const handlePickXrRuntimeJson = async () => {
+    const result = await window.ucVR?.pickRuntimeJson?.()
+    if (result?.ok && result.path) {
+      setVrXrRuntimeJson(result.path)
+      await window.ucSettings?.set?.('vrXrRuntimeJson', result.path).catch(() => {})
     }
   }
 
@@ -1961,6 +2088,203 @@ export function SettingsPage() {
               </div>
             )}
           </div>
+        </CardContent>
+      </Card>
+
+      <Card className="border-border/60">
+        <CardContent className="p-6 space-y-6">
+          <div>
+            <h2 className="text-lg font-semibold">VR / SteamVR</h2>
+            <p className="text-sm text-muted-foreground">
+              Configure SteamVR and OpenXR settings for VR game launches.
+            </p>
+          </div>
+
+          {/* Enable VR toggle */}
+          <div className="flex items-center justify-between">
+            <div>
+              <label className="text-sm font-medium cursor-pointer">Enable VR support</label>
+              <p className="text-xs text-muted-foreground mt-1">
+                Apply VR environment variables (XR_RUNTIME_JSON, STEAM_VR_RUNTIME) when launching games.
+              </p>
+            </div>
+            <button
+              onClick={async () => {
+                const newValue = !vrEnabled
+                setVrEnabled(newValue)
+                try { await window.ucSettings?.set?.('vrEnabled', newValue) } catch {}
+              }}
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${vrEnabled ? 'bg-primary' : 'bg-slate-700'}`}
+              title="Toggle VR support"
+            >
+              <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${vrEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
+            </button>
+          </div>
+
+          {/* Detection status */}
+          <div className="flex flex-wrap gap-2">
+            {vrDetected !== null && (
+              <span className={`text-[11px] px-2 py-1 rounded-full border ${vrDetected.found ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' : 'bg-muted/30 text-muted-foreground border-border/40'}`}>
+                SteamVR: {vrDetected.found ? `found${vrDetected.dir ? ` (${vrDetected.dir.split('/').pop()})` : ''}` : 'not found'}
+              </span>
+            )}
+            {vrOpenXrDetected !== null && (
+              <span className={`text-[11px] px-2 py-1 rounded-full border ${vrOpenXrDetected.found ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' : 'bg-muted/30 text-muted-foreground border-border/40'}`}>
+                OpenXR: {vrOpenXrDetected.found ? 'runtime found' : 'not found'}
+              </span>
+            )}
+          </div>
+
+          {/* Launch SteamVR button */}
+          <div className="flex flex-wrap gap-2 items-center">
+            <Button
+              variant="outline"
+              className="gap-2"
+              onClick={handleLaunchSteamVR}
+              disabled={vrToolRunning}
+            >
+              {vrToolRunning ? 'Launching...' : 'Launch SteamVR'}
+            </Button>
+            {vrToolFeedback && (
+              <span className={`text-xs ${vrToolFeedback.type === 'success' ? 'text-emerald-400' : 'text-destructive'}`}>
+                {vrToolFeedback.message}
+              </span>
+            )}
+          </div>
+
+          {/* Auto-launch SteamVR toggle */}
+          <div className="flex items-center justify-between">
+            <div>
+              <label className="text-sm font-medium cursor-pointer">Auto-launch SteamVR with VR games</label>
+              <p className="text-xs text-muted-foreground mt-1">
+                Automatically start SteamVR before launching a VR game.
+              </p>
+            </div>
+            <button
+              onClick={async () => {
+                const newValue = !vrAutoLaunchSteamVr
+                setVrAutoLaunchSteamVr(newValue)
+                try { await window.ucSettings?.set?.('vrAutoLaunchSteamVr', newValue) } catch {}
+              }}
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${vrAutoLaunchSteamVr ? 'bg-primary' : 'bg-slate-700'}`}
+              title="Toggle auto-launch SteamVR"
+            >
+              <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${vrAutoLaunchSteamVr ? 'translate-x-6' : 'translate-x-1'}`} />
+            </button>
+          </div>
+
+          {/* Advanced toggle */}
+          <button
+            onClick={() => setShowVrAdvanced(!showVrAdvanced)}
+            className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <ChevronDown className={`h-4 w-4 transition-transform ${showVrAdvanced ? 'rotate-180' : ''}`} />
+            Advanced VR settings
+          </button>
+
+          {showVrAdvanced && (
+            <div className="space-y-4 rounded-lg border border-border/60 bg-card/50 p-4">
+
+              {/* SteamVR directory */}
+              <div className="space-y-2">
+                <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">SteamVR Directory</label>
+                <div className="flex gap-2">
+                  <Input
+                    value={vrSteamVrPath}
+                    onChange={(e) => setVrSteamVrPath(e.target.value)}
+                    onBlur={async () => {
+                      try { await window.ucSettings?.set?.('vrSteamVrPath', vrSteamVrPath) } catch {}
+                    }}
+                    placeholder="~/.steam/steam/steamapps/common/SteamVR"
+                    className="flex-1"
+                  />
+                  <Button variant="outline" size="sm" onClick={handlePickSteamVRDir} title="Browse for SteamVR directory">
+                    <FolderOpen className="h-4 w-4" />
+                  </Button>
+                </div>
+                {vrDetected?.found && vrDetected.dir && (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      setVrSteamVrPath(vrDetected.dir!)
+                      await window.ucSettings?.set?.('vrSteamVrPath', vrDetected.dir).catch(() => {})
+                    }}
+                    className="text-[10px] px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20 transition-colors"
+                  >
+                    Use detected: {vrDetected.dir}
+                  </button>
+                )}
+              </div>
+
+              {/* XR_RUNTIME_JSON */}
+              <div className="space-y-2">
+                <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                  XR_RUNTIME_JSON <span className="normal-case">(OpenXR runtime)</span>
+                </label>
+                <div className="flex gap-2">
+                  <Input
+                    value={vrXrRuntimeJson}
+                    onChange={(e) => setVrXrRuntimeJson(e.target.value)}
+                    onBlur={async () => {
+                      try { await window.ucSettings?.set?.('vrXrRuntimeJson', vrXrRuntimeJson) } catch {}
+                    }}
+                    placeholder="/path/to/steamxr_linux64.json"
+                    className="flex-1"
+                  />
+                  <Button variant="outline" size="sm" onClick={handlePickXrRuntimeJson} title="Browse for OpenXR runtime JSON">
+                    <FolderOpen className="h-4 w-4" />
+                  </Button>
+                </div>
+                {vrOpenXrDetected?.found && vrOpenXrDetected.path && (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      setVrXrRuntimeJson(vrOpenXrDetected.path!)
+                      await window.ucSettings?.set?.('vrXrRuntimeJson', vrOpenXrDetected.path).catch(() => {})
+                    }}
+                    className="text-[10px] px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20 transition-colors"
+                  >
+                    Use detected: {vrOpenXrDetected.path}
+                  </button>
+                )}
+              </div>
+
+              {/* STEAM_VR_RUNTIME */}
+              <div className="space-y-2">
+                <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                  STEAM_VR_RUNTIME
+                </label>
+                <Input
+                  value={vrSteamVrRuntime}
+                  onChange={(e) => setVrSteamVrRuntime(e.target.value)}
+                  onBlur={async () => {
+                    try { await window.ucSettings?.set?.('vrSteamVrRuntime', vrSteamVrRuntime) } catch {}
+                  }}
+                  placeholder="~/.steam/steam/steamapps/common/SteamVR"
+                />
+              </div>
+
+              {/* VR extra env vars */}
+              <div className="space-y-2">
+                <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">VR extra environment variables</label>
+                <p className="text-xs text-muted-foreground">One per line, format: <code className="font-mono bg-muted/50 px-1 rounded">KEY=VALUE</code>. Applied in addition to the Linux gaming env vars.</p>
+                <textarea
+                  value={vrExtraEnv}
+                  onChange={(e) => setVrExtraEnv(e.target.value)}
+                  onBlur={async () => {
+                    try { await window.ucSettings?.set?.('vrExtraEnv', vrExtraEnv) } catch {}
+                  }}
+                  rows={3}
+                  placeholder={"ENABLE_VK_LAYER_VALVE_steam_overlay_1=1\n# VR_OVERRIDE=1"}
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-xs font-mono text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring resize-y"
+                />
+              </div>
+
+              <div className="rounded-lg border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-xs text-blue-200">
+                <strong>Tip:</strong> For SteamVR on Linux, set <code className="font-mono">XR_RUNTIME_JSON</code> to the SteamVR OpenXR runtime JSON (e.g. <code className="font-mono">steamxr_linux64.json</code>). For Monado or WiVRn, point it to their respective runtime JSON files.
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 

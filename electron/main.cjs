@@ -4307,6 +4307,239 @@ ipcMain.handle('uc:linux-steam-path', () => {
   }
 })
 
+// ============================================================
+// SteamVR / OpenXR / VR Helpers
+// ============================================================
+
+/**
+ * Detect SteamVR installation paths on Linux and Windows.
+ * Returns the SteamVR directory and the vrserver executable if found.
+ */
+function detectSteamVR() {
+  const home = process.platform !== 'win32' ? app.getPath('home') : null
+  const candidates = []
+
+  if (process.platform === 'linux') {
+    candidates.push(
+      path.join(home, '.steam', 'steam', 'steamapps', 'common', 'SteamVR'),
+      path.join(home, '.local', 'share', 'Steam', 'steamapps', 'common', 'SteamVR'),
+    )
+  } else if (process.platform === 'win32') {
+    // Common Steam install locations on Windows
+    const drives = ['C', 'D', 'E']
+    for (const d of drives) {
+      candidates.push(
+        `${d}:\\Program Files (x86)\\Steam\\steamapps\\common\\SteamVR`,
+        `${d}:\\Steam\\steamapps\\common\\SteamVR`,
+      )
+    }
+    // Also check registry-based Steam path via env
+    const steamPath = process.env.STEAM_PATH || process.env.SteamPath
+    if (steamPath) candidates.push(path.join(steamPath, 'steamapps', 'common', 'SteamVR'))
+  } else if (process.platform === 'darwin') {
+    candidates.push(
+      path.join(home, 'Library', 'Application Support', 'Steam', 'steamapps', 'common', 'SteamVR'),
+    )
+  }
+
+  for (const dir of candidates) {
+    if (!fs.existsSync(dir)) continue
+    // Find the vrserver executable
+    const vrserverCandidates = [
+      path.join(dir, 'bin', 'linux64', 'vrserver'),
+      path.join(dir, 'bin', 'win64', 'vrserver.exe'),
+      path.join(dir, 'bin', 'osx64', 'vrserver'),
+    ]
+    const vrserver = vrserverCandidates.find(p => fs.existsSync(p)) || null
+    // Find the vrstartup script
+    const startupCandidates = [
+      path.join(dir, 'bin', 'linux64', 'vrstartup.sh'),
+      path.join(dir, 'bin', 'win64', 'vrstartup.exe'),
+    ]
+    const startup = startupCandidates.find(p => fs.existsSync(p)) || null
+    return { found: true, dir, vrserver, startup }
+  }
+  return { found: false, dir: null, vrserver: null, startup: null }
+}
+
+/**
+ * Detect OpenXR runtime JSON files on Linux.
+ * Returns the active runtime JSON path if found.
+ */
+function detectOpenXRRuntime() {
+  if (process.platform !== 'linux') return null
+  const home = app.getPath('home')
+  const candidates = [
+    // SteamVR OpenXR runtime
+    path.join(home, '.steam', 'steam', 'steamapps', 'common', 'SteamVR', 'steamxr_linux64.json'),
+    path.join(home, '.local', 'share', 'Steam', 'steamapps', 'common', 'SteamVR', 'steamxr_linux64.json'),
+    // Monado
+    '/usr/share/openxr/1/openxr_monado.json',
+    '/usr/local/share/openxr/1/openxr_monado.json',
+    // WiVRn
+    path.join(home, '.config', 'openxr', '1', 'active_runtime.json'),
+    // System active runtime
+    '/etc/xdg/openxr/1/active_runtime.json',
+  ]
+  for (const c of candidates) {
+    if (fs.existsSync(c)) return c
+  }
+  return null
+}
+
+/**
+ * Build environment variables for VR game launches.
+ * Merges SteamVR-specific env vars from settings.
+ */
+function buildVRGameEnv(baseEnv) {
+  const settings = readSettings() || {}
+  const env = { ...(baseEnv || process.env) }
+
+  // XR_RUNTIME_JSON — OpenXR runtime
+  const xrRuntime = typeof settings.vrXrRuntimeJson === 'string' ? settings.vrXrRuntimeJson.trim() : ''
+  if (xrRuntime) env.XR_RUNTIME_JSON = xrRuntime
+
+  // STEAM_VR_RUNTIME — SteamVR runtime path
+  const steamVrRuntime = typeof settings.vrSteamVrRuntime === 'string' ? settings.vrSteamVrRuntime.trim() : ''
+  if (steamVrRuntime) env.STEAM_VR_RUNTIME = steamVrRuntime
+
+  // VR-specific extra env vars
+  const vrExtraEnv = typeof settings.vrExtraEnv === 'string' ? settings.vrExtraEnv.trim() : ''
+  if (vrExtraEnv) {
+    for (const line of vrExtraEnv.split('\n')) {
+      const trimmed = line.trim()
+      if (!trimmed || trimmed.startsWith('#')) continue
+      const eqIdx = trimmed.indexOf('=')
+      if (eqIdx < 1) continue
+      const key = trimmed.slice(0, eqIdx).trim()
+      const value = trimmed.slice(eqIdx + 1).trim()
+      if (key) env[key] = value
+    }
+  }
+
+  return env
+}
+
+// IPC: Detect SteamVR
+ipcMain.handle('uc:vr-detect-steamvr', () => {
+  try {
+    const result = detectSteamVR()
+    return { ok: true, ...result }
+  } catch (err) {
+    return { ok: false, error: err.message, found: false }
+  }
+})
+
+// IPC: Detect OpenXR runtime
+ipcMain.handle('uc:vr-detect-openxr', () => {
+  try {
+    const runtimePath = detectOpenXRRuntime()
+    return { ok: true, found: Boolean(runtimePath), path: runtimePath }
+  } catch (err) {
+    return { ok: false, error: err.message, found: false }
+  }
+})
+
+// IPC: Launch SteamVR
+ipcMain.handle('uc:vr-launch-steamvr', async () => {
+  try {
+    const settings = readSettings() || {}
+    const steamVrDir = typeof settings.vrSteamVrPath === 'string' && settings.vrSteamVrPath.trim()
+      ? settings.vrSteamVrPath.trim()
+      : detectSteamVR().dir
+
+    if (!steamVrDir) return { ok: false, error: 'SteamVR not found. Set the SteamVR path in settings.' }
+
+    const env = buildVRGameEnv(buildLinuxGameEnv(process.env))
+
+    // Try to launch via Steam URL first (most reliable)
+    if (process.platform === 'linux' || process.platform === 'darwin') {
+      try {
+        const proc = child_process.spawn('steam', ['steam://rungameid/250820'], {
+          detached: true,
+          stdio: 'ignore',
+          env,
+        })
+        proc.unref()
+        ucLog('SteamVR launched via steam:// URL')
+        return { ok: true, method: 'steam-url' }
+      } catch {}
+    }
+
+    // Fallback: launch vrserver directly
+    const vrInfo = detectSteamVR()
+    const startup = vrInfo.startup
+    if (startup && fs.existsSync(startup)) {
+      const proc = child_process.spawn(startup, [], {
+        detached: true,
+        stdio: 'ignore',
+        cwd: path.dirname(startup),
+        env,
+      })
+      proc.unref()
+      ucLog(`SteamVR launched via startup script: ${startup}`)
+      return { ok: true, method: 'startup-script' }
+    }
+
+    // Last resort: shell.openExternal
+    await shell.openExternal('steam://rungameid/250820')
+    return { ok: true, method: 'shell-open' }
+  } catch (err) {
+    ucLog(`SteamVR launch failed: ${err.message}`, 'error')
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Pick a file for XR runtime JSON or SteamVR path
+ipcMain.handle('uc:vr-pick-runtime-json', async () => {
+  try {
+    const result = await dialog.showOpenDialog({
+      title: 'Select OpenXR Runtime JSON',
+      properties: ['openFile'],
+      filters: [
+        { name: 'JSON files', extensions: ['json'] },
+        { name: 'All files', extensions: ['*'] },
+      ],
+    })
+    if (result.canceled || !result.filePaths?.length) return { ok: false, cancelled: true }
+    return { ok: true, path: result.filePaths[0] }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Pick SteamVR directory
+ipcMain.handle('uc:vr-pick-steamvr-dir', async () => {
+  try {
+    const result = await dialog.showOpenDialog({
+      title: 'Select SteamVR Directory',
+      properties: ['openDirectory'],
+    })
+    if (result.canceled || !result.filePaths?.length) return { ok: false, cancelled: true }
+    return { ok: true, path: result.filePaths[0] }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Check if a VR game should use VR mode (based on settings)
+ipcMain.handle('uc:vr-get-settings', () => {
+  try {
+    const settings = readSettings() || {}
+    return {
+      ok: true,
+      vrEnabled: Boolean(settings.vrEnabled),
+      vrSteamVrPath: settings.vrSteamVrPath || '',
+      vrXrRuntimeJson: settings.vrXrRuntimeJson || '',
+      vrSteamVrRuntime: settings.vrSteamVrRuntime || '',
+      vrExtraEnv: settings.vrExtraEnv || '',
+      vrAutoLaunchSteamVr: Boolean(settings.vrAutoLaunchSteamVr),
+    }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
 ipcMain.handle('uc:game-exe-launch', async (_event, appid, exePath, gameName, showGameName) => {
   try {
     if (!exePath || typeof exePath !== 'string') return { ok: false }
@@ -4345,8 +4578,8 @@ ipcMain.handle('uc:game-exe-launch', async (_event, appid, exePath, gameName, sh
         return { ok: true, pid: proc.pid }
       }
       
-      // Non-Windows path (Linux/macOS) — apply Wine/Proton env vars
-      const env = buildLinuxGameEnv(process.env)
+      // Non-Windows path (Linux/macOS) — apply Wine/Proton and VR env vars
+      const env = buildVRGameEnv(buildLinuxGameEnv(process.env))
       env.PATH = `${cwd}:${env.PATH || ''}`
       
       const proc = child_process.spawn(command, args, {
@@ -4383,8 +4616,8 @@ ipcMain.handle('uc:game-exe-launch-admin', async (_event, appid, exePath, gameNa
       try {
         const { command, args, cwd } = resolveLaunchCommand(exePath)
         
-        // Prepare environment - inherit all variables, apply Wine/Proton env, ensure game directory is in PATH
-        const env = buildLinuxGameEnv(process.env)
+        // Prepare environment - inherit all variables, apply Wine/Proton and VR env, ensure game directory is in PATH
+        const env = buildVRGameEnv(buildLinuxGameEnv(process.env))
         env.PATH = `${cwd}:${env.PATH || ''}`
         
         const proc = child_process.spawn(command, args, {

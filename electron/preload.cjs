@@ -117,3 +117,12 @@ contextBridge.exposeInMainWorld('ucLinux', {
   checkTool: (toolName) => ipcRenderer.invoke('uc:linux-check-tool', toolName),
   getSteamPath: () => ipcRenderer.invoke('uc:linux-steam-path'),
 })
+
+contextBridge.exposeInMainWorld('ucVR', {
+  detectSteamVR: () => ipcRenderer.invoke('uc:vr-detect-steamvr'),
+  detectOpenXR: () => ipcRenderer.invoke('uc:vr-detect-openxr'),
+  launchSteamVR: () => ipcRenderer.invoke('uc:vr-launch-steamvr'),
+  pickRuntimeJson: () => ipcRenderer.invoke('uc:vr-pick-runtime-json'),
+  pickSteamVRDir: () => ipcRenderer.invoke('uc:vr-pick-steamvr-dir'),
+  getSettings: () => ipcRenderer.invoke('uc:vr-get-settings'),
+})
