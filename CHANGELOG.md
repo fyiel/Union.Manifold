@@ -1,5 +1,20 @@
 # Changelog
 
+## Version 1.1.0 - 2026-02-20
+
+### Features
+
+- **New game page and game card design** — redesigned the game detail page and card components for an improved user experience
+- **Settings page redesign** — replaced the monolithic scrolling settings layout with a modern two-column sidebar navigation system
+  - Added sticky sidebar with four organized sections: Account, Downloads, Game Launch, and Advanced
+  - Each sidebar item shows descriptive text for quick identification
+  - Update check button moved to sidebar footer for easy access
+  - Eliminates endless scrolling while preserving all existing functionality
+- **Linux gaming and VR support** — added comprehensive support for Windows games on Linux via Wine/Proton, and set up SteamVR/OpenXR for VR games ([#14](https://github.com/Union-Crax/UnionCrax.Direct/pull/14))
+  - Added `ucLinux` and `ucVR` IPC APIs in the Electron preload script
+  - Introduced `LINUX_SETTINGS_KEYS` and `VR_SETTINGS_KEYS` constants for persistent storage
+  - Implemented comprehensive UI controls in SettingsPage for Wine/Proton and VR runtime configuration
+
 ## Version 1.0.1 - 2026-02-16
 
 ### Fixes & Improvements
