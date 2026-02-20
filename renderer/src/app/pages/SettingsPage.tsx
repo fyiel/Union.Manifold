@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
-import { ChevronDown, FolderOpen, HardDrive, LogIn, LogOut, Plus, RefreshCw, UserRound } from "lucide-react"
+import { ChevronDown, FolderOpen, HardDrive, LogIn, LogOut, Plus, RefreshCw, UserRound, Terminal, Cpu, FlaskConical } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -64,6 +64,20 @@ export function SettingsPage() {
   const [linuxLaunchMode, setLinuxLaunchMode] = useState<'auto' | 'native' | 'wine' | 'proton'>('auto')
   const [linuxWinePath, setLinuxWinePath] = useState('')
   const [linuxProtonPath, setLinuxProtonPath] = useState('')
+  const [linuxWinePrefix, setLinuxWinePrefix] = useState('')
+  const [linuxProtonPrefix, setLinuxProtonPrefix] = useState('')
+  const [linuxSteamPath, setLinuxSteamPath] = useState('')
+  const [linuxExtraEnv, setLinuxExtraEnv] = useState('')
+  const [linuxWinetricksInput, setLinuxWinetricksInput] = useState('')
+  const [linuxProtontricksAppId, setLinuxProtontricksAppId] = useState('')
+  const [linuxProtontricksInput, setLinuxProtontricksInput] = useState('')
+  const [linuxToolFeedback, setLinuxToolFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
+  const [linuxToolRunning, setLinuxToolRunning] = useState<string | null>(null)
+  const [detectedProtonVersions, setDetectedProtonVersions] = useState<Array<{ label: string; path: string }>>([])
+  const [detectedWineVersions, setDetectedWineVersions] = useState<Array<{ label: string; path: string }>>([])
+  const [linuxToolAvailability, setLinuxToolAvailability] = useState<Record<string, boolean>>({})
+  const [showLinuxAdvanced, setShowLinuxAdvanced] = useState(false)
+  const [linuxPrefixArch, setLinuxPrefixArch] = useState<'win64' | 'win32'>('win64')
   const [discordRpcEnabled, setDiscordRpcEnabled] = useState(true)
   const [showRpcAdvanced, setShowRpcAdvanced] = useState(false)
   const [rpcHideNsfw, setRpcHideNsfw] = useState(true)
@@ -158,12 +172,22 @@ export function SettingsPage() {
         const mode = await window.ucSettings?.get?.('linuxLaunchMode')
         const winePath = await window.ucSettings?.get?.('linuxWinePath')
         const protonPath = await window.ucSettings?.get?.('linuxProtonPath')
+        const winePrefix = await window.ucSettings?.get?.('linuxWinePrefix')
+        const protonPrefix = await window.ucSettings?.get?.('linuxProtonPrefix')
+        const steamPath = await window.ucSettings?.get?.('linuxSteamPath')
+        const extraEnv = await window.ucSettings?.get?.('linuxExtraEnv')
+        const prefixArch = await window.ucSettings?.get?.('linuxPrefixArch')
         if (!mounted) return
         if (mode && ['auto', 'native', 'wine', 'proton'].includes(String(mode))) {
           setLinuxLaunchMode(mode as 'auto' | 'native' | 'wine' | 'proton')
         }
         if (typeof winePath === 'string') setLinuxWinePath(winePath)
         if (typeof protonPath === 'string') setLinuxProtonPath(protonPath)
+        if (typeof winePrefix === 'string') setLinuxWinePrefix(winePrefix)
+        if (typeof protonPrefix === 'string') setLinuxProtonPrefix(protonPrefix)
+        if (typeof steamPath === 'string') setLinuxSteamPath(steamPath)
+        if (typeof extraEnv === 'string') setLinuxExtraEnv(extraEnv)
+        if (prefixArch === 'win32') setLinuxPrefixArch('win32')
       } catch {
         // ignore
       }
@@ -175,6 +199,11 @@ export function SettingsPage() {
         setLinuxLaunchMode('auto')
         setLinuxWinePath('')
         setLinuxProtonPath('')
+        setLinuxWinePrefix('')
+        setLinuxProtonPrefix('')
+        setLinuxSteamPath('')
+        setLinuxExtraEnv('')
+        setLinuxPrefixArch('win64')
         return
       }
       if (data.key === 'linuxLaunchMode' && data.value) {
@@ -183,12 +212,55 @@ export function SettingsPage() {
       }
       if (data.key === 'linuxWinePath') setLinuxWinePath(data.value || '')
       if (data.key === 'linuxProtonPath') setLinuxProtonPath(data.value || '')
+      if (data.key === 'linuxWinePrefix') setLinuxWinePrefix(data.value || '')
+      if (data.key === 'linuxProtonPrefix') setLinuxProtonPrefix(data.value || '')
+      if (data.key === 'linuxSteamPath') setLinuxSteamPath(data.value || '')
+      if (data.key === 'linuxExtraEnv') setLinuxExtraEnv(data.value || '')
+      if (data.key === 'linuxPrefixArch') setLinuxPrefixArch(data.value === 'win32' ? 'win32' : 'win64')
     })
     return () => {
       mounted = false
       if (typeof off === 'function') off()
     }
   }, [])
+
+  // Detect Linux tools when on Linux
+  useEffect(() => {
+    if (!isLinux) return
+    let mounted = true
+    const detect = async () => {
+      try {
+        const [protonResult, wineResult, winetricksResult, protontricksResult, steamResult] = await Promise.allSettled([
+          window.ucLinux?.detectProton?.(),
+          window.ucLinux?.detectWine?.(),
+          window.ucLinux?.checkTool?.('winetricks'),
+          window.ucLinux?.checkTool?.('protontricks'),
+          window.ucLinux?.getSteamPath?.(),
+        ])
+        if (!mounted) return
+        if (protonResult.status === 'fulfilled' && protonResult.value?.ok) {
+          setDetectedProtonVersions(protonResult.value.versions || [])
+        }
+        if (wineResult.status === 'fulfilled' && wineResult.value?.ok) {
+          setDetectedWineVersions(wineResult.value.versions || [])
+        }
+        const availability: Record<string, boolean> = {}
+        if (winetricksResult.status === 'fulfilled') availability.winetricks = Boolean(winetricksResult.value?.available)
+        if (protontricksResult.status === 'fulfilled') availability.protontricks = Boolean(protontricksResult.value?.available)
+        setLinuxToolAvailability(availability)
+        if (steamResult.status === 'fulfilled' && steamResult.value?.ok && steamResult.value.path) {
+          const storedSteam = await window.ucSettings?.get?.('linuxSteamPath')
+          if (!storedSteam && mounted) {
+            setLinuxSteamPath(steamResult.value.path)
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
+    detect()
+    return () => { mounted = false }
+  }, [isLinux])
 
   useEffect(() => {
     let mounted = true
@@ -864,6 +936,118 @@ export function SettingsPage() {
     }
   }
 
+  // Linux tool helpers
+  const linuxToolFeedbackShow = (type: 'success' | 'error', message: string) => {
+    setLinuxToolFeedback({ type, message })
+    setTimeout(() => setLinuxToolFeedback(null), 4000)
+  }
+
+  const handleRunWinecfg = async () => {
+    if (linuxToolRunning) return
+    setLinuxToolRunning('winecfg')
+    try {
+      const result = await window.ucLinux?.runWinecfg?.()
+      if (result?.ok) {
+        linuxToolFeedbackShow('success', 'winecfg launched.')
+      } else {
+        linuxToolFeedbackShow('error', result?.error || 'Failed to launch winecfg.')
+      }
+    } catch {
+      linuxToolFeedbackShow('error', 'Failed to launch winecfg.')
+    } finally {
+      setLinuxToolRunning(null)
+    }
+  }
+
+  const handleRunWinetricks = async () => {
+    if (linuxToolRunning) return
+    setLinuxToolRunning('winetricks')
+    try {
+      const packages = linuxWinetricksInput.trim().split(/\s+/).filter(Boolean)
+      const result = await window.ucLinux?.runWinetricks?.(packages.length ? packages : undefined)
+      if (result?.ok) {
+        linuxToolFeedbackShow('success', packages.length ? `winetricks launched with: ${packages.join(' ')}` : 'winetricks launched.')
+      } else {
+        linuxToolFeedbackShow('error', result?.error || 'Failed to launch winetricks.')
+      }
+    } catch {
+      linuxToolFeedbackShow('error', 'Failed to launch winetricks.')
+    } finally {
+      setLinuxToolRunning(null)
+    }
+  }
+
+  const handleRunProtontricks = async () => {
+    if (linuxToolRunning) return
+    setLinuxToolRunning('protontricks')
+    try {
+      const packages = linuxProtontricksInput.trim().split(/\s+/).filter(Boolean)
+      const result = await window.ucLinux?.runProtontricks?.(linuxProtontricksAppId.trim() || undefined, packages.length ? packages : undefined)
+      if (result?.ok) {
+        linuxToolFeedbackShow('success', 'protontricks launched.')
+      } else {
+        linuxToolFeedbackShow('error', result?.error || 'Failed to launch protontricks.')
+      }
+    } catch {
+      linuxToolFeedbackShow('error', 'Failed to launch protontricks.')
+    } finally {
+      setLinuxToolRunning(null)
+    }
+  }
+
+  const handleCreateWinePrefix = async () => {
+    if (linuxToolRunning) return
+    if (!linuxWinePrefix.trim()) {
+      linuxToolFeedbackShow('error', 'Set a WINEPREFIX path first.')
+      return
+    }
+    setLinuxToolRunning('create-prefix')
+    try {
+      const result = await window.ucLinux?.createPrefix?.(linuxWinePrefix.trim(), linuxPrefixArch)
+      if (result?.ok) {
+        linuxToolFeedbackShow('success', `WINEPREFIX initialized at ${linuxWinePrefix.trim()}`)
+      } else {
+        linuxToolFeedbackShow('error', result?.error || 'Failed to initialize WINEPREFIX.')
+      }
+    } catch {
+      linuxToolFeedbackShow('error', 'Failed to initialize WINEPREFIX.')
+    } finally {
+      setLinuxToolRunning(null)
+    }
+  }
+
+  const handlePickWinePrefix = async () => {
+    const result = await window.ucLinux?.pickPrefixDir?.()
+    if (result?.ok && result.path) {
+      setLinuxWinePrefix(result.path)
+      await window.ucSettings?.set?.('linuxWinePrefix', result.path).catch(() => {})
+    }
+  }
+
+  const handlePickProtonPrefix = async () => {
+    const result = await window.ucLinux?.pickPrefixDir?.()
+    if (result?.ok && result.path) {
+      setLinuxProtonPrefix(result.path)
+      await window.ucSettings?.set?.('linuxProtonPrefix', result.path).catch(() => {})
+    }
+  }
+
+  const handlePickWineBinary = async () => {
+    const result = await window.ucLinux?.pickBinary?.()
+    if (result?.ok && result.path) {
+      setLinuxWinePath(result.path)
+      await window.ucSettings?.set?.('linuxWinePath', result.path).catch(() => {})
+    }
+  }
+
+  const handlePickProtonBinary = async () => {
+    const result = await window.ucLinux?.pickBinary?.()
+    if (result?.ok && result.path) {
+      setLinuxProtonPath(result.path)
+      await window.ucSettings?.set?.('linuxProtonPath', result.path).catch(() => {})
+    }
+  }
+
   const accountLabel = accountUser ? accountUser.displayName || accountUser.username : "Account"
   const accountAvatarUrl = accountUser?.avatarUrl || null
   const showAccountControls = Boolean(accountUser && authenticated)
@@ -1450,60 +1634,330 @@ export function SettingsPage() {
             )}
 
             {isLinux && (
-              <div className="rounded-xl border border-border/60 bg-muted/30 p-4 space-y-3">
-                <div>
-                  <div className="text-sm font-semibold">Linux launch mode</div>
-                  <div className="text-xs text-muted-foreground">Choose how Windows games are started on Linux.</div>
+              <div className="rounded-xl border border-border/60 bg-muted/30 p-4 space-y-4">
+                {/* Header */}
+                <div className="flex items-center gap-2">
+                  <Terminal className="h-4 w-4 text-primary" />
+                  <div>
+                    <div className="text-sm font-semibold">Linux Gaming</div>
+                    <div className="text-xs text-muted-foreground">Configure Wine, Proton, and compatibility tools for running Windows games on Linux.</div>
+                  </div>
                 </div>
-                <Select
-                  value={linuxLaunchMode}
-                  onValueChange={async (value) => {
-                    const next = value as 'auto' | 'native' | 'wine' | 'proton'
-                    setLinuxLaunchMode(next)
-                    try {
-                      await window.ucSettings?.set?.('linuxLaunchMode', next)
-                    } catch {}
-                  }}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select a launch mode" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="auto">Auto (native or Wine)</SelectItem>
-                    <SelectItem value="native">Native only</SelectItem>
-                    <SelectItem value="wine">Wine</SelectItem>
-                    <SelectItem value="proton">Proton</SelectItem>
-                  </SelectContent>
-                </Select>
 
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <div className="space-y-2">
-                    <label className="text-xs font-medium text-muted-foreground">Wine binary path (optional)</label>
+                {/* Launch Mode */}
+                <div className="space-y-2">
+                  <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Launch Mode</label>
+                  <Select
+                    value={linuxLaunchMode}
+                    onValueChange={async (value) => {
+                      const next = value as 'auto' | 'native' | 'wine' | 'proton'
+                      setLinuxLaunchMode(next)
+                      try {
+                        await window.ucSettings?.set?.('linuxLaunchMode', next)
+                      } catch {}
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select a launch mode" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="auto">Auto (native or Wine)</SelectItem>
+                      <SelectItem value="native">Native only</SelectItem>
+                      <SelectItem value="wine">Wine</SelectItem>
+                      <SelectItem value="proton">Proton (Steam)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Wine Binary */}
+                <div className="space-y-2">
+                  <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Wine Binary</label>
+                  <div className="flex gap-2">
                     <Input
                       value={linuxWinePath}
                       onChange={(e) => setLinuxWinePath(e.target.value)}
                       onBlur={async () => {
-                        try {
-                          await window.ucSettings?.set?.('linuxWinePath', linuxWinePath)
-                        } catch {}
+                        try { await window.ucSettings?.set?.('linuxWinePath', linuxWinePath) } catch {}
                       }}
                       placeholder="wine"
+                      className="flex-1"
                     />
+                    <Button variant="outline" size="sm" onClick={handlePickWineBinary} title="Browse for wine binary">
+                      <FolderOpen className="h-4 w-4" />
+                    </Button>
                   </div>
-                  <div className="space-y-2">
-                    <label className="text-xs font-medium text-muted-foreground">Proton script path (optional)</label>
+                  {detectedWineVersions.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-1">
+                      {detectedWineVersions.slice(0, 4).map((v) => (
+                        <button
+                          key={v.path}
+                          type="button"
+                          onClick={async () => {
+                            setLinuxWinePath(v.path)
+                            await window.ucSettings?.set?.('linuxWinePath', v.path).catch(() => {})
+                          }}
+                          className="text-[10px] px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20 transition-colors"
+                        >
+                          {v.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Proton Binary */}
+                <div className="space-y-2">
+                  <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Proton Script</label>
+                  <div className="flex gap-2">
                     <Input
                       value={linuxProtonPath}
                       onChange={(e) => setLinuxProtonPath(e.target.value)}
                       onBlur={async () => {
-                        try {
-                          await window.ucSettings?.set?.('linuxProtonPath', linuxProtonPath)
-                        } catch {}
+                        try { await window.ucSettings?.set?.('linuxProtonPath', linuxProtonPath) } catch {}
                       }}
-                      placeholder="/home/user/.steam/steam/steamapps/common/Proton*/proton"
+                      placeholder="~/.steam/steam/steamapps/common/Proton 9.0/proton"
+                      className="flex-1"
                     />
+                    <Button variant="outline" size="sm" onClick={handlePickProtonBinary} title="Browse for proton script">
+                      <FolderOpen className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  {detectedProtonVersions.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-1">
+                      {detectedProtonVersions.map((v) => (
+                        <button
+                          key={v.path}
+                          type="button"
+                          onClick={async () => {
+                            setLinuxProtonPath(v.path)
+                            await window.ucSettings?.set?.('linuxProtonPath', v.path).catch(() => {})
+                          }}
+                          className="text-[10px] px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20 transition-colors"
+                        >
+                          {v.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* WINEPREFIX */}
+                <div className="space-y-2">
+                  <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">WINEPREFIX</label>
+                  <div className="flex gap-2">
+                    <Input
+                      value={linuxWinePrefix}
+                      onChange={(e) => setLinuxWinePrefix(e.target.value)}
+                      onBlur={async () => {
+                        try { await window.ucSettings?.set?.('linuxWinePrefix', linuxWinePrefix) } catch {}
+                      }}
+                      placeholder="~/.wine  (leave empty for default)"
+                      className="flex-1"
+                    />
+                    <Button variant="outline" size="sm" onClick={handlePickWinePrefix} title="Browse for WINEPREFIX directory">
+                      <FolderOpen className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <Select value={linuxPrefixArch} onValueChange={(v) => {
+                      setLinuxPrefixArch(v as 'win64' | 'win32')
+                      window.ucSettings?.set?.('linuxPrefixArch', v).catch(() => {})
+                    }}>
+                      <SelectTrigger className="h-7 w-24 text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="win64">64-bit</SelectItem>
+                        <SelectItem value="win32">32-bit</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 text-xs"
+                      onClick={handleCreateWinePrefix}
+                      disabled={linuxToolRunning === 'create-prefix' || !linuxWinePrefix.trim()}
+                    >
+                      {linuxToolRunning === 'create-prefix' ? 'Initializing...' : 'Initialize prefix'}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 text-xs"
+                      onClick={handleRunWinecfg}
+                      disabled={linuxToolRunning === 'winecfg'}
+                    >
+                      {linuxToolRunning === 'winecfg' ? 'Opening...' : 'winecfg'}
+                    </Button>
                   </div>
                 </div>
+
+                {/* Proton Prefix (STEAM_COMPAT_DATA_PATH) */}
+                <div className="space-y-2">
+                  <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Proton Prefix <span className="normal-case">(STEAM_COMPAT_DATA_PATH)</span></label>
+                  <div className="flex gap-2">
+                    <Input
+                      value={linuxProtonPrefix}
+                      onChange={(e) => setLinuxProtonPrefix(e.target.value)}
+                      onBlur={async () => {
+                        try { await window.ucSettings?.set?.('linuxProtonPrefix', linuxProtonPrefix) } catch {}
+                      }}
+                      placeholder="~/.steam/steam/steamapps/compatdata/12345"
+                      className="flex-1"
+                    />
+                    <Button variant="outline" size="sm" onClick={handlePickProtonPrefix} title="Browse for Proton prefix directory">
+                      <FolderOpen className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Steam Path */}
+                <div className="space-y-2">
+                  <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Steam Install Path <span className="normal-case">(STEAM_COMPAT_CLIENT_INSTALL_PATH)</span></label>
+                  <Input
+                    value={linuxSteamPath}
+                    onChange={(e) => setLinuxSteamPath(e.target.value)}
+                    onBlur={async () => {
+                      try { await window.ucSettings?.set?.('linuxSteamPath', linuxSteamPath) } catch {}
+                    }}
+                    placeholder="~/.steam/steam"
+                  />
+                </div>
+
+                {/* Advanced toggle */}
+                <button
+                  onClick={() => setShowLinuxAdvanced(!showLinuxAdvanced)}
+                  className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  <ChevronDown className={`h-4 w-4 transition-transform ${showLinuxAdvanced ? 'rotate-180' : ''}`} />
+                  Advanced tools & environment
+                </button>
+
+                {showLinuxAdvanced && (
+                  <div className="space-y-4 rounded-lg border border-border/60 bg-card/50 p-4">
+
+                    {/* Extra environment variables */}
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <Cpu className="h-3.5 w-3.5 text-muted-foreground" />
+                        <label className="text-xs font-medium">Extra environment variables</label>
+                      </div>
+                      <p className="text-xs text-muted-foreground">One per line, format: <code className="font-mono bg-muted/50 px-1 rounded">KEY=VALUE</code>. Applied to every game launch.</p>
+                      <textarea
+                        value={linuxExtraEnv}
+                        onChange={(e) => setLinuxExtraEnv(e.target.value)}
+                        onBlur={async () => {
+                          try { await window.ucSettings?.set?.('linuxExtraEnv', linuxExtraEnv) } catch {}
+                        }}
+                        rows={4}
+                        placeholder={"DXVK_HUD=fps\nMESA_GL_VERSION_OVERRIDE=4.5\n# WINEDEBUG=-all"}
+                        className="w-full rounded-md border border-input bg-background px-3 py-2 text-xs font-mono text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring resize-y"
+                      />
+                    </div>
+
+                    {/* Winetricks */}
+                    <div className="space-y-2 border-t border-border/40 pt-4">
+                      <div className="flex items-center gap-2">
+                        <FlaskConical className="h-3.5 w-3.5 text-muted-foreground" />
+                        <label className="text-xs font-medium">winetricks</label>
+                        {linuxToolAvailability.winetricks === false && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-destructive/20 text-destructive border border-destructive/30">not found</span>
+                        )}
+                        {linuxToolAvailability.winetricks === true && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">available</span>
+                        )}
+                      </div>
+                      <p className="text-xs text-muted-foreground">Install Windows components into your WINEPREFIX (e.g. <code className="font-mono bg-muted/50 px-1 rounded">vcrun2019 d3dx9</code>).</p>
+                      <div className="flex gap-2">
+                        <Input
+                          value={linuxWinetricksInput}
+                          onChange={(e) => setLinuxWinetricksInput(e.target.value)}
+                          placeholder="vcrun2019 d3dx9 dotnet48 ..."
+                          className="flex-1 text-xs"
+                          onKeyDown={(e) => { if (e.key === 'Enter') handleRunWinetricks() }}
+                        />
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={handleRunWinetricks}
+                          disabled={linuxToolRunning === 'winetricks'}
+                        >
+                          {linuxToolRunning === 'winetricks' ? 'Running...' : 'Run'}
+                        </Button>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-xs h-7"
+                        onClick={async () => {
+                          setLinuxWinetricksInput('')
+                          setLinuxToolRunning('winetricks')
+                          try {
+                            const result = await window.ucLinux?.runWinetricks?.([])
+                            if (result?.ok) linuxToolFeedbackShow('success', 'winetricks GUI launched.')
+                            else linuxToolFeedbackShow('error', result?.error || 'Failed to launch winetricks.')
+                          } catch { linuxToolFeedbackShow('error', 'Failed to launch winetricks.') }
+                          finally { setLinuxToolRunning(null) }
+                        }}
+                        disabled={linuxToolRunning === 'winetricks'}
+                      >
+                        Open winetricks GUI
+                      </Button>
+                    </div>
+
+                    {/* Protontricks */}
+                    <div className="space-y-2 border-t border-border/40 pt-4">
+                      <div className="flex items-center gap-2">
+                        <FlaskConical className="h-3.5 w-3.5 text-muted-foreground" />
+                        <label className="text-xs font-medium">protontricks</label>
+                        {linuxToolAvailability.protontricks === false && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-destructive/20 text-destructive border border-destructive/30">not found</span>
+                        )}
+                        {linuxToolAvailability.protontricks === true && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">available</span>
+                        )}
+                      </div>
+                      <p className="text-xs text-muted-foreground">Install components into a Proton prefix by Steam App ID (e.g. <code className="font-mono bg-muted/50 px-1 rounded">12345 vcrun2019</code>).</p>
+                      <div className="flex gap-2">
+                        <Input
+                          value={linuxProtontricksAppId}
+                          onChange={(e) => setLinuxProtontricksAppId(e.target.value)}
+                          placeholder="Steam App ID"
+                          className="w-32 text-xs"
+                        />
+                        <Input
+                          value={linuxProtontricksInput}
+                          onChange={(e) => setLinuxProtontricksInput(e.target.value)}
+                          placeholder="vcrun2019 d3dx9 ..."
+                          className="flex-1 text-xs"
+                          onKeyDown={(e) => { if (e.key === 'Enter') handleRunProtontricks() }}
+                        />
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={handleRunProtontricks}
+                          disabled={linuxToolRunning === 'protontricks'}
+                        >
+                          {linuxToolRunning === 'protontricks' ? 'Running...' : 'Run'}
+                        </Button>
+                      </div>
+                    </div>
+
+                    {/* Tool feedback */}
+                    {linuxToolFeedback && (
+                      <div className={`text-xs rounded-md px-3 py-2 ${linuxToolFeedback.type === 'success' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30' : 'bg-destructive/10 text-destructive border border-destructive/30'}`}>
+                        {linuxToolFeedback.message}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Inline feedback when advanced is closed */}
+                {!showLinuxAdvanced && linuxToolFeedback && (
+                  <div className={`text-xs rounded-md px-3 py-2 ${linuxToolFeedback.type === 'success' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30' : 'bg-destructive/10 text-destructive border border-destructive/30'}`}>
+                    {linuxToolFeedback.message}
+                  </div>
+                )}
               </div>
             )}
           </div>

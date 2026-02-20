@@ -4007,6 +4007,306 @@ function resolveLaunchCommand(exePath) {
   return { command: exePath, args: [], cwd }
 }
 
+// ============================================================
+// Linux Gaming Helpers
+// ============================================================
+
+/**
+ * Build the environment object for Wine/Proton launches, merging in
+ * WINEPREFIX, STEAM_COMPAT_DATA_PATH, STEAM_COMPAT_CLIENT_INSTALL_PATH,
+ * and any user-defined extra env vars from settings.
+ */
+function buildLinuxGameEnv(baseEnv) {
+  const settings = readSettings() || {}
+  const env = { ...(baseEnv || process.env) }
+
+  // WINEPREFIX
+  const winePrefix = typeof settings.linuxWinePrefix === 'string' ? settings.linuxWinePrefix.trim() : ''
+  if (winePrefix) env.WINEPREFIX = winePrefix
+
+  // Proton prefix (STEAM_COMPAT_DATA_PATH)
+  const protonPrefix = typeof settings.linuxProtonPrefix === 'string' ? settings.linuxProtonPrefix.trim() : ''
+  if (protonPrefix) {
+    env.STEAM_COMPAT_DATA_PATH = protonPrefix
+    // STEAM_COMPAT_CLIENT_INSTALL_PATH is needed by some Proton builds
+    if (!env.STEAM_COMPAT_CLIENT_INSTALL_PATH) {
+      const steamPath = typeof settings.linuxSteamPath === 'string' ? settings.linuxSteamPath.trim() : ''
+      if (steamPath) env.STEAM_COMPAT_CLIENT_INSTALL_PATH = steamPath
+    }
+  }
+
+  // Extra environment variables (stored as "KEY=VALUE\nKEY2=VALUE2")
+  const extraEnv = typeof settings.linuxExtraEnv === 'string' ? settings.linuxExtraEnv.trim() : ''
+  if (extraEnv) {
+    for (const line of extraEnv.split('\n')) {
+      const trimmed = line.trim()
+      if (!trimmed || trimmed.startsWith('#')) continue
+      const eqIdx = trimmed.indexOf('=')
+      if (eqIdx < 1) continue
+      const key = trimmed.slice(0, eqIdx).trim()
+      const value = trimmed.slice(eqIdx + 1).trim()
+      if (key) env[key] = value
+    }
+  }
+
+  return env
+}
+
+/**
+ * Detect installed Proton versions from common Steam library paths.
+ * Returns an array of { label, path } objects.
+ */
+function detectProtonVersions() {
+  const results = []
+  const home = app.getPath('home')
+  const steamRoots = [
+    path.join(home, '.steam', 'steam'),
+    path.join(home, '.local', 'share', 'Steam'),
+    '/usr/share/steam',
+  ]
+
+  for (const steamRoot of steamRoots) {
+    const commonDir = path.join(steamRoot, 'steamapps', 'common')
+    if (!fs.existsSync(commonDir)) continue
+    try {
+      const entries = fs.readdirSync(commonDir, { withFileTypes: true })
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue
+        const lower = entry.name.toLowerCase()
+        if (!lower.startsWith('proton')) continue
+        const protonScript = path.join(commonDir, entry.name, 'proton')
+        if (fs.existsSync(protonScript)) {
+          results.push({ label: entry.name, path: protonScript })
+        }
+      }
+    } catch {}
+  }
+
+  return results
+}
+
+/**
+ * Detect common Wine installations on the system.
+ */
+function detectWineVersions() {
+  const results = []
+  const candidates = [
+    { label: 'System wine', path: 'wine' },
+    { label: 'System wine64', path: 'wine64' },
+  ]
+
+  // Check /usr/bin and /usr/local/bin
+  const binDirs = ['/usr/bin', '/usr/local/bin', '/opt/wine/bin', '/opt/wine-staging/bin', '/opt/wine-tkg/bin']
+  for (const dir of binDirs) {
+    for (const name of ['wine', 'wine64', 'wine-stable', 'wine-staging']) {
+      const full = path.join(dir, name)
+      if (fs.existsSync(full)) {
+        const label = `${name} (${dir})`
+        if (!results.some(r => r.path === full)) {
+          results.push({ label, path: full })
+        }
+      }
+    }
+  }
+
+  // Deduplicate against candidates
+  for (const c of candidates) {
+    if (!results.some(r => r.path === c.path)) {
+      results.push(c)
+    }
+  }
+
+  return results
+}
+
+/**
+ * Run a Linux tool (winetricks, protontricks, winecfg, etc.) with the
+ * appropriate environment variables applied.
+ */
+function runLinuxTool(toolCmd, toolArgs, env, opts) {
+  return new Promise((resolve) => {
+    try {
+      const proc = child_process.spawn(toolCmd, toolArgs || [], {
+        detached: true,
+        stdio: opts && opts.captureOutput ? ['ignore', 'pipe', 'pipe'] : 'ignore',
+        env: env || process.env,
+        cwd: opts && opts.cwd ? opts.cwd : undefined,
+      })
+
+      if (opts && opts.captureOutput) {
+        let stdout = ''
+        let stderr = ''
+        proc.stdout && proc.stdout.on('data', (d) => { stdout += String(d) })
+        proc.stderr && proc.stderr.on('data', (d) => { stderr += String(d) })
+        proc.on('close', (code) => resolve({ ok: code === 0, code, stdout, stderr }))
+        proc.on('error', (err) => resolve({ ok: false, error: err.message }))
+      } else {
+        proc.unref()
+        resolve({ ok: true, pid: proc.pid })
+        proc.on('error', () => {})
+      }
+    } catch (err) {
+      resolve({ ok: false, error: err.message })
+    }
+  })
+}
+
+// IPC: Detect Proton versions
+ipcMain.handle('uc:linux-detect-proton', () => {
+  try {
+    if (process.platform !== 'linux') return { ok: false, error: 'not-linux', versions: [] }
+    const versions = detectProtonVersions()
+    return { ok: true, versions }
+  } catch (err) {
+    return { ok: false, error: err.message, versions: [] }
+  }
+})
+
+// IPC: Detect Wine versions
+ipcMain.handle('uc:linux-detect-wine', () => {
+  try {
+    if (process.platform !== 'linux') return { ok: false, error: 'not-linux', versions: [] }
+    const versions = detectWineVersions()
+    return { ok: true, versions }
+  } catch (err) {
+    return { ok: false, error: err.message, versions: [] }
+  }
+})
+
+// IPC: Run winecfg
+ipcMain.handle('uc:linux-winecfg', async () => {
+  try {
+    if (process.platform !== 'linux') return { ok: false, error: 'not-linux' }
+    const settings = readSettings() || {}
+    const winePath = normalizeRunnerPath(settings.linuxWinePath, 'wine')
+    const wineDir = path.isAbsolute(winePath) ? path.dirname(winePath) : null
+    const winecfgCmd = wineDir ? path.join(wineDir, 'winecfg') : 'winecfg'
+    const env = buildLinuxGameEnv(process.env)
+    ucLog(`Running winecfg: ${winecfgCmd}`)
+    const result = await runLinuxTool(winecfgCmd, [], env, {})
+    return result
+  } catch (err) {
+    ucLog(`winecfg failed: ${err.message}`, 'error')
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Run winetricks
+ipcMain.handle('uc:linux-winetricks', async (_event, packages) => {
+  try {
+    if (process.platform !== 'linux') return { ok: false, error: 'not-linux' }
+    const env = buildLinuxGameEnv(process.env)
+    const args = Array.isArray(packages) && packages.length > 0 ? packages : []
+    ucLog(`Running winetricks: ${args.join(' ')}`)
+    const result = await runLinuxTool('winetricks', args, env, {})
+    return result
+  } catch (err) {
+    ucLog(`winetricks failed: ${err.message}`, 'error')
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Run protontricks
+ipcMain.handle('uc:linux-protontricks', async (_event, appId, packages) => {
+  try {
+    if (process.platform !== 'linux') return { ok: false, error: 'not-linux' }
+    const env = buildLinuxGameEnv(process.env)
+    const args = []
+    if (appId) args.push(String(appId))
+    if (Array.isArray(packages) && packages.length > 0) args.push(...packages)
+    ucLog(`Running protontricks: ${args.join(' ')}`)
+    const result = await runLinuxTool('protontricks', args, env, {})
+    return result
+  } catch (err) {
+    ucLog(`protontricks failed: ${err.message}`, 'error')
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Create a new WINEPREFIX
+ipcMain.handle('uc:linux-create-prefix', async (_event, prefixPath, arch) => {
+  try {
+    if (process.platform !== 'linux') return { ok: false, error: 'not-linux' }
+    if (!prefixPath || typeof prefixPath !== 'string') return { ok: false, error: 'invalid-path' }
+    const settings = readSettings() || {}
+    const winePath = normalizeRunnerPath(settings.linuxWinePath, 'wine')
+    const env = buildLinuxGameEnv(process.env)
+    env.WINEPREFIX = prefixPath
+    if (arch === '32' || arch === 'win32') env.WINEARCH = 'win32'
+    else env.WINEARCH = 'win64'
+    ucLog(`Creating WINEPREFIX at ${prefixPath} (arch=${env.WINEARCH})`)
+    // wineboot -i initializes the prefix
+    const result = await runLinuxTool(winePath.replace(/wine$/, 'wineboot').replace(/wine64$/, 'wineboot'), ['-i'], env, { captureOutput: true })
+    return result
+  } catch (err) {
+    ucLog(`create-prefix failed: ${err.message}`, 'error')
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Pick a directory for WINEPREFIX or Proton prefix
+ipcMain.handle('uc:linux-pick-prefix-dir', async () => {
+  try {
+    const result = await dialog.showOpenDialog({
+      title: 'Select Prefix Directory',
+      properties: ['openDirectory', 'createDirectory'],
+    })
+    if (result.canceled || !result.filePaths?.length) return { ok: false, cancelled: true }
+    return { ok: true, path: result.filePaths[0] }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Pick a file (for wine/proton binary)
+ipcMain.handle('uc:linux-pick-binary', async () => {
+  try {
+    const result = await dialog.showOpenDialog({
+      title: 'Select Binary',
+      properties: ['openFile'],
+    })
+    if (result.canceled || !result.filePaths?.length) return { ok: false, cancelled: true }
+    return { ok: true, path: result.filePaths[0] }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Check if a tool is available on PATH
+ipcMain.handle('uc:linux-check-tool', async (_event, toolName) => {
+  try {
+    if (process.platform !== 'linux') return { ok: false, available: false }
+    const result = await new Promise((resolve) => {
+      const proc = child_process.spawn('which', [toolName], { stdio: ['ignore', 'pipe', 'ignore'] })
+      let out = ''
+      proc.stdout && proc.stdout.on('data', (d) => { out += String(d) })
+      proc.on('close', (code) => resolve({ available: code === 0, path: out.trim() }))
+      proc.on('error', () => resolve({ available: false }))
+    })
+    return { ok: true, ...result }
+  } catch (err) {
+    return { ok: false, available: false, error: err.message }
+  }
+})
+
+// IPC: Get Steam install path (for Proton)
+ipcMain.handle('uc:linux-steam-path', () => {
+  try {
+    if (process.platform !== 'linux') return { ok: false, error: 'not-linux' }
+    const home = app.getPath('home')
+    const candidates = [
+      path.join(home, '.steam', 'steam'),
+      path.join(home, '.local', 'share', 'Steam'),
+    ]
+    for (const c of candidates) {
+      if (fs.existsSync(c)) return { ok: true, path: c }
+    }
+    return { ok: false, error: 'not-found' }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
 ipcMain.handle('uc:game-exe-launch', async (_event, appid, exePath, gameName, showGameName) => {
   try {
     if (!exePath || typeof exePath !== 'string') return { ok: false }
@@ -4045,9 +4345,9 @@ ipcMain.handle('uc:game-exe-launch', async (_event, appid, exePath, gameName, sh
         return { ok: true, pid: proc.pid }
       }
       
-      // Non-Windows path
-      const env = { ...process.env }
-      env.PATH = `${cwd};${env.PATH || ''}`
+      // Non-Windows path (Linux/macOS) — apply Wine/Proton env vars
+      const env = buildLinuxGameEnv(process.env)
+      env.PATH = `${cwd}:${env.PATH || ''}`
       
       const proc = child_process.spawn(command, args, {
         detached: true,
@@ -4083,9 +4383,9 @@ ipcMain.handle('uc:game-exe-launch-admin', async (_event, appid, exePath, gameNa
       try {
         const { command, args, cwd } = resolveLaunchCommand(exePath)
         
-        // Prepare environment - inherit all variables and ensure game directory is in PATH
-        const env = { ...process.env }
-        env.PATH = `${cwd};${env.PATH || ''}`
+        // Prepare environment - inherit all variables, apply Wine/Proton env, ensure game directory is in PATH
+        const env = buildLinuxGameEnv(process.env)
+        env.PATH = `${cwd}:${env.PATH || ''}`
         
         const proc = child_process.spawn(command, args, {
           detached: true,
