@@ -1,5 +1,19 @@
 # Changelog
 
+## Version 1.1.2 - 2026-02-20
+
+### Fixes & Improvements
+
+- **Fixed download payload type validation in Electron** — the `uc:download-start` and `uc:download-resume-with-fresh-url` IPC handlers now defensively coerce non-string `url` values (e.g., persisted `DownloadHostEntry` objects from old builds) to strings before calling `.includes()`, preventing "url.includes is not a function" errors ([#15](https://github.com/Union-Crax/UnionCrax.Direct/issues/15))
+- **Fixed stale download restoration from localStorage** — download items persisted by older builds that had `url` as an object (`{url: string, part: number|null}`) are now sanitized on app startup, extracting the string URL before resuming
+- **Added type coercion in resolveDownloadUrl** — the `resolveDownloadUrl` function now coerces non-string `url` inputs at entry point, ensuring old persisted state can never produce a falsely-resolved download URL object
+
+### Files touched (UnionCrax.Direct)
+
+- `electron/main.cjs`
+- `renderer/src/context/downloads-context.tsx`
+- `renderer/src/lib/downloads.ts`
+
 ## Version 1.1.1 - 2026-02-20
 
 ### Fixes & Improvements
@@ -14,14 +28,6 @@
 - **Fixed admin launch UX** — when a user declines a UAC prompt, the launcher now correctly fails rather than silently falling back to a non-admin launch, giving clear feedback that admin privileges are required.
 - **Fixed false quick-exit modal on Windows** — removed the cmd.exe wrapper from non-admin Windows launches, which was causing all GUI games to immediately trigger the "couldn't start" modal (cmd.exe exits quickly when launching GUI apps). Games now launch directly and are tracked correctly.
 - **Improved IPC listener cleanup** — launch tracking listeners are now properly subscribed and unsubscribed, eliminating listener leaks across multiple game launches.
-
-### Files touched (UnionCrax.Direct)
-
-- `electron/main.cjs`
-- `renderer/src/app/pages/GameDetailPage.tsx`
-- `renderer/src/components/GameLaunchFailedModal.tsx`
-- `renderer/src/vite-env.d.ts`
-- `electron/preload.cjs`
 
 ## Version 1.1.0 - 2026-02-20
 

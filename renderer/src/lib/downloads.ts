@@ -768,6 +768,12 @@ export async function resolveRootzDownload(url: string): Promise<ResolvedDownloa
 }
 
 export async function resolveDownloadUrl(host: string, url: string): Promise<ResolvedDownload> {
+  // Guard: coerce non-string url (e.g. DownloadHostEntry object from old persisted state)
+  if (typeof url !== "string") {
+    const coerced = (url && typeof (url as any).url === "string") ? (url as any).url : String(url ?? "")
+    if (!coerced) return { url: "", resolved: false }
+    url = coerced
+  }
   if (host === "rootz") {
     return resolveRootzDownload(url)
   }
