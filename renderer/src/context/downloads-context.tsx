@@ -13,6 +13,7 @@ import {
   selectHost,
   SUPPORTED_DOWNLOAD_HOSTS,
   type DownloadConfig,
+  type DownloadHostEntry,
   type PreferredDownloadHost,
 } from "@/lib/downloads"
 import { addDownloadedGameToHistory, hasCookieConsent } from "@/lib/user-history"
@@ -562,13 +563,13 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
           ? (preferredHostOverride as PreferredDownloadHost)
           : await getPreferredDownloadHost()
 
-      let links: string[] = []
+      let links: DownloadHostEntry[] = []
       let selectedHost = preferredHost
 
       if (linksResult.redirectUrl) {
         // Accept redirect URLs (may be signed Rootz URLs)
         const redirectUrl = linksResult.redirectUrl
-        links = [redirectUrl]
+        links = [{ url: redirectUrl, part: null }]
         if (isPixeldrainUrl(redirectUrl)) {
           selectedHost = "pixeldrain"
         } else if (isRootzUrl(redirectUrl)) {
@@ -600,14 +601,15 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
       const baseName = safeGameFilename(game.name)
       const host = selectedHost
       const batchId = `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`
-      const queue = links.map((sourceUrl, index) => {
+      const queue = links.map((entry, index) => {
         const filenameFallback = inferFilenameFromUrl(
-          sourceUrl,
-          `${baseName}${links.length > 1 ? `-part${index + 1}` : ""}`
+          entry.url,
+          `${baseName}${links.length > 1 ? `-part${entry.part ?? index + 1}` : ""}`
         )
         const downloadId = `${game.appid}-${batchId}-${index}`
-        const partIndex = parsePartIndexFromFilename(filenameFallback)
-        return { sourceUrl, filenameFallback, downloadId, index, partIndex }
+        // Prefer the explicit part number from the API, then fall back to filename parsing
+        const partIndex = entry.part ?? parsePartIndexFromFilename(filenameFallback)
+        return { sourceUrl: entry.url, filenameFallback, downloadId, index, partIndex }
       })
       const inferredTotalParts = Math.max(1, queue.length)
       const parsedPartNumbers = queue
