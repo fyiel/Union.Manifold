@@ -4641,12 +4641,6 @@ ipcMain.handle('uc:game-exe-launch-admin', async (_event, appid, exePath, gameNa
         // Prepare environment - inherit all variables, apply Wine/Proton and VR env, ensure game directory is in PATH
         const env = buildVRGameEnv(buildLinuxGameEnv(process.env))
         env.PATH = `${cwd}:${env.PATH || ''}`
-        
-
-
-        // Prepare environment - inherit all variables and ensure game directory is in PATH
-        const env = { ...process.env }
-        env.PATH = `${cwd};${env.PATH || ''}`
 
         const proc = child_process.spawn(command, args, {
           detached: true,
