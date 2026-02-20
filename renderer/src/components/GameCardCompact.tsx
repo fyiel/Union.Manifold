@@ -45,18 +45,16 @@ export const GameCardCompact = memo(function GameCardCompact({ game }: { game: C
       <div className="relative overflow-hidden rounded-2xl border border-border/60 bg-card/80 transition hover:border-primary/50">
         <div className="relative aspect-[3/4]">
           <img
-            src={proxyImageUrl(game.image) || "/banner.png"}
+            src={proxyImageUrl(game.image) || "./banner.png"}
             alt={game.name}
             loading="lazy"
-            className={`h-full w-full object-cover transition duration-500 group-hover:scale-105 ${
-              isNSFW ? (allowNsfwReveal ? "blur-md group-hover:blur-none" : "blur-md") : ""
-            }`}
+            className={`h-full w-full object-cover transition duration-500 group-hover:scale-105 ${isNSFW ? (allowNsfwReveal ? "blur-md group-hover:blur-none" : "blur-md") : ""
+              }`}
           />
           {isNSFW && (
             <div
-              className={`absolute inset-0 bg-black/40 flex items-center justify-center transition-opacity duration-300 ${
-                allowNsfwReveal ? "group-hover:opacity-0" : ""
-              }`}
+              className={`absolute inset-0 bg-black/40 flex items-center justify-center transition-opacity duration-300 ${allowNsfwReveal ? "group-hover:opacity-0" : ""
+                }`}
             >
               <div className="bg-red-600 text-white px-3 py-1 rounded-full text-xs font-bold">18+</div>
             </div>

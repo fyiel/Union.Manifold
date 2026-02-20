@@ -213,7 +213,7 @@ export function GameDetailPage() {
               return
             }
           }
-        } catch {}
+        } catch { }
         // Don't show error for external games that simply need manifest
         if (!appid.startsWith('external-')) {
           setError(err instanceof Error ? err.message : "Failed to load game")
@@ -272,7 +272,7 @@ export function GameDetailPage() {
           setInstalledVersions(Array.isArray(list) ? list : [])
           return
         }
-      } catch {}
+      } catch { }
       if (!mounted) return
       setInstalledVersions(installedManifest ? [installedManifest] : [])
     }
@@ -449,14 +449,14 @@ export function GameDetailPage() {
   useEffect(() => {
     if (isGameRunning || !(gameJustLaunchedRef.current > Date.now())) return
     gameJustLaunchedRef.current = 0
-    try { gameQuickExitUnsubRef.current?.() } catch {}
+    try { gameQuickExitUnsubRef.current?.() } catch { }
     gameQuickExitUnsubRef.current = null
     void (async () => {
       const adminEnabled = Boolean(await getRunAsAdminEnabled().catch(() => false))
       setGameStartFailedAdminEnabled(adminEnabled)
       setGameStartFailedOpen(true)
     })()
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isGameRunning])
 
   const openLightbox = (index: number) => {
@@ -544,7 +544,7 @@ export function GameDetailPage() {
     if (installingManifest && (!hasActiveItems || isCancelled || hasFailedInstall || hasCancelledInstall || force)) {
       try {
         await window.ucDownloads?.deleteInstalling?.(game.appid)
-      } catch {}
+      } catch { }
       setInstallingManifest(null)
     }
     if (hasFailedDownload && !force) {
@@ -568,12 +568,12 @@ export function GameDetailPage() {
     try {
       const savedExe = await getSavedExe(selectedVersionKey, selectedVersionLabel, installedVersionLabels.length <= 1)
       const runAsAdminEnabled = await getRunAsAdminEnabled()
-      
+
       if (savedExe) {
         await launchGame(savedExe, runAsAdminEnabled)
         return
       }
-      
+
       const result = await window.ucDownloads.listGameExecutables(game.appid, selectedVersionLabel)
       const exes = result?.exes || []
       const folder = result?.folder || null
@@ -584,7 +584,7 @@ export function GameDetailPage() {
       if (pick && confident) {
         setPendingExePath(pick.path)
         const promptShown = await getAdminPromptShown()
-        
+
         if (!promptShown) {
           if (isWindows) {
             setAdminPromptOpen(true)
@@ -597,7 +597,7 @@ export function GameDetailPage() {
         return
       }
       await openExePicker(exes, { mode: "launch", actionLabel: "Launch", folder: browseFolder })
-    } catch {}
+    } catch { }
   }
   const popularAppIds = useMemo(() => {
     const withStats = games.filter((g) => {
@@ -729,19 +729,19 @@ export function GameDetailPage() {
     ? "Quit"
     : isCheckingLinks
       ? "Checking..."
-    : isSelectedVersionInstalled
-      ? "Play"
-      : isInstalled && !isSelectedVersionInstalled
-        ? "Download Now"
-        : isPaused
-          ? "Resume"
-          : isQueued
-            ? "Queued"
-            : isFailed
-              ? "Download failed"
-              : isInstalling
-                ? "Installing"
-                : "Download Now"
+      : isSelectedVersionInstalled
+        ? "Play"
+        : isInstalled && !isSelectedVersionInstalled
+          ? "Download Now"
+          : isPaused
+            ? "Resume"
+            : isQueued
+              ? "Queued"
+              : isFailed
+                ? "Download failed"
+                : isInstalling
+                  ? "Installing"
+                  : "Download Now"
   const actionDisabled = !isGameRunning && (isCheckingLinks || isInstalling || isQueued || isFailed)
 
   const getExeKeys = (versionKey?: string | null, versionLabel?: string | null, allowLegacyFallback: boolean = true) => {
@@ -787,7 +787,7 @@ export function GameDetailPage() {
       if (allowLegacyFallback) {
         await window.ucSettings.set(`gameExe:${game.appid}`, path || null)
       }
-    } catch {}
+    } catch { }
   }
 
   const getAdminPromptShown = async () => {
@@ -804,7 +804,7 @@ export function GameDetailPage() {
     if (!window.ucSettings?.set) return
     try {
       await window.ucSettings.set('adminPromptShown', true)
-    } catch {}
+    } catch { }
   }
 
   const getRunAsAdminEnabled = async () => {
@@ -830,7 +830,7 @@ export function GameDetailPage() {
     if (!window.ucSettings?.set || !game) return
     try {
       await window.ucSettings.set(`shortcutAsked:${game.appid}`, true)
-    } catch {}
+    } catch { }
   }
 
   const getAlwaysCreateShortcut = async () => {
@@ -854,7 +854,7 @@ export function GameDetailPage() {
     try {
       try {
         await window.ucDownloads?.deleteDesktopShortcut?.(game.name)
-      } catch {}
+      } catch { }
       const result = await window.ucDownloads.createDesktopShortcut(game.name, exePath)
       if (result?.ok) {
         gameLogger.info('Desktop shortcut created', { appid: game.appid })
@@ -1028,9 +1028,9 @@ export function GameDetailPage() {
   const launchGame = async (path: string, asAdmin: boolean = false) => {
     if (!window.ucDownloads) return
     const launchFn = asAdmin && isWindows
-      ? window.ucDownloads.launchGameExecutableAsAdmin 
+      ? window.ucDownloads.launchGameExecutableAsAdmin
       : window.ucDownloads.launchGameExecutable
-    
+
     if (!launchFn) return
     const showGameName = await window.ucSettings?.get?.('rpcShowGameName') ?? true
     const res = await launchFn(game.appid, path, game.name, showGameName)
@@ -1056,12 +1056,12 @@ export function GameDetailPage() {
       }
 
       // Fast path: IPC event from main process when it detects a quick exit
-      try { gameQuickExitUnsubRef.current?.() } catch {}
+      try { gameQuickExitUnsubRef.current?.() } catch { }
       gameQuickExitUnsubRef.current = window.ucDownloads?.onGameQuickExit?.((data) => {
         if (data?.appid !== game.appid) return
         if (!(gameJustLaunchedRef.current > Date.now())) return
         gameJustLaunchedRef.current = 0
-        try { gameQuickExitUnsubRef.current?.() } catch {}
+        try { gameQuickExitUnsubRef.current?.() } catch { }
         gameQuickExitUnsubRef.current = null
         void showStartFailedModal()
       }) ?? null
@@ -1075,11 +1075,11 @@ export function GameDetailPage() {
       return
     }
     await setAdminPromptShown()
-    
+
     // Check if we should show shortcut modal BEFORE launching
     const alreadyAsked = await getShortcutAskedForGame()
     const alwaysCreate = await getAlwaysCreateShortcut()
-    
+
     if (alwaysCreate && !alreadyAsked) {
       // Auto-create shortcut without asking, then launch
       await createDesktopShortcut(path)
@@ -1108,7 +1108,7 @@ export function GameDetailPage() {
     }
     const promptShown = await getAdminPromptShown()
     const runAsAdminEnabled = await getRunAsAdminEnabled()
-    
+
     if (!promptShown) {
       if (isWindows) {
         setAdminPromptOpen(true)
@@ -1125,13 +1125,13 @@ export function GameDetailPage() {
     if (!window.ucDownloads?.quitGameExecutable) return
     // Clear the launch tracking so the quick-exit modal doesn't appear on manual quit
     gameJustLaunchedRef.current = 0
-    try { gameQuickExitUnsubRef.current?.() } catch {}
+    try { gameQuickExitUnsubRef.current?.() } catch { }
     gameQuickExitUnsubRef.current = null
     setStoppingGame(true)
     try {
       await window.ucDownloads.quitGameExecutable(game.appid)
       setIsGameRunning(false)
-    } catch {}
+    } catch { }
     setStoppingGame(false)
   }
 
@@ -1143,7 +1143,7 @@ export function GameDetailPage() {
             <div className="relative rounded-3xl overflow-hidden border border-white/10 bg-black/40 backdrop-blur-md shadow-2xl shadow-black/50">
               <div className="relative aspect-video">
                 <img
-                  src={proxyImageUrl(heroImage || "") || "/banner.png"}
+                  src={proxyImageUrl(heroImage || "") || "./banner.png"}
                   alt={game.name}
                   className="h-full w-full object-cover"
                 />
@@ -1311,7 +1311,7 @@ export function GameDetailPage() {
                         aria-label={`Open screenshot ${index + 1}`}
                       >
                         <img
-                          src={proxyImageUrl(screenshot) || "/banner.png"}
+                          src={proxyImageUrl(screenshot) || "./banner.png"}
                           alt={`Screenshot ${index + 1}`}
                           className="h-full w-full object-cover"
                           loading="lazy"
@@ -1368,11 +1368,10 @@ export function GameDetailPage() {
                 <div className="flex items-center gap-3">
                   <Button
                     size="lg"
-                    className={`flex-1 font-bold text-lg py-6 rounded-xl shadow-lg transition-all duration-200 ${
-                      isGameRunning
+                    className={`flex-1 font-bold text-lg py-6 rounded-xl shadow-lg transition-all duration-200 ${isGameRunning
                         ? "bg-destructive hover:bg-destructive/90 shadow-destructive/25"
                         : "bg-primary hover:bg-primary/90 shadow-primary/25"
-                    }`}
+                      }`}
                     onClick={() => {
                       if (isGameRunning) {
                         void stopRunningGame()
@@ -1686,7 +1685,7 @@ export function GameDetailPage() {
             <div className="w-full h-full flex items-center justify-center">
               <div className="w-full max-w-[1200px] max-h-[80vh] flex items-center justify-center">
                 <img
-                  src={proxyImageUrl(resolvedScreenshots[lightboxIndex]) || "/banner.png"}
+                  src={proxyImageUrl(resolvedScreenshots[lightboxIndex]) || "./banner.png"}
                   alt={`Screenshot ${lightboxIndex + 1}`}
                   className="max-w-full max-h-full object-contain mx-auto"
                 />
@@ -1723,7 +1722,7 @@ export function GameDetailPage() {
           try {
             await window.ucDownloads?.deleteInstalled?.(game.appid)
             setInstalledManifest(null)
-          } catch {}
+          } catch { }
           void openHostSelector()
         }}
         onClose={() => setVersionConflictOpen(false)}
@@ -1741,7 +1740,7 @@ export function GameDetailPage() {
           setIsCheckingLinks(false)
           try {
             setPreferredDownloadHost(config.host)
-          } catch {}
+          } catch { }
           const shouldForce = overwriteOnDownload || (isInstalled && !isSelectedVersionInstalled)
           await startDownload(config.host, config, shouldForce)
           setOverwriteOnDownload(false)
@@ -1874,7 +1873,7 @@ export function GameDetailPage() {
         onEnableAdmin={async () => {
           try {
             await window.ucSettings?.set?.('runGamesAsAdmin', true)
-          } catch {}
+          } catch { }
           setGameStartFailedOpen(false)
         }}
         onClose={() => setGameStartFailedOpen(false)}

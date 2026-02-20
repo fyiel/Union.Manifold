@@ -30,7 +30,7 @@ async function readInstalledGames(): Promise<Game[]> {
               name: entry.name || entry.appid,
               description: entry.description || "",
               genres: entry.genres || [],
-              image: entry.image || "/banner.png",
+              image: entry.image || "./banner.png",
               release_date: entry.release_date || "",
               size: entry.size || "",
               source: entry.source || "local",
@@ -96,7 +96,7 @@ export function useGamesData() {
                 if (meta && meta.localImage) return { ...g, image: meta.localImage }
                 if (meta && meta.metadata && meta.metadata.localImage) return { ...g, image: meta.metadata.localImage }
               }
-            } catch {}
+            } catch { }
             return g
           })
           const map = new Map<string, Game>()
@@ -126,7 +126,7 @@ export function useGamesData() {
             cache.stats = {}
             setState({ games: installed, stats: {}, loading: false, error: null })
             return
-          } catch {}
+          } catch { }
 
           setState((prev) => ({
             ...prev,

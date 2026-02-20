@@ -42,7 +42,7 @@ function manifestToGame(entry: LibraryEntry): Game | null {
       name: entry.name || entry.appid,
       description: "",
       genres: [],
-      image: "/banner.png",
+      image: "./banner.png",
       release_date: "",
       size: "",
       source: "local",
@@ -62,7 +62,7 @@ function scoreLibraryGame(game: Game): number {
   if (game.source && game.source !== "local") score += 3
   if (game.name && game.name !== game.appid) score += 1
   if (game.description) score += 1
-  if (game.image && game.image !== "/banner.png") score += 1
+  if (game.image && game.image !== "./banner.png") score += 1
   if (game.release_date) score += 1
   if (game.size) score += 1
   if (game.genres && game.genres.length > 0) score += 1
@@ -114,7 +114,7 @@ export function LibraryPage() {
   const [settingsPopupGame, setSettingsPopupGame] = useState<Game | null>(null)
   const [shortcutFeedback, setShortcutFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
   const [editMetadataOpen, setEditMetadataOpen] = useState(false)
-  const itemsPerPage = 8
+  const itemsPerPage = 24
   const [installedPage, setInstalledPage] = useState(1)
   const [installingPage, setInstallingPage] = useState(1)
   const hasLoadedRef = useRef(false)
@@ -279,7 +279,7 @@ export function LibraryPage() {
       if (allowLegacyFallback) {
         await window.ucSettings.set(`gameExe:${appid}`, path || null)
       }
-    } catch {}
+    } catch { }
   }
 
   const getInstalledVersionLabels = async (appid: string) => {
@@ -417,7 +417,7 @@ export function LibraryPage() {
         <h2 className="text-xl font-black font-montserrat">Installed</h2>
         {loading || statsLoading ? (
           <div className="grid gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
-            {Array.from({ length: 8 }).map((_, idx) => (
+            {Array.from({ length: 24 }).map((_, idx) => (
               <GameCardSkeleton key={idx} />
             ))}
           </div>
@@ -488,11 +488,11 @@ export function LibraryPage() {
                               try {
                                 const result = await window.ucDownloads.listGameExecutables(settingsPopupGame.appid, resolved.label)
                                 savedExe = result?.exes?.[0]?.path || null
-                              } catch {}
+                              } catch { }
                             }
 
                             if (savedExe) {
-                              try { await window.ucDownloads?.deleteDesktopShortcut?.(settingsPopupGame.name) } catch {}
+                              try { await window.ucDownloads?.deleteDesktopShortcut?.(settingsPopupGame.name) } catch { }
                               const result = await window.ucDownloads?.createDesktopShortcut?.(settingsPopupGame.name, savedExe)
                               if (result?.ok) {
                                 gameLogger.info('Desktop shortcut created manually', { appid: settingsPopupGame.appid })
@@ -620,7 +620,7 @@ export function LibraryPage() {
         <h2 className="text-xl font-black font-montserrat">Installing</h2>
         {loading || statsLoading ? (
           <div className="grid gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
-            {Array.from({ length: 8 }).map((_, idx) => (
+            {Array.from({ length: 24 }).map((_, idx) => (
               <GameCardSkeleton key={idx} />
             ))}
           </div>
