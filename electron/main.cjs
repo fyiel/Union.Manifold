@@ -4179,7 +4179,16 @@ ipcMain.handle('uc:linux-winecfg', async () => {
     const settings = readSettings() || {}
     const winePath = normalizeRunnerPath(settings.linuxWinePath, 'wine')
     const wineDir = path.isAbsolute(winePath) ? path.dirname(winePath) : null
-    const winecfgCmd = wineDir ? path.join(wineDir, 'winecfg') : 'winecfg'
+    let winecfgCmd = 'winecfg'
+    if (wineDir) {
+      const candidate = path.join(wineDir, 'winecfg')
+      try {
+        fs.accessSync(candidate, fs.constants.X_OK)
+        winecfgCmd = candidate
+      } catch {
+        // If the candidate is not accessible/executable, fall back to the default 'winecfg'
+      }
+    }
     const env = buildLinuxGameEnv(process.env)
     ucLog(`Running winecfg: ${winecfgCmd}`)
     const result = await runLinuxTool(winecfgCmd, [], env, {})
