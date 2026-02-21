@@ -1,6 +1,10 @@
 # Changelog
 
-## Version 1.1.2 - 2026-02-20
+## Version 1.1.2 - 2026-02-21
+
+### Features & Improvements
+
+- **Synced flow with new backend** — updated application to work seamlessly with the new backend infrastructure, ensuring smooth communication and data synchronization across all features
 
 ### Fixes & Improvements
 
