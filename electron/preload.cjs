@@ -121,6 +121,8 @@ contextBridge.exposeInMainWorld('ucLinux', {
   pickBinary: () => ipcRenderer.invoke('uc:linux-pick-binary'),
   checkTool: (toolName) => ipcRenderer.invoke('uc:linux-check-tool', toolName),
   getSteamPath: () => ipcRenderer.invoke('uc:linux-steam-path'),
+  detectSLSSteam: () => ipcRenderer.invoke('uc:linux-detect-slssteam'),
+  pickSo: () => ipcRenderer.invoke('uc:linux-pick-so'),
 })
 
 contextBridge.exposeInMainWorld('ucVR', {

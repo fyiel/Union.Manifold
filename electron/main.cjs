@@ -4209,7 +4209,53 @@ function buildLinuxGameEnv(baseEnv) {
     }
   }
 
+  // SLSsteam integration: inject LD_AUDIT when enabled
+  if (settings.slsSteamEnabled && process.platform === 'linux') {
+    const home = app.getPath('home')
+    const defaultSlsDir = path.join(home, '.local', 'share', 'SLSsteam')
+    const slsSteamPath = typeof settings.slsSteamPath === 'string' && settings.slsSteamPath.trim()
+      ? settings.slsSteamPath.trim()
+      : path.join(defaultSlsDir, 'SLSsteam.so')
+    const slsInjectPath = typeof settings.slsInjectPath === 'string' && settings.slsInjectPath.trim()
+      ? settings.slsInjectPath.trim()
+      : path.join(defaultSlsDir, 'library-inject.so')
+
+    if (fs.existsSync(slsSteamPath) && fs.existsSync(slsInjectPath)) {
+      const ldAuditEntry = `${slsInjectPath}:${slsSteamPath}`
+      const existing = env.LD_AUDIT || ''
+      // Avoid duplicating entries
+      if (!existing.includes(slsSteamPath)) {
+        env.LD_AUDIT = existing ? `${existing}:${ldAuditEntry}` : ldAuditEntry
+      }
+      ucLog(`SLSsteam: injecting LD_AUDIT=${env.LD_AUDIT}`)
+    } else {
+      ucLog(`SLSsteam: enabled but .so files not found (slsSteamPath=${slsSteamPath}, slsInjectPath=${slsInjectPath})`, 'warn')
+    }
+  }
+
   return env
+}
+
+/**
+ * Detect SLSsteam installation at the default path (~/.local/share/SLSsteam/).
+ */
+function detectSLSSteam() {
+  if (process.platform !== 'linux') return { found: false }
+  try {
+    const home = app.getPath('home')
+    const slsDir = path.join(home, '.local', 'share', 'SLSsteam')
+    const slsSteamSo = path.join(slsDir, 'SLSsteam.so')
+    const slsInjectSo = path.join(slsDir, 'library-inject.so')
+    const found = fs.existsSync(slsSteamSo) && fs.existsSync(slsInjectSo)
+    return {
+      found,
+      dir: found ? slsDir : null,
+      slsSteamPath: found ? slsSteamSo : null,
+      slsInjectPath: found ? slsInjectSo : null,
+    }
+  } catch (err) {
+    return { found: false, error: err.message }
+  }
 }
 
 /**
@@ -4484,6 +4530,34 @@ ipcMain.handle('uc:linux-steam-path', () => {
       if (fs.existsSync(c)) return { ok: true, path: c }
     }
     return { ok: false, error: 'not-found' }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Detect SLSsteam installation
+ipcMain.handle('uc:linux-detect-slssteam', () => {
+  try {
+    const result = detectSLSSteam()
+    return { ok: true, ...result }
+  } catch (err) {
+    return { ok: false, error: err.message, found: false }
+  }
+})
+
+// IPC: Pick a .so file (for SLSsteam paths)
+ipcMain.handle('uc:linux-pick-so', async () => {
+  try {
+    const result = await dialog.showOpenDialog({
+      title: 'Select .so Library',
+      properties: ['openFile'],
+      filters: [
+        { name: 'Shared Libraries', extensions: ['so'] },
+        { name: 'All Files', extensions: ['*'] },
+      ],
+    })
+    if (result.canceled || !result.filePaths?.length) return { ok: false, cancelled: true }
+    return { ok: true, path: result.filePaths[0] }
   } catch (err) {
     return { ok: false, error: err.message }
   }

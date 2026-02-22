@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
-import { ArrowDownToLine, ChevronDown, FolderOpen, Gamepad2, HardDrive, LogIn, LogOut, Plus, RefreshCw, Settings2, UserRound, Terminal, Cpu, FlaskConical } from "lucide-react"
+import { ArrowDownToLine, ChevronDown, FolderOpen, Gamepad2, HardDrive, LogIn, LogOut, Plus, RefreshCw, Settings2, UserRound, Terminal, Cpu, FlaskConical, Zap } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -78,6 +78,11 @@ export function SettingsPage() {
   const [linuxToolAvailability, setLinuxToolAvailability] = useState<Record<string, boolean>>({})
   const [showLinuxAdvanced, setShowLinuxAdvanced] = useState(false)
   const [linuxPrefixArch, setLinuxPrefixArch] = useState<'win64' | 'win32'>('win64')
+  // SLSsteam integration
+  const [slsSteamEnabled, setSlsSteamEnabled] = useState(false)
+  const [slsSteamPath, setSlsSteamPath] = useState('')
+  const [slsInjectPath, setSlsInjectPath] = useState('')
+  const [slsSteamDetected, setSlsSteamDetected] = useState<{ found: boolean; dir?: string | null } | null>(null)
   // SteamVR / VR settings
   const [vrEnabled, setVrEnabled] = useState(false)
   const [vrSteamVrPath, setVrSteamVrPath] = useState('')
@@ -310,6 +315,55 @@ export function SettingsPage() {
     detect()
     return () => { mounted = false }
   }, [])
+
+  // Load SLSsteam settings and detect installation
+  useEffect(() => {
+    if (!isLinux) return
+    let mounted = true
+    const loadSls = async () => {
+      try {
+        const enabled = await window.ucSettings?.get?.('slsSteamEnabled')
+        const slsPath = await window.ucSettings?.get?.('slsSteamPath')
+        const injectPath = await window.ucSettings?.get?.('slsInjectPath')
+        if (!mounted) return
+        setSlsSteamEnabled(Boolean(enabled))
+        if (typeof slsPath === 'string') setSlsSteamPath(slsPath)
+        if (typeof injectPath === 'string') setSlsInjectPath(injectPath)
+      } catch { }
+    }
+    const detectSls = async () => {
+      try {
+        const result = await window.ucLinux?.detectSLSSteam?.()
+        if (!mounted || !result?.ok) return
+        setSlsSteamDetected({ found: result.found, dir: result.dir })
+        // Auto-fill paths if not already set and SLSsteam is detected
+        if (result.found) {
+          const storedPath = await window.ucSettings?.get?.('slsSteamPath')
+          const storedInject = await window.ucSettings?.get?.('slsInjectPath')
+          if (!storedPath && result.slsSteamPath && mounted) setSlsSteamPath(result.slsSteamPath)
+          if (!storedInject && result.slsInjectPath && mounted) setSlsInjectPath(result.slsInjectPath)
+        }
+      } catch { }
+    }
+    loadSls()
+    detectSls()
+    const off = window.ucSettings?.onChanged?.((data: any) => {
+      if (!data || !data.key) return
+      if (data.key === '__CLEAR_ALL__') {
+        setSlsSteamEnabled(false)
+        setSlsSteamPath('')
+        setSlsInjectPath('')
+        return
+      }
+      if (data.key === 'slsSteamEnabled') setSlsSteamEnabled(Boolean(data.value))
+      if (data.key === 'slsSteamPath') setSlsSteamPath(data.value || '')
+      if (data.key === 'slsInjectPath') setSlsInjectPath(data.value || '')
+    })
+    return () => {
+      mounted = false
+      if (typeof off === 'function') off()
+    }
+  }, [isLinux])
 
   // Detect Linux tools when on Linux
   useEffect(() => {
@@ -2115,6 +2169,132 @@ export function SettingsPage() {
                   </div>
                 </CardContent>
               </Card>
+
+              {/* SLSsteam Integration Card — Linux only */}
+              {isLinux && (
+              <Card className="border-border/60">
+                <CardContent className="p-6 space-y-6">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <Zap className="h-4 w-4 text-primary" />
+                        <h2 className="text-lg font-semibold">SLSsteam Integration</h2>
+                      </div>
+                      <p className="text-sm text-muted-foreground mt-1">
+                        Inject SLSsteam into game launches via <code className="font-mono bg-muted/50 px-1 rounded text-xs">LD_AUDIT</code> to enable Steam client modifications (DRM bypass, family sharing, etc.) for games launched through UnionCrax.Direct.
+                      </p>
+                    </div>
+                    <button
+                      onClick={async () => {
+                        const newValue = !slsSteamEnabled
+                        setSlsSteamEnabled(newValue)
+                        try { await window.ucSettings?.set?.('slsSteamEnabled', newValue) } catch { }
+                      }}
+                      className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${slsSteamEnabled ? 'bg-primary' : 'bg-slate-700'}`}
+                      title="Toggle SLSsteam integration"
+                    >
+                      <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${slsSteamEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
+                    </button>
+                  </div>
+
+                  {/* Detection status */}
+                  <div className="flex flex-wrap gap-2">
+                    {slsSteamDetected !== null && (
+                      <span className={`text-[11px] px-2 py-1 rounded-full border ${slsSteamDetected.found ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' : 'bg-muted/30 text-muted-foreground border-border/40'}`}>
+                        SLSsteam: {slsSteamDetected.found ? `found${slsSteamDetected.dir ? ` (${slsSteamDetected.dir})` : ''}` : 'not found at default path'}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Path configuration */}
+                  <div className="space-y-4 rounded-lg border border-border/60 bg-card/50 p-4">
+                    <div className="space-y-2">
+                      <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">SLSsteam.so path</label>
+                      <div className="flex gap-2">
+                        <Input
+                          value={slsSteamPath}
+                          onChange={(e) => setSlsSteamPath(e.target.value)}
+                          onBlur={async () => {
+                            try { await window.ucSettings?.set?.('slsSteamPath', slsSteamPath) } catch { }
+                          }}
+                          placeholder="~/.local/share/SLSsteam/SLSsteam.so"
+                          className="flex-1 font-mono text-xs"
+                        />
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={async () => {
+                            const result = await window.ucLinux?.pickSo?.()
+                            if (result?.ok && result.path) {
+                              setSlsSteamPath(result.path)
+                              await window.ucSettings?.set?.('slsSteamPath', result.path).catch(() => { })
+                            }
+                          }}
+                          title="Browse for SLSsteam.so"
+                        >
+                          <FolderOpen className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">library-inject.so path</label>
+                      <div className="flex gap-2">
+                        <Input
+                          value={slsInjectPath}
+                          onChange={(e) => setSlsInjectPath(e.target.value)}
+                          onBlur={async () => {
+                            try { await window.ucSettings?.set?.('slsInjectPath', slsInjectPath) } catch { }
+                          }}
+                          placeholder="~/.local/share/SLSsteam/library-inject.so"
+                          className="flex-1 font-mono text-xs"
+                        />
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={async () => {
+                            const result = await window.ucLinux?.pickSo?.()
+                            if (result?.ok && result.path) {
+                              setSlsInjectPath(result.path)
+                              await window.ucSettings?.set?.('slsInjectPath', result.path).catch(() => { })
+                            }
+                          }}
+                          title="Browse for library-inject.so"
+                        >
+                          <FolderOpen className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+
+                    {slsSteamDetected?.found && (
+                      <div className="flex flex-wrap gap-1">
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            if (slsSteamDetected.dir) {
+                              const p = `${slsSteamDetected.dir}/SLSsteam.so`
+                              setSlsSteamPath(p)
+                              await window.ucSettings?.set?.('slsSteamPath', p).catch(() => { })
+                              const ip = `${slsSteamDetected.dir}/library-inject.so`
+                              setSlsInjectPath(ip)
+                              await window.ucSettings?.set?.('slsInjectPath', ip).catch(() => { })
+                            }
+                          }}
+                          className="text-[10px] px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20 transition-colors"
+                        >
+                          Use detected paths
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="rounded-lg border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-xs text-blue-200 space-y-1">
+                    <p><strong>Note:</strong> SLSsteam is a Linux-only Steam client modification. It must be installed separately via its own <code className="font-mono bg-blue-900/30 px-1 rounded">setup.sh</code> script.</p>
+                    <p>When enabled, <code className="font-mono bg-blue-900/30 px-1 rounded">LD_AUDIT</code> is set to load SLSsteam into every game launched from UnionCrax.Direct on Linux.</p>
+                  </div>
+                </CardContent>
+              </Card>
+              )}
 
               <Card className="border-border/60">
                 <CardContent className="p-6 space-y-6">
