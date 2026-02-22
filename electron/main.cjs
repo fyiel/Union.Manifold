@@ -4135,8 +4135,55 @@ function normalizeRunnerPath(candidate, fallback) {
   if (!candidate || typeof candidate !== 'string') return fallback
   const trimmed = candidate.trim()
   if (!trimmed) return fallback
-  if (path.isAbsolute(trimmed) && !fs.existsSync(trimmed)) return fallback
+  // Only reject absolute paths that don't exist — relative/bare commands (e.g. 'wine', 'proton')
+  // are resolved via PATH at spawn time, so we should not reject them here.
+  if (path.isAbsolute(trimmed) && !fs.existsSync(trimmed)) {
+    ucLog(`normalizeRunnerPath: absolute path not found: ${trimmed}, falling back to ${fallback}`, 'warn')
+    return fallback
+  }
   return trimmed
+}
+
+/**
+ * Ensure the Proton environment is properly set up.
+ * Proton requires STEAM_COMPAT_DATA_PATH and STEAM_COMPAT_CLIENT_INSTALL_PATH.
+ * If not set, auto-detect from Steam installation.
+ */
+function ensureProtonEnv(env) {
+  if (process.platform !== 'linux') return env
+  const result = { ...env }
+
+  // Auto-detect Steam path if not set
+  if (!result.STEAM_COMPAT_CLIENT_INSTALL_PATH) {
+    const home = app.getPath('home')
+    const steamCandidates = [
+      path.join(home, '.steam', 'steam'),
+      path.join(home, '.local', 'share', 'Steam'),
+    ]
+    for (const c of steamCandidates) {
+      if (fs.existsSync(c)) {
+        result.STEAM_COMPAT_CLIENT_INSTALL_PATH = c
+        ucLog(`Proton: auto-set STEAM_COMPAT_CLIENT_INSTALL_PATH=${c}`)
+        break
+      }
+    }
+  }
+
+  // Auto-create a default STEAM_COMPAT_DATA_PATH if not set
+  // Proton will fail without this — use a per-game prefix under ~/.local/share/uc-proton/
+  if (!result.STEAM_COMPAT_DATA_PATH) {
+    const home = app.getPath('home')
+    const defaultPrefix = path.join(home, '.local', 'share', 'uc-proton', 'default')
+    try {
+      if (!fs.existsSync(defaultPrefix)) {
+        fs.mkdirSync(defaultPrefix, { recursive: true })
+      }
+    } catch {}
+    result.STEAM_COMPAT_DATA_PATH = defaultPrefix
+    ucLog(`Proton: auto-set STEAM_COMPAT_DATA_PATH=${defaultPrefix}`)
+  }
+
+  return result
 }
 
 function resolveLaunchCommand(exePath) {
@@ -4148,7 +4195,7 @@ function resolveLaunchCommand(exePath) {
   const settings = readSettings() || {}
   const mode = String(settings.linuxLaunchMode || 'auto').toLowerCase()
   const winePath = normalizeRunnerPath(settings.linuxWinePath, 'wine')
-  const protonPath = normalizeRunnerPath(settings.linuxProtonPath, 'proton')
+  const protonPath = normalizeRunnerPath(settings.linuxProtonPath, '')
   const isExe = exePath.toLowerCase().endsWith('.exe')
 
   if (mode === 'native') {
@@ -4157,7 +4204,11 @@ function resolveLaunchCommand(exePath) {
 
   if (isExe) {
     if (mode === 'proton') {
-      return { command: protonPath, args: ['run', exePath], cwd }
+      if (!protonPath) {
+        ucLog('Proton mode selected but no proton path configured — falling back to wine', 'warn')
+        return { command: winePath, args: [exePath], cwd }
+      }
+      return { command: protonPath, args: ['run', exePath], cwd, needsProtonEnv: true }
     }
     if (mode === 'wine' || mode === 'auto') {
       return { command: winePath, args: [exePath], cwd }
@@ -4188,11 +4239,19 @@ function buildLinuxGameEnv(baseEnv) {
   const protonPrefix = typeof settings.linuxProtonPrefix === 'string' ? settings.linuxProtonPrefix.trim() : ''
   if (protonPrefix) {
     env.STEAM_COMPAT_DATA_PATH = protonPrefix
-    // STEAM_COMPAT_CLIENT_INSTALL_PATH is needed by some Proton builds
-    if (!env.STEAM_COMPAT_CLIENT_INSTALL_PATH) {
-      const steamPath = typeof settings.linuxSteamPath === 'string' ? settings.linuxSteamPath.trim() : ''
-      if (steamPath) env.STEAM_COMPAT_CLIENT_INSTALL_PATH = steamPath
-    }
+  }
+
+  // STEAM_COMPAT_CLIENT_INSTALL_PATH — needed by Proton
+  const steamPath = typeof settings.linuxSteamPath === 'string' ? settings.linuxSteamPath.trim() : ''
+  if (steamPath && !env.STEAM_COMPAT_CLIENT_INSTALL_PATH) {
+    env.STEAM_COMPAT_CLIENT_INSTALL_PATH = steamPath
+  }
+
+  // If Proton mode is active, ensure required env vars are set
+  const mode = String(settings.linuxLaunchMode || 'auto').toLowerCase()
+  if (mode === 'proton') {
+    const withProton = ensureProtonEnv(env)
+    Object.assign(env, withProton)
   }
 
   // Extra environment variables (stored as "KEY=VALUE\nKEY2=VALUE2")
@@ -5271,10 +5330,20 @@ function resolveLaunchCommandWithGameConfig(exePath, appid) {
   const globalSettings = readSettings() || {}
   const gameConfig = getGameLinuxConfig(appid) || {}
 
-  // Per-game overrides take precedence over global settings
-  const mode = String(gameConfig.launchMode || globalSettings.linuxLaunchMode || 'auto').toLowerCase()
-  const winePath = normalizeRunnerPath(gameConfig.winePath || globalSettings.linuxWinePath, 'wine')
-  const protonPath = normalizeRunnerPath(gameConfig.protonPath || globalSettings.linuxProtonPath, 'proton')
+  // 'inherit' means use global settings; otherwise per-game overrides take precedence
+  const rawMode = gameConfig.launchMode && gameConfig.launchMode !== 'inherit'
+    ? gameConfig.launchMode
+    : globalSettings.linuxLaunchMode || 'auto'
+  const mode = String(rawMode).toLowerCase()
+
+  const winePath = normalizeRunnerPath(
+    (gameConfig.winePath && gameConfig.winePath !== '') ? gameConfig.winePath : globalSettings.linuxWinePath,
+    'wine'
+  )
+  const protonPath = normalizeRunnerPath(
+    (gameConfig.protonPath && gameConfig.protonPath !== '') ? gameConfig.protonPath : globalSettings.linuxProtonPath,
+    ''
+  )
   const isExe = exePath.toLowerCase().endsWith('.exe')
 
   if (mode === 'native') {
@@ -5283,7 +5352,11 @@ function resolveLaunchCommandWithGameConfig(exePath, appid) {
 
   if (isExe) {
     if (mode === 'proton') {
-      return { command: protonPath, args: ['run', exePath], cwd }
+      if (!protonPath) {
+        ucLog(`Proton mode for ${appid} but no proton path — falling back to wine`, 'warn')
+        return { command: winePath, args: [exePath], cwd }
+      }
+      return { command: protonPath, args: ['run', exePath], cwd, needsProtonEnv: true }
     }
     if (mode === 'wine' || mode === 'auto') {
       return { command: winePath, args: [exePath], cwd }
@@ -5302,6 +5375,7 @@ function buildGameLaunchEnv(appid, baseEnv) {
 
   if (process.platform !== 'linux' || !appid) return env
 
+  const globalSettings = readSettings() || {}
   const gameConfig = getGameLinuxConfig(appid) || {}
 
   // Per-game WINEPREFIX override
@@ -5334,6 +5408,15 @@ function buildGameLaunchEnv(appid, baseEnv) {
   } else if (gameConfig.vrEnabled) {
     const xrRuntime = typeof gameConfig.vrXrRuntimeJson === 'string' ? gameConfig.vrXrRuntimeJson.trim() : ''
     if (xrRuntime) env.XR_RUNTIME_JSON = xrRuntime
+  }
+
+  // If effective mode is Proton, ensure required Proton env vars are set
+  const effectiveMode = (gameConfig.launchMode && gameConfig.launchMode !== 'inherit')
+    ? gameConfig.launchMode
+    : globalSettings.linuxLaunchMode || 'auto'
+  if (String(effectiveMode).toLowerCase() === 'proton') {
+    const withProton = ensureProtonEnv(env)
+    Object.assign(env, withProton)
   }
 
   return env
@@ -5376,16 +5459,6 @@ ipcMain.handle('uc:game-linux-config-set', (_event, appid, config) => {
 // ============================================================
 
 const SLSSTEAM_GITHUB_URL = 'https://github.com/acesls/SLSsteam/releases/latest'
-
-// IPC: Detect SLSsteam
-ipcMain.handle('uc:linux-detect-slssteam', () => {
-  try {
-    const result = detectSLSSteam()
-    return { ok: true, ...result }
-  } catch (err) {
-    return { ok: false, error: err.message, found: false }
-  }
-})
 
 // IPC: Open SLSsteam GitHub releases page
 ipcMain.handle('uc:linux-slssteam-download', async () => {
@@ -5462,5 +5535,3 @@ ipcMain.handle('uc:linux-slssteam-check-game', (_event, appid) => {
   }
 })
 
-// IPC: Pick a .so file (for SLSsteam paths)
-// (already defined above as uc:linux-pick-so, but ensure it's not duplicated)

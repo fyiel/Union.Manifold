@@ -39,6 +39,7 @@ import {
   Info,
   Loader2,
   Play,
+  Terminal,
 } from "lucide-react"
 import { ExePickerModal } from "@/components/ExePickerModal"
 import { AdminPromptModal } from "@/components/AdminPromptModal"
@@ -48,6 +49,7 @@ import { DownloadCheckModal } from "@/components/DownloadCheckModal"
 import { DesktopShortcutModal } from "@/components/DesktopShortcutModal"
 import { EditGameMetadataModal } from "@/components/EditGameMetadataModal"
 import { VersionConflictModal } from "@/components/VersionConflictModal"
+import { GameLinuxConfigModal } from "@/components/GameLinuxConfigModal"
 import { gameLogger } from "@/lib/logger"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { GamePageSkeleton } from "@/components/GamePageSkeleton"
@@ -62,6 +64,7 @@ const PROTON_RANK_COLORS: Record<string, string> = {
 
 export function GameDetailPage() {
   const isWindows = typeof navigator !== 'undefined' && /windows/i.test(navigator.userAgent)
+  const isLinux = typeof navigator !== 'undefined' && /linux/i.test(navigator.userAgent)
   const isOnline = useOnlineStatus()
   const params = useParams()
   const { startGameDownload, resumeGroup, downloads, clearByAppid } = useDownloads()
@@ -106,6 +109,7 @@ export function GameDetailPage() {
   const [overwriteOnDownload, setOverwriteOnDownload] = useState(false)
   const [gameStartFailedOpen, setGameStartFailedOpen] = useState(false)
   const [gameStartFailedAdminEnabled, setGameStartFailedAdminEnabled] = useState(false)
+  const [linuxConfigOpen, setLinuxConfigOpen] = useState(false)
   // Ref to track whether a game was just launched (cleared on manual quit)
   // Stores the expiry timestamp of the quick-exit detection window (0 = not watching)
   const gameJustLaunchedRef = useRef<number>(0)
@@ -1457,6 +1461,19 @@ export function GameDetailPage() {
                             Edit Details
                           </button>
                         )}
+                        {isLinux && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setActionMenuOpen(false)
+                              setLinuxConfigOpen(true)
+                            }}
+                            className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-gray-400 transition-colors hover:text-white hover:bg-white/10"
+                          >
+                            <Terminal className="mr-2 h-4 w-4" />
+                            Linux / VR Config
+                          </button>
+                        )}
                         <div className="my-1 h-px bg-white/10" />
                         <button
                           type="button"
@@ -1878,6 +1895,14 @@ export function GameDetailPage() {
         }}
         onClose={() => setGameStartFailedOpen(false)}
       />
+      {isLinux && (
+        <GameLinuxConfigModal
+          open={linuxConfigOpen}
+          appid={game.appid}
+          gameName={game.name}
+          onClose={() => setLinuxConfigOpen(false)}
+        />
+      )}
     </div>
   )
 }
