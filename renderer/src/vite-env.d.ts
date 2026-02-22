@@ -189,6 +189,8 @@ declare global {
       pickBinary: () => Promise<{ ok: boolean; path?: string; cancelled?: boolean; error?: string }>
       checkTool: (toolName: string) => Promise<{ ok: boolean; available: boolean; path?: string; error?: string }>
       getSteamPath: () => Promise<{ ok: boolean; path?: string; error?: string }>
+      detectSLSSteam: () => Promise<{ ok: boolean; found: boolean; dir?: string | null; slsSteamPath?: string | null; slsInjectPath?: string | null; error?: string }>
+      pickSo: () => Promise<{ ok: boolean; path?: string; cancelled?: boolean; error?: string }>
     }
     ucVR?: {
       detectSteamVR: () => Promise<{ ok: boolean; found: boolean; dir?: string | null; vrserver?: string | null; startup?: string | null; error?: string }>
