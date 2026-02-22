@@ -83,6 +83,7 @@ export function SettingsPage() {
   const [slsSteamPath, setSlsSteamPath] = useState('')
   const [slsInjectPath, setSlsInjectPath] = useState('')
   const [slsSteamDetected, setSlsSteamDetected] = useState<{ found: boolean; dir?: string | null } | null>(null)
+  const [slsToolFeedback, setSlsToolFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
   // SteamVR / VR settings
   const [vrEnabled, setVrEnabled] = useState(false)
   const [vrSteamVrPath, setVrSteamVrPath] = useState('')
@@ -2345,9 +2346,23 @@ export function SettingsPage() {
                     )}
                   </div>
 
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="gap-2 text-xs"
+                      onClick={async () => {
+                        try { await window.ucLinux?.slsSteamDownload?.() } catch { }
+                      }}
+                    >
+                      Download SLSsteam from GitHub
+                    </Button>
+                  </div>
+
                   <div className="rounded-lg border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-xs text-blue-200 space-y-1">
                     <p><strong>Note:</strong> SLSsteam is a Linux-only Steam client modification. It must be installed separately via its own <code className="font-mono bg-blue-900/30 px-1 rounded">setup.sh</code> script.</p>
                     <p>When enabled, <code className="font-mono bg-blue-900/30 px-1 rounded">LD_AUDIT</code> is set to load SLSsteam into every game launched from UnionCrax.Direct on Linux.</p>
+                    <p>Per-game configuration (Steam App ID, enable/disable) can be set from the Library page via the game's settings menu → <strong>Linux / VR Config</strong>.</p>
                   </div>
                 </CardContent>
               </Card>

@@ -37,6 +37,30 @@ type DownloadUpdatePayload = {
   }
 }
 
+/** Per-game Linux/VR configuration stored as gameLinux:${appid} in settings */
+type GameLinuxConfig = {
+  /** Override launch mode for this game: 'auto' | 'native' | 'wine' | 'proton' | 'inherit' */
+  launchMode?: 'auto' | 'native' | 'wine' | 'proton' | 'inherit'
+  /** Override Wine binary path for this game */
+  winePath?: string
+  /** Override Proton script path for this game */
+  protonPath?: string
+  /** Override WINEPREFIX for this game */
+  winePrefix?: string
+  /** Override Proton prefix (STEAM_COMPAT_DATA_PATH) for this game */
+  protonPrefix?: string
+  /** Per-game extra environment variables (newline-separated KEY=VALUE) */
+  extraEnv?: string
+  /** Override VR support for this game: true=force on, false=force off, undefined=use global */
+  vrEnabled?: boolean
+  /** Override XR_RUNTIME_JSON for this game */
+  vrXrRuntimeJson?: string
+  /** SLSteam Steam App ID for this game */
+  slsSteamAppId?: string
+  /** Whether SLSteam is enabled for this game */
+  slsSteamEnabled?: boolean
+}
+
 declare global {
   interface Window {
     ucDownloads?: {
@@ -187,10 +211,17 @@ declare global {
       createPrefix: (prefixPath: string, arch?: '32' | '64' | 'win32' | 'win64') => Promise<{ ok: boolean; code?: number; stdout?: string; stderr?: string; error?: string }>
       pickPrefixDir: () => Promise<{ ok: boolean; path?: string; cancelled?: boolean; error?: string }>
       pickBinary: () => Promise<{ ok: boolean; path?: string; cancelled?: boolean; error?: string }>
+      pickSo: () => Promise<{ ok: boolean; path?: string; cancelled?: boolean; error?: string }>
       checkTool: (toolName: string) => Promise<{ ok: boolean; available: boolean; path?: string; error?: string }>
       getSteamPath: () => Promise<{ ok: boolean; path?: string; error?: string }>
+      // Per-game Linux config
+      getGameConfig: (appid: string) => Promise<{ ok: boolean; config: GameLinuxConfig; error?: string }>
+      setGameConfig: (appid: string, config: GameLinuxConfig | null) => Promise<{ ok: boolean; error?: string }>
+      // SLSteam
       detectSLSSteam: () => Promise<{ ok: boolean; found: boolean; dir?: string | null; slsSteamPath?: string | null; slsInjectPath?: string | null; error?: string }>
-      pickSo: () => Promise<{ ok: boolean; path?: string; cancelled?: boolean; error?: string }>
+      slsSteamDownload: () => Promise<{ ok: boolean; error?: string }>
+      slsSteamSetupGame: (appid: string, steamAppId?: string) => Promise<{ ok: boolean; path?: string; steamAppId?: string; error?: string }>
+      slsSteamCheckGame: (appid: string) => Promise<{ ok: boolean; found: boolean; path?: string; steamAppId?: string; error?: string }>
     }
     ucVR?: {
       detectSteamVR: () => Promise<{ ok: boolean; found: boolean; dir?: string | null; vrserver?: string | null; startup?: string | null; error?: string }>

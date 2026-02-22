@@ -119,10 +119,17 @@ contextBridge.exposeInMainWorld('ucLinux', {
   createPrefix: (prefixPath, arch) => ipcRenderer.invoke('uc:linux-create-prefix', prefixPath, arch),
   pickPrefixDir: () => ipcRenderer.invoke('uc:linux-pick-prefix-dir'),
   pickBinary: () => ipcRenderer.invoke('uc:linux-pick-binary'),
+  pickSo: () => ipcRenderer.invoke('uc:linux-pick-so'),
   checkTool: (toolName) => ipcRenderer.invoke('uc:linux-check-tool', toolName),
   getSteamPath: () => ipcRenderer.invoke('uc:linux-steam-path'),
+  // Per-game Linux config
+  getGameConfig: (appid) => ipcRenderer.invoke('uc:game-linux-config-get', appid),
+  setGameConfig: (appid, config) => ipcRenderer.invoke('uc:game-linux-config-set', appid, config),
+  // SLSteam
   detectSLSSteam: () => ipcRenderer.invoke('uc:linux-detect-slssteam'),
-  pickSo: () => ipcRenderer.invoke('uc:linux-pick-so'),
+  slsSteamDownload: () => ipcRenderer.invoke('uc:linux-slssteam-download'),
+  slsSteamSetupGame: (appid, steamAppId) => ipcRenderer.invoke('uc:linux-slssteam-setup-game', appid, steamAppId),
+  slsSteamCheckGame: (appid) => ipcRenderer.invoke('uc:linux-slssteam-check-game', appid),
 })
 
 contextBridge.exposeInMainWorld('ucVR', {
