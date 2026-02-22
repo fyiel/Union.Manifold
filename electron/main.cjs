@@ -4801,7 +4801,10 @@ ipcMain.handle('uc:game-exe-launch', async (_event, appid, exePath, gameName, sh
     if (!exePath || typeof exePath !== 'string') return { ok: false }
     ucLog(`Launching game: ${appid} at ${exePath}`)
     try {
-      const { command, args, cwd } = resolveLaunchCommand(exePath)
+      // Use per-game config overrides if available
+      const { command, args, cwd } = appid
+        ? resolveLaunchCommandWithGameConfig(exePath, appid)
+        : resolveLaunchCommand(exePath)
 
       // Verbose logging
       const settings = readSettings() || {}
@@ -4812,9 +4815,6 @@ ipcMain.handle('uc:game-exe-launch', async (_event, appid, exePath, gameName, sh
       }
 
       // Windows (non-admin): spawn the exe directly so we track the actual game process.
-      // A cmd.exe wrapper was used here previously, but GUI applications detach from cmd.exe
-      // immediately, causing cmd.exe to exit in <100 ms and falsely triggering the quick-exit
-      // detection even when the game launched fine.
       if (process.platform === 'win32') {
         const env = { ...process.env }
         env.PATH = `${cwd};${env.PATH || ''}`
@@ -4832,9 +4832,8 @@ ipcMain.handle('uc:game-exe-launch', async (_event, appid, exePath, gameName, sh
         return { ok: true, pid: proc.pid }
       }
 
-      
-      // Non-Windows path (Linux/macOS) — apply Wine/Proton and VR env vars
-      const env = buildVRGameEnv(buildLinuxGameEnv(process.env))
+      // Non-Windows path (Linux/macOS) — apply per-game + global Wine/Proton/VR/SLSsteam env vars
+      const env = buildGameLaunchEnv(appid, process.env)
       env.PATH = `${cwd}:${env.PATH || ''}`
 
       const proc = child_process.spawn(command, args, {
@@ -4869,10 +4868,12 @@ ipcMain.handle('uc:game-exe-launch-admin', async (_event, appid, exePath, gameNa
     if (process.platform !== 'win32') {
       ucLog(`Launching game (non-admin fallback): ${appid} at ${exePath}`)
       try {
-        const { command, args, cwd } = resolveLaunchCommand(exePath)
+        const { command, args, cwd } = appid
+          ? resolveLaunchCommandWithGameConfig(exePath, appid)
+          : resolveLaunchCommand(exePath)
         
-        // Prepare environment - inherit all variables, apply Wine/Proton and VR env, ensure game directory is in PATH
-        const env = buildVRGameEnv(buildLinuxGameEnv(process.env))
+        // Prepare environment - apply per-game + global Wine/Proton/VR/SLSsteam env vars
+        const env = buildGameLaunchEnv(appid, process.env)
         env.PATH = `${cwd}:${env.PATH || ''}`
 
         const proc = child_process.spawn(command, args, {
@@ -5236,3 +5237,230 @@ ipcMain.handle('uc:create-desktop-shortcut', async (_event, gameName, exePath) =
     return { ok: false, error: err.message }
   }
 })
+
+// ============================================================
+// Per-game Linux / VR configuration
+// ============================================================
+
+/**
+ * Read per-game Linux config from settings.
+ * Stored as `gameLinux:${appid}` in settings.json.
+ */
+function getGameLinuxConfig(appid) {
+  if (!appid) return null
+  try {
+    const s = readSettings() || {}
+    const raw = s[`gameLinux:${appid}`]
+    if (!raw || typeof raw !== 'object') return null
+    return raw
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Resolve the effective launch command for a game, applying per-game overrides
+ * on top of the global Linux settings.
+ */
+function resolveLaunchCommandWithGameConfig(exePath, appid) {
+  const cwd = path.dirname(exePath)
+  if (process.platform !== 'linux') {
+    return { command: exePath, args: [], cwd }
+  }
+
+  const globalSettings = readSettings() || {}
+  const gameConfig = getGameLinuxConfig(appid) || {}
+
+  // Per-game overrides take precedence over global settings
+  const mode = String(gameConfig.launchMode || globalSettings.linuxLaunchMode || 'auto').toLowerCase()
+  const winePath = normalizeRunnerPath(gameConfig.winePath || globalSettings.linuxWinePath, 'wine')
+  const protonPath = normalizeRunnerPath(gameConfig.protonPath || globalSettings.linuxProtonPath, 'proton')
+  const isExe = exePath.toLowerCase().endsWith('.exe')
+
+  if (mode === 'native') {
+    return { command: exePath, args: [], cwd }
+  }
+
+  if (isExe) {
+    if (mode === 'proton') {
+      return { command: protonPath, args: ['run', exePath], cwd }
+    }
+    if (mode === 'wine' || mode === 'auto') {
+      return { command: winePath, args: [exePath], cwd }
+    }
+  }
+
+  return { command: exePath, args: [], cwd }
+}
+
+/**
+ * Build the effective environment for a game launch, merging global and per-game settings.
+ */
+function buildGameLaunchEnv(appid, baseEnv) {
+  // Start with global Linux + VR env
+  const env = buildVRGameEnv(buildLinuxGameEnv(baseEnv || process.env))
+
+  if (process.platform !== 'linux' || !appid) return env
+
+  const gameConfig = getGameLinuxConfig(appid) || {}
+
+  // Per-game WINEPREFIX override
+  const winePrefix = typeof gameConfig.winePrefix === 'string' ? gameConfig.winePrefix.trim() : ''
+  if (winePrefix) env.WINEPREFIX = winePrefix
+
+  // Per-game Proton prefix override
+  const protonPrefix = typeof gameConfig.protonPrefix === 'string' ? gameConfig.protonPrefix.trim() : ''
+  if (protonPrefix) env.STEAM_COMPAT_DATA_PATH = protonPrefix
+
+  // Per-game extra env vars
+  const extraEnv = typeof gameConfig.extraEnv === 'string' ? gameConfig.extraEnv.trim() : ''
+  if (extraEnv) {
+    for (const line of extraEnv.split('\n')) {
+      const trimmed = line.trim()
+      if (!trimmed || trimmed.startsWith('#')) continue
+      const eqIdx = trimmed.indexOf('=')
+      if (eqIdx < 1) continue
+      const key = trimmed.slice(0, eqIdx).trim()
+      const value = trimmed.slice(eqIdx + 1).trim()
+      if (key) env[key] = value
+    }
+  }
+
+  // Per-game VR override
+  if (typeof gameConfig.vrEnabled === 'boolean' && !gameConfig.vrEnabled) {
+    // Explicitly disabled for this game — remove VR env vars
+    delete env.XR_RUNTIME_JSON
+    delete env.STEAM_VR_RUNTIME
+  } else if (gameConfig.vrEnabled) {
+    const xrRuntime = typeof gameConfig.vrXrRuntimeJson === 'string' ? gameConfig.vrXrRuntimeJson.trim() : ''
+    if (xrRuntime) env.XR_RUNTIME_JSON = xrRuntime
+  }
+
+  return env
+}
+
+// IPC: Get per-game Linux config
+ipcMain.handle('uc:game-linux-config-get', (_event, appid) => {
+  try {
+    if (!appid) return { ok: false, error: 'missing-appid' }
+    const config = getGameLinuxConfig(appid)
+    return { ok: true, config: config || {} }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Set per-game Linux config
+ipcMain.handle('uc:game-linux-config-set', (_event, appid, config) => {
+  try {
+    if (!appid) return { ok: false, error: 'missing-appid' }
+    const s = readSettings() || {}
+    const prev = { ...s }
+    if (config === null || config === undefined) {
+      delete s[`gameLinux:${appid}`]
+    } else {
+      s[`gameLinux:${appid}`] = config
+    }
+    writeSettings(s)
+    broadcastSettingsChanges(s, prev)
+    ucLog(`Per-game Linux config set for ${appid}`)
+    return { ok: true }
+  } catch (err) {
+    ucLog(`Per-game Linux config set failed for ${appid}: ${err.message}`, 'error')
+    return { ok: false, error: err.message }
+  }
+})
+
+// ============================================================
+// SLSteam integration
+// ============================================================
+
+const SLSSTEAM_GITHUB_URL = 'https://github.com/acesls/SLSsteam/releases/latest'
+
+// IPC: Detect SLSsteam
+ipcMain.handle('uc:linux-detect-slssteam', () => {
+  try {
+    const result = detectSLSSteam()
+    return { ok: true, ...result }
+  } catch (err) {
+    return { ok: false, error: err.message, found: false }
+  }
+})
+
+// IPC: Open SLSsteam GitHub releases page
+ipcMain.handle('uc:linux-slssteam-download', async () => {
+  try {
+    await shell.openExternal(SLSSTEAM_GITHUB_URL)
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Set up a game folder for SLSsteam (create steam_appid.txt)
+ipcMain.handle('uc:linux-slssteam-setup-game', async (_event, appid, steamAppId) => {
+  try {
+    if (!appid) return { ok: false, error: 'missing-appid' }
+
+    // Find the installed game folder
+    const gameFolder = findInstalledFolderByAppid(appid)
+    if (!gameFolder) return { ok: false, error: 'game-not-found' }
+
+    // Find the actual game directory (may be a subfolder)
+    let targetDir = gameFolder
+    try {
+      const entries = fs.readdirSync(gameFolder, { withFileTypes: true })
+      const subdirs = entries.filter(e => e.isDirectory() && e.name !== 'screenshots')
+      const files = entries.filter(e => e.isFile())
+      // If there's only installed.json and one subdirectory, use that subdirectory
+      if (subdirs.length === 1 && files.every(f => f.name === INSTALLED_MANIFEST)) {
+        targetDir = path.join(gameFolder, subdirs[0].name)
+      }
+    } catch {}
+
+    // Write steam_appid.txt
+    const steamAppIdStr = steamAppId ? String(steamAppId).trim() : '0'
+    const steamAppIdPath = path.join(targetDir, 'steam_appid.txt')
+    fs.writeFileSync(steamAppIdPath, steamAppIdStr, 'utf8')
+    ucLog(`SLSsteam: wrote steam_appid.txt to ${steamAppIdPath} (appid=${steamAppIdStr})`)
+
+    return { ok: true, path: steamAppIdPath, steamAppId: steamAppIdStr }
+  } catch (err) {
+    ucLog(`SLSsteam setup failed for ${appid}: ${err.message}`, 'error')
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Check if a game has steam_appid.txt set up
+ipcMain.handle('uc:linux-slssteam-check-game', (_event, appid) => {
+  try {
+    if (!appid) return { ok: false, error: 'missing-appid' }
+    const gameFolder = findInstalledFolderByAppid(appid)
+    if (!gameFolder) return { ok: false, error: 'game-not-found' }
+
+    // Check in game folder and one level of subdirectories
+    const candidates = [gameFolder]
+    try {
+      const entries = fs.readdirSync(gameFolder, { withFileTypes: true })
+      for (const e of entries) {
+        if (e.isDirectory()) candidates.push(path.join(gameFolder, e.name))
+      }
+    } catch {}
+
+    for (const dir of candidates) {
+      const steamAppIdPath = path.join(dir, 'steam_appid.txt')
+      if (fs.existsSync(steamAppIdPath)) {
+        try {
+          const content = fs.readFileSync(steamAppIdPath, 'utf8').trim()
+          return { ok: true, found: true, path: steamAppIdPath, steamAppId: content }
+        } catch {}
+      }
+    }
+    return { ok: true, found: false }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Pick a .so file (for SLSsteam paths)
+// (already defined above as uc:linux-pick-so, but ensure it's not duplicated)
