@@ -99,7 +99,8 @@ export function SettingsPage() {
   const [showRpcAdvanced, setShowRpcAdvanced] = useState(false)
   const [rpcHideNsfw, setRpcHideNsfw] = useState(true)
   const [rpcShowGameName, setRpcShowGameName] = useState(true)
-  const [rpcShowStatus, setRpcShowStatus] = useState(true)
+  const [rpcShowDownloadStatus, setRpcShowDownloadStatus] = useState(true)
+  const [rpcShowBrowseStatus, setRpcShowBrowseStatus] = useState(true)
   const [rpcShowButtons, setRpcShowButtons] = useState(true)
   const [clearingData, setClearingData] = useState(false)
   const [showClearConfirm, setShowClearConfirm] = useState(false)
@@ -460,13 +461,17 @@ export function SettingsPage() {
         const enabled = await window.ucSettings?.get?.('discordRpcEnabled')
         const hideNsfw = await window.ucSettings?.get?.('rpcHideNsfw')
         const showGameName = await window.ucSettings?.get?.('rpcShowGameName')
-        const showStatus = await window.ucSettings?.get?.('rpcShowStatus')
+        const showDownloadStatus = await window.ucSettings?.get?.('rpcShowDownloadStatus')
+        const showBrowseStatus = await window.ucSettings?.get?.('rpcShowBrowseStatus')
+        // Legacy fallback: if new keys are unset, read old rpcShowStatus
+        const legacyShowStatus = await window.ucSettings?.get?.('rpcShowStatus')
         const showButtons = await window.ucSettings?.get?.('rpcShowButtons')
         if (!mounted) return
         setDiscordRpcEnabled(enabled !== false)
         setRpcHideNsfw(hideNsfw !== false)
         setRpcShowGameName(showGameName !== false)
-        setRpcShowStatus(showStatus !== false)
+        setRpcShowDownloadStatus(showDownloadStatus !== undefined ? showDownloadStatus !== false : legacyShowStatus !== false)
+        setRpcShowBrowseStatus(showBrowseStatus !== undefined ? showBrowseStatus !== false : legacyShowStatus !== false)
         setRpcShowButtons(showButtons !== false)
       } catch {
         // ignore
@@ -479,14 +484,21 @@ export function SettingsPage() {
         setDiscordRpcEnabled(true)
         setRpcHideNsfw(true)
         setRpcShowGameName(true)
-        setRpcShowStatus(true)
+        setRpcShowDownloadStatus(true)
+        setRpcShowBrowseStatus(true)
         setRpcShowButtons(true)
         return
       }
       if (data.key === 'discordRpcEnabled') setDiscordRpcEnabled(data.value !== false)
       if (data.key === 'rpcHideNsfw') setRpcHideNsfw(data.value !== false)
       if (data.key === 'rpcShowGameName') setRpcShowGameName(data.value !== false)
-      if (data.key === 'rpcShowStatus') setRpcShowStatus(data.value !== false)
+      if (data.key === 'rpcShowDownloadStatus') setRpcShowDownloadStatus(data.value !== false)
+      if (data.key === 'rpcShowBrowseStatus') setRpcShowBrowseStatus(data.value !== false)
+      // Legacy key sync
+      if (data.key === 'rpcShowStatus') {
+        setRpcShowDownloadStatus(data.value !== false)
+        setRpcShowBrowseStatus(data.value !== false)
+      }
       if (data.key === 'rpcShowButtons') setRpcShowButtons(data.value !== false)
     })
     return () => {
@@ -883,9 +895,24 @@ export function SettingsPage() {
         } catch { }
       }
       if (typeof prefs.rpcShowStatus === "boolean") {
-        setRpcShowStatus(prefs.rpcShowStatus)
+        // Legacy: sync both new keys from old API preference
+        setRpcShowDownloadStatus(prefs.rpcShowStatus)
+        setRpcShowBrowseStatus(prefs.rpcShowStatus)
         try {
-          await window.ucSettings?.set?.('rpcShowStatus', prefs.rpcShowStatus)
+          await window.ucSettings?.set?.('rpcShowDownloadStatus', prefs.rpcShowStatus)
+          await window.ucSettings?.set?.('rpcShowBrowseStatus', prefs.rpcShowStatus)
+        } catch { }
+      }
+      if (typeof prefs.rpcShowDownloadStatus === "boolean") {
+        setRpcShowDownloadStatus(prefs.rpcShowDownloadStatus)
+        try {
+          await window.ucSettings?.set?.('rpcShowDownloadStatus', prefs.rpcShowDownloadStatus)
+        } catch { }
+      }
+      if (typeof prefs.rpcShowBrowseStatus === "boolean") {
+        setRpcShowBrowseStatus(prefs.rpcShowBrowseStatus)
+        try {
+          await window.ucSettings?.set?.('rpcShowBrowseStatus', prefs.rpcShowBrowseStatus)
         } catch { }
       }
       if (typeof prefs.rpcShowButtons === "boolean") {
@@ -1014,12 +1041,21 @@ export function SettingsPage() {
     }).catch(() => { })
   }
 
-  const updateRpcShowStatus = (checked: boolean) => {
-    window.ucSettings?.set?.('rpcShowStatus', checked).catch(() => { })
+  const updateRpcShowDownloadStatus = (checked: boolean) => {
+    window.ucSettings?.set?.('rpcShowDownloadStatus', checked).catch(() => { })
     apiFetch("/api/account/preferences", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ rpcShowStatus: checked }),
+      body: JSON.stringify({ rpcShowDownloadStatus: checked }),
+    }).catch(() => { })
+  }
+
+  const updateRpcShowBrowseStatus = (checked: boolean) => {
+    window.ucSettings?.set?.('rpcShowBrowseStatus', checked).catch(() => { })
+    apiFetch("/api/account/preferences", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rpcShowBrowseStatus: checked }),
     }).catch(() => { })
   }
 
@@ -1493,20 +1529,41 @@ export function SettingsPage() {
 
                         <div className="flex items-center justify-between">
                           <div>
-                            <div className="text-sm font-medium">Show activity status</div>
-                            <div className="text-xs text-muted-foreground">Display what you're doing (downloading, playing, browsing)</div>
+                            <div className="text-sm font-medium">Show download status</div>
+                            <div className="text-xs text-muted-foreground">Display download/extraction progress and queue in your status</div>
                           </div>
                           <button
                             onClick={() => {
-                              const newValue = !rpcShowStatus
-                              setRpcShowStatus(newValue)
-                              updateRpcShowStatus(newValue)
+                              const newValue = !rpcShowDownloadStatus
+                              setRpcShowDownloadStatus(newValue)
+                              updateRpcShowDownloadStatus(newValue)
                             }}
-                            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${rpcShowStatus ? 'bg-primary' : 'bg-slate-700'
+                            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${rpcShowDownloadStatus ? 'bg-primary' : 'bg-slate-700'
                               }`}
                           >
                             <span
-                              className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${rpcShowStatus ? 'translate-x-6' : 'translate-x-1'
+                              className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${rpcShowDownloadStatus ? 'translate-x-6' : 'translate-x-1'
+                                }`}
+                            />
+                          </button>
+                        </div>
+
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <div className="text-sm font-medium">Show browsing status</div>
+                            <div className="text-xs text-muted-foreground">Display what you're viewing or playing (browsing, game details, library)</div>
+                          </div>
+                          <button
+                            onClick={() => {
+                              const newValue = !rpcShowBrowseStatus
+                              setRpcShowBrowseStatus(newValue)
+                              updateRpcShowBrowseStatus(newValue)
+                            }}
+                            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${rpcShowBrowseStatus ? 'bg-primary' : 'bg-slate-700'
+                              }`}
+                          >
+                            <span
+                              className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${rpcShowBrowseStatus ? 'translate-x-6' : 'translate-x-1'
                                 }`}
                             />
                           </button>

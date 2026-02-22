@@ -141,7 +141,8 @@ export function useDiscordRpcPresence() {
   const [enabled, setEnabled] = useState(true)
   const [rpcHideNsfw, setRpcHideNsfw] = useState(true)
   const [rpcShowGameName, setRpcShowGameName] = useState(true)
-  const [rpcShowStatus, setRpcShowStatus] = useState(true)
+  const [rpcShowDownloadStatus, setRpcShowDownloadStatus] = useState(true)
+  const [rpcShowBrowseStatus, setRpcShowBrowseStatus] = useState(true)
   const [rpcShowButtons, setRpcShowButtons] = useState(true)
   const [nameTick, setNameTick] = useState(0)
   const nameOverridesRef = useRef<Map<string, string>>(new Map())
@@ -154,13 +155,18 @@ export function useDiscordRpcPresence() {
         const nextEnabled = await window.ucSettings?.get?.("discordRpcEnabled")
         const hideNsfw = await window.ucSettings?.get?.("rpcHideNsfw")
         const showGameName = await window.ucSettings?.get?.("rpcShowGameName")
-        const showStatus = await window.ucSettings?.get?.("rpcShowStatus")
+        const showDownloadStatus = await window.ucSettings?.get?.("rpcShowDownloadStatus")
+        const showBrowseStatus = await window.ucSettings?.get?.("rpcShowBrowseStatus")
+        // Legacy fallback: if the new keys are unset, read the old rpcShowStatus key
+        const legacyShowStatus = await window.ucSettings?.get?.("rpcShowStatus")
         const showButtons = await window.ucSettings?.get?.("rpcShowButtons")
         if (!mounted) return
         setEnabled(nextEnabled !== false)
         setRpcHideNsfw(hideNsfw !== false)
         setRpcShowGameName(showGameName !== false)
-        setRpcShowStatus(showStatus !== false)
+        // Use new keys if set, otherwise fall back to legacy rpcShowStatus
+        setRpcShowDownloadStatus(showDownloadStatus !== undefined ? showDownloadStatus !== false : legacyShowStatus !== false)
+        setRpcShowBrowseStatus(showBrowseStatus !== undefined ? showBrowseStatus !== false : legacyShowStatus !== false)
         setRpcShowButtons(showButtons !== false)
       } catch {
         // ignore
@@ -173,14 +179,21 @@ export function useDiscordRpcPresence() {
         setEnabled(true)
         setRpcHideNsfw(true)
         setRpcShowGameName(true)
-        setRpcShowStatus(true)
+        setRpcShowDownloadStatus(true)
+        setRpcShowBrowseStatus(true)
         setRpcShowButtons(true)
         return
       }
       if (data.key === "discordRpcEnabled") setEnabled(data.value !== false)
       if (data.key === "rpcHideNsfw") setRpcHideNsfw(data.value !== false)
       if (data.key === "rpcShowGameName") setRpcShowGameName(data.value !== false)
-      if (data.key === "rpcShowStatus") setRpcShowStatus(data.value !== false)
+      if (data.key === "rpcShowDownloadStatus") setRpcShowDownloadStatus(data.value !== false)
+      if (data.key === "rpcShowBrowseStatus") setRpcShowBrowseStatus(data.value !== false)
+      // Legacy key: sync both new keys when old key changes (e.g. from API preference sync)
+      if (data.key === "rpcShowStatus") {
+        setRpcShowDownloadStatus(data.value !== false)
+        setRpcShowBrowseStatus(data.value !== false)
+      }
       if (data.key === "rpcShowButtons") setRpcShowButtons(data.value !== false)
     })
     return () => {
@@ -222,11 +235,11 @@ export function useDiscordRpcPresence() {
         ? Math.min(100, Math.max(0, Math.round((activeDownload.receivedBytes / activeDownload.totalBytes) * 100)))
         : null
       
-      const details = rpcShowStatus 
+      const details = rpcShowDownloadStatus
         ? `${formatStatus(activeDownload.status)} ${title}`
         : title
       
-      const state = rpcShowStatus
+      const state = rpcShowDownloadStatus
         ? (activeDownload.status === "downloading" && activeDownload.etaSeconds
           ? `ETA ${Math.ceil(activeDownload.etaSeconds / 60)}m • ${progress ?? 0}%`
           : progress !== null ? `${progress}%` : formatStatus(activeDownload.status))
@@ -239,9 +252,9 @@ export function useDiscordRpcPresence() {
     }
     const queuedCount = downloads.filter((item) => item.status === "queued").length
     if (queuedCount > 0) {
-      return { 
-        details: rpcShowStatus ? "Queued downloads" : "Downloads", 
-        state: rpcShowStatus ? `${queuedCount} queued` : undefined
+      return {
+        details: rpcShowDownloadStatus ? "Queued downloads" : "Downloads",
+        state: rpcShowDownloadStatus ? `${queuedCount} queued` : undefined
       }
     }
     
@@ -251,12 +264,12 @@ export function useDiscordRpcPresence() {
       const genres = getGameGenres(appid)
       if (isGameNSFW(genres || undefined)) {
         // Return masked activity for NSFW game
-        return buildRouteActivity(location.pathname, downloads, nameOverridesRef.current, false, rpcShowStatus, true)
+        return buildRouteActivity(location.pathname, downloads, nameOverridesRef.current, false, rpcShowBrowseStatus, true)
       }
     }
     
-    return buildRouteActivity(location.pathname, downloads, nameOverridesRef.current, rpcShowGameName, rpcShowStatus, false)
-  }, [downloads, location.pathname, nameTick, rpcShowGameName, rpcShowStatus, rpcHideNsfw])
+    return buildRouteActivity(location.pathname, downloads, nameOverridesRef.current, rpcShowGameName, rpcShowBrowseStatus, false)
+  }, [downloads, location.pathname, nameTick, rpcShowGameName, rpcShowDownloadStatus, rpcShowBrowseStatus, rpcHideNsfw])
 
   useEffect(() => {
     if (!window.ucRpc?.setActivity) return
