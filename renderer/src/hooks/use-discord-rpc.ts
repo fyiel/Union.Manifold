@@ -239,11 +239,12 @@ export function useDiscordRpcPresence() {
         ? `${formatStatus(activeDownload.status)} ${title}`
         : title
       
+      // Only show progress/ETA when download status is enabled
       const state = rpcShowDownloadStatus
         ? (activeDownload.status === "downloading" && activeDownload.etaSeconds
           ? `ETA ${Math.ceil(activeDownload.etaSeconds / 60)}m • ${progress ?? 0}%`
           : progress !== null ? `${progress}%` : formatStatus(activeDownload.status))
-        : (progress !== null ? `${progress}%` : undefined)
+        : undefined
       
       return {
         details,
