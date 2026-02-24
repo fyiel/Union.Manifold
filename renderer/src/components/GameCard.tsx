@@ -6,6 +6,7 @@ import { Calendar, HardDrive, Download, Eye, Wifi, Flame, Play, Square } from "l
 import { formatNumber, hasOnlineMode, pickGameExecutable, proxyImageUrl } from "@/lib/utils"
 import { useDownloads, useDownloadsSelector } from "@/context/downloads-context"
 import { apiUrl } from "@/lib/api"
+import { nsfwRevealedAppids } from "@/lib/nsfw-session"
 import { ExePickerModal } from "@/components/ExePickerModal"
 import { AdminPromptModal } from "@/components/AdminPromptModal"
 import { DesktopShortcutModal } from "@/components/DesktopShortcutModal"
@@ -53,6 +54,7 @@ export const GameCard = memo(function GameCard({
   const displayGenres = genres.filter((genre) => String(genre).toLowerCase() !== "nsfw")
   const isNSFW = genres.some((genre) => genre.toLowerCase() === "nsfw")
   const [allowNsfwReveal, setAllowNsfwReveal] = useState(false)
+  const [sessionRevealed, setSessionRevealed] = useState(false)
   const displayStats = initialStats || hoveredStats || { downloads: 0, views: 0 }
 
   const { openPath } = useDownloads()
@@ -114,6 +116,14 @@ export const GameCard = memo(function GameCard({
       window.removeEventListener("uc_nsfw_pref", onPreferenceChange)
     }
   }, [])
+
+  // Session reveal: in-memory only — resets on page reload, never persisted to storage.
+  useEffect(() => {
+    const checkSession = () => setSessionRevealed(nsfwRevealedAppids.has(game.appid))
+    checkSession()
+    window.addEventListener("uc_nsfw_session_changed", checkSession)
+    return () => window.removeEventListener("uc_nsfw_session_changed", checkSession)
+  }, [game.appid])
 
   useEffect(() => {
     let mounted = true
@@ -520,21 +530,34 @@ export const GameCard = memo(function GameCard({
             <img
               src={proxyImageUrl((typeof navigator !== 'undefined' && !navigator.onLine && previewImage) ? previewImage : game.image) || "./banner.png"}
               alt={game.name}
-              className={`h-full w-full object-cover transition-all duration-700 ease-in-out group-hover:scale-110 ${isNSFW
-                ? (allowNsfwReveal ? "blur-md group-hover:blur-none" : "blur-xl brightness-50")
-                : (imageLoaded ? "" : "blur-lg")
+              className={`h-full w-full object-cover transition-all duration-700 ease-in-out group-hover:scale-110 ${
+                isNSFW && !(sessionRevealed || allowNsfwReveal)
+                  ? "blur-xl brightness-50"
+                  : (isNSFW ? "" : (imageLoaded ? "" : "blur-lg"))
                 }`}
               loading="lazy"
               onLoad={() => setImageLoaded(true)}
             />
 
-            {/* NSFW Overlay */}
-            {isNSFW && (
-              <div
-                className={`absolute inset-0 z-20 flex items-center justify-center bg-black/40 transition-opacity duration-300 ${allowNsfwReveal ? "group-hover:opacity-0" : ""
-                  }`}
-              >
+            {/* NSFW overlay: show Reveal button when not revealed */}
+            {isNSFW && !(sessionRevealed || allowNsfwReveal) && (
+              <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/50 gap-2">
                 <div className="bg-red-600 text-white px-3 py-1 rounded-full text-xs font-bold">18+</div>
+                <button
+                  type="button"
+                  aria-label={`Reveal NSFW cover for ${game.name}`}
+                  className="mt-1 bg-white/10 hover:bg-white/20 focus:bg-white/25 text-white text-xs font-semibold px-3 py-1.5 rounded-lg border border-white/20 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
+                  onClick={(e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    nsfwRevealedAppids.add(game.appid)
+                    setSessionRevealed(true)
+                    window.dispatchEvent(new Event('uc_nsfw_session_changed'))
+                  }}
+                >
+                  Reveal
+                </button>
+                <span className="text-white/50 text-[10px]">Tap to reveal</span>
               </div>
             )}
 

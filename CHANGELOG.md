@@ -1,5 +1,30 @@
 # Changelog
 
+## Version 1.1.3 - 2026-02-24
+
+### Features & Improvements
+
+- **Simplified NSFW reveal system** — replaced the three-state hover-based system with a clearer two-state toggle:
+  - **Toggle OFF**: images are blurred (`blur-xl brightness-50`) with a "Reveal" button overlay that unblurs the specific game for the current page session
+  - **Toggle ON**: NSFW covers show immediately with no blur — no more intermediate hover-to-unblur state that looked identical to OFF
+  - **Session reveals now truly ephemeral** — clicking "Reveal" on a blurred cover now adds the game to an in-memory `Set` instead of `sessionStorage`, so reveals reset on every page refresh (not just when closing the tab). This prevents the "mom walked in" scenario where refreshing the page is the natural escape hatch.
+  - **Updated settings label** — changed from "NSFW hover reveal / Allow NSFW covers to unblur on hover" to **"Show NSFW covers / Unblur NSFW game cover images"** to reflect the new direct-reveal behavior
+
+### Files touched
+
+#### Web (union-crax.xyz)
+- `lib/nsfw-session.ts` (new shared in-memory Set)
+- `components/game-card.tsx`
+- `components/game-card-compact.tsx`
+- `components/quick-view-modal.tsx`
+- `app/settings/page.tsx`
+
+#### Desktop (UnionCrax.Direct)
+- `renderer/src/lib/nsfw-session.ts` (new shared in-memory Set)
+- `renderer/src/components/GameCard.tsx`
+- `renderer/src/components/GameCardCompact.tsx`
+- `renderer/src/app/pages/SettingsPage.tsx`
+
 ## Version 1.1.2 - 2026-02-21
 
 ### Features & Improvements

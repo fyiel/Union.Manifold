@@ -4,14 +4,7 @@ import { GameCardSkeleton } from "@/components/GameCardSkeleton"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import {
-  Pagination,
-  PaginationContent,
-  PaginationItem,
-  PaginationLink,
-  PaginationNext,
-  PaginationPrevious,
-} from "@/components/ui/pagination"
+import { PaginationBar } from "@/components/PaginationBar"
 import { useGamesData } from "@/hooks/use-games"
 import type { Game } from "@/lib/types"
 import { useDownloads } from "@/context/downloads-context"
@@ -577,37 +570,12 @@ export function LibraryPage() {
                 </div>
               ))}
             </div>
-            {installedTotalPages > 1 && (
-              <Pagination>
-                <PaginationContent>
-                  <PaginationItem>
-                    <PaginationPrevious
-                      onClick={() => setInstalledPage(Math.max(1, installedPage - 1))}
-                      className={installedPage === 1 ? "pointer-events-none opacity-50" : "cursor-pointer"}
-                    />
-                  </PaginationItem>
-                  {Array.from({ length: installedTotalPages }, (_, index) => index + 1).map((page) => (
-                    <PaginationItem key={`installed-${page}`}>
-                      <PaginationLink
-                        onClick={() => setInstalledPage(page)}
-                        isActive={installedPage === page}
-                        className="cursor-pointer"
-                      >
-                        {page}
-                      </PaginationLink>
-                    </PaginationItem>
-                  ))}
-                  <PaginationItem>
-                    <PaginationNext
-                      onClick={() => setInstalledPage(Math.min(installedTotalPages, installedPage + 1))}
-                      className={
-                        installedPage === installedTotalPages ? "pointer-events-none opacity-50" : "cursor-pointer"
-                      }
-                    />
-                  </PaginationItem>
-                </PaginationContent>
-              </Pagination>
-            )}
+            <PaginationBar
+              currentPage={installedPage}
+              totalPages={installedTotalPages}
+              onPageChange={setInstalledPage}
+              wrapperClassName="mt-6"
+            />
           </div>
         ) : (
           <div className="rounded-2xl border border-border/60 bg-card/60 p-6 text-sm text-muted-foreground">
@@ -682,37 +650,12 @@ export function LibraryPage() {
                 </div>
               ))}
             </div>
-            {installingTotalPages > 1 && (
-              <Pagination>
-                <PaginationContent>
-                  <PaginationItem>
-                    <PaginationPrevious
-                      onClick={() => setInstallingPage(Math.max(1, installingPage - 1))}
-                      className={installingPage === 1 ? "pointer-events-none opacity-50" : "cursor-pointer"}
-                    />
-                  </PaginationItem>
-                  {Array.from({ length: installingTotalPages }, (_, index) => index + 1).map((page) => (
-                    <PaginationItem key={`installing-${page}`}>
-                      <PaginationLink
-                        onClick={() => setInstallingPage(page)}
-                        isActive={installingPage === page}
-                        className="cursor-pointer"
-                      >
-                        {page}
-                      </PaginationLink>
-                    </PaginationItem>
-                  ))}
-                  <PaginationItem>
-                    <PaginationNext
-                      onClick={() => setInstallingPage(Math.min(installingTotalPages, installingPage + 1))}
-                      className={
-                        installingPage === installingTotalPages ? "pointer-events-none opacity-50" : "cursor-pointer"
-                      }
-                    />
-                  </PaginationItem>
-                </PaginationContent>
-              </Pagination>
-            )}
+            <PaginationBar
+              currentPage={installingPage}
+              totalPages={installingTotalPages}
+              onPageChange={setInstallingPage}
+              wrapperClassName="mt-6"
+            />
           </div>
         ) : (
           <div className="rounded-2xl border border-border/60 bg-card/60 p-6 text-sm text-muted-foreground">
