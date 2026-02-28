@@ -20,7 +20,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { DiscordAvatar } from "@/components/DiscordAvatar"
-import { isStaff, STAFF_ROLES } from "@/lib/staff-roles"
+
 import { PaginationBar } from "@/components/PaginationBar"
 import { apiFetch, apiUrl, getApiBaseUrl } from "@/lib/api"
 import { CommentSkeleton } from "@/components/CommentSkeleton"
@@ -46,6 +46,8 @@ type CommentUser = {
   displayName: string | null
   avatarUrl: string | null
   role?: string | null
+  isStaff?: boolean
+  permissions?: string[]
 }
 
 type ThreadCommentPayload = {
@@ -242,7 +244,6 @@ export function GameComments({
   const itemsPerPage = 10
 
   const remaining = useMemo(() => 1000 - body.length, [body.length])
-  const canModerate = useMemo(() => (user ? isStaff(user.discordId) : false), [user])
   const sortedComments = useMemo(() => sortThread(comments, 0, sortMode, filterMode), [comments, sortMode, filterMode])
   const totalPages = Math.max(1, Math.ceil(sortedComments.length / itemsPerPage))
   const paginatedComments = useMemo(() => {
@@ -501,26 +502,7 @@ export function GameComments({
     }
   }
 
-  const togglePin = async (id: string, nextPinned: boolean) => {
-    setPinning(id)
-    setError(null)
-    try {
-      const res = await apiFetch(`/api/comments/${appid}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id, pinned: nextPinned }),
-      })
-      const data = await res.json().catch(() => ({}))
-      if (!res.ok) {
-        throw new Error(data?.error || "Failed to update pin")
-      }
-      setComments((prev) => updateCommentInTree(prev, id, (comment) => ({ ...comment, pinned: nextPinned })))
-    } catch (e: any) {
-      setError(e?.message || "Failed to update pin")
-    } finally {
-      setPinning(null)
-    }
-  }
+
 
   const toggleLike = async (id: string, liked: boolean) => {
     setLikingId(id)
@@ -608,7 +590,7 @@ export function GameComments({
     const isPinned = Boolean(comment.pinned)
     const isDeleted = Boolean(comment.deletedBy)
     const isContentRevealed = revealedDeletedIds.has(comment.id)
-    const authorRole = comment.author?.discordId && STAFF_ROLES[comment.author.discordId]
+    const authorRole = comment.author?.role
 
     const toggleRevealDeleted = () => {
       setRevealedDeletedIds((prev) => {
@@ -631,9 +613,8 @@ export function GameComments({
         <div
           key={comment.id}
           id={`comment-${comment.id}`}
-          className={`rounded-2xl border border-border/40 bg-card/20 p-4 sm:p-5 transition-shadow ${
-            depth > 0 ? "ml-4 sm:ml-10" : ""
-          } ${isHighlighted ? "shadow-lg shadow-primary/30" : ""}`}
+          className={`rounded-2xl border border-border/40 bg-card/20 p-4 sm:p-5 transition-shadow ${depth > 0 ? "ml-4 sm:ml-10" : ""
+            } ${isHighlighted ? "shadow-lg shadow-primary/30" : ""}`}
         >
           <div className="flex items-start gap-3">
             <div className="h-10 w-10 rounded-full bg-muted/30 flex items-center justify-center shrink-0">
@@ -697,9 +678,8 @@ export function GameComments({
       <div
         key={comment.id}
         id={`comment-${comment.id}`}
-        className={`rounded-2xl border border-border/60 bg-card/40 p-4 sm:p-5 transition-shadow ${
-          depth > 0 ? "ml-4 sm:ml-10" : ""
-        } ${isPinned ? "ring-1 ring-primary/40" : ""} ${isHighlighted ? "shadow-lg shadow-primary/30" : ""}`}
+        className={`rounded-2xl border border-border/60 bg-card/40 p-4 sm:p-5 transition-shadow ${depth > 0 ? "ml-4 sm:ml-10" : ""
+          } ${isPinned ? "ring-1 ring-primary/40" : ""} ${isHighlighted ? "shadow-lg shadow-primary/30" : ""}`}
       >
         <div className="flex items-start gap-3">
           <DiscordAvatar
@@ -775,19 +755,7 @@ export function GameComments({
                 <Flag className="h-4 w-4 mr-1" />
                 Report
               </Button>
-              {canModerate && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-8 rounded-full px-3"
-                  onClick={() => togglePin(comment.id, !comment.pinned)}
-                  disabled={pinning === comment.id}
-                >
-                  <Pin className="h-4 w-4 mr-1" />
-                  {comment.pinned ? "Unpin" : "Pin"}
-                </Button>
-              )}
-              {(canModerate || user?.discordId === comment.author?.discordId) && (
+              {user?.discordId && user?.discordId === comment.author?.discordId && (
                 <Button
                   variant="ghost"
                   size="sm"
