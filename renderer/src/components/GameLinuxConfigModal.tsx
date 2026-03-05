@@ -221,13 +221,16 @@ export function GameLinuxConfigModal({ open, appid, gameName, onClose }: Props) 
                     value={config.protonPrefix || ''}
                     onChange={(e) => setConfig({ ...config, protonPrefix: e.target.value })}
                     onBlur={() => save(config)}
-                    placeholder="Inherit from global"
+                    placeholder={`Auto: ~/.local/share/uc-proton/${appid || 'APPID'}`}
                     className="flex-1 h-9 text-sm"
                   />
                   <Button variant="outline" size="sm" className="h-9" onClick={handlePickProtonPrefix}>
                     <FolderOpen className="h-4 w-4" />
                   </Button>
                 </div>
+                <p className="text-[10px] text-muted-foreground/60">
+                  Leave empty to use automatic per-game prefix (~/.local/share/uc-proton/{appid})
+                </p>
               </div>
 
               {/* VR Override */}

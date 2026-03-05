@@ -117,6 +117,8 @@ contextBridge.exposeInMainWorld('ucLinux', {
   runWinetricks: (packages) => ipcRenderer.invoke('uc:linux-winetricks', packages),
   runProtontricks: (appId, packages) => ipcRenderer.invoke('uc:linux-protontricks', appId, packages),
   createPrefix: (prefixPath, arch) => ipcRenderer.invoke('uc:linux-create-prefix', prefixPath, arch),
+  initDefaultProtonPrefix: (sourcePrefixPath) => ipcRenderer.invoke('uc:linux-init-default-proton-prefix', sourcePrefixPath),
+  getDefaultProtonPrefixPath: () => ipcRenderer.invoke('uc:linux-get-default-proton-prefix-path'),
   pickPrefixDir: () => ipcRenderer.invoke('uc:linux-pick-prefix-dir'),
   pickBinary: () => ipcRenderer.invoke('uc:linux-pick-binary'),
   pickSo: () => ipcRenderer.invoke('uc:linux-pick-so'),
