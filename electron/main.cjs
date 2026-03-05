@@ -4148,8 +4148,11 @@ function normalizeRunnerPath(candidate, fallback) {
  * Ensure the Proton environment is properly set up.
  * Proton requires STEAM_COMPAT_DATA_PATH and STEAM_COMPAT_CLIENT_INSTALL_PATH.
  * If not set, auto-detect from Steam installation.
+ * 
+ * @param {object} env - The environment object to modify
+ * @param {string} [appid] - Optional game appid for per-game prefix (like Steam's compatdata)
  */
-function ensureProtonEnv(env) {
+function ensureProtonEnv(env, appid) {
   if (process.platform !== 'linux') return env
   const result = { ...env }
 
@@ -4169,18 +4172,25 @@ function ensureProtonEnv(env) {
     }
   }
 
-  // Auto-create a default STEAM_COMPAT_DATA_PATH if not set
-  // Proton will fail without this — use a per-game prefix under ~/.local/share/uc-proton/
+  // Auto-create STEAM_COMPAT_DATA_PATH - use per-game prefix if appid provided
+  // This mimics Steam's compatdata/{appid} structure
   if (!result.STEAM_COMPAT_DATA_PATH) {
     const home = app.getPath('home')
-    const defaultPrefix = path.join(home, '.local', 'share', 'uc-proton', 'default')
+    let prefixPath
+    if (appid) {
+      // Per-game prefix: ~/.local/share/uc-proton/{appid}
+      prefixPath = path.join(home, '.local', 'share', 'uc-proton', String(appid))
+    } else {
+      // Default prefix: ~/.local/share/uc-proton/default
+      prefixPath = path.join(home, '.local', 'share', 'uc-proton', 'default')
+    }
     try {
-      if (!fs.existsSync(defaultPrefix)) {
-        fs.mkdirSync(defaultPrefix, { recursive: true })
+      if (!fs.existsSync(prefixPath)) {
+        fs.mkdirSync(prefixPath, { recursive: true })
       }
     } catch {}
-    result.STEAM_COMPAT_DATA_PATH = defaultPrefix
-    ucLog(`Proton: auto-set STEAM_COMPAT_DATA_PATH=${defaultPrefix}`)
+    result.STEAM_COMPAT_DATA_PATH = prefixPath
+    ucLog(`Proton: auto-set STEAM_COMPAT_DATA_PATH=${prefixPath}${appid ? ' (per-game)' : ''}`)
   }
 
   return result
@@ -4208,6 +4218,18 @@ function resolveLaunchCommand(exePath) {
         ucLog('Proton mode selected but no proton path configured — falling back to wine', 'warn')
         return { command: winePath, args: [exePath], cwd }
       }
+      
+      // Validate proton executable exists
+      const protonExists = protonPath.includes('/') || protonPath.includes('\\') 
+        ? fs.existsSync(protonPath) 
+        : true // Bare command will be resolved at spawn time
+      
+      if (!protonExists) {
+        ucLog(`Proton executable not found: ${protonPath}, falling back to wine`, 'error')
+        return { command: winePath, args: [exePath], cwd }
+      }
+      
+      ucLog(`Proton launch (global): path=${protonPath} exe=${exePath}`)
       return { command: protonPath, args: ['run', exePath], cwd, needsProtonEnv: true }
     }
     if (mode === 'wine' || mode === 'auto') {
@@ -4248,6 +4270,7 @@ function buildLinuxGameEnv(baseEnv) {
   }
 
   // If Proton mode is active, ensure required env vars are set
+  // Note: appid is not available in global context, will use default prefix
   const mode = String(settings.linuxLaunchMode || 'auto').toLowerCase()
   if (mode === 'proton') {
     const withProton = ensureProtonEnv(env)
@@ -4527,6 +4550,50 @@ ipcMain.handle('uc:linux-create-prefix', async (_event, prefixPath, arch) => {
     return result
   } catch (err) {
     ucLog(`create-prefix failed: ${err.message}`, 'error')
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Initialize default proton prefix (copies from source or creates fresh)
+ipcMain.handle('uc:linux-init-default-proton-prefix', async (_event, sourcePrefixPath) => {
+  try {
+    if (process.platform !== 'linux') return { ok: false, error: 'not-linux' }
+    const home = app.getPath('home')
+    const defaultPrefix = path.join(home, '.local', 'share', 'uc-proton', 'default')
+    
+    // If default already exists, don't overwrite
+    if (fs.existsSync(defaultPrefix)) {
+      ucLog(`Default proton prefix already exists at ${defaultPrefix}`)
+      return { ok: true, path: defaultPrefix, alreadyExisted: true }
+    }
+    
+    // If source path provided and exists, copy it
+    if (sourcePrefixPath && typeof sourcePrefixPath === 'string') {
+      if (fs.existsSync(sourcePrefixPath)) {
+        ucLog(`Copying default proton prefix from ${sourcePrefixPath} to ${defaultPrefix}`)
+        await fs.promises.cp(sourcePrefixPath, defaultPrefix, { recursive: true })
+        return { ok: true, path: defaultPrefix, copied: true }
+      }
+    }
+    
+    // Create fresh default prefix directory
+    ucLog(`Creating default proton prefix at ${defaultPrefix}`)
+    fs.mkdirSync(defaultPrefix, { recursive: true })
+    return { ok: true, path: defaultPrefix, created: true }
+  } catch (err) {
+    ucLog(`init-default-proton-prefix failed: ${err.message}`, 'error')
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Get default proton prefix path
+ipcMain.handle('uc:linux-get-default-proton-prefix-path', async () => {
+  try {
+    if (process.platform !== 'linux') return { ok: false, error: 'not-linux' }
+    const home = app.getPath('home')
+    const defaultPrefix = path.join(home, '.local', 'share', 'uc-proton', 'default')
+    return { ok: true, path: defaultPrefix }
+  } catch (err) {
     return { ok: false, error: err.message }
   }
 })
@@ -5353,9 +5420,21 @@ function resolveLaunchCommandWithGameConfig(exePath, appid) {
   if (isExe) {
     if (mode === 'proton') {
       if (!protonPath) {
-        ucLog(`Proton mode for ${appid} but no proton path — falling back to wine`, 'warn')
+        ucLog(`Proton mode for ${appid} but no proton path configured — falling back to wine`, 'warn')
         return { command: winePath, args: [exePath], cwd }
       }
+      
+      // Validate proton executable exists
+      const protonExists = protonPath.includes('/') || protonPath.includes('\\') 
+        ? fs.existsSync(protonPath) 
+        : true // Bare command will be resolved at spawn time
+      
+      if (!protonExists) {
+        ucLog(`Proton executable not found: ${protonPath}, falling back to wine`, 'error')
+        return { command: winePath, args: [exePath], cwd }
+      }
+      
+      ucLog(`Proton launch: path=${protonPath} exe=${exePath} prefix=~/.local/share/uc-proton/${appid || 'default'}`)
       return { command: protonPath, args: ['run', exePath], cwd, needsProtonEnv: true }
     }
     if (mode === 'wine' || mode === 'auto') {
@@ -5411,11 +5490,12 @@ function buildGameLaunchEnv(appid, baseEnv) {
   }
 
   // If effective mode is Proton, ensure required Proton env vars are set
+  // Pass appid to enable per-game prefix creation
   const effectiveMode = (gameConfig.launchMode && gameConfig.launchMode !== 'inherit')
     ? gameConfig.launchMode
     : globalSettings.linuxLaunchMode || 'auto'
   if (String(effectiveMode).toLowerCase() === 'proton') {
-    const withProton = ensureProtonEnv(env)
+    const withProton = ensureProtonEnv(env, appid)
     Object.assign(env, withProton)
   }
 
