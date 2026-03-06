@@ -2927,16 +2927,19 @@ function createWindow() {
                 const totalBytes2 = totalBytesOverride != null ? totalBytesOverride : st2 ? st2.size : 0
                 if (totalBytes2 > 0) sendDownloadUpdate(mainWindow, { downloadId, status: 'extracting', receivedBytes: totalBytes2, totalBytes: totalBytes2, speedBps: 0, etaSeconds: 0, filename: path.basename(archiveToExtract), savePath: archiveToExtract, appid: entry?.appid || null })
               } catch (e) { }
+              // Clean up archives first (delete the archive files)
               try {
                 if (partFiles && partFiles.length) {
                   for (const part of partFiles) {
                     try { if (fs.existsSync(part)) fs.unlinkSync(part) } catch (e) { }
                   }
                   uc_log(`deleted multipart parts for ${archiveToExtract}`)
-                } else if (fs.existsSync(archiveToExtract)) {
+                } else if (archiveToExtract && fs.existsSync(archiveToExtract)) {
                   try { fs.unlinkSync(archiveToExtract); uc_log(`deleted archive ${archiveToExtract} from installing folder`) } catch (e) { uc_log(`failed to delete archive: ${String(e)}`) }
                 }
-              } catch (e) { }
+              } catch (e) {
+                uc_log(`error deleting archive: ${String(e)}`)
+              }
 
               // Move extracted files from installing folder to installed folder
               try {
@@ -2948,18 +2951,46 @@ function createWindow() {
                 uc_log(`failed to migrate extracted files: ${String(e)}`)
               }
 
-              // Clean up installing folder and manifest after successful extraction
+              // Update manifest status BEFORE deleting the installing folder to ensure it's saved
               try {
-                try {
-                  if (entry?.appid) updateInstallingManifestStatus(entry.appid, 'completed', null)
-                } catch (e) { }
-                if (fs.existsSync(installingRoot)) {
-                  fs.rmSync(installingRoot, { recursive: true, force: true })
-                  uc_log(`deleted installing folder for ${entry?.appid}`)
-                }
+                if (entry?.appid) updateInstallingManifestStatus(entry.appid, 'completed', null)
               } catch (e) {
-                uc_log(`failed to delete installing folder: ${String(e)}`)
+                uc_log(`failed to update installing manifest status: ${String(e)}`)
               }
+
+              // Use async rm with timeout to prevent hanging on Windows file locks
+              // The folder will be cleaned up on next app restart if deletion fails
+              const deleteInstallingFolder = () => {
+                return new Promise((resolve) => {
+                  if (!fs.existsSync(installingRoot)) {
+                    uc_log(`installing folder already gone for ${entry?.appid}`)
+                    resolve()
+                    return
+                  }
+                  // Try quick delete first
+                  try {
+                    fs.rmSync(installingRoot, { recursive: true, force: true })
+                    uc_log(`deleted installing folder for ${entry?.appid}`)
+                    resolve()
+                  } catch (e) {
+                    uc_log(`initial rmSync failed, trying async: ${String(e)}`)
+                    // Fall back to async with timeout
+                    fs.promises.rm(installingRoot, { recursive: true, force: true, maxRetries: 3, retryDelayMs: 500 })
+                      .then(() => {
+                        uc_log(`deleted installing folder async for ${entry?.appid}`)
+                        resolve()
+                      })
+                      .catch((err) => {
+                        uc_log(`failed to delete installing folder (non-fatal): ${String(err)}`)
+                        // Don't reject - this is not fatal, folder will persist until next restart
+                        resolve()
+                      })
+                  }
+                })
+              }
+
+              // Execute async folder deletion without blocking
+              deleteInstallingFolder()
 
               sendDownloadUpdate(mainWindow, { downloadId, status: 'extracted', extracted: extractedFiles, savePath: null, appid: entry?.appid || null })
               try {
@@ -3026,18 +3057,38 @@ function createWindow() {
                 uc_log(`failed to migrate non-archive extras: ${String(e)}`)
               }
 
-              // Clean up installing folder after moving to installed
+              // Update manifest status BEFORE deleting the installing folder
               try {
-                try {
-                  if (entry?.appid) updateInstallingManifestStatus(entry.appid, 'completed', null)
-                } catch (e) { }
-                if (fs.existsSync(installingRoot)) {
-                  fs.rmSync(installingRoot, { recursive: true, force: true })
-                  uc_log(`deleted installing folder for non-archive ${entry?.appid}`)
-                }
-              } catch (e) {
-                uc_log(`failed to delete installing folder for non-archive: ${String(e)}`)
+                if (entry?.appid) updateInstallingManifestStatus(entry.appid, 'completed', null)
+              } catch (e) { }
+
+              // Clean up installing folder after moving to installed (async to prevent hanging)
+              const deleteInstallingFolderNonArchive = () => {
+                return new Promise((resolve) => {
+                  if (!fs.existsSync(installingRoot)) {
+                    uc_log(`installing folder already gone for non-archive ${entry?.appid}`)
+                    resolve()
+                    return
+                  }
+                  try {
+                    fs.rmSync(installingRoot, { recursive: true, force: true })
+                    uc_log(`deleted installing folder for non-archive ${entry?.appid}`)
+                    resolve()
+                  } catch (e) {
+                    uc_log(`initial rmSync failed for non-archive, trying async: ${String(e)}`)
+                    fs.promises.rm(installingRoot, { recursive: true, force: true, maxRetries: 3, retryDelayMs: 500 })
+                      .then(() => {
+                        uc_log(`deleted installing folder async for non-archive ${entry?.appid}`)
+                        resolve()
+                      })
+                      .catch((err) => {
+                        uc_log(`failed to delete installing folder for non-archive (non-fatal): ${String(err)}`)
+                        resolve()
+                      })
+                  }
+                })
               }
+              deleteInstallingFolderNonArchive()
 
               // update installed manifest in the installed folder
               try {
