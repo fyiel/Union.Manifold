@@ -11,18 +11,11 @@ import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
-import {
-  Pagination,
-  PaginationContent,
-  PaginationItem,
-  PaginationLink,
-  PaginationNext,
-  PaginationPrevious,
-} from "@/components/ui/pagination"
-import { Filter, Wifi, X, SlidersHorizontal, RefreshCw, Heart, Star } from "lucide-react"
+import { PaginationBar } from "@/components/PaginationBar"
+import { Filter, Wifi, X, SlidersHorizontal, RefreshCw, Heart, Star, ChevronRight } from "lucide-react"
 import { useDebounce } from "@/hooks/use-debounce"
 import { parseSize } from "@/lib/search-utils"
-import { hasOnlineMode, generateErrorCode, ErrorTypes } from "@/lib/utils"
+import { hasOnlineMode, generateErrorCode, ErrorTypes, proxyImageUrl } from "@/lib/utils"
 import { addSearchToHistory } from "@/lib/user-history"
 import { APIErrorBoundary } from "@/components/error-boundary"
 import { GamesGridSkeleton } from "@/components/api-fallback"
@@ -97,6 +90,7 @@ export function SearchPage() {
   const [refreshKey, setRefreshKey] = useState(0)
   const [gamesError, setGamesError] = useState<{ type: string; message: string; code: string } | null>(null)
   const [statsError, setStatsError] = useState<{ type: string; message: string; code: string } | null>(null)
+  const [didYouMeanResults, setDidYouMeanResults] = useState<any[]>([])
 
   const [currentPage, setCurrentPage] = useState(1)
   const itemsPerPage = 20
@@ -148,6 +142,20 @@ export function SearchPage() {
     fetchMeta()
   }, [])
 
+  useEffect(() => {
+    const q = appliedFilters.searchTerm.trim()
+    if (!loading && q.length >= 2 && games.length === 0) {
+      apiFetch(`/api/games/suggestions?q=${encodeURIComponent(q)}&limit=8&nsfw=true`)
+        .then((r) => r.ok ? r.json() : null)
+        .then((data) => {
+          if (data) setDidYouMeanResults(Array.isArray(data.didYouMean) ? data.didYouMean : [])
+        })
+        .catch(() => {})
+    } else {
+      setDidYouMeanResults([])
+    }
+  }, [loading, games, appliedFilters.searchTerm])
+
   const fetchMeta = async () => {
     try {
       const res = await apiFetch("/api/meta")
@@ -173,9 +181,13 @@ export function SearchPage() {
       appliedFilters.developers.forEach((d) => params.append("developers", d))
       if (appliedFilters.online) params.set("online", "true")
 
-      const allowNsfw = Boolean(appliedFilters.nsfwOnly)
-      params.set("nsfw", allowNsfw ? "true" : "false")
-      // NSFW mode controls inclusion via the API; it does not force an NSFW-only filter.
+      // nsfwOnly=true  → send dedicated param so server filters to NSFW-only results.
+      // nsfwOnly=false → send nsfw=false so server excludes NSFW from default results.
+      if (appliedFilters.nsfwOnly) {
+        params.set("nsfwOnly", "true")
+      } else {
+        params.set("nsfw", "false")
+      }
 
       if (appliedFilters.sortBy) params.set("sort", appliedFilters.sortBy)
 
@@ -493,19 +505,18 @@ export function SearchPage() {
 
   const applyFilters = useCallback(async () => {
     setFiltering(true)
-    await new Promise((resolve) => setTimeout(resolve, 50))
 
+    // Apply the draft filters. The useEffect on appliedFilters will trigger
+    // loadGames with the correct (updated) state, avoiding the stale-closure
+    // race condition that occurred when refreshGames() was called here directly.
     setAppliedFilters({ ...draftFilters })
-
-    await refreshGames()
 
     if (draftFilters.searchTerm.trim()) {
       addSearchToHistory(draftFilters.searchTerm.trim())
     }
 
-    await new Promise((resolve) => setTimeout(resolve, 100))
-    setFiltering(false)
-  }, [draftFilters, refreshGames])
+    setTimeout(() => setFiltering(false), 200)
+  }, [draftFilters])
 
   const clearFilters = useCallback(() => {
     const clearedFilters = {
@@ -664,8 +675,12 @@ export function SearchPage() {
                           <label className="text-sm font-medium">NSFW Mode</label>
                           <div className="flex items-center justify-between gap-3 rounded-xl border border-border/60 bg-background/40 px-4 py-3">
                             <div className="space-y-0.5">
-                              <p className="text-sm font-semibold text-foreground">NSFW mode</p>
-                              <p className="text-xs text-muted-foreground">Show only NSFW results.</p>
+                              <p className="text-sm font-semibold text-foreground">NSFW Mode</p>
+                              <p className="text-xs text-muted-foreground">
+                                {draftFilters.nsfwOnly
+                                  ? "Show only NSFW results"
+                                  : "Hide NSFW from search results"}
+                              </p>
                             </div>
                             <Switch
                               checked={Boolean(draftFilters.nsfwOnly)}
@@ -1067,52 +1082,12 @@ export function SearchPage() {
                     ))}
                   </div>
 
-                  {totalPages > 1 && (
-                    <div className="mt-6 sm:mt-8 overflow-x-auto">
-                      <Pagination>
-                        <PaginationContent className="min-w-max">
-                          <PaginationItem>
-                            <PaginationPrevious
-                              onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
-                              className={currentPage === 1 ? "pointer-events-none opacity-50" : "cursor-pointer"}
-                            />
-                          </PaginationItem>
-
-                          {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-                            let pageNumber
-                            if (totalPages <= 5) {
-                              pageNumber = i + 1
-                            } else if (currentPage <= 3) {
-                              pageNumber = i + 1
-                            } else if (currentPage >= totalPages - 2) {
-                              pageNumber = totalPages - 4 + i
-                            } else {
-                              pageNumber = currentPage - 2 + i
-                            }
-
-                            return (
-                              <PaginationItem key={pageNumber}>
-                                <PaginationLink
-                                  onClick={() => setCurrentPage(pageNumber)}
-                                  isActive={currentPage === pageNumber}
-                                  className="cursor-pointer"
-                                >
-                                  {pageNumber}
-                                </PaginationLink>
-                              </PaginationItem>
-                            )
-                          })}
-
-                          <PaginationItem>
-                            <PaginationNext
-                              onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
-                              className={currentPage === totalPages ? "pointer-events-none opacity-50" : "cursor-pointer"}
-                            />
-                          </PaginationItem>
-                        </PaginationContent>
-                      </Pagination>
-                    </div>
-                  )}
+                  <PaginationBar
+                    currentPage={currentPage}
+                    totalPages={totalPages}
+                    onPageChange={setCurrentPage}
+                    wrapperClassName="mt-6 sm:mt-8 overflow-x-auto"
+                  />
                 </div>
 
                 {filteredGames.length === 0 && games.length === 0 && (
@@ -1140,6 +1115,40 @@ export function SearchPage() {
                               No games match your search criteria. Try adjusting your filters or search terms.
                             </p>
                           </div>
+                          {didYouMeanResults.length > 0 && (
+                            <div className="w-full mt-2 text-left">
+                              <p className="text-xs uppercase tracking-wide text-muted-foreground mb-3">Did you mean</p>
+                              <div className="flex flex-col gap-1">
+                                {didYouMeanResults.map((game) => (
+                                  <button
+                                    key={game.appid}
+                                    type="button"
+                                    className="group flex items-center gap-3 rounded-xl px-3 py-2 text-left transition-all duration-200 hover:bg-foreground/5"
+                                    onClick={() => navigate(`/game/${game.appid}`)}
+                                  >
+                                    <div className="h-12 w-12 flex-shrink-0 overflow-hidden rounded-lg bg-muted/40">
+                                      {game.image ? (
+                                        <img
+                                          src={proxyImageUrl(game.image)}
+                                          alt={game.name}
+                                          className="h-full w-full object-cover"
+                                        />
+                                      ) : (
+                                        <div className="h-full w-full bg-muted" />
+                                      )}
+                                    </div>
+                                    <div className="min-w-0 flex-1">
+                                      <div className="text-sm font-semibold text-foreground line-clamp-1">{game.name}</div>
+                                      {game.developer && (
+                                        <div className="text-xs text-muted-foreground line-clamp-1">by {game.developer}</div>
+                                      )}
+                                    </div>
+                                    <ChevronRight className="h-4 w-4 text-muted-foreground transition-transform duration-200 group-hover:translate-x-1" />
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
