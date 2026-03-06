@@ -1,4 +1,4 @@
-const { app, BrowserWindow, shell, ipcMain, dialog, Tray, Menu, nativeImage } = require('electron')
+const { app, BrowserWindow, shell, ipcMain, dialog, Tray, Menu, nativeImage, globalShortcut } = require('electron')
 const path = require('node:path')
 const fs = require('node:fs')
 const crypto = require('node:crypto')
@@ -83,6 +83,177 @@ const globalDownloadQueue = []
 const cancelledDownloadIds = new Set()
 const activeExtractions = new Set()
 const runningGames = new Map()
+
+// ============================================================
+// In-Game Overlay System (Steam-like)
+// ============================================================
+
+let overlayWindow = null
+let overlayEnabled = true
+let overlayHotkey = 'Shift+Tab'
+let currentOverlayAppid = null
+let overlayAutoShow = true
+
+// Create the overlay window (transparent, always on top, click-through capable)
+function createOverlayWindow() {
+  if (overlayWindow && !overlayWindow.isDestroyed()) {
+    return overlayWindow
+  }
+
+  // Get primary display dimensions
+  const primaryDisplay = require('electron').screen.getPrimaryDisplay()
+  const { width, height } = primaryDisplay.workAreaSize
+
+  overlayWindow = new BrowserWindow({
+    width: width,
+    height: height,
+    x: 0,
+    y: 0,
+    frame: false,
+    transparent: true,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    resizable: false,
+    movable: false,
+    focusable: true,
+    show: false,
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      preload: path.join(__dirname, 'preload.cjs'),
+      webSecurity: true
+    }
+  })
+
+  // Load the overlay page
+  if (isDev) {
+    overlayWindow.loadURL('http://localhost:5173/#/overlay')
+  } else {
+    overlayWindow.loadFile(path.join(__dirname, '..', 'renderer', 'dist', 'index.html'), { hash: '/overlay' })
+  }
+
+  // Make the overlay transparent and ignore mouse events when hidden
+  overlayWindow.setIgnoreMouseEvents(true, { forward: true })
+  overlayWindow.setVisibleOnAllWorkspaces(true)
+
+  overlayWindow.on('closed', () => {
+    overlayWindow = null
+    currentOverlayAppid = null
+  })
+
+  ucLog('Overlay window created')
+  return overlayWindow
+}
+
+// Show the overlay window
+function showOverlay(appid = null) {
+  if (!overlayEnabled) return
+  if (!overlayWindow || overlayWindow.isDestroyed()) {
+    createOverlayWindow()
+  }
+  
+  if (overlayWindow && !overlayWindow.isDestroyed()) {
+    currentOverlayAppid = appid
+    overlayWindow.show()
+    overlayWindow.focus()
+    overlayWindow.setIgnoreMouseEvents(false)
+    
+    // Notify renderer
+    overlayWindow.webContents.send('uc:overlay-show', { appid })
+    
+    // Notify main window
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('uc:overlay-state-changed', { visible: true, appid })
+    }
+    
+    ucLog(`Overlay shown for game: ${appid || 'unknown'}`)
+  }
+}
+
+// Hide the overlay window
+function hideOverlay() {
+  if (overlayWindow && !overlayWindow.isDestroyed()) {
+    overlayWindow.hide()
+    overlayWindow.setIgnoreMouseEvents(true, { forward: true })
+    
+    // Notify renderer
+    overlayWindow.webContents.send('uc:overlay-hide', {})
+    
+    // Notify main window
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('uc:overlay-state-changed', { visible: false, appid: currentOverlayAppid })
+    }
+    
+    ucLog('Overlay hidden')
+  }
+}
+
+// Toggle the overlay visibility
+function toggleOverlay(appid = null) {
+  if (!overlayWindow || overlayWindow.isDestroyed() || !overlayWindow.isVisible()) {
+    showOverlay(appid)
+  } else {
+    hideOverlay()
+  }
+}
+
+// Register global hotkey for overlay
+function registerOverlayHotkey() {
+  // Unregister existing hotkey first
+  globalShortcut.unregisterAll()
+  
+  if (overlayEnabled && overlayHotkey) {
+    const success = globalShortcut.register(overlayHotkey, () => {
+      ucLog(`Overlay hotkey pressed: ${overlayHotkey}`)
+      toggleOverlay(currentOverlayAppid)
+    })
+    
+    if (success) {
+      ucLog(`Overlay hotkey registered: ${overlayHotkey}`)
+    } else {
+      ucLog(`Failed to register overlay hotkey: ${overlayHotkey}`, 'warn')
+    }
+  }
+}
+
+// Update overlay settings
+function updateOverlaySettings(settings) {
+  const newEnabled = settings.overlayEnabled !== undefined ? settings.overlayEnabled : overlayEnabled
+  const newHotkey = settings.overlayHotkey || overlayHotkey
+  const newAutoShow = settings.overlayAutoShow !== undefined ? settings.overlayAutoShow : overlayAutoShow
+  
+  let changed = false
+  
+  if (newEnabled !== overlayEnabled) {
+    overlayEnabled = newEnabled
+    changed = true
+    if (!overlayEnabled) {
+      hideOverlay()
+      globalShortcut.unregisterAll()
+    }
+  }
+  
+  if (newHotkey !== overlayHotkey) {
+    overlayHotkey = newHotkey
+    changed = true
+  }
+  
+  if (newAutoShow !== overlayAutoShow) {
+    overlayAutoShow = newAutoShow
+    changed = true
+  }
+  
+  if (changed && overlayEnabled) {
+    registerOverlayHotkey()
+  }
+}
+
+// Check if a game is running and auto-show overlay if enabled
+function checkAndShowOverlayForGame(appid) {
+  if (overlayAutoShow && overlayEnabled && runningGames.has(appid)) {
+    showOverlay(appid)
+  }
+}
 const downloadDirName = 'UnionCrax.Direct'
 const installingDirName = 'installing'
 const installedDirName = 'installed'
@@ -3167,6 +3338,17 @@ app.whenReady().then(() => {
   ensureDownloadDir()
   createWindow()
   createTray()
+  
+  // Initialize overlay system
+  const settings = readSettings()
+  if (settings.overlayEnabled !== false) {
+    overlayEnabled = settings.overlayEnabled !== false
+    overlayHotkey = settings.overlayHotkey || 'Shift+Tab'
+    overlayAutoShow = settings.overlayAutoShow !== false
+    createOverlayWindow()
+    registerOverlayHotkey()
+  }
+  
   updateRpcSettings(readSettings()).catch(() => { })
 
   ucLog(`App ready. Version: ${getAppVersion()}`)
@@ -4973,10 +5155,114 @@ ipcMain.handle('uc:vr-get-settings', () => {
   }
 })
 
+// ============================================================
+// UC Launcher Integration
+// ============================================================
+
+/**
+ * Find the uc.launcher.exe executable.
+ * Checks multiple locations: packaged app resources, app directory, etc.
+ * @returns {string|null} Path to uc.launcher.exe or null if not found
+ */
+function findLauncherExe() {
+  const candidates = []
+
+  // For packaged apps, check in resources
+  if (app.isPackaged) {
+    // Check in resources/launcher folder
+    candidates.push(path.join(process.resourcesPath, 'launcher', 'uc.launcher.exe'))
+    // Check in resources root
+    candidates.push(path.join(process.resourcesPath, 'uc.launcher.exe'))
+  }
+
+  // Check in app directory (where the main exe is)
+  const appDir = path.dirname(app.getPath('exe'))
+  candidates.push(path.join(appDir, 'uc.launcher.exe'))
+  candidates.push(path.join(appDir, 'launcher', 'uc.launcher.exe'))
+
+  // Check in current working directory
+  candidates.push(path.join(process.cwd(), 'uc.launcher.exe'))
+  candidates.push(path.join(process.cwd(), 'launcher', 'uc.launcher.exe'))
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      ucLog(`Found uc.launcher.exe at: ${candidate}`)
+      return candidate
+    }
+  }
+
+  return null
+}
+
+/**
+ * Launch a game using uc.launcher.exe if available.
+ * The launcher will:
+ * 1. Check for <appid>.ini in its directory
+ * 2. If not found, fetch game data from API and save to INI
+ * 3. Read INI and launch the game
+ * @param {string} appid - The game appid
+ * @param {string} exePath - Path to the game executable (optional, for fallback)
+ * @param {string} gameName - Name of the game
+ * @param {boolean} showGameName - Whether to show game name in Discord RPC
+ * @returns {Promise<{ok: boolean, pid?: number, error?: string, method?: string}>}
+ */
+async function launchGameWithLauncher(appid, exePath, gameName, showGameName) {
+  const launcherPath = findLauncherExe()
+
+  // If launcher not found, fall back to direct launch
+  if (!launcherPath) {
+    ucLog('uc.launcher.exe not found, using direct launch')
+    return { ok: false, error: 'launcher-not-found', method: 'direct' }
+  }
+
+  try {
+    ucLog(`Launching game via uc.launcher.exe: ${appid} (${gameName})`)
+
+    // Launch via the launcher - it handles INI creation/fetching automatically
+    const launcherDir = path.dirname(launcherPath)
+    const proc = child_process.spawn(launcherPath, ['-appid', String(appid)], {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true,
+      cwd: launcherDir
+    })
+
+    proc.unref()
+
+    // Register the running game (using launcher path as exePath for tracking)
+    registerRunningGame(appid, launcherPath, proc, gameName, showGameName)
+
+    ucLog(`Game launched via launcher: ${appid} (PID: ${proc.pid})`)
+    return { ok: true, pid: proc.pid, method: 'launcher' }
+  } catch (err) {
+    ucLog(`Launcher launch failed for ${appid}: ${err.message}`, 'error')
+    return { ok: false, error: err.message, method: 'launcher' }
+  }
+}
+
+// IPC: Check if launcher is available
+ipcMain.handle('uc:launcher-available', () => {
+  const launcherPath = findLauncherExe()
+  return { ok: true, available: !!launcherPath, path: launcherPath }
+})
+
 ipcMain.handle('uc:game-exe-launch', async (_event, appid, exePath, gameName, showGameName) => {
   try {
     if (!exePath || typeof exePath !== 'string') return { ok: false }
     ucLog(`Launching game: ${appid} at ${exePath}`)
+
+    // Try to use uc.launcher.exe first if we have an appid
+    if (appid) {
+      const launcherResult = await launchGameWithLauncher(appid, exePath, gameName, showGameName)
+      // If launcher succeeded or was not found (not an error), return result
+      if (launcherResult.ok || launcherResult.method === 'direct') {
+        return launcherResult
+      }
+      // If launcher failed with an error, fall through to direct launch
+      ucLog(`Launcher failed, falling back to direct launch: ${launcherResult.error}`, 'warn')
+    }
+
+    // Direct launch fallback
     try {
       // Use per-game config overrides if available
       const { command, args, cwd } = appid
@@ -5663,6 +5949,163 @@ ipcMain.handle('uc:linux-slssteam-check-game', (_event, appid) => {
     return { ok: true, found: false }
   } catch (err) {
     return { ok: false, error: err.message }
+  }
+})
+
+// ============================================================
+// In-Game Overlay IPC Handlers
+// ============================================================
+
+// IPC: Show overlay
+ipcMain.handle('uc:overlay-show', (_event, appid) => {
+  try {
+    showOverlay(appid)
+    return { ok: true }
+  } catch (err) {
+    ucLog(`Overlay show failed: ${err.message}`, 'error')
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Hide overlay
+ipcMain.handle('uc:overlay-hide', () => {
+  try {
+    hideOverlay()
+    return { ok: true }
+  } catch (err) {
+    ucLog(`Overlay hide failed: ${err.message}`, 'error')
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Toggle overlay
+ipcMain.handle('uc:overlay-toggle', (_event, appid) => {
+  try {
+    toggleOverlay(appid)
+    return { ok: true }
+  } catch (err) {
+    ucLog(`Overlay toggle failed: ${err.message}`, 'error')
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Get overlay status
+ipcMain.handle('uc:overlay-status', () => {
+  try {
+    const visible = overlayWindow && !overlayWindow.isDestroyed() && overlayWindow.isVisible()
+    return { 
+      ok: true, 
+      visible, 
+      appid: currentOverlayAppid,
+      enabled: overlayEnabled 
+    }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Get overlay settings
+ipcMain.handle('uc:overlay-get-settings', () => {
+  try {
+    return { 
+      ok: true, 
+      settings: {
+        overlayEnabled,
+        overlayHotkey,
+        overlayAutoShow
+      }
+    }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Set overlay settings
+ipcMain.handle('uc:overlay-set-settings', (_event, settings) => {
+  try {
+    if (!settings || typeof settings !== 'object') {
+      return { ok: false, error: 'invalid-settings' }
+    }
+    updateOverlaySettings(settings)
+    
+    // Persist settings
+    const currentSettings = readSettings()
+    if (settings.overlayEnabled !== undefined) currentSettings.overlayEnabled = settings.overlayEnabled
+    if (settings.overlayHotkey) currentSettings.overlayHotkey = settings.overlayHotkey
+    if (settings.overlayAutoShow !== undefined) currentSettings.overlayAutoShow = settings.overlayAutoShow
+    writeSettings(currentSettings)
+    
+    return { ok: true }
+  } catch (err) {
+    ucLog(`Overlay settings update failed: ${err.message}`, 'error')
+    return { ok: false, error: err.message }
+  }
+})
+
+// ============================================================
+// Controller Support IPC Handlers
+// ============================================================
+
+let controllerSettings = {
+  enabled: false,
+  controllerType: 'generic',
+  vibrationEnabled: true,
+  deadzone: 0.15,
+  triggerDeadzone: 0.1,
+  buttonLayout: 'default'
+}
+
+// IPC: Get controller settings
+ipcMain.handle('uc:controller-get-settings', () => {
+  try {
+    // Load from settings
+    const settings = readSettings()
+    if (settings.controllerSettings) {
+      controllerSettings = { ...controllerSettings, ...settings.controllerSettings }
+    }
+    return { ok: true, settings: controllerSettings }
+  } catch (err) {
+    ucLog(`Controller get settings failed: ${err.message}`, 'error')
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Set controller settings
+ipcMain.handle('uc:controller-set-settings', (_event, settings) => {
+  try {
+    if (!settings || typeof settings !== 'object') {
+      return { ok: false, error: 'invalid-settings' }
+    }
+    controllerSettings = { ...controllerSettings, ...settings }
+    
+    // Persist to settings
+    const currentSettings = readSettings()
+    currentSettings.controllerSettings = controllerSettings
+    writeSettings(currentSettings)
+    
+    ucLog(`Controller settings updated: ${JSON.stringify(controllerSettings)}`)
+    return { ok: true }
+  } catch (err) {
+    ucLog(`Controller set settings failed: ${err.message}`, 'error')
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Get connected controller info
+ipcMain.handle('uc:controller-get-connected', () => {
+  try {
+    // In a real implementation, this would detect connected gamepads
+    // For now, return a placeholder that no controller is connected
+    // The actual gamepad detection would happen in the renderer using the Gamepad API
+    return { 
+      connected: false, 
+      controllerId: null, 
+      controllerName: null, 
+      controllerType: null 
+    }
+  } catch (err) {
+    ucLog(`Controller get connected failed: ${err.message}`, 'error')
+    return { connected: false, controllerId: null, controllerName: null, controllerType: null }
   }
 })
 

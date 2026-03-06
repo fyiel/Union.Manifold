@@ -32,6 +32,7 @@ contextBridge.exposeInMainWorld('ucDownloads', {
   launchGameExecutable: (appid, exePath, gameName, showGameName) => ipcRenderer.invoke('uc:game-exe-launch', appid, exePath, gameName, showGameName),
   launchGameExecutableAsAdmin: (appid, exePath, gameName, showGameName) => ipcRenderer.invoke('uc:game-exe-launch-admin', appid, exePath, gameName, showGameName),
   getRunningGame: (appid) => ipcRenderer.invoke('uc:game-exe-running', appid),
+  isLauncherAvailable: () => ipcRenderer.invoke('uc:launcher-available'),
   quitGameExecutable: (appid) => ipcRenderer.invoke('uc:game-exe-quit', appid),
   deleteInstalled: (appid) => ipcRenderer.invoke('uc:installed-delete', appid),
   deleteInstalling: (appid) => ipcRenderer.invoke('uc:installing-delete', appid),
@@ -141,4 +142,36 @@ contextBridge.exposeInMainWorld('ucVR', {
   pickRuntimeJson: () => ipcRenderer.invoke('uc:vr-pick-runtime-json'),
   pickSteamVRDir: () => ipcRenderer.invoke('uc:vr-pick-steamvr-dir'),
   getSettings: () => ipcRenderer.invoke('uc:vr-get-settings'),
+})
+
+// In-Game Overlay API
+contextBridge.exposeInMainWorld('ucOverlay', {
+  show: (appid) => ipcRenderer.invoke('uc:overlay-show', appid),
+  hide: () => ipcRenderer.invoke('uc:overlay-hide'),
+  toggle: (appid) => ipcRenderer.invoke('uc:overlay-toggle', appid),
+  getStatus: () => ipcRenderer.invoke('uc:overlay-status'),
+  getSettings: () => ipcRenderer.invoke('uc:overlay-get-settings'),
+  setSettings: (settings) => ipcRenderer.invoke('uc:overlay-set-settings', settings),
+  onShow: (callback) => {
+    const listener = (_event, data) => callback(data)
+    ipcRenderer.on('uc:overlay-show', listener)
+    return () => ipcRenderer.removeListener('uc:overlay-show', listener)
+  },
+  onHide: (callback) => {
+    const listener = (_event, data) => callback(data)
+    ipcRenderer.on('uc:overlay-hide', listener)
+    return () => ipcRenderer.removeListener('uc:overlay-hide', listener)
+  },
+  onStateChanged: (callback) => {
+    const listener = (_event, data) => callback(data)
+    ipcRenderer.on('uc:overlay-state-changed', listener)
+    return () => ipcRenderer.removeListener('uc:overlay-state-changed', listener)
+  }
+})
+
+// Controller Support API
+contextBridge.exposeInMainWorld('ucController', {
+  getSettings: () => ipcRenderer.invoke('uc:controller-get-settings'),
+  setSettings: (settings) => ipcRenderer.invoke('uc:controller-set-settings', settings),
+  getConnected: () => ipcRenderer.invoke('uc:controller-get-connected')
 })

@@ -3,3 +3,9 @@ dist
 dist-packaged
 secrets.md
 .env
+
+# UnionCrax.Launcher build outputs
+UnionCrax.Launcher/build*
+UnionCrax.Launcher/*.exe
+UnionCrax.Launcher/*.ico
+UnionCrax.Launcher/*.png
