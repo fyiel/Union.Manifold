@@ -90,7 +90,7 @@ const runningGames = new Map()
 
 let overlayWindow = null
 let overlayEnabled = true
-let overlayHotkey = 'Shift+Tab'
+let overlayHotkey = 'Ctrl+Shift+Tab'
 let currentOverlayAppid = null
 let overlayAutoShow = true
 
@@ -3343,7 +3343,7 @@ app.whenReady().then(() => {
   const settings = readSettings()
   if (settings.overlayEnabled !== false) {
     overlayEnabled = settings.overlayEnabled !== false
-    overlayHotkey = settings.overlayHotkey || 'Shift+Tab'
+    overlayHotkey = settings.overlayHotkey || 'Ctrl+Shift+Tab'
     overlayAutoShow = settings.overlayAutoShow !== false
     createOverlayWindow()
     registerOverlayHotkey()
