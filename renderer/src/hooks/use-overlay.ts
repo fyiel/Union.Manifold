@@ -21,13 +21,13 @@ export function useOverlay() {
   const [status, setStatus] = useState<OverlayStatus>({
     enabled: true,
     visible: false,
-    hotkey: 'Shift+Tab',
+    hotkey: 'Ctrl+Shift+Tab',
     autoShow: true,
     currentAppid: null
   })
   const [settings, setSettings] = useState<OverlaySettings>({
     enabled: true,
-    hotkey: 'Shift+Tab',
+    hotkey: 'Ctrl+Shift+Tab',
     autoShow: true
   })
   const [isLoading, setIsLoading] = useState(true)

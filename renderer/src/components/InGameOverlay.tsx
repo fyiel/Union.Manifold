@@ -15,7 +15,7 @@ export function InGameOverlay({ initialAppid }: InGameOverlayProps) {
   const [currentAppid, setCurrentAppid] = useState<string | null>(initialAppid || null)
   const [overlaySettings, setOverlaySettings] = useState({
     enabled: true,
-    hotkey: 'Shift+Tab',
+    hotkey: 'Ctrl+Shift+Tab',
     autoShow: true
   })
 
