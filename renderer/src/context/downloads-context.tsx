@@ -2,7 +2,6 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import type { Game } from "@/lib/types"
 import {
   fetchDownloadLinks,
-  fetchDownloadLinksForVersion,
   inferFilenameFromUrl,
   getPreferredDownloadHost,
   isPixeldrainUrl,
@@ -41,7 +40,6 @@ export type DownloadItem = {
   filename: string
   partIndex?: number
   partTotal?: number
-  versionLabel?: string
   authHeader?: string
   status: DownloadStatus
   receivedBytes: number
@@ -142,9 +140,14 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
       const restored = parsed.map((item) => {
         // Sanitize url in case it was persisted as a DownloadHostEntry object from an older build
         const safeItem = typeof item.url !== "string" ? { ...item, url: coerceUrl(item.url) } : item
-        return safeItem.status === "downloading" || safeItem.status === "extracting" || safeItem.status === "installing"
-          ? { ...safeItem, status: "paused" as DownloadStatus, error: "App restarted" }
-          : safeItem
+        // Downloads lose their Electron DownloadItem on reload — mark as paused so user can resume.
+        // But extracting/installing items are handled by the main process independently of the
+        // renderer.  Keep them as-is here; the immediate post-mount reconciliation (below) will
+        // query the main process and either let extraction continue or mark them completed/paused.
+        if (safeItem.status === "downloading") {
+          return { ...safeItem, status: "paused" as DownloadStatus, error: "App restarted" }
+        }
+        return safeItem
       })
 
       // Log restored downloads so they're visible in app logs
@@ -191,10 +194,25 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
             if (item.appid !== appid) return item
             if (["completed", "extracted"].includes(item.status)) return item
 
-            // Allow force-completing items that are at 100% even if in active states.
-            // This fixes the "stuck at 100%" UI bug where the main process finishes 
-            // but the renderer doesn't receive/process the completion event.
-            if (["extracting", "installing", "downloading"].includes(item.status)) {
+            // Force-complete items whose appid has an installed manifest on disk.
+            // For extracting/installing items this means extraction finished successfully.
+            // For paused/downloading items at 100% bytes, the download + extraction already
+            // completed but the renderer missed the status update.
+            if (["extracting", "installing"].includes(item.status)) {
+              // Extraction was in progress and installed manifest now exists → done.
+              mutated = true
+              return {
+                ...item,
+                status: "completed" as DownloadStatus,
+                error: null,
+                completedAt: Date.now(),
+                speedBps: 0,
+                etaSeconds: null,
+                receivedBytes: item.totalBytes || item.receivedBytes,
+              }
+            }
+
+            if (["downloading", "paused"].includes(item.status)) {
               const isFinished = item.totalBytes > 0 && item.receivedBytes >= item.totalBytes
               if (!isFinished) return item
             }
@@ -224,6 +242,58 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
     },
     []
   )
+
+  // Immediately after mount, reconcile items that were extracting/installing when the page
+  // reloaded.  The main process continues extraction independently — if it already finished,
+  // transitioning to "completed" here prevents a false "paused" state that leads to
+  // unnecessary re-downloads when the user clicks Resume.
+  const mountReconcileRanRef = useRef(false)
+  useEffect(() => {
+    if (mountReconcileRanRef.current) return
+    mountReconcileRanRef.current = true
+
+    const needsReconcile = downloadsRef.current.filter((item) =>
+      ["extracting", "installing"].includes(item.status)
+    )
+    if (!needsReconcile.length) return
+
+    const appids = [...new Set(needsReconcile.map((item) => item.appid))]
+    void (async () => {
+      for (const appid of appids) {
+        // First check if the game is already fully installed
+        await reconcileInstalledState(appid)
+
+        // If items are still extracting after reconcile (no installed manifest yet),
+        // query the main process to see if extraction is actively running.
+        const stillExtracting = downloadsRef.current.some(
+          (item) => item.appid === appid && ["extracting", "installing"].includes(item.status)
+        )
+        if (!stillExtracting) continue
+
+        // Ask the main process if this appid has an active extraction
+        try {
+          const status = await window.ucDownloads?.getActiveStatus?.(appid)
+          if (status?.extracting || status?.downloading) {
+            // Main process is still working — keep the extracting status, the normal
+            // onUpdate listener will receive progress/completion events.
+            downloadLogger.info(`Post-mount: ${appid} still extracting/downloading in main process`)
+            continue
+          }
+        } catch { }
+
+        // Main process is NOT extracting and game is NOT installed.
+        // The extraction likely failed silently or the installing folder was cleaned up.
+        // Mark as paused so the user can retry.
+        setDownloads((prev) =>
+          prev.map((item) =>
+            item.appid === appid && ["extracting", "installing"].includes(item.status)
+              ? { ...item, status: "paused" as DownloadStatus, error: "Extraction interrupted — please resume" }
+              : item
+          )
+        )
+      }
+    })()
+  }, [reconcileInstalledState])
 
   // Installed metadata is stored by the main process as a file inside the installed folder.
 
@@ -378,7 +448,6 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
           partIndex: next.partIndex,
           partTotal: next.partTotal,
           authHeader: resolved.authHeader,
-          versionLabel: next.versionLabel || undefined,
         })
         if (res && typeof res === "object" && "ok" in res && !res.ok) {
           throw new Error((res as { error?: string }).error || "Failed to start download")
@@ -509,6 +578,8 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (typeof window === "undefined") return
+    // Reconcile frequently — catches stuck extracting/installing items when the main
+    // process finishes but the status update was missed (e.g. window was hidden).
     const interval = setInterval(() => {
       const appids = new Set(
         downloadsRef.current
@@ -519,7 +590,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
       for (const appid of appids) {
         void reconcileInstalledState(appid)
       }
-    }, 8000)
+    }, 3000)
     return () => clearInterval(interval)
   }, [reconcileInstalledState])
 
@@ -548,7 +619,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
           // pass the full game object as metadata, with downloadedVersion from config
           const metadataWithVersion = {
             ...game,
-            downloadedVersion: config?.versionLabel || game.version || undefined,
+            downloadedVersion: game.version || undefined,
           }
           await window.ucDownloads.saveInstalledMetadata(game.appid, metadataWithVersion)
         }
@@ -561,11 +632,8 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         addDownloadedGameToHistory(game.appid)
       }
 
-      // Use version-specific fetch if a versionId was provided via config
-      const versionId = config?.versionId
-      const linksResult = versionId
-        ? await fetchDownloadLinksForVersion(game.appid, downloadToken, versionId)
-        : await fetchDownloadLinks(game.appid, downloadToken)
+      // Always fetch the current download links
+      const linksResult = await fetchDownloadLinks(game.appid, downloadToken)
 
       const preferredHost =
         SUPPORTED_DOWNLOAD_HOSTS.includes(preferredHostOverride as PreferredDownloadHost)
@@ -639,7 +707,6 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
           filename: item.filenameFallback,
           partIndex,
           partTotal,
-          versionLabel: config?.versionLabel || game.version,
           status: "queued",
           receivedBytes: 0,
           totalBytes: 0,
@@ -731,6 +798,39 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
       if (!target) return
 
       downloadLogger.info("Resume attempt", { data: { downloadId, host: target.host, status: target.status, hasResumeData: Boolean(target.resumeData?.offset) } })
+
+      // Guard: Before attempting any resume, check if the game is already installed or
+      // extraction is still running in the main process.  This prevents re-downloading
+      // a file that was already fully downloaded and extracted.
+      if (target.appid && window.ucDownloads) {
+        try {
+          const installed = await window.ucDownloads.getInstalled?.(target.appid)
+          if (installed) {
+            downloadLogger.info("Resume skipped: game already installed", { data: { appid: target.appid } })
+            setDownloads((prev) =>
+              prev.map((item) =>
+                item.appid === target.appid && !["completed", "extracted"].includes(item.status)
+                  ? { ...item, status: "completed" as DownloadStatus, error: null, completedAt: Date.now(), speedBps: 0, etaSeconds: null, receivedBytes: item.totalBytes || item.receivedBytes }
+                  : item
+              )
+            )
+            return
+          }
+        } catch { }
+
+        try {
+          const activeStatus = await window.ucDownloads.getActiveStatus?.(target.appid)
+          if (activeStatus?.extracting) {
+            downloadLogger.info("Resume skipped: extraction still running in main process", { data: { appid: target.appid } })
+            setDownloads((prev) =>
+              prev.map((item) =>
+                item.id === downloadId ? { ...item, status: "extracting" as DownloadStatus, error: null } : item
+              )
+            )
+            return
+          }
+        } catch { }
+      }
 
       let ok = false
 

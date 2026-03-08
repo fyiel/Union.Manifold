@@ -7,7 +7,7 @@ import { GameCard } from "@/components/GameCard"
 import { GameComments } from "@/components/GameComments"
 import { useDownloads } from "@/context/downloads-context"
 import { apiUrl, apiFetch } from "@/lib/api"
-import { getPreferredDownloadHost, setPreferredDownloadHost, requestDownloadToken, fetchGameVersionsMeta, type PreferredDownloadHost, type DownloadConfig, type GameVersion } from "@/lib/downloads"
+import { getPreferredDownloadHost, setPreferredDownloadHost, requestDownloadToken, type PreferredDownloadHost, type DownloadConfig } from "@/lib/downloads"
 import { formatNumber, hasOnlineMode, pickGameExecutable, proxyImageUrl, cn, generateErrorCode, ErrorTypes } from "@/lib/utils"
 import type { Game } from "@/lib/types"
 import { useGamesData } from "@/hooks/use-games"
@@ -25,7 +25,6 @@ import {
   ExternalLink,
   Flame,
   HardDrive,
-  History,
   RefreshCw,
   ShieldCheck,
   Settings,
@@ -47,7 +46,7 @@ import { LinuxExperiences } from "@/components/LinuxExperiences"
 import { DownloadCheckModal } from "@/components/DownloadCheckModal"
 import { DesktopShortcutModal } from "@/components/DesktopShortcutModal"
 import { EditGameMetadataModal } from "@/components/EditGameMetadataModal"
-import { VersionConflictModal } from "@/components/VersionConflictModal"
+import { UpdateBackupWarningModal } from "@/components/VersionConflictModal"
 import { gameLogger } from "@/lib/logger"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { GamePageSkeleton } from "@/components/GamePageSkeleton"
@@ -102,8 +101,8 @@ export function GameDetailPage() {
   const [shortcutFeedback, setShortcutFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
   const [pendingDeleteAction, setPendingDeleteAction] = useState<"installed" | "installing" | null>(null)
   const [editMetadataOpen, setEditMetadataOpen] = useState(false)
-  const [versionConflictOpen, setVersionConflictOpen] = useState(false)
-  const [overwriteOnDownload, setOverwriteOnDownload] = useState(false)
+  const [updateWarningOpen, setUpdateWarningOpen] = useState(false)
+  const [pendingForceDownload, setPendingForceDownload] = useState(false)
   const [gameStartFailedOpen, setGameStartFailedOpen] = useState(false)
   const [gameStartFailedAdminEnabled, setGameStartFailedAdminEnabled] = useState(false)
   // Ref to track whether a game was just launched (cleared on manual quit)
@@ -114,10 +113,6 @@ export function GameDetailPage() {
   // ProtonDB state
   const [protonData, setProtonData] = useState<any>(null)
   const [protonLoading, setProtonLoading] = useState(false)
-
-  // Version switcher state
-  const [downloadVersions, setDownloadVersions] = useState<GameVersion[]>([])
-  const [selectedPageVersionId, setSelectedPageVersionId] = useState<string | null>(null)
 
   const appid = params.id || ""
 
@@ -354,76 +349,6 @@ export function GameDetailPage() {
     }
   }, [appid, handleRateLimit])
 
-  // Fetch version list (public metadata, no token needed)
-  useEffect(() => {
-    if (!game?.appid || game.appid.startsWith('external-')) return
-    let mounted = true
-    fetchGameVersionsMeta(game.appid).then((list) => {
-      if (!mounted) return
-      setDownloadVersions(list)
-      if (list.length > 0 && !selectedPageVersionId) {
-        setSelectedPageVersionId(String(list[0].id || 'current'))
-      }
-    })
-    return () => { mounted = false }
-  }, [game?.appid])
-
-  // Derive displayed game data based on selected version's metadata
-  const selectedVersion = useMemo(() => {
-    if (!selectedPageVersionId || downloadVersions.length === 0) return null
-    return downloadVersions.find((v) => String(v.id) === String(selectedPageVersionId)) || null
-  }, [selectedPageVersionId, downloadVersions])
-
-  const selectedVersionKey = selectedVersion?.id ? String(selectedVersion.id) : null
-  const selectedVersionLabel = selectedVersion?.label || null
-
-  const selectedVersionMeta = selectedVersion?.metadata || null
-
-  const displayedGame = useMemo(() => {
-    if (!game) return null
-    if (!selectedVersion) return game
-
-    const isCurrent = selectedVersion.is_current === true
-    const meta: Record<string, any> = selectedVersionMeta || {}
-
-    if (isCurrent) {
-      return {
-        ...game,
-        size: meta.size || game.size || '',
-        source: meta.source || game.source || '',
-        comment: meta.comment ?? game.comment ?? '',
-        genres: Array.isArray(meta.genres) && meta.genres.length > 0 ? meta.genres : (game.genres || []),
-        hasCoOp: meta.hasCoOp !== undefined ? meta.hasCoOp : (game.hasCoOp ?? false),
-        dlc: Array.isArray(meta.dlc) && meta.dlc.length > 0 ? meta.dlc : (game.dlc || []),
-      }
-    }
-
-    // Archived version: use ONLY stored metadata
-    return {
-      ...game,
-      size: meta.size || '',
-      source: meta.source || '',
-      comment: meta.comment || '',
-      genres: Array.isArray(meta.genres) ? meta.genres : [],
-      hasCoOp: typeof meta.hasCoOp === 'boolean' ? meta.hasCoOp : false,
-      dlc: Array.isArray(meta.dlc) ? meta.dlc : [],
-    }
-  }, [game, selectedVersion, selectedVersionMeta])
-
-  const handleVersionSelect = useCallback((versionId: string) => {
-    setSelectedPageVersionId(versionId)
-  }, [])
-
-  const formatVersionDate = (dateStr: string) => {
-    if (!dateStr) return null
-    try {
-      const date = new Date(dateStr)
-      return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
-    } catch {
-      return null
-    }
-  }
-
   useEffect(() => {
     if (!appid || !window.ucDownloads?.getRunningGame) return
     let mounted = true
@@ -566,7 +491,7 @@ export function GameDetailPage() {
     if (!game) return
     if (!window.ucDownloads?.listGameExecutables || !window.ucDownloads?.launchGameExecutable) return
     try {
-      const savedExe = await getSavedExe(selectedVersionKey, selectedVersionLabel, installedVersionLabels.length <= 1)
+      const savedExe = await getSavedExe()
       const runAsAdminEnabled = await getRunAsAdminEnabled()
 
       if (savedExe) {
@@ -574,12 +499,10 @@ export function GameDetailPage() {
         return
       }
 
-      const result = await window.ucDownloads.listGameExecutables(game.appid, selectedVersionLabel)
+      const result = await window.ucDownloads.listGameExecutables(game.appid)
       const exes = result?.exes || []
       const folder = result?.folder || null
-      // Use the top-level game root as browse default so the native dialog doesn't open
-      // deep inside a version subfolder (e.g. versions/latest_b537082)
-      const browseFolder = result?.gameRoot || folder
+      const browseFolder = folder
       const { pick, confident } = pickGameExecutable(exes, game.name, game.source, folder)
       if (pick && confident) {
         setPendingExePath(pick.path)
@@ -637,21 +560,7 @@ export function GameDetailPage() {
       .map((label) => String(label))
     return Array.from(new Set(labels))
   }, [installedVersions])
-  const installedVersionSummary = useMemo(() => {
-    if (!installedVersionLabels.length) return null
-    if (installedVersionLabels.length === 1) return installedVersionLabels[0]
-    return `${installedVersionLabels.length} versions`
-  }, [installedVersionLabels])
   const hasInstalledVersions = installedVersions.length > 0 || Boolean(installedManifest)
-  const isSelectedVersionInstalled = useMemo(() => {
-    if (!hasInstalledVersions) return false
-    if (!selectedVersion) return true // no version selected yet → treat as current → Play
-    // The current/latest version is always "installed" when the game is installed at all
-    if (selectedVersion.is_current) return true
-    // For archived versions: check whether we have that specific version's label installed
-    if (!installedVersionLabels.length) return false
-    return installedVersionLabels.includes(selectedVersion.label)
-  }, [hasInstalledVersions, selectedVersion, installedVersionLabels])
 
   const installedMeta = installedManifest?.metadata || null
   const localScreenshots = Array.isArray(installedMeta?.localScreenshots) ? installedMeta.localScreenshots : []
@@ -718,6 +627,7 @@ export function GameDetailPage() {
   const isCancelled = downloads.some((item) => item.appid === game.appid && item.status === "cancelled")
   const hasCancelledManifest = installingManifest?.installStatus === "cancelled"
   const isInstalled = hasInstalledVersions
+  const hasUpdate = isInstalled && Boolean(game?.version) && installedVersionLabels.length > 0 && !installedVersionLabels.includes(game.version ?? '')
   const showActionMenu = isInstalled
   // Only treat as "installing" from manifest if there are corresponding download items.
   // If the manifest exists but no download items remain (e.g. items were lost), it's a stale
@@ -729,64 +639,32 @@ export function GameDetailPage() {
     ? "Quit"
     : isCheckingLinks
       ? "Checking..."
-      : isSelectedVersionInstalled
+      : isInstalled
         ? "Play"
-        : isInstalled && !isSelectedVersionInstalled
-          ? "Download Now"
-          : isPaused
-            ? "Resume"
-            : isQueued
-              ? "Queued"
-              : isFailed
-                ? "Download failed"
-                : isInstalling
-                  ? "Installing"
-                  : "Download Now"
+        : isPaused
+          ? "Resume"
+          : isQueued
+            ? "Queued"
+            : isFailed
+              ? "Download failed"
+              : isInstalling
+                ? "Installing"
+                : "Download Now"
   const actionDisabled = !isGameRunning && (isCheckingLinks || isInstalling || isQueued || isFailed)
 
-  const getExeKeys = (versionKey?: string | null, versionLabel?: string | null, allowLegacyFallback: boolean = true) => {
-    const keys: string[] = []
-    if (versionKey) keys.push(`gameExe:${game.appid}:v:${versionKey}`)
-    if (versionLabel) keys.push(`gameExe:${game.appid}:${versionLabel}`)
-    if (allowLegacyFallback) keys.push(`gameExe:${game.appid}`)
-    return keys
-  }
-
-  const getSavedExe = async (
-    versionKey?: string | null,
-    versionLabel?: string | null,
-    allowLegacyFallback: boolean = true
-  ) => {
+  const getSavedExe = async () => {
     if (!window.ucSettings?.get) return null
     try {
-      const keys = getExeKeys(versionKey, versionLabel, allowLegacyFallback)
-      for (const key of keys) {
-        const value = await window.ucSettings.get(key)
-        if (value) return value
-      }
-      return null
+      return await window.ucSettings.get(`gameExe:${game.appid}`) || null
     } catch {
       return null
     }
   }
 
-  const setSavedExe = async (
-    path: string | null,
-    versionKey?: string | null,
-    versionLabel?: string | null,
-    allowLegacyFallback: boolean = true
-  ) => {
+  const setSavedExe = async (path: string | null) => {
     if (!window.ucSettings?.set) return
     try {
-      if (versionKey) {
-        await window.ucSettings.set(`gameExe:${game.appid}:v:${versionKey}`, path || null)
-      }
-      if (versionLabel) {
-        await window.ucSettings.set(`gameExe:${game.appid}:${versionLabel}`, path || null)
-      }
-      if (allowLegacyFallback) {
-        await window.ucSettings.set(`gameExe:${game.appid}`, path || null)
-      }
+      await window.ucSettings.set(`gameExe:${game.appid}`, path || null)
     } catch { }
   }
 
@@ -872,7 +750,7 @@ export function GameDetailPage() {
     exes: Array<{ name: string; path: string; size?: number; depth?: number }>,
     opts?: { title?: string; message?: string; actionLabel?: string; mode?: "launch" | "set"; currentPath?: string | null; folder?: string | null }
   ) => {
-    const savedExe = await getSavedExe(selectedVersionKey, selectedVersionLabel, installedVersionLabels.length <= 1)
+    const savedExe = await getSavedExe()
     setExePickerTitle(opts?.title || "Select executable")
     setExePickerMessage(opts?.message || `We couldn't confidently detect the correct exe for "${game?.name}". Please choose the one to launch.`)
     setExePickerActionLabel(opts?.actionLabel || "Launch")
@@ -887,8 +765,8 @@ export function GameDetailPage() {
     if (!game || !window.ucDownloads?.listGameExecutables) return
     try {
       const [result, savedExe] = await Promise.all([
-        window.ucDownloads.listGameExecutables(game.appid, selectedVersionLabel),
-        getSavedExe(selectedVersionKey, selectedVersionLabel, installedVersionLabels.length <= 1),
+        window.ucDownloads.listGameExecutables(game.appid),
+        getSavedExe(),
       ])
       const exes = result?.exes || []
       await openExePicker(exes, {
@@ -899,7 +777,7 @@ export function GameDetailPage() {
         actionLabel: "Set",
         mode: "set",
         currentPath: savedExe || null,
-        folder: result?.gameRoot || result?.folder || null,
+        folder: result?.folder || null,
       })
     } catch {
       await openExePicker([], {
@@ -918,14 +796,14 @@ export function GameDetailPage() {
       let folder: string | null = null
       let discoveredExePath: string | null = null
       if (window.ucDownloads?.listGameExecutables) {
-        const result = await window.ucDownloads.listGameExecutables(game.appid, selectedVersionLabel)
+        const result = await window.ucDownloads.listGameExecutables(game.appid)
         folder = result?.folder || null
         if (result?.exes?.[0]?.path) {
           discoveredExePath = result.exes[0].path
         }
       }
 
-      const savedExe = await getSavedExe(selectedVersionKey, selectedVersionLabel, installedVersionLabels.length <= 1)
+      const savedExe = await getSavedExe()
       const preferredExePath = savedExe || discoveredExePath
       const exeDir = preferredExePath ? dirname(preferredExePath) : null
       const candidate = exeDir || null
@@ -952,12 +830,12 @@ export function GameDetailPage() {
     if (!game || !window.ucDownloads?.createDesktopShortcut) return
     try {
       setShortcutFeedback(null)
-      let targetExe = await getSavedExe(selectedVersionKey, selectedVersionLabel, installedVersionLabels.length <= 1)
+      let targetExe = await getSavedExe()
       let exes: Array<{ name: string; path: string; size?: number; depth?: number }> = []
       let folder: string | null = null
 
       if (!targetExe && window.ucDownloads?.listGameExecutables) {
-        const result = await window.ucDownloads.listGameExecutables(game.appid, selectedVersionLabel)
+        const result = await window.ucDownloads.listGameExecutables(game.appid)
         exes = result?.exes || []
         folder = result?.folder || null
 
@@ -1035,7 +913,7 @@ export function GameDetailPage() {
     const showGameName = await window.ucSettings?.get?.('rpcShowGameName') ?? true
     const res = await launchFn(game.appid, path, game.name, showGameName)
     if (res && res.ok) {
-      await setSavedExe(path, selectedVersionKey, selectedVersionLabel, installedVersionLabels.length <= 1)
+      await setSavedExe(path)
       setExePickerOpen(false)
       setAdminPromptOpen(false)
       setShortcutModalOpen(false)
@@ -1101,7 +979,7 @@ export function GameDetailPage() {
   const handleExePicked = async (path: string) => {
     setPendingExePath(path)
     if (exePickerMode === "set") {
-      await setSavedExe(path, selectedVersionKey, selectedVersionLabel, installedVersionLabels.length <= 1)
+      await setSavedExe(path)
       setExePickerCurrentPath(path)
       // Do NOT close the modal, match Library behavior
       return
@@ -1152,7 +1030,7 @@ export function GameDetailPage() {
 
               <div className="absolute bottom-0 left-0 right-0 p-8 space-y-4">
                 <div className="flex flex-wrap gap-2">
-                  {displayedGame?.genres?.map((genre) => (
+                  {game?.genres?.map((genre) => (
                     <Badge
                       key={genre}
                       variant={genre.toLowerCase() === "nsfw" ? "destructive" : "default"}
@@ -1170,7 +1048,7 @@ export function GameDetailPage() {
                       Popular
                     </Badge>
                   )}
-                  {hasOnlineMode(displayedGame?.hasCoOp) && (
+                  {hasOnlineMode(game?.hasCoOp) && (
                     <Badge className="px-3 py-1 rounded-full bg-emerald-500/20 border-emerald-500/30 text-emerald-400 font-semibold flex items-center gap-1.5 backdrop-blur-md shadow-lg">
                       <Wifi className="h-3 w-3" />
                       Online
@@ -1232,49 +1110,7 @@ export function GameDetailPage() {
         </div>
       </section>
 
-      {/* Version Switcher Tab Bar */}
-      {downloadVersions.length > 1 && (
-        <section className="container mx-auto px-4 -mt-2 pb-0">
-          <div className="max-w-6xl mx-auto">
-            <div className="flex items-center gap-3 overflow-x-auto scrollbar-hide pb-1">
-              <div className="flex items-center gap-1.5 text-sm text-gray-400 shrink-0 mr-1">
-                <History className="h-4 w-4" />
-                <span className="font-semibold text-xs uppercase tracking-wider">Versions</span>
-              </div>
-              {downloadVersions.map((v) => {
-                const isSelected = String(v.id) === String(selectedPageVersionId)
-                const meta = v.metadata || {}
-                return (
-                  <button
-                    key={String(v.id)}
-                    onClick={() => handleVersionSelect(String(v.id))}
-                    className={`
-                      relative shrink-0 flex items-center gap-2 px-4 py-2 rounded-full text-sm font-semibold
-                      transition-all duration-200 border
-                      ${isSelected
-                        ? "bg-primary text-primary-foreground border-primary shadow-lg shadow-primary/25"
-                        : "bg-white/5 text-gray-400 border-white/10 hover:bg-white/10 hover:text-white"
-                      }
-                    `}
-                  >
-                    <span className="truncate max-w-[160px]">{v.label}</span>
-                    {meta.size && (
-                      <span className={`text-[10px] font-medium ${isSelected ? "text-primary-foreground/70" : "text-muted-foreground/60"}`}>
-                        {meta.size}
-                      </span>
-                    )}
-                    {v.date && (
-                      <span className={`text-[10px] tabular-nums ${isSelected ? "text-primary-foreground/60" : "text-muted-foreground/50"}`}>
-                        {formatVersionDate(v.date)}
-                      </span>
-                    )}
-                  </button>
-                )
-              })}
-            </div>
-          </div>
-        </section>
-      )}
+      {/* Version Switcher Tab Bar removed — single-version system */}
 
       <section className="container mx-auto px-4 py-12">
         <div className="max-w-6xl mx-auto">
@@ -1335,13 +1171,13 @@ export function GameDetailPage() {
                 </div>
               )}
 
-              {displayedGame?.dlc && displayedGame.dlc.length > 0 && (
+              {game?.dlc && game.dlc.length > 0 && (
                 <div className="p-8 rounded-2xl bg-black/40 border border-white/10 backdrop-blur-md shadow-xl">
                   <h2 className="text-2xl font-black text-white font-montserrat mb-4 tracking-tight">
-                    Included DLC ({displayedGame.dlc.length})
+                    Included DLC ({game.dlc.length})
                   </h2>
                   <ul className="space-y-2 max-h-[400px] overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-white/20 hover:scrollbar-thumb-white/40">
-                    {displayedGame.dlc.map((dlc, index) => (
+                    {game.dlc.map((dlc, index) => (
                       <li key={`${dlc}-${index}`} className="flex items-center gap-2 text-gray-300 bg-white/5 p-2 rounded-lg border border-white/5">
                         <span className="h-1.5 w-1.5 rounded-full bg-primary flex-shrink-0" />
                         {dlc}
@@ -1351,13 +1187,13 @@ export function GameDetailPage() {
                 </div>
               )}
 
-              {displayedGame?.comment && (
+              {game?.comment && (
                 <div className="p-6 rounded-2xl bg-primary/10 border border-primary/20">
                   <div className="flex items-start gap-3">
                     <AlertTriangle className="h-5 w-5 text-primary flex-shrink-0 mt-0.5" />
                     <div>
                       <h3 className="font-semibold text-foreground mb-1">Important Note</h3>
-                      <p className="text-sm text-muted-foreground">{displayedGame.comment}</p>
+                      <p className="text-sm text-muted-foreground">{game.comment}</p>
                     </div>
                   </div>
                 </div>
@@ -1375,10 +1211,8 @@ export function GameDetailPage() {
                     onClick={() => {
                       if (isGameRunning) {
                         void stopRunningGame()
-                      } else if (isInstalled && isSelectedVersionInstalled) {
+                      } else if (isInstalled) {
                         void launchInstalledGame()
-                      } else if (isInstalled && !isSelectedVersionInstalled) {
-                        setVersionConflictOpen(true)
                       } else if (isPaused) {
                         void resumeGroup(game.appid)
                       } else {
@@ -1391,7 +1225,7 @@ export function GameDetailPage() {
                       <Square className="mr-2 h-5 w-5" />
                     ) : isCheckingLinks ? (
                       <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                    ) : isSelectedVersionInstalled ? (
+                    ) : isInstalled ? (
                       <Play className="mr-2 h-5 w-5" />
                     ) : (
                       <Download className="mr-2 h-5 w-5" />
@@ -1495,6 +1329,17 @@ export function GameDetailPage() {
                   </Button>
                 )}
 
+                {hasUpdate && !isInstalling && !isGameRunning && (
+                  <Button
+                    variant="outline"
+                    className="mt-2 w-full border-amber-500/40 bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 hover:text-amber-300"
+                    onClick={() => setUpdateWarningOpen(true)}
+                  >
+                    <RefreshCw className="mr-2 h-4 w-4" />
+                    Update available — {game.version}
+                  </Button>
+                )}
+
                 {shortcutFeedback && (
                   <div className={`mt-2 text-xs ${shortcutFeedback.type === 'success' ? 'text-emerald-400' : 'text-destructive'}`}>
                     {shortcutFeedback.message}
@@ -1566,51 +1411,16 @@ export function GameDetailPage() {
                       <HardDrive className="h-4 w-4" />
                       Size
                     </span>
-                    <span className="font-semibold text-white">{displayedGame?.size || "Unknown"}</span>
+                    <span className="font-semibold text-white">{game?.size || "Unknown"}</span>
                   </div>
 
                   {(game.version || installedVersionLabels.length > 0) && (
-                    <>
-                      {installedVersionLabels.length > 0 ? (
-                        <>
-                          <div className="flex items-center justify-between">
-                            <span className="text-gray-400">Installed version(s)</span>
-                            <Popover>
-                              <PopoverTrigger asChild>
-                                <button
-                                  type="button"
-                                  className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold text-white hover:bg-white/10 transition-colors"
-                                >
-                                  {installedVersionSummary || "Installed"}
-                                  <ChevronRight className="h-3.5 w-3.5" />
-                                </button>
-                              </PopoverTrigger>
-                              <PopoverContent align="end" className="w-56 rounded-2xl p-3 bg-zinc-900 border-white/10 text-white shadow-xl">
-                                <div className="text-xs font-semibold text-gray-400 mb-2">Installed versions</div>
-                                <div className="space-y-1">
-                                  {installedVersionLabels.map((label) => (
-                                    <div key={label} className="text-sm text-white">
-                                      {label}
-                                    </div>
-                                  ))}
-                                </div>
-                              </PopoverContent>
-                            </Popover>
-                          </div>
-                          {game.version && !installedVersionLabels.includes(game.version) && (
-                            <div className="flex items-center justify-between">
-                              <span className="text-gray-400">Latest version</span>
-                              <span className="font-semibold text-white">{game.version}</span>
-                            </div>
-                          )}
-                        </>
-                      ) : (
-                        <div className="flex items-center justify-between">
-                          <span className="text-gray-400">Version</span>
-                          <span className="font-semibold text-white">{game.version}</span>
-                        </div>
-                      )}
-                    </>
+                    <div className="flex items-center justify-between">
+                      <span className="text-gray-400">Version</span>
+                      <span className="font-semibold text-white">
+                        {installedVersionLabels[0] || game.version}
+                      </span>
+                    </div>
                   )}
 
                   {game.update_time && (
@@ -1630,7 +1440,7 @@ export function GameDetailPage() {
                       <ShieldCheck className="h-4 w-4" />
                       Source
                     </span>
-                    <span className="font-semibold text-white">{displayedGame?.source || "Unknown"}</span>
+                    <span className="font-semibold text-white">{game?.source || "Unknown"}</span>
                   </div>
                 </div>
               </div>
@@ -1706,33 +1516,20 @@ export function GameDetailPage() {
           </div>
         </div>
       )}
-      <VersionConflictModal
-        open={versionConflictOpen}
-        installedVersionLabel={installedVersionSummary || "Unknown"}
-        selectedVersionLabel={selectedVersion?.label || "selected"}
-        onInstallSideBySide={() => {
-          setVersionConflictOpen(false)
-          setOverwriteOnDownload(false)
+      <UpdateBackupWarningModal
+        open={updateWarningOpen}
+        onProceed={async () => {
+          setUpdateWarningOpen(false)
+          setPendingForceDownload(true)
           void openHostSelector()
         }}
-        onOverwrite={async () => {
-          setVersionConflictOpen(false)
-          setOverwriteOnDownload(true)
-          // Delete the current installation first
-          try {
-            await window.ucDownloads?.deleteInstalled?.(game.appid)
-            setInstalledManifest(null)
-          } catch { }
-          void openHostSelector()
-        }}
-        onClose={() => setVersionConflictOpen(false)}
+        onClose={() => setUpdateWarningOpen(false)}
       />
       <DownloadCheckModal
         open={hostSelectorOpen}
         game={game}
         downloadToken={downloadToken}
         defaultHost={defaultHost}
-        defaultVersionId={selectedPageVersionId || undefined}
         onCheckingChange={setIsCheckingLinks}
         onConfirm={async (config: DownloadConfig) => {
           setHostSelectorOpen(false)
@@ -1741,9 +1538,15 @@ export function GameDetailPage() {
           try {
             setPreferredDownloadHost(config.host)
           } catch { }
-          const shouldForce = overwriteOnDownload || (isInstalled && !isSelectedVersionInstalled)
+          const shouldForce = pendingForceDownload
+          if (shouldForce) {
+            try {
+              await window.ucDownloads?.deleteInstalled?.(game.appid)
+              setInstalledManifest(null)
+            } catch { }
+          }
           await startDownload(config.host, config, shouldForce)
-          setOverwriteOnDownload(false)
+          setPendingForceDownload(false)
         }}
         onClose={() => {
           setHostSelectorOpen(false)

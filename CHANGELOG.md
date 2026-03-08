@@ -1,5 +1,81 @@
 # Changelog
 
+## Version 1.3.0 - 2026-03-08
+
+### Features & Improvements
+
+- **UC.Files (files.union-crax.xyz) added as in-app download host**:
+  - Resolves via server-side `UCFILES_API_KEY` — no Turnstile, no browser-based auth
+  - Full resume support via HTTP Range requests
+  - Set as the default download host in settings
+
+- **Parallel range download engine for UC.Files**:
+  - Bypasses Chromium's single-connection downloader entirely
+  - Opens 6 concurrent HTTP Range connections against the same signed `/dl/` token URL
+  - Achieves ~11 MB/s aggregate throughput (vs ~2–5 MB/s with a single connection)
+  - Pre-allocates the output file and writes each connection's bytes at the correct offset
+  - Progress reported every 500ms with smoothed speed and ETA
+  - Pause/resume/cancel fully supported — pause blocks all worker connections, resume wakes them all atomically
+  - File-size integrity check after all chunks complete before extraction begins
+  - Falls back to Chromium's downloader if the server doesn't return `Accept-Ranges: bytes`
+  - Strict 206 validation and `Content-Range` header verification to prevent corruption
+
+- **Bug fixes**:
+  - Fixed data corruption caused by Chromium caching parallel Range requests — all fetch calls now use `cache: 'no-store'` and `Cache-Control: no-cache` headers to force fresh per-worker connections
+  - Fixed "UC.Files link could not be resolved" false error — main process now sends an immediate `status: 'downloading'` update before the async parallel download starts, preventing the renderer from re-triggering resolution
+  - Fixed already-resolved `/dl/` token URLs being re-resolved (returning `resolved: false`) — `resolveUCFilesDownload` now short-circuits for `/dl/` URLs
+  - Fixed missing splash image and screenshots after UC.Files downloads — `migrateInstallingExtras` now runs before archive extraction, moving cached metadata images from `installing/` to `installed/`
+  - Fixed file descriptor leak on cancel/abort — `fd` is now closed in a `try/finally` path
+
+- **Archive install system** — new universal drag-and-drop / file-picker dialog for installing games from local archive files:
+  - Support for `.7z`, `.rar`, `.tar`, `.gz`, `.tgz`, and multipart archives (`.7z.001`, `.7z.002`, etc.)
+  - Automatic sibling part detection when only `.001` is selected
+  - 6-step modal wizard: choose method → select files → confirm → install → done/error
+  - Live progress tracking with speed, ETA, and extraction status
+  - Modal can be closed during extraction; process continues in background
+  - Installed games are registered in the manifest with file inventory
+
+- **Web-only host guidance** — when in-app hosts (Pixeldrain, FileQ, Rootz) have no alive links but external hosts do:
+  - Shows "Not available in-app" modal instead of false "all dead" message
+  - Lists available web-only hosts (VikingFile, DataVaults, etc.)
+  - 3-step guide: visit game page on website → download → come back and install from archive
+  - Archive install option always available as fallback
+  - Server-side check for web-only hosts; responsive UI on both availability states
+
+- **UI/UX improvements**:
+  - Download button now disabled when selected host has no parts (shows "Host unavailable")
+  - Archive extract progress capped at 99% until completion (prevents > 100% display)
+  - DownloadCheckModal message is context-aware (distinguishes "truly unavailable" from "not on in-app hosts")
+
+- **Removed deprecated hosts**:
+  - DataVaults removed from in-app download options (broken/non-functional)
+  - Support for `.zip` archives removed; `.7z` is the primary format
+  - Host list simplified to Pixeldrain, FileQ, Rootz (all marked retiring)
+
+- **Website (union-crax.xyz)**:
+  - "Download via UC.Files Direct" button now correctly shown in bin-links modal
+  - UC.Files no longer shows "retiring" tag
+  - Host normalization correctly maps `files.union-crax.xyz` → `UC.Files`
+
+### Files touched
+
+#### New
+- `union-crax.xyz/app/api/ucfiles/resolve/route.ts` — server-side resolver: parallel-fetches metadata + signed DL token, returns `{ url, filename, size }`
+- `renderer/src/components/ArchiveInstallModal.tsx`
+
+#### Modified (UnionCrax.Direct)
+- `electron/main.cjs` — `ucfilesParallelDownload`, `handleUCFilesDownloadComplete`, `isUCFilesUrl`, `ucfilesActiveDownloads` map; cancel/pause/resume IPC handlers extended for parallel downloads; `hasAnyActiveOrPendingDownloads` includes UC.Files active downloads; `uc:pick-archive-files` and `uc:install-from-archive` IPC handlers; extraction polling with live progress updates
+- `electron/preload.cjs` — exposed archive install methods to renderer
+- `renderer/src/vite-env.d.ts` — TypeScript types for archive install APIs
+- `renderer/src/lib/downloads.ts` — `ucfiles` host type, `resolveUCFilesDownload`, `extractUCFilesFileId`, `isUCFilesUrl`, `isUCFilesDlTokenUrl` (short-circuit for already-resolved tokens), `pickHostLinks`, `resolveDownloadSize`; removed DataVaults, added `webOnlyHosts` to AvailabilityResult
+- `renderer/src/lib/settings-constants.ts` — `ucfiles` added to `MirrorHost` type and `MIRROR_HOSTS` as first entry (default)
+- `renderer/src/components/DownloadCheckModal.tsx` — UC.Files in `HOST_OPTIONS`, `hostMatchesKey` helper for case-insensitive matching; web-only host guidance, improved messaging, disabled state handling
+
+#### Modified (union-crax.xyz)
+- `app/api/downloads/check-availability/route.ts` — `APP_HOSTS` includes `ucfiles`; matching is case-insensitive with non-alphanumeric stripping; universal web-only host detection (routes unsupported hosts to separate `webOnlyHosts` object), parallel HEAD checks with 12s timeout
+- `lib/url-utils.ts` — `files.union-crax.xyz` → `UC.Files` in `knownHosts`
+- `components/bin-links-modal.tsx` — `isUCFilesHost` helper, UC.Files excluded from retiring tag, direct download button shown
+
 ## Version 1.1.3 - 2026-02-24
 
 ### Features & Improvements

@@ -98,8 +98,6 @@ export function LibraryPage() {
   const [exePickerTitle, setExePickerTitle] = useState("")
   const [exePickerMessage, setExePickerMessage] = useState("")
   const [exePickerAppId, setExePickerAppId] = useState<string | null>(null)
-  const [exePickerVersionLabel, setExePickerVersionLabel] = useState<string | null>(null)
-  const [exePickerAllowLegacyFallback, setExePickerAllowLegacyFallback] = useState(true)
   const [exePickerExes, setExePickerExes] = useState<Array<{ name: string; path: string; size?: number; depth?: number }>>([])
   const [exePickerCurrentPath, setExePickerCurrentPath] = useState<string | null>(null)
   const [exePickerFolder, setExePickerFolder] = useState<string | null>(null)
@@ -247,58 +245,20 @@ export function LibraryPage() {
     }
   }
 
-  const getSavedExe = async (appid: string, versionLabel?: string | null, allowLegacyFallback: boolean = true) => {
+  const getSavedExe = async (appid: string) => {
     if (!window.ucSettings?.get) return null
     try {
-      if (versionLabel) {
-        const versioned = await window.ucSettings.get(`gameExe:${appid}:${versionLabel}`)
-        if (versioned) return versioned
-      }
-      if (allowLegacyFallback) {
-        return await window.ucSettings.get(`gameExe:${appid}`)
-      }
-      return null
+      return await window.ucSettings.get(`gameExe:${appid}`) || null
     } catch {
       return null
     }
   }
 
-  const setSavedExe = async (appid: string, path: string | null, versionLabel?: string | null, allowLegacyFallback: boolean = true) => {
+  const setSavedExe = async (appid: string, path: string | null) => {
     if (!window.ucSettings?.set) return
     try {
-      if (versionLabel) {
-        await window.ucSettings.set(`gameExe:${appid}:${versionLabel}`, path || null)
-      }
-      if (allowLegacyFallback) {
-        await window.ucSettings.set(`gameExe:${appid}`, path || null)
-      }
+      await window.ucSettings.set(`gameExe:${appid}`, path || null)
     } catch { }
-  }
-
-  const getInstalledVersionLabels = async (appid: string) => {
-    try {
-      if (!window.ucDownloads?.listInstalledByAppid) return []
-      const list = await window.ucDownloads.listInstalledByAppid(appid)
-      const labels = (Array.isArray(list) ? list : [])
-        .map((manifest) => manifest?.metadata?.downloadedVersion || manifest?.metadata?.version || manifest?.version)
-        .filter(Boolean)
-        .map((label) => String(label))
-      return Array.from(new Set(labels))
-    } catch {
-      return []
-    }
-  }
-
-  const resolveLibraryVersionLabel = async (game: Game) => {
-    const labels = await getInstalledVersionLabels(game.appid)
-    if (labels.length === 1) return { label: labels[0], allowLegacyFallback: true }
-    if (labels.length > 1) {
-      if (game.version && labels.includes(game.version)) {
-        return { label: game.version, allowLegacyFallback: false }
-      }
-      return { label: labels[0], allowLegacyFallback: false }
-    }
-    return { label: game.version || null, allowLegacyFallback: true }
   }
 
   const dirname = (targetPath: string | null | undefined) => {
@@ -308,31 +268,18 @@ export function LibraryPage() {
     return parts.length ? parts.join("\\") : null
   }
 
-  const resolveBasename = (targetPath: string | null) => {
-    if (!targetPath) return null
-    const parts = targetPath.split(/[\\/]/)
-    return parts[parts.length - 1] || null
-  }
-
   const openExecutablePicker = async (game: Game) => {
     if (!window.ucDownloads?.listGameExecutables) return
     try {
-      const resolved = await resolveLibraryVersionLabel(game)
       const [result, savedExe] = await Promise.all([
-        window.ucDownloads.listGameExecutables(game.appid, resolved.label),
-        getSavedExe(game.appid, resolved.label, resolved.allowLegacyFallback),
+        window.ucDownloads.listGameExecutables(game.appid),
+        getSavedExe(game.appid),
       ])
       const exes = result?.exes || []
-      const folder = result?.gameRoot || result?.folder || null
-      const savedName = resolveBasename(savedExe)
-      const message = savedName
-        ? `Select the exe to launch for "${game.name}".`
-        : `Select the exe to launch for "${game.name}".`
+      const folder = result?.folder || null
       setExePickerTitle("Set launch executable")
-      setExePickerMessage(message)
+      setExePickerMessage(`Select the exe to launch for "${game.name}".`)
       setExePickerAppId(game.appid)
-      setExePickerVersionLabel(resolved.label)
-      setExePickerAllowLegacyFallback(resolved.allowLegacyFallback)
       setExePickerExes(exes)
       setExePickerCurrentPath(savedExe)
       setExePickerFolder(folder)
@@ -341,8 +288,6 @@ export function LibraryPage() {
       setExePickerTitle("Set launch executable")
       setExePickerMessage(`Unable to list executables for "${game.name}".`)
       setExePickerAppId(null)
-      setExePickerVersionLabel(null)
-      setExePickerAllowLegacyFallback(true)
       setExePickerExes([])
       setExePickerCurrentPath(null)
       setExePickerFolder(null)
@@ -354,10 +299,9 @@ export function LibraryPage() {
     try {
       let folder: string | null = null
       let discoveredExePath: string | null = null
-      const resolved = await resolveLibraryVersionLabel(game)
       if (window.ucDownloads?.listGameExecutables) {
-        const result = await window.ucDownloads.listGameExecutables(game.appid, resolved.label)
-        folder = result?.gameRoot || result?.folder || null
+        const result = await window.ucDownloads.listGameExecutables(game.appid)
+        folder = result?.folder || null
         if (result?.exes?.[0]?.path) {
           discoveredExePath = result.exes[0].path
         }
@@ -389,7 +333,7 @@ export function LibraryPage() {
 
   const handleExePicked = async (path: string) => {
     if (!exePickerAppId) return
-    await setSavedExe(exePickerAppId, path, exePickerVersionLabel, exePickerAllowLegacyFallback)
+    await setSavedExe(exePickerAppId, path)
     // Update the current path to reflect the new selection
     setExePickerCurrentPath(path)
   }
@@ -475,11 +419,10 @@ export function LibraryPage() {
                           onClick={async () => {
                             if (!settingsPopupGame) return
                             setShortcutFeedback(null)
-                            const resolved = await resolveLibraryVersionLabel(settingsPopupGame)
-                            let savedExe = await getSavedExe(settingsPopupGame.appid, resolved.label, resolved.allowLegacyFallback)
+                            let savedExe = await getSavedExe(settingsPopupGame.appid)
                             if (!savedExe && window.ucDownloads?.listGameExecutables) {
                               try {
-                                const result = await window.ucDownloads.listGameExecutables(settingsPopupGame.appid, resolved.label)
+                                const result = await window.ucDownloads.listGameExecutables(settingsPopupGame.appid)
                                 savedExe = result?.exes?.[0]?.path || null
                               } catch { }
                             }
@@ -550,22 +493,6 @@ export function LibraryPage() {
                         )}
                       </PopoverContent>
                     </Popover>
-                  </div>
-                  <div className="absolute top-2 right-2 z-20">
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      onClick={(event) => {
-                        event.preventDefault()
-                        event.stopPropagation()
-                        setPendingDeleteGame(game)
-                        setPendingDeleteAction("installed")
-                      }}
-                      className="h-8 w-8 rounded-full bg-black/60 text-white hover:bg-white/20"
-                      title={game.isExternal ? "Unlink game from UnionCrax" : "Delete installed game"}
-                    >
-                      {game.isExternal ? <Unlink2 className="h-4 w-4" /> : <Trash2 className="h-4 w-4" />}
-                    </Button>
                   </div>
                 </div>
               ))}

@@ -36,12 +36,15 @@ contextBridge.exposeInMainWorld('ucDownloads', {
   deleteInstalled: (appid) => ipcRenderer.invoke('uc:installed-delete', appid),
   deleteInstalling: (appid) => ipcRenderer.invoke('uc:installing-delete', appid),
   setInstallingStatus: (appid, status, error) => ipcRenderer.invoke('uc:installing-status-set', appid, status, error),
+  getActiveStatus: (appid) => ipcRenderer.invoke('uc:download-active-status', appid),
   createDesktopShortcut: (gameName, exePath) => ipcRenderer.invoke('uc:create-desktop-shortcut', gameName, exePath),
   deleteDesktopShortcut: (gameName) => ipcRenderer.invoke('uc:delete-desktop-shortcut', gameName),
   addExternalGame: (appid, metadata, gamePath) => ipcRenderer.invoke('uc:add-external-game', appid, metadata, gamePath),
   updateInstalledMetadata: (appid, updates) => ipcRenderer.invoke('uc:installed-update-metadata', appid, updates),
   pickExternalGameFolder: () => ipcRenderer.invoke('uc:pick-external-game-folder'),
   pickImage: () => ipcRenderer.invoke('uc:pick-image'),
+  pickArchiveFiles: () => ipcRenderer.invoke('uc:pick-archive-files'),
+  installFromArchive: (payload) => ipcRenderer.invoke('uc:install-from-archive', payload),
   onUpdate: (callback) => {
     const listener = (_event, data) => {
       try {

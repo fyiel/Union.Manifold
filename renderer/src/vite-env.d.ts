@@ -50,7 +50,6 @@ declare global {
         partTotal?: number
         authHeader?: string
         savePath?: string
-        versionLabel?: string
       }) => Promise<{ ok: boolean; queued?: boolean; error?: string }>
       cancel: (downloadId: string) => Promise<{ ok: boolean }>
       pause: (downloadId: string) => Promise<{ ok: boolean }>
@@ -99,7 +98,7 @@ declare global {
       getInstalledGlobal: (appid: string) => Promise<any | null>
       listInstallingGlobal: () => Promise<any[]>
       getInstallingGlobal: (appid: string) => Promise<any | null>
-      listGameExecutables: (appid: string, versionLabel?: string | null) => Promise<{ ok: boolean; folder?: string; gameRoot?: string; exes: { name: string; path: string; size?: number; depth?: number }[]; error?: string }>
+      listGameExecutables: (appid: string) => Promise<{ ok: boolean; folder?: string; exes: { name: string; path: string; size?: number; depth?: number }[]; error?: string }>
       findGameSubfolder: (folder: string) => Promise<string | null>
       launchGameExecutable: (appid: string, exePath: string, gameName?: string, showGameName?: boolean) => Promise<{ ok: boolean; error?: string; pid?: number }>
       launchGameExecutableAsAdmin: (appid: string, exePath: string, gameName?: string, showGameName?: boolean) => Promise<{ ok: boolean; error?: string; pid?: number }>
@@ -109,12 +108,21 @@ declare global {
       deleteInstalling: (appid: string) => Promise<{ ok: boolean }>
       saveInstalledMetadata: (appid: string, metadata: any) => Promise<{ ok: boolean }>
       setInstallingStatus: (appid: string, status: string, error?: string | null) => Promise<{ ok: boolean }>
+      getActiveStatus: (appid: string) => Promise<{ extracting: boolean; downloading: boolean }>
       createDesktopShortcut: (gameName: string, exePath: string) => Promise<{ ok: boolean; error?: string }>
       deleteDesktopShortcut: (gameName: string) => Promise<{ ok: boolean; error?: string }>
       addExternalGame: (appid: string, metadata: any, gamePath: string) => Promise<{ ok: boolean; error?: string }>
       updateInstalledMetadata: (appid: string, updates: Record<string, any>) => Promise<{ ok: boolean; error?: string }>
       pickExternalGameFolder: () => Promise<string | null>
       pickImage: () => Promise<string | null>
+      pickArchiveFiles: () => Promise<{ ok: boolean; cancelled?: boolean; files?: { path: string; name: string; size: number }[]; error?: string }>
+      installFromArchive: (payload: {
+        appid?: string
+        gameName?: string
+        archivePaths: string[]
+        downloadId?: string
+        metadata?: Record<string, any>
+      }) => Promise<{ ok: boolean; downloadId?: string; extracted?: number; error?: string }>
       browseForGameExe: (defaultPath?: string) => Promise<{ ok: boolean; path?: string }>
       onUpdate: (callback: (update: DownloadUpdatePayload) => void) => () => void
       onGameQuickExit: (callback: (data: { appid: string | null; exePath: string | null; elapsed: number }) => void) => () => void
