@@ -5156,113 +5156,14 @@ ipcMain.handle('uc:vr-get-settings', () => {
 })
 
 // ============================================================
-// UC Launcher Integration
+// Game Launch
 // ============================================================
-
-/**
- * Find the uc.launcher.exe executable.
- * Checks multiple locations: packaged app resources, app directory, etc.
- * @returns {string|null} Path to uc.launcher.exe or null if not found
- */
-function findLauncherExe() {
-  const candidates = []
-
-  // For packaged apps, check in resources
-  if (app.isPackaged) {
-    // Check in resources/launcher folder
-    candidates.push(path.join(process.resourcesPath, 'launcher', 'uc.launcher.exe'))
-    // Check in resources root
-    candidates.push(path.join(process.resourcesPath, 'uc.launcher.exe'))
-  }
-
-  // Check in app directory (where the main exe is)
-  const appDir = path.dirname(app.getPath('exe'))
-  candidates.push(path.join(appDir, 'uc.launcher.exe'))
-  candidates.push(path.join(appDir, 'launcher', 'uc.launcher.exe'))
-
-  // Check in current working directory
-  candidates.push(path.join(process.cwd(), 'uc.launcher.exe'))
-  candidates.push(path.join(process.cwd(), 'launcher', 'uc.launcher.exe'))
-
-  for (const candidate of candidates) {
-    if (fs.existsSync(candidate)) {
-      ucLog(`Found uc.launcher.exe at: ${candidate}`)
-      return candidate
-    }
-  }
-
-  return null
-}
-
-/**
- * Launch a game using uc.launcher.exe if available.
- * The launcher will:
- * 1. Check for <appid>.ini in its directory
- * 2. If not found, fetch game data from API and save to INI
- * 3. Read INI and launch the game
- * @param {string} appid - The game appid
- * @param {string} exePath - Path to the game executable (optional, for fallback)
- * @param {string} gameName - Name of the game
- * @param {boolean} showGameName - Whether to show game name in Discord RPC
- * @returns {Promise<{ok: boolean, pid?: number, error?: string, method?: string}>}
- */
-async function launchGameWithLauncher(appid, exePath, gameName, showGameName) {
-  const launcherPath = findLauncherExe()
-
-  // If launcher not found, fall back to direct launch
-  if (!launcherPath) {
-    ucLog('uc.launcher.exe not found, using direct launch')
-    return { ok: false, error: 'launcher-not-found', method: 'direct' }
-  }
-
-  try {
-    ucLog(`Launching game via uc.launcher.exe: ${appid} (${gameName})`)
-
-    // Launch via the launcher - it handles INI creation/fetching automatically
-    const launcherDir = path.dirname(launcherPath)
-    const proc = child_process.spawn(launcherPath, ['-appid', String(appid)], {
-      detached: true,
-      stdio: 'ignore',
-      windowsHide: true,
-      cwd: launcherDir
-    })
-
-    proc.unref()
-
-    // Register the running game (using launcher path as exePath for tracking)
-    registerRunningGame(appid, launcherPath, proc, gameName, showGameName)
-
-    ucLog(`Game launched via launcher: ${appid} (PID: ${proc.pid})`)
-    return { ok: true, pid: proc.pid, method: 'launcher' }
-  } catch (err) {
-    ucLog(`Launcher launch failed for ${appid}: ${err.message}`, 'error')
-    return { ok: false, error: err.message, method: 'launcher' }
-  }
-}
-
-// IPC: Check if launcher is available
-ipcMain.handle('uc:launcher-available', () => {
-  const launcherPath = findLauncherExe()
-  return { ok: true, available: !!launcherPath, path: launcherPath }
-})
 
 ipcMain.handle('uc:game-exe-launch', async (_event, appid, exePath, gameName, showGameName) => {
   try {
     if (!exePath || typeof exePath !== 'string') return { ok: false }
     ucLog(`Launching game: ${appid} at ${exePath}`)
 
-    // Try to use uc.launcher.exe first if we have an appid
-    if (appid) {
-      const launcherResult = await launchGameWithLauncher(appid, exePath, gameName, showGameName)
-      // If launcher succeeded or was not found (not an error), return result
-      if (launcherResult.ok || launcherResult.method === 'direct') {
-        return launcherResult
-      }
-      // If launcher failed with an error, fall through to direct launch
-      ucLog(`Launcher failed, falling back to direct launch: ${launcherResult.error}`, 'warn')
-    }
-
-    // Direct launch fallback
     try {
       // Use per-game config overrides if available
       const { command, args, cwd } = appid
