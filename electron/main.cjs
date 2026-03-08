@@ -993,7 +993,7 @@ function ensureSubdir(root, folder) {
   return target
 }
 
-// Iterate game folders including versioned subdirs (gamename/versions/*)
+// Iterate game folders in a root directory
 function* iterateGameFolders(root) {
   if (!root || !fs.existsSync(root)) return
   let entries
@@ -1001,18 +1001,7 @@ function* iterateGameFolders(root) {
   for (const dirent of entries) {
     if (!dirent.isDirectory()) continue
     const folder = path.join(root, dirent.name)
-    yield { folder, name: dirent.name, isVersioned: false }
-    // Also check versioned subdirs
-    const versionsDir = path.join(folder, 'versions')
-    try {
-      if (fs.existsSync(versionsDir)) {
-        const vEntries = fs.readdirSync(versionsDir, { withFileTypes: true })
-        for (const vDirent of vEntries) {
-          if (!vDirent.isDirectory()) continue
-          yield { folder: path.join(versionsDir, vDirent.name), name: vDirent.name, isVersioned: true, parentFolder: folder }
-        }
-      }
-    } catch { }
+    yield { folder, name: dirent.name }
   }
 }
 
@@ -1449,7 +1438,7 @@ function listManifestsFromRoot(root, allowFallback) {
     if (!fs.existsSync(root)) return []
     const manifests = []
     const seenAppids = new Map() // appid -> index in manifests
-    for (const { folder, name, isVersioned } of iterateGameFolders(root)) {
+    for (const { folder, name } of iterateGameFolders(root)) {
       const manifestPath = path.join(folder, INSTALLED_MANIFEST)
       const manifest = readJsonFile(manifestPath)
       if (manifest && manifest.appid) {
@@ -1465,10 +1454,7 @@ function listManifestsFromRoot(root, allowFallback) {
         }
         continue
       }
-      if (allowFallback && !isVersioned) {
-        // Skip fallback for folders that have a versions/ subdir — those will be handled by versioned entries
-        const versionsDir = path.join(folder, 'versions')
-        try { if (fs.existsSync(versionsDir)) continue } catch { }
+      if (allowFallback) {
         const files = fs.readdirSync(folder).filter((f) => f !== INSTALLED_MANIFEST)
         if (files.length && !seenAppids.has(name)) {
           seenAppids.set(name, manifests.length)
@@ -1509,15 +1495,13 @@ function listDownloadRoots() {
 function deleteFolderByAppId(root, appid) {
   try {
     if (!root || !appid || !fs.existsSync(root)) return false
-    for (const { folder, name, isVersioned, parentFolder } of iterateGameFolders(root)) {
+    for (const { folder, name } of iterateGameFolders(root)) {
       const manifestPath = path.join(folder, INSTALLED_MANIFEST)
       const manifest = readJsonFile(manifestPath)
       const match = (manifest && manifest.appid === appid) || name === appid
       if (!match) continue
-      // For versioned folders, delete the parent game folder (all versions)
-      const toDelete = isVersioned && parentFolder ? parentFolder : folder
       try {
-        fs.rmSync(toDelete, { recursive: true, force: true })
+        fs.rmSync(folder, { recursive: true, force: true })
       } catch (e) { }
       return true
     }
@@ -1530,15 +1514,13 @@ function deleteFolderByAppId(root, appid) {
 async function deleteFolderByAppIdAsync(root, appid) {
   try {
     if (!root || !appid || !fs.existsSync(root)) return false
-    for (const { folder, name, isVersioned, parentFolder } of iterateGameFolders(root)) {
+    for (const { folder, name } of iterateGameFolders(root)) {
       const manifestPath = path.join(folder, INSTALLED_MANIFEST)
       const manifest = readJsonFile(manifestPath)
       const match = (manifest && manifest.appid === appid) || name === appid
       if (!match) continue
-      // For versioned folders, delete the parent game folder (all versions)
-      const toDelete = isVersioned && parentFolder ? parentFolder : folder
       try {
-        await fs.promises.rm(toDelete, { recursive: true, force: true })
+        await fs.promises.rm(folder, { recursive: true, force: true })
       } catch (e) { }
       return true
     }
@@ -1563,28 +1545,6 @@ function findInstalledFolderByAppid(appid) {
     }
   } catch (err) {
     console.error('[UC] findInstalledFolderByAppid failed', err)
-  }
-  return null
-}
-
-function findInstalledFolderByAppidVersion(appid, versionLabel) {
-  try {
-    if (!appid || !versionLabel) return null
-    const target = String(versionLabel).trim()
-    if (!target) return null
-    const roots = listDownloadRoots()
-    for (const root of roots) {
-      const installedRoot = path.join(root, installedDirName)
-      for (const { folder } of iterateGameFolders(installedRoot)) {
-        const manifestPath = path.join(folder, INSTALLED_MANIFEST)
-        const manifest = readJsonFile(manifestPath)
-        if (!manifest || manifest.appid !== appid) continue
-        const label = manifest?.metadata?.downloadedVersion || manifest?.metadata?.version || manifest?.version || null
-        if (label && String(label) === target) return folder
-      }
-    }
-  } catch (err) {
-    console.error('[UC] findInstalledFolderByAppidVersion failed', err)
   }
   return null
 }
@@ -1809,6 +1769,7 @@ function hasQueuedDownloadsForApp(appid) {
 
 function hasAnyActiveOrPendingDownloads() {
   if (activeDownloads.size > 0) return true
+  if (ucfilesActiveDownloads.size > 0) return true
   // Only count non-stale pending entries
   const now = Date.now()
   return pendingDownloads.some((entry) => !entry._addedAt || (now - entry._addedAt) < 60000)
@@ -1888,6 +1849,322 @@ async function visitPixeldrainViewerPage(fileId) {
   }
 }
 
+// ── UC.Files parallel range download engine ──
+// Downloads a UC.Files /dl/ URL using multiple concurrent HTTP connections
+// with Range headers to multiply throughput (Telegram CDN serves ~5-20 MB/s per connection).
+
+const UCFILES_CONNECTIONS = 6
+const UCFILES_CHUNK_SIZE = 50 * 1024 * 1024 // 50 MB per range chunk
+
+/** Map<downloadId, { abort: AbortController, state: { paused: boolean, pauseResolvers: Function[] } }> */
+const ucfilesActiveDownloads = new Map()
+
+function isUCFilesUrl(url) {
+  try {
+    return typeof url === 'string' && new URL(url).hostname.includes('files.union-crax.xyz')
+  } catch { return false }
+}
+
+async function ucfilesParallelDownload(win, payload) {
+  const { url, downloadId, filename, appid, gameName, partIndex, partTotal } = payload
+  const downloadRoot = ensureDownloadDir()
+  const gameFolder = safeFolderName(gameName || appid || downloadId)
+  const installingRoot = ensureSubdir(path.join(downloadRoot, installingDirName), gameFolder)
+  const savePath = payload.savePath || path.join(installingRoot, filename || 'download')
+
+  const ctrl = new AbortController()
+  const state = { paused: false, pauseResolvers: [] }
+  ucfilesActiveDownloads.set(downloadId, { abort: ctrl, state })
+
+  // finalSavePath is determined after HEAD (may get filename from Content-Disposition)
+  let resolvedSavePath = savePath
+
+  const sendUpdate = (data) => {
+    sendDownloadUpdate(win, {
+      downloadId, appid: appid || null, gameName: gameName || null, url,
+      filename: path.basename(resolvedSavePath), savePath: resolvedSavePath,
+      partIndex, partTotal,
+      resumeData: null,
+      ...data,
+    })
+  }
+
+  let fd = null
+  try {
+    // 1. HEAD request to get total size
+    // cache: 'no-store' prevents Chromium's networking stack from caching/reusing responses
+    const headRes = await fetch(url, { method: 'HEAD', signal: ctrl.signal, redirect: 'follow', cache: 'no-store' })
+    if (!headRes.ok) {
+      throw new Error(`HEAD failed: ${headRes.status} ${headRes.statusText}`)
+    }
+    const totalBytes = parseInt(headRes.headers.get('content-length') || '0', 10)
+    const acceptsRanges = (headRes.headers.get('accept-ranges') || '').toLowerCase().includes('bytes')
+
+    if (!totalBytes || !acceptsRanges) {
+      // Fallback: single-connection download (server doesn't support ranges or unknown size)
+      ucfilesActiveDownloads.delete(downloadId)
+      return null // signal caller to use default Chromium downloader
+    }
+
+    // Derive filename from Content-Disposition if we don't have one
+    let finalFilename = filename
+    if (!finalFilename) {
+      const cd = headRes.headers.get('content-disposition') || ''
+      const m = cd.match(/filename\*?=(?:UTF-8''|"?)([^";]+)"?/i)
+      if (m?.[1]) finalFilename = decodeURIComponent(m[1])
+    }
+    if (!finalFilename) finalFilename = 'download'
+    const finalSavePath = payload.savePath || path.join(installingRoot, finalFilename)
+    resolvedSavePath = finalSavePath
+
+    sendUpdate({ status: 'downloading', receivedBytes: 0, totalBytes, speedBps: 0, etaSeconds: null })
+
+    // 2. Build chunk list
+    const chunks = []
+    for (let offset = 0; offset < totalBytes; offset += UCFILES_CHUNK_SIZE) {
+      const end = Math.min(offset + UCFILES_CHUNK_SIZE - 1, totalBytes - 1)
+      chunks.push({ start: offset, end, done: false })
+    }
+
+    // 3. Pre-allocate output file
+    fd = fs.openSync(finalSavePath, 'w')
+    fs.ftruncateSync(fd, totalBytes)
+
+    // 4. Progress tracking
+    let totalReceived = 0
+    let lastProgressTime = Date.now()
+    let lastProgressBytes = 0
+    let smoothSpeed = 0
+
+    const reportProgress = () => {
+      const now = Date.now()
+      const dt = Math.max(0.001, (now - lastProgressTime) / 1000)
+      const db = totalReceived - lastProgressBytes
+      const instantSpeed = db / dt
+      smoothSpeed = smoothSpeed > 0 ? smoothSpeed * 0.7 + instantSpeed * 0.3 : instantSpeed
+      lastProgressTime = now
+      lastProgressBytes = totalReceived
+      const remaining = Math.max(0, totalBytes - totalReceived)
+      const finalSpeed = (totalReceived >= totalBytes) ? 0 : smoothSpeed
+      const etaSeconds = finalSpeed > 0 && remaining > 0 ? remaining / finalSpeed : null
+      sendUpdate({
+        status: state.paused ? 'paused' : 'downloading',
+        receivedBytes: totalReceived,
+        totalBytes,
+        speedBps: finalSpeed,
+        etaSeconds,
+      })
+    }
+
+    const progressInterval = setInterval(reportProgress, 500)
+
+    // 5. Worker: download one chunk with strict validation
+    const downloadChunk = async (chunk) => {
+      // Pause support
+      while (state.paused) {
+        await new Promise(resolve => { state.pauseResolvers.push(resolve) })
+      }
+      if (ctrl.signal.aborted) return
+
+      const expectedBytes = chunk.end - chunk.start + 1
+
+      // cache: 'no-store' is critical — Electron's fetch uses Chromium's network stack,
+      // which can cache/deduplicate requests to the same URL. Without this, workers may
+      // receive a cached full-file (200) response instead of their specific range (206).
+      const res = await fetch(url, {
+        headers: {
+          Range: `bytes=${chunk.start}-${chunk.end}`,
+          'Cache-Control': 'no-cache',
+          Pragma: 'no-cache',
+        },
+        signal: ctrl.signal,
+        redirect: 'follow',
+        cache: 'no-store',
+      })
+
+      // Strict status validation: MUST be 206 for range requests
+      if (res.status !== 206) {
+        // If server returned 200 (full file), writing at chunk.start would corrupt adjacent chunks
+        throw new Error(`Expected 206 Partial Content, got ${res.status} for range ${chunk.start}-${chunk.end}`)
+      }
+
+      // Validate Content-Range header matches our request
+      const contentRange = res.headers.get('content-range') || ''
+      const crMatch = contentRange.match(/bytes (\d+)-(\d+)\/(\d+)/)
+      if (crMatch) {
+        const actualStart = parseInt(crMatch[1], 10)
+        const actualEnd = parseInt(crMatch[2], 10)
+        if (actualStart !== chunk.start || actualEnd !== chunk.end) {
+          throw new Error(`Content-Range mismatch: requested ${chunk.start}-${chunk.end}, got ${actualStart}-${actualEnd}`)
+        }
+      }
+
+      const reader = res.body.getReader()
+      let offset = chunk.start
+      const chunkLimit = chunk.end + 1 // exclusive upper bound
+      while (true) {
+        // Pause support
+        while (state.paused) {
+          await new Promise(resolve => { state.pauseResolvers.push(resolve) })
+        }
+        if (ctrl.signal.aborted) return
+
+        const { done, value } = await reader.read()
+        if (done) break
+        const buf = Buffer.from(value)
+        // Cap write to never overflow past this chunk's boundary
+        const remaining = chunkLimit - offset
+        const writeLen = Math.min(buf.length, remaining)
+        if (writeLen > 0) {
+          fs.writeSync(fd, buf, 0, writeLen, offset)
+          offset += writeLen
+          totalReceived += writeLen
+        }
+        if (offset >= chunkLimit) break
+      }
+
+      // Verify we got the right amount of data
+      const actualBytes = offset - chunk.start
+      if (actualBytes !== expectedBytes) {
+        uc_log(`[UC.Files] Chunk ${chunk.start}-${chunk.end}: expected ${expectedBytes} bytes, got ${actualBytes}`)
+      }
+      chunk.done = true
+    }
+
+    // 6. Run workers in parallel (pool of UCFILES_CONNECTIONS)
+    let chunkIndex = 0
+    const workers = []
+    for (let i = 0; i < Math.min(UCFILES_CONNECTIONS, chunks.length); i++) {
+      workers.push((async () => {
+        while (chunkIndex < chunks.length) {
+          if (ctrl.signal.aborted) return
+          const ci = chunkIndex++
+          if (ci >= chunks.length) return
+          await downloadChunk(chunks[ci])
+        }
+      })())
+    }
+
+    await Promise.all(workers)
+    clearInterval(progressInterval)
+    try { fs.closeSync(fd) } catch { }
+    fd = null
+
+    if (ctrl.signal.aborted) {
+      ucfilesActiveDownloads.delete(downloadId)
+      return { ok: false, cancelled: true }
+    }
+
+    // Verify file integrity: actual size on disk must match expected
+    try {
+      const stat = fs.statSync(finalSavePath)
+      if (stat.size !== totalBytes) {
+        throw new Error(`File size mismatch: expected ${totalBytes}, got ${stat.size}`)
+      }
+    } catch (verifyErr) {
+      if (verifyErr.message.includes('File size mismatch')) throw verifyErr
+      // stat failed — file might have been deleted, let post-handler deal with it
+    }
+
+    // 7. Done — mimic the will-download 'done' event flow
+    totalReceived = totalBytes
+    reportProgress()
+
+    ucfilesActiveDownloads.delete(downloadId)
+
+    // Trigger extraction / completion like the normal Chromium download path
+    sendUpdate({ status: 'completed', receivedBytes: totalBytes, totalBytes, speedBps: 0, etaSeconds: null })
+
+    // Run the post-download handler (extract archive, move to installed, etc.)
+    await handleUCFilesDownloadComplete(win, {
+      downloadId, savePath: finalSavePath, appid, gameName, url, partIndex, partTotal,
+    })
+
+    return { ok: true }
+  } catch (err) {
+    // Always close the file descriptor on error/cancel
+    if (fd !== null) { try { fs.closeSync(fd) } catch { } }
+    ucfilesActiveDownloads.delete(downloadId)
+    if (ctrl.signal.aborted) return { ok: false, cancelled: true }
+    ucLog(`[UC.Files] Parallel download error: ${err.message}`, 'error')
+    sendUpdate({ status: 'failed', error: err.message, receivedBytes: 0, totalBytes: 0, speedBps: 0, etaSeconds: null })
+    return { ok: false, error: err.message }
+  }
+}
+
+async function handleUCFilesDownloadComplete(win, info) {
+  const { downloadId, savePath, appid, gameName, url, partIndex, partTotal } = info
+  const downloadRoot = ensureDownloadDir()
+  const folderName = safeFolderName(gameName || appid || downloadId)
+  const installingRoot = path.join(downloadRoot, installingDirName, folderName)
+  const installedRoot = ensureSubdir(path.join(downloadRoot, installedDirName), folderName)
+  const metadataForInstall = getInstallingMetadata(installingRoot, installedRoot, appid, gameName)
+
+  const ext = path.extname(savePath).toLowerCase()
+  const isArchive = ['.zip', '.rar', '.7z', '.tar', '.gz', '.bz2', '.xz', '.tgz'].includes(ext)
+
+  const makeUpdate = (extra) => ({
+    downloadId, filename: path.basename(savePath), savePath,
+    appid: appid || null, gameName: gameName || null, url,
+    receivedBytes: 0, totalBytes: 0, speedBps: 0, etaSeconds: null,
+    partIndex, partTotal, resumeData: null,
+    ...extra,
+  })
+
+  if (isArchive) {
+    try {
+      // Migrate cached metadata images (splash, screenshots) from installing → installed BEFORE extraction
+      // The renderer's saveInstalledMetadata call caches them into installingRoot earlier
+      try {
+        migrateInstallingExtras(installingRoot, installedRoot, new Set([path.basename(savePath)]))
+      } catch (migErr) {
+        ucLog(`[UC.Files] migrateInstallingExtras warning: ${migErr.message}`, 'warn')
+      }
+
+      sendDownloadUpdate(win, makeUpdate({ status: 'extracting' }))
+      const result = await run7zExtract(savePath, installedRoot, ({ percent }) => {
+        sendDownloadUpdate(win, makeUpdate({ status: 'extracting', extractProgress: percent }))
+      })
+      if (!result.ok) throw new Error(result.error || 'Extraction failed')
+      // Remove the archive after extraction
+      try { fs.unlinkSync(savePath) } catch { }
+      // Clean up installing folder
+      try {
+        if (fs.existsSync(installingRoot)) fs.rmSync(installingRoot, { recursive: true, force: true })
+      } catch { }
+      // Update manifest
+      updateInstalledManifest(installedRoot, metadataForInstall, null)
+      sendDownloadUpdate(win, makeUpdate({ status: 'completed', savePath: installedRoot }))
+    } catch (err) {
+      ucLog(`[UC.Files] Extraction failed: ${err.message}`, 'error')
+      sendDownloadUpdate(win, makeUpdate({ status: 'failed', error: `Extraction failed: ${err.message}` }))
+    }
+  } else {
+    // Non-archive: move to installed folder
+    const destPath = path.join(installedRoot, path.basename(savePath))
+    try {
+      try { fs.renameSync(savePath, destPath) } catch {
+        fs.copyFileSync(savePath, destPath); try { fs.unlinkSync(savePath) } catch { }
+      }
+      migrateInstallingExtras(installingRoot, installedRoot, new Set([path.basename(destPath)]))
+      try {
+        if (fs.existsSync(installingRoot)) fs.rmSync(installingRoot, { recursive: true, force: true })
+      } catch { }
+      // Update manifest with file entry
+      const stats = fs.existsSync(destPath) ? fs.statSync(destPath) : null
+      updateInstalledManifest(installedRoot, metadataForInstall, {
+        path: destPath, name: path.basename(destPath),
+        size: stats ? stats.size : 0, addedAt: Date.now(),
+      })
+      sendDownloadUpdate(win, makeUpdate({ status: 'completed', filename: path.basename(destPath), savePath: destPath }))
+    } catch (err) {
+      ucLog(`[UC.Files] Post-download move failed: ${err.message}`, 'error')
+      sendDownloadUpdate(win, makeUpdate({ status: 'failed', error: err.message }))
+    }
+  }
+  startNextQueuedDownload(appid)
+}
+
 async function startDownloadNow(win, payload) {
   if (!win || win.isDestroyed()) return { ok: false }
 
@@ -1922,7 +2199,6 @@ async function startDownloadNow(win, payload) {
     partTotal: payload.partTotal,
     authHeader: payload.authHeader,
     savePath: payload.savePath,
-    versionLabel: payload.versionLabel || null,
     _addedAt: Date.now()
   })
 
@@ -1973,6 +2249,53 @@ async function startDownloadNow(win, payload) {
       // Authenticated: skip viewer page visit and delay entirely
       uc_log(`Pixeldrain download authenticated — skipping viewer page visit and delay`)
     }
+  }
+
+  // UC.Files parallel download engine — bypass Chromium single-connection downloader
+  if (isUCFilesUrl(payload.url)) {
+    uc_log(`startDownloadNow: using UC.Files parallel engine — downloadId=${payload.downloadId}`)
+    // Remove from pending since we're handling it directly (won't hit will-download)
+    const pendIdx = pendingDownloads.findIndex(p => p.downloadId === payload.downloadId)
+    if (pendIdx >= 0) pendingDownloads.splice(pendIdx, 1)
+
+    // Immediately notify the renderer that this download is active, before the async
+    // parallel download starts. Without this, the renderer sees the item as still "queued"
+    // and may call startNextQueuedPart again, causing a double-resolve.
+    sendDownloadUpdate(win, {
+      downloadId: payload.downloadId,
+      status: 'downloading',
+      receivedBytes: 0,
+      totalBytes: 0,
+      speedBps: 0,
+      etaSeconds: null,
+      filename: payload.filename || null,
+      savePath: null,
+      appid: payload.appid || null,
+      gameName: payload.gameName || null,
+      url: payload.url,
+      partIndex: payload.partIndex,
+      partTotal: payload.partTotal,
+      resumeData: null,
+    })
+
+    ucfilesParallelDownload(win, payload).then(result => {
+      if (!result) {
+        // Fallback: server didn't support ranges, use Chromium
+        uc_log(`[UC.Files] Range not supported, falling back to Chromium downloader`)
+        pendingDownloads.push({
+          url: payload.url, normalizedUrl: normalizeDownloadUrl(payload.url),
+          downloadId: payload.downloadId, filename: payload.filename,
+          appid: payload.appid, gameName: payload.gameName,
+          partIndex: payload.partIndex, partTotal: payload.partTotal,
+          authHeader: payload.authHeader, savePath: payload.savePath,
+          _addedAt: Date.now()
+        })
+        win.webContents.downloadURL(payload.url)
+      }
+    }).catch(err => {
+      ucLog(`[UC.Files] Parallel download unexpected error: ${err.message}`, 'error')
+    })
+    return { ok: true }
   }
 
   uc_log(`startDownloadNow: calling downloadURL — downloadId=${payload.downloadId} url=${payload.url}`)
@@ -2656,9 +2979,7 @@ function createWindow() {
     const partIndex = match?.partIndex
     const partTotal = match?.partTotal
     const gameFolder = safeFolderName(match?.gameName || match?.appid || downloadId)
-    const versionSlug = match?.versionLabel ? safeFolderName(match.versionLabel) : null
-    const actualFolder = versionSlug ? path.join(gameFolder, 'versions', versionSlug) : gameFolder
-    const installingRoot = ensureSubdir(path.join(downloadRoot, installingDirName), actualFolder)
+    const installingRoot = ensureSubdir(path.join(downloadRoot, installingDirName), gameFolder)
     const savePath = match?.savePath || path.join(installingRoot, filename)
     try {
       item.setSavePath(savePath)
@@ -2668,7 +2989,7 @@ function createWindow() {
     const state = { lastBytes: 0, lastTime: startedAt, speedBps: 0 }
     uc_log(`activeDownloads.set - partIndex=${partIndex} partTotal=${partTotal}`)
     activeDownloads.set(downloadId, {
-      item, state, appid: match?.appid, gameName: match?.gameName, url, savePath, partIndex, partTotal, versionLabel: match?.versionLabel || null,
+      item, state, appid: match?.appid, gameName: match?.gameName, url, savePath, partIndex, partTotal,
     })
 
     // For interrupted downloads (created by createInterruptedDownload), the item starts
@@ -2781,10 +3102,8 @@ function createWindow() {
       let extractionError = null
       if (state === 'completed' && entry?.savePath) {
         const folderName = safeFolderName(entry?.gameName || entry?.appid || downloadId)
-        const versionSlug = entry?.versionLabel ? safeFolderName(entry.versionLabel) : null
-        const actualFolder = versionSlug ? path.join(folderName, 'versions', versionSlug) : folderName
-        const installingRoot = path.join(downloadRoot, installingDirName, actualFolder)
-        const installedRoot = ensureSubdir(path.join(downloadRoot, installedDirName), actualFolder)
+        const installingRoot = path.join(downloadRoot, installingDirName, folderName)
+        const installedRoot = ensureSubdir(path.join(downloadRoot, installedDirName), folderName)
         const metadataForInstall = getInstallingMetadata(installingRoot, installedRoot, entry?.appid, entry?.gameName)
 
         // If this was a Pixeldrain URL and filename lacks an extension, try to get original name first
@@ -3321,6 +3640,15 @@ ipcMain.handle('uc:download-cancel', (_event, downloadId) => {
   // Auto-clean after 5 minutes to avoid memory leak
   setTimeout(() => cancelledDownloadIds.delete(downloadId), 5 * 60 * 1000)
 
+  // UC.Files parallel download cancel
+  const ucEntry = ucfilesActiveDownloads.get(downloadId)
+  if (ucEntry) {
+    ucEntry.abort.abort()
+    ucfilesActiveDownloads.delete(downloadId)
+    ucLog(`Download cancelled (UC.Files parallel): ${downloadId}`)
+    return { ok: true }
+  }
+
   const entry = activeDownloads.get(downloadId)
   if (entry) {
     // Clean up speed limit timer
@@ -3364,6 +3692,15 @@ ipcMain.handle('uc:download-cancel', (_event, downloadId) => {
 
 ipcMain.handle('uc:download-pause', (event, downloadId) => {
   const win = BrowserWindow.fromWebContents(event.sender)
+
+  // UC.Files parallel download pause
+  const ucEntry = ucfilesActiveDownloads.get(downloadId)
+  if (ucEntry) {
+    ucEntry.state.paused = true
+    ucLog(`Download paused (UC.Files parallel): ${downloadId}`)
+    return { ok: true }
+  }
+
   const entry = activeDownloads.get(downloadId)
   if (!entry) return { ok: false }
   try {
@@ -3397,6 +3734,17 @@ ipcMain.handle('uc:download-pause', (event, downloadId) => {
 
 ipcMain.handle('uc:download-resume', (event, downloadId) => {
   const win = BrowserWindow.fromWebContents(event.sender)
+
+  // UC.Files parallel download resume
+  const ucEntry = ucfilesActiveDownloads.get(downloadId)
+  if (ucEntry && ucEntry.state.paused) {
+    ucEntry.state.paused = false
+    for (const resolve of ucEntry.state.pauseResolvers) resolve()
+    ucEntry.state.pauseResolvers = []
+    ucLog(`Download resumed (UC.Files parallel): ${downloadId}`)
+    return { ok: true }
+  }
+
   const entry = activeDownloads.get(downloadId)
   if (!entry) return { ok: false }
   try {
@@ -3628,10 +3976,7 @@ ipcMain.handle('uc:installed-save', (_event, appid, metadata) => {
   try {
     const downloadRoot = ensureDownloadDir()
     const folderName = safeFolderName((metadata && (metadata.name || metadata.gameName)) || appid || 'unknown')
-    const versionLabel = metadata?.downloadedVersion
-    const versionSlug = versionLabel ? safeFolderName(versionLabel) : null
-    const actualFolder = versionSlug ? path.join(folderName, 'versions', versionSlug) : folderName
-    const installingRoot = ensureSubdir(path.join(downloadRoot, installingDirName), actualFolder)
+    const installingRoot = ensureSubdir(path.join(downloadRoot, installingDirName), folderName)
     const manifestPath = path.join(installingRoot, INSTALLED_MANIFEST)
     const manifest = readJsonFile(manifestPath) || {}
     manifest.appid = appid
@@ -3833,6 +4178,231 @@ ipcMain.handle('uc:pick-image', async () => {
   }
 })
 
+// Pick archive files for manual game installation
+ipcMain.handle('uc:pick-archive-files', async () => {
+  try {
+    const result = await dialog.showOpenDialog({
+      title: 'Select Archive Files',
+      properties: ['openFile', 'multiSelections'],
+      filters: [
+        { name: 'Archives', extensions: ['7z', 'rar', 'tar', 'gz', 'tgz', '001', '002', '003', '004', '005', '006', '007', '008', '009', '010'] },
+        { name: 'All Files', extensions: ['*'] }
+      ],
+      buttonLabel: 'Select Archives'
+    })
+    if (result.canceled || !result.filePaths || result.filePaths.length === 0) {
+      return { ok: false, cancelled: true }
+    }
+    // Return file info for each selected file
+    const files = []
+    for (const fp of result.filePaths) {
+      try {
+        const st = fs.statSync(fp)
+        files.push({ path: fp, name: path.basename(fp), size: st.size })
+      } catch {
+        files.push({ path: fp, name: path.basename(fp), size: 0 })
+      }
+    }
+    return { ok: true, files }
+  } catch (err) {
+    console.error('[UC] pick-archive-files failed', err)
+    return { ok: false, error: String(err) }
+  }
+})
+
+// Install a game from user-provided archive files (single or multipart)
+ipcMain.handle('uc:install-from-archive', async (_event, payload) => {
+  const win = mainWindow
+  if (!win || win.isDestroyed()) return { ok: false, error: 'no_window' }
+  if (!payload || !Array.isArray(payload.archivePaths) || payload.archivePaths.length === 0) {
+    return { ok: false, error: 'missing_archive_paths' }
+  }
+
+  const appid = payload.appid || 'manual-install'
+  const gameName = payload.gameName || appid
+  const archivePaths = payload.archivePaths
+  const metadata = payload.metadata || { appid, name: gameName }
+  const downloadId = payload.downloadId || `archive-install-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`
+
+  // Validate all paths exist
+  for (const fp of archivePaths) {
+    if (!fs.existsSync(fp)) {
+      return { ok: false, error: `File not found: ${path.basename(fp)}` }
+    }
+  }
+
+  // For multipart: verify all parts are in the same directory
+  const dirs = new Set(archivePaths.map(fp => path.dirname(fp)))
+  if (dirs.size > 1) {
+    return { ok: false, error: 'All archive parts must be in the same folder. Please move them together and try again.' }
+  }
+
+  // Determine the archive to extract
+  // For multipart (.001, .002, etc.), sort and use .001 as the entry point
+  const isMultipart = archivePaths.length > 1 || archivePaths.some(fp => isMultipartPartPath(fp))
+  let archiveToExtract
+  let partFiles = null
+
+  if (isMultipart) {
+    // Sort parts numerically
+    const sorted = [...archivePaths].sort((a, b) => {
+      const numA = parseInt((a.match(/\.(\d{3})$/) || ['', '0'])[1], 10)
+      const numB = parseInt((b.match(/\.(\d{3})$/) || ['', '0'])[1], 10)
+      return numA - numB
+    })
+    // If user only selected .001, scan the folder for sibling parts
+    if (sorted.length === 1 && isMultipartPartPath(sorted[0])) {
+      const dir = path.dirname(sorted[0])
+      const baseName = path.basename(sorted[0]).replace(/\.\d{3}$/, '')
+      try {
+        const entries = fs.readdirSync(dir)
+        const siblingParts = entries
+          .filter(e => e.startsWith(baseName + '.') && /\.\d{3}$/.test(e))
+          .map(e => path.join(dir, e))
+          .sort()
+        if (siblingParts.length > 1) {
+          partFiles = siblingParts
+          archiveToExtract = siblingParts[0]
+        } else {
+          archiveToExtract = sorted[0]
+          partFiles = sorted
+        }
+      } catch {
+        archiveToExtract = sorted[0]
+        partFiles = sorted
+      }
+    } else {
+      archiveToExtract = sorted[0]
+      partFiles = sorted
+    }
+  } else {
+    archiveToExtract = archivePaths[0]
+  }
+
+  // Calculate total size
+  const allFiles = partFiles || [archiveToExtract]
+  let totalBytes = 0
+  for (const fp of allFiles) {
+    try { totalBytes += fs.statSync(fp).size } catch { }
+  }
+
+  // Prepare installed folder
+  const downloadRoot = ensureDownloadDir()
+  const folderName = safeFolderName(gameName || appid)
+  const installedRoot = ensureSubdir(path.join(downloadRoot, installedDirName), folderName)
+
+  ucLog(`[Archive Install] Starting: appid=${appid} gameName=${gameName} files=${allFiles.length} totalBytes=${totalBytes} dest=${installedRoot}`)
+
+  // Send initial extracting status
+  sendDownloadUpdate(win, {
+    downloadId,
+    status: 'extracting',
+    receivedBytes: 0,
+    totalBytes,
+    speedBps: 0,
+    etaSeconds: null,
+    filename: path.basename(archiveToExtract),
+    savePath: archiveToExtract,
+    appid,
+    gameName
+  })
+
+  // Run extraction
+  let _lastBytes = 0
+  let _lastTime = Date.now()
+  let _lastSpeed = 0
+  let _pollTimer = null
+
+  try {
+    _pollTimer = setInterval(() => {
+      getDirectorySize(installedRoot).then((size) => {
+        try {
+          const now = Date.now()
+          const deltaBytes = Math.max(0, size - _lastBytes)
+          const deltaSec = Math.max(0.001, (now - _lastTime) / 1000)
+          const instSpeed = deltaBytes / deltaSec
+          const speedBps = _lastSpeed > 0 ? _lastSpeed * 0.7 + instSpeed * 0.3 : instSpeed
+          _lastSpeed = speedBps
+          _lastBytes = size
+          _lastTime = now
+          const etaSeconds = speedBps > 0 ? Math.max(0, Math.round((totalBytes - size) / speedBps)) : null
+          sendDownloadUpdate(win, {
+            downloadId, status: 'extracting', receivedBytes: size, totalBytes,
+            speedBps: Math.round(speedBps), etaSeconds,
+            filename: path.basename(archiveToExtract), savePath: archiveToExtract, appid, gameName
+          })
+        } catch { }
+      }).catch(() => { })
+    }, 500)
+  } catch { }
+
+  const res = await run7zExtract(archiveToExtract, installedRoot, ({ percent }) => {
+    try {
+      const received = Math.round((totalBytes * (percent || 0)) / 100)
+      const now = Date.now()
+      const deltaBytes = Math.max(0, received - _lastBytes)
+      const deltaSec = Math.max(0.001, (now - _lastTime) / 1000)
+      const instSpeed = deltaBytes / deltaSec
+      const speedBps = _lastSpeed > 0 ? _lastSpeed * 0.7 + instSpeed * 0.3 : instSpeed
+      _lastSpeed = speedBps
+      _lastBytes = received
+      _lastTime = now
+      const etaSeconds = speedBps > 0 ? Math.max(0, Math.round((totalBytes - received) / speedBps)) : null
+      sendDownloadUpdate(win, {
+        downloadId, status: 'extracting', receivedBytes: received, totalBytes,
+        speedBps: Math.round(speedBps), etaSeconds,
+        filename: path.basename(archiveToExtract), savePath: archiveToExtract, appid, gameName
+      })
+    } catch { }
+  })
+
+  try { if (_pollTimer) clearInterval(_pollTimer) } catch { }
+
+  if (res && res.ok) {
+    ucLog(`[Archive Install] Extraction succeeded: ${(res.files || []).length} files`)
+    const extractedFiles = res.files || []
+    const fileEntries = []
+    for (const ef of extractedFiles) {
+      try {
+        const stats = fs.existsSync(ef) ? fs.statSync(ef) : null
+        fileEntries.push({
+          path: ef, name: path.basename(ef),
+          size: stats ? stats.size : 0, checksum: null, addedAt: Date.now()
+        })
+      } catch { }
+    }
+
+    // Ensure metadata has appid and name
+    const metaForManifest = { ...metadata, appid, name: gameName }
+    if (fileEntries.length > 0) {
+      updateInstalledManifestBulk(installedRoot, metaForManifest, fileEntries)
+    } else {
+      updateInstalledManifest(installedRoot, metaForManifest, null)
+    }
+
+    // Send completion
+    sendDownloadUpdate(win, {
+      downloadId, status: 'extracted', extracted: extractedFiles,
+      savePath: null, appid, gameName
+    })
+    sendDownloadUpdate(win, {
+      downloadId, status: 'completed',
+      receivedBytes: totalBytes, totalBytes, speedBps: 0, etaSeconds: 0,
+      filename: path.basename(archiveToExtract), savePath: null, appid, gameName
+    })
+
+    return { ok: true, downloadId, extracted: extractedFiles.length }
+  } else {
+    const errorMsg = res && res.error ? res.error : 'Extraction failed'
+    ucLog(`[Archive Install] Extraction failed: ${errorMsg}`, 'error')
+    sendDownloadUpdate(win, {
+      downloadId, status: 'extract_failed', error: errorMsg,
+      savePath: archiveToExtract, appid, gameName
+    })
+    return { ok: false, downloadId, error: errorMsg }
+  }
+})
+
 ipcMain.handle('uc:installing-status-set', (_event, appid, status, error) => {
   try {
     const ok = updateInstallingManifestStatus(appid, status, error)
@@ -3841,6 +4411,20 @@ ipcMain.handle('uc:installing-status-set', (_event, appid, status, error) => {
     console.error('[UC] installing-status-set failed', err)
     return { ok: false }
   }
+})
+
+// Check whether an appid currently has an active extraction running in the main process, or
+// an active/pending download.  The renderer uses this after a page reload to decide whether
+// a "paused" item is really still being processed on the backend and should not be resumed.
+ipcMain.handle('uc:download-active-status', (_event, appid) => {
+  if (!appid) return { extracting: false, downloading: false }
+  const extracting = [...activeExtractions].some((key) => {
+    // activeExtractions stores archive paths; fall back to checking if the appid folder name matches
+    const lower = String(key).toLowerCase()
+    return lower.includes(String(appid).toLowerCase())
+  })
+  const downloading = hasActiveDownloadsForApp(appid)
+  return { extracting, downloading }
 })
 
 // List installed manifests from installed folder
@@ -4039,12 +4623,9 @@ ipcMain.handle('uc:installing-get-global', (_event, appid) => {
   }
 })
 
-ipcMain.handle('uc:game-exe-list', (_event, appid, versionLabel) => {
+ipcMain.handle('uc:game-exe-list', (_event, appid) => {
   try {
-    const folder = versionLabel
-      ? findInstalledFolderByAppidVersion(appid, versionLabel)
-      : findInstalledFolderByAppid(appid)
-    const resolvedFolder = folder || findInstalledFolderByAppid(appid)
+    const resolvedFolder = findInstalledFolderByAppid(appid)
     if (!resolvedFolder) return { ok: false, error: 'not-found', exes: [] }
 
     // Try listing from the game folder — use depth 6 to handle deeply nested structures
@@ -4079,11 +4660,7 @@ ipcMain.handle('uc:game-exe-list', (_event, appid, versionLabel) => {
       } catch { }
     }
 
-    // gameRoot is always the top-level game folder (independent of version)
-    // Used as the defaultPath for the native browse dialog so it opens at a useful location
-    // rather than deep inside a version subfolder
-    const gameRoot = findInstalledFolderByAppid(appid) || effectiveFolder
-    return { ok: true, folder: effectiveFolder, gameRoot, exes }
+    return { ok: true, folder: effectiveFolder, exes }
   } catch (err) {
     console.error('[UC] game-exe-list failed', err)
     return { ok: false, error: 'failed', exes: [] }

@@ -1,23 +1,13 @@
 import { Button } from "@/components/ui/button"
-import { AlertTriangle, Download, RefreshCw } from "lucide-react"
+import { AlertTriangle } from "lucide-react"
 
 type Props = {
   open: boolean
-  installedVersionLabel: string
-  selectedVersionLabel: string
-  onInstallSideBySide: () => void
-  onOverwrite: () => void
+  onProceed: () => void
   onClose: () => void
 }
 
-export function VersionConflictModal({
-  open,
-  installedVersionLabel,
-  selectedVersionLabel,
-  onInstallSideBySide,
-  onOverwrite,
-  onClose,
-}: Props) {
+export function UpdateBackupWarningModal({ open, onProceed, onClose }: Props) {
   if (!open) return null
 
   return (
@@ -28,38 +18,27 @@ export function VersionConflictModal({
       />
       <div className="relative w-full max-w-md rounded-2xl border border-border/60 bg-slate-950/95 p-6 text-white shadow-2xl">
         <div className="flex items-center gap-2 text-lg font-semibold">
-          <AlertTriangle className="h-5 w-5 text-primary" />
-          Version Already Installed
+          <AlertTriangle className="h-5 w-5 text-amber-400" />
+          Backup your game data first
         </div>
 
         <p className="mt-3 text-sm text-slate-300 leading-relaxed">
-          You currently have <span className="font-semibold text-foreground">{installedVersionLabel}</span> installed.
-          Do you wish to install the <span className="font-semibold text-foreground">{selectedVersionLabel}</span> version?
+          Please backup your game data before updating. As sometimes game saves are stored inside the game files. For help, join our Discord server.
         </p>
 
         <div className="mt-5 flex flex-col gap-2">
           <Button
-            className="w-full justify-start gap-2 rounded-xl"
-            onClick={onInstallSideBySide}
+            className="w-full justify-center rounded-xl"
+            onClick={onProceed}
           >
-            <Download className="h-4 w-4" />
-            Download &amp; Install
-            <span className="ml-auto text-xs text-primary-foreground/60">keeps current version</span>
+            Got it, Proceed with Update
           </Button>
 
           <Button
-            variant="outline"
-            className="w-full justify-start gap-2 rounded-xl border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
-            onClick={onOverwrite}
+            variant="ghost"
+            className="w-full rounded-xl"
+            onClick={onClose}
           >
-            <RefreshCw className="h-4 w-4" />
-            Download &amp; Overwrite
-            <span className="ml-auto text-xs text-muted-foreground">replaces current version</span>
-          </Button>
-        </div>
-
-        <div className="mt-3 flex justify-end">
-          <Button variant="ghost" size="sm" onClick={onClose}>
             Cancel
           </Button>
         </div>

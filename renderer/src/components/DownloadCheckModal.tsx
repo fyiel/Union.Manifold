@@ -3,10 +3,8 @@ import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import {
   checkAvailability,
-  fetchGameVersions,
   type AvailabilityResult,
   type DownloadConfig,
-  type GameVersion,
   type PreferredDownloadHost,
 } from "@/lib/downloads"
 import type { Game } from "@/lib/types"
@@ -15,10 +13,13 @@ import {
   AlertTriangle,
   CheckCircle2,
   CircleX,
+  ExternalLink,
+  FileArchive,
   Loader2,
   ShieldAlert,
   ArrowRightLeft,
 } from "lucide-react"
+import { ArchiveInstallModal } from "@/components/ArchiveInstallModal"
 
 type HostOption = {
   key: PreferredDownloadHost
@@ -28,9 +29,9 @@ type HostOption = {
 }
 
 const HOST_OPTIONS: HostOption[] = [
-  { key: "pixeldrain", label: "Pixeldrain", supportsResume: true },
-  { key: "fileq", label: "FileQ", supportsResume: false },
-  { key: "datavaults", label: "DataVaults", tag: "soon", supportsResume: false },
+  { key: "ucfiles", label: "UC.Files", supportsResume: true },
+  { key: "pixeldrain", label: "Pixeldrain", tag: "retiring", supportsResume: true },
+  { key: "fileq", label: "FileQ", tag: "retiring", supportsResume: false },
   { key: "rootz", label: "Rootz", tag: "retiring", supportsResume: false },
 ]
 
@@ -38,12 +39,18 @@ function hostLabel(key: string): string {
   return HOST_OPTIONS.find((h) => h.key === key)?.label || key
 }
 
+/** Compare a host key from the API (e.g. "UC.Files") against a local key (e.g. "ucfiles") */
+function hostMatchesKey(apiHost: string, key: string): boolean {
+  const a = apiHost.toLowerCase().replace(/[^a-z0-9]/g, "")
+  const b = key.toLowerCase().replace(/[^a-z0-9]/g, "")
+  return a.includes(b) || b.includes(a)
+}
+
 type Props = {
   open: boolean
   game: Game | null
   downloadToken: string | null
   defaultHost: PreferredDownloadHost
-  defaultVersionId?: string
   onCheckingChange?: (checking: boolean) => void
   onConfirm: (config: DownloadConfig) => void
   onClose: () => void
@@ -51,15 +58,14 @@ type Props = {
 
 type Phase = "loading" | "ready" | "unavailable" | "error"
 
-export function DownloadCheckModal({ open, game, downloadToken, defaultHost, defaultVersionId, onCheckingChange, onConfirm, onClose }: Props) {
+export function DownloadCheckModal({ open, game, downloadToken, defaultHost, onCheckingChange, onConfirm, onClose }: Props) {
   const [phase, setPhase] = useState<Phase>("loading")
   const [selectedHost, setSelectedHost] = useState<PreferredDownloadHost>(defaultHost)
   const [errorMsg, setErrorMsg] = useState("")
-  const [versions, setVersions] = useState<GameVersion[]>([])
-  const [selectedVersion, setSelectedVersion] = useState<string | undefined>(undefined)
   const [availability, setAvailability] = useState<AvailabilityResult | null>(null)
   const [partOverrides, setPartOverrides] = useState<Record<number, { host: string; url: string }>>({})
   const [deadLinksReported, setDeadLinksReported] = useState(false)
+  const [showArchiveInstall, setShowArchiveInstall] = useState(false)
   const reportSentRef = useRef(false)
 
   // Reset state when modal opens
@@ -68,35 +74,22 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, def
     setPhase("loading")
     setSelectedHost(defaultHost)
     setErrorMsg("")
-    setVersions([])
-    setSelectedVersion(defaultVersionId || undefined)
     setAvailability(null)
     setPartOverrides({})
     setDeadLinksReported(false)
+    setShowArchiveInstall(false)
     reportSentRef.current = false
   }, [open, defaultHost])
 
-  // Fetch versions + run availability check
+  // Run availability check
   const runCheck = useCallback(
-    async (versionId?: string) => {
+    async () => {
       if (!game || !downloadToken) return
       setPhase("loading")
       setPartOverrides({})
 
       try {
-        // Fetch versions in parallel with first availability check
-        const [versionList, avail] = await Promise.all([
-          versions.length > 0 ? Promise.resolve(versions) : fetchGameVersions(game.appid, downloadToken),
-          checkAvailability(game.appid, downloadToken, versionId),
-        ])
-
-        if (versionList.length > 0 && versions.length === 0) {
-          setVersions(versionList)
-          if (!versionId && !selectedVersion) {
-            const current = versionList.find((v) => v.is_current)
-            if (current) setSelectedVersion(current.id)
-          }
-        }
+        const avail = await checkAvailability(game.appid, downloadToken)
 
         setAvailability(avail)
 
@@ -108,22 +101,26 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, def
         // Auto-select the best host based on availability
         const hostEntries = Object.entries(avail.hosts)
         const preferredEntry = hostEntries.find(
-          ([h]) => h.toLowerCase().includes(selectedHost)
+          ([h]) => hostMatchesKey(h, selectedHost)
         )
+        const preferredUsable = preferredEntry && preferredEntry[1].totalParts > 0
 
-        if (preferredEntry && preferredEntry[1].allAlive) {
+        if (preferredUsable && preferredEntry[1].allAlive) {
           // Preferred host is fully alive — great
           setPhase("ready")
           return
         }
 
-        // If preferred host has dead parts, check if all parts are dead
-        if (preferredEntry && preferredEntry[1].aliveParts === 0) {
-          // All dead on preferred host — switch to first fully alive host
-          const fullyAlive = hostEntries.find(([, h]) => h.allAlive)
-          if (fullyAlive) {
+        // Preferred host missing, has no parts, or all parts dead — switch to best alternative
+        if (!preferredUsable || preferredEntry[1].aliveParts === 0) {
+          const fullyAlive = hostEntries.find(([, h]) => h.allAlive && h.totalParts > 0)
+          const partiallyAlive = !fullyAlive
+            ? hostEntries.find(([, h]) => h.aliveParts > 0)
+            : null
+          const best = fullyAlive ?? partiallyAlive
+          if (best) {
             const matchedOption = HOST_OPTIONS.find((o) =>
-              fullyAlive[0].toLowerCase().includes(o.key)
+              hostMatchesKey(best[0], o.key)
             )
             if (matchedOption) setSelectedHost(matchedOption.key)
           }
@@ -135,12 +132,12 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, def
         setPhase("error")
       }
     },
-    [game, downloadToken, versions, selectedHost]
+    [game, downloadToken, selectedHost]
   )
 
   useEffect(() => {
     if (open && game && downloadToken) {
-      void runCheck(defaultVersionId || selectedVersion)
+      void runCheck()
     } else if (open && game && !downloadToken) {
       // Skip link check mode — show host picker immediately
       setPhase("ready")
@@ -176,11 +173,6 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, def
     }
   }, [phase, availability, game])
 
-  const handleVersionChange = (versionId: string) => {
-    setSelectedVersion(versionId)
-    void runCheck(versionId)
-  }
-
   // Apply a cross-host alternative for a dead part
   const applyAlternative = (partIndex: number, fromHost: string) => {
     if (!availability) return
@@ -204,7 +196,7 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, def
   // Determine health for current selected host
   const currentHostAvail = availability
     ? Object.entries(availability.hosts).find(([h]) =>
-        h.toLowerCase().includes(selectedHost)
+        hostMatchesKey(h, selectedHost)
       )?.[1] ?? null
     : null
 
@@ -252,7 +244,6 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, def
                 onClick={() =>
                   onConfirm({
                     host: selectedHost,
-                    versionId: selectedVersion,
                     partOverrides: {},
                   })
                 }
@@ -264,91 +255,95 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, def
         )}
 
         {/* ── Unavailable Phase ── */}
-        {phase === "unavailable" && (
+        {phase === "unavailable" && (() => {
+          const webOnlyHostKeys = availability?.webOnlyHosts ? Object.keys(availability.webOnlyHosts) : []
+          const hasWebOnly = webOnlyHostKeys.length > 0
+          const hasDeadInApp = availability && Object.keys(availability.hosts).length > 0
+
+          return (
           <div className="space-y-4">
             <div className="flex items-center gap-2 text-lg font-semibold">
               <CircleX className="h-5 w-5 text-destructive" />
-              Game not available
+              {hasWebOnly ? "Not available in-app" : "Game not available"}
             </div>
             <p className="text-sm text-muted-foreground">
-              All download links for <span className="font-medium text-foreground">{game?.name}</span> are
-              currently dead on every host. The game cannot be downloaded right now.
+              {hasWebOnly
+                ? <>
+                    <span className="font-medium text-foreground">{game?.name}</span> isn&apos;t
+                    hosted on any in-app download host, but it&apos;s available on the web.
+                  </>
+                : <>
+                    All download links for <span className="font-medium text-foreground">{game?.name}</span> are
+                    currently dead on every host. The game cannot be downloaded right now.
+                  </>
+              }
             </p>
-            {availability && availability.fullyDeadParts.length > 0 && (
+            {hasDeadInApp && availability.fullyDeadParts.length > 0 && (
               <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-200">
                 Dead parts: {availability.fullyDeadParts.map((p) => `Part ${p}`).join(", ")}
               </div>
             )}
-            <div className="rounded-lg border border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-              Please try <strong>downloading from the website</strong> where more hosts may be available.
-            </div>
+            {/* Web-only hosts guidance */}
+            {(() => {
+              const webOnlyHosts = availability?.webOnlyHosts
+                ? Object.keys(availability.webOnlyHosts)
+                : []
+              if (webOnlyHosts.length === 0) return (
+                <div className="rounded-lg border border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+                  Please try <strong>downloading from the website</strong> where more hosts may be available.
+                </div>
+              )
+              return (
+                <div className="rounded-lg border border-primary/30 bg-primary/5 px-3 py-3 space-y-2">
+                  <div className="flex items-center gap-1.5 text-sm font-medium text-foreground">
+                    <ExternalLink className="h-3.5 w-3.5 text-primary" />
+                    Available on the web
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    This game has links alive on {webOnlyHosts.join(", ")} — these hosts don&apos;t work in the app, but you can download from the website and install here.
+                  </p>
+                  <ol className="text-xs text-muted-foreground space-y-1 pl-4 list-decimal">
+                    <li>
+                      <a
+                        href={`https://union-crax.xyz/game/${game?.appid}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-primary underline hover:text-primary/80"
+                      >
+                        Go to the game page on the website
+                      </a>
+                    </li>
+                    <li>Download the archive using {webOnlyHosts[0]}</li>
+                    <li>Come back and use <strong>Install from archive</strong> below</li>
+                  </ol>
+                </div>
+              )
+            })()}
             {deadLinksReported && (
               <p className="text-[11px] text-muted-foreground/60 text-center">
                 We detected dead links and have reported it for you.
               </p>
             )}
-            <div className="flex justify-end">
+            <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
               <Button variant="ghost" onClick={onClose}>
                 Close
               </Button>
+              <Button variant="outline" onClick={() => setShowArchiveInstall(true)}>
+                <FileArchive className="mr-1.5 h-4 w-4" />
+                Install from archive
+              </Button>
             </div>
           </div>
-        )}
+          )
+        })()}
 
         {/* ── Ready Phase ── */}
         {phase === "ready" && (
           <div className="space-y-4">
             <div className="text-lg font-semibold">Download options</div>
             <p className="text-sm text-muted-foreground">
-              Choose a host {versions.length > 0 ? "and version " : ""}for this download.
+              Choose a host for this download.
             </p>
-
-            {/* Version selector (only when multiple versions) */}
-            {versions.length > 1 && (
-              <div className="space-y-1.5">
-                <label className="text-sm font-medium text-foreground">Version</label>
-                <Select value={selectedVersion || ""} onValueChange={handleVersionChange}>
-                  <SelectTrigger className="h-10 w-full">
-                    <SelectValue placeholder="Select version" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {versions.map((v) => (
-                      <SelectItem key={v.id} value={v.id}>
-                        <div className="flex items-center gap-2">
-                          <span>{v.label}</span>
-                          {v.is_current && (
-                            <span className="ml-1 inline-block text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-primary/20 text-primary">
-                              current
-                            </span>
-                          )}
-                          {v.date && (
-                            <span className="ml-auto text-[10px] text-muted-foreground">
-                              {new Date(v.date).toLocaleDateString()}
-                            </span>
-                          )}
-                        </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
-
-            {/* Version metadata strip (shown even for single version) */}
-            {(() => {
-              const sel = versions.length > 0
-                ? versions.find((v) => v.id === selectedVersion) || versions[0]
-                : null
-              const meta = sel?.metadata
-              if (!meta || (!meta.size && !meta.source && !meta.comment)) return null
-              return (
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-border/40 bg-muted/20 px-3 py-1.5 text-xs text-muted-foreground">
-                  {meta.size && <span><strong className="text-foreground/70">Size:</strong> {meta.size}</span>}
-                  {meta.source && <span><strong className="text-foreground/70">Source:</strong> {meta.source}</span>}
-                  {meta.comment && <span className="text-amber-300/80"><strong className="text-amber-400/80">Note:</strong> {meta.comment}</span>}
-                </div>
-              )
-            })()}
 
             {/* Host selector + health */}
             <div className="space-y-1.5">
@@ -485,9 +480,16 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, def
                   ) ?? []
                   return filteredAlive.length === 0
                 }) && (
-                  <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-200">
-                    Some parts are dead on every host. Please try{" "}
-                    <strong>downloading from the website</strong> where more hosts may be available.
+                  <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-200 space-y-1.5">
+                    <p>Some parts are dead on every host. Please try{" "}
+                    <strong>downloading from the website</strong> where more hosts may be available.</p>
+                    <button
+                      onClick={() => setShowArchiveInstall(true)}
+                      className="flex items-center gap-1 text-[10px] font-medium text-red-100 underline hover:text-red-50"
+                    >
+                      <FileArchive className="h-3 w-3" />
+                      Or: install from archive
+                    </button>
                   </div>
                 )}
               </div>
@@ -514,7 +516,7 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, def
                 Cancel
               </Button>
               <Button
-                disabled={hasDeadParts && !allPartsHandled}
+                disabled={(hasDeadParts && !allPartsHandled) || !currentHostAvail || currentHostAvail.totalParts === 0}
                 onClick={() => {
                   // Auto-report dead links (excluding rootz) on download confirm
                   if (!reportSentRef.current && availability && selectedHost !== 'rootz') {
@@ -544,23 +546,28 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, def
                     }
                   }
 
-                  const selectedVersionObj = versions.find((v) => v.id === selectedVersion)
                   onConfirm({
                     host: selectedHost,
-                    versionId: selectedVersion,
-                    versionLabel: selectedVersionObj?.label,
                     partOverrides: Object.keys(partOverrides).length > 0 ? partOverrides : undefined,
-                  })
-                }}
+                  })                }}
               >
-                {hasDeadParts && !allPartsHandled
-                  ? "Resolve dead parts first"
-                  : `Download with ${hostLabel(selectedHost)}`}
+                {!currentHostAvail || currentHostAvail.totalParts === 0
+                  ? "Host unavailable"
+                  : hasDeadParts && !allPartsHandled
+                    ? "Resolve dead parts first"
+                    : `Download with ${hostLabel(selectedHost)}`}
               </Button>
             </div>
           </div>
         )}
       </div>
+
+      {/* Archive Install overlay */}
+      <ArchiveInstallModal
+        open={showArchiveInstall}
+        game={game}
+        onClose={() => setShowArchiveInstall(false)}
+      />
     </div>
   )
 }

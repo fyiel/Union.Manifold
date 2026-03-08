@@ -715,6 +715,11 @@ export function DownloadsPage() {
                       <h2 className="text-2xl sm:text-3xl font-black font-montserrat">
                         {primaryGroup[0]?.gameName || "Unknown"}
                       </h2>
+                      {primaryGame?.version && (
+                        <span className="text-xs font-medium text-muted-foreground bg-muted/40 px-2 py-0.5 rounded-full">
+                          {primaryGame.version}
+                        </span>
+                      )}
                     </div>
                     <p className="text-xs uppercase tracking-wide text-muted-foreground">
                       {primaryStats?.phase === "queued"
@@ -727,11 +732,6 @@ export function DownloadsPage() {
                               ? "Extracting"
                               : "Downloading"}
                     </p>
-                    {primaryGroup[0]?.versionLabel && (
-                      <div className="text-xs text-muted-foreground">
-                        Version {primaryGroup[0].versionLabel}
-                      </div>
-                    )}
                     {primaryTotalParts > 1 && (
                       <div className="text-xs text-muted-foreground">
                         {(() => {
@@ -926,11 +926,11 @@ export function DownloadsPage() {
                     <div className="min-w-0">
                       <h3 className="truncate text-base font-semibold">{gameName}</h3>
                       <div className="text-xs text-muted-foreground">
+                        {game?.version && (
+                          <span>{game.version} · </span>
+                        )}
                         {groupStatus && (
                           <span>{groupStatus} · </span>
-                        )}
-                        {items[0]?.versionLabel && (
-                          <span>{items[0].versionLabel} · </span>
                         )}
                         {totalParts} {getPartsLabel(items)}
                         {overallTotalBytes > 0 && (
@@ -1049,7 +1049,7 @@ export function DownloadsPage() {
                     <div>
                       <h3 className="text-base font-semibold">{gameName}</h3>
                       <div className="text-xs text-muted-foreground">
-                        {items[0]?.versionLabel || game?.version || "Unknown version"} - {game?.source || "Unknown source"} - Completed {finishedAt ? new Date(finishedAt).toLocaleString() : ""}
+                        {game?.version || "Unknown version"} - {game?.source || "Unknown source"} - Completed {finishedAt ? new Date(finishedAt).toLocaleString() : ""}
                       </div>
                       {game?.comment && (
                         <div className="mt-2 text-xs text-amber-200/90">
@@ -1132,7 +1132,7 @@ export function DownloadsPage() {
                     <div>
                       <h3 className="text-base font-semibold text-muted-foreground">{gameName}</h3>
                       <div className="text-xs text-destructive">
-                        {statusLabel}{items[0]?.versionLabel ? ` · ${items[0].versionLabel}` : ""}
+                        {statusLabel}{game?.version ? ` · ${game.version}` : ""}
                       </div>
                     </div>
                   </div>

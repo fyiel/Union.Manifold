@@ -228,32 +228,19 @@ export const GameCard = memo(function GameCard({
 
   const { isQueued, isInstalling } = downloadState
 
-  const getExeKey = (versionLabel?: string | null) =>
-    versionLabel ? `gameExe:${game.appid}:${versionLabel}` : `gameExe:${game.appid}`
-
-  const getSavedExe = async (versionLabel?: string | null, allowLegacyFallback: boolean = true) => {
+  const getSavedExe = async () => {
     if (!window.ucSettings?.get) return null
     try {
-      const key = getExeKey(versionLabel)
-      const versioned = await window.ucSettings.get(key)
-      if (versioned) return versioned
-      if (versionLabel && allowLegacyFallback) {
-        return await window.ucSettings.get(`gameExe:${game.appid}`)
-      }
-      return versioned
+      return await window.ucSettings.get(`gameExe:${game.appid}`)
     } catch {
       return null
     }
   }
 
-  const setSavedExe = async (path: string | null, versionLabel?: string | null) => {
+  const setSavedExe = async (path: string | null) => {
     if (!window.ucSettings?.set) return
     try {
-      const key = getExeKey(versionLabel)
-      await window.ucSettings.set(key, path || null)
-      if (!versionLabel) {
-        await window.ucSettings.set(`gameExe:${game.appid}`, path || null)
-      }
+      await window.ucSettings.set(`gameExe:${game.appid}`, path || null)
     } catch { }
   }
 
@@ -326,34 +313,9 @@ export const GameCard = memo(function GameCard({
     }
   }
 
-  const getInstalledVersionLabels = async () => {
-    try {
-      if (!window.ucDownloads?.listInstalledByAppid) return []
-      const list = await window.ucDownloads.listInstalledByAppid(game.appid)
-      const labels = (Array.isArray(list) ? list : [])
-        .map((manifest) => manifest?.metadata?.downloadedVersion || manifest?.metadata?.version || manifest?.version)
-        .filter(Boolean)
-        .map((label) => String(label))
-      return Array.from(new Set(labels))
-    } catch {
-      return []
-    }
-  }
-
-  const resolveCardVersionLabel = async () => {
-    const labels = await getInstalledVersionLabels()
-    if (labels.length === 1) return labels[0]
-    return game.version || null
-  }
-
-  const listGameExecutablesWithFallback = async () => {
+  const listGameExecutables = async () => {
     if (!window.ucDownloads?.listGameExecutables) return null
-    const preferredLabel = await resolveCardVersionLabel()
-    let result = await window.ucDownloads.listGameExecutables(game.appid, preferredLabel || null)
-    if (!result?.ok || !result.exes?.length) {
-      result = await window.ucDownloads.listGameExecutables(game.appid)
-    }
-    return result
+    return await window.ucDownloads.listGameExecutables(game.appid)
   }
 
   const openExePicker = (exes: Array<{ name: string; path: string; size?: number; depth?: number }>, folder?: string | null) => {
@@ -372,8 +334,7 @@ export const GameCard = memo(function GameCard({
     const showGameName = await window.ucSettings?.get?.('rpcShowGameName') ?? true
     const res = await launchFn(game.appid, path, game.name, showGameName)
     if (res && res.ok) {
-      const preferredLabel = await resolveCardVersionLabel()
-      await setSavedExe(path, preferredLabel)
+      await setSavedExe(path)
       setIsRunning(true)
       setExePickerOpen(false)
       setAdminPromptOpen(false)
@@ -474,10 +435,7 @@ export const GameCard = memo(function GameCard({
       return
     }
     try {
-      const preferredLabel = await resolveCardVersionLabel()
-      const installedLabels = await getInstalledVersionLabels()
-      const allowLegacyFallback = installedLabels.length <= 1
-      const savedExe = await getSavedExe(preferredLabel, allowLegacyFallback)
+      const savedExe = await getSavedExe()
       const runAsAdminEnabled = await getRunAsAdminEnabled()
 
       if (savedExe) {
@@ -485,14 +443,14 @@ export const GameCard = memo(function GameCard({
         return
       }
 
-      const result = await listGameExecutablesWithFallback()
+      const result = await listGameExecutables()
       if (!result) {
         if (installedPath) openPath(installedPath)
         return
       }
       const exes = result?.exes || []
       const folder = result?.folder || null
-      const browseFolder = result?.gameRoot || folder
+      const browseFolder = folder
       const { pick, confident } = pickGameExecutable(exes, game.name, game.source, folder)
       if (pick && confident) {
         setPendingExePath(pick.path)

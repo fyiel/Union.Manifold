@@ -9,7 +9,7 @@ export type DownloadLinksResult = {
   redirectUrl?: string
 }
 
-export type PreferredDownloadHost = "pixeldrain" | "fileq" | "datavaults" | "rootz"
+export type PreferredDownloadHost = "pixeldrain" | "fileq" | "rootz" | "ucfiles"
 
 export type ResolvedDownload = {
   url: string
@@ -44,39 +44,22 @@ export type AvailabilityResult = {
   alternatives: Record<string, AlternativeInfo>
   gameAvailable: boolean
   fullyDeadParts: number[]
-}
-
-export type GameVersion = {
-  id: string
-  label: string
-  date?: string
-  host_count?: number
-  is_current?: boolean
-  metadata?: {
-    size?: string
-    source?: string
-    comment?: string
-    genres?: string[]
-    hasCoOp?: boolean
-    dlc?: string[]
-  }
+  webOnlyHosts?: Record<string, { totalParts: number; aliveParts: number }>
 }
 
 export type DownloadConfig = {
   host: PreferredDownloadHost
-  versionId?: string
-  versionLabel?: string
   partOverrides?: Record<number, { host: string; url: string }>
 }
 
 const DOWNLOAD_HOST_STORAGE_KEY = "uc_direct_download_host"
 const ROOTZ_SIGNED_HOST = "signed-url.cloudflare.com"
-export const SUPPORTED_DOWNLOAD_HOSTS: PreferredDownloadHost[] = ["pixeldrain", "fileq", "datavaults", "rootz"]
-const PREFERRED_HOSTS: PreferredDownloadHost[] = ["pixeldrain", "fileq", "datavaults", "rootz"]
+export const SUPPORTED_DOWNLOAD_HOSTS: PreferredDownloadHost[] = ["pixeldrain", "fileq", "rootz", "ucfiles"]
+const PREFERRED_HOSTS: PreferredDownloadHost[] = ["pixeldrain", "fileq", "rootz", "ucfiles"]
 const PIXELDRAIN_404_MESSAGE = "Pixeldrain returned 404. The link appears to be dead."
 const ROOTZ_404_MESSAGE = "Rootz returned 404. The link appears to be dead."
 const FILEQ_404_MESSAGE = "FileQ returned 404. The link appears to be dead."
-const DATAVAULTS_404_MESSAGE = "DataVaults returned 404. The link appears to be dead."
+const UCFILES_404_MESSAGE = "UC.Files returned 404. The link appears to be dead."
 
 /**
  * Normalise host entries from API — handles both legacy string[] and new {url,part}[] shapes.
@@ -215,70 +198,11 @@ export async function requestDownloadToken(appid: string) {
   return data.downloadToken as string
 }
 
-export async function fetchGameVersions(
-  appid: string,
-  downloadToken: string
-): Promise<GameVersion[]> {
-  try {
-    const response = await apiFetch(
-      `/api/downloads/versions/${encodeURIComponent(appid)}?downloadToken=${encodeURIComponent(downloadToken)}`,
-      { headers: { "X-UC-Client": "unioncrax-direct" } }
-    )
-    if (!response.ok) return []
-    const data = await response.json()
-    if (data && Array.isArray(data.versions)) {
-      return data.versions.map((v: any) => ({
-        id: String(v.id || "current"),
-        label: String(v.label || "Unknown"),
-        date: v.date || v.archived_at || undefined,
-        host_count: v.host_count || 0,
-        is_current: Boolean(v.is_current),
-        metadata: v.metadata || undefined,
-      }))
-    }
-    return []
-  } catch {
-    return []
-  }
-}
-
-/**
- * Fetch version list with metadata only (no download token required).
- * Used by the game detail page to show version tabs before the user clicks download.
- */
-export async function fetchGameVersionsMeta(
-  appid: string
-): Promise<GameVersion[]> {
-  try {
-    const response = await apiFetch(
-      `/api/downloads/versions/${encodeURIComponent(appid)}?meta=true`,
-      { headers: { "X-UC-Client": "unioncrax-direct" } }
-    )
-    if (!response.ok) return []
-    const data = await response.json()
-    if (data && Array.isArray(data.versions)) {
-      return data.versions.map((v: any) => ({
-        id: String(v.id || "current"),
-        label: String(v.label || "Unknown"),
-        date: v.date || v.archived_at || undefined,
-        host_count: v.host_count || 0,
-        is_current: Boolean(v.is_current),
-        metadata: v.metadata || undefined,
-      }))
-    }
-    return []
-  } catch {
-    return []
-  }
-}
-
 export async function checkAvailability(
   appid: string,
-  downloadToken: string,
-  versionId?: string
+  downloadToken: string
 ): Promise<AvailabilityResult> {
   const body: Record<string, string> = { appid, downloadToken }
-  if (versionId) body.versionId = versionId
 
   const response = await apiFetch("/api/downloads/check-availability", {
     method: "POST",
@@ -330,61 +254,24 @@ export async function fetchDownloadLinks(appid: string, downloadToken: string): 
   return { hosts: {}, redirectUrl: response.url }
 }
 
-export async function fetchDownloadLinksForVersion(
-  appid: string,
-  downloadToken: string,
-  versionId: string
-): Promise<DownloadLinksResult> {
-  const url = apiUrl(
-    `/api/downloads/versions/${encodeURIComponent(appid)}?versionId=${encodeURIComponent(versionId)}&downloadToken=${encodeURIComponent(downloadToken)}`
-  )
-  const response = await fetch(url, {
-    redirect: "manual",
-    headers: {
-      "X-UC-Client": "unioncrax-direct",
-    },
-  })
-  const contentType = response.headers.get("content-type") || ""
-
-  if (!response.ok && contentType.includes("application/json")) {
-    const errorPayload = await response.json().catch(() => null)
-    if (errorPayload?.error) {
-      throw new Error(errorPayload.error)
-    }
-  }
-
-  if (response.status >= 300 && response.status < 400) {
-    const redirectUrl = response.headers.get("Location") || response.headers.get("location") || response.url
-    return { hosts: {}, redirectUrl: redirectUrl || undefined }
-  }
-
-  if (contentType.includes("application/json")) {
-    const data = await response.json()
-    const hosts = sanitizeHosts(data?.hosts || {})
-    return { hosts }
-  }
-
-  return { hosts: {}, redirectUrl: response.url }
-}
-
 function pickHostLinks(available: DownloadHosts, host: PreferredDownloadHost) {
   if (host === "rootz") {
-    return available.rootz || available["rootz.so"] || available["www.rootz.so"] || []
+    return available.rootz || available["rootz.so"] || available["www.rootz.so"] || available["Rootz"] || []
   }
   if (host === "pixeldrain") {
-    return available.pixeldrain || available["pixeldrain.com"] || []
+    return available.pixeldrain || available["pixeldrain.com"] || available["PixelDrain"] || []
   }
   if (host === "fileq") {
-    return available.fileq || available["fileq.net"] || []
+    return available.fileq || available["fileq.net"] || available["FileQ"] || []
   }
-  if (host === "datavaults") {
-    return available.datavaults || available["datavaults.co"] || []
+  if (host === "ucfiles") {
+    return available.ucfiles || available["files.union-crax.xyz"] || available["UC.Files"] || []
   }
   return []
 }
 
 export async function getPreferredDownloadHost(): Promise<PreferredDownloadHost> {
-  if (typeof window === "undefined") return "pixeldrain"
+  if (typeof window === "undefined") return "ucfiles"
   
   // Try to get from electron settings first (synchronized with Settings UI)
   if (window.ucSettings?.get) {
@@ -404,7 +291,7 @@ export async function getPreferredDownloadHost(): Promise<PreferredDownloadHost>
     return legacy as PreferredDownloadHost
   }
   
-  return "pixeldrain"
+  return "ucfiles"
 }
 
 export function setPreferredDownloadHost(host: PreferredDownloadHost) {
@@ -423,7 +310,7 @@ export function setPreferredDownloadHost(host: PreferredDownloadHost) {
 }
 
 export function selectHost(available: DownloadHosts, preferredHost?: PreferredDownloadHost): { host: string; links: DownloadHostEntry[] } {
-  const preferred = preferredHost && PREFERRED_HOSTS.includes(preferredHost) ? preferredHost : "pixeldrain"
+  const preferred = preferredHost && PREFERRED_HOSTS.includes(preferredHost) ? preferredHost : "ucfiles"
   if (SUPPORTED_DOWNLOAD_HOSTS.includes(preferred)) {
     const preferredLinks = pickHostLinks(available, preferred)
     if (preferredLinks.length) {
@@ -690,6 +577,91 @@ export async function resolveDataVaultsDownload(url: string): Promise<ResolvedDo
   return { url, resolved: false }
 }
 
+// ── UC.Files download resolution ──
+
+export function extractUCFilesFileId(url: string): string | null {
+  try {
+    const parsed = new URL(url)
+    if (!parsed.hostname.includes("files.union-crax.xyz")) return null
+    // Matches /f/{fileId} (16-char nanoid landing page)
+    const fMatch = parsed.pathname.match(/\/f\/([A-Za-z0-9_-]{1,64})/)
+    if (fMatch?.[1]) return fMatch[1]
+    // Matches /dl/{token} — already a direct download URL, no fileId to extract
+    const dlMatch = parsed.pathname.match(/\/dl\/([A-Za-z0-9_-]{1,64})/)
+    if (dlMatch?.[1]) return null // token, not a file ID
+    return null
+  } catch {
+    return null
+  }
+}
+
+export function isUCFilesUrl(url: string): boolean {
+  try {
+    return new URL(url).hostname.includes("files.union-crax.xyz")
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Returns true if the UC.Files URL is already a signed /dl/ token URL
+ * (i.e. it was already resolved and doesn't need re-resolution).
+ */
+function isUCFilesDlTokenUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url)
+    return parsed.hostname.includes("files.union-crax.xyz") && /^\/dl\//.test(parsed.pathname)
+  } catch {
+    return false
+  }
+}
+
+export async function resolveUCFilesDownload(url: string): Promise<ResolvedDownload> {
+  if (!url) return { url, resolved: false }
+
+  // If the URL is already a signed /dl/ token, it's already resolved — pass it through
+  if (isUCFilesDlTokenUrl(url)) {
+    return {
+      url,
+      filename: inferFilenameFromUrl(url, ""),
+      resolved: true,
+    }
+  }
+
+  const fileId = extractUCFilesFileId(url)
+  if (!fileId) return { url, resolved: false }
+
+  try {
+    const response = await apiFetch("/api/ucfiles/resolve", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fileId }),
+    })
+
+    if (response.status === 404) {
+      throw new Error(UCFILES_404_MESSAGE)
+    }
+
+    const data = await response.json().catch(() => null)
+    if (!response.ok || !data?.success || !data?.data?.url) {
+      downloadLogger.warn("UC.Files resolve failed", { data: { status: response.status, body: data } })
+      return { url, resolved: false }
+    }
+
+    const result = data.data as Record<string, any>
+    return {
+      url: result.url,
+      filename: firstString(result.filename),
+      size: toNumber(result.size),
+      resolved: true,
+    }
+  } catch (err) {
+    if (err instanceof Error && err.message === UCFILES_404_MESSAGE) throw err
+    downloadLogger.warn("UC.Files resolve error", { data: err })
+    return { url, resolved: false }
+  }
+}
+
 // ── Rootz download resolution ──
 
 export function extractRootzFileId(url: string): string | null {
@@ -783,8 +755,8 @@ export async function resolveDownloadUrl(host: string, url: string): Promise<Res
   if (host === "fileq") {
     return resolveFileQDownload(url)
   }
-  if (host === "datavaults") {
-    return resolveDataVaultsDownload(url)
+  if (host === "ucfiles") {
+    return resolveUCFilesDownload(url)
   }
   return { url, resolved: false }
 }
@@ -819,8 +791,8 @@ export async function resolveDownloadSize(host: string, url: string): Promise<nu
     const resolved = await resolveFileQDownload(url)
     return resolved?.size ?? null
   }
-  if (host === "datavaults") {
-    const resolved = await resolveDataVaultsDownload(url)
+  if (host === "ucfiles") {
+    const resolved = await resolveUCFilesDownload(url)
     return resolved?.size ?? null
   }
   return null
