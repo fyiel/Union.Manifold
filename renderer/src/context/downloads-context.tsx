@@ -137,7 +137,10 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         return String(url ?? "")
       }
 
-      const restored = parsed.map((item) => {
+      const restored = parsed
+        // Drop entries that have already completed or been cancelled — no action needed on restart
+        .filter((item) => !["completed", "extracted", "cancelled"].includes(item.status))
+        .map((item) => {
         // Sanitize url in case it was persisted as a DownloadHostEntry object from an older build
         const safeItem = typeof item.url !== "string" ? { ...item, url: coerceUrl(item.url) } : item
         // Downloads lose their Electron DownloadItem on reload — mark as paused so user can resume.
@@ -377,7 +380,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         return
       }
       const hasActive = downloadsRef.current.some((item) =>
-        ["downloading", "extracting", "installing"].includes(item.status)
+        ["downloading", "extracting", "installing", "verifying", "retrying"].includes(item.status)
       )
       if (hasActive) return
 
@@ -558,7 +561,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const hasActive = downloads.some((item) =>
-      ["downloading", "extracting", "installing"].includes(item.status)
+      ["downloading", "extracting", "installing", "verifying", "retrying"].includes(item.status)
     )
     if (hasActive) return
     const hasQueued = downloads.some((item) => item.status === "queued")
@@ -604,7 +607,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
     const existingActive = downloadsRef.current.filter(
       (item) =>
         item.appid === game.appid &&
-        ["queued", "downloading", "paused", "extracting", "installing"].includes(item.status)
+        ["queued", "downloading", "paused", "extracting", "installing", "verifying", "retrying"].includes(item.status)
     )
     if (existingActive.length > 0) {
       downloadLogger.warn(`startGameDownload skipped: active items exist for ${game.appid}`)
@@ -1002,7 +1005,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
       if (!appid) return
       const current = downloadsRef.current.filter((item) => item.appid === appid)
       const hasActive = current.some((item) =>
-        ["downloading", "extracting", "installing"].includes(item.status)
+        ["downloading", "extracting", "installing", "verifying", "retrying"].includes(item.status)
       )
       if (hasActive) return
       // Prefer resuming the part that actually has downloaded bytes, not just pre-fetched totalBytes

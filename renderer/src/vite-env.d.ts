@@ -37,6 +37,30 @@ type DownloadUpdatePayload = {
   }
 }
 
+/** Per-game Linux/VR configuration stored as gameLinux:${appid} in settings */
+type GameLinuxConfig = {
+  /** Override launch mode for this game: 'auto' | 'native' | 'wine' | 'proton' | 'inherit' */
+  launchMode?: 'auto' | 'native' | 'wine' | 'proton' | 'inherit'
+  /** Override Wine binary path for this game */
+  winePath?: string
+  /** Override Proton script path for this game */
+  protonPath?: string
+  /** Override WINEPREFIX for this game */
+  winePrefix?: string
+  /** Override Proton prefix (STEAM_COMPAT_DATA_PATH) for this game */
+  protonPrefix?: string
+  /** Per-game extra environment variables (newline-separated KEY=VALUE) */
+  extraEnv?: string
+  /** Override VR support for this game: true=force on, false=force off, undefined=use global */
+  vrEnabled?: boolean
+  /** Override XR_RUNTIME_JSON for this game */
+  vrXrRuntimeJson?: string
+  /** SLSteam Steam App ID for this game */
+  slsSteamAppId?: string
+  /** Whether SLSteam is enabled for this game */
+  slsSteamEnabled?: boolean
+}
+
 declare global {
   interface Window {
     ucDownloads?: {
@@ -195,8 +219,17 @@ declare global {
       createPrefix: (prefixPath: string, arch?: '32' | '64' | 'win32' | 'win64') => Promise<{ ok: boolean; code?: number; stdout?: string; stderr?: string; error?: string }>
       pickPrefixDir: () => Promise<{ ok: boolean; path?: string; cancelled?: boolean; error?: string }>
       pickBinary: () => Promise<{ ok: boolean; path?: string; cancelled?: boolean; error?: string }>
+      pickSo: () => Promise<{ ok: boolean; path?: string; cancelled?: boolean; error?: string }>
       checkTool: (toolName: string) => Promise<{ ok: boolean; available: boolean; path?: string; error?: string }>
       getSteamPath: () => Promise<{ ok: boolean; path?: string; error?: string }>
+      // Per-game Linux config
+      getGameConfig: (appid: string) => Promise<{ ok: boolean; config: GameLinuxConfig; error?: string }>
+      setGameConfig: (appid: string, config: GameLinuxConfig | null) => Promise<{ ok: boolean; error?: string }>
+      // SLSteam
+      detectSLSSteam: () => Promise<{ ok: boolean; found: boolean; dir?: string | null; slsSteamPath?: string | null; slsInjectPath?: string | null; error?: string }>
+      slsSteamDownload: () => Promise<{ ok: boolean; error?: string }>
+      slsSteamSetupGame: (appid: string, steamAppId?: string) => Promise<{ ok: boolean; path?: string; steamAppId?: string; error?: string }>
+      slsSteamCheckGame: (appid: string) => Promise<{ ok: boolean; found: boolean; path?: string; steamAppId?: string; error?: string }>
     }
     ucVR?: {
       detectSteamVR: () => Promise<{ ok: boolean; found: boolean; dir?: string | null; vrserver?: string | null; startup?: string | null; error?: string }>
@@ -213,6 +246,95 @@ declare global {
         vrExtraEnv?: string
         vrAutoLaunchSteamVr?: boolean
         error?: string
+      }>
+    }
+    ucOverlay?: {
+      show: (appid?: string) => Promise<{ ok: boolean; error?: string }>
+      hide: () => Promise<{ ok: boolean; error?: string }>
+      toggle: (appid?: string) => Promise<{ ok: boolean; visible?: boolean; error?: string }>
+      getStatus: () => Promise<{
+        ok: boolean
+        enabled: boolean
+        visible: boolean
+        hotkey: string
+        autoShow: boolean
+        position: 'left' | 'right'
+        currentAppid: string | null
+      }>
+      getSettings: () => Promise<{
+        ok: boolean
+        enabled: boolean
+        hotkey: string
+        autoShow: boolean
+        position: 'left' | 'right'
+      }>
+      setSettings: (settings: {
+        overlayEnabled?: boolean
+        overlayHotkey?: string
+        overlayAutoShow?: boolean
+        overlayPosition?: 'left' | 'right'
+      }) => Promise<{ ok: boolean; error?: string }>
+      getGameInfo: (appid: string) => Promise<{
+        ok: boolean
+        gameName?: string
+        pid?: number
+        startedAt?: number
+      }>
+      getRunningGames: () => Promise<{
+        ok: boolean
+        games: Array<{
+          appid: string | null
+          gameName: string | null
+          pid: number
+          startedAt: number
+        }>
+      }>
+      getDownloads: () => Promise<{
+        ok: boolean
+        downloads: Array<{
+          downloadId: string
+          status: string
+          filename?: string
+          gameName?: string
+          appid?: string
+          receivedBytes?: number
+          totalBytes?: number
+          speedBps?: number
+          etaSeconds?: number | null
+        }>
+      }>
+      onShow: (callback: (data: { appid: string | null }) => void) => () => void
+      onHide: (callback: () => void) => () => void
+      onStateChanged: (callback: (data: { visible: boolean; appid: string | null }) => void) => () => void
+      onPositionChanged: (callback: (data: { position: 'left' | 'right' }) => void) => () => void
+      onDownloadUpdate: (callback: (update: DownloadUpdatePayload) => void) => () => void
+    }
+    ucController?: {
+      getSettings: () => Promise<{
+        ok: boolean
+        settings?: {
+          enabled: boolean
+          controllerType: 'xbox' | 'playstation' | 'generic'
+          vibrationEnabled: boolean
+          deadzone: number
+          triggerDeadzone: number
+          buttonLayout: 'default' | 'legacy'
+        }
+        error?: string
+      }>
+      setSettings: (settings: {
+        enabled?: boolean
+        controllerType?: 'xbox' | 'playstation' | 'generic'
+        vibrationEnabled?: boolean
+        deadzone?: number
+        triggerDeadzone?: number
+        buttonLayout?: 'default' | 'legacy'
+      }) => Promise<{ ok: boolean; error?: string }>
+      getConnected: () => Promise<{
+        connected: boolean
+        controllerId: string | null
+        controllerName: string | null
+        controllerType: string | null
       }>
     }
   }

@@ -3,3 +3,34 @@ dist
 dist-packaged
 secrets.md
 .env
+
+# UnionCrax.Launcher build outputs
+UnionCrax.Launcher/build*
+UnionCrax.Launcher/*.exe
+UnionCrax.Launcher/*.ico
+UnionCrax.Launcher/*.png
+
+# Native addon & C++ build directories (compiled, never commit)
+build/
+electron/native/build/
+overlay-dll/build/
+
+# Vendored third-party C++ libraries (MinHook etc. — fetched at build time)
+overlay-dll/vendor/
+
+# Compiled binary artifacts
+*.node
+*.dll
+*.lib
+*.exp
+*.obj
+*.pdb
+*.ilk
+*.iobj
+*.ipdb
+
+# CMake / MSBuild generated files (outside tracked source)
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+*.vcxproj.user

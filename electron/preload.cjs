@@ -32,6 +32,7 @@ contextBridge.exposeInMainWorld('ucDownloads', {
   launchGameExecutable: (appid, exePath, gameName, showGameName) => ipcRenderer.invoke('uc:game-exe-launch', appid, exePath, gameName, showGameName),
   launchGameExecutableAsAdmin: (appid, exePath, gameName, showGameName) => ipcRenderer.invoke('uc:game-exe-launch-admin', appid, exePath, gameName, showGameName),
   getRunningGame: (appid) => ipcRenderer.invoke('uc:game-exe-running', appid),
+  isLauncherAvailable: () => ipcRenderer.invoke('uc:launcher-available'),
   quitGameExecutable: (appid) => ipcRenderer.invoke('uc:game-exe-quit', appid),
   deleteInstalled: (appid) => ipcRenderer.invoke('uc:installed-delete', appid),
   deleteInstalling: (appid) => ipcRenderer.invoke('uc:installing-delete', appid),
@@ -120,10 +121,21 @@ contextBridge.exposeInMainWorld('ucLinux', {
   runWinetricks: (packages) => ipcRenderer.invoke('uc:linux-winetricks', packages),
   runProtontricks: (appId, packages) => ipcRenderer.invoke('uc:linux-protontricks', appId, packages),
   createPrefix: (prefixPath, arch) => ipcRenderer.invoke('uc:linux-create-prefix', prefixPath, arch),
+  initDefaultProtonPrefix: (sourcePrefixPath) => ipcRenderer.invoke('uc:linux-init-default-proton-prefix', sourcePrefixPath),
+  getDefaultProtonPrefixPath: () => ipcRenderer.invoke('uc:linux-get-default-proton-prefix-path'),
   pickPrefixDir: () => ipcRenderer.invoke('uc:linux-pick-prefix-dir'),
   pickBinary: () => ipcRenderer.invoke('uc:linux-pick-binary'),
+  pickSo: () => ipcRenderer.invoke('uc:linux-pick-so'),
   checkTool: (toolName) => ipcRenderer.invoke('uc:linux-check-tool', toolName),
   getSteamPath: () => ipcRenderer.invoke('uc:linux-steam-path'),
+  // Per-game Linux config
+  getGameConfig: (appid) => ipcRenderer.invoke('uc:game-linux-config-get', appid),
+  setGameConfig: (appid, config) => ipcRenderer.invoke('uc:game-linux-config-set', appid, config),
+  // SLSteam
+  detectSLSSteam: () => ipcRenderer.invoke('uc:linux-detect-slssteam'),
+  slsSteamDownload: () => ipcRenderer.invoke('uc:linux-slssteam-download'),
+  slsSteamSetupGame: (appid, steamAppId) => ipcRenderer.invoke('uc:linux-slssteam-setup-game', appid, steamAppId),
+  slsSteamCheckGame: (appid) => ipcRenderer.invoke('uc:linux-slssteam-check-game', appid),
 })
 
 contextBridge.exposeInMainWorld('ucVR', {
@@ -133,4 +145,56 @@ contextBridge.exposeInMainWorld('ucVR', {
   pickRuntimeJson: () => ipcRenderer.invoke('uc:vr-pick-runtime-json'),
   pickSteamVRDir: () => ipcRenderer.invoke('uc:vr-pick-steamvr-dir'),
   getSettings: () => ipcRenderer.invoke('uc:vr-get-settings'),
+})
+
+// In-Game Overlay API
+contextBridge.exposeInMainWorld('ucOverlay', {
+  show: (appid) => ipcRenderer.invoke('uc:overlay-show', appid),
+  hide: () => ipcRenderer.invoke('uc:overlay-hide'),
+  toggle: (appid) => ipcRenderer.invoke('uc:overlay-toggle', appid),
+  getStatus: () => ipcRenderer.invoke('uc:overlay-status'),
+  getSettings: () => ipcRenderer.invoke('uc:overlay-get-settings'),
+  setSettings: (settings) => ipcRenderer.invoke('uc:overlay-set-settings', settings),
+  getGameInfo: (appid) => ipcRenderer.invoke('uc:overlay-game-info', appid),
+  getRunningGames: () => ipcRenderer.invoke('uc:overlay-running-games'),
+  getDownloads: () => ipcRenderer.invoke('uc:overlay-get-downloads'),
+  onShow: (callback) => {
+    const listener = (_event, data) => callback(data)
+    ipcRenderer.on('uc:overlay-show', listener)
+    return () => ipcRenderer.removeListener('uc:overlay-show', listener)
+  },
+  onHide: (callback) => {
+    const listener = (_event, data) => callback(data)
+    ipcRenderer.on('uc:overlay-hide', listener)
+    return () => ipcRenderer.removeListener('uc:overlay-hide', listener)
+  },
+  onStateChanged: (callback) => {
+    const listener = (_event, data) => callback(data)
+    ipcRenderer.on('uc:overlay-state-changed', listener)
+    return () => ipcRenderer.removeListener('uc:overlay-state-changed', listener)
+  },
+  onPositionChanged: (callback) => {
+    const listener = (_event, data) => callback(data)
+    ipcRenderer.on('uc:overlay-position-changed', listener)
+    return () => ipcRenderer.removeListener('uc:overlay-position-changed', listener)
+  },
+  onDownloadUpdate: (callback) => {
+    const listener = (_event, data) => callback(data)
+    ipcRenderer.on('uc:download-update', listener)
+    return () => ipcRenderer.removeListener('uc:download-update', listener)
+  },
+  pauseDownload: (downloadId) => ipcRenderer.invoke('uc:download-pause', downloadId),
+  resumeDownload: (downloadId) => ipcRenderer.invoke('uc:download-resume', downloadId),
+  onToast: (callback) => {
+    const listener = (_event, data) => callback(data)
+    ipcRenderer.on('uc:overlay-toast', listener)
+    return () => ipcRenderer.removeListener('uc:overlay-toast', listener)
+  }
+})
+
+// Controller Support API
+contextBridge.exposeInMainWorld('ucController', {
+  getSettings: () => ipcRenderer.invoke('uc:controller-get-settings'),
+  setSettings: (settings) => ipcRenderer.invoke('uc:controller-set-settings', settings),
+  getConnected: () => ipcRenderer.invoke('uc:controller-get-connected')
 })

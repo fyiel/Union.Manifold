@@ -1,8 +1,10 @@
-const { app, BrowserWindow, shell, ipcMain, dialog, Tray, Menu, nativeImage } = require('electron')
+const { app, BrowserWindow, shell, ipcMain, dialog, Tray, Menu, nativeImage, globalShortcut } = require('electron')
 const path = require('node:path')
 const fs = require('node:fs')
 const crypto = require('node:crypto')
 const child_process = require('node:child_process')
+const https = require('node:https')
+const http = require('node:http')
 const DiscordRPC = require('discord-rpc')
 
 const packageJson = require('../package.json')
@@ -83,6 +85,475 @@ const globalDownloadQueue = []
 const cancelledDownloadIds = new Set()
 const activeExtractions = new Set()
 const runningGames = new Map()
+
+// ============================================================
+// In-Game Overlay System (Steam-like)
+// ============================================================
+
+let overlayWindow = null
+let overlayEnabled = true
+let overlayHotkey = 'Ctrl+Shift+Tab'
+let currentOverlayAppid = null
+let overlayAutoShow = true
+let overlayPosition = 'left'
+let overlayMode = 'hidden' // 'hidden' | 'toast' | 'panel'
+let overlayToastTimer = null
+
+// Create the overlay window (transparent, always on top, click-through capable)
+function createOverlayWindow() {
+  if (overlayWindow && !overlayWindow.isDestroyed()) {
+    return overlayWindow
+  }
+
+  // Get primary display dimensions — use full size (not workAreaSize) so the
+  // overlay covers fullscreen/exclusive games that extend under the taskbar.
+  const primaryDisplay = require('electron').screen.getPrimaryDisplay()
+  const { width, height } = primaryDisplay.size
+
+  overlayWindow = new BrowserWindow({
+    width: width,
+    height: height,
+    x: 0,
+    y: 0,
+    frame: false,
+    transparent: true,
+    backgroundColor: '#00000000',
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    resizable: false,
+    movable: false,
+    focusable: true,
+    fullscreenable: false,
+    show: false,
+    type: 'toolbar', // 'toolbar' type helps overlay appear on top of fullscreen games on Windows
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      preload: path.join(__dirname, 'preload.cjs'),
+      webSecurity: true
+    }
+  })
+
+  // Load the overlay page
+  if (isDev) {
+    overlayWindow.loadURL('http://localhost:5173/#/overlay')
+  } else {
+    overlayWindow.loadFile(path.join(__dirname, '..', 'renderer', 'dist', 'index.html'), { hash: '/overlay' })
+  }
+
+  // Make the overlay transparent and ignore mouse events when hidden
+  overlayWindow.setIgnoreMouseEvents(true, { forward: true })
+  overlayWindow.setVisibleOnAllWorkspaces(true)
+  overlayWindow.setAlwaysOnTop(true, 'screen-saver')
+
+  overlayWindow.on('closed', () => {
+    overlayWindow = null
+    currentOverlayAppid = null
+  })
+
+  ucLog('Overlay window created')
+  return overlayWindow
+}
+
+// Show the overlay window (full panel mode)
+function showOverlay(appid = null) {
+  if (!overlayEnabled) return
+  // If no appid given, use current overlay appid or fall back to first running game
+  if (!appid) {
+    appid = currentOverlayAppid || (runningGames.size > 0 ? [...runningGames.values()].find(g => g.appid)?.appid || null : null)
+  }
+  if (!overlayWindow || overlayWindow.isDestroyed()) createOverlayWindow()
+  if (overlayWindow && !overlayWindow.isDestroyed()) {
+    clearTimeout(overlayToastTimer)
+    overlayMode = 'panel'
+    currentOverlayAppid = appid
+    overlayWindow.setIgnoreMouseEvents(false)
+    overlayWindow.show()
+    overlayWindow.focus()
+    overlayWindow.webContents.send('uc:overlay-show', { appid })
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('uc:overlay-state-changed', { visible: true, appid })
+    }
+    ucLog(`Overlay panel shown for game: ${appid || 'unknown'}`)
+  }
+}
+
+// Show a transient toast notification when a game launches (auto-dismisses)
+function showOverlayToast(appid = null) {
+  if (!overlayEnabled) return
+  if (!overlayWindow || overlayWindow.isDestroyed()) createOverlayWindow()
+  if (overlayWindow && !overlayWindow.isDestroyed()) {
+    overlayMode = 'toast'
+    currentOverlayAppid = appid
+    overlayWindow.setIgnoreMouseEvents(true, { forward: true })
+    overlayWindow.showInactive()
+    overlayWindow.webContents.send('uc:overlay-toast', { appid })
+    clearTimeout(overlayToastTimer)
+    overlayToastTimer = setTimeout(() => {
+      if (overlayMode === 'toast') hideOverlay()
+    }, 5500)
+    ucLog(`Overlay toast shown for game: ${appid || 'unknown'}`)
+  }
+}
+
+// Hide the overlay window
+function hideOverlay() {
+  clearTimeout(overlayToastTimer)
+  const wasPanel = overlayMode === 'panel'
+  overlayMode = 'hidden'
+  if (overlayWindow && !overlayWindow.isDestroyed()) {
+    overlayWindow.setIgnoreMouseEvents(true, { forward: true })
+    try { overlayWindow.blur() } catch { }
+    overlayWindow.hide()
+
+    // On Windows, actively return focus to the game window.
+    // overlayWindow.blur() alone does not refocus fullscreen games.
+    if (wasPanel && process.platform === 'win32') {
+      const gamePid = currentOverlayAppid ? getRunningGame(currentOverlayAppid)?.pid : null
+      if (gamePid) {
+        try {
+          child_process.exec(
+            `powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -Command "$p = Get-Process -Id ${gamePid} -ErrorAction SilentlyContinue; if ($p -and $p.MainWindowHandle -ne 0) { Add-Type -Name WinAPI -Namespace UC -MemberDefinition '[DllImport(\\\"user32.dll\\\")] public static extern bool SetForegroundWindow(IntPtr hWnd);'; [UC.WinAPI]::SetForegroundWindow($p.MainWindowHandle) }"`,
+            { windowsHide: true, timeout: 3000 },
+            () => {}
+          )
+        } catch { }
+      }
+    }
+    
+    // Notify renderer
+    overlayWindow.webContents.send('uc:overlay-hide', {})
+    
+    // Notify main window
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('uc:overlay-state-changed', { visible: false, appid: currentOverlayAppid })
+    }
+    
+    ucLog('Overlay hidden')
+  }
+}
+
+// Toggle the overlay visibility
+function toggleOverlay(appid = null) {
+  // Toggle injected overlays for all running games
+  for (const [pid] of overlayInjections) {
+    toggleInjectedOverlay(pid)
+  }
+
+  // Mode-aware toggle: upgrade toast → panel, hide panel, or open panel
+  if (overlayMode === 'toast') {
+    showOverlay(appid || currentOverlayAppid)
+  } else if (overlayMode === 'panel') {
+    hideOverlay()
+  } else {
+    showOverlay(appid || currentOverlayAppid)
+  }
+}
+
+// Register global hotkey for overlay
+function registerOverlayHotkey() {
+  // Unregister existing hotkey first
+  globalShortcut.unregisterAll()
+  
+  if (overlayEnabled && overlayHotkey) {
+    const success = globalShortcut.register(overlayHotkey, () => {
+      ucLog(`Overlay hotkey pressed: ${overlayHotkey}`)
+      toggleOverlay(currentOverlayAppid)
+    })
+    
+    if (success) {
+      ucLog(`Overlay hotkey registered: ${overlayHotkey}`)
+    } else {
+      ucLog(`Failed to register overlay hotkey: ${overlayHotkey}`, 'warn')
+    }
+  }
+}
+
+// Update overlay settings
+function updateOverlaySettings(settings) {
+  const newEnabled = settings.overlayEnabled !== undefined ? settings.overlayEnabled : overlayEnabled
+  const newHotkey = settings.overlayHotkey || overlayHotkey
+  const newAutoShow = settings.overlayAutoShow !== undefined ? settings.overlayAutoShow : overlayAutoShow
+  const newPosition = settings.overlayPosition || overlayPosition
+  
+  let changed = false
+  
+  if (newEnabled !== overlayEnabled) {
+    overlayEnabled = newEnabled
+    changed = true
+    if (!overlayEnabled) {
+      hideOverlay()
+      globalShortcut.unregisterAll()
+    }
+  }
+  
+  if (newHotkey !== overlayHotkey) {
+    overlayHotkey = newHotkey
+    changed = true
+  }
+  
+  if (newAutoShow !== overlayAutoShow) {
+    overlayAutoShow = newAutoShow
+    changed = true
+  }
+
+  if (newPosition !== overlayPosition) {
+    overlayPosition = newPosition
+    changed = true
+  }
+  
+  if (changed && overlayEnabled) {
+    registerOverlayHotkey()
+  }
+
+  // Broadcast position to overlay window so the UI can update
+  if (overlayWindow && !overlayWindow.isDestroyed()) {
+    overlayWindow.webContents.send('uc:overlay-position-changed', { position: overlayPosition })
+  }
+}
+
+// Check if a game is running and auto-show overlay toast if enabled
+function checkAndShowOverlayForGame(appid) {
+  if (overlayAutoShow && overlayEnabled && runningGames.has(appid)) {
+    showOverlayToast(appid)
+  }
+}
+
+// ============================================================
+// Native Overlay Injection System
+// ============================================================
+// Loads the C++ native addon for DLL injection, shared memory,
+// and named pipes. Falls back gracefully to transparent-window-only mode.
+
+let nativeOverlay = null
+try {
+  nativeOverlay = require('./native/build/Release/uc_overlay_native.node')
+  console.log('[UC] [INFO] Native overlay addon loaded')
+} catch (e) {
+  console.warn('[UC] [WARN] Native overlay addon not available — using window-only overlay:', e.message)
+}
+
+// Per-game injection state: pid -> { shmemHandle, pipeHandle, offscreenWindow }
+const overlayInjections = new Map()
+
+const OVERLAY_FRAME_WIDTH = 1920
+const OVERLAY_FRAME_HEIGHT = 1080
+
+function getDllPath() {
+  if (isDev) {
+    return path.join(__dirname, '..', 'build', 'Release', 'uc-overlay-x64.dll')
+  }
+  return path.join(process.resourcesPath, 'uc-overlay-x64.dll')
+}
+
+/**
+ * Inject the overlay DLL into a running game process.
+ * Creates shared memory, pipe server, and an offscreen BrowserWindow
+ * that paints the overlay UI into the shared memory region.
+ */
+function injectOverlayIntoGame(pid, appid) {
+  if (!nativeOverlay || !overlayEnabled) return
+  if (overlayInjections.has(pid)) return
+
+  const dllPath = getDllPath()
+  if (!fs.existsSync(dllPath)) {
+    ucLog(`Overlay DLL not found at ${dllPath} — skipping injection`, 'warn')
+    return
+  }
+
+  try {
+    // 1. Create shared memory for frame data
+    const shmemHandle = nativeOverlay.createSharedFrame(pid, OVERLAY_FRAME_WIDTH, OVERLAY_FRAME_HEIGHT)
+
+    // 2. Create pipe server to receive input from DLL
+    const pipeHandle = nativeOverlay.createPipeServer(pid, (msg) => {
+      handleDllMessage(pid, msg)
+    })
+
+    // 3. Create offscreen BrowserWindow for rendering overlay
+    const offscreenWin = new BrowserWindow({
+      width: OVERLAY_FRAME_WIDTH,
+      height: OVERLAY_FRAME_HEIGHT,
+      show: false,
+      webPreferences: {
+        contextIsolation: true,
+        nodeIntegration: false,
+        preload: path.join(__dirname, 'preload.cjs'),
+        offscreen: true
+      }
+    })
+
+    // When the offscreen window paints, write pixels to shared memory
+    offscreenWin.webContents.on('paint', (event, dirty, image) => {
+      const injection = overlayInjections.get(pid)
+      if (!injection) return
+      const bitmap = image.toBitmap()
+      const size = image.getSize()
+      // Only write if dimensions match (or close enough)
+      if (size.width === OVERLAY_FRAME_WIDTH && size.height === OVERLAY_FRAME_HEIGHT) {
+        try {
+          nativeOverlay.writeSharedFrame(injection.shmemHandle, Buffer.from(bitmap), injection.visible)
+        } catch {}
+      }
+    })
+
+    offscreenWin.webContents.setFrameRate(60)
+
+    // Load overlay page
+    if (isDev) {
+      offscreenWin.loadURL('http://localhost:5173/#/overlay')
+    } else {
+      offscreenWin.loadFile(path.join(__dirname, '..', 'renderer', 'dist', 'index.html'), { hash: '/overlay' })
+    }
+
+    // Show the overlay initially if auto-show is on
+    offscreenWin.webContents.on('did-finish-load', () => {
+      if (overlayAutoShow) {
+        offscreenWin.webContents.send('uc:overlay-show', { appid })
+      }
+    })
+
+    const injection = {
+      shmemHandle,
+      pipeHandle,
+      offscreenWindow: offscreenWin,
+      pid,
+      appid,
+      visible: overlayAutoShow
+    }
+    overlayInjections.set(pid, injection)
+
+    // 4. Inject the DLL — do this after everything else is ready
+    // Small delay to let pipe server start listening
+    setTimeout(() => {
+      try {
+        const success = nativeOverlay.injectDll(pid, dllPath)
+        if (success) {
+          ucLog(`Overlay DLL injected into PID ${pid} for game ${appid}`)
+        } else {
+          ucLog(`Failed to inject overlay DLL into PID ${pid}`, 'warn')
+          cleanupOverlayInjection(pid)
+        }
+      } catch (e) {
+        ucLog(`Error injecting overlay DLL: ${e.message}`, 'error')
+        cleanupOverlayInjection(pid)
+      }
+    }, 500)
+
+  } catch (e) {
+    ucLog(`Error setting up overlay injection for PID ${pid}: ${e.message}`, 'error')
+    cleanupOverlayInjection(pid)
+  }
+}
+
+/**
+ * Handle input messages coming from the injected DLL via pipe.
+ */
+function handleDllMessage(pid, msg) {
+  const injection = overlayInjections.get(pid)
+  if (!injection || !injection.offscreenWindow || injection.offscreenWindow.isDestroyed()) return
+
+  const wc = injection.offscreenWindow.webContents
+
+  switch (msg.type) {
+    case 'connected':
+      ucLog(`Overlay DLL connected from PID ${pid}`)
+      break
+
+    case 'key': {
+      // Forward key event to offscreen renderer
+      const keyEvent = {
+        type: msg.down ? 'keyDown' : 'keyUp',
+        keyCode: msg.key || ''
+      }
+      wc.sendInputEvent(keyEvent)
+      break
+    }
+
+    case 'mouseClick': {
+      const button = msg.button === 1 ? 'right' : msg.button === 2 ? 'middle' : 'left'
+      wc.sendInputEvent({
+        type: msg.clickType === 0 ? 'mouseDown' : 'mouseUp',
+        x: msg.x || 0,
+        y: msg.y || 0,
+        button,
+        clickCount: 1
+      })
+      break
+    }
+
+    case 'mouseMove': {
+      wc.sendInputEvent({
+        type: 'mouseMove',
+        x: msg.x || 0,
+        y: msg.y || 0
+      })
+      break
+    }
+  }
+}
+
+/**
+ * Toggle the injected overlay visibility for a specific game.
+ */
+function toggleInjectedOverlay(pid) {
+  const injection = overlayInjections.get(pid)
+  if (!injection) return
+
+  injection.visible = !injection.visible
+  const wc = injection.offscreenWindow?.webContents
+  if (wc && !injection.offscreenWindow.isDestroyed()) {
+    if (injection.visible) {
+      wc.send('uc:overlay-show', { appid: injection.appid })
+    } else {
+      wc.send('uc:overlay-hide', {})
+    }
+  }
+
+  // Send visibility command to DLL via pipe
+  if (nativeOverlay && injection.pipeHandle) {
+    const cmd = Buffer.alloc(4)
+    cmd[0] = 0x10 // show/hide command
+    cmd.writeUInt16LE(1, 1) // payload length
+    cmd[3] = injection.visible ? 1 : 0
+    try {
+      nativeOverlay.sendPipeMessage(injection.pipeHandle, cmd)
+    } catch {}
+  }
+}
+
+/**
+ * Clean up overlay injection state for a game process.
+ */
+function cleanupOverlayInjection(pid) {
+  const injection = overlayInjections.get(pid)
+  if (!injection) return
+
+  try {
+    // Eject DLL
+    if (nativeOverlay) {
+      try { nativeOverlay.ejectDll(pid, getDllPath()) } catch {}
+    }
+    // Destroy pipe server
+    if (nativeOverlay && injection.pipeHandle) {
+      try { nativeOverlay.destroyPipeServer(injection.pipeHandle) } catch {}
+    }
+    // Destroy shared memory
+    if (nativeOverlay && injection.shmemHandle) {
+      try { nativeOverlay.destroySharedFrame(injection.shmemHandle) } catch {}
+    }
+    // Close offscreen window
+    if (injection.offscreenWindow && !injection.offscreenWindow.isDestroyed()) {
+      injection.offscreenWindow.close()
+    }
+  } catch (e) {
+    ucLog(`Error cleaning up overlay for PID ${pid}: ${e.message}`, 'warn')
+  }
+
+  overlayInjections.delete(pid)
+  ucLog(`Overlay injection cleaned up for PID ${pid}`)
+}
+
 const downloadDirName = 'UnionCrax.Direct'
 const installingDirName = 'installing'
 const installedDirName = 'installed'
@@ -450,7 +921,10 @@ const DEFAULT_BASE_URL = 'https://union-crax.xyz'
 let tray = null
 let mainWindow = null
 
-const gotTheLock = app.requestSingleInstanceLock()
+// In development, allow multiple instances so `pnpm dev` is not blocked by a
+// hidden tray instance from a prior run.
+const enforceSingleInstance = !isDev
+const gotTheLock = enforceSingleInstance ? app.requestSingleInstanceLock() : true
 if (!gotTheLock) {
   app.quit()
 } else {
@@ -460,7 +934,16 @@ if (!gotTheLock) {
     if (argv && Array.isArray(argv)) {
       for (const arg of argv) {
         const lower = String(arg).toLowerCase()
-        if (lower.includes('setup') || lower.includes('nsis') || lower.includes('.exe')) {
+        // Detect installer/update invocations only; do not treat generic .exe
+        // args as setup runs, otherwise normal second-instance events can quit
+        // the app unexpectedly.
+        if (
+          lower.includes('setup') ||
+          lower.includes('installer') ||
+          lower.includes('nsis') ||
+          lower.includes('squirrel') ||
+          lower.includes('--squirrel')
+        ) {
           isSetupRun = true
           break
         }
@@ -1768,8 +2251,18 @@ function hasQueuedDownloadsForApp(appid) {
 }
 
 function hasAnyActiveOrPendingDownloads() {
-  if (activeDownloads.size > 0) return true
-  if (ucfilesActiveDownloads.size > 0) return true
+  // Check Chromium active downloads (exclude paused ones)
+  for (const entry of activeDownloads.values()) {
+    if (entry && entry.item) {
+      const isPaused = (typeof entry.item.isPaused === 'function' && entry.item.isPaused())
+        || entry.item.getState?.() === 'interrupted'
+      if (!isPaused) return true
+    }
+  }
+  // Check UC Files active downloads (exclude paused ones)
+  for (const entry of ucfilesActiveDownloads.values()) {
+    if (entry && entry.state && !entry.state.paused) return true
+  }
   // Only count non-stale pending entries
   const now = Date.now()
   return pendingDownloads.some((entry) => !entry._addedAt || (now - entry._addedAt) < 60000)
@@ -1856,6 +2349,44 @@ async function visitPixeldrainViewerPage(fileId) {
 const UCFILES_CONNECTIONS = 6
 const UCFILES_CHUNK_SIZE = 50 * 1024 * 1024 // 50 MB per range chunk
 
+// HTTP/1.1 Range request using Node.js networking (not Chromium's fetch).
+// Chromium's fetch multiplexes concurrent requests over a single HTTP/2 connection,
+// which can intermittently deliver data frames to the wrong response stream under load,
+// causing silent data corruption (correct byte count, wrong content).
+// Node.js https creates independent TCP connections per request, eliminating this.
+function ucfilesRangeRequest(url, start, end, signal) {
+  return new Promise((resolve, reject) => {
+    const parsed = new URL(url)
+    const mod = parsed.protocol === 'https:' ? https : http
+    const req = mod.request({
+      hostname: parsed.hostname,
+      port: parsed.port || undefined,
+      path: parsed.pathname + parsed.search,
+      method: 'GET',
+      headers: { Range: `bytes=${start}-${end}`, Connection: 'close' },
+      agent: false, // Disable keep-alive — fresh TCP connection per range to prevent stale data corruption
+    }, (res) => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        res.resume()
+        ucfilesRangeRequest(res.headers.location, start, end, signal).then(resolve, reject)
+        return
+      }
+      resolve({ statusCode: res.statusCode, headers: res.headers, stream: res })
+    })
+    req.on('error', (err) => {
+      if (signal?.aborted) reject(new Error('Aborted'))
+      else reject(err)
+    })
+    if (signal) {
+      if (signal.aborted) { req.destroy(); reject(new Error('Aborted')); return }
+      const onAbort = () => req.destroy()
+      signal.addEventListener('abort', onAbort, { once: true })
+      req.on('close', () => signal.removeEventListener('abort', onAbort))
+    }
+    req.end()
+  })
+}
+
 /** Map<downloadId, { abort: AbortController, state: { paused: boolean, pauseResolvers: Function[] } }> */
 const ucfilesActiveDownloads = new Map()
 
@@ -1865,7 +2396,39 @@ function isUCFilesUrl(url) {
   } catch { return false }
 }
 
-async function ucfilesParallelDownload(win, payload) {
+/**
+ * Re-read downloaded chunks from disk and compare SHA-256 against the hashes
+ * computed during download. Returns array of chunk indices that don't match
+ * (i.e. bytes on disk differ from bytes received over the network).
+ */
+function verifyChunkHashes(filePath, chunks) {
+  const READ_BUF_SIZE = 4 * 1024 * 1024 // 4 MB
+  const readBuf = Buffer.alloc(READ_BUF_SIZE)
+  const verifyFd = fs.openSync(filePath, 'r')
+  const bad = []
+  try {
+    for (let i = 0; i < chunks.length; i++) {
+      if (!chunks[i].sha256) continue
+      const c = chunks[i]
+      const hasher = crypto.createHash('sha256')
+      let pos = c.start
+      let left = c.end - c.start + 1
+      while (left > 0) {
+        const n = fs.readSync(verifyFd, readBuf, 0, Math.min(readBuf.length, left), pos)
+        if (n === 0) break
+        hasher.update(readBuf.subarray(0, n))
+        pos += n
+        left -= n
+      }
+      if (hasher.digest('hex') !== c.sha256) bad.push(i)
+    }
+  } finally {
+    fs.closeSync(verifyFd)
+  }
+  return bad
+}
+
+async function ucfilesParallelDownload(win, payload, _retryCount = 0) {
   const { url, downloadId, filename, appid, gameName, partIndex, partTotal } = payload
   const downloadRoot = ensureDownloadDir()
   const gameFolder = safeFolderName(gameName || appid || downloadId)
@@ -1875,6 +2438,11 @@ async function ucfilesParallelDownload(win, payload) {
   const ctrl = new AbortController()
   const state = { paused: false, pauseResolvers: [] }
   ucfilesActiveDownloads.set(downloadId, { abort: ctrl, state })
+
+  // Unblock paused workers on abort so they exit cleanly instead of hanging
+  ctrl.signal.addEventListener('abort', () => {
+    state.pauseResolvers.splice(0).forEach(r => r())
+  }, { once: true })
 
   // finalSavePath is determined after HEAD (may get filename from Content-Disposition)
   let resolvedSavePath = savePath
@@ -1890,6 +2458,7 @@ async function ucfilesParallelDownload(win, payload) {
   }
 
   let fd = null
+  let progressInterval = null
   try {
     // 1. HEAD request to get total size
     // cache: 'no-store' prevents Chromium's networking stack from caching/reusing responses
@@ -1936,7 +2505,18 @@ async function ucfilesParallelDownload(win, payload) {
     let lastProgressBytes = 0
     let smoothSpeed = 0
 
+    let pausedUpdateSent = false
     const reportProgress = () => {
+      if (state.paused) {
+        // When paused, send one update then go silent until resumed
+        if (!pausedUpdateSent) {
+          pausedUpdateSent = true
+          smoothSpeed = 0
+          sendUpdate({ status: 'paused', receivedBytes: totalReceived, totalBytes, speedBps: 0, etaSeconds: null })
+        }
+        return
+      }
+      pausedUpdateSent = false
       const now = Date.now()
       const dt = Math.max(0.001, (now - lastProgressTime) / 1000)
       const db = totalReceived - lastProgressBytes
@@ -1948,7 +2528,7 @@ async function ucfilesParallelDownload(win, payload) {
       const finalSpeed = (totalReceived >= totalBytes) ? 0 : smoothSpeed
       const etaSeconds = finalSpeed > 0 && remaining > 0 ? remaining / finalSpeed : null
       sendUpdate({
-        status: state.paused ? 'paused' : 'downloading',
+        status: 'downloading',
         receivedBytes: totalReceived,
         totalBytes,
         speedBps: finalSpeed,
@@ -1956,99 +2536,129 @@ async function ucfilesParallelDownload(win, payload) {
       })
     }
 
-    const progressInterval = setInterval(reportProgress, 500)
+    progressInterval = setInterval(reportProgress, 500)
+    const MAX_CHUNK_RETRIES = 3
 
-    // 5. Worker: download one chunk with strict validation
+    // 5. Worker: download one chunk with retry on short/broken reads
+    // Uses Node.js https (HTTP/1.1, independent TCP connections) instead of
+    // Chromium's fetch (HTTP/2 multiplexed) to prevent data corruption.
     const downloadChunk = async (chunk) => {
-      // Pause support
-      while (state.paused) {
-        await new Promise(resolve => { state.pauseResolvers.push(resolve) })
-      }
-      if (ctrl.signal.aborted) return
-
+      const chunkHasher = crypto.createHash('sha256')
       const expectedBytes = chunk.end - chunk.start + 1
-
-      // cache: 'no-store' is critical — Electron's fetch uses Chromium's network stack,
-      // which can cache/deduplicate requests to the same URL. Without this, workers may
-      // receive a cached full-file (200) response instead of their specific range (206).
-      const res = await fetch(url, {
-        headers: {
-          Range: `bytes=${chunk.start}-${chunk.end}`,
-          'Cache-Control': 'no-cache',
-          Pragma: 'no-cache',
-        },
-        signal: ctrl.signal,
-        redirect: 'follow',
-        cache: 'no-store',
-      })
-
-      // Strict status validation: MUST be 206 for range requests
-      if (res.status !== 206) {
-        // If server returned 200 (full file), writing at chunk.start would corrupt adjacent chunks
-        throw new Error(`Expected 206 Partial Content, got ${res.status} for range ${chunk.start}-${chunk.end}`)
-      }
-
-      // Validate Content-Range header matches our request
-      const contentRange = res.headers.get('content-range') || ''
-      const crMatch = contentRange.match(/bytes (\d+)-(\d+)\/(\d+)/)
-      if (crMatch) {
-        const actualStart = parseInt(crMatch[1], 10)
-        const actualEnd = parseInt(crMatch[2], 10)
-        if (actualStart !== chunk.start || actualEnd !== chunk.end) {
-          throw new Error(`Content-Range mismatch: requested ${chunk.start}-${chunk.end}, got ${actualStart}-${actualEnd}`)
-        }
-      }
-
-      const reader = res.body.getReader()
-      let offset = chunk.start
       const chunkLimit = chunk.end + 1 // exclusive upper bound
-      while (true) {
-        // Pause support
+      let offset = chunk.start
+      let retries = 0
+
+      // Outer loop: re-request from current offset on short reads or stream errors
+      while (offset < chunkLimit) {
         while (state.paused) {
           await new Promise(resolve => { state.pauseResolvers.push(resolve) })
         }
         if (ctrl.signal.aborted) return
 
-        const { done, value } = await reader.read()
-        if (done) break
-        const buf = Buffer.from(value)
-        // Cap write to never overflow past this chunk's boundary
-        const remaining = chunkLimit - offset
-        const writeLen = Math.min(buf.length, remaining)
-        if (writeLen > 0) {
-          fs.writeSync(fd, buf, 0, writeLen, offset)
-          offset += writeLen
-          totalReceived += writeLen
-        }
-        if (offset >= chunkLimit) break
-      }
+        const rangeEnd = chunk.end
+        const { statusCode, headers, stream } = await ucfilesRangeRequest(url, offset, rangeEnd, ctrl.signal)
 
-      // Verify we got the right amount of data
-      const actualBytes = offset - chunk.start
-      if (actualBytes !== expectedBytes) {
-        uc_log(`[UC.Files] Chunk ${chunk.start}-${chunk.end}: expected ${expectedBytes} bytes, got ${actualBytes}`)
+        // Strict status validation: MUST be 206 for range requests
+        if (statusCode !== 206) {
+          stream.resume() // drain
+          throw new Error(`Expected 206 Partial Content, got ${statusCode} for range ${offset}-${rangeEnd}`)
+        }
+
+        // Validate Content-Range header matches our request
+        const contentRange = headers['content-range'] || ''
+        const crMatch = contentRange.match(/bytes (\d+)-(\d+)\/(\d+)/)
+        if (crMatch) {
+          const actualStart = parseInt(crMatch[1], 10)
+          const actualEnd = parseInt(crMatch[2], 10)
+          if (actualStart !== offset || actualEnd !== rangeEnd) {
+            stream.destroy()
+            throw new Error(`Content-Range mismatch: requested ${offset}-${rangeEnd}, got ${actualStart}-${actualEnd}`)
+          }
+        }
+
+        // Validate Content-Length matches expected range size
+        const expectedRangeBytes = rangeEnd - offset + 1
+        const clHeader = parseInt(headers['content-length'] || '0', 10)
+        if (clHeader > 0 && clHeader !== expectedRangeBytes) {
+          stream.destroy()
+          throw new Error(`Content-Length mismatch: expected ${expectedRangeBytes}, got ${clHeader} for range ${offset}-${rangeEnd}`)
+        }
+
+        let chunkBytesWritten = 0
+        try {
+          for await (const value of stream) {
+            while (state.paused) {
+              await new Promise(resolve => { state.pauseResolvers.push(resolve) })
+            }
+            if (ctrl.signal.aborted) return
+
+            const buf = Buffer.isBuffer(value) ? value : Buffer.from(value)
+            // Cap write to never overflow past this chunk's boundary
+            const remaining = chunkLimit - offset
+            const writeLen = Math.min(buf.length, remaining)
+            if (writeLen > 0) {
+              // Check abort before write — fd may have been invalidated by another worker's failure
+              if (ctrl.signal.aborted) return
+              fs.writeSync(fd, buf, 0, writeLen, offset)
+              chunkHasher.update(buf.subarray(0, writeLen))
+              offset += writeLen
+              totalReceived += writeLen
+              chunkBytesWritten += writeLen
+            }
+            if (offset >= chunkLimit) break
+          }
+        } catch (streamErr) {
+          if (ctrl.signal.aborted) return
+          ucLog(`[UC.Files] Stream error in chunk ${chunk.start}-${chunk.end} at offset ${offset}: ${streamErr.message}`, 'warn')
+        }
+
+        // If we haven't received all bytes, retry from current offset
+        if (offset < chunkLimit) {
+          retries++
+          if (retries > MAX_CHUNK_RETRIES) {
+            throw new Error(`Chunk ${chunk.start}-${chunk.end}: only received ${offset - chunk.start}/${expectedBytes} bytes after ${MAX_CHUNK_RETRIES} retries`)
+          }
+          ucLog(`[UC.Files] Chunk ${chunk.start}-${chunk.end}: short read (${offset - chunk.start}/${expectedBytes} bytes), retry ${retries}/${MAX_CHUNK_RETRIES} from offset ${offset}`)
+        }
       }
       chunk.done = true
+      chunk.sha256 = chunkHasher.digest('hex')
     }
 
     // 6. Run workers in parallel (pool of UCFILES_CONNECTIONS)
+    // Each worker catches errors internally and aborts others, so we can
+    // safely wait for ALL workers to finish before closing the file descriptor.
     let chunkIndex = 0
+    let firstWorkerError = null
     const workers = []
     for (let i = 0; i < Math.min(UCFILES_CONNECTIONS, chunks.length); i++) {
       workers.push((async () => {
-        while (chunkIndex < chunks.length) {
-          if (ctrl.signal.aborted) return
-          const ci = chunkIndex++
-          if (ci >= chunks.length) return
-          await downloadChunk(chunks[ci])
+        try {
+          while (chunkIndex < chunks.length) {
+            if (ctrl.signal.aborted) return
+            const ci = chunkIndex++
+            if (ci >= chunks.length) return
+            await downloadChunk(chunks[ci])
+          }
+        } catch (workerErr) {
+          if (!firstWorkerError) firstWorkerError = workerErr
+          ctrl.abort() // Signal all other workers to stop immediately
         }
       })())
     }
 
-    await Promise.all(workers)
+    await Promise.allSettled(workers) // Wait for ALL workers to exit before touching fd
     clearInterval(progressInterval)
+    // Flush all writes to disk before closing
+    try { fs.fsyncSync(fd) } catch { }
     try { fs.closeSync(fd) } catch { }
     fd = null
+
+    // If a worker error occurred, throw it now (fd is safely closed)
+    if (firstWorkerError) {
+      throw firstWorkerError
+    }
 
     if (ctrl.signal.aborted) {
       ucfilesActiveDownloads.delete(downloadId)
@@ -2066,7 +2676,60 @@ async function ucfilesParallelDownload(win, payload) {
       // stat failed — file might have been deleted, let post-handler deal with it
     }
 
-    // 7. Done — mimic the will-download 'done' event flow
+    // Compute SHA-256 of the downloaded file for integrity logging
+    try {
+      const fileHash = crypto.createHash('sha256')
+      const hashStream = fs.createReadStream(finalSavePath)
+      await new Promise((resolve, reject) => {
+        hashStream.on('data', (chunk) => fileHash.update(chunk))
+        hashStream.on('end', resolve)
+        hashStream.on('error', reject)
+      })
+      const sha256 = fileHash.digest('hex')
+      ucLog(`[UC.Files] Download SHA-256: ${sha256} | ${path.basename(finalSavePath)} (${totalBytes} bytes)`)
+    } catch (hashErr) {
+      ucLog(`[UC.Files] SHA-256 computation failed: ${hashErr.message}`, 'warn')
+    }
+
+    // 7. Verify chunk write integrity: re-read each chunk from disk and compare
+    //    SHA-256 against the hash computed during download. Detects OS/filesystem
+    //    write corruption (bytes received correctly but written incorrectly).
+    ucLog('[UC.Files] Verifying chunk write integrity...')
+    sendUpdate({ status: 'verifying', receivedBytes: totalBytes, totalBytes, speedBps: 0, etaSeconds: null })
+    const badChunks = verifyChunkHashes(finalSavePath, chunks)
+    if (badChunks.length > 0) {
+      ucLog(`[UC.Files] WRITE CORRUPTION: ${badChunks.length}/${chunks.length} chunks differ on disk! Indices: [${badChunks.join(', ')}]`, 'error')
+      for (const ci of badChunks) {
+        const c = chunks[ci]
+        ucLog(`[UC.Files]   Chunk ${ci}: bytes ${c.start}-${c.end} (${c.end - c.start + 1} bytes)`, 'error')
+      }
+    } else {
+      ucLog(`[UC.Files] All ${chunks.length} chunks verified — disk matches network bytes`)
+    }
+
+    // 8. Archive integrity test: run `7z t` to validate the archive before extraction.
+    //    This catches ALL corruption sources (server, network, write) regardless of
+    //    whether the per-chunk hashes matched — the server could have sent wrong bytes.
+    const archiveExt = path.extname(finalSavePath).toLowerCase()
+    const isDownloadedArchive = ['.zip', '.rar', '.7z', '.tar', '.gz', '.bz2', '.xz', '.tgz'].includes(archiveExt)
+    if (isDownloadedArchive) {
+      ucLog('[UC.Files] Testing archive integrity with 7z...')
+      const testResult = await run7zTest(finalSavePath)
+      if (!testResult.ok) {
+        ucLog(`[UC.Files] Archive FAILED integrity test: ${testResult.error}`, 'error')
+        if (_retryCount < 2) {
+          ucLog(`[UC.Files] Deleting corrupt file and retrying download (attempt ${_retryCount + 1})...`)
+          sendUpdate({ status: 'retrying', receivedBytes: 0, totalBytes: 0, speedBps: 0, etaSeconds: null })
+          try { fs.unlinkSync(finalSavePath) } catch {}
+          ucfilesActiveDownloads.delete(downloadId)
+          return ucfilesParallelDownload(win, payload, _retryCount + 1)
+        }
+        throw new Error(`Archive corrupt after ${_retryCount + 1} download attempts. The file on the server may be damaged.`)
+      }
+      ucLog('[UC.Files] Archive integrity test PASSED')
+    }
+
+    // 9. Done — mimic the will-download 'done' event flow
     totalReceived = totalBytes
     reportProgress()
 
@@ -2084,11 +2747,13 @@ async function ucfilesParallelDownload(win, payload) {
   } catch (err) {
     // Always close the file descriptor on error/cancel
     if (fd !== null) { try { fs.closeSync(fd) } catch { } }
+    clearInterval(progressInterval)
     ucfilesActiveDownloads.delete(downloadId)
     if (ctrl.signal.aborted) return { ok: false, cancelled: true }
-    ucLog(`[UC.Files] Parallel download error: ${err.message}`, 'error')
-    sendUpdate({ status: 'failed', error: err.message, receivedBytes: 0, totalBytes: 0, speedBps: 0, etaSeconds: null })
-    return { ok: false, error: err.message }
+    const errMsg = (err && err.message) || String(err) || 'Unknown download error'
+    ucLog(`[UC.Files] Parallel download error: ${errMsg}`, 'error')
+    sendUpdate({ status: 'failed', error: errMsg, receivedBytes: 0, totalBytes: 0, speedBps: 0, etaSeconds: null })
+    return { ok: false, error: errMsg }
   }
 }
 
@@ -2303,30 +2968,168 @@ async function startDownloadNow(win, payload) {
   return { ok: true }
 }
 
+// Pause the currently-active download (if any), excluding `excludeId`.
+// Returns the downloadId that was paused, or null.
+function pauseActiveDownload(excludeId) {
+  // Check UC Files downloads
+  for (const [dlId, ucEntry] of ucfilesActiveDownloads) {
+    if (dlId === excludeId) continue
+    if (ucEntry && ucEntry.state && !ucEntry.state.paused) {
+      ucEntry.state.paused = true
+      ucLog(`[Queue] Auto-paused UC.Files download for swap: ${dlId}`)
+      // Send paused update so both windows see the change
+      const snap = latestDownloadState.get(dlId)
+      sendDownloadUpdate(mainWindow, {
+        downloadId: dlId,
+        status: 'paused',
+        receivedBytes: snap?.receivedBytes || 0,
+        totalBytes: snap?.totalBytes || 0,
+        speedBps: 0,
+        etaSeconds: null,
+        filename: snap?.filename || '',
+        savePath: snap?.savePath || '',
+        appid: snap?.appid || null,
+        gameName: snap?.gameName || null,
+        url: snap?.url || '',
+        resumeData: null,
+        partIndex: snap?.partIndex,
+        partTotal: snap?.partTotal,
+      })
+      return dlId
+    }
+  }
+  // Check Chromium downloads
+  for (const [dlId, entry] of activeDownloads) {
+    if (dlId === excludeId) continue
+    if (!entry || !entry.item) continue
+    const isPaused = (typeof entry.item.isPaused === 'function' && entry.item.isPaused())
+      || entry.item.getState?.() === 'interrupted'
+    if (!isPaused) {
+      if (entry.speedLimitResumeTimer) {
+        clearTimeout(entry.speedLimitResumeTimer)
+        delete entry.speedLimitResumeTimer
+      }
+      entry.speedLimitPaused = false
+      if (typeof entry.item.pause === 'function') entry.item.pause()
+      ucLog(`[Queue] Auto-paused Chromium download for swap: ${dlId}`)
+      sendDownloadUpdate(mainWindow, {
+        downloadId: dlId,
+        status: 'paused',
+        receivedBytes: entry.item.getReceivedBytes(),
+        totalBytes: entry.item.getTotalBytes(),
+        speedBps: 0,
+        etaSeconds: null,
+        filename: path.basename(entry.savePath || ''),
+        savePath: entry.savePath,
+        appid: entry.appid || null,
+        gameName: entry.gameName || null,
+        url: entry.url,
+        resumeData: buildResumeData(entry.item, entry.savePath),
+        partIndex: entry.partIndex,
+        partTotal: entry.partTotal,
+      })
+      return dlId
+    }
+  }
+  return null
+}
+
+// Auto-resume the first paused download (called when nothing else is active/queued)
+function autoResumeNextPaused() {
+  // UC Files paused downloads first
+  for (const [dlId, ucEntry] of ucfilesActiveDownloads) {
+    if (ucEntry && ucEntry.state && ucEntry.state.paused) {
+      ucEntry.state.paused = false
+      for (const resolve of ucEntry.state.pauseResolvers) resolve()
+      ucEntry.state.pauseResolvers = []
+      ucLog(`[Queue] Auto-resumed paused UC.Files download: ${dlId}`)
+      const snap = latestDownloadState.get(dlId)
+      sendDownloadUpdate(mainWindow, {
+        downloadId: dlId,
+        status: 'downloading',
+        receivedBytes: snap?.receivedBytes || 0,
+        totalBytes: snap?.totalBytes || 0,
+        speedBps: 0,
+        etaSeconds: null,
+        filename: snap?.filename || '',
+        savePath: snap?.savePath || '',
+        appid: snap?.appid || null,
+        gameName: snap?.gameName || null,
+        url: snap?.url || '',
+        resumeData: null,
+        partIndex: snap?.partIndex,
+        partTotal: snap?.partTotal,
+      })
+      return true
+    }
+  }
+  // Chromium paused downloads
+  for (const [dlId, entry] of activeDownloads) {
+    if (!entry || !entry.item) continue
+    const isPaused = (typeof entry.item.isPaused === 'function' && entry.item.isPaused())
+      || entry.item.getState?.() === 'interrupted'
+    if (isPaused) {
+      entry.speedLimitPaused = false
+      if (entry.speedLimitResumeTimer) {
+        clearTimeout(entry.speedLimitResumeTimer)
+        delete entry.speedLimitResumeTimer
+      }
+      const nowMs = Date.now()
+      entry.speedLimitWindow = { startTime: nowMs, startBytes: entry.item.getReceivedBytes() }
+      entry.state.speedBps = 0
+      if (typeof entry.item.resume === 'function') entry.item.resume()
+      ucLog(`[Queue] Auto-resumed paused Chromium download: ${dlId}`)
+      sendDownloadUpdate(mainWindow, {
+        downloadId: dlId,
+        status: 'downloading',
+        receivedBytes: entry.item.getReceivedBytes(),
+        totalBytes: entry.item.getTotalBytes(),
+        speedBps: 0,
+        etaSeconds: null,
+        filename: path.basename(entry.savePath || ''),
+        savePath: entry.savePath,
+        appid: entry.appid || null,
+        gameName: entry.gameName || null,
+        url: entry.url,
+        resumeData: buildResumeData(entry.item, entry.savePath),
+        partIndex: entry.partIndex,
+        partTotal: entry.partTotal,
+      })
+      return true
+    }
+  }
+  return false
+}
+
 function startNextQueuedDownload(lastCompletedAppid) {
   uc_log(`=== startNextQueuedDownload ===`)
   uc_log(`lastCompletedAppid: ${lastCompletedAppid}`)
   uc_log(`hasAnyActiveOrPendingDownloads: ${hasAnyActiveOrPendingDownloads()}`)
   uc_log(`globalDownloadQueue.length: ${globalDownloadQueue.length}`)
   if (hasAnyActiveOrPendingDownloads()) return
-  if (!globalDownloadQueue.length) return
 
-  // If we have a lastCompletedAppid, prioritize remaining parts of the same game
-  // Note: findIndex is O(n) but typical queue sizes are small (< 20 items)
-  let nextIndex = 0
-  if (lastCompletedAppid) {
-    // Find the next download for the same appid (multi-part downloads)
-    nextIndex = globalDownloadQueue.findIndex(entry => entry?.payload?.appid === lastCompletedAppid)
-    // If not found, default to first item (FIFO for different games)
-    if (nextIndex === -1) nextIndex = 0
+  if (globalDownloadQueue.length) {
+    // If we have a lastCompletedAppid, prioritize remaining parts of the same game
+    // Note: findIndex is O(n) but typical queue sizes are small (< 20 items)
+    let nextIndex = 0
+    if (lastCompletedAppid) {
+      // Find the next download for the same appid (multi-part downloads)
+      nextIndex = globalDownloadQueue.findIndex(entry => entry?.payload?.appid === lastCompletedAppid)
+      // If not found, default to first item (FIFO for different games)
+      if (nextIndex === -1) nextIndex = 0
+    }
+
+    const next = globalDownloadQueue.splice(nextIndex, 1)[0]
+    if (!next) return // Safety check in case queue was modified concurrently
+
+    const win = getWindowByWebContentsId(next.webContentsId)
+    if (!win || win.isDestroyed()) return
+    startDownloadNow(win, next.payload)
+    return
   }
 
-  const next = globalDownloadQueue.splice(nextIndex, 1)[0]
-  if (!next) return // Safety check in case queue was modified concurrently
-
-  const win = getWindowByWebContentsId(next.webContentsId)
-  if (!win || win.isDestroyed()) return
-  startDownloadNow(win, next.payload)
+  // No queued downloads — auto-resume the next paused download
+  autoResumeNextPaused()
 }
 
 function isDownloadIdKnown(downloadId) {
@@ -2664,22 +3467,76 @@ function run7zExtract(archivePath, destDir, onProgress) {
   })
 }
 
+/**
+ * Test archive integrity without extracting (7z t).
+ * Returns { ok: true } if the archive is valid, or { ok: false, error } if corrupt.
+ */
+function run7zTest(archivePath) {
+  return new Promise((resolve) => {
+    try {
+      const cmd = resolve7zipBinary()
+      if (!cmd) {
+        resolve({ ok: false, error: '7zip binary not found' })
+        return
+      }
+      const args = ['t', archivePath, '-y']
+      uc_log(`[UC.Files] 7z test: ${cmd} ${args.join(' ')}`)
+      const proc = child_process.spawn(cmd, args, { windowsHide: true })
+      let stdout = ''
+      let stderr = ''
+      proc.stdout && proc.stdout.on('data', (d) => { stdout += d.toString() })
+      proc.stderr && proc.stderr.on('data', (d) => { stderr += d.toString() })
+      proc.on('close', (code) => {
+        if (code !== 0) {
+          const errorMsg = stderr || stdout || `7z test exited with code ${code}`
+          uc_log(`[UC.Files] 7z test FAILED: ${errorMsg}`)
+          resolve({ ok: false, error: errorMsg })
+        } else {
+          resolve({ ok: true })
+        }
+      })
+      proc.on('error', (err) => {
+        resolve({ ok: false, error: `7z test process error: ${String(err)}` })
+      })
+    } catch (err) {
+      resolve({ ok: false, error: String(err) })
+    }
+  })
+}
+
+// Snapshot of the last-seen state per downloadId — used by uc:overlay-get-downloads
+// for an accurate initial panel load regardless of which downloader is active.
+const latestDownloadState = new Map()
+
 function sendDownloadUpdate(win, payload) {
-  if (!win || win.isDestroyed()) {
-    ucLog(`[Download] Skipping update - window is null or destroyed`, 'warn')
-    return
-  }
   try {
     const settings = readSettings() || {}
     const isProgressUpdate = payload.status === 'downloading' || payload.status === 'paused'
     if (settings.verboseDownloadLogging) {
-      // Verbose mode: log full JSON for every update
       ucLog(`[Download] ${payload.downloadId} | ${payload.status} | ${payload.receivedBytes || 0}/${payload.totalBytes || 0} | ${Math.round(payload.speedBps || 0)} B/s | ${payload.filename || ''}`)
     } else if (!isProgressUpdate) {
-      // Non-verbose: only log state changes (started, completed, cancelled, failed, extracting, etc.)
       ucLog(`[Download] ${payload.downloadId} → ${payload.status}${payload.error ? ' (' + payload.error + ')' : ''} | ${payload.filename || ''} | appid=${payload.appid || 'unknown'}`)
     }
-    win.webContents.send('uc:download-update', payload)
+    // Keep a live snapshot for the overlay's initial panel load
+    if (payload.downloadId) {
+      if (['completed', 'failed', 'cancelled'].includes(payload.status)) {
+        latestDownloadState.delete(payload.downloadId)
+      } else {
+        latestDownloadState.set(payload.downloadId, payload)
+      }
+    }
+    // Send to main window (always)
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('uc:download-update', payload)
+    }
+    // Send to the caller's window if it's different from mainWindow
+    if (win && !win.isDestroyed() && win !== mainWindow) {
+      win.webContents.send('uc:download-update', payload)
+    }
+    // Forward to overlay window
+    if (overlayWindow && !overlayWindow.isDestroyed() && overlayWindow !== win) {
+      overlayWindow.webContents.send('uc:download-update', payload)
+    }
   } catch (error) {
     ucLog(`[Download] Failed to send update: ${String(error)}`, 'error')
   }
@@ -2714,23 +3571,81 @@ function registerRunningGame(appid, exePath, proc, gameName, showGameName = true
       buttons
     }).catch(() => { })
   }
+  // Auto-show overlay when game launches
+  if (appid) checkAndShowOverlayForGame(appid)
+
+  // Native DLL injection is disabled — the transparent window overlay works without it.
+  // The offscreen-rendering + shared-memory pipeline (~480 MB/s memcpy at 60fps) blocks
+  // the main process event loop, causing Electron to stop responding.
+  // TODO: move frame writing to a worker thread before re-enabling.
+  // if (nativeOverlay && proc.pid) {
+  //   setTimeout(() => injectOverlayIntoGame(proc.pid, appid), 2000)
+  // }
+
   proc.on('exit', () => {
     const elapsed = Date.now() - payload.startedAt
-    if (appid) runningGames.delete(appid)
-    if (exePath) runningGames.delete(exePath)
-    if (runningGames.size === 0) clearGameRpcActivity()
-    // If the game exited very quickly it likely failed to start (wrong exe, missing admin, etc.)
-    // Notify the renderer so it can show a helpful message
-    if (elapsed < 5000) {
-      ucLog(`Game quick-exit detected: ${appid} (elapsed=${elapsed}ms)`, 'warn')
-      for (const win of BrowserWindow.getAllWindows()) {
-        try {
-          if (!win.isDestroyed()) {
-            win.webContents.send('uc:game-quick-exit', { appid: appid || null, exePath: exePath || null, elapsed })
-          }
-        } catch {}
+
+    function doCleanup() {
+      ucLog(`[Game] ${appid || 'unknown'} exited (PID ${proc.pid}, elapsed=${elapsed}ms)`)
+      if (appid) runningGames.delete(appid)
+      if (exePath) runningGames.delete(exePath)
+      if (runningGames.size === 0) clearGameRpcActivity()
+      if (proc.pid) cleanupOverlayInjection(proc.pid)
+      if (runningGames.size === 0) hideOverlay()
+      if (elapsed < 5000) {
+        ucLog(`Game quick-exit detected: ${appid} (elapsed=${elapsed}ms)`, 'warn')
+        for (const win of BrowserWindow.getAllWindows()) {
+          try {
+            if (!win.isDestroyed()) {
+              win.webContents.send('uc:game-quick-exit', { appid: appid || null, exePath: exePath || null, elapsed })
+            }
+          } catch {}
+        }
       }
     }
+
+    // On Windows many games are launchers that spawn the real game process then exit.
+    // Before removing from runningGames, scan for surviving processes in the game directory.
+    if (process.platform === 'win32' && exePath) {
+      const gameDir = path.dirname(exePath)
+      // PowerShell script to find processes whose exe path is inside the game directory
+      const psScript = `$dir = '${gameDir.replace(/'/g, "''")}'
+Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($dir + '\\', [StringComparison]::OrdinalIgnoreCase) } | ForEach-Object { $_.ProcessId }`
+      const encoded = Buffer.from(psScript, 'utf16le').toString('base64')
+      child_process.exec(
+        `powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand ${encoded}`,
+        { windowsHide: true, timeout: 8000 },
+        (err, stdout) => {
+          const survivingPids = (stdout || '').trim().split(/\r?\n/).map(s => Number(s.trim())).filter(p => p > 0 && p !== proc.pid)
+          if (survivingPids.length > 0) {
+            // Found child game process — adopt its PID and keep tracking
+            const newPid = survivingPids[0]
+            ucLog(`[Game] ${appid || 'unknown'} launcher exited (PID ${proc.pid}), adopting child PID ${newPid}`)
+            payload.pid = newPid
+            if (appid) runningGames.set(appid, payload)
+            if (exePath) runningGames.set(exePath, payload)
+            cleanupOverlayInjection(proc.pid)
+            // Poll the adopted PID for exit
+            const pidPollInterval = setInterval(() => {
+              try { process.kill(newPid, 0) } catch {
+                clearInterval(pidPollInterval)
+                ucLog(`[Game] ${appid || 'unknown'} exited (adopted PID ${newPid})`)
+                if (appid) runningGames.delete(appid)
+                if (exePath) runningGames.delete(exePath)
+                if (runningGames.size === 0) { clearGameRpcActivity(); hideOverlay() }
+                cleanupOverlayInjection(newPid)
+              }
+            }, 3000)
+            return
+          }
+          // No surviving processes in game directory — truly exited
+          doCleanup()
+        }
+      )
+      return
+    }
+
+    doCleanup()
   })
 }
 
@@ -2763,6 +3678,31 @@ function registerRunningGamePid(appid, exePath, pid, gameName, showGameName = tr
       buttons
     }).catch(() => { })
   }
+
+  // Auto-show overlay when game launches (PID-based)
+  if (appid) checkAndShowOverlayForGame(appid)
+
+  // Native DLL injection disabled (see registerRunningGame comment)
+  // if (nativeOverlay && pid) {
+  //   setTimeout(() => injectOverlayIntoGame(Number(pid), appid), 2000)
+  // }
+
+  // Poll PID for exit (handles externally-launched games not tracked via proc.on('exit'))
+  const numPid = Number(pid)
+  const pidPollInterval = setInterval(() => {
+    try {
+      process.kill(numPid, 0)
+    } catch {
+      clearInterval(pidPollInterval)
+      if (appid) runningGames.delete(appid)
+      if (exePath) runningGames.delete(exePath)
+      if (runningGames.size === 0) {
+        clearGameRpcActivity()
+        hideOverlay()
+      }
+      cleanupOverlayInjection(numPid)
+    }
+  }, 3000)
 }
 
 function getRunningGame(appid) {
@@ -3246,16 +4186,19 @@ function createWindow() {
                 const totalBytes2 = totalBytesOverride != null ? totalBytesOverride : st2 ? st2.size : 0
                 if (totalBytes2 > 0) sendDownloadUpdate(mainWindow, { downloadId, status: 'extracting', receivedBytes: totalBytes2, totalBytes: totalBytes2, speedBps: 0, etaSeconds: 0, filename: path.basename(archiveToExtract), savePath: archiveToExtract, appid: entry?.appid || null })
               } catch (e) { }
+              // Clean up archives first (delete the archive files)
               try {
                 if (partFiles && partFiles.length) {
                   for (const part of partFiles) {
                     try { if (fs.existsSync(part)) fs.unlinkSync(part) } catch (e) { }
                   }
                   uc_log(`deleted multipart parts for ${archiveToExtract}`)
-                } else if (fs.existsSync(archiveToExtract)) {
+                } else if (archiveToExtract && fs.existsSync(archiveToExtract)) {
                   try { fs.unlinkSync(archiveToExtract); uc_log(`deleted archive ${archiveToExtract} from installing folder`) } catch (e) { uc_log(`failed to delete archive: ${String(e)}`) }
                 }
-              } catch (e) { }
+              } catch (e) {
+                uc_log(`error deleting archive: ${String(e)}`)
+              }
 
               // Move extracted files from installing folder to installed folder
               try {
@@ -3267,18 +4210,46 @@ function createWindow() {
                 uc_log(`failed to migrate extracted files: ${String(e)}`)
               }
 
-              // Clean up installing folder and manifest after successful extraction
+              // Update manifest status BEFORE deleting the installing folder to ensure it's saved
               try {
-                try {
-                  if (entry?.appid) updateInstallingManifestStatus(entry.appid, 'completed', null)
-                } catch (e) { }
-                if (fs.existsSync(installingRoot)) {
-                  fs.rmSync(installingRoot, { recursive: true, force: true })
-                  uc_log(`deleted installing folder for ${entry?.appid}`)
-                }
+                if (entry?.appid) updateInstallingManifestStatus(entry.appid, 'completed', null)
               } catch (e) {
-                uc_log(`failed to delete installing folder: ${String(e)}`)
+                uc_log(`failed to update installing manifest status: ${String(e)}`)
               }
+
+              // Use async rm with timeout to prevent hanging on Windows file locks
+              // The folder will be cleaned up on next app restart if deletion fails
+              const deleteInstallingFolder = () => {
+                return new Promise((resolve) => {
+                  if (!fs.existsSync(installingRoot)) {
+                    uc_log(`installing folder already gone for ${entry?.appid}`)
+                    resolve()
+                    return
+                  }
+                  // Try quick delete first
+                  try {
+                    fs.rmSync(installingRoot, { recursive: true, force: true })
+                    uc_log(`deleted installing folder for ${entry?.appid}`)
+                    resolve()
+                  } catch (e) {
+                    uc_log(`initial rmSync failed, trying async: ${String(e)}`)
+                    // Fall back to async with timeout
+                    fs.promises.rm(installingRoot, { recursive: true, force: true, maxRetries: 3, retryDelayMs: 500 })
+                      .then(() => {
+                        uc_log(`deleted installing folder async for ${entry?.appid}`)
+                        resolve()
+                      })
+                      .catch((err) => {
+                        uc_log(`failed to delete installing folder (non-fatal): ${String(err)}`)
+                        // Don't reject - this is not fatal, folder will persist until next restart
+                        resolve()
+                      })
+                  }
+                })
+              }
+
+              // Execute async folder deletion without blocking
+              deleteInstallingFolder()
 
               sendDownloadUpdate(mainWindow, { downloadId, status: 'extracted', extracted: extractedFiles, savePath: null, appid: entry?.appid || null })
               try {
@@ -3345,18 +4316,38 @@ function createWindow() {
                 uc_log(`failed to migrate non-archive extras: ${String(e)}`)
               }
 
-              // Clean up installing folder after moving to installed
+              // Update manifest status BEFORE deleting the installing folder
               try {
-                try {
-                  if (entry?.appid) updateInstallingManifestStatus(entry.appid, 'completed', null)
-                } catch (e) { }
-                if (fs.existsSync(installingRoot)) {
-                  fs.rmSync(installingRoot, { recursive: true, force: true })
-                  uc_log(`deleted installing folder for non-archive ${entry?.appid}`)
-                }
-              } catch (e) {
-                uc_log(`failed to delete installing folder for non-archive: ${String(e)}`)
+                if (entry?.appid) updateInstallingManifestStatus(entry.appid, 'completed', null)
+              } catch (e) { }
+
+              // Clean up installing folder after moving to installed (async to prevent hanging)
+              const deleteInstallingFolderNonArchive = () => {
+                return new Promise((resolve) => {
+                  if (!fs.existsSync(installingRoot)) {
+                    uc_log(`installing folder already gone for non-archive ${entry?.appid}`)
+                    resolve()
+                    return
+                  }
+                  try {
+                    fs.rmSync(installingRoot, { recursive: true, force: true })
+                    uc_log(`deleted installing folder for non-archive ${entry?.appid}`)
+                    resolve()
+                  } catch (e) {
+                    uc_log(`initial rmSync failed for non-archive, trying async: ${String(e)}`)
+                    fs.promises.rm(installingRoot, { recursive: true, force: true, maxRetries: 3, retryDelayMs: 500 })
+                      .then(() => {
+                        uc_log(`deleted installing folder async for non-archive ${entry?.appid}`)
+                        resolve()
+                      })
+                      .catch((err) => {
+                        uc_log(`failed to delete installing folder for non-archive (non-fatal): ${String(err)}`)
+                        resolve()
+                      })
+                  }
+                })
               }
+              deleteInstallingFolderNonArchive()
 
               // update installed manifest in the installed folder
               try {
@@ -3435,6 +4426,18 @@ app.whenReady().then(() => {
   ensureDownloadDir()
   createWindow()
   createTray()
+  
+  // Initialize overlay system
+  const settings = readSettings()
+  if (settings.overlayEnabled !== false) {
+    overlayEnabled = settings.overlayEnabled !== false
+    overlayHotkey = settings.overlayHotkey || 'Ctrl+Shift+Tab'
+    overlayAutoShow = settings.overlayAutoShow !== false
+    overlayPosition = settings.overlayPosition || 'left'
+    createOverlayWindow()
+    registerOverlayHotkey()
+  }
+  
   updateRpcSettings(readSettings()).catch(() => { })
 
   ucLog(`App ready. Version: ${getAppVersion()}`)
@@ -3627,6 +4630,22 @@ ipcMain.handle('uc:download-start', (event, payload) => {
   if (hasAnyActiveOrPendingDownloads() || globalDownloadQueue.length > 0) {
     enqueueGlobalDownload(payload, win.webContents.id)
     ucLog(`Download queued: ${appid}`)
+    // Notify overlay/renderer that this download exists (in queued state)
+    sendDownloadUpdate(win, {
+      downloadId: payload.downloadId,
+      status: 'queued',
+      receivedBytes: 0,
+      totalBytes: 0,
+      speedBps: 0,
+      etaSeconds: null,
+      filename: payload.filename || null,
+      appid: payload.appid || null,
+      gameName: payload.gameName || null,
+      url: payload.url,
+      partIndex: payload.partIndex,
+      partTotal: payload.partTotal,
+      resumeData: null,
+    })
     return { ok: true, queued: true }
   }
 
@@ -3640,12 +4659,21 @@ ipcMain.handle('uc:download-cancel', (_event, downloadId) => {
   // Auto-clean after 5 minutes to avoid memory leak
   setTimeout(() => cancelledDownloadIds.delete(downloadId), 5 * 60 * 1000)
 
+  // Helper: broadcast cancelled status so overlay/renderer remove the item
+  const broadcastCancelled = () => {
+    latestDownloadState.delete(downloadId)
+    const cancelPayload = { downloadId, status: 'cancelled', receivedBytes: 0, totalBytes: 0, speedBps: 0, etaSeconds: null, filename: '', savePath: '', appid: null, gameName: null, url: '' }
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('uc:download-update', cancelPayload)
+    if (overlayWindow && !overlayWindow.isDestroyed()) overlayWindow.webContents.send('uc:download-update', cancelPayload)
+  }
+
   // UC.Files parallel download cancel
   const ucEntry = ucfilesActiveDownloads.get(downloadId)
   if (ucEntry) {
     ucEntry.abort.abort()
     ucfilesActiveDownloads.delete(downloadId)
     ucLog(`Download cancelled (UC.Files parallel): ${downloadId}`)
+    broadcastCancelled()
     return { ok: true }
   }
 
@@ -3660,6 +4688,7 @@ ipcMain.handle('uc:download-cancel', (_event, downloadId) => {
       entry.item.cancel()
     } catch { }
     ucLog(`Download cancelled (active): ${downloadId}`)
+    broadcastCancelled()
     return { ok: true }
   }
   // Check pendingDownloads (between downloadURL() call and will-download firing)
@@ -3667,6 +4696,7 @@ ipcMain.handle('uc:download-cancel', (_event, downloadId) => {
   if (pendingIdx >= 0) {
     pendingDownloads.splice(pendingIdx, 1)
     ucLog(`Download cancelled (pending): ${downloadId}`)
+    broadcastCancelled()
     return { ok: true }
   }
   // Check per-app download queues
@@ -3676,6 +4706,7 @@ ipcMain.handle('uc:download-cancel', (_event, downloadId) => {
       queue.splice(idx, 1)
       if (!queue.length) downloadQueues.delete(appid)
       ucLog(`Download cancelled (app queue): ${downloadId}`)
+      broadcastCancelled()
       return { ok: true }
     }
   }
@@ -3684,9 +4715,11 @@ ipcMain.handle('uc:download-cancel', (_event, downloadId) => {
   if (idx >= 0) {
     globalDownloadQueue.splice(idx, 1)
     ucLog(`Download cancelled (global queue): ${downloadId}`)
+    broadcastCancelled()
     return { ok: true }
   }
   ucLog(`Download cancel: ${downloadId} not found in any queue`, 'warn')
+  broadcastCancelled()
   return { ok: false }
 })
 
@@ -3698,6 +4731,28 @@ ipcMain.handle('uc:download-pause', (event, downloadId) => {
   if (ucEntry) {
     ucEntry.state.paused = true
     ucLog(`Download paused (UC.Files parallel): ${downloadId}`)
+    // Send explicit paused update (reportProgress will skip while paused)
+    const snap = latestDownloadState.get(downloadId)
+    sendDownloadUpdate(win, {
+      downloadId,
+      status: 'paused',
+      receivedBytes: snap?.receivedBytes || 0,
+      totalBytes: snap?.totalBytes || 0,
+      speedBps: 0,
+      etaSeconds: null,
+      filename: snap?.filename || '',
+      savePath: snap?.savePath || '',
+      appid: snap?.appid || null,
+      gameName: snap?.gameName || null,
+      url: snap?.url || '',
+      resumeData: null,
+      partIndex: snap?.partIndex,
+      partTotal: snap?.partTotal,
+    })
+    // A paused download no longer blocks the queue — start the next one
+    if (globalDownloadQueue.length > 0 && !hasAnyActiveOrPendingDownloads()) {
+      startNextQueuedDownload(null)
+    }
     return { ok: true }
   }
 
@@ -3729,6 +4784,10 @@ ipcMain.handle('uc:download-pause', (event, downloadId) => {
       partTotal: entry.partTotal
     })
   } catch (e) { }
+  // A paused download no longer blocks the queue — start the next one
+  if (globalDownloadQueue.length > 0 && !hasAnyActiveOrPendingDownloads()) {
+    startNextQueuedDownload(null)
+  }
   return { ok: true }
 })
 
@@ -3738,15 +4797,40 @@ ipcMain.handle('uc:download-resume', (event, downloadId) => {
   // UC.Files parallel download resume
   const ucEntry = ucfilesActiveDownloads.get(downloadId)
   if (ucEntry && ucEntry.state.paused) {
+    // Swap: pause whatever is currently active, then resume this one
+    if (hasAnyActiveOrPendingDownloads()) {
+      pauseActiveDownload(downloadId)
+    }
     ucEntry.state.paused = false
     for (const resolve of ucEntry.state.pauseResolvers) resolve()
     ucEntry.state.pauseResolvers = []
     ucLog(`Download resumed (UC.Files parallel): ${downloadId}`)
+    const snap = latestDownloadState.get(downloadId)
+    sendDownloadUpdate(win, {
+      downloadId,
+      status: 'downloading',
+      receivedBytes: snap?.receivedBytes || 0,
+      totalBytes: snap?.totalBytes || 0,
+      speedBps: 0,
+      etaSeconds: null,
+      filename: snap?.filename || '',
+      savePath: snap?.savePath || '',
+      appid: snap?.appid || null,
+      gameName: snap?.gameName || null,
+      url: snap?.url || '',
+      resumeData: null,
+      partIndex: snap?.partIndex,
+      partTotal: snap?.partTotal,
+    })
     return { ok: true }
   }
 
   const entry = activeDownloads.get(downloadId)
   if (!entry) return { ok: false }
+  // Swap: pause whatever is currently active, then resume this one
+  if (hasAnyActiveOrPendingDownloads()) {
+    pauseActiveDownload(downloadId)
+  }
   try {
     // Reset speed-limit state so measurement starts fresh after manual resume
     entry.speedLimitPaused = false
@@ -4712,8 +5796,65 @@ function normalizeRunnerPath(candidate, fallback) {
   if (!candidate || typeof candidate !== 'string') return fallback
   const trimmed = candidate.trim()
   if (!trimmed) return fallback
-  if (path.isAbsolute(trimmed) && !fs.existsSync(trimmed)) return fallback
+  // Only reject absolute paths that don't exist — relative/bare commands (e.g. 'wine', 'proton')
+  // are resolved via PATH at spawn time, so we should not reject them here.
+  if (path.isAbsolute(trimmed) && !fs.existsSync(trimmed)) {
+    ucLog(`normalizeRunnerPath: absolute path not found: ${trimmed}, falling back to ${fallback}`, 'warn')
+    return fallback
+  }
   return trimmed
+}
+
+/**
+ * Ensure the Proton environment is properly set up.
+ * Proton requires STEAM_COMPAT_DATA_PATH and STEAM_COMPAT_CLIENT_INSTALL_PATH.
+ * If not set, auto-detect from Steam installation.
+ * 
+ * @param {object} env - The environment object to modify
+ * @param {string} [appid] - Optional game appid for per-game prefix (like Steam's compatdata)
+ */
+function ensureProtonEnv(env, appid) {
+  if (process.platform !== 'linux') return env
+  const result = { ...env }
+
+  // Auto-detect Steam path if not set
+  if (!result.STEAM_COMPAT_CLIENT_INSTALL_PATH) {
+    const home = app.getPath('home')
+    const steamCandidates = [
+      path.join(home, '.steam', 'steam'),
+      path.join(home, '.local', 'share', 'Steam'),
+    ]
+    for (const c of steamCandidates) {
+      if (fs.existsSync(c)) {
+        result.STEAM_COMPAT_CLIENT_INSTALL_PATH = c
+        ucLog(`Proton: auto-set STEAM_COMPAT_CLIENT_INSTALL_PATH=${c}`)
+        break
+      }
+    }
+  }
+
+  // Auto-create STEAM_COMPAT_DATA_PATH - use per-game prefix if appid provided
+  // This mimics Steam's compatdata/{appid} structure
+  if (!result.STEAM_COMPAT_DATA_PATH) {
+    const home = app.getPath('home')
+    let prefixPath
+    if (appid) {
+      // Per-game prefix: ~/.local/share/uc-proton/{appid}
+      prefixPath = path.join(home, '.local', 'share', 'uc-proton', String(appid))
+    } else {
+      // Default prefix: ~/.local/share/uc-proton/default
+      prefixPath = path.join(home, '.local', 'share', 'uc-proton', 'default')
+    }
+    try {
+      if (!fs.existsSync(prefixPath)) {
+        fs.mkdirSync(prefixPath, { recursive: true })
+      }
+    } catch {}
+    result.STEAM_COMPAT_DATA_PATH = prefixPath
+    ucLog(`Proton: auto-set STEAM_COMPAT_DATA_PATH=${prefixPath}${appid ? ' (per-game)' : ''}`)
+  }
+
+  return result
 }
 
 function resolveLaunchCommand(exePath) {
@@ -4725,7 +5866,7 @@ function resolveLaunchCommand(exePath) {
   const settings = readSettings() || {}
   const mode = String(settings.linuxLaunchMode || 'auto').toLowerCase()
   const winePath = normalizeRunnerPath(settings.linuxWinePath, 'wine')
-  const protonPath = normalizeRunnerPath(settings.linuxProtonPath, 'proton')
+  const protonPath = normalizeRunnerPath(settings.linuxProtonPath, '')
   const isExe = exePath.toLowerCase().endsWith('.exe')
 
   if (mode === 'native') {
@@ -4734,7 +5875,23 @@ function resolveLaunchCommand(exePath) {
 
   if (isExe) {
     if (mode === 'proton') {
-      return { command: protonPath, args: ['run', exePath], cwd }
+      if (!protonPath) {
+        ucLog('Proton mode selected but no proton path configured — falling back to wine', 'warn')
+        return { command: winePath, args: [exePath], cwd }
+      }
+      
+      // Validate proton executable exists
+      const protonExists = protonPath.includes('/') || protonPath.includes('\\') 
+        ? fs.existsSync(protonPath) 
+        : true // Bare command will be resolved at spawn time
+      
+      if (!protonExists) {
+        ucLog(`Proton executable not found: ${protonPath}, falling back to wine`, 'error')
+        return { command: winePath, args: [exePath], cwd }
+      }
+      
+      ucLog(`Proton launch (global): path=${protonPath} exe=${exePath}`)
+      return { command: protonPath, args: ['run', exePath], cwd, needsProtonEnv: true }
     }
     if (mode === 'wine' || mode === 'auto') {
       return { command: winePath, args: [exePath], cwd }
@@ -4765,11 +5922,20 @@ function buildLinuxGameEnv(baseEnv) {
   const protonPrefix = typeof settings.linuxProtonPrefix === 'string' ? settings.linuxProtonPrefix.trim() : ''
   if (protonPrefix) {
     env.STEAM_COMPAT_DATA_PATH = protonPrefix
-    // STEAM_COMPAT_CLIENT_INSTALL_PATH is needed by some Proton builds
-    if (!env.STEAM_COMPAT_CLIENT_INSTALL_PATH) {
-      const steamPath = typeof settings.linuxSteamPath === 'string' ? settings.linuxSteamPath.trim() : ''
-      if (steamPath) env.STEAM_COMPAT_CLIENT_INSTALL_PATH = steamPath
-    }
+  }
+
+  // STEAM_COMPAT_CLIENT_INSTALL_PATH — needed by Proton
+  const steamPath = typeof settings.linuxSteamPath === 'string' ? settings.linuxSteamPath.trim() : ''
+  if (steamPath && !env.STEAM_COMPAT_CLIENT_INSTALL_PATH) {
+    env.STEAM_COMPAT_CLIENT_INSTALL_PATH = steamPath
+  }
+
+  // If Proton mode is active, ensure required env vars are set
+  // Note: appid is not available in global context, will use default prefix
+  const mode = String(settings.linuxLaunchMode || 'auto').toLowerCase()
+  if (mode === 'proton') {
+    const withProton = ensureProtonEnv(env)
+    Object.assign(env, withProton)
   }
 
   // Extra environment variables (stored as "KEY=VALUE\nKEY2=VALUE2")
@@ -4786,7 +5952,53 @@ function buildLinuxGameEnv(baseEnv) {
     }
   }
 
+  // SLSsteam integration: inject LD_AUDIT when enabled
+  if (settings.slsSteamEnabled && process.platform === 'linux') {
+    const home = app.getPath('home')
+    const defaultSlsDir = path.join(home, '.local', 'share', 'SLSsteam')
+    const slsSteamPath = typeof settings.slsSteamPath === 'string' && settings.slsSteamPath.trim()
+      ? settings.slsSteamPath.trim()
+      : path.join(defaultSlsDir, 'SLSsteam.so')
+    const slsInjectPath = typeof settings.slsInjectPath === 'string' && settings.slsInjectPath.trim()
+      ? settings.slsInjectPath.trim()
+      : path.join(defaultSlsDir, 'library-inject.so')
+
+    if (fs.existsSync(slsSteamPath) && fs.existsSync(slsInjectPath)) {
+      const ldAuditEntry = `${slsInjectPath}:${slsSteamPath}`
+      const existing = env.LD_AUDIT || ''
+      // Avoid duplicating entries
+      if (!existing.includes(slsSteamPath)) {
+        env.LD_AUDIT = existing ? `${existing}:${ldAuditEntry}` : ldAuditEntry
+      }
+      ucLog(`SLSsteam: injecting LD_AUDIT=${env.LD_AUDIT}`)
+    } else {
+      ucLog(`SLSsteam: enabled but .so files not found (slsSteamPath=${slsSteamPath}, slsInjectPath=${slsInjectPath})`, 'warn')
+    }
+  }
+
   return env
+}
+
+/**
+ * Detect SLSsteam installation at the default path (~/.local/share/SLSsteam/).
+ */
+function detectSLSSteam() {
+  if (process.platform !== 'linux') return { found: false }
+  try {
+    const home = app.getPath('home')
+    const slsDir = path.join(home, '.local', 'share', 'SLSsteam')
+    const slsSteamSo = path.join(slsDir, 'SLSsteam.so')
+    const slsInjectSo = path.join(slsDir, 'library-inject.so')
+    const found = fs.existsSync(slsSteamSo) && fs.existsSync(slsInjectSo)
+    return {
+      found,
+      dir: found ? slsDir : null,
+      slsSteamPath: found ? slsSteamSo : null,
+      slsInjectPath: found ? slsInjectSo : null,
+    }
+  } catch (err) {
+    return { found: false, error: err.message }
+  }
 }
 
 /**
@@ -5003,6 +6215,50 @@ ipcMain.handle('uc:linux-create-prefix', async (_event, prefixPath, arch) => {
   }
 })
 
+// IPC: Initialize default proton prefix (copies from source or creates fresh)
+ipcMain.handle('uc:linux-init-default-proton-prefix', async (_event, sourcePrefixPath) => {
+  try {
+    if (process.platform !== 'linux') return { ok: false, error: 'not-linux' }
+    const home = app.getPath('home')
+    const defaultPrefix = path.join(home, '.local', 'share', 'uc-proton', 'default')
+    
+    // If default already exists, don't overwrite
+    if (fs.existsSync(defaultPrefix)) {
+      ucLog(`Default proton prefix already exists at ${defaultPrefix}`)
+      return { ok: true, path: defaultPrefix, alreadyExisted: true }
+    }
+    
+    // If source path provided and exists, copy it
+    if (sourcePrefixPath && typeof sourcePrefixPath === 'string') {
+      if (fs.existsSync(sourcePrefixPath)) {
+        ucLog(`Copying default proton prefix from ${sourcePrefixPath} to ${defaultPrefix}`)
+        await fs.promises.cp(sourcePrefixPath, defaultPrefix, { recursive: true })
+        return { ok: true, path: defaultPrefix, copied: true }
+      }
+    }
+    
+    // Create fresh default prefix directory
+    ucLog(`Creating default proton prefix at ${defaultPrefix}`)
+    fs.mkdirSync(defaultPrefix, { recursive: true })
+    return { ok: true, path: defaultPrefix, created: true }
+  } catch (err) {
+    ucLog(`init-default-proton-prefix failed: ${err.message}`, 'error')
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Get default proton prefix path
+ipcMain.handle('uc:linux-get-default-proton-prefix-path', async () => {
+  try {
+    if (process.platform !== 'linux') return { ok: false, error: 'not-linux' }
+    const home = app.getPath('home')
+    const defaultPrefix = path.join(home, '.local', 'share', 'uc-proton', 'default')
+    return { ok: true, path: defaultPrefix }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
 // IPC: Pick a directory for WINEPREFIX or Proton prefix
 ipcMain.handle('uc:linux-pick-prefix-dir', async () => {
   try {
@@ -5061,6 +6317,34 @@ ipcMain.handle('uc:linux-steam-path', () => {
       if (fs.existsSync(c)) return { ok: true, path: c }
     }
     return { ok: false, error: 'not-found' }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Detect SLSsteam installation
+ipcMain.handle('uc:linux-detect-slssteam', () => {
+  try {
+    const result = detectSLSSteam()
+    return { ok: true, ...result }
+  } catch (err) {
+    return { ok: false, error: err.message, found: false }
+  }
+})
+
+// IPC: Pick a .so file (for SLSsteam paths)
+ipcMain.handle('uc:linux-pick-so', async () => {
+  try {
+    const result = await dialog.showOpenDialog({
+      title: 'Select .so Library',
+      properties: ['openFile'],
+      filters: [
+        { name: 'Shared Libraries', extensions: ['so'] },
+        { name: 'All Files', extensions: ['*'] },
+      ],
+    })
+    if (result.canceled || !result.filePaths?.length) return { ok: false, cancelled: true }
+    return { ok: true, path: result.filePaths[0] }
   } catch (err) {
     return { ok: false, error: err.message }
   }
@@ -5299,12 +6583,20 @@ ipcMain.handle('uc:vr-get-settings', () => {
   }
 })
 
+// ============================================================
+// Game Launch
+// ============================================================
+
 ipcMain.handle('uc:game-exe-launch', async (_event, appid, exePath, gameName, showGameName) => {
   try {
     if (!exePath || typeof exePath !== 'string') return { ok: false }
     ucLog(`Launching game: ${appid} at ${exePath}`)
+
     try {
-      const { command, args, cwd } = resolveLaunchCommand(exePath)
+      // Use per-game config overrides if available
+      const { command, args, cwd } = appid
+        ? resolveLaunchCommandWithGameConfig(exePath, appid)
+        : resolveLaunchCommand(exePath)
 
       // Verbose logging
       const settings = readSettings() || {}
@@ -5315,9 +6607,6 @@ ipcMain.handle('uc:game-exe-launch', async (_event, appid, exePath, gameName, sh
       }
 
       // Windows (non-admin): spawn the exe directly so we track the actual game process.
-      // A cmd.exe wrapper was used here previously, but GUI applications detach from cmd.exe
-      // immediately, causing cmd.exe to exit in <100 ms and falsely triggering the quick-exit
-      // detection even when the game launched fine.
       if (process.platform === 'win32') {
         const env = { ...process.env }
         env.PATH = `${cwd};${env.PATH || ''}`
@@ -5335,9 +6624,8 @@ ipcMain.handle('uc:game-exe-launch', async (_event, appid, exePath, gameName, sh
         return { ok: true, pid: proc.pid }
       }
 
-      
-      // Non-Windows path (Linux/macOS) — apply Wine/Proton and VR env vars
-      const env = buildVRGameEnv(buildLinuxGameEnv(process.env))
+      // Non-Windows path (Linux/macOS) — apply per-game + global Wine/Proton/VR/SLSsteam env vars
+      const env = buildGameLaunchEnv(appid, process.env)
       env.PATH = `${cwd}:${env.PATH || ''}`
 
       const proc = child_process.spawn(command, args, {
@@ -5372,10 +6660,12 @@ ipcMain.handle('uc:game-exe-launch-admin', async (_event, appid, exePath, gameNa
     if (process.platform !== 'win32') {
       ucLog(`Launching game (non-admin fallback): ${appid} at ${exePath}`)
       try {
-        const { command, args, cwd } = resolveLaunchCommand(exePath)
+        const { command, args, cwd } = appid
+          ? resolveLaunchCommandWithGameConfig(exePath, appid)
+          : resolveLaunchCommand(exePath)
         
-        // Prepare environment - inherit all variables, apply Wine/Proton and VR env, ensure game directory is in PATH
-        const env = buildVRGameEnv(buildLinuxGameEnv(process.env))
+        // Prepare environment - apply per-game + global Wine/Proton/VR/SLSsteam env vars
+        const env = buildGameLaunchEnv(appid, process.env)
         env.PATH = `${cwd}:${env.PATH || ''}`
 
         const proc = child_process.spawn(command, args, {
@@ -5739,3 +7029,529 @@ ipcMain.handle('uc:create-desktop-shortcut', async (_event, gameName, exePath) =
     return { ok: false, error: err.message }
   }
 })
+
+// ============================================================
+// Per-game Linux / VR configuration
+// ============================================================
+
+/**
+ * Read per-game Linux config from settings.
+ * Stored as `gameLinux:${appid}` in settings.json.
+ */
+function getGameLinuxConfig(appid) {
+  if (!appid) return null
+  try {
+    const s = readSettings() || {}
+    const raw = s[`gameLinux:${appid}`]
+    if (!raw || typeof raw !== 'object') return null
+    return raw
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Resolve the effective launch command for a game, applying per-game overrides
+ * on top of the global Linux settings.
+ */
+function resolveLaunchCommandWithGameConfig(exePath, appid) {
+  const cwd = path.dirname(exePath)
+  if (process.platform !== 'linux') {
+    return { command: exePath, args: [], cwd }
+  }
+
+  const globalSettings = readSettings() || {}
+  const gameConfig = getGameLinuxConfig(appid) || {}
+
+  // 'inherit' means use global settings; otherwise per-game overrides take precedence
+  const rawMode = gameConfig.launchMode && gameConfig.launchMode !== 'inherit'
+    ? gameConfig.launchMode
+    : globalSettings.linuxLaunchMode || 'auto'
+  const mode = String(rawMode).toLowerCase()
+
+  const winePath = normalizeRunnerPath(
+    (gameConfig.winePath && gameConfig.winePath !== '') ? gameConfig.winePath : globalSettings.linuxWinePath,
+    'wine'
+  )
+  const protonPath = normalizeRunnerPath(
+    (gameConfig.protonPath && gameConfig.protonPath !== '') ? gameConfig.protonPath : globalSettings.linuxProtonPath,
+    ''
+  )
+  const isExe = exePath.toLowerCase().endsWith('.exe')
+
+  if (mode === 'native') {
+    return { command: exePath, args: [], cwd }
+  }
+
+  if (isExe) {
+    if (mode === 'proton') {
+      if (!protonPath) {
+        ucLog(`Proton mode for ${appid} but no proton path configured — falling back to wine`, 'warn')
+        return { command: winePath, args: [exePath], cwd }
+      }
+      
+      // Validate proton executable exists
+      const protonExists = protonPath.includes('/') || protonPath.includes('\\') 
+        ? fs.existsSync(protonPath) 
+        : true // Bare command will be resolved at spawn time
+      
+      if (!protonExists) {
+        ucLog(`Proton executable not found: ${protonPath}, falling back to wine`, 'error')
+        return { command: winePath, args: [exePath], cwd }
+      }
+      
+      ucLog(`Proton launch: path=${protonPath} exe=${exePath} prefix=~/.local/share/uc-proton/${appid || 'default'}`)
+      return { command: protonPath, args: ['run', exePath], cwd, needsProtonEnv: true }
+    }
+    if (mode === 'wine' || mode === 'auto') {
+      return { command: winePath, args: [exePath], cwd }
+    }
+  }
+
+  return { command: exePath, args: [], cwd }
+}
+
+/**
+ * Build the effective environment for a game launch, merging global and per-game settings.
+ */
+function buildGameLaunchEnv(appid, baseEnv) {
+  // Start with global Linux + VR env
+  const env = buildVRGameEnv(buildLinuxGameEnv(baseEnv || process.env))
+
+  if (process.platform !== 'linux' || !appid) return env
+
+  const globalSettings = readSettings() || {}
+  const gameConfig = getGameLinuxConfig(appid) || {}
+
+  // Per-game WINEPREFIX override
+  const winePrefix = typeof gameConfig.winePrefix === 'string' ? gameConfig.winePrefix.trim() : ''
+  if (winePrefix) env.WINEPREFIX = winePrefix
+
+  // Per-game Proton prefix override
+  const protonPrefix = typeof gameConfig.protonPrefix === 'string' ? gameConfig.protonPrefix.trim() : ''
+  if (protonPrefix) env.STEAM_COMPAT_DATA_PATH = protonPrefix
+
+  // Per-game extra env vars
+  const extraEnv = typeof gameConfig.extraEnv === 'string' ? gameConfig.extraEnv.trim() : ''
+  if (extraEnv) {
+    for (const line of extraEnv.split('\n')) {
+      const trimmed = line.trim()
+      if (!trimmed || trimmed.startsWith('#')) continue
+      const eqIdx = trimmed.indexOf('=')
+      if (eqIdx < 1) continue
+      const key = trimmed.slice(0, eqIdx).trim()
+      const value = trimmed.slice(eqIdx + 1).trim()
+      if (key) env[key] = value
+    }
+  }
+
+  // Per-game VR override
+  if (typeof gameConfig.vrEnabled === 'boolean' && !gameConfig.vrEnabled) {
+    // Explicitly disabled for this game — remove VR env vars
+    delete env.XR_RUNTIME_JSON
+    delete env.STEAM_VR_RUNTIME
+  } else if (gameConfig.vrEnabled) {
+    const xrRuntime = typeof gameConfig.vrXrRuntimeJson === 'string' ? gameConfig.vrXrRuntimeJson.trim() : ''
+    if (xrRuntime) env.XR_RUNTIME_JSON = xrRuntime
+  }
+
+  // If effective mode is Proton, ensure required Proton env vars are set
+  // Pass appid to enable per-game prefix creation
+  const effectiveMode = (gameConfig.launchMode && gameConfig.launchMode !== 'inherit')
+    ? gameConfig.launchMode
+    : globalSettings.linuxLaunchMode || 'auto'
+  if (String(effectiveMode).toLowerCase() === 'proton') {
+    const withProton = ensureProtonEnv(env, appid)
+    Object.assign(env, withProton)
+  }
+
+  return env
+}
+
+// IPC: Get per-game Linux config
+ipcMain.handle('uc:game-linux-config-get', (_event, appid) => {
+  try {
+    if (!appid) return { ok: false, error: 'missing-appid' }
+    const config = getGameLinuxConfig(appid)
+    return { ok: true, config: config || {} }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Set per-game Linux config
+ipcMain.handle('uc:game-linux-config-set', (_event, appid, config) => {
+  try {
+    if (!appid) return { ok: false, error: 'missing-appid' }
+    const s = readSettings() || {}
+    const prev = { ...s }
+    if (config === null || config === undefined) {
+      delete s[`gameLinux:${appid}`]
+    } else {
+      s[`gameLinux:${appid}`] = config
+    }
+    writeSettings(s)
+    broadcastSettingsChanges(s, prev)
+    ucLog(`Per-game Linux config set for ${appid}`)
+    return { ok: true }
+  } catch (err) {
+    ucLog(`Per-game Linux config set failed for ${appid}: ${err.message}`, 'error')
+    return { ok: false, error: err.message }
+  }
+})
+
+// ============================================================
+// SLSteam integration
+// ============================================================
+
+const SLSSTEAM_GITHUB_URL = 'https://github.com/acesls/SLSsteam/releases/latest'
+
+// IPC: Open SLSsteam GitHub releases page
+ipcMain.handle('uc:linux-slssteam-download', async () => {
+  try {
+    await shell.openExternal(SLSSTEAM_GITHUB_URL)
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Set up a game folder for SLSsteam (create steam_appid.txt)
+ipcMain.handle('uc:linux-slssteam-setup-game', async (_event, appid, steamAppId) => {
+  try {
+    if (!appid) return { ok: false, error: 'missing-appid' }
+
+    // Find the installed game folder
+    const gameFolder = findInstalledFolderByAppid(appid)
+    if (!gameFolder) return { ok: false, error: 'game-not-found' }
+
+    // Find the actual game directory (may be a subfolder)
+    let targetDir = gameFolder
+    try {
+      const entries = fs.readdirSync(gameFolder, { withFileTypes: true })
+      const subdirs = entries.filter(e => e.isDirectory() && e.name !== 'screenshots')
+      const files = entries.filter(e => e.isFile())
+      // If there's only installed.json and one subdirectory, use that subdirectory
+      if (subdirs.length === 1 && files.every(f => f.name === INSTALLED_MANIFEST)) {
+        targetDir = path.join(gameFolder, subdirs[0].name)
+      }
+    } catch {}
+
+    // Write steam_appid.txt
+    const steamAppIdStr = steamAppId ? String(steamAppId).trim() : '0'
+    const steamAppIdPath = path.join(targetDir, 'steam_appid.txt')
+    fs.writeFileSync(steamAppIdPath, steamAppIdStr, 'utf8')
+    ucLog(`SLSsteam: wrote steam_appid.txt to ${steamAppIdPath} (appid=${steamAppIdStr})`)
+
+    return { ok: true, path: steamAppIdPath, steamAppId: steamAppIdStr }
+  } catch (err) {
+    ucLog(`SLSsteam setup failed for ${appid}: ${err.message}`, 'error')
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Check if a game has steam_appid.txt set up
+ipcMain.handle('uc:linux-slssteam-check-game', (_event, appid) => {
+  try {
+    if (!appid) return { ok: false, error: 'missing-appid' }
+    const gameFolder = findInstalledFolderByAppid(appid)
+    if (!gameFolder) return { ok: false, error: 'game-not-found' }
+
+    // Check in game folder and one level of subdirectories
+    const candidates = [gameFolder]
+    try {
+      const entries = fs.readdirSync(gameFolder, { withFileTypes: true })
+      for (const e of entries) {
+        if (e.isDirectory()) candidates.push(path.join(gameFolder, e.name))
+      }
+    } catch {}
+
+    for (const dir of candidates) {
+      const steamAppIdPath = path.join(dir, 'steam_appid.txt')
+      if (fs.existsSync(steamAppIdPath)) {
+        try {
+          const content = fs.readFileSync(steamAppIdPath, 'utf8').trim()
+          return { ok: true, found: true, path: steamAppIdPath, steamAppId: content }
+        } catch {}
+      }
+    }
+    return { ok: true, found: false }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
+// ============================================================
+// In-Game Overlay IPC Handlers
+// ============================================================
+
+// IPC: Show overlay
+ipcMain.handle('uc:overlay-show', (_event, appid) => {
+  try {
+    showOverlay(appid)
+    return { ok: true }
+  } catch (err) {
+    ucLog(`Overlay show failed: ${err.message}`, 'error')
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Hide overlay
+ipcMain.handle('uc:overlay-hide', () => {
+  try {
+    hideOverlay()
+    return { ok: true }
+  } catch (err) {
+    ucLog(`Overlay hide failed: ${err.message}`, 'error')
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Toggle overlay
+ipcMain.handle('uc:overlay-toggle', (_event, appid) => {
+  try {
+    toggleOverlay(appid)
+    return { ok: true }
+  } catch (err) {
+    ucLog(`Overlay toggle failed: ${err.message}`, 'error')
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Get overlay status
+ipcMain.handle('uc:overlay-status', () => {
+  try {
+    const visible = overlayWindow && !overlayWindow.isDestroyed() && overlayWindow.isVisible()
+    return { 
+      ok: true, 
+      visible, 
+      currentAppid: currentOverlayAppid,
+      enabled: overlayEnabled,
+      hotkey: overlayHotkey,
+      autoShow: overlayAutoShow,
+      position: overlayPosition
+    }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Get overlay settings
+ipcMain.handle('uc:overlay-get-settings', () => {
+  try {
+    return { 
+      ok: true, 
+      enabled: overlayEnabled,
+      hotkey: overlayHotkey,
+      autoShow: overlayAutoShow,
+      position: overlayPosition
+    }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Set overlay settings
+ipcMain.handle('uc:overlay-set-settings', (_event, settings) => {
+  try {
+    if (!settings || typeof settings !== 'object') {
+      return { ok: false, error: 'invalid-settings' }
+    }
+    updateOverlaySettings(settings)
+    
+    // Persist settings
+    const currentSettings = readSettings()
+    if (settings.overlayEnabled !== undefined) currentSettings.overlayEnabled = settings.overlayEnabled
+    if (settings.overlayHotkey) currentSettings.overlayHotkey = settings.overlayHotkey
+    if (settings.overlayAutoShow !== undefined) currentSettings.overlayAutoShow = settings.overlayAutoShow
+    if (settings.overlayPosition) currentSettings.overlayPosition = settings.overlayPosition
+    writeSettings(currentSettings)
+    
+    return { ok: true }
+  } catch (err) {
+    ucLog(`Overlay settings update failed: ${err.message}`, 'error')
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Get overlay game info (for overlay UI to show game name, playtime, etc.)
+ipcMain.handle('uc:overlay-game-info', (_event, appid) => {
+  try {
+    // Helper to look up game image from installed manifest
+    const getGameImage = (gameAppid) => {
+      try {
+        const folder = findInstalledFolderByAppid(gameAppid)
+        if (!folder) return null
+        const manifest = readJsonFile(path.join(folder, INSTALLED_MANIFEST))
+        return manifest?.metadata?.image || null
+      } catch { return null }
+    }
+
+    if (!appid) {
+      // Return first running game if no appid specified
+      for (const [key, val] of runningGames) {
+        if (val && val.appid && val.appid === key) {
+          return { ok: true, appid: val.appid, gameName: val.gameName, startedAt: val.startedAt, pid: val.pid, image: getGameImage(val.appid) }
+        }
+      }
+      return { ok: true, appid: null }
+    }
+    const game = getRunningGame(appid)
+    if (!game) return { ok: true, appid: null }
+    return { ok: true, appid: game.appid, gameName: game.gameName, startedAt: game.startedAt, pid: game.pid, image: getGameImage(game.appid) }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: List all running games (for overlay UI)
+ipcMain.handle('uc:overlay-running-games', () => {
+  try {
+    const games = []
+    const seen = new Set()
+    for (const [key, val] of runningGames) {
+      if (val && val.appid && val.appid === key && !seen.has(val.appid)) {
+        seen.add(val.appid)
+        games.push({ appid: val.appid, gameName: val.gameName, startedAt: val.startedAt, pid: val.pid })
+      }
+    }
+    return { ok: true, games }
+  } catch (err) {
+    return { ok: false, error: err.message, games: [] }
+  }
+})
+
+// IPC: Get active downloads for overlay UI
+ipcMain.handle('uc:overlay-get-downloads', () => {
+  try {
+    const downloads = []
+    const seen = new Set()
+
+    // Primary: latestDownloadState has snapshots for every active download
+    // regardless of which downloader (Chromium or UC Files) is handling it.
+    for (const [downloadId, snap] of latestDownloadState) {
+      seen.add(downloadId)
+      downloads.push({
+        id: downloadId,
+        appid: snap.appid || '',
+        gameName: snap.gameName || snap.appid || 'Unknown',
+        status: snap.status || 'downloading',
+        receivedBytes: snap.receivedBytes || 0,
+        totalBytes: snap.totalBytes || 0,
+        speedBps: snap.speedBps || 0,
+        etaSeconds: snap.etaSeconds ?? null,
+      })
+    }
+
+    // Fallback: Chromium activeDownloads (for any items not yet seen via sendDownloadUpdate)
+    for (const [downloadId, entry] of activeDownloads) {
+      if (seen.has(downloadId) || !entry || !entry.item) continue
+      const item = entry.item
+      const received = item.getReceivedBytes ? item.getReceivedBytes() : 0
+      const total = item.getTotalBytes ? item.getTotalBytes() : 0
+      const state = item.getState ? item.getState() : 'progressing'
+      let status = 'downloading'
+      if (state === 'interrupted') status = 'paused'
+      else if (item.isPaused && item.isPaused()) status = 'paused'
+      const speed = entry.state?.speedBps || 0
+      downloads.push({
+        id: downloadId,
+        appid: entry.appid || '',
+        gameName: entry.gameName || entry.appid || 'Unknown',
+        status,
+        receivedBytes: received,
+        totalBytes: total,
+        speedBps: speed,
+        etaSeconds: total > 0 && speed > 0 ? Math.round((total - received) / speed) : null,
+      })
+    }
+
+    // Queued entries that haven't started yet
+    for (const queueEntry of globalDownloadQueue) {
+      if (seen.has(queueEntry.downloadId)) continue
+      downloads.push({
+        id: queueEntry.downloadId || '',
+        appid: queueEntry.appid || '',
+        gameName: queueEntry.gameName || queueEntry.appid || 'Queued',
+        status: 'queued',
+        receivedBytes: 0,
+        totalBytes: 0,
+        speedBps: 0,
+        etaSeconds: null,
+      })
+    }
+
+    return { ok: true, downloads }
+  } catch (err) {
+    ucLog(`overlay-get-downloads error: ${err.message}`, 'error')
+    return { ok: true, downloads: [] }
+  }
+})
+
+// ============================================================
+// Controller Support IPC Handlers
+// ============================================================
+
+let controllerSettings = {
+  enabled: false,
+  controllerType: 'generic',
+  vibrationEnabled: true,
+  deadzone: 0.15,
+  triggerDeadzone: 0.1,
+  buttonLayout: 'default'
+}
+
+// IPC: Get controller settings
+ipcMain.handle('uc:controller-get-settings', () => {
+  try {
+    // Load from settings
+    const settings = readSettings()
+    if (settings.controllerSettings) {
+      controllerSettings = { ...controllerSettings, ...settings.controllerSettings }
+    }
+    return { ok: true, settings: controllerSettings }
+  } catch (err) {
+    ucLog(`Controller get settings failed: ${err.message}`, 'error')
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Set controller settings
+ipcMain.handle('uc:controller-set-settings', (_event, settings) => {
+  try {
+    if (!settings || typeof settings !== 'object') {
+      return { ok: false, error: 'invalid-settings' }
+    }
+    controllerSettings = { ...controllerSettings, ...settings }
+    
+    // Persist to settings
+    const currentSettings = readSettings()
+    currentSettings.controllerSettings = controllerSettings
+    writeSettings(currentSettings)
+    
+    ucLog(`Controller settings updated: ${JSON.stringify(controllerSettings)}`)
+    return { ok: true }
+  } catch (err) {
+    ucLog(`Controller set settings failed: ${err.message}`, 'error')
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Get connected controller info
+ipcMain.handle('uc:controller-get-connected', () => {
+  try {
+    // In a real implementation, this would detect connected gamepads
+    // For now, return a placeholder that no controller is connected
+    // The actual gamepad detection would happen in the renderer using the Gamepad API
+    return { 
+      connected: false, 
+      controllerId: null, 
+      controllerName: null, 
+      controllerType: null 
+    }
+  } catch (err) {
+    ucLog(`Controller get connected failed: ${err.message}`, 'error')
+    return { connected: false, controllerId: null, controllerName: null, controllerType: null }
+  }
+})
+

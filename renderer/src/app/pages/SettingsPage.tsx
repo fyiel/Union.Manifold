@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
-import { ArrowDownToLine, ChevronDown, FolderOpen, Gamepad2, HardDrive, LogIn, LogOut, Plus, RefreshCw, Settings2, UserRound, Terminal, Cpu, FlaskConical } from "lucide-react"
+import { ArrowDownToLine, ChevronDown, FolderOpen, Gamepad2, HardDrive, LogIn, LogOut, Plus, RefreshCw, Settings2, UserRound, Terminal, Cpu, FlaskConical, Zap, Layers } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -78,6 +78,12 @@ export function SettingsPage() {
   const [linuxToolAvailability, setLinuxToolAvailability] = useState<Record<string, boolean>>({})
   const [showLinuxAdvanced, setShowLinuxAdvanced] = useState(false)
   const [linuxPrefixArch, setLinuxPrefixArch] = useState<'win64' | 'win32'>('win64')
+  // SLSsteam integration
+  const [slsSteamEnabled, setSlsSteamEnabled] = useState(false)
+  const [slsSteamPath, setSlsSteamPath] = useState('')
+  const [slsInjectPath, setSlsInjectPath] = useState('')
+  const [slsSteamDetected, setSlsSteamDetected] = useState<{ found: boolean; dir?: string | null } | null>(null)
+  const [slsToolFeedback, setSlsToolFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
   // SteamVR / VR settings
   const [vrEnabled, setVrEnabled] = useState(false)
   const [vrSteamVrPath, setVrSteamVrPath] = useState('')
@@ -94,7 +100,8 @@ export function SettingsPage() {
   const [showRpcAdvanced, setShowRpcAdvanced] = useState(false)
   const [rpcHideNsfw, setRpcHideNsfw] = useState(true)
   const [rpcShowGameName, setRpcShowGameName] = useState(true)
-  const [rpcShowStatus, setRpcShowStatus] = useState(true)
+  const [rpcShowDownloadStatus, setRpcShowDownloadStatus] = useState(true)
+  const [rpcShowBrowseStatus, setRpcShowBrowseStatus] = useState(true)
   const [rpcShowButtons, setRpcShowButtons] = useState(true)
   const [clearingData, setClearingData] = useState(false)
   const [showClearConfirm, setShowClearConfirm] = useState(false)
@@ -119,7 +126,15 @@ export function SettingsPage() {
   const [bioSaving, setBioSaving] = useState(false)
   const [bioSaved, setBioSaved] = useState(false)
   const [skipLinkCheck, setSkipLinkCheck] = useState(false)
-  const [activeSection, setActiveSection] = useState<'account' | 'downloads' | 'game-launch' | 'advanced'>('account')
+  const [activeSection, setActiveSection] = useState<'account' | 'downloads' | 'game-launch' | 'overlay' | 'advanced'>('account')
+
+  // Overlay settings state
+  const [overlayEnabled, setOverlayEnabled] = useState(true)
+  const [overlayAutoShow, setOverlayAutoShow] = useState(true)
+  const [overlayHotkey, setOverlayHotkey] = useState('Ctrl+Shift+Tab')
+  const [overlayPosition, setOverlayPosition] = useState<'left' | 'right'>('left')
+  const [recordingHotkey, setRecordingHotkey] = useState(false)
+  const [overlayLoaded, setOverlayLoaded] = useState(false)
 
   useEffect(() => {
     const loadVersion = async () => {
@@ -311,6 +326,55 @@ export function SettingsPage() {
     return () => { mounted = false }
   }, [])
 
+  // Load SLSsteam settings and detect installation
+  useEffect(() => {
+    if (!isLinux) return
+    let mounted = true
+    const loadSls = async () => {
+      try {
+        const enabled = await window.ucSettings?.get?.('slsSteamEnabled')
+        const slsPath = await window.ucSettings?.get?.('slsSteamPath')
+        const injectPath = await window.ucSettings?.get?.('slsInjectPath')
+        if (!mounted) return
+        setSlsSteamEnabled(Boolean(enabled))
+        if (typeof slsPath === 'string') setSlsSteamPath(slsPath)
+        if (typeof injectPath === 'string') setSlsInjectPath(injectPath)
+      } catch { }
+    }
+    const detectSls = async () => {
+      try {
+        const result = await window.ucLinux?.detectSLSSteam?.()
+        if (!mounted || !result?.ok) return
+        setSlsSteamDetected({ found: result.found, dir: result.dir })
+        // Auto-fill paths if not already set and SLSsteam is detected
+        if (result.found) {
+          const storedPath = await window.ucSettings?.get?.('slsSteamPath')
+          const storedInject = await window.ucSettings?.get?.('slsInjectPath')
+          if (!storedPath && result.slsSteamPath && mounted) setSlsSteamPath(result.slsSteamPath)
+          if (!storedInject && result.slsInjectPath && mounted) setSlsInjectPath(result.slsInjectPath)
+        }
+      } catch { }
+    }
+    loadSls()
+    detectSls()
+    const off = window.ucSettings?.onChanged?.((data: any) => {
+      if (!data || !data.key) return
+      if (data.key === '__CLEAR_ALL__') {
+        setSlsSteamEnabled(false)
+        setSlsSteamPath('')
+        setSlsInjectPath('')
+        return
+      }
+      if (data.key === 'slsSteamEnabled') setSlsSteamEnabled(Boolean(data.value))
+      if (data.key === 'slsSteamPath') setSlsSteamPath(data.value || '')
+      if (data.key === 'slsInjectPath') setSlsInjectPath(data.value || '')
+    })
+    return () => {
+      mounted = false
+      if (typeof off === 'function') off()
+    }
+  }, [isLinux])
+
   // Detect Linux tools when on Linux
   useEffect(() => {
     if (!isLinux) return
@@ -406,13 +470,17 @@ export function SettingsPage() {
         const enabled = await window.ucSettings?.get?.('discordRpcEnabled')
         const hideNsfw = await window.ucSettings?.get?.('rpcHideNsfw')
         const showGameName = await window.ucSettings?.get?.('rpcShowGameName')
-        const showStatus = await window.ucSettings?.get?.('rpcShowStatus')
+        const showDownloadStatus = await window.ucSettings?.get?.('rpcShowDownloadStatus')
+        const showBrowseStatus = await window.ucSettings?.get?.('rpcShowBrowseStatus')
+        // Legacy fallback: if new keys are unset, read old rpcShowStatus
+        const legacyShowStatus = await window.ucSettings?.get?.('rpcShowStatus')
         const showButtons = await window.ucSettings?.get?.('rpcShowButtons')
         if (!mounted) return
         setDiscordRpcEnabled(enabled !== false)
         setRpcHideNsfw(hideNsfw !== false)
         setRpcShowGameName(showGameName !== false)
-        setRpcShowStatus(showStatus !== false)
+        setRpcShowDownloadStatus(showDownloadStatus !== undefined ? showDownloadStatus !== false : legacyShowStatus !== false)
+        setRpcShowBrowseStatus(showBrowseStatus !== undefined ? showBrowseStatus !== false : legacyShowStatus !== false)
         setRpcShowButtons(showButtons !== false)
       } catch {
         // ignore
@@ -425,14 +493,21 @@ export function SettingsPage() {
         setDiscordRpcEnabled(true)
         setRpcHideNsfw(true)
         setRpcShowGameName(true)
-        setRpcShowStatus(true)
+        setRpcShowDownloadStatus(true)
+        setRpcShowBrowseStatus(true)
         setRpcShowButtons(true)
         return
       }
       if (data.key === 'discordRpcEnabled') setDiscordRpcEnabled(data.value !== false)
       if (data.key === 'rpcHideNsfw') setRpcHideNsfw(data.value !== false)
       if (data.key === 'rpcShowGameName') setRpcShowGameName(data.value !== false)
-      if (data.key === 'rpcShowStatus') setRpcShowStatus(data.value !== false)
+      if (data.key === 'rpcShowDownloadStatus') setRpcShowDownloadStatus(data.value !== false)
+      if (data.key === 'rpcShowBrowseStatus') setRpcShowBrowseStatus(data.value !== false)
+      // Legacy key sync
+      if (data.key === 'rpcShowStatus') {
+        setRpcShowDownloadStatus(data.value !== false)
+        setRpcShowBrowseStatus(data.value !== false)
+      }
       if (data.key === 'rpcShowButtons') setRpcShowButtons(data.value !== false)
     })
     return () => {
@@ -829,9 +904,24 @@ export function SettingsPage() {
         } catch { }
       }
       if (typeof prefs.rpcShowStatus === "boolean") {
-        setRpcShowStatus(prefs.rpcShowStatus)
+        // Legacy: sync both new keys from old API preference
+        setRpcShowDownloadStatus(prefs.rpcShowStatus)
+        setRpcShowBrowseStatus(prefs.rpcShowStatus)
         try {
-          await window.ucSettings?.set?.('rpcShowStatus', prefs.rpcShowStatus)
+          await window.ucSettings?.set?.('rpcShowDownloadStatus', prefs.rpcShowStatus)
+          await window.ucSettings?.set?.('rpcShowBrowseStatus', prefs.rpcShowStatus)
+        } catch { }
+      }
+      if (typeof prefs.rpcShowDownloadStatus === "boolean") {
+        setRpcShowDownloadStatus(prefs.rpcShowDownloadStatus)
+        try {
+          await window.ucSettings?.set?.('rpcShowDownloadStatus', prefs.rpcShowDownloadStatus)
+        } catch { }
+      }
+      if (typeof prefs.rpcShowBrowseStatus === "boolean") {
+        setRpcShowBrowseStatus(prefs.rpcShowBrowseStatus)
+        try {
+          await window.ucSettings?.set?.('rpcShowBrowseStatus', prefs.rpcShowBrowseStatus)
         } catch { }
       }
       if (typeof prefs.rpcShowButtons === "boolean") {
@@ -960,12 +1050,21 @@ export function SettingsPage() {
     }).catch(() => { })
   }
 
-  const updateRpcShowStatus = (checked: boolean) => {
-    window.ucSettings?.set?.('rpcShowStatus', checked).catch(() => { })
+  const updateRpcShowDownloadStatus = (checked: boolean) => {
+    window.ucSettings?.set?.('rpcShowDownloadStatus', checked).catch(() => { })
     apiFetch("/api/account/preferences", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ rpcShowStatus: checked }),
+      body: JSON.stringify({ rpcShowDownloadStatus: checked }),
+    }).catch(() => { })
+  }
+
+  const updateRpcShowBrowseStatus = (checked: boolean) => {
+    window.ucSettings?.set?.('rpcShowBrowseStatus', checked).catch(() => { })
+    apiFetch("/api/account/preferences", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rpcShowBrowseStatus: checked }),
     }).catch(() => { })
   }
 
@@ -1155,10 +1254,29 @@ export function SettingsPage() {
   const showAccountControls = Boolean(accountUser && authenticated)
   const accountBusy = accountLoading || loggingIn || loggingOut || accountRefreshing
 
+  // Load overlay settings on mount
+  useEffect(() => {
+    if (overlayLoaded) return
+    const loadOverlaySettings = async () => {
+      try {
+        const result = await window.ucOverlay?.getSettings?.()
+        if (result?.ok) {
+          setOverlayEnabled(result.enabled ?? true)
+          setOverlayAutoShow(result.autoShow ?? true)
+          setOverlayHotkey(result.hotkey || 'Ctrl+Shift+Tab')
+          setOverlayPosition((result.position as 'left' | 'right') || 'left')
+        }
+      } catch { }
+      setOverlayLoaded(true)
+    }
+    loadOverlaySettings()
+  }, [overlayLoaded])
+
   const NAV_ITEMS = [
     { id: 'account' as const, label: 'Account', icon: UserRound, description: 'Profile & preferences' },
     { id: 'downloads' as const, label: 'Downloads', icon: ArrowDownToLine, description: 'Storage & mirrors' },
     { id: 'game-launch' as const, label: 'Game Launch', icon: Gamepad2, description: 'Launch & compatibility' },
+    { id: 'overlay' as const, label: 'Overlay', icon: Layers, description: 'In-game overlay' },
     { id: 'advanced' as const, label: 'Advanced', icon: Settings2, description: 'Dev tools & danger zone' },
   ]
 
@@ -1439,20 +1557,41 @@ export function SettingsPage() {
 
                         <div className="flex items-center justify-between">
                           <div>
-                            <div className="text-sm font-medium">Show activity status</div>
-                            <div className="text-xs text-muted-foreground">Display what you're doing (downloading, playing, browsing)</div>
+                            <div className="text-sm font-medium">Show download status</div>
+                            <div className="text-xs text-muted-foreground">Display download/extraction progress and queue in your status</div>
                           </div>
                           <button
                             onClick={() => {
-                              const newValue = !rpcShowStatus
-                              setRpcShowStatus(newValue)
-                              updateRpcShowStatus(newValue)
+                              const newValue = !rpcShowDownloadStatus
+                              setRpcShowDownloadStatus(newValue)
+                              updateRpcShowDownloadStatus(newValue)
                             }}
-                            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${rpcShowStatus ? 'bg-primary' : 'bg-slate-700'
+                            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${rpcShowDownloadStatus ? 'bg-primary' : 'bg-slate-700'
                               }`}
                           >
                             <span
-                              className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${rpcShowStatus ? 'translate-x-6' : 'translate-x-1'
+                              className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${rpcShowDownloadStatus ? 'translate-x-6' : 'translate-x-1'
+                                }`}
+                            />
+                          </button>
+                        </div>
+
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <div className="text-sm font-medium">Show browsing status</div>
+                            <div className="text-xs text-muted-foreground">Display what you're viewing or playing (browsing, game details, library)</div>
+                          </div>
+                          <button
+                            onClick={() => {
+                              const newValue = !rpcShowBrowseStatus
+                              setRpcShowBrowseStatus(newValue)
+                              updateRpcShowBrowseStatus(newValue)
+                            }}
+                            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${rpcShowBrowseStatus ? 'bg-primary' : 'bg-slate-700'
+                              }`}
+                          >
+                            <span
+                              className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${rpcShowBrowseStatus ? 'translate-x-6' : 'translate-x-1'
                                 }`}
                             />
                           </button>
@@ -2116,6 +2255,146 @@ export function SettingsPage() {
                 </CardContent>
               </Card>
 
+              {/* SLSsteam Integration Card — Linux only */}
+              {isLinux && (
+              <Card className="border-border/60">
+                <CardContent className="p-6 space-y-6">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <Zap className="h-4 w-4 text-primary" />
+                        <h2 className="text-lg font-semibold">SLSsteam Integration</h2>
+                      </div>
+                      <p className="text-sm text-muted-foreground mt-1">
+                        Inject SLSsteam into game launches via <code className="font-mono bg-muted/50 px-1 rounded text-xs">LD_AUDIT</code> to enable Steam client modifications (DRM bypass, family sharing, etc.) for games launched through UnionCrax.Direct.
+                      </p>
+                    </div>
+                    <button
+                      onClick={async () => {
+                        const newValue = !slsSteamEnabled
+                        setSlsSteamEnabled(newValue)
+                        try { await window.ucSettings?.set?.('slsSteamEnabled', newValue) } catch { }
+                      }}
+                      className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${slsSteamEnabled ? 'bg-primary' : 'bg-slate-700'}`}
+                      title="Toggle SLSsteam integration"
+                    >
+                      <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${slsSteamEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
+                    </button>
+                  </div>
+
+                  {/* Detection status */}
+                  <div className="flex flex-wrap gap-2">
+                    {slsSteamDetected !== null && (
+                      <span className={`text-[11px] px-2 py-1 rounded-full border ${slsSteamDetected.found ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' : 'bg-muted/30 text-muted-foreground border-border/40'}`}>
+                        SLSsteam: {slsSteamDetected.found ? `found${slsSteamDetected.dir ? ` (${slsSteamDetected.dir})` : ''}` : 'not found at default path'}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Path configuration */}
+                  <div className="space-y-4 rounded-lg border border-border/60 bg-card/50 p-4">
+                    <div className="space-y-2">
+                      <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">SLSsteam.so path</label>
+                      <div className="flex gap-2">
+                        <Input
+                          value={slsSteamPath}
+                          onChange={(e) => setSlsSteamPath(e.target.value)}
+                          onBlur={async () => {
+                            try { await window.ucSettings?.set?.('slsSteamPath', slsSteamPath) } catch { }
+                          }}
+                          placeholder="~/.local/share/SLSsteam/SLSsteam.so"
+                          className="flex-1 font-mono text-xs"
+                        />
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={async () => {
+                            const result = await window.ucLinux?.pickSo?.()
+                            if (result?.ok && result.path) {
+                              setSlsSteamPath(result.path)
+                              await window.ucSettings?.set?.('slsSteamPath', result.path).catch(() => { })
+                            }
+                          }}
+                          title="Browse for SLSsteam.so"
+                        >
+                          <FolderOpen className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">library-inject.so path</label>
+                      <div className="flex gap-2">
+                        <Input
+                          value={slsInjectPath}
+                          onChange={(e) => setSlsInjectPath(e.target.value)}
+                          onBlur={async () => {
+                            try { await window.ucSettings?.set?.('slsInjectPath', slsInjectPath) } catch { }
+                          }}
+                          placeholder="~/.local/share/SLSsteam/library-inject.so"
+                          className="flex-1 font-mono text-xs"
+                        />
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={async () => {
+                            const result = await window.ucLinux?.pickSo?.()
+                            if (result?.ok && result.path) {
+                              setSlsInjectPath(result.path)
+                              await window.ucSettings?.set?.('slsInjectPath', result.path).catch(() => { })
+                            }
+                          }}
+                          title="Browse for library-inject.so"
+                        >
+                          <FolderOpen className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+
+                    {slsSteamDetected?.found && (
+                      <div className="flex flex-wrap gap-1">
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            if (slsSteamDetected.dir) {
+                              const p = `${slsSteamDetected.dir}/SLSsteam.so`
+                              setSlsSteamPath(p)
+                              await window.ucSettings?.set?.('slsSteamPath', p).catch(() => { })
+                              const ip = `${slsSteamDetected.dir}/library-inject.so`
+                              setSlsInjectPath(ip)
+                              await window.ucSettings?.set?.('slsInjectPath', ip).catch(() => { })
+                            }
+                          }}
+                          className="text-[10px] px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20 transition-colors"
+                        >
+                          Use detected paths
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="gap-2 text-xs"
+                      onClick={async () => {
+                        try { await window.ucLinux?.slsSteamDownload?.() } catch { }
+                      }}
+                    >
+                      Download SLSsteam from GitHub
+                    </Button>
+                  </div>
+
+                  <div className="rounded-lg border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-xs text-blue-200 space-y-1">
+                    <p><strong>Note:</strong> SLSsteam is a Linux-only Steam client modification. It must be installed separately via its own <code className="font-mono bg-blue-900/30 px-1 rounded">setup.sh</code> script.</p>
+                    <p>When enabled, <code className="font-mono bg-blue-900/30 px-1 rounded">LD_AUDIT</code> is set to load SLSsteam into every game launched from UnionCrax.Direct on Linux.</p>
+                    <p>Per-game configuration (Steam App ID, enable/disable) can be set from the Library page via the game's settings menu → <strong>Linux / VR Config</strong>.</p>
+                  </div>
+                </CardContent>
+              </Card>
+              )}
+
               <Card className="border-border/60">
                 <CardContent className="p-6 space-y-6">
                   <div>
@@ -2313,6 +2592,165 @@ export function SettingsPage() {
                 </CardContent>
               </Card>
 
+            </>
+          )}
+
+          {/* ====== OVERLAY ====== */}
+          {activeSection === 'overlay' && (
+            <>
+              <Card className="border-border/60">
+                <CardContent className="p-6 space-y-6">
+                  <div>
+                    <h2 className="text-lg font-semibold">In-Game Overlay</h2>
+                    <p className="text-sm text-muted-foreground">
+                      A Discord-style overlay that appears over your games. Toggle it with a hotkey.
+                    </p>
+                  </div>
+
+                  <div className="space-y-4">
+                    {/* Enable/Disable */}
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <label className="text-sm font-medium">Enable in-game overlay</label>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Show the UC.Direct overlay panel while games are running
+                        </p>
+                      </div>
+                      <button
+                        onClick={async () => {
+                          const next = !overlayEnabled
+                          setOverlayEnabled(next)
+                          await window.ucOverlay?.setSettings?.({ overlayEnabled: next })
+                        }}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${overlayEnabled ? 'bg-primary' : 'bg-slate-700'}`}
+                      >
+                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${overlayEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
+                      </button>
+                    </div>
+
+                    {/* Auto-show on game launch */}
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <label className="text-sm font-medium">Show overlay when game launches</label>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Automatically show the overlay when you start a game
+                        </p>
+                      </div>
+                      <button
+                        onClick={async () => {
+                          const next = !overlayAutoShow
+                          setOverlayAutoShow(next)
+                          await window.ucOverlay?.setSettings?.({ overlayAutoShow: next })
+                        }}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${overlayAutoShow ? 'bg-primary' : 'bg-slate-700'}`}
+                        disabled={!overlayEnabled}
+                      >
+                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${overlayAutoShow ? 'translate-x-6' : 'translate-x-1'}`} />
+                      </button>
+                    </div>
+
+                    {/* Hotkey */}
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <label className="text-sm font-medium">Toggle hotkey</label>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Press this key combination to show/hide the overlay in-game
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <kbd className="px-3 py-1.5 rounded-md border text-xs font-mono bg-muted">
+                          {recordingHotkey ? 'Press keys...' : overlayHotkey}
+                        </kbd>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="text-xs h-8"
+                          disabled={!overlayEnabled}
+                          onClick={() => {
+                            if (recordingHotkey) {
+                              setRecordingHotkey(false)
+                              return
+                            }
+                            setRecordingHotkey(true)
+                            const handler = (e: KeyboardEvent) => {
+                              e.preventDefault()
+                              e.stopPropagation()
+                              const parts: string[] = []
+                              if (e.ctrlKey) parts.push('Ctrl')
+                              if (e.shiftKey) parts.push('Shift')
+                              if (e.altKey) parts.push('Alt')
+                              const key = e.key
+                              if (!['Control', 'Shift', 'Alt', 'Meta'].includes(key)) {
+                                parts.push(key === 'Tab' ? 'Tab' : key === ' ' ? 'Space' : key.length === 1 ? key.toUpperCase() : key)
+                              }
+                              if (parts.length >= 2 && !['Control', 'Shift', 'Alt', 'Meta'].includes(e.key)) {
+                                const combo = parts.join('+')
+                                setOverlayHotkey(combo)
+                                setRecordingHotkey(false)
+                                window.removeEventListener('keydown', handler, true)
+                                window.ucOverlay?.setSettings?.({ overlayHotkey: combo })
+                              }
+                            }
+                            window.addEventListener('keydown', handler, true)
+                            // Auto-cancel after 5 seconds
+                            setTimeout(() => {
+                              setRecordingHotkey(false)
+                              window.removeEventListener('keydown', handler, true)
+                            }, 5000)
+                          }}
+                        >
+                          {recordingHotkey ? 'Cancel' : 'Change'}
+                        </Button>
+                      </div>
+                    </div>
+
+                    {/* Position */}
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <label className="text-sm font-medium">Panel position</label>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Which side of the screen the overlay slides in from
+                        </p>
+                      </div>
+                      <div className="flex gap-1 p-1 rounded-lg bg-muted">
+                        <button
+                          onClick={async () => {
+                            setOverlayPosition('left')
+                            await window.ucOverlay?.setSettings?.({ overlayPosition: 'left' })
+                          }}
+                          className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
+                            overlayPosition === 'left'
+                              ? 'bg-background text-foreground shadow-sm'
+                              : 'text-muted-foreground hover:text-foreground'
+                          }`}
+                          disabled={!overlayEnabled}
+                        >
+                          Left
+                        </button>
+                        <button
+                          onClick={async () => {
+                            setOverlayPosition('right')
+                            await window.ucOverlay?.setSettings?.({ overlayPosition: 'right' })
+                          }}
+                          className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
+                            overlayPosition === 'right'
+                              ? 'bg-background text-foreground shadow-sm'
+                              : 'text-muted-foreground hover:text-foreground'
+                          }`}
+                          disabled={!overlayEnabled}
+                        >
+                          Right
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Info box */}
+                  <div className="rounded-lg border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-xs text-blue-200">
+                    <strong>Note:</strong> The in-game overlay hooks directly into the game's graphics pipeline (DirectX 9/11/12, OpenGL) to render inside the game window. It works in both windowed and exclusive fullscreen modes. Input is isolated so your keypresses don't affect the game while the overlay is open.
+                  </div>
+                </CardContent>
+              </Card>
             </>
           )}
 

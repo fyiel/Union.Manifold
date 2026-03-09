@@ -12,27 +12,35 @@ import { AccountOverviewPage } from "@/app/pages/AccountOverviewPage"
 import { ViewHistoryPage } from "@/app/pages/ViewHistoryPage"
 import { SearchHistoryPage } from "@/app/pages/SearchHistoryPage"
 import { DownloadsProvider } from "@/context/downloads-context"
+import { InGameOverlay } from "@/components/InGameOverlay"
+
+function AppWithDownloads() {
+  return (
+    <DownloadsProvider>
+      <AppLayout />
+    </DownloadsProvider>
+  )
+}
 
 export default function App() {
   return (
     <HashRouter>
-      <DownloadsProvider>
-        <Routes>
-          <Route element={<AppLayout />}>
-            <Route path="/" element={<LauncherPage />} />
-            <Route path="/search" element={<SearchPage />} />
-            <Route path="/game/:id" element={<GameDetailPage />} />
-            <Route path="/library" element={<LibraryPage />} />
-            <Route path="/downloads" element={<DownloadsPage />} />
-            <Route path="/settings" element={<SettingsPage />} />
-            <Route path="/wishlist" element={<WishlistPage />} />
-            <Route path="/liked" element={<LikedPage />} />
-            <Route path="/account" element={<AccountOverviewPage />} />
-            <Route path="/view-history" element={<ViewHistoryPage />} />
-            <Route path="/search-history" element={<SearchHistoryPage />} />
-          </Route>
-        </Routes>
-      </DownloadsProvider>
+      <Routes>
+        <Route path="/overlay" element={<InGameOverlay />} />
+        <Route element={<AppWithDownloads />}>
+          <Route path="/" element={<LauncherPage />} />
+          <Route path="/search" element={<SearchPage />} />
+          <Route path="/game/:id" element={<GameDetailPage />} />
+          <Route path="/library" element={<LibraryPage />} />
+          <Route path="/downloads" element={<DownloadsPage />} />
+          <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/wishlist" element={<WishlistPage />} />
+          <Route path="/liked" element={<LikedPage />} />
+          <Route path="/account" element={<AccountOverviewPage />} />
+          <Route path="/view-history" element={<ViewHistoryPage />} />
+          <Route path="/search-history" element={<SearchHistoryPage />} />
+        </Route>
+      </Routes>
     </HashRouter>
   )
 }
