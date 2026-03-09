@@ -119,6 +119,8 @@ function computeGroupStats(
   overallTotalBytes = Math.max(overallTotalBytes, overallReceivedBytes)
   const installingItems = items.filter((item) => item.status === "installing")
   const extractingItems = items.filter((item) => item.status === "extracting")
+  const verifyingItems = items.filter((item) => item.status === "verifying")
+  const retryingItems = items.filter((item) => item.status === "retrying")
   const downloadingItems = items.filter((item) => item.status === "downloading" || item.status === "paused")
   const queuedItems = items.filter((item) => item.status === "queued")
   const queuedOnly = items.every((item) => item.status === "queued")
@@ -127,12 +129,18 @@ function computeGroupStats(
     ? installingItems
     : extractingItems.length
       ? extractingItems
-      : downloadingItems.length
-        ? downloadingItems
-        : items
+      : verifyingItems.length
+        ? verifyingItems
+        : retryingItems.length
+          ? retryingItems
+          : downloadingItems.length
+            ? downloadingItems
+            : items
 
   const primaryItem =
     downloadingItems[0] ||
+    verifyingItems[0] ||
+    retryingItems[0] ||
     installingItems[0] ||
     extractingItems[0] ||
     queuedItems[0] ||
@@ -149,7 +157,11 @@ function computeGroupStats(
         ? "installing"
         : extractingItems.length
           ? "extracting"
-          : "downloading"
+          : verifyingItems.length
+            ? "verifying"
+            : retryingItems.length
+              ? "retrying"
+              : "downloading"
   if (overallTotalBytes > 0) {
     totalBytes = overallTotalBytes
     receivedBytes = Math.min(overallReceivedBytes, overallTotalBytes)
@@ -800,6 +812,12 @@ export function DownloadsPage() {
                       }
                       if (primaryStats?.phase === "paused") {
                         return "Paused"
+                      }
+                      if (primaryStats?.phase === "verifying") {
+                        return "Verifying archive integrity"
+                      }
+                      if (primaryStats?.phase === "retrying") {
+                        return "Verification failed — re-downloading"
                       }
                       if (primaryStats?.phase === "installing" || primaryStats?.phase === "extracting") {
                         return primaryTotalParts > 1 ? `Installing part ${part} of ${primaryTotalParts}` : "Installing data"
