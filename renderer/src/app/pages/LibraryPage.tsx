@@ -8,9 +8,10 @@ import { PaginationBar } from "@/components/PaginationBar"
 import { useGamesData } from "@/hooks/use-games"
 import type { Game } from "@/lib/types"
 import { useDownloads } from "@/context/downloads-context"
-import { Settings, Trash2, AlertTriangle, FolderOpen, ExternalLink, Unlink2, Pencil } from "lucide-react"
+import { Settings, Trash2, AlertTriangle, FolderOpen, ExternalLink, Unlink2, Pencil, Terminal } from "lucide-react"
 import { ExePickerModal } from "@/components/ExePickerModal"
 import { EditGameMetadataModal } from "@/components/EditGameMetadataModal"
+import { GameLinuxConfigModal } from "@/components/GameLinuxConfigModal"
 import { gameLogger } from "@/lib/logger"
 
 type LibraryEntry = {
@@ -105,6 +106,9 @@ export function LibraryPage() {
   const [settingsPopupGame, setSettingsPopupGame] = useState<Game | null>(null)
   const [shortcutFeedback, setShortcutFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
   const [editMetadataOpen, setEditMetadataOpen] = useState(false)
+  const [linuxConfigOpen, setLinuxConfigOpen] = useState(false)
+  const [linuxConfigGame, setLinuxConfigGame] = useState<Game | null>(null)
+  const isLinux = typeof navigator !== 'undefined' && /linux/i.test(navigator.userAgent)
   const itemsPerPage = 24
   const [installedPage, setInstalledPage] = useState(1)
   const [installingPage, setInstallingPage] = useState(1)
@@ -463,6 +467,21 @@ export function LibraryPage() {
                             Edit Details
                           </button>
                         )}
+                        {isLinux && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSettingsPopupOpen(false)
+                              setShortcutFeedback(null)
+                              setLinuxConfigGame(game)
+                              setLinuxConfigOpen(true)
+                            }}
+                            className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-gray-400 transition-colors hover:text-white hover:bg-white/10"
+                          >
+                            <Terminal className="mr-2 h-4 w-4" />
+                            Linux / VR Config
+                          </button>
+                        )}
                         <div className="my-1 h-px bg-white/10" />
                         <button
                           type="button"
@@ -671,6 +690,17 @@ export function LibraryPage() {
                 g.appid === settingsPopupGame.appid ? { ...g, ...updates } : g
               )
             )
+          }}
+        />
+      )}
+      {linuxConfigGame && (
+        <GameLinuxConfigModal
+          open={linuxConfigOpen}
+          appid={linuxConfigGame.appid}
+          gameName={linuxConfigGame.name}
+          onClose={() => {
+            setLinuxConfigOpen(false)
+            setLinuxConfigGame(null)
           }}
         />
       )}

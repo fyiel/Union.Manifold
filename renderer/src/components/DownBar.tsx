@@ -5,7 +5,7 @@ import { Progress } from "@/components/ui/progress"
 import { PauseCircle, Play, Plus } from "lucide-react"
 import { AddGameModal } from "@/components/AddGameModal"
 
-const ACTIVE_STATUSES = ["downloading", "paused", "extracting", "installing"]
+const ACTIVE_STATUSES = ["downloading", "paused", "extracting", "installing", "verifying", "retrying"]
 
 function parsePartIndex(filename: string) {
   const lower = filename.toLowerCase()
@@ -97,6 +97,8 @@ export function DownBar() {
     const downloading = displayGroup.find((item) => item.status === "downloading")
     const extracting = displayGroup.find((item) => item.status === "extracting")
     const installing = displayGroup.find((item) => item.status === "installing")
+    const verifying = displayGroup.find((item) => item.status === "verifying")
+    const retrying = displayGroup.find((item) => item.status === "retrying")
     const paused = displayGroup.find((item) => item.status === "paused")
     const completed = displayGroup.find((item) => item.status === "completed" || item.status === "extracted")
     const fallbackLatest = displayGroup.reduce<typeof displayGroup[number] | null>((latest, item) => {
@@ -111,7 +113,7 @@ export function DownBar() {
       }
       return latest
     }, null)
-    const activeItem = downloading || extracting || installing || paused || completed || fallbackLatest || displayGroup[0]
+    const activeItem = downloading || verifying || retrying || extracting || installing || paused || completed || fallbackLatest || displayGroup[0]
     const totalParts = getTotalParts(displayGroup)
     const partInfo = getPartIndex(
       activeItem?.filename || "",
@@ -123,13 +125,17 @@ export function DownBar() {
       ? "Installing"
       : extracting
         ? "Installing"
-        : downloading
-          ? "Downloading"
-          : completed
-            ? "Completed"
-            : paused
-              ? "Paused"
-              : "Queued"
+        : verifying
+          ? "Verifying"
+          : retrying
+            ? "Retrying"
+            : downloading
+              ? "Downloading"
+              : completed
+                ? "Completed"
+                : paused
+                  ? "Paused"
+                  : "Queued"
     return {
       totalBytes,
       receivedBytes,
@@ -185,7 +191,7 @@ export function DownBar() {
   }
 
   const isPaused = displayGroup.some((item) => item.status === "paused") &&
-    !displayGroup.some((item) => ["downloading", "extracting", "installing"].includes(item.status))
+    !displayGroup.some((item) => ["downloading", "extracting", "installing", "verifying", "retrying"].includes(item.status))
   const isQueuedOnly = displayGroup.every((item) => item.status === "queued")
   const displayName = displayGroup[0]?.gameName || "Download"
   const displayHost = displayGroup[0]?.host || "unknown"

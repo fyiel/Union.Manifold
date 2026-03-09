@@ -2,8 +2,11 @@ name: Build and Release
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches:
+      - uc-sls.direct
+  pull_request:
+    branches:
+      - uc-sls.direct
   workflow_dispatch:
 
 jobs:

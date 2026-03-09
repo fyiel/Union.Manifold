@@ -1,6 +1,6 @@
 {
   "name": "unioncrax-direct",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "Standalone Electron app for managing and launching games from UnionCrax",
   "type": "module",
   "main": "electron/main.cjs",
@@ -15,14 +15,16 @@
   },
   "homepage": "https://github.com/Union-Crax/UnionCrax.Direct#readme",
   "scripts": {
-    "setup": "node node_modules/electron/install.js",
+    "setup": "node ./node_modules/electron/install.js",
     "dev": "concurrently -k \"pnpm:dev:renderer\" \"pnpm:dev:electron\"",
     "dev:renderer": "vite --config renderer/vite.config.ts",
-    "dev:electron": "wait-on http://localhost:5173 && node scripts/run-electron.cjs electron/main.cjs",
+    "dev:electron": "wait-on http://localhost:5173 && node ./scripts/run-electron.cjs ./electron/main.cjs",
     "build": "pnpm -s build:renderer && pnpm -s build:electron",
     "build:renderer": "vite build --config renderer/vite.config.ts",
-    "build:electron": "node scripts/build-electron.cjs",
-    "pack": "pnpm -s build && electron-builder"
+    "build:electron": "node ./scripts/build-electron.cjs",
+    "pack": "pnpm -s build && electron-builder",
+    "rebuild-native": "cd electron/native && node-gyp rebuild",
+    "postinstall": "pnpm rebuild-native || echo 'Native overlay addon build skipped (install C++ build tools to enable)'"
   },
   "dependencies": {
     "7zip-bin": "^5.0.0",
@@ -43,6 +45,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "discord-rpc": "^4.0.1",
+    "node-addon-api": "^7.1.0",
 
     "embla-carousel-react": "^8.5.1",
     "fuse.js": "^7.1.0",
@@ -93,7 +96,14 @@
       "package.json"
     ],
     "asarUnpack": [
-      "node_modules/7zip-bin"
+      "node_modules/7zip-bin",
+      "electron/native/build/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "build/uc-overlay-x64.dll",
+        "to": "uc-overlay-x64.dll"
+      }
     ],
     "win": {
       "icon": "assets/icon.ico",
