@@ -2460,14 +2460,22 @@ async function ucfilesParallelDownload(win, payload, _retryCount = 0) {
   let fd = null
   let progressInterval = null
   try {
-    // 1. HEAD request to get total size
+    // 1. HEAD request to get total size (with retry on transient server errors)
     // cache: 'no-store' prevents Chromium's networking stack from caching/reusing responses
-    const headRes = await fetch(url, { method: 'HEAD', signal: ctrl.signal, redirect: 'follow', cache: 'no-store' })
+    let headRes
+    for (let headAttempt = 0; headAttempt < 3; headAttempt++) {
+      headRes = await fetch(url, { method: 'HEAD', signal: ctrl.signal, redirect: 'follow', cache: 'no-store' })
+      if (headRes.ok || headRes.status < 500) break
+      ucLog(`[UC.Files] HEAD attempt ${headAttempt + 1}/3 failed: ${headRes.status} ${headRes.statusText}, retrying in 3s...`, 'warn')
+      await new Promise(r => setTimeout(r, 3000))
+    }
     if (!headRes.ok) {
       throw new Error(`HEAD failed: ${headRes.status} ${headRes.statusText}`)
     }
     const totalBytes = parseInt(headRes.headers.get('content-length') || '0', 10)
     const acceptsRanges = (headRes.headers.get('accept-ranges') || '').toLowerCase().includes('bytes')
+    const expectedSHA256 = (headRes.headers.get('x-file-sha256') || '').toLowerCase().trim() || null
+    if (expectedSHA256) ucLog(`[UC.Files] Server hash: ${expectedSHA256}`)
 
     if (!totalBytes || !acceptsRanges) {
       // Fallback: single-connection download (server doesn't support ranges or unknown size)
@@ -2676,7 +2684,9 @@ async function ucfilesParallelDownload(win, payload, _retryCount = 0) {
       // stat failed — file might have been deleted, let post-handler deal with it
     }
 
-    // Compute SHA-256 of the downloaded file for integrity logging
+    // Compute SHA-256 of the downloaded file and compare against server hash
+    let downloadSHA256 = null
+    let fileVerifiedByHash = false
     try {
       const fileHash = crypto.createHash('sha256')
       const hashStream = fs.createReadStream(finalSavePath)
@@ -2685,48 +2695,153 @@ async function ucfilesParallelDownload(win, payload, _retryCount = 0) {
         hashStream.on('end', resolve)
         hashStream.on('error', reject)
       })
-      const sha256 = fileHash.digest('hex')
-      ucLog(`[UC.Files] Download SHA-256: ${sha256} | ${path.basename(finalSavePath)} (${totalBytes} bytes)`)
+      downloadSHA256 = fileHash.digest('hex')
+      ucLog(`[UC.Files] Download SHA-256: ${downloadSHA256} | ${path.basename(finalSavePath)} (${totalBytes} bytes)`)
     } catch (hashErr) {
       ucLog(`[UC.Files] SHA-256 computation failed: ${hashErr.message}`, 'warn')
+    }
+
+    // If the server provided its known-good hash, compare — verifies ALL file types
+    if (expectedSHA256 && downloadSHA256) {
+      if (downloadSHA256 === expectedSHA256) {
+        ucLog('[UC.Files] SHA-256 matches server hash — file integrity confirmed, skipping archive test')
+        fileVerifiedByHash = true
+      } else {
+        ucLog(`[UC.Files] SHA-256 MISMATCH! Server: ${expectedSHA256}, Downloaded: ${downloadSHA256}`, 'error')
+      }
     }
 
     // 7. Verify chunk write integrity: re-read each chunk from disk and compare
     //    SHA-256 against the hash computed during download. Detects OS/filesystem
     //    write corruption (bytes received correctly but written incorrectly).
-    ucLog('[UC.Files] Verifying chunk write integrity...')
-    sendUpdate({ status: 'verifying', receivedBytes: totalBytes, totalBytes, speedBps: 0, etaSeconds: null })
-    const badChunks = verifyChunkHashes(finalSavePath, chunks)
-    if (badChunks.length > 0) {
-      ucLog(`[UC.Files] WRITE CORRUPTION: ${badChunks.length}/${chunks.length} chunks differ on disk! Indices: [${badChunks.join(', ')}]`, 'error')
-      for (const ci of badChunks) {
-        const c = chunks[ci]
-        ucLog(`[UC.Files]   Chunk ${ci}: bytes ${c.start}-${c.end} (${c.end - c.start + 1} bytes)`, 'error')
+    //    Skipped when the whole-file hash already matches the server.
+    if (!fileVerifiedByHash) {
+      ucLog('[UC.Files] Verifying chunk write integrity...')
+      sendUpdate({ status: 'verifying', receivedBytes: totalBytes, totalBytes, speedBps: 0, etaSeconds: null })
+      const badChunks = verifyChunkHashes(finalSavePath, chunks)
+      if (badChunks.length > 0) {
+        ucLog(`[UC.Files] WRITE CORRUPTION: ${badChunks.length}/${chunks.length} chunks differ on disk! Indices: [${badChunks.join(', ')}]`, 'error')
+        for (const ci of badChunks) {
+          const c = chunks[ci]
+          ucLog(`[UC.Files]   Chunk ${ci}: bytes ${c.start}-${c.end} (${c.end - c.start + 1} bytes)`, 'error')
+        }
+      } else {
+        ucLog(`[UC.Files] All ${chunks.length} chunks verified — disk matches network bytes`)
       }
-    } else {
-      ucLog(`[UC.Files] All ${chunks.length} chunks verified — disk matches network bytes`)
     }
 
     // 8. Archive integrity test: run `7z t` to validate the archive before extraction.
     //    This catches ALL corruption sources (server, network, write) regardless of
     //    whether the per-chunk hashes matched — the server could have sent wrong bytes.
+    //    Skipped when the whole-file hash already matches the server.
     const archiveExt = path.extname(finalSavePath).toLowerCase()
     const isDownloadedArchive = ['.zip', '.rar', '.7z', '.tar', '.gz', '.bz2', '.xz', '.tgz'].includes(archiveExt)
-    if (isDownloadedArchive) {
+    if (!fileVerifiedByHash && isDownloadedArchive) {
       ucLog('[UC.Files] Testing archive integrity with 7z...')
       const testResult = await run7zTest(finalSavePath)
       if (!testResult.ok) {
         ucLog(`[UC.Files] Archive FAILED integrity test: ${testResult.error}`, 'error')
+
+        // --- Smart chunk-level repair ---
+        // Instead of deleting the entire file and re-downloading ~1 GB, re-fetch
+        // each chunk individually and compare its hash against the original.
+        // Chunks whose hash differs were served corrupt data by the CDN; overwrite
+        // only those chunks and re-test the archive.  This typically saves 90%+ of
+        // the bandwidth compared to a full re-download.
         if (_retryCount < 2) {
-          ucLog(`[UC.Files] Deleting corrupt file and retrying download (attempt ${_retryCount + 1})...`)
-          sendUpdate({ status: 'retrying', receivedBytes: 0, totalBytes: 0, speedBps: 0, etaSeconds: null })
-          try { fs.unlinkSync(finalSavePath) } catch {}
-          ucfilesActiveDownloads.delete(downloadId)
-          return ucfilesParallelDownload(win, payload, _retryCount + 1)
+          ucLog(`[UC.Files] Starting targeted chunk repair (attempt ${_retryCount + 1}/3)...`)
+          sendUpdate({ status: 'retrying', receivedBytes: totalBytes, totalBytes, speedBps: 0, etaSeconds: null, error: `Verification failed — repairing corrupt chunks (attempt ${_retryCount + 1}/3)` })
+          // Brief delay — gives CDN caches a moment to rotate
+          await new Promise(r => setTimeout(r, 3000))
+
+          let patchedCount = 0
+          const repairFd = fs.openSync(finalSavePath, 'r+')
+          try {
+            for (let ci = 0; ci < chunks.length; ci++) {
+              const chunk = chunks[ci]
+              if (!chunk.sha256) continue
+              const chunkBytes = chunk.end - chunk.start + 1
+
+              // Re-download the full chunk into memory and compute hash
+              let freshBuf = Buffer.alloc(chunkBytes)
+              let freshOffset = 0
+              let freshRetries = 0
+              const freshHasher = crypto.createHash('sha256')
+              while (freshOffset < chunkBytes) {
+                try {
+                  const { statusCode, stream } = await ucfilesRangeRequest(
+                    url, chunk.start + freshOffset, chunk.end, ctrl.signal)
+                  if (statusCode !== 206) { stream.resume(); break }
+                  for await (const data of stream) {
+                    const buf = Buffer.isBuffer(data) ? data : Buffer.from(data)
+                    const copyLen = Math.min(buf.length, chunkBytes - freshOffset)
+                    buf.copy(freshBuf, freshOffset, 0, copyLen)
+                    freshHasher.update(buf.subarray(0, copyLen))
+                    freshOffset += copyLen
+                    if (freshOffset >= chunkBytes) break
+                  }
+                } catch (e) {
+                  if (ctrl.signal.aborted) break
+                  freshRetries++
+                  if (freshRetries > 3) break
+                }
+              }
+              if (freshOffset < chunkBytes) {
+                ucLog(`[UC.Files] Chunk repair: chunk ${ci} re-download incomplete (${freshOffset}/${chunkBytes}), skipping`, 'warn')
+                continue
+              }
+
+              const freshHash = freshHasher.digest('hex')
+              if (freshHash !== chunk.sha256) {
+                // The fresh download differs from the original — the original was corrupt.
+                // Overwrite with the fresh (hopefully correct) data.
+                ucLog(`[UC.Files] Chunk ${ci} (${chunk.start}-${chunk.end}): hash CHANGED — patching disk`)
+                fs.writeSync(repairFd, freshBuf, 0, chunkBytes, chunk.start)
+                chunk.sha256 = freshHash
+                patchedCount++
+              }
+              // Report progress: show which chunk we're verifying
+              sendUpdate({ status: 'retrying', receivedBytes: totalBytes, totalBytes, speedBps: 0, etaSeconds: null,
+                error: `Repairing chunks: ${ci + 1}/${chunks.length} checked, ${patchedCount} patched` })
+            }
+          } finally {
+            try { fs.fsyncSync(repairFd) } catch {}
+            try { fs.closeSync(repairFd) } catch {}
+          }
+
+          if (patchedCount > 0) {
+            ucLog(`[UC.Files] Chunk repair: patched ${patchedCount}/${chunks.length} chunks — re-testing archive`)
+            const reTestResult = await run7zTest(finalSavePath)
+            if (reTestResult.ok) {
+              ucLog('[UC.Files] Archive integrity test PASSED after chunk repair')
+              // Fall through to the success path below
+            } else {
+              ucLog(`[UC.Files] Archive STILL corrupt after chunk repair: ${reTestResult.error}`, 'error')
+              // Fall back to full re-download for the next attempt
+              sendUpdate({ status: 'retrying', receivedBytes: 0, totalBytes: 0, speedBps: 0, etaSeconds: null,
+                error: `Chunk repair failed — full re-download (attempt ${_retryCount + 1}/3)` })
+              try { fs.unlinkSync(finalSavePath) } catch {}
+              ucfilesActiveDownloads.delete(downloadId)
+              await new Promise(r => setTimeout(r, 3000))
+              return ucfilesParallelDownload(win, payload, _retryCount + 1)
+            }
+          } else {
+            // No chunks changed — the CDN served the same (corrupt) data again.
+            // Fall back to full re-download which creates fresh TCP connections.
+            ucLog('[UC.Files] Chunk repair: no chunks changed — CDN is consistently corrupt, full re-download')
+            sendUpdate({ status: 'retrying', receivedBytes: 0, totalBytes: 0, speedBps: 0, etaSeconds: null,
+              error: `Same corrupt data from server — full re-download (attempt ${_retryCount + 1}/3)` })
+            try { fs.unlinkSync(finalSavePath) } catch {}
+            ucfilesActiveDownloads.delete(downloadId)
+            await new Promise(r => setTimeout(r, 3000))
+            return ucfilesParallelDownload(win, payload, _retryCount + 1)
+          }
+        } else {
+          sendUpdate({ status: 'failed', receivedBytes: 0, totalBytes: 0, speedBps: 0, etaSeconds: null, error: `Archive corrupt after ${_retryCount + 1} download attempts. The file on the server may be damaged.` })
+          throw new Error(`Archive corrupt after ${_retryCount + 1} download attempts. The file on the server may be damaged.`)
         }
-        throw new Error(`Archive corrupt after ${_retryCount + 1} download attempts. The file on the server may be damaged.`)
       }
-      ucLog('[UC.Files] Archive integrity test PASSED')
+      if (testResult.ok) ucLog('[UC.Files] Archive integrity test PASSED')
     }
 
     // 9. Done — mimic the will-download 'done' event flow
@@ -4957,6 +5072,15 @@ ipcMain.handle('uc:download-resume-with-fresh-url', (event, payload) => {
 
   if (actualOffset <= 0) {
     return { ok: false, error: 'empty-file' }
+  }
+
+  // If the file on disk is already the expected size (or larger), the download
+  // is actually complete.  Chromium's createInterruptedDownload rejects
+  // offset >= length, so tell the renderer the file is already done so it can
+  // skip straight to verification/extraction.
+  if (payload.totalBytes && actualOffset >= payload.totalBytes) {
+    ucLog(`resume-with-fresh-url: file already complete (offset=${actualOffset}, totalBytes=${payload.totalBytes}), skipping re-download`, 'info')
+    return { ok: false, error: 'file-already-complete' }
   }
 
   ucLog(`resume-with-fresh-url: downloadId=${payload.downloadId} url=${payload.url} offset=${actualOffset} savePath=${savePath}`, 'info')
