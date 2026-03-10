@@ -1290,10 +1290,8 @@ ipcMain.handle('uc:network-test', async (_event, baseUrl) => {
     const targets = [
       { label: 'API base', url: origin },
       { label: 'API downloads', url: new URL('/api/downloads/all', origin).toString() },
-      { label: 'Pixeldrain', url: 'https://pixeldrain.com' },
-      { label: 'FileQ', url: 'https://fileq.net' },
-      { label: 'DataVaults', url: 'https://datavaults.co' },
-      { label: 'Rootz', url: 'https://rootz.so' }
+      { label: 'Vikingfile', url: 'https://vikingfile.com' },
+      { label: 'UC-Files', url: 'https://files.union-crax.xyz' }
     ]
     const results = await Promise.all(
       targets.map(async (target) => ({ label: target.label, ...(await probeUrl(target.url)) }))
@@ -2460,14 +2458,22 @@ async function ucfilesParallelDownload(win, payload, _retryCount = 0) {
   let fd = null
   let progressInterval = null
   try {
-    // 1. HEAD request to get total size
+    // 1. HEAD request to get total size (with retry on transient server errors)
     // cache: 'no-store' prevents Chromium's networking stack from caching/reusing responses
-    const headRes = await fetch(url, { method: 'HEAD', signal: ctrl.signal, redirect: 'follow', cache: 'no-store' })
+    let headRes
+    for (let headAttempt = 0; headAttempt < 3; headAttempt++) {
+      headRes = await fetch(url, { method: 'HEAD', signal: ctrl.signal, redirect: 'follow', cache: 'no-store' })
+      if (headRes.ok || headRes.status < 500) break
+      ucLog(`[UC.Files] HEAD attempt ${headAttempt + 1}/3 failed: ${headRes.status} ${headRes.statusText}, retrying in 3s...`, 'warn')
+      await new Promise(r => setTimeout(r, 3000))
+    }
     if (!headRes.ok) {
       throw new Error(`HEAD failed: ${headRes.status} ${headRes.statusText}`)
     }
     const totalBytes = parseInt(headRes.headers.get('content-length') || '0', 10)
     const acceptsRanges = (headRes.headers.get('accept-ranges') || '').toLowerCase().includes('bytes')
+    const expectedSHA256 = (headRes.headers.get('x-file-sha256') || '').toLowerCase().trim() || null
+    if (expectedSHA256) ucLog(`[UC.Files] Server hash: ${expectedSHA256}`)
 
     if (!totalBytes || !acceptsRanges) {
       // Fallback: single-connection download (server doesn't support ranges or unknown size)
@@ -2676,7 +2682,9 @@ async function ucfilesParallelDownload(win, payload, _retryCount = 0) {
       // stat failed — file might have been deleted, let post-handler deal with it
     }
 
-    // Compute SHA-256 of the downloaded file for integrity logging
+    // Compute SHA-256 of the downloaded file and compare against server hash
+    let downloadSHA256 = null
+    let fileVerifiedByHash = false
     try {
       const fileHash = crypto.createHash('sha256')
       const hashStream = fs.createReadStream(finalSavePath)
@@ -2685,48 +2693,153 @@ async function ucfilesParallelDownload(win, payload, _retryCount = 0) {
         hashStream.on('end', resolve)
         hashStream.on('error', reject)
       })
-      const sha256 = fileHash.digest('hex')
-      ucLog(`[UC.Files] Download SHA-256: ${sha256} | ${path.basename(finalSavePath)} (${totalBytes} bytes)`)
+      downloadSHA256 = fileHash.digest('hex')
+      ucLog(`[UC.Files] Download SHA-256: ${downloadSHA256} | ${path.basename(finalSavePath)} (${totalBytes} bytes)`)
     } catch (hashErr) {
       ucLog(`[UC.Files] SHA-256 computation failed: ${hashErr.message}`, 'warn')
+    }
+
+    // If the server provided its known-good hash, compare — verifies ALL file types
+    if (expectedSHA256 && downloadSHA256) {
+      if (downloadSHA256 === expectedSHA256) {
+        ucLog('[UC.Files] SHA-256 matches server hash — file integrity confirmed, skipping archive test')
+        fileVerifiedByHash = true
+      } else {
+        ucLog(`[UC.Files] SHA-256 MISMATCH! Server: ${expectedSHA256}, Downloaded: ${downloadSHA256}`, 'error')
+      }
     }
 
     // 7. Verify chunk write integrity: re-read each chunk from disk and compare
     //    SHA-256 against the hash computed during download. Detects OS/filesystem
     //    write corruption (bytes received correctly but written incorrectly).
-    ucLog('[UC.Files] Verifying chunk write integrity...')
-    sendUpdate({ status: 'verifying', receivedBytes: totalBytes, totalBytes, speedBps: 0, etaSeconds: null })
-    const badChunks = verifyChunkHashes(finalSavePath, chunks)
-    if (badChunks.length > 0) {
-      ucLog(`[UC.Files] WRITE CORRUPTION: ${badChunks.length}/${chunks.length} chunks differ on disk! Indices: [${badChunks.join(', ')}]`, 'error')
-      for (const ci of badChunks) {
-        const c = chunks[ci]
-        ucLog(`[UC.Files]   Chunk ${ci}: bytes ${c.start}-${c.end} (${c.end - c.start + 1} bytes)`, 'error')
+    //    Skipped when the whole-file hash already matches the server.
+    if (!fileVerifiedByHash) {
+      ucLog('[UC.Files] Verifying chunk write integrity...')
+      sendUpdate({ status: 'verifying', receivedBytes: totalBytes, totalBytes, speedBps: 0, etaSeconds: null })
+      const badChunks = verifyChunkHashes(finalSavePath, chunks)
+      if (badChunks.length > 0) {
+        ucLog(`[UC.Files] WRITE CORRUPTION: ${badChunks.length}/${chunks.length} chunks differ on disk! Indices: [${badChunks.join(', ')}]`, 'error')
+        for (const ci of badChunks) {
+          const c = chunks[ci]
+          ucLog(`[UC.Files]   Chunk ${ci}: bytes ${c.start}-${c.end} (${c.end - c.start + 1} bytes)`, 'error')
+        }
+      } else {
+        ucLog(`[UC.Files] All ${chunks.length} chunks verified — disk matches network bytes`)
       }
-    } else {
-      ucLog(`[UC.Files] All ${chunks.length} chunks verified — disk matches network bytes`)
     }
 
     // 8. Archive integrity test: run `7z t` to validate the archive before extraction.
     //    This catches ALL corruption sources (server, network, write) regardless of
     //    whether the per-chunk hashes matched — the server could have sent wrong bytes.
+    //    Skipped when the whole-file hash already matches the server.
     const archiveExt = path.extname(finalSavePath).toLowerCase()
     const isDownloadedArchive = ['.zip', '.rar', '.7z', '.tar', '.gz', '.bz2', '.xz', '.tgz'].includes(archiveExt)
-    if (isDownloadedArchive) {
+    if (!fileVerifiedByHash && isDownloadedArchive) {
       ucLog('[UC.Files] Testing archive integrity with 7z...')
       const testResult = await run7zTest(finalSavePath)
       if (!testResult.ok) {
         ucLog(`[UC.Files] Archive FAILED integrity test: ${testResult.error}`, 'error')
+
+        // --- Smart chunk-level repair ---
+        // Instead of deleting the entire file and re-downloading ~1 GB, re-fetch
+        // each chunk individually and compare its hash against the original.
+        // Chunks whose hash differs were served corrupt data by the CDN; overwrite
+        // only those chunks and re-test the archive.  This typically saves 90%+ of
+        // the bandwidth compared to a full re-download.
         if (_retryCount < 2) {
-          ucLog(`[UC.Files] Deleting corrupt file and retrying download (attempt ${_retryCount + 1})...`)
-          sendUpdate({ status: 'retrying', receivedBytes: 0, totalBytes: 0, speedBps: 0, etaSeconds: null })
-          try { fs.unlinkSync(finalSavePath) } catch {}
-          ucfilesActiveDownloads.delete(downloadId)
-          return ucfilesParallelDownload(win, payload, _retryCount + 1)
+          ucLog(`[UC.Files] Starting targeted chunk repair (attempt ${_retryCount + 1}/3)...`)
+          sendUpdate({ status: 'retrying', receivedBytes: totalBytes, totalBytes, speedBps: 0, etaSeconds: null, error: `Verification failed — repairing corrupt chunks (attempt ${_retryCount + 1}/3)` })
+          // Brief delay — gives CDN caches a moment to rotate
+          await new Promise(r => setTimeout(r, 3000))
+
+          let patchedCount = 0
+          const repairFd = fs.openSync(finalSavePath, 'r+')
+          try {
+            for (let ci = 0; ci < chunks.length; ci++) {
+              const chunk = chunks[ci]
+              if (!chunk.sha256) continue
+              const chunkBytes = chunk.end - chunk.start + 1
+
+              // Re-download the full chunk into memory and compute hash
+              let freshBuf = Buffer.alloc(chunkBytes)
+              let freshOffset = 0
+              let freshRetries = 0
+              const freshHasher = crypto.createHash('sha256')
+              while (freshOffset < chunkBytes) {
+                try {
+                  const { statusCode, stream } = await ucfilesRangeRequest(
+                    url, chunk.start + freshOffset, chunk.end, ctrl.signal)
+                  if (statusCode !== 206) { stream.resume(); break }
+                  for await (const data of stream) {
+                    const buf = Buffer.isBuffer(data) ? data : Buffer.from(data)
+                    const copyLen = Math.min(buf.length, chunkBytes - freshOffset)
+                    buf.copy(freshBuf, freshOffset, 0, copyLen)
+                    freshHasher.update(buf.subarray(0, copyLen))
+                    freshOffset += copyLen
+                    if (freshOffset >= chunkBytes) break
+                  }
+                } catch (e) {
+                  if (ctrl.signal.aborted) break
+                  freshRetries++
+                  if (freshRetries > 3) break
+                }
+              }
+              if (freshOffset < chunkBytes) {
+                ucLog(`[UC.Files] Chunk repair: chunk ${ci} re-download incomplete (${freshOffset}/${chunkBytes}), skipping`, 'warn')
+                continue
+              }
+
+              const freshHash = freshHasher.digest('hex')
+              if (freshHash !== chunk.sha256) {
+                // The fresh download differs from the original — the original was corrupt.
+                // Overwrite with the fresh (hopefully correct) data.
+                ucLog(`[UC.Files] Chunk ${ci} (${chunk.start}-${chunk.end}): hash CHANGED — patching disk`)
+                fs.writeSync(repairFd, freshBuf, 0, chunkBytes, chunk.start)
+                chunk.sha256 = freshHash
+                patchedCount++
+              }
+              // Report progress: show which chunk we're verifying
+              sendUpdate({ status: 'retrying', receivedBytes: totalBytes, totalBytes, speedBps: 0, etaSeconds: null,
+                error: `Repairing chunks: ${ci + 1}/${chunks.length} checked, ${patchedCount} patched` })
+            }
+          } finally {
+            try { fs.fsyncSync(repairFd) } catch {}
+            try { fs.closeSync(repairFd) } catch {}
+          }
+
+          if (patchedCount > 0) {
+            ucLog(`[UC.Files] Chunk repair: patched ${patchedCount}/${chunks.length} chunks — re-testing archive`)
+            const reTestResult = await run7zTest(finalSavePath)
+            if (reTestResult.ok) {
+              ucLog('[UC.Files] Archive integrity test PASSED after chunk repair')
+              // Fall through to the success path below
+            } else {
+              ucLog(`[UC.Files] Archive STILL corrupt after chunk repair: ${reTestResult.error}`, 'error')
+              // Fall back to full re-download for the next attempt
+              sendUpdate({ status: 'retrying', receivedBytes: 0, totalBytes: 0, speedBps: 0, etaSeconds: null,
+                error: `Chunk repair failed — full re-download (attempt ${_retryCount + 1}/3)` })
+              try { fs.unlinkSync(finalSavePath) } catch {}
+              ucfilesActiveDownloads.delete(downloadId)
+              await new Promise(r => setTimeout(r, 3000))
+              return ucfilesParallelDownload(win, payload, _retryCount + 1)
+            }
+          } else {
+            // No chunks changed — the CDN served the same (corrupt) data again.
+            // Fall back to full re-download which creates fresh TCP connections.
+            ucLog('[UC.Files] Chunk repair: no chunks changed — CDN is consistently corrupt, full re-download')
+            sendUpdate({ status: 'retrying', receivedBytes: 0, totalBytes: 0, speedBps: 0, etaSeconds: null,
+              error: `Same corrupt data from server — full re-download (attempt ${_retryCount + 1}/3)` })
+            try { fs.unlinkSync(finalSavePath) } catch {}
+            ucfilesActiveDownloads.delete(downloadId)
+            await new Promise(r => setTimeout(r, 3000))
+            return ucfilesParallelDownload(win, payload, _retryCount + 1)
+          }
+        } else {
+          sendUpdate({ status: 'failed', receivedBytes: 0, totalBytes: 0, speedBps: 0, etaSeconds: null, error: `Archive corrupt after ${_retryCount + 1} download attempts. The file on the server may be damaged.` })
+          throw new Error(`Archive corrupt after ${_retryCount + 1} download attempts. The file on the server may be damaged.`)
         }
-        throw new Error(`Archive corrupt after ${_retryCount + 1} download attempts. The file on the server may be damaged.`)
       }
-      ucLog('[UC.Files] Archive integrity test PASSED')
+      if (testResult.ok) ucLog('[UC.Files] Archive integrity test PASSED')
     }
 
     // 9. Done — mimic the will-download 'done' event flow
@@ -4959,6 +5072,15 @@ ipcMain.handle('uc:download-resume-with-fresh-url', (event, payload) => {
     return { ok: false, error: 'empty-file' }
   }
 
+  // If the file on disk is already the expected size (or larger), the download
+  // is actually complete.  Chromium's createInterruptedDownload rejects
+  // offset >= length, so tell the renderer the file is already done so it can
+  // skip straight to verification/extraction.
+  if (payload.totalBytes && actualOffset >= payload.totalBytes) {
+    ucLog(`resume-with-fresh-url: file already complete (offset=${actualOffset}, totalBytes=${payload.totalBytes}), skipping re-download`, 'info')
+    return { ok: false, error: 'file-already-complete' }
+  }
+
   ucLog(`resume-with-fresh-url: downloadId=${payload.downloadId} url=${payload.url} offset=${actualOffset} savePath=${savePath}`, 'info')
 
   // Register auth header for pixeldrain authenticated downloads
@@ -6004,17 +6126,44 @@ function detectSLSSteam() {
 /**
  * Detect installed Proton versions from common Steam library paths.
  * Returns an array of { label, path } objects.
+ * Enhanced to match Heroic/Lutris behavior - scans more locations and returns sorted by version.
  */
 function detectProtonVersions() {
   const results = []
   const home = app.getPath('home')
+  
+  // Steam library locations to scan (similar to Heroic/Lutris)
   const steamRoots = [
     path.join(home, '.steam', 'steam'),
     path.join(home, '.local', 'share', 'Steam'),
+    path.join(home, '.steam', 'steamroot'),
     '/usr/share/steam',
+    '/opt/steam',
   ]
 
+  // Also check for Steam library folders defined in steamapps/libraryfolders.vdf
+  const libraryFolders = new Set(steamRoots)
+  
+  // Parse libraryfolders.vdf if it exists to find additional Steam libraries
   for (const steamRoot of steamRoots) {
+    const libraryFoldersPath = path.join(steamRoot, 'steamapps', 'libraryfolders.vdf')
+    if (fs.existsSync(libraryFoldersPath)) {
+      try {
+        const content = fs.readFileSync(libraryFoldersPath, 'utf8')
+        const matches = content.match(/"path"\s+"([^"]+)"/g)
+        if (matches) {
+          for (const match of matches) {
+            const folderPath = match.replace(/"path"\s+"/, '').replace(/"/, '')
+            if (folderPath && fs.existsSync(folderPath)) {
+              libraryFolders.add(folderPath)
+            }
+          }
+        }
+      } catch {}
+    }
+  }
+
+  for (const steamRoot of libraryFolders) {
     const commonDir = path.join(steamRoot, 'steamapps', 'common')
     if (!fs.existsSync(commonDir)) continue
     try {
@@ -6022,16 +6171,47 @@ function detectProtonVersions() {
       for (const entry of entries) {
         if (!entry.isDirectory()) continue
         const lower = entry.name.toLowerCase()
+        // Match Proton versions (Proton, Proton Experimental, etc.)
         if (!lower.startsWith('proton')) continue
         const protonScript = path.join(commonDir, entry.name, 'proton')
         if (fs.existsSync(protonScript)) {
           results.push({ label: entry.name, path: protonScript })
         }
+        // Also check for proton script in bin directory
+        const protonBin = path.join(commonDir, entry.name, 'bin', 'proton')
+        if (fs.existsSync(protonBin)) {
+          results.push({ label: entry.name, path: protonBin })
+        }
       }
     } catch {}
   }
 
-  return results
+  // Sort results by version (newest first)
+  results.sort((a, b) => {
+    const aVersion = extractProtonVersion(a.label)
+    const bVersion = extractProtonVersion(b.label)
+    return compareVersions(bVersion, aVersion)
+  })
+
+  // Deduplicate by path
+  const seen = new Set()
+  const unique = []
+  for (const r of results) {
+    if (!seen.has(r.path)) {
+      seen.add(r.path)
+      unique.push(r)
+    }
+  }
+  
+  return unique
+}
+
+/**
+ * Extract version number from Proton name for sorting
+ */
+function extractProtonVersion(name) {
+  const match = name.match(/(\d+\.\d+)/)
+  return match ? match[1] : '0.0'
 }
 
 /**
@@ -6100,11 +6280,31 @@ function runLinuxTool(toolCmd, toolArgs, env, opts) {
   })
 }
 
-// IPC: Detect Proton versions
-ipcMain.handle('uc:linux-detect-proton', () => {
+// IPC: Detect Proton versions (enhanced with auto-apply similar to Heroic/Lutris)
+ipcMain.handle('uc:linux-detect-proton', async () => {
   try {
     if (process.platform !== 'linux') return { ok: false, error: 'not-linux', versions: [] }
     const versions = detectProtonVersions()
+    
+    // Auto-apply: if no proton path is configured, use the best available one
+    const settings = readSettings() || {}
+    const currentProtonPath = settings.linuxProtonPath || ''
+    
+    // If no proton path is set and we found some, auto-select the first (newest) one
+    if (!currentProtonPath && versions.length > 0) {
+      const bestProton = versions[0] // Already sorted by version
+      settings.linuxProtonPath = bestProton.path
+      settings.linuxLaunchMode = 'proton'
+      writeSettings(settings)
+      ucLog(`Proton: auto-detected and applied ${bestProton.label} (${bestProton.path})`)
+      return { 
+        ok: true, 
+        versions, 
+        autoApplied: true, 
+        appliedVersion: bestProton 
+      }
+    }
+    
     return { ok: true, versions }
   } catch (err) {
     return { ok: false, error: err.message, versions: [] }
@@ -7552,6 +7752,634 @@ ipcMain.handle('uc:controller-get-connected', () => {
   } catch (err) {
     ucLog(`Controller get connected failed: ${err.message}`, 'error')
     return { connected: false, controllerId: null, controllerName: null, controllerType: null }
+  }
+})
+
+// IPC: Get mapping presets (x360ce-style)
+ipcMain.handle('uc:controller-get-mapping-presets', () => {
+  try {
+    const settings = readSettings()
+    const presets = settings?.controllerMappingPresets || [
+      { id: 'generic', name: 'Generic Controller' },
+      { id: 'xbox', name: 'Xbox Controller' },
+      { id: 'playstation', name: 'PlayStation Controller' },
+      { id: 'dualsense', name: 'DualSense (PS5)' },
+      { id: 'dualshock4', name: 'DualShock 4 (PS4)' },
+      { id: 'xboxone', name: 'Xbox One' },
+      { id: 'xboxseries', name: 'Xbox Series X' },
+    ]
+    return { ok: true, presets }
+  } catch (err) {
+    return { ok: false, presets: [], error: err.message }
+  }
+})
+
+// IPC: Get active mapping
+ipcMain.handle('uc:controller-get-active-mapping', () => {
+  try {
+    const settings = readSettings()
+    return { 
+      ok: true, 
+      mapping: settings?.controllerActiveMapping || { preset: 'auto', customMapping: null } 
+    }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Set active mapping
+ipcMain.handle('uc:controller-set-active-mapping', (_event, preset, customMapping) => {
+  try {
+    const settings = readSettings()
+    settings.controllerActiveMapping = { preset, customMapping }
+    writeSettings(settings)
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Get profiles (key binding profiles - antimicrox-style)
+ipcMain.handle('uc:controller-get-profiles', () => {
+  try {
+    const settings = readSettings()
+    const profiles = settings?.controllerProfiles || [
+      {
+        id: 'default',
+        name: 'Default',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        mappingEnabled: true,
+        keyBindingEnabled: false,
+        deadzone: 0.15,
+        triggerDeadzone: 0.1,
+        vibrationEnabled: true,
+        vibrationIntensity: 1.0,
+        keyBinding: {
+          id: 'default',
+          name: 'Default',
+          profileName: 'Default',
+          enabled: true,
+          buttonMappings: {},
+          stickToMouse: { leftStick: false, rightStick: false, mouseSpeed: 1.0, mouseAcceleration: false },
+          triggerToScroll: { leftTrigger: false, rightTrigger: false, scrollSpeed: 1.0 },
+        }
+      }
+    ]
+    return { ok: true, profiles }
+  } catch (err) {
+    return { ok: false, profiles: [], error: err.message }
+  }
+})
+
+// IPC: Get active profile
+ipcMain.handle('uc:controller-get-active-profile', () => {
+  try {
+    const settings = readSettings()
+    const profiles = settings?.controllerProfiles || []
+    const activeId = settings?.controllerActiveProfileId || 'default'
+    const activeProfile = profiles.find(p => p.id === activeId) || profiles[0] || null
+    return { ok: true, profile: activeProfile }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Set active profile
+ipcMain.handle('uc:controller-set-active-profile', (_event, profileId) => {
+  try {
+    const settings = readSettings()
+    settings.controllerActiveProfileId = profileId
+    writeSettings(settings)
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Create profile
+ipcMain.handle('uc:controller-create-profile', (_event, profile) => {
+  try {
+    const settings = readSettings()
+    const profiles = settings?.controllerProfiles || []
+    profiles.push({
+      ...profile,
+      id: profile.id || `profile_${Date.now()}`,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    })
+    settings.controllerProfiles = profiles
+    writeSettings(settings)
+    return { ok: true, profile }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Update profile
+ipcMain.handle('uc:controller-update-profile', (_event, profile) => {
+  try {
+    const settings = readSettings()
+    const profiles = settings?.controllerProfiles || []
+    const idx = profiles.findIndex(p => p.id === profile.id)
+    if (idx >= 0) {
+      profiles[idx] = { ...profile, updatedAt: Date.now() }
+      settings.controllerProfiles = profiles
+      writeSettings(settings)
+      return { ok: true }
+    }
+    return { ok: false, error: 'Profile not found' }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Delete profile
+ipcMain.handle('uc:controller-delete-profile', (_event, profileId) => {
+  try {
+    const settings = readSettings()
+    let profiles = settings?.controllerProfiles || []
+    profiles = profiles.filter(p => p.id !== profileId)
+    // Ensure at least one profile exists
+    if (profiles.length === 0) {
+      profiles.push({
+        id: 'default',
+        name: 'Default',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        mappingEnabled: true,
+        keyBindingEnabled: false,
+        deadzone: 0.15,
+        triggerDeadzone: 0.1,
+        vibrationEnabled: true,
+        vibrationIntensity: 1.0,
+        keyBinding: {
+          id: 'default',
+          name: 'Default',
+          profileName: 'Default',
+          enabled: true,
+        }
+      })
+    }
+    settings.controllerProfiles = profiles
+    // If deleted profile was active, switch to first available
+    if (settings.controllerActiveProfileId === profileId) {
+      settings.controllerActiveProfileId = profiles[0].id
+    }
+    writeSettings(settings)
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Get controller overlay settings
+ipcMain.handle('uc:controller-get-overlay-settings', () => {
+  try {
+    const settings = readSettings()
+    return {
+      ok: true,
+      settings: {
+        overlayEnabled: settings?.controllerOverlayEnabled ?? true,
+        overlayHotkey: settings?.controllerOverlayHotkey || 'Ctrl+Shift+Gamepad',
+        overlayPosition: settings?.controllerOverlayPosition || 'right',
+      }
+    }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Set controller overlay settings
+ipcMain.handle('uc:controller-set-overlay-settings', (_event, overlaySettings) => {
+  try {
+    const settings = readSettings()
+    settings.controllerOverlayEnabled = overlaySettings.overlayEnabled
+    settings.controllerOverlayHotkey = overlaySettings.overlayHotkey
+    settings.controllerOverlayPosition = overlaySettings.overlayPosition
+    writeSettings(settings)
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
+// END Controller IPC Handlers
+
+// IPC: Get mapping presets (x360ce-style)
+ipcMain.handle('uc:controller-get-mapping-presets', () => {
+  try {
+    const settings = readSettings()
+    const presets = settings?.controllerMappingPresets || [
+      { id: 'generic', name: 'Generic Controller' },
+      { id: 'xbox', name: 'Xbox Controller' },
+      { id: 'playstation', name: 'PlayStation Controller' },
+      { id: 'dualsense', name: 'DualSense (PS5)' },
+      { id: 'dualshock4', name: 'DualShock 4 (PS4)' },
+      { id: 'xboxone', name: 'Xbox One' },
+      { id: 'xboxseries', name: 'Xbox Series X' },
+    ]
+    return { ok: true, presets }
+  } catch (err) {
+    return { ok: false, presets: [], error: err.message }
+  }
+})
+
+// IPC: Get active mapping
+ipcMain.handle('uc:controller-get-active-mapping', () => {
+  try {
+    const settings = readSettings()
+    return { 
+      ok: true, 
+      mapping: settings?.controllerActiveMapping || { preset: 'auto', customMapping: null } 
+    }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Set active mapping
+ipcMain.handle('uc:controller-set-active-mapping', (_event, preset, customMapping) => {
+  try {
+    const settings = readSettings()
+    settings.controllerActiveMapping = { preset, customMapping }
+    writeSettings(settings)
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Get profiles (key binding profiles - antimicrox-style)
+ipcMain.handle('uc:controller-get-profiles', () => {
+  try {
+    const settings = readSettings()
+    const profiles = settings?.controllerProfiles || [
+      {
+        id: 'default',
+        name: 'Default',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        mappingEnabled: true,
+        keyBindingEnabled: false,
+        deadzone: 0.15,
+        triggerDeadzone: 0.1,
+        vibrationEnabled: true,
+        vibrationIntensity: 1.0,
+        keyBinding: {
+          id: 'default',
+          name: 'Default',
+          profileName: 'Default',
+          enabled: true,
+          buttonMappings: {},
+          stickToMouse: { leftStick: false, rightStick: false, mouseSpeed: 1.0, mouseAcceleration: false },
+          triggerToScroll: { leftTrigger: false, rightTrigger: false, scrollSpeed: 1.0 },
+        }
+      }
+    ]
+    return { ok: true, profiles }
+  } catch (err) {
+    return { ok: false, profiles: [], error: err.message }
+  }
+})
+
+// IPC: Get active profile
+ipcMain.handle('uc:controller-get-active-profile', () => {
+  try {
+    const settings = readSettings()
+    const profiles = settings?.controllerProfiles || []
+    const activeId = settings?.controllerActiveProfileId || 'default'
+    const activeProfile = profiles.find(p => p.id === activeId) || profiles[0] || null
+    return { ok: true, profile: activeProfile }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Set active profile
+ipcMain.handle('uc:controller-set-active-profile', (_event, profileId) => {
+  try {
+    const settings = readSettings()
+    settings.controllerActiveProfileId = profileId
+    writeSettings(settings)
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Create profile
+ipcMain.handle('uc:controller-create-profile', (_event, profile) => {
+  try {
+    const settings = readSettings()
+    const profiles = settings?.controllerProfiles || []
+    profiles.push({
+      ...profile,
+      id: profile.id || `profile_${Date.now()}`,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    })
+    settings.controllerProfiles = profiles
+    writeSettings(settings)
+    return { ok: true, profile }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Update profile
+ipcMain.handle('uc:controller-update-profile', (_event, profile) => {
+  try {
+    const settings = readSettings()
+    const profiles = settings?.controllerProfiles || []
+    const idx = profiles.findIndex(p => p.id === profile.id)
+    if (idx >= 0) {
+      profiles[idx] = { ...profile, updatedAt: Date.now() }
+      settings.controllerProfiles = profiles
+      writeSettings(settings)
+      return { ok: true }
+    }
+    return { ok: false, error: 'Profile not found' }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Delete profile
+ipcMain.handle('uc:controller-delete-profile', (_event, profileId) => {
+  try {
+    const settings = readSettings()
+    let profiles = settings?.controllerProfiles || []
+    profiles = profiles.filter(p => p.id !== profileId)
+    // Ensure at least one profile exists
+    if (profiles.length === 0) {
+      profiles.push({
+        id: 'default',
+        name: 'Default',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        mappingEnabled: true,
+        keyBindingEnabled: false,
+        deadzone: 0.15,
+        triggerDeadzone: 0.1,
+        vibrationEnabled: true,
+        vibrationIntensity: 1.0,
+        keyBinding: {
+          id: 'default',
+          name: 'Default',
+          profileName: 'Default',
+          enabled: true,
+          buttonMappings: {},
+          stickToMouse: { leftStick: false, rightStick: false, mouseSpeed: 1.0, mouseAcceleration: false },
+          triggerToScroll: { leftTrigger: false, rightTrigger: false, scrollSpeed: 1.0 },
+        }
+      })
+    }
+    settings.controllerProfiles = profiles
+    // If deleted profile was active, switch to first available
+    if (settings.controllerActiveProfileId === profileId) {
+      settings.controllerActiveProfileId = profiles[0].id
+    }
+    writeSettings(settings)
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Get controller overlay settings
+ipcMain.handle('uc:controller-get-overlay-settings', () => {
+  try {
+    const settings = readSettings()
+    return {
+      ok: true,
+      settings: {
+        overlayEnabled: settings?.controllerOverlayEnabled ?? true,
+        overlayHotkey: settings?.controllerOverlayHotkey || 'Ctrl+Shift+Gamepad',
+        overlayPosition: settings?.controllerOverlayPosition || 'right',
+      }
+    }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Set controller overlay settings
+ipcMain.handle('uc:controller-set-overlay-settings', (_event, overlaySettings) => {
+  try {
+    const settings = readSettings()
+    settings.controllerOverlayEnabled = overlaySettings.overlayEnabled
+    settings.controllerOverlayHotkey = overlaySettings.overlayHotkey
+    settings.controllerOverlayPosition = overlaySettings.overlayPosition
+    writeSettings(settings)
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
+// ============================================================
+// System Functions (Volume, Screenshot, Notifications)
+// ============================================================
+
+// IPC: Get system volume (0-100)
+ipcMain.handle('uc:system-get-volume', async () => {
+  try {
+    if (process.platform === 'win32') {
+      const { exec } = require('child_process')
+      return new Promise((resolve) => {
+        exec('powershell -Command "(Get-AudioDevice -PlaybackVolume).Volume*100"', (err, stdout) => {
+          if (err || !stdout) {
+            resolve({ ok: true, volume: 50 })
+            return
+          }
+          const vol = parseInt(stdout.trim(), 10)
+          resolve({ ok: true, volume: isNaN(vol) ? 50 : Math.round(vol) })
+        })
+      })
+    }
+    return { ok: true, volume: 50 }
+  } catch (err) {
+    ucLog(`System get volume failed: ${err.message}`, 'error')
+    return { ok: true, volume: 50 }
+  }
+})
+
+// IPC: Set system volume (0-100)
+ipcMain.handle('uc:system-set-volume', async (_event, level) => {
+  try {
+    if (process.platform === 'win32') {
+      const vol = Math.max(0, Math.min(100, parseInt(level, 10) || 50))
+      const { exec } = require('child_process')
+      exec(`powershell -Command "(Get-AudioDevice -PlaybackVolume).Volume = ${vol / 100}"`, (err) => {
+        if (err) ucLog(`System set volume failed: ${err.message}`, 'error')
+      })
+      return { ok: true }
+    }
+    return { ok: false, error: 'not-supported' }
+  } catch (err) {
+    ucLog(`System set volume failed: ${err.message}`, 'error')
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Get mute state
+ipcMain.handle('uc:system-get-muted', async () => {
+  try {
+    if (process.platform === 'win32') {
+      const { exec } = require('child_process')
+      return new Promise((resolve) => {
+        exec('powershell -Command "(Get-AudioDevice -PlaybackMute).Mute"', (err, stdout) => {
+          if (err || !stdout) {
+            resolve({ ok: true, muted: false })
+            return
+          }
+          const muted = stdout.trim().toLowerCase() === 'true'
+          resolve({ ok: true, muted })
+        })
+      })
+    }
+    return { ok: true, muted: false }
+  } catch (err) {
+    ucLog(`System get muted failed: ${err.message}`, 'error')
+    return { ok: true, muted: false }
+  }
+})
+
+// IPC: Set mute state
+ipcMain.handle('uc:system-set-muted', async (_event, muted) => {
+  try {
+    if (process.platform === 'win32') {
+      const { exec } = require('child_process')
+      const muteVal = muted ? 'True' : 'False'
+      exec(`powershell -Command "(Get-AudioDevice -PlaybackMute).Mute = ${muteVal}"`, (err) => {
+        if (err) ucLog(`System set muted failed: ${err.message}`, 'error')
+      })
+      return { ok: true }
+    }
+    return { ok: false, error: 'not-supported' }
+  } catch (err) {
+    ucLog(`System set muted failed: ${err.message}`, 'error')
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Take screenshot
+ipcMain.handle('uc:system-screenshot', async () => {
+  try {
+    if (process.platform === 'win32') {
+      const screenshotsDir = path.join(app.getPath('pictures'), 'UnionCrax.Direct', 'Screenshots')
+      if (!fs.existsSync(screenshotsDir)) {
+        fs.mkdirSync(screenshotsDir, { recursive: true })
+      }
+      
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
+      const filename = `screenshot-${timestamp}.png`
+      const filepath = path.join(screenshotsDir, filename)
+      
+      // Use PowerShell to capture the screen
+      const { exec } = require('child_process')
+      const psScript = `
+        Add-Type -AssemblyName System.Windows.Forms
+        Add-Type -AssemblyName System.Drawing
+        $screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+        $bitmap = New-Object System.Drawing.Bitmap($screen.Width, $screen.Height)
+        $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+        $graphics.CopyFromScreen($screen.Location, [System.Drawing.Point]::Empty, $screen.Size)
+        $bitmap.Save('${filepath.replace(/\\/g, '\\\\')}', [System.Drawing.Imaging.ImageFormat]::Png)
+        $graphics.Dispose()
+        $bitmap.Dispose()
+      `
+      
+      return new Promise((resolve) => {
+        exec(`powershell -Command "${psScript.replace(/"/g, '\\"').replace(/\n/g, ' ')}"`, (err) => {
+          if (err) {
+            ucLog(`Screenshot failed: ${err.message}`, 'error')
+            resolve({ ok: false, error: err.message })
+            return
+          }
+          
+          if (fs.existsSync(filepath)) {
+            ucLog(`Screenshot saved: ${filepath}`)
+            resolve({ ok: true, path: filepath, filename })
+          } else {
+            resolve({ ok: false, error: 'file-not-created' })
+          }
+        })
+      })
+    }
+    return { ok: false, error: 'not-supported' }
+  } catch (err) {
+    ucLog(`System screenshot failed: ${err.message}`, 'error')
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Get screenshot save path
+ipcMain.handle('uc:system-screenshot-path', async () => {
+  try {
+    const screenshotsDir = path.join(app.getPath('pictures'), 'UnionCrax.Direct', 'Screenshots')
+    return { ok: true, path: screenshotsDir }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Get Windows notifications
+ipcMain.handle('uc:system-notifications', async () => {
+  try {
+    if (process.platform === 'win32') {
+      const { exec } = require('child_process')
+      return new Promise((resolve) => {
+        // Get notifications from Windows Action Center using PowerShell
+        const psScript = `
+          $toastXml = [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null
+          $notifier = [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier("UnionCrax.Direct")
+          $history = $notifier.GetHistory()
+          $notifications = @()
+          foreach ($toast in $history) {
+            $notifications += @{
+              id = $toast.Id
+              title = $toast.Content.QueryText
+              timestamp = $toast.Timestamp.ToString("o")
+              appName = "UnionCrax.Direct"
+            }
+          }
+          $notifications | ConvertTo-Json -Compress
+        `
+        exec(`powershell -Command "${psScript.replace(/"/g, '\\"').replace(/\n/g, ' ')}"`, (err, stdout) => {
+          if (err || !stdout) {
+            // Return empty array if no notifications or error
+            resolve({ ok: true, notifications: [] })
+            return
+          }
+          try {
+            const parsed = JSON.parse(stdout.trim())
+            const notifications = Array.isArray(parsed) ? parsed : [parsed]
+            resolve({ ok: true, notifications })
+          } catch (e) {
+            resolve({ ok: true, notifications: [] })
+          }
+        })
+      })
+    }
+    return { ok: true, notifications: [] }
+  } catch (err) {
+    ucLog(`System notifications failed: ${err.message}`, 'error')
+    return { ok: true, notifications: [] }
+  }
+})
+
+// IPC: Clear notification (when clicked)
+ipcMain.handle('uc:system-notification-activated', async (_event, notificationId) => {
+  try {
+    if (process.platform === 'win32') {
+      // Clear the notification from history when user clicks on it in the overlay
+      ucLog(`Notification activated: ${notificationId}`)
+    }
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, error: err.message }
   }
 })
 

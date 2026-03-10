@@ -126,9 +126,9 @@ export function DownBar() {
       : extracting
         ? "Installing"
         : verifying
-          ? "Verifying"
+          ? "Verifying integrity"
           : retrying
-            ? "Retrying"
+            ? retrying.error || "Verification failed — retrying"
             : downloading
               ? "Downloading"
               : completed
