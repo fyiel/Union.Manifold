@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Camera, ChevronLeft, ChevronRight, FolderOpen, Trash2, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 
 interface Screenshot {
   filename: string
@@ -180,39 +181,31 @@ export function ScreenshotsPage() {
       </div>
 
       {/* Delete confirmation dialog */}
-      {deleteConfirm && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
-          onClick={() => setDeleteConfirm(null)}
-        >
-          <div
-            className="bg-[#1a1a2e] border border-white/15 rounded-xl p-6 w-80 shadow-2xl"
-            onClick={e => e.stopPropagation()}
-          >
-            <h3 className="text-white font-semibold mb-2">Delete Screenshot</h3>
-            <p className="text-white/60 text-sm mb-5">
+      <Dialog open={Boolean(deleteConfirm)} onOpenChange={(open) => !open && setDeleteConfirm(null)}>
+        <DialogContent className="sm:max-w-md rounded-2xl border-border/60 bg-card/95 shadow-2xl">
+          <DialogHeader>
+            <DialogTitle>Delete Screenshot</DialogTitle>
+            <DialogDescription className="text-left pt-1">
               This will permanently delete the screenshot. This action cannot be undone.
-            </p>
-            <div className="flex gap-3 justify-end">
-              <Button
-                variant="outline"
-                size="sm"
-                className="border-white/20 bg-white/5 text-white/70 hover:bg-white/10 hover:text-white"
-                onClick={() => setDeleteConfirm(null)}
-              >
-                Cancel
-              </Button>
-              <Button
-                size="sm"
-                className="bg-red-500/80 hover:bg-red-500 text-white border-0"
-                onClick={() => handleDelete(deleteConfirm)}
-              >
-                Delete
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="flex-row gap-2 sm:justify-end">
+            <Button
+              variant="outline"
+              onClick={() => setDeleteConfirm(null)}
+              className="flex-1 sm:flex-none"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => deleteConfirm && handleDelete(deleteConfirm)}
+              className="flex-1 sm:flex-none bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Lightbox */}
       {lightboxScreenshot && lightboxIndex !== null && (
