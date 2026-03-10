@@ -34,6 +34,7 @@ const siteNavItems = [
 const directNavItems = [
   { label: "Library", to: "/library" },
   { label: "Activity", to: "/downloads" },
+  { label: "Screenshots", to: "/screenshots" },
   { label: "Settings", to: "/settings" },
 ]
 
