@@ -1,6 +1,6 @@
 /**
  * Controller Input Mapping System
- * 
+ *
  * x360ce-style: Translates unsupported controller inputs to Xbox 360 inputs
  * antimicrox-style: Remaps controller inputs to keyboard and mouse inputs
  */
@@ -449,14 +449,13 @@ export function detectControllerType(gamepad: { id: string; axes: number[]; butt
   const id = gamepad.id.toLowerCase()
   
   // Xbox controllers
-  if (id.includes('xbox') || id.includes('microsoft')) {
-    if (id.includes('xbox series') || id.includes('xbox one')) {
-      return 'xboxseries'
-    } else if (id.includes('xbox 360')) {
-      return 'xbox'
-    } else if (id.includes('xbox one')) {
-      return 'xboxone'
-    }
+  if (id.includes('xbox series')) {
+    return 'xboxseries'
+  } else if (id.includes('xbox one')) {
+    return 'xboxone'
+  } else if (id.includes('xbox 360')) {
+    return 'xbox'
+  } else if (id.includes('xbox')) {
     return 'xbox'
   }
   

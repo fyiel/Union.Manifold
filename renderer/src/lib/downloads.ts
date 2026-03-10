@@ -9,7 +9,7 @@ export type DownloadLinksResult = {
   redirectUrl?: string
 }
 
-export type PreferredDownloadHost = "ucfiles" | "vikingfile"
+export type PreferredDownloadHost = "ucfiles" | "vikingfile" | "pixeldrain"
 
 export type ResolvedDownload = {
   url: string
@@ -53,13 +53,11 @@ export type DownloadConfig = {
 }
 
 const DOWNLOAD_HOST_STORAGE_KEY = "uc_direct_download_host"
-const ROOTZ_SIGNED_HOST = "signed-url.cloudflare.com"
-export const SUPPORTED_DOWNLOAD_HOSTS: PreferredDownloadHost[] = ["ucfiles", "vikingfile"]
-const PREFERRED_HOSTS: PreferredDownloadHost[] = ["ucfiles", "vikingfile"]
+export const SUPPORTED_DOWNLOAD_HOSTS: PreferredDownloadHost[] = ["ucfiles", "vikingfile", "pixeldrain"]
+const PREFERRED_HOSTS: PreferredDownloadHost[] = ["ucfiles", "vikingfile", "pixeldrain"]
 const PIXELDRAIN_404_MESSAGE = "Pixeldrain returned 404. The link appears to be dead."
-const ROOTZ_404_MESSAGE = "Rootz returned 404. The link appears to be dead."
-const FILEQ_404_MESSAGE = "FileQ returned 404. The link appears to be dead."
 const UCFILES_404_MESSAGE = "UC.Files returned 404. The link appears to be dead."
+const VIKINGFILE_404_MESSAGE = "VikingFile returned 404. The link appears to be dead."
 
 /**
  * Normalise host entries from API — handles both legacy string[] and new {url,part}[] shapes.
@@ -81,12 +79,6 @@ function sanitizeHosts(input: Record<string, any[]> | null | undefined): Downloa
   return cleaned
 }
 
-function pickRootzPayload(value: unknown): Record<string, any> | null {
-  if (!value || typeof value !== "object") return null
-  const record = value as Record<string, any>
-  return (record.data as Record<string, any>) || (record.file as Record<string, any>) || record
-}
-
 function firstString(...values: unknown[]) {
   for (const value of values) {
     if (typeof value === "string" && value.trim()) return value
@@ -97,79 +89,6 @@ function firstString(...values: unknown[]) {
 function toNumber(value: unknown): number | undefined {
   const numberValue = typeof value === "number" ? value : Number(value)
   return Number.isFinite(numberValue) ? numberValue : undefined
-}
-
-function normalizeRootzPayload(payload: Record<string, any> | null) {
-  if (!payload) return null
-  return {
-    url: firstString(payload.url, payload.downloadUrl, payload.signedUrl),
-    fileName: firstString(payload.fileName, payload.filename, payload.name),
-    size: toNumber(payload.size),
-    id: firstString(payload.id, payload.fileId),
-  }
-}
-
-async function fetchRootzPayload(path: string, opts?: { shortId?: string; fileId?: string }) {
-  // Ask the UnionCrax backend to resolve Rootz URLs server-side.
-  let response: Response
-  try {
-    response = await apiFetch("/api/rootz/resolve", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        path,
-        shortId: opts?.shortId || null,
-        fileId: opts?.fileId || null,
-      }),
-    })
-  } catch {
-    return null
-  }
-
-  if (response.status === 404) {
-    throw new Error(ROOTZ_404_MESSAGE)
-  }
-
-  try {
-    const data = await response.json().catch(() => null)
-    if (!response.ok || !data?.success) return null
-    return pickRootzPayload(data.data)
-  } catch (err) {
-    if (err instanceof Error && err.message === ROOTZ_404_MESSAGE) throw err
-    return null
-  }
-}
-
-async function fetchRootzDownload(fileId: string) {
-  if (!fileId) return null
-  const payload = await fetchRootzPayload(`/files/download/${encodeURIComponent(fileId)}`, { fileId })
-  return normalizeRootzPayload(payload)
-}
-
-async function fetchRootzByShortId(shortId: string) {
-  if (!shortId) return null
-  const payload = await fetchRootzPayload(`/files/short/${encodeURIComponent(shortId)}`, { shortId })
-  return normalizeRootzPayload(payload)
-}
-
-function extractRootzShortId(url: string): string | null {
-  try {
-    const parsed = new URL(url)
-    const directMatch = parsed.pathname.match(/\/d\/([^/?#]+)/)
-    if (directMatch?.[1]) return directMatch[1]
-    const queryId = parsed.searchParams.get("shortId") || parsed.searchParams.get("shortid")
-    if (queryId) return queryId
-  } catch {}
-  return null
-}
-
-function isRootzSignedUrl(url: string): boolean {
-  try {
-    const parsed = new URL(url)
-    return parsed.hostname.includes(ROOTZ_SIGNED_HOST)
-  } catch {
-    return false
-  }
 }
 
 export async function requestDownloadToken(appid: string) {
@@ -255,7 +174,7 @@ export async function fetchDownloadLinks(appid: string, downloadToken: string): 
 }
 
 function pickHostLinks(available: DownloadHosts, host: PreferredDownloadHost) {
-  if (host === "ucfiles") {
+  if (host === "ucfiles" || host === "pixeldrain") {
     return available.ucfiles || available["files.union-crax.xyz"] || available["UC.Files"] || []
   }
   if (host === "vikingfile") {
@@ -422,10 +341,9 @@ export function isVikingFileUrl(url: string): boolean {
 
 // Aliases for backwards compatibility
 export const isPixeldrainUrl = isUCFilesUrl
-export const isRootzUrl = isVikingFileUrl
 
 export async function resolveDownloadUrl(host: string, url: string): Promise<ResolvedDownload> {
-  if (host === "ucfiles" || isUCFilesUrl(url)) {
+  if (host === "ucfiles" || host === "pixeldrain" || isUCFilesUrl(url)) {
     return resolveUCFilesDownload(url)
   }
   if (host === "vikingfile" || isVikingFileUrl(url)) {
