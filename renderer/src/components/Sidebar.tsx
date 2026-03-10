@@ -1,10 +1,11 @@
 import { NavLink } from "react-router-dom"
-import { Download, Gamepad2, Library, Settings } from "lucide-react"
+import { Camera, Download, Gamepad2, Library, Settings } from "lucide-react"
 
 const navItems = [
   { label: "Browse", to: "/", icon: Gamepad2 },
   { label: "Library", to: "/library", icon: Library },
   { label: "Activity", to: "/downloads", icon: Download },
+  { label: "Screenshots", to: "/screenshots", icon: Camera },
   { label: "Settings", to: "/settings", icon: Settings },
 ]
 

@@ -337,6 +337,19 @@ declare global {
         controllerType: string | null
       }>
     }
+    ucSystem?: {
+      getVolume: () => Promise<{ ok: boolean; volume: number }>
+      setVolume: (level: number) => Promise<{ ok: boolean }>
+      getMuted: () => Promise<{ ok: boolean; muted: boolean }>
+      setMuted: (muted: boolean) => Promise<{ ok: boolean }>
+      takeScreenshot: () => Promise<{ ok: boolean; path?: string }>
+      getScreenshotPath: () => Promise<{ ok: boolean; path: string }>
+      listScreenshots: () => Promise<{ ok: boolean; screenshots: Array<{ filename: string; path: string; size: number; takenAt: number }>; error?: string }>
+      deleteScreenshot: (filePath: string) => Promise<{ ok: boolean; error?: string }>
+      openScreenshot: (filePath: string) => Promise<{ ok: boolean; error?: string }>
+      getNotifications: () => Promise<{ ok: boolean; notifications: SystemNotification[] }>
+      onNotificationActivated: (callback: (data: { id: string }) => void) => () => void
+    }
   }
 }
 

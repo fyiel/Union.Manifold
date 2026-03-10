@@ -8126,6 +8126,51 @@ ipcMain.handle('uc:system-screenshot-path', async () => {
   }
 })
 
+// IPC: List all saved screenshots
+ipcMain.handle('uc:system-list-screenshots', async () => {
+  try {
+    const screenshotsDir = path.join(app.getPath('pictures'), 'UnionCrax.Direct', 'Screenshots')
+    if (!fs.existsSync(screenshotsDir)) return { ok: true, screenshots: [] }
+    const files = fs.readdirSync(screenshotsDir)
+      .filter(f => /\.(png|jpg|jpeg)$/i.test(f))
+      .map(f => {
+        const filePath = path.join(screenshotsDir, f)
+        const stat = fs.statSync(filePath)
+        return { filename: f, path: filePath, size: stat.size, takenAt: stat.birthtimeMs || stat.mtimeMs }
+      })
+      .sort((a, b) => b.takenAt - a.takenAt)
+    return { ok: true, screenshots: files }
+  } catch (err) {
+    return { ok: false, error: err.message, screenshots: [] }
+  }
+})
+
+// IPC: Delete a screenshot
+ipcMain.handle('uc:system-delete-screenshot', async (_event, filePath) => {
+  try {
+    if (!filePath || typeof filePath !== 'string') return { ok: false, error: 'invalid-path' }
+    const screenshotsDir = path.join(app.getPath('pictures'), 'UnionCrax.Direct', 'Screenshots')
+    const resolved = path.resolve(filePath)
+    const resolvedDir = path.resolve(screenshotsDir)
+    if (!resolved.startsWith(resolvedDir + path.sep)) return { ok: false, error: 'path-not-allowed' }
+    fs.unlinkSync(resolved)
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Show screenshot in Explorer
+ipcMain.handle('uc:system-open-screenshot', async (_event, filePath) => {
+  try {
+    if (!filePath || typeof filePath !== 'string') return { ok: false, error: 'invalid-path' }
+    shell.showItemInFolder(filePath)
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
 // IPC: Get Windows notifications
 ipcMain.handle('uc:system-notifications', async () => {
   try {

@@ -11,6 +11,7 @@ import { LikedPage } from "@/app/pages/LikedPage"
 import { AccountOverviewPage } from "@/app/pages/AccountOverviewPage"
 import { ViewHistoryPage } from "@/app/pages/ViewHistoryPage"
 import { SearchHistoryPage } from "@/app/pages/SearchHistoryPage"
+import { ScreenshotsPage } from "@/app/pages/ScreenshotsPage"
 import { DownloadsProvider } from "@/context/downloads-context"
 import { InGameOverlay } from "@/components/InGameOverlay"
 
@@ -39,6 +40,7 @@ export default function App() {
           <Route path="/account" element={<AccountOverviewPage />} />
           <Route path="/view-history" element={<ViewHistoryPage />} />
           <Route path="/search-history" element={<SearchHistoryPage />} />
+          <Route path="/screenshots" element={<ScreenshotsPage />} />
         </Route>
       </Routes>
     </HashRouter>
