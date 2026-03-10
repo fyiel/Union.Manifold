@@ -7970,22 +7970,55 @@ ipcMain.handle('uc:controller-set-overlay-settings', (_event, overlaySettings) =
 // System Functions (Volume, Screenshot, Notifications)
 // ============================================================
 
+// Helper: run a PowerShell script via a temp file to avoid shell-injection risks
+function runPsFile(scriptContent) {
+  return new Promise((resolve, reject) => {
+    const { execFile } = require('child_process')
+    const os = require('os')
+    const tmpScript = path.join(os.tmpdir(), `uc-sys-${Date.now()}-${Math.random().toString(36).slice(2)}.ps1`)
+    try {
+      fs.writeFileSync(tmpScript, scriptContent, 'utf8')
+    } catch (err) {
+      return reject(err)
+    }
+    execFile('powershell.exe', ['-ExecutionPolicy', 'Bypass', '-NonInteractive', '-NoProfile', '-File', tmpScript],
+      { timeout: 10000 },
+      (err, stdout) => {
+        try { fs.unlinkSync(tmpScript) } catch {}
+        if (err) return reject(err)
+        resolve(stdout.trim())
+      }
+    )
+  })
+}
+
+// Correct Core Audio COM interface definition shared by all volume/mute handlers.
+// IAudioEndpointVolume vtable stubs match the Windows SDK order exactly so that
+// GetMasterVolumeLevelScalar (index 5), SetMasterVolumeLevelScalar (index 3),
+// SetMute (index 11) and GetMute (index 12) dispatch to the right methods.
+const AUDIO_TYPE_DEF = `Add-Type -TypeDefinition @"
+using System;using System.Runtime.InteropServices;
+[Guid("A95664D2-9614-4F35-A746-DE8DB63617E6"),InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+interface IMMDeviceEnumerator{int n0();int GetDefaultAudioEndpoint(int d,int r,out IMMDevice ep);}
+[Guid("D666063F-1587-4E43-81F1-B948E807363F"),InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+interface IMMDevice{int Activate(ref Guid id,int ctx,IntPtr p,[MarshalAs(UnmanagedType.Interface)]out IAudioEndpointVolume aev);}
+[Guid("5CDF2C82-841E-4546-9722-0CF74078229A"),InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+interface IAudioEndpointVolume{int n0(IntPtr p);int n1(IntPtr p);int n2(float l,ref Guid g);int SetMasterVolumeLevelScalar(float l,ref Guid g);int n4(out float l);int GetMasterVolumeLevelScalar(out float l);int n6(uint c,float l,ref Guid g);int n7(uint c,float l,ref Guid g);int n8(uint c,out float l);int n9(uint c,out float l);int n10(out uint c);int SetMute([MarshalAs(UnmanagedType.Bool)]bool m,ref Guid g);int GetMute([MarshalAs(UnmanagedType.Bool)]out bool m);}
+"@ -ErrorAction SilentlyContinue
+$_e=[Activator]::CreateInstance([Type]::GetTypeFromCLSID([Guid]"BCDE0395-E52F-467C-8E3D-C4579291692E")) -as [IMMDeviceEnumerator]
+$_d=$null;$_e.GetDefaultAudioEndpoint(0,1,[ref]$_d)
+$_aevGuid=[Guid]"5CDF2C82-841E-4546-9722-0CF74078229A"
+$_a=$null;$_d.Activate([ref]$_aevGuid,1,[IntPtr]::Zero,[ref]$_a)
+`
+
 // IPC: Get system volume (0-100)
 ipcMain.handle('uc:system-get-volume', async () => {
   try {
     if (process.platform === 'win32') {
-      const { exec } = require('child_process')
-      return new Promise((resolve) => {
-        // Use Windows Core Audio API (no external module required)
-        exec('powershell -Command "Add-Type -TypeDefinition @\"using System;using System.Runtime.InteropServices;[Guid(\"A95664D2-9614-4F35-A746-DE8DB63617E6\"),InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]interface IMMDeviceEnumerator{int NotImpl1();int GetDefaultAudioEndpoint(int dataFlow,int role,out IMMDevice endpoint);}[Guid(\"D666063F-1587-4E43-81F1-B948E807363F\"),InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]interface IMMDevice{int Activate(ref Guid id,int clsCtx,IntPtr activationParams,out IAudioEndpointVolume aev);}[Guid(\"5CDF2C82-841E-4546-9722-0CF74078229A\"),InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]interface IAudioEndpointVolume{int NotImpl1();int GetMasterVolumeLevel(out float level);}$Enumerator=[Activator]::CreateInstance([Type]::GetTypeFromCLSID([GUID]::Parse(\"{BCDE0395-E52F-467C-8E3D-C4579291692E}\")));$Device=$null;$Enumerator.GetDefaultAudioEndpoint(0,1,[ref]$Device);$Volume=[IntPtr]::Zero;$Device.Activate([ref][GUID]::Parse(\"{5CDF2C82-841E-4546-9722-0CF74078229A}\"),1,[IntPtr]::Zero,[ref]$Volume);$VolumeObj=[System.Runtime.InteropServices.Marshal]::GetObjectForIUnknown($Volume);$Level=0;$VolumeObj.GetMasterVolumeLevel([ref]$Level);[Math]::Round($Level*100)\""', (err, stdout) => {
-          if (err || !stdout) {
-            resolve({ ok: false, volume: 50, error: 'Failed to get volume' })
-            return
-          }
-          const vol = parseInt(stdout.trim(), 10)
-          resolve({ ok: true, volume: isNaN(vol) ? 50 : Math.round(vol) })
-        })
-      })
+      const script = AUDIO_TYPE_DEF + `$l=0.0;$_a.GetMasterVolumeLevelScalar([ref]$l);[Math]::Round($l*100)`
+      const stdout = await runPsFile(script)
+      const vol = parseInt(stdout, 10)
+      return { ok: true, volume: isNaN(vol) ? 50 : Math.round(vol) }
     }
     return { ok: false, error: 'not-supported' }
   } catch (err) {
@@ -7999,11 +8032,8 @@ ipcMain.handle('uc:system-set-volume', async (_event, level) => {
   try {
     if (process.platform === 'win32') {
       const vol = Math.max(0, Math.min(100, parseInt(level, 10) || 50))
-      const { exec } = require('child_process')
-      // Use Windows Core Audio API (no external module required)
-      exec(`powershell -Command "Add-Type -TypeDefinition @\"using System;using System.Runtime.InteropServices;[Guid(\"A95664D2-9614-4F35-A746-DE8DB63617E6\"),InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]interface IMMDeviceEnumerator{int NotImpl1();int GetDefaultAudioEndpoint(int dataFlow,int role,out IMMDevice endpoint);}[Guid(\"D666063F-1587-4E43-81F1-B948E807363F\"),InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]interface IMMDevice{int Activate(ref Guid id,int clsCtx,IntPtr activationParams,out IAudioEndpointVolume aev);}[Guid(\"5CDF2C82-841E-4546-9722-0CF74078229A\"),InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]interface IAudioEndpointVolume{int NotImpl1();int SetMasterVolumeLevel(float level,ref Guid eventContext);}$Enumerator=[Activator]::CreateInstance([Type]::GetTypeFromCLSID([GUID]::Parse(\"{BCDE0395-E52F-467C-8E3D-C4579291692E}\")));$Device=$null;$Enumerator.GetDefaultAudioEndpoint(0,1,[ref]$Device);$Volume=[IntPtr]::Zero;$Device.Activate([ref][GUID]::Parse(\"{5CDF2C82-841E-4546-9722-0CF74078229A}\"),1,[IntPtr]::Zero,[ref]$Volume);$VolumeObj=[System.Runtime.InteropServices.Marshal]::GetObjectForIUnknown($Volume);$VolumeObj.SetMasterVolumeLevel(${vol}/100,[ref][GUID]::Empty)\"`, (err) => {
-        if (err) ucLog(`System set volume failed: ${err.message}`, 'error')
-      })
+      const script = AUDIO_TYPE_DEF + `$_a.SetMasterVolumeLevelScalar(${vol}/100.0,[ref][Guid]::Empty)`
+      await runPsFile(script)
       return { ok: true }
     }
     return { ok: false, error: 'not-supported' }
@@ -8017,18 +8047,9 @@ ipcMain.handle('uc:system-set-volume', async (_event, level) => {
 ipcMain.handle('uc:system-get-muted', async () => {
   try {
     if (process.platform === 'win32') {
-      const { exec } = require('child_process')
-      return new Promise((resolve) => {
-        // Use Windows Core Audio API (no external module required)
-        exec('powershell -Command "Add-Type -TypeDefinition @\"using System;using System.Runtime.InteropServices;[Guid(\"A95664D2-9614-4F35-A746-DE8DB63617E6\"),InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]interface IMMDeviceEnumerator{int NotImpl1();int GetDefaultAudioEndpoint(int dataFlow,int role,out IMMDevice endpoint);}[Guid(\"D666063F-1587-4E43-81F1-B948E807363F\"),InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]interface IMMDevice{int Activate(ref Guid id,int clsCtx,IntPtr activationParams,out IAudioEndpointVolume aev);}[Guid(\"5CDF2C82-841E-4546-9722-0CF74078229A\"),InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]interface IAudioEndpointVolume{int NotImpl1();int GetMute(out bool mute);}$Enumerator=[Activator]::CreateInstance([Type]::GetTypeFromCLSID([GUID]::Parse(\"{BCDE0395-E52F-467C-8E3D-C4579291692E}\")));$Device=$null;$Enumerator.GetDefaultAudioEndpoint(0,1,[ref]$Device);$Volume=[IntPtr]::Zero;$Device.Activate([ref][GUID]::Parse(\"{5CDF2C82-841E-4546-9722-0CF74078229A}\"),1,[IntPtr]::Zero,[ref]$Volume);$VolumeObj=[System.Runtime.InteropServices.Marshal]::GetObjectForIUnknown($Volume);$Muted=$false;$VolumeObj.GetMute([ref]$Muted);$Muted\"', (err, stdout) => {
-          if (err || !stdout) {
-            resolve({ ok: false, muted: false, error: 'Failed to get mute state' })
-            return
-          }
-          const muted = stdout.trim().toLowerCase() === 'true'
-          resolve({ ok: true, muted })
-        })
-      })
+      const script = AUDIO_TYPE_DEF + `$m=$false;$_a.GetMute([ref]$m);$m`
+      const stdout = await runPsFile(script)
+      return { ok: true, muted: stdout.toLowerCase() === 'true' }
     }
     return { ok: false, error: 'not-supported' }
   } catch (err) {
@@ -8041,12 +8062,9 @@ ipcMain.handle('uc:system-get-muted', async () => {
 ipcMain.handle('uc:system-set-muted', async (_event, muted) => {
   try {
     if (process.platform === 'win32') {
-      const { exec } = require('child_process')
       const muteVal = muted ? '$true' : '$false'
-      // Use Windows Core Audio API (no external module required)
-      exec(`powershell -Command "Add-Type -TypeDefinition @\"using System;using System.Runtime.InteropServices;[Guid(\"A95664D2-9614-4F35-A746-DE8DB63617E6\"),InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]interface IMMDeviceEnumerator{int NotImpl1();int GetDefaultAudioEndpoint(int dataFlow,int role,out IMMDevice endpoint);}[Guid(\"D666063F-1587-4E43-81F1-B948E807363F\"),InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]interface IMMDevice{int Activate(ref Guid id,int clsCtx,IntPtr activationParams,out IAudioEndpointVolume aev);}[Guid(\"5CDF2C82-841E-4546-9722-0CF74078229A\"),InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]interface IAudioEndpointVolume{int NotImpl1();int SetMute(bool mute,ref Guid eventContext);}$Enumerator=[Activator]::CreateInstance([Type]::GetTypeFromCLSID([GUID]::Parse(\"{BCDE0395-E52F-467C-8E3D-C4579291692E}\")));$Device=$null;$Enumerator.GetDefaultAudioEndpoint(0,1,[ref]$Device);$Volume=[IntPtr]::Zero;$Device.Activate([ref][GUID]::Parse(\"{5CDF2C82-841E-4546-9722-0CF74078229A}\"),1,[IntPtr]::Zero,[ref]$Volume);$VolumeObj=[System.Runtime.InteropServices.Marshal]::GetObjectForIUnknown($Volume);$VolumeObj.SetMute(${muteVal},[ref][GUID]::Empty)\"`, (err) => {
-        if (err) ucLog(`System set muted failed: ${err.message}`, 'error')
-      })
+      const script = AUDIO_TYPE_DEF + `$_a.SetMute(${muteVal},[ref][Guid]::Empty)`
+      await runPsFile(script)
       return { ok: true }
     }
     return { ok: false, error: 'not-supported' }
@@ -8069,36 +8087,27 @@ ipcMain.handle('uc:system-screenshot', async () => {
       const filename = `screenshot-${timestamp}.png`
       const filepath = path.join(screenshotsDir, filename)
       
-      // Use PowerShell to capture the screen
-      const { exec } = require('child_process')
-      const psScript = `
-        Add-Type -AssemblyName System.Windows.Forms
-        Add-Type -AssemblyName System.Drawing
-        $screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
-        $bitmap = New-Object System.Drawing.Bitmap($screen.Width, $screen.Height)
-        $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
-        $graphics.CopyFromScreen($screen.Location, [System.Drawing.Point]::Empty, $screen.Size)
-        $bitmap.Save('${filepath.replace(/\\/g, '\\\\')}', [System.Drawing.Imaging.ImageFormat]::Png)
-        $graphics.Dispose()
-        $bitmap.Dispose()
-      `
+      // Escape single quotes in the path for a PowerShell single-quoted string,
+      // then write the script to a temp file to avoid CMD shell-injection risks.
+      const psPath = filepath.replace(/'/g, "''")
+      const psScript = `Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+$screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+$bitmap = New-Object System.Drawing.Bitmap($screen.Width, $screen.Height)
+$graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+$graphics.CopyFromScreen($screen.Location, [System.Drawing.Point]::Empty, $screen.Size)
+$bitmap.Save('${psPath}', [System.Drawing.Imaging.ImageFormat]::Png)
+$graphics.Dispose()
+$bitmap.Dispose()
+`
       
-      return new Promise((resolve) => {
-        exec(`powershell -Command "${psScript.replace(/"/g, '\\"').replace(/\n/g, ' ')}"`, (err) => {
-          if (err) {
-            ucLog(`Screenshot failed: ${err.message}`, 'error')
-            resolve({ ok: false, error: err.message })
-            return
-          }
-          
-          if (fs.existsSync(filepath)) {
-            ucLog(`Screenshot saved: ${filepath}`)
-            resolve({ ok: true, path: filepath, filename })
-          } else {
-            resolve({ ok: false, error: 'file-not-created' })
-          }
-        })
-      })
+      await runPsFile(psScript)
+      
+      if (fs.existsSync(filepath)) {
+        ucLog(`Screenshot saved: ${filepath}`)
+        return { ok: true, path: filepath, filename }
+      }
+      return { ok: false, error: 'file-not-created' }
     }
     return { ok: false, error: 'not-supported' }
   } catch (err) {

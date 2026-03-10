@@ -21,7 +21,7 @@ export const APP_INFO = {
 } as const
 
 // Mirror host configuration
-export type MirrorHost = 'vikingfile' | 'ucfiles'
+export type MirrorHost = 'vikingfile' | 'ucfiles' | 'pixeldrain'
 export type MirrorHostTag = 'beta' | 'soon' | 'retiring'
 
 export interface MirrorHostInfo {

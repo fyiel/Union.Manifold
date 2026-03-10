@@ -343,13 +343,21 @@ export function isVikingFileUrl(url: string): boolean {
 export const isPixeldrainUrl = isUCFilesUrl
 
 export async function resolveDownloadUrl(host: string, url: string): Promise<ResolvedDownload> {
-  if (host === "ucfiles" || host === "pixeldrain" || isUCFilesUrl(url)) {
-    return resolveUCFilesDownload(url)
+  // Defensive guard for legacy persisted state where "url" may be an object
+  const normalizedUrl =
+    typeof url === "string"
+      ? url
+      : url && typeof (url as any).url === "string"
+        ? String((url as any).url)
+        : String(url ?? "")
+
+  if (host === "ucfiles" || host === "pixeldrain" || isUCFilesUrl(normalizedUrl)) {
+    return resolveUCFilesDownload(normalizedUrl)
   }
-  if (host === "vikingfile" || isVikingFileUrl(url)) {
-    return resolveVikingFileDownload(url)
+  if (host === "vikingfile" || isVikingFileUrl(normalizedUrl)) {
+    return resolveVikingFileDownload(normalizedUrl)
   }
-  return { url, resolved: false }
+  return { url: normalizedUrl, resolved: false }
 }
 
 export async function resolveDownloadSize(url: string): Promise<number | undefined> {
@@ -378,7 +386,7 @@ function extractVikingFileId(url: string): string | null {
 export function isVikingFileDirectUrl(url: string): boolean {
   try {
     const parsed = new URL(url)
-    return parsed.hostname.includes("vikingfile.com")
+    return parsed.hostname.includes("vikingfile.com") && /^\/dl\//.test(parsed.pathname)
   } catch {
     return false
   }
@@ -416,7 +424,7 @@ export async function resolveVikingFileDownload(url: string): Promise<ResolvedDo
     })
 
     if (response.status === 404) {
-      throw new Error("VikingFile returned 404. The link appears to be dead.")
+      throw new Error(VIKINGFILE_404_MESSAGE)
     }
 
     const data = await response.json().catch(() => null)
@@ -433,7 +441,7 @@ export async function resolveVikingFileDownload(url: string): Promise<ResolvedDo
       resolved: true,
     }
   } catch (err) {
-    if (err instanceof Error && err.message.includes("404")) throw err
+    if (err instanceof Error && err.message === VIKINGFILE_404_MESSAGE) throw err
     downloadLogger.warn("VikingFile resolve error", { data: err })
     return { url, resolved: false }
   }

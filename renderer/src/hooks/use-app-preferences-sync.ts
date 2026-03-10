@@ -29,8 +29,8 @@ function normalizePreferences(input: unknown): AppPreferences {
   const prefs: AppPreferences = {}
 
   const mirrorHost = record.defaultMirrorHost
-  if (mirrorHost === "pixeldrain") {
-    prefs.defaultMirrorHost = mirrorHost
+  if (mirrorHost === "ucfiles" || mirrorHost === "vikingfile") {
+    prefs.defaultMirrorHost = mirrorHost as PreferredDownloadHost
   }
 
   if (typeof record.discordRpcEnabled === "boolean") {
