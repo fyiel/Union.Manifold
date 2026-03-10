@@ -15,6 +15,7 @@ import {
 } from "@/lib/downloads"
 import { LogViewer } from "@/components/LogViewer"
 import { useDiscordAccount } from "@/hooks/use-discord-account"
+import { ControllerSettingsPanel } from "@/components/ControllerSettingsPanel"
 import {
   SETTINGS_KEYS,
   TEXT_CONSTRAINTS,
@@ -55,7 +56,7 @@ export function SettingsPage() {
   const [error, setError] = useState<string | null>(null)
   const [ucSizeBytes, setUcSizeBytes] = useState<number | null>(null)
   const [usageLoading, setUsageLoading] = useState(false)
-  const [defaultHost, setDefaultHost] = useState<MirrorHost>('pixeldrain')
+  const [defaultHost, setDefaultHost] = useState<MirrorHost>('ucfiles')
   const [checkingUpdate, setCheckingUpdate] = useState(false)
   const [appVersion, setAppVersion] = useState<string>("")
   const [updateCheckResult, setUpdateCheckResult] = useState<string | null>(null)
@@ -126,7 +127,7 @@ export function SettingsPage() {
   const [bioSaving, setBioSaving] = useState(false)
   const [bioSaved, setBioSaved] = useState(false)
   const [skipLinkCheck, setSkipLinkCheck] = useState(false)
-  const [activeSection, setActiveSection] = useState<'account' | 'downloads' | 'game-launch' | 'overlay' | 'advanced'>('account')
+  const [activeSection, setActiveSection] = useState<'account' | 'downloads' | 'game-launch' | 'overlay' | 'controller' | 'advanced'>('account')
 
   // Overlay settings state
   const [overlayEnabled, setOverlayEnabled] = useState(true)
@@ -391,6 +392,11 @@ export function SettingsPage() {
         if (!mounted) return
         if (protonResult.status === 'fulfilled' && protonResult.value?.ok) {
           setDetectedProtonVersions(protonResult.value.versions || [])
+          // Show notification if proton was auto-detected and applied
+          if (protonResult.value.autoApplied && protonResult.value.appliedVersion) {
+            // Use a simple alert for now since toast might not be available
+            console.log(`Proton: auto-detected and applied ${protonResult.value.appliedVersion.label}`)
+          }
         }
         if (wineResult.status === 'fulfilled' && wineResult.value?.ok) {
           setDetectedWineVersions(wineResult.value.versions || [])
@@ -1276,6 +1282,7 @@ export function SettingsPage() {
     { id: 'account' as const, label: 'Account', icon: UserRound, description: 'Profile & preferences' },
     { id: 'downloads' as const, label: 'Downloads', icon: ArrowDownToLine, description: 'Storage & mirrors' },
     { id: 'game-launch' as const, label: 'Game Launch', icon: Gamepad2, description: 'Launch & compatibility' },
+    { id: 'controller' as const, label: 'Controller', icon: Gamepad2, description: 'Controller support' },
     { id: 'overlay' as const, label: 'Overlay', icon: Layers, description: 'In-game overlay' },
     { id: 'advanced' as const, label: 'Advanced', icon: Settings2, description: 'Dev tools & danger zone' },
   ]
@@ -2595,6 +2602,17 @@ export function SettingsPage() {
             </>
           )}
 
+          {/* ====== CONTROLLER ====== */}
+          {activeSection === 'controller' && (
+            <>
+              <Card className="border-border/60">
+                <CardContent className="p-6">
+                  <ControllerSettingsPanel />
+                </CardContent>
+              </Card>
+            </>
+          )}
+
           {/* ====== OVERLAY ====== */}
           {activeSection === 'overlay' && (
             <>
@@ -2801,7 +2819,7 @@ export function SettingsPage() {
                                   // Reset all local state to defaults
                                   setRunGamesAsAdmin(false)
                                   setAlwaysCreateDesktopShortcut(false)
-                                  setDefaultHost('pixeldrain')
+                                  setDefaultHost('ucfiles')
                                   setDiscordRpcEnabled(true)
                                   setDeveloperMode(false)
                                   setVerboseDownloadLogging(false)

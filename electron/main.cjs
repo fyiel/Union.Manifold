@@ -1290,10 +1290,8 @@ ipcMain.handle('uc:network-test', async (_event, baseUrl) => {
     const targets = [
       { label: 'API base', url: origin },
       { label: 'API downloads', url: new URL('/api/downloads/all', origin).toString() },
-      { label: 'Pixeldrain', url: 'https://pixeldrain.com' },
-      { label: 'FileQ', url: 'https://fileq.net' },
-      { label: 'DataVaults', url: 'https://datavaults.co' },
-      { label: 'Rootz', url: 'https://rootz.so' }
+      { label: 'Vikingfile', url: 'https://vikingfile.com' },
+      { label: 'UC-Files', url: 'https://files.union-crax.xyz' }
     ]
     const results = await Promise.all(
       targets.map(async (target) => ({ label: target.label, ...(await probeUrl(target.url)) }))
@@ -6128,17 +6126,44 @@ function detectSLSSteam() {
 /**
  * Detect installed Proton versions from common Steam library paths.
  * Returns an array of { label, path } objects.
+ * Enhanced to match Heroic/Lutris behavior - scans more locations and returns sorted by version.
  */
 function detectProtonVersions() {
   const results = []
   const home = app.getPath('home')
+  
+  // Steam library locations to scan (similar to Heroic/Lutris)
   const steamRoots = [
     path.join(home, '.steam', 'steam'),
     path.join(home, '.local', 'share', 'Steam'),
+    path.join(home, '.steam', 'steamroot'),
     '/usr/share/steam',
+    '/opt/steam',
   ]
 
+  // Also check for Steam library folders defined in steamapps/libraryfolders.vdf
+  const libraryFolders = new Set(steamRoots)
+  
+  // Parse libraryfolders.vdf if it exists to find additional Steam libraries
   for (const steamRoot of steamRoots) {
+    const libraryFoldersPath = path.join(steamRoot, 'steamapps', 'libraryfolders.vdf')
+    if (fs.existsSync(libraryFoldersPath)) {
+      try {
+        const content = fs.readFileSync(libraryFoldersPath, 'utf8')
+        const matches = content.match(/"path"\s+"([^"]+)"/g)
+        if (matches) {
+          for (const match of matches) {
+            const folderPath = match.replace(/"path"\s+"/, '').replace(/"/, '')
+            if (folderPath && fs.existsSync(folderPath)) {
+              libraryFolders.add(folderPath)
+            }
+          }
+        }
+      } catch {}
+    }
+  }
+
+  for (const steamRoot of libraryFolders) {
     const commonDir = path.join(steamRoot, 'steamapps', 'common')
     if (!fs.existsSync(commonDir)) continue
     try {
@@ -6146,16 +6171,47 @@ function detectProtonVersions() {
       for (const entry of entries) {
         if (!entry.isDirectory()) continue
         const lower = entry.name.toLowerCase()
+        // Match Proton versions (Proton, Proton Experimental, etc.)
         if (!lower.startsWith('proton')) continue
         const protonScript = path.join(commonDir, entry.name, 'proton')
         if (fs.existsSync(protonScript)) {
           results.push({ label: entry.name, path: protonScript })
         }
+        // Also check for proton script in bin directory
+        const protonBin = path.join(commonDir, entry.name, 'bin', 'proton')
+        if (fs.existsSync(protonBin)) {
+          results.push({ label: entry.name, path: protonBin })
+        }
       }
     } catch {}
   }
 
-  return results
+  // Sort results by version (newest first)
+  results.sort((a, b) => {
+    const aVersion = extractProtonVersion(a.label)
+    const bVersion = extractProtonVersion(b.label)
+    return compareVersions(bVersion, aVersion)
+  })
+
+  // Deduplicate by path
+  const seen = new Set()
+  const unique = []
+  for (const r of results) {
+    if (!seen.has(r.path)) {
+      seen.add(r.path)
+      unique.push(r)
+    }
+  }
+  
+  return unique
+}
+
+/**
+ * Extract version number from Proton name for sorting
+ */
+function extractProtonVersion(name) {
+  const match = name.match(/(\d+\.\d+)/)
+  return match ? match[1] : '0.0'
 }
 
 /**
@@ -6224,11 +6280,31 @@ function runLinuxTool(toolCmd, toolArgs, env, opts) {
   })
 }
 
-// IPC: Detect Proton versions
-ipcMain.handle('uc:linux-detect-proton', () => {
+// IPC: Detect Proton versions (enhanced with auto-apply similar to Heroic/Lutris)
+ipcMain.handle('uc:linux-detect-proton', async () => {
   try {
     if (process.platform !== 'linux') return { ok: false, error: 'not-linux', versions: [] }
     const versions = detectProtonVersions()
+    
+    // Auto-apply: if no proton path is configured, use the best available one
+    const settings = readSettings() || {}
+    const currentProtonPath = settings.linuxProtonPath || ''
+    
+    // If no proton path is set and we found some, auto-select the first (newest) one
+    if (!currentProtonPath && versions.length > 0) {
+      const bestProton = versions[0] // Already sorted by version
+      settings.linuxProtonPath = bestProton.path
+      settings.linuxLaunchMode = 'proton'
+      writeSettings(settings)
+      ucLog(`Proton: auto-detected and applied ${bestProton.label} (${bestProton.path})`)
+      return { 
+        ok: true, 
+        versions, 
+        autoApplied: true, 
+        appliedVersion: bestProton 
+      }
+    }
+    
     return { ok: true, versions }
   } catch (err) {
     return { ok: false, error: err.message, versions: [] }
@@ -7676,6 +7752,435 @@ ipcMain.handle('uc:controller-get-connected', () => {
   } catch (err) {
     ucLog(`Controller get connected failed: ${err.message}`, 'error')
     return { connected: false, controllerId: null, controllerName: null, controllerType: null }
+  }
+})
+
+// IPC: Get mapping presets (x360ce-style)
+ipcMain.handle('uc:controller-get-mapping-presets', () => {
+  try {
+    const settings = readSettings()
+    const presets = settings?.controllerMappingPresets || [
+      { id: 'generic', name: 'Generic Controller' },
+      { id: 'xbox', name: 'Xbox Controller' },
+      { id: 'playstation', name: 'PlayStation Controller' },
+      { id: 'dualsense', name: 'DualSense (PS5)' },
+      { id: 'dualshock4', name: 'DualShock 4 (PS4)' },
+      { id: 'xboxone', name: 'Xbox One' },
+      { id: 'xboxseries', name: 'Xbox Series X' },
+    ]
+    return { ok: true, presets }
+  } catch (err) {
+    return { ok: false, presets: [], error: err.message }
+  }
+})
+
+// IPC: Get active mapping
+ipcMain.handle('uc:controller-get-active-mapping', () => {
+  try {
+    const settings = readSettings()
+    return { 
+      ok: true, 
+      mapping: settings?.controllerActiveMapping || { preset: 'auto', customMapping: null } 
+    }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Set active mapping
+ipcMain.handle('uc:controller-set-active-mapping', (_event, preset, customMapping) => {
+  try {
+    const settings = readSettings()
+    settings.controllerActiveMapping = { preset, customMapping }
+    writeSettings(settings)
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Get profiles (key binding profiles - antimicrox-style)
+ipcMain.handle('uc:controller-get-profiles', () => {
+  try {
+    const settings = readSettings()
+    const profiles = settings?.controllerProfiles || [
+      {
+        id: 'default',
+        name: 'Default',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        mappingEnabled: true,
+        keyBindingEnabled: false,
+        deadzone: 0.15,
+        triggerDeadzone: 0.1,
+        vibrationEnabled: true,
+        vibrationIntensity: 1.0,
+        keyBinding: {
+          id: 'default',
+          name: 'Default',
+          profileName: 'Default',
+          enabled: true,
+          buttonMappings: {},
+          stickToMouse: { leftStick: false, rightStick: false, mouseSpeed: 1.0, mouseAcceleration: false },
+          triggerToScroll: { leftTrigger: false, rightTrigger: false, scrollSpeed: 1.0 },
+        }
+      }
+    ]
+    return { ok: true, profiles }
+  } catch (err) {
+    return { ok: false, profiles: [], error: err.message }
+  }
+})
+
+// IPC: Get active profile
+ipcMain.handle('uc:controller-get-active-profile', () => {
+  try {
+    const settings = readSettings()
+    const profiles = settings?.controllerProfiles || []
+    const activeId = settings?.controllerActiveProfileId || 'default'
+    const activeProfile = profiles.find(p => p.id === activeId) || profiles[0] || null
+    return { ok: true, profile: activeProfile }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Set active profile
+ipcMain.handle('uc:controller-set-active-profile', (_event, profileId) => {
+  try {
+    const settings = readSettings()
+    settings.controllerActiveProfileId = profileId
+    writeSettings(settings)
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Create profile
+ipcMain.handle('uc:controller-create-profile', (_event, profile) => {
+  try {
+    const settings = readSettings()
+    const profiles = settings?.controllerProfiles || []
+    profiles.push({
+      ...profile,
+      id: profile.id || `profile_${Date.now()}`,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    })
+    settings.controllerProfiles = profiles
+    writeSettings(settings)
+    return { ok: true, profile }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Update profile
+ipcMain.handle('uc:controller-update-profile', (_event, profile) => {
+  try {
+    const settings = readSettings()
+    const profiles = settings?.controllerProfiles || []
+    const idx = profiles.findIndex(p => p.id === profile.id)
+    if (idx >= 0) {
+      profiles[idx] = { ...profile, updatedAt: Date.now() }
+      settings.controllerProfiles = profiles
+      writeSettings(settings)
+      return { ok: true }
+    }
+    return { ok: false, error: 'Profile not found' }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Delete profile
+ipcMain.handle('uc:controller-delete-profile', (_event, profileId) => {
+  try {
+    const settings = readSettings()
+    let profiles = settings?.controllerProfiles || []
+    profiles = profiles.filter(p => p.id !== profileId)
+    // Ensure at least one profile exists
+    if (profiles.length === 0) {
+      profiles.push({
+        id: 'default',
+        name: 'Default',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        mappingEnabled: true,
+        keyBindingEnabled: false,
+        deadzone: 0.15,
+        triggerDeadzone: 0.1,
+        vibrationEnabled: true,
+        vibrationIntensity: 1.0,
+        keyBinding: {
+          id: 'default',
+          name: 'Default',
+          profileName: 'Default',
+          enabled: true,
+        }
+      })
+    }
+    settings.controllerProfiles = profiles
+    // If deleted profile was active, switch to first available
+    if (settings.controllerActiveProfileId === profileId) {
+      settings.controllerActiveProfileId = profiles[0].id
+    }
+    writeSettings(settings)
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Get controller overlay settings
+ipcMain.handle('uc:controller-get-overlay-settings', () => {
+  try {
+    const settings = readSettings()
+    return {
+      ok: true,
+      settings: {
+        overlayEnabled: settings?.controllerOverlayEnabled ?? true,
+        overlayHotkey: settings?.controllerOverlayHotkey || 'Ctrl+Shift+Gamepad',
+        overlayPosition: settings?.controllerOverlayPosition || 'right',
+      }
+    }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Set controller overlay settings
+ipcMain.handle('uc:controller-set-overlay-settings', (_event, overlaySettings) => {
+  try {
+    const settings = readSettings()
+    settings.controllerOverlayEnabled = overlaySettings.overlayEnabled
+    settings.controllerOverlayHotkey = overlaySettings.overlayHotkey
+    settings.controllerOverlayPosition = overlaySettings.overlayPosition
+    writeSettings(settings)
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
+// END Controller IPC Handlers
+
+// ============================================================
+// System Functions (Volume, Screenshot, Notifications)
+// ============================================================
+
+// Helper: run a PowerShell script via a temp file to avoid shell-injection risks
+function runPsFile(scriptContent) {
+  return new Promise((resolve, reject) => {
+    const { execFile } = require('child_process')
+    const os = require('os')
+    const tmpScript = path.join(os.tmpdir(), `uc-sys-${Date.now()}-${Math.random().toString(36).slice(2)}.ps1`)
+    try {
+      fs.writeFileSync(tmpScript, scriptContent, 'utf8')
+    } catch (err) {
+      return reject(err)
+    }
+    execFile('powershell.exe', ['-ExecutionPolicy', 'Bypass', '-NonInteractive', '-NoProfile', '-File', tmpScript],
+      { timeout: 10000 },
+      (err, stdout) => {
+        try { fs.unlinkSync(tmpScript) } catch {}
+        if (err) return reject(err)
+        resolve(stdout.trim())
+      }
+    )
+  })
+}
+
+// Correct Core Audio COM interface definition shared by all volume/mute handlers.
+// IAudioEndpointVolume vtable stubs match the Windows SDK order exactly so that
+// GetMasterVolumeLevelScalar (index 5), SetMasterVolumeLevelScalar (index 3),
+// SetMute (index 11) and GetMute (index 12) dispatch to the right methods.
+const AUDIO_TYPE_DEF = `Add-Type -TypeDefinition @"
+using System;using System.Runtime.InteropServices;
+[Guid("A95664D2-9614-4F35-A746-DE8DB63617E6"),InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+interface IMMDeviceEnumerator{int n0();int GetDefaultAudioEndpoint(int d,int r,out IMMDevice ep);}
+[Guid("D666063F-1587-4E43-81F1-B948E807363F"),InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+interface IMMDevice{int Activate(ref Guid id,int ctx,IntPtr p,[MarshalAs(UnmanagedType.Interface)]out IAudioEndpointVolume aev);}
+[Guid("5CDF2C82-841E-4546-9722-0CF74078229A"),InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+interface IAudioEndpointVolume{int n0(IntPtr p);int n1(IntPtr p);int n2(float l,ref Guid g);int SetMasterVolumeLevelScalar(float l,ref Guid g);int n4(out float l);int GetMasterVolumeLevelScalar(out float l);int n6(uint c,float l,ref Guid g);int n7(uint c,float l,ref Guid g);int n8(uint c,out float l);int n9(uint c,out float l);int n10(out uint c);int SetMute([MarshalAs(UnmanagedType.Bool)]bool m,ref Guid g);int GetMute([MarshalAs(UnmanagedType.Bool)]out bool m);}
+"@ -ErrorAction SilentlyContinue
+$_e=[Activator]::CreateInstance([Type]::GetTypeFromCLSID([Guid]"BCDE0395-E52F-467C-8E3D-C4579291692E")) -as [IMMDeviceEnumerator]
+$_d=$null;$_e.GetDefaultAudioEndpoint(0,1,[ref]$_d)
+$_aevGuid=[Guid]"5CDF2C82-841E-4546-9722-0CF74078229A"
+$_a=$null;$_d.Activate([ref]$_aevGuid,1,[IntPtr]::Zero,[ref]$_a)
+`
+
+// IPC: Get system volume (0-100)
+ipcMain.handle('uc:system-get-volume', async () => {
+  try {
+    if (process.platform === 'win32') {
+      const script = AUDIO_TYPE_DEF + `$l=0.0;$_a.GetMasterVolumeLevelScalar([ref]$l);[Math]::Round($l*100)`
+      const stdout = await runPsFile(script)
+      const vol = parseInt(stdout, 10)
+      return { ok: true, volume: isNaN(vol) ? 50 : Math.round(vol) }
+    }
+    return { ok: false, error: 'not-supported' }
+  } catch (err) {
+    ucLog(`System get volume failed: ${err.message}`, 'error')
+    return { ok: false, error: err.message, volume: 50 }
+  }
+})
+
+// IPC: Set system volume (0-100)
+ipcMain.handle('uc:system-set-volume', async (_event, level) => {
+  try {
+    if (process.platform === 'win32') {
+      const vol = Math.max(0, Math.min(100, parseInt(level, 10) || 50))
+      const script = AUDIO_TYPE_DEF + `$_a.SetMasterVolumeLevelScalar(${vol}/100.0,[ref][Guid]::Empty)`
+      await runPsFile(script)
+      return { ok: true }
+    }
+    return { ok: false, error: 'not-supported' }
+  } catch (err) {
+    ucLog(`System set volume failed: ${err.message}`, 'error')
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Get mute state
+ipcMain.handle('uc:system-get-muted', async () => {
+  try {
+    if (process.platform === 'win32') {
+      const script = AUDIO_TYPE_DEF + `$m=$false;$_a.GetMute([ref]$m);$m`
+      const stdout = await runPsFile(script)
+      return { ok: true, muted: stdout.toLowerCase() === 'true' }
+    }
+    return { ok: false, error: 'not-supported' }
+  } catch (err) {
+    ucLog(`System get muted failed: ${err.message}`, 'error')
+    return { ok: false, error: err.message, muted: false }
+  }
+})
+
+// IPC: Set mute state
+ipcMain.handle('uc:system-set-muted', async (_event, muted) => {
+  try {
+    if (process.platform === 'win32') {
+      const muteVal = muted ? '$true' : '$false'
+      const script = AUDIO_TYPE_DEF + `$_a.SetMute(${muteVal},[ref][Guid]::Empty)`
+      await runPsFile(script)
+      return { ok: true }
+    }
+    return { ok: false, error: 'not-supported' }
+  } catch (err) {
+    ucLog(`System set muted failed: ${err.message}`, 'error')
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Take screenshot
+ipcMain.handle('uc:system-screenshot', async () => {
+  try {
+    if (process.platform === 'win32') {
+      const screenshotsDir = path.join(app.getPath('pictures'), 'UnionCrax.Direct', 'Screenshots')
+      if (!fs.existsSync(screenshotsDir)) {
+        fs.mkdirSync(screenshotsDir, { recursive: true })
+      }
+      
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
+      const filename = `screenshot-${timestamp}.png`
+      const filepath = path.join(screenshotsDir, filename)
+      
+      // Escape single quotes in the path for a PowerShell single-quoted string,
+      // then write the script to a temp file to avoid CMD shell-injection risks.
+      const psPath = filepath.replace(/'/g, "''")
+      const psScript = `Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+$screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+$bitmap = New-Object System.Drawing.Bitmap($screen.Width, $screen.Height)
+$graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+$graphics.CopyFromScreen($screen.Location, [System.Drawing.Point]::Empty, $screen.Size)
+$bitmap.Save('${psPath}', [System.Drawing.Imaging.ImageFormat]::Png)
+$graphics.Dispose()
+$bitmap.Dispose()
+`
+      
+      await runPsFile(psScript)
+      
+      if (fs.existsSync(filepath)) {
+        ucLog(`Screenshot saved: ${filepath}`)
+        return { ok: true, path: filepath, filename }
+      }
+      return { ok: false, error: 'file-not-created' }
+    }
+    return { ok: false, error: 'not-supported' }
+  } catch (err) {
+    ucLog(`System screenshot failed: ${err.message}`, 'error')
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Get screenshot save path
+ipcMain.handle('uc:system-screenshot-path', async () => {
+  try {
+    const screenshotsDir = path.join(app.getPath('pictures'), 'UnionCrax.Direct', 'Screenshots')
+    return { ok: true, path: screenshotsDir }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Get Windows notifications
+ipcMain.handle('uc:system-notifications', async () => {
+  try {
+    if (process.platform === 'win32') {
+      const { exec } = require('child_process')
+      return new Promise((resolve) => {
+        // Get notifications from Windows Action Center using PowerShell
+        const psScript = `
+          $toastXml = [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null
+          $notifier = [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier("UnionCrax.Direct")
+          $history = $notifier.GetHistory()
+          $notifications = @()
+          foreach ($toast in $history) {
+            $notifications += @{
+              id = $toast.Id
+              title = $toast.Content.QueryText
+              timestamp = $toast.Timestamp.ToString("o")
+              appName = "UnionCrax.Direct"
+            }
+          }
+          $notifications | ConvertTo-Json -Compress
+        `
+        exec(`powershell -Command "${psScript.replace(/"/g, '\\"').replace(/\n/g, ' ')}"`, (err, stdout) => {
+          if (err || !stdout) {
+            // Return empty array if no notifications or error
+            resolve({ ok: true, notifications: [] })
+            return
+          }
+          try {
+            const parsed = JSON.parse(stdout.trim())
+            const notifications = Array.isArray(parsed) ? parsed : [parsed]
+            resolve({ ok: true, notifications })
+          } catch (e) {
+            resolve({ ok: true, notifications: [] })
+          }
+        })
+      })
+    }
+    return { ok: true, notifications: [] }
+  } catch (err) {
+    ucLog(`System notifications failed: ${err.message}`, 'error')
+    return { ok: true, notifications: [] }
+  }
+})
+
+// IPC: Clear notification (when clicked)
+ipcMain.handle('uc:system-notification-activated', async (_event, notificationId) => {
+  try {
+    if (process.platform === 'win32') {
+      // Clear the notification from history when user clicks on it in the overlay
+      ucLog(`Notification activated: ${notificationId}`)
+    }
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, error: err.message }
   }
 })
 

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { Hammer, X, Clock, Download, Square, Play, Gamepad2, Loader2, Pause } from 'lucide-react'
+import { Hammer, X, Clock, Download, Square, Play, Gamepad2, Loader2, Pause, Volume2, VolumeX, Bell, Camera, Minus, Plus } from 'lucide-react'
+import { ControllerOverlayFlyout } from './ControllerOverlayFlyout'
 
 declare global {
   interface Window {
@@ -36,6 +37,16 @@ declare global {
       resumeDownload: (downloadId: string) => Promise<{ ok: boolean }>
       onPositionChanged: (callback: (data: { position: string }) => void) => () => void
     }
+    ucSystem?: {
+      getVolume: () => Promise<{ ok: boolean; volume: number }>
+      setVolume: (level: number) => Promise<{ ok: boolean }>
+      getMuted: () => Promise<{ ok: boolean; muted: boolean }>
+      setMuted: (muted: boolean) => Promise<{ ok: boolean }>
+      takeScreenshot: () => Promise<{ ok: boolean; path?: string }>
+      getScreenshotPath: () => Promise<{ ok: boolean; path: string }>
+      getNotifications: () => Promise<{ ok: boolean; notifications: SystemNotification[] }>
+      onNotificationActivated: (callback: (data: { id: string }) => void) => () => void
+    }
   }
 }
 
@@ -48,6 +59,16 @@ interface OverlayDownloadItem {
   totalBytes: number
   speedBps: number
   etaSeconds: number | null
+}
+
+interface SystemNotification {
+  id: string
+  title: string
+  body: string
+  appId?: string
+  icon?: string
+  timestamp: number
+  read: boolean
 }
 
 interface GameInfo {
@@ -76,10 +97,20 @@ export function InGameOverlay() {
   const [downloads, setDownloads] = useState<OverlayDownloadItem[]>([])
   const [installedGames, setInstalledGames] = useState<InstalledGame[]>([])
   const [toastProgress, setToastProgress] = useState(100)
+  // New state for additional features
+  const [currentTime, setCurrentTime] = useState(new Date())
+  const [volume, setVolume] = useState(50)
+  const [isMuted, setIsMuted] = useState(false)
+  const [notifications, setNotifications] = useState<SystemNotification[]>([])
+  const [showNotifications, setShowNotifications] = useState(false)
+  const [screenshotTaken, setScreenshotTaken] = useState(false)
+  // Controller flyout state
+  const [showControllerFlyout, setShowControllerFlyout] = useState(false)
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const toastProgressRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const playtimeIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const hideTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const clockIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const modeRef = useRef<OverlayMode>(mode)
   modeRef.current = mode
 
@@ -95,6 +126,32 @@ export function InGameOverlay() {
     setTransparent(document.getElementById('root'))
   }, [])
 
+  // Clock ticker - always running when overlay is visible
+  useEffect(() => {
+    if (mode !== 'hidden') {
+      setCurrentTime(new Date())
+      clockIntervalRef.current = setInterval(() => setCurrentTime(new Date()), 1000)
+    }
+    return () => {
+      if (clockIntervalRef.current) { clearInterval(clockIntervalRef.current); clockIntervalRef.current = null }
+    }
+  }, [mode])
+
+  // Refresh volume and notifications when panel opens
+  useEffect(() => {
+    if (mode === 'panel') {
+      // Refresh volume
+      if (window.ucSystem?.getVolume) {
+        window.ucSystem.getVolume().then(r => { if (r.ok) setVolume(r.volume ?? 50) }).catch(() => {})
+        window.ucSystem.getMuted().then(r => { if (r.ok) setIsMuted(r.muted ?? false) }).catch(() => {})
+      }
+      // Refresh notifications
+      if (window.ucSystem?.getNotifications) {
+        window.ucSystem.getNotifications().then(r => { if (r.ok) setNotifications(r.notifications || []) }).catch(() => {})
+      }
+    }
+  }, [mode])
+
   const formatBytes = useCallback((bytes: number) => {
     if (bytes === 0) return '0 B'
     const k = 1024
@@ -107,6 +164,51 @@ export function InGameOverlay() {
     if (bps <= 0) return '—'
     return formatBytes(bps) + '/s'
   }, [formatBytes])
+
+  const formatTime = useCallback((date: Date) => {
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  }, [])
+
+  const formatNotificationTime = useCallback((timestamp: number) => {
+    const now = Date.now()
+    const diff = now - timestamp
+    const minutes = Math.floor(diff / 60000)
+    const hours = Math.floor(diff / 3600000)
+    const days = Math.floor(diff / 86400000)
+    if (minutes < 1) return 'now'
+    if (minutes < 60) return `${minutes}m`
+    if (hours < 24) return `${hours}h`
+    return `${days}d`
+  }, [])
+
+  const handleVolumeChange = useCallback(async (newVolume: number) => {
+    setVolume(newVolume)
+    if (window.ucSystem?.setVolume) {
+      try { await window.ucSystem.setVolume(newVolume) } catch { /* ignore */ }
+    }
+  }, [])
+
+  const handleMuteToggle = useCallback(async () => {
+    const newMuted = !isMuted
+    setIsMuted(newMuted)
+    if (window.ucSystem?.setMuted) {
+      try { await window.ucSystem.setMuted(newMuted) } catch { /* ignore */ }
+    }
+  }, [isMuted])
+
+  const handleScreenshot = useCallback(async () => {
+    setScreenshotTaken(true)
+    if (window.ucSystem?.takeScreenshot) {
+      try {
+        const result = await window.ucSystem.takeScreenshot()
+        if (result.ok) {
+          setTimeout(() => setScreenshotTaken(false), 1500)
+          return
+        }
+      } catch { /* ignore */ }
+    }
+    setTimeout(() => setScreenshotTaken(false), 1500)
+  }, [])
 
   const updatePlaytime = useCallback((startedAt: number) => {
     const elapsed = Math.max(0, Math.floor((Date.now() - startedAt) / 1000))
@@ -310,6 +412,7 @@ export function InGameOverlay() {
   }, [enterMode])
 
   const activeDownloads = downloads.filter(d => ['downloading', 'extracting', 'installing', 'queued', 'paused', 'verifying', 'retrying'].includes(d.status))
+  const unreadNotifications = notifications.filter(n => !n.read)
 
   if (mode === 'hidden') return null
 
@@ -384,6 +487,239 @@ export function InGameOverlay() {
       style={{ position: 'fixed', inset: 0, zIndex: 9998, background: 'transparent' }}
       onClick={closePanelAndHide}
     >
+
+      {/* Clock - Top Middle */}
+      <div
+        style={{
+          position: 'absolute',
+          top: 20,
+          left: '50%',
+          transform: 'translateX(-50%)',
+          zIndex: 9999,
+          opacity: animated ? 1 : 0,
+          transition: 'opacity 0.18s ease',
+        }}
+      >
+        <div style={{
+          background: 'rgba(13, 13, 21, 0.85)',
+          border: '1px solid rgba(255,255,255,0.12)',
+          borderRadius: 12,
+          padding: '8px 16px',
+          boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+        }}>
+          <Clock size={14} color="rgba(255,255,255,0.6)" />
+          <span style={{ fontSize: 14, fontWeight: 600, color: 'white', fontFamily: 'monospace' }}>
+            {formatTime(currentTime)}
+          </span>
+        </div>
+      </div>
+
+      {/* Quick Actions Bar - Top Right */}
+      <div
+        style={{
+          position: 'absolute',
+          top: 20,
+          right: 20,
+          zIndex: 9999,
+          display: 'flex',
+          gap: 8,
+          opacity: animated ? 1 : 0,
+          transition: 'opacity 0.18s ease',
+        }}
+      >
+        {/* Screenshot Button */}
+        <button
+          onClick={handleScreenshot}
+          style={{
+            width: 40,
+            height: 40,
+            borderRadius: 10,
+            background: screenshotTaken ? 'rgba(34, 197, 94, 0.2)' : 'rgba(13, 13, 21, 0.85)',
+            border: '1px solid rgba(255,255,255,0.12)',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
+            transition: 'all 0.15s ease',
+          }}
+          title="Take Screenshot"
+        >
+          <Camera size={16} color={screenshotTaken ? '#22c55e' : 'rgba(255,255,255,0.7)'} />
+        </button>
+
+        {/* Notifications Button */}
+        <button
+          onClick={() => setShowNotifications(!showNotifications)}
+          style={{
+            width: 40,
+            height: 40,
+            borderRadius: 10,
+            background: showNotifications ? 'rgba(59, 130, 246, 0.2)' : 'rgba(13, 13, 21, 0.85)',
+            border: '1px solid rgba(255,255,255,0.12)',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
+            position: 'relative',
+            transition: 'all 0.15s ease',
+          }}
+          title="Notifications"
+        >
+          <Bell size={16} color={showNotifications ? '#60a5fa' : 'rgba(255,255,255,0.7)'} />
+          {unreadNotifications.length > 0 && (
+            <div style={{
+              position: 'absolute',
+              top: -4,
+              right: -4,
+              width: 18,
+              height: 18,
+              borderRadius: '50%',
+              background: '#ef4444',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: 10,
+              fontWeight: 700,
+              color: 'white',
+            }}>
+              {unreadNotifications.length > 9 ? '9+' : unreadNotifications.length}
+            </div>
+          )}
+        </button>
+
+        {/* Volume Control */}
+        <div style={{
+          height: 40,
+          borderRadius: 10,
+          background: 'rgba(13, 13, 21, 0.85)',
+          border: '1px solid rgba(255,255,255,0.12)',
+          display: 'flex',
+          alignItems: 'center',
+          padding: '0 8px',
+          gap: 6,
+          boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
+        }}>
+          <button
+            onClick={handleMuteToggle}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: 4,
+            }}
+            title={isMuted ? 'Unmute' : 'Mute'}
+          >
+            {isMuted ? <VolumeX size={16} color="rgba(255,255,255,0.5)" /> : <Volume2 size={16} color="rgba(255,255,255,0.7)" />}
+          </button>
+          <div style={{ width: 60, position: 'relative' }}>
+            <input
+              type="range"
+              min="0"
+              max="100"
+              value={isMuted ? 0 : volume}
+              onChange={(e) => handleVolumeChange(Number(e.target.value))}
+              style={{
+                width: '100%',
+                height: 4,
+                appearance: 'none',
+                background: `linear-gradient(to right, #7c3aed 0%, #7c3aed ${isMuted ? 0 : volume}%, rgba(255,255,255,0.15) ${isMuted ? 0 : volume}%, rgba(255,255,255,0.15) 100%)`,
+                borderRadius: 2,
+                cursor: 'pointer',
+              }}
+            />
+          </div>
+          <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', minWidth: 24, textAlign: 'right', fontFamily: 'monospace' }}>
+            {isMuted ? 0 : volume}%
+          </span>
+        </div>
+
+        {/* Controller Button */}
+        <button
+          onClick={() => setShowControllerFlyout(!showControllerFlyout)}
+          style={{
+            width: 40,
+            height: 40,
+            borderRadius: 10,
+            background: showControllerFlyout ? 'rgba(139, 92, 246, 0.2)' : 'rgba(13, 13, 21, 0.85)',
+            border: '1px solid rgba(255,255,255,0.12)',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
+            position: 'relative',
+            transition: 'all 0.15s ease',
+          }}
+          title="Controller Settings"
+        >
+          <Gamepad2 size={16} color={showControllerFlyout ? '#a78bfa' : 'rgba(255,255,255,0.7)'} />
+        </button>
+      </div>
+
+      {/* Notifications Panel */}
+      {showNotifications && (
+        <div
+          style={{
+            position: 'absolute',
+            top: 70,
+            right: 20,
+            width: 280,
+            maxHeight: 300,
+            background: 'rgba(13, 13, 21, 0.95)',
+            border: '1px solid rgba(255,255,255,0.12)',
+            borderRadius: 12,
+            boxShadow: '0 16px 48px rgba(0,0,0,0.8)',
+            overflow: 'hidden',
+            zIndex: 9999,
+            opacity: animated ? 1 : 0,
+            transform: animated ? 'translateY(0)' : 'translateY(-8px)',
+            transition: 'opacity 0.18s ease, transform 0.18s ease',
+          }}
+          onClick={e => e.stopPropagation()}
+        >
+          <div style={{ padding: '12px 14px', borderBottom: '1px solid rgba(255,255,255,0.06)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <span style={{ fontSize: 12, fontWeight: 700, color: 'white' }}>Notifications</span>
+            <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)' }}>{notifications.length} total</span>
+          </div>
+          <div style={{ maxHeight: 230, overflowY: 'auto' }}>
+            {notifications.length === 0 ? (
+              <div style={{ padding: 24, textAlign: 'center' }}>
+                <Bell size={24} color="rgba(255,255,255,0.2)" style={{ marginBottom: 8 }} />
+                <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)' }}>No notifications</div>
+              </div>
+            ) : (
+              notifications.slice(0, 10).map(n => (
+                <div
+                  key={n.id}
+                  style={{
+                    padding: '10px 14px',
+                    borderBottom: '1px solid rgba(255,255,255,0.04)',
+                    cursor: 'pointer',
+                    background: n.read ? 'transparent' : 'rgba(59, 130, 246, 0.05)',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                    {!n.read && <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#3b82f6', marginTop: 5, flexShrink: 0 }} />}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: 'white', marginBottom: 2 }}>{n.title}</div>
+                      <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{n.body}</div>
+                    </div>
+                    <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.3)', flexShrink: 0 }}>{formatNotificationTime(n.timestamp)}</span>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Floating card */}
       <div
@@ -567,9 +903,15 @@ export function InGameOverlay() {
           </div>
         </div>
       </div>
+
+      {/* Controller Overlay Flyout */}
+      <ControllerOverlayFlyout 
+        visible={showControllerFlyout} 
+        onClose={() => setShowControllerFlyout(false)}
+        position="right"
+      />
     </div>
   )
 }
 
 export default InGameOverlay
-
