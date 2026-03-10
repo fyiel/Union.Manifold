@@ -240,6 +240,9 @@ contextBridge.exposeInMainWorld('ucSystem', {
   // Screenshot
   takeScreenshot: () => ipcRenderer.invoke('uc:system-screenshot'),
   getScreenshotPath: () => ipcRenderer.invoke('uc:system-screenshot-path'),
+  listScreenshots: () => ipcRenderer.invoke('uc:system-list-screenshots'),
+  deleteScreenshot: (filePath) => ipcRenderer.invoke('uc:system-delete-screenshot', filePath),
+  openScreenshot: (filePath) => ipcRenderer.invoke('uc:system-open-screenshot', filePath),
   // Notifications
   getNotifications: () => ipcRenderer.invoke('uc:system-notifications'),
   onNotificationActivated: (callback) => {
