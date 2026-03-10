@@ -242,7 +242,6 @@ export function ScreenshotsPage() {
               className="text-white/50 hover:text-red-400 transition-colors ml-1"
               title="Delete screenshot"
               onClick={() => {
-                setLightboxIndex(null)
                 setDeleteConfirm(lightboxScreenshot.path)
               }}
             >
