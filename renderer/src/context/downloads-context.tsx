@@ -4,8 +4,8 @@ import {
   fetchDownloadLinks,
   inferFilenameFromUrl,
   getPreferredDownloadHost,
-  isPixeldrainUrl,
-  isRootzUrl,
+  isUCFilesUrl,
+  isVikingFileUrl,
   requestDownloadToken,
   resolveDownloadUrl,
   resolveDownloadSize,
@@ -22,6 +22,8 @@ export type DownloadStatus =
   | "queued"
   | "downloading"
   | "paused"
+  | "verifying"
+  | "retrying"
   | "extracting"
   | "installing"
   | "completed"
@@ -335,7 +337,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
           await Promise.all(
             batch.map(async (entry) => {
               try {
-                const size = await resolveDownloadSize(host, entry.url)
+                const size = await resolveDownloadSize(entry.url)
                 if (size && size > 0) {
                   sizeMap.set(entry.id, size)
                 }
@@ -344,14 +346,14 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
               }
             })
           )
-          if (host === "rootz") {
+          if (host === "vikingfile") {
             await new Promise((resolve) => setTimeout(resolve, 500))
           }
         }
         return sizeMap
       }
 
-      if (host === "rootz") {
+      if (host === "vikingfile") {
         setTimeout(() => {
           void (async () => {
             const [first, ...rest] = queue
@@ -519,7 +521,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
           filename: update.filename ?? existing.filename,
           savePath: update.savePath ?? existing.savePath,
           url: update.url ?? existing.url,
-          error: update.error ?? existing.error,
+          error: update.error !== undefined ? update.error : (finalStatus === "downloading" ? null : existing.error),
           partIndex: update.partIndex ?? existing.partIndex,
           partTotal: update.partTotal ?? existing.partTotal,
           resumeData: update.resumeData ?? existing.resumeData,
@@ -650,10 +652,10 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         // Accept redirect URLs (may be signed Rootz URLs)
         const redirectUrl = linksResult.redirectUrl
         links = [{ url: redirectUrl, part: null }]
-        if (isPixeldrainUrl(redirectUrl)) {
-          selectedHost = "pixeldrain"
-        } else if (isRootzUrl(redirectUrl)) {
-          selectedHost = "rootz"
+        if (isUCFilesUrl(redirectUrl)) {
+          selectedHost = "ucfiles"
+        } else if (isVikingFileUrl(redirectUrl)) {
+          selectedHost = "vikingfile"
         } else {
           selectedHost = preferredHost
         }
@@ -944,6 +946,18 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
               if (resumeRes && typeof resumeRes === "object" && resumeRes.ok) {
                 resumedFromDisk = true
                 ok = true
+              } else if (resumeRes && typeof resumeRes === "object" && resumeRes.error === "file-already-complete") {
+                // File on disk is already the full expected size — skip straight to completed.
+                downloadLogger.info("Resume Level 3: file already complete, marking done")
+                resumedFromDisk = true
+                ok = true
+                setDownloads((prev) =>
+                  prev.map((item) =>
+                    item.id === downloadId
+                      ? { ...item, status: "completed" as DownloadStatus, receivedBytes: item.totalBytes }
+                      : item
+                  )
+                )
               }
             } catch (e) {
               downloadLogger.warn("Resume Level 3 resumeWithFreshUrl failed, falling back to fresh start", { data: e })

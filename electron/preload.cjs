@@ -194,7 +194,57 @@ contextBridge.exposeInMainWorld('ucOverlay', {
 
 // Controller Support API
 contextBridge.exposeInMainWorld('ucController', {
+  // Basic settings
   getSettings: () => ipcRenderer.invoke('uc:controller-get-settings'),
   setSettings: (settings) => ipcRenderer.invoke('uc:controller-set-settings', settings),
-  getConnected: () => ipcRenderer.invoke('uc:controller-get-connected')
+  getConnected: () => ipcRenderer.invoke('uc:controller-get-connected'),
+  // Input translation (x360ce-style)
+  getMappingPresets: () => ipcRenderer.invoke('uc:controller-get-mapping-presets'),
+  getActiveMapping: () => ipcRenderer.invoke('uc:controller-get-active-mapping'),
+  setActiveMapping: (preset, customMapping) => ipcRenderer.invoke('uc:controller-set-active-mapping', preset, customMapping),
+  // Key binding (antimicrox-style)
+  getProfiles: () => ipcRenderer.invoke('uc:controller-get-profiles'),
+  getActiveProfile: () => ipcRenderer.invoke('uc:controller-get-active-profile'),
+  setActiveProfile: (profileId) => ipcRenderer.invoke('uc:controller-set-active-profile', profileId),
+  createProfile: (profile) => ipcRenderer.invoke('uc:controller-create-profile', profile),
+  updateProfile: (profile) => ipcRenderer.invoke('uc:controller-update-profile', profile),
+  deleteProfile: (profileId) => ipcRenderer.invoke('uc:controller-delete-profile', profileId),
+  // Input events
+  onControllerConnected: (callback) => {
+    const listener = (_event, data) => callback(data)
+    ipcRenderer.on('uc:controller-connected', listener)
+    return () => ipcRenderer.removeListener('uc:controller-connected', listener)
+  },
+  onControllerDisconnected: (callback) => {
+    const listener = (_event, data) => callback(data)
+    ipcRenderer.on('uc:controller-disconnected', listener)
+    return () => ipcRenderer.removeListener('uc:controller-disconnected', listener)
+  },
+  onControllerInput: (callback) => {
+    const listener = (_event, data) => callback(data)
+    ipcRenderer.on('uc:controller-input', listener)
+    return () => ipcRenderer.removeListener('uc:controller-input', listener)
+  },
+  // Overlay-specific
+  getOverlaySettings: () => ipcRenderer.invoke('uc:controller-get-overlay-settings'),
+  setOverlaySettings: (settings) => ipcRenderer.invoke('uc:controller-set-overlay-settings', settings),
+})
+
+// System Notifications API
+contextBridge.exposeInMainWorld('ucSystem', {
+  // Volume control
+  getVolume: () => ipcRenderer.invoke('uc:system-get-volume'),
+  setVolume: (level) => ipcRenderer.invoke('uc:system-set-volume', level),
+  getMuted: () => ipcRenderer.invoke('uc:system-get-muted'),
+  setMuted: (muted) => ipcRenderer.invoke('uc:system-set-muted', muted),
+  // Screenshot
+  takeScreenshot: () => ipcRenderer.invoke('uc:system-screenshot'),
+  getScreenshotPath: () => ipcRenderer.invoke('uc:system-screenshot-path'),
+  // Notifications
+  getNotifications: () => ipcRenderer.invoke('uc:system-notifications'),
+  onNotificationActivated: (callback) => {
+    const listener = (_event, data) => callback(data)
+    ipcRenderer.on('uc:system-notification-activated', listener)
+    return () => ipcRenderer.removeListener('uc:system-notification-activated', listener)
+  }
 })
