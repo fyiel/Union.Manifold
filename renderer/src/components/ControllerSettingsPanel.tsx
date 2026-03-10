@@ -128,7 +128,8 @@ export function ControllerSettingsPanel() {
     await deleteProfile(profileId)
   }
 
-  const handleDuplicateProfile = async (profile: ControllerProfile) => {
+  const handleDuplicateProfile = async (profile: ControllerProfile | null) => {
+    if (!profile) return
     const duplicated: ControllerProfile = {
       ...profile,
       id: `profile_${Date.now()}`,
@@ -465,7 +466,8 @@ export function ControllerSettingsPanel() {
                   <Button 
                     variant="outline" 
                     size="icon"
-                    onClick={() => handleDuplicateProfile(activeProfile!)}
+                    onClick={() => handleDuplicateProfile(activeProfile)}
+                    disabled={!activeProfile}
                     title="Duplicate profile"
                   >
                     <Copy size={16} />

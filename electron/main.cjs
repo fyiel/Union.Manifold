@@ -7966,218 +7966,6 @@ ipcMain.handle('uc:controller-set-overlay-settings', (_event, overlaySettings) =
 
 // END Controller IPC Handlers
 
-// IPC: Get mapping presets (x360ce-style)
-ipcMain.handle('uc:controller-get-mapping-presets', () => {
-  try {
-    const settings = readSettings()
-    const presets = settings?.controllerMappingPresets || [
-      { id: 'generic', name: 'Generic Controller' },
-      { id: 'xbox', name: 'Xbox Controller' },
-      { id: 'playstation', name: 'PlayStation Controller' },
-      { id: 'dualsense', name: 'DualSense (PS5)' },
-      { id: 'dualshock4', name: 'DualShock 4 (PS4)' },
-      { id: 'xboxone', name: 'Xbox One' },
-      { id: 'xboxseries', name: 'Xbox Series X' },
-    ]
-    return { ok: true, presets }
-  } catch (err) {
-    return { ok: false, presets: [], error: err.message }
-  }
-})
-
-// IPC: Get active mapping
-ipcMain.handle('uc:controller-get-active-mapping', () => {
-  try {
-    const settings = readSettings()
-    return { 
-      ok: true, 
-      mapping: settings?.controllerActiveMapping || { preset: 'auto', customMapping: null } 
-    }
-  } catch (err) {
-    return { ok: false, error: err.message }
-  }
-})
-
-// IPC: Set active mapping
-ipcMain.handle('uc:controller-set-active-mapping', (_event, preset, customMapping) => {
-  try {
-    const settings = readSettings()
-    settings.controllerActiveMapping = { preset, customMapping }
-    writeSettings(settings)
-    return { ok: true }
-  } catch (err) {
-    return { ok: false, error: err.message }
-  }
-})
-
-// IPC: Get profiles (key binding profiles - antimicrox-style)
-ipcMain.handle('uc:controller-get-profiles', () => {
-  try {
-    const settings = readSettings()
-    const profiles = settings?.controllerProfiles || [
-      {
-        id: 'default',
-        name: 'Default',
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-        mappingEnabled: true,
-        keyBindingEnabled: false,
-        deadzone: 0.15,
-        triggerDeadzone: 0.1,
-        vibrationEnabled: true,
-        vibrationIntensity: 1.0,
-        keyBinding: {
-          id: 'default',
-          name: 'Default',
-          profileName: 'Default',
-          enabled: true,
-          buttonMappings: {},
-          stickToMouse: { leftStick: false, rightStick: false, mouseSpeed: 1.0, mouseAcceleration: false },
-          triggerToScroll: { leftTrigger: false, rightTrigger: false, scrollSpeed: 1.0 },
-        }
-      }
-    ]
-    return { ok: true, profiles }
-  } catch (err) {
-    return { ok: false, profiles: [], error: err.message }
-  }
-})
-
-// IPC: Get active profile
-ipcMain.handle('uc:controller-get-active-profile', () => {
-  try {
-    const settings = readSettings()
-    const profiles = settings?.controllerProfiles || []
-    const activeId = settings?.controllerActiveProfileId || 'default'
-    const activeProfile = profiles.find(p => p.id === activeId) || profiles[0] || null
-    return { ok: true, profile: activeProfile }
-  } catch (err) {
-    return { ok: false, error: err.message }
-  }
-})
-
-// IPC: Set active profile
-ipcMain.handle('uc:controller-set-active-profile', (_event, profileId) => {
-  try {
-    const settings = readSettings()
-    settings.controllerActiveProfileId = profileId
-    writeSettings(settings)
-    return { ok: true }
-  } catch (err) {
-    return { ok: false, error: err.message }
-  }
-})
-
-// IPC: Create profile
-ipcMain.handle('uc:controller-create-profile', (_event, profile) => {
-  try {
-    const settings = readSettings()
-    const profiles = settings?.controllerProfiles || []
-    profiles.push({
-      ...profile,
-      id: profile.id || `profile_${Date.now()}`,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    })
-    settings.controllerProfiles = profiles
-    writeSettings(settings)
-    return { ok: true, profile }
-  } catch (err) {
-    return { ok: false, error: err.message }
-  }
-})
-
-// IPC: Update profile
-ipcMain.handle('uc:controller-update-profile', (_event, profile) => {
-  try {
-    const settings = readSettings()
-    const profiles = settings?.controllerProfiles || []
-    const idx = profiles.findIndex(p => p.id === profile.id)
-    if (idx >= 0) {
-      profiles[idx] = { ...profile, updatedAt: Date.now() }
-      settings.controllerProfiles = profiles
-      writeSettings(settings)
-      return { ok: true }
-    }
-    return { ok: false, error: 'Profile not found' }
-  } catch (err) {
-    return { ok: false, error: err.message }
-  }
-})
-
-// IPC: Delete profile
-ipcMain.handle('uc:controller-delete-profile', (_event, profileId) => {
-  try {
-    const settings = readSettings()
-    let profiles = settings?.controllerProfiles || []
-    profiles = profiles.filter(p => p.id !== profileId)
-    // Ensure at least one profile exists
-    if (profiles.length === 0) {
-      profiles.push({
-        id: 'default',
-        name: 'Default',
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-        mappingEnabled: true,
-        keyBindingEnabled: false,
-        deadzone: 0.15,
-        triggerDeadzone: 0.1,
-        vibrationEnabled: true,
-        vibrationIntensity: 1.0,
-        keyBinding: {
-          id: 'default',
-          name: 'Default',
-          profileName: 'Default',
-          enabled: true,
-          buttonMappings: {},
-          stickToMouse: { leftStick: false, rightStick: false, mouseSpeed: 1.0, mouseAcceleration: false },
-          triggerToScroll: { leftTrigger: false, rightTrigger: false, scrollSpeed: 1.0 },
-        }
-      })
-    }
-    settings.controllerProfiles = profiles
-    // If deleted profile was active, switch to first available
-    if (settings.controllerActiveProfileId === profileId) {
-      settings.controllerActiveProfileId = profiles[0].id
-    }
-    writeSettings(settings)
-    return { ok: true }
-  } catch (err) {
-    return { ok: false, error: err.message }
-  }
-})
-
-// IPC: Get controller overlay settings
-ipcMain.handle('uc:controller-get-overlay-settings', () => {
-  try {
-    const settings = readSettings()
-    return {
-      ok: true,
-      settings: {
-        overlayEnabled: settings?.controllerOverlayEnabled ?? true,
-        overlayHotkey: settings?.controllerOverlayHotkey || 'Ctrl+Shift+Gamepad',
-        overlayPosition: settings?.controllerOverlayPosition || 'right',
-      }
-    }
-  } catch (err) {
-    return { ok: false, error: err.message }
-  }
-})
-
-// IPC: Set controller overlay settings
-ipcMain.handle('uc:controller-set-overlay-settings', (_event, overlaySettings) => {
-  try {
-    const settings = readSettings()
-    settings.controllerOverlayEnabled = overlaySettings.overlayEnabled
-    settings.controllerOverlayHotkey = overlaySettings.overlayHotkey
-    settings.controllerOverlayPosition = overlaySettings.overlayPosition
-    writeSettings(settings)
-    return { ok: true }
-  } catch (err) {
-    return { ok: false, error: err.message }
-  }
-})
-
 // ============================================================
 // System Functions (Volume, Screenshot, Notifications)
 // ============================================================
@@ -8188,9 +7976,10 @@ ipcMain.handle('uc:system-get-volume', async () => {
     if (process.platform === 'win32') {
       const { exec } = require('child_process')
       return new Promise((resolve) => {
-        exec('powershell -Command "(Get-AudioDevice -PlaybackVolume).Volume*100"', (err, stdout) => {
+        // Use Windows Core Audio API (no external module required)
+        exec('powershell -Command "Add-Type -TypeDefinition @\"using System;using System.Runtime.InteropServices;[Guid(\"A95664D2-9614-4F35-A746-DE8DB63617E6\"),InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]interface IMMDeviceEnumerator{int NotImpl1();int GetDefaultAudioEndpoint(int dataFlow,int role,out IMMDevice endpoint);}[Guid(\"D666063F-1587-4E43-81F1-B948E807363F\"),InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]interface IMMDevice{int Activate(ref Guid id,int clsCtx,IntPtr activationParams,out IAudioEndpointVolume aev);}[Guid(\"5CDF2C82-841E-4546-9722-0CF74078229A\"),InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]interface IAudioEndpointVolume{int NotImpl1();int GetMasterVolumeLevel(out float level);}$Enumerator=[Activator]::CreateInstance([Type]::GetTypeFromCLSID([GUID]::Parse(\"{BCDE0395-E52F-467C-8E3D-C4579291692E}\")));$Device=$null;$Enumerator.GetDefaultAudioEndpoint(0,1,[ref]$Device);$Volume=[IntPtr]::Zero;$Device.Activate([ref][GUID]::Parse(\"{5CDF2C82-841E-4546-9722-0CF74078229A}\"),1,[IntPtr]::Zero,[ref]$Volume);$VolumeObj=[System.Runtime.InteropServices.Marshal]::GetObjectForIUnknown($Volume);$Level=0;$VolumeObj.GetMasterVolumeLevel([ref]$Level);[Math]::Round($Level*100)\""', (err, stdout) => {
           if (err || !stdout) {
-            resolve({ ok: true, volume: 50 })
+            resolve({ ok: false, volume: 50, error: 'Failed to get volume' })
             return
           }
           const vol = parseInt(stdout.trim(), 10)
@@ -8198,10 +7987,10 @@ ipcMain.handle('uc:system-get-volume', async () => {
         })
       })
     }
-    return { ok: true, volume: 50 }
+    return { ok: false, error: 'not-supported' }
   } catch (err) {
     ucLog(`System get volume failed: ${err.message}`, 'error')
-    return { ok: true, volume: 50 }
+    return { ok: false, error: err.message, volume: 50 }
   }
 })
 
@@ -8211,7 +8000,8 @@ ipcMain.handle('uc:system-set-volume', async (_event, level) => {
     if (process.platform === 'win32') {
       const vol = Math.max(0, Math.min(100, parseInt(level, 10) || 50))
       const { exec } = require('child_process')
-      exec(`powershell -Command "(Get-AudioDevice -PlaybackVolume).Volume = ${vol / 100}"`, (err) => {
+      // Use Windows Core Audio API (no external module required)
+      exec(`powershell -Command "Add-Type -TypeDefinition @\"using System;using System.Runtime.InteropServices;[Guid(\"A95664D2-9614-4F35-A746-DE8DB63617E6\"),InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]interface IMMDeviceEnumerator{int NotImpl1();int GetDefaultAudioEndpoint(int dataFlow,int role,out IMMDevice endpoint);}[Guid(\"D666063F-1587-4E43-81F1-B948E807363F\"),InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]interface IMMDevice{int Activate(ref Guid id,int clsCtx,IntPtr activationParams,out IAudioEndpointVolume aev);}[Guid(\"5CDF2C82-841E-4546-9722-0CF74078229A\"),InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]interface IAudioEndpointVolume{int NotImpl1();int SetMasterVolumeLevel(float level,ref Guid eventContext);}$Enumerator=[Activator]::CreateInstance([Type]::GetTypeFromCLSID([GUID]::Parse(\"{BCDE0395-E52F-467C-8E3D-C4579291692E}\")));$Device=$null;$Enumerator.GetDefaultAudioEndpoint(0,1,[ref]$Device);$Volume=[IntPtr]::Zero;$Device.Activate([ref][GUID]::Parse(\"{5CDF2C82-841E-4546-9722-0CF74078229A}\"),1,[IntPtr]::Zero,[ref]$Volume);$VolumeObj=[System.Runtime.InteropServices.Marshal]::GetObjectForIUnknown($Volume);$VolumeObj.SetMasterVolumeLevel(${vol}/100,[ref][GUID]::Empty)\"`, (err) => {
         if (err) ucLog(`System set volume failed: ${err.message}`, 'error')
       })
       return { ok: true }
@@ -8229,9 +8019,10 @@ ipcMain.handle('uc:system-get-muted', async () => {
     if (process.platform === 'win32') {
       const { exec } = require('child_process')
       return new Promise((resolve) => {
-        exec('powershell -Command "(Get-AudioDevice -PlaybackMute).Mute"', (err, stdout) => {
+        // Use Windows Core Audio API (no external module required)
+        exec('powershell -Command "Add-Type -TypeDefinition @\"using System;using System.Runtime.InteropServices;[Guid(\"A95664D2-9614-4F35-A746-DE8DB63617E6\"),InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]interface IMMDeviceEnumerator{int NotImpl1();int GetDefaultAudioEndpoint(int dataFlow,int role,out IMMDevice endpoint);}[Guid(\"D666063F-1587-4E43-81F1-B948E807363F\"),InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]interface IMMDevice{int Activate(ref Guid id,int clsCtx,IntPtr activationParams,out IAudioEndpointVolume aev);}[Guid(\"5CDF2C82-841E-4546-9722-0CF74078229A\"),InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]interface IAudioEndpointVolume{int NotImpl1();int GetMute(out bool mute);}$Enumerator=[Activator]::CreateInstance([Type]::GetTypeFromCLSID([GUID]::Parse(\"{BCDE0395-E52F-467C-8E3D-C4579291692E}\")));$Device=$null;$Enumerator.GetDefaultAudioEndpoint(0,1,[ref]$Device);$Volume=[IntPtr]::Zero;$Device.Activate([ref][GUID]::Parse(\"{5CDF2C82-841E-4546-9722-0CF74078229A}\"),1,[IntPtr]::Zero,[ref]$Volume);$VolumeObj=[System.Runtime.InteropServices.Marshal]::GetObjectForIUnknown($Volume);$Muted=$false;$VolumeObj.GetMute([ref]$Muted);$Muted\"', (err, stdout) => {
           if (err || !stdout) {
-            resolve({ ok: true, muted: false })
+            resolve({ ok: false, muted: false, error: 'Failed to get mute state' })
             return
           }
           const muted = stdout.trim().toLowerCase() === 'true'
@@ -8239,10 +8030,10 @@ ipcMain.handle('uc:system-get-muted', async () => {
         })
       })
     }
-    return { ok: true, muted: false }
+    return { ok: false, error: 'not-supported' }
   } catch (err) {
     ucLog(`System get muted failed: ${err.message}`, 'error')
-    return { ok: true, muted: false }
+    return { ok: false, error: err.message, muted: false }
   }
 })
 
@@ -8251,8 +8042,9 @@ ipcMain.handle('uc:system-set-muted', async (_event, muted) => {
   try {
     if (process.platform === 'win32') {
       const { exec } = require('child_process')
-      const muteVal = muted ? 'True' : 'False'
-      exec(`powershell -Command "(Get-AudioDevice -PlaybackMute).Mute = ${muteVal}"`, (err) => {
+      const muteVal = muted ? '$true' : '$false'
+      // Use Windows Core Audio API (no external module required)
+      exec(`powershell -Command "Add-Type -TypeDefinition @\"using System;using System.Runtime.InteropServices;[Guid(\"A95664D2-9614-4F35-A746-DE8DB63617E6\"),InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]interface IMMDeviceEnumerator{int NotImpl1();int GetDefaultAudioEndpoint(int dataFlow,int role,out IMMDevice endpoint);}[Guid(\"D666063F-1587-4E43-81F1-B948E807363F\"),InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]interface IMMDevice{int Activate(ref Guid id,int clsCtx,IntPtr activationParams,out IAudioEndpointVolume aev);}[Guid(\"5CDF2C82-841E-4546-9722-0CF74078229A\"),InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]interface IAudioEndpointVolume{int NotImpl1();int SetMute(bool mute,ref Guid eventContext);}$Enumerator=[Activator]::CreateInstance([Type]::GetTypeFromCLSID([GUID]::Parse(\"{BCDE0395-E52F-467C-8E3D-C4579291692E}\")));$Device=$null;$Enumerator.GetDefaultAudioEndpoint(0,1,[ref]$Device);$Volume=[IntPtr]::Zero;$Device.Activate([ref][GUID]::Parse(\"{5CDF2C82-841E-4546-9722-0CF74078229A}\"),1,[IntPtr]::Zero,[ref]$Volume);$VolumeObj=[System.Runtime.InteropServices.Marshal]::GetObjectForIUnknown($Volume);$VolumeObj.SetMute(${muteVal},[ref][GUID]::Empty)\"`, (err) => {
         if (err) ucLog(`System set muted failed: ${err.message}`, 'error')
       })
       return { ok: true }

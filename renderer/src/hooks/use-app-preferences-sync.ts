@@ -29,7 +29,7 @@ function normalizePreferences(input: unknown): AppPreferences {
   const prefs: AppPreferences = {}
 
   const mirrorHost = record.defaultMirrorHost
-  if (mirrorHost === "pixeldrain" || mirrorHost === "rootz") {
+  if (mirrorHost === "pixeldrain") {
     prefs.defaultMirrorHost = mirrorHost
   }
 
