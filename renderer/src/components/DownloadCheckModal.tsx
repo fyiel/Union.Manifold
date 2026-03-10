@@ -30,9 +30,7 @@ type HostOption = {
 
 const HOST_OPTIONS: HostOption[] = [
   { key: "ucfiles", label: "UC.Files", supportsResume: true },
-  { key: "pixeldrain", label: "Pixeldrain", tag: "retiring", supportsResume: true },
-  { key: "fileq", label: "FileQ", tag: "retiring", supportsResume: false },
-  { key: "rootz", label: "Rootz", tag: "retiring", supportsResume: false },
+  { key: "vikingfile", label: "VikingFile", supportsResume: true },
 ]
 
 function hostLabel(key: string): string {
@@ -153,7 +151,6 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, onC
     if (phase !== "unavailable" || !availability || !game || reportSentRef.current) return
     const deadLines: string[] = []
     for (const [h, hostData] of Object.entries(availability.hosts)) {
-      if (h.toLowerCase().includes('rootz')) continue
       const deadParts = hostData.parts.filter((p) => p.status === 'dead')
       if (deadParts.length === 0) continue
       deadLines.push(`${h}: all ${hostData.totalParts} parts dead`)
@@ -518,11 +515,10 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, onC
               <Button
                 disabled={(hasDeadParts && !allPartsHandled) || !currentHostAvail || currentHostAvail.totalParts === 0}
                 onClick={() => {
-                  // Auto-report dead links (excluding rootz) on download confirm
-                  if (!reportSentRef.current && availability && selectedHost !== 'rootz') {
+                  // Auto-report dead links on download confirm
+                  if (!reportSentRef.current && availability && selectedHost !== 'vikingfile') {
                     const deadLines: string[] = []
                     for (const [h, hostData] of Object.entries(availability.hosts)) {
-                      if (h.toLowerCase().includes('rootz')) continue
                       const deadParts = hostData.parts.filter((p) => p.status === 'dead')
                       if (deadParts.length === 0) continue
                       if (deadParts.length === hostData.totalParts) {

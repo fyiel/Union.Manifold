@@ -211,7 +211,7 @@ declare global {
       }
     }
     ucLinux?: {
-      detectProton: () => Promise<{ ok: boolean; versions: Array<{ label: string; path: string }>; error?: string }>
+      detectProton: () => Promise<{ ok: boolean; versions: Array<{ label: string; path: string }>; autoApplied?: boolean; appliedVersion?: { label: string; path: string }; error?: string }>
       detectWine: () => Promise<{ ok: boolean; versions: Array<{ label: string; path: string }>; error?: string }>
       runWinecfg: () => Promise<{ ok: boolean; pid?: number; error?: string }>
       runWinetricks: (packages?: string[]) => Promise<{ ok: boolean; pid?: number; error?: string }>

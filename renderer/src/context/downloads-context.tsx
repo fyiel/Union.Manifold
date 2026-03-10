@@ -4,8 +4,8 @@ import {
   fetchDownloadLinks,
   inferFilenameFromUrl,
   getPreferredDownloadHost,
-  isPixeldrainUrl,
-  isRootzUrl,
+  isUCFilesUrl,
+  isVikingFileUrl,
   requestDownloadToken,
   resolveDownloadUrl,
   resolveDownloadSize,
@@ -337,7 +337,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
           await Promise.all(
             batch.map(async (entry) => {
               try {
-                const size = await resolveDownloadSize(host, entry.url)
+                const size = await resolveDownloadSize(entry.url)
                 if (size && size > 0) {
                   sizeMap.set(entry.id, size)
                 }
@@ -346,14 +346,14 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
               }
             })
           )
-          if (host === "rootz") {
+          if (host === "vikingfile") {
             await new Promise((resolve) => setTimeout(resolve, 500))
           }
         }
         return sizeMap
       }
 
-      if (host === "rootz") {
+      if (host === "vikingfile") {
         setTimeout(() => {
           void (async () => {
             const [first, ...rest] = queue
@@ -652,10 +652,10 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         // Accept redirect URLs (may be signed Rootz URLs)
         const redirectUrl = linksResult.redirectUrl
         links = [{ url: redirectUrl, part: null }]
-        if (isPixeldrainUrl(redirectUrl)) {
-          selectedHost = "pixeldrain"
-        } else if (isRootzUrl(redirectUrl)) {
-          selectedHost = "rootz"
+        if (isUCFilesUrl(redirectUrl)) {
+          selectedHost = "ucfiles"
+        } else if (isVikingFileUrl(redirectUrl)) {
+          selectedHost = "vikingfile"
         } else {
           selectedHost = preferredHost
         }

@@ -87,10 +87,10 @@ export function useOverlay() {
     })
 
     const unsubStateChanged = overlay.onStateChanged((data) => {
-      setStatus(prev => ({ 
-        ...prev, 
-        visible: data.visible, 
-        currentAppid: data.appid 
+      setStatus(prev => ({
+        ...prev,
+        visible: data.visible,
+        currentAppid: data.appid
       }))
     })
 
