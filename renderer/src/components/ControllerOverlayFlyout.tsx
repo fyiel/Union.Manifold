@@ -127,6 +127,7 @@ export function ControllerOverlayFlyout({ visible, onClose, position = 'right' }
         transition: 'opacity 0.2s ease, transform 0.2s ease',
         pointerEvents: visible ? 'auto' : 'none',
       }}
+      onClick={e => e.stopPropagation()}
     >
       <div
         style={{

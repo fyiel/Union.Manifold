@@ -499,6 +499,7 @@ export function InGameOverlay() {
           opacity: animated ? 1 : 0,
           transition: 'opacity 0.18s ease',
         }}
+        onClick={e => e.stopPropagation()}
       >
         <div style={{
           background: 'rgba(13, 13, 21, 0.85)',
@@ -529,6 +530,7 @@ export function InGameOverlay() {
           opacity: animated ? 1 : 0,
           transition: 'opacity 0.18s ease',
         }}
+        onClick={e => e.stopPropagation()}
       >
         {/* Screenshot Button */}
         <button
