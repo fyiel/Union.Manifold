@@ -1,5 +1,5 @@
 /**
- * WndProc Hook — subclasses the game window to intercept input when the overlay is visible.
+ * WndProc Hook - subclasses the game window to intercept input when the overlay is visible.
  * When visible: consumes WM_KEY*, WM_CHAR, WM_MOUSE* and forwards them to Electron via pipe.
  * When hidden: passes all messages through to the original WndProc.
  */
@@ -61,7 +61,7 @@ static LRESULT CALLBACK hooked_WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
         return CallWindowProcW(g_origWndProc, hwnd, msg, wParam, lParam);
     }
 
-    // Overlay is visible — intercept input messages
+    // Overlay is visible - intercept input messages
     bool ctrl  = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
     bool shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
     bool alt   = (GetKeyState(VK_MENU) & 0x8000) != 0;

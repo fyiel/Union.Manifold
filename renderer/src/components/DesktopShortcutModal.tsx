@@ -13,14 +13,14 @@ type DesktopShortcutModalProps = {
 export function DesktopShortcutModal({ open, gameName, onCreateShortcut, onSkip, onClose }: DesktopShortcutModalProps) {
   return (
     <Dialog open={open} onOpenChange={(isOpen) => !isOpen && onClose()}>
-      <DialogContent className="sm:max-w-md rounded-2xl border-border/60 bg-card/95 shadow-2xl">
+      <DialogContent className="sm:max-w-md rounded-2xl border-white/[.07] bg-zinc-900/95 shadow-2xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <ExternalLink className="h-5 w-5 text-primary" />
+            <ExternalLink className="h-5 w-5 text-white" />
             Create Desktop Shortcut?
           </DialogTitle>
           <DialogDescription className="text-left pt-2">
-            Would you like to create a desktop shortcut for <span className="font-semibold text-foreground">{gameName}</span>? This will allow you to launch the game directly from your desktop.
+            Would you like to create a desktop shortcut for <span className="font-semibold text-zinc-100">{gameName}</span>? This will allow you to launch the game directly from your desktop.
           </DialogDescription>
         </DialogHeader>
         <DialogFooter className="flex-row gap-2 sm:justify-end">
@@ -42,3 +42,4 @@ export function DesktopShortcutModal({ open, gameName, onCreateShortcut, onSkip,
     </Dialog>
   )
 }
+

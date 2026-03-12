@@ -8,13 +8,12 @@ import { GameComments } from "@/components/GameComments"
 import { useDownloads } from "@/context/downloads-context"
 import { apiUrl, apiFetch } from "@/lib/api"
 import { getPreferredDownloadHost, setPreferredDownloadHost, requestDownloadToken, type PreferredDownloadHost, type DownloadConfig } from "@/lib/downloads"
-import { formatNumber, hasOnlineMode, pickGameExecutable, proxyImageUrl, cn, generateErrorCode, ErrorTypes } from "@/lib/utils"
+import { formatNumber, hasOnlineMode, pickGameExecutable, proxyImageUrl, cn } from "@/lib/utils"
 import type { Game } from "@/lib/types"
 import { useGamesData } from "@/hooks/use-games"
 import { addViewedGameToHistory, hasCookieConsent } from "@/lib/user-history"
 import { useOnlineStatus } from "@/hooks/use-online-status"
 import { OfflineBanner } from "@/components/OfflineBanner"
-import { RateLimitError } from "@/components/RateLimitError"
 import {
   AlertTriangle,
   Calendar,
@@ -71,7 +70,6 @@ export function GameDetailPage() {
   const [game, setGame] = useState<Game | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [rateLimit, setRateLimit] = useState<{ message: string; code: string } | null>(null)
   const [downloadCount, setDownloadCount] = useState(0)
   const [viewCount, setViewCount] = useState(0)
   const [downloading, setDownloading] = useState(false)
@@ -120,14 +118,6 @@ export function GameDetailPage() {
 
   const appid = params.id || ""
 
-  const handleRateLimit = useCallback((context?: string) => {
-    const contextSuffix = context ? `:${context}` : ""
-    setRateLimit({
-      message: "Ye be firin' the cannons too fast, matey! Give it a moment and try again.",
-      code: generateErrorCode(ErrorTypes.GAME_FETCH, `game-detail${contextSuffix}`),
-    })
-  }, [])
-
   // Fetch ProtonDB summary for this game (proxied through the web API)
   useEffect(() => {
     if (!game?.appid) return
@@ -136,10 +126,6 @@ export function GameDetailPage() {
 
     apiFetch(`/api/protondb/${game.appid}`)
       .then(async (res) => {
-        if (res.status === 429) {
-          handleRateLimit("protondb")
-          return { success: false }
-        }
         if (!res.ok) return { success: false }
         return await res.json()
       })
@@ -155,7 +141,7 @@ export function GameDetailPage() {
       })
 
     return () => { cancelled = true }
-  }, [game?.appid, handleRateLimit])
+  }, [game?.appid])
 
   const persistGameName = (id: string, name?: string | null) => {
     if (!id || !name) return
@@ -171,17 +157,12 @@ export function GameDetailPage() {
       try {
         setLoading(true)
         setError(null)
-        setRateLimit(null)
 
-        // External games don't exist on the API — load directly from local manifest
+        // External games don't exist on the API - load directly from local manifest
         const isExternalId = appid.startsWith('external-')
 
         if (!isExternalId) {
           const response = await fetch(apiUrl(`/api/games/${encodeURIComponent(appid)}`))
-          if (response.status === 429) {
-            handleRateLimit("game")
-            return
-          }
           if (!response.ok) {
             throw new Error(`Unable to load game (${response.status})`)
           }
@@ -225,7 +206,7 @@ export function GameDetailPage() {
     if (appid) {
       load()
     }
-  }, [appid, handleRateLimit])
+  }, [appid])
 
   useEffect(() => {
     if (!appid) return
@@ -287,19 +268,11 @@ export function GameDetailPage() {
     const fetchCounts = async () => {
       try {
         const downloadsRes = await fetch(apiUrl(`/api/downloads/count/${encodeURIComponent(appid)}`))
-        if (downloadsRes.status === 429) {
-          handleRateLimit("downloads-count")
-          return
-        }
         if (downloadsRes.ok) {
           const data = await downloadsRes.json()
           if (data.success) setDownloadCount(data.downloads || 0)
         }
         const viewsRes = await fetch(apiUrl(`/api/views/${encodeURIComponent(appid)}`))
-        if (viewsRes.status === 429) {
-          handleRateLimit("views-count")
-          return
-        }
         if (viewsRes.ok) {
           const data = await viewsRes.json()
           if (data.success) setViewCount(data.viewCount || 0)
@@ -310,7 +283,7 @@ export function GameDetailPage() {
     }
 
     fetchCounts()
-  }, [appid, handleRateLimit])
+  }, [appid])
 
   useEffect(() => {
     if (!appid) return
@@ -322,10 +295,6 @@ export function GameDetailPage() {
           headers: { "Content-Type": "application/json" },
         })
         if (cancelled) return
-        if (res.status === 429) {
-          handleRateLimit("views-post")
-          return
-        }
         if (res.ok) {
           if (hasCookieConsent()) addViewedGameToHistory(appid)
         }
@@ -334,15 +303,11 @@ export function GameDetailPage() {
       }
 
       try {
-        const historyRes = await apiFetch("/api/view-history", {
+        await apiFetch("/api/view-history", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ appid }),
         })
-        if (cancelled) return
-        if (historyRes.status === 429) {
-          handleRateLimit("view-history")
-        }
       } catch {
         // ignore
       }
@@ -351,7 +316,7 @@ export function GameDetailPage() {
     return () => {
       cancelled = true
     }
-  }, [appid, handleRateLimit])
+  }, [appid])
 
   useEffect(() => {
     if (!appid || !window.ucDownloads?.getRunningGame) return
@@ -574,19 +539,9 @@ export function GameDetailPage() {
     return game.screenshots.map((shot, index) => localScreenshots[index] || shot)
   }, [game?.screenshots, localScreenshots])
 
-  if (rateLimit && isOnline) {
-    return (
-      <RateLimitError
-        message={rateLimit.message}
-        errorCode={rateLimit.code}
-        retry={() => window.location.reload()}
-      />
-    )
-  }
-
   if (loading) {
     return (
-      <div className="min-h-screen bg-background pb-12">
+      <div className="min-h-screen bg-[#09090b] pb-12">
         <GamePageSkeleton />
       </div>
     )
@@ -597,7 +552,7 @@ export function GameDetailPage() {
       return (
         <div className="space-y-4">
           <OfflineBanner variant="compact" />
-          <div className="rounded-2xl border border-muted/40 bg-muted/10 px-4 py-3 text-sm text-muted-foreground">
+          <div className="rounded-2xl border border-zinc-800 bg-zinc-900/50 px-4 py-3 text-sm text-zinc-400">
             This game isn't available offline. Check your Library for installed games.
           </div>
         </div>
@@ -1080,7 +1035,7 @@ export function GameDetailPage() {
                         PROTON_RANK_COLORS[protonData.rating?.toLowerCase()] || "text-sky-400 border-sky-500/30"
                       )}
                       onClick={() => window.open(protonData.url || `https://www.protondb.com/app/${game.appid}`, "_blank")}
-                      title="ProtonDB — Linux compatibility rating"
+                      title="ProtonDB - Linux compatibility rating"
                     >
                       <ShieldCheck className="h-3 w-3" />
                       Linux: {protonData.rating ? protonData.rating.charAt(0).toUpperCase() + protonData.rating.slice(1) : "Rated"}
@@ -1090,7 +1045,7 @@ export function GameDetailPage() {
                       variant="online"
                       className="px-3 py-1 rounded-full text-sky-400 border-sky-500/30 font-semibold flex items-center gap-1.5 backdrop-blur-md shadow-lg cursor-pointer transition-all hover:bg-black/80"
                       onClick={() => window.open("https://www.protondb.com/", "_blank")}
-                      title="ProtonDB — Linux compatibility rating not available"
+                      title="ProtonDB - Linux compatibility rating not available"
                     >
                       <ShieldCheck className="h-3 w-3" />
                       Linux: N/A
@@ -1099,7 +1054,7 @@ export function GameDetailPage() {
                 </div>
 
                 <div className="space-y-1">
-                  <h1 className="text-4xl md:text-6xl font-black text-white font-montserrat tracking-tight drop-shadow-lg">
+                  <h1 className="text-4xl md:text-6xl font-black text-white  tracking-tight drop-shadow-lg">
                     {game.name}
                   </h1>
                   <p className="text-lg text-white/80 flex items-center gap-2 font-medium drop-shadow-md">
@@ -1114,14 +1069,14 @@ export function GameDetailPage() {
         </div>
       </section>
 
-      {/* Version Switcher Tab Bar removed — single-version system */}
+      {/* Version Switcher Tab Bar removed - single-version system */}
 
       <section className="container mx-auto px-4 py-12">
         <div className="max-w-6xl mx-auto">
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             <div className="lg:col-span-2 space-y-8">
               <div className="p-8 rounded-2xl bg-black/40 border border-white/10 backdrop-blur-md shadow-xl">
-                <h2 className="text-2xl font-black text-white font-montserrat mb-4 tracking-tight">About This Game</h2>
+                <h2 className="text-2xl font-black text-white  mb-4 tracking-tight">About This Game</h2>
                 <p className="text-base text-gray-300 leading-relaxed whitespace-pre-wrap">
                   {game.description}
                 </p>
@@ -1133,7 +1088,7 @@ export function GameDetailPage() {
               {resolvedScreenshots.length > 0 && (
                 <div className="p-6 rounded-2xl bg-black/40 border border-white/10 backdrop-blur-md shadow-xl">
                   <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-xl font-black text-white font-montserrat">Screenshots</h3>
+                    <h3 className="text-xl font-black text-white ">Screenshots</h3>
                     <div className="flex items-center gap-2">
                       <span className="text-sm text-gray-400">{resolvedScreenshots.length} images</span>
                       <Button variant="outline" size="sm" className="h-8 px-2 border-white/20 bg-white/5 hover:bg-white/10 text-white" onClick={() => openLightbox(0)}>
@@ -1147,7 +1102,7 @@ export function GameDetailPage() {
                       <button
                         key={`${screenshot}-${index}`}
                         onClick={() => openLightbox(index)}
-                        className="relative w-full aspect-video rounded-lg overflow-hidden border border-white/10 hover:border-primary/50 hover:scale-[1.02] transition-transform shadow-md"
+                        className="relative w-full aspect-video rounded-lg overflow-hidden border border-white/10 hover:border-zinc-500 hover:scale-[1.02] transition-transform shadow-md"
                         aria-label={`Open screenshot ${index + 1}`}
                       >
                         <img
@@ -1162,12 +1117,12 @@ export function GameDetailPage() {
                     {resolvedScreenshots.length > 6 && (
                       <button
                         onClick={() => openLightbox(6)}
-                        className="relative col-span-2 sm:col-auto w-full aspect-video rounded-lg overflow-hidden border border-border/60 flex items-center justify-center bg-background/50"
+                        className="relative col-span-2 sm:col-auto w-full aspect-video rounded-lg overflow-hidden border border-zinc-800 flex items-center justify-center bg-zinc-900/50"
                         aria-label="View more screenshots"
                       >
                         <div className="text-center">
                           <div className="text-lg font-bold">+{resolvedScreenshots.length - 6}</div>
-                          <div className="text-sm text-muted-foreground">more</div>
+                          <div className="text-sm text-zinc-400">more</div>
                         </div>
                       </button>
                     )}
@@ -1177,13 +1132,13 @@ export function GameDetailPage() {
 
               {game?.dlc && game.dlc.length > 0 && (
                 <div className="p-8 rounded-2xl bg-black/40 border border-white/10 backdrop-blur-md shadow-xl">
-                  <h2 className="text-2xl font-black text-white font-montserrat mb-4 tracking-tight">
+                  <h2 className="text-2xl font-black text-white mb-4 tracking-tight">
                     Included DLC ({game.dlc.length})
                   </h2>
                   <ul className="space-y-2 max-h-[400px] overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-white/20 hover:scrollbar-thumb-white/40">
                     {game.dlc.map((dlc, index) => (
                       <li key={`${dlc}-${index}`} className="flex items-center gap-2 text-gray-300 bg-white/5 p-2 rounded-lg border border-white/5">
-                        <span className="h-1.5 w-1.5 rounded-full bg-primary flex-shrink-0" />
+                        <span className="h-1.5 w-1.5 rounded-full bg-zinc-400 flex-shrink-0" />
                         {dlc}
                       </li>
                     ))}
@@ -1192,12 +1147,12 @@ export function GameDetailPage() {
               )}
 
               {game?.comment && (
-                <div className="p-6 rounded-2xl bg-primary/10 border border-primary/20">
+                <div className="p-6 rounded-2xl bg-zinc-800/50 border border-zinc-700">
                   <div className="flex items-start gap-3">
-                    <AlertTriangle className="h-5 w-5 text-primary flex-shrink-0 mt-0.5" />
+                    <AlertTriangle className="h-5 w-5 text-zinc-400 flex-shrink-0 mt-0.5" />
                     <div>
-                      <h3 className="font-semibold text-foreground mb-1">Important Note</h3>
-                      <p className="text-sm text-muted-foreground">{game.comment}</p>
+                      <h3 className="font-semibold text-zinc-100 mb-1">Important Note</h3>
+                      <p className="text-sm text-zinc-400">{game.comment}</p>
                     </div>
                   </div>
                 </div>
@@ -1209,8 +1164,8 @@ export function GameDetailPage() {
                   <Button
                     size="lg"
                     className={`flex-1 font-bold text-lg py-6 rounded-xl shadow-lg transition-all duration-200 ${isGameRunning
-                        ? "bg-destructive hover:bg-destructive/90 shadow-destructive/25"
-                        : "bg-primary hover:bg-primary/90 shadow-primary/25"
+                        ? "bg-destructive hover:bg-destructive/90"
+                        : "bg-white text-black hover:bg-zinc-200"
                       }`}
                     onClick={() => {
                       if (isGameRunning) {
@@ -1243,7 +1198,7 @@ export function GameDetailPage() {
                         <Button
                           variant="outline"
                           size="icon"
-                          className="h-[52px] w-[52px] rounded-xl border-primary/40 bg-primary/10 text-primary hover:bg-primary/15"
+                          className="h-[52px] w-[52px] rounded-xl border-zinc-700 bg-zinc-800 text-zinc-300 hover:bg-zinc-700 hover:text-white"
                           aria-label="Game actions"
                         >
                           <Settings className="h-5 w-5" />
@@ -1353,7 +1308,7 @@ export function GameDetailPage() {
                     onClick={() => setUpdateWarningOpen(true)}
                   >
                     <RefreshCw className="mr-2 h-4 w-4" />
-                    Update available — {game.version}
+                    Update available - {game.version}
                   </Button>
                 )}
 
@@ -1370,8 +1325,8 @@ export function GameDetailPage() {
 
               <div className={`grid grid-cols-2 gap-3${isUCMatched ? ' opacity-40 blur-[2px] pointer-events-none select-none' : ''}`}>
                 <div className="p-4 rounded-xl bg-black/40 border border-white/10 backdrop-blur-md text-center shadow-lg">
-                  <Download className="h-5 w-5 text-primary mx-auto mb-2" />
-                  <div className="text-2xl font-black text-white font-montserrat">
+                  <Download className="h-5 w-5 text-zinc-400 mx-auto mb-2" />
+                  <div className="text-2xl font-black text-white">
                     {formatNumber(effectiveDownloadCount)}
                   </div>
                   <div className="text-xs text-gray-400">Downloads</div>
@@ -1379,7 +1334,7 @@ export function GameDetailPage() {
 
                 <div className="p-4 rounded-xl bg-black/40 border border-white/10 backdrop-blur-md text-center shadow-lg">
                   <Eye className="h-5 w-5 text-blue-400 mx-auto mb-2" />
-                  <div className="text-2xl font-black text-white font-montserrat">
+                  <div className="text-2xl font-black text-white">
                     {formatNumber(effectiveViewCount)}
                   </div>
                   <div className="text-xs text-gray-400">Views</div>
@@ -1388,12 +1343,12 @@ export function GameDetailPage() {
 
               <div className="p-6 rounded-2xl bg-black/40 border border-white/10 backdrop-blur-md shadow-xl space-y-4">
                 <div className="flex items-center justify-between">
-                  <h3 className="font-black text-white font-montserrat">Details</h3>
+                  <h3 className="font-black text-white">Details</h3>
                   {isExternalGame && (
                     <Button
                       variant="ghost"
                       size="sm"
-                      className="h-7 px-2.5 text-xs text-primary hover:text-primary hover:bg-primary/10"
+                      className="h-7 px-2.5 text-xs text-zinc-400 hover:text-white hover:bg-white/[.05]"
                       onClick={() => setEditMetadataOpen(true)}
                     >
                       <Settings className="mr-1.5 h-3 w-3" />
@@ -1405,7 +1360,7 @@ export function GameDetailPage() {
                 {isUCMatched && (
                   <div className="flex items-start gap-2 rounded-lg bg-yellow-500/10 border border-yellow-500/20 px-3 py-2 text-xs text-yellow-400">
                     <Info className="h-3.5 w-3.5 flex-shrink-0 mt-0.5" />
-                    <span>Matched from UC catalog — details may not reflect your installed version.</span>
+                    <span>Matched from UC catalog - details may not reflect your installed version.</span>
                   </div>
                 )}
 
@@ -1466,12 +1421,12 @@ export function GameDetailPage() {
         </div>
       </section>
 
-      <GameComments appid={game.appid} gameName={game.name} onRateLimit={(code) => handleRateLimit(code)} />
+      <GameComments appid={game.appid} gameName={game.name} />
 
       {relatedGames.length > 0 && (
         <section className="py-16 px-4 bg-black/20">
           <div className="container mx-auto max-w-7xl">
-            <h2 className="text-3xl md:text-4xl font-black text-white font-montserrat mb-8">
+            <h2 className="text-3xl md:text-4xl font-black text-white  mb-8">
               You May Also Like
             </h2>
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">

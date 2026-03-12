@@ -33,10 +33,10 @@ export function UpdateNotification() {
   if (!available) return null
 
   return (
-    <div className="fixed bottom-4 right-4 z-50 max-w-md rounded-xl border border-primary/40 bg-gradient-to-br from-slate-950/95 via-slate-900/95 to-slate-950/95 p-4 shadow-2xl backdrop-blur-sm">
+    <div className="fixed bottom-4 right-4 z-50 max-w-md rounded-xl border border-zinc-700 bg-gradient-to-br from-slate-950/95 via-slate-900/95 to-slate-950/95 p-4 shadow-2xl backdrop-blur-sm">
       <div className="flex items-start gap-3">
-        <div className="flex-shrink-0 rounded-full bg-primary/20 p-2">
-          <Download className="h-5 w-5 text-primary" />
+        <div className="flex-shrink-0 rounded-full bg-white/20 p-2">
+          <Download className="h-5 w-5 text-white" />
         </div>
         <div className="flex-1">
           <h3 className="font-semibold text-white">Update Available</h3>
@@ -48,3 +48,4 @@ export function UpdateNotification() {
     </div>
   )
 }
+

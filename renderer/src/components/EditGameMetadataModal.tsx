@@ -121,10 +121,10 @@ export function EditGameMetadataModal({ open, onOpenChange, game, onSaved }: Edi
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg max-h-[85vh] overflow-y-auto rounded-2xl border-border/60 bg-card/95 shadow-2xl">
+      <DialogContent className="sm:max-w-lg max-h-[85vh] overflow-y-auto rounded-2xl border-white/[.07] bg-zinc-900/95 shadow-2xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Save className="h-5 w-5 text-primary" />
+            <Save className="h-5 w-5 text-white" />
             Edit Game Details
           </DialogTitle>
           <DialogDescription className="sr-only">Edit metadata for this game</DialogDescription>
@@ -133,18 +133,18 @@ export function EditGameMetadataModal({ open, onOpenChange, game, onSaved }: Edi
         <div className="space-y-4 py-2">
           {/* Images Row */}
           <div className="space-y-2">
-            <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+            <Label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">
               Images
             </Label>
             <div className="flex gap-3">
               {/* Card Image */}
               <div className="space-y-1">
-                <p className="text-xs text-muted-foreground">Card</p>
+                <p className="text-xs text-zinc-400">Card</p>
                 <button
                   type="button"
                   onClick={handlePickCardImage}
                   disabled={saving}
-                  className="group/card relative h-28 w-20 rounded-lg border border-border/60 bg-muted/30 overflow-hidden flex items-center justify-center cursor-pointer hover:border-primary/60 transition-colors"
+                  className="group/card relative h-28 w-20 rounded-lg border border-white/[.07] bg-zinc-800/30 overflow-hidden flex items-center justify-center cursor-pointer hover:border-zinc-500 transition-colors"
                 >
                   {cardImagePreview ? (
                     <img
@@ -154,7 +154,7 @@ export function EditGameMetadataModal({ open, onOpenChange, game, onSaved }: Edi
                       onError={() => setCardImagePreview(null)}
                     />
                   ) : (
-                    <ImageIcon className="h-8 w-8 text-muted-foreground/40" />
+                    <ImageIcon className="h-8 w-8 text-zinc-400/40" />
                   )}
                   <div className="absolute inset-0 bg-black/60 opacity-0 group-hover/card:opacity-100 transition-opacity flex items-center justify-center">
                     <span className="text-xs text-white font-medium">Change</span>
@@ -171,12 +171,12 @@ export function EditGameMetadataModal({ open, onOpenChange, game, onSaved }: Edi
               </div>
               {/* Banner Image */}
               <div className="flex-1 space-y-1">
-                <p className="text-xs text-muted-foreground">Banner</p>
+                <p className="text-xs text-zinc-400">Banner</p>
                 <button
                   type="button"
                   onClick={handlePickBannerImage}
                   disabled={saving}
-                  className="group/banner relative h-28 w-full rounded-lg border border-border/60 bg-muted/30 overflow-hidden flex items-center justify-center cursor-pointer hover:border-primary/60 transition-colors"
+                  className="group/banner relative h-28 w-full rounded-lg border border-white/[.07] bg-zinc-800/30 overflow-hidden flex items-center justify-center cursor-pointer hover:border-zinc-500 transition-colors"
                 >
                   {bannerImagePreview ? (
                     <img
@@ -186,7 +186,7 @@ export function EditGameMetadataModal({ open, onOpenChange, game, onSaved }: Edi
                       onError={() => setBannerImagePreview(null)}
                     />
                   ) : (
-                    <ImageIcon className="h-8 w-8 text-muted-foreground/40" />
+                    <ImageIcon className="h-8 w-8 text-zinc-400/40" />
                   )}
                   <div className="absolute inset-0 bg-black/60 opacity-0 group-hover/banner:opacity-100 transition-opacity flex items-center justify-center">
                     <span className="text-xs text-white font-medium">Change</span>
@@ -270,14 +270,14 @@ export function EditGameMetadataModal({ open, onOpenChange, game, onSaved }: Edi
               onChange={(e) => setGenres(e.target.value)}
               placeholder="Action, Adventure, RPG"
             />
-            <p className="text-xs text-muted-foreground">Comma-separated</p>
+            <p className="text-xs text-zinc-400">Comma-separated</p>
             {genres.trim() && (
               <div className="flex flex-wrap gap-1.5 mt-1">
                 {genres.split(",").map((g) => g.trim()).filter(Boolean).map((g) => (
                   <Badge
                     key={g}
                     variant={g.toLowerCase() === "nsfw" ? "destructive" : "default"}
-                    className="px-2 py-0.5 text-xs rounded-full bg-primary/20 border-primary/30 text-primary"
+                    className="px-2 py-0.5 text-xs rounded-full bg-white/20 border-zinc-700 text-white"
                   >
                     {g}
                   </Badge>
@@ -316,3 +316,4 @@ export function EditGameMetadataModal({ open, onOpenChange, game, onSaved }: Edi
     </Dialog>
   )
 }
+

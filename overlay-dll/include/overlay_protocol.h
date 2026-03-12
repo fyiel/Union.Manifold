@@ -1,6 +1,6 @@
 #pragma once
 /**
- * UC Overlay Protocol — shared between DLL (injected into game) and Node addon (Electron side).
+ * UC Overlay Protocol - shared between DLL (injected into game) and Node addon (Electron side).
  *
  * Communication channels:
  *   1. Shared Memory: Electron renders the overlay UI offscreen → writes BGRA pixels here.
@@ -37,14 +37,14 @@ inline uint64_t ucFrameMemorySize(uint32_t w, uint32_t h) {
 }
 
 // --- Named Pipe JSON Commands (Electron → DLL) ---
-// {"cmd":"show"}          — make the DLL start drawing
-// {"cmd":"hide"}          — stop drawing
-// {"cmd":"ping"}          — heartbeat check
-// {"cmd":"shutdown"}      — graceful cleanup and unhook
+// {"cmd":"show"}          - make the DLL start drawing
+// {"cmd":"hide"}          - stop drawing
+// {"cmd":"ping"}          - heartbeat check
+// {"cmd":"shutdown"}      - graceful cleanup and unhook
 
 // --- Named Pipe JSON Events (DLL → Electron) ---
-// {"event":"connected","api":"d3d11"}   — DLL hooked successfully, reports graphics API
-// {"event":"disconnected"}              — DLL shutting down
+// {"event":"connected","api":"d3d11"}   - DLL hooked successfully, reports graphics API
+// {"event":"disconnected"}              - DLL shutting down
 // {"event":"input_key","key":"Escape","down":true,"ctrl":false,"shift":false,"alt":false}
 // {"event":"input_mouse","x":123,"y":456,"button":"left","down":true}
 // {"event":"exclusive_fullscreen","active":true}

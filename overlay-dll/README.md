@@ -1,6 +1,6 @@
 # UC.Direct Native Overlay System
 
-Professional in-game overlay (like Steam/Discord) that injects into game processes to render the overlay UI directly in the game window — works in exclusive fullscreen, borderless, and windowed modes.
+Professional in-game overlay (like Steam/Discord) that injects into game processes to render the overlay UI directly in the game window - works in exclusive fullscreen, borderless, and windowed modes.
 
 ## Architecture
 
@@ -166,4 +166,4 @@ npm install --global --production windows-build-tools
 
 ### DLL injection fails
 
-Check Windows Defender / antivirus — DLL injection triggers many security tools. Add UC.Direct to exclusions if safe.
+Check Windows Defender / antivirus - DLL injection triggers many security tools. Add UC.Direct to exclusions if safe.

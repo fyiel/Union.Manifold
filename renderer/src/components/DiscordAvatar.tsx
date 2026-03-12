@@ -23,7 +23,7 @@ export function DiscordAvatar({ avatarUrl, fallback, alt, className }: DiscordAv
     <div
       className={`relative group rounded-lg overflow-hidden transition-all duration-300 hover:scale-[1.05] ${className || "h-10 w-10"}`}
     >
-      <div className="h-full w-full border-2 border-border/50 hover:border-primary/50 rounded-lg bg-card/95 backdrop-blur-sm hover:shadow-lg hover:shadow-primary/20 transition-all duration-300">
+      <div className="h-full w-full border-2 border-white/[.07] hover:border-zinc-500 rounded-lg bg-zinc-900/95 backdrop-blur-sm hover:shadow-lg hover:shadow-primary/20 transition-all duration-300">
         {showImage ? (
           <img src={src} alt={alt} onError={() => setImageError(true)} className="h-full w-full object-cover" />
         ) : (
@@ -33,3 +33,4 @@ export function DiscordAvatar({ avatarUrl, fallback, alt, className }: DiscordAv
     </div>
   )
 }
+

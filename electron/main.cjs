@@ -84,6 +84,7 @@ const downloadQueues = new Map()
 const globalDownloadQueue = []
 const cancelledDownloadIds = new Set()
 const activeExtractions = new Set()
+const deferredArchives = new Map() // appid → archivePath[] waiting for all parts to finish
 const runningGames = new Map()
 
 // ============================================================
@@ -105,7 +106,7 @@ function createOverlayWindow() {
     return overlayWindow
   }
 
-  // Get primary display dimensions — use full size (not workAreaSize) so the
+  // Get primary display dimensions - use full size (not workAreaSize) so the
   // overlay covers fullscreen/exclusive games that extend under the taskbar.
   const primaryDisplay = require('electron').screen.getPrimaryDisplay()
   const { width, height } = primaryDisplay.size
@@ -330,7 +331,7 @@ try {
   nativeOverlay = require('./native/build/Release/uc_overlay_native.node')
   console.log('[UC] [INFO] Native overlay addon loaded')
 } catch (e) {
-  console.warn('[UC] [WARN] Native overlay addon not available — using window-only overlay:', e.message)
+  console.warn('[UC] [WARN] Native overlay addon not available - using window-only overlay:', e.message)
 }
 
 // Per-game injection state: pid -> { shmemHandle, pipeHandle, offscreenWindow }
@@ -357,7 +358,7 @@ function injectOverlayIntoGame(pid, appid) {
 
   const dllPath = getDllPath()
   if (!fs.existsSync(dllPath)) {
-    ucLog(`Overlay DLL not found at ${dllPath} — skipping injection`, 'warn')
+    ucLog(`Overlay DLL not found at ${dllPath} - skipping injection`, 'warn')
     return
   }
 
@@ -423,7 +424,7 @@ function injectOverlayIntoGame(pid, appid) {
     }
     overlayInjections.set(pid, injection)
 
-    // 4. Inject the DLL — do this after everything else is ready
+    // 4. Inject the DLL - do this after everything else is ready
     // Small delay to let pipe server start listening
     setTimeout(() => {
       try {
@@ -1290,7 +1291,6 @@ ipcMain.handle('uc:network-test', async (_event, baseUrl) => {
     const targets = [
       { label: 'API base', url: origin },
       { label: 'API downloads', url: new URL('/api/downloads/all', origin).toString() },
-      { label: 'Vikingfile', url: 'https://vikingfile.com' },
       { label: 'UC-Files', url: 'https://files.union-crax.xyz' }
     ]
     const results = await Promise.all(
@@ -1426,7 +1426,34 @@ function ensureDownloadDir() {
   }
   ensureSubdir(target, installingDirName)
   ensureSubdir(target, installedDirName)
+  ensureInstalledFolderReadme(target)
   return target
+}
+
+function ensureInstalledFolderReadme(downloadRoot) {
+  try {
+    const installedRoot = path.join(downloadRoot, installedDirName)
+    const readmePath = path.join(installedRoot, 'README.txt')
+    if (fs.existsSync(readmePath)) return
+
+    const content = [
+      'UnionCrax.Direct Installed Games Folder',
+      '',
+      'Do not drag and drop game folders into this directory manually.',
+      'Games added this way will be missing required metadata (installed.json) and may not work correctly in the app.',
+      '',
+      'To add games correctly, use one of these methods inside UnionCrax.Direct:',
+      '- Install from the app download flow',
+      '- Add External Game',
+      '- Install from Archive',
+      '',
+      'This file is generated automatically by UnionCrax.Direct.'
+    ].join('\n')
+
+    fs.writeFileSync(readmePath, content, 'utf8')
+  } catch (err) {
+    ucLog(`ensureInstalledFolderReadme failed: ${err.message}`, 'warn')
+  }
 }
 
 function normalizeDownloadRoot(targetPath) {
@@ -1633,6 +1660,8 @@ async function cacheMetadataAssets(metadata, targetFolder, manifestPath, downloa
 
   if (!updated || !manifestPath) return updated
   try {
+    // Guard: if the target folder was deleted (e.g. installing cleanup raced ahead), skip the write
+    if (!fs.existsSync(path.dirname(manifestPath))) return updated
     const manifest = readJsonFile(manifestPath) || {}
     manifest.metadata = { ...(manifest.metadata || {}), ...nextMeta }
     try { manifest.metadataHash = computeObjectHash(manifest.metadata) } catch { }
@@ -1818,7 +1847,7 @@ function restorePreservedFile(savePath) {
   if (!savePath) return false
   const backupPath = savePath + RESUME_BACKUP_EXT
   if (fs.existsSync(savePath)) {
-    // Original still exists — clean up the backup if present
+    // Original still exists - clean up the backup if present
     if (fs.existsSync(backupPath)) {
       try { fs.unlinkSync(backupPath) } catch { }
     }
@@ -2275,7 +2304,7 @@ function hasActiveOrPendingDownloadsForApp(appid) {
   const now = Date.now()
   return pendingDownloads.some((entry) => {
     if (entry.appid !== appid) return false
-    // If the pending entry has been sitting for more than 60s, it's stale — ignore it
+    // If the pending entry has been sitting for more than 60s, it's stale - ignore it
     if (entry._addedAt && (now - entry._addedAt) > 60000) return false
     return true
   })
@@ -2283,6 +2312,11 @@ function hasActiveOrPendingDownloadsForApp(appid) {
 
 function hasActiveDownloadsForApp(appid) {
   return hasActiveOrPendingDownloadsForApp(appid) || hasQueuedDownloadsForApp(appid)
+}
+
+function hasPendingInGlobalQueueForApp(appid) {
+  if (!appid) return false
+  return globalDownloadQueue.some(entry => entry?.payload?.appid === appid)
 }
 
 function getWindowByWebContentsId(webContentsId) {
@@ -2344,8 +2378,8 @@ async function visitPixeldrainViewerPage(fileId) {
 // Downloads a UC.Files /dl/ URL using multiple concurrent HTTP connections
 // with Range headers to multiply throughput (Telegram CDN serves ~5-20 MB/s per connection).
 
-const UCFILES_CONNECTIONS = 6
-const UCFILES_CHUNK_SIZE = 50 * 1024 * 1024 // 50 MB per range chunk
+const UCFILES_CONNECTIONS = 4
+const UCFILES_CHUNK_SIZE = 20 * 1024 * 1024 // 20 MB per range chunk
 
 // HTTP/1.1 Range request using Node.js networking (not Chromium's fetch).
 // Chromium's fetch multiplexes concurrent requests over a single HTTP/2 connection,
@@ -2362,7 +2396,7 @@ function ucfilesRangeRequest(url, start, end, signal) {
       path: parsed.pathname + parsed.search,
       method: 'GET',
       headers: { Range: `bytes=${start}-${end}`, Connection: 'close' },
-      agent: false, // Disable keep-alive — fresh TCP connection per range to prevent stale data corruption
+      agent: false, // Disable keep-alive - fresh TCP connection per range to prevent stale data corruption
     }, (res) => {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
         res.resume()
@@ -2604,7 +2638,7 @@ async function ucfilesParallelDownload(win, payload, _retryCount = 0) {
             const remaining = chunkLimit - offset
             const writeLen = Math.min(buf.length, remaining)
             if (writeLen > 0) {
-              // Check abort before write — fd may have been invalidated by another worker's failure
+              // Check abort before write - fd may have been invalidated by another worker's failure
               if (ctrl.signal.aborted) return
               fs.writeSync(fd, buf, 0, writeLen, offset)
               chunkHasher.update(buf.subarray(0, writeLen))
@@ -2679,7 +2713,7 @@ async function ucfilesParallelDownload(win, payload, _retryCount = 0) {
       }
     } catch (verifyErr) {
       if (verifyErr.message.includes('File size mismatch')) throw verifyErr
-      // stat failed — file might have been deleted, let post-handler deal with it
+      // stat failed - file might have been deleted, let post-handler deal with it
     }
 
     // Compute SHA-256 of the downloaded file and compare against server hash
@@ -2699,10 +2733,10 @@ async function ucfilesParallelDownload(win, payload, _retryCount = 0) {
       ucLog(`[UC.Files] SHA-256 computation failed: ${hashErr.message}`, 'warn')
     }
 
-    // If the server provided its known-good hash, compare — verifies ALL file types
+    // If the server provided its known-good hash, compare - verifies ALL file types
     if (expectedSHA256 && downloadSHA256) {
       if (downloadSHA256 === expectedSHA256) {
-        ucLog('[UC.Files] SHA-256 matches server hash — file integrity confirmed, skipping archive test')
+        ucLog('[UC.Files] SHA-256 matches server hash - file integrity confirmed, skipping archive test')
         fileVerifiedByHash = true
       } else {
         ucLog(`[UC.Files] SHA-256 MISMATCH! Server: ${expectedSHA256}, Downloaded: ${downloadSHA256}`, 'error')
@@ -2724,13 +2758,13 @@ async function ucfilesParallelDownload(win, payload, _retryCount = 0) {
           ucLog(`[UC.Files]   Chunk ${ci}: bytes ${c.start}-${c.end} (${c.end - c.start + 1} bytes)`, 'error')
         }
       } else {
-        ucLog(`[UC.Files] All ${chunks.length} chunks verified — disk matches network bytes`)
+        ucLog(`[UC.Files] All ${chunks.length} chunks verified - disk matches network bytes`)
       }
     }
 
     // 8. Archive integrity test: run `7z t` to validate the archive before extraction.
     //    This catches ALL corruption sources (server, network, write) regardless of
-    //    whether the per-chunk hashes matched — the server could have sent wrong bytes.
+    //    whether the per-chunk hashes matched - the server could have sent wrong bytes.
     //    Skipped when the whole-file hash already matches the server.
     const archiveExt = path.extname(finalSavePath).toLowerCase()
     const isDownloadedArchive = ['.zip', '.rar', '.7z', '.tar', '.gz', '.bz2', '.xz', '.tgz'].includes(archiveExt)
@@ -2748,8 +2782,8 @@ async function ucfilesParallelDownload(win, payload, _retryCount = 0) {
         // the bandwidth compared to a full re-download.
         if (_retryCount < 2) {
           ucLog(`[UC.Files] Starting targeted chunk repair (attempt ${_retryCount + 1}/3)...`)
-          sendUpdate({ status: 'retrying', receivedBytes: totalBytes, totalBytes, speedBps: 0, etaSeconds: null, error: `Verification failed — repairing corrupt chunks (attempt ${_retryCount + 1}/3)` })
-          // Brief delay — gives CDN caches a moment to rotate
+          sendUpdate({ status: 'retrying', receivedBytes: totalBytes, totalBytes, speedBps: 0, etaSeconds: null, error: `Verification failed - repairing corrupt chunks (attempt ${_retryCount + 1}/3)` })
+          // Brief delay - gives CDN caches a moment to rotate
           await new Promise(r => setTimeout(r, 3000))
 
           let patchedCount = 0
@@ -2791,9 +2825,9 @@ async function ucfilesParallelDownload(win, payload, _retryCount = 0) {
 
               const freshHash = freshHasher.digest('hex')
               if (freshHash !== chunk.sha256) {
-                // The fresh download differs from the original — the original was corrupt.
+                // The fresh download differs from the original - the original was corrupt.
                 // Overwrite with the fresh (hopefully correct) data.
-                ucLog(`[UC.Files] Chunk ${ci} (${chunk.start}-${chunk.end}): hash CHANGED — patching disk`)
+                ucLog(`[UC.Files] Chunk ${ci} (${chunk.start}-${chunk.end}): hash CHANGED - patching disk`)
                 fs.writeSync(repairFd, freshBuf, 0, chunkBytes, chunk.start)
                 chunk.sha256 = freshHash
                 patchedCount++
@@ -2808,7 +2842,7 @@ async function ucfilesParallelDownload(win, payload, _retryCount = 0) {
           }
 
           if (patchedCount > 0) {
-            ucLog(`[UC.Files] Chunk repair: patched ${patchedCount}/${chunks.length} chunks — re-testing archive`)
+            ucLog(`[UC.Files] Chunk repair: patched ${patchedCount}/${chunks.length} chunks - re-testing archive`)
             const reTestResult = await run7zTest(finalSavePath)
             if (reTestResult.ok) {
               ucLog('[UC.Files] Archive integrity test PASSED after chunk repair')
@@ -2817,18 +2851,18 @@ async function ucfilesParallelDownload(win, payload, _retryCount = 0) {
               ucLog(`[UC.Files] Archive STILL corrupt after chunk repair: ${reTestResult.error}`, 'error')
               // Fall back to full re-download for the next attempt
               sendUpdate({ status: 'retrying', receivedBytes: 0, totalBytes: 0, speedBps: 0, etaSeconds: null,
-                error: `Chunk repair failed — full re-download (attempt ${_retryCount + 1}/3)` })
+                error: `Chunk repair failed - full re-download (attempt ${_retryCount + 1}/3)` })
               try { fs.unlinkSync(finalSavePath) } catch {}
               ucfilesActiveDownloads.delete(downloadId)
               await new Promise(r => setTimeout(r, 3000))
               return ucfilesParallelDownload(win, payload, _retryCount + 1)
             }
           } else {
-            // No chunks changed — the CDN served the same (corrupt) data again.
+            // No chunks changed - the CDN served the same (corrupt) data again.
             // Fall back to full re-download which creates fresh TCP connections.
-            ucLog('[UC.Files] Chunk repair: no chunks changed — CDN is consistently corrupt, full re-download')
+            ucLog('[UC.Files] Chunk repair: no chunks changed - CDN is consistently corrupt, full re-download')
             sendUpdate({ status: 'retrying', receivedBytes: 0, totalBytes: 0, speedBps: 0, etaSeconds: null,
-              error: `Same corrupt data from server — full re-download (attempt ${_retryCount + 1}/3)` })
+              error: `Same corrupt data from server - full re-download (attempt ${_retryCount + 1}/3)` })
             try { fs.unlinkSync(finalSavePath) } catch {}
             ucfilesActiveDownloads.delete(downloadId)
             await new Promise(r => setTimeout(r, 3000))
@@ -2842,7 +2876,7 @@ async function ucfilesParallelDownload(win, payload, _retryCount = 0) {
       if (testResult.ok) ucLog('[UC.Files] Archive integrity test PASSED')
     }
 
-    // 9. Done — mimic the will-download 'done' event flow
+    // 9. Done - mimic the will-download 'done' event flow
     totalReceived = totalBytes
     reportProgress()
 
@@ -3025,13 +3059,13 @@ async function startDownloadNow(win, payload) {
       lastPixeldrainDownloadTime = Date.now()
     } else {
       // Authenticated: skip viewer page visit and delay entirely
-      uc_log(`Pixeldrain download authenticated — skipping viewer page visit and delay`)
+      uc_log(`Pixeldrain download authenticated - skipping viewer page visit and delay`)
     }
   }
 
-  // UC.Files parallel download engine — bypass Chromium single-connection downloader
+  // UC.Files parallel download engine - bypass Chromium single-connection downloader
   if (isUCFilesUrl(payload.url)) {
-    uc_log(`startDownloadNow: using UC.Files parallel engine — downloadId=${payload.downloadId}`)
+    uc_log(`startDownloadNow: using UC.Files parallel engine - downloadId=${payload.downloadId}`)
     // Remove from pending since we're handling it directly (won't hit will-download)
     const pendIdx = pendingDownloads.findIndex(p => p.downloadId === payload.downloadId)
     if (pendIdx >= 0) pendingDownloads.splice(pendIdx, 1)
@@ -3076,7 +3110,7 @@ async function startDownloadNow(win, payload) {
     return { ok: true }
   }
 
-  uc_log(`startDownloadNow: calling downloadURL — downloadId=${payload.downloadId} url=${payload.url}`)
+  uc_log(`startDownloadNow: calling downloadURL - downloadId=${payload.downloadId} url=${payload.url}`)
   win.webContents.downloadURL(payload.url)
   return { ok: true }
 }
@@ -3241,7 +3275,7 @@ function startNextQueuedDownload(lastCompletedAppid) {
     return
   }
 
-  // No queued downloads — auto-resume the next paused download
+  // No queued downloads - auto-resume the next paused download
   autoResumeNextPaused()
 }
 
@@ -3617,7 +3651,7 @@ function run7zTest(archivePath) {
   })
 }
 
-// Snapshot of the last-seen state per downloadId — used by uc:overlay-get-downloads
+// Snapshot of the last-seen state per downloadId - used by uc:overlay-get-downloads
 // for an accurate initial panel load regardless of which downloader is active.
 const latestDownloadState = new Map()
 
@@ -3687,7 +3721,7 @@ function registerRunningGame(appid, exePath, proc, gameName, showGameName = true
   // Auto-show overlay when game launches
   if (appid) checkAndShowOverlayForGame(appid)
 
-  // Native DLL injection is disabled — the transparent window overlay works without it.
+  // Native DLL injection is disabled - the transparent window overlay works without it.
   // The offscreen-rendering + shared-memory pipeline (~480 MB/s memcpy at 60fps) blocks
   // the main process event loop, causing Electron to stop responding.
   // TODO: move frame writing to a worker thread before re-enabling.
@@ -3731,7 +3765,7 @@ Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and $_.Executa
         (err, stdout) => {
           const survivingPids = (stdout || '').trim().split(/\r?\n/).map(s => Number(s.trim())).filter(p => p > 0 && p !== proc.pid)
           if (survivingPids.length > 0) {
-            // Found child game process — adopt its PID and keep tracking
+            // Found child game process - adopt its PID and keep tracking
             const newPid = survivingPids[0]
             ucLog(`[Game] ${appid || 'unknown'} launcher exited (PID ${proc.pid}), adopting child PID ${newPid}`)
             payload.pid = newPid
@@ -3751,7 +3785,7 @@ Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and $_.Executa
             }, 3000)
             return
           }
-          // No surviving processes in game directory — truly exited
+          // No surviving processes in game directory - truly exited
           doCleanup()
         }
       )
@@ -4051,7 +4085,7 @@ function createWindow() {
     const initialReceivedBytes = item.getReceivedBytes() || 0
 
     if (isInterruptedResume) {
-      uc_log(`will-download: interrupted download detected, calling item.resume() — offset=${initialReceivedBytes}`)
+      uc_log(`will-download: interrupted download detected, calling item.resume() - offset=${initialReceivedBytes}`)
       // Initialize speed tracking from the offset so delta calculations are correct
       state.lastBytes = initialReceivedBytes
     }
@@ -4117,13 +4151,13 @@ function createWindow() {
     })
 
     item.once('done', async (_event, state) => {
-      uc_log(`download done handler start — downloadId=${downloadId} state=${state} url=${url}`)
+      uc_log(`download done handler start - downloadId=${downloadId} state=${state} url=${url}`)
 
       // When the app is quitting, Electron cancels all active/paused DownloadItems and fires
-      // done with state='cancelled'. Don't propagate this to the renderer — the download
+      // done with state='cancelled'. Don't propagate this to the renderer - the download
       // was not cancelled by the user. On next startup the renderer will restore it as 'paused'.
       if (app.isQuitting && state === 'cancelled') {
-        uc_log(`download done during quit — suppressing cancelled status for ${downloadId}`)
+        uc_log(`download done during quit - suppressing cancelled status for ${downloadId}`)
         activeDownloads.delete(downloadId)
         return
       }
@@ -4406,7 +4440,23 @@ function createWindow() {
               await extractArchive(multipartInfo.firstPartPath, multipartInfo.partFiles || [], multipartInfo.totalBytes || null, extractionKey)
             }
           } else if (maybeArchive && finalPath && fs.existsSync(finalPath)) {
-            await extractArchive(finalPath, null, null, null)
+            if (entry?.appid && hasPendingInGlobalQueueForApp(entry.appid)) {
+              // More parts are queued - defer extraction until all downloads for this game finish
+              const prev = deferredArchives.get(entry.appid) || []
+              deferredArchives.set(entry.appid, [...prev, finalPath])
+              uc_log(`deferred archive extraction for ${entry.appid}: ${path.basename(finalPath)} (other downloads still queued)`)
+            } else {
+              // Process any previously-deferred archives first, then extract this one
+              const deferred = entry?.appid ? (deferredArchives.get(entry.appid) || []) : []
+              if (deferred.length) deferredArchives.delete(entry.appid)
+              for (const dPath of deferred) {
+                if (fs.existsSync(dPath)) {
+                  uc_log(`running deferred archive for ${entry.appid}: ${path.basename(dPath)}`)
+                  await extractArchive(dPath, null, null, null)
+                }
+              }
+              await extractArchive(finalPath, null, null, null)
+            }
           } else {
             // Not an archive - move file to installed folder like before
             try {
@@ -4426,7 +4476,21 @@ function createWindow() {
                 if (basenameFinal) skipNames.add(basenameFinal)
                 migrateInstallingExtras(installingRoot, installedRoot, skipNames)
               } catch (e) {
-                uc_log(`failed to migrate non-archive extras: ${String(e)}`)
+                uc_log(`failed to migrate non-archive extras: ${String(e)}`)  
+              }
+
+              // If this was the last download for the game, process any deferred archive extractions
+              if (entry?.appid && !hasPendingInGlobalQueueForApp(entry.appid)) {
+                const deferred = deferredArchives.get(entry.appid) || []
+                if (deferred.length) {
+                  deferredArchives.delete(entry.appid)
+                  for (const dPath of deferred) {
+                    if (fs.existsSync(dPath)) {
+                      uc_log(`processing deferred archive after non-archive download for ${entry.appid}: ${path.basename(dPath)}`)
+                      await extractArchive(dPath, null, null, null)
+                    }
+                  }
+                }
               }
 
               // Update manifest status BEFORE deleting the installing folder
@@ -4701,7 +4765,7 @@ app.on('before-quit', () => {
   // Preserve partial download files before Chromium deletes them.
   // When Electron quits it cancels all active/paused DownloadItems, and Chromium's
   // cancel handler deletes the partially-written file from disk. Creating a hardlink
-  // is instant (no data copy, even for 10 GB files) — the hardlink survives the
+  // is instant (no data copy, even for 10 GB files) - the hardlink survives the
   // original's deletion because both point to the same inode on disk.
   for (const [downloadId, entry] of activeDownloads) {
     if (entry.savePath) {
@@ -4862,7 +4926,7 @@ ipcMain.handle('uc:download-pause', (event, downloadId) => {
       partIndex: snap?.partIndex,
       partTotal: snap?.partTotal,
     })
-    // A paused download no longer blocks the queue — start the next one
+    // A paused download no longer blocks the queue - start the next one
     if (globalDownloadQueue.length > 0 && !hasAnyActiveOrPendingDownloads()) {
       startNextQueuedDownload(null)
     }
@@ -4897,7 +4961,7 @@ ipcMain.handle('uc:download-pause', (event, downloadId) => {
       partTotal: entry.partTotal
     })
   } catch (e) { }
-  // A paused download no longer blocks the queue — start the next one
+  // A paused download no longer blocks the queue - start the next one
   if (globalDownloadQueue.length > 0 && !hasAnyActiveOrPendingDownloads()) {
     startNextQueuedDownload(null)
   }
@@ -5010,7 +5074,7 @@ ipcMain.handle('uc:download-resume-interrupted', (event, payload) => {
     savePath
   })
 
-  // Use the actual file size on disk as the offset — the stored resumeData.offset
+  // Use the actual file size on disk as the offset - the stored resumeData.offset
   // can be stale if the app was closed before localStorage caught up to the actual
   // bytes written to disk (updates arrive ~1/sec, disk writes are continuous).
   let actualOffset = resume.offset || 0
@@ -5058,7 +5122,7 @@ ipcMain.handle('uc:download-resume-with-fresh-url', (event, payload) => {
   const savePath = payload.savePath
   // Attempt to restore the partial file if Chromium deleted it during a previous quit
   if (!savePath || !restorePreservedFile(savePath)) {
-    // No partial file on disk — caller should fall back to a from-scratch download
+    // No partial file on disk - caller should fall back to a from-scratch download
     return { ok: false, error: 'missing-file' }
   }
 
@@ -5105,7 +5169,7 @@ ipcMain.handle('uc:download-resume-with-fresh-url', (event, payload) => {
 
   try {
     // Use createInterruptedDownload with the fresh URL. We intentionally pass empty
-    // eTag/lastModified because this is a brand-new URL — stale metadata from the
+    // eTag/lastModified because this is a brand-new URL - stale metadata from the
     // original session would cause the server to reject the Range request.
     win.webContents.session.createInterruptedDownload({
       path: savePath,
@@ -5324,7 +5388,7 @@ ipcMain.handle('uc:add-external-game', async (_event, appid, metadata, gamePath)
       }
     } catch (linkErr) {
       console.warn('[UC] Could not create link to external game folder:', linkErr.message)
-      // Not fatal — the externalPath in manifest can still be used
+      // Not fatal - the externalPath in manifest can still be used
     }
 
     // Attempt to download and save remote media locally
@@ -5391,7 +5455,7 @@ ipcMain.handle('uc:pick-archive-files', async () => {
       title: 'Select Archive Files',
       properties: ['openFile', 'multiSelections'],
       filters: [
-        { name: 'Archives', extensions: ['7z', 'rar', 'tar', 'gz', 'tgz', '001', '002', '003', '004', '005', '006', '007', '008', '009', '010'] },
+        { name: 'Archives', extensions: ['7z', 'tar', 'gz', 'tgz', '001', '002', '003', '004', '005', '006', '007', '008', '009', '010'] },
         { name: 'All Files', extensions: ['*'] }
       ],
       buttonLabel: 'Select Archives'
@@ -5834,7 +5898,7 @@ ipcMain.handle('uc:game-exe-list', (_event, appid) => {
     const resolvedFolder = findInstalledFolderByAppid(appid)
     if (!resolvedFolder) return { ok: false, error: 'not-found', exes: [] }
 
-    // Try listing from the game folder — use depth 6 to handle deeply nested structures
+    // Try listing from the game folder - use depth 6 to handle deeply nested structures
     let exes = listExecutables(resolvedFolder, 6, 100)
     let effectiveFolder = resolvedFolder
 
@@ -5918,7 +5982,7 @@ function normalizeRunnerPath(candidate, fallback) {
   if (!candidate || typeof candidate !== 'string') return fallback
   const trimmed = candidate.trim()
   if (!trimmed) return fallback
-  // Only reject absolute paths that don't exist — relative/bare commands (e.g. 'wine', 'proton')
+  // Only reject absolute paths that don't exist - relative/bare commands (e.g. 'wine', 'proton')
   // are resolved via PATH at spawn time, so we should not reject them here.
   if (path.isAbsolute(trimmed) && !fs.existsSync(trimmed)) {
     ucLog(`normalizeRunnerPath: absolute path not found: ${trimmed}, falling back to ${fallback}`, 'warn')
@@ -5998,7 +6062,7 @@ function resolveLaunchCommand(exePath) {
   if (isExe) {
     if (mode === 'proton') {
       if (!protonPath) {
-        ucLog('Proton mode selected but no proton path configured — falling back to wine', 'warn')
+        ucLog('Proton mode selected but no proton path configured - falling back to wine', 'warn')
         return { command: winePath, args: [exePath], cwd }
       }
       
@@ -6046,7 +6110,7 @@ function buildLinuxGameEnv(baseEnv) {
     env.STEAM_COMPAT_DATA_PATH = protonPrefix
   }
 
-  // STEAM_COMPAT_CLIENT_INSTALL_PATH — needed by Proton
+  // STEAM_COMPAT_CLIENT_INSTALL_PATH - needed by Proton
   const steamPath = typeof settings.linuxSteamPath === 'string' ? settings.linuxSteamPath.trim() : ''
   if (steamPath && !env.STEAM_COMPAT_CLIENT_INSTALL_PATH) {
     env.STEAM_COMPAT_CLIENT_INSTALL_PATH = steamPath
@@ -6638,11 +6702,11 @@ function buildVRGameEnv(baseEnv) {
   const settings = readSettings() || {}
   const env = { ...(baseEnv || process.env) }
 
-  // XR_RUNTIME_JSON — OpenXR runtime
+  // XR_RUNTIME_JSON - OpenXR runtime
   const xrRuntime = typeof settings.vrXrRuntimeJson === 'string' ? settings.vrXrRuntimeJson.trim() : ''
   if (xrRuntime) env.XR_RUNTIME_JSON = xrRuntime
 
-  // STEAM_VR_RUNTIME — SteamVR runtime path
+  // STEAM_VR_RUNTIME - SteamVR runtime path
   const steamVrRuntime = typeof settings.vrSteamVrRuntime === 'string' ? settings.vrSteamVrRuntime.trim() : ''
   if (steamVrRuntime) env.STEAM_VR_RUNTIME = steamVrRuntime
 
@@ -6824,7 +6888,7 @@ ipcMain.handle('uc:game-exe-launch', async (_event, appid, exePath, gameName, sh
         return { ok: true, pid: proc.pid }
       }
 
-      // Non-Windows path (Linux/macOS) — apply per-game + global Wine/Proton/VR/SLSsteam env vars
+      // Non-Windows path (Linux/macOS) - apply per-game + global Wine/Proton/VR/SLSsteam env vars
       const env = buildGameLaunchEnv(appid, process.env)
       env.PATH = `${cwd}:${env.PATH || ''}`
 
@@ -6969,7 +7033,7 @@ ipcMain.handle('uc:game-exe-launch-admin', async (_event, appid, exePath, gameNa
       return result
     } catch (err) {
       ucLog(`Game launch as admin failed: ${appid} - ${err.message}`, 'error')
-      // Don't silently fall back to a non-admin launch — the caller chose admin intentionally.
+      // Don't silently fall back to a non-admin launch - the caller chose admin intentionally.
       // If UAC was declined the user gets a clean failure rather than a confusing silent launch.
       return { ok: false, error: err.message }
     }
@@ -7286,7 +7350,7 @@ function resolveLaunchCommandWithGameConfig(exePath, appid) {
   if (isExe) {
     if (mode === 'proton') {
       if (!protonPath) {
-        ucLog(`Proton mode for ${appid} but no proton path configured — falling back to wine`, 'warn')
+        ucLog(`Proton mode for ${appid} but no proton path configured - falling back to wine`, 'warn')
         return { command: winePath, args: [exePath], cwd }
       }
       
@@ -7347,7 +7411,7 @@ function buildGameLaunchEnv(appid, baseEnv) {
 
   // Per-game VR override
   if (typeof gameConfig.vrEnabled === 'boolean' && !gameConfig.vrEnabled) {
-    // Explicitly disabled for this game — remove VR env vars
+    // Explicitly disabled for this game - remove VR env vars
     delete env.XR_RUNTIME_JSON
     delete env.STEAM_VR_RUNTIME
   } else if (gameConfig.vrEnabled) {

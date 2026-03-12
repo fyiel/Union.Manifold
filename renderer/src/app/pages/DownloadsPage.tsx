@@ -218,6 +218,8 @@ function getPartIndex(filename: string, index: number, total: number, partIndex?
   return { partNum, total }
 }
 
+const ACTIVE_DOWNLOAD_STATUSES = ["downloading", "paused", "extracting", "installing", "verifying", "retrying"]
+
 export function DownloadsPage() {
   const isWindows = typeof navigator !== 'undefined' && /windows/i.test(navigator.userAgent)
   const {
@@ -243,7 +245,7 @@ export function DownloadsPage() {
   }, [downloads])
 
   const activeGroups = Object.values(grouped).filter((items) => {
-    const hasActive = items.some((item) => ["downloading", "paused", "extracting", "installing"].includes(item.status))
+    const hasActive = items.some((item) => ACTIVE_DOWNLOAD_STATUSES.includes(item.status))
     const hasCompletedAndQueued = items.some((item) => ["completed", "extracted"].includes(item.status)) && items.some((item) => item.status === "queued")
     return hasActive || hasCompletedAndQueued
   })
@@ -657,8 +659,8 @@ export function DownloadsPage() {
     <div className="container mx-auto max-w-7xl space-y-8">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl sm:text-3xl font-black font-montserrat">Activity</h1>
-          <p className="text-sm text-muted-foreground">Track downloads, installs, and completed titles.</p>
+          <h1 className="text-2xl sm:text-3xl font-black ">Activity</h1>
+          <p className="text-sm text-zinc-400">Track downloads, installs, and completed titles.</p>
         </div>
         <Button variant="outline" onClick={clearCompleted}>
           Clear
@@ -667,12 +669,12 @@ export function DownloadsPage() {
 
       {runningGames.length > 0 && (
         <section className="space-y-4">
-          <h2 className="text-xl font-bold font-montserrat">Running Games</h2>
+          <h2 className="text-xl font-bold ">Running Games</h2>
           <div className="space-y-3">
             {runningGames.map((game) => (
               <div
                 key={game.appid}
-                className="flex items-center justify-between rounded-xl border border-border/60 bg-card/60 p-4 transition-all hover:bg-card"
+                className="flex items-center justify-between rounded-xl border border-white/[.07] bg-zinc-900/60 p-4 transition-all hover:bg-zinc-900"
               >
                 <div className="flex items-center gap-3">
                   <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-green-500/20">
@@ -680,7 +682,7 @@ export function DownloadsPage() {
                   </div>
                   <div>
                     <div className="font-semibold">{game.gameName}</div>
-                    <div className="text-xs text-muted-foreground">Running • PID: {game.pid}</div>
+                    <div className="text-xs text-zinc-400">Running • PID: {game.pid}</div>
                   </div>
                 </div>
                 <Button
@@ -724,16 +726,16 @@ export function DownloadsPage() {
                           />
                         </div>
                       )}
-                      <h2 className="text-2xl sm:text-3xl font-black font-montserrat">
+                      <h2 className="text-2xl sm:text-3xl font-black ">
                         {primaryGroup[0]?.gameName || "Unknown"}
                       </h2>
                       {primaryGame?.version && (
-                        <span className="text-xs font-medium text-muted-foreground bg-muted/40 px-2 py-0.5 rounded-full">
+                        <span className="text-xs font-medium text-zinc-400 bg-zinc-800/40 px-2 py-0.5 rounded-full">
                           {primaryGame.version}
                         </span>
                       )}
                     </div>
-                    <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                    <p className="text-xs uppercase tracking-wide text-zinc-400">
                       {primaryStats?.phase === "queued"
                         ? "Queued"
                         : primaryStats?.phase === "paused"
@@ -745,7 +747,7 @@ export function DownloadsPage() {
                               : "Downloading"}
                     </p>
                     {primaryTotalParts > 1 && (
-                      <div className="text-xs text-muted-foreground">
+                      <div className="text-xs text-zinc-400">
                         {(() => {
                           const info = getPartIndex(
                             primaryStats.primaryPartFilename || "",
@@ -757,17 +759,17 @@ export function DownloadsPage() {
                         })()}
                       </div>
                     )}
-                    <div className="flex flex-wrap gap-6 text-xs text-muted-foreground">
+                    <div className="flex flex-wrap gap-6 text-xs text-zinc-400">
                       <div>
-                        <div className="text-foreground font-semibold">ETA</div>
+                        <div className="text-zinc-100 font-semibold">ETA</div>
                       <div>{formatEta(primaryStats.etaSeconds)}</div>
                     </div>
                     <div>
-                      <div className="text-foreground font-semibold">{primaryTotalParts > 1 ? "Parts" : "File"}</div>
+                      <div className="text-zinc-100 font-semibold">{primaryTotalParts > 1 ? "Parts" : "File"}</div>
                       <div>{primaryTotalParts}</div>
                     </div>
                     <div>
-                      <div className="text-foreground font-semibold">Average speed</div>
+                      <div className="text-zinc-100 font-semibold">Average speed</div>
                       <div>{formatSpeed(averageSpeed)}</div>
                     </div>
                   </div>
@@ -798,7 +800,7 @@ export function DownloadsPage() {
               </div>
 
               <div className="space-y-4">
-                <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <div className="flex items-center justify-between text-xs text-zinc-400">
                   <span>
                     {(() => {
                       const part = getPartIndex(
@@ -817,7 +819,7 @@ export function DownloadsPage() {
                         return "Verifying archive integrity"
                       }
                       if (primaryStats?.phase === "retrying") {
-                        return "Verification failed — re-downloading"
+                        return "Verification failed - re-downloading"
                       }
                       if (primaryStats?.phase === "installing" || primaryStats?.phase === "extracting") {
                         return primaryTotalParts > 1 ? `Installing part ${part} of ${primaryTotalParts}` : "Installing data"
@@ -831,18 +833,18 @@ export function DownloadsPage() {
                 </div>
                 <Progress
                   value={primaryStats.progress}
-                  className="h-2 bg-slate-800/90 [&_[data-slot=progress-indicator]]:bg-primary/80"
+                  className="h-2 bg-slate-800/90 [&_[data-slot=progress-indicator]]:bg-white/80"
                 />
                 {primaryStats.phase !== "downloading" && primaryStats.overallTotalBytes > 0 && (
-                  <div className="text-xs text-muted-foreground">
+                  <div className="text-xs text-zinc-400">
                     Downloaded {formatBytes(primaryStats.overallReceivedBytes)} / {formatBytes(primaryStats.overallTotalBytes)}
                   </div>
                 )}
               </div>
 
               <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-4">
-                <div className="flex items-center justify-between text-xs text-muted-foreground">
-                  <span className="font-semibold text-foreground">Performance</span>
+                <div className="flex items-center justify-between text-xs text-zinc-400">
+                  <span className="font-semibold text-zinc-100">Performance</span>
                   <div className="flex items-center gap-4">
                     <span className="inline-flex items-center gap-2">
                       <span className="h-2 w-2 rounded-full bg-sky-400" />
@@ -862,20 +864,20 @@ export function DownloadsPage() {
 
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                 <div className="rounded-xl border border-white/10 bg-slate-950/60 p-4">
-                  <div className="text-xs text-muted-foreground">Current</div>
-                  <div className="text-lg font-semibold text-foreground">{formatSpeed(currentShown)}</div>
+                  <div className="text-xs text-zinc-400">Current</div>
+                  <div className="text-lg font-semibold text-zinc-100">{formatSpeed(currentShown)}</div>
                 </div>
                 <div className="rounded-xl border border-white/10 bg-slate-950/60 p-4">
-                  <div className="text-xs text-muted-foreground">Peak</div>
-                  <div className="text-lg font-semibold text-foreground">{formatSpeed(peakSpeed)}</div>
+                  <div className="text-xs text-zinc-400">Peak</div>
+                  <div className="text-lg font-semibold text-zinc-100">{formatSpeed(peakSpeed)}</div>
                 </div>
                 <div className="rounded-xl border border-white/10 bg-slate-950/60 p-4">
-                  <div className="text-xs text-muted-foreground">Total</div>
-                  <div className="text-lg font-semibold text-foreground">{formatBytes(primaryStats.receivedBytes)}</div>
+                  <div className="text-xs text-zinc-400">Total</div>
+                  <div className="text-lg font-semibold text-zinc-100">{formatBytes(primaryStats.receivedBytes)}</div>
                 </div>
                 <div className="rounded-xl border border-white/10 bg-slate-950/60 p-4">
-                  <div className="text-xs text-muted-foreground">Disk usage</div>
-                  <div className="text-lg font-semibold text-foreground">{formatSpeed(currentDisk)}</div>
+                  <div className="text-xs text-zinc-400">Disk usage</div>
+                  <div className="text-lg font-semibold text-zinc-100">{formatSpeed(currentDisk)}</div>
                 </div>
               </div>
             </div>
@@ -884,15 +886,15 @@ export function DownloadsPage() {
       )}
       <section className="space-y-4">
         <div className="flex items-center gap-2">
-          <Download className="h-5 w-5 text-primary" />
-          <h2 className="text-xl font-black font-montserrat">Queue</h2>
+          <Download className="h-5 w-5 text-white" />
+          <h2 className="text-xl font-black ">Queue</h2>
           <Badge variant="secondary" className="rounded-full">
             {queuedGroups.length}
           </Badge>
         </div>
 
         {queuedGroups.length === 0 && (
-          <div className="rounded-2xl border border-border/60 bg-card/60 p-6 text-sm text-muted-foreground">
+          <div className="rounded-2xl border border-white/[.07] bg-zinc-900/60 p-6 text-sm text-zinc-400">
             Queue is empty. Start a download from any game page.
           </div>
         )}
@@ -928,11 +930,11 @@ export function DownloadsPage() {
             return (
               <div
                 key={`${items[0].appid}-${gameName}`}
-                className="rounded-xl border border-border/60 bg-gradient-to-b from-slate-950/70 via-slate-950/50 to-slate-900/40 shadow-lg shadow-black/20"
+                className="rounded-xl border border-white/[.07] bg-gradient-to-b from-slate-950/70 via-slate-950/50 to-slate-900/40 shadow-lg shadow-black/20"
               >
                 <div className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center">
                   <div className="flex items-center gap-4 sm:w-[320px]">
-                    <div className="h-14 w-24 overflow-hidden rounded-md border border-border/50 bg-muted">
+                    <div className="h-14 w-24 overflow-hidden rounded-md border border-white/[.07] bg-zinc-800">
                       {game?.image ? (
                         <img
                           src={proxyImageUrl(game.image)}
@@ -943,7 +945,7 @@ export function DownloadsPage() {
                     </div>
                     <div className="min-w-0">
                       <h3 className="truncate text-base font-semibold">{gameName}</h3>
-                      <div className="text-xs text-muted-foreground">
+                      <div className="text-xs text-zinc-400">
                         {game?.version && (
                           <span>{game.version} · </span>
                         )}
@@ -961,7 +963,7 @@ export function DownloadsPage() {
                   </div>
 
                   <div className="flex-1 space-y-2">
-                    <div className="flex items-center justify-between text-xs text-muted-foreground">
+                    <div className="flex items-center justify-between text-xs text-zinc-400">
                       <span>
                         {queuedOnly
                           ? "Queued"
@@ -977,11 +979,11 @@ export function DownloadsPage() {
                     </div>
                     <Progress value={progress} className="h-2" />
                     {phase !== "downloading" && overallTotalBytes > 0 && (
-                      <div className="text-xs text-muted-foreground">
+                      <div className="text-xs text-zinc-400">
                         Downloaded {formatBytes(overallReceivedBytes)} / {formatBytes(overallTotalBytes)}
                       </div>
                     )}
-                    <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-zinc-400">
                       <span>ETA {formatEta(etaSeconds)}</span>
                       <span>{formatSpeed(speedBps)}</span>
                     </div>
@@ -994,8 +996,8 @@ export function DownloadsPage() {
                   </div>
                 </div>
 
-                <div className="border-t border-border/50 px-5 py-3">
-                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+                <div className="border-t border-white/[.07] px-5 py-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-zinc-400">
                     <span>{totalParts} {getPartsLabel(items)}</span>
                     <span>
                       {(() => {
@@ -1022,15 +1024,15 @@ export function DownloadsPage() {
 
       <section className="space-y-4">
         <div className="flex items-center gap-2">
-          <Download className="h-5 w-5 text-primary" />
-          <h2 className="text-xl font-black font-montserrat">Completed</h2>
+          <Download className="h-5 w-5 text-white" />
+          <h2 className="text-xl font-black ">Completed</h2>
           <Badge variant="secondary" className="rounded-full">
             {completedGroups.length}
           </Badge>
         </div>
 
         {completedGroups.length === 0 && (
-          <div className="rounded-2xl border border-border/60 bg-card/60 p-6 text-sm text-muted-foreground">
+          <div className="rounded-2xl border border-white/[.07] bg-zinc-900/60 p-6 text-sm text-zinc-400">
             Completed downloads will appear here.
           </div>
         )}
@@ -1048,14 +1050,14 @@ export function DownloadsPage() {
             return (
               <div
                 key={`completed-${items[0].appid}-${gameName}`}
-                className="cursor-pointer rounded-xl border border-border/60 bg-gradient-to-b from-slate-950/60 via-slate-950/40 to-slate-900/30 shadow-lg shadow-black/20 transition hover:border-primary/40"
+                className="cursor-pointer rounded-xl border border-white/[.07] bg-gradient-to-b from-slate-950/60 via-slate-950/40 to-slate-900/30 shadow-lg shadow-black/20 transition hover:border-zinc-700"
                 onClick={() => {
                   if (appid) navigate(`/game/${appid}`)
                 }}
               >
                 <div className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
                   <div className="flex items-center gap-4">
-                    <div className="h-14 w-24 overflow-hidden rounded-md border border-border/50 bg-muted">
+                    <div className="h-14 w-24 overflow-hidden rounded-md border border-white/[.07] bg-zinc-800">
                       {game?.image ? (
                         <img
                           src={proxyImageUrl(game.image)}
@@ -1066,7 +1068,7 @@ export function DownloadsPage() {
                     </div>
                     <div>
                       <h3 className="text-base font-semibold">{gameName}</h3>
-                      <div className="text-xs text-muted-foreground">
+                      <div className="text-xs text-zinc-400">
                         {game?.version || "Unknown version"} - {game?.source || "Unknown source"} - Completed {finishedAt ? new Date(finishedAt).toLocaleString() : ""}
                       </div>
                       {game?.comment && (
@@ -1093,8 +1095,8 @@ export function DownloadsPage() {
                   </div>
                 </div>
 
-                <div className="border-t border-border/50 px-5 py-3">
-                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+                <div className="border-t border-white/[.07] px-5 py-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-zinc-400">
                     <span>{totalParts} {getPartsLabel(items)}</span>
                     <Badge variant="outline" className="rounded-full">
                       Completed
@@ -1110,14 +1112,14 @@ export function DownloadsPage() {
       <section className="space-y-4">
         <div className="flex items-center gap-2">
           <XCircle className="h-5 w-5 text-destructive" />
-          <h2 className="text-xl font-black font-montserrat">Cancelled / Failed</h2>
+          <h2 className="text-xl font-black ">Cancelled / Failed</h2>
           <Badge variant="secondary" className="rounded-full">
             {cancelledGroups.length}
           </Badge>
         </div>
 
         {cancelledGroups.length === 0 && (
-          <div className="rounded-2xl border border-border/60 bg-card/60 p-6 text-sm text-muted-foreground">
+          <div className="rounded-2xl border border-white/[.07] bg-zinc-900/60 p-6 text-sm text-zinc-400">
             Cancelled or failed downloads will appear here.
           </div>
         )}
@@ -1138,7 +1140,7 @@ export function DownloadsPage() {
               >
                 <div className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
                   <div className="flex items-center gap-4">
-                    <div className="h-14 w-24 overflow-hidden rounded-md border border-border/50 bg-muted">
+                    <div className="h-14 w-24 overflow-hidden rounded-md border border-white/[.07] bg-zinc-800">
                       {game?.image ? (
                         <img
                           src={proxyImageUrl(game.image)}
@@ -1148,7 +1150,7 @@ export function DownloadsPage() {
                       ) : null}
                     </div>
                     <div>
-                      <h3 className="text-base font-semibold text-muted-foreground">{gameName}</h3>
+                      <h3 className="text-base font-semibold text-zinc-400">{gameName}</h3>
                       <div className="text-xs text-destructive">
                         {statusLabel}{game?.version ? ` · ${game.version}` : ""}
                       </div>
@@ -1177,8 +1179,8 @@ export function DownloadsPage() {
                   </div>
                 </div>
 
-                <div className="border-t border-border/50 px-5 py-3">
-                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+                <div className="border-t border-white/[.07] px-5 py-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-zinc-400">
                     <span>{totalParts} {getPartsLabel(items)}</span>
                     <Badge variant="outline" className="rounded-full border-destructive/40 text-destructive">
                       {statusLabel}
@@ -1252,5 +1254,6 @@ export function DownloadsPage() {
     </div>
   )
 }
+
 
 

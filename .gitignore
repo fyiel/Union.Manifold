@@ -15,7 +15,7 @@ build/
 electron/native/build/
 overlay-dll/build/
 
-# Vendored third-party C++ libraries (MinHook etc. — fetched at build time)
+# Vendored third-party C++ libraries (MinHook etc. - fetched at build time)
 overlay-dll/vendor/
 
 # Compiled binary artifacts

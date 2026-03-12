@@ -42,7 +42,7 @@ export const GameCardCompact = memo(function GameCardCompact({ game }: { game: C
     }
   }, [])
 
-  // Session reveal: in-memory only — resets on page reload, never persisted to storage.
+  // Session reveal: in-memory only - resets on page reload, never persisted to storage.
   useEffect(() => {
     const checkSession = () => setSessionRevealed(nsfwRevealedAppids.has(game.appid))
     checkSession()
@@ -52,7 +52,7 @@ export const GameCardCompact = memo(function GameCardCompact({ game }: { game: C
 
   return (
     <Link to={`/game/${game.appid}`} className="group block">
-      <div className="relative overflow-hidden rounded-2xl border border-border/60 bg-card/80 transition hover:border-primary/50">
+      <div className="relative overflow-hidden rounded-2xl border border-white/[.07] bg-zinc-900/80 transition hover:border-zinc-500">
         <div className="relative aspect-[3/4]">
           <img
             src={proxyImageUrl(game.image) || "./banner.png"}
@@ -96,3 +96,4 @@ export const GameCardCompact = memo(function GameCardCompact({ game }: { game: C
     </Link>
   )
 })
+

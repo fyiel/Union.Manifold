@@ -581,14 +581,14 @@ export function SearchPage() {
   }, [developerQuery, filterOptions.allDevelopers])
 
   return (
-    <div className={`min-h-screen bg-background ${loading ? "min-h-[200vh]" : ""}`}>
+    <div className={`min-h-screen bg-[#09090b] ${loading ? "min-h-[200vh]" : ""}`}>
       <div className="container mx-auto max-w-7xl px-3 sm:px-4 py-6 sm:py-8">
         <div className="mb-6 sm:mb-8 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
           <div>
-            <h1 className="text-2xl sm:text-3xl font-bold text-foreground font-montserrat mb-1 sm:mb-2">
+            <h1 className="text-2xl sm:text-3xl font-bold text-white mb-1 sm:mb-2">
               Advanced Search
             </h1>
-            <p className="text-sm sm:text-base text-muted-foreground">
+            <p className="text-sm sm:text-base text-zinc-400">
               Find exactly what you're looking for with detailed filters
             </p>
           </div>
@@ -604,11 +604,11 @@ export function SearchPage() {
         </div>
 
         <div className="mb-5">
-          <Card className="border border-border/60 bg-card/40">
+          <Card className="border border-white/[.07] bg-zinc-900/50">
             <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <CardTitle className="text-lg">Your Lists</CardTitle>
-                <p className="text-sm text-muted-foreground">Jump to wishlist or liked games.</p>
+                <p className="text-sm text-zinc-400">Jump to wishlist or liked games.</p>
               </div>
               <div className="flex flex-wrap gap-2">
                 <Button variant="outline" className="gap-2" onClick={() => navigate("/wishlist")}>
@@ -625,14 +625,14 @@ export function SearchPage() {
         </div>
 
         <div className="mb-5">
-          <Card className="border border-border/60 bg-card/40 backdrop-blur-sm">
+          <Card className="border border-white/[.07] bg-zinc-900/50 backdrop-blur-sm">
             <CardHeader className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
               <div className="space-y-1">
                 <CardTitle className="text-lg flex items-center gap-2">
                   <SlidersHorizontal className="h-5 w-5" />
                   Search & Filters
                 </CardTitle>
-                <p className="text-sm text-muted-foreground">
+                <p className="text-sm text-zinc-400">
                   Quick search + sort is always visible. Open the filter panel for genres, developers, size, and online-only.
                 </p>
               </div>
@@ -659,10 +659,10 @@ export function SearchPage() {
                       <div className="space-y-5">
                         <div className="space-y-2">
                           <label className="text-sm font-medium">Online Only</label>
-                          <div className="flex items-center justify-between gap-3 rounded-xl border border-border/60 bg-background/40 px-4 py-3">
+                          <div className="flex items-center justify-between gap-3 rounded-xl border border-zinc-800 bg-zinc-900/50 px-4 py-3">
                             <div className="space-y-0.5">
-                              <p className="text-sm font-semibold text-foreground">Show online games</p>
-                              <p className="text-xs text-muted-foreground">Filters using the online/co-op badge.</p>
+                              <p className="text-sm font-semibold text-zinc-100">Show online games</p>
+                              <p className="text-xs text-zinc-400">Filters using the online/co-op badge.</p>
                             </div>
                             <Switch
                               checked={Boolean(draftFilters.online)}
@@ -673,10 +673,10 @@ export function SearchPage() {
 
                         <div className="space-y-2">
                           <label className="text-sm font-medium">NSFW Mode</label>
-                          <div className="flex items-center justify-between gap-3 rounded-xl border border-border/60 bg-background/40 px-4 py-3">
+                          <div className="flex items-center justify-between gap-3 rounded-xl border border-zinc-800 bg-zinc-900/50 px-4 py-3">
                             <div className="space-y-0.5">
-                              <p className="text-sm font-semibold text-foreground">NSFW Mode</p>
-                              <p className="text-xs text-muted-foreground">
+                              <p className="text-sm font-semibold text-zinc-100">NSFW Mode</p>
+                              <p className="text-xs text-zinc-400">
                                 {draftFilters.nsfwOnly
                                   ? "Show only NSFW results"
                                   : "Hide NSFW from search results"}
@@ -691,8 +691,8 @@ export function SearchPage() {
 
                         <div className="space-y-2">
                           <label className="text-sm font-medium">Size Range</label>
-                          <div className="rounded-xl border border-border/60 bg-background/40 p-4 space-y-3">
-                            <p className="text-xs text-muted-foreground">
+                          <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4 space-y-3">
+                            <p className="text-xs text-zinc-400">
                               {draftFilters.sizeRange[0]}GB - {draftFilters.sizeRange[1]}GB
                             </p>
                             <Slider
@@ -708,15 +708,15 @@ export function SearchPage() {
 
                         <div className="space-y-2">
                           <label className="text-sm font-medium">Genres</label>
-                          <ScrollArea className="h-56 rounded-xl border border-border/60 bg-background/40 p-2">
+                          <ScrollArea className="h-56 rounded-xl border border-zinc-800 bg-zinc-900/50 p-2">
                             <div className="grid grid-cols-1 gap-1">
                               {filterOptions.allGenres.map((genre) => (
                                 <button
                                   key={genre}
                                   type="button"
                                   className={`text-left px-3 py-2 rounded-lg text-sm transition-colors ${draftFilters.genres.includes(genre)
-                                    ? "bg-primary text-primary-foreground"
-                                    : "hover:bg-muted"
+                                    ? "bg-zinc-700 text-white"
+                                    : "hover:bg-zinc-800"
                                     }`}
                                   onClick={() => toggleDraftGenre(genre)}
                                 >
@@ -734,15 +734,15 @@ export function SearchPage() {
                             onChange={(e) => setDeveloperQuery(e.target.value)}
                             placeholder="Search developers..."
                           />
-                          <ScrollArea className="h-56 rounded-xl border border-border/60 bg-background/40 p-2">
+                          <ScrollArea className="h-56 rounded-xl border border-zinc-800 bg-zinc-900/50 p-2">
                             <div className="grid grid-cols-1 gap-1">
                               {filteredDevelopers.slice(0, 200).map((developer) => (
                                 <button
                                   key={developer}
                                   type="button"
                                   className={`text-left px-3 py-2 rounded-lg text-sm transition-colors ${draftFilters.developers.includes(developer)
-                                    ? "bg-primary text-primary-foreground"
-                                    : "hover:bg-muted"
+                                    ? "bg-zinc-700 text-white"
+                                    : "hover:bg-zinc-800"
                                     }`}
                                   onClick={() => toggleDraftDeveloper(developer)}
                                 >
@@ -750,7 +750,7 @@ export function SearchPage() {
                                 </button>
                               ))}
                               {filteredDevelopers.length > 200 && (
-                                <p className="px-3 py-2 text-xs text-muted-foreground">
+                                <p className="px-3 py-2 text-xs text-zinc-400">
                                   Showing first 200 matches. Refine your search to narrow it down.
                                 </p>
                               )}
@@ -811,7 +811,7 @@ export function SearchPage() {
                       placeholder="Search games..."
                     />
                     {isSearching && (
-                      <div className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground">
+                      <div className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400">
                         <RefreshCw className="h-4 w-4 animate-spin" />
                       </div>
                     )}
@@ -846,7 +846,7 @@ export function SearchPage() {
                       variant="outline"
                       className="gap-2 text-xs sm:text-sm rounded-full border-border/60 bg-muted/40 px-3 py-1 shadow-sm"
                     >
-                      <span className="text-muted-foreground">Search:</span>
+                      <span className="text-zinc-400">Search:</span>
                       <span className="max-w-[240px] truncate">{appliedFilters.searchTerm.trim()}</span>
                       <Button
                         variant="ghost"
@@ -868,7 +868,7 @@ export function SearchPage() {
                       variant="outline"
                       className="gap-2 text-xs sm:text-sm rounded-full border-border/60 bg-muted/40 px-3 py-1 shadow-sm"
                     >
-                      <span className="text-muted-foreground">Sort:</span>
+                      <span className="text-zinc-400">Sort:</span>
                       <span className="truncate">{sortLabel}</span>
                       <Button
                         variant="ghost"
@@ -890,7 +890,7 @@ export function SearchPage() {
                       variant="outline"
                       className="gap-2 text-xs sm:text-sm rounded-full border-border/60 bg-muted/40 px-3 py-1 shadow-sm"
                     >
-                      <span className="text-muted-foreground">Size:</span>
+                      <span className="text-zinc-400">Size:</span>
                       <span className="truncate">
                         {appliedFilters.sizeRange[0]}-{appliedFilters.sizeRange[1]}GB
                       </span>
@@ -1057,10 +1057,10 @@ export function SearchPage() {
             ) : (
               <>
                 <div className="mb-4 sm:mb-6">
-                  <h2 className="text-lg sm:text-xl font-semibold text-foreground mb-2 flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2">
+                  <h2 className="text-lg sm:text-xl font-semibold text-zinc-100 mb-2 flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2">
                     Search Results ({filteredGames.length} games)
                     {filteredGames.length > itemsPerPage && (
-                      <span className="text-xs sm:text-sm text-muted-foreground font-normal">
+                      <span className="text-xs sm:text-sm text-zinc-400 font-normal">
                         • Showing {startItem}-{endItem} of {filteredGames.length}
                       </span>
                     )}
@@ -1069,9 +1069,9 @@ export function SearchPage() {
 
                 <div className="relative">
                   {filtering && (
-                    <div className="absolute inset-0 bg-background/80 backdrop-blur-sm z-10 flex items-center justify-center rounded-lg">
-                      <div className="flex items-center gap-3 bg-card p-4 rounded-lg shadow-lg">
-                        <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
+                    <div className="absolute inset-0 bg-[#09090b]/80 backdrop-blur-sm z-10 flex items-center justify-center rounded-lg">
+                      <div className="flex items-center gap-3 bg-zinc-900 p-4 rounded-lg shadow-lg border border-white/[.07]">
+                        <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-white"></div>
                         <span className="text-sm font-medium">Filtering games...</span>
                       </div>
                     </div>
@@ -1107,17 +1107,17 @@ export function SearchPage() {
                       ) : (
                         <div className="flex flex-col items-center gap-4">
                           <div className="p-4 rounded-full bg-muted">
-                            <Filter className="h-8 w-8 text-muted-foreground" />
+                            <Filter className="h-8 w-8 text-zinc-400" />
                           </div>
                           <div>
-                            <h3 className="text-lg sm:text-xl font-semibold text-foreground mb-2">No games found</h3>
-                            <p className="text-sm sm:text-base text-muted-foreground">
+                            <h3 className="text-lg sm:text-xl font-semibold text-zinc-100 mb-2">No games found</h3>
+                            <p className="text-sm sm:text-base text-zinc-400">
                               No games match your search criteria. Try adjusting your filters or search terms.
                             </p>
                           </div>
                           {didYouMeanResults.length > 0 && (
                             <div className="w-full mt-2 text-left">
-                              <p className="text-xs uppercase tracking-wide text-muted-foreground mb-3">Did you mean</p>
+                              <p className="text-xs uppercase tracking-wide text-zinc-400 mb-3">Did you mean</p>
                               <div className="flex flex-col gap-1">
                                 {didYouMeanResults.map((game) => (
                                   <button
@@ -1138,12 +1138,12 @@ export function SearchPage() {
                                       )}
                                     </div>
                                     <div className="min-w-0 flex-1">
-                                      <div className="text-sm font-semibold text-foreground line-clamp-1">{game.name}</div>
+                                      <div className="text-sm font-semibold text-zinc-100 line-clamp-1">{game.name}</div>
                                       {game.developer && (
-                                        <div className="text-xs text-muted-foreground line-clamp-1">by {game.developer}</div>
+                                        <div className="text-xs text-zinc-400 line-clamp-1">by {game.developer}</div>
                                       )}
                                     </div>
-                                    <ChevronRight className="h-4 w-4 text-muted-foreground transition-transform duration-200 group-hover:translate-x-1" />
+                                    <ChevronRight className="h-4 w-4 text-zinc-400 transition-transform duration-200 group-hover:translate-x-1" />
                                   </button>
                                 ))}
                               </div>
@@ -1160,11 +1160,11 @@ export function SearchPage() {
                     <div className="max-w-xl mx-auto">
                       <div className="flex flex-col items-center gap-4">
                         <div className="p-4 rounded-full bg-muted">
-                          <Filter className="h-8 w-8 text-muted-foreground" />
+                          <Filter className="h-8 w-8 text-zinc-400" />
                         </div>
                         <div>
-                          <h3 className="text-lg sm:text-xl font-semibold text-foreground mb-2">No games found</h3>
-                          <p className="text-sm sm:text-base text-muted-foreground">
+                          <h3 className="text-lg sm:text-xl font-semibold text-zinc-100 mb-2">No games found</h3>
+                          <p className="text-sm sm:text-base text-zinc-400">
                             No games match your search criteria. Try adjusting your filters or search terms.
                           </p>
                         </div>
@@ -1180,3 +1180,4 @@ export function SearchPage() {
     </div>
   )
 }
+

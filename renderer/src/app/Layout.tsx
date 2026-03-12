@@ -20,7 +20,7 @@ export function AppLayout() {
   }, [location.pathname, location.hash])
 
   return (
-    <div className="h-screen w-full flex flex-col bg-background text-foreground overflow-hidden">
+    <div className="h-screen w-full flex flex-col bg-[#09090b] text-zinc-100 overflow-hidden">
       <div className="flex-none z-40">
         <TopBar />
       </div>

@@ -117,7 +117,7 @@ export const GameCard = memo(function GameCard({
     }
   }, [])
 
-  // Session reveal: in-memory only — resets on page reload, never persisted to storage.
+  // Session reveal: in-memory only - resets on page reload, never persisted to storage.
   useEffect(() => {
     const checkSession = () => setSessionRevealed(nsfwRevealedAppids.has(game.appid))
     checkSession()
@@ -477,7 +477,7 @@ export const GameCard = memo(function GameCard({
     <div className="relative group/container h-full">
       <Link to={`/game/${game.appid}`} className="block h-full">
         <Card
-          className={`group relative h-full overflow-hidden border border-white/10 bg-black/40 backdrop-blur-md transition-all duration-500 hover:-translate-y-1 hover:shadow-[0_0_30px_rgba(var(--primary),0.15)] hover:border-primary/50 flex flex-col gap-0 py-0 ${isCompact ? "rounded-xl" : "rounded-2xl"
+          className={`group relative h-full overflow-hidden border border-white/[.07] bg-zinc-900/60 backdrop-blur-md transition-all duration-300 hover:-translate-y-0.5 hover:bg-white/[.03] hover:border-zinc-600 flex flex-col gap-0 py-0 ${isCompact ? "rounded-xl" : "rounded-2xl"
             }`}
           onMouseEnter={fetchStatsOnHover}
         >
@@ -524,13 +524,11 @@ export const GameCard = memo(function GameCard({
               <div className="absolute inset-0 z-30 flex items-center justify-center">
                 <button
                   onClick={handlePlayClick}
-                  className={`group/play relative inline-flex items-center justify-center h-14 w-14 rounded-full shadow-[0_0_20px_rgba(var(--primary),0.5)] transition-transform duration-300 hover:scale-110 hover:shadow-[0_0_30px_rgba(var(--primary),0.7)] ${isRunning
-                    ? "bg-red-600 text-white shadow-red-500/40"
-                    : "bg-primary text-primary-foreground"
+                  className={`group/play relative inline-flex items-center justify-center h-14 w-14 rounded-full transition-transform duration-300 hover:scale-110 active:scale-95 ${isRunning
+                    ? "bg-red-600 text-white"
+                    : "bg-white text-black"
                     }`}
                 >
-                  <span className={`absolute inset-0 rounded-full opacity-0 transition-opacity duration-300 group-hover/play:opacity-100 blur-lg ${isRunning ? "bg-red-500/40" : "bg-primary/40"
-                    }`} />
                   {isRunning ? <Square className="relative h-6 w-6 fill-current" /> : <Play className="relative h-6 w-6 fill-current ml-1" />}
                 </button>
               </div>
@@ -546,7 +544,7 @@ export const GameCard = memo(function GameCard({
               )}
 
               {isPopular && (
-                <Badge className="bg-primary/90 hover:bg-primary text-primary-foreground backdrop-blur-md shadow-[0_0_15px_rgba(var(--primary),0.4)] border-0 px-2 py-0.5 text-xs font-bold uppercase tracking-wider animate-in fade-in zoom-in duration-300">
+                <Badge className="bg-zinc-200 text-black border-0 px-2 py-0.5 text-xs font-bold uppercase tracking-wider animate-in fade-in zoom-in duration-300">
                   <Flame className="w-3 h-3 mr-1 fill-current" /> Popular
                 </Badge>
               )}
@@ -563,7 +561,7 @@ export const GameCard = memo(function GameCard({
             <div className="absolute bottom-0 left-0 right-0 z-20 p-4 translate-y-full transition-transform duration-300 ease-out group-hover:translate-y-0 bg-gradient-to-t from-black/90 via-black/60 to-transparent pt-10">
               <div className="flex items-center justify-between text-xs font-medium text-white/90">
                 <div className="flex items-center gap-1.5 bg-black/40 rounded-full px-2 py-1 backdrop-blur-sm border border-white/10">
-                  <Download className="w-3.5 h-3.5 text-primary" />
+                  <Download className="w-3.5 h-3.5 text-zinc-300" />
                   <span>{formatNumber(displayStats.downloads)}</span>
                 </div>
                 <div className="flex items-center gap-1.5 bg-black/40 rounded-full px-2 py-1 backdrop-blur-sm border border-white/10">
@@ -578,7 +576,7 @@ export const GameCard = memo(function GameCard({
           <CardContent className={`${isCompact ? "p-3" : "p-4"} flex-1 flex flex-col space-y-2 relative z-20 bg-background/5`}>
             <div className="space-y-1">
               <h3
-                className={`font-bold leading-tight line-clamp-1 text-white group-hover:text-primary transition-colors duration-300 ${isCompact ? "text-base" : "text-lg"
+                className={`font-medium leading-tight line-clamp-1 text-zinc-200 group-hover:text-white transition-colors duration-200 ${isCompact ? "text-sm" : "text-base"
                   }`}
               >
                 {game.name}

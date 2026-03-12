@@ -1,5 +1,5 @@
 /**
- * D3D11/DXGI Present Hook — intercepts IDXGISwapChain::Present.
+ * D3D11/DXGI Present Hook - intercepts IDXGISwapChain::Present.
  * This covers both D3D11 and D3D12 games (both go through DXGI).
  *
  * Strategy:

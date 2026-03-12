@@ -87,12 +87,12 @@ export function WishlistPage() {
   }
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-[#09090b]">
       <div className="container mx-auto max-w-7xl px-3 sm:px-4 py-6 sm:py-8">
         <div className="mb-6 sm:mb-8 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
           <div>
-            <h1 className="text-2xl sm:text-3xl font-bold text-foreground font-montserrat mb-1 sm:mb-2">Wishlist</h1>
-            <p className="text-sm sm:text-base text-muted-foreground">Games you want to keep an eye on.</p>
+            <h1 className="text-2xl sm:text-3xl font-bold text-zinc-100  mb-1 sm:mb-2">Wishlist</h1>
+            <p className="text-sm sm:text-base text-zinc-400">Games you want to keep an eye on.</p>
           </div>
           <div className="flex gap-2">
             <Button variant="outline" onClick={() => navigate("/liked")} className="gap-2">
@@ -112,13 +112,13 @@ export function WishlistPage() {
         </div>
 
         {!accountUser && !accountLoading && (
-          <Card className="border border-border/60 bg-card/40">
+          <Card className="border border-white/[.07] bg-zinc-900/40">
             <CardContent className="p-6 text-center space-y-3">
-              <div className="inline-flex items-center justify-center rounded-full bg-primary/10 text-primary p-3">
+              <div className="inline-flex items-center justify-center rounded-full bg-white/10 text-white p-3">
                 <Star className="h-5 w-5" />
               </div>
               <div className="text-lg font-semibold">Login to see your wishlist</div>
-              <p className="text-sm text-muted-foreground">Your wishlist syncs across devices when you sign in.</p>
+              <p className="text-sm text-zinc-400">Your wishlist syncs across devices when you sign in.</p>
               <Button className="gap-2" onClick={handleLogin} disabled={loggingIn}>
                 <LogIn className="h-4 w-4" />
                 {loggingIn ? "Connecting..." : "Login with Discord"}
@@ -140,8 +140,8 @@ export function WishlistPage() {
             ))}
           </div>
         ) : items.length === 0 ? (
-          <Card className="border border-border/60 bg-card/40">
-            <CardContent className="p-10 text-center text-muted-foreground">
+          <Card className="border border-white/[.07] bg-zinc-900/40">
+            <CardContent className="p-10 text-center text-zinc-400">
               No wishlist items yet.
             </CardContent>
           </Card>
@@ -156,3 +156,4 @@ export function WishlistPage() {
     </div>
   )
 }
+

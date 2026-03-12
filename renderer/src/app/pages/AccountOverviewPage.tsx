@@ -133,25 +133,25 @@ export function AccountOverviewPage() {
   }, [summary])
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-[#09090b]">
       <div className="container mx-auto px-4 py-10 sm:py-12 md:py-14 max-w-6xl">
         <div className="text-center mb-12">
           <div className="flex justify-center mb-6">
-            <div className="p-4 sm:p-6 rounded-2xl bg-gradient-to-br from-primary/20 to-primary/5 border border-primary/30 shadow-lg shadow-primary/10">
-              <Shield className="h-12 w-12 sm:h-14 sm:w-14 text-primary" />
+            <div className="p-4 sm:p-6 rounded-2xl bg-gradient-to-br from-primary/20 to-primary/5 border border-zinc-700 shadow-lg shadow-primary/10">
+              <Shield className="h-12 w-12 sm:h-14 sm:w-14 text-white" />
             </div>
           </div>
-          <h1 className="text-4xl sm:text-5xl md:text-6xl font-black text-foreground mb-4 font-montserrat">My Profile</h1>
-          <p className="text-base sm:text-lg md:text-xl text-muted-foreground max-w-3xl mx-auto leading-relaxed">
+          <h1 className="text-4xl sm:text-5xl md:text-6xl font-black text-zinc-100 mb-4 ">My Profile</h1>
+          <p className="text-base sm:text-lg md:text-xl text-zinc-400 max-w-3xl mx-auto leading-relaxed">
             Track your account activity and stay on top of what you care about.
           </p>
         </div>
 
         {!hasSession && !accountLoading && (
-          <Card className="border-2 border-border/50 shadow-xl bg-card/60 backdrop-blur-sm rounded-2xl">
+          <Card className="border-2 border-white/[.07] shadow-xl bg-zinc-900/60 backdrop-blur-sm rounded-2xl">
             <CardContent className="py-12 text-center space-y-4">
-              <p className="text-lg font-semibold text-foreground">Login to continue.</p>
-              <p className="text-sm text-muted-foreground">
+              <p className="text-lg font-semibold text-zinc-100">Login to continue.</p>
+              <p className="text-sm text-zinc-400">
                 Sign in to see your saved lists and recent activity.
               </p>
               <Button className="w-full md:w-auto" onClick={handleLogin} disabled={loggingIn}>
@@ -164,10 +164,10 @@ export function AccountOverviewPage() {
 
         {hasSession && (
           <div className="space-y-8">
-            <Card className="border-2 border-border/50 shadow-xl bg-card/60 backdrop-blur-sm rounded-2xl">
+            <Card className="border-2 border-white/[.07] shadow-xl bg-zinc-900/60 backdrop-blur-sm rounded-2xl">
               <CardHeader className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
                 <CardTitle className="text-xl font-bold flex items-center gap-2">
-                  <MessageCircle className="h-5 w-5 text-primary" />
+                  <MessageCircle className="h-5 w-5 text-white" />
                   Recent Activity
                 </CardTitle>
                 <Button variant="outline" className="gap-2" onClick={handleRefresh} disabled={refreshing}>
@@ -188,18 +188,18 @@ export function AccountOverviewPage() {
                     ))}
                   </div>
                 ) : recentError ? (
-                  <p className="text-sm text-muted-foreground">{recentError}</p>
+                  <p className="text-sm text-zinc-400">{recentError}</p>
                 ) : recentComments.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">No recent comments yet.</p>
+                  <p className="text-sm text-zinc-400">No recent comments yet.</p>
                 ) : (
                   <div className="space-y-3">
                     {recentComments.map((comment) => (
-                      <div key={comment.id} className="rounded-xl border border-border/60 bg-muted/20 p-4">
-                        <p className="text-sm text-muted-foreground">
+                      <div key={comment.id} className="rounded-xl border border-white/[.07] bg-zinc-800/20 p-4">
+                        <p className="text-sm text-zinc-400">
                           {comment.gameName ? (
                             <Button
                               variant="link"
-                              className="px-0 text-primary"
+                              className="px-0 text-white"
                               onClick={() => navigate(`/game/${comment.appid}`)}
                             >
                               {comment.gameName}
@@ -207,17 +207,17 @@ export function AccountOverviewPage() {
                           ) : (
                             <Button
                               variant="link"
-                              className="px-0 text-primary"
+                              className="px-0 text-white"
                               onClick={() => navigate(`/game/${comment.appid}`)}
                             >
                               View game
                             </Button>
                           )}
-                          <span className="ml-2 text-xs text-muted-foreground">
+                          <span className="ml-2 text-xs text-zinc-400">
                             {new Date(comment.createdAt).toLocaleDateString()}
                           </span>
                         </p>
-                        <p className="text-sm text-foreground mt-2 line-clamp-3">{comment.body}</p>
+                        <p className="text-sm text-zinc-100 mt-2 line-clamp-3">{comment.body}</p>
                       </div>
                     ))}
                   </div>
@@ -225,38 +225,38 @@ export function AccountOverviewPage() {
               </CardContent>
             </Card>
 
-            <Card className="border-2 border-border/50 shadow-xl bg-card/60 backdrop-blur-sm rounded-2xl">
+            <Card className="border-2 border-white/[.07] shadow-xl bg-zinc-900/60 backdrop-blur-sm rounded-2xl">
               <CardHeader>
                 <CardTitle className="text-xl font-bold">Your Lists</CardTitle>
               </CardHeader>
               <CardContent className="grid gap-4 md:grid-cols-2">
-                <div className="rounded-xl border border-border/60 bg-muted/20 p-4 space-y-2">
+                <div className="rounded-xl border border-white/[.07] bg-zinc-800/20 p-4 space-y-2">
                   <div className="flex items-center gap-2">
-                    <Star className="h-4 w-4 text-primary" />
+                    <Star className="h-4 w-4 text-white" />
                     <p className="text-sm font-semibold">Wishlist</p>
                   </div>
                   <p className="text-2xl font-bold">{overviewStats.wishlist}</p>
                   <Button variant="outline" className="gap-2" onClick={() => navigate("/wishlist")}>View wishlist</Button>
                 </div>
-                <div className="rounded-xl border border-border/60 bg-muted/20 p-4 space-y-2">
+                <div className="rounded-xl border border-white/[.07] bg-zinc-800/20 p-4 space-y-2">
                   <div className="flex items-center gap-2">
-                    <Heart className="h-4 w-4 text-primary" />
+                    <Heart className="h-4 w-4 text-white" />
                     <p className="text-sm font-semibold">Liked</p>
                   </div>
                   <p className="text-2xl font-bold">{overviewStats.favorites}</p>
                   <Button variant="outline" className="gap-2" onClick={() => navigate("/liked")}>View liked</Button>
                 </div>
-                <div className="rounded-xl border border-border/60 bg-muted/20 p-4 space-y-2">
+                <div className="rounded-xl border border-white/[.07] bg-zinc-800/20 p-4 space-y-2">
                   <div className="flex items-center gap-2">
-                    <Clock className="h-4 w-4 text-primary" />
+                    <Clock className="h-4 w-4 text-white" />
                     <p className="text-sm font-semibold">View history</p>
                   </div>
                   <p className="text-2xl font-bold">{overviewStats.viewHistory}</p>
                   <Button variant="outline" className="gap-2" onClick={() => navigate("/view-history")}>View history</Button>
                 </div>
-                <div className="rounded-xl border border-border/60 bg-muted/20 p-4 space-y-2">
+                <div className="rounded-xl border border-white/[.07] bg-zinc-800/20 p-4 space-y-2">
                   <div className="flex items-center gap-2">
-                    <Clock className="h-4 w-4 text-primary" />
+                    <Clock className="h-4 w-4 text-white" />
                     <p className="text-sm font-semibold">Search history</p>
                   </div>
                   <p className="text-2xl font-bold">{overviewStats.searchHistory}</p>
@@ -269,7 +269,7 @@ export function AccountOverviewPage() {
 
         <div className="mt-8">
           {accountLoading ? (
-            <Card className="border-2 border-border/50 shadow-xl bg-card/60 backdrop-blur-sm rounded-2xl">
+            <Card className="border-2 border-white/[.07] shadow-xl bg-zinc-900/60 backdrop-blur-sm rounded-2xl">
               <CardHeader className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
                 <Skeleton className="h-6 w-40" />
                 <Skeleton className="h-9 w-32" />
@@ -295,3 +295,4 @@ export function AccountOverviewPage() {
     </div>
   )
 }
+

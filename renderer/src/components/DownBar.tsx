@@ -128,7 +128,7 @@ export function DownBar() {
         : verifying
           ? "Verifying integrity"
           : retrying
-            ? retrying.error || "Verification failed — retrying"
+            ? retrying.error || "Verification failed - retrying"
             : downloading
               ? "Downloading"
               : completed
@@ -160,12 +160,12 @@ export function DownBar() {
           onKeyDown={(e) => {
             if (e.key === "Enter" || e.key === " ") handleClick()
           }}
-          className="fixed bottom-0 left-0 right-0 z-30 border-t border-border/60 bg-card/95 px-4 py-3 text-left text-sm text-foreground backdrop-blur-md transition hover:bg-card"
+          className="fixed bottom-0 left-0 right-0 z-30 border-t border-white/[.07] bg-zinc-950/90 px-4 py-3 text-left text-sm text-zinc-200 backdrop-blur-md transition-colors hover:bg-zinc-950"
         >
           <div className="flex items-center justify-between">
-            <span className="font-semibold">See activity</span>
+            <span className="font-medium text-zinc-200">See activity</span>
             <div className="flex items-center gap-2">
-              <span className="text-xs text-muted-foreground">No active downloads</span>
+              <span className="text-xs text-zinc-500">No active downloads</span>
               <button
                 type="button"
                 onClick={(e) => {
@@ -176,7 +176,7 @@ export function DownBar() {
                   }
                   setAddGameOpen(true)
                 }}
-                className="flex h-7 w-7 items-center justify-center rounded-full border border-border/60 bg-primary/10 text-primary transition hover:bg-primary/20"
+                className="flex h-7 w-7 items-center justify-center rounded-full border border-white/[.07] bg-zinc-800 text-zinc-300 transition-all hover:bg-zinc-700 hover:text-white active:scale-95"
                 aria-label="Add external game"
                 title="Add a game manually"
               >
@@ -221,13 +221,13 @@ export function DownBar() {
         onKeyDown={(e) => {
           if (e.key === "Enter" || e.key === " ") handleClick()
         }}
-        className="fixed bottom-0 left-0 right-0 z-30 border-t border-border/60 bg-card/95 px-4 py-3 text-left text-sm text-foreground backdrop-blur-md transition hover:bg-card"
+        className="fixed bottom-0 left-0 right-0 z-30 border-t border-white/[.07] bg-zinc-950/90 px-4 py-3 text-left text-sm text-zinc-200 backdrop-blur-md transition-colors hover:bg-zinc-950"
       >
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
-              <span className="truncate font-semibold">{displayName}</span>
-              <span className="text-xs text-muted-foreground">
+              <span className="truncate font-medium text-zinc-200">{displayName}</span>
+              <span className="text-xs text-zinc-500">
                 {isPaused
                   ? `Downloads paused - ${queuedCount} queued`
                   : isQueuedOnly
@@ -244,11 +244,11 @@ export function DownBar() {
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <div className="text-xs text-muted-foreground">{formatPercent(stats.progress)}</div>
+            <div className="text-xs text-zinc-500">{formatPercent(stats.progress)}</div>
             <button
               type="button"
               onClick={handleToggle}
-              className="flex h-8 w-8 items-center justify-center rounded-full border border-border/60 bg-card/60 text-foreground transition hover:bg-card"
+              className="flex h-8 w-8 items-center justify-center rounded-full border border-white/[.07] bg-zinc-800 text-zinc-300 transition-all hover:bg-zinc-700 hover:text-white active:scale-95"
               aria-label={isPaused ? "Resume downloads" : "Pause downloads"}
             >
               {isPaused ? <Play className="h-4 w-4" /> : <PauseCircle className="h-4 w-4" />}
@@ -263,7 +263,7 @@ export function DownBar() {
                 }
                 setAddGameOpen(true)
               }}
-              className="flex h-8 w-8 items-center justify-center rounded-full border border-border/60 bg-primary/10 text-primary transition hover:bg-primary/20"
+              className="flex h-8 w-8 items-center justify-center rounded-full border border-white/[.07] bg-zinc-800 text-zinc-300 transition-all hover:bg-zinc-700 hover:text-white active:scale-95"
               aria-label="Add external game"
               title="Add a game manually"
             >

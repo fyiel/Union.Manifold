@@ -106,13 +106,13 @@ export function ExePickerModal({ open, title, message, exes, gameName, baseFolde
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
-      <div className="absolute inset-0 bg-background/40 backdrop-blur-sm animate-in fade-in duration-300 ease-out" onClick={onClose} />
-      <div className="relative w-full max-w-lg overflow-hidden rounded-2xl border border-border/60 bg-card/95 p-5 text-foreground shadow-2xl animate-in slide-in-from-top-4 duration-300 ease-out">
+      <div className="absolute inset-0 bg-[#09090b]/40 backdrop-blur-sm animate-in fade-in duration-300 ease-out" onClick={onClose} />
+      <div className="relative w-full max-w-lg overflow-hidden rounded-2xl border border-white/[.07] bg-zinc-900/95 p-5 text-zinc-100 shadow-2xl animate-in slide-in-from-top-4 duration-300 ease-out">
         <div className="text-lg font-semibold">{title}</div>
-        <p className="mt-1 text-sm text-muted-foreground">{message}</p>
+        <p className="mt-1 text-sm text-zinc-400">{message}</p>
 
         <div className="mt-4 space-y-3">
-          {/* Search bar — only show when there are enough exes to warrant searching */}
+          {/* Search bar - only show when there are enough exes to warrant searching */}
           {ranked.length > 3 && (
             <div className="flex flex-wrap items-center gap-2">
               <Input
@@ -120,19 +120,19 @@ export function ExePickerModal({ open, title, message, exes, gameName, baseFolde
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
                 placeholder="Search exe name or path..."
-                className="h-9 flex-1 rounded-xl bg-background/70"
+                className="h-9 flex-1 rounded-xl bg-[#09090b]/70"
               />
             </div>
           )}
 
           {/* Recommended exe (highlighted at top, only when there are 2+ exes) */}
           {showRecommended && recommended ? (
-            <div className="rounded-xl border border-primary/30 bg-primary/10 px-3 py-2 text-sm">
+            <div className="rounded-xl border border-zinc-700 bg-white/10 px-3 py-2 text-sm">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="min-w-0 flex-1">
-                  <div className="text-xs uppercase tracking-wide text-primary/80">Recommended</div>
-                  <div className="truncate text-sm font-semibold text-primary">{recommended.name}</div>
-                  <div className="truncate text-xs text-primary/70">{getRelativePath(recommended.path)}</div>
+                  <div className="text-xs uppercase tracking-wide text-white/80">Recommended</div>
+                  <div className="truncate text-sm font-semibold text-white">{recommended.name}</div>
+                  <div className="truncate text-xs text-white/70">{getRelativePath(recommended.path)}</div>
                 </div>
                 <Button size="sm" onClick={() => onSelect(recommended.path)}>
                   {actionLabel}
@@ -152,22 +152,22 @@ export function ExePickerModal({ open, title, message, exes, gameName, baseFolde
                     key={exe.path}
                     className={`flex items-center justify-between gap-3 rounded-xl border px-3 py-2 transition-colors ${
                       isCurrent
-                        ? "border-primary/60 bg-primary/10"
-                        : "border-border/60 bg-background/70 hover:border-foreground/30 hover:bg-foreground/5"
+                        ? "border-white/60 bg-white/10"
+                        : "border-white/[.07] bg-[#09090b]/70 hover:border-foreground/30 hover:bg-foreground/5"
                     }`}
                   >
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 truncate text-sm font-medium">
-                        <span className={`truncate ${isCurrent ? "text-primary" : ""}`}>{exe.name}</span>
+                        <span className={`truncate ${isCurrent ? "text-white" : ""}`}>{exe.name}</span>
                         {isCurrent ? (
-                          <span className="flex-none rounded-full border border-primary/40 bg-primary/10 px-2 py-0.5 text-[10px] font-semibold uppercase text-primary/90">
+                          <span className="flex-none rounded-full border border-zinc-700 bg-white/10 px-2 py-0.5 text-[10px] font-semibold uppercase text-white/90">
                             Current
                           </span>
                         ) : null}
                       </div>
-                      <div className={`truncate text-xs ${isCurrent ? "text-primary/70" : "text-muted-foreground"}`}>{relativePath}</div>
+                      <div className={`truncate text-xs ${isCurrent ? "text-white/70" : "text-zinc-400"}`}>{relativePath}</div>
                       {typeof exe.size === "number" && exe.size > 0 ? (
-                        <div className="text-[10px] text-muted-foreground">{formatFileSize(exe.size)}</div>
+                        <div className="text-[10px] text-zinc-400">{formatFileSize(exe.size)}</div>
                       ) : null}
                     </div>
                     <Button
@@ -181,13 +181,13 @@ export function ExePickerModal({ open, title, message, exes, gameName, baseFolde
                 )
               })
             ) : hasExes && search.trim() ? (
-              <div className="rounded-xl border border-border/60 bg-background/70 px-3 py-3 text-sm text-muted-foreground">
+              <div className="rounded-xl border border-white/[.07] bg-[#09090b]/70 px-3 py-3 text-sm text-zinc-400">
                 No executables matching &quot;{search.trim()}&quot;.
               </div>
             ) : !hasExes ? (
-              <div className="rounded-xl border border-border/60 bg-background/70 px-3 py-4 text-center text-sm text-muted-foreground">
+              <div className="rounded-xl border border-white/[.07] bg-[#09090b]/70 px-3 py-4 text-center text-sm text-zinc-400">
                 <p>No executables found in this game folder.</p>
-                <p className="mt-1 text-xs text-muted-foreground">The game may still be extracting, or the folder structure is unusual.</p>
+                <p className="mt-1 text-xs text-zinc-400">The game may still be extracting, or the folder structure is unusual.</p>
               </div>
             ) : null}
           </div>
@@ -218,3 +218,4 @@ function formatFileSize(bytes: number): string {
   if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`
 }
+

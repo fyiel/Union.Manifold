@@ -87,12 +87,12 @@ export function SearchHistoryPage() {
   }
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-[#09090b]">
       <div className="container mx-auto max-w-6xl px-3 sm:px-4 py-6 sm:py-8">
         <div className="mb-6 sm:mb-8 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
           <div>
-            <h1 className="text-2xl sm:text-3xl font-bold text-foreground font-montserrat mb-1 sm:mb-2">Search History</h1>
-            <p className="text-sm sm:text-base text-muted-foreground">Recent searches synced with your account.</p>
+            <h1 className="text-2xl sm:text-3xl font-bold text-zinc-100  mb-1 sm:mb-2">Search History</h1>
+            <p className="text-sm sm:text-base text-zinc-400">Recent searches synced with your account.</p>
           </div>
           <div className="flex gap-2">
             <Button variant="outline" onClick={() => navigate("/view-history")} className="gap-2">
@@ -111,13 +111,13 @@ export function SearchHistoryPage() {
         </div>
 
         {!accountUser && !accountLoading && (
-          <Card className="border border-border/60 bg-card/40">
+          <Card className="border border-white/[.07] bg-zinc-900/40">
             <CardContent className="p-6 text-center space-y-3">
-              <div className="inline-flex items-center justify-center rounded-full bg-primary/10 text-primary p-3">
+              <div className="inline-flex items-center justify-center rounded-full bg-white/10 text-white p-3">
                 <Clock className="h-5 w-5" />
               </div>
               <div className="text-lg font-semibold">Login to see your search history</div>
-              <p className="text-sm text-muted-foreground">Sign in to sync search history across devices.</p>
+              <p className="text-sm text-zinc-400">Sign in to sync search history across devices.</p>
               <Button className="gap-2" onClick={handleLogin} disabled={loggingIn}>
                 <LogIn className="h-4 w-4" />
                 {loggingIn ? "Connecting..." : "Login with Discord"}
@@ -135,12 +135,12 @@ export function SearchHistoryPage() {
         {loading ? (
           <div className="space-y-3">
             {Array.from({ length: 6 }).map((_, idx) => (
-              <div key={idx} className="h-12 rounded-xl bg-muted/30" />
+              <div key={idx} className="h-12 rounded-xl bg-zinc-800/30" />
             ))}
           </div>
         ) : items.length === 0 ? (
-          <Card className="border border-border/60 bg-card/40">
-            <CardContent className="p-10 text-center text-muted-foreground">
+          <Card className="border border-white/[.07] bg-zinc-900/40">
+            <CardContent className="p-10 text-center text-zinc-400">
               No search history yet.
             </CardContent>
           </Card>
@@ -149,12 +149,12 @@ export function SearchHistoryPage() {
             {items.map((item, index) => {
               const timestamp = item.lastSearchedAt || item.last_searched_at
               return (
-                <Card key={`${item.term}-${index}`} className="border border-border/60 bg-card/40">
+                <Card key={`${item.term}-${index}`} className="border border-white/[.07] bg-zinc-900/40">
                   <CardContent className="flex items-center justify-between gap-4 p-4">
                     <div>
-                      <div className="text-sm font-semibold text-foreground">{item.term}</div>
+                      <div className="text-sm font-semibold text-zinc-100">{item.term}</div>
                       {timestamp ? (
-                        <div className="text-xs text-muted-foreground">Searched {new Date(timestamp).toLocaleDateString()}</div>
+                        <div className="text-xs text-zinc-400">Searched {new Date(timestamp).toLocaleDateString()}</div>
                       ) : null}
                     </div>
                     <Button variant="outline" onClick={() => navigate(`/search?q=${encodeURIComponent(item.term)}`)}>
@@ -170,3 +170,4 @@ export function SearchHistoryPage() {
     </div>
   )
 }
+

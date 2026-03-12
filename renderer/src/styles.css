@@ -1,13 +1,13 @@
 :root {
   color-scheme: dark;
-  --bg: #0b0b12;
-  --panel: #121222;
-  --panel2: #0f0f1d;
-  --text: #e6e6f0;
-  --muted: #a8a8c4;
-  --border: rgba(255, 255, 255, 0.12);
-  --primary: #8b5cf6;
-  --primary2: #6d28d9;
+  --bg: #09090b;
+  --panel: #18181b;
+  --panel2: #18181b;
+  --text: #f4f4f5;
+  --muted: #71717a;
+  --border: rgba(255, 255, 255, 0.07);
+  --primary: #ffffff;
+  --primary2: #e4e4e7;
   --danger: #ef4444;
   --ok: #22c55e;
 }
@@ -22,11 +22,9 @@ body {
 }
 
 body {
-  background: radial-gradient(1200px 600px at 15% 10%, rgba(139, 92, 246, 0.25), transparent 60%),
-    radial-gradient(900px 500px at 80% 30%, rgba(59, 130, 246, 0.12), transparent 55%),
-    var(--bg);
+  background: var(--bg);
   color: var(--text);
-  font-family: "Geist", ui-sans-serif, system-ui, sans-serif;
+  font-family: "Inter", ui-sans-serif, system-ui, sans-serif;
 }
 
 a {

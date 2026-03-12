@@ -9,7 +9,7 @@ export type DownloadLinksResult = {
   redirectUrl?: string
 }
 
-export type PreferredDownloadHost = "ucfiles" | "vikingfile" | "pixeldrain"
+export type PreferredDownloadHost = "ucfiles" | "pixeldrain"
 
 export type ResolvedDownload = {
   url: string
@@ -53,21 +53,18 @@ export type DownloadConfig = {
 }
 
 const DOWNLOAD_HOST_STORAGE_KEY = "uc_direct_download_host"
-export const SUPPORTED_DOWNLOAD_HOSTS: PreferredDownloadHost[] = ["ucfiles", "vikingfile", "pixeldrain"]
-const PREFERRED_HOSTS: PreferredDownloadHost[] = ["ucfiles", "vikingfile", "pixeldrain"]
+export const SUPPORTED_DOWNLOAD_HOSTS: PreferredDownloadHost[] = ["ucfiles", "pixeldrain"]
+const PREFERRED_HOSTS: PreferredDownloadHost[] = ["ucfiles", "pixeldrain"]
 const PIXELDRAIN_404_MESSAGE = "Pixeldrain returned 404. The link appears to be dead."
 const UCFILES_404_MESSAGE = "UC.Files returned 404. The link appears to be dead."
-const VIKINGFILE_404_MESSAGE = "VikingFile returned 404. The link appears to be dead."
 
 /**
- * Normalise host entries from API — handles both legacy string[] and new {url,part}[] shapes.
+ * Normalise host entries from API - handles both legacy string[] and new {url,part}[] shapes.
  */
 function sanitizeHosts(input: Record<string, any[]> | null | undefined): DownloadHosts {
   const hosts = input && typeof input === "object" ? input : {}
   const cleaned: DownloadHosts = {}
   for (const [key, value] of Object.entries(hosts)) {
-    const lower = key.toLowerCase()
-    if (lower.includes("vikingfile")) continue
     if (!Array.isArray(value)) { cleaned[key] = []; continue }
     cleaned[key] = value.map((entry, i) => {
       if (typeof entry === "string") return { url: entry, part: null }
@@ -174,11 +171,11 @@ export async function fetchDownloadLinks(appid: string, downloadToken: string): 
 }
 
 function pickHostLinks(available: DownloadHosts, host: PreferredDownloadHost) {
-  if (host === "ucfiles" || host === "pixeldrain") {
+  if (host === "ucfiles") {
     return available.ucfiles || available["files.union-crax.xyz"] || available["UC.Files"] || []
   }
-  if (host === "vikingfile") {
-    return available.vikingfile || available["vikingfile.com"] || available["VikingFile"] || []
+  if (host === "pixeldrain") {
+    return available.pixeldrain || available["Pixeldrain"] || available["pixeldrain.com"] || []
   }
   return []
 }
@@ -230,6 +227,11 @@ export function selectHost(available: DownloadHosts, preferredHost?: PreferredDo
       return { host: preferred, links: preferredLinks }
     }
   }
+  // Pixeldrain fallback: if pixeldrain has no links, try UC.Files
+  if (preferred === "pixeldrain") {
+    const ucLinks = pickHostLinks(available, "ucfiles")
+    if (ucLinks.length) return { host: "ucfiles", links: ucLinks }
+  }
   return { host: "", links: [] }
 }
 
@@ -253,7 +255,7 @@ export function extractUCFilesFileId(url: string): string | null {
     // Matches /f/{fileId} (16-char nanoid landing page)
     const fMatch = parsed.pathname.match(/\/f\/([A-Za-z0-9_-]{1,64})/)
     if (fMatch?.[1]) return fMatch[1]
-    // Matches /dl/{token} — already a direct download URL, no fileId to extract
+    // Matches /dl/{token} - already a direct download URL, no fileId to extract
     const dlMatch = parsed.pathname.match(/\/dl\/([A-Za-z0-9_-]{1,64})/)
     if (dlMatch?.[1]) return null // token, not a file ID
     return null
@@ -286,7 +288,7 @@ function isUCFilesDlTokenUrl(url: string): boolean {
 export async function resolveUCFilesDownload(url: string): Promise<ResolvedDownload> {
   if (!url) return { url, resolved: false }
 
-  // If the URL is already a signed /dl/ token, it's already resolved — pass it through
+  // If the URL is already a signed /dl/ token, it's already resolved - pass it through
   if (isUCFilesDlTokenUrl(url)) {
     return {
       url,
@@ -329,16 +331,6 @@ export async function resolveUCFilesDownload(url: string): Promise<ResolvedDownl
   }
 }
 
-// ── Vikingfile download resolution ──
-
-export function isVikingFileUrl(url: string): boolean {
-  try {
-    return new URL(url).hostname.includes("vikingfile.com")
-  } catch {
-    return false
-  }
-}
-
 // Aliases for backwards compatibility
 export const isPixeldrainUrl = isUCFilesUrl
 
@@ -351,11 +343,12 @@ export async function resolveDownloadUrl(host: string, url: string): Promise<Res
         ? String((url as any).url)
         : String(url ?? "")
 
-  if (host === "ucfiles" || host === "pixeldrain" || isUCFilesUrl(normalizedUrl)) {
+  if (host === "ucfiles" || isUCFilesUrl(normalizedUrl)) {
     return resolveUCFilesDownload(normalizedUrl)
   }
-  if (host === "vikingfile" || isVikingFileUrl(normalizedUrl)) {
-    return resolveVikingFileDownload(normalizedUrl)
+  if (host === "pixeldrain") {
+    // Pixeldrain URLs are direct downloads - no resolution step needed
+    return { url: normalizedUrl, resolved: true }
   }
   return { url: normalizedUrl, resolved: false }
 }
@@ -369,80 +362,3 @@ export async function resolveDownloadSize(url: string): Promise<number | undefin
   }
 }
 
-function extractVikingFileId(url: string): string | null {
-  try {
-    const parsed = new URL(url)
-    if (!parsed.hostname.includes("vikingfile.com")) return null
-    const fMatch = parsed.pathname.match(/\/file\/([A-Za-z0-9_-]{1,64})/)
-    if (fMatch?.[1]) return fMatch[1]
-    const dlMatch = parsed.pathname.match(/\/dl\/([A-Za-z0-9_-]{1,64})/)
-    if (dlMatch?.[1]) return null // token, not a file ID
-    return null
-  } catch {
-    return null
-  }
-}
-
-export function isVikingFileDirectUrl(url: string): boolean {
-  try {
-    const parsed = new URL(url)
-    return parsed.hostname.includes("vikingfile.com") && /^\/dl\//.test(parsed.pathname)
-  } catch {
-    return false
-  }
-}
-
-function isVikingFileDlTokenUrl(url: string): boolean {
-  try {
-    const parsed = new URL(url)
-    return parsed.hostname.includes("vikingfile.com") && /^\/dl\//.test(parsed.pathname)
-  } catch {
-    return false
-  }
-}
-
-export async function resolveVikingFileDownload(url: string): Promise<ResolvedDownload> {
-  if (!url) return { url, resolved: false }
-
-  // If the URL is already a signed /dl/ token, it's already resolved — pass it through
-  if (isVikingFileDlTokenUrl(url)) {
-    return {
-      url,
-      filename: inferFilenameFromUrl(url, ""),
-      resolved: true,
-    }
-  }
-
-  const fileId = extractVikingFileId(url)
-  if (!fileId) return { url, resolved: false }
-
-  try {
-    const response = await apiFetch("/api/vikingfile/resolve", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ fileId }),
-    })
-
-    if (response.status === 404) {
-      throw new Error(VIKINGFILE_404_MESSAGE)
-    }
-
-    const data = await response.json().catch(() => null)
-    if (!response.ok || !data?.success || !data?.data?.url) {
-      downloadLogger.warn("VikingFile resolve failed", { data: { status: response.status, body: data } })
-      return { url, resolved: false }
-    }
-
-    const result = data.data as Record<string, any>
-    return {
-      url: result.url,
-      filename: firstString(result.filename),
-      size: toNumber(result.size),
-      resolved: true,
-    }
-  } catch (err) {
-    if (err instanceof Error && err.message === VIKINGFILE_404_MESSAGE) throw err
-    downloadLogger.warn("VikingFile resolve error", { data: err })
-    return { url, resolved: false }
-  }
-}

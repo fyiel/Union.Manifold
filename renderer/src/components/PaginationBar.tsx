@@ -50,7 +50,7 @@ export function PaginationBar({
     <div className={cn("mt-10 flex justify-center", wrapperClassName)}>
       <Pagination
         className={cn(
-          "bg-background/50 dark:bg-black/40 backdrop-blur-xl border border-white/20 dark:border-white/10 rounded-full px-4 py-2 shadow-lg inline-flex w-auto",
+          "bg-[#09090b]/50 dark:bg-black/40 backdrop-blur-xl border border-white/20 dark:border-white/10 rounded-full px-4 py-2 shadow-lg inline-flex w-auto",
           className
         )}
       >
@@ -60,8 +60,8 @@ export function PaginationBar({
               onClick={(e) => handlePageChange(e, currentPage - 1)}
               className={
                 isFirst
-                  ? "pointer-events-none opacity-50 font-bold text-muted-foreground"
-                  : "cursor-pointer font-bold text-foreground/80 hover:text-foreground hover:bg-white/10 rounded-full"
+                  ? "pointer-events-none opacity-50 font-bold text-zinc-400"
+                  : "cursor-pointer font-bold text-zinc-100/80 hover:text-zinc-100 hover:bg-white/10 rounded-full"
               }
             />
           </PaginationItem>
@@ -77,8 +77,8 @@ export function PaginationBar({
                   className={cn(
                     "cursor-pointer font-bold rounded-full transition-all",
                     currentPage === pageNumber
-                      ? "bg-primary text-white shadow-[0_0_15px_rgba(var(--primary),0.5)] border-primary"
-                      : "text-foreground/80 hover:text-foreground hover:bg-white/10"
+                      ? "bg-white text-black border-white"
+                      : "text-zinc-100/80 hover:text-zinc-100 hover:bg-white/10"
                   )}
                 >
                   {pageNumber}
@@ -92,8 +92,8 @@ export function PaginationBar({
               onClick={(e) => handlePageChange(e, currentPage + 1)}
               className={
                 isLast
-                  ? "pointer-events-none opacity-50 font-bold text-muted-foreground"
-                  : "cursor-pointer font-bold text-foreground/80 hover:text-foreground hover:bg-white/10 rounded-full"
+                  ? "pointer-events-none opacity-50 font-bold text-zinc-400"
+                  : "cursor-pointer font-bold text-zinc-100/80 hover:text-zinc-100 hover:bg-white/10 rounded-full"
               }
             />
           </PaginationItem>
@@ -102,3 +102,4 @@ export function PaginationBar({
     </div>
   )
 }
+

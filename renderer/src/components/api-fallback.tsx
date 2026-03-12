@@ -49,11 +49,11 @@ export function APIFallback({
     <div className="flex items-center justify-center p-8">
       <Card className="w-full max-w-md rounded-2xl">
         <CardHeader className="text-center p-8">
-          <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/20 to-primary/5 border border-primary/20">
+          <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/20 to-primary/5 border border-zinc-700">
             {showOfflineMessage && !isOnline ? (
               <WifiOff className="h-7 w-7 text-orange-500" />
             ) : (
-              <AlertTriangle className="h-7 w-7 text-primary" />
+              <AlertTriangle className="h-7 w-7 text-white" />
             )}
           </div>
           <CardTitle className="text-xl">{message}</CardTitle>
@@ -91,7 +91,7 @@ export function APIFallback({
 
           {showOfflineMessage && !isOnline && (
             <div className="text-center">
-              <p className="text-sm text-muted-foreground leading-relaxed">
+              <p className="text-sm text-zinc-400 leading-relaxed">
                 Check your internet connection and try again when you're back online.
               </p>
             </div>
@@ -99,7 +99,7 @@ export function APIFallback({
 
           {isOnline && (
             <div className="text-center">
-              <p className="text-sm text-muted-foreground leading-relaxed">
+              <p className="text-sm text-zinc-400 leading-relaxed">
                 If this problem persists, the service might be temporarily unavailable.
               </p>
             </div>
@@ -115,13 +115,13 @@ export function GamesGridSkeleton({ count = 12 }: { count?: number }) {
     <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-6">
       {Array.from({ length: count }).map((_, index) => (
         <Card key={index} className="overflow-hidden rounded-2xl">
-          <div className="aspect-[3/4] bg-muted animate-pulse" />
+          <div className="aspect-[3/4] bg-zinc-800 animate-pulse" />
           <CardContent className="p-5 space-y-3">
-            <div className="h-4 bg-muted animate-pulse rounded-lg" />
-            <div className="h-3 bg-muted animate-pulse rounded-lg w-3/4" />
+            <div className="h-4 bg-zinc-800 animate-pulse rounded-lg" />
+            <div className="h-3 bg-zinc-800 animate-pulse rounded-lg w-3/4" />
             <div className="flex justify-between items-center">
-              <div className="h-3 bg-muted animate-pulse rounded-lg w-1/4" />
-              <div className="h-3 bg-muted animate-pulse rounded-lg w-1/3" />
+              <div className="h-3 bg-zinc-800 animate-pulse rounded-lg w-1/4" />
+              <div className="h-3 bg-zinc-800 animate-pulse rounded-lg w-1/3" />
             </div>
           </CardContent>
         </Card>
@@ -133,10 +133,11 @@ export function GamesGridSkeleton({ count = 12 }: { count?: number }) {
 export function LoadingState({ message = "Loading..." }: { message?: string }) {
   return (
     <div className="flex flex-col items-center justify-center p-12 space-y-4">
-      <div className="relative p-6 rounded-2xl bg-gradient-to-br from-primary/20 to-primary/5 border border-primary/20">
-        <RefreshCw className="h-10 w-10 animate-spin text-primary" />
+      <div className="relative p-6 rounded-2xl bg-gradient-to-br from-primary/20 to-primary/5 border border-zinc-700">
+        <RefreshCw className="h-10 w-10 animate-spin text-white" />
       </div>
-      <p className="text-muted-foreground text-base">{message}</p>
+      <p className="text-zinc-400 text-base">{message}</p>
     </div>
   )
 }
+

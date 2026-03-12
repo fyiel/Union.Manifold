@@ -161,7 +161,7 @@ export function LinuxExperiences({ appid }: { appid: string }) {
 
   return (
     <div className="rounded-2xl bg-black/40 border border-white/10 backdrop-blur-md shadow-xl overflow-hidden">
-      {/* Header — always visible, clickable to toggle */}
+      {/* Header - always visible, clickable to toggle */}
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}

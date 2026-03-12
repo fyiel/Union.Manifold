@@ -1,5 +1,5 @@
 /**
- * Named Pipe Server — Electron side.
+ * Named Pipe Server - Electron side.
  *
  * Creates a named pipe server (\\.\pipe\uc-direct-overlay-{pid}) that the
  * injected DLL connects to. Messages from the DLL are forwarded to a JS
