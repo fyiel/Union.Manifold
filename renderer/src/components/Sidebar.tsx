@@ -19,12 +19,12 @@ export function Sidebar({ mobileOpen, onClose }: SidebarProps) {
     <>
       <aside className="hidden md:flex md:w-64 md:flex-col md:fixed md:inset-y-0 bg-sidebar text-sidebar-foreground border-r border-sidebar-border">
         <div className="flex items-center gap-3 px-6 py-6">
-          <div className="h-10 w-10 rounded-xl bg-primary/20 flex items-center justify-center">
-            <Gamepad2 className="h-6 w-6 text-primary" />
+          <div className="h-10 w-10 rounded-xl bg-white/20 flex items-center justify-center">
+            <Gamepad2 className="h-6 w-6 text-white" />
           </div>
           <div>
-            <div className="text-lg font-black font-montserrat">UnionCrax.Direct</div>
-            <div className="text-xs text-muted-foreground">Direct downloads</div>
+            <div className="text-lg font-black ">UnionCrax.Direct</div>
+            <div className="text-xs text-zinc-400">Direct downloads</div>
           </div>
         </div>
         <nav className="flex-1 px-3 space-y-2">
@@ -37,7 +37,7 @@ export function Sidebar({ mobileOpen, onClose }: SidebarProps) {
                 `flex items-center gap-3 px-4 py-3 rounded-xl transition-all border border-transparent ${
                   isActive
                     ? "bg-sidebar-accent text-sidebar-accent-foreground border-sidebar-border"
-                    : "text-muted-foreground hover:text-foreground hover:bg-sidebar-accent/60"
+                    : "text-zinc-400 hover:text-zinc-100 hover:bg-sidebar-accent/60"
                 }`
               }
             >
@@ -54,12 +54,12 @@ export function Sidebar({ mobileOpen, onClose }: SidebarProps) {
           <div className="absolute inset-0 bg-black/60" onClick={onClose} />
           <div className="absolute left-0 top-0 bottom-0 w-72 bg-sidebar text-sidebar-foreground border-r border-sidebar-border p-4 flex flex-col">
             <div className="flex items-center gap-3 px-2 py-4">
-              <div className="h-10 w-10 rounded-xl bg-primary/20 flex items-center justify-center">
-                <Gamepad2 className="h-6 w-6 text-primary" />
+              <div className="h-10 w-10 rounded-xl bg-white/20 flex items-center justify-center">
+                <Gamepad2 className="h-6 w-6 text-white" />
               </div>
               <div>
-                <div className="text-lg font-black font-montserrat">UnionCrax.Direct</div>
-                <div className="text-xs text-muted-foreground">Direct downloads</div>
+                <div className="text-lg font-black ">UnionCrax.Direct</div>
+                <div className="text-xs text-zinc-400">Direct downloads</div>
               </div>
             </div>
             <nav className="flex-1 px-1 space-y-2">
@@ -73,7 +73,7 @@ export function Sidebar({ mobileOpen, onClose }: SidebarProps) {
                     `flex items-center gap-3 px-4 py-3 rounded-xl transition-all border border-transparent ${
                       isActive
                         ? "bg-sidebar-accent text-sidebar-accent-foreground border-sidebar-border"
-                        : "text-muted-foreground hover:text-foreground hover:bg-sidebar-accent/60"
+                        : "text-zinc-400 hover:text-zinc-100 hover:bg-sidebar-accent/60"
                     }`
                   }
                 >
@@ -89,3 +89,4 @@ export function Sidebar({ mobileOpen, onClose }: SidebarProps) {
     </>
   )
 }
+

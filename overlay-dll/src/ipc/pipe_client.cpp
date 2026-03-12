@@ -1,5 +1,5 @@
 /**
- * Named Pipe IPC Client — runs inside the injected DLL.
+ * Named Pipe IPC Client - runs inside the injected DLL.
  * Connects to \\.\pipe\uc-direct-overlay-{pid} (created by the Node addon on the Electron side).
  * Protocol: newline-delimited JSON messages in both directions.
  */
@@ -125,7 +125,7 @@ void pumpMessages() {
     char* start = g_readBuf;
     while (char* nl = strchr(start, '\n')) {
         *nl = '\0';
-        // Parse command (simple string matching — no JSON lib needed for our tiny protocol)
+        // Parse command (simple string matching - no JSON lib needed for our tiny protocol)
         if (strstr(start, "\"cmd\":\"shutdown\"")) {
             ::g_running = false;
         }

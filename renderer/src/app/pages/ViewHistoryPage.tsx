@@ -88,12 +88,12 @@ export function ViewHistoryPage() {
   }
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-[#09090b]">
       <div className="container mx-auto max-w-7xl px-3 sm:px-4 py-6 sm:py-8">
         <div className="mb-6 sm:mb-8 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
           <div>
-            <h1 className="text-2xl sm:text-3xl font-bold text-foreground font-montserrat mb-1 sm:mb-2">View History</h1>
-            <p className="text-sm sm:text-base text-muted-foreground">Quickly jump back to recently viewed games.</p>
+            <h1 className="text-2xl sm:text-3xl font-bold text-zinc-100  mb-1 sm:mb-2">View History</h1>
+            <p className="text-sm sm:text-base text-zinc-400">Quickly jump back to recently viewed games.</p>
           </div>
           <div className="flex gap-2">
             <Button variant="outline" onClick={() => navigate("/search-history")} className="gap-2">
@@ -108,13 +108,13 @@ export function ViewHistoryPage() {
         </div>
 
         {!accountUser && !accountLoading && (
-          <Card className="border border-border/60 bg-card/40">
+          <Card className="border border-white/[.07] bg-zinc-900/40">
             <CardContent className="p-6 text-center space-y-3">
-              <div className="inline-flex items-center justify-center rounded-full bg-primary/10 text-primary p-3">
+              <div className="inline-flex items-center justify-center rounded-full bg-white/10 text-white p-3">
                 <Clock className="h-5 w-5" />
               </div>
               <div className="text-lg font-semibold">Login to see your view history</div>
-              <p className="text-sm text-muted-foreground">Sign in to sync view history across devices.</p>
+              <p className="text-sm text-zinc-400">Sign in to sync view history across devices.</p>
               <Button className="gap-2" onClick={handleLogin} disabled={loggingIn}>
                 <LogIn className="h-4 w-4" />
                 {loggingIn ? "Connecting..." : "Login with Discord"}
@@ -136,8 +136,8 @@ export function ViewHistoryPage() {
             ))}
           </div>
         ) : items.length === 0 ? (
-          <Card className="border border-border/60 bg-card/40">
-            <CardContent className="p-10 text-center text-muted-foreground">
+          <Card className="border border-white/[.07] bg-zinc-900/40">
+            <CardContent className="p-10 text-center text-zinc-400">
               No view history yet.
             </CardContent>
           </Card>
@@ -145,7 +145,7 @@ export function ViewHistoryPage() {
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {items.map((game) => (
               <div key={game.appid} className="space-y-2">
-                <div className="text-xs text-muted-foreground flex items-center gap-2">
+                <div className="text-xs text-zinc-400 flex items-center gap-2">
                   <Clock className="h-3 w-3" />
                   Viewed {new Date(game.lastViewedAt).toLocaleDateString()}
                 </div>
@@ -158,3 +158,4 @@ export function ViewHistoryPage() {
     </div>
   )
 }
+

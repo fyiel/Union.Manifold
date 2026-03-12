@@ -181,10 +181,10 @@ export function MyRequests({
   }
 
   return (
-    <Card className="border-2 border-border/50 shadow-xl bg-card/60 backdrop-blur-sm rounded-2xl">
+    <Card className="border-2 border-white/[.07] shadow-xl bg-zinc-900/60 backdrop-blur-sm rounded-2xl">
       <CardHeader className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
         <CardTitle className="text-xl font-bold flex items-center gap-2">
-          <Clock className="h-5 w-5 text-primary" />
+          <Clock className="h-5 w-5 text-white" />
           {title}
         </CardTitle>
         <Button variant="outline" size="sm" onClick={refresh} disabled={loading || refreshing}>
@@ -194,19 +194,19 @@ export function MyRequests({
       </CardHeader>
       <CardContent className="space-y-6">
         {showUnauthedHelp && viewerMatch?.match === "ip" && (
-          <Alert className="border-2 border-primary/20 bg-primary/5">
+          <Alert className="border-2 border-zinc-700 bg-white/5">
             <AlertDescription className="flex flex-col gap-3 text-sm leading-relaxed md:flex-row md:items-center md:justify-between">
               <div className="flex items-start gap-3">
-                <div className="mt-0.5 flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-primary">
+                <div className="mt-0.5 flex h-8 w-8 items-center justify-center rounded-full bg-white/10 text-white">
                   <Info className="h-4 w-4" />
                 </div>
-                <p className="text-muted-foreground">
+                <p className="text-zinc-400">
                   You are seeing requests matched to this IP. Log in to sync request history across devices.
                 </p>
               </div>
               <Button
                 variant="outline"
-                className="border-primary/30 bg-primary/10 text-primary hover:bg-primary/20"
+                className="border-zinc-700 bg-white/10 text-white hover:bg-white/20"
                 onClick={() => navigate("/settings")}
               >
                 Login with Discord
@@ -220,30 +220,30 @@ export function MyRequests({
             {Array.from({ length: 2 }).map((_, groupIndex) => (
               <div key={groupIndex}>
                 <div className="flex items-center gap-3 mb-4">
-                  <Skeleton className="h-6 w-32 bg-muted/40" />
-                  <Skeleton className="h-6 w-12 rounded-full bg-muted/40" />
+                  <Skeleton className="h-6 w-32 bg-zinc-800/40" />
+                  <Skeleton className="h-6 w-12 rounded-full bg-zinc-800/40" />
                 </div>
                 <div className="grid gap-4 md:grid-cols-2">
                   {Array.from({ length: 2 }).map((_, index) => (
-                    <Card key={index} className="border-2 border-border/50 bg-card rounded-2xl overflow-hidden">
+                    <Card key={index} className="border-2 border-white/[.07] bg-zinc-900 rounded-2xl overflow-hidden">
                       <CardHeader className="pb-3 space-y-2">
                         <div className="flex items-start justify-between gap-3">
                           <div className="flex items-center gap-2 min-w-0">
-                            <Skeleton className="h-9 w-9 rounded-lg bg-muted/40 shrink-0" />
+                            <Skeleton className="h-9 w-9 rounded-lg bg-zinc-800/40 shrink-0" />
                             <div className="min-w-0 flex-1">
-                              <Skeleton className="h-4 w-20 mb-1 bg-muted/40" />
-                              <Skeleton className="h-5 w-40 bg-muted/40" />
+                              <Skeleton className="h-4 w-20 mb-1 bg-zinc-800/40" />
+                              <Skeleton className="h-5 w-40 bg-zinc-800/40" />
                             </div>
                           </div>
-                          <Skeleton className="h-6 w-24 rounded-full bg-muted/40" />
+                          <Skeleton className="h-6 w-24 rounded-full bg-zinc-800/40" />
                         </div>
                       </CardHeader>
                       <CardContent className="space-y-3">
-                        <Skeleton className="h-12 w-full rounded-lg bg-muted/40" />
-                        <Skeleton className="h-10 w-full rounded-lg bg-muted/40" />
-                        <div className="flex items-center justify-between pt-2 border-t border-border/50">
-                          <Skeleton className="h-4 w-24 bg-muted/40" />
-                          <Skeleton className="h-4 w-16 bg-muted/40" />
+                        <Skeleton className="h-12 w-full rounded-lg bg-zinc-800/40" />
+                        <Skeleton className="h-10 w-full rounded-lg bg-zinc-800/40" />
+                        <div className="flex items-center justify-between pt-2 border-t border-white/[.07]">
+                          <Skeleton className="h-4 w-24 bg-zinc-800/40" />
+                          <Skeleton className="h-4 w-16 bg-zinc-800/40" />
                         </div>
                       </CardContent>
                     </Card>
@@ -253,20 +253,20 @@ export function MyRequests({
             ))}
           </div>
         ) : error ? (
-          <div className="rounded-xl border border-border/60 bg-muted/30 p-4 text-sm text-muted-foreground">
+          <div className="rounded-xl border border-white/[.07] bg-zinc-800/30 p-4 text-sm text-zinc-400">
             {error}
           </div>
         ) : requests.length === 0 ? (
           <div className="text-center py-8">
             <div className="flex justify-center mb-4">
-              <div className="p-4 rounded-2xl bg-gradient-to-br from-primary/20 to-primary/5 border border-primary/30">
-                <CheckCircle className="h-10 w-10 text-primary" />
+              <div className="p-4 rounded-2xl bg-gradient-to-br from-primary/20 to-primary/5 border border-zinc-700">
+                <CheckCircle className="h-10 w-10 text-white" />
               </div>
             </div>
-            <p className="text-lg font-semibold text-foreground">No requests found.</p>
-            <p className="text-sm text-muted-foreground mt-1">
+            <p className="text-lg font-semibold text-zinc-100">No requests found.</p>
+            <p className="text-sm text-zinc-400 mt-1">
               Submit a request at{" "}
-              <button type="button" onClick={openRequestForm} className="text-primary hover:underline font-semibold">
+              <button type="button" onClick={openRequestForm} className="text-white hover:underline font-semibold">
                 the request form
               </button>
               .
@@ -279,7 +279,7 @@ export function MyRequests({
               return (
                 <div key={status}>
                   <div className="flex items-center gap-3 mb-4">
-                    <p className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                    <p className="text-sm font-semibold uppercase tracking-wide text-zinc-400">
                       {status === "other" ? "Other" : status}
                     </p>
                     <Badge variant="outline" className="px-2 py-0.5 text-xs rounded-full">
@@ -288,31 +288,31 @@ export function MyRequests({
                   </div>
                   <div className="grid gap-4 md:grid-cols-2">
                     {items.map((request) => (
-                      <Card key={request.id} className="border-2 border-border/50 bg-card rounded-2xl overflow-hidden">
+                      <Card key={request.id} className="border-2 border-white/[.07] bg-zinc-900 rounded-2xl overflow-hidden">
                         <CardHeader className="pb-3 space-y-2">
                           <div className="flex items-start justify-between gap-3">
                             <div className="flex items-center gap-2 min-w-0">
-                              <div className="h-9 w-9 rounded-lg bg-primary/10 text-primary flex items-center justify-center shrink-0">
+                              <div className="h-9 w-9 rounded-lg bg-white/10 text-white flex items-center justify-center shrink-0">
                                 {getTypeIcon(request.type)}
                               </div>
                               <div className="min-w-0 flex-1">
-                                <p className="text-xs text-muted-foreground uppercase tracking-wide">
+                                <p className="text-xs text-zinc-400 uppercase tracking-wide">
                                   {getTypeLabel(request.type)}
                                 </p>
-                                <p className="text-base font-semibold text-foreground truncate">{request.title}</p>
+                                <p className="text-base font-semibold text-zinc-100 truncate">{request.title}</p>
                               </div>
                             </div>
                             {getStatusBadge(request.status, request.claimed_by)}
                           </div>
                         </CardHeader>
                         <CardContent className="space-y-3">
-                          <p className="text-sm text-muted-foreground line-clamp-3">{request.description}</p>
+                          <p className="text-sm text-zinc-400 line-clamp-3">{request.description}</p>
                           {request.note ? (
-                            <div className="rounded-lg border border-border/60 bg-muted/30 p-3 text-xs text-muted-foreground">
+                            <div className="rounded-lg border border-white/[.07] bg-zinc-800/30 p-3 text-xs text-zinc-400">
                               {request.note}
                             </div>
                           ) : null}
-                          <div className="flex items-center justify-between pt-2 border-t border-border/50 text-xs text-muted-foreground">
+                          <div className="flex items-center justify-between pt-2 border-t border-white/[.07] text-xs text-zinc-400">
                             <span>{new Date(request.created_at).toLocaleDateString()}</span>
                             <span>{request.username}</span>
                           </div>
@@ -350,3 +350,4 @@ export function MyRequests({
     </Card>
   )
 }
+

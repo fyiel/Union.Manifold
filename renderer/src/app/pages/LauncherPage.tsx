@@ -7,7 +7,6 @@ import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { SearchSuggestions } from "@/components/SearchSuggestions"
 import { ErrorMessage } from "@/components/ErrorMessage"
-import { RateLimitError } from "@/components/RateLimitError"
 import { AnimatedCounter } from "@/components/AnimatedCounter"
 import { OfflineBanner } from "@/components/OfflineBanner"
 import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious } from "@/components/ui/carousel"
@@ -74,7 +73,7 @@ export function LauncherPage() {
     if (error instanceof TypeError) return true
     const status = error instanceof GamesFetchError ? error.status : undefined
     // Treat common upstream/startup statuses as transient (DB warming up, gateway unavailable, etc.).
-    return status === 429 || status === 500 || status === 502 || status === 503 || status === 504
+    return status === 500 || status === 502 || status === 503 || status === 504
   }
 
   const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms))
@@ -210,15 +209,6 @@ export function LauncherPage() {
 
       const response = await fetch(apiUrl("/api/downloads/all"))
 
-      if (response.status === 429) {
-        setGamesError({
-          type: "rate-limit",
-          message: "Ye be firin' the cannons too fast, matey! Give the crew a moment to reload before ye try again.",
-          code: generateErrorCode(ErrorTypes.DOWNLOADS_FETCH, "launcher-stats"),
-        })
-        return
-      }
-
       if (!response.ok) {
         throw new Error(`Stats API route failed: ${response.status}`)
       }
@@ -238,7 +228,7 @@ export function LauncherPage() {
   const fetchGames = async (): Promise<Game[]> => {
     // Check offline before attempting fetch
     if (typeof navigator !== "undefined" && !navigator.onLine) {
-      // Don't set an error — we'll show the offline banner instead
+      // Don't set an error - we'll show the offline banner instead
       return []
     }
 
@@ -318,14 +308,7 @@ export function LauncherPage() {
 
         console.error("Error loading games:", error)
 
-        if (error instanceof GamesFetchError && error.status === 429) {
-          setGamesError({
-            type: "rate-limit",
-            message: "Ye be firin' the cannons too fast, matey! Give the crew a moment to reload before ye try again.",
-            code: generateErrorCode(ErrorTypes.GAME_FETCH, "launcher"),
-          })
-        } else {
-          setGamesError({
+        setGamesError({
             type: "games",
             message:
               error instanceof GamesFetchError && error.status
@@ -333,26 +316,11 @@ export function LauncherPage() {
                 : "Unable to load games. Please try again or contact support if the issue persists.",
             code: generateErrorCode(ErrorTypes.GAME_FETCH, "launcher"),
           })
-        }
         setLoading(false)
         setRefreshing(false)
         return
       }
     }
-  }
-
-  if (gamesError?.type === "rate-limit" && isOnline && !loading) {
-    return (
-      <RateLimitError
-        message={gamesError.message}
-        errorCode={gamesError.code}
-        retry={() => {
-          setGamesError(null)
-          setLoading(true)
-          loadGames(true)
-        }}
-      />
-    )
   }
 
   const newReleases = useMemo(() => {
@@ -461,36 +429,36 @@ export function LauncherPage() {
   }, [])
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-[#09090b]">
       <section id="hero" className="relative py-20 sm:py-24 md:py-32 px-4 text-center">
         <div className="container mx-auto max-w-5xl">
           <div className="flex justify-center mb-8">
-            <div className="p-4 sm:p-6 rounded-2xl bg-gradient-to-br from-primary/20 to-primary/5 border border-primary/30 shadow-lg shadow-primary/10">
-              <Hammer className="h-12 w-12 sm:h-16 sm:w-16 text-primary" />
+            <div className="p-4 sm:p-6 rounded-2xl bg-zinc-900 border border-white/[.07]">
+              <Hammer className="h-12 w-12 sm:h-16 sm:w-16 text-white" />
             </div>
           </div>
-          <h1 className="text-4xl sm:text-5xl md:text-7xl font-black mb-6 sm:mb-8 text-foreground font-montserrat text-balance leading-tight">
+          <h1 className="text-4xl sm:text-5xl md:text-7xl font-black mb-6 sm:mb-8 text-white text-balance leading-tight">
             Free Games for{" "}
-            <span className="bg-gradient-to-r from-primary via-purple-400 to-primary bg-clip-text text-transparent">
+            <span className="text-zinc-400">
               Everyone
             </span>
           </h1>
-          <p className="text-base sm:text-xl md:text-2xl text-muted-foreground mb-8 sm:mb-12 max-w-3xl mx-auto leading-relaxed text-pretty">
+          <p className="text-base sm:text-xl md:text-2xl text-zinc-400 mb-8 sm:mb-12 max-w-3xl mx-auto leading-relaxed text-pretty">
             Join UnionCrax and fulfill all your gaming needs. No matter who you are, where you're from, or how much
             money you make - we make games accessible to everyone.
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
             <Button
               size="lg"
-              className="font-semibold text-base sm:text-lg px-6 sm:px-8 py-5 sm:py-6 rounded-xl bg-primary hover:bg-primary/90 shadow-lg shadow-primary/25"
+              className="font-semibold text-base sm:text-lg px-6 sm:px-8 py-5 sm:py-6"
               onClick={() => document.getElementById("featured")?.scrollIntoView({ behavior: "smooth" })}
             >
               Browse Games
             </Button>
             <Button
               size="lg"
-              variant="outline"
-              className="font-semibold text-base sm:text-lg px-6 sm:px-8 py-5 sm:py-6 rounded-xl border-2 bg-transparent"
+              variant="secondary"
+              className="font-semibold text-base sm:text-lg px-6 sm:px-8 py-5 sm:py-6"
               onClick={() => window.open("https://union-crax.xyz/discord", "_blank", "noreferrer")}
             >
               Join Discord
@@ -500,17 +468,17 @@ export function LauncherPage() {
       </section>
 
       {/* Announcement Banner */}
-      <section className="py-8 px-4 border-y border-border/50">
+      <section className="py-8 px-4 border-y border-white/[.07]">
         <div className="container mx-auto max-w-4xl text-center">
-          <div className="inline-flex items-center gap-3 px-6 py-3 rounded-full bg-gradient-to-r from-orange-400/15 via-orange-300/15 to-orange-200/15 border border-orange-200/30 shadow-sm">
+          <div className="inline-flex items-center gap-3 px-6 py-3 rounded-full bg-orange-500/10 border border-orange-500/20">
             <Hammer className="h-5 w-5 text-orange-500" />
-            <span className="text-base font-semibold text-foreground/90">
-              UnionCrax.Direct is currently in beta —{" "}
+            <span className="text-base font-semibold text-zinc-200">
+              UnionCrax.Direct is currently in beta -{" "}
               <a
                 href="https://github.com/Union-Crax/UnionCrax.Direct/issues"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="font-bold text-orange-500 underline underline-offset-4 decoration-orange-300/30 hover:decoration-orange-500/60"
+                className="font-bold text-orange-400 underline underline-offset-4 decoration-orange-400/30 hover:decoration-orange-400/60"
               >
                 Report issues on GitHub
               </a>
@@ -524,8 +492,8 @@ export function LauncherPage() {
       <section className="py-12 sm:py-16 md:py-20 px-4">
         <div className="container mx-auto max-w-6xl">
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="group p-5 sm:p-8 rounded-2xl bg-gradient-to-br from-card to-card/50 border border-border/50 hover:border-primary/30 transition-all space-y-3">
-              <div className="text-3xl sm:text-4xl md:text-5xl font-black bg-gradient-to-br from-primary to-purple-400 bg-clip-text text-transparent font-montserrat">
+            <div className="group p-5 sm:p-8 rounded-2xl bg-zinc-900/60 border border-white/[.07] hover:border-zinc-600 transition-all space-y-3">
+              <div className="text-3xl sm:text-4xl md:text-5xl font-black text-white">
                 {displayTotalSizeGB >= 1024 ? (
                   <AnimatedCounter value={displayTotalSizeTB} suffix="TB" />
                 ) : displayTotalSizeGB && displayTotalSizeGB > 0 ? (
@@ -534,8 +502,8 @@ export function LauncherPage() {
                   "?"
                 )}
               </div>
-              <div className="text-foreground/90 font-semibold">Total Storage*</div>
-              <div className="text-xs text-muted-foreground leading-relaxed">
+              <div className="text-zinc-200 font-semibold">Total Storage*</div>
+              <div className="text-xs text-zinc-500 leading-relaxed">
                 * Actual bandwidth used is around{" "}
                 {(() => {
                   const bandwidthGB = displayTotalSizeGB * 3
@@ -547,32 +515,32 @@ export function LauncherPage() {
               </div>
             </div>
 
-            <div className="group p-5 sm:p-8 rounded-2xl bg-gradient-to-br from-card to-card/50 border border-border/50 hover:border-primary/30 transition-all space-y-3">
-              <div className="text-3xl sm:text-4xl md:text-5xl font-black bg-gradient-to-br from-primary to-purple-400 bg-clip-text text-transparent font-montserrat">
+            <div className="group p-5 sm:p-8 rounded-2xl bg-zinc-900/60 border border-white/[.07] hover:border-zinc-600 transition-all space-y-3">
+              <div className="text-3xl sm:text-4xl md:text-5xl font-black text-white">
                 {stats.totalGames === 0 ? "?" : <AnimatedCounter value={stats.totalGames} format={formatNumber} />}
               </div>
-              <div className="text-foreground/90 font-semibold">Games Available*</div>
-              <div className="text-xs text-muted-foreground">
+              <div className="text-zinc-200 font-semibold">Games Available*</div>
+              <div className="text-xs text-zinc-500">
                 * Restored {stats.totalGames === 0 ? "0" : stats.totalGames} of 1228 games after the attack
               </div>
             </div>
 
-            <div className="group p-5 sm:p-8 rounded-2xl bg-gradient-to-br from-card to-card/50 border border-border/50 hover:border-primary/30 transition-all space-y-3">
-              <div className="text-3xl sm:text-4xl md:text-5xl font-black bg-gradient-to-br from-primary to-purple-400 bg-clip-text text-transparent font-montserrat">
+            <div className="group p-5 sm:p-8 rounded-2xl bg-zinc-900/60 border border-white/[.07] hover:border-zinc-600 transition-all space-y-3">
+              <div className="text-3xl sm:text-4xl md:text-5xl font-black text-white">
                 {stats.totalDownloads === 0 ? (
                   "?"
                 ) : (
                   <AnimatedCounter value={stats.totalDownloads} format={formatNumber} />
                 )}
               </div>
-              <div className="text-foreground/90 font-semibold">Total Downloads</div>
+              <div className="text-zinc-200 font-semibold">Total Downloads</div>
             </div>
 
-            <div className="group p-5 sm:p-8 rounded-2xl bg-gradient-to-br from-card to-card/50 border border-border/50 hover:border-primary/30 transition-all space-y-3">
-              <div className="text-3xl sm:text-4xl md:text-5xl font-black bg-gradient-to-br from-primary to-purple-400 bg-clip-text text-transparent font-montserrat">
+            <div className="group p-5 sm:p-8 rounded-2xl bg-zinc-900/60 border border-white/[.07] hover:border-zinc-600 transition-all space-y-3">
+              <div className="text-3xl sm:text-4xl md:text-5xl font-black text-white">
                 {stats.totalGames === 0 ? "0%" : <AnimatedCounter value={100} suffix="%" />}
               </div>
-              <div className="text-foreground/90 font-semibold">Free Forever</div>
+              <div className="text-zinc-200 font-semibold">Free Forever</div>
             </div>
           </div>
           <div className="text-center mt-8">
@@ -582,7 +550,7 @@ export function LauncherPage() {
       </section>
 
       {/* Search Bar (clickable - opens global search popup) */}
-      <div id="home-search" className="py-8 px-4 border-y border-border/50 bg-card/30">
+      <div id="home-search" className="py-8 px-4 border-y border-white/[.07] bg-zinc-900/30">
         <div className="container mx-auto max-w-3xl">
           <div
             role="button"
@@ -594,7 +562,7 @@ export function LauncherPage() {
                 window.dispatchEvent(new Event("uc_open_search_popup"))
               }
             }}
-            className="w-full px-4 py-3 text-base rounded-xl border-2 cursor-pointer text-muted-foreground flex items-center gap-3 transition-colors hover:border-primary/50 border-input"
+            className="w-full px-4 py-3 text-base rounded-2xl border border-zinc-700 cursor-pointer text-zinc-500 flex items-center gap-3 transition-colors hover:border-zinc-500 bg-zinc-900 active:scale-[.99]"
           >
             <Search className="h-5 w-5 flex-shrink-0" aria-hidden />
             <span>Click to search ({shortcutLabel})</span>
@@ -606,10 +574,10 @@ export function LauncherPage() {
         <section className="py-12 sm:py-16 md:py-20 px-4">
           <div className="container mx-auto max-w-7xl">
             <div className="mb-10">
-              <h2 className="text-3xl sm:text-4xl md:text-5xl font-black text-foreground font-montserrat mb-3">
+              <h2 className="text-3xl sm:text-4xl md:text-5xl font-black text-white mb-3">
                 Recently Installed
               </h2>
-              <p className="text-base sm:text-lg text-muted-foreground">
+              <p className="text-base sm:text-lg text-zinc-400">
                 Games you installed on this device
               </p>
             </div>
@@ -646,10 +614,10 @@ export function LauncherPage() {
                     className="group block h-full w-full text-left"
                     aria-label="Open your installed library"
                   >
-                    <div className="h-full rounded-2xl border border-dashed border-border/60 bg-card/60 p-4 flex flex-col items-center justify-center text-center transition hover:border-primary/50">
-                      <div className="text-sm font-semibold text-foreground">Manage installs</div>
-                      <div className="text-xs text-muted-foreground mt-1">Open your library</div>
-                      <div className="mt-3 text-xs text-primary group-hover:underline">/library</div>
+                    <div className="h-full rounded-2xl border border-dashed border-zinc-700 bg-zinc-900/60 p-4 flex flex-col items-center justify-center text-center transition hover:border-zinc-500 active:scale-[.98]">
+                      <div className="text-sm font-semibold text-zinc-200">Manage installs</div>
+                      <div className="text-xs text-zinc-500 mt-1">Open your library</div>
+                      <div className="mt-3 text-xs text-zinc-400 group-hover:text-white group-hover:underline">/library</div>
                     </div>
                   </button>
                 </CarouselItem>
@@ -711,8 +679,8 @@ export function LauncherPage() {
             {loading ? (
               <>
                 <div className="mb-10">
-                  <Skeleton className="h-10 w-48 mb-3 bg-muted/40" />
-                  <Skeleton className="h-5 w-80 bg-muted/30" />
+                  <Skeleton className="h-10 w-48 mb-3" />
+                  <Skeleton className="h-5 w-80" />
                 </div>
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                   {Array.from({ length: 4 }).map((_, index) => (
@@ -723,8 +691,8 @@ export function LauncherPage() {
             ) : (
               <>
                 <div className="mb-10">
-                  <h2 className="text-3xl sm:text-4xl md:text-5xl font-black text-foreground font-montserrat mb-3">Latest Games</h2>
-                  <p className="text-base sm:text-lg text-muted-foreground">Recently added games to our collection</p>
+                  <h2 className="text-3xl sm:text-4xl md:text-5xl font-black text-white mb-3">Latest Games</h2>
+                  <p className="text-base sm:text-lg text-zinc-400">Recently added games to our collection</p>
                 </div>
                 <Carousel
                   opts={{
@@ -756,20 +724,19 @@ export function LauncherPage() {
 
       {(loading || popularReleases.length > 0) && (
         <section className="relative py-16 sm:py-20 md:py-24 px-4 overflow-hidden">
-          <div className="absolute inset-0 bg-gradient-to-b from-primary/10 via-background/50 to-background pointer-events-none -z-10" />
           <div className="container relative z-10 mx-auto max-w-7xl">
             {loading ? (
               <div className="mb-12">
-                <Skeleton className="h-12 w-64 mb-4 bg-muted/20" />
-                <Skeleton className="h-6 w-96 bg-muted/10" />
+                <Skeleton className="h-12 w-64 mb-4" />
+                <Skeleton className="h-6 w-96" />
               </div>
             ) : (
               <div className="mb-12 flex flex-col md:flex-row md:items-end justify-between gap-4">
                 <div>
-                  <h2 className="text-4xl sm:text-5xl md:text-6xl font-black bg-gradient-to-r from-white to-white/50 bg-clip-text text-transparent font-montserrat mb-3 tracking-tight">
+                  <h2 className="text-4xl sm:text-5xl md:text-6xl font-black text-white mb-3 tracking-tight">
                     Most Popular
                   </h2>
-                  <p className="text-lg sm:text-xl text-muted-foreground font-medium">Top trending downloads in our community</p>
+                  <p className="text-lg sm:text-xl text-zinc-400 font-medium">Top trending downloads in our community</p>
                 </div>
               </div>
             )}
@@ -782,6 +749,7 @@ export function LauncherPage() {
               </div>
             ) : (
               <Carousel
+
                 opts={{
                   align: "start",
                   loop: false,
@@ -826,8 +794,8 @@ export function LauncherPage() {
             <>
               <div className="mb-10 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                 <div>
-                  <h2 className="text-4xl md:text-5xl font-black text-foreground font-montserrat mb-3">All Games</h2>
-                  <p className="text-lg text-muted-foreground">Browse our complete collection</p>
+                  <h2 className="text-4xl md:text-5xl font-black text-white mb-3">All Games</h2>
+                  <p className="text-lg text-zinc-400">Browse our complete collection</p>
                 </div>
                 <Button
                   variant="outline"

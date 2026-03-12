@@ -1,7 +1,5 @@
-import { useEffect, useMemo, useState, type MouseEvent } from "react"
+﻿import { useEffect, useMemo, useState, type MouseEvent } from "react"
 import { NavLink, useLocation, useNavigate, useSearchParams } from "react-router-dom"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { SearchSuggestions } from "@/components/SearchSuggestions"
@@ -148,27 +146,32 @@ export function TopBar() {
 
   return (
     <>
-      <nav className="sticky top-0 z-40 w-full border-b border-border bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/60">
-        <div className="container mx-auto max-w-7xl px-4">
-          <div className="flex h-16 items-center gap-4">
+      <nav className="sticky top-0 z-40 w-full border-b border-white/[.07] bg-zinc-950/80 backdrop-blur-md">
+        <div className="max-w-7xl mx-auto px-4">
+          <div className="flex h-16 items-center gap-3">
             <BackButton />
-            
-            <NavLink to="/" className="flex items-center gap-2" onClick={handleLogoNav}>
-              <Hammer className="h-7 w-7 text-foreground" />
-              <span className="font-black text-lg text-foreground font-montserrat">UnionCrax</span>
-              <Badge className="rounded-full bg-primary/15 text-primary border-primary/20">Direct</Badge>
+
+            {/* Logo */}
+            <NavLink to="/" className="flex items-center gap-2 shrink-0" onClick={handleLogoNav}>
+              <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center shrink-0">
+                <Hammer className="w-4 h-4 text-black" />
+              </div>
+              <span className="font-brand text-base tracking-tight text-white hidden sm:block">
+                UnionCrax<span className="text-zinc-400">.Direct</span>
+              </span>
             </NavLink>
 
-            <div className="hidden lg:flex items-center gap-5">
-              {siteNavItems.map((item) => (
+            {/* Desktop site nav */}
+            <div className="hidden lg:flex items-center gap-5 ml-2">
+              {siteNavItems.map((item) =>
                 item.label === "Home" ? (
                   <NavLink
                     key={item.label}
                     to="/"
                     onClick={handleHomeNav}
                     className={({ isActive }) =>
-                      `cursor-pointer text-sm font-medium transition-colors ${
-                        isActive ? "text-primary" : "text-muted-foreground hover:text-primary"
+                      `text-sm font-medium transition-colors ${
+                        isActive ? "text-white" : "text-zinc-400 hover:text-white"
                       }`
                     }
                   >
@@ -179,29 +182,37 @@ export function TopBar() {
                     key={item.label}
                     type="button"
                     onClick={() => openExternal(item.path)}
-                    className="cursor-pointer text-sm font-medium text-muted-foreground transition-colors hover:text-primary"
+                    className="text-sm font-medium text-zinc-400 hover:text-white transition-colors"
                   >
                     {item.label}
                   </button>
                 )
-              ))}
+              )}
+
+              {/* Direct dropdown */}
               <Popover>
                 <PopoverTrigger asChild>
-                  <Button variant="ghost" size="sm" className="gap-2 rounded-full">
+                  <button
+                    type="button"
+                    className="flex items-center gap-1.5 text-sm font-medium text-zinc-400 hover:text-white transition-colors"
+                  >
                     Direct
-                    <ChevronDown className="h-4 w-4" />
-                  </Button>
+                    <ChevronDown className="h-3.5 w-3.5" />
+                  </button>
                 </PopoverTrigger>
-                <PopoverContent align="start" className="w-44 rounded-2xl p-2">
+                <PopoverContent
+                  align="start"
+                  className="w-44 rounded-2xl p-2 bg-zinc-900 border border-white/[.07] shadow-2xl"
+                >
                   {directNavItems.map((item) => (
                     <NavLink
                       key={item.label}
                       to={item.to}
                       className={({ isActive }) =>
-                        `block rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+                        `block rounded-xl px-3 py-2 text-sm font-medium transition-colors ${
                           isActive
-                            ? "bg-primary/15 text-primary"
-                            : "text-muted-foreground hover:text-foreground hover:bg-muted/40"
+                            ? "bg-white/[.05] text-white"
+                            : "text-zinc-400 hover:text-white hover:bg-white/[.03]"
                         }`
                       }
                     >
@@ -212,238 +223,249 @@ export function TopBar() {
               </Popover>
             </div>
 
-            <div className="ml-auto hidden lg:flex items-center gap-2">
-              <Button
-                variant="ghost"
-                size="icon"
+            {/* Right side */}
+            <div className="ml-auto flex items-center gap-2">
+              {/* Search */}
+              <button
+                type="button"
                 onClick={handleSearchShortcut}
                 aria-label="Open search"
                 title="Ctrl+K to search"
+                className="w-9 h-9 flex items-center justify-center rounded-full text-zinc-400 hover:text-white hover:bg-white/[.05] transition-all active:scale-95"
               >
-                <Search className="h-5 w-5" />
-              </Button>
+                <Search className="h-4.5 w-4.5" />
+              </button>
 
-              {showAccountLoading ? (
-                <div className="h-9 w-9 rounded-full border border-border/60 flex items-center justify-center bg-card/70">
-                  <UserRound className="h-5 w-5" />
-                </div>
-              ) : (
-                <Popover>
-                  <PopoverTrigger
-                    className="flex items-center justify-center rounded-full outline-hidden ring-offset-background focus-visible:ring-2 focus-visible:ring-primary/60"
-                    aria-label={`${accountLabel} menu`}
-                  >
-                    {avatarUrl ? (
-                      <DiscordAvatar avatarUrl={avatarUrl} alt="Account avatar" className="h-9 w-9 rounded-full" />
-                    ) : (
-                      <div className="h-9 w-9 rounded-full border border-border/60 flex items-center justify-center bg-card/70">
-                        <UserRound className="h-5 w-5" />
-                      </div>
-                    )}
-                  </PopoverTrigger>
-                  <PopoverContent align="end" className="w-56 rounded-2xl p-2">
-                    <div className="px-3 pb-2">
-                      <div className="text-sm font-semibold text-foreground">{accountLabel}</div>
-                      <div className="text-xs text-muted-foreground">{accountSubtitle}</div>
-                    </div>
-                    {accountNavItems.map((item) => (
-                      <button
-                        key={item.label}
-                        type="button"
-                        onClick={() => navigate(item.to)}
-                        className="block w-full cursor-pointer rounded-lg px-3 py-2 text-left text-sm text-muted-foreground transition-colors hover:text-primary hover:bg-primary/10"
-                      >
-                        {item.label}
-                      </button>
-                    ))}
-                    <div className="my-2 h-px bg-border/60" />
-                    <button
-                      type="button"
-                      onClick={() => navigate("/settings")}
-                      className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-primary hover:bg-primary/10"
+              {/* Account â€” desktop */}
+              <div className="hidden lg:block">
+                {showAccountLoading ? (
+                  <div className="w-9 h-9 rounded-full border border-white/[.07] bg-zinc-900 flex items-center justify-center">
+                    <UserRound className="h-4.5 w-4.5 text-zinc-500" />
+                  </div>
+                ) : (
+                  <Popover>
+                    <PopoverTrigger
+                      className="flex items-center justify-center rounded-full outline-none ring-offset-background focus-visible:ring-1 focus-visible:ring-white/20"
+                      aria-label={`${accountLabel} menu`}
                     >
-                      <Settings className="h-4 w-4" />
-                      Account settings
-                    </button>
-                    <button
-                      type="button"
-                      onClick={accountUser ? handleLogout : handleLogin}
-                      disabled={accountUser ? loggingOut : loggingIn}
-                      className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors disabled:opacity-60 ${
-                        accountUser
-                          ? "text-destructive hover:bg-destructive/10"
-                          : "text-primary hover:bg-primary/10"
-                      }`}
-                    >
-                      {accountUser ? <LogOut className="h-4 w-4" /> : <LogIn className="h-4 w-4" />}
-                      {accountActionLabel}
-                    </button>
-                  </PopoverContent>
-                </Popover>
-              )}
-            </div>
-
-            <div className="ml-auto flex items-center gap-2 lg:hidden">
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={handleSearchShortcut}
-                aria-label="Open search"
-              >
-                <Search className="h-5 w-5" />
-              </Button>
-              <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
-                <SheetTrigger asChild>
-                  <Button variant="ghost" size="icon" aria-label="Open menu">
-                    <Menu className="h-5 w-5" />
-                  </Button>
-                </SheetTrigger>
-                <SheetContent side="right" className="w-64">
-                  <div className="flex flex-col gap-4 pt-6">
-                    <div className="flex items-center gap-3">
-                      <div className="h-10 w-10 rounded-xl bg-primary/20 flex items-center justify-center">
-                        <Hammer className="h-6 w-6 text-primary" />
-                      </div>
-                      <div>
-                        <div className="text-base font-black font-montserrat">UnionCrax.Direct</div>
-                        <div className="text-xs text-muted-foreground">Direct downloads</div>
-                      </div>
-                    </div>
-
-                    <div className="space-y-2">
-                      {accountUser ? (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            navigate("/settings")
-                            setMobileOpen(false)
-                          }}
-                          className="flex items-center gap-3 rounded-xl px-3 py-2 text-left text-sm font-medium transition-colors text-foreground hover:bg-muted/40"
-                        >
-                          {avatarUrl ? (
-                            <DiscordAvatar avatarUrl={avatarUrl} alt="Account avatar" className="h-9 w-9 rounded-full" />
-                          ) : (
-                            <div className="h-9 w-9 rounded-full border border-border/60 flex items-center justify-center bg-card/70">
-                              <UserRound className="h-5 w-5" />
-                            </div>
-                          )}
-                          <div>
-                            <div className="text-sm font-semibold">{accountLabel}</div>
-                            <div className="text-xs text-muted-foreground">Profile & requests</div>
-                          </div>
-                        </button>
-                      ) : showAccountLoading ? (
-                        <div className="flex items-center gap-3 rounded-xl px-3 py-2 text-sm text-muted-foreground">
-                          <div className="h-9 w-9 rounded-full border border-border/60 flex items-center justify-center bg-card/70">
-                            <UserRound className="h-5 w-5" />
-                          </div>
-                          <div>
-                            <div className="text-sm font-semibold">Loading account...</div>
-                            <div className="text-xs text-muted-foreground">Please wait</div>
-                          </div>
-                        </div>
+                      {avatarUrl ? (
+                        <DiscordAvatar
+                          avatarUrl={avatarUrl}
+                          alt="Account avatar"
+                          className="h-9 w-9 rounded-full border border-white/[.07]"
+                        />
                       ) : (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            handleLogin()
-                            setMobileOpen(false)
-                          }}
-                          className="flex items-center gap-3 rounded-xl px-3 py-2 text-left text-sm font-medium transition-colors text-foreground hover:bg-muted/40"
-                        >
-                          <div className="h-9 w-9 rounded-full border border-border/60 flex items-center justify-center bg-card/70">
-                            <UserRound className="h-5 w-5" />
-                          </div>
-                          <div>
-                            <div className="text-sm font-semibold">Login with Discord</div>
-                            <div className="text-xs text-muted-foreground">Login to continue</div>
-                          </div>
-                        </button>
+                        <div className="w-9 h-9 rounded-full border border-white/[.07] bg-zinc-900 flex items-center justify-center hover:bg-zinc-800 transition-colors">
+                          <UserRound className="h-4.5 w-4.5 text-zinc-400" />
+                        </div>
                       )}
-                    </div>
-
-                    {accountUser && (
-                      <div className="space-y-2">
-                        <div className="text-xs uppercase tracking-wide text-muted-foreground px-1">Account</div>
-                        {accountNavItems.map((item) => (
-                          <button
-                            key={item.label}
-                            type="button"
-                            onClick={() => {
-                              navigate(item.to)
-                              setMobileOpen(false)
-                            }}
-                            className="flex w-full cursor-pointer items-center justify-between rounded-xl px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-primary hover:bg-primary/10"
-                          >
-                            {item.label}
-                          </button>
-                        ))}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            navigate("/settings")
-                            setMobileOpen(false)
-                          }}
-                          className="flex w-full cursor-pointer items-center justify-between rounded-xl px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-primary hover:bg-primary/10"
-                        >
-                          Account settings
-                        </button>
+                    </PopoverTrigger>
+                    <PopoverContent
+                      align="end"
+                      className="w-56 rounded-2xl p-2 bg-zinc-900 border border-white/[.07] shadow-2xl"
+                    >
+                      <div className="px-3 py-2">
+                        <div className="text-sm font-semibold text-zinc-200">{accountLabel}</div>
+                        <div className="text-xs text-zinc-500">{accountSubtitle}</div>
                       </div>
-                    )}
-
-                    <div className="space-y-2">
-                      <div className="text-xs uppercase tracking-wide text-muted-foreground px-1">UnionCrax</div>
-                      {siteNavItems.map((item) => (
-                        item.label === "Home" ? (
-                          <button
-                            key={item.label}
-                            type="button"
-                            onClick={() => {
-                              handleHomeNav()
-                              setMobileOpen(false)
-                            }}
-                            className="flex w-full cursor-pointer items-center justify-between rounded-xl px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-primary hover:bg-primary/10"
-                          >
-                            {item.label}
-                          </button>
-                        ) : (
-                          <button
-                            key={item.label}
-                            type="button"
-                            onClick={() => {
-                              openExternal(item.path)
-                              setMobileOpen(false)
-                            }}
-                            className="flex w-full cursor-pointer items-center justify-between rounded-xl px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-primary hover:bg-primary/10"
-                          >
-                            {item.label}
-                          </button>
-                        )
-                      ))}
-                    </div>
-
-                    <div className="space-y-2">
-                      <div className="text-xs uppercase tracking-wide text-muted-foreground px-1">Direct</div>
-                      {directNavItems.map((item) => (
-                        <NavLink
+                      <div className="h-px bg-white/[.07] my-1" />
+                      {accountNavItems.map((item) => (
+                        <button
                           key={item.label}
-                          to={item.to}
-                          onClick={() => setMobileOpen(false)}
-                          className={({ isActive }) =>
-                            `flex items-center justify-between rounded-xl px-3 py-2 text-sm font-medium transition-colors ${
-                              isActive
-                                ? "bg-primary/15 text-primary"
-                                : "text-muted-foreground hover:text-foreground hover:bg-muted/40"
-                            }`
-                          }
+                          type="button"
+                          onClick={() => navigate(item.to)}
+                          className="block w-full text-left rounded-xl px-3 py-2 text-sm text-zinc-400 hover:text-white hover:bg-white/[.03] transition-colors"
                         >
                           {item.label}
-                        </NavLink>
+                        </button>
                       ))}
+                      <div className="h-px bg-white/[.07] my-1" />
+                      <button
+                        type="button"
+                        onClick={() => navigate("/settings")}
+                        className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-sm text-zinc-400 hover:text-white hover:bg-white/[.03] transition-colors"
+                      >
+                        <Settings className="h-4 w-4" />
+                        Account settings
+                      </button>
+                      <button
+                        type="button"
+                        onClick={accountUser ? handleLogout : handleLogin}
+                        disabled={accountUser ? loggingOut : loggingIn}
+                        className={`flex w-full items-center gap-2 rounded-xl px-3 py-2 text-sm transition-colors disabled:opacity-40 ${
+                          accountUser
+                            ? "text-zinc-500 hover:text-red-400 hover:bg-red-500/10"
+                            : "text-zinc-400 hover:text-white hover:bg-white/[.03]"
+                        }`}
+                      >
+                        {accountUser ? <LogOut className="h-4 w-4" /> : <LogIn className="h-4 w-4" />}
+                        {accountActionLabel}
+                      </button>
+                    </PopoverContent>
+                  </Popover>
+                )}
+              </div>
+
+              {/* Mobile hamburger */}
+              <div className="lg:hidden">
+                <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
+                  <SheetTrigger asChild>
+                    <button
+                      type="button"
+                      aria-label="Open menu"
+                      className="w-9 h-9 flex items-center justify-center rounded-full text-zinc-400 hover:text-white hover:bg-white/[.05] transition-all active:scale-95"
+                    >
+                      <Menu className="h-5 w-5" />
+                    </button>
+                  </SheetTrigger>
+                  <SheetContent
+                    side="right"
+                    className="w-72 bg-zinc-950 border-l border-white/[.07] p-0"
+                  >
+                    <div className="flex flex-col gap-5 p-5 pt-8">
+                      {/* Logo row */}
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center">
+                          <Hammer className="w-4 h-4 text-black" />
+                        </div>
+                        <div>
+                          <div className="text-sm font-brand text-white">UnionCrax.Direct</div>
+                          <div className="text-xs text-zinc-500">Game launcher</div>
+                        </div>
+                      </div>
+
+                      {/* Account row */}
+                      <div className="glass rounded-2xl p-3">
+                        {accountUser ? (
+                          <button
+                            type="button"
+                            onClick={() => { navigate("/settings"); setMobileOpen(false) }}
+                            className="flex items-center gap-3 w-full text-left"
+                          >
+                            {avatarUrl ? (
+                              <DiscordAvatar avatarUrl={avatarUrl} alt="Account avatar" className="h-9 w-9 rounded-full" />
+                            ) : (
+                              <div className="w-9 h-9 rounded-full border border-white/[.07] bg-zinc-800 flex items-center justify-center">
+                                <UserRound className="h-4.5 w-4.5 text-zinc-400" />
+                              </div>
+                            )}
+                            <div>
+                              <div className="text-sm font-semibold text-zinc-200">{accountLabel}</div>
+                              <div className="text-xs text-zinc-500">Profile & requests</div>
+                            </div>
+                          </button>
+                        ) : showAccountLoading ? (
+                          <div className="flex items-center gap-3">
+                            <div className="w-9 h-9 rounded-full border border-white/[.07] bg-zinc-800 flex items-center justify-center">
+                              <UserRound className="h-4.5 w-4.5 text-zinc-500" />
+                            </div>
+                            <div className="text-sm text-zinc-500">Loading account...</div>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => { handleLogin(); setMobileOpen(false) }}
+                            className="flex items-center gap-3 w-full text-left"
+                          >
+                            <div className="w-9 h-9 rounded-full border border-white/[.07] bg-zinc-800 flex items-center justify-center">
+                              <UserRound className="h-4.5 w-4.5 text-zinc-400" />
+                            </div>
+                            <div>
+                              <div className="text-sm font-medium text-zinc-200">Login with Discord</div>
+                              <div className="text-xs text-zinc-500">Connect your account</div>
+                            </div>
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Account nav items */}
+                      {accountUser && (
+                        <div>
+                          <div className="section-label mb-2">Account</div>
+                          <div className="space-y-0.5">
+                            {accountNavItems.map((item) => (
+                              <button
+                                key={item.label}
+                                type="button"
+                                onClick={() => { navigate(item.to); setMobileOpen(false) }}
+                                className="flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-sm font-medium text-zinc-400 hover:text-white hover:bg-white/[.03] transition-colors"
+                              >
+                                {item.label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Site nav */}
+                      <div>
+                        <div className="section-label mb-2">UnionCrax</div>
+                        <div className="space-y-0.5">
+                          {siteNavItems.map((item) =>
+                            item.label === "Home" ? (
+                              <button
+                                key={item.label}
+                                type="button"
+                                onClick={() => { handleHomeNav(); setMobileOpen(false) }}
+                                className="flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-sm font-medium text-zinc-400 hover:text-white hover:bg-white/[.03] transition-colors"
+                              >
+                                {item.label}
+                              </button>
+                            ) : (
+                              <button
+                                key={item.label}
+                                type="button"
+                                onClick={() => { openExternal(item.path); setMobileOpen(false) }}
+                                className="flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-sm font-medium text-zinc-400 hover:text-white hover:bg-white/[.03] transition-colors"
+                              >
+                                {item.label}
+                              </button>
+                            )
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Direct nav */}
+                      <div>
+                        <div className="section-label mb-2">Direct</div>
+                        <div className="space-y-0.5">
+                          {directNavItems.map((item) => (
+                            <NavLink
+                              key={item.label}
+                              to={item.to}
+                              onClick={() => setMobileOpen(false)}
+                              className={({ isActive }) =>
+                                `flex items-center justify-between rounded-xl px-3 py-2.5 text-sm font-medium transition-colors ${
+                                  isActive
+                                    ? "bg-white/[.05] text-white"
+                                    : "text-zinc-400 hover:text-white hover:bg-white/[.03]"
+                                }`
+                              }
+                            >
+                              {item.label}
+                            </NavLink>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Logout / login at bottom */}
+                      <button
+                        type="button"
+                        onClick={accountUser ? handleLogout : handleLogin}
+                        disabled={accountUser ? loggingOut : loggingIn}
+                        className={`flex items-center gap-2 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors disabled:opacity-40 ${
+                          accountUser
+                            ? "text-zinc-500 hover:text-red-400 hover:bg-red-500/10"
+                            : "text-zinc-400 hover:text-white hover:bg-white/[.03]"
+                        }`}
+                      >
+                        {accountUser ? <LogOut className="h-4 w-4" /> : <LogIn className="h-4 w-4" />}
+                        {accountActionLabel}
+                      </button>
                     </div>
-                  </div>
-                </SheetContent>
-              </Sheet>
+                  </SheetContent>
+                </Sheet>
+              </div>
             </div>
           </div>
         </div>

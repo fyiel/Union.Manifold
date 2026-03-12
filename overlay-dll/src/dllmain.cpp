@@ -1,5 +1,5 @@
 /**
- * UC Overlay DLL — Entry point.
+ * UC Overlay DLL - Entry point.
  *
  * This DLL is injected into game processes by the Electron app's native addon.
  * On DLL_PROCESS_ATTACH it spawns a background thread that:

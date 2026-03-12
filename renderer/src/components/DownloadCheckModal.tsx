@@ -30,7 +30,7 @@ type HostOption = {
 
 const HOST_OPTIONS: HostOption[] = [
   { key: "ucfiles", label: "UC.Files", supportsResume: true },
-  { key: "vikingfile", label: "VikingFile", supportsResume: true },
+  { key: "pixeldrain", label: "Pixeldrain", supportsResume: true },
 ]
 
 function hostLabel(key: string): string {
@@ -104,12 +104,12 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, onC
         const preferredUsable = preferredEntry && preferredEntry[1].totalParts > 0
 
         if (preferredUsable && preferredEntry[1].allAlive) {
-          // Preferred host is fully alive — great
+          // Preferred host is fully alive - great
           setPhase("ready")
           return
         }
 
-        // Preferred host missing, has no parts, or all parts dead — switch to best alternative
+        // Preferred host missing, has no parts, or all parts dead - switch to best alternative
         if (!preferredUsable || preferredEntry[1].aliveParts === 0) {
           const fullyAlive = hostEntries.find(([, h]) => h.allAlive && h.totalParts > 0)
           const partiallyAlive = !fullyAlive
@@ -137,7 +137,7 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, onC
     if (open && game && downloadToken) {
       void runCheck()
     } else if (open && game && !downloadToken) {
-      // Skip link check mode — show host picker immediately
+      // Skip link check mode - show host picker immediately
       setPhase("ready")
     }
   }, [open, game, downloadToken]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -213,13 +213,13 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, onC
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
-      <div className="absolute inset-0 bg-background/40 backdrop-blur-sm animate-in fade-in duration-300 ease-out" onClick={onClose} />
-      <div className="relative w-full max-w-lg overflow-hidden rounded-2xl border border-border/60 bg-card/95 p-5 text-foreground shadow-2xl animate-in slide-in-from-top-4 duration-300 ease-out">
+      <div className="absolute inset-0 bg-[#09090b]/40 backdrop-blur-sm animate-in fade-in duration-300 ease-out" onClick={onClose} />
+      <div className="relative w-full max-w-lg overflow-hidden rounded-2xl border border-white/[.07] bg-zinc-900/95 p-5 text-zinc-100 shadow-2xl animate-in slide-in-from-top-4 duration-300 ease-out">
         {/* ── Loading Phase ── */}
         {phase === "loading" && (
           <div className="flex flex-col items-center gap-3 py-8">
-            <Loader2 className="h-8 w-8 animate-spin text-primary" />
-            <p className="text-sm text-muted-foreground">Checking link availability…</p>
+            <Loader2 className="h-8 w-8 animate-spin text-white" />
+            <p className="text-sm text-zinc-400">Checking link availability…</p>
           </div>
         )}
 
@@ -230,12 +230,16 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, onC
               <ShieldAlert className="h-5 w-5 text-destructive" />
               Availability check failed
             </div>
-            <p className="text-sm text-muted-foreground">
+            <p className="text-sm text-zinc-400">
               {errorMsg || "Could not verify link availability. You can still try downloading."}
             </p>
             <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
               <Button variant="ghost" onClick={onClose}>
                 Cancel
+              </Button>
+              <Button variant="outline" onClick={() => setShowArchiveInstall(true)}>
+                <FileArchive className="mr-1.5 h-4 w-4" />
+                Install from archive
               </Button>
               <Button
                 onClick={() =>
@@ -263,14 +267,14 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, onC
               <CircleX className="h-5 w-5 text-destructive" />
               {hasWebOnly ? "Not available in-app" : "Game not available"}
             </div>
-            <p className="text-sm text-muted-foreground">
+            <p className="text-sm text-zinc-400">
               {hasWebOnly
                 ? <>
-                    <span className="font-medium text-foreground">{game?.name}</span> isn&apos;t
+                    <span className="font-medium text-zinc-100">{game?.name}</span> isn&apos;t
                     hosted on any in-app download host, but it&apos;s available on the web.
                   </>
                 : <>
-                    All download links for <span className="font-medium text-foreground">{game?.name}</span> are
+                    All download links for <span className="font-medium text-zinc-100">{game?.name}</span> are
                     currently dead on every host. The game cannot be downloaded right now.
                   </>
               }
@@ -286,26 +290,26 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, onC
                 ? Object.keys(availability.webOnlyHosts)
                 : []
               if (webOnlyHosts.length === 0) return (
-                <div className="rounded-lg border border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+                <div className="rounded-lg border border-white/[.07] bg-zinc-800/30 px-3 py-2 text-xs text-zinc-400">
                   Please try <strong>downloading from the website</strong> where more hosts may be available.
                 </div>
               )
               return (
-                <div className="rounded-lg border border-primary/30 bg-primary/5 px-3 py-3 space-y-2">
-                  <div className="flex items-center gap-1.5 text-sm font-medium text-foreground">
-                    <ExternalLink className="h-3.5 w-3.5 text-primary" />
+                <div className="rounded-lg border border-zinc-700 bg-white/5 px-3 py-3 space-y-2">
+                  <div className="flex items-center gap-1.5 text-sm font-medium text-zinc-100">
+                    <ExternalLink className="h-3.5 w-3.5 text-white" />
                     Available on the web
                   </div>
-                  <p className="text-xs text-muted-foreground">
-                    This game has links alive on {webOnlyHosts.join(", ")} — these hosts don&apos;t work in the app, but you can download from the website and install here.
+                  <p className="text-xs text-zinc-400">
+                    This game has links alive on {webOnlyHosts.join(", ")} - these hosts don&apos;t work in the app, but you can download from the website and install here.
                   </p>
-                  <ol className="text-xs text-muted-foreground space-y-1 pl-4 list-decimal">
+                  <ol className="text-xs text-zinc-400 space-y-1 pl-4 list-decimal">
                     <li>
                       <a
                         href={`https://union-crax.xyz/game/${game?.appid}`}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-primary underline hover:text-primary/80"
+                        className="text-white underline hover:text-white/80"
                       >
                         Go to the game page on the website
                       </a>
@@ -317,7 +321,7 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, onC
               )
             })()}
             {deadLinksReported && (
-              <p className="text-[11px] text-muted-foreground/60 text-center">
+              <p className="text-[11px] text-zinc-400/60 text-center">
                 We detected dead links and have reported it for you.
               </p>
             )}
@@ -338,13 +342,13 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, onC
         {phase === "ready" && (
           <div className="space-y-4">
             <div className="text-lg font-semibold">Download options</div>
-            <p className="text-sm text-muted-foreground">
+            <p className="text-sm text-zinc-400">
               Choose a host for this download.
             </p>
 
             {/* Host selector + health */}
             <div className="space-y-1.5">
-              <label className="text-sm font-medium text-foreground">Host</label>
+              <label className="text-sm font-medium text-zinc-100">Host</label>
               <Select value={selectedHost} onValueChange={(v) => {
                 setSelectedHost(v as PreferredDownloadHost)
                 setPartOverrides({}) // reset overrides when host changes
@@ -391,13 +395,13 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, onC
                               ) : (
                                 <AlertTriangle className="h-3.5 w-3.5 text-amber-400" />
                               )}
-                              <span className="text-muted-foreground">
+                              <span className="text-zinc-400">
                                 {alive}/{total}
                               </span>
                             </span>
                           )}
                           {hasAvailData && noParts && (
-                            <span className="ml-auto text-xs text-muted-foreground">
+                            <span className="ml-auto text-xs text-zinc-400">
                               unavailable
                             </span>
                           )}
@@ -455,7 +459,7 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, onC
                           {!isOverridden && filteredAliveOn.length > 0 && (
                             <button
                               onClick={() => applyAlternative(p.part, selectedHost)}
-                              className="flex items-center gap-1 rounded-full border border-border/60 bg-background/70 px-2 py-0.5 text-[10px] font-medium text-foreground transition-colors hover:bg-foreground/5"
+                              className="flex items-center gap-1 rounded-full border border-white/[.07] bg-[#09090b]/70 px-2 py-0.5 text-[10px] font-medium text-zinc-100 transition-colors hover:bg-foreground/5"
                             >
                               <ArrowRightLeft className="h-2.5 w-2.5" />
                               Use {hostLabel(filteredAliveOn[0])}
@@ -502,7 +506,7 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, onC
 
             {/* Dead links reported notice */}
             {deadLinksReported && (
-              <p className="text-[11px] text-muted-foreground/60 text-center">
+              <p className="text-[11px] text-zinc-400/60 text-center">
                 We detected dead links and have reported it for you.
               </p>
             )}
@@ -512,11 +516,15 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, onC
               <Button variant="ghost" onClick={onClose}>
                 Cancel
               </Button>
+              <Button variant="outline" onClick={() => setShowArchiveInstall(true)}>
+                <FileArchive className="mr-1.5 h-4 w-4" />
+                Install from archive
+              </Button>
               <Button
                 disabled={(hasDeadParts && !allPartsHandled) || !currentHostAvail || currentHostAvail.totalParts === 0}
                 onClick={() => {
                   // Auto-report dead links on download confirm
-                  if (!reportSentRef.current && availability && selectedHost !== 'vikingfile') {
+                  if (!reportSentRef.current && availability) {
                     const deadLines: string[] = []
                     for (const [h, hostData] of Object.entries(availability.hosts)) {
                       const deadParts = hostData.parts.filter((p) => p.status === 'dead')
@@ -547,7 +555,7 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, onC
                     partOverrides: Object.keys(partOverrides).length > 0 ? partOverrides : undefined,
                   })                }}
               >
-                {!currentHostAvail || currentHostAvail.totalParts === 0
+                  {!currentHostAvail || currentHostAvail.totalParts === 0
                   ? "Host unavailable"
                   : hasDeadParts && !allPartsHandled
                     ? "Resolve dead parts first"
@@ -567,3 +575,4 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, onC
     </div>
   )
 }
+

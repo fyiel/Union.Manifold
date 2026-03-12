@@ -211,11 +211,9 @@ const sortThread = (
 export function GameComments({
   appid,
   gameName,
-  onRateLimit,
 }: {
   appid: string
   gameName: string
-  onRateLimit?: (code: string) => void
 }) {
   const [user, setUser] = useState<CommentUser | null>(null)
   const [comments, setComments] = useState<GameComment[]>([])
@@ -297,11 +295,6 @@ export function GameComments({
         apiFetch("/api/comments/me"),
         apiFetch(`/api/comments/${appid}`),
       ])
-
-      if (meRes.status === 429 || listRes.status === 429) {
-        onRateLimit?.("429-COMMENTS")
-        return
-      }
 
       if (meRes.ok) {
         const meData = await meRes.json()
@@ -613,27 +606,27 @@ export function GameComments({
         <div
           key={comment.id}
           id={`comment-${comment.id}`}
-          className={`rounded-2xl border border-border/40 bg-card/20 p-4 sm:p-5 transition-shadow ${depth > 0 ? "ml-4 sm:ml-10" : ""
+          className={`rounded-2xl border border-white/[.07] bg-zinc-900/20 p-4 sm:p-5 transition-shadow ${depth > 0 ? "ml-4 sm:ml-10" : ""
             } ${isHighlighted ? "shadow-lg shadow-primary/30" : ""}`}
         >
           <div className="flex items-start gap-3">
-            <div className="h-10 w-10 rounded-full bg-muted/30 flex items-center justify-center shrink-0">
-              <Trash2 className="h-5 w-5 text-muted-foreground/50" />
+            <div className="h-10 w-10 rounded-full bg-zinc-800/30 flex items-center justify-center shrink-0">
+              <Trash2 className="h-5 w-5 text-zinc-400/50" />
             </div>
             <div className="flex-1">
               <div className="flex flex-wrap items-center gap-2">
-                <span className="text-sm text-muted-foreground italic">{deletedLabel}</span>
+                <span className="text-sm text-zinc-400 italic">{deletedLabel}</span>
               </div>
 
               {isContentRevealed ? (
                 <div className="mt-2">
-                  <p className="text-sm text-muted-foreground/70 whitespace-pre-wrap leading-relaxed italic">
+                  <p className="text-sm text-zinc-400/70 whitespace-pre-wrap leading-relaxed italic">
                     {comment.body}
                   </p>
                   <button
                     type="button"
                     onClick={toggleRevealDeleted}
-                    className="mt-2 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                    className="mt-2 text-xs text-zinc-400 hover:text-zinc-100 transition-colors"
                   >
                     Hide content
                   </button>
@@ -642,7 +635,7 @@ export function GameComments({
                 <button
                   type="button"
                   onClick={toggleRevealDeleted}
-                  className="mt-2 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                  className="mt-2 text-xs text-zinc-400 hover:text-zinc-100 transition-colors"
                 >
                   Click to view deleted message
                 </button>
@@ -678,7 +671,7 @@ export function GameComments({
       <div
         key={comment.id}
         id={`comment-${comment.id}`}
-        className={`rounded-2xl border border-border/60 bg-card/40 p-4 sm:p-5 transition-shadow ${depth > 0 ? "ml-4 sm:ml-10" : ""
+        className={`rounded-2xl border border-white/[.07] bg-zinc-900/40 p-4 sm:p-5 transition-shadow ${depth > 0 ? "ml-4 sm:ml-10" : ""
           } ${isPinned ? "ring-1 ring-primary/40" : ""} ${isHighlighted ? "shadow-lg shadow-primary/30" : ""}`}
       >
         <div className="flex items-start gap-3">
@@ -690,11 +683,11 @@ export function GameComments({
           />
           <div className="flex-1">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="font-semibold text-foreground">
+              <span className="font-semibold text-zinc-100">
                 {comment.author?.displayName || comment.author?.username || "Discord user"}
               </span>
               {authorRole && (
-                <span className="rounded-full bg-primary/10 border border-primary/30 px-2 py-0.5 text-[11px] font-semibold text-primary">
+                <span className="rounded-full bg-white/10 border border-zinc-700 px-2 py-0.5 text-[11px] font-semibold text-white">
                   {authorRole}
                 </span>
               )}
@@ -704,11 +697,11 @@ export function GameComments({
                   Pinned
                 </span>
               )}
-              <span className="text-xs text-muted-foreground">
+              <span className="text-xs text-zinc-400">
                 {new Date(comment.createdAt).toLocaleString()}
               </span>
             </div>
-            <p className="mt-2 text-sm text-muted-foreground whitespace-pre-wrap leading-relaxed">
+            <p className="mt-2 text-sm text-zinc-400 whitespace-pre-wrap leading-relaxed">
               {comment.body}
             </p>
             <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -783,7 +776,7 @@ export function GameComments({
                   placeholder={`Reply to ${comment.author?.displayName || comment.author?.username || "user"}...`}
                   maxLength={1000}
                 />
-                <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <div className="flex items-center justify-between text-xs text-zinc-400">
                   <span>{(replyDrafts[comment.id] ?? "").length} / 1000</span>
                   <div className="flex gap-2">
                     <Button
@@ -834,11 +827,11 @@ export function GameComments({
       <div className="max-w-6xl mx-auto space-y-6">
         <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
           <div>
-            <h2 className="text-2xl md:text-3xl font-black text-foreground font-montserrat flex items-center gap-2">
-              <MessageSquare className="h-6 w-6 text-primary" />
+            <h2 className="text-2xl md:text-3xl font-black text-zinc-100  flex items-center gap-2">
+              <MessageSquare className="h-6 w-6 text-white" />
               Comments
             </h2>
-            <p className="text-sm text-muted-foreground">
+            <p className="text-sm text-zinc-400">
               Share feedback about <span className="font-semibold">{gameName}</span>
             </p>
           </div>
@@ -867,7 +860,7 @@ export function GameComments({
           </div>
         </div>
 
-        <Card className="border-border/60">
+        <Card className="border-white/[.07]">
           <CardContent className="p-5 space-y-4">
             {user ? (
               <div className="flex items-center gap-3">
@@ -877,13 +870,13 @@ export function GameComments({
                   className="h-10 w-10 rounded-full"
                 />
                 <div>
-                  <div className="text-sm font-semibold text-foreground">
+                  <div className="text-sm font-semibold text-zinc-100">
                     {user.displayName || user.username}
                   </div>
                   <button
                     type="button"
                     onClick={logout}
-                    className="text-xs text-muted-foreground hover:text-foreground"
+                    className="text-xs text-zinc-400 hover:text-zinc-100"
                   >
                     Logout
                   </button>
@@ -891,7 +884,7 @@ export function GameComments({
               </div>
             ) : (
               <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <div className="flex items-center gap-2 text-sm text-zinc-400">
                   <MessageCircle className="h-4 w-4" />
                   Sign in with Discord to post and like comments.
                 </div>
@@ -907,7 +900,7 @@ export function GameComments({
               className="min-h-[120px]"
               maxLength={1000}
             />
-            <div className="flex items-center justify-between text-xs text-muted-foreground">
+            <div className="flex items-center justify-between text-xs text-zinc-400">
               <span>{remaining} characters remaining</span>
               <Button size="sm" onClick={submit} disabled={!user || posting}>
                 {posting ? "Posting..." : "Post comment"}
@@ -929,7 +922,7 @@ export function GameComments({
             ))}
           </div>
         ) : comments.length === 0 ? (
-          <div className="rounded-2xl border border-border/60 bg-card/40 p-6 text-sm text-muted-foreground">
+          <div className="rounded-2xl border border-white/[.07] bg-zinc-900/40 p-6 text-sm text-zinc-400">
             No comments yet. Be the first to share your thoughts.
           </div>
         ) : (
@@ -989,3 +982,4 @@ export function GameComments({
     </section>
   )
 }
+

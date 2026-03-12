@@ -1,5 +1,5 @@
 /**
- * UC Overlay Native Addon — N-API entry point.
+ * UC Overlay Native Addon - N-API entry point.
  *
  * Exports:
  *   injectDll(pid: number, dllPath: string): boolean

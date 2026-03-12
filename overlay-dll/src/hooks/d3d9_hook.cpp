@@ -1,5 +1,5 @@
 /**
- * D3D9 Present Hook — intercepts IDirect3DDevice9::Present.
+ * D3D9 Present Hook - intercepts IDirect3DDevice9::Present.
  *
  * Strategy:
  *   1. Load d3d9.dll

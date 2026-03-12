@@ -29,7 +29,10 @@ function normalizePreferences(input: unknown): AppPreferences {
   const prefs: AppPreferences = {}
 
   const mirrorHost = record.defaultMirrorHost
-  if (mirrorHost === "ucfiles" || mirrorHost === "vikingfile") {
+  if (
+    mirrorHost === "ucfiles" ||
+    mirrorHost === "pixeldrain"
+  ) {
     prefs.defaultMirrorHost = mirrorHost as PreferredDownloadHost
   }
 

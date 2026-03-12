@@ -1,5 +1,5 @@
 /**
- * OpenGL wglSwapBuffers Hook — intercepts the final buffer swap.
+ * OpenGL wglSwapBuffers Hook - intercepts the final buffer swap.
  *
  * Strategy:
  *   1. Check if opengl32.dll is loaded
@@ -44,7 +44,7 @@ bool tryHook() {
     HMODULE hGL = GetModuleHandleA("opengl32.dll");
     if (!hGL) return false;
 
-    // wglSwapBuffers is not exported by opengl32.dll — it's SwapBuffers from gdi32
+    // wglSwapBuffers is not exported by opengl32.dll - it's SwapBuffers from gdi32
     // But the actual GL-aware one is in opengl32.dll's internal dispatch.
     // We hook gdi32!SwapBuffers since that's what games call.
     HMODULE hGDI = GetModuleHandleA("gdi32.dll");

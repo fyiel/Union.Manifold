@@ -1,5 +1,5 @@
 /**
- * Shared Memory Frame Reader — runs inside the injected DLL.
+ * Shared Memory Frame Reader - runs inside the injected DLL.
  * Opens the shared memory created by the Node addon (uc-direct-frame-{pid})
  * and maps it read-only. The graphics hooks read pixels from here.
  */

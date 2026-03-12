@@ -5,7 +5,6 @@ import {
   inferFilenameFromUrl,
   getPreferredDownloadHost,
   isUCFilesUrl,
-  isVikingFileUrl,
   requestDownloadToken,
   resolveDownloadUrl,
   resolveDownloadSize,
@@ -140,12 +139,12 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
       }
 
       const restored = parsed
-        // Drop entries that have already completed or been cancelled — no action needed on restart
+        // Drop entries that have already completed or been cancelled - no action needed on restart
         .filter((item) => !["completed", "extracted", "cancelled"].includes(item.status))
         .map((item) => {
         // Sanitize url in case it was persisted as a DownloadHostEntry object from an older build
         const safeItem = typeof item.url !== "string" ? { ...item, url: coerceUrl(item.url) } : item
-        // Downloads lose their Electron DownloadItem on reload — mark as paused so user can resume.
+        // Downloads lose their Electron DownloadItem on reload - mark as paused so user can resume.
         // But extracting/installing items are handled by the main process independently of the
         // renderer.  Keep them as-is here; the immediate post-mount reconciliation (below) will
         // query the main process and either let extraction continue or mark them completed/paused.
@@ -249,7 +248,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
   )
 
   // Immediately after mount, reconcile items that were extracting/installing when the page
-  // reloaded.  The main process continues extraction independently — if it already finished,
+  // reloaded.  The main process continues extraction independently - if it already finished,
   // transitioning to "completed" here prevents a false "paused" state that leads to
   // unnecessary re-downloads when the user clicks Resume.
   const mountReconcileRanRef = useRef(false)
@@ -279,7 +278,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         try {
           const status = await window.ucDownloads?.getActiveStatus?.(appid)
           if (status?.extracting || status?.downloading) {
-            // Main process is still working — keep the extracting status, the normal
+            // Main process is still working - keep the extracting status, the normal
             // onUpdate listener will receive progress/completion events.
             downloadLogger.info(`Post-mount: ${appid} still extracting/downloading in main process`)
             continue
@@ -292,7 +291,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         setDownloads((prev) =>
           prev.map((item) =>
             item.appid === appid && ["extracting", "installing"].includes(item.status)
-              ? { ...item, status: "paused" as DownloadStatus, error: "Extraction interrupted — please resume" }
+              ? { ...item, status: "paused" as DownloadStatus, error: "Extraction interrupted - please resume" }
               : item
           )
         )
@@ -346,28 +345,8 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
               }
             })
           )
-          if (host === "vikingfile") {
-            await new Promise((resolve) => setTimeout(resolve, 500))
-          }
         }
         return sizeMap
-      }
-
-      if (host === "vikingfile") {
-        setTimeout(() => {
-          void (async () => {
-            const [first, ...rest] = queue
-            if (first) {
-              const firstMap = await fetchSizes([first])
-              applySizes(firstMap)
-            }
-            if (rest.length) {
-              const restMap = await fetchSizes(rest)
-              applySizes(restMap)
-            }
-          })()
-        }, 500)
-        return
       }
 
       const sizeMap = await fetchSizes(queue)
@@ -551,7 +530,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
       }
 
       // Only reconcile installed state AFTER extraction/install is fully done.
-      // Do NOT reconcile while extracting/installing — the installed manifest may already
+      // Do NOT reconcile while extracting/installing - the installed manifest may already
       // exist on disk before extraction finishes, which causes premature "completed" status.
       if (update.appid && (update.status === "completed" || update.status === "extracted")) {
         queueMicrotask(() => {
@@ -583,7 +562,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (typeof window === "undefined") return
-    // Reconcile frequently — catches stuck extracting/installing items when the main
+    // Reconcile frequently - catches stuck extracting/installing items when the main
     // process finishes but the status update was missed (e.g. window was hidden).
     const interval = setInterval(() => {
       const appids = new Set(
@@ -654,8 +633,6 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         links = [{ url: redirectUrl, part: null }]
         if (isUCFilesUrl(redirectUrl)) {
           selectedHost = "ucfiles"
-        } else if (isVikingFileUrl(redirectUrl)) {
-          selectedHost = "vikingfile"
         } else {
           selectedHost = preferredHost
         }
@@ -947,7 +924,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
                 resumedFromDisk = true
                 ok = true
               } else if (resumeRes && typeof resumeRes === "object" && resumeRes.error === "file-already-complete") {
-                // File on disk is already the full expected size — skip straight to completed.
+                // File on disk is already the full expected size - skip straight to completed.
                 downloadLogger.info("Resume Level 3: file already complete, marking done")
                 resumedFromDisk = true
                 ok = true
@@ -1028,7 +1005,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         .sort((a, b) => (b.receivedBytes || 0) - (a.receivedBytes || 0))
         .find((item) => item.receivedBytes > 0 || item.totalBytes > 0)
       if (pausedWithProgress) {
-        // Resume the part with progress first. Do NOT re-queue siblings yet —
+        // Resume the part with progress first. Do NOT re-queue siblings yet -
         // wait until the resumed download is actually running to avoid the
         // auto-start effect picking them up during the async resolve gap.
         await resumeDownload(pausedWithProgress.id)

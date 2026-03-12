@@ -5,7 +5,7 @@
 ### Features & Improvements
 
 - **UC.Files (files.union-crax.xyz) added as in-app download host**:
-  - Resolves via server-side `UCFILES_API_KEY` — no Turnstile, no browser-based auth
+  - Resolves via server-side `UCFILES_API_KEY` - no Turnstile, no browser-based auth
   - Full resume support via HTTP Range requests
   - Set as the default download host in settings
 
@@ -15,19 +15,19 @@
   - Achieves ~11 MB/s aggregate throughput (vs ~2–5 MB/s with a single connection)
   - Pre-allocates the output file and writes each connection's bytes at the correct offset
   - Progress reported every 500ms with smoothed speed and ETA
-  - Pause/resume/cancel fully supported — pause blocks all worker connections, resume wakes them all atomically
+  - Pause/resume/cancel fully supported - pause blocks all worker connections, resume wakes them all atomically
   - File-size integrity check after all chunks complete before extraction begins
   - Falls back to Chromium's downloader if the server doesn't return `Accept-Ranges: bytes`
   - Strict 206 validation and `Content-Range` header verification to prevent corruption
 
 - **Bug fixes**:
-  - Fixed data corruption caused by Chromium caching parallel Range requests — all fetch calls now use `cache: 'no-store'` and `Cache-Control: no-cache` headers to force fresh per-worker connections
-  - Fixed "UC.Files link could not be resolved" false error — main process now sends an immediate `status: 'downloading'` update before the async parallel download starts, preventing the renderer from re-triggering resolution
-  - Fixed already-resolved `/dl/` token URLs being re-resolved (returning `resolved: false`) — `resolveUCFilesDownload` now short-circuits for `/dl/` URLs
-  - Fixed missing splash image and screenshots after UC.Files downloads — `migrateInstallingExtras` now runs before archive extraction, moving cached metadata images from `installing/` to `installed/`
-  - Fixed file descriptor leak on cancel/abort — `fd` is now closed in a `try/finally` path
+  - Fixed data corruption caused by Chromium caching parallel Range requests - all fetch calls now use `cache: 'no-store'` and `Cache-Control: no-cache` headers to force fresh per-worker connections
+  - Fixed "UC.Files link could not be resolved" false error - main process now sends an immediate `status: 'downloading'` update before the async parallel download starts, preventing the renderer from re-triggering resolution
+  - Fixed already-resolved `/dl/` token URLs being re-resolved (returning `resolved: false`) - `resolveUCFilesDownload` now short-circuits for `/dl/` URLs
+  - Fixed missing splash image and screenshots after UC.Files downloads - `migrateInstallingExtras` now runs before archive extraction, moving cached metadata images from `installing/` to `installed/`
+  - Fixed file descriptor leak on cancel/abort - `fd` is now closed in a `try/finally` path
 
-- **Archive install system** — new universal drag-and-drop / file-picker dialog for installing games from local archive files:
+- **Archive install system** - new universal drag-and-drop / file-picker dialog for installing games from local archive files:
   - Support for `.7z`, `.rar`, `.tar`, `.gz`, `.tgz`, and multipart archives (`.7z.001`, `.7z.002`, etc.)
   - Automatic sibling part detection when only `.001` is selected
   - 6-step modal wizard: choose method → select files → confirm → install → done/error
@@ -35,7 +35,7 @@
   - Modal can be closed during extraction; process continues in background
   - Installed games are registered in the manifest with file inventory
 
-- **Web-only host guidance** — when in-app hosts (Pixeldrain, FileQ, Rootz) have no alive links but external hosts do:
+- **Web-only host guidance** - when in-app hosts (Pixeldrain, FileQ, Rootz) have no alive links but external hosts do:
   - Shows "Not available in-app" modal instead of false "all dead" message
   - Lists available web-only hosts (VikingFile, DataVaults, etc.)
   - 3-step guide: visit game page on website → download → come back and install from archive
@@ -60,31 +60,31 @@
 ### Files touched
 
 #### New
-- `union-crax.xyz/app/api/ucfiles/resolve/route.ts` — server-side resolver: parallel-fetches metadata + signed DL token, returns `{ url, filename, size }`
+- `union-crax.xyz/app/api/ucfiles/resolve/route.ts` - server-side resolver: parallel-fetches metadata + signed DL token, returns `{ url, filename, size }`
 - `renderer/src/components/ArchiveInstallModal.tsx`
 
 #### Modified (UnionCrax.Direct)
-- `electron/main.cjs` — `ucfilesParallelDownload`, `handleUCFilesDownloadComplete`, `isUCFilesUrl`, `ucfilesActiveDownloads` map; cancel/pause/resume IPC handlers extended for parallel downloads; `hasAnyActiveOrPendingDownloads` includes UC.Files active downloads; `uc:pick-archive-files` and `uc:install-from-archive` IPC handlers; extraction polling with live progress updates
-- `electron/preload.cjs` — exposed archive install methods to renderer
-- `renderer/src/vite-env.d.ts` — TypeScript types for archive install APIs
-- `renderer/src/lib/downloads.ts` — `ucfiles` host type, `resolveUCFilesDownload`, `extractUCFilesFileId`, `isUCFilesUrl`, `isUCFilesDlTokenUrl` (short-circuit for already-resolved tokens), `pickHostLinks`, `resolveDownloadSize`; removed DataVaults, added `webOnlyHosts` to AvailabilityResult
-- `renderer/src/lib/settings-constants.ts` — `ucfiles` added to `MirrorHost` type and `MIRROR_HOSTS` as first entry (default)
-- `renderer/src/components/DownloadCheckModal.tsx` — UC.Files in `HOST_OPTIONS`, `hostMatchesKey` helper for case-insensitive matching; web-only host guidance, improved messaging, disabled state handling
+- `electron/main.cjs` - `ucfilesParallelDownload`, `handleUCFilesDownloadComplete`, `isUCFilesUrl`, `ucfilesActiveDownloads` map; cancel/pause/resume IPC handlers extended for parallel downloads; `hasAnyActiveOrPendingDownloads` includes UC.Files active downloads; `uc:pick-archive-files` and `uc:install-from-archive` IPC handlers; extraction polling with live progress updates
+- `electron/preload.cjs` - exposed archive install methods to renderer
+- `renderer/src/vite-env.d.ts` - TypeScript types for archive install APIs
+- `renderer/src/lib/downloads.ts` - `ucfiles` host type, `resolveUCFilesDownload`, `extractUCFilesFileId`, `isUCFilesUrl`, `isUCFilesDlTokenUrl` (short-circuit for already-resolved tokens), `pickHostLinks`, `resolveDownloadSize`; removed DataVaults, added `webOnlyHosts` to AvailabilityResult
+- `renderer/src/lib/settings-constants.ts` - `ucfiles` added to `MirrorHost` type and `MIRROR_HOSTS` as first entry (default)
+- `renderer/src/components/DownloadCheckModal.tsx` - UC.Files in `HOST_OPTIONS`, `hostMatchesKey` helper for case-insensitive matching; web-only host guidance, improved messaging, disabled state handling
 
 #### Modified (union-crax.xyz)
-- `app/api/downloads/check-availability/route.ts` — `APP_HOSTS` includes `ucfiles`; matching is case-insensitive with non-alphanumeric stripping; universal web-only host detection (routes unsupported hosts to separate `webOnlyHosts` object), parallel HEAD checks with 12s timeout
-- `lib/url-utils.ts` — `files.union-crax.xyz` → `UC.Files` in `knownHosts`
-- `components/bin-links-modal.tsx` — `isUCFilesHost` helper, UC.Files excluded from retiring tag, direct download button shown
+- `app/api/downloads/check-availability/route.ts` - `APP_HOSTS` includes `ucfiles`; matching is case-insensitive with non-alphanumeric stripping; universal web-only host detection (routes unsupported hosts to separate `webOnlyHosts` object), parallel HEAD checks with 12s timeout
+- `lib/url-utils.ts` - `files.union-crax.xyz` → `UC.Files` in `knownHosts`
+- `components/bin-links-modal.tsx` - `isUCFilesHost` helper, UC.Files excluded from retiring tag, direct download button shown
 
 ## Version 1.1.3 - 2026-02-24
 
 ### Features & Improvements
 
-- **Simplified NSFW reveal system** — replaced the three-state hover-based system with a clearer two-state toggle:
+- **Simplified NSFW reveal system** - replaced the three-state hover-based system with a clearer two-state toggle:
   - **Toggle OFF**: images are blurred (`blur-xl brightness-50`) with a "Reveal" button overlay that unblurs the specific game for the current page session
-  - **Toggle ON**: NSFW covers show immediately with no blur — no more intermediate hover-to-unblur state that looked identical to OFF
-  - **Session reveals now truly ephemeral** — clicking "Reveal" on a blurred cover now adds the game to an in-memory `Set` instead of `sessionStorage`, so reveals reset on every page refresh (not just when closing the tab). This prevents the "mom walked in" scenario where refreshing the page is the natural escape hatch.
-  - **Updated settings label** — changed from "NSFW hover reveal / Allow NSFW covers to unblur on hover" to **"Show NSFW covers / Unblur NSFW game cover images"** to reflect the new direct-reveal behavior
+  - **Toggle ON**: NSFW covers show immediately with no blur - no more intermediate hover-to-unblur state that looked identical to OFF
+  - **Session reveals now truly ephemeral** - clicking "Reveal" on a blurred cover now adds the game to an in-memory `Set` instead of `sessionStorage`, so reveals reset on every page refresh (not just when closing the tab). This prevents the "mom walked in" scenario where refreshing the page is the natural escape hatch.
+  - **Updated settings label** - changed from "NSFW hover reveal / Allow NSFW covers to unblur on hover" to **"Show NSFW covers / Unblur NSFW game cover images"** to reflect the new direct-reveal behavior
 
 ### Files touched
 
@@ -105,13 +105,13 @@
 
 ### Features & Improvements
 
-- **Synced flow with new backend** — updated application to work seamlessly with the new backend infrastructure, ensuring smooth communication and data synchronization across all features
+- **Synced flow with new backend** - updated application to work seamlessly with the new backend infrastructure, ensuring smooth communication and data synchronization across all features
 
 ### Fixes & Improvements
 
-- **Fixed download payload type validation in Electron** — the `uc:download-start` and `uc:download-resume-with-fresh-url` IPC handlers now defensively coerce non-string `url` values (e.g., persisted `DownloadHostEntry` objects from old builds) to strings before calling `.includes()`, preventing "url.includes is not a function" errors ([#15](https://github.com/Union-Crax/UnionCrax.Direct/issues/15))
-- **Fixed stale download restoration from localStorage** — download items persisted by older builds that had `url` as an object (`{url: string, part: number|null}`) are now sanitized on app startup, extracting the string URL before resuming
-- **Added type coercion in resolveDownloadUrl** — the `resolveDownloadUrl` function now coerces non-string `url` inputs at entry point, ensuring old persisted state can never produce a falsely-resolved download URL object
+- **Fixed download payload type validation in Electron** - the `uc:download-start` and `uc:download-resume-with-fresh-url` IPC handlers now defensively coerce non-string `url` values (e.g., persisted `DownloadHostEntry` objects from old builds) to strings before calling `.includes()`, preventing "url.includes is not a function" errors ([#15](https://github.com/Union-Crax/UnionCrax.Direct/issues/15))
+- **Fixed stale download restoration from localStorage** - download items persisted by older builds that had `url` as an object (`{url: string, part: number|null}`) are now sanitized on app startup, extracting the string URL before resuming
+- **Added type coercion in resolveDownloadUrl** - the `resolveDownloadUrl` function now coerces non-string `url` inputs at entry point, ensuring old persisted state can never produce a falsely-resolved download URL object
 
 ### Files touched (UnionCrax.Direct)
 
@@ -123,28 +123,28 @@
 
 ### Fixes & Improvements
 
-- **Fixed exe picker opening in wrong folder** — the exe picker browse dialog was opening inside the version-specific subfolder (e.g. `versions/latest_b537082/`) instead of the game's root folder. The `listGameExecutables` IPC now returns a separate `gameRoot` field pointing to the top-level game folder, which is used as the default path for both the launch flow and the gear-icon exe picker.
-- **Fixed Play/Download Now button flickering** — resolved a logic error in `isSelectedVersionInstalled` where the button would briefly flash "Download Now" then change back to "Play", even when the game was fully installed. Current versions are now always treated as installed.
-- **Added game launch failure detection and modal** — when a game exits within 12 seconds of launch (indicating a failed start), a helpful modal now appears suggesting to:
+- **Fixed exe picker opening in wrong folder** - the exe picker browse dialog was opening inside the version-specific subfolder (e.g. `versions/latest_b537082/`) instead of the game's root folder. The `listGameExecutables` IPC now returns a separate `gameRoot` field pointing to the top-level game folder, which is used as the default path for both the launch flow and the gear-icon exe picker.
+- **Fixed Play/Download Now button flickering** - resolved a logic error in `isSelectedVersionInstalled` where the button would briefly flash "Download Now" then change back to "Play", even when the game was fully installed. Current versions are now always treated as installed.
+- **Added game launch failure detection and modal** - when a game exits within 12 seconds of launch (indicating a failed start), a helpful modal now appears suggesting to:
   - Check that the correct executable is selected via the gear icon
   - Enable "Launch as Administrator" (Windows only, shown only if not already enabled)
   - The modal displays the actual game name being launched instead of a hardcoded example
-- **Improved launch tracking** — replaced hardcoded 5-second timeout with a timestamp-based 12-second detection window, so normal game exits that take longer won't falsely trigger the failure modal. The window automatically expires after 12 seconds.
-- **Fixed admin launch UX** — when a user declines a UAC prompt, the launcher now correctly fails rather than silently falling back to a non-admin launch, giving clear feedback that admin privileges are required.
-- **Fixed false quick-exit modal on Windows** — removed the cmd.exe wrapper from non-admin Windows launches, which was causing all GUI games to immediately trigger the "couldn't start" modal (cmd.exe exits quickly when launching GUI apps). Games now launch directly and are tracked correctly.
-- **Improved IPC listener cleanup** — launch tracking listeners are now properly subscribed and unsubscribed, eliminating listener leaks across multiple game launches.
+- **Improved launch tracking** - replaced hardcoded 5-second timeout with a timestamp-based 12-second detection window, so normal game exits that take longer won't falsely trigger the failure modal. The window automatically expires after 12 seconds.
+- **Fixed admin launch UX** - when a user declines a UAC prompt, the launcher now correctly fails rather than silently falling back to a non-admin launch, giving clear feedback that admin privileges are required.
+- **Fixed false quick-exit modal on Windows** - removed the cmd.exe wrapper from non-admin Windows launches, which was causing all GUI games to immediately trigger the "couldn't start" modal (cmd.exe exits quickly when launching GUI apps). Games now launch directly and are tracked correctly.
+- **Improved IPC listener cleanup** - launch tracking listeners are now properly subscribed and unsubscribed, eliminating listener leaks across multiple game launches.
 
 ## Version 1.1.0 - 2026-02-20
 
 ### Features
 
-- **New game page and game card design** — redesigned the game detail page and card components for an improved user experience
-- **Settings page redesign** — replaced the monolithic scrolling settings layout with a modern two-column sidebar navigation system
+- **New game page and game card design** - redesigned the game detail page and card components for an improved user experience
+- **Settings page redesign** - replaced the monolithic scrolling settings layout with a modern two-column sidebar navigation system
   - Added sticky sidebar with four organized sections: Account, Downloads, Game Launch, and Advanced
   - Each sidebar item shows descriptive text for quick identification
   - Update check button moved to sidebar footer for easy access
   - Eliminates endless scrolling while preserving all existing functionality
-- **Linux gaming and VR support** — added comprehensive support for Windows games on Linux via Wine/Proton, and set up SteamVR/OpenXR for VR games ([#14](https://github.com/Union-Crax/UnionCrax.Direct/pull/14))
+- **Linux gaming and VR support** - added comprehensive support for Windows games on Linux via Wine/Proton, and set up SteamVR/OpenXR for VR games ([#14](https://github.com/Union-Crax/UnionCrax.Direct/pull/14))
   - Added `ucLinux` and `ucVR` IPC APIs in the Electron preload script
   - Introduced `LINUX_SETTINGS_KEYS` and `VR_SETTINGS_KEYS` constants for persistent storage
   - Implemented comprehensive UI controls in SettingsPage for Wine/Proton and VR runtime configuration
@@ -153,10 +153,10 @@
 
 ### Fixes & Improvements
 
-- **Removed noisy settings logs** — removed `Setting get: ...` messages from application logs that were cluttering output on every preference access.
-- **Download queue state fix** — Resolved a bug where pausing the current download would inadvertently trigger the next queued game to start download.
-- **Scoped pause controls** — The global pause button in the download bar is now correctly scoped to the active game group, preventing it from incorrectly pausing unrelated downloads.
-- **TypeScript type safety fixes** — resolved multiple build errors in the downloads context:
+- **Removed noisy settings logs** - removed `Setting get: ...` messages from application logs that were cluttering output on every preference access.
+- **Download queue state fix** - Resolved a bug where pausing the current download would inadvertently trigger the next queued game to start download.
+- **Scoped pause controls** - The global pause button in the download bar is now correctly scoped to the active game group, preventing it from incorrectly pausing unrelated downloads.
+- **TypeScript type safety fixes** - resolved multiple build errors in the downloads context:
   - Added missing `versionLabel` to the main process `start()` IPC payload type in `vite-env.d.ts`.
   - Fixed host selection type mismatch in `downloads-context.tsx` by correctly casting the resolved download host to `PreferredDownloadHost`.
   - Fixed state narrowing issues where `"queued"` status was being widened to `string` during object spreads in `resumeGroup`.
@@ -172,27 +172,27 @@
 
 ### Features
 
-- **Download resume actually works across app restarts** — previously, closing the app and resuming a download would restart it from byte 0, even for 10 GB files. The entire three-level resume system has been overhauled:
-  - **Partial file preservation** — Chromium deletes partial download files when it cancels DownloadItems during app quit. The app now creates instant hardlinks (`.ucresume` backup files) in `before-quit` so the downloaded data survives. On next launch, resume handlers automatically restore the backup if the original was deleted.
-  - **Level 3 resume with fresh URL** — when the stored URL chain has expired (CDN links rotate), the app re-resolves a fresh URL and now uses `createInterruptedDownload` with the actual file offset from disk instead of calling `downloadURL()` from byte 0. This sends a proper `Range` header so the server returns only the remaining bytes.
-  - **`savePath` propagation** — the download start payload now carries `savePath` through to `pendingDownloads`, so `will-download` reuses the existing partial file path instead of generating a new one.
-  - **URL chain matching fix** — `will-download` now matches against the full stored `urlChain` array, fixing a bug where redirect chains caused the pending download entry to be missed.
-  - **Backup cleanup** — `.ucresume` files are automatically cleaned up when downloads complete, are cancelled by the user, or when the original file is still present.
+- **Download resume actually works across app restarts** - previously, closing the app and resuming a download would restart it from byte 0, even for 10 GB files. The entire three-level resume system has been overhauled:
+  - **Partial file preservation** - Chromium deletes partial download files when it cancels DownloadItems during app quit. The app now creates instant hardlinks (`.ucresume` backup files) in `before-quit` so the downloaded data survives. On next launch, resume handlers automatically restore the backup if the original was deleted.
+  - **Level 3 resume with fresh URL** - when the stored URL chain has expired (CDN links rotate), the app re-resolves a fresh URL and now uses `createInterruptedDownload` with the actual file offset from disk instead of calling `downloadURL()` from byte 0. This sends a proper `Range` header so the server returns only the remaining bytes.
+  - **`savePath` propagation** - the download start payload now carries `savePath` through to `pendingDownloads`, so `will-download` reuses the existing partial file path instead of generating a new one.
+  - **URL chain matching fix** - `will-download` now matches against the full stored `urlChain` array, fixing a bug where redirect chains caused the pending download entry to be missed.
+  - **Backup cleanup** - `.ucresume` files are automatically cleaned up when downloads complete, are cancelled by the user, or when the original file is still present.
 
-- **Discord Rich Presence advanced options** — added collapsible advanced settings for Discord RPC customization:
-  - **Hide NSFW content** — option to mask NSFW game names as "****" when viewing or downloading NSFW games (automatically detects games with "nsfw" genre while keeping the RPC activity visible)
+- **Discord Rich Presence advanced options** - added collapsible advanced settings for Discord RPC customization:
+  - **Hide NSFW content** - option to mask NSFW game names as "****" when viewing or downloading NSFW games (automatically detects games with "nsfw" genre while keeping the RPC activity visible)
   - **Show game name** - toggle display of game titles in your status
-  - **Show activity status** — control whether your current activity (downloading, playing, browsing) is shown
-  - **Show buttons** — control visibility of "Open on web" and "Download UC.D" buttons
+  - **Show activity status** - control whether your current activity (downloading, playing, browsing) is shown
+  - **Show buttons** - control visibility of "Open on web" and "Download UC.D" buttons
 
-- **New improved version selector & Version management** — enhanced version selection and management system
+- **New improved version selector & Version management** - enhanced version selection and management system
 
 ### Fixes & Improvements
 
-- **Developer mode settings behavior** — disabling Developer Mode now reverts the API base URL to the default (union-crax.xyz) while preserving the custom URL setting. Re-enabling Developer Mode reapplies the previously saved custom URL. The Reset button now permanently clears the custom URL setting and returns to the default URL for fresh use.
-- **Game launching from Downloads page** — fixed issue where launching downloaded games from the Downloads page would show the app ID instead of the game name in Discord Rich Presence. The launch function now properly looks up the game name from the games data before passing it to the main process.
-- **Discord RPC settings sync to account** — advanced Discord RPC settings (Hide NSFW, Show game name, Show status, Show buttons) are saved to the user's account database and automatically restored when logging into different devices or reinstalling the app.
-- **Loading animation during game fetch** — fixed brief flash of "No games available" error message during initial game loading. Added loading state management with debounce to ensure loading skeleton remains visible until games are fully loaded from the database.
+- **Developer mode settings behavior** - disabling Developer Mode now reverts the API base URL to the default (union-crax.xyz) while preserving the custom URL setting. Re-enabling Developer Mode reapplies the previously saved custom URL. The Reset button now permanently clears the custom URL setting and returns to the default URL for fresh use.
+- **Game launching from Downloads page** - fixed issue where launching downloaded games from the Downloads page would show the app ID instead of the game name in Discord Rich Presence. The launch function now properly looks up the game name from the games data before passing it to the main process.
+- **Discord RPC settings sync to account** - advanced Discord RPC settings (Hide NSFW, Show game name, Show status, Show buttons) are saved to the user's account database and automatically restored when logging into different devices or reinstalling the app.
+- **Loading animation during game fetch** - fixed brief flash of "No games available" error message during initial game loading. Added loading state management with debounce to ensure loading skeleton remains visible until games are fully loaded from the database.
 - **Files touched (UnionCrax.Direct)**
 - `electron/main.cjs`
 - `electron/preload.cjs`
@@ -213,13 +213,13 @@
 
 ### Features
 
-- **FileQ & DataVaults hosts visible (coming soon)** — FileQ and DataVaults now appear in the host selector and network tests, marked as "soon". Download support for these hosts will be enabled in a future update once mirrors are populated.
+- **FileQ & DataVaults hosts visible (coming soon)** - FileQ and DataVaults now appear in the host selector and network tests, marked as "soon". Download support for these hosts will be enabled in a future update once mirrors are populated.
 
 ### Fixes & Improvements
 
-- **Generalized download resolution errors** — resolution failure messages are no longer Rootz-specific and will report the failing host name for clearer diagnostics.
-- **Preferred host handling** — preferred-host override logic now uses the exported supported-hosts list instead of hardcoded checks, making it future-proof for added hosts.
-- **Network tests extended** — the built-in network test now probes FileQ and DataVaults endpoints as part of mirror diagnostics.
+- **Generalized download resolution errors** - resolution failure messages are no longer Rootz-specific and will report the failing host name for clearer diagnostics.
+- **Preferred host handling** - preferred-host override logic now uses the exported supported-hosts list instead of hardcoded checks, making it future-proof for added hosts.
+- **Network tests extended** - the built-in network test now probes FileQ and DataVaults endpoints as part of mirror diagnostics.
 
 ### Files touched (UnionCrax.Direct)
 
@@ -232,9 +232,9 @@
 
 ### Features
 
-- **Version selector in downloads** — users can now choose which version to download when multiple archived versions are available. The selected version label is displayed throughout the download flow (in the downloads page, active downloads, completed downloads) so users always know which version they're downloading.
-- **Installed version tracking** — downloaded version is now persisted to the install manifest and displayed on the game detail page as "Installed version". When a newer version is available on the API, both "Installed version" and "Latest version" are shown separately, making it easy to see if an update is available at a glance.
-- **Version info in downloads activity** — the downloads page now shows the version label for each download:
+- **Version selector in downloads** - users can now choose which version to download when multiple archived versions are available. The selected version label is displayed throughout the download flow (in the downloads page, active downloads, completed downloads) so users always know which version they're downloading.
+- **Installed version tracking** - downloaded version is now persisted to the install manifest and displayed on the game detail page as "Installed version". When a newer version is available on the API, both "Installed version" and "Latest version" are shown separately, making it easy to see if an update is available at a glance.
+- **Version info in downloads activity** - the downloads page now shows the version label for each download:
   - Primary active download hero section displays version
   - Queued download groups show version label before part count
   - Completed downloads show the downloaded version (from the DownloadItem) instead of always showing the latest API version
@@ -242,9 +242,9 @@
 
 ### Fixes
 
-- **Download cancel not working** — when clicking cancel during a multi-part download, the download continued after cancellation with the file growing in the downloads folder. Root cause: the cancel handler only checked `activeDownloads` and queues but never checked `pendingDownloads` (the limbo state between Electron's `downloadURL()` and `will-download` firing). Fixed by checking all 5 states (active, pending, app queues, global queue, and newly added `cancelledDownloadIds` tracking set). Also fixed pixeldrain delay race condition where a delayed download couldn't be cancelled during its timeout period. Now immediately cancels downloads that were cancelled while pending.
-- **Verbose download logs missing** — when "Verbose download logging" was enabled in settings, download progress wasn't being logged. `sendDownloadUpdate` was logging every single progress tick (hundreds/second) via `uc_log`, creating duplicate/concatenated output. Fixed logging to distinguish between settings: when verbose is OFF, only log state transitions (started, completed, cancelled, failed); when ON, log compact summaries per update (ID, status, bytes, speed, filename). Prevents log flooding while keeping useful diagnostics available.
-- **"Don't show this again" toggle simplified** — removed the per-download "don't show this again" toggle from the link checker modal. Modal now always shows before download unless "Skip link availability check" is disabled in Settings. This ensures users always see link status before committing to a download, unless they explicitly opt out via settings. Removed `dontShowAgain` from DownloadConfig type and related `dontShowHostSelector` bypass logic.
+- **Download cancel not working** - when clicking cancel during a multi-part download, the download continued after cancellation with the file growing in the downloads folder. Root cause: the cancel handler only checked `activeDownloads` and queues but never checked `pendingDownloads` (the limbo state between Electron's `downloadURL()` and `will-download` firing). Fixed by checking all 5 states (active, pending, app queues, global queue, and newly added `cancelledDownloadIds` tracking set). Also fixed pixeldrain delay race condition where a delayed download couldn't be cancelled during its timeout period. Now immediately cancels downloads that were cancelled while pending.
+- **Verbose download logs missing** - when "Verbose download logging" was enabled in settings, download progress wasn't being logged. `sendDownloadUpdate` was logging every single progress tick (hundreds/second) via `uc_log`, creating duplicate/concatenated output. Fixed logging to distinguish between settings: when verbose is OFF, only log state transitions (started, completed, cancelled, failed); when ON, log compact summaries per update (ID, status, bytes, speed, filename). Prevents log flooding while keeping useful diagnostics available.
+- **"Don't show this again" toggle simplified** - removed the per-download "don't show this again" toggle from the link checker modal. Modal now always shows before download unless "Skip link availability check" is disabled in Settings. This ensures users always see link status before committing to a download, unless they explicitly opt out via settings. Removed `dontShowAgain` from DownloadConfig type and related `dontShowHostSelector` bypass logic.
 
 ### Files touched
 
@@ -261,24 +261,24 @@
 
 ### Features
 
-- **Automatic link availability checker** — before downloading, the app now verifies that all download links are alive via server-side HEAD checks. A modal displays per-host health with color-coded indicators (🟢 all alive, 🟡 some dead, 🔴 all dead) and shows exact part counts (e.g. "7/15 parts alive"). Prevents wasted time on games with dead links by catching issues before download starts.
-- **Smart cross-host fallback** — when multi-part games have dead parts on your selected host, the modal shows exactly which parts are dead and offers one-click "Use Pixeldrain" / "Use Rootz" buttons to download individual dead parts from an alternative host where they're alive. Fully transparent about what's dead and where to get it.
-- **Per-part status indicators** — each downloadable link shows a live status dot (🟢 alive, 🔴 dead) updated during the download check, so you can see at a glance which specific parts are problematic before commitment.
-- **Dead parts messaging** — when a part is dead on every available host, the modal clearly states "dead on all hosts" and suggests reporting the broken link on the game page or trying the website (which may have more mirrors). For unavailable games, shows a prominent message encouraging users to report dead links.
-- **Version selector in modal** — games with multiple archived versions now show a dropdown to choose specific versions to download, making it easy to grab older builds without navigating away from the download flow.
-- **"Don't show this again" toggle** — the availability check modal includes a checkbox to skip the dialog on future downloads, going straight to your preferred host while still protecting against obviously dead games (fully unavailable titles still show the error).
-- **Settings: Skip link checks entirely** — new toggle in Settings → Download checks to disable availability checking completely for users who prefer to download without verification.
-- **Settings: Reset "don't show again"** — new button to re-enable the availability check dialog after opting out.
+- **Automatic link availability checker** - before downloading, the app now verifies that all download links are alive via server-side HEAD checks. A modal displays per-host health with color-coded indicators (🟢 all alive, 🟡 some dead, 🔴 all dead) and shows exact part counts (e.g. "7/15 parts alive"). Prevents wasted time on games with dead links by catching issues before download starts.
+- **Smart cross-host fallback** - when multi-part games have dead parts on your selected host, the modal shows exactly which parts are dead and offers one-click "Use Pixeldrain" / "Use Rootz" buttons to download individual dead parts from an alternative host where they're alive. Fully transparent about what's dead and where to get it.
+- **Per-part status indicators** - each downloadable link shows a live status dot (🟢 alive, 🔴 dead) updated during the download check, so you can see at a glance which specific parts are problematic before commitment.
+- **Dead parts messaging** - when a part is dead on every available host, the modal clearly states "dead on all hosts" and suggests reporting the broken link on the game page or trying the website (which may have more mirrors). For unavailable games, shows a prominent message encouraging users to report dead links.
+- **Version selector in modal** - games with multiple archived versions now show a dropdown to choose specific versions to download, making it easy to grab older builds without navigating away from the download flow.
+- **"Don't show this again" toggle** - the availability check modal includes a checkbox to skip the dialog on future downloads, going straight to your preferred host while still protecting against obviously dead games (fully unavailable titles still show the error).
+- **Settings: Skip link checks entirely** - new toggle in Settings → Download checks to disable availability checking completely for users who prefer to download without verification.
+- **Settings: Reset "don't show again"** - new button to re-enable the availability check dialog after opting out.
 
 ### Backend
 
-- **New endpoint `POST /api/downloads/check-availability`** — server-side link health checker that HEAD-checks all URLs in parallel (12s timeout per link), returns per-host availability with actual part numbers, cross-host alternatives for dead parts (showing which OTHER hosts have each dead part alive), and a `gameAvailable` flag. Correctly handles legacy data by assigning sequential part numbers to NULL entries.
-- **Fixed part numbering bug** — when part column is NULL (legacy games), backend now assigns sequential 1-based part numbers per host instead of always using "Part 1", preventing display confusion.
+- **New endpoint `POST /api/downloads/check-availability`** - server-side link health checker that HEAD-checks all URLs in parallel (12s timeout per link), returns per-host availability with actual part numbers, cross-host alternatives for dead parts (showing which OTHER hosts have each dead part alive), and a `gameAvailable` flag. Correctly handles legacy data by assigning sequential part numbers to NULL entries.
+- **Fixed part numbering bug** - when part column is NULL (legacy games), backend now assigns sequential 1-based part numbers per host instead of always using "Part 1", preventing display confusion.
 
 ### Fixes
 
-- **"Don't show this again" not working** — the setting previously required both `skipLinkCheck` AND `dontShowHostSelector` to be true, now correctly uses `dontShowHostSelector` alone to skip the modal while still serving fully-dead games as errors.
-- **Missing `fetchDownloadLinks` export** — re-added the original `fetchDownloadLinks` function alongside new `fetchDownloadLinksForVersion` to prevent crashes in components still using the original function signature.
+- **"Don't show this again" not working** - the setting previously required both `skipLinkCheck` AND `dontShowHostSelector` to be true, now correctly uses `dontShowHostSelector` alone to skip the modal while still serving fully-dead games as errors.
+- **Missing `fetchDownloadLinks` export** - re-added the original `fetchDownloadLinks` function alongside new `fetchDownloadLinksForVersion` to prevent crashes in components still using the original function signature.
 
 ### Files touched
 
@@ -294,9 +294,9 @@
 
 ### Fixes
 
-- **Comment endpoints returning 404** — fixed incorrect API endpoint URLs for comment operations. Pin, like, and report endpoints were calling wrong URLs with incorrect request methods. Pin now correctly uses `PATCH /api/comments/{appid}` with `{ id, pinned }` body. Like now uses `POST/DELETE /api/comments/like` with `{ appid, commentId }` body. Report now uses `POST /api/comments/report` with `{ appid, commentId, reason }` body.
-- **View history not syncing between app and web** — Direct app was only recording anonymous view counts but not syncing to user's personal view history. Now calls `/api/view-history` POST alongside the anonymous `/api/views/{appid}` call, matching the web app behavior for cross-device history sync.
-- **Removed account stats from settings page** — removed the "Account overview" card showing wishlist, favorites, view history, and search history counts as this data was not useful and cluttered the settings interface.
+- **Comment endpoints returning 404** - fixed incorrect API endpoint URLs for comment operations. Pin, like, and report endpoints were calling wrong URLs with incorrect request methods. Pin now correctly uses `PATCH /api/comments/{appid}` with `{ id, pinned }` body. Like now uses `POST/DELETE /api/comments/like` with `{ appid, commentId }` body. Report now uses `POST /api/comments/report` with `{ appid, commentId, reason }` body.
+- **View history not syncing between app and web** - Direct app was only recording anonymous view counts but not syncing to user's personal view history. Now calls `/api/view-history` POST alongside the anonymous `/api/views/{appid}` call, matching the web app behavior for cross-device history sync.
+- **Removed account stats from settings page** - removed the "Account overview" card showing wishlist, favorites, view history, and search history counts as this data was not useful and cluttered the settings interface.
 
 ### Files touched
 
@@ -310,19 +310,19 @@
 
 ### Fixes
 
-- **Installer desktop shortcut recreation** — added `deleteAppFolder: false` to NSIS configuration to prevent unnecessary deletion and recreation of desktop shortcuts during app updates.
-- **App not opening on second instance** — improved single-instance handler with better error handling, proper window focusing using `setImmediate()`, and fallback window creation. App now reliably shows and focuses when double-clicking the shortcut while already running.
-- **Game exe picker broken state** — fully rebuilt exe picker with critical React Hooks fix (early return before state calls), proper deduplication by normalized path, single-exe visibility bug (now shows when 1 exe exists), and improved filtering of redistributables/junk executables. Added "Browse..." button fallback for manual exe selection when scanner finds nothing. Backend now uses proper BFS (not DFS) with higher depth (6) and result limits (100) to find exes in deeply nested game folders. Auto-detects single-subfolder game structures. Added symlink loop protection to prevent infinite recursion.
-- **Download system stuck after completion** — fixed critical bug where downloads would finish but extraction never started. Root cause: `reconcileInstalledState` was called during `extracting` status and would prematurely mark the download as `completed` (because the installed manifest already existed on disk mid-extraction). The terminal-state guard then blocked all subsequent `extracting` progress updates from the main process. Now reconciliation only runs after `completed`/`extracted` status, and active items (`downloading`/`extracting`/`installing`) are never force-completed.
-- **Stats bars still active after download** — speed chart kept showing blue bars after download finished because: (1) the terminal status update from main process sent stale `speedBps` instead of 0, (2) the renderer's `??` merge preserved the last non-zero speed, (3) the chart interval kept sampling. Fixed by always zeroing `speedBps`/`etaSeconds` on terminal states, and stopping chart sampling when progress is 100% with zero speed.
-- **Stale pendingDownloads blocking queue** — when Electron's `will-download` failed to match a pending entry (URL normalization mismatch after redirects), the entry stayed in `pendingDownloads` forever, making `hasActiveDownloadsForApp()` return true and blocking both multipart extraction and queue progression. Added safety cleanup in the `done` handler and staleness timeout (60s) for pending entries.
-- **Terminal state guard too aggressive** — the guard blocked ALL non-terminal status updates once an item reached any terminal state, including legitimate `extracting` → `extracted` → `completed` transitions from the main process. Relaxed to only block true regressions (`downloading`/`queued`/`paused` after `completed`/`failed`).
-- **Duplicate `flushQueuedGlobalDownloads` function** — removed duplicate definition that silently overrode the first.
-- **Debug console.logs left in production** — removed `startNextQueuedPart` and `onUpdate` debug logging from downloads context.
-- **"Download already exists" infinite spam blocking all downloads** — when a download's `will-download` event never fired (bad URL, server block, etc.), the pending entry stayed forever. On retry, `getKnownDownloadState` found the stale entry and returned "already exists", but the renderer never handled this response — the item stayed "queued", causing the useEffect to retry thousands of times per second. Fixed on three levels: (1) `getKnownDownloadState` now auto-cleans pending entries older than 30s instead of blocking on them, (2) renderer's `startNextQueuedPart` now marks items as "downloading" when main process responds with `already` or `queued`, breaking the retry loop, (3) periodic cleanup interval (15s) removes stale pending entries, sends failure updates to renderer, and unblocks the download queue.
-- **Extraction crash: `entry is not defined`** — the download `done` handler called `activeDownloads.delete(downloadId)` *before* saving a reference to the entry, then tried to use `entry.savePath` to find the file for extraction. This ReferenceError silently killed the entire done handler, so downloads completed but extraction never started (no error shown to user). Fixed by retrieving the entry reference before deletion.
-- **Network speed bars persisting after download** — the last few `updated` events before `done` sent non-zero `speedBps` even though `receivedBytes === totalBytes`. The chart kept displaying these stale values. Fixed by zeroing `speedBps` in the `updated` callback when `received >= total`.
-- **Downloads page chart resetting on navigation** — navigating away from the downloads page and back reset the speed chart, peak speed, and history to empty. Now chart data is persisted at module level and restored when returning to the page (as long as the same download is still active).
+- **Installer desktop shortcut recreation** - added `deleteAppFolder: false` to NSIS configuration to prevent unnecessary deletion and recreation of desktop shortcuts during app updates.
+- **App not opening on second instance** - improved single-instance handler with better error handling, proper window focusing using `setImmediate()`, and fallback window creation. App now reliably shows and focuses when double-clicking the shortcut while already running.
+- **Game exe picker broken state** - fully rebuilt exe picker with critical React Hooks fix (early return before state calls), proper deduplication by normalized path, single-exe visibility bug (now shows when 1 exe exists), and improved filtering of redistributables/junk executables. Added "Browse..." button fallback for manual exe selection when scanner finds nothing. Backend now uses proper BFS (not DFS) with higher depth (6) and result limits (100) to find exes in deeply nested game folders. Auto-detects single-subfolder game structures. Added symlink loop protection to prevent infinite recursion.
+- **Download system stuck after completion** - fixed critical bug where downloads would finish but extraction never started. Root cause: `reconcileInstalledState` was called during `extracting` status and would prematurely mark the download as `completed` (because the installed manifest already existed on disk mid-extraction). The terminal-state guard then blocked all subsequent `extracting` progress updates from the main process. Now reconciliation only runs after `completed`/`extracted` status, and active items (`downloading`/`extracting`/`installing`) are never force-completed.
+- **Stats bars still active after download** - speed chart kept showing blue bars after download finished because: (1) the terminal status update from main process sent stale `speedBps` instead of 0, (2) the renderer's `??` merge preserved the last non-zero speed, (3) the chart interval kept sampling. Fixed by always zeroing `speedBps`/`etaSeconds` on terminal states, and stopping chart sampling when progress is 100% with zero speed.
+- **Stale pendingDownloads blocking queue** - when Electron's `will-download` failed to match a pending entry (URL normalization mismatch after redirects), the entry stayed in `pendingDownloads` forever, making `hasActiveDownloadsForApp()` return true and blocking both multipart extraction and queue progression. Added safety cleanup in the `done` handler and staleness timeout (60s) for pending entries.
+- **Terminal state guard too aggressive** - the guard blocked ALL non-terminal status updates once an item reached any terminal state, including legitimate `extracting` → `extracted` → `completed` transitions from the main process. Relaxed to only block true regressions (`downloading`/`queued`/`paused` after `completed`/`failed`).
+- **Duplicate `flushQueuedGlobalDownloads` function** - removed duplicate definition that silently overrode the first.
+- **Debug console.logs left in production** - removed `startNextQueuedPart` and `onUpdate` debug logging from downloads context.
+- **"Download already exists" infinite spam blocking all downloads** - when a download's `will-download` event never fired (bad URL, server block, etc.), the pending entry stayed forever. On retry, `getKnownDownloadState` found the stale entry and returned "already exists", but the renderer never handled this response - the item stayed "queued", causing the useEffect to retry thousands of times per second. Fixed on three levels: (1) `getKnownDownloadState` now auto-cleans pending entries older than 30s instead of blocking on them, (2) renderer's `startNextQueuedPart` now marks items as "downloading" when main process responds with `already` or `queued`, breaking the retry loop, (3) periodic cleanup interval (15s) removes stale pending entries, sends failure updates to renderer, and unblocks the download queue.
+- **Extraction crash: `entry is not defined`** - the download `done` handler called `activeDownloads.delete(downloadId)` *before* saving a reference to the entry, then tried to use `entry.savePath` to find the file for extraction. This ReferenceError silently killed the entire done handler, so downloads completed but extraction never started (no error shown to user). Fixed by retrieving the entry reference before deletion.
+- **Network speed bars persisting after download** - the last few `updated` events before `done` sent non-zero `speedBps` even though `receivedBytes === totalBytes`. The chart kept displaying these stale values. Fixed by zeroing `speedBps` in the `updated` callback when `received >= total`.
+- **Downloads page chart resetting on navigation** - navigating away from the downloads page and back reset the speed chart, peak speed, and history to empty. Now chart data is persisted at module level and restored when returning to the page (as long as the same download is still active).
 
 ### Files touched
 
@@ -346,11 +346,11 @@ Account and preference handling were tightened up across the app. Discord sessio
 
 ### Improvements
 
-- **Account reliability** — account overview and settings now load only when a real session exists, avoiding false "unable to load" errors.
-- **Preferences sync** — app preferences (mirror host, RPC, launch settings, developer mode, custom base URL, verbose logging) sync across devices when logged in.
-- **NSFW wording cleanup** — labels now describe hover-reveal behavior and NSFW-only filters more accurately.
-- **Custom profile image removal** — all remaining avatar/banner customization UI and storage hooks are removed in Direct.
-- **API fetch stability** — auth fetches now map network errors to a safe status code to avoid crashes.
+- **Account reliability** - account overview and settings now load only when a real session exists, avoiding false "unable to load" errors.
+- **Preferences sync** - app preferences (mirror host, RPC, launch settings, developer mode, custom base URL, verbose logging) sync across devices when logged in.
+- **NSFW wording cleanup** - labels now describe hover-reveal behavior and NSFW-only filters more accurately.
+- **Custom profile image removal** - all remaining avatar/banner customization UI and storage hooks are removed in Direct.
+- **API fetch stability** - auth fetches now map network errors to a safe status code to avoid crashes.
 
 ### Fixes
 
@@ -376,7 +376,7 @@ Account and preference handling were tightened up across the app. Discord sessio
 
 ### Highlights
 
-Introducing the **External Games System** — you can now add any game from your PC to UnionCrax Direct, even if it's not in the UC catalog. Use the **+** button in the bottom bar to point at any game folder, optionally match it to a UC title, or keep it fully custom. Once added, external games appear in your library with play, shortcut, and settings support just like regular installs.
+Introducing the **External Games System** - you can now add any game from your PC to UnionCrax Direct, even if it's not in the UC catalog. Use the **+** button in the bottom bar to point at any game folder, optionally match it to a UC title, or keep it fully custom. Once added, external games appear in your library with play, shortcut, and settings support just like regular installs.
 
 A full **metadata editor** lets you set the name, description, developer, genres, and pick local images for both the card thumbnail and the detail page banner. Games that matched a UC catalog entry show a subtle blur on details to signal the metadata came from a different source, while fully custom entries display your info as-is with an "Externally Added" badge.
 
@@ -384,20 +384,20 @@ A full **metadata editor** lets you set the name, description, developer, genres
 
 ### New Features
 
-- **Add External Games** — plus button in the bottom bar opens a modal to select any game folder on your PC. Auto-detects executables and optionally matches against the UC catalog via image lookup.
-- **Edit Game Metadata modal** — full editor for external game details: name, description, developer, version, size, genres, card image, and banner image. Accessible from the game detail page and the library card settings.
-- **Image file picker** — native file dialog to pick local images (jpg, png, gif, webp, bmp) for card art and banners.
-- **Metadata persistence** — metadata updates are saved into the installed manifest and survive app restarts.
-- **Edit Details in Library** — external games show an "Edit Details" option in the library card settings popup, with context-aware "Unlink Game" labeling.
-- **Conditional detail blur** — UC-matched external games show blurred stats/details (since catalog data may not match the actual installed version), while fully custom entries do not.
-- **"Externally Added" badge** — yellow badge in the hero section for all external games.
+- **Add External Games** - plus button in the bottom bar opens a modal to select any game folder on your PC. Auto-detects executables and optionally matches against the UC catalog via image lookup.
+- **Edit Game Metadata modal** - full editor for external game details: name, description, developer, version, size, genres, card image, and banner image. Accessible from the game detail page and the library card settings.
+- **Image file picker** - native file dialog to pick local images (jpg, png, gif, webp, bmp) for card art and banners.
+- **Metadata persistence** - metadata updates are saved into the installed manifest and survive app restarts.
+- **Edit Details in Library** - external games show an "Edit Details" option in the library card settings popup, with context-aware "Unlink Game" labeling.
+- **Conditional detail blur** - UC-matched external games show blurred stats/details (since catalog data may not match the actual installed version), while fully custom entries do not.
+- **"Externally Added" badge** - yellow badge in the hero section for all external games.
 
 ### Improvements
 
-- **Hover-to-change image previews** — card and banner image slots sit side-by-side in the editor; hover to reveal a "Change" overlay, click to pick a new file.
-- **Local image path support** — `proxyImageUrl` now correctly converts Windows paths to `file:///` URLs instead of routing them through the remote image proxy.
-- **External games skip API fetch** — games with `external-` IDs load directly from the local manifest, eliminating 404 network errors.
-- **Desktop shortcut exe auto-detection** — "Create Desktop Shortcut" now runs auto-detection before falling back to the exe picker.
+- **Hover-to-change image previews** - card and banner image slots sit side-by-side in the editor; hover to reveal a "Change" overlay, click to pick a new file.
+- **Local image path support** - `proxyImageUrl` now correctly converts Windows paths to `file:///` URLs instead of routing them through the remote image proxy.
+- **External games skip API fetch** - games with `external-` IDs load directly from the local manifest, eliminating 404 network errors.
+- **Desktop shortcut exe auto-detection** - "Create Desktop Shortcut" now runs auto-detection before falling back to the exe picker.
 
 ### Fixes
 
@@ -432,10 +432,10 @@ A full **metadata editor** lets you set the name, description, developer, genres
 
 ### New Features
 
-- **Settings export & import** (`electron/main.cjs`, `electron/preload.cjs`, `renderer/src/app/pages/SettingsPage.tsx`) — export current JSON settings and import from a file.
-- **Network test** (`electron/main.cjs`, `renderer/src/app/pages/SettingsPage.tsx`) — probe API and mirror endpoints and show timing/status results.
-- **Open logs folder** (`electron/main.cjs`, `electron/preload.cjs`, `renderer/src/app/pages/SettingsPage.tsx`) — open the app logs directory from Settings.
-- **Download cache clear** (`electron/main.cjs`, `renderer/src/app/pages/SettingsPage.tsx`) — remove temporary installing parts when no downloads are active.
+- **Settings export & import** (`electron/main.cjs`, `electron/preload.cjs`, `renderer/src/app/pages/SettingsPage.tsx`) - export current JSON settings and import from a file.
+- **Network test** (`electron/main.cjs`, `renderer/src/app/pages/SettingsPage.tsx`) - probe API and mirror endpoints and show timing/status results.
+- **Open logs folder** (`electron/main.cjs`, `electron/preload.cjs`, `renderer/src/app/pages/SettingsPage.tsx`) - open the app logs directory from Settings.
+- **Download cache clear** (`electron/main.cjs`, `renderer/src/app/pages/SettingsPage.tsx`) - remove temporary installing parts when no downloads are active.
 
 ### Improvements
 

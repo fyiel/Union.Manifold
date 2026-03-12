@@ -346,16 +346,16 @@ export function LibraryPage() {
     <div className="container mx-auto max-w-7xl space-y-10">
       <section className="space-y-4">
         <div className="flex items-center gap-3">
-          <h1 className="text-2xl sm:text-3xl font-black font-montserrat">Your Library</h1>
-          <Badge className="rounded-full bg-primary/15 text-primary border-primary/20">Direct downloads</Badge>
+          <h1 className="text-2xl sm:text-3xl font-black ">Your Library</h1>
+          <Badge className="rounded-full bg-white/15 text-white border-zinc-700">Direct downloads</Badge>
         </div>
-        <p className="text-sm text-muted-foreground max-w-2xl">
+        <p className="text-sm text-zinc-400 max-w-2xl">
           Titles detected inside your installed and installing folders appear here.
         </p>
       </section>
 
       <section className="space-y-4">
-        <h2 className="text-xl font-black font-montserrat">Installed</h2>
+        <h2 className="text-xl font-black ">Installed</h2>
         {loading || statsLoading ? (
           <div className="grid gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
             {Array.from({ length: 24 }).map((_, idx) => (
@@ -524,14 +524,14 @@ export function LibraryPage() {
             />
           </div>
         ) : (
-          <div className="rounded-2xl border border-border/60 bg-card/60 p-6 text-sm text-muted-foreground">
+          <div className="rounded-2xl border border-white/[.07] bg-zinc-900/60 p-6 text-sm text-zinc-400">
             No installed titles yet. Start a download to populate your library.
           </div>
         )}
       </section>
 
       <section className="space-y-4">
-        <h2 className="text-xl font-black font-montserrat">Installing</h2>
+        <h2 className="text-xl font-black ">Installing</h2>
         {loading || statsLoading ? (
           <div className="grid gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
             {Array.from({ length: 24 }).map((_, idx) => (
@@ -604,7 +604,7 @@ export function LibraryPage() {
             />
           </div>
         ) : (
-          <div className="rounded-2xl border border-border/60 bg-card/60 p-6 text-sm text-muted-foreground">
+          <div className="rounded-2xl border border-white/[.07] bg-zinc-900/60 p-6 text-sm text-zinc-400">
             No current installs. Downloads will appear here while they install.
           </div>
         )}
@@ -618,7 +618,7 @@ export function LibraryPage() {
               setPendingDeleteAction(null)
             }}
           />
-          <div className="relative w-full max-w-md rounded-2xl border border-border/60 bg-slate-950/95 p-5 text-white shadow-2xl">
+          <div className="relative w-full max-w-md rounded-2xl border border-white/[.07] bg-slate-950/95 p-5 text-white shadow-2xl">
             <div className="flex items-center gap-2 text-lg font-semibold">
               <AlertTriangle className="h-5 w-5 text-destructive" />
               {pendingDeleteAction === "installing"
@@ -631,7 +631,7 @@ export function LibraryPage() {
               {pendingDeleteAction === "installing"
                 ? `Remove "${pendingDeleteGame.name}" from the installing list? This will delete any downloaded data.`
                 : pendingDeleteGame.isExternal
-                  ? `Unlink "${pendingDeleteGame.name}" from UnionCrax? This only removes it from your library — your game files won't be touched.`
+                  ? `Unlink "${pendingDeleteGame.name}" from UnionCrax? This only removes it from your library - your game files won't be touched.`
                   : `Delete "${pendingDeleteGame.name}" permanently? This removes the installed files from disk.`}
             </p>
             <div className="mt-4 flex justify-end gap-2">
@@ -707,3 +707,4 @@ export function LibraryPage() {
     </div>
   )
 }
+

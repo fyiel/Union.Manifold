@@ -1,5 +1,5 @@
 /**
- * DLL Injector — injects/ejects the overlay DLL into a target game process.
+ * DLL Injector - injects/ejects the overlay DLL into a target game process.
  *
  * Uses the classic LoadLibrary + CreateRemoteThread technique.
  * This is safe for non-anti-cheat games (pirated/offline games).

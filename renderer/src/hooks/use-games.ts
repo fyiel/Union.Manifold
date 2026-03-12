@@ -90,7 +90,7 @@ export function useGamesData() {
           const installedNormalized = installed.map((g) => {
             try {
               const meta: any = (g as any)
-              // Only prefer localImage when offline — when online keep remote images
+              // Only prefer localImage when offline - when online keep remote images
               const isOffline = typeof navigator !== 'undefined' && !navigator.onLine
               if (isOffline) {
                 if (meta && meta.localImage) return { ...g, image: meta.localImage }

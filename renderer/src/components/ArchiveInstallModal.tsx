@@ -17,9 +17,22 @@ type Step = "method" | "pick" | "confirm" | "installing" | "done" | "error"
 type ArchiveMode = "single" | "multipart"
 type SelectedFile = { path: string; name: string; size: number }
 
+export type ArchiveInstallMetadata = {
+  appid?: string
+  name?: string
+  description?: string
+  genres?: string[]
+  image?: string
+  developer?: string
+  release_date?: string
+  size?: string
+}
+
 type Props = {
   open: boolean
   game: Game | null
+  installMetadata?: ArchiveInstallMetadata | null
+  onInstalled?: () => void
   onClose: () => void
 }
 
@@ -31,7 +44,7 @@ function formatBytes(bytes: number): string {
   return `${(bytes / Math.pow(k, i)).toFixed(1)} ${sizes[i]}`
 }
 
-export function ArchiveInstallModal({ open, game, onClose }: Props) {
+export function ArchiveInstallModal({ open, game, installMetadata, onInstalled, onClose }: Props) {
   const [step, setStep] = useState<Step>("method")
   const [mode, setMode] = useState<ArchiveMode>("single")
   const [files, setFiles] = useState<SelectedFile[]>([])
@@ -40,6 +53,18 @@ export function ArchiveInstallModal({ open, game, onClose }: Props) {
   const [errorMsg, setErrorMsg] = useState("")
   const [dragOver, setDragOver] = useState(false)
   const dropRef = useRef<HTMLDivElement>(null)
+  const installedNotifiedRef = useRef(false)
+  const resolvedName = installMetadata?.name?.trim() || game?.name || "archive"
+  const resolvedMetadata = {
+    appid: installMetadata?.appid || game?.appid,
+    name: resolvedName,
+    image: installMetadata?.image ?? game?.image,
+    description: installMetadata?.description ?? game?.description,
+    genres: installMetadata?.genres ?? game?.genres ?? [],
+    developer: installMetadata?.developer ?? game?.developer,
+    release_date: installMetadata?.release_date ?? game?.release_date,
+    size: installMetadata?.size ?? game?.size,
+  }
 
   // Reset when modal opens
   useEffect(() => {
@@ -51,7 +76,19 @@ export function ArchiveInstallModal({ open, game, onClose }: Props) {
     setProgress({ percent: 0, speedBps: 0, etaSeconds: null, status: "" })
     setErrorMsg("")
     setDragOver(false)
+    installedNotifiedRef.current = false
   }, [open])
+
+  useEffect(() => {
+    if (step !== "done" || installedNotifiedRef.current) return
+    installedNotifiedRef.current = true
+    try {
+      window.dispatchEvent(new Event("uc_game_installed"))
+    } catch {
+      // ignore DOM event failures
+    }
+    onInstalled?.()
+  }, [step, onInstalled])
 
   // Subscribe to download updates during installation
   useEffect(() => {
@@ -157,32 +194,32 @@ export function ArchiveInstallModal({ open, game, onClose }: Props) {
     setProgress({ percent: 0, speedBps: 0, etaSeconds: null, status: "Starting extraction..." })
 
     const result = await window.ucDownloads.installFromArchive({
-      appid: game?.appid,
-      gameName: game?.name,
+      appid: resolvedMetadata.appid,
+      gameName: resolvedName,
       archivePaths: files.map((f) => f.path),
       downloadId: id,
-      metadata: game ? { appid: game.appid, name: game.name, image: game.image, description: game.description, genres: game.genres, developer: game.developer, release_date: game.release_date, size: game.size } : undefined,
+      metadata: resolvedMetadata,
     })
 
     if (!result.ok) {
       setErrorMsg(result.error || "Failed to start installation")
       setStep("error")
     }
-  }, [files, game])
+  }, [files, resolvedMetadata, resolvedName])
 
   if (!open) return null
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center px-4">
-      <div className="absolute inset-0 bg-background/40 backdrop-blur-sm animate-in fade-in duration-300 ease-out" onClick={onClose} />
-      <div className="relative w-full max-w-lg overflow-hidden rounded-2xl border border-border/60 bg-card/95 p-5 text-foreground shadow-2xl animate-in slide-in-from-top-4 duration-300 ease-out">
+      <div className="absolute inset-0 bg-[#09090b]/40 backdrop-blur-sm animate-in fade-in duration-300 ease-out" onClick={onClose} />
+      <div className="relative w-full max-w-lg overflow-hidden rounded-2xl border border-white/[.07] bg-zinc-900/95 p-5 text-zinc-100 shadow-2xl animate-in slide-in-from-top-4 duration-300 ease-out">
 
         {/* ── Step 1: Choose Method ── */}
         {step === "method" && (
           <div className="space-y-4">
             <div className="text-lg font-semibold">Install from archive</div>
-            <p className="text-sm text-muted-foreground">
-              Install {game?.name ? <span className="font-medium text-foreground">{game.name}</span> : "a game"} from
+            <p className="text-sm text-zinc-400">
+              Install {resolvedName ? <span className="font-medium text-zinc-100">{resolvedName}</span> : "a game"} from
               archive files you already have.
             </p>
 
@@ -194,22 +231,22 @@ export function ArchiveInstallModal({ open, game, onClose }: Props) {
               <div className="grid grid-cols-2 gap-3">
                 <button
                   onClick={() => { setMode("single"); setFiles([]); setStep("pick") }}
-                  className="flex flex-col items-center gap-3 rounded-xl border border-border/60 bg-background/50 p-4 text-center transition-all hover:border-primary/50 hover:bg-primary/5"
+                  className="flex flex-col items-center gap-3 rounded-xl border border-white/[.07] bg-[#09090b]/50 p-4 text-center transition-all hover:border-zinc-500 hover:bg-white/5"
                 >
-                  <FileArchive className="h-8 w-8 text-primary" />
+                  <FileArchive className="h-8 w-8 text-white" />
                   <div>
                     <div className="text-sm font-medium">Single archive</div>
-                    <div className="mt-0.5 text-[11px] text-muted-foreground">.7z / .rar</div>
+                    <div className="mt-0.5 text-[11px] text-zinc-400">.7z</div>
                   </div>
                 </button>
                 <button
                   onClick={() => { setMode("multipart"); setFiles([]); setStep("pick") }}
-                  className="flex flex-col items-center gap-3 rounded-xl border border-border/60 bg-background/50 p-4 text-center transition-all hover:border-primary/50 hover:bg-primary/5"
+                  className="flex flex-col items-center gap-3 rounded-xl border border-white/[.07] bg-[#09090b]/50 p-4 text-center transition-all hover:border-zinc-500 hover:bg-white/5"
                 >
-                  <Layers className="h-8 w-8 text-primary" />
+                  <Layers className="h-8 w-8 text-white" />
                   <div>
                     <div className="text-sm font-medium">Multipart archive</div>
-                    <div className="mt-0.5 text-[11px] text-muted-foreground">.7z.001, .7z.002…</div>
+                    <div className="mt-0.5 text-[11px] text-zinc-400">.7z.001, .7z.002…</div>
                   </div>
                 </button>
               </div>
@@ -227,9 +264,9 @@ export function ArchiveInstallModal({ open, game, onClose }: Props) {
             <div className="text-lg font-semibold">
               {mode === "single" ? "Select archive" : "Select archive parts"}
             </div>
-            <p className="text-sm text-muted-foreground">
+            <p className="text-sm text-zinc-400">
               {mode === "single"
-                ? "Drag and drop your .7z or .rar file below, or browse to select it."
+                ? "Drag and drop your .7z file below, or browse to select it."
                 : "Select the .001 file (sibling parts will be auto-detected), or select all parts manually."}
             </p>
 
@@ -241,12 +278,12 @@ export function ArchiveInstallModal({ open, game, onClose }: Props) {
               onDragLeave={handleDragLeave}
               className={`flex min-h-[120px] flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed transition-colors ${
                 dragOver
-                  ? "border-primary bg-primary/10"
-                  : "border-border/60 bg-background/30 hover:border-primary/40"
+                  ? "border-white bg-white/10"
+                  : "border-white/[.07] bg-[#09090b]/30 hover:border-zinc-700"
               }`}
             >
-              <Upload className={`h-6 w-6 ${dragOver ? "text-primary" : "text-muted-foreground"}`} />
-              <p className="text-xs text-muted-foreground">
+              <Upload className={`h-6 w-6 ${dragOver ? "text-white" : "text-zinc-400"}`} />
+              <p className="text-xs text-zinc-400">
                 {dragOver ? "Drop files here" : "Drag & drop archive files here"}
               </p>
               <Button variant="outline" size="sm" onClick={handleBrowse} className="mt-1">
@@ -258,21 +295,21 @@ export function ArchiveInstallModal({ open, game, onClose }: Props) {
             {/* Selected files list */}
             {files.length > 0 && (
               <div className="space-y-1">
-                <div className="text-xs font-medium text-muted-foreground">
+                <div className="text-xs font-medium text-zinc-400">
                   {files.length} file{files.length !== 1 ? "s" : ""} selected ({formatBytes(totalSize)})
                 </div>
-                <div className="max-h-[160px] overflow-y-auto rounded-lg border border-border/40 bg-background/30">
+                <div className="max-h-[160px] overflow-y-auto rounded-lg border border-white/[.07] bg-[#09090b]/30">
                   {files.map((f) => (
-                    <div key={f.path} className="flex items-center justify-between gap-2 border-b border-border/20 px-3 py-1.5 last:border-0">
+                    <div key={f.path} className="flex items-center justify-between gap-2 border-b border-white/[.07] px-3 py-1.5 last:border-0">
                       <div className="flex items-center gap-2 min-w-0">
-                        <Archive className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
+                        <Archive className="h-3.5 w-3.5 flex-shrink-0 text-zinc-400" />
                         <span className="truncate text-xs">{f.name}</span>
                       </div>
                       <div className="flex items-center gap-2 flex-shrink-0">
-                        <span className="text-[10px] text-muted-foreground">{formatBytes(f.size)}</span>
+                        <span className="text-[10px] text-zinc-400">{formatBytes(f.size)}</span>
                         <button
                           onClick={() => removeFile(f.path)}
-                          className="rounded p-0.5 text-muted-foreground hover:text-destructive transition-colors"
+                          className="rounded p-0.5 text-zinc-400 hover:text-destructive transition-colors"
                         >
                           <CircleX className="h-3.5 w-3.5" />
                         </button>
@@ -297,25 +334,25 @@ export function ArchiveInstallModal({ open, game, onClose }: Props) {
           <div className="space-y-4">
             <div className="text-lg font-semibold">Confirm installation</div>
 
-            <div className="rounded-lg border border-border/40 bg-background/30 p-3 space-y-2">
-              {game?.name && (
+            <div className="rounded-lg border border-white/[.07] bg-[#09090b]/30 p-3 space-y-2">
+              {resolvedName && (
                 <div className="flex items-center gap-2">
-                  <span className="text-xs text-muted-foreground">Game:</span>
-                  <span className="text-sm font-medium">{game.name}</span>
+                  <span className="text-xs text-zinc-400">Game:</span>
+                  <span className="text-sm font-medium">{resolvedName}</span>
                 </div>
               )}
               <div className="flex items-center gap-2">
-                <span className="text-xs text-muted-foreground">Type:</span>
+                <span className="text-xs text-zinc-400">Type:</span>
                 <span className="text-sm">{mode === "single" ? "Single archive" : `Multipart (${files.length} parts)`}</span>
               </div>
               <div className="flex items-center gap-2">
-                <span className="text-xs text-muted-foreground">Total size:</span>
+                <span className="text-xs text-zinc-400">Total size:</span>
                 <span className="text-sm">{formatBytes(totalSize)}</span>
               </div>
               {files.length <= 6 && (
-                <div className="space-y-0.5 pt-1 border-t border-border/20">
+                <div className="space-y-0.5 pt-1 border-t border-white/[.07]">
                   {files.map((f) => (
-                    <div key={f.path} className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <div key={f.path} className="flex items-center gap-2 text-xs text-zinc-400">
                       <Archive className="h-3 w-3 flex-shrink-0" />
                       <span className="truncate">{f.name}</span>
                       <span className="ml-auto flex-shrink-0">{formatBytes(f.size)}</span>
@@ -325,7 +362,7 @@ export function ArchiveInstallModal({ open, game, onClose }: Props) {
               )}
             </div>
 
-            <div className="rounded-lg border border-border/40 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+            <div className="rounded-lg border border-white/[.07] bg-zinc-800/30 px-3 py-2 text-xs text-zinc-400">
               The archive will be extracted to your game library. Original files will not be modified.
             </div>
 
@@ -340,19 +377,19 @@ export function ArchiveInstallModal({ open, game, onClose }: Props) {
         {step === "installing" && (
           <div className="space-y-4 py-2">
             <div className="text-lg font-semibold">Installing…</div>
-            <p className="text-sm text-muted-foreground">
-              Extracting {game?.name ? <span className="font-medium text-foreground">{game.name}</span> : "archive"}. Please do not close the app.
+            <p className="text-sm text-zinc-400">
+              Extracting {resolvedName ? <span className="font-medium text-zinc-100">{resolvedName}</span> : "archive"}. Please do not close the app.
             </p>
 
             {/* Progress bar */}
             <div className="space-y-1.5">
-              <div className="h-2.5 w-full overflow-hidden rounded-full bg-muted/50">
+              <div className="h-2.5 w-full overflow-hidden rounded-full bg-zinc-800/50">
                 <div
-                  className="h-full rounded-full bg-primary transition-all duration-300 ease-out"
+                  className="h-full rounded-full bg-white transition-all duration-300 ease-out"
                   style={{ width: `${Math.min(100, progress.percent)}%` }}
                 />
               </div>
-              <div className="flex items-center justify-between text-xs text-muted-foreground">
+              <div className="flex items-center justify-between text-xs text-zinc-400">
                 <span>{progress.status || "Extracting..."}</span>
                 <div className="flex items-center gap-3">
                   {progress.speedBps > 0 && <span>{formatBytes(progress.speedBps)}/s</span>}
@@ -385,8 +422,8 @@ export function ArchiveInstallModal({ open, game, onClose }: Props) {
               <CheckCircle2 className="h-5 w-5 text-emerald-400" />
               Installation complete
             </div>
-            <p className="text-sm text-muted-foreground">
-              {game?.name ? <span className="font-medium text-foreground">{game.name}</span> : "The game"} has been
+            <p className="text-sm text-zinc-400">
+              {resolvedName ? <span className="font-medium text-zinc-100">{resolvedName}</span> : "The game"} has been
               installed successfully. You can now launch it from your library.
             </p>
             <div className="flex justify-end">
@@ -402,7 +439,7 @@ export function ArchiveInstallModal({ open, game, onClose }: Props) {
               <AlertTriangle className="h-5 w-5 text-destructive" />
               Installation failed
             </div>
-            <p className="text-sm text-muted-foreground">
+            <p className="text-sm text-zinc-400">
               {errorMsg || "Something went wrong during extraction."}
             </p>
             <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
@@ -415,3 +452,4 @@ export function ArchiveInstallModal({ open, game, onClose }: Props) {
     </div>
   )
 }
+

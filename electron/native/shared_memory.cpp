@@ -1,5 +1,5 @@
 /**
- * Shared Memory Manager — creates and writes to shared memory regions
+ * Shared Memory Manager - creates and writes to shared memory regions
  * that the injected DLL reads from.
  *
  * Memory layout (matches overlay_protocol.h):
@@ -140,7 +140,7 @@ Napi::Value WriteSharedFrame(const Napi::CallbackInfo& info) {
     // Copy pixel data
     memcpy(frame.pView + sizeof(UCFrameHeader), buffer.Data(), pixelBytes);
 
-    // Update header (atomic-ish — seq last to signal completion)
+    // Update header (atomic-ish - seq last to signal completion)
     auto* hdr = (UCFrameHeader*)frame.pView;
     hdr->visible = visible ? 1 : 0;
     MemoryBarrier();

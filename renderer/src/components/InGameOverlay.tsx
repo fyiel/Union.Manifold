@@ -151,7 +151,7 @@ export function InGameOverlay() {
   }, [])
 
   const formatSpeed = useCallback((bps: number) => {
-    if (bps <= 0) return '—'
+    if (bps <= 0) return '-'
     return formatBytes(bps) + '/s'
   }, [formatBytes])
 
@@ -812,7 +812,7 @@ export function InGameOverlay() {
                         <div style={{ height: '100%', borderRadius: 2, background: dl.status === 'extracting' ? 'linear-gradient(90deg,#f59e0b,#d97706)' : dl.status === 'verifying' ? 'linear-gradient(90deg,#06b6d4,#0891b2)' : dl.status === 'retrying' ? 'linear-gradient(90deg,#ef4444,#dc2626)' : dl.status === 'paused' ? '#6b7280' : dl.status === 'queued' ? '#4b5563' : 'linear-gradient(90deg,#3b82f6,#7c3aed)', width: `${pct}%`, transition: 'width 0.3s' }} />
                       </div>
                       <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.25)' }}>
-                        {dl.status === 'extracting' ? 'Extracting...' : dl.status === 'verifying' ? 'Verifying integrity...' : dl.status === 'retrying' ? 'Corrupt — retrying...' : dl.status === 'queued' ? 'Queued' : dl.status === 'paused' ? 'Paused' : `${formatSpeed(dl.speedBps)} · ${formatBytes(dl.receivedBytes)} / ${formatBytes(dl.totalBytes)}`}
+                        {dl.status === 'extracting' ? 'Extracting...' : dl.status === 'verifying' ? 'Verifying integrity...' : dl.status === 'retrying' ? 'Corrupt - retrying...' : dl.status === 'queued' ? 'Queued' : dl.status === 'paused' ? 'Paused' : `${formatSpeed(dl.speedBps)} · ${formatBytes(dl.receivedBytes)} / ${formatBytes(dl.totalBytes)}`}
                       </span>
                     </div>
                   )

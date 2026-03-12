@@ -1,15 +1,46 @@
 import { apiLogger } from "./logger"
 
 const DEFAULT_BASE_URL = "https://union-crax.xyz"
+const CUSTOM_API_BASE_URL_STORAGE_KEY = "uc_custom_api_base_url"
+
+export function normalizeApiBaseUrl(url: string): string {
+  const trimmed = String(url || "").trim()
+  if (!trimmed) return ""
+
+  const withProtocol = /^https?:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`
+  try {
+    const parsed = new URL(withProtocol)
+    return parsed.toString().replace(/\/+$/, "")
+  } catch {
+    return ""
+  }
+}
+
+function readCustomApiBaseUrl(): string {
+  if (typeof window === "undefined") return ""
+  try {
+    return normalizeApiBaseUrl(window.localStorage.getItem(CUSTOM_API_BASE_URL_STORAGE_KEY) || "")
+  } catch {
+    return ""
+  }
+}
 
 export function getApiBaseUrl(): string {
-  return DEFAULT_BASE_URL
+  return readCustomApiBaseUrl() || DEFAULT_BASE_URL
 }
 
 export function setApiBaseUrl(url: string): void {
-  // Custom base URL overrides were removed (they were too error-prone and caused
-  // session/cookie issues when switching between origins).
-  void url
+  if (typeof window === "undefined") return
+  const normalized = normalizeApiBaseUrl(url)
+  try {
+    if (normalized) {
+      window.localStorage.setItem(CUSTOM_API_BASE_URL_STORAGE_KEY, normalized)
+    } else {
+      window.localStorage.removeItem(CUSTOM_API_BASE_URL_STORAGE_KEY)
+    }
+  } catch {
+    // ignore storage errors
+  }
 }
 
 export function apiUrl(path: string): string {
