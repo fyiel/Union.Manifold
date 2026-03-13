@@ -3,10 +3,7 @@ name: Build and Release
 on:
   push:
     branches:
-      - uc-sls.direct
-  pull_request:
-    branches:
-      - uc-sls.direct
+      - mainhttps://github.com/Union-Crax/UnionCrax.Direct/actions/runs/23073087622/artifacts/5919551725
   workflow_dispatch:
 
 jobs:
