@@ -295,7 +295,6 @@ export function DownloadsPage() {
     progress: number
   } | null>(null)
   const lastSampleRef = useRef<{ time: number; received: number } | null>(null)
-  const startTimeRef = useRef<number | null>(null)
 
   const primaryStats = useMemo(() => {
     if (!primaryGroup) return null
@@ -320,7 +319,6 @@ export function DownloadsPage() {
     _persistedPeakSpeed = 0
     _persistedForAppId = null
     lastSampleRef.current = null
-    startTimeRef.current = null
     return
   }
 
@@ -415,13 +413,19 @@ export function DownloadsPage() {
 
   const currentNetwork = networkHistory[networkHistory.length - 1] ?? primaryStats?.speedBps ?? 0
   const currentDisk = diskHistory[diskHistory.length - 1] ?? 0
-  // show disk speed in the main 'Current' box when installing (extraction)
-  const currentShown = primaryIsInstalling ? currentDisk : currentNetwork
   const averageSpeed = useMemo(() => {
-    if (!primaryStats || !startTimeRef.current) return 0
-    const elapsed = Math.max(1, (Date.now() - startTimeRef.current) / 1000)
-    return primaryStats.receivedBytes / elapsed
-  }, [primaryStats, networkHistory.length])
+    const nonZeroSamples = networkHistory.filter((sample) => sample > 0)
+    if (nonZeroSamples.length > 0) {
+      return nonZeroSamples.reduce((sum, sample) => sum + sample, 0) / nonZeroSamples.length
+    }
+    return primaryStats?.speedBps ?? 0
+  }, [networkHistory, primaryStats?.speedBps])
+  const peakNetworkSpeed = useMemo(() => {
+    if (networkHistory.length > 0) {
+      return Math.max(...networkHistory)
+    }
+    return peakSpeed
+  }, [networkHistory, peakSpeed])
 
   const getSavedExe = async (appid: string) => {
     if (!window.ucSettings?.get) return null
@@ -864,20 +868,20 @@ export function DownloadsPage() {
 
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                 <div className="rounded-xl border border-white/10 bg-slate-950/60 p-4">
-                  <div className="text-xs text-zinc-400">Current</div>
-                  <div className="text-lg font-semibold text-zinc-100">{formatSpeed(currentShown)}</div>
+                  <div className="text-xs text-zinc-400">Download speed</div>
+                  <div className="text-lg font-semibold text-zinc-100">{formatSpeed(currentNetwork)}</div>
                 </div>
                 <div className="rounded-xl border border-white/10 bg-slate-950/60 p-4">
-                  <div className="text-xs text-zinc-400">Peak</div>
-                  <div className="text-lg font-semibold text-zinc-100">{formatSpeed(peakSpeed)}</div>
+                  <div className="text-xs text-zinc-400">Peak download</div>
+                  <div className="text-lg font-semibold text-zinc-100">{formatSpeed(peakNetworkSpeed)}</div>
                 </div>
                 <div className="rounded-xl border border-white/10 bg-slate-950/60 p-4">
-                  <div className="text-xs text-zinc-400">Total</div>
-                  <div className="text-lg font-semibold text-zinc-100">{formatBytes(primaryStats.receivedBytes)}</div>
-                </div>
-                <div className="rounded-xl border border-white/10 bg-slate-950/60 p-4">
-                  <div className="text-xs text-zinc-400">Disk usage</div>
+                  <div className="text-xs text-zinc-400">Disk write</div>
                   <div className="text-lg font-semibold text-zinc-100">{formatSpeed(currentDisk)}</div>
+                </div>
+                <div className="rounded-xl border border-white/10 bg-slate-950/60 p-4">
+                  <div className="text-xs text-zinc-400">Total transferred</div>
+                  <div className="text-lg font-semibold text-zinc-100">{formatBytes(primaryStats.receivedBytes)}</div>
                 </div>
               </div>
             </div>

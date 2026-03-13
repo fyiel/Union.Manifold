@@ -1,9 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useController, ControllerProfile } from '../hooks/use-controller'
 import { Switch } from './ui/switch'
-import { Label } from './ui/label'
-import { Slider } from './ui/slider'
-import { Button } from './ui/button'
 import { 
   Gamepad2, X, ChevronDown, ChevronUp, Save, RefreshCw,
   Keyboard, Mouse, Settings, Monitor, Volume2
@@ -131,10 +128,12 @@ export function ControllerOverlayFlyout({ visible, onClose, position = 'right' }
     >
       <div
         style={{
-          background: 'rgba(13, 13, 21, 0.95)',
-          border: '1px solid rgba(255,255,255,0.12)',
-          borderRadius: 16,
-          boxShadow: '0 16px 48px rgba(0,0,0,0.8)',
+          background: 'rgba(9, 9, 11, 0.88)',
+          border: '1px solid rgba(255,255,255,0.07)',
+          borderRadius: 28,
+          boxShadow: '0 28px 80px rgba(0,0,0,0.6)',
+          backdropFilter: 'blur(18px)',
+          WebkitBackdropFilter: 'blur(18px)',
           overflow: 'hidden',
         }}
       >
@@ -145,23 +144,24 @@ export function ControllerOverlayFlyout({ visible, onClose, position = 'right' }
             alignItems: 'center', 
             gap: 10, 
             padding: '12px 16px', 
-            borderBottom: expanded ? '1px solid rgba(255,255,255,0.06)' : 'none',
+            borderBottom: expanded ? '1px solid rgba(255,255,255,0.07)' : 'none',
             cursor: 'pointer',
           }}
           onClick={() => setExpanded(!expanded)}
         >
-          <div style={{ width: 28, height: 28, borderRadius: 6, background: 'linear-gradient(135deg,#8b5cf6,#6366f1)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-            <Gamepad2 size={14} color="white" />
+          <div style={{ width: 28, height: 28, borderRadius: 8, background: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <Gamepad2 size={14} color="#09090b" />
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 13, fontWeight: 600, color: 'white', lineHeight: 1 }}>Controller</div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: 'rgba(161,161,170,1)', lineHeight: 1, letterSpacing: '0.18em', textTransform: 'uppercase' }}>Controller</div>
+            <div style={{ fontSize: 16, fontWeight: 800, color: 'white', lineHeight: 1.1, marginTop: 4, letterSpacing: '-0.02em' }}>Input Console</div>
             <div style={{ fontSize: 10, color: connected ? 'rgba(34,197,94,0.8)' : 'rgba(255,255,255,0.35)', marginTop: 2, lineHeight: 1 }}>
               {connected ? (controllerInfo.name || 'Connected') : 'Disconnected'}
             </div>
           </div>
           <button 
             onClick={(e) => { e.stopPropagation(); onClose() }}
-            style={{ padding: 4, borderRadius: 6, background: 'transparent', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.35)', display: 'flex' }}
+            style={{ padding: 8, borderRadius: 999, background: 'rgba(24,24,27,0.85)', border: '1px solid rgba(255,255,255,0.07)', cursor: 'pointer', color: 'rgba(255,255,255,0.45)', display: 'flex' }}
           >
             <X size={14} />
           </button>
@@ -169,7 +169,7 @@ export function ControllerOverlayFlyout({ visible, onClose, position = 'right' }
 
         {/* Expanded Content */}
         {expanded && (
-          <div style={{ padding: 12 }}>
+          <div style={{ padding: 14 }}>
             {/* Quick Tabs */}
             <div style={{ display: 'flex', gap: 4, marginBottom: 12 }}>
               <button
@@ -177,10 +177,10 @@ export function ControllerOverlayFlyout({ visible, onClose, position = 'right' }
                 style={{
                   flex: 1,
                   padding: '6px 8px',
-                  borderRadius: 8,
-                  border: 'none',
-                  background: activeTab === 'quick' ? 'rgba(139,92,246,0.2)' : 'transparent',
-                  color: activeTab === 'quick' ? '#a78bfa' : 'rgba(255,255,255,0.5)',
+                  borderRadius: 999,
+                  border: activeTab === 'quick' ? '1px solid rgba(255,255,255,0.2)' : '1px solid rgba(255,255,255,0.07)',
+                  background: activeTab === 'quick' ? '#ffffff' : 'rgba(24,24,27,0.75)',
+                  color: activeTab === 'quick' ? '#09090b' : 'rgba(255,255,255,0.55)',
                   fontSize: 11,
                   fontWeight: 600,
                   cursor: 'pointer',
@@ -198,10 +198,10 @@ export function ControllerOverlayFlyout({ visible, onClose, position = 'right' }
                 style={{
                   flex: 1,
                   padding: '6px 8px',
-                  borderRadius: 8,
-                  border: 'none',
-                  background: activeTab === 'mouse' ? 'rgba(139,92,246,0.2)' : 'transparent',
-                  color: activeTab === 'mouse' ? '#a78bfa' : 'rgba(255,255,255,0.5)',
+                  borderRadius: 999,
+                  border: activeTab === 'mouse' ? '1px solid rgba(255,255,255,0.2)' : '1px solid rgba(255,255,255,0.07)',
+                  background: activeTab === 'mouse' ? '#ffffff' : 'rgba(24,24,27,0.75)',
+                  color: activeTab === 'mouse' ? '#09090b' : 'rgba(255,255,255,0.55)',
                   fontSize: 11,
                   fontWeight: 600,
                   cursor: 'pointer',
@@ -219,10 +219,10 @@ export function ControllerOverlayFlyout({ visible, onClose, position = 'right' }
                 style={{
                   flex: 1,
                   padding: '6px 8px',
-                  borderRadius: 8,
-                  border: 'none',
-                  background: activeTab === 'mapping' ? 'rgba(139,92,246,0.2)' : 'transparent',
-                  color: activeTab === 'mapping' ? '#a78bfa' : 'rgba(255,255,255,0.5)',
+                  borderRadius: 999,
+                  border: activeTab === 'mapping' ? '1px solid rgba(255,255,255,0.2)' : '1px solid rgba(255,255,255,0.07)',
+                  background: activeTab === 'mapping' ? '#ffffff' : 'rgba(24,24,27,0.75)',
+                  color: activeTab === 'mapping' ? '#09090b' : 'rgba(255,255,255,0.55)',
                   fontSize: 11,
                   fontWeight: 600,
                   cursor: 'pointer',
@@ -259,7 +259,7 @@ export function ControllerOverlayFlyout({ visible, onClose, position = 'right' }
                       width: '100%',
                       height: 4,
                       appearance: 'none',
-                      background: `linear-gradient(to right, #8b5cf6 0%, #8b5cf6 ${(localDeadzone / 0.5) * 100}%, rgba(255,255,255,0.15) ${(localDeadzone / 0.5) * 100}%, rgba(255,255,255,0.15) 100%)`,
+                      background: `linear-gradient(to right, rgba(255,255,255,0.95) 0%, rgba(255,255,255,0.95) ${(localDeadzone / 0.5) * 100}%, rgba(255,255,255,0.15) ${(localDeadzone / 0.5) * 100}%, rgba(255,255,255,0.15) 100%)`,
                       borderRadius: 2,
                       cursor: 'pointer',
                     }}
@@ -287,9 +287,9 @@ export function ControllerOverlayFlyout({ visible, onClose, position = 'right' }
                     justifyContent: 'center',
                     gap: 6,
                     padding: '8px 12px',
-                    borderRadius: 8,
-                    border: '1px solid rgba(255,255,255,0.1)',
-                    background: 'rgba(255,255,255,0.03)',
+                    borderRadius: 999,
+                    border: '1px solid rgba(255,255,255,0.07)',
+                    background: 'rgba(24,24,27,0.75)',
                     color: 'rgba(255,255,255,0.7)',
                     fontSize: 11,
                     cursor: 'pointer',
@@ -344,7 +344,7 @@ export function ControllerOverlayFlyout({ visible, onClose, position = 'right' }
                       width: '100%',
                       height: 4,
                       appearance: 'none',
-                      background: `linear-gradient(to right, #8b5cf6 0%, #8b5cf6 ${((activeProfile.keyBinding?.stickToMouse?.mouseSpeed ?? 1.0) - 0.1) / 2.9 * 100}%, rgba(255,255,255,0.15) ${((activeProfile.keyBinding?.stickToMouse?.mouseSpeed ?? 1.0) - 0.1) / 2.9 * 100}%, rgba(255,255,255,0.15) 100%)`,
+                      background: `linear-gradient(to right, rgba(255,255,255,0.95) 0%, rgba(255,255,255,0.95) ${((activeProfile.keyBinding?.stickToMouse?.mouseSpeed ?? 1.0) - 0.1) / 2.9 * 100}%, rgba(255,255,255,0.15) ${((activeProfile.keyBinding?.stickToMouse?.mouseSpeed ?? 1.0) - 0.1) / 2.9 * 100}%, rgba(255,255,255,0.15) 100%)`,
                       borderRadius: 2,
                       cursor: 'pointer',
                     }}
@@ -364,9 +364,9 @@ export function ControllerOverlayFlyout({ visible, onClose, position = 'right' }
                     style={{
                       width: '100%',
                       padding: '8px 10px',
-                      borderRadius: 8,
-                      border: '1px solid rgba(255,255,255,0.1)',
-                      background: 'rgba(255,255,255,0.05)',
+                      borderRadius: 18,
+                      border: '1px solid rgba(255,255,255,0.07)',
+                      background: 'rgba(24,24,27,0.78)',
                       color: 'white',
                       fontSize: 12,
                       cursor: 'pointer',
@@ -382,14 +382,14 @@ export function ControllerOverlayFlyout({ visible, onClose, position = 'right' }
 
                 <div style={{ 
                   padding: 10, 
-                  borderRadius: 8, 
-                  background: 'rgba(139,92,246,0.1)', 
-                  border: '1px solid rgba(139,92,246,0.2)',
+                  borderRadius: 18, 
+                  background: 'rgba(24,24,27,0.78)', 
+                  border: '1px solid rgba(255,255,255,0.07)',
                 }}>
                   <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.6)', marginBottom: 4 }}>
                     Input Translation
                   </div>
-                  <div style={{ fontSize: 11, color: '#a78bfa', fontWeight: 500 }}>
+                  <div style={{ fontSize: 11, color: 'white', fontWeight: 600 }}>
                     {settings.inputTranslation?.enabled ? 'Enabled' : 'Disabled'}
                   </div>
                   <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)', marginTop: 4 }}>
@@ -405,10 +405,10 @@ export function ControllerOverlayFlyout({ visible, onClose, position = 'right' }
                     justifyContent: 'center',
                     gap: 6,
                     padding: '10px 12px',
-                    borderRadius: 8,
-                    border: 'none',
-                    background: 'linear-gradient(135deg,#8b5cf6,#6366f1)',
-                    color: 'white',
+                    borderRadius: 999,
+                    border: '1px solid rgba(255,255,255,0.2)',
+                    background: '#ffffff',
+                    color: '#09090b',
                     fontSize: 12,
                     fontWeight: 600,
                     cursor: 'pointer',
