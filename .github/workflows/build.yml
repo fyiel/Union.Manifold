@@ -3,7 +3,7 @@ name: Build and Release
 on:
   push:
     branches:
-      - mainhttps://github.com/Union-Crax/UnionCrax.Direct/actions/runs/23073087622/artifacts/5919551725
+      - main  
   workflow_dispatch:
 
 jobs:
