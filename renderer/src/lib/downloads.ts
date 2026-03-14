@@ -175,7 +175,10 @@ function pickHostLinks(available: DownloadHosts, host: PreferredDownloadHost) {
     return available.ucfiles || available["files.union-crax.xyz"] || available["UC.Files"] || []
   }
   if (host === "pixeldrain") {
-    return available.pixeldrain || available["Pixeldrain"] || available["pixeldrain.com"] || []
+    return available.pixeldrain || available["pixeldrain.com"] || available["Pixeldrain"]  || []
+  }
+  if (host === "vikingfile") {
+    return available.vikingfile || available["vikingfile.com"] || available["VikingFile"] ||  []
   }
   return []
 }
@@ -331,8 +334,102 @@ export async function resolveUCFilesDownload(url: string): Promise<ResolvedDownl
   }
 }
 
+// Pixeldrain URL detection and resolution
+
+/**
+ * Checks if a URL is a Pixeldrain URL (user-facing format)
+ */
+export function isPixeldrainUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url)
+    return parsed.hostname.includes("pixeldrain.com") || parsed.hostname.includes("pixeldrain")
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Extracts the file ID from a Pixeldrain URL.
+ * Supports formats:
+ * - https://pixeldrain.com/u/{file_id}
+ * - https://pixeldrain.com/file/{file_id}
+ * - https://pixeldrain.com/api/file/{file_id}
+ */
+function extractPixeldrainFileId(url: string): string | null {
+  try {
+    const parsed = new URL(url)
+    if (!parsed.hostname.includes("pixeldrain")) return null
+    
+    // Match /u/{file_id} or /file/{file_id} or /api/file/{file_id}
+    const pathMatch = parsed.pathname.match(/\/(?:u|file|api\/file)\/([a-zA-Z0-9_-]+)/)
+    if (pathMatch?.[1]) return pathMatch[1]
+    return null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Resolves a Pixeldrain URL to the API download format.
+ * User-facing URLs need to be converted to API format for actual file download.
+ */
+async function resolvePixeldrainDownload(url: string): Promise<ResolvedDownload> {
+  if (!url) return { url, resolved: false }
+  
+  // If URL is already in API format with ?download, pass it through
+  try {
+    const parsed = new URL(url)
+    if (parsed.pathname.startsWith("/api/file/") && parsed.searchParams.has("download")) {
+      return {
+        url,
+        filename: inferFilenameFromUrl(url, ""),
+        resolved: true,
+      }
+    }
+  } catch {
+    // Invalid URL, will be handled below
+  }
+  
+  const fileId = extractPixeldrainFileId(url)
+  if (!fileId) {
+    // Not a recognizable pixeldrain URL format
+    return { url, resolved: false }
+  }
+  
+  // Convert to API download URL
+  const apiUrl = `https://pixeldrain.com/api/file/${fileId}?download`
+  
+  // Try to get file info to extract filename and size
+  try {
+    const infoResponse = await fetch(`https://pixeldrain.com/api/file/${fileId}/info`, {
+      headers: {
+        "X-UC-Client": "unioncrax-direct",
+      },
+    })
+    
+    if (infoResponse.ok) {
+      const info = await infoResponse.json()
+      if (info?.success && info?.name) {
+        return {
+          url: apiUrl,
+          filename: info.name,
+          size: info.size,
+          resolved: true,
+        }
+      }
+    }
+  } catch {
+    // Best effort - just return the converted URL
+  }
+  
+  return {
+    url: apiUrl,
+    filename: inferFilenameFromUrl(url, ""),
+    resolved: true,
+  }
+}
+
 // Aliases for backwards compatibility
-export const isPixeldrainUrl = isUCFilesUrl
 
 export async function resolveDownloadUrl(host: string, url: string): Promise<ResolvedDownload> {
   // Defensive guard for legacy persisted state where "url" may be an object
@@ -346,9 +443,9 @@ export async function resolveDownloadUrl(host: string, url: string): Promise<Res
   if (host === "ucfiles" || isUCFilesUrl(normalizedUrl)) {
     return resolveUCFilesDownload(normalizedUrl)
   }
-  if (host === "pixeldrain") {
-    // Pixeldrain URLs are direct downloads - no resolution step needed
-    return { url: normalizedUrl, resolved: true }
+  if (host === "pixeldrain" || isPixeldrainUrl(normalizedUrl)) {
+    // Pixeldrain URLs need to be resolved from user-facing format to API download format
+    return resolvePixeldrainDownload(normalizedUrl)
   }
   return { url: normalizedUrl, resolved: false }
 }
