@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { Bell, Camera, Clock, Gamepad2, Hammer, Loader2, Pause, Play, Square, Volume2, VolumeX, X } from 'lucide-react'
+import { Bell, Camera, Clock, Download, Gamepad2, Hammer, Pause, Play, Square, Volume2, VolumeX, X } from 'lucide-react'
 import { ControllerOverlayFlyout } from './ControllerOverlayFlyout'
 
 type OverlayApi = NonNullable<Window['ucOverlay']> & {
@@ -129,11 +129,21 @@ export function InGameOverlay() {
   const [screenshotTaken, setScreenshotTaken] = useState(false)
   const [showControllerFlyout, setShowControllerFlyout] = useState(false)
   const [dock, setDock] = useState<OverlayDock>('left')
+  const currentAppidRef = useRef<string | null>(null)
+  const modeRef = useRef<OverlayMode>(mode)
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const toastProgressRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const playtimeIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const hideTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const clockIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  useEffect(() => {
+    currentAppidRef.current = currentAppid
+  }, [currentAppid])
+
+  useEffect(() => {
+    modeRef.current = mode
+  }, [mode])
 
   useEffect(() => {
     const setTransparent = (el: HTMLElement | null) => {
@@ -203,26 +213,22 @@ export function InGameOverlay() {
     return `${days}d`
   }, [])
 
-  const formatEta = useCallback((seconds: number | null) => {
-    if (!seconds || seconds <= 0) return '--'
-    const minutes = Math.floor(seconds / 60)
-    const secs = Math.floor(seconds % 60)
-    if (minutes > 60) {
-      const hours = Math.floor(minutes / 60)
-      return `${hours}h ${minutes % 60}m`
-    }
-    if (minutes > 0) return `${minutes}m ${secs}s`
-    return `${secs}s`
-  }, [])
-
   const handleVolumeChange = useCallback(async (newVolume: number) => {
-    setVolume(newVolume)
+    const clamped = Math.max(0, Math.min(100, newVolume))
+    const shouldMute = clamped === 0
+    setVolume(clamped)
+    if (isMuted !== shouldMute) setIsMuted(shouldMute)
     if (window.ucSystem?.setVolume) {
       try {
-        await window.ucSystem.setVolume(newVolume)
+        await window.ucSystem.setVolume(clamped)
       } catch {}
     }
-  }, [])
+    if (window.ucSystem?.setMuted && isMuted !== shouldMute) {
+      try {
+        await window.ucSystem.setMuted(shouldMute)
+      } catch {}
+    }
+  }, [isMuted])
 
   const handleMuteToggle = useCallback(async () => {
     const nextMuted = !isMuted
@@ -259,7 +265,8 @@ export function InGameOverlay() {
   const refreshGameInfo = useCallback(async (appid?: string | null) => {
     const overlay = getOverlayApi()
     if (!overlay?.getGameInfo) return
-    const result = await overlay.getGameInfo(appid || undefined)
+    const resolvedAppid = appid ?? currentAppidRef.current ?? undefined
+    const result = await overlay.getGameInfo(resolvedAppid)
     if (result.ok && result.appid) {
       setGameInfo({
         appid: result.appid,
@@ -269,7 +276,34 @@ export function InGameOverlay() {
       })
       return
     }
-    setGameInfo(null)
+    if (resolvedAppid) {
+      try {
+        const fallback = await overlay.getGameInfo()
+        if (fallback.ok && fallback.appid) {
+          setGameInfo({
+            appid: fallback.appid,
+            gameName: fallback.gameName || fallback.appid,
+            startedAt: fallback.startedAt || Date.now(),
+            image: fallback.image || null,
+          })
+          return
+        }
+      } catch {}
+    }
+    if (overlay.getStatus) {
+      try {
+        const status = await overlay.getStatus()
+        if (status?.ok && !status.currentAppid) {
+          setCurrentAppid(null)
+          setGameInfo(null)
+          return
+        }
+      } catch {}
+    }
+    setGameInfo((prev) => {
+      if (prev && resolvedAppid && prev.appid === resolvedAppid) return prev
+      return null
+    })
   }, [])
 
   const refreshDownloads = useCallback(async () => {
@@ -310,13 +344,25 @@ export function InGameOverlay() {
   const enterMode = useCallback((nextMode: OverlayMode, appid?: string | null) => {
     clearToastTimers()
     if (nextMode === 'hidden') {
+      modeRef.current = 'hidden'
       setAnimated(false)
       hideTimeoutRef.current = setTimeout(() => setMode('hidden'), 180)
       return
     }
-    setMode(nextMode)
-    if (appid !== undefined) setCurrentAppid(appid)
-    requestAnimationFrame(() => requestAnimationFrame(() => setAnimated(true)))
+    // Force React to re-render even if mode is the same (e.g. toast → toast).
+    // This handles the case where a new toast fires while the old toast's mode
+    // was stale (BrowserWindow hidden but renderer still thought it was toast).
+    if (modeRef.current === nextMode) {
+      setMode('hidden')
+    }
+    modeRef.current = nextMode
+    setAnimated(false)
+    // Use rAF to ensure the DOM resets before animating in
+    requestAnimationFrame(() => {
+      setMode(nextMode)
+      if (appid !== undefined) setCurrentAppid(appid)
+      requestAnimationFrame(() => setAnimated(true))
+    })
     if (nextMode === 'toast') {
       setToastProgress(100)
       const start = Date.now()
@@ -342,25 +388,24 @@ export function InGameOverlay() {
     if (!overlay) return
 
     const unsubShow = overlay.onShow((data) => {
-      setCurrentAppid(data.appid)
+      setCurrentAppid(data.appid ?? null)
       refreshGameInfo(data.appid)
       enterMode('panel', data.appid)
     })
 
     const unsubHide = overlay.onHide(() => {
-      setGameInfo(null)
       enterMode('hidden')
     })
 
     const unsubStateChanged = overlay.onStateChanged((data) => {
+      if (data.appid) setCurrentAppid(data.appid)
       if (!data.visible) {
-        setGameInfo(null)
         enterMode('hidden')
       }
     })
 
     const unsubToast = overlay.onToast?.((data) => {
-      setCurrentAppid(data.appid)
+      setCurrentAppid(data.appid ?? null)
       refreshGameInfo(data.appid)
       enterMode('toast', data.appid)
     })
@@ -414,6 +459,10 @@ export function InGameOverlay() {
     overlay.getStatus().then((status) => {
       if (!status.ok) return
       setDock(getDock(status.position))
+      if (status.currentAppid) {
+        setCurrentAppid(status.currentAppid)
+        refreshGameInfo(status.currentAppid)
+      }
     }).catch(() => {})
 
     return () => {
@@ -456,11 +505,12 @@ export function InGameOverlay() {
   }, [enterMode])
 
   const quitGame = useCallback(() => {
-    if (currentAppid && (window as unknown as Record<string, unknown>).ucDownloads) {
-      ;(window as unknown as { ucDownloads: { quitGameExecutable: (id: string) => void } }).ucDownloads.quitGameExecutable(currentAppid)
+    const sessionId = gameInfo?.appid ?? currentAppid
+    if (sessionId && (window as unknown as Record<string, unknown>).ucDownloads) {
+      ;(window as unknown as { ucDownloads: { quitGameExecutable: (id: string) => void } }).ucDownloads.quitGameExecutable(sessionId)
     }
     closePanelAndHide()
-  }, [closePanelAndHide, currentAppid])
+  }, [closePanelAndHide, currentAppid, gameInfo?.appid])
 
   const quickLaunchGame = useCallback(async (game: InstalledGame) => {
     const uc = (window as unknown as {
@@ -497,51 +547,50 @@ export function InGameOverlay() {
 
   const activeDownloads = downloads.filter((download) => ACTIVE_DOWNLOAD_STATUSES.includes(download.status))
   const unreadNotifications = notifications.filter((notification) => !notification.read)
-  const panelSideStyle = dock === 'right' ? { right: 24 } : { left: 24 }
+  const sessionAppid = gameInfo?.appid ?? currentAppid
+  const hasSession = Boolean(sessionAppid)
+  const panelSideClass = dock === 'right' ? 'right-6' : 'left-6'
+  const quickActionsSideClass = dock === 'right' ? 'left-6' : 'right-6'
   const toastSideStyle = dock === 'right' ? { right: 24 } : { left: 24 }
-  const panelTransform = animated
-    ? 'translate3d(0, 0, 0) scale(1)'
-    : `translate3d(${dock === 'right' ? '14px' : '-14px'}, 0, 0) scale(0.98)`
 
   if (mode === 'hidden') return null
 
   if (mode === 'toast') {
     return (
       <div
-        className="pointer-events-none fixed bottom-6 z-[9999] w-[320px]"
-        style={{
-          ...toastSideStyle,
-          opacity: animated ? 1 : 0,
-          transform: animated ? 'translateY(0)' : 'translateY(12px)',
-          transition: 'opacity 180ms ease, transform 180ms ease',
-        }}
+        className="pointer-events-none fixed bottom-6 z-[9999] w-[280px]"
+        style={toastSideStyle}
       >
-        <div className="glass overflow-hidden rounded-[24px] border border-white/[.07] bg-zinc-950/80 shadow-[0_24px_80px_rgba(0,0,0,0.55)]">
-          <div className="flex items-center gap-3 p-4">
-            <div className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-xl bg-white text-black">
+        <div
+          className={`glass rounded-2xl border border-white/[.08] !bg-zinc-950/92 p-3 shadow-[0_18px_60px_rgba(0,0,0,0.7)] transition-all duration-200 ${
+            animated ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-3'
+          }`}
+        >
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-xl bg-white text-black">
               {gameInfo?.image ? (
                 <img src={gameInfo.image} alt="" className="h-full w-full object-cover" />
               ) : (
-                <Hammer size={16} />
+                <Hammer size={15} />
               )}
             </div>
             <div className="min-w-0 flex-1">
-              <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-zinc-500">Overlay Ready</div>
-              <div className="truncate text-sm font-semibold tracking-tight text-white">
+              <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-zinc-500">Now Playing</div>
+              <div className="truncate text-sm font-semibold text-white">
                 {gameInfo?.gameName || currentAppid || 'Game session'}
               </div>
             </div>
-            <div className="rounded-full border border-white/[.07] bg-zinc-900/80 px-2.5 py-1 font-mono text-[10px] text-zinc-400">
-              {hotkey}
-            </div>
+            <span className="h-2 w-2 rounded-full bg-emerald-400" />
           </div>
-          <div className="px-4 pb-3 text-xs text-zinc-400">Open the full panel to manage downloads, controls, and session tools.</div>
-          <div className="h-px bg-white/[.06]" />
-          <div className="h-1 bg-white/[.06]">
+          <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/[.08]">
             <div
-              className="h-full rounded-r-full bg-white"
+              className="h-full rounded-full bg-white"
               style={{ width: `${toastProgress}%`, transition: 'width 50ms linear' }}
             />
+          </div>
+          <div className="mt-2 flex items-center justify-between text-[10px] text-zinc-500">
+            <span>Press to open overlay</span>
+            <span className="token-chip text-[9px]">{hotkey}</span>
           </div>
         </div>
       </div>
@@ -551,352 +600,313 @@ export function InGameOverlay() {
   return (
     <div className="fixed inset-0 z-[9998]" onClick={closePanelAndHide}>
       <div
-        className="absolute inset-0"
-        style={{
-          background: 'radial-gradient(circle at 20% 20%, rgba(255,255,255,0.06), transparent 0 28%), linear-gradient(180deg, rgba(9,9,11,0.18), rgba(9,9,11,0.06) 38%, rgba(9,9,11,0.14) 100%)',
-        }}
-      />
-
-      <div
-        className="pointer-events-auto absolute left-1/2 top-6 z-[9999] -translate-x-1/2"
+        className={`pointer-events-auto absolute top-5 left-1/2 -translate-x-1/2 transition-all duration-200 ${
+          animated ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-2'
+        }`}
         onClick={(event) => event.stopPropagation()}
-        style={{
-          opacity: animated ? 1 : 0,
-          transform: `translateX(-50%) translateY(${animated ? '0' : '-8px'})`,
-          transition: 'opacity 180ms ease, transform 180ms ease',
-        }}
       >
-        <div className="glass flex items-center gap-3 rounded-full border border-white/[.07] bg-zinc-950/70 px-4 py-2 shadow-[0_12px_40px_rgba(0,0,0,0.4)]">
+        <div className="glass flex items-center gap-2 rounded-full border border-white/[.08] !bg-zinc-950/92 px-3 py-2 shadow-[0_12px_40px_rgba(0,0,0,0.55)]">
           <Clock size={14} className="text-zinc-500" />
-          <span className="font-mono text-sm text-zinc-100">{formatTime(currentTime)}</span>
-          <span className="h-1 w-1 rounded-full bg-zinc-700" />
-          <span className="text-[11px] uppercase tracking-[0.16em] text-zinc-500">{gameInfo ? 'Session live' : 'Overlay standby'}</span>
+          <span className="text-sm font-mono text-zinc-200">{formatTime(currentTime)}</span>
         </div>
       </div>
 
       <div
-        className="pointer-events-auto absolute bottom-6 top-6 z-[9999] w-[380px]"
-        style={{
-          ...panelSideStyle,
-          opacity: animated ? 1 : 0,
-          transform: panelTransform,
-          transition: 'opacity 180ms ease, transform 180ms ease',
-        }}
+        className={`pointer-events-auto absolute top-5 ${quickActionsSideClass} flex items-center gap-2 transition-all duration-200 ${
+          animated ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-2'
+        }`}
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="glass flex h-full flex-col overflow-hidden rounded-[30px] border border-white/[.07] bg-zinc-950/78 shadow-[0_28px_100px_rgba(0,0,0,0.58)]">
-          <div className="flex items-center gap-4 border-b border-white/[.07] px-5 py-4">
-            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-white text-black">
-              <Hammer size={16} />
+        <button
+          onClick={handleScreenshot}
+          className={`glass flex h-10 w-10 items-center justify-center rounded-xl border border-white/[.08] !bg-zinc-950/92 text-zinc-300 shadow-[0_12px_40px_rgba(0,0,0,0.55)] transition hover:bg-white/[.06] hover:text-white active:scale-95 ${
+            screenshotTaken ? 'bg-emerald-500/10 text-emerald-300' : ''
+          }`}
+          title="Take Screenshot"
+          aria-label="Take Screenshot"
+        >
+          <Camera size={15} />
+        </button>
+
+        <button
+          onClick={() => setShowNotifications((current) => !current)}
+          className={`glass relative flex h-10 w-10 items-center justify-center rounded-xl border border-white/[.08] !bg-zinc-950/92 text-zinc-300 shadow-[0_12px_40px_rgba(0,0,0,0.55)] transition hover:bg-white/[.06] hover:text-white active:scale-95 ${
+            showNotifications ? 'bg-sky-500/10 text-sky-200' : ''
+          }`}
+          title="Notifications"
+          aria-label="Notifications"
+        >
+          <Bell size={15} />
+          {unreadNotifications.length > 0 && (
+            <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-white px-1 text-[9px] font-bold text-black">
+              {unreadNotifications.length > 9 ? '9+' : unreadNotifications.length}
+            </span>
+          )}
+        </button>
+
+        <div className="glass flex h-10 items-center gap-2 rounded-xl border border-white/[.08] !bg-zinc-950/92 px-2.5 shadow-[0_12px_40px_rgba(0,0,0,0.55)]">
+          <button
+            onClick={handleMuteToggle}
+            className="flex h-7 w-7 items-center justify-center rounded-lg border border-white/[.08] bg-zinc-900/85 text-zinc-400 transition hover:bg-white/[.06] hover:text-white active:scale-95"
+            title={isMuted ? 'Unmute' : 'Mute'}
+            aria-label={isMuted ? 'Unmute' : 'Mute'}
+          >
+            {isMuted ? <VolumeX size={14} /> : <Volume2 size={14} />}
+          </button>
+          <input
+            type="range"
+            min="0"
+            max="100"
+            value={isMuted ? 0 : volume}
+            onChange={(event) => handleVolumeChange(Number(event.target.value))}
+            className="h-1 w-20 appearance-none rounded-full bg-transparent"
+            style={{
+              background: `linear-gradient(to right, rgba(255,255,255,0.95) 0%, rgba(255,255,255,0.95) ${
+                isMuted ? 0 : volume
+              }%, rgba(255,255,255,0.15) ${isMuted ? 0 : volume}%, rgba(255,255,255,0.15) 100%)`,
+            }}
+          />
+          <span className="w-9 text-right font-mono text-[10px] text-zinc-400">
+            {isMuted ? 0 : volume}%
+          </span>
+        </div>
+
+        <button
+          onClick={() => setShowControllerFlyout((current) => !current)}
+          className={`glass flex h-10 w-10 items-center justify-center rounded-xl border border-white/[.08] !bg-zinc-950/92 text-zinc-300 shadow-[0_12px_40px_rgba(0,0,0,0.55)] transition hover:bg-white/[.06] hover:text-white active:scale-95 ${
+            showControllerFlyout ? 'bg-violet-500/10 text-violet-200' : ''
+          }`}
+          title="Controller Settings"
+          aria-label="Controller Settings"
+        >
+          <Gamepad2 size={15} />
+        </button>
+      </div>
+
+      {showNotifications && (
+        <div
+          className={`pointer-events-auto absolute top-[68px] ${quickActionsSideClass} w-[280px] overflow-hidden rounded-2xl border border-white/[.08] !bg-zinc-950/92 shadow-[0_24px_60px_rgba(0,0,0,0.7)] transition-all duration-200 ${
+            animated ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-2'
+          }`}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <div className="flex items-center justify-between border-b border-white/[.06] px-3 py-2">
+            <span className="text-xs font-semibold text-white">Notifications</span>
+            <span className="text-[10px] text-zinc-500">{notifications.length} total</span>
+          </div>
+          <div className="max-h-[230px] overflow-y-auto">
+            {notifications.length === 0 ? (
+              <div className="flex flex-col items-center justify-center gap-2 px-4 py-6 text-center">
+                <Bell size={20} className="text-zinc-600" />
+                <div className="text-xs text-zinc-500">No notifications yet</div>
+              </div>
+            ) : (
+              <div className="space-y-1 p-2">
+                {notifications.slice(0, 10).map((notification) => (
+                  <div
+                    key={notification.id}
+                    className={`rounded-xl border px-3 py-2 ${
+                      notification.read
+                        ? 'border-white/[.05] bg-white/[.02]'
+                        : 'border-white/[.08] bg-white/[.05]'
+                    }`}
+                  >
+                    <div className="flex items-start gap-2">
+                      {!notification.read && <span className="mt-1 h-2 w-2 rounded-full bg-sky-400" />}
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-xs font-semibold text-white">{notification.title}</div>
+                        <div className="mt-1 truncate text-[11px] text-zinc-500">{notification.body}</div>
+                      </div>
+                      <span className="text-[10px] text-zinc-500">{formatNotificationTime(notification.timestamp)}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      <div
+        className={`pointer-events-auto absolute top-5 ${panelSideClass} w-[320px] max-h-[calc(100vh-40px)] transition-all duration-200 ${
+          animated ? 'opacity-100 translate-y-0 scale-100' : 'opacity-0 -translate-y-2 scale-[0.98]'
+        }`}
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="glass flex h-full flex-col overflow-hidden rounded-2xl border border-white/[.08] !bg-zinc-950/92 shadow-[0_28px_80px_rgba(0,0,0,0.7)]">
+          <div className="flex items-center gap-3 border-b border-white/[.06] px-4 py-3">
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-white text-black">
+              <Hammer size={15} />
             </div>
             <div className="min-w-0 flex-1">
-              <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-zinc-500">UnionCrax Direct</div>
-              <div className="truncate text-lg font-black tracking-tight text-white">Overlay Console</div>
-            </div>
-            <div className="rounded-full border border-white/[.07] bg-zinc-900/80 px-3 py-1 font-mono text-[10px] text-zinc-400">
-              {hotkey}
+              <div className="text-sm font-brand text-white">UnionCrax.Direct</div>
+              <div className="text-[10px] text-zinc-500">In-Game Overlay</div>
             </div>
             <button
               onClick={closePanelAndHide}
-              className="flex h-10 w-10 items-center justify-center rounded-full border border-white/[.07] bg-zinc-900/80 text-zinc-400 transition hover:bg-white/[.05] hover:text-white active:scale-95"
+              className="flex h-8 w-8 items-center justify-center rounded-full border border-white/[.08] bg-zinc-900/85 text-zinc-400 transition hover:bg-white/[.06] hover:text-white active:scale-95"
               aria-label="Close overlay"
             >
               <X size={14} />
             </button>
           </div>
 
-          <div className="flex-1 space-y-4 overflow-y-auto px-5 py-5">
-            <section className="relative overflow-hidden rounded-[28px] border border-white/[.07] bg-zinc-900/70 p-5">
-              {gameInfo?.image && (
-                <>
-                  <img src={gameInfo.image} alt="" className="absolute inset-0 h-full w-full object-cover opacity-25" />
-                  <div className="absolute inset-0 bg-gradient-to-br from-zinc-950/90 via-zinc-950/82 to-zinc-900/78" />
-                </>
-              )}
-              <div className="relative space-y-4">
-                <div className="flex items-center justify-between gap-3">
-                  <span className="rounded-full border border-white/[.07] bg-white px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-black">
-                    {gameInfo ? 'Now playing' : 'Ready'}
-                  </span>
-                  <span className="rounded-full border border-white/[.07] bg-zinc-900/80 px-3 py-1 font-mono text-[11px] text-zinc-300">
-                    {gameInfo ? playtime : `${activeDownloads.length} active`}
-                  </span>
+          <div className="flex-1 overflow-y-auto">
+            {hasSession && (
+              <section className="border-b border-white/[.06] px-4 py-3">
+                <div className="mb-2 flex items-center gap-2 text-emerald-300">
+                  <span className="h-2 w-2 rounded-full bg-emerald-400" />
+                  <span className="text-[10px] font-semibold uppercase tracking-[0.16em]">Now Playing</span>
                 </div>
-
-                <div className="space-y-2">
-                  <div className="text-2xl font-black tracking-tight text-white">
-                    {gameInfo?.gameName || 'Your session hub is ready'}
-                  </div>
-                  <p className="text-sm text-zinc-400">
-                    {gameInfo
-                      ? 'Control the current session, monitor installs, and keep system actions one keypress away.'
-                      : 'Use the overlay to launch installed titles, track active installs, and manage session tools without leaving the game.'}
-                  </p>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  {gameInfo ? (
-                    <>
-                      <button
-                        onClick={closePanelAndHide}
-                        className="flex items-center gap-3 rounded-full border border-white/[.07] bg-white px-4 py-3 text-left text-black transition hover:bg-zinc-200 active:scale-95"
-                      >
-                        <Play size={15} />
-                        <div>
-                          <div className="text-sm font-semibold">Resume game</div>
-                          <div className="text-[11px] text-black/60">Return to the current session</div>
-                        </div>
-                      </button>
-                      <button
-                        onClick={quitGame}
-                        className="flex items-center gap-3 rounded-full border border-red-500/20 bg-red-500/10 px-4 py-3 text-left text-red-200 transition hover:bg-red-500/15 active:scale-95"
-                      >
-                        <Square size={15} />
-                        <div>
-                          <div className="text-sm font-semibold">Quit game</div>
-                          <div className="text-[11px] text-red-200/70">Stop the running executable</div>
-                        </div>
-                      </button>
-                    </>
-                  ) : (
-                    <>
-                      <div className="rounded-full border border-white/[.07] bg-zinc-950/75 px-4 py-3">
-                        <div className="text-[11px] uppercase tracking-[0.16em] text-zinc-500">Installed</div>
-                        <div className="mt-1 text-lg font-semibold tracking-tight text-white">{installedGames.length}</div>
-                      </div>
-                      <div className="rounded-full border border-white/[.07] bg-zinc-950/75 px-4 py-3">
-                        <div className="text-[11px] uppercase tracking-[0.16em] text-zinc-500">Notifications</div>
-                        <div className="mt-1 text-lg font-semibold tracking-tight text-white">{unreadNotifications.length}</div>
-                      </div>
-                    </>
-                  )}
-                </div>
-              </div>
-            </section>
-
-            <section className="grid grid-cols-2 gap-3">
-              <button
-                onClick={handleScreenshot}
-                className="flex items-center gap-3 rounded-full border border-white/[.07] bg-zinc-900/75 px-4 py-3 text-left text-zinc-200 transition hover:bg-white/[.05] active:scale-95"
-              >
-                <div className={`flex h-9 w-9 items-center justify-center rounded-full ${screenshotTaken ? 'bg-emerald-500/15 text-emerald-300' : 'bg-white/[.05] text-zinc-300'}`}>
-                  <Camera size={15} />
-                </div>
-                <div className="min-w-0">
-                  <div className="text-sm font-semibold text-white">Screenshot</div>
-                  <div className="text-[11px] text-zinc-500">{screenshotTaken ? 'Saved to your captures folder' : 'Capture the current frame'}</div>
-                </div>
-              </button>
-
-              <button
-                onClick={() => setShowNotifications((current) => !current)}
-                className="flex items-center gap-3 rounded-full border border-white/[.07] bg-zinc-900/75 px-4 py-3 text-left text-zinc-200 transition hover:bg-white/[.05] active:scale-95"
-              >
-                <div className="relative flex h-9 w-9 items-center justify-center rounded-full bg-white/[.05] text-zinc-300">
-                  <Bell size={15} />
-                  {unreadNotifications.length > 0 && (
-                    <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-white px-1 text-[9px] font-bold text-black">
-                      {unreadNotifications.length > 9 ? '9+' : unreadNotifications.length}
-                    </span>
-                  )}
-                </div>
-                <div className="min-w-0">
-                  <div className="text-sm font-semibold text-white">Notifications</div>
-                  <div className="text-[11px] text-zinc-500">{showNotifications ? 'Hide inbox' : 'Review recent system events'}</div>
-                </div>
-              </button>
-
-              <div className="col-span-2 rounded-[26px] border border-white/[.07] bg-zinc-900/75 p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-3">
-                    <button
-                      onClick={handleMuteToggle}
-                      className="flex h-10 w-10 items-center justify-center rounded-full border border-white/[.07] bg-zinc-950/80 text-zinc-300 transition hover:bg-white/[.05] hover:text-white active:scale-95"
-                      aria-label={isMuted ? 'Unmute' : 'Mute'}
-                    >
-                      {isMuted ? <VolumeX size={15} /> : <Volume2 size={15} />}
-                    </button>
-                    <div>
-                      <div className="text-sm font-semibold text-white">System volume</div>
-                      <div className="text-[11px] text-zinc-500">{isMuted ? 'Muted' : `${volume}% output`}</div>
+                <div className="overflow-hidden rounded-xl border border-white/[.06] bg-white/[.03]">
+                  {gameInfo?.image && (
+                    <div className="h-20 w-full overflow-hidden">
+                      <img src={gameInfo.image} alt="" className="h-full w-full object-cover" />
                     </div>
-                  </div>
-                  <button
-                    onClick={() => setShowControllerFlyout((current) => !current)}
-                    className="flex items-center gap-2 rounded-full border border-white/[.07] bg-zinc-950/80 px-3 py-2 text-sm text-zinc-300 transition hover:bg-white/[.05] hover:text-white active:scale-95"
-                  >
-                    <Gamepad2 size={14} />
-                    Controls
-                  </button>
-                </div>
-                <div className="mt-4">
-                  <input
-                    type="range"
-                    min="0"
-                    max="100"
-                    value={isMuted ? 0 : volume}
-                    onChange={(event) => handleVolumeChange(Number(event.target.value))}
-                    className="h-1.5 w-full appearance-none rounded-full bg-transparent"
-                    style={{
-                      background: `linear-gradient(to right, rgba(255,255,255,0.95) 0%, rgba(255,255,255,0.95) ${isMuted ? 0 : volume}%, rgba(255,255,255,0.12) ${isMuted ? 0 : volume}%, rgba(255,255,255,0.12) 100%)`,
-                    }}
-                  />
-                </div>
-              </div>
-            </section>
-
-            {(showNotifications || unreadNotifications.length > 0) && (
-              <section className="rounded-[28px] border border-white/[.07] bg-zinc-900/72 p-4">
-                <div className="mb-3 flex items-center justify-between gap-3">
-                  <div>
-                    <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-zinc-500">Inbox</div>
-                    <div className="text-lg font-semibold tracking-tight text-white">Recent notifications</div>
-                  </div>
-                  <div className="rounded-full border border-white/[.07] bg-zinc-950/80 px-3 py-1 text-xs text-zinc-400">
-                    {notifications.length} total
-                  </div>
-                </div>
-
-                {notifications.length === 0 ? (
-                  <div className="rounded-[22px] border border-dashed border-white/[.07] bg-zinc-950/60 px-4 py-6 text-center text-sm text-zinc-500">
-                    No notifications yet.
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    {notifications.slice(0, 6).map((notification) => (
-                      <div
-                        key={notification.id}
-                        className={`rounded-[22px] border px-4 py-3 ${notification.read ? 'border-white/[.05] bg-zinc-950/60' : 'border-white/[.08] bg-white/[.03]'}`}
-                      >
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-center gap-2">
-                              {!notification.read && <span className="h-2 w-2 rounded-full bg-white" />}
-                              <div className="truncate text-sm font-semibold text-white">{notification.title}</div>
-                            </div>
-                            <div className="mt-1 text-xs text-zinc-400">{notification.body}</div>
-                          </div>
-                          <span className="text-[11px] text-zinc-500">{formatNotificationTime(notification.timestamp)}</span>
-                        </div>
+                  )}
+                  <div className="p-3">
+                    <div className="truncate text-sm font-semibold text-white">
+                      {gameInfo?.gameName || 'Session active'}
+                    </div>
+                    <div className="mt-2 flex items-center gap-2 text-xs text-zinc-400">
+                      <Clock size={12} className="text-zinc-500" />
+                      {gameInfo?.startedAt ? (
+                        <>
+                          <span className="font-mono text-zinc-200">{playtime}</span>
+                          <span className="text-[10px] text-zinc-500">session</span>
+                        </>
+                      ) : (
+                        <span className="text-[10px] text-zinc-500">Live session</span>
+                      )}
+                    </div>
+                    {!gameInfo?.gameName && sessionAppid && (
+                      <div className="mt-2">
+                        <span className="token-chip text-[9px]">App {sessionAppid}</span>
                       </div>
-                    ))}
+                    )}
                   </div>
-                )}
+                </div>
               </section>
             )}
 
-            <section className="rounded-[28px] border border-white/[.07] bg-zinc-900/72 p-4">
-              <div className="mb-3 flex items-center justify-between gap-3">
-                <div>
-                  <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-zinc-500">Downloads</div>
-                  <div className="text-lg font-semibold tracking-tight text-white">Activity queue</div>
+            {activeDownloads.length > 0 && (
+              <section className="border-b border-white/[.06] px-4 py-3">
+                <div className="flex items-center gap-2">
+                  <Download size={12} className="text-sky-300" />
+                  <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-sky-200">Downloads</span>
+                  <span className="ml-auto text-[10px] text-zinc-500">{activeDownloads.length} active</span>
                 </div>
-                <div className="rounded-full border border-white/[.07] bg-zinc-950/80 px-3 py-1 text-xs text-zinc-400">
-                  {activeDownloads.length} active
-                </div>
-              </div>
-
-              {activeDownloads.length === 0 ? (
-                <div className="rounded-[22px] border border-dashed border-white/[.07] bg-zinc-950/60 px-4 py-6 text-center text-sm text-zinc-500">
-                  No active downloads. Start a new install to monitor it here.
-                </div>
-              ) : (
-                <div className="space-y-3">
+                <div className="mt-3 space-y-2">
                   {activeDownloads.slice(0, 5).map((download) => {
                     const progress = download.totalBytes > 0 ? Math.round((download.receivedBytes / download.totalBytes) * 100) : 0
                     const canPause = download.status === 'downloading'
                     const canResume = download.status === 'paused'
-                    const isInstalling = download.status === 'extracting' || download.status === 'installing'
-                    const speedLabel = isInstalling ? 'Disk write' : 'Download speed'
+                    const statusLine = download.status === 'extracting'
+                      ? 'Extracting...'
+                      : download.status === 'installing'
+                        ? 'Installing...'
+                        : download.status === 'verifying'
+                          ? 'Verifying integrity...'
+                          : download.status === 'retrying'
+                            ? 'Recovery in progress...'
+                            : download.status === 'queued'
+                              ? 'Queued'
+                              : download.status === 'paused'
+                                ? 'Paused'
+                                : `${formatSpeed(download.speedBps)} | ${formatBytes(download.receivedBytes)} / ${formatBytes(download.totalBytes)}`
 
                     return (
-                      <div key={download.id} className="rounded-[24px] border border-white/[.07] bg-zinc-950/70 p-4">
-                        <div className="mb-3 flex items-start justify-between gap-3">
+                      <div key={download.id} className="rounded-xl border border-white/[.06] bg-white/[.03] p-3">
+                        <div className="flex items-start justify-between gap-2">
                           <div className="min-w-0 flex-1">
-                            <div className="truncate text-sm font-semibold text-white">{download.gameName || download.appid}</div>
+                            <div className="truncate text-xs font-semibold text-white">{download.gameName || download.appid}</div>
                             <div className="mt-1 flex flex-wrap items-center gap-2">
-                              <span className={`rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] ${getDownloadBadge(download.status)}`}>
+                              <span className={`rounded-full px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.14em] ${getDownloadBadge(download.status)}`}>
                                 {getDownloadLabel(download.status)}
                               </span>
-                              <span className="rounded-full border border-white/[.07] bg-zinc-900/80 px-2.5 py-1 font-mono text-[10px] text-zinc-400">
-                                {progress}%
-                              </span>
+                              <span className="token-chip text-[9px]">{progress}%</span>
                             </div>
                           </div>
-
                           {(canPause || canResume) && (
                             <button
                               onClick={() => {
                                 if (canPause) window.ucOverlay?.pauseDownload(download.id)
                                 if (canResume) window.ucOverlay?.resumeDownload(download.id)
                               }}
-                              className="flex h-10 w-10 items-center justify-center rounded-full border border-white/[.07] bg-zinc-900/80 text-zinc-300 transition hover:bg-white/[.05] hover:text-white active:scale-95"
+                              className="flex h-7 w-7 items-center justify-center rounded-lg border border-white/[.08] bg-zinc-900/85 text-zinc-300 transition hover:bg-white/[.06] hover:text-white active:scale-95"
                               aria-label={canPause ? 'Pause download' : 'Resume download'}
                             >
-                              {canPause ? <Pause size={14} /> : <Play size={14} />}
+                              {canPause ? <Pause size={12} /> : <Play size={12} />}
                             </button>
                           )}
                         </div>
-
-                        <div className="mb-3 h-2 overflow-hidden rounded-full bg-white/[.06]">
+                        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/[.08]">
                           <div
                             className="h-full rounded-full"
                             style={{ width: `${progress}%`, background: getDownloadProgress(download.status), transition: 'width 300ms ease' }}
                           />
                         </div>
-
-                        <div className="grid grid-cols-2 gap-3">
-                          <div className="rounded-[20px] border border-white/[.07] bg-zinc-900/75 px-3 py-2.5">
-                            <div className="text-[10px] uppercase tracking-[0.16em] text-zinc-500">{speedLabel}</div>
-                            <div className="mt-1 text-sm font-semibold text-white">{formatSpeed(download.speedBps)}</div>
-                          </div>
-                          <div className="rounded-[20px] border border-white/[.07] bg-zinc-900/75 px-3 py-2.5">
-                            <div className="text-[10px] uppercase tracking-[0.16em] text-zinc-500">ETA</div>
-                            <div className="mt-1 text-sm font-semibold text-white">{formatEta(download.etaSeconds)}</div>
-                          </div>
-                        </div>
-
-                        <div className="mt-3 flex items-center justify-between gap-3 text-xs text-zinc-400">
-                          <span>{formatBytes(download.receivedBytes)} / {formatBytes(download.totalBytes)}</span>
-                          <span className="inline-flex items-center gap-1.5">
-                            {(download.status === 'extracting' || download.status === 'installing' || download.status === 'verifying') && (
-                              <Loader2 size={12} className="animate-spin text-zinc-500" />
-                            )}
-                            {download.status === 'retrying' ? 'Recovery in progress' : isInstalling ? 'Writing extracted data to disk' : 'Tracking live transfer speed'}
-                          </span>
-                        </div>
+                        <div className="mt-2 text-[10px] text-zinc-500">{statusLine}</div>
                       </div>
                     )
                   })}
                 </div>
-              )}
-            </section>
+              </section>
+            )}
 
-            {!gameInfo && installedGames.length > 0 && (
-              <section className="rounded-[28px] border border-white/[.07] bg-zinc-900/72 p-4">
-                <div className="mb-3">
-                  <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-zinc-500">Library</div>
-                  <div className="text-lg font-semibold tracking-tight text-white">Recently installed</div>
+            {hasSession && (
+              <section className="border-b border-white/[.06] px-4 py-3">
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    onClick={closePanelAndHide}
+                    className="flex items-center gap-2 rounded-xl border border-white/[.08] bg-white/[.06] px-3 py-2 text-left text-white transition hover:bg-white/[.12] active:scale-95"
+                  >
+                    <Play size={14} />
+                    <div>
+                      <div className="text-xs font-semibold">Resume</div>
+                      <div className="text-[10px] text-zinc-400">Back to game</div>
+                    </div>
+                  </button>
+                  <button
+                    onClick={quitGame}
+                    className="flex items-center gap-2 rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-left text-red-200 transition hover:bg-red-500/15 active:scale-95"
+                  >
+                    <Square size={14} />
+                    <div>
+                      <div className="text-xs font-semibold">Quit game</div>
+                      <div className="text-[10px] text-red-200/70">Stop process</div>
+                    </div>
+                  </button>
                 </div>
-                <div className="space-y-2">
+              </section>
+            )}
+
+            {!hasSession && installedGames.length > 0 && (
+              <section className="border-b border-white/[.06] px-4 py-3">
+                <div className="flex items-center gap-2">
+                  <Gamepad2 size={12} className="text-violet-300" />
+                  <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-violet-200">Recently installed</span>
+                </div>
+                <div className="mt-2 space-y-1">
                   {installedGames.map((game) => (
                     <button
                       key={game.appid}
                       onClick={() => quickLaunchGame(game)}
-                      className="flex w-full items-center gap-3 rounded-full border border-white/[.07] bg-zinc-950/70 px-4 py-3 text-left transition hover:bg-white/[.05] active:scale-95"
+                      className="flex w-full items-center gap-2 rounded-xl border border-white/[.06] bg-white/[.03] px-3 py-2 text-left transition hover:bg-white/[.06] active:scale-95"
                     >
-                      <div className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-xl bg-white/[.05] text-zinc-400">
+                      <div className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-lg bg-white/[.05] text-zinc-400">
                         {game.metadata?.image ? (
                           <img src={game.metadata.image} alt="" className="h-full w-full object-cover" />
                         ) : (
-                          <Gamepad2 size={16} />
+                          <Gamepad2 size={14} />
                         )}
                       </div>
                       <div className="min-w-0 flex-1">
-                        <div className="truncate text-sm font-semibold text-white">{game.metadata?.name || game.name || game.appid}</div>
-                        <div className="text-[11px] text-zinc-500">Launch from the overlay</div>
+                        <div className="truncate text-xs font-semibold text-white">
+                          {game.metadata?.name || game.name || game.appid}
+                        </div>
                       </div>
-                      <Play size={14} className="text-zinc-500" />
+                      <Play size={12} className="text-zinc-500" />
                     </button>
                   ))}
                 </div>
@@ -904,16 +914,13 @@ export function InGameOverlay() {
             )}
           </div>
 
-          <div className="border-t border-white/[.07] px-5 py-4">
-            <div className="flex items-center justify-between gap-3 rounded-full border border-white/[.07] bg-zinc-900/70 px-4 py-3 text-xs text-zinc-400">
-              <div className="flex items-center gap-2">
-                <span className="rounded-full border border-white/[.07] bg-zinc-950/80 px-2.5 py-1 font-mono text-[10px] text-zinc-400">Esc</span>
-                Close overlay
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="rounded-full border border-white/[.07] bg-zinc-950/80 px-2.5 py-1 font-mono text-[10px] text-zinc-400">{hotkey}</span>
-                Toggle overlay
-              </div>
+          <div className="border-t border-white/[.06] px-4 py-3">
+            <div className="flex items-center justify-center gap-2 text-[10px] text-zinc-500">
+              <span>Close</span>
+              <span className="token-chip text-[9px]">Esc</span>
+              <span className="text-zinc-700">|</span>
+              <span className="token-chip text-[9px]">{hotkey}</span>
+              <span>Toggle</span>
             </div>
           </div>
         </div>
