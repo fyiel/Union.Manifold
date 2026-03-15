@@ -1,10 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useController, ControllerProfile } from '../hooks/use-controller'
 import { Switch } from './ui/switch'
-import { 
-  Gamepad2, X, ChevronDown, ChevronUp, Save, RefreshCw,
-  Keyboard, Mouse, Settings, Monitor, Volume2
-} from 'lucide-react'
+import { Gamepad2, X, RefreshCw, Mouse, Settings, Volume2 } from 'lucide-react'
 
 interface ControllerOverlayFlyoutProps {
   visible: boolean
@@ -13,21 +10,21 @@ interface ControllerOverlayFlyoutProps {
 }
 
 export function ControllerOverlayFlyout({ visible, onClose, position = 'right' }: ControllerOverlayFlyoutProps) {
-  const { 
-    settings, 
-    connected, 
+  const {
+    settings,
+    connected,
     controllerInfo,
     activeProfile,
     updateProfile,
     setActiveProfile,
     profiles,
-    checkControllers
+    checkControllers,
   } = useController()
 
   const [expanded, setExpanded] = useState(true)
   const [activeTab, setActiveTab] = useState<'mapping' | 'mouse' | 'quick'>('quick')
-  const [localDeadzone, setLocalDeadzone] = useState(settings.deadzone)
-  const [localVibration, setLocalVibration] = useState(settings.vibrationEnabled)
+  const [localDeadzone, setLocalDeadzone] = useState(settings?.deadzone ?? 0.1)
+  const [localVibration, setLocalVibration] = useState(settings?.vibrationEnabled ?? true)
 
   useEffect(() => {
     if (settings) {
@@ -36,7 +33,6 @@ export function ControllerOverlayFlyout({ visible, onClose, position = 'right' }
     }
   }, [settings])
 
-  // Close on Escape
   useEffect(() => {
     if (!visible) return
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -46,7 +42,6 @@ export function ControllerOverlayFlyout({ visible, onClose, position = 'right' }
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [visible, onClose])
 
-  // Poll for controller connection
   useEffect(() => {
     if (!visible) return
     checkControllers()
@@ -84,8 +79,8 @@ export function ControllerOverlayFlyout({ visible, onClose, position = 'right' }
           rightStick: stick === 'right' ? enabled : (activeProfile.keyBinding?.stickToMouse?.rightStick ?? false),
           mouseSpeed: activeProfile.keyBinding?.stickToMouse?.mouseSpeed ?? 1.0,
           mouseAcceleration: activeProfile.keyBinding?.stickToMouse?.mouseAcceleration ?? false,
-        }
-      }
+        },
+      },
     }
     updateProfile(updated)
   }, [activeProfile, updateProfile])
@@ -101,8 +96,8 @@ export function ControllerOverlayFlyout({ visible, onClose, position = 'right' }
           rightStick: activeProfile.keyBinding?.stickToMouse?.rightStick ?? false,
           mouseSpeed: value[0],
           mouseAcceleration: activeProfile.keyBinding?.stickToMouse?.mouseAcceleration ?? false,
-        }
-      }
+        },
+      },
     }
     updateProfile(updated)
   }, [activeProfile, updateProfile])
@@ -110,141 +105,91 @@ export function ControllerOverlayFlyout({ visible, onClose, position = 'right' }
   if (!visible) return null
 
   const isLeft = position === 'left'
+  const sideClass = isLeft ? 'left-6' : 'right-6'
+  const statusLabel = connected ? (controllerInfo.name || 'Connected') : 'Disconnected'
 
   return (
     <div
-      style={{
-        position: 'fixed',
-        top: 20,
-        [isLeft ? 'left' : 'right']: 20,
-        width: 320,
-        zIndex: 10000,
-        opacity: visible ? 1 : 0,
-        transform: visible ? 'translateY(0)' : 'translateY(-10px)',
-        transition: 'opacity 0.2s ease, transform 0.2s ease',
-        pointerEvents: visible ? 'auto' : 'none',
-      }}
-      onClick={e => e.stopPropagation()}
+      className={`pointer-events-auto fixed top-5 ${sideClass} z-[10000] w-[320px] transition-all duration-200 ${
+        visible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-2'
+      }`}
+      onClick={(event) => event.stopPropagation()}
     >
-      <div
-        style={{
-          background: 'rgba(9, 9, 11, 0.88)',
-          border: '1px solid rgba(255,255,255,0.07)',
-          borderRadius: 28,
-          boxShadow: '0 28px 80px rgba(0,0,0,0.6)',
-          backdropFilter: 'blur(18px)',
-          WebkitBackdropFilter: 'blur(18px)',
-          overflow: 'hidden',
-        }}
-      >
-        {/* Header */}
-        <div 
-          style={{ 
-            display: 'flex', 
-            alignItems: 'center', 
-            gap: 10, 
-            padding: '12px 16px', 
-            borderBottom: expanded ? '1px solid rgba(255,255,255,0.07)' : 'none',
-            cursor: 'pointer',
-          }}
+      <div className="glass overflow-hidden rounded-[28px] border border-white/[.07] !bg-zinc-950/92 shadow-[0_28px_80px_rgba(0,0,0,0.6)]">
+        <div
+          className={`flex items-center gap-3 px-4 py-3 ${expanded ? 'border-b border-white/[.07]' : ''} cursor-pointer`}
           onClick={() => setExpanded(!expanded)}
         >
-          <div style={{ width: 28, height: 28, borderRadius: 8, background: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-            <Gamepad2 size={14} color="#09090b" />
+          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-white text-black">
+            <Gamepad2 size={15} />
           </div>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: 'rgba(161,161,170,1)', lineHeight: 1, letterSpacing: '0.18em', textTransform: 'uppercase' }}>Controller</div>
-            <div style={{ fontSize: 16, fontWeight: 800, color: 'white', lineHeight: 1.1, marginTop: 4, letterSpacing: '-0.02em' }}>Input Console</div>
-            <div style={{ fontSize: 10, color: connected ? 'rgba(34,197,94,0.8)' : 'rgba(255,255,255,0.35)', marginTop: 2, lineHeight: 1 }}>
-              {connected ? (controllerInfo.name || 'Connected') : 'Disconnected'}
-            </div>
+          <div className="min-w-0 flex-1">
+            <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-zinc-500">Controller</div>
+            <div className="text-base font-black tracking-tight text-white">Input Console</div>
+            <div className={`text-[10px] ${connected ? 'text-emerald-300' : 'text-zinc-500'}`}>{statusLabel}</div>
           </div>
-          <button 
-            onClick={(e) => { e.stopPropagation(); onClose() }}
-            style={{ padding: 8, borderRadius: 999, background: 'rgba(24,24,27,0.85)', border: '1px solid rgba(255,255,255,0.07)', cursor: 'pointer', color: 'rgba(255,255,255,0.45)', display: 'flex' }}
+          <button
+            onClick={(event) => {
+              event.stopPropagation()
+              onClose()
+            }}
+            className="flex h-8 w-8 items-center justify-center rounded-full border border-white/[.08] bg-zinc-900/85 text-zinc-400 transition hover:bg-white/[.06] hover:text-white active:scale-95"
+            aria-label="Close controller overlay"
           >
             <X size={14} />
           </button>
         </div>
 
-        {/* Expanded Content */}
         {expanded && (
-          <div style={{ padding: 14 }}>
-            {/* Quick Tabs */}
-            <div style={{ display: 'flex', gap: 4, marginBottom: 12 }}>
+          <div className="p-4">
+            <div className="flex gap-2">
               <button
                 onClick={() => setActiveTab('quick')}
-                style={{
-                  flex: 1,
-                  padding: '6px 8px',
-                  borderRadius: 999,
-                  border: activeTab === 'quick' ? '1px solid rgba(255,255,255,0.2)' : '1px solid rgba(255,255,255,0.07)',
-                  background: activeTab === 'quick' ? '#ffffff' : 'rgba(24,24,27,0.75)',
-                  color: activeTab === 'quick' ? '#09090b' : 'rgba(255,255,255,0.55)',
-                  fontSize: 11,
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: 4,
-                }}
+                className={`flex-1 rounded-full border px-3 py-2 text-[11px] font-semibold transition active:scale-95 ${
+                  activeTab === 'quick'
+                    ? 'border-white/60 bg-white text-black'
+                    : 'border-white/[.07] bg-zinc-900/85 text-zinc-400 hover:bg-white/[.06] hover:text-white'
+                }`}
               >
-                <Settings size={12} />
-                Quick
+                <span className="inline-flex items-center justify-center gap-2">
+                  <Settings size={12} />
+                  Quick
+                </span>
               </button>
               <button
                 onClick={() => setActiveTab('mouse')}
-                style={{
-                  flex: 1,
-                  padding: '6px 8px',
-                  borderRadius: 999,
-                  border: activeTab === 'mouse' ? '1px solid rgba(255,255,255,0.2)' : '1px solid rgba(255,255,255,0.07)',
-                  background: activeTab === 'mouse' ? '#ffffff' : 'rgba(24,24,27,0.75)',
-                  color: activeTab === 'mouse' ? '#09090b' : 'rgba(255,255,255,0.55)',
-                  fontSize: 11,
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: 4,
-                }}
+                className={`flex-1 rounded-full border px-3 py-2 text-[11px] font-semibold transition active:scale-95 ${
+                  activeTab === 'mouse'
+                    ? 'border-white/60 bg-white text-black'
+                    : 'border-white/[.07] bg-zinc-900/85 text-zinc-400 hover:bg-white/[.06] hover:text-white'
+                }`}
               >
-                <Mouse size={12} />
-                Mouse
+                <span className="inline-flex items-center justify-center gap-2">
+                  <Mouse size={12} />
+                  Mouse
+                </span>
               </button>
               <button
                 onClick={() => setActiveTab('mapping')}
-                style={{
-                  flex: 1,
-                  padding: '6px 8px',
-                  borderRadius: 999,
-                  border: activeTab === 'mapping' ? '1px solid rgba(255,255,255,0.2)' : '1px solid rgba(255,255,255,0.07)',
-                  background: activeTab === 'mapping' ? '#ffffff' : 'rgba(24,24,27,0.75)',
-                  color: activeTab === 'mapping' ? '#09090b' : 'rgba(255,255,255,0.55)',
-                  fontSize: 11,
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: 4,
-                }}
+                className={`flex-1 rounded-full border px-3 py-2 text-[11px] font-semibold transition active:scale-95 ${
+                  activeTab === 'mapping'
+                    ? 'border-white/60 bg-white text-black'
+                    : 'border-white/[.07] bg-zinc-900/85 text-zinc-400 hover:bg-white/[.06] hover:text-white'
+                }`}
               >
-                <Gamepad2 size={12} />
-                Mapping
+                <span className="inline-flex items-center justify-center gap-2">
+                  <Gamepad2 size={12} />
+                  Mapping
+                </span>
               </button>
             </div>
 
-            {/* Quick Settings Tab */}
             {activeTab === 'quick' && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                {/* Deadzone */}
+              <div className="mt-4 space-y-4">
                 <div>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-                    <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.7)' }}>Deadzone</span>
-                    <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)' }}>{Math.round(localDeadzone * 100)}%</span>
+                  <div className="mb-2 flex items-center justify-between text-[11px] text-zinc-400">
+                    <span>Deadzone</span>
+                    <span>{Math.round(localDeadzone * 100)}%</span>
                   </div>
                   <input
                     type="range"
@@ -255,45 +200,24 @@ export function ControllerOverlayFlyout({ visible, onClose, position = 'right' }
                     onChange={(e) => handleDeadzoneChange([Number(e.target.value)])}
                     onMouseUp={handleDeadzoneCommit}
                     onTouchEnd={handleDeadzoneCommit}
+                    className="h-1.5 w-full appearance-none rounded-full bg-transparent"
                     style={{
-                      width: '100%',
-                      height: 4,
-                      appearance: 'none',
                       background: `linear-gradient(to right, rgba(255,255,255,0.95) 0%, rgba(255,255,255,0.95) ${(localDeadzone / 0.5) * 100}%, rgba(255,255,255,0.15) ${(localDeadzone / 0.5) * 100}%, rgba(255,255,255,0.15) 100%)`,
-                      borderRadius: 2,
-                      cursor: 'pointer',
                     }}
                   />
                 </div>
 
-                {/* Vibration */}
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <Volume2 size={14} color="rgba(255,255,255,0.5)" />
-                    <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.7)' }}>Vibration</span>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-[11px] text-zinc-400">
+                    <Volume2 size={14} className="text-zinc-500" />
+                    <span>Vibration</span>
                   </div>
-                  <Switch 
-                    checked={localVibration} 
-                    onCheckedChange={handleVibrationToggle}
-                  />
+                  <Switch checked={localVibration} onCheckedChange={handleVibrationToggle} />
                 </div>
 
-                {/* Refresh Controller */}
-                <button 
+                <button
                   onClick={checkControllers}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: 6,
-                    padding: '8px 12px',
-                    borderRadius: 999,
-                    border: '1px solid rgba(255,255,255,0.07)',
-                    background: 'rgba(24,24,27,0.75)',
-                    color: 'rgba(255,255,255,0.7)',
-                    fontSize: 11,
-                    cursor: 'pointer',
-                  }}
+                  className="flex w-full items-center justify-center gap-2 rounded-full border border-white/[.07] bg-zinc-900/85 px-3 py-2 text-[11px] text-zinc-300 transition hover:bg-white/[.06] hover:text-white active:scale-95"
                 >
                   <RefreshCw size={12} />
                   Refresh Controller
@@ -301,37 +225,34 @@ export function ControllerOverlayFlyout({ visible, onClose, position = 'right' }
               </div>
             )}
 
-            {/* Mouse Settings Tab */}
             {activeTab === 'mouse' && activeProfile && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <Mouse size={14} color="rgba(255,255,255,0.5)" />
-                    <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.7)' }}>Left Stick → Mouse</span>
+              <div className="mt-4 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-[11px] text-zinc-400">
+                    <Mouse size={14} className="text-zinc-500" />
+                    <span>Left Stick to Mouse</span>
                   </div>
-                  <Switch 
-                    checked={activeProfile.keyBinding?.stickToMouse?.leftStick ?? false} 
+                  <Switch
+                    checked={activeProfile.keyBinding?.stickToMouse?.leftStick ?? false}
                     onCheckedChange={(checked) => handleStickToMouseToggle('left', checked)}
                   />
                 </div>
 
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <Mouse size={14} color="rgba(255,255,255,0.5)" />
-                    <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.7)' }}>Right Stick → Mouse</span>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-[11px] text-zinc-400">
+                    <Mouse size={14} className="text-zinc-500" />
+                    <span>Right Stick to Mouse</span>
                   </div>
-                  <Switch 
-                    checked={activeProfile.keyBinding?.stickToMouse?.rightStick ?? false} 
+                  <Switch
+                    checked={activeProfile.keyBinding?.stickToMouse?.rightStick ?? false}
                     onCheckedChange={(checked) => handleStickToMouseToggle('right', checked)}
                   />
                 </div>
 
                 <div>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-                    <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.7)' }}>Mouse Speed</span>
-                    <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)' }}>
-                      {(activeProfile.keyBinding?.stickToMouse?.mouseSpeed ?? 1.0).toFixed(1)}x
-                    </span>
+                  <div className="mb-2 flex items-center justify-between text-[11px] text-zinc-400">
+                    <span>Mouse Speed</span>
+                    <span>{(activeProfile.keyBinding?.stickToMouse?.mouseSpeed ?? 1.0).toFixed(1)}x</span>
                   </div>
                   <input
                     type="range"
@@ -340,39 +261,25 @@ export function ControllerOverlayFlyout({ visible, onClose, position = 'right' }
                     step="0.1"
                     value={activeProfile.keyBinding?.stickToMouse?.mouseSpeed ?? 1.0}
                     onChange={(e) => handleMouseSpeedChange([Number(e.target.value)])}
+                    className="h-1.5 w-full appearance-none rounded-full bg-transparent"
                     style={{
-                      width: '100%',
-                      height: 4,
-                      appearance: 'none',
                       background: `linear-gradient(to right, rgba(255,255,255,0.95) 0%, rgba(255,255,255,0.95) ${((activeProfile.keyBinding?.stickToMouse?.mouseSpeed ?? 1.0) - 0.1) / 2.9 * 100}%, rgba(255,255,255,0.15) ${((activeProfile.keyBinding?.stickToMouse?.mouseSpeed ?? 1.0) - 0.1) / 2.9 * 100}%, rgba(255,255,255,0.15) 100%)`,
-                      borderRadius: 2,
-                      cursor: 'pointer',
                     }}
                   />
                 </div>
               </div>
             )}
 
-            {/* Mapping Tab */}
             {activeTab === 'mapping' && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div className="mt-4 space-y-4">
                 <div>
-                  <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.7)', marginBottom: 6, display: 'block' }}>Active Profile</span>
+                  <div className="mb-2 text-[11px] text-zinc-400">Active Profile</div>
                   <select
                     value={activeProfile?.id || ''}
                     onChange={(e) => setActiveProfile(e.target.value)}
-                    style={{
-                      width: '100%',
-                      padding: '8px 10px',
-                      borderRadius: 18,
-                      border: '1px solid rgba(255,255,255,0.07)',
-                      background: 'rgba(24,24,27,0.78)',
-                      color: 'white',
-                      fontSize: 12,
-                      cursor: 'pointer',
-                    }}
-                  >
-                    {profiles.map(profile => (
+                  className="w-full rounded-2xl border border-white/[.07] bg-zinc-900/85 px-3 py-2 text-sm text-white"
+                >
+                    {profiles.map((profile) => (
                       <option key={profile.id} value={profile.id}>
                         {profile.name}
                       </option>
@@ -380,39 +287,19 @@ export function ControllerOverlayFlyout({ visible, onClose, position = 'right' }
                   </select>
                 </div>
 
-                <div style={{ 
-                  padding: 10, 
-                  borderRadius: 18, 
-                  background: 'rgba(24,24,27,0.78)', 
-                  border: '1px solid rgba(255,255,255,0.07)',
-                }}>
-                  <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.6)', marginBottom: 4 }}>
-                    Input Translation
+                <div className="rounded-2xl border border-white/[.07] bg-zinc-950/85 px-3 py-3">
+                  <div className="text-[10px] text-zinc-500">Input Translation</div>
+                  <div className="mt-1 text-sm font-semibold text-white">
+                    {settings?.inputTranslation?.enabled ? 'Enabled' : 'Disabled'}
                   </div>
-                  <div style={{ fontSize: 11, color: 'white', fontWeight: 600 }}>
-                    {settings.inputTranslation?.enabled ? 'Enabled' : 'Disabled'}
-                  </div>
-                  <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)', marginTop: 4 }}>
-                    Preset: {settings.inputTranslation?.mappingPreset || 'Auto'}
+                  <div className="mt-1 text-[10px] text-zinc-500">
+                    Preset: {settings?.inputTranslation?.mappingPreset || 'Auto'}
                   </div>
                 </div>
 
                 <button
                   onClick={onClose}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: 6,
-                    padding: '10px 12px',
-                    borderRadius: 999,
-                    border: '1px solid rgba(255,255,255,0.2)',
-                    background: '#ffffff',
-                    color: '#09090b',
-                    fontSize: 12,
-                    fontWeight: 600,
-                    cursor: 'pointer',
-                  }}
+                  className="flex w-full items-center justify-center gap-2 rounded-full border border-white/60 bg-white px-3 py-2 text-[12px] font-semibold text-black transition hover:bg-zinc-200 active:scale-95"
                 >
                   <Settings size={14} />
                   Open Full Settings
@@ -420,27 +307,13 @@ export function ControllerOverlayFlyout({ visible, onClose, position = 'right' }
               </div>
             )}
 
-            {/* Footer */}
-            <div style={{ 
-              marginTop: 12, 
-              paddingTop: 10, 
-              borderTop: '1px solid rgba(255,255,255,0.04)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: 6,
-            }}>
-              <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.2)' }}>Press</span>
-              <kbd style={{ 
-                fontSize: 9, 
-                fontFamily: 'monospace', 
-                color: 'rgba(255,255,255,0.3)', 
-                background: 'rgba(255,255,255,0.05)', 
-                border: '1px solid rgba(255,255,255,0.08)', 
-                borderRadius: 4, 
-                padding: '1px 5px' 
-              }}>Esc</kbd>
-              <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.2)' }}>to close</span>
+            <div className="mt-4 border-t border-white/[.06] pt-3">
+              <div className="flex items-center justify-center gap-2 text-[10px] text-zinc-500">
+                <span>Press</span>
+                <span className="token-chip text-[9px]">Esc</span>
+                <span className="text-zinc-700">|</span>
+                <span>Close</span>
+              </div>
             </div>
           </div>
         )}

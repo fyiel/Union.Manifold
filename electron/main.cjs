@@ -86,6 +86,9 @@ const cancelledDownloadIds = new Set()
 const activeExtractions = new Set()
 const deferredArchives = new Map() // appid → archivePath[] waiting for all parts to finish
 const runningGames = new Map()
+const WINDOWS_GAME_HANDOFF_GRACE_MS = 12000
+const WINDOWS_GAME_HANDOFF_POLL_MS = 1000
+const GAME_PID_POLL_MS = 3000
 
 // ============================================================
 // In-Game Overlay System (Steam-like)
@@ -99,6 +102,8 @@ let overlayAutoShow = true
 let overlayPosition = 'left'
 let overlayMode = 'hidden' // 'hidden' | 'toast' | 'panel'
 let overlayToastTimer = null
+let overlayReady = false // true once overlay webContents finishes loading
+let overlayDeferredToastAppid = undefined // set when toast requested before overlay ready
 
 // Create the overlay window (transparent, always on top, click-through capable)
 function createOverlayWindow() {
@@ -147,8 +152,20 @@ function createOverlayWindow() {
   overlayWindow.setVisibleOnAllWorkspaces(true)
   overlayWindow.setAlwaysOnTop(true, 'screen-saver')
 
+  overlayWindow.webContents.once('did-finish-load', () => {
+    overlayReady = true
+    ucLog('Overlay renderer loaded and ready')
+    // If a toast was requested while the page was loading, fire it now
+    if (overlayDeferredToastAppid !== undefined) {
+      const deferred = overlayDeferredToastAppid
+      overlayDeferredToastAppid = undefined
+      showOverlayToast(deferred)
+    }
+  })
+
   overlayWindow.on('closed', () => {
     overlayWindow = null
+    overlayReady = false
     currentOverlayAppid = null
   })
 
@@ -181,12 +198,26 @@ function showOverlay(appid = null) {
 
 // Show a transient toast notification when a game launches (auto-dismisses)
 function showOverlayToast(appid = null) {
-  if (!overlayEnabled) return
-  if (!overlayWindow || overlayWindow.isDestroyed()) createOverlayWindow()
+  if (!overlayEnabled) {
+    ucLog(`Overlay toast skipped (disabled) for game: ${appid || 'unknown'}`)
+    return
+  }
+  if (!overlayWindow || overlayWindow.isDestroyed()) {
+    overlayReady = false
+    createOverlayWindow()
+  }
+  // If the overlay page hasn't finished loading yet, defer the toast
+  if (!overlayReady) {
+    ucLog(`Overlay toast deferred (page loading) for game: ${appid || 'unknown'}`)
+    overlayDeferredToastAppid = appid
+    return
+  }
   if (overlayWindow && !overlayWindow.isDestroyed()) {
     overlayMode = 'toast'
     currentOverlayAppid = appid
     overlayWindow.setIgnoreMouseEvents(true, { forward: true })
+    // Re-assert always-on-top so the overlay is above fullscreen games
+    overlayWindow.setAlwaysOnTop(true, 'screen-saver')
     overlayWindow.showInactive()
     overlayWindow.webContents.send('uc:overlay-toast', { appid })
     clearTimeout(overlayToastTimer)
@@ -199,6 +230,7 @@ function showOverlayToast(appid = null) {
 
 // Hide the overlay window
 function hideOverlay() {
+  ucLog(`[Overlay] hideOverlay called (current mode: ${overlayMode})`)
   clearTimeout(overlayToastTimer)
   const wasPanel = overlayMode === 'panel'
   overlayMode = 'hidden'
@@ -317,6 +349,8 @@ function updateOverlaySettings(settings) {
 function checkAndShowOverlayForGame(appid) {
   if (overlayAutoShow && overlayEnabled && runningGames.has(appid)) {
     showOverlayToast(appid)
+  } else {
+    ucLog(`[Overlay] checkAndShowOverlayForGame(${appid}): skipped (autoShow=${overlayAutoShow}, enabled=${overlayEnabled}, tracked=${runningGames.has(appid)})`)
   }
 }
 
@@ -3718,6 +3752,155 @@ function registerRunningGame(appid, exePath, proc, gameName, showGameName = true
       buttons
     }).catch(() => { })
   }
+
+  function isTrackedPayloadCurrent() {
+    if (payload.appid && runningGames.get(payload.appid) === payload) return true
+    if (payload.exePath && runningGames.get(payload.exePath) === payload) return true
+    return false
+  }
+
+  function clearTrackedPayload() {
+    if (payload.appid) runningGames.delete(payload.appid)
+    if (payload.exePath) runningGames.delete(payload.exePath)
+    payload.handoffPendingUntil = 0
+  }
+
+  function finalizeTrackedExit(exitedPid) {
+    if (!isTrackedPayloadCurrent()) return
+    const elapsed = Date.now() - payload.startedAt
+    ucLog(`[Game] ${payload.appid || 'unknown'} exited (PID ${exitedPid}, elapsed=${elapsed}ms)`)
+    clearTrackedPayload()
+    if (runningGames.size === 0) clearGameRpcActivity()
+    if (exitedPid) cleanupOverlayInjection(exitedPid)
+    if (runningGames.size === 0) hideOverlay()
+    if (elapsed < 5000) {
+      ucLog(`Game quick-exit detected: ${payload.appid} (elapsed=${elapsed}ms)`, 'warn')
+      for (const win of BrowserWindow.getAllWindows()) {
+        try {
+          if (!win.isDestroyed()) {
+            win.webContents.send('uc:game-quick-exit', {
+              appid: payload.appid || null,
+              exePath: payload.exePath || null,
+              elapsed
+            })
+          }
+        } catch {}
+      }
+    }
+  }
+
+  function runHiddenPowerShell(script, timeout = 8000) {
+    return new Promise((resolve) => {
+      const encoded = Buffer.from(script, 'utf16le').toString('base64')
+      child_process.execFile(
+        'powershell.exe',
+        ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-EncodedCommand', encoded],
+        { windowsHide: true, timeout },
+        (_err, stdout) => resolve(String(stdout || ''))
+      )
+    })
+  }
+
+  async function findWindowsSuccessorPids(rootPid) {
+    if (process.platform !== 'win32' || !rootPid) return []
+    const gameDir = payload.exePath ? path.dirname(payload.exePath) : ''
+    const escapedDir = gameDir.replace(/'/g, "''")
+    const psScript = `$rootPid = ${Number(rootPid)}
+$gameDir = '${escapedDir}'
+$processes = @()
+try {
+  $processes = @(Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId, ExecutablePath, CreationDate)
+} catch {}
+$queue = New-Object System.Collections.Queue
+$seen = New-Object 'System.Collections.Generic.HashSet[int]'
+$descendants = New-Object System.Collections.ArrayList
+$queue.Enqueue([int]$rootPid)
+[void]$seen.Add([int]$rootPid)
+while ($queue.Count -gt 0) {
+  $parentPid = [int]$queue.Dequeue()
+  foreach ($proc in @($processes | Where-Object { [int]$_.ParentProcessId -eq $parentPid })) {
+    $pid = [int]$proc.ProcessId
+    if ($pid -gt 0 -and $seen.Add($pid)) {
+      [void]$descendants.Add($proc)
+      $queue.Enqueue($pid)
+    }
+  }
+}
+$candidates = @($descendants)
+if ($candidates.Count -eq 0 -and $gameDir) {
+  $candidates = @($processes | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($gameDir + '\\', [StringComparison]::OrdinalIgnoreCase) })
+}
+$candidates | Sort-Object CreationDate | ForEach-Object { $_.ProcessId }`
+    const stdout = await runHiddenPowerShell(psScript)
+    return stdout
+      .trim()
+      .split(/\r?\n/)
+      .map((value) => Number(value.trim()))
+      .filter((candidatePid) => candidatePid > 0 && candidatePid !== Number(rootPid))
+  }
+
+  function monitorTrackedPid(trackedPid) {
+    const numericPid = Number(trackedPid)
+    if (!numericPid) return
+    let checking = false
+    const pidPollInterval = setInterval(async () => {
+      if (checking) return
+      checking = true
+      try {
+        const alive = await isProcessRunning(numericPid)
+        if (alive) return
+        clearInterval(pidPollInterval)
+        if (payload.pid !== numericPid) return
+        handleTrackedExit(numericPid)
+      } finally {
+        checking = false
+      }
+    }, GAME_PID_POLL_MS)
+  }
+
+  function handleTrackedExit(exitedPid) {
+    if (process.platform !== 'win32' || !payload.exePath) {
+      finalizeTrackedExit(exitedPid)
+      return
+    }
+
+    const handoffDeadline = Date.now() + WINDOWS_GAME_HANDOFF_GRACE_MS
+    payload.handoffPendingUntil = handoffDeadline
+
+    const tryAdoptSuccessor = async () => {
+      if (!isTrackedPayloadCurrent()) return
+      if (payload.pid !== exitedPid) return
+
+      const successorPids = await findWindowsSuccessorPids(exitedPid)
+      if (!isTrackedPayloadCurrent()) return
+      if (payload.pid !== exitedPid) return
+
+      if (successorPids.length > 0) {
+        const adoptedPid = successorPids[successorPids.length - 1]
+        ucLog(`[Game] ${payload.appid || 'unknown'} launcher exited (PID ${exitedPid}), adopting child PID ${adoptedPid}`)
+        payload.pid = adoptedPid
+        payload.handoffPendingUntil = 0
+        if (payload.appid) runningGames.set(payload.appid, payload)
+        if (payload.exePath) runningGames.set(payload.exePath, payload)
+        cleanupOverlayInjection(exitedPid)
+        if (payload.appid && overlayAutoShow && overlayEnabled && overlayMode !== 'panel') {
+          showOverlayToast(payload.appid)
+        }
+        monitorTrackedPid(adoptedPid)
+        return
+      }
+
+      if (Date.now() >= handoffDeadline) {
+        finalizeTrackedExit(exitedPid)
+        return
+      }
+
+      setTimeout(tryAdoptSuccessor, WINDOWS_GAME_HANDOFF_POLL_MS)
+    }
+
+    setTimeout(tryAdoptSuccessor, 500)
+  }
+
   // Auto-show overlay when game launches
   if (appid) checkAndShowOverlayForGame(appid)
 
@@ -3730,69 +3913,7 @@ function registerRunningGame(appid, exePath, proc, gameName, showGameName = true
   // }
 
   proc.on('exit', () => {
-    const elapsed = Date.now() - payload.startedAt
-
-    function doCleanup() {
-      ucLog(`[Game] ${appid || 'unknown'} exited (PID ${proc.pid}, elapsed=${elapsed}ms)`)
-      if (appid) runningGames.delete(appid)
-      if (exePath) runningGames.delete(exePath)
-      if (runningGames.size === 0) clearGameRpcActivity()
-      if (proc.pid) cleanupOverlayInjection(proc.pid)
-      if (runningGames.size === 0) hideOverlay()
-      if (elapsed < 5000) {
-        ucLog(`Game quick-exit detected: ${appid} (elapsed=${elapsed}ms)`, 'warn')
-        for (const win of BrowserWindow.getAllWindows()) {
-          try {
-            if (!win.isDestroyed()) {
-              win.webContents.send('uc:game-quick-exit', { appid: appid || null, exePath: exePath || null, elapsed })
-            }
-          } catch {}
-        }
-      }
-    }
-
-    // On Windows many games are launchers that spawn the real game process then exit.
-    // Before removing from runningGames, scan for surviving processes in the game directory.
-    if (process.platform === 'win32' && exePath) {
-      const gameDir = path.dirname(exePath)
-      // PowerShell script to find processes whose exe path is inside the game directory
-      const psScript = `$dir = '${gameDir.replace(/'/g, "''")}'
-Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($dir + '\\', [StringComparison]::OrdinalIgnoreCase) } | ForEach-Object { $_.ProcessId }`
-      const encoded = Buffer.from(psScript, 'utf16le').toString('base64')
-      child_process.exec(
-        `powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand ${encoded}`,
-        { windowsHide: true, timeout: 8000 },
-        (err, stdout) => {
-          const survivingPids = (stdout || '').trim().split(/\r?\n/).map(s => Number(s.trim())).filter(p => p > 0 && p !== proc.pid)
-          if (survivingPids.length > 0) {
-            // Found child game process - adopt its PID and keep tracking
-            const newPid = survivingPids[0]
-            ucLog(`[Game] ${appid || 'unknown'} launcher exited (PID ${proc.pid}), adopting child PID ${newPid}`)
-            payload.pid = newPid
-            if (appid) runningGames.set(appid, payload)
-            if (exePath) runningGames.set(exePath, payload)
-            cleanupOverlayInjection(proc.pid)
-            // Poll the adopted PID for exit
-            const pidPollInterval = setInterval(() => {
-              try { process.kill(newPid, 0) } catch {
-                clearInterval(pidPollInterval)
-                ucLog(`[Game] ${appid || 'unknown'} exited (adopted PID ${newPid})`)
-                if (appid) runningGames.delete(appid)
-                if (exePath) runningGames.delete(exePath)
-                if (runningGames.size === 0) { clearGameRpcActivity(); hideOverlay() }
-                cleanupOverlayInjection(newPid)
-              }
-            }, 3000)
-            return
-          }
-          // No surviving processes in game directory - truly exited
-          doCleanup()
-        }
-      )
-      return
-    }
-
-    doCleanup()
+    handleTrackedExit(proc.pid)
   })
 }
 
@@ -3834,22 +3955,140 @@ function registerRunningGamePid(appid, exePath, pid, gameName, showGameName = tr
   //   setTimeout(() => injectOverlayIntoGame(Number(pid), appid), 2000)
   // }
 
-  // Poll PID for exit (handles externally-launched games not tracked via proc.on('exit'))
   const numPid = Number(pid)
-  const pidPollInterval = setInterval(() => {
-    try {
-      process.kill(numPid, 0)
-    } catch {
-      clearInterval(pidPollInterval)
-      if (appid) runningGames.delete(appid)
-      if (exePath) runningGames.delete(exePath)
-      if (runningGames.size === 0) {
-        clearGameRpcActivity()
-        hideOverlay()
-      }
-      cleanupOverlayInjection(numPid)
+  const isTrackedPayloadCurrent = () => {
+    if (payload.appid && runningGames.get(payload.appid) === payload) return true
+    if (payload.exePath && runningGames.get(payload.exePath) === payload) return true
+    return false
+  }
+
+  const clearTrackedPayload = () => {
+    if (payload.appid) runningGames.delete(payload.appid)
+    if (payload.exePath) runningGames.delete(payload.exePath)
+    payload.handoffPendingUntil = 0
+  }
+
+  const finalizeTrackedExit = (exitedPid) => {
+    if (!isTrackedPayloadCurrent()) return
+    clearTrackedPayload()
+    if (runningGames.size === 0) {
+      clearGameRpcActivity()
+      hideOverlay()
     }
-  }, 3000)
+    cleanupOverlayInjection(exitedPid)
+  }
+
+  const runHiddenPowerShell = (script, timeout = 8000) => new Promise((resolve) => {
+    const encoded = Buffer.from(script, 'utf16le').toString('base64')
+    child_process.execFile(
+      'powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-EncodedCommand', encoded],
+      { windowsHide: true, timeout },
+      (_err, stdout) => resolve(String(stdout || ''))
+    )
+  })
+
+  const findWindowsSuccessorPids = async (rootPid) => {
+    if (process.platform !== 'win32' || !rootPid) return []
+    const gameDir = payload.exePath ? path.dirname(payload.exePath) : ''
+    const escapedDir = gameDir.replace(/'/g, "''")
+    const psScript = `$rootPid = ${Number(rootPid)}
+$gameDir = '${escapedDir}'
+$processes = @()
+try {
+  $processes = @(Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId, ExecutablePath, CreationDate)
+} catch {}
+$queue = New-Object System.Collections.Queue
+$seen = New-Object 'System.Collections.Generic.HashSet[int]'
+$descendants = New-Object System.Collections.ArrayList
+$queue.Enqueue([int]$rootPid)
+[void]$seen.Add([int]$rootPid)
+while ($queue.Count -gt 0) {
+  $parentPid = [int]$queue.Dequeue()
+  foreach ($proc in @($processes | Where-Object { [int]$_.ParentProcessId -eq $parentPid })) {
+    $pid = [int]$proc.ProcessId
+    if ($pid -gt 0 -and $seen.Add($pid)) {
+      [void]$descendants.Add($proc)
+      $queue.Enqueue($pid)
+    }
+  }
+}
+$candidates = @($descendants)
+if ($candidates.Count -eq 0 -and $gameDir) {
+  $candidates = @($processes | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($gameDir + '\\', [StringComparison]::OrdinalIgnoreCase) })
+}
+$candidates | Sort-Object CreationDate | ForEach-Object { $_.ProcessId }`
+    const stdout = await runHiddenPowerShell(psScript)
+    return stdout
+      .trim()
+      .split(/\r?\n/)
+      .map((value) => Number(value.trim()))
+      .filter((candidatePid) => candidatePid > 0 && candidatePid !== Number(rootPid))
+  }
+
+  const handleTrackedExit = (exitedPid) => {
+    if (process.platform !== 'win32' || !payload.exePath) {
+      finalizeTrackedExit(exitedPid)
+      return
+    }
+
+    const handoffDeadline = Date.now() + WINDOWS_GAME_HANDOFF_GRACE_MS
+    payload.handoffPendingUntil = handoffDeadline
+
+    const tryAdoptSuccessor = async () => {
+      if (!isTrackedPayloadCurrent()) return
+      if (payload.pid !== exitedPid) return
+
+      const successorPids = await findWindowsSuccessorPids(exitedPid)
+      if (!isTrackedPayloadCurrent()) return
+      if (payload.pid !== exitedPid) return
+
+      if (successorPids.length > 0) {
+        const adoptedPid = successorPids[successorPids.length - 1]
+        ucLog(`[Game] ${payload.appid || 'unknown'} launcher exited (PID ${exitedPid}), adopting child PID ${adoptedPid}`)
+        payload.pid = adoptedPid
+        payload.handoffPendingUntil = 0
+        if (payload.appid) runningGames.set(payload.appid, payload)
+        if (payload.exePath) runningGames.set(payload.exePath, payload)
+        cleanupOverlayInjection(exitedPid)
+        if (payload.appid && overlayAutoShow && overlayEnabled && overlayMode !== 'panel') {
+          showOverlayToast(payload.appid)
+        }
+        monitorTrackedPid(adoptedPid)
+        return
+      }
+
+      if (Date.now() >= handoffDeadline) {
+        finalizeTrackedExit(exitedPid)
+        return
+      }
+
+      setTimeout(tryAdoptSuccessor, WINDOWS_GAME_HANDOFF_POLL_MS)
+    }
+
+    setTimeout(tryAdoptSuccessor, 500)
+  }
+
+  const monitorTrackedPid = (trackedPid) => {
+    const numericPid = Number(trackedPid)
+    if (!numericPid) return
+    let checking = false
+    const pidPollInterval = setInterval(async () => {
+      if (checking) return
+      checking = true
+      try {
+        const alive = await isProcessRunning(numericPid)
+        if (alive) return
+        clearInterval(pidPollInterval)
+        if (payload.pid !== numericPid) return
+        handleTrackedExit(numericPid)
+      } finally {
+        checking = false
+      }
+    }, GAME_PID_POLL_MS)
+  }
+
+  monitorTrackedPid(numPid)
 }
 
 function getRunningGame(appid) {
@@ -3925,6 +4164,9 @@ async function pruneRunningGames() {
   }
 
   for (const payload of payloads) {
+    if (payload.handoffPendingUntil && payload.handoffPendingUntil > Date.now()) {
+      continue
+    }
     const alive = await isProcessRunning(payload.pid)
     if (!alive) {
       if (payload.appid) runningGames.delete(payload.appid)
