@@ -124,7 +124,7 @@ export function useOverlay() {
       overlayEnabled?: boolean
       overlayHotkey?: string
       overlayAutoShow?: boolean
-      overlayPosition?: string
+      overlayPosition?: 'left' | 'right'
     } = {}
     
     if (newSettings.enabled !== undefined) {
