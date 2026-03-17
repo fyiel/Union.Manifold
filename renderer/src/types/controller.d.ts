@@ -2,7 +2,7 @@
  * Controller Support API Type Definitions
  * 
  * x360ce-style: Translates unsupported controller inputs to Xbox 360 inputs
- * antim Remaps controller inputs to keyboard and mouseicrox-style: inputs
+ * antimicrox-style: Remaps controller inputs to keyboard and mouse inputs
  */
 
 import type { ControllerSettings, ControllerProfile, ControllerMapping } from '../lib/controller-mappings'
