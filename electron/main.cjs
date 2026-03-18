@@ -1159,7 +1159,11 @@ async function fetchWithSession(session, baseUrl, path, init) {
   if (!headers.has('user-agent')) {
     headers.set('User-Agent', `UnionCrax.Direct/${getAppVersion()}`)
   }
-  if (typeof path === 'string' && path.startsWith('/api/downloads') && !headers.has('x-uc-client')) {
+  if (
+    typeof path === 'string' &&
+    (path.startsWith('/api/downloads') || path.startsWith('/api/ucfiles')) &&
+    !headers.has('x-uc-client')
+  ) {
     headers.set('X-UC-Client', 'unioncrax-direct')
   }
   if (cookieHeader) headers.set('Cookie', cookieHeader)
@@ -2456,9 +2460,22 @@ function ucfilesRangeRequest(url, start, end, signal) {
 /** Map<downloadId, { abort: AbortController, state: { paused: boolean, pauseResolvers: Function[] } }> */
 const ucfilesActiveDownloads = new Map()
 
+function isUCFilesHostName(value) {
+  const normalized = String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/^www\./, '')
+
+  if (!normalized) return false
+  if (normalized === 'files.union-crax.xyz' || normalized === 'ucfiles' || normalized === 'uc.files') {
+    return true
+  }
+  return normalized.startsWith('files') && normalized.endsWith('.union-crax.xyz')
+}
+
 function isUCFilesUrl(url) {
   try {
-    return typeof url === 'string' && new URL(url).hostname.includes('files.union-crax.xyz')
+    return typeof url === 'string' && isUCFilesHostName(new URL(url).hostname)
   } catch { return false }
 }
 
