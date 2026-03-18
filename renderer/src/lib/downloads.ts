@@ -58,6 +58,29 @@ const PREFERRED_HOSTS: PreferredDownloadHost[] = ["ucfiles", "pixeldrain"]
 const PIXELDRAIN_404_MESSAGE = "Pixeldrain returned 404. The link appears to be dead."
 const UCFILES_404_MESSAGE = "UC.Files returned 404. The link appears to be dead."
 
+function normalizeUCFilesHostValue(value: string): string {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//, "")
+    .replace(/^www\./, "")
+    .split("/")[0]
+    .split(",")[0]
+    .trim()
+}
+
+function isUCFilesHostValue(value: string): boolean {
+  const normalized = normalizeUCFilesHostValue(value)
+  if (!normalized) return false
+  if (normalized === "ucfiles" || normalized === "uc.files" || normalized === "uc files" || normalized === "uc-files") {
+    return true
+  }
+  if (normalized === "files.union-crax.xyz") {
+    return true
+  }
+  return normalized.startsWith("files") && normalized.endsWith(".union-crax.xyz")
+}
+
 /**
  * Normalise host entries from API - handles both legacy string[] and new {url,part}[] shapes.
  */
@@ -172,7 +195,9 @@ export async function fetchDownloadLinks(appid: string, downloadToken: string): 
 
 function pickHostLinks(available: DownloadHosts, host: PreferredDownloadHost) {
   if (host === "ucfiles") {
-    return available.ucfiles || available["files.union-crax.xyz"] || available["UC.Files"] || []
+    return Object.entries(available)
+      .filter(([key]) => isUCFilesHostValue(key))
+      .flatMap(([, entries]) => entries)
   }
   if (host === "pixeldrain") {
     return available.pixeldrain || available["pixeldrain.com"] || available["Pixeldrain"]  || []
@@ -254,12 +279,11 @@ export function inferFilenameFromUrl(url: string, fallback: string) {
 export function extractUCFilesFileId(url: string): string | null {
   try {
     const parsed = new URL(url)
-    if (!parsed.hostname.includes("files.union-crax.xyz")) return null
-    // Matches /f/{fileId} (16-char nanoid landing page)
-    const fMatch = parsed.pathname.match(/\/f\/([A-Za-z0-9_-]{1,64})/)
+    if (!isUCFilesHostValue(parsed.hostname)) return null
+    const fMatch = parsed.pathname.match(/\/(?:f|file)\/([A-Za-z0-9_-]{1,64})(?:[/?#]|$)/)
     if (fMatch?.[1]) return fMatch[1]
     // Matches /dl/{token} - already a direct download URL, no fileId to extract
-    const dlMatch = parsed.pathname.match(/\/dl\/([A-Za-z0-9_-]{1,64})/)
+    const dlMatch = parsed.pathname.match(/\/dl\/([A-Za-z0-9_-]{1,64})(?:[/?#]|$)/)
     if (dlMatch?.[1]) return null // token, not a file ID
     return null
   } catch {
@@ -269,7 +293,7 @@ export function extractUCFilesFileId(url: string): string | null {
 
 export function isUCFilesUrl(url: string): boolean {
   try {
-    return new URL(url).hostname.includes("files.union-crax.xyz")
+    return isUCFilesHostValue(new URL(url).hostname)
   } catch {
     return false
   }
@@ -282,7 +306,7 @@ export function isUCFilesUrl(url: string): boolean {
 function isUCFilesDlTokenUrl(url: string): boolean {
   try {
     const parsed = new URL(url)
-    return parsed.hostname.includes("files.union-crax.xyz") && /^\/dl\//.test(parsed.pathname)
+    return isUCFilesHostValue(parsed.hostname) && /^\/dl\//.test(parsed.pathname)
   } catch {
     return false
   }
