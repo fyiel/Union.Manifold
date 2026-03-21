@@ -1,4 +1,4 @@
-import { apiFetch, apiUrl } from "@/lib/api"
+import { apiFetch } from "@/lib/api"
 import { downloadLogger } from "@/lib/logger"
 
 export type DownloadHostEntry = { url: string; part: number | null }
@@ -161,15 +161,15 @@ export async function checkAvailability(
 }
 
 export async function fetchDownloadLinks(appid: string, downloadToken: string): Promise<DownloadLinksResult> {
-  const url = apiUrl(
-    `/api/downloads/${encodeURIComponent(appid)}?fetchLinks=true&downloadToken=${encodeURIComponent(downloadToken)}`
-  )
-  const response = await fetch(url, {
+  const response = await apiFetch(
+    `/api/downloads/${encodeURIComponent(appid)}?fetchLinks=true&downloadToken=${encodeURIComponent(downloadToken)}`,
+    {
     redirect: "manual",
     headers: {
       "X-UC-Client": "unioncrax-direct",
     },
-  })
+    }
+  )
   const contentType = response.headers.get("content-type") || ""
 
   if (!response.ok && contentType.includes("application/json")) {
