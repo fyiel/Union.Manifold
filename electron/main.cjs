@@ -6,11 +6,45 @@ const child_process = require('node:child_process')
 const https = require('node:https')
 const http = require('node:http')
 const DiscordRPC = require('discord-rpc')
+const { autoUpdater } = require('electron-updater')
 
 const packageJson = require('../package.json')
-// When auto-updates are disabled, open the releases page instead
-const RELEASES_URL = 'https://github.com/Union-Crax/UnionCrax.Direct/releases/latest'
 const isDev = !app.isPackaged
+const UPDATE_PROVIDER = packageJson?.build?.publish?.[0] || {}
+const UPDATE_OWNER = UPDATE_PROVIDER.owner || 'Union-Crax'
+const UPDATE_REPO = UPDATE_PROVIDER.repo || 'UnionCrax.Direct'
+
+const updateState = {
+  enabled: !isDev,
+  state: isDev ? 'disabled' : 'idle',
+  currentVersion: String(packageJson?.version || app.getVersion?.() || ''),
+  version: null,
+  available: false,
+  downloaded: false,
+  progress: 0,
+  error: null,
+  checkedAt: null,
+}
+
+function getUpdateStatusSnapshot() {
+  return {
+    ...updateState,
+    currentVersion: String(packageJson?.version || app.getVersion?.() || ''),
+  }
+}
+
+function broadcastUpdateStatus() {
+  const payload = getUpdateStatusSnapshot()
+  const windows = BrowserWindow.getAllWindows()
+  windows.forEach((win) => {
+    try { win.webContents.send('uc:update-status-changed', payload) } catch { }
+  })
+}
+
+function setUpdateStatus(patch) {
+  Object.assign(updateState, patch)
+  broadcastUpdateStatus()
+}
 
 // Helper: compare semantic versions a vs b; returns 1 if a>b, -1 if a<b, 0 if equal
 function compareVersions(a, b) {
@@ -27,13 +61,13 @@ function compareVersions(a, b) {
 
 // Helper: fetch latest release info from GitHub
 async function fetchLatestReleaseInfo() {
-  const resp = await fetch('https://api.github.com/repos/Union-Crax/UnionCrax.Direct/releases/latest', {
+  const resp = await fetch(`https://api.github.com/repos/${UPDATE_OWNER}/${UPDATE_REPO}/releases/latest`, {
     headers: { 'Accept': 'application/vnd.github+json' }
   })
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
   const data = await resp.json()
   const tag = (data && (data.tag_name || data.name)) || ''
-  const url = (data && data.html_url) || RELEASES_URL
+  const url = (data && data.html_url) || `https://github.com/${UPDATE_OWNER}/${UPDATE_REPO}/releases/latest`
   const latest = String(tag).replace(/^v/i, '')
   return { latest, url }
 }
@@ -104,12 +138,176 @@ let overlayMode = 'hidden' // 'hidden' | 'toast' | 'panel'
 let overlayToastTimer = null
 let overlayReady = false // true once overlay webContents finishes loading
 let overlayDeferredToastAppid = undefined // set when toast requested before overlay ready
+let overlayLastEvent = 'not-initialized'
+let overlayLastError = null
+
+function setOverlayEvent(event) {
+  overlayLastEvent = `${new Date().toISOString()} ${event}`
+}
+
+function setOverlayError(error) {
+  overlayLastError = error ? String(error) : null
+  if (overlayLastError) setOverlayEvent(`error: ${overlayLastError}`)
+}
+
+function getOverlayDiagnostics() {
+  const visible = Boolean(overlayWindow && !overlayWindow.isDestroyed() && overlayWindow.isVisible())
+  const hotkeyRegistered = Boolean(overlayEnabled && overlayHotkey && globalShortcut.isRegistered(overlayHotkey))
+  const dllPath = getDllPath()
+  const injections = Array.from(overlayInjections.keys()).map((pid) => {
+    const runningEntry = Array.from(runningGames.values()).find((entry) => entry?.pid === pid)
+    return {
+      pid,
+      appid: runningEntry?.appid || null,
+      gameName: runningEntry?.gameName || null,
+    }
+  })
+
+  return {
+    enabled: overlayEnabled,
+    autoShow: overlayAutoShow,
+    hotkey: overlayHotkey,
+    hotkeyRegistered,
+    position: overlayPosition,
+    currentMode: overlayMode,
+    currentAppid: currentOverlayAppid,
+    overlayWindowCreated: Boolean(overlayWindow && !overlayWindow.isDestroyed()),
+    overlayWindowReady: overlayReady,
+    overlayWindowVisible: visible,
+    nativeAddonAvailable: Boolean(nativeOverlay),
+    dllPath,
+    dllExists: fs.existsSync(dllPath),
+    injectionCount: overlayInjections.size,
+    injections,
+    runningGameCount: runningGames.size,
+    lastEvent: overlayLastEvent,
+    lastError: overlayLastError,
+  }
+}
+
+function configureAutoUpdater() {
+  if (isDev) {
+    setUpdateStatus({ enabled: false, state: 'disabled' })
+    return
+  }
+
+  autoUpdater.autoDownload = true
+  autoUpdater.autoInstallOnAppQuit = true
+  autoUpdater.allowPrerelease = false
+  autoUpdater.setFeedURL({
+    provider: 'github',
+    owner: UPDATE_OWNER,
+    repo: UPDATE_REPO,
+  })
+
+  autoUpdater.on('checking-for-update', () => {
+    ucLog('Checking for app updates')
+    setUpdateStatus({ state: 'checking', error: null, checkedAt: Date.now() })
+  })
+
+  autoUpdater.on('update-available', (info) => {
+    const version = String(info?.version || '').replace(/^v/i, '') || null
+    ucLog(`Update available: ${version || 'unknown version'}`)
+    setUpdateStatus({
+      state: 'available',
+      version,
+      available: true,
+      downloaded: false,
+      progress: 0,
+      error: null,
+      checkedAt: Date.now(),
+    })
+  })
+
+  autoUpdater.on('update-not-available', () => {
+    ucLog('No app update available')
+    setUpdateStatus({
+      state: 'not-available',
+      version: null,
+      available: false,
+      downloaded: false,
+      progress: 0,
+      error: null,
+      checkedAt: Date.now(),
+    })
+  })
+
+  autoUpdater.on('download-progress', (progress) => {
+    setUpdateStatus({
+      state: 'downloading',
+      available: true,
+      downloaded: false,
+      progress: Math.max(0, Math.min(100, Number(progress?.percent || 0))),
+      error: null,
+    })
+  })
+
+  autoUpdater.on('update-downloaded', (info) => {
+    const version = String(info?.version || updateState.version || '').replace(/^v/i, '') || updateState.version
+    ucLog(`Update downloaded: ${version || 'unknown version'}`)
+    setUpdateStatus({
+      state: 'downloaded',
+      version,
+      available: true,
+      downloaded: true,
+      progress: 100,
+      error: null,
+    })
+  })
+
+  autoUpdater.on('error', (err) => {
+    const message = err?.message || String(err)
+    ucLog(`Auto-update failed: ${message}`, 'warn')
+    setUpdateStatus({ state: 'error', error: message })
+  })
+}
+
+async function triggerAutoUpdateCheck() {
+  if (isDev) {
+    setUpdateStatus({ enabled: false, state: 'disabled', error: null })
+    return getUpdateStatusSnapshot()
+  }
+  if (updateState.state === 'checking' || updateState.state === 'downloading') {
+    return getUpdateStatusSnapshot()
+  }
+
+  try {
+    await autoUpdater.checkForUpdates()
+    return getUpdateStatusSnapshot()
+  } catch (err) {
+    const message = err?.message || String(err)
+    setUpdateStatus({ state: 'error', error: message, checkedAt: Date.now() })
+    return getUpdateStatusSnapshot()
+  }
+}
+
+async function retryAutoUpdate() {
+  if (isDev) {
+    setUpdateStatus({ enabled: false, state: 'disabled', error: null })
+    return getUpdateStatusSnapshot()
+  }
+  if (updateState.state === 'downloaded') return getUpdateStatusSnapshot()
+
+  try {
+    if (updateState.available && !updateState.downloaded) {
+      setUpdateStatus({ state: 'downloading', error: null })
+      await autoUpdater.downloadUpdate()
+      return getUpdateStatusSnapshot()
+    }
+    return await triggerAutoUpdateCheck()
+  } catch (err) {
+    const message = err?.message || String(err)
+    setUpdateStatus({ state: 'error', error: message, checkedAt: Date.now() })
+    return getUpdateStatusSnapshot()
+  }
+}
 
 // Create the overlay window (transparent, always on top, click-through capable)
 function createOverlayWindow() {
   if (overlayWindow && !overlayWindow.isDestroyed()) {
     return overlayWindow
   }
+  setOverlayEvent('creating overlay window')
 
   // Get primary display dimensions - use full size (not workAreaSize) so the
   // overlay covers fullscreen/exclusive games that extend under the taskbar.
@@ -154,6 +352,7 @@ function createOverlayWindow() {
 
   overlayWindow.webContents.once('did-finish-load', () => {
     overlayReady = true
+    setOverlayEvent('overlay renderer ready')
     ucLog('Overlay renderer loaded and ready')
     // If a toast was requested while the page was loading, fire it now
     if (overlayDeferredToastAppid !== undefined) {
@@ -167,8 +366,10 @@ function createOverlayWindow() {
     overlayWindow = null
     overlayReady = false
     currentOverlayAppid = null
+    setOverlayEvent('overlay window closed')
   })
 
+  setOverlayError(null)
   ucLog('Overlay window created')
   return overlayWindow
 }
@@ -188,6 +389,7 @@ function showOverlay(appid = null) {
     overlayWindow.setIgnoreMouseEvents(false)
     overlayWindow.show()
     overlayWindow.focus()
+    setOverlayEvent(`overlay panel shown for ${appid || 'unknown'}`)
     overlayWindow.webContents.send('uc:overlay-show', { appid })
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('uc:overlay-state-changed', { visible: true, appid })
@@ -209,6 +411,7 @@ function showOverlayToast(appid = null) {
   // If the overlay page hasn't finished loading yet, defer the toast
   if (!overlayReady) {
     ucLog(`Overlay toast deferred (page loading) for game: ${appid || 'unknown'}`)
+    setOverlayEvent(`overlay toast deferred for ${appid || 'unknown'}`)
     overlayDeferredToastAppid = appid
     return
   }
@@ -219,6 +422,7 @@ function showOverlayToast(appid = null) {
     // Re-assert always-on-top so the overlay is above fullscreen games
     overlayWindow.setAlwaysOnTop(true, 'screen-saver')
     overlayWindow.showInactive()
+    setOverlayEvent(`overlay toast shown for ${appid || 'unknown'}`)
     overlayWindow.webContents.send('uc:overlay-toast', { appid })
     clearTimeout(overlayToastTimer)
     overlayToastTimer = setTimeout(() => {
@@ -263,6 +467,7 @@ function hideOverlay() {
     }
     
     ucLog('Overlay hidden')
+    setOverlayEvent('overlay hidden')
   }
 }
 
@@ -296,8 +501,11 @@ function registerOverlayHotkey() {
     
     if (success) {
       ucLog(`Overlay hotkey registered: ${overlayHotkey}`)
+      setOverlayError(null)
+      setOverlayEvent(`overlay hotkey registered: ${overlayHotkey}`)
     } else {
       ucLog(`Failed to register overlay hotkey: ${overlayHotkey}`, 'warn')
+      setOverlayError(`Failed to register hotkey: ${overlayHotkey}`)
     }
   }
 }
@@ -393,6 +601,7 @@ function injectOverlayIntoGame(pid, appid) {
   const dllPath = getDllPath()
   if (!fs.existsSync(dllPath)) {
     ucLog(`Overlay DLL not found at ${dllPath} - skipping injection`, 'warn')
+    setOverlayError(`Overlay DLL not found at ${dllPath}`)
     return
   }
 
@@ -465,18 +674,23 @@ function injectOverlayIntoGame(pid, appid) {
         const success = nativeOverlay.injectDll(pid, dllPath)
         if (success) {
           ucLog(`Overlay DLL injected into PID ${pid} for game ${appid}`)
+          setOverlayError(null)
+          setOverlayEvent(`overlay injected into pid ${pid} (${appid || 'unknown'})`)
         } else {
           ucLog(`Failed to inject overlay DLL into PID ${pid}`, 'warn')
+          setOverlayError(`Failed to inject overlay DLL into PID ${pid}`)
           cleanupOverlayInjection(pid)
         }
       } catch (e) {
         ucLog(`Error injecting overlay DLL: ${e.message}`, 'error')
+        setOverlayError(`Error injecting overlay DLL into PID ${pid}: ${e.message}`)
         cleanupOverlayInjection(pid)
       }
     }, 500)
 
   } catch (e) {
     ucLog(`Error setting up overlay injection for PID ${pid}: ${e.message}`, 'error')
+    setOverlayError(`Error setting up overlay injection for PID ${pid}: ${e.message}`)
     cleanupOverlayInjection(pid)
   }
 }
@@ -587,6 +801,7 @@ function cleanupOverlayInjection(pid) {
 
   overlayInjections.delete(pid)
   ucLog(`Overlay injection cleaned up for PID ${pid}`)
+  setOverlayEvent(`overlay injection cleaned up for pid ${pid}`)
 }
 
 const downloadDirName = 'UnionCrax.Direct'
@@ -3934,180 +4149,6 @@ $candidates | Sort-Object CreationDate | ForEach-Object { $_.ProcessId }`
   })
 }
 
-function registerRunningGamePid(appid, exePath, pid, gameName, showGameName = true) {
-  if (!pid) return
-  const payload = {
-    appid: appid || null,
-    exePath: exePath || null,
-    gameName: gameName || null,
-    pid: Number(pid),
-    startedAt: Date.now()
-  }
-  if (appid) runningGames.set(appid, payload)
-  if (exePath) runningGames.set(exePath, payload)
-  if (gameName || appid) {
-    const buttons = appid
-      ? [
-        { label: 'Open on web', url: `https://union-crax.xyz/game/${appid}` },
-        { label: 'Download UC.D', url: 'https://union-crax.xyz/direct' }
-      ]
-      : [
-        { label: 'Open on web', url: 'https://union-crax.xyz/direct' },
-        { label: 'Download UC.D', url: 'https://union-crax.xyz/direct' }
-      ]
-    const displayName = showGameName ? (gameName || appid) : 'A game'
-    setGameRpcActivity({
-      details: `Playing ${displayName}`,
-      state: 'Playing',
-      startTimestamp: Math.floor(payload.startedAt / 1000),
-      buttons
-    }).catch(() => { })
-  }
-
-  // Auto-show overlay when game launches (PID-based)
-  if (appid) checkAndShowOverlayForGame(appid)
-
-  // Native DLL injection disabled (see registerRunningGame comment)
-  // if (nativeOverlay && pid) {
-  //   setTimeout(() => injectOverlayIntoGame(Number(pid), appid), 2000)
-  // }
-
-  const numPid = Number(pid)
-  const isTrackedPayloadCurrent = () => {
-    if (payload.appid && runningGames.get(payload.appid) === payload) return true
-    if (payload.exePath && runningGames.get(payload.exePath) === payload) return true
-    return false
-  }
-
-  const clearTrackedPayload = () => {
-    if (payload.appid) runningGames.delete(payload.appid)
-    if (payload.exePath) runningGames.delete(payload.exePath)
-    payload.handoffPendingUntil = 0
-  }
-
-  const finalizeTrackedExit = (exitedPid) => {
-    if (!isTrackedPayloadCurrent()) return
-    clearTrackedPayload()
-    if (runningGames.size === 0) {
-      clearGameRpcActivity()
-      hideOverlay()
-    }
-    cleanupOverlayInjection(exitedPid)
-  }
-
-  const runHiddenPowerShell = (script, timeout = 8000) => new Promise((resolve) => {
-    const encoded = Buffer.from(script, 'utf16le').toString('base64')
-    child_process.execFile(
-      'powershell.exe',
-      ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-EncodedCommand', encoded],
-      { windowsHide: true, timeout },
-      (_err, stdout) => resolve(String(stdout || ''))
-    )
-  })
-
-  const findWindowsSuccessorPids = async (rootPid) => {
-    if (process.platform !== 'win32' || !rootPid) return []
-    const gameDir = payload.exePath ? path.dirname(payload.exePath) : ''
-    const escapedDir = gameDir.replace(/'/g, "''")
-    const psScript = `$rootPid = ${Number(rootPid)}
-$gameDir = '${escapedDir}'
-$processes = @()
-try {
-  $processes = @(Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId, ExecutablePath, CreationDate)
-} catch {}
-$queue = New-Object System.Collections.Queue
-$seen = New-Object 'System.Collections.Generic.HashSet[int]'
-$descendants = New-Object System.Collections.ArrayList
-$queue.Enqueue([int]$rootPid)
-[void]$seen.Add([int]$rootPid)
-while ($queue.Count -gt 0) {
-  $parentPid = [int]$queue.Dequeue()
-  foreach ($proc in @($processes | Where-Object { [int]$_.ParentProcessId -eq $parentPid })) {
-    $pid = [int]$proc.ProcessId
-    if ($pid -gt 0 -and $seen.Add($pid)) {
-      [void]$descendants.Add($proc)
-      $queue.Enqueue($pid)
-    }
-  }
-}
-$candidates = @($descendants)
-if ($candidates.Count -eq 0 -and $gameDir) {
-  $candidates = @($processes | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($gameDir + '\\', [StringComparison]::OrdinalIgnoreCase) })
-}
-$candidates | Sort-Object CreationDate | ForEach-Object { $_.ProcessId }`
-    const stdout = await runHiddenPowerShell(psScript)
-    return stdout
-      .trim()
-      .split(/\r?\n/)
-      .map((value) => Number(value.trim()))
-      .filter((candidatePid) => candidatePid > 0 && candidatePid !== Number(rootPid))
-  }
-
-  const handleTrackedExit = (exitedPid) => {
-    if (process.platform !== 'win32' || !payload.exePath) {
-      finalizeTrackedExit(exitedPid)
-      return
-    }
-
-    const handoffDeadline = Date.now() + WINDOWS_GAME_HANDOFF_GRACE_MS
-    payload.handoffPendingUntil = handoffDeadline
-
-    const tryAdoptSuccessor = async () => {
-      if (!isTrackedPayloadCurrent()) return
-      if (payload.pid !== exitedPid) return
-
-      const successorPids = await findWindowsSuccessorPids(exitedPid)
-      if (!isTrackedPayloadCurrent()) return
-      if (payload.pid !== exitedPid) return
-
-      if (successorPids.length > 0) {
-        const adoptedPid = successorPids[successorPids.length - 1]
-        ucLog(`[Game] ${payload.appid || 'unknown'} launcher exited (PID ${exitedPid}), adopting child PID ${adoptedPid}`)
-        payload.pid = adoptedPid
-        payload.handoffPendingUntil = 0
-        if (payload.appid) runningGames.set(payload.appid, payload)
-        if (payload.exePath) runningGames.set(payload.exePath, payload)
-        cleanupOverlayInjection(exitedPid)
-        if (payload.appid && overlayAutoShow && overlayEnabled && overlayMode !== 'panel') {
-          showOverlayToast(payload.appid)
-        }
-        monitorTrackedPid(adoptedPid)
-        return
-      }
-
-      if (Date.now() >= handoffDeadline) {
-        finalizeTrackedExit(exitedPid)
-        return
-      }
-
-      setTimeout(tryAdoptSuccessor, WINDOWS_GAME_HANDOFF_POLL_MS)
-    }
-
-    setTimeout(tryAdoptSuccessor, 500)
-  }
-
-  const monitorTrackedPid = (trackedPid) => {
-    const numericPid = Number(trackedPid)
-    if (!numericPid) return
-    let checking = false
-    const pidPollInterval = setInterval(async () => {
-      if (checking) return
-      checking = true
-      try {
-        const alive = await isProcessRunning(numericPid)
-        if (alive) return
-        clearInterval(pidPollInterval)
-        if (payload.pid !== numericPid) return
-        handleTrackedExit(numericPid)
-      } finally {
-        checking = false
-      }
-    }, GAME_PID_POLL_MS)
-  }
-
-  monitorTrackedPid(numPid)
-}
-
 function getRunningGame(appid) {
   if (!appid) return null
   const byApp = runningGames.get(appid)
@@ -4194,29 +4235,6 @@ async function pruneRunningGames() {
   if (runningGames.size === 0 && rpcGameActivity) {
     clearGameRpcActivity()
   }
-}
-
-function killProcessTreeElevated(pid) {
-  return new Promise((resolve) => {
-    if (!pid || process.platform !== 'win32') return resolve(false)
-    try {
-      const psScript = `try { $p = Start-Process -FilePath 'taskkill' -ArgumentList '/PID', '${pid}', '/T', '/F' -Verb RunAs -Wait -PassThru -ErrorAction Stop; if ($p.ExitCode -eq 0) { exit 0 } else { exit 1 } } catch { exit 1 }`
-      const killer = child_process.spawn('powershell.exe', [
-        '-NoProfile',
-        '-NonInteractive',
-        '-WindowStyle',
-        'Hidden',
-        '-ExecutionPolicy',
-        'Bypass',
-        '-Command',
-        psScript
-      ], { windowsHide: true, stdio: 'ignore' })
-      killer.on('close', (code) => resolve(code === 0))
-      killer.on('error', () => resolve(false))
-    } catch {
-      resolve(false)
-    }
-  })
 }
 
 function createWindow() {
@@ -4862,6 +4880,7 @@ app.whenReady().then(() => {
   ensureDownloadDir()
   createWindow()
   createTray()
+  configureAutoUpdater()
   
   // Initialize overlay system
   const settings = readSettings()
@@ -4915,43 +4934,15 @@ app.whenReady().then(() => {
     }
   }, 15000)
 
-  // Update behavior: auto-updater removed. Open releases page instead.
   if (!isDev) {
-    ucLog('Auto-updater disabled. Update checks will open GitHub releases page.')
+    setTimeout(() => {
+      triggerAutoUpdateCheck().catch(() => { })
+    }, 10000)
+    setInterval(() => {
+      triggerAutoUpdateCheck().catch(() => { })
+    }, 60 * 60 * 1000)
   } else {
-    ucLog('DEV mode - update checks will open GitHub releases page.')
-  }
-  // Automatic check for new releases: query GitHub API and notify renderer
-  try {
-    const checkLatestRelease = async () => {
-      try {
-        const { latest, url } = await fetchLatestReleaseInfo()
-        const current = String(getAppVersion() || '')
-
-        if (latest && compareVersions(latest, current) === 1) {
-          const info = { version: latest, url }
-          ucLog(`New release available: v${latest} (current: ${current})`)
-          const windows = BrowserWindow.getAllWindows()
-          windows.forEach(win => {
-            try { win.webContents.send('update-available', info) } catch (e) { }
-          })
-        } else {
-          ucLog(`No new release. Current: v${current}`)
-          const windows = BrowserWindow.getAllWindows()
-          windows.forEach(win => {
-            try { win.webContents.send('update-not-available', { version: current }) } catch (e) { }
-          })
-        }
-      } catch (err) {
-        ucLog(`Release check error: ${err && err.message ? err.message : String(err)}`, 'warn')
-      }
-    }
-    // Initial check shortly after startup
-    setTimeout(() => { checkLatestRelease().catch(() => { }) }, 5000)
-    // Hourly checks
-    setInterval(() => { checkLatestRelease().catch(() => { }) }, 60 * 60 * 1000)
-  } catch (e) {
-    ucLog(`Failed to schedule release checks: ${e && e.message ? e.message : String(e)}`, 'warn')
+    ucLog('DEV mode - automatic update checks disabled.')
   }
 
   app.on('activate', () => {
@@ -4959,54 +4950,35 @@ app.whenReady().then(() => {
   })
 })
 
-// Simplified update handlers: open GitHub Releases page instead of auto-updates
 ipcMain.handle('uc:check-for-updates', async () => {
-  try {
-    const current = String(getAppVersion() || '')
-    let latestInfo
-    try {
-      latestInfo = await fetchLatestReleaseInfo()
-    } catch (e) {
-      ucLog(`Latest release fetch failed: ${e && e.message ? e.message : String(e)}`, 'warn')
-      // On fetch failure, do not open the page
-      return { ok: false, error: 'release_check_failed' }
-    }
-    const { latest, url } = latestInfo
-    if (latest && compareVersions(latest, current) === 1) {
-      ucLog(`Opening releases page for updates: ${url} (current: v${current} -> latest: v${latest})`)
-      try { shell.openExternal(url) } catch (e) { }
-      return { ok: true, url, latest, current }
-    }
-    ucLog(`Up to date. Current: v${current}`)
-    return { ok: false, upToDate: true, current }
-  } catch (err) {
-    ucLog(`Failed to open releases page: ${err.message}`, 'error')
-    return { ok: false, error: err.message }
-  }
+  return await triggerAutoUpdateCheck()
 })
 
 ipcMain.handle('uc:update-retry', async () => {
+  return await retryAutoUpdate()
+})
+
+ipcMain.handle('uc:install-update', () => {
+  if (isDev) return { ok: false, error: 'updates-disabled-in-dev' }
+  if (!updateState.downloaded) return { ok: false, error: 'update-not-downloaded' }
   try {
-    const current = String(getAppVersion() || '')
-    let latestInfo
-    try {
-      latestInfo = await fetchLatestReleaseInfo()
-    } catch (e) {
-      ucLog(`Latest release fetch failed (retry): ${e && e.message ? e.message : String(e)}`, 'warn')
-      return { ok: false, error: 'release_check_failed' }
-    }
-    const { latest, url } = latestInfo
-    if (latest && compareVersions(latest, current) === 1) {
-      ucLog(`Opening releases page for update retry: ${url} (current: v${current} -> latest: v${latest})`)
-      try { shell.openExternal(url) } catch (e) { }
-      return { ok: true, url, latest, current }
-    }
-    ucLog(`Up to date. Current: v${current}`)
-    return { ok: false, upToDate: true, current }
+    setUpdateStatus({ state: 'installing', error: null })
+    setImmediate(() => {
+      try {
+        autoUpdater.quitAndInstall(false, true)
+      } catch (err) {
+        setUpdateStatus({ state: 'error', error: err?.message || String(err) })
+      }
+    })
+    return { ok: true }
   } catch (err) {
-    ucLog(`Failed to open releases page: ${err.message}`, 'error')
-    return { ok: false, error: err.message }
+    setUpdateStatus({ state: 'error', error: err?.message || String(err) })
+    return { ok: false, error: err?.message || String(err) }
   }
+})
+
+ipcMain.handle('uc:get-update-status', () => {
+  return getUpdateStatusSnapshot()
 })
 
 ipcMain.handle('uc:get-version', () => {
@@ -7110,9 +7082,152 @@ ipcMain.handle('uc:vr-get-settings', () => {
 // Game Launch
 // ============================================================
 
+function launchTrackedGameProcess({ appid, exePath, gameName, showGameName, command, args, cwd, env }) {
+  return new Promise((resolve, reject) => {
+    try {
+      const proc = child_process.spawn(command, Array.isArray(args) ? args : [], {
+        shell: false,
+        detached: true,
+        stdio: 'ignore',
+        windowsHide: true,
+        cwd,
+        env
+      })
+
+      proc.once('spawn', () => {
+        proc.unref()
+        registerRunningGame(appid, exePath, proc, gameName, showGameName)
+        ucLog(`Game launched successfully: ${appid} (PID: ${proc.pid})`)
+        resolve({ ok: true, pid: proc.pid })
+      })
+
+      proc.once('error', reject)
+    } catch (err) {
+      reject(err)
+    }
+  })
+}
+
+function buildGameLaunchPreflight(appid, exePath) {
+  const checks = []
+
+  if (!exePath || typeof exePath !== 'string') {
+    return {
+      ok: true,
+      canLaunch: false,
+      checks: [{ level: 'error', code: 'invalid-exe-path', message: 'The selected executable path is invalid.' }],
+      resolved: null,
+    }
+  }
+
+  if (!fs.existsSync(exePath)) {
+    return {
+      ok: true,
+      canLaunch: false,
+      checks: [{ level: 'error', code: 'exe-not-found', message: 'The selected executable no longer exists on disk.' }],
+      resolved: null,
+    }
+  }
+
+  let stat = null
+  try {
+    stat = fs.statSync(exePath)
+  } catch (err) {
+    return {
+      ok: true,
+      canLaunch: false,
+      checks: [{ level: 'error', code: 'exe-stat-failed', message: err?.message || 'Unable to inspect the selected executable.' }],
+      resolved: null,
+    }
+  }
+
+  if (!stat.isFile()) {
+    checks.push({ level: 'error', code: 'exe-not-file', message: 'The selected path is not a file.' })
+  }
+
+  const basename = path.basename(exePath)
+  const ext = path.extname(basename).toLowerCase()
+  const suspiciousNamePattern = /(setup|install|unins|uninstall|redist|prereq|benchmark|config|dxsetup|vc_redist|crashreport)/i
+  const likelyExecutableExtensions = new Set(['.exe', '.bat', '.cmd', '.com', '.sh', '.appimage'])
+
+  if (ext && !likelyExecutableExtensions.has(ext) && ext !== '.lnk') {
+    checks.push({
+      level: 'warning',
+      code: 'unusual-extension',
+      message: `This file uses an unusual launch extension (${ext}). Make sure it is the actual game executable.`,
+    })
+  }
+
+  if (ext === '.lnk') {
+    checks.push({
+      level: 'warning',
+      code: 'shortcut-selected',
+      message: 'A shortcut file was selected. Launching the real executable directly is usually more reliable.',
+    })
+  }
+
+  if (suspiciousNamePattern.test(basename)) {
+    checks.push({
+      level: 'warning',
+      code: 'suspicious-name',
+      message: 'This filename looks like an installer, prerequisite, or helper executable rather than the main game binary.',
+    })
+  }
+
+  let resolved = null
+  try {
+    resolved = appid ? resolveLaunchCommandWithGameConfig(exePath, appid) : resolveLaunchCommand(exePath)
+    if (resolved?.cwd && !fs.existsSync(resolved.cwd)) {
+      checks.push({ level: 'error', code: 'missing-working-directory', message: 'The launch working directory could not be found.' })
+    }
+  } catch (err) {
+    checks.push({ level: 'error', code: 'resolve-launch-command-failed', message: err?.message || 'Unable to build the launch command.' })
+  }
+
+  if (process.platform !== 'win32') {
+    try {
+      fs.accessSync(exePath, fs.constants.X_OK)
+    } catch {
+      checks.push({
+        level: 'warning',
+        code: 'not-executable',
+        message: 'This file is not marked as executable on the current system.',
+      })
+    }
+  }
+
+  return {
+    ok: true,
+    canLaunch: !checks.some((check) => check.level === 'error'),
+    checks,
+    resolved: resolved ? {
+      command: resolved.command,
+      args: Array.isArray(resolved.args) ? resolved.args : [],
+      cwd: resolved.cwd,
+    } : null,
+  }
+}
+
+ipcMain.handle('uc:game-exe-preflight', async (_event, appid, exePath) => {
+  try {
+    return buildGameLaunchPreflight(appid, exePath)
+  } catch (err) {
+    return {
+      ok: true,
+      canLaunch: false,
+      checks: [{ level: 'error', code: 'preflight-failed', message: err?.message || 'Launch preflight failed.' }],
+      resolved: null,
+    }
+  }
+})
+
 ipcMain.handle('uc:game-exe-launch', async (_event, appid, exePath, gameName, showGameName) => {
   try {
     if (!exePath || typeof exePath !== 'string') return { ok: false }
+    if (!fs.existsSync(exePath)) {
+      ucLog(`Game launch failed: ${appid} - executable not found at ${exePath}`, 'error')
+      return { ok: false, error: 'exe-not-found' }
+    }
     ucLog(`Launching game: ${appid} at ${exePath}`)
 
     try {
@@ -7134,34 +7249,32 @@ ipcMain.handle('uc:game-exe-launch', async (_event, appid, exePath, gameName, sh
         const env = { ...process.env }
         env.PATH = `${cwd};${env.PATH || ''}`
 
-        const proc = child_process.spawn(command, args.length ? args : [], {
-          detached: true,
-          stdio: 'ignore',
-          windowsHide: false,
+        return await launchTrackedGameProcess({
+          appid,
+          exePath,
+          gameName,
+          showGameName,
+          command,
+          args,
           cwd,
           env
         })
-        proc.unref()
-        registerRunningGame(appid, exePath, proc, gameName, showGameName)
-        ucLog(`Game launched successfully: ${appid} (PID: ${proc.pid})`)
-        return { ok: true, pid: proc.pid }
       }
 
       // Non-Windows path (Linux/macOS) - apply per-game + global Wine/Proton/VR/SLSsteam env vars
       const env = buildGameLaunchEnv(appid, process.env)
       env.PATH = `${cwd}:${env.PATH || ''}`
 
-      const proc = child_process.spawn(command, args, {
-        detached: true,
-        stdio: 'ignore',
-        windowsHide: false,
+      return await launchTrackedGameProcess({
+        appid,
+        exePath,
+        gameName,
+        showGameName,
+        command,
+        args,
         cwd,
         env
       })
-      proc.unref()
-      registerRunningGame(appid, exePath, proc, gameName, showGameName)
-      ucLog(`Game launched successfully: ${appid} (PID: ${proc.pid})`)
-      return { ok: true, pid: proc.pid }
     } catch (err) {
       const res = await shell.openPath(exePath)
       if (res && typeof res === 'string' && res.length > 0) {
@@ -7173,131 +7286,6 @@ ipcMain.handle('uc:game-exe-launch', async (_event, appid, exePath, gameName, sh
     }
   } catch (err) {
     ucLog(`Game launch error: ${appid} - ${err.message}`, 'error')
-    return { ok: false }
-  }
-})
-
-ipcMain.handle('uc:game-exe-launch-admin', async (_event, appid, exePath, gameName, showGameName) => {
-  try {
-    if (!exePath || typeof exePath !== 'string') return { ok: false }
-    if (process.platform !== 'win32') {
-      ucLog(`Launching game (non-admin fallback): ${appid} at ${exePath}`)
-      try {
-        const { command, args, cwd } = appid
-          ? resolveLaunchCommandWithGameConfig(exePath, appid)
-          : resolveLaunchCommand(exePath)
-        
-        // Prepare environment - apply per-game + global Wine/Proton/VR/SLSsteam env vars
-        const env = buildGameLaunchEnv(appid, process.env)
-        env.PATH = `${cwd}:${env.PATH || ''}`
-
-        const proc = child_process.spawn(command, args, {
-          detached: true,
-          stdio: 'ignore',
-          windowsHide: false,
-          cwd,
-          env
-        })
-        proc.unref()
-        registerRunningGame(appid, exePath, proc, gameName, showGameName)
-        ucLog(`Game launched successfully: ${appid} (PID: ${proc.pid})`)
-        return { ok: true, pid: proc.pid }
-      } catch (err) {
-        const res = await shell.openPath(exePath)
-        if (res && typeof res === 'string' && res.length > 0) {
-          ucLog(`Game launch failed: ${appid} - ${res}`, 'error')
-          return { ok: false, error: res }
-        }
-        ucLog(`Game opened via shell: ${appid}`)
-        return { ok: true }
-      }
-    }
-    ucLog(`Launching game as admin: ${appid} at ${exePath}`)
-    try {
-      const workingDir = path.dirname(exePath)
-
-      // Verbose logging
-      const settings = readSettings() || {}
-      if (settings.verboseDownloadLogging) {
-        ucLog(`  Working directory (admin): ${workingDir}`, 'info')
-        ucLog(`  Executable (admin): ${exePath}`, 'info')
-      }
-
-      // Launch via cmd.exe as admin so the wrapper PID can be tracked and quit can kill the whole tree.
-      const safeWorkingDir = String(workingDir).replace(/'/g, "''")
-      const safeExePath = String(exePath).replace(/'/g, "''")
-      const cmdLine = `set "PATH=${safeWorkingDir};%PATH%" && "${safeExePath}"`
-
-      const psScript = `try { $p = Start-Process -FilePath 'cmd.exe' -ArgumentList @('/d','/s','/c', '${cmdLine}') -WorkingDirectory '${safeWorkingDir}' -Verb RunAs -WindowStyle Hidden -PassThru -ErrorAction Stop; if ($p) { Write-Output \"STARTED:$($p.Id)\"; exit 0 } else { Write-Error 'START-FAILED'; exit 1 } } catch { Write-Error $_.Exception.Message; exit 1 }`
-      const proc = child_process.spawn('powershell.exe', [
-        '-NoProfile',
-        '-NonInteractive',
-        '-WindowStyle',
-        'Hidden',
-        '-ExecutionPolicy',
-        'Bypass',
-        '-Command',
-        psScript
-      ], {
-        detached: false,
-        stdio: ['ignore', 'pipe', 'pipe'],
-        windowsHide: true
-      })
-      const result = await new Promise((resolve) => {
-        let done = false
-        let launchedPid = null
-        const finish = (payload) => {
-          if (done) return
-          done = true
-          resolve(payload)
-        }
-
-        const timer = setTimeout(() => {
-          finish({ ok: false, error: 'launch-timeout' })
-        }, 12000)
-
-        proc.stdout?.on('data', (data) => {
-          const msg = String(data).trim()
-          if (msg) {
-            ucLog(`Game launch as admin stdout: ${appid} - ${msg}`)
-            const match = msg.match(/STARTED:(\d+)/)
-            if (match && match[1]) {
-              launchedPid = Number(match[1])
-              registerRunningGamePid(appid, exePath, launchedPid, gameName, showGameName)
-              clearTimeout(timer)
-              finish({ ok: true, pid: launchedPid })
-            }
-          }
-        })
-        proc.stderr?.on('data', (data) => {
-          const msg = String(data).trim()
-          if (msg) ucLog(`Game launch as admin stderr: ${appid} - ${msg}`, 'error')
-        })
-        proc.on('error', (err) => {
-          clearTimeout(timer)
-          ucLog(`Game launch as admin process error: ${appid} - ${err.message}`, 'error')
-          finish({ ok: false, error: err.message })
-        })
-        proc.on('exit', (code, signal) => {
-          ucLog(`Game launch as admin process exit: ${appid} - code=${code} signal=${signal}`, 'info')
-          if (!done) {
-            clearTimeout(timer)
-            finish({ ok: false, error: 'launch-exit' })
-          }
-        })
-      })
-
-      if (!result.ok) throw new Error(result.error || 'launch-failed')
-      ucLog(`Game launched as admin successfully: ${appid}`)
-      return result
-    } catch (err) {
-      ucLog(`Game launch as admin failed: ${appid} - ${err.message}`, 'error')
-      // Don't silently fall back to a non-admin launch - the caller chose admin intentionally.
-      // If UAC was declined the user gets a clean failure rather than a confusing silent launch.
-      return { ok: false, error: err.message }
-    }
-  } catch (err) {
-    ucLog(`Game launch as admin error: ${appid} - ${err.message}`, 'error')
     return { ok: false }
   }
 })
@@ -7324,9 +7312,6 @@ ipcMain.handle('uc:game-exe-quit', async (_event, appid) => {
     const running = getRunningGame(appid)
     if (!running) return { ok: true, stopped: false }
     let stopped = await killProcessTree(running.pid)
-    if (!stopped) {
-      stopped = await killProcessTreeElevated(running.pid)
-    }
     if (!stopped) {
       const alive = await isProcessRunning(running.pid)
       if (!alive) stopped = true
@@ -7893,6 +7878,14 @@ ipcMain.handle('uc:overlay-set-settings', (_event, settings) => {
     return { ok: true }
   } catch (err) {
     ucLog(`Overlay settings update failed: ${err.message}`, 'error')
+    return { ok: false, error: err.message }
+  }
+})
+
+ipcMain.handle('uc:overlay-diagnostics', () => {
+  try {
+    return { ok: true, diagnostics: getOverlayDiagnostics() }
+  } catch (err) {
     return { ok: false, error: err.message }
   }
 })

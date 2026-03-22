@@ -29,8 +29,8 @@ contextBridge.exposeInMainWorld('ucDownloads', {
   listGameExecutables: (appid, versionLabel) => ipcRenderer.invoke('uc:game-exe-list', appid, versionLabel),
   browseForGameExe: (defaultPath) => ipcRenderer.invoke('uc:game-browse-exe', defaultPath),
   findGameSubfolder: (folder) => ipcRenderer.invoke('uc:game-subfolder-find', folder),
+  preflightGameLaunch: (appid, exePath) => ipcRenderer.invoke('uc:game-exe-preflight', appid, exePath),
   launchGameExecutable: (appid, exePath, gameName, showGameName) => ipcRenderer.invoke('uc:game-exe-launch', appid, exePath, gameName, showGameName),
-  launchGameExecutableAsAdmin: (appid, exePath, gameName, showGameName) => ipcRenderer.invoke('uc:game-exe-launch-admin', appid, exePath, gameName, showGameName),
   getRunningGame: (appid) => ipcRenderer.invoke('uc:game-exe-running', appid),
   isLauncherAvailable: () => ipcRenderer.invoke('uc:launcher-available'),
   quitGameExecutable: (appid) => ipcRenderer.invoke('uc:game-exe-quit', appid),
@@ -87,7 +87,15 @@ contextBridge.exposeInMainWorld('ucAuth', {
 
 contextBridge.exposeInMainWorld('ucUpdater', {
   checkForUpdates: () => ipcRenderer.invoke('uc:check-for-updates'),
-  getVersion: () => ipcRenderer.invoke('uc:get-version')
+  installUpdate: () => ipcRenderer.invoke('uc:install-update'),
+  getVersion: () => ipcRenderer.invoke('uc:get-version'),
+  getUpdateStatus: () => ipcRenderer.invoke('uc:get-update-status'),
+  retryUpdate: () => ipcRenderer.invoke('uc:update-retry'),
+  onStatusChanged: (callback) => {
+    const listener = (_event, data) => callback(data)
+    ipcRenderer.on('uc:update-status-changed', listener)
+    return () => ipcRenderer.removeListener('uc:update-status-changed', listener)
+  }
 })
 
 contextBridge.exposeInMainWorld('ucLogs', {
@@ -154,6 +162,7 @@ contextBridge.exposeInMainWorld('ucOverlay', {
   toggle: (appid) => ipcRenderer.invoke('uc:overlay-toggle', appid),
   getStatus: () => ipcRenderer.invoke('uc:overlay-status'),
   getSettings: () => ipcRenderer.invoke('uc:overlay-get-settings'),
+  getDiagnostics: () => ipcRenderer.invoke('uc:overlay-diagnostics'),
   setSettings: (settings) => ipcRenderer.invoke('uc:overlay-set-settings', settings),
   getGameInfo: (appid) => ipcRenderer.invoke('uc:overlay-game-info', appid),
   getRunningGames: () => ipcRenderer.invoke('uc:overlay-running-games'),

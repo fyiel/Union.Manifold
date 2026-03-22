@@ -124,8 +124,13 @@ declare global {
       getInstallingGlobal: (appid: string) => Promise<any | null>
       listGameExecutables: (appid: string) => Promise<{ ok: boolean; folder?: string; exes: { name: string; path: string; size?: number; depth?: number }[]; error?: string }>
       findGameSubfolder: (folder: string) => Promise<string | null>
+      preflightGameLaunch: (appid: string, exePath: string) => Promise<{
+        ok: boolean
+        canLaunch: boolean
+        checks: Array<{ level: 'error' | 'warning' | 'info'; code: string; message: string }>
+        resolved?: { command: string; args: string[]; cwd: string } | null
+      }>
       launchGameExecutable: (appid: string, exePath: string, gameName?: string, showGameName?: boolean) => Promise<{ ok: boolean; error?: string; pid?: number }>
-      launchGameExecutableAsAdmin: (appid: string, exePath: string, gameName?: string, showGameName?: boolean) => Promise<{ ok: boolean; error?: string; pid?: number }>
       getRunningGame: (appid: string) => Promise<{ ok: boolean; running: boolean; pid?: number; exePath?: string }>
       quitGameExecutable: (appid: string) => Promise<{ ok: boolean; stopped?: boolean }>
       deleteInstalled: (appid: string) => Promise<{ ok: boolean }>
@@ -177,11 +182,52 @@ declare global {
       }>
     }
     ucUpdater?: {
-      checkForUpdates: () => Promise<{ available: boolean; version?: string; message?: string; error?: string }>
-      installUpdate: () => void
+      checkForUpdates: () => Promise<{
+        enabled: boolean
+        state: 'disabled' | 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'installing' | 'not-available' | 'error'
+        currentVersion: string
+        version?: string | null
+        available: boolean
+        downloaded: boolean
+        progress: number
+        error?: string | null
+        checkedAt?: number | null
+      }>
+      installUpdate: () => Promise<{ ok: boolean; error?: string }>
       getVersion: () => Promise<string>
-      getUpdateStatus: () => Promise<any>
-      retryUpdate: () => Promise<{ ok: boolean; error?: string }>
+      getUpdateStatus: () => Promise<{
+        enabled: boolean
+        state: 'disabled' | 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'installing' | 'not-available' | 'error'
+        currentVersion: string
+        version?: string | null
+        available: boolean
+        downloaded: boolean
+        progress: number
+        error?: string | null
+        checkedAt?: number | null
+      }>
+      retryUpdate: () => Promise<{
+        enabled: boolean
+        state: 'disabled' | 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'installing' | 'not-available' | 'error'
+        currentVersion: string
+        version?: string | null
+        available: boolean
+        downloaded: boolean
+        progress: number
+        error?: string | null
+        checkedAt?: number | null
+      }>
+      onStatusChanged: (callback: (status: {
+        enabled: boolean
+        state: 'disabled' | 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'installing' | 'not-available' | 'error'
+        currentVersion: string
+        version?: string | null
+        available: boolean
+        downloaded: boolean
+        progress: number
+        error?: string | null
+        checkedAt?: number | null
+      }) => void) => () => void
     }
     ucLogs?: {
       log: (level: string, message: string, data?: any) => Promise<void>
@@ -267,6 +313,30 @@ declare global {
         hotkey: string
         autoShow: boolean
         position: 'left' | 'right'
+      }>
+      getDiagnostics: () => Promise<{
+        ok: boolean
+        diagnostics?: {
+          enabled: boolean
+          autoShow: boolean
+          hotkey: string
+          hotkeyRegistered: boolean
+          position: 'left' | 'right'
+          currentMode: 'hidden' | 'toast' | 'panel'
+          currentAppid: string | null
+          overlayWindowCreated: boolean
+          overlayWindowReady: boolean
+          overlayWindowVisible: boolean
+          nativeAddonAvailable: boolean
+          dllPath: string
+          dllExists: boolean
+          injectionCount: number
+          injections: Array<{ pid: number; appid: string | null; gameName: string | null }>
+          runningGameCount: number
+          lastEvent: string
+          lastError: string | null
+        }
+        error?: string
       }>
       setSettings: (settings: {
         overlayEnabled?: boolean

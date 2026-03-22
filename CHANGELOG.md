@@ -4,6 +4,7 @@
 
 ### Fixes & Improvements
 
+- Removed the admin-launch system; games now launch with standard user-level permissions. The launcher maintains all other functionality including executable auto-detection, desktop shortcut creation, and process tracking.
 - Fixed UC.Files compatibility after the stricter hotlink-protection rollout by making the desktop client recognize UC.Files host aliases when selecting mirrors, resolving signed download URLs, and choosing the native range downloader.
 - Fixed Electron-authenticated API calls so the UC.Files resolver endpoints receive the same `X-UC-Client` identity header as the download APIs.
 - Fixed the website direct-download flow to keep showing the UC.Files button when a mirror is already a signed `/dl/` URL instead of only handling landing-page `/f/` links.

@@ -33,6 +33,74 @@ type DiskInfo = {
   freeBytes: number
 }
 
+type UpdateStatus = {
+  enabled: boolean
+  state: 'disabled' | 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'installing' | 'not-available' | 'error'
+  currentVersion: string
+  version?: string | null
+  available: boolean
+  downloaded: boolean
+  progress: number
+  error?: string | null
+  checkedAt?: number | null
+}
+
+type OverlayDiagnostics = {
+  enabled: boolean
+  autoShow: boolean
+  hotkey: string
+  hotkeyRegistered: boolean
+  position: 'left' | 'right'
+  currentMode: 'hidden' | 'toast' | 'panel'
+  currentAppid: string | null
+  overlayWindowCreated: boolean
+  overlayWindowReady: boolean
+  overlayWindowVisible: boolean
+  nativeAddonAvailable: boolean
+  dllPath: string
+  dllExists: boolean
+  injectionCount: number
+  injections: Array<{ pid: number; appid: string | null; gameName: string | null }>
+  runningGameCount: number
+  lastEvent: string
+  lastError: string | null
+}
+
+const INITIAL_UPDATE_STATUS: UpdateStatus = {
+  enabled: true,
+  state: 'idle',
+  currentVersion: '',
+  version: null,
+  available: false,
+  downloaded: false,
+  progress: 0,
+  error: null,
+  checkedAt: null,
+}
+
+function getUpdateStatusMessage(status: UpdateStatus) {
+  switch (status.state) {
+    case 'disabled':
+      return 'Automatic updates are disabled in development builds.'
+    case 'checking':
+      return 'Checking for updates.'
+    case 'available':
+      return status.version ? `Update available: v${status.version}. Download will start automatically.` : 'Update available. Download will start automatically.'
+    case 'downloading':
+      return status.version ? `Downloading v${status.version} (${Math.round(status.progress)}%).` : `Downloading update (${Math.round(status.progress)}%).`
+    case 'downloaded':
+      return status.version ? `v${status.version} is ready to install.` : 'Update is ready to install.'
+    case 'installing':
+      return 'Installing update and restarting the app.'
+    case 'not-available':
+      return "You're up to date!"
+    case 'error':
+      return status.error || 'Update failed.'
+    default:
+      return 'Check for updates to fetch the latest build.'
+  }
+}
+
 function formatBytes(bytes: number) {
   if (!bytes) return "0 B"
   const units = ["B", "KB", "MB", "GB", "TB"]
@@ -60,7 +128,7 @@ export function SettingsPage() {
   const [checkingUpdate, setCheckingUpdate] = useState(false)
   const [appVersion, setAppVersion] = useState<string>("")
   const [updateCheckResult, setUpdateCheckResult] = useState<string | null>(null)
-  const [runGamesAsAdmin, setRunGamesAsAdmin] = useState(false)
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus>(INITIAL_UPDATE_STATUS)
   const [alwaysCreateDesktopShortcut, setAlwaysCreateDesktopShortcut] = useState(false)
   const [linuxLaunchMode, setLinuxLaunchMode] = useState<'auto' | 'native' | 'wine' | 'proton'>('auto')
   const [linuxWinePath, setLinuxWinePath] = useState('')
@@ -137,6 +205,8 @@ export function SettingsPage() {
   const [overlayPosition, setOverlayPosition] = useState<'left' | 'right'>('left')
   const [recordingHotkey, setRecordingHotkey] = useState(false)
   const [overlayLoaded, setOverlayLoaded] = useState(false)
+  const [overlayDiagnostics, setOverlayDiagnostics] = useState<OverlayDiagnostics | null>(null)
+  const [overlayDiagnosticsLoading, setOverlayDiagnosticsLoading] = useState(false)
 
   useEffect(() => {
     const loadVersion = async () => {
@@ -145,6 +215,49 @@ export function SettingsPage() {
     }
     loadVersion()
   }, [])
+
+  useEffect(() => {
+    let mounted = true
+
+    const loadUpdateStatus = async () => {
+      try {
+        const status = await window.ucUpdater?.getUpdateStatus?.()
+        if (mounted && status) {
+          setUpdateStatus(status)
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    void loadUpdateStatus()
+
+    const off = window.ucUpdater?.onStatusChanged?.((status) => {
+      if (!mounted) return
+      setUpdateStatus(status)
+      setUpdateCheckResult(getUpdateStatusMessage(status))
+    })
+
+    return () => {
+      mounted = false
+      if (typeof off === 'function') off()
+    }
+  }, [])
+
+  const loadOverlayDiagnostics = async () => {
+    if (overlayDiagnosticsLoading) return
+    setOverlayDiagnosticsLoading(true)
+    try {
+      const result = await window.ucOverlay?.getDiagnostics?.()
+      if (result?.ok && result.diagnostics) {
+        setOverlayDiagnostics(result.diagnostics)
+      }
+    } catch {
+      // ignore
+    } finally {
+      setOverlayDiagnosticsLoading(false)
+    }
+  }
 
   useEffect(() => {
     const load = async () => {
@@ -422,31 +535,6 @@ export function SettingsPage() {
 
   useEffect(() => {
     let mounted = true
-    const loadAdminSetting = async () => {
-      try {
-        const value = await window.ucSettings?.get?.('runGamesAsAdmin')
-        if (mounted) {
-          setRunGamesAsAdmin(value || false)
-        }
-      } catch {
-        // ignore
-      }
-    }
-    loadAdminSetting()
-    const off = window.ucSettings?.onChanged?.((data: any) => {
-      if (!data || !data.key) return
-      if (data.key === 'runGamesAsAdmin') {
-        setRunGamesAsAdmin(data.value || false)
-      }
-    })
-    return () => {
-      mounted = false
-      if (typeof off === 'function') off()
-    }
-  }, [])
-
-  useEffect(() => {
-    let mounted = true
     const loadShortcutSetting = async () => {
       try {
         const value = await window.ucSettings?.get?.('alwaysCreateDesktopShortcut')
@@ -686,21 +774,17 @@ export function SettingsPage() {
     setUpdateCheckResult(null)
     try {
       const result = await window.ucUpdater?.checkForUpdates()
-      if (result?.available) {
-        setUpdateCheckResult(`Update available: v${result.version}`)
-      } else if (result?.message) {
-        setUpdateCheckResult(result.message)
+      if (result) {
+        setUpdateStatus(result)
+        setUpdateCheckResult(getUpdateStatusMessage(result))
       } else {
-        setUpdateCheckResult("You're up to date!")
+        setUpdateCheckResult('Failed to check for updates')
       }
     } catch (err) {
       console.error("[UC] Failed to check for updates:", err)
       setUpdateCheckResult("Failed to check for updates")
     } finally {
-      setTimeout(() => {
-        setCheckingUpdate(false)
-        setTimeout(() => setUpdateCheckResult(null), 5000)
-      }, 1000)
+      setCheckingUpdate(false)
     }
   }
 
@@ -714,6 +798,16 @@ export function SettingsPage() {
       const downloadPathValue = downloadPathResult?.path || downloadPath || 'unknown'
       const platformValue = typeof navigator !== 'undefined' ? navigator.platform : 'unknown'
       const userAgentValue = typeof navigator !== 'undefined' ? navigator.userAgent : 'unknown'
+      const overlaySummary = overlayDiagnostics
+        ? [
+            `Overlay Enabled: ${overlayDiagnostics.enabled ? 'yes' : 'no'}`,
+            `Overlay Hotkey Registered: ${overlayDiagnostics.hotkeyRegistered ? 'yes' : 'no'}`,
+            `Overlay Native Addon: ${overlayDiagnostics.nativeAddonAvailable ? 'available' : 'missing'}`,
+            `Overlay DLL Exists: ${overlayDiagnostics.dllExists ? 'yes' : 'no'}`,
+            `Overlay Last Event: ${overlayDiagnostics.lastEvent}`,
+            `Overlay Last Error: ${overlayDiagnostics.lastError || 'none'}`,
+          ]
+        : ['Overlay Diagnostics: unavailable']
 
       const diagnostics = [
         `Version: ${version || 'unknown'}`,
@@ -723,6 +817,9 @@ export function SettingsPage() {
         `Developer Mode: ${developerMode ? 'enabled' : 'disabled'}`,
         `Verbose Download Logging: ${verboseDownloadLogging ? 'enabled' : 'disabled'}`,
         `API Base URL: ${getApiBaseUrl()}`,
+        `Updater State: ${updateStatus.state}`,
+        `Updater Target Version: ${updateStatus.version || 'n/a'}`,
+        ...overlaySummary,
       ].join('\n')
 
       if (navigator?.clipboard?.writeText) {
@@ -1315,7 +1412,10 @@ export function SettingsPage() {
     if (overlayLoaded) return
     const loadOverlaySettings = async () => {
       try {
-        const result = await window.ucOverlay?.getSettings?.()
+        const [result] = await Promise.all([
+          window.ucOverlay?.getSettings?.(),
+          loadOverlayDiagnostics(),
+        ])
         if (result?.ok) {
           setOverlayEnabled(result.enabled ?? true)
           setOverlayAutoShow(result.autoShow ?? true)
@@ -1376,10 +1476,10 @@ export function SettingsPage() {
               className="w-full flex items-center gap-2 text-xs text-zinc-500 hover:text-zinc-200 transition-colors py-1 disabled:opacity-60"
             >
               <RefreshCw className={`h-3.5 w-3.5 ${checkingUpdate ? 'animate-spin' : ''}`} />
-              {checkingUpdate ? 'Checking...' : 'Check for updates'}
+              {checkingUpdate ? 'Checking...' : updateStatus.state === 'downloaded' ? 'Update ready' : 'Check for updates'}
             </button>
-            {updateCheckResult && (
-              <div className="mt-2 text-[11px] text-zinc-300">{updateCheckResult}</div>
+            {(updateCheckResult || updateStatus.state !== 'idle') && (
+              <div className="mt-2 text-[11px] text-zinc-300">{updateCheckResult || getUpdateStatusMessage(updateStatus)}</div>
             )}
           </div>
         </aside>
@@ -1793,16 +1893,25 @@ export function SettingsPage() {
                   <div>
                     <h2 className="text-lg font-semibold">Updates</h2>
                     <p className="text-sm text-zinc-400">
-                      Check for new versions of UnionCrax.Direct.
+                      Download and install new versions of UnionCrax.Direct inside the app.
                     </p>
                   </div>
                   <div className="flex items-center justify-between text-sm">
                     <span className="text-zinc-400">Current version</span>
                     <span className="font-mono font-medium">{appVersion ? `v${appVersion}` : 'Loading...'}</span>
                   </div>
-                  {updateCheckResult && (
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-zinc-400">Updater state</span>
+                    <span className="font-medium capitalize">{updateStatus.state.replaceAll('-', ' ')}</span>
+                  </div>
+                  {(updateCheckResult || updateStatus.state !== 'idle') && (
                     <div className="rounded-lg border border-zinc-700 bg-zinc-800/50 px-3 py-2 text-sm text-zinc-300">
-                      {updateCheckResult}
+                      {updateCheckResult || getUpdateStatusMessage(updateStatus)}
+                    </div>
+                  )}
+                  {updateStatus.state === 'downloading' && (
+                    <div className="rounded-lg border border-white/[.07] bg-zinc-900/60 px-3 py-2 text-xs text-zinc-300">
+                      Download progress: {Math.round(updateStatus.progress)}%
                     </div>
                   )}
                   <Button
@@ -1814,6 +1923,26 @@ export function SettingsPage() {
                     <RefreshCw className={`h-4 w-4 ${checkingUpdate ? 'animate-spin' : ''}`} />
                     {checkingUpdate ? 'Checking...' : 'Check for Updates'}
                   </Button>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      variant="secondary"
+                      onClick={() => window.ucUpdater?.retryUpdate?.().then((status) => {
+                        if (status) {
+                          setUpdateStatus(status)
+                          setUpdateCheckResult(getUpdateStatusMessage(status))
+                        }
+                      })}
+                      disabled={updateStatus.state !== 'error' && !(updateStatus.available && !updateStatus.downloaded)}
+                    >
+                      Retry update
+                    </Button>
+                    <Button
+                      onClick={() => window.ucUpdater?.installUpdate?.()}
+                      disabled={updateStatus.state !== 'downloaded'}
+                    >
+                      Install downloaded update
+                    </Button>
+                  </div>
                 </CardContent>
               </Card>
 
@@ -1921,34 +2050,6 @@ export function SettingsPage() {
                   </div>
 
                   <div className="space-y-4">
-                    {isWindows && (
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <label className="text-sm font-medium cursor-pointer">Run games as Administrator</label>
-                          <p className="text-xs text-zinc-400 mt-1">
-                            Automatically launch games with admin privileges
-                          </p>
-                        </div>
-                        <button
-                          onClick={async () => {
-                            const newValue = !runGamesAsAdmin
-                            setRunGamesAsAdmin(newValue)
-                            try {
-                              await window.ucSettings?.set?.('runGamesAsAdmin', newValue)
-                            } catch { }
-                          }}
-                          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${runGamesAsAdmin ? 'bg-white' : 'bg-zinc-700'
-                          }`}
-                          title="Toggle run games as admin"
-                        >
-                          <span
-                            className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${runGamesAsAdmin ? 'translate-x-6' : 'translate-x-1'
-                              }`}
-                          />
-                        </button>
-                      </div>
-                    )}
-
                     <div className="flex items-center justify-between">
                       <div>
                         <label className="text-sm font-medium cursor-pointer">Always create desktop shortcuts</label>
@@ -2818,6 +2919,57 @@ export function SettingsPage() {
                     </div>
                   </div>
 
+                  <div className="rounded-2xl border border-white/[.07] bg-zinc-900/40 p-4 space-y-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <h3 className="text-sm font-semibold">Overlay diagnostics</h3>
+                        <p className="text-xs text-zinc-400 mt-1">
+                          Live health data for overlay loading, hotkey registration, and native injection.
+                        </p>
+                      </div>
+                      <Button variant="outline" size="sm" className="gap-2" onClick={() => void loadOverlayDiagnostics()} disabled={overlayDiagnosticsLoading}>
+                        <RefreshCw className={`h-4 w-4 ${overlayDiagnosticsLoading ? 'animate-spin' : ''}`} />
+                        Refresh
+                      </Button>
+                    </div>
+
+                    {overlayDiagnostics && (
+                      <div className="grid gap-3 md:grid-cols-2">
+                        <div className="rounded-xl border border-white/[.07] bg-black/20 px-3 py-3 text-sm">
+                          <div className="text-xs uppercase tracking-[0.14em] text-zinc-500">Window state</div>
+                          <div className="mt-2 space-y-1 text-zinc-200">
+                            <div>Created: {overlayDiagnostics.overlayWindowCreated ? 'Yes' : 'No'}</div>
+                            <div>Renderer ready: {overlayDiagnostics.overlayWindowReady ? 'Yes' : 'No'}</div>
+                            <div>Visible: {overlayDiagnostics.overlayWindowVisible ? 'Yes' : 'No'}</div>
+                            <div>Mode: {overlayDiagnostics.currentMode}</div>
+                          </div>
+                        </div>
+                        <div className="rounded-xl border border-white/[.07] bg-black/20 px-3 py-3 text-sm">
+                          <div className="text-xs uppercase tracking-[0.14em] text-zinc-500">Hook state</div>
+                          <div className="mt-2 space-y-1 text-zinc-200">
+                            <div>Native addon: {overlayDiagnostics.nativeAddonAvailable ? 'Available' : 'Missing'}</div>
+                            <div>DLL present: {overlayDiagnostics.dllExists ? 'Yes' : 'No'}</div>
+                            <div>Hotkey registered: {overlayDiagnostics.hotkeyRegistered ? 'Yes' : 'No'}</div>
+                            <div>Injected games: {overlayDiagnostics.injectionCount}</div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {overlayDiagnostics && (
+                      <div className="space-y-2 rounded-xl border border-white/[.07] bg-black/20 px-3 py-3 text-xs text-zinc-300">
+                        <div><span className="text-zinc-500">DLL path:</span> {overlayDiagnostics.dllPath}</div>
+                        <div><span className="text-zinc-500">Last event:</span> {overlayDiagnostics.lastEvent}</div>
+                        <div><span className="text-zinc-500">Last error:</span> {overlayDiagnostics.lastError || 'None'}</div>
+                        {overlayDiagnostics.injections.length > 0 && (
+                          <div>
+                            <span className="text-zinc-500">Injected PIDs:</span> {overlayDiagnostics.injections.map((entry) => `${entry.pid}${entry.gameName ? ` (${entry.gameName})` : ''}`).join(', ')}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
                   {/* Info box */}
                   <div className="rounded-lg border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-xs text-blue-200">
                     <strong>Note:</strong> The in-game overlay hooks directly into the game's graphics pipeline (DirectX 9/11/12, OpenGL) to render inside the game window. It works in both windowed and exclusive fullscreen modes. Input is isolated so your keypresses don't affect the game while the overlay is open.
@@ -2872,7 +3024,6 @@ export function SettingsPage() {
                                 const result = await window.ucSettings?.clearAll?.()
                                 if (result?.ok) {
                                   // Reset all local state to defaults
-                                  setRunGamesAsAdmin(false)
                                   setAlwaysCreateDesktopShortcut(false)
                                   setDefaultHost('ucfiles')
                                   setDiscordRpcEnabled(true)

@@ -8,8 +8,8 @@ import { Progress } from "@/components/ui/progress"
 import { pickGameExecutable, proxyImageUrl } from "@/lib/utils"
 import { Download, PauseCircle, Play, XCircle, Square } from "lucide-react"
 import { ExePickerModal } from "@/components/ExePickerModal"
-import { AdminPromptModal } from "@/components/AdminPromptModal"
 import { DesktopShortcutModal } from "@/components/DesktopShortcutModal"
+import { GameLaunchPreflightModal, type LaunchPreflightResult } from "@/components/GameLaunchPreflightModal"
 import { gameLogger } from "@/lib/logger"
 
 function formatBytes(bytes: number) {
@@ -283,10 +283,11 @@ export function DownloadsPage() {
   const [exePickerExes, setExePickerExes] = useState<Array<{ name: string; path: string; size?: number; depth?: number }>>([])
   const [retryingAppId, setRetryingAppId] = useState<string | null>(null)
   const [runningGames, setRunningGames] = useState<Array<{ appid: string; gameName: string; pid: number }>>([])
-  const [adminPromptOpen, setAdminPromptOpen] = useState(false)
   const [pendingExePath, setPendingExePath] = useState<string | null>(null)
   const [pendingAppId, setPendingAppId] = useState<string | null>(null);
   const [shortcutModalOpen, setShortcutModalOpen] = useState(false)
+  const [launchPreflightOpen, setLaunchPreflightOpen] = useState(false)
+  const [launchPreflightResult, setLaunchPreflightResult] = useState<LaunchPreflightResult | null>(null)
   const primaryStatsRef = useRef<{
     totalBytes: number
     receivedBytes: number
@@ -443,33 +444,6 @@ export function DownloadsPage() {
     } catch {}
   }
 
-  const getAdminPromptShown = async () => {
-    if (!isWindows) return true
-    if (!window.ucSettings?.get) return false
-    try {
-      return await window.ucSettings.get('adminPromptShown')
-    } catch {
-      return false
-    }
-  }
-
-  const setAdminPromptShown = async () => {
-    if (!window.ucSettings?.set) return
-    try {
-      await window.ucSettings.set('adminPromptShown', true)
-    } catch {}
-  }
-
-  const getRunAsAdminEnabled = async () => {
-    if (!isWindows) return false
-    if (!window.ucSettings?.get) return false
-    try {
-      return await window.ucSettings.get('runGamesAsAdmin')
-    } catch {
-      return false
-    }
-  }
-
   const getShortcutAskedForGame = async (appid: string) => {
     if (!window.ucSettings?.get) return false
     try {
@@ -521,6 +495,31 @@ export function DownloadsPage() {
     setExePickerOpen(true)
   }
 
+  const runLaunchPreflight = async (appid: string, path: string) => {
+    const result = await window.ucDownloads?.preflightGameLaunch?.(appid, path)
+    if (!result?.ok) return true
+    if (result.canLaunch && result.checks.length === 0) return true
+
+    setPendingAppId(appid)
+    setPendingExePath(path)
+    setLaunchPreflightResult(result)
+    setLaunchPreflightOpen(true)
+    return false
+  }
+
+  const reopenExecutablePicker = async () => {
+    if (!pendingAppId) return
+    const game = games.find((entry) => entry.appid === pendingAppId)
+    if (!game || !window.ucDownloads?.listGameExecutables) return
+
+    try {
+      const result = await window.ucDownloads.listGameExecutables(pendingAppId)
+      openExePicker(pendingAppId, game.name, result?.exes || [], result?.folder || null)
+    } finally {
+      setLaunchPreflightOpen(false)
+    }
+  }
+
   const handleRetry = async (appid?: string) => {
     if (!appid) return
     const game = games.find((g) => g.appid === appid)
@@ -536,34 +535,27 @@ export function DownloadsPage() {
     }
   }
 
-  const launchGame = async (appid: string, path: string, asAdmin: boolean = false) => {
-    if (!window.ucDownloads) return
-    const launchFn = asAdmin && isWindows
-      ? window.ucDownloads.launchGameExecutableAsAdmin 
-      : window.ucDownloads.launchGameExecutable
-    
-    if (!launchFn) return
+  const launchGame = async (appid: string, path: string) => {
+    if (!window.ucDownloads?.launchGameExecutable) return
     const game = games.find((g) => g.appid === appid)
     const gameName = game?.name || appid
     const showGameName = await window.ucSettings?.get?.('rpcShowGameName') ?? true
-    const res = await launchFn(appid, path, gameName, showGameName)
+    const res = await window.ucDownloads.launchGameExecutable(appid, path, gameName, showGameName)
     if (res && res.ok) {
       await setSavedExe(appid, path)
       setExePickerOpen(false)
-      setAdminPromptOpen(false)
       setShortcutModalOpen(false)
       setPendingExePath(null)
       setPendingAppId(null)
     }
   }
 
-  const handleAdminDecision = async (appid: string, path: string, asAdmin: boolean) => {
-    if (!isWindows) {
-      await launchGame(appid, path, false)
-      return
+  const handleLaunchWithShortcutCheck = async (appid: string, path: string, options?: { skipPreflight?: boolean }) => {
+    if (!options?.skipPreflight) {
+      const passed = await runLaunchPreflight(appid, path)
+      if (!passed) return
     }
-    await setAdminPromptShown()
-    
+
     // Check if we should show shortcut modal BEFORE launching
     const alreadyAsked = await getShortcutAskedForGame(appid)
     const alwaysCreate = await getAlwaysCreateShortcut()
@@ -572,18 +564,16 @@ export function DownloadsPage() {
       // Auto-create shortcut without asking, then launch
       await createDesktopShortcut(appid, path)
       await setShortcutAskedForGame(appid)
-      await launchGame(appid, path, asAdmin)
+      await launchGame(appid, path)
     } else if (!alreadyAsked && !alwaysCreate) {
       // Show the shortcut prompt BEFORE launching
       setPendingExePath(path)
       setPendingAppId(appid)
-      setAdminPromptOpen(false)
+      setExePickerOpen(false)
       setShortcutModalOpen(true)
-      // Store asAdmin preference for later
-      await window.ucSettings?.set?.('runGamesAsAdmin', asAdmin)
     } else {
       // No shortcut needed, just launch
-      await launchGame(appid, path, asAdmin)
+      await launchGame(appid, path)
     }
   }
 
@@ -591,19 +581,7 @@ export function DownloadsPage() {
     if (!exePickerAppId) return
     setPendingExePath(path)
     setPendingAppId(exePickerAppId)
-    const promptShown = await getAdminPromptShown()
-    const runAsAdminEnabled = await getRunAsAdminEnabled()
-    
-    if (!promptShown) {
-      if (isWindows) {
-        setAdminPromptOpen(true)
-      } else {
-        await launchGame(exePickerAppId, path, false)
-      }
-      setExePickerOpen(false)
-    } else {
-      await launchGame(exePickerAppId, path, runAsAdminEnabled)
-    }
+    await handleLaunchWithShortcutCheck(exePickerAppId, path)
   }
 
   const handleLaunch = async (appid: string, gameName: string, fallbackPath?: string) => {
@@ -614,10 +592,9 @@ export function DownloadsPage() {
     }
     try {
       const savedExe = await getSavedExe(appid)
-      const runAsAdminEnabled = await getRunAsAdminEnabled()
       
       if (savedExe) {
-        await launchGame(appid, savedExe, runAsAdminEnabled)
+        await handleLaunchWithShortcutCheck(appid, savedExe)
         return
       }
       
@@ -626,19 +603,7 @@ export function DownloadsPage() {
       const folder = result?.folder || null
       const { pick, confident } = pickGameExecutable(exes, gameName, undefined, folder)
       if (pick && confident) {
-        setPendingExePath(pick.path)
-        setPendingAppId(appid)
-        const promptShown = await getAdminPromptShown()
-        
-        if (!promptShown) {
-          if (isWindows) {
-            setAdminPromptOpen(true)
-          } else {
-            await launchGame(appid, pick.path, false)
-          }
-        } else {
-          await launchGame(appid, pick.path, runAsAdminEnabled)
-        }
+        await handleLaunchWithShortcutCheck(appid, pick.path)
         return
       }
       openExePicker(appid, gameName, exes, folder)
@@ -1207,25 +1172,6 @@ export function DownloadsPage() {
         onSelect={handleExePicked}
         onClose={() => setExePickerOpen(false)}
       />
-      <AdminPromptModal
-        open={adminPromptOpen}
-        gameName={games.find((g) => g.appid === pendingAppId)?.name || "Game"}
-        onRunAsAdmin={async () => {
-          if (pendingExePath && pendingAppId) {
-            await handleAdminDecision(pendingAppId, pendingExePath, true)
-          }
-        }}
-        onContinueWithoutAdmin={async () => {
-          if (pendingExePath && pendingAppId) {
-            await handleAdminDecision(pendingAppId, pendingExePath, false)
-          }
-        }}
-        onClose={() => {
-          setAdminPromptOpen(false)
-          setPendingExePath(null)
-          setPendingAppId(null)
-        }}
-      />
       <DesktopShortcutModal
         open={shortcutModalOpen}
         gameName={games.find((g) => g.appid === pendingAppId)?.name || "Game"}
@@ -1233,8 +1179,7 @@ export function DownloadsPage() {
           if (pendingExePath && pendingAppId) {
             await createDesktopShortcut(pendingAppId, pendingExePath)
             await setShortcutAskedForGame(pendingAppId)
-            const runAsAdmin = await getRunAsAdminEnabled()
-            await launchGame(pendingAppId, pendingExePath, runAsAdmin)
+            await launchGame(pendingAppId, pendingExePath)
           }
         }}
         onSkip={async () => {
@@ -1242,8 +1187,7 @@ export function DownloadsPage() {
             await setShortcutAskedForGame(pendingAppId)
           }
           if (pendingExePath && pendingAppId) {
-            const runAsAdmin = await getRunAsAdminEnabled()
-            await launchGame(pendingAppId, pendingExePath, runAsAdmin)
+            await launchGame(pendingAppId, pendingExePath)
           }
         }}
         onClose={async () => {
@@ -1254,6 +1198,27 @@ export function DownloadsPage() {
           setPendingExePath(null)
           setPendingAppId(null)
         }}
+      />
+      <GameLaunchPreflightModal
+        open={launchPreflightOpen}
+        gameName={games.find((g) => g.appid === pendingAppId)?.name || 'Game'}
+        result={launchPreflightResult}
+        onClose={() => {
+          setLaunchPreflightOpen(false)
+          setLaunchPreflightResult(null)
+          setPendingExePath(null)
+          setPendingAppId(null)
+        }}
+        onChooseAnother={reopenExecutablePicker}
+        onContinue={launchPreflightResult?.canLaunch && pendingExePath && pendingAppId
+          ? async () => {
+              const nextPath = pendingExePath
+              const nextAppId = pendingAppId
+              setLaunchPreflightOpen(false)
+              setLaunchPreflightResult(null)
+              await handleLaunchWithShortcutCheck(nextAppId, nextPath, { skipPreflight: true })
+            }
+          : undefined}
       />
     </div>
   )

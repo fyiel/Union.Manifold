@@ -40,8 +40,8 @@ import {
   Terminal,
 } from "lucide-react"
 import { ExePickerModal } from "@/components/ExePickerModal"
-import { AdminPromptModal } from "@/components/AdminPromptModal"
 import { GameLaunchFailedModal } from "@/components/GameLaunchFailedModal"
+import { GameLaunchPreflightModal, type LaunchPreflightResult } from "@/components/GameLaunchPreflightModal"
 import { LinuxExperiences } from "@/components/LinuxExperiences"
 import { DownloadCheckModal } from "@/components/DownloadCheckModal"
 import { DesktopShortcutModal } from "@/components/DesktopShortcutModal"
@@ -84,9 +84,10 @@ export function GameDetailPage() {
   const [stoppingGame, setStoppingGame] = useState(false)
   const [lightboxOpen, setLightboxOpen] = useState(false)
   const [lightboxIndex, setLightboxIndex] = useState(0)
-  const [adminPromptOpen, setAdminPromptOpen] = useState(false)
   const [pendingExePath, setPendingExePath] = useState<string | null>(null)
   const [shortcutModalOpen, setShortcutModalOpen] = useState(false)
+  const [launchPreflightOpen, setLaunchPreflightOpen] = useState(false)
+  const [launchPreflightResult, setLaunchPreflightResult] = useState<LaunchPreflightResult | null>(null)
   const [hostSelectorOpen, setHostSelectorOpen] = useState(false)
   const [selectedHost, setSelectedHost] = useState<PreferredDownloadHost>("pixeldrain")
   const [defaultHost, setDefaultHost] = useState<PreferredDownloadHost>("pixeldrain")
@@ -105,7 +106,6 @@ export function GameDetailPage() {
   const [updateWarningOpen, setUpdateWarningOpen] = useState(false)
   const [pendingForceDownload, setPendingForceDownload] = useState(false)
   const [gameStartFailedOpen, setGameStartFailedOpen] = useState(false)
-  const [gameStartFailedAdminEnabled, setGameStartFailedAdminEnabled] = useState(false)
   const [linuxConfigOpen, setLinuxConfigOpen] = useState(false)
   // Ref to track whether a game was just launched (cleared on manual quit)
   // Stores the expiry timestamp of the quick-exit detection window (0 = not watching)
@@ -345,11 +345,7 @@ export function GameDetailPage() {
     gameJustLaunchedRef.current = 0
     try { gameQuickExitUnsubRef.current?.() } catch { }
     gameQuickExitUnsubRef.current = null
-    void (async () => {
-      const adminEnabled = Boolean(await getRunAsAdminEnabled().catch(() => false))
-      setGameStartFailedAdminEnabled(adminEnabled)
-      setGameStartFailedOpen(true)
-    })()
+    setGameStartFailedOpen(true)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isGameRunning])
 
@@ -461,10 +457,9 @@ export function GameDetailPage() {
     if (!window.ucDownloads?.listGameExecutables || !window.ucDownloads?.launchGameExecutable) return
     try {
       const savedExe = await getSavedExe()
-      const runAsAdminEnabled = await getRunAsAdminEnabled()
 
       if (savedExe) {
-        await launchGame(savedExe, runAsAdminEnabled)
+        await handleLaunchWithShortcutCheck(savedExe)
         return
       }
 
@@ -474,18 +469,7 @@ export function GameDetailPage() {
       const browseFolder = folder
       const { pick, confident } = pickGameExecutable(exes, game.name, game.source, folder)
       if (pick && confident) {
-        setPendingExePath(pick.path)
-        const promptShown = await getAdminPromptShown()
-
-        if (!promptShown) {
-          if (isWindows) {
-            setAdminPromptOpen(true)
-          } else {
-            await launchGame(pick.path, false)
-          }
-        } else {
-          await launchGame(pick.path, runAsAdminEnabled)
-        }
+        await handleLaunchWithShortcutCheck(pick.path)
         return
       }
       await openExePicker(exes, { mode: "launch", actionLabel: "Launch", folder: browseFolder })
@@ -627,33 +611,6 @@ export function GameDetailPage() {
     } catch { }
   }
 
-  const getAdminPromptShown = async () => {
-    if (!isWindows) return true
-    if (!window.ucSettings?.get) return false
-    try {
-      return await window.ucSettings.get('adminPromptShown')
-    } catch {
-      return false
-    }
-  }
-
-  const setAdminPromptShown = async () => {
-    if (!window.ucSettings?.set) return
-    try {
-      await window.ucSettings.set('adminPromptShown', true)
-    } catch { }
-  }
-
-  const getRunAsAdminEnabled = async () => {
-    if (!isWindows) return false
-    if (!window.ucSettings?.get) return false
-    try {
-      return await window.ucSettings.get('runGamesAsAdmin')
-    } catch {
-      return false
-    }
-  }
-
   const getShortcutAskedForGame = async () => {
     if (!window.ucSettings?.get || !game) return false
     try {
@@ -746,6 +703,36 @@ export function GameDetailPage() {
         mode: "set",
         currentPath: null,
       })
+    }
+  }
+
+  const runLaunchPreflight = async (path: string) => {
+    if (!game) return true
+    const result = await window.ucDownloads?.preflightGameLaunch?.(game.appid, path)
+    if (!result?.ok) return true
+    if (result.canLaunch && result.checks.length === 0) return true
+
+    setPendingExePath(path)
+    setLaunchPreflightResult(result)
+    setLaunchPreflightOpen(true)
+    return false
+  }
+
+  const reopenLaunchExecutablePicker = async () => {
+    if (!game || !window.ucDownloads?.listGameExecutables) return
+    try {
+      const result = await window.ucDownloads.listGameExecutables(game.appid)
+      const exes = result?.exes || []
+      await openExePicker(exes, {
+        title: 'Select executable',
+        message: `We couldn't confidently detect the correct exe for "${game.name}". Please choose the one to launch.`,
+        actionLabel: 'Launch',
+        mode: 'launch',
+        currentPath: pendingExePath,
+        folder: result?.folder || null,
+      })
+    } finally {
+      setLaunchPreflightOpen(false)
     }
   }
 
@@ -862,19 +849,13 @@ export function GameDetailPage() {
     }
   }
 
-  const launchGame = async (path: string, asAdmin: boolean = false) => {
-    if (!window.ucDownloads) return
-    const launchFn = asAdmin && isWindows
-      ? window.ucDownloads.launchGameExecutableAsAdmin
-      : window.ucDownloads.launchGameExecutable
-
-    if (!launchFn) return
+  const launchGame = async (path: string) => {
+    if (!window.ucDownloads?.launchGameExecutable) return
     const showGameName = await window.ucSettings?.get?.('rpcShowGameName') ?? true
-    const res = await launchFn(game.appid, path, game.name, showGameName)
+    const res = await window.ucDownloads.launchGameExecutable(game.appid, path, game.name, showGameName)
     if (res && res.ok) {
       await setSavedExe(path)
       setExePickerOpen(false)
-      setAdminPromptOpen(false)
       setShortcutModalOpen(false)
       setPendingExePath(null)
       setIsGameRunning(true)
@@ -885,10 +866,8 @@ export function GameDetailPage() {
       // Games that exit normally after 12+ seconds won't trigger it.
       gameJustLaunchedRef.current = Date.now() + 12000
 
-      const showStartFailedModal = async () => {
+      const showStartFailedModal = () => {
         setIsGameRunning(false)
-        const adminEnabled = Boolean(await getRunAsAdminEnabled().catch(() => false))
-        setGameStartFailedAdminEnabled(adminEnabled)
         setGameStartFailedOpen(true)
       }
 
@@ -906,12 +885,11 @@ export function GameDetailPage() {
     }
   }
 
-  const handleAdminDecision = async (path: string, asAdmin: boolean) => {
-    if (!isWindows) {
-      await launchGame(path, false)
-      return
+  const handleLaunchWithShortcutCheck = async (path: string, options?: { skipPreflight?: boolean }) => {
+    if (!options?.skipPreflight) {
+      const passed = await runLaunchPreflight(path)
+      if (!passed) return
     }
-    await setAdminPromptShown()
 
     // Check if we should show shortcut modal BEFORE launching
     const alreadyAsked = await getShortcutAskedForGame()
@@ -921,17 +899,15 @@ export function GameDetailPage() {
       // Auto-create shortcut without asking, then launch
       await createDesktopShortcut(path)
       await setShortcutAskedForGame()
-      await launchGame(path, asAdmin)
+      await launchGame(path)
     } else if (!alreadyAsked && !alwaysCreate) {
       // Show the shortcut prompt BEFORE launching
       setPendingExePath(path)
-      setAdminPromptOpen(false)
+      setExePickerOpen(false)
       setShortcutModalOpen(true)
-      // Store asAdmin preference for later
-      await window.ucSettings?.set?.('runGamesAsAdmin', asAdmin)
     } else {
       // No shortcut needed, just launch
-      await launchGame(path, asAdmin)
+      await launchGame(path)
     }
   }
 
@@ -943,19 +919,7 @@ export function GameDetailPage() {
       // Do NOT close the modal, match Library behavior
       return
     }
-    const promptShown = await getAdminPromptShown()
-    const runAsAdminEnabled = await getRunAsAdminEnabled()
-
-    if (!promptShown) {
-      if (isWindows) {
-        setAdminPromptOpen(true)
-      } else {
-        await launchGame(path, false)
-      }
-      setExePickerOpen(false)
-    } else {
-      await launchGame(path, runAsAdminEnabled)
-    }
+    await handleLaunchWithShortcutCheck(path)
   }
 
   const stopRunningGame = async () => {
@@ -1524,6 +1488,7 @@ export function GameDetailPage() {
           setHostSelectorOpen(false)
           setDownloadToken(null)
           setIsCheckingLinks(false)
+          setPendingForceDownload(false)
         }}
       />
       {pendingDeleteAction && game && (
@@ -1580,24 +1545,6 @@ export function GameDetailPage() {
         onSelect={handleExePicked}
         onClose={() => setExePickerOpen(false)}
       />
-      <AdminPromptModal
-        open={adminPromptOpen}
-        gameName={game.name}
-        onRunAsAdmin={async () => {
-          if (pendingExePath) {
-            await handleAdminDecision(pendingExePath, true)
-          }
-        }}
-        onContinueWithoutAdmin={async () => {
-          if (pendingExePath) {
-            await handleAdminDecision(pendingExePath, false)
-          }
-        }}
-        onClose={() => {
-          setAdminPromptOpen(false)
-          setPendingExePath(null)
-        }}
-      />
       <DesktopShortcutModal
         open={shortcutModalOpen}
         gameName={game.name}
@@ -1605,15 +1552,13 @@ export function GameDetailPage() {
           if (pendingExePath) {
             await createDesktopShortcut(pendingExePath)
             await setShortcutAskedForGame()
-            const runAsAdmin = await getRunAsAdminEnabled()
-            await launchGame(pendingExePath, runAsAdmin)
+            await launchGame(pendingExePath)
           }
         }}
         onSkip={async () => {
           await setShortcutAskedForGame()
           if (pendingExePath) {
-            const runAsAdmin = await getRunAsAdminEnabled()
-            await launchGame(pendingExePath, runAsAdmin)
+            await launchGame(pendingExePath)
           }
         }}
         onClose={async () => {
@@ -1621,6 +1566,25 @@ export function GameDetailPage() {
           setShortcutModalOpen(false)
           setPendingExePath(null)
         }}
+      />
+      <GameLaunchPreflightModal
+        open={launchPreflightOpen}
+        gameName={game.name}
+        result={launchPreflightResult}
+        onClose={() => {
+          setLaunchPreflightOpen(false)
+          setLaunchPreflightResult(null)
+          setPendingExePath(null)
+        }}
+        onChooseAnother={reopenLaunchExecutablePicker}
+        onContinue={launchPreflightResult?.canLaunch && pendingExePath
+          ? async () => {
+              const nextPath = pendingExePath
+              setLaunchPreflightOpen(false)
+              setLaunchPreflightResult(null)
+              await handleLaunchWithShortcutCheck(nextPath, { skipPreflight: true })
+            }
+          : undefined}
       />
       {isExternalGame && game && (
         <EditGameMetadataModal
@@ -1643,14 +1607,6 @@ export function GameDetailPage() {
       <GameLaunchFailedModal
         open={gameStartFailedOpen}
         gameName={game.name}
-        isWindows={isWindows}
-        adminAlreadyEnabled={gameStartFailedAdminEnabled}
-        onEnableAdmin={async () => {
-          try {
-            await window.ucSettings?.set?.('runGamesAsAdmin', true)
-          } catch { }
-          setGameStartFailedOpen(false)
-        }}
         onClose={() => setGameStartFailedOpen(false)}
       />
       {isLinux && (
