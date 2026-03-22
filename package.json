@@ -1,6 +1,6 @@
 {
   "name": "unioncrax-direct",
-  "version": "1.5.3",
+  "version": "1.5.4",
   "description": "Standalone Electron app for managing and launching games from UnionCrax",
   "type": "module",
   "main": "electron/main.cjs",
@@ -45,12 +45,12 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "discord-rpc": "^4.0.1",
-    "node-addon-api": "^7.1.0",
-
+    "electron-updater": "^6.8.3",
     "embla-carousel-react": "^8.5.1",
     "fuse.js": "^7.1.0",
     "geist": "^1.5.1",
     "lucide-react": "^0.454.0",
+    "node-addon-api": "^7.1.0",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-router-dom": "^7.0.2",
@@ -120,9 +120,10 @@
       "createStartMenuShortcut": true,
       "shortcutName": "UnionCrax.Direct"
     },
-
     "linux": {
-      "target": ["AppImage"],
+      "target": [
+        "AppImage"
+      ],
       "icon": "assets/icons"
     }
   },

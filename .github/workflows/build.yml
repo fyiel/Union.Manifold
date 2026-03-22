@@ -51,7 +51,9 @@ jobs:
           name: dist-${{ matrix.os }}
           path: |
             dist-packaged/*.exe
+            dist-packaged/*.blockmap
             dist-packaged/*.zip
+            dist-packaged/latest*.yml
             dist-packaged/*.AppImage
             dist-packaged/*.tar.gz
 
@@ -70,7 +72,13 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
-          files: dist-packaged/**
+          files: |
+            dist-packaged/**/*.exe
+            dist-packaged/**/*.blockmap
+            dist-packaged/**/*.zip
+            dist-packaged/**/latest*.yml
+            dist-packaged/**/*.AppImage
+            dist-packaged/**/*.tar.gz
           draft: false
           prerelease: false
         env:

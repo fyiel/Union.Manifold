@@ -8,9 +8,9 @@ import { useDownloads, useDownloadsSelector } from "@/context/downloads-context"
 import { apiUrl } from "@/lib/api"
 import { nsfwRevealedAppids } from "@/lib/nsfw-session"
 import { ExePickerModal } from "@/components/ExePickerModal"
-import { AdminPromptModal } from "@/components/AdminPromptModal"
 import { DesktopShortcutModal } from "@/components/DesktopShortcutModal"
 import { GameLaunchFailedModal } from "@/components/GameLaunchFailedModal"
+import { GameLaunchPreflightModal, type LaunchPreflightResult } from "@/components/GameLaunchPreflightModal"
 import { gameLogger } from "@/lib/logger"
 
 interface GameCardProps {
@@ -87,11 +87,11 @@ export const GameCard = memo(function GameCard({
   const [exePickerOpen, setExePickerOpen] = useState(false)
   const [exePickerExes, setExePickerExes] = useState<Array<{ name: string; path: string; size?: number; depth?: number }>>([])
   const [exePickerFolder, setExePickerFolder] = useState<string | null>(null)
-  const [adminPromptOpen, setAdminPromptOpen] = useState(false)
   const [pendingExePath, setPendingExePath] = useState<string | null>(null)
   const [shortcutModalOpen, setShortcutModalOpen] = useState(false)
   const [gameStartFailedOpen, setGameStartFailedOpen] = useState(false)
-  const [gameStartFailedAdminEnabled, setGameStartFailedAdminEnabled] = useState(false)
+  const [launchPreflightOpen, setLaunchPreflightOpen] = useState(false)
+  const [launchPreflightResult, setLaunchPreflightResult] = useState<LaunchPreflightResult | null>(null)
   const gameJustLaunchedRef = useRef<number>(0)
   const gameQuickExitUnsubRef = useRef<(() => void) | null>(null)
 
@@ -193,11 +193,7 @@ export const GameCard = memo(function GameCard({
     gameJustLaunchedRef.current = 0
     try { gameQuickExitUnsubRef.current?.() } catch { }
     gameQuickExitUnsubRef.current = null
-    void (async () => {
-      const adminEnabled = Boolean(await getRunAsAdminEnabled().catch(() => false))
-      setGameStartFailedAdminEnabled(adminEnabled)
-      setGameStartFailedOpen(true)
-    })()
+    setGameStartFailedOpen(true)
   }, [isRunning])
 
   const fetchStatsOnHover = useCallback(async () => {
@@ -242,33 +238,6 @@ export const GameCard = memo(function GameCard({
     try {
       await window.ucSettings.set(`gameExe:${game.appid}`, path || null)
     } catch { }
-  }
-
-  const getAdminPromptShown = async () => {
-    if (!isWindows) return true
-    if (!window.ucSettings?.get) return false
-    try {
-      return await window.ucSettings.get('adminPromptShown')
-    } catch {
-      return false
-    }
-  }
-
-  const setAdminPromptShown = async () => {
-    if (!window.ucSettings?.set) return
-    try {
-      await window.ucSettings.set('adminPromptShown', true)
-    } catch { }
-  }
-
-  const getRunAsAdminEnabled = async () => {
-    if (!isWindows) return false
-    if (!window.ucSettings?.get) return false
-    try {
-      return await window.ucSettings.get('runGamesAsAdmin')
-    } catch {
-      return false
-    }
   }
 
   const getShortcutAskedForGame = async () => {
@@ -324,20 +293,37 @@ export const GameCard = memo(function GameCard({
     setExePickerOpen(true)
   }
 
-  const launchGame = async (path: string, asAdmin: boolean = false) => {
-    if (!window.ucDownloads) return
-    const launchFn = asAdmin && isWindows
-      ? window.ucDownloads.launchGameExecutableAsAdmin
-      : window.ucDownloads.launchGameExecutable
+  const runLaunchPreflight = async (path: string) => {
+    const result = await window.ucDownloads?.preflightGameLaunch?.(game.appid, path)
+    if (!result?.ok) return true
+    if (result.canLaunch && result.checks.length === 0) return true
 
-    if (!launchFn) return
+    setPendingExePath(path)
+    setLaunchPreflightResult(result)
+    setLaunchPreflightOpen(true)
+    return false
+  }
+
+  const reopenExecutablePicker = async () => {
+    try {
+      const result = await listGameExecutables()
+      const exes = result?.exes || []
+      const folder = result?.folder || null
+      setLaunchPreflightOpen(false)
+      openExePicker(exes, folder)
+    } catch {
+      setLaunchPreflightOpen(false)
+    }
+  }
+
+  const launchGame = async (path: string) => {
+    if (!window.ucDownloads?.launchGameExecutable) return
     const showGameName = await window.ucSettings?.get?.('rpcShowGameName') ?? true
-    const res = await launchFn(game.appid, path, game.name, showGameName)
+    const res = await window.ucDownloads.launchGameExecutable(game.appid, path, game.name, showGameName)
     if (res && res.ok) {
       await setSavedExe(path)
       setIsRunning(true)
       setExePickerOpen(false)
-      setAdminPromptOpen(false)
       setShortcutModalOpen(false)
       setPendingExePath(null)
       setGameStartFailedOpen(false)
@@ -345,10 +331,8 @@ export const GameCard = memo(function GameCard({
       // Quick-exit detection window: 12 seconds after launch
       gameJustLaunchedRef.current = Date.now() + 12000
 
-      const showStartFailedModal = async () => {
+      const showStartFailedModal = () => {
         setIsRunning(false)
-        const adminEnabled = Boolean(await getRunAsAdminEnabled().catch(() => false))
-        setGameStartFailedAdminEnabled(adminEnabled)
         setGameStartFailedOpen(true)
       }
 
@@ -364,12 +348,11 @@ export const GameCard = memo(function GameCard({
     }
   }
 
-  const handleAdminDecision = async (path: string, asAdmin: boolean) => {
-    if (!isWindows) {
-      await launchGame(path, false)
-      return
+  const handleLaunchWithShortcutCheck = async (path: string, options?: { skipPreflight?: boolean }) => {
+    if (!options?.skipPreflight) {
+      const passed = await runLaunchPreflight(path)
+      if (!passed) return
     }
-    await setAdminPromptShown()
 
     // Check if we should show shortcut modal BEFORE launching
     const alreadyAsked = await getShortcutAskedForGame()
@@ -379,35 +362,21 @@ export const GameCard = memo(function GameCard({
       // Auto-create shortcut without asking, then launch
       await createDesktopShortcut(path)
       await setShortcutAskedForGame()
-      await launchGame(path, asAdmin)
+      await launchGame(path)
     } else if (!alreadyAsked && !alwaysCreate) {
       // Show the shortcut prompt BEFORE launching
       setPendingExePath(path)
-      setAdminPromptOpen(false)
+      setExePickerOpen(false)
       setShortcutModalOpen(true)
-      // Store asAdmin preference for later
-      await window.ucSettings?.set?.('runGamesAsAdmin', asAdmin)
     } else {
       // No shortcut needed, just launch
-      await launchGame(path, asAdmin)
+      await launchGame(path)
     }
   }
 
   const handleExePicked = async (path: string) => {
     setPendingExePath(path)
-    const promptShown = await getAdminPromptShown()
-    const runAsAdminEnabled = await getRunAsAdminEnabled()
-
-    if (!promptShown) {
-      if (isWindows) {
-        setAdminPromptOpen(true)
-      } else {
-        await launchGame(path, false)
-      }
-      setExePickerOpen(false)
-    } else {
-      await launchGame(path, runAsAdminEnabled)
-    }
+    await handleLaunchWithShortcutCheck(path)
   }
 
   const handlePlayClick = async (event: MouseEvent) => {
@@ -436,10 +405,9 @@ export const GameCard = memo(function GameCard({
     }
     try {
       const savedExe = await getSavedExe()
-      const runAsAdminEnabled = await getRunAsAdminEnabled()
 
       if (savedExe) {
-        await launchGame(savedExe, runAsAdminEnabled)
+        await handleLaunchWithShortcutCheck(savedExe)
         return
       }
 
@@ -453,18 +421,7 @@ export const GameCard = memo(function GameCard({
       const browseFolder = folder
       const { pick, confident } = pickGameExecutable(exes, game.name, game.source, folder)
       if (pick && confident) {
-        setPendingExePath(pick.path)
-        const promptShown = await getAdminPromptShown()
-
-        if (!promptShown) {
-          if (isWindows) {
-            setAdminPromptOpen(true)
-          } else {
-            await launchGame(pick.path, false)
-          }
-        } else {
-          await launchGame(pick.path, runAsAdminEnabled)
-        }
+        await handleLaunchWithShortcutCheck(pick.path)
         return
       }
       openExePicker(exes, browseFolder)
@@ -616,24 +573,6 @@ export const GameCard = memo(function GameCard({
         onSelect={handleExePicked}
         onClose={() => setExePickerOpen(false)}
       />
-      <AdminPromptModal
-        open={adminPromptOpen}
-        gameName={game.name}
-        onRunAsAdmin={async () => {
-          if (pendingExePath) {
-            await handleAdminDecision(pendingExePath, true)
-          }
-        }}
-        onContinueWithoutAdmin={async () => {
-          if (pendingExePath) {
-            await handleAdminDecision(pendingExePath, false)
-          }
-        }}
-        onClose={() => {
-          setAdminPromptOpen(false)
-          setPendingExePath(null)
-        }}
-      />
       <DesktopShortcutModal
         open={shortcutModalOpen}
         gameName={game.name}
@@ -641,15 +580,13 @@ export const GameCard = memo(function GameCard({
           if (pendingExePath) {
             await createDesktopShortcut(pendingExePath)
             await setShortcutAskedForGame()
-            const runAsAdmin = await getRunAsAdminEnabled()
-            await launchGame(pendingExePath, runAsAdmin)
+            await launchGame(pendingExePath)
           }
         }}
         onSkip={async () => {
           await setShortcutAskedForGame()
           if (pendingExePath) {
-            const runAsAdmin = await getRunAsAdminEnabled()
-            await launchGame(pendingExePath, runAsAdmin)
+            await launchGame(pendingExePath)
           }
         }}
         onClose={async () => {
@@ -658,17 +595,28 @@ export const GameCard = memo(function GameCard({
           setPendingExePath(null)
         }}
       />
+      <GameLaunchPreflightModal
+        open={launchPreflightOpen}
+        gameName={game.name}
+        result={launchPreflightResult}
+        onClose={() => {
+          setLaunchPreflightOpen(false)
+          setLaunchPreflightResult(null)
+          setPendingExePath(null)
+        }}
+        onChooseAnother={reopenExecutablePicker}
+        onContinue={launchPreflightResult?.canLaunch && pendingExePath
+          ? async () => {
+              const nextPath = pendingExePath
+              setLaunchPreflightOpen(false)
+              setLaunchPreflightResult(null)
+              await handleLaunchWithShortcutCheck(nextPath, { skipPreflight: true })
+            }
+          : undefined}
+      />
       <GameLaunchFailedModal
         open={gameStartFailedOpen}
         gameName={game.name}
-        isWindows={isWindows}
-        adminAlreadyEnabled={gameStartFailedAdminEnabled}
-        onEnableAdmin={async () => {
-          try {
-            await window.ucSettings?.set?.('runGamesAsAdmin', true)
-          } catch { }
-          setGameStartFailedOpen(false)
-        }}
         onClose={() => setGameStartFailedOpen(false)}
       />
     </div>

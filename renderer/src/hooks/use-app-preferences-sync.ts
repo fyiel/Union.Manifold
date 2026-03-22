@@ -6,7 +6,6 @@ import { useDiscordAccount } from "@/hooks/use-discord-account"
 type AppPreferences = {
   defaultMirrorHost?: PreferredDownloadHost
   discordRpcEnabled?: boolean
-  runGamesAsAdmin?: boolean
   alwaysCreateDesktopShortcut?: boolean
   linuxLaunchMode?: "auto" | "native" | "wine" | "proton"
   developerMode?: boolean
@@ -16,7 +15,6 @@ type AppPreferences = {
 const ALLOWED_KEYS = new Set<keyof AppPreferences>([
   "defaultMirrorHost",
   "discordRpcEnabled",
-  "runGamesAsAdmin",
   "alwaysCreateDesktopShortcut",
   "linuxLaunchMode",
   "developerMode",
@@ -38,9 +36,6 @@ function normalizePreferences(input: unknown): AppPreferences {
 
   if (typeof record.discordRpcEnabled === "boolean") {
     prefs.discordRpcEnabled = record.discordRpcEnabled
-  }
-  if (typeof record.runGamesAsAdmin === "boolean") {
-    prefs.runGamesAsAdmin = record.runGamesAsAdmin
   }
   if (typeof record.alwaysCreateDesktopShortcut === "boolean") {
     prefs.alwaysCreateDesktopShortcut = record.alwaysCreateDesktopShortcut
@@ -74,11 +69,6 @@ async function readLocalPreferences(): Promise<AppPreferences> {
   try {
     const rpcEnabled = await window.ucSettings.get("discordRpcEnabled")
     if (typeof rpcEnabled === "boolean") prefs.discordRpcEnabled = rpcEnabled
-  } catch {}
-
-  try {
-    const runAsAdmin = await window.ucSettings.get("runGamesAsAdmin")
-    if (typeof runAsAdmin === "boolean") prefs.runGamesAsAdmin = runAsAdmin
   } catch {}
 
   try {

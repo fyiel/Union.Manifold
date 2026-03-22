@@ -1,27 +1,18 @@
 import { Button } from "@/components/ui/button"
-import { AlertTriangle, Shield } from "lucide-react"
+import { AlertTriangle } from "lucide-react"
 
 type GameLaunchFailedModalProps = {
   open: boolean
   gameName: string
-  isWindows: boolean
-  adminAlreadyEnabled: boolean
-  onEnableAdmin?: () => void
   onClose: () => void
 }
 
 export function GameLaunchFailedModal({
   open,
   gameName,
-  isWindows,
-  adminAlreadyEnabled,
-  onEnableAdmin,
   onClose,
 }: GameLaunchFailedModalProps) {
   if (!open) return null
-
-  // Only suggest admin on Windows when it's not already enabled
-  const showAdminSuggestion = isWindows && !adminAlreadyEnabled
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
@@ -42,26 +33,14 @@ export function GameLaunchFailedModal({
           the Play button.
         </p>
 
-        {showAdminSuggestion && (
-          <p className="text-sm text-muted-foreground mb-4">
-            If the issue persists, try enabling{" "}
-            <span className="font-semibold text-foreground">
-              Launch as Administrator
-            </span>
-            . {gameName} may require admin privileges to start correctly.
-          </p>
-        )}
+        <p className="text-sm text-muted-foreground mb-4">
+          If the issue persists, try picking a different executable for {gameName}, especially if the current one is a setup helper or launcher stub.
+        </p>
 
         <div className="flex justify-end gap-2 pt-1">
           <Button variant="ghost" size="sm" onClick={onClose}>
             Dismiss
           </Button>
-          {showAdminSuggestion && onEnableAdmin && (
-            <Button size="sm" onClick={onEnableAdmin} className="gap-1.5">
-              <Shield className="h-4 w-4" />
-              Enable Admin Launch
-            </Button>
-          )}
         </div>
       </div>
     </div>
