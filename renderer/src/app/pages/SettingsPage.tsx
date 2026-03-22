@@ -1902,7 +1902,7 @@ export function SettingsPage() {
                   </div>
                   <div className="flex items-center justify-between text-sm">
                     <span className="text-zinc-400">Updater state</span>
-                    <span className="font-medium capitalize">{updateStatus.state.replaceAll('-', ' ')}</span>
+                    <span className="font-medium capitalize">{updateStatus.state.replace(/-/g, ' ')}</span>
                   </div>
                   {(updateCheckResult || updateStatus.state !== 'idle') && (
                     <div className="rounded-lg border border-zinc-700 bg-zinc-800/50 px-3 py-2 text-sm text-zinc-300">
@@ -2078,7 +2078,7 @@ export function SettingsPage() {
 
                     {isWindows && (
                       <div className="rounded-lg border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-xs text-blue-200">
-                        The admin prompt appears only once on your first game launch.
+                        The desktop shortcut prompt appears only once per game on first launch unless you enable automatic shortcut creation.
                       </div>
                     )}
 
@@ -2972,7 +2972,7 @@ export function SettingsPage() {
 
                   {/* Info box */}
                   <div className="rounded-lg border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-xs text-blue-200">
-                    <strong>Note:</strong> The in-game overlay hooks directly into the game's graphics pipeline (DirectX 9/11/12, OpenGL) to render inside the game window. It works in both windowed and exclusive fullscreen modes. Input is isolated so your keypresses don't affect the game while the overlay is open.
+                    <strong>Note:</strong> The in-game overlay is still a WIP.
                   </div>
                 </CardContent>
               </Card>

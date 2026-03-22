@@ -1,6 +1,6 @@
 {
   "name": "unioncrax-direct",
-  "version": "1.5.5",
+  "version": "1.5.4",
   "description": "Standalone Electron app for managing and launching games from UnionCrax",
   "type": "module",
   "main": "electron/main.cjs",
@@ -115,6 +115,7 @@
       "publisherName": "UnionCrax"
     },
     "nsis": {
+      "artifactName": "${productName}.Setup.${version}.${ext}",
       "oneClick": false,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
