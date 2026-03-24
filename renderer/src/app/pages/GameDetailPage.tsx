@@ -1021,14 +1021,14 @@ export function GameDetailPage() {
       <section className="relative pt-6">
         <div className="container mx-auto px-4">
           <div className="max-w-6xl mx-auto">
-            <div className="relative rounded-3xl overflow-hidden border border-white/10 bg-black/40 backdrop-blur-md shadow-2xl shadow-black/50">
-              <div className="relative aspect-video">
+            <div className="relative rounded-3xl overflow-hidden border border-white/[.07] glass shadow-2xl shadow-black/40">
+              <div className="relative aspect-video overflow-hidden">
                 <img
                   src={proxyImageUrl(heroImage || "") || "./banner.png"}
                   alt={game.name}
-                  className="h-full w-full object-cover"
+                  className="h-full w-full object-cover transition-transform duration-700 hover:scale-[1.02]"
                 />
-                <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent" />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent" />
               </div>
 
               <div className="absolute bottom-0 left-0 right-0 p-8 space-y-4">
@@ -1046,19 +1046,30 @@ export function GameDetailPage() {
                     </Badge>
                   ))}
                   {isPopular && (
-                    <Badge className="px-3 py-1 rounded-full bg-orange-500/20 border-orange-500/30 text-orange-400 font-semibold flex items-center gap-1.5 backdrop-blur-md shadow-lg animate-pulse">
+                    <Badge className="px-3 py-1 rounded-full bg-zinc-800/60 border-white/10 text-white font-semibold flex items-center gap-1.5 backdrop-blur-md shadow-lg animate-pulse">
                       <Flame className="h-3 w-3" />
                       Popular
                     </Badge>
                   )}
                   {hasOnlineMode(game?.hasCoOp) && (
-                    <Badge className="px-3 py-1 rounded-full bg-emerald-500/20 border-emerald-500/30 text-emerald-400 font-semibold flex items-center gap-1.5 backdrop-blur-md shadow-lg">
+                    <Badge className="px-3 py-1 rounded-full bg-zinc-800/60 border-white/10 text-white font-semibold flex items-center gap-1.5 backdrop-blur-md shadow-lg">
                       <Wifi className="h-3 w-3" />
                       Online
                     </Badge>
                   )}
+                  {game?.hasHv && (
+                    <Badge className="px-3 py-1 rounded-full bg-red-500/20 border-red-500/30 text-red-400 font-semibold flex items-center gap-1.5 backdrop-blur-md shadow-lg cursor-pointer transition-transform hover:scale-105 active:scale-95"
+                      onClick={() => {
+                        const noteEl = document.getElementById("game-important-note")
+                        if (noteEl) noteEl.scrollIntoView({ behavior: "smooth", block: "center" })
+                      }}
+                      title="Scroll to important notes"
+                    >
+                      HV
+                    </Badge>
+                  )}
                   {isExternalGame && (
-                    <Badge className="px-3 py-1 rounded-full bg-yellow-500/20 border-yellow-500/30 text-yellow-400 font-semibold flex items-center gap-1.5 backdrop-blur-md shadow-lg">
+                    <Badge className="px-3 py-1 rounded-full bg-zinc-800/60 border-white/10 text-zinc-300 font-semibold flex items-center gap-1.5 backdrop-blur-md shadow-lg">
                       <Info className="h-3 w-3" />
                       Externally Added
                     </Badge>
@@ -1066,7 +1077,7 @@ export function GameDetailPage() {
                   {protonLoading ? (
                     <Badge
                       variant="online"
-                      className="px-3 py-1 rounded-full text-sky-400 border-sky-500/30 font-semibold flex items-center gap-1.5 backdrop-blur-md shadow-lg"
+                      className="px-3 py-1 rounded-full text-zinc-300 border-white/10 font-semibold flex items-center gap-1.5 backdrop-blur-md shadow-lg"
                     >
                       <Loader2 className="h-3 w-3 animate-spin" />
                       Linux: Loading...
@@ -1076,7 +1087,7 @@ export function GameDetailPage() {
                       variant="online"
                       className={cn(
                         "px-3 py-1 rounded-full font-semibold flex items-center gap-1.5 backdrop-blur-md shadow-lg cursor-pointer transition-all hover:bg-black/80",
-                        PROTON_RANK_COLORS[protonData.rating?.toLowerCase()] || "text-sky-400 border-sky-500/30"
+                        PROTON_RANK_COLORS[protonData.rating?.toLowerCase()] || "text-zinc-300 border-white/10"
                       )}
                       onClick={() => window.open(protonData.url || `https://www.protondb.com/app/${game.appid}`, "_blank")}
                       title="ProtonDB - Linux compatibility rating"
@@ -1087,7 +1098,7 @@ export function GameDetailPage() {
                   ) : protonData && !protonData.success ? (
                     <Badge
                       variant="online"
-                      className="px-3 py-1 rounded-full text-sky-400 border-sky-500/30 font-semibold flex items-center gap-1.5 backdrop-blur-md shadow-lg cursor-pointer transition-all hover:bg-black/80"
+                      className="px-3 py-1 rounded-full text-zinc-300 border-white/10 font-semibold flex items-center gap-1.5 backdrop-blur-md shadow-lg cursor-pointer transition-all hover:bg-black/80"
                       onClick={() => window.open("https://www.protondb.com/", "_blank")}
                       title="ProtonDB - Linux compatibility rating not available"
                     >
@@ -1097,11 +1108,11 @@ export function GameDetailPage() {
                   ) : null}
                 </div>
 
-                <div className="space-y-1">
-                  <h1 className="text-4xl md:text-6xl font-black text-white  tracking-tight drop-shadow-lg">
+                <div className="space-y-2">
+                  <h1 className="text-4xl md:text-6xl font-light text-white tracking-tight drop-shadow-lg">
                     {game.name}
                   </h1>
-                  <p className="text-lg text-white/80 flex items-center gap-2 font-medium drop-shadow-md">
+                  <p className="text-lg text-white/70 flex items-center gap-2 font-medium drop-shadow-md">
                     <User className="h-4 w-4" />
                     {game.developer || "Unknown Developer"}
                   </p>
@@ -1119,9 +1130,10 @@ export function GameDetailPage() {
         <div className="max-w-6xl mx-auto">
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             <div className="lg:col-span-2 space-y-8">
-              <div className="p-8 rounded-2xl bg-black/40 border border-white/10 backdrop-blur-md shadow-xl">
-                <h2 className="text-2xl font-black text-white  mb-4 tracking-tight">About This Game</h2>
-                <p className="text-base text-gray-300 leading-relaxed whitespace-pre-wrap">
+              <div className="p-8 rounded-2xl glass">
+                <p className="section-label mb-2">Overview</p>
+                <h2 className="text-2xl font-light text-white mb-4 tracking-tight">About This Game</h2>
+                <p className="text-base text-zinc-300 leading-relaxed whitespace-pre-wrap">
                   {game.description}
                 </p>
               </div>
@@ -1130,12 +1142,12 @@ export function GameDetailPage() {
               <LinuxExperiences appid={game.appid} />
 
               {resolvedScreenshots.length > 0 && (
-                <div className="p-6 rounded-2xl bg-black/40 border border-white/10 backdrop-blur-md shadow-xl">
+                <div className="p-6 rounded-2xl glass">
                   <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-xl font-black text-white ">Screenshots</h3>
+                    <h3 className="text-xl font-light text-white tracking-tight">Screenshots</h3>
                     <div className="flex items-center gap-2">
-                      <span className="text-sm text-gray-400">{resolvedScreenshots.length} images</span>
-                      <Button variant="outline" size="sm" className="h-8 px-2 border-white/20 bg-white/5 hover:bg-white/10 text-white" onClick={() => openLightbox(0)}>
+                      <span className="text-sm text-zinc-400">{resolvedScreenshots.length} images</span>
+                      <Button variant="outline" size="sm" className="h-8 px-2 border-white/[.07] bg-white/5 hover:bg-white/10 text-white" onClick={() => openLightbox(0)}>
                         View All
                       </Button>
                     </div>
@@ -1146,7 +1158,7 @@ export function GameDetailPage() {
                       <button
                         key={`${screenshot}-${index}`}
                         onClick={() => openLightbox(index)}
-                        className="relative w-full aspect-video rounded-lg overflow-hidden border border-white/10 hover:border-zinc-500 hover:scale-[1.02] transition-transform shadow-md"
+                        className="relative w-full aspect-video rounded-xl overflow-hidden border border-white/[.07] hover:border-zinc-500 hover:scale-[1.02] transition-all shadow-md"
                         aria-label={`Open screenshot ${index + 1}`}
                       >
                         <img
@@ -1175,13 +1187,13 @@ export function GameDetailPage() {
               )}
 
               {game?.dlc && game.dlc.length > 0 && (
-                <div className="p-8 rounded-2xl bg-black/40 border border-white/10 backdrop-blur-md shadow-xl">
-                  <h2 className="text-2xl font-black text-white mb-4 tracking-tight">
+                <div className="p-8 rounded-2xl glass">
+                  <h2 className="text-2xl font-light text-white mb-4 tracking-tight">
                     Included DLC ({game.dlc.length})
                   </h2>
                   <ul className="space-y-2 max-h-[400px] overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-white/20 hover:scrollbar-thumb-white/40">
                     {game.dlc.map((dlc, index) => (
-                      <li key={`${dlc}-${index}`} className="flex items-center gap-2 text-gray-300 bg-white/5 p-2 rounded-lg border border-white/5">
+                      <li key={`${dlc}-${index}`} className="flex items-center gap-2 text-zinc-300 bg-white/5 p-2 rounded-lg border border-white/[.07]">
                         <span className="h-1.5 w-1.5 rounded-full bg-zinc-400 flex-shrink-0" />
                         {dlc}
                       </li>
@@ -1191,19 +1203,25 @@ export function GameDetailPage() {
               )}
 
               {game?.comment && (
-                <div className="p-6 rounded-2xl bg-zinc-800/50 border border-zinc-700">
-                  <div className="flex items-start gap-3">
-                    <AlertTriangle className="h-5 w-5 text-zinc-400 flex-shrink-0 mt-0.5" />
-                    <div>
-                      <h3 className="font-semibold text-zinc-100 mb-1">Important Note</h3>
-                      <p className="text-sm text-zinc-400">{game.comment}</p>
-                    </div>
+                <div id="game-important-note" className={`p-6 rounded-2xl flex items-start gap-3 ${
+                  game.hasHv
+                    ? 'bg-red-950/30 border border-red-500/30'
+                    : 'bg-zinc-800/50 border border-zinc-700/50'
+                }`}>
+                  <div className={`p-1.5 rounded-full shrink-0 mt-0.5 ${
+                    game.hasHv ? 'bg-red-900/30' : 'bg-zinc-800/30'
+                  }`}>
+                    <AlertTriangle className={`h-5 w-5 ${game.hasHv ? 'text-red-400' : 'text-zinc-400'}`} />
+                  </div>
+                  <div>
+                    <h3 className={`font-bold text-sm mb-1 ${game.hasHv ? 'text-red-300' : 'text-zinc-100'}`}>Important Note</h3>
+                    <p className={`text-sm leading-relaxed ${game.hasHv ? 'text-red-200' : 'text-zinc-400'}`}>{game.comment}</p>
                   </div>
                 </div>
               )}
             </div>
             <div className="space-y-4">
-              <div className="p-6 rounded-2xl bg-black/40 border border-white/10 backdrop-blur-md shadow-xl">
+              <div className="p-6 rounded-2xl glass">
                 <div className="flex items-center gap-3">
                   <Button
                     size="lg"
@@ -1258,7 +1276,7 @@ export function GameDetailPage() {
                           onClick={() => {
                             void openExecutablePicker()
                           }}
-                          className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-gray-400 transition-colors hover:text-white hover:bg-white/10"
+                          className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-zinc-400 transition-colors hover:text-white hover:bg-white/10"
                         >
                           <Settings className="mr-2 h-4 w-4" />
                           Set Executable
@@ -1269,7 +1287,7 @@ export function GameDetailPage() {
                             setActionMenuOpen(false)
                             void handleCreateShortcut()
                           }}
-                          className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-gray-400 transition-colors hover:text-white hover:bg-white/10"
+                          className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-zinc-400 transition-colors hover:text-white hover:bg-white/10"
                         >
                           <ExternalLink className="mr-2 h-4 w-4" />
                           Create Desktop Shortcut
@@ -1280,7 +1298,7 @@ export function GameDetailPage() {
                             setActionMenuOpen(false)
                             void openGameFiles()
                           }}
-                          className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-gray-400 transition-colors hover:text-white hover:bg-white/10"
+                          className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-zinc-400 transition-colors hover:text-white hover:bg-white/10"
                         >
                           <FolderOpen className="mr-2 h-4 w-4" />
                           Open Game Files
@@ -1292,7 +1310,7 @@ export function GameDetailPage() {
                               setActionMenuOpen(false)
                               setEditMetadataOpen(true)
                             }}
-                            className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-gray-400 transition-colors hover:text-white hover:bg-white/10"
+                            className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-zinc-400 transition-colors hover:text-white hover:bg-white/10"
                           >
                             <Settings className="mr-2 h-4 w-4" />
                             Edit Details
@@ -1305,7 +1323,7 @@ export function GameDetailPage() {
                               setActionMenuOpen(false)
                               setLinuxConfigOpen(true)
                             }}
-                            className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-gray-400 transition-colors hover:text-white hover:bg-white/10"
+                            className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-zinc-400 transition-colors hover:text-white hover:bg-white/10"
                           >
                             <Terminal className="mr-2 h-4 w-4" />
                             Linux / VR Config
@@ -1361,7 +1379,7 @@ export function GameDetailPage() {
                 )}
 
                 {shortcutFeedback && (
-                  <div className={`mt-2 text-xs ${shortcutFeedback.type === 'success' ? 'text-emerald-400' : 'text-destructive'}`}>
+                  <div className={`mt-2 text-xs ${shortcutFeedback.type === 'success' ? 'text-zinc-300' : 'text-destructive'}`}>
                     {shortcutFeedback.message}
                   </div>
                 )}
@@ -1372,26 +1390,26 @@ export function GameDetailPage() {
               </div>
 
               <div className={`grid grid-cols-2 gap-3${isUCMatched ? ' opacity-40 blur-[2px] pointer-events-none select-none' : ''}`}>
-                <div className="p-4 rounded-xl bg-black/40 border border-white/10 backdrop-blur-md text-center shadow-lg">
+                <div className="p-4 rounded-xl glass text-center">
                   <Download className="h-5 w-5 text-zinc-400 mx-auto mb-2" />
-                  <div className="text-2xl font-black text-white">
+                  <div className="text-2xl font-bold text-white">
                     {formatNumber(effectiveDownloadCount)}
                   </div>
-                  <div className="text-xs text-gray-400">Downloads</div>
+                  <div className="text-xs text-zinc-400">Downloads</div>
                 </div>
 
-                <div className="p-4 rounded-xl bg-black/40 border border-white/10 backdrop-blur-md text-center shadow-lg">
-                  <Eye className="h-5 w-5 text-blue-400 mx-auto mb-2" />
-                  <div className="text-2xl font-black text-white">
+                <div className="p-4 rounded-xl glass text-center">
+                  <Eye className="h-5 w-5 text-zinc-400 mx-auto mb-2" />
+                  <div className="text-2xl font-bold text-white">
                     {formatNumber(effectiveViewCount)}
                   </div>
-                  <div className="text-xs text-gray-400">Views</div>
+                  <div className="text-xs text-zinc-400">Views</div>
                 </div>
               </div>
 
-              <div className="p-6 rounded-2xl bg-black/40 border border-white/10 backdrop-blur-md shadow-xl space-y-4">
+              <div className="p-6 rounded-2xl glass space-y-4">
                 <div className="flex items-center justify-between">
-                  <h3 className="font-black text-white">Details</h3>
+                  <h3 className="section-label">Details</h3>
                   {isExternalGame && (
                     <Button
                       variant="ghost"
@@ -1406,7 +1424,7 @@ export function GameDetailPage() {
                 </div>
 
                 {isUCMatched && (
-                  <div className="flex items-start gap-2 rounded-lg bg-yellow-500/10 border border-yellow-500/20 px-3 py-2 text-xs text-yellow-400">
+                  <div className="flex items-start gap-2 rounded-lg bg-zinc-800/50 border border-zinc-700/50 px-3 py-2 text-xs text-zinc-400">
                     <Info className="h-3.5 w-3.5 flex-shrink-0 mt-0.5" />
                     <span>Matched from UC catalog - details may not reflect your installed version.</span>
                   </div>
@@ -1414,7 +1432,7 @@ export function GameDetailPage() {
 
                 <div className={`space-y-3 text-sm${isUCMatched ? ' opacity-50 blur-[1.5px] select-none' : ''}`}>
                   <div className="flex items-center justify-between">
-                    <span className="text-gray-400 flex items-center gap-2">
+                    <span className="text-zinc-400 flex items-center gap-2">
                       <Calendar className="h-4 w-4" />
                       Released
                     </span>
@@ -1427,7 +1445,7 @@ export function GameDetailPage() {
                   </div>
 
                   <div className="flex items-center justify-between">
-                    <span className="text-gray-400 flex items-center gap-2">
+                    <span className="text-zinc-400 flex items-center gap-2">
                       <HardDrive className="h-4 w-4" />
                       Size
                     </span>
@@ -1436,7 +1454,7 @@ export function GameDetailPage() {
 
                   {(game.version || installedVersionLabels.length > 0) && (
                     <div className="flex items-center justify-between">
-                      <span className="text-gray-400">Version</span>
+                      <span className="text-zinc-400">Version</span>
                       <span className="font-semibold text-white">
                         {installedVersionLabels[0] || game.version}
                       </span>
@@ -1445,7 +1463,7 @@ export function GameDetailPage() {
 
                   {game.update_time && (
                     <div className="flex items-center justify-between">
-                      <span className="text-gray-400">Updated</span>
+                      <span className="text-zinc-400">Updated</span>
                       <span className="font-semibold text-white">
                         {(() => {
                           const date = new Date(game.update_time)
@@ -1456,7 +1474,7 @@ export function GameDetailPage() {
                   )}
 
                   <div className="flex items-center justify-between">
-                    <span className="text-gray-400 flex items-center gap-2">
+                    <span className="text-zinc-400 flex items-center gap-2">
                       <ShieldCheck className="h-4 w-4" />
                       Source
                     </span>
@@ -1466,17 +1484,17 @@ export function GameDetailPage() {
               </div>
 
               {/* ── Collections & Tags ── */}
-              <div className="p-6 rounded-2xl bg-black/40 border border-white/10 backdrop-blur-md shadow-xl space-y-4">
+              <div className="p-6 rounded-2xl glass space-y-4">
                 <div className="space-y-3">
-                  <h3 className="font-black text-white flex items-center gap-2">
-                    <Layers3 className="h-4 w-4 text-blue-400" />
+                  <h3 className="section-label flex items-center gap-2">
+                    <Layers3 className="h-4 w-4 text-zinc-400" />
                     Collections
                   </h3>
                   <div className="flex flex-wrap gap-1.5">
                     {(gameMeta.collections || []).map((c) => (
                       <Badge
                         key={c}
-                        className="rounded-full border-blue-400/20 bg-blue-500/10 text-blue-200 pl-2.5 pr-1 gap-1 cursor-pointer hover:bg-blue-500/20"
+                        className="rounded-full border-zinc-700/50 bg-zinc-800/50 text-zinc-300 pl-2.5 pr-1 gap-1 cursor-pointer hover:bg-zinc-700/50"
                         onClick={() => void removeCollection(c)}
                       >
                         {c}
@@ -1502,15 +1520,15 @@ export function GameDetailPage() {
                 </div>
                 <div className="h-px bg-white/10" />
                 <div className="space-y-3">
-                  <h3 className="font-black text-white flex items-center gap-2">
-                    <Tags className="h-4 w-4 text-emerald-400" />
+                  <h3 className="section-label flex items-center gap-2">
+                    <Tags className="h-4 w-4 text-zinc-400" />
                     Tags
                   </h3>
                   <div className="flex flex-wrap gap-1.5">
                     {(gameMeta.tags || []).map((t) => (
                       <Badge
                         key={t}
-                        className="rounded-full border-emerald-400/20 bg-emerald-500/10 text-emerald-200 pl-2.5 pr-1 gap-1 cursor-pointer hover:bg-emerald-500/20"
+                        className="rounded-full border-zinc-700/50 bg-zinc-800/50 text-zinc-300 pl-2.5 pr-1 gap-1 cursor-pointer hover:bg-zinc-700/50"
                         onClick={() => void removeTag(t)}
                       >
                         #{t}
@@ -1545,10 +1563,11 @@ export function GameDetailPage() {
       {relatedGames.length > 0 && (
         <section className="py-16 px-4 bg-black/20">
           <div className="container mx-auto max-w-7xl">
-            <h2 className="text-3xl md:text-4xl font-black text-white  mb-8">
+            <p className="section-label mb-2">Related</p>
+            <h2 className="text-2xl font-light tracking-tight text-white mb-8">
               You May Also Like
             </h2>
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6 stagger-grid">
               {relatedGames.map((relatedGame) => (
                 <GameCard
                   key={relatedGame.appid}
@@ -1652,7 +1671,7 @@ export function GameDetailPage() {
             className="absolute inset-0 bg-black/70"
             onClick={() => setPendingDeleteAction(null)}
           />
-          <div className="relative w-full max-w-md rounded-2xl border border-border/60 bg-slate-950/95 p-5 text-white shadow-2xl">
+          <div className="relative w-full max-w-md rounded-2xl border border-border/60 bg-card/95 p-5 text-foreground shadow-2xl">
             <div className="flex items-center gap-2 text-lg font-semibold">
               <AlertTriangle className="h-5 w-5 text-destructive" />
               {pendingDeleteAction === "installing"
@@ -1661,7 +1680,7 @@ export function GameDetailPage() {
                   ? "Unlink game"
                   : "Delete game"}
             </div>
-            <p className="mt-2 text-sm text-slate-300">
+            <p className="mt-2 text-sm text-muted-foreground">
               {pendingDeleteAction === "installing"
                 ? `Remove "${game.name}" from the installing list? This will delete any downloaded data.`
                 : installedManifest?.isExternal

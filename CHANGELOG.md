@@ -4,6 +4,10 @@
 
 ### Fixes & Improvements
 
+- Refreshed the renderer shell with a launcher-first layout: persistent left navigation, route-aware top chrome, stronger visual treatment, and removal of website-style primary links that only redirected users out of the app.
+- Reworked the home page into a desktop launcher surface with a spotlight panel, in-app quick actions, clearer stats, and a faster search entry flow.
+- Improved the library UX with a new overview header, better filter rail hierarchy, cleaner search and selection controls, and upgraded card styling for installed and installing titles.
+- Polished shared renderer surfaces including navigation cards, game cards, typography, background treatments, and the bottom activity bar so the app feels more cohesive and less like a wrapped website.
 - Fixed single-instance behavior so launching the app a second time (e.g. double-clicking the exe) always brings the existing window to the foreground rather than opening a second window. If the app is hidden in the tray it is restored automatically.
 - Fixed Windows focus-stealing prevention blocking the restore: the second-instance handler now briefly sets `alwaysOnTop` to force the window to the front, then immediately clears it.
 - Added a splash screen shown immediately on launch while the main window loads.

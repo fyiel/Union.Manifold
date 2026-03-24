@@ -1,13 +1,8 @@
 import { NavLink } from "react-router-dom"
-import { Camera, Download, Gamepad2, Library, Settings } from "lucide-react"
-
-const navItems = [
-  { label: "Browse", to: "/", icon: Gamepad2 },
-  { label: "Library", to: "/library", icon: Library },
-  { label: "Activity", to: "/downloads", icon: Download },
-  { label: "Screenshots", to: "/screenshots", icon: Camera },
-  { label: "Settings", to: "/settings", icon: Settings },
-]
+import { Hammer, ChevronDown } from "lucide-react"
+import { primaryNavItems, secondaryNavItems, bottomNavItems } from "@/lib/navigation"
+import { cn } from "@/lib/utils"
+import { useState } from "react"
 
 interface SidebarProps {
   mobileOpen: boolean
@@ -15,74 +10,150 @@ interface SidebarProps {
 }
 
 export function Sidebar({ mobileOpen, onClose }: SidebarProps) {
-  return (
-    <>
-      <aside className="hidden md:flex md:w-64 md:flex-col md:fixed md:inset-y-0 bg-sidebar text-sidebar-foreground border-r border-sidebar-border">
-        <div className="flex items-center gap-3 px-6 py-6">
-          <div className="h-10 w-10 rounded-xl bg-white/20 flex items-center justify-center">
-            <Gamepad2 className="h-6 w-6 text-white" />
-          </div>
-          <div>
-            <div className="text-lg font-black ">UnionCrax.Direct</div>
-            <div className="text-xs text-zinc-400">Direct downloads</div>
-          </div>
+  const [collectionsOpen, setCollectionsOpen] = useState(true)
+
+  const content = (
+    <div className="flex h-full flex-col">
+      {/* Logo */}
+      <div className="flex items-center gap-2.5 px-5 py-5">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white shadow-sm">
+          <Hammer className="h-4.5 w-4.5 text-black" />
         </div>
-        <nav className="flex-1 px-3 space-y-2">
-          {navItems.map((item) => (
+        <div className="min-w-0">
+          <span className="block text-sm font-bold tracking-tight text-white">UnionCrax</span>
+          <span className="block text-[10px] font-semibold uppercase tracking-[0.16em] text-zinc-500">.Direct</span>
+        </div>
+      </div>
+
+      <div className="mx-4 h-px bg-white/[.07]" />
+
+      {/* Main Navigation */}
+      <nav className="flex-1 overflow-y-auto px-3 pt-4">
+        <div className="mb-1 px-3">
+          <span className="section-label">Main</span>
+        </div>
+        <div className="space-y-0.5">
+          {primaryNavItems.map((item) => (
             <NavLink
               key={item.label}
               to={item.to}
               end={item.to === "/"}
+              onClick={onClose}
               className={({ isActive }) =>
-                `flex items-center gap-3 px-4 py-3 rounded-xl transition-all border border-transparent ${
+                cn(
+                  "group flex items-center gap-3 rounded-xl px-3 py-2 text-[13px] font-medium transition-all duration-150",
                   isActive
-                    ? "bg-sidebar-accent text-sidebar-accent-foreground border-sidebar-border"
-                    : "text-zinc-400 hover:text-zinc-100 hover:bg-sidebar-accent/60"
-                }`
+                    ? "bg-white/[.08] text-white shadow-sm"
+                    : "text-zinc-500 hover:bg-white/[.04] hover:text-zinc-200"
+                )
               }
             >
-              <item.icon className="h-5 w-5" />
-              <span className="font-medium">{item.label}</span>
+              {({ isActive }) => (
+                <>
+                  <div className={cn(
+                    "flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition-colors",
+                    isActive ? "bg-white/10" : "bg-transparent group-hover:bg-white/[.04]"
+                  )}>
+                    <item.icon className="h-4 w-4 shrink-0" />
+                  </div>
+                  <span>{item.label}</span>
+                </>
+              )}
             </NavLink>
           ))}
-        </nav>
-        <div className="px-6 py-4 border-t border-sidebar-border" />
+        </div>
+
+        {/* Collections section */}
+        <div className="mt-6">
+          <button
+            type="button"
+            onClick={() => setCollectionsOpen(!collectionsOpen)}
+            className="mb-1 flex w-full items-center justify-between px-3 group"
+          >
+            <span className="section-label">Collections</span>
+            <ChevronDown className={cn(
+              "h-3 w-3 text-zinc-600 transition-transform duration-200 group-hover:text-zinc-400",
+              collectionsOpen ? "rotate-0" : "-rotate-90"
+            )} />
+          </button>
+          {collectionsOpen && (
+            <div className="space-y-0.5">
+              {secondaryNavItems.map((item) => (
+                <NavLink
+                  key={item.label}
+                  to={item.to}
+                  onClick={onClose}
+                  className={({ isActive }) =>
+                    cn(
+                      "group flex items-center gap-3 rounded-xl px-3 py-2 text-[13px] font-medium transition-all duration-150",
+                      isActive
+                        ? "bg-white/[.08] text-white shadow-sm"
+                        : "text-zinc-500 hover:bg-white/[.04] hover:text-zinc-200"
+                    )
+                  }
+                >
+                  {({ isActive }) => (
+                    <>
+                      <div className={cn(
+                        "flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition-colors",
+                        isActive ? "bg-white/10" : "bg-transparent group-hover:bg-white/[.04]"
+                      )}>
+                        <item.icon className="h-4 w-4 shrink-0" />
+                      </div>
+                      <span>{item.label}</span>
+                    </>
+                  )}
+                </NavLink>
+              ))}
+            </div>
+          )}
+        </div>
+      </nav>
+
+      {/* Bottom section */}
+      <div className="mt-auto border-t border-white/[.07] px-3 py-3">
+        {bottomNavItems.map((item) => (
+          <NavLink
+            key={item.label}
+            to={item.to}
+            onClick={onClose}
+            className={({ isActive }) =>
+              cn(
+                "group flex items-center gap-3 rounded-xl px-3 py-2 text-[13px] font-medium transition-all duration-150",
+                isActive
+                  ? "bg-white/[.08] text-white shadow-sm"
+                  : "text-zinc-500 hover:bg-white/[.04] hover:text-zinc-200"
+              )
+            }
+          >
+            {({ isActive }) => (
+              <>
+                <div className={cn(
+                  "flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition-colors",
+                  isActive ? "bg-white/10" : "bg-transparent group-hover:bg-white/[.04]"
+                )}>
+                  <item.icon className="h-4 w-4 shrink-0" />
+                </div>
+                <span>{item.label}</span>
+              </>
+            )}
+          </NavLink>
+        ))}
+      </div>
+    </div>
+  )
+
+  return (
+    <>
+      <aside className="hidden md:fixed md:inset-y-0 md:z-40 md:flex md:w-[16rem] md:flex-col border-r border-white/[.07] bg-zinc-950/95 backdrop-blur-xl">
+        {content}
       </aside>
 
       {mobileOpen && (
         <div className="fixed inset-0 z-50 md:hidden">
-          <div className="absolute inset-0 bg-black/60" onClick={onClose} />
-          <div className="absolute left-0 top-0 bottom-0 w-72 bg-sidebar text-sidebar-foreground border-r border-sidebar-border p-4 flex flex-col">
-            <div className="flex items-center gap-3 px-2 py-4">
-              <div className="h-10 w-10 rounded-xl bg-white/20 flex items-center justify-center">
-                <Gamepad2 className="h-6 w-6 text-white" />
-              </div>
-              <div>
-                <div className="text-lg font-black ">UnionCrax.Direct</div>
-                <div className="text-xs text-zinc-400">Direct downloads</div>
-              </div>
-            </div>
-            <nav className="flex-1 px-1 space-y-2">
-              {navItems.map((item) => (
-                <NavLink
-                  key={item.label}
-                  to={item.to}
-                  end={item.to === "/"}
-                  onClick={onClose}
-                  className={({ isActive }) =>
-                    `flex items-center gap-3 px-4 py-3 rounded-xl transition-all border border-transparent ${
-                      isActive
-                        ? "bg-sidebar-accent text-sidebar-accent-foreground border-sidebar-border"
-                        : "text-zinc-400 hover:text-zinc-100 hover:bg-sidebar-accent/60"
-                    }`
-                  }
-                >
-                  <item.icon className="h-5 w-5" />
-                  <span className="font-medium">{item.label}</span>
-                </NavLink>
-              ))}
-            </nav>
-            <div className="px-2 py-3 border-t border-sidebar-border" />
+          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
+          <div className="absolute left-0 top-0 bottom-0 flex w-72 flex-col border-r border-white/[.07] bg-zinc-950 shadow-2xl">
+            {content}
           </div>
         </div>
       )}

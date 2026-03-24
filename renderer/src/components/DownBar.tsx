@@ -2,7 +2,7 @@ import { useMemo, useState, type MouseEvent } from "react"
 import { useNavigate } from "react-router-dom"
 import { useDownloads } from "@/context/downloads-context"
 import { Progress } from "@/components/ui/progress"
-import { PauseCircle, Play, Plus } from "lucide-react"
+import { PauseCircle, Play, Plus, Activity } from "lucide-react"
 import { AddGameModal } from "@/components/AddGameModal"
 
 const ACTIVE_STATUSES = ["downloading", "paused", "extracting", "installing", "verifying", "retrying"]
@@ -153,36 +153,36 @@ export function DownBar() {
   if (!displayGroup || !stats) {
     return (
       <>
-        <div
-          role="button"
-          tabIndex={0}
-          onClick={handleClick}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" || e.key === " ") handleClick()
-          }}
-          className="fixed bottom-0 left-0 right-0 z-30 border-t border-white/[.07] bg-zinc-950/90 px-4 py-3 text-left text-sm text-zinc-200 backdrop-blur-md transition-colors hover:bg-zinc-950"
-        >
-          <div className="flex items-center justify-between">
-            <span className="font-medium text-zinc-200">See activity</span>
-            <div className="flex items-center gap-2">
+        <div className="pointer-events-none fixed bottom-4 left-0 right-0 z-30 flex justify-center px-4 md:left-[17rem]">
+          <div
+            role="button"
+            tabIndex={0}
+            onClick={handleClick}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") handleClick()
+            }}
+            className="pointer-events-auto flex w-full max-w-xl cursor-pointer items-center justify-between gap-3 rounded-full border border-white/[.07] bg-zinc-900/90 px-4 py-2.5 text-sm text-zinc-200 shadow-[0_8px_40px_rgba(0,0,0,0.5)] backdrop-blur-2xl transition-all hover:bg-zinc-800/90"
+          >
+            <div className="flex items-center gap-2.5">
+              <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-zinc-800">
+                <Activity className="h-3.5 w-3.5 text-zinc-400" />
+              </div>
+              <span className="font-medium text-zinc-300">Activity</span>
               <span className="text-xs text-zinc-500">No active downloads</span>
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.preventDefault()
-                  e.stopPropagation()
-                  if (e.nativeEvent) {
-                    e.nativeEvent.stopImmediatePropagation()
-                  }
-                  setAddGameOpen(true)
-                }}
-                className="flex h-7 w-7 items-center justify-center rounded-full border border-white/[.07] bg-zinc-800 text-zinc-300 transition-all hover:bg-zinc-700 hover:text-white active:scale-95"
-                aria-label="Add external game"
-                title="Add a game manually"
-              >
-                <Plus className="h-3.5 w-3.5" />
-              </button>
             </div>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
+                if (e.nativeEvent) e.nativeEvent.stopImmediatePropagation()
+                setAddGameOpen(true)
+              }}
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-white/[.07] bg-zinc-800 text-zinc-300 transition-all hover:bg-zinc-700 hover:text-white active:scale-95"
+              aria-label="Add external game"
+            >
+              <Plus className="h-3.5 w-3.5" />
+            </button>
           </div>
         </div>
         <AddGameModal open={addGameOpen} onOpenChange={setAddGameOpen} />
@@ -214,60 +214,54 @@ export function DownBar() {
 
   return (
     <>
-      <div
-        role="button"
-        tabIndex={0}
-        onClick={handleClick}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") handleClick()
-        }}
-        className="fixed bottom-0 left-0 right-0 z-30 border-t border-white/[.07] bg-zinc-950/90 px-4 py-3 text-left text-sm text-zinc-200 backdrop-blur-md transition-colors hover:bg-zinc-950"
-      >
-        <div className="flex items-center justify-between gap-3">
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <span className="truncate font-medium text-zinc-200">{displayName}</span>
-              <span className="text-xs text-zinc-500">
-                {isPaused
-                  ? `Downloads paused - ${queuedCount} queued`
-                  : isQueuedOnly
-                    ? "Queued"
-                    : stats.partInfo.total > 1
-                      ? `${stats.phase} part ${stats.partInfo.partNum} of ${stats.partInfo.total}`
-                      : stats.phase}
-                {queuedCount > 0 && !isPaused && !isQueuedOnly ? ` • ${queuedCount} queued` : ""}
-                {displayHost ? ` • ${displayHost}` : ""}
-              </span>
+      <div className="pointer-events-none fixed bottom-4 left-0 right-0 z-30 flex justify-center px-4 md:left-[17rem]">
+        <div
+          role="button"
+          tabIndex={0}
+          onClick={handleClick}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") handleClick()
+          }}
+          className="pointer-events-auto flex w-full max-w-xl cursor-pointer items-center gap-3 rounded-full border border-white/[.07] bg-zinc-900/90 px-4 py-2.5 text-sm text-zinc-200 shadow-[0_8px_40px_rgba(0,0,0,0.5)] backdrop-blur-2xl transition-all hover:bg-zinc-800/90"
+        >
+          <div className="min-w-0 flex-1 flex items-center gap-2.5">
+            <span className="max-w-[160px] truncate text-sm font-medium text-zinc-200">{displayName}</span>
+            <span className="shrink-0 text-xs text-zinc-500">
+              {isPaused
+                ? `Paused · ${queuedCount} queued`
+                : isQueuedOnly
+                  ? "Queued"
+                  : stats.partInfo.total > 1
+                    ? `${stats.phase} · part ${stats.partInfo.partNum}/${stats.partInfo.total}`
+                    : stats.phase}
+              {queuedCount > 0 && !isPaused && !isQueuedOnly ? ` · ${queuedCount} queued` : ""}
+            </span>
+            <div className="flex-1 min-w-[48px]">
+              <Progress value={stats.progress} className="h-1 bg-white/[.07]" />
             </div>
-            <div className="mt-2">
-              <Progress value={stats.progress} className="h-1.5" />
-            </div>
+            <span className="shrink-0 text-xs tabular-nums text-zinc-500">{formatPercent(stats.progress)}</span>
           </div>
-          <div className="flex items-center gap-3">
-            <div className="text-xs text-zinc-500">{formatPercent(stats.progress)}</div>
+          <div className="flex shrink-0 items-center gap-1.5">
             <button
               type="button"
               onClick={handleToggle}
-              className="flex h-8 w-8 items-center justify-center rounded-full border border-white/[.07] bg-zinc-800 text-zinc-300 transition-all hover:bg-zinc-700 hover:text-white active:scale-95"
+              className="flex h-7 w-7 items-center justify-center rounded-full border border-white/[.07] bg-zinc-800 text-zinc-300 transition-all hover:bg-zinc-700 hover:text-white active:scale-95"
               aria-label={isPaused ? "Resume downloads" : "Pause downloads"}
             >
-              {isPaused ? <Play className="h-4 w-4" /> : <PauseCircle className="h-4 w-4" />}
+              {isPaused ? <Play className="h-3.5 w-3.5" /> : <PauseCircle className="h-3.5 w-3.5" />}
             </button>
             <button
               type="button"
               onClick={(e) => {
                 e.preventDefault()
                 e.stopPropagation()
-                if (e.nativeEvent) {
-                  e.nativeEvent.stopImmediatePropagation()
-                }
+                if (e.nativeEvent) e.nativeEvent.stopImmediatePropagation()
                 setAddGameOpen(true)
               }}
-              className="flex h-8 w-8 items-center justify-center rounded-full border border-white/[.07] bg-zinc-800 text-zinc-300 transition-all hover:bg-zinc-700 hover:text-white active:scale-95"
+              className="flex h-7 w-7 items-center justify-center rounded-full border border-white/[.07] bg-zinc-800 text-zinc-300 transition-all hover:bg-zinc-700 hover:text-white active:scale-95"
               aria-label="Add external game"
-              title="Add a game manually"
             >
-              <Plus className="h-4 w-4" />
+              <Plus className="h-3.5 w-3.5" />
             </button>
           </div>
         </div>

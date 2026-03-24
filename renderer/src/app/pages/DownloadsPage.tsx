@@ -646,29 +646,29 @@ export function DownloadsPage() {
   }
 
   return (
-    <div className="container mx-auto max-w-7xl space-y-8">
-      <div className="flex items-center justify-between">
+    <div className="container mx-auto max-w-7xl space-y-10">
+      <div className="flex items-center justify-between anim">
         <div>
-          <h1 className="text-2xl sm:text-3xl font-black ">Activity</h1>
-          <p className="text-sm text-zinc-400">Track downloads, installs, install-ready titles, and completed titles.</p>
+          <p className="section-label mb-2">Downloads</p>
+          <h1 className="text-4xl font-light tracking-tight text-white">Activity</h1>
         </div>
-        <Button variant="outline" onClick={clearCompleted}>
+        <Button variant="outline" onClick={clearCompleted} className="rounded-full px-6">
           Clear
         </Button>
       </div>
 
       {runningGames.length > 0 && (
-        <section className="space-y-4">
-          <h2 className="text-xl font-bold ">Running Games</h2>
+        <section className="space-y-4 anim anim-d1">
+          <p className="section-label">Now Playing</p>
           <div className="space-y-3">
             {runningGames.map((game) => (
               <div
                 key={game.appid}
-                className="flex items-center justify-between rounded-xl border border-white/[.07] bg-zinc-900/60 p-4 transition-all hover:bg-zinc-900"
+                className="flex items-center justify-between rounded-xl glass p-4 transition-all hover:bg-white/[.03]"
               >
                 <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-green-500/20">
-                    <Play className="h-5 w-5 text-green-500" />
+                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-white/10">
+                    <Play className="h-5 w-5 text-white" />
                   </div>
                   <div>
                     <div className="font-semibold">{game.gameName}</div>
@@ -692,23 +692,23 @@ export function DownloadsPage() {
 
       {primaryGroup && primaryStats && (
         <section>
-          <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-br from-slate-950 via-slate-950/95 to-slate-900/90 shadow-lg shadow-black/20">
+          <div className="relative overflow-hidden rounded-2xl glass shadow-lg shadow-black/20 anim anim-d1">
             <div className="absolute inset-0">
               {primaryGame?.image && (
                 <img
                   src={proxyImageUrl(primaryGame.image)}
                   alt={primaryGroup[0]?.gameName || "Download"}
-                  className="h-full w-full scale-110 object-cover opacity-45 blur-2xl saturate-90"
+                  className="h-full w-full scale-110 object-cover opacity-30 blur-2xl saturate-50"
                 />
               )}
-              <div className="absolute inset-0 bg-gradient-to-br from-slate-950/75 via-slate-950/85 to-slate-900/80" />
+              <div className="absolute inset-0 bg-gradient-to-br from-black/60 via-black/70 to-black/60" />
             </div>
             <div className="relative z-10 space-y-6 p-6 lg:p-8">
                 <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
                   <div className="space-y-2">
                     <div className="flex items-center gap-3">
                       {primaryGame?.image && (
-                        <div className="h-10 w-16 overflow-hidden rounded-md border border-white/10 bg-slate-900/60">
+                        <div className="h-10 w-16 overflow-hidden rounded-md border border-white/[.07] bg-zinc-900/60">
                           <img
                             src={proxyImageUrl(primaryGame.image)}
                             alt={primaryGroup[0]?.gameName || "Download"}
@@ -716,7 +716,7 @@ export function DownloadsPage() {
                           />
                         </div>
                       )}
-                      <h2 className="text-2xl sm:text-3xl font-black ">
+                      <h2 className="text-2xl sm:text-3xl font-light tracking-tight text-white">
                         {primaryGroup[0]?.gameName || "Unknown"}
                       </h2>
                       {primaryGame?.version && (
@@ -823,7 +823,7 @@ export function DownloadsPage() {
                 </div>
                 <Progress
                   value={primaryStats.progress}
-                  className="h-2 bg-slate-800/90 [&_[data-slot=progress-indicator]]:bg-white/80"
+                  className="h-2 bg-zinc-800/90 [&_[data-slot=progress-indicator]]:bg-white/80"
                 />
                 {primaryStats.phase !== "downloading" && primaryStats.overallTotalBytes > 0 && (
                   <div className="text-xs text-zinc-400">
@@ -832,40 +832,40 @@ export function DownloadsPage() {
                 )}
               </div>
 
-              <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-4">
+              <div className="rounded-2xl glass p-4">
                 <div className="flex items-center justify-between text-xs text-zinc-400">
                   <span className="font-semibold text-zinc-100">Performance</span>
                   <div className="flex items-center gap-4">
                     <span className="inline-flex items-center gap-2">
-                      <span className="h-2 w-2 rounded-full bg-sky-400" />
+                      <span className="h-2 w-2 rounded-full bg-white" />
                       Network
                     </span>
                     <span className="inline-flex items-center gap-2">
-                      <span className="h-2 w-2 rounded-full bg-emerald-400" />
+                      <span className="h-2 w-2 rounded-full bg-zinc-500" />
                       Disk
                     </span>
                   </div>
                 </div>
                 <svg viewBox="0 0 600 70" className="mt-3 h-20 w-full">
-                  {renderBars(networkHistory, "rgb(56 189 248)")}
-                  {renderLine(diskHistory, "rgb(52 211 153)")}
+                  {renderBars(networkHistory, "rgb(255 255 255)")}
+                  {renderLine(diskHistory, "rgb(161 161 170)")}
                 </svg>
               </div>
 
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                <div className="rounded-xl border border-white/10 bg-slate-950/60 p-4">
+                <div className="rounded-xl glass p-4">
                   <div className="text-xs text-zinc-400">Download speed</div>
                   <div className="text-lg font-semibold text-zinc-100">{formatSpeed(currentNetwork)}</div>
                 </div>
-                <div className="rounded-xl border border-white/10 bg-slate-950/60 p-4">
+                <div className="rounded-xl glass p-4">
                   <div className="text-xs text-zinc-400">Peak download</div>
                   <div className="text-lg font-semibold text-zinc-100">{formatSpeed(peakNetworkSpeed)}</div>
                 </div>
-                <div className="rounded-xl border border-white/10 bg-slate-950/60 p-4">
+                <div className="rounded-xl glass p-4">
                   <div className="text-xs text-zinc-400">Disk write</div>
                   <div className="text-lg font-semibold text-zinc-100">{formatSpeed(currentDisk)}</div>
                 </div>
-                <div className="rounded-xl border border-white/10 bg-slate-950/60 p-4">
+                <div className="rounded-xl glass p-4">
                   <div className="text-xs text-zinc-400">Total transferred</div>
                   <div className="text-lg font-semibold text-zinc-100">{formatBytes(primaryStats.receivedBytes)}</div>
                 </div>
@@ -876,8 +876,7 @@ export function DownloadsPage() {
       )}
       <section className="space-y-4">
         <div className="flex items-center gap-2">
-          <Download className="h-5 w-5 text-white" />
-          <h2 className="text-xl font-black ">Queue</h2>
+          <p className="section-label">Queue</p>
           <Badge variant="secondary" className="rounded-full">
             {queuedGroups.length}
           </Badge>
@@ -920,7 +919,7 @@ export function DownloadsPage() {
             return (
               <div
                 key={`${items[0].appid}-${gameName}`}
-                className="rounded-xl border border-white/[.07] bg-gradient-to-b from-slate-950/70 via-slate-950/50 to-slate-900/40 shadow-lg shadow-black/20"
+                className="rounded-xl glass"
               >
                 <div className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center">
                   <div className="flex items-center gap-4 sm:w-[320px]">
@@ -1014,8 +1013,7 @@ export function DownloadsPage() {
 
       <section className="space-y-4">
         <div className="flex items-center gap-2">
-          <HardDrive className="h-5 w-5 text-amber-300" />
-          <h2 className="text-xl font-black ">Install Ready</h2>
+          <p className="section-label">Install Ready</p>
           <Badge variant="secondary" className="rounded-full">
             {installReadyGroups.length}
           </Badge>
@@ -1041,7 +1039,7 @@ export function DownloadsPage() {
             return (
               <div
                 key={`install-ready-${items[0].appid}-${gameName}`}
-                className="rounded-xl border border-amber-400/20 bg-gradient-to-b from-amber-950/20 via-slate-950/40 to-slate-900/30 shadow-lg shadow-black/20"
+                className="rounded-xl glass"
               >
                 <div className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
                   <div className="flex items-center gap-4">
@@ -1059,7 +1057,7 @@ export function DownloadsPage() {
                       <div className="text-xs text-zinc-400">
                         {game?.version || "Unknown version"} - {game?.source || "Unknown source"} - Ready {readyAt ? new Date(readyAt).toLocaleString() : "now"}
                       </div>
-                      <div className="mt-2 text-xs text-amber-200/90">{readyNote}</div>
+                      <div className="mt-2 text-xs text-zinc-400">{readyNote}</div>
                     </div>
                   </div>
 
@@ -1089,7 +1087,7 @@ export function DownloadsPage() {
                 <div className="border-t border-white/[.07] px-5 py-3">
                   <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-zinc-400">
                     <span>{totalParts} {getPartsLabel(items)}</span>
-                    <Badge variant="outline" className="rounded-full border-amber-400/40 text-amber-200">
+                    <Badge variant="outline" className="rounded-full border-white/10 text-zinc-300">
                       Install ready
                     </Badge>
                   </div>
@@ -1102,8 +1100,7 @@ export function DownloadsPage() {
 
       <section className="space-y-4">
         <div className="flex items-center gap-2">
-          <Download className="h-5 w-5 text-white" />
-          <h2 className="text-xl font-black ">Completed</h2>
+          <p className="section-label">Completed</p>
           <Badge variant="secondary" className="rounded-full">
             {completedGroups.length}
           </Badge>
@@ -1128,7 +1125,7 @@ export function DownloadsPage() {
             return (
               <div
                 key={`completed-${items[0].appid}-${gameName}`}
-                className="cursor-pointer rounded-xl border border-white/[.07] bg-gradient-to-b from-slate-950/60 via-slate-950/40 to-slate-900/30 shadow-lg shadow-black/20 transition hover:border-zinc-700"
+                className="cursor-pointer rounded-xl glass transition hover:bg-white/[.03]"
                 onClick={() => {
                   if (appid) navigate(`/game/${appid}`)
                 }}
@@ -1150,7 +1147,7 @@ export function DownloadsPage() {
                         {game?.version || "Unknown version"} - {game?.source || "Unknown source"} - Completed {finishedAt ? new Date(finishedAt).toLocaleString() : ""}
                       </div>
                       {game?.comment && (
-                        <div className="mt-2 text-xs text-amber-200/90">
+                        <div className="mt-2 text-xs text-zinc-400">
                           Important note: {game.comment}
                         </div>
                       )}
@@ -1189,8 +1186,7 @@ export function DownloadsPage() {
 
       <section className="space-y-4">
         <div className="flex items-center gap-2">
-          <XCircle className="h-5 w-5 text-destructive" />
-          <h2 className="text-xl font-black ">Cancelled / Failed</h2>
+          <p className="section-label">Cancelled / Failed</p>
           <Badge variant="secondary" className="rounded-full">
             {cancelledGroups.length}
           </Badge>
@@ -1214,7 +1210,7 @@ export function DownloadsPage() {
             return (
               <div
                 key={`cancelled-${items[0].appid}-${gameName}`}
-                className="rounded-xl border border-destructive/40 bg-gradient-to-b from-slate-950/60 via-slate-950/40 to-slate-900/30 shadow-lg shadow-black/20"
+                className="rounded-xl glass opacity-60"
               >
                 <div className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
                   <div className="flex items-center gap-4">
@@ -1260,7 +1256,7 @@ export function DownloadsPage() {
                 <div className="border-t border-white/[.07] px-5 py-3">
                   <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-zinc-400">
                     <span>{totalParts} {getPartsLabel(items)}</span>
-                    <Badge variant="outline" className="rounded-full border-destructive/40 text-destructive">
+                    <Badge variant="outline" className="rounded-full border-zinc-700/50 text-zinc-500">
                       {statusLabel}
                     </Badge>
                   </div>

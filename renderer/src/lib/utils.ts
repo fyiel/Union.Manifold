@@ -309,3 +309,38 @@ export function pickGameExecutable(exes: GameExecutable[], gameName: string, gam
   const confident = topScore >= 6
   return { pick: top || null, confident }
 }
+
+export function getCardImage(imageUrl: string): string {
+  return imageUrl
+    .replace('/t_thumb/', '/t_cover_big_2x/')
+    .replace('/t_cover_big/', '/t_cover_big_2x/')
+}
+
+export function timeAgo(dateStr?: string | null): string {
+  if (!dateStr) return ""
+  const date = new Date(dateStr)
+  if (isNaN(date.getTime())) return ""
+  const seconds = Math.floor((Date.now() - date.getTime()) / 1000)
+  if (seconds < 60) return "just now"
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `${minutes}m ago`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}h ago`
+  const days = Math.floor(hours / 24)
+  if (days < 30) return `${days}d ago`
+  const months = Math.floor(days / 30)
+  if (months < 12) return `${months}mo ago`
+  return `${Math.floor(months / 12)}y ago`
+}
+
+export function isGameVersionUpdate(game: { update_time?: string; release_time?: string }): boolean {
+  if (!game.update_time) return false
+  const updateDate = new Date(game.update_time)
+  if (isNaN(updateDate.getTime())) return false
+  const daysSinceUpdate = Math.floor((Date.now() - updateDate.getTime()) / (1000 * 60 * 60 * 24))
+  if (daysSinceUpdate > 14) return false
+  if (!game.release_time) return true
+  const releaseDate = new Date(game.release_time)
+  if (isNaN(releaseDate.getTime())) return true
+  return updateDate.getTime() > releaseDate.getTime() + 86400000
+}

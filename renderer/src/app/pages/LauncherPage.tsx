@@ -1,20 +1,20 @@
-import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState, startTransition } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, startTransition } from "react"
 import { useNavigate } from "react-router-dom"
 import { GameCard } from "@/components/GameCard"
 import { GameCardCompact } from "@/components/GameCardCompact"
 import { GameCardSkeleton } from "@/components/GameCardSkeleton"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
-import { SearchSuggestions } from "@/components/SearchSuggestions"
 import { ErrorMessage } from "@/components/ErrorMessage"
 import { AnimatedCounter } from "@/components/AnimatedCounter"
 import { OfflineBanner } from "@/components/OfflineBanner"
 import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious } from "@/components/ui/carousel"
 import { PaginationBar } from "@/components/PaginationBar"
 import { apiUrl } from "@/lib/api"
+import { getLauncherHomeMeta } from "@/lib/navigation"
 import { formatNumber, generateErrorCode, ErrorTypes } from "@/lib/utils"
 import { useOnlineStatus } from "@/hooks/use-online-status"
-import { Hammer, SlidersHorizontal, Wifi, EyeOff, ArrowRight, Server, Search } from "lucide-react"
+import { ArrowRight, Search } from "lucide-react"
 
 const extractDeveloper = (description: string): string => {
   const developerMatch = description.match(/(?:by|from|developer|dev|studio)\s+([^.,\n]+)/i)
@@ -80,7 +80,6 @@ export function LauncherPage() {
 
   const [games, setGames] = useState<Game[]>([])
   const [loading, setLoading] = useState(true)
-  const [searchInput, setSearchInput] = useState("")
   const [refreshing, setRefreshing] = useState(false)
   const [gameStats, setGameStats] = useState<Record<string, { downloads: number; views: number }>>({})
   const [refreshKey, setRefreshKey] = useState(0)
@@ -89,17 +88,10 @@ export function LauncherPage() {
   const [emptyStateReady, setEmptyStateReady] = useState(false)
   const [currentPage, setCurrentPage] = useState(1)
   const [recentlyInstalledGames, setRecentlyInstalledGames] = useState<Game[]>([])
-  const [shortcutLabel, setShortcutLabel] = useState("Ctrl+K")
   const itemsPerPage = 20
   const [statsCacheTime, setStatsCacheTime] = useState<number>(0)
 
   const activeLoadIdRef = useRef(0)
-
-  useEffect(() => {
-    if (typeof navigator === "undefined") return
-    const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform)
-    setShortcutLabel(isMac ? "Cmd+K" : "Ctrl+K")
-  }, [])
 
   useEffect(() => {
     loadGames()
@@ -413,173 +405,164 @@ export function LauncherPage() {
 
   const displayTotalSizeTB = (stats as any).totalSizeTB ?? 0
   const displayTotalSizeGB = (stats as any).totalSizeGB ?? Math.round(displayTotalSizeTB * 1024 * 10) / 10
+  const launcherMeta = getLauncherHomeMeta()
 
-  const handleSearchSubmit = useCallback(
-    (e: FormEvent) => {
-      e.preventDefault()
-      if (searchInput.trim()) {
-        navigate(`/search?q=${encodeURIComponent(searchInput.trim())}`)
-      }
-    },
-    [searchInput, navigate]
-  )
+  const spotlightLockRef = useRef<Game | null>(null)
+  const spotlightGame = useMemo(() => {
+    const candidate = recentlyInstalledGames[0] || popularReleases[0] || newReleases[0] || featuredGames[0] || null
+    if (!spotlightLockRef.current && candidate) {
+      spotlightLockRef.current = candidate
+    }
+    return spotlightLockRef.current
+  }, [featuredGames, newReleases, popularReleases, recentlyInstalledGames])
 
-  const handleSearchChange = useCallback((value: string) => {
-    setSearchInput(value)
-  }, [])
+  const spotlightStats = spotlightGame ? gameStats[spotlightGame.appid] : undefined
 
   return (
-    <div className="min-h-screen bg-[#09090b]">
-      <section id="hero" className="relative py-20 sm:py-24 md:py-32 px-4 text-center">
-        <div className="container mx-auto max-w-5xl">
-          <div className="flex justify-center mb-8">
-            <div className="p-4 sm:p-6 rounded-2xl bg-zinc-900 border border-white/[.07]">
-              <Hammer className="h-12 w-12 sm:h-16 sm:w-16 text-white" />
+    <div className="space-y-10 pb-4">
+      <section
+        id="hero"
+        className="glass-card relative overflow-hidden rounded-3xl p-6 sm:p-8 xl:p-10"
+      >
+        <div className="relative grid gap-8 xl:grid-cols-[minmax(0,1.2fr)_380px] xl:items-stretch">
+          <div className="space-y-8">
+            <div className="inline-flex items-center gap-2 rounded-full border border-white/[.07] bg-zinc-800 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-zinc-300 anim">
+              <launcherMeta.icon className="h-3.5 w-3.5" />
+              {launcherMeta.eyebrow}
             </div>
-          </div>
-          <h1 className="text-4xl sm:text-5xl md:text-7xl font-black mb-6 sm:mb-8 text-white text-balance leading-tight">
-            Free Games for{" "}
-            <span className="text-zinc-400">
-              Everyone
-            </span>
-          </h1>
-          <p className="text-base sm:text-xl md:text-2xl text-zinc-400 mb-8 sm:mb-12 max-w-3xl mx-auto leading-relaxed text-pretty">
-            Join UnionCrax and fulfill all your gaming needs. No matter who you are, where you're from, or how much
-            money you make - we make games accessible to everyone.
-          </p>
-          <div className="flex flex-col sm:flex-row gap-4 justify-center">
-            <Button
-              size="lg"
-              className="font-semibold text-base sm:text-lg px-6 sm:px-8 py-5 sm:py-6"
-              onClick={() => document.getElementById("featured")?.scrollIntoView({ behavior: "smooth" })}
-            >
-              Browse Games
-            </Button>
-            <Button
-              size="lg"
-              variant="secondary"
-              className="font-semibold text-base sm:text-lg px-6 sm:px-8 py-5 sm:py-6"
-              onClick={() => window.open("https://union-crax.xyz/discord", "_blank", "noreferrer")}
-            >
-              Join Discord
-            </Button>
-          </div>
-        </div>
-      </section>
 
-      {/* Announcement Banner */}
-      <section className="py-8 px-4 border-y border-white/[.07]">
-        <div className="container mx-auto max-w-4xl text-center">
-          <div className="inline-flex items-center gap-3 px-6 py-3 rounded-full bg-orange-500/10 border border-orange-500/20">
-            <Hammer className="h-5 w-5 text-orange-500" />
-            <span className="text-base font-semibold text-zinc-200">
-              UnionCrax.Direct is currently in beta -{" "}
-              <a
-                href="https://github.com/Union-Crax/UnionCrax.Direct/issues"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="font-bold text-orange-400 underline underline-offset-4 decoration-orange-400/30 hover:decoration-orange-400/60"
+            <div className="max-w-4xl space-y-4 anim anim-d1">
+              <h1 className="max-w-3xl text-4xl font-light tracking-tight text-white sm:text-5xl xl:text-6xl">
+                {launcherMeta.title}
+              </h1>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-3 anim anim-d2">
+              <div className="rounded-2xl border border-white/[.07] bg-zinc-900/60 p-4">
+                <div className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">Catalogue</div>
+                <div className="mt-2 text-3xl font-bold text-white">
+                  {stats.totalGames === 0 ? "?" : <AnimatedCounter value={stats.totalGames} format={formatNumber} />}
+                </div>
+              </div>
+              <div className="rounded-2xl border border-white/[.07] bg-zinc-900/60 p-4">
+                <div className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">Downloads</div>
+                <div className="mt-2 text-3xl font-bold text-white">
+                  {stats.totalDownloads === 0 ? "?" : <AnimatedCounter value={stats.totalDownloads} format={formatNumber} />}
+                </div>
+              </div>
+              <div className="rounded-2xl border border-white/[.07] bg-zinc-900/60 p-4">
+                <div className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">Storage</div>
+                <div className="mt-2 text-3xl font-bold text-white">
+                  {displayTotalSizeGB >= 1024 ? (
+                    <AnimatedCounter value={displayTotalSizeTB} suffix="TB" />
+                  ) : displayTotalSizeGB && displayTotalSizeGB > 0 ? (
+                    <AnimatedCounter value={displayTotalSizeGB} suffix="GB" />
+                  ) : (
+                    "?"
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-3 sm:flex-row">
+              <Button
+                size="lg"
+                className="h-11 rounded-full bg-white px-6 text-sm font-medium text-black hover:bg-zinc-200 active:scale-95"
+                onClick={() => navigate("/library")}
               >
-                Report issues on GitHub
-              </a>
-              .
-            </span>
+                Open library
+              </Button>
+              <Button
+                size="lg"
+                variant="outline"
+                className="h-11 rounded-full border-zinc-700 px-6 text-sm font-medium text-zinc-200 hover:border-zinc-500 hover:text-white active:scale-95"
+                onClick={() => typeof window !== "undefined" && window.dispatchEvent(new Event("uc_open_search_popup"))}
+              >
+                Search catalogue
+              </Button>
+              <Button
+                size="lg"
+                variant="ghost"
+                className="h-11 rounded-full px-6 text-sm font-medium text-zinc-400 hover:bg-white/[.03] hover:text-white active:scale-95"
+                onClick={() => navigate("/downloads")}
+              >
+                View activity
+              </Button>
+            </div>
+          </div>
+
+          <div className="relative flex h-full flex-col rounded-2xl border border-white/[.07] bg-zinc-900/60 p-4">
+            <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-[0.24em] text-zinc-500">
+              <span>Spotlight</span>
+              <span>{spotlightStats?.downloads ? `${formatNumber(spotlightStats.downloads)} dl` : "Fresh pick"}</span>
+            </div>
+
+            {spotlightGame ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => navigate(`/game/${spotlightGame.appid}`)}
+                  className="mt-4 overflow-hidden rounded-2xl border border-white/[.07] bg-zinc-900 text-left transition hover:border-zinc-600"
+                >
+                  <div className="aspect-[16/9] overflow-hidden bg-zinc-900">
+                    <img
+                      src={spotlightGame.image || "./banner.png"}
+                      alt={spotlightGame.name}
+                      className="h-full w-full object-cover transition duration-700 hover:scale-105"
+                      loading="lazy"
+                    />
+                  </div>
+                  <div className="space-y-3 p-4">
+                    <div className="text-lg font-semibold text-white">{spotlightGame.name}</div>
+                    <div className="flex flex-wrap gap-2">
+                      {(spotlightGame.genres || []).slice(0, 3).map((genre) => (
+                        <span
+                          key={genre}
+                          className="rounded-full border border-white/[.07] bg-zinc-800 px-2.5 py-1 text-[11px] font-medium uppercase tracking-wider text-zinc-300"
+                        >
+                          {genre}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                </button>
+
+                <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+                  <button
+                    type="button"
+                    onClick={() => navigate(`/game/${spotlightGame.appid}`)}
+                    className="flex items-center justify-between rounded-2xl border border-white/[.07] bg-zinc-800/50 px-4 py-3 text-left transition hover:bg-zinc-700/50 active:scale-95"
+                  >
+                    <div className="text-sm font-medium text-white">Open game page</div>
+                    <ArrowRight className="h-4 w-4 text-zinc-500" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => document.getElementById("featured")?.scrollIntoView({ behavior: "smooth" })}
+                    className="flex items-center justify-between rounded-2xl border border-white/[.07] bg-zinc-800/50 px-4 py-3 text-left transition hover:bg-zinc-700/50 active:scale-95"
+                  >
+                    <div className="text-sm font-medium text-white">Browse catalogue</div>
+                    <Search className="h-4 w-4 text-zinc-500" />
+                  </button>
+                </div>
+              </>
+            ) : (
+              <div className="mt-4 flex flex-1 items-center justify-center rounded-2xl border border-dashed border-white/[.07] bg-zinc-900/40 p-6 text-center text-sm text-zinc-500">
+                Loading...
+              </div>
+            )}
           </div>
         </div>
       </section>
-
-      {/* Stats Section */}
-      <section className="py-12 sm:py-16 md:py-20 px-4">
-        <div className="container mx-auto max-w-6xl">
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="group p-5 sm:p-8 rounded-2xl bg-zinc-900/60 border border-white/[.07] hover:border-zinc-600 transition-all space-y-3">
-              <div className="text-3xl sm:text-4xl md:text-5xl font-black text-white">
-                {displayTotalSizeGB >= 1024 ? (
-                  <AnimatedCounter value={displayTotalSizeTB} suffix="TB" />
-                ) : displayTotalSizeGB && displayTotalSizeGB > 0 ? (
-                  <AnimatedCounter value={displayTotalSizeGB} suffix="GB" />
-                ) : (
-                  "?"
-                )}
-              </div>
-              <div className="text-zinc-200 font-semibold">Total Storage*</div>
-              <div className="text-xs text-zinc-500 leading-relaxed">
-                * Actual bandwidth used is around{" "}
-                {(() => {
-                  const bandwidthGB = displayTotalSizeGB * 3
-                  const bandwidthTB = Math.round((bandwidthGB / 1024) * 10) / 10
-                  return bandwidthGB >= 1024
-                    ? `${bandwidthTB}TB`
-                    : `${Math.round(bandwidthGB * 10) / 10}GB`
-                })()} as we upload to multiple hosts
-              </div>
-            </div>
-
-            <div className="group p-5 sm:p-8 rounded-2xl bg-zinc-900/60 border border-white/[.07] hover:border-zinc-600 transition-all space-y-3">
-              <div className="text-3xl sm:text-4xl md:text-5xl font-black text-white">
-                {stats.totalGames === 0 ? "?" : <AnimatedCounter value={stats.totalGames} format={formatNumber} />}
-              </div>
-              <div className="text-zinc-200 font-semibold">Games Available*</div>
-              <div className="text-xs text-zinc-500">
-                * Restored {stats.totalGames === 0 ? "0" : stats.totalGames} of 1228 games after the attack
-              </div>
-            </div>
-
-            <div className="group p-5 sm:p-8 rounded-2xl bg-zinc-900/60 border border-white/[.07] hover:border-zinc-600 transition-all space-y-3">
-              <div className="text-3xl sm:text-4xl md:text-5xl font-black text-white">
-                {stats.totalDownloads === 0 ? (
-                  "?"
-                ) : (
-                  <AnimatedCounter value={stats.totalDownloads} format={formatNumber} />
-                )}
-              </div>
-              <div className="text-zinc-200 font-semibold">Total Downloads</div>
-            </div>
-
-            <div className="group p-5 sm:p-8 rounded-2xl bg-zinc-900/60 border border-white/[.07] hover:border-zinc-600 transition-all space-y-3">
-              <div className="text-3xl sm:text-4xl md:text-5xl font-black text-white">
-                {stats.totalGames === 0 ? "0%" : <AnimatedCounter value={100} suffix="%" />}
-              </div>
-              <div className="text-zinc-200 font-semibold">Free Forever</div>
-            </div>
-          </div>
-          <div className="text-center mt-8">
-            <p className="text-sm text-muted-foreground italic">We prefer dangerous freedom over peaceful slavery</p>
-          </div>
-        </div>
-      </section>
-
-      {/* Search Bar (clickable - opens global search popup) */}
-      <div id="home-search" className="py-8 px-4 border-y border-white/[.07] bg-zinc-900/30">
-        <div className="container mx-auto max-w-3xl">
-          <div
-            role="button"
-            tabIndex={0}
-            onClick={() => typeof window !== "undefined" && window.dispatchEvent(new Event("uc_open_search_popup"))}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault()
-                window.dispatchEvent(new Event("uc_open_search_popup"))
-              }
-            }}
-            className="w-full px-4 py-3 text-base rounded-2xl border border-zinc-700 cursor-pointer text-zinc-500 flex items-center gap-3 transition-colors hover:border-zinc-500 bg-zinc-900 active:scale-[.99]"
-          >
-            <Search className="h-5 w-5 flex-shrink-0" aria-hidden />
-            <span>Click to search ({shortcutLabel})</span>
-          </div>
-        </div>
-      </div>
 
       {recentlyInstalledGames.length > 0 && (
         <section className="py-12 sm:py-16 md:py-20 px-4">
           <div className="container mx-auto max-w-7xl">
             <div className="mb-10">
-              <h2 className="text-3xl sm:text-4xl md:text-5xl font-black text-white mb-3">
+              <p className="section-label mb-2">Your Games</p>
+              <h2 className="text-2xl font-light tracking-tight text-white">
                 Recently Installed
               </h2>
-              <p className="text-base sm:text-lg text-zinc-400">
-                Games you installed on this device
-              </p>
             </div>
 
             <Carousel
@@ -615,9 +598,8 @@ export function LauncherPage() {
                     aria-label="Open your installed library"
                   >
                     <div className="h-full rounded-2xl border border-dashed border-zinc-700 bg-zinc-900/60 p-4 flex flex-col items-center justify-center text-center transition hover:border-zinc-500 active:scale-[.98]">
-                      <div className="text-sm font-semibold text-zinc-200">Manage installs</div>
-                      <div className="text-xs text-zinc-500 mt-1">Open your library</div>
-                      <div className="mt-3 text-xs text-zinc-400 group-hover:text-white group-hover:underline">/library</div>
+                      <div className="text-sm font-semibold text-zinc-200">View all</div>
+                      <div className="mt-2 text-zinc-400 group-hover:text-white"><ArrowRight className="h-4 w-4" /></div>
                     </div>
                   </button>
                 </CarouselItem>
@@ -691,8 +673,8 @@ export function LauncherPage() {
             ) : (
               <>
                 <div className="mb-10">
-                  <h2 className="text-3xl sm:text-4xl md:text-5xl font-black text-white mb-3">Latest Games</h2>
-                  <p className="text-base sm:text-lg text-zinc-400">Recently added games to our collection</p>
+                  <p className="section-label mb-2">New</p>
+                  <h2 className="text-2xl font-light tracking-tight text-white">Latest Games</h2>
                 </div>
                 <Carousel
                   opts={{
@@ -733,10 +715,10 @@ export function LauncherPage() {
             ) : (
               <div className="mb-12 flex flex-col md:flex-row md:items-end justify-between gap-4">
                 <div>
-                  <h2 className="text-4xl sm:text-5xl md:text-6xl font-black text-white mb-3 tracking-tight">
+                  <p className="section-label mb-2">Trending</p>
+                  <h2 className="text-2xl font-light tracking-tight text-white">
                     Most Popular
                   </h2>
-                  <p className="text-lg sm:text-xl text-zinc-400 font-medium">Top trending downloads in our community</p>
                 </div>
               </div>
             )}
@@ -794,8 +776,8 @@ export function LauncherPage() {
             <>
               <div className="mb-10 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                 <div>
-                  <h2 className="text-4xl md:text-5xl font-black text-white mb-3">All Games</h2>
-                  <p className="text-lg text-zinc-400">Browse our complete collection</p>
+                  <p className="section-label mb-2">Library</p>
+                  <h2 className="text-2xl font-light tracking-tight text-white">All Games</h2>
                 </div>
                 <Button
                   variant="outline"
@@ -811,7 +793,7 @@ export function LauncherPage() {
                 </Button>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6 stagger-grid">
                 {(loading || refreshing) ? (
                   Array.from({ length: itemsPerPage }).map((_, i) => (
                     <GameCardSkeleton key={`skeleton-all-${i}`} />

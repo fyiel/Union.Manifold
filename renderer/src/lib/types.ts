@@ -16,6 +16,7 @@ export interface Game {
   dlc: string[]
   update_time?: string
   hasCoOp?: boolean
+  hasHv?: boolean
   isExternal?: boolean
   externalPath?: string
 }
