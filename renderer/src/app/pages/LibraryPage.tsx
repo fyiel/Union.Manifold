@@ -1,34 +1,81 @@
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState, useCallback } from "react"
 import { GameCard } from "@/components/GameCard"
 import { GameCardSkeleton } from "@/components/GameCardSkeleton"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { PaginationBar } from "@/components/PaginationBar"
 import { useGamesData } from "@/hooks/use-games"
 import type { Game } from "@/lib/types"
+import { pickGameExecutable } from "@/lib/utils"
 import { useDownloads } from "@/context/downloads-context"
-import { Settings, Trash2, AlertTriangle, FolderOpen, ExternalLink, Unlink2, Pencil, Terminal } from "lucide-react"
+import {
+  Settings, Trash2, AlertTriangle, FolderOpen, ExternalLink, Unlink2,
+  Pencil, Terminal, CheckSquare2, Tags, Layers3, Search, ArrowUpDown,
+  Library, X, Loader2, Check,
+} from "lucide-react"
 import { ExePickerModal } from "@/components/ExePickerModal"
 import { EditGameMetadataModal } from "@/components/EditGameMetadataModal"
 import { GameLinuxConfigModal } from "@/components/GameLinuxConfigModal"
 import { gameLogger } from "@/lib/logger"
 
+type LibraryGameMeta = {
+  collections?: string[]
+  tags?: string[]
+  lastPlayedAt?: number
+}
+
+type LibraryGame = Game & {
+  installedAt?: number
+  libraryMeta?: LibraryGameMeta
+}
+
 type LibraryEntry = {
   appid: string
   name?: string
-  metadata?: Game
+  metadata?: Game & { installedAt?: number }
   installStatus?: string
   installError?: string
+  installedAt?: number
 }
 
-function manifestToGame(entry: LibraryEntry): Game | null {
-  const meta = entry && (entry.metadata as Game | undefined)
+type BatchActionResult = {
+  ok: number
+  failed: number
+}
+
+function normalizeLibraryToken(value: string) {
+  return value.trim().replace(/\s+/g, " ")
+}
+
+function dedupeCaseInsensitive(values: string[]) {
+  const seen = new Set<string>()
+  const next: string[] = []
+  for (const value of values) {
+    const normalized = normalizeLibraryToken(value)
+    if (!normalized) continue
+    const key = normalized.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    next.push(normalized)
+  }
+  return next.sort((left, right) => left.localeCompare(right))
+}
+
+function manifestToGame(entry: LibraryEntry): LibraryGame | null {
+  const meta = entry && (entry.metadata as (Game & { installedAt?: number }) | undefined)
+  const installedAt = typeof entry?.installedAt === "number"
+    ? entry.installedAt
+    : typeof meta?.installedAt === "number"
+      ? meta.installedAt
+      : undefined
+
   if (meta && meta.appid) {
-    // Propagate isExternal/externalPath from the parent manifest or from metadata
     const isExternal = Boolean((entry as any).isExternal || meta.isExternal)
     const externalPath = (entry as any).externalPath || meta.externalPath || undefined
-    return { ...meta, isExternal, externalPath }
+    return { ...meta, isExternal, externalPath, installedAt }
   }
   if (entry && entry.appid) {
     return {
@@ -46,6 +93,7 @@ function manifestToGame(entry: LibraryEntry): Game | null {
       dlc: [],
       isExternal: Boolean((entry as any).isExternal),
       externalPath: (entry as any).externalPath || undefined,
+      installedAt,
     }
   }
   return null
@@ -66,8 +114,8 @@ function scoreLibraryGame(game: Game): number {
   return score
 }
 
-function dedupeLibraryGames(games: Game[]): Game[] {
-  const map = new Map<string, Game>()
+function dedupeLibraryGames(games: LibraryGame[]): LibraryGame[] {
+  const map = new Map<string, LibraryGame>()
   for (const game of games) {
     if (!game?.appid) continue
     const existing = map.get(game.appid)
@@ -79,18 +127,35 @@ function dedupeLibraryGames(games: Game[]): Game[] {
     const nextScore = scoreLibraryGame(game)
     if (nextScore > existingScore) {
       map.set(game.appid, game)
+      continue
+    }
+    if (nextScore === existingScore && (game.installedAt || 0) > (existing.installedAt || 0)) {
+      map.set(game.appid, game)
     }
   }
   return Array.from(map.values())
+}
+
+function formatRelativeTimestamp(timestamp?: number) {
+  if (!timestamp) return null
+  const deltaMs = Date.now() - timestamp
+  if (deltaMs < 60_000) return "just now"
+  const deltaMinutes = Math.round(deltaMs / 60_000)
+  if (deltaMinutes < 60) return `${deltaMinutes}m ago`
+  const deltaHours = Math.round(deltaMinutes / 60)
+  if (deltaHours < 48) return `${deltaHours}h ago`
+  const deltaDays = Math.round(deltaHours / 24)
+  return `${deltaDays}d ago`
 }
 
 export function LibraryPage() {
   const { stats, loading: statsLoading } = useGamesData()
   const { downloads, clearByAppid } = useDownloads()
   const [loading, setLoading] = useState(true)
-  const [installed, setInstalled] = useState<Game[]>([])
-  const [installing, setInstalling] = useState<Game[]>([])
+  const [installed, setInstalled] = useState<LibraryGame[]>([])
+  const [installing, setInstalling] = useState<LibraryGame[]>([])
   const [installingMeta, setInstallingMeta] = useState<Record<string, { status?: string; error?: string }>>({})
+  const [libraryGameMeta, setLibraryGameMeta] = useState<Record<string, LibraryGameMeta>>({})
   const [refreshTick, setRefreshTick] = useState(0)
   const [hiddenAppIds, setHiddenAppIds] = useState<Set<string>>(new Set())
   const [pendingDeleteGame, setPendingDeleteGame] = useState<Game | null>(null)
@@ -103,16 +168,55 @@ export function LibraryPage() {
   const [exePickerCurrentPath, setExePickerCurrentPath] = useState<string | null>(null)
   const [exePickerFolder, setExePickerFolder] = useState<string | null>(null)
   const [settingsPopupOpen, setSettingsPopupOpen] = useState(false)
-  const [settingsPopupGame, setSettingsPopupGame] = useState<Game | null>(null)
+  const [settingsPopupGame, setSettingsPopupGame] = useState<LibraryGame | null>(null)
   const [shortcutFeedback, setShortcutFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
   const [editMetadataOpen, setEditMetadataOpen] = useState(false)
   const [linuxConfigOpen, setLinuxConfigOpen] = useState(false)
-  const [linuxConfigGame, setLinuxConfigGame] = useState<Game | null>(null)
+  const [linuxConfigGame, setLinuxConfigGame] = useState<LibraryGame | null>(null)
+    const [batchDeleteConfirmOpen, setBatchDeleteConfirmOpen] = useState(false)
+  const [librarySearch, setLibrarySearch] = useState("")
+  const [selectedCollection, setSelectedCollection] = useState("all")
+  const [selectedTag, setSelectedTag] = useState("all")
+  const [sortMode, setSortMode] = useState<'name' | 'recent-install' | 'recent-play'>('name')
+  const [selectionMode, setSelectionMode] = useState(false)
+  const [selectedAppIds, setSelectedAppIds] = useState<Set<string>>(new Set())
+  const [collectionDraft, setCollectionDraft] = useState("")
+  const [tagDraft, setTagDraft] = useState("")
+  const [batchFeedback, setBatchFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
+  const [batchWorking, setBatchWorking] = useState(false)
+  const [batchProgress, setBatchProgress] = useState<{ done: number; total: number } | null>(null)
   const isLinux = typeof navigator !== 'undefined' && /linux/i.test(navigator.userAgent)
   const itemsPerPage = 24
   const [installedPage, setInstalledPage] = useState(1)
   const [installingPage, setInstallingPage] = useState(1)
   const hasLoadedRef = useRef(false)
+
+  // Debounced search: only apply the search filter after 250ms of no typing
+  const [debouncedSearch, setDebouncedSearch] = useState("")
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const handleSearchChange = useCallback((value: string) => {
+    setLibrarySearch(value)
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current)
+    searchTimerRef.current = setTimeout(() => setDebouncedSearch(value), 250)
+  }, [])
+  useEffect(() => {
+    return () => { if (searchTimerRef.current) clearTimeout(searchTimerRef.current) }
+  }, [])
+
+  const persistLibraryGameMeta = async (nextMeta: Record<string, LibraryGameMeta>) => {
+    setLibraryGameMeta(nextMeta)
+    try {
+      await window.ucSettings?.set?.('libraryGameMeta', nextMeta)
+    } catch { }
+  }
+
+  const updateLibraryGameMeta = async (appids: string[], mutate: (current: LibraryGameMeta) => LibraryGameMeta) => {
+    const nextMeta = { ...libraryGameMeta }
+    for (const appid of appids) {
+      nextMeta[appid] = mutate(nextMeta[appid] || {})
+    }
+    await persistLibraryGameMeta(nextMeta)
+  }
 
   const cancelledAppIds = useMemo(() => {
     const ids = new Set<string>()
@@ -122,28 +226,80 @@ export function LibraryPage() {
     return ids
   }, [downloads])
 
-  const visibleInstalled = useMemo(() => installed.filter((game) => !hiddenAppIds.has(game.appid)), [installed, hiddenAppIds])
+  const installedWithMeta = useMemo(() => {
+    return installed
+      .filter((game) => !hiddenAppIds.has(game.appid))
+      .map((game) => ({
+        ...game,
+        libraryMeta: libraryGameMeta[game.appid] || {},
+      }))
+  }, [installed, hiddenAppIds, libraryGameMeta])
+
+  const availableCollections = useMemo(() => {
+    return dedupeCaseInsensitive(installedWithMeta.flatMap((game) => game.libraryMeta?.collections || []))
+  }, [installedWithMeta])
+
+  const availableTags = useMemo(() => {
+    return dedupeCaseInsensitive(installedWithMeta.flatMap((game) => game.libraryMeta?.tags || []))
+  }, [installedWithMeta])
+
+  const filteredInstalled = useMemo(() => {
+    const normalizedSearch = debouncedSearch.trim().toLowerCase()
+    const next = installedWithMeta.filter((game) => {
+      if (selectedCollection !== "all" && !(game.libraryMeta?.collections || []).some((value) => value.toLowerCase() === selectedCollection.toLowerCase())) {
+        return false
+      }
+      if (selectedTag !== "all" && !(game.libraryMeta?.tags || []).some((value) => value.toLowerCase() === selectedTag.toLowerCase())) {
+        return false
+      }
+      if (!normalizedSearch) return true
+      const haystack = [
+        game.name,
+        game.appid,
+        game.developer,
+        game.store,
+        ...(game.libraryMeta?.collections || []),
+        ...(game.libraryMeta?.tags || []),
+      ].join(" ").toLowerCase()
+      return haystack.includes(normalizedSearch)
+    })
+
+    next.sort((left, right) => {
+      if (sortMode === 'recent-install') {
+        return (right.installedAt || 0) - (left.installedAt || 0) || left.name.localeCompare(right.name)
+      }
+      if (sortMode === 'recent-play') {
+        return (right.libraryMeta?.lastPlayedAt || 0) - (left.libraryMeta?.lastPlayedAt || 0) || left.name.localeCompare(right.name)
+      }
+      return left.name.localeCompare(right.name)
+    })
+    return next
+  }, [installedWithMeta, debouncedSearch, selectedCollection, selectedTag, sortMode])
+
   const visibleInstalling = useMemo(() => {
     return installing.filter((game) => {
       if (hiddenAppIds.has(game.appid)) return false
-      // Filter out cancelled downloads
       if (cancelledAppIds.has(game.appid)) return false
       return true
     })
   }, [installing, hiddenAppIds, cancelledAppIds])
 
-  const installedTotalPages = Math.max(1, Math.ceil(visibleInstalled.length / itemsPerPage))
+  const installedTotalPages = Math.max(1, Math.ceil(filteredInstalled.length / itemsPerPage))
   const installingTotalPages = Math.max(1, Math.ceil(visibleInstalling.length / itemsPerPage))
 
   const pagedInstalled = useMemo(() => {
     const start = (installedPage - 1) * itemsPerPage
-    return visibleInstalled.slice(start, start + itemsPerPage)
-  }, [visibleInstalled, installedPage, itemsPerPage])
+    return filteredInstalled.slice(start, start + itemsPerPage)
+  }, [filteredInstalled, installedPage, itemsPerPage])
 
   const pagedInstalling = useMemo(() => {
     const start = (installingPage - 1) * itemsPerPage
     return visibleInstalling.slice(start, start + itemsPerPage)
   }, [visibleInstalling, installingPage, itemsPerPage])
+
+  const selectedInstalledGames = useMemo(() => {
+    return filteredInstalled.filter((game) => selectedAppIds.has(game.appid))
+  }, [filteredInstalled, selectedAppIds])
 
   const cancelledKey = useMemo(() => {
     if (!cancelledAppIds.size) return ""
@@ -179,13 +335,13 @@ export function LibraryPage() {
         const installedGames = dedupeLibraryGames(
           installedList
             .map((entry: LibraryEntry) => manifestToGame(entry))
-            .filter(Boolean) as Game[]
+            .filter(Boolean) as LibraryGame[]
         )
         const installingMetaMap: Record<string, { status?: string; error?: string }> = {}
         const installingGames = dedupeLibraryGames(
           installingList
             .map((entry: LibraryEntry) => manifestToGame(entry))
-            .filter(Boolean) as Game[]
+            .filter(Boolean) as LibraryGame[]
         )
         for (const entry of installingList as LibraryEntry[]) {
           if (!entry?.appid) continue
@@ -207,6 +363,65 @@ export function LibraryPage() {
     }
   }, [refreshTick, cancelledKey, failedKey])
 
+  useEffect(() => {
+    let mounted = true
+    const loadLibraryMeta = async () => {
+      try {
+        const value = await window.ucSettings?.get?.('libraryGameMeta')
+        if (!mounted) return
+        if (value && typeof value === 'object' && !Array.isArray(value)) {
+          setLibraryGameMeta(value as Record<string, LibraryGameMeta>)
+        } else {
+          setLibraryGameMeta({})
+        }
+      } catch {
+        if (mounted) setLibraryGameMeta({})
+      }
+    }
+    void loadLibraryMeta()
+    const off = window.ucSettings?.onChanged?.((data: any) => {
+      if (!data?.key) return
+      if (data.key === '__CLEAR_ALL__') {
+        setLibraryGameMeta({})
+        return
+      }
+      if (data.key === 'libraryGameMeta') {
+        if (data.value && typeof data.value === 'object' && !Array.isArray(data.value)) {
+          setLibraryGameMeta(data.value as Record<string, LibraryGameMeta>)
+        } else {
+          setLibraryGameMeta({})
+        }
+      }
+    })
+    return () => {
+      mounted = false
+      if (typeof off === 'function') off()
+    }
+  }, [])
+
+  useEffect(() => {
+    setInstalledPage((page) => Math.min(page, installedTotalPages))
+  }, [installedTotalPages])
+
+  useEffect(() => {
+    setInstallingPage((page) => Math.min(page, installingTotalPages))
+  }, [installingTotalPages])
+
+  useEffect(() => {
+    setSelectedAppIds((prev) => {
+      const next = new Set<string>()
+      for (const appid of prev) {
+        if (filteredInstalled.some((game) => game.appid === appid)) next.add(appid)
+      }
+      return next
+    })
+  }, [filteredInstalled])
+
+  const showBatchFeedback = (type: 'success' | 'error', message: string) => {
+    setBatchFeedback({ type, message })
+    setTimeout(() => setBatchFeedback(null), 3000)
+  }
+
   const handleDeleteInstalled = async (game: Game) => {
     setHiddenAppIds((prev) => {
       const next = new Set(prev)
@@ -216,11 +431,15 @@ export function LibraryPage() {
     setInstalled((prev) => prev.filter((item) => item.appid !== game.appid))
     try {
       await window.ucDownloads?.deleteInstalled?.(game.appid)
-      // Also delete the desktop shortcut if it exists
       await window.ucDownloads?.deleteDesktopShortcut?.(game.name)
       clearByAppid(game.appid)
     } finally {
       setRefreshTick((tick) => tick + 1)
+      setSelectedAppIds((prev) => {
+        const next = new Set(prev)
+        next.delete(game.appid)
+        return next
+      })
       setHiddenAppIds((prev) => {
         const next = new Set(prev)
         next.delete(game.appid)
@@ -311,7 +530,6 @@ export function LibraryPage() {
         }
       }
 
-      // Prefer the directory of the saved exe (or first discovered exe) if it lives inside the folder.
       const preferredExePath = discoveredExePath
       const exeDir = preferredExePath ? dirname(preferredExePath) : null
       const candidate = exeDir || null
@@ -320,7 +538,6 @@ export function LibraryPage() {
       } else if (!folder && candidate) {
         folder = candidate
       } else if (folder && window.ucDownloads?.findGameSubfolder) {
-        // If no exe is set, check if there's a game subfolder to navigate to
         const subfolder = await window.ucDownloads.findGameSubfolder(folder)
         if (subfolder) {
           folder = subfolder
@@ -338,294 +555,674 @@ export function LibraryPage() {
   const handleExePicked = async (path: string) => {
     if (!exePickerAppId) return
     await setSavedExe(exePickerAppId, path)
-    // Update the current path to reflect the new selection
     setExePickerCurrentPath(path)
   }
 
+  const toggleSelected = (appid: string) => {
+    setSelectedAppIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(appid)) next.delete(appid)
+      else next.add(appid)
+      return next
+    })
+  }
+
+  const runBatchShortcutCreation = async (onProgress?: (done: number, total: number) => void): Promise<BatchActionResult> => {
+    let ok = 0
+    let failed = 0
+    const total = selectedInstalledGames.length
+    for (let i = 0; i < total; i++) {
+      const game = selectedInstalledGames[i]
+      onProgress?.(i, total)
+      let savedExe = await getSavedExe(game.appid)
+      if (!savedExe && window.ucDownloads?.listGameExecutables) {
+        try {
+          const result = await window.ucDownloads.listGameExecutables(game.appid)
+          const exes = result?.exes || []
+          const folder = result?.folder || null
+          const { pick } = pickGameExecutable(exes, game.name, game.source, folder)
+          savedExe = pick?.path || null
+        } catch { }
+      }
+
+      if (!savedExe) {
+        failed += 1
+        continue
+      }
+
+      try {
+        await window.ucDownloads?.deleteDesktopShortcut?.(game.name)
+        const result = await window.ucDownloads?.createDesktopShortcut?.(game.name, savedExe)
+        if (result?.ok) ok += 1
+        else failed += 1
+      } catch {
+        failed += 1
+      }
+    }
+    onProgress?.(total, total)
+    return { ok, failed }
+  }
+
+  const handleBatchAssignCollection = async () => {
+    const value = normalizeLibraryToken(collectionDraft)
+    if (!value || selectedAppIds.size === 0) return
+    setBatchWorking(true)
+    try {
+      await updateLibraryGameMeta(Array.from(selectedAppIds), (current) => ({
+        ...current,
+        collections: dedupeCaseInsensitive([...(current.collections || []), value]),
+      }))
+      setCollectionDraft("")
+      showBatchFeedback('success', `Added collection "${value}" to ${selectedAppIds.size} games.`)
+    } finally {
+      setBatchWorking(false)
+    }
+  }
+
+  const handleBatchAddTag = async () => {
+    const value = normalizeLibraryToken(tagDraft)
+    if (!value || selectedAppIds.size === 0) return
+    setBatchWorking(true)
+    try {
+      await updateLibraryGameMeta(Array.from(selectedAppIds), (current) => ({
+        ...current,
+        tags: dedupeCaseInsensitive([...(current.tags || []), value]),
+      }))
+      setTagDraft("")
+      showBatchFeedback('success', `Added tag "${value}" to ${selectedAppIds.size} games.`)
+    } finally {
+      setBatchWorking(false)
+    }
+  }
+
+  const handleBatchDelete = async () => {
+    if (selectedInstalledGames.length === 0) return
+    setBatchDeleteConfirmOpen(true)
+  }
+
+  const executeBatchDelete = async () => {
+    setBatchDeleteConfirmOpen(false)
+    setBatchWorking(true)
+    try {
+      for (const game of selectedInstalledGames) {
+        await handleDeleteInstalled(game)
+      }
+      setSelectedAppIds(new Set())
+      showBatchFeedback('success', `Processed ${selectedInstalledGames.length} games.`)
+    } finally {
+      setBatchWorking(false)
+    }
+  }
+
+  const handleBatchCreateShortcuts = async () => {
+    if (selectedInstalledGames.length === 0) return
+    setBatchWorking(true)
+    setBatchProgress({ done: 0, total: selectedInstalledGames.length })
+    try {
+      const result = await runBatchShortcutCreation((done, total) => setBatchProgress({ done, total }))
+      if (result.failed === 0) {
+        showBatchFeedback('success', `Created ${result.ok} desktop shortcuts.`)
+      } else {
+        showBatchFeedback('error', `Created ${result.ok} shortcuts, ${result.failed} games still need an executable.`)
+      }
+    } finally {
+      setBatchWorking(false)
+      setBatchProgress(null)
+    }
+  }
+
+  const handleBatchDeleteShortcuts = async () => {
+    if (selectedInstalledGames.length === 0) return
+    setBatchWorking(true)
+    setBatchProgress({ done: 0, total: selectedInstalledGames.length })
+    let ok = 0
+    let failed = 0
+    try {
+      for (let i = 0; i < selectedInstalledGames.length; i++) {
+        const game = selectedInstalledGames[i]
+        setBatchProgress({ done: i, total: selectedInstalledGames.length })
+        try {
+          await window.ucDownloads?.deleteDesktopShortcut?.(game.name)
+          ok += 1
+        } catch {
+          failed += 1
+        }
+      }
+      setBatchProgress({ done: selectedInstalledGames.length, total: selectedInstalledGames.length })
+      if (failed === 0) {
+        showBatchFeedback('success', `Deleted ${ok} desktop shortcuts.`)
+      } else {
+        showBatchFeedback('error', `Deleted ${ok} shortcuts, ${failed} failed.`)
+      }
+    } finally {
+      setBatchWorking(false)
+      setBatchProgress(null)
+    }
+  }
+
+  const isAllPageSelected = pagedInstalled.length > 0 && pagedInstalled.every((game) => selectedAppIds.has(game.appid))
+  const isAllVisibleSelected = filteredInstalled.length > 0 && filteredInstalled.every((game) => selectedAppIds.has(game.appid))
+
   return (
-    <div className="container mx-auto max-w-7xl space-y-10">
-      <section className="space-y-4">
-        <div className="flex items-center gap-3">
-          <h1 className="text-2xl sm:text-3xl font-black ">Your Library</h1>
-          <Badge className="rounded-full bg-white/15 text-white border-zinc-700">Direct downloads</Badge>
-        </div>
-        <p className="text-sm text-zinc-400 max-w-2xl">
-          Titles detected inside your installed and installing folders appear here.
-        </p>
-      </section>
-
-      <section className="space-y-4">
-        <h2 className="text-xl font-black ">Installed</h2>
-        {loading || statsLoading ? (
-          <div className="grid gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
-            {Array.from({ length: 24 }).map((_, idx) => (
-              <GameCardSkeleton key={idx} />
-            ))}
+    <div className="flex gap-0 min-h-[calc(100vh-4rem)]">
+      {/* ──── Sidebar ──── */}
+      <aside className="hidden lg:flex w-56 flex-shrink-0 flex-col border-r border-white/[.07] bg-zinc-950/60 backdrop-blur-sm overflow-y-auto sticky top-0 max-h-[calc(100vh-4rem)]">
+        <div className="p-4 space-y-5">
+          {/* Sidebar header */}
+          <div className="flex items-center gap-2 text-zinc-200">
+            <Library className="h-5 w-5" />
+            <span className="font-bold text-sm tracking-wide uppercase">Library</span>
           </div>
-        ) : visibleInstalled.length ? (
-          <div className="space-y-4">
-            <div className="grid gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
-              {pagedInstalled.map((game) => (
-                <div key={game.appid} className="relative">
-                  <GameCard game={game} stats={stats[game.appid]} size="compact" />
-                  <div className="absolute top-2 left-2 z-20">
-                    <Popover
-                      open={settingsPopupOpen && settingsPopupGame?.appid === game.appid}
-                      onOpenChange={(open) => {
-                        if (open) {
-                          setSettingsPopupGame(game)
-                          setShortcutFeedback(null)
-                          setSettingsPopupOpen(true)
-                        } else {
-                          setSettingsPopupOpen(false)
-                          setShortcutFeedback(null)
-                        }
-                      }}
-                    >
-                      <PopoverTrigger asChild>
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          onClick={(event) => {
-                            event.stopPropagation()
-                          }}
-                          className="h-8 w-8 rounded-full bg-black/60 text-white hover:bg-white/20"
-                          title="Game actions"
-                        >
-                          <Settings className="h-4 w-4" />
-                        </Button>
-                      </PopoverTrigger>
-                      <PopoverContent align="start" className="w-56 rounded-2xl p-2 bg-zinc-950 border-white/10 text-white shadow-xl">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setSettingsPopupOpen(false)
-                            void openExecutablePicker(game)
-                          }}
-                          className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-gray-400 transition-colors hover:text-white hover:bg-white/10"
-                        >
-                          <Settings className="mr-2 h-4 w-4" />
-                          Set Executable
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setSettingsPopupOpen(false)
-                            void handleOpenGameFiles(game)
-                          }}
-                          className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-gray-400 transition-colors hover:text-white hover:bg-white/10"
-                        >
-                          <FolderOpen className="mr-2 h-4 w-4" />
-                          Open Game Files
-                        </button>
-                        <button
-                          type="button"
-                          onClick={async () => {
-                            if (!settingsPopupGame) return
-                            setShortcutFeedback(null)
-                            let savedExe = await getSavedExe(settingsPopupGame.appid)
-                            if (!savedExe && window.ucDownloads?.listGameExecutables) {
-                              try {
-                                const result = await window.ucDownloads.listGameExecutables(settingsPopupGame.appid)
-                                savedExe = result?.exes?.[0]?.path || null
-                              } catch { }
-                            }
 
-                            if (savedExe) {
-                              try { await window.ucDownloads?.deleteDesktopShortcut?.(settingsPopupGame.name) } catch { }
-                              const result = await window.ucDownloads?.createDesktopShortcut?.(settingsPopupGame.name, savedExe)
-                              if (result?.ok) {
-                                gameLogger.info('Desktop shortcut created manually', { appid: settingsPopupGame.appid })
-                                setShortcutFeedback({ type: 'success', message: 'Desktop shortcut created.' })
+          {/* Counts */}
+          <div className="text-xs text-zinc-500 space-y-1">
+            <div>{filteredInstalled.length} / {installedWithMeta.length} games</div>
+            {visibleInstalling.length > 0 && <div>{visibleInstalling.length} installing</div>}
+          </div>
+
+          {/* Sort */}
+          <div className="space-y-1.5">
+            <label className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500">Sort by</label>
+            <Select value={sortMode} onValueChange={(value) => setSortMode(value as 'name' | 'recent-install' | 'recent-play')}>
+              <SelectTrigger className="h-8 text-xs bg-zinc-900/60 border-white/[.07]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="name">Name</SelectItem>
+                <SelectItem value="recent-install">Recently installed</SelectItem>
+                <SelectItem value="recent-play">Recently played</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Collections */}
+          <div className="space-y-1.5">
+            <label className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500">Collections</label>
+            <button
+              type="button"
+              onClick={() => setSelectedCollection("all")}
+              className={`w-full text-left text-xs rounded-lg px-2.5 py-1.5 transition-colors ${selectedCollection === "all" ? "bg-white/10 text-white font-medium" : "text-zinc-400 hover:text-zinc-200 hover:bg-white/5"}`}
+            >
+              All games
+            </button>
+            {availableCollections.map((collection) => (
+              <button
+                key={collection}
+                type="button"
+                onClick={() => setSelectedCollection(selectedCollection === collection ? "all" : collection)}
+                className={`w-full text-left text-xs rounded-lg px-2.5 py-1.5 transition-colors truncate ${selectedCollection === collection ? "bg-blue-500/20 text-blue-200 font-medium" : "text-zinc-400 hover:text-zinc-200 hover:bg-white/5"}`}
+              >
+                {collection}
+              </button>
+            ))}
+            {availableCollections.length === 0 && (
+              <p className="text-[11px] text-zinc-600 px-2.5 italic">No collections yet</p>
+            )}
+          </div>
+
+          {/* Tags */}
+          <div className="space-y-1.5">
+            <label className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500">Tags</label>
+            <button
+              type="button"
+              onClick={() => setSelectedTag("all")}
+              className={`w-full text-left text-xs rounded-lg px-2.5 py-1.5 transition-colors ${selectedTag === "all" ? "bg-white/10 text-white font-medium" : "text-zinc-400 hover:text-zinc-200 hover:bg-white/5"}`}
+            >
+              All tags
+            </button>
+            {availableTags.map((tag) => (
+              <button
+                key={tag}
+                type="button"
+                onClick={() => setSelectedTag(selectedTag === tag ? "all" : tag)}
+                className={`w-full text-left text-xs rounded-lg px-2.5 py-1.5 transition-colors truncate ${selectedTag === tag ? "bg-emerald-500/20 text-emerald-200 font-medium" : "text-zinc-400 hover:text-zinc-200 hover:bg-white/5"}`}
+              >
+                #{tag}
+              </button>
+            ))}
+            {availableTags.length === 0 && (
+              <p className="text-[11px] text-zinc-600 px-2.5 italic">No tags yet</p>
+            )}
+          </div>
+        </div>
+      </aside>
+
+      {/* ──── Main content ──── */}
+      <main className="flex-1 min-w-0 px-4 lg:px-6 py-6 space-y-6">
+        {/* Top bar: search + tools */}
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="relative flex-1 max-w-md">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500 pointer-events-none" />
+            <Input
+              value={librarySearch}
+              onChange={(event) => handleSearchChange(event.target.value)}
+              placeholder="Search games..."
+              className="pl-9 h-9 bg-zinc-900/60 border-white/[.07] text-sm"
+            />
+            {librarySearch && (
+              <button type="button" onClick={() => { setLibrarySearch(""); setDebouncedSearch("") }} className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-200 transition-colors">
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2 flex-shrink-0">
+            {/* Mobile-only sort selector */}
+            <div className="lg:hidden">
+              <Select value={sortMode} onValueChange={(value) => setSortMode(value as 'name' | 'recent-install' | 'recent-play')}>
+                <SelectTrigger className="h-9 text-xs bg-zinc-900/60 border-white/[.07] w-36">
+                  <ArrowUpDown className="h-3.5 w-3.5 mr-1.5" />
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="name">Name</SelectItem>
+                  <SelectItem value="recent-install">Recently installed</SelectItem>
+                  <SelectItem value="recent-play">Recently played</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Mobile-only collection/tag filters */}
+            <div className="lg:hidden flex gap-2">
+              <Select value={selectedCollection} onValueChange={setSelectedCollection}>
+                <SelectTrigger className="h-9 text-xs bg-zinc-900/60 border-white/[.07] w-32">
+                  <Layers3 className="h-3.5 w-3.5 mr-1.5" />
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All collections</SelectItem>
+                  {availableCollections.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <Select value={selectedTag} onValueChange={setSelectedTag}>
+                <SelectTrigger className="h-9 text-xs bg-zinc-900/60 border-white/[.07] w-28">
+                  <Tags className="h-3.5 w-3.5 mr-1.5" />
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All tags</SelectItem>
+                  {availableTags.map((t) => <SelectItem key={t} value={t}>#{t}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <Button
+              variant={selectionMode ? "secondary" : "outline"}
+              size="sm"
+              className="h-9"
+              onClick={() => {
+                const nextMode = !selectionMode
+                setSelectionMode(nextMode)
+                if (!nextMode) setSelectedAppIds(new Set())
+              }}
+            >
+              <CheckSquare2 className="h-4 w-4 mr-1.5" />
+              {selectionMode ? `${selectedAppIds.size} selected` : 'Select'}
+            </Button>
+          </div>
+        </div>
+
+        {/* Active filters */}
+        {(selectedCollection !== "all" || selectedTag !== "all" || debouncedSearch) && (
+          <div className="flex flex-wrap items-center gap-1.5 text-xs">
+            {selectedCollection !== "all" && (
+              <Badge className="rounded-full border-blue-400/30 bg-blue-500/15 text-blue-200 pl-2.5 pr-1.5 gap-1.5 cursor-pointer hover:bg-blue-500/25" onClick={() => setSelectedCollection("all")}>
+                {selectedCollection}
+                <X className="h-3 w-3" />
+              </Badge>
+            )}
+            {selectedTag !== "all" && (
+              <Badge className="rounded-full border-emerald-400/30 bg-emerald-500/15 text-emerald-200 pl-2.5 pr-1.5 gap-1.5 cursor-pointer hover:bg-emerald-500/25" onClick={() => setSelectedTag("all")}>
+                #{selectedTag}
+                <X className="h-3 w-3" />
+              </Badge>
+            )}
+            {debouncedSearch && (
+              <Badge className="rounded-full border-white/10 bg-white/5 text-zinc-300 pl-2.5 pr-1.5 gap-1.5 cursor-pointer hover:bg-white/10" onClick={() => { setLibrarySearch(""); setDebouncedSearch("") }}>
+                "{debouncedSearch}"
+                <X className="h-3 w-3" />
+              </Badge>
+            )}
+            <span className="text-zinc-500 ml-1">{filteredInstalled.length} result{filteredInstalled.length !== 1 ? "s" : ""}</span>
+          </div>
+        )}
+
+        {/* ── Selection mode batch actions bar ── */}
+        {selectionMode && (
+          <div className="rounded-xl border border-white/[.07] bg-zinc-900/80 backdrop-blur-sm p-3 space-y-3 sticky top-0 z-30">
+            <div className="flex flex-wrap items-center gap-2">
+              <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={() => {
+                if (isAllPageSelected) setSelectedAppIds((prev) => { const next = new Set(prev); pagedInstalled.forEach((g) => next.delete(g.appid)); return next })
+                else setSelectedAppIds((prev) => new Set([...prev, ...pagedInstalled.map((g) => g.appid)]))
+              }}>
+                {isAllPageSelected ? 'Deselect page' : 'Select page'}
+              </Button>
+              <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={() => {
+                if (isAllVisibleSelected) setSelectedAppIds(new Set())
+                else setSelectedAppIds(new Set(filteredInstalled.map((game) => game.appid)))
+              }}>
+                {isAllVisibleSelected ? 'Clear all' : 'Select all'}
+              </Button>
+              <div className="h-4 w-px bg-white/10" />
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" size="sm" className="h-8 text-xs" disabled={batchWorking || selectedAppIds.size === 0}>
+                    <Layers3 className="h-3.5 w-3.5 mr-1.5" /> Collection
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-64 p-3 bg-zinc-950 border-white/10 text-white rounded-xl shadow-xl">
+                  <div className="space-y-2">
+                    <p className="text-xs text-zinc-400">Add collection to {selectedAppIds.size} game{selectedAppIds.size !== 1 ? "s" : ""}</p>
+                    <div className="flex gap-2">
+                      <Input value={collectionDraft} onChange={(e) => setCollectionDraft(e.target.value)} placeholder="Collection name" className="h-8 text-xs flex-1" onKeyDown={(e) => { if (e.key === "Enter") void handleBatchAssignCollection() }} />
+                      <Button size="sm" className="h-8" onClick={() => void handleBatchAssignCollection()} disabled={!collectionDraft.trim()}>Add</Button>
+                    </div>
+                  </div>
+                </PopoverContent>
+              </Popover>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" size="sm" className="h-8 text-xs" disabled={batchWorking || selectedAppIds.size === 0}>
+                    <Tags className="h-3.5 w-3.5 mr-1.5" /> Tag
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-64 p-3 bg-zinc-950 border-white/10 text-white rounded-xl shadow-xl">
+                  <div className="space-y-2">
+                    <p className="text-xs text-zinc-400">Add tag to {selectedAppIds.size} game{selectedAppIds.size !== 1 ? "s" : ""}</p>
+                    <div className="flex gap-2">
+                      <Input value={tagDraft} onChange={(e) => setTagDraft(e.target.value)} placeholder="Tag name" className="h-8 text-xs flex-1" onKeyDown={(e) => { if (e.key === "Enter") void handleBatchAddTag() }} />
+                      <Button size="sm" className="h-8" onClick={() => void handleBatchAddTag()} disabled={!tagDraft.trim()}>Add</Button>
+                    </div>
+                  </div>
+                </PopoverContent>
+              </Popover>
+              <div className="h-4 w-px bg-white/10" />
+              <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => void handleBatchCreateShortcuts()} disabled={batchWorking || selectedAppIds.size === 0}>
+                <ExternalLink className="h-3.5 w-3.5 mr-1.5" /> Create Shortcuts
+              </Button>
+              <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => void handleBatchDeleteShortcuts()} disabled={batchWorking || selectedAppIds.size === 0}>
+                <X className="h-3.5 w-3.5 mr-1.5" /> Delete Shortcuts
+              </Button>
+              <Button variant="destructive" size="sm" className="h-8 text-xs" onClick={() => { void handleBatchDelete() }} disabled={batchWorking || selectedAppIds.size === 0}>
+                <Trash2 className="h-3.5 w-3.5 mr-1.5" /> Delete
+              </Button>
+            </div>
+            {batchProgress && (
+              <div className="space-y-1">
+                <div className="flex items-center gap-2 text-xs text-zinc-400">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  <span>Processing {batchProgress.done} / {batchProgress.total}...</span>
+                </div>
+                <div className="h-1 rounded-full bg-white/10 overflow-hidden">
+                  <div className="h-full bg-white/40 rounded-full transition-all duration-200" style={{ width: `${batchProgress.total > 0 ? (batchProgress.done / batchProgress.total) * 100 : 0}%` }} />
+                </div>
+              </div>
+            )}
+            {batchFeedback && !batchProgress && (
+              <div className={`flex items-center gap-1.5 text-xs ${batchFeedback.type === 'success' ? 'text-emerald-400' : 'text-destructive'}`}>
+                {batchFeedback.type === 'success' ? <Check className="h-3.5 w-3.5" /> : <AlertTriangle className="h-3.5 w-3.5" />}
+                {batchFeedback.message}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── Installed games grid ── */}
+        <section className="space-y-4">
+          {loading || statsLoading ? (
+            <div className="grid gap-4 grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+              {Array.from({ length: 20 }).map((_, idx) => (
+                <GameCardSkeleton key={idx} />
+              ))}
+            </div>
+          ) : filteredInstalled.length ? (
+            <div className="space-y-4">
+              <div className="grid gap-4 grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+                {pagedInstalled.map((game) => {
+                  const collections = game.libraryMeta?.collections || []
+                  const tags = game.libraryMeta?.tags || []
+                  const lastPlayed = formatRelativeTimestamp(game.libraryMeta?.lastPlayedAt)
+                  const isSelected = selectedAppIds.has(game.appid)
+                  return (
+                    <div
+                      key={game.appid}
+                      className={`group/tile relative rounded-xl transition-all duration-200 ${
+                        selectionMode ? "cursor-pointer" : ""
+                      } ${isSelected ? "ring-2 ring-blue-500/60 ring-offset-1 ring-offset-zinc-950" : ""}`}
+                      onClick={selectionMode ? (e) => { e.preventDefault(); e.stopPropagation(); toggleSelected(game.appid) } : undefined}
+                    >
+                      {/* Game card wrapper - disable navigation in selection mode */}
+                      <div className={selectionMode ? "pointer-events-none" : ""}>
+                        <GameCard game={game} stats={stats[game.appid]} size="compact" />
+                      </div>
+
+                      {/* Selection overlay */}
+                      {selectionMode && (
+                        <div className={`absolute inset-0 z-20 rounded-xl transition-colors ${isSelected ? "bg-blue-500/10" : "hover:bg-white/5"}`}>
+                          <div className={`absolute top-2.5 right-2.5 h-6 w-6 rounded-md border-2 flex items-center justify-center transition-all ${
+                            isSelected
+                              ? "border-blue-500 bg-blue-500 text-white"
+                              : "border-zinc-500 bg-black/50"
+                          }`}>
+                            {isSelected && <Check className="h-4 w-4" />}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Settings button - only when NOT in selection mode */}
+                      {!selectionMode && (
+                        <div className="absolute top-2 left-2 z-20 opacity-0 group-hover/tile:opacity-100 transition-opacity">
+                          <Popover
+                            open={settingsPopupOpen && settingsPopupGame?.appid === game.appid}
+                            onOpenChange={(open) => {
+                              if (open) {
+                                setSettingsPopupGame(game)
+                                setShortcutFeedback(null)
+                                setSettingsPopupOpen(true)
                               } else {
-                                setShortcutFeedback({ type: 'error', message: 'Failed to create desktop shortcut.' })
+                                setSettingsPopupOpen(false)
+                                setShortcutFeedback(null)
                               }
-                            } else {
-                              gameLogger.warn('No saved exe found for creating shortcut', { appid: settingsPopupGame.appid })
-                              setShortcutFeedback({ type: 'error', message: 'Select an executable first.' })
-                              void openExecutablePicker(settingsPopupGame)
-                              setSettingsPopupOpen(false)
-                            }
-                            setTimeout(() => setShortcutFeedback(null), 3000)
-                          }}
-                          className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-gray-400 transition-colors hover:text-white hover:bg-white/10"
-                        >
-                          <ExternalLink className="mr-2 h-4 w-4" />
-                          Create Desktop Shortcut
-                        </button>
-                        {settingsPopupGame?.isExternal && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setSettingsPopupOpen(false)
-                              setShortcutFeedback(null)
-                              setEditMetadataOpen(true)
                             }}
-                            className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-gray-400 transition-colors hover:text-white hover:bg-white/10"
                           >
-                            <Pencil className="mr-2 h-4 w-4" />
-                            Edit Details
-                          </button>
-                        )}
-                        {isLinux && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setSettingsPopupOpen(false)
-                              setShortcutFeedback(null)
-                              setLinuxConfigGame(game)
-                              setLinuxConfigOpen(true)
-                            }}
-                            className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-gray-400 transition-colors hover:text-white hover:bg-white/10"
-                          >
-                            <Terminal className="mr-2 h-4 w-4" />
-                            Linux / VR Config
-                          </button>
-                        )}
-                        <div className="my-1 h-px bg-white/10" />
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setSettingsPopupOpen(false)
-                            setShortcutFeedback(null)
-                            setPendingDeleteGame(game)
-                            setPendingDeleteAction("installed")
-                          }}
-                          className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-destructive transition-colors hover:bg-destructive/10"
-                        >
-                          {game.isExternal ? (
-                            <>
-                              <Unlink2 className="mr-2 h-4 w-4" />
-                              Unlink Game
-                            </>
-                          ) : (
-                            <>
-                              <Trash2 className="mr-2 h-4 w-4" />
-                              Delete Game
-                            </>
-                          )}
-                        </button>
-                        {shortcutFeedback && settingsPopupGame?.appid === game.appid && (
-                          <div className={`mt-2 text-xs ${shortcutFeedback.type === 'success' ? 'text-emerald-400' : 'text-destructive'}`}>
-                            {shortcutFeedback.message}
+                            <PopoverTrigger asChild>
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                onClick={(event) => { event.stopPropagation() }}
+                                className="h-7 w-7 rounded-lg bg-black/70 text-white hover:bg-white/20 backdrop-blur-sm"
+                                title="Game actions"
+                              >
+                                <Settings className="h-3.5 w-3.5" />
+                              </Button>
+                            </PopoverTrigger>
+                            <PopoverContent align="start" className="w-56 rounded-2xl p-2 bg-zinc-950 border-white/10 text-white shadow-xl">
+                              <button type="button" onClick={() => { setSettingsPopupOpen(false); void openExecutablePicker(game) }} className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-gray-400 transition-colors hover:text-white hover:bg-white/10">
+                                <Settings className="mr-2 h-4 w-4" /> Set Executable
+                              </button>
+                              <button type="button" onClick={() => { setSettingsPopupOpen(false); void handleOpenGameFiles(game) }} className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-gray-400 transition-colors hover:text-white hover:bg-white/10">
+                                <FolderOpen className="mr-2 h-4 w-4" /> Open Game Files
+                              </button>
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  if (!settingsPopupGame) return
+                                  setShortcutFeedback(null)
+                                  let savedExe = await getSavedExe(settingsPopupGame.appid)
+                                  if (!savedExe && window.ucDownloads?.listGameExecutables) {
+                                    try {
+                                      const result = await window.ucDownloads.listGameExecutables(settingsPopupGame.appid)
+                                      const exes = result?.exes || []
+                                      const folder = result?.folder || null
+                                      const { pick } = pickGameExecutable(exes, settingsPopupGame.name, settingsPopupGame.source, folder)
+                                      savedExe = pick?.path || null
+                                    } catch { }
+                                  }
+                                  if (savedExe) {
+                                    try { await window.ucDownloads?.deleteDesktopShortcut?.(settingsPopupGame.name) } catch { }
+                                    const result = await window.ucDownloads?.createDesktopShortcut?.(settingsPopupGame.name, savedExe)
+                                    if (result?.ok) {
+                                      gameLogger.info('Desktop shortcut created manually', { appid: settingsPopupGame.appid })
+                                      setShortcutFeedback({ type: 'success', message: 'Desktop shortcut created.' })
+                                    } else {
+                                      setShortcutFeedback({ type: 'error', message: 'Failed to create desktop shortcut.' })
+                                    }
+                                  } else {
+                                    gameLogger.warn('No saved exe found for creating shortcut', { appid: settingsPopupGame.appid })
+                                    setShortcutFeedback({ type: 'error', message: 'Select an executable first.' })
+                                    void openExecutablePicker(settingsPopupGame)
+                                    setSettingsPopupOpen(false)
+                                  }
+                                  setTimeout(() => setShortcutFeedback(null), 3000)
+                                }}
+                                className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-gray-400 transition-colors hover:text-white hover:bg-white/10"
+                              >
+                                <ExternalLink className="mr-2 h-4 w-4" /> Create Desktop Shortcut
+                              </button>
+                              {settingsPopupGame?.isExternal && (
+                                <button type="button" onClick={() => { setSettingsPopupOpen(false); setShortcutFeedback(null); setEditMetadataOpen(true) }} className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-gray-400 transition-colors hover:text-white hover:bg-white/10">
+                                  <Pencil className="mr-2 h-4 w-4" /> Edit Details
+                                </button>
+                              )}
+                              {isLinux && (
+                                <button type="button" onClick={() => { setSettingsPopupOpen(false); setShortcutFeedback(null); setLinuxConfigGame(game); setLinuxConfigOpen(true) }} className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-gray-400 transition-colors hover:text-white hover:bg-white/10">
+                                  <Terminal className="mr-2 h-4 w-4" /> Linux / VR Config
+                                </button>
+                              )}
+                              <div className="my-1 h-px bg-white/10" />
+                              <button type="button" onClick={() => { setSettingsPopupOpen(false); setShortcutFeedback(null); setPendingDeleteGame(game); setPendingDeleteAction("installed") }} className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-destructive transition-colors hover:bg-destructive/10">
+                                {game.isExternal ? (<><Unlink2 className="mr-2 h-4 w-4" /> Unlink Game</>) : (<><Trash2 className="mr-2 h-4 w-4" /> Delete Game</>)}
+                              </button>
+                              {shortcutFeedback && settingsPopupGame?.appid === game.appid && (
+                                <div className={`mt-2 text-xs ${shortcutFeedback.type === 'success' ? 'text-emerald-400' : 'text-destructive'}`}>{shortcutFeedback.message}</div>
+                              )}
+                            </PopoverContent>
+                          </Popover>
+                        </div>
+                      )}
+
+                      {/* Card footer with meta info */}
+                      <div className="mt-1 px-1 space-y-1">
+                        {(collections.length > 0 || tags.length > 0) && (
+                          <div className="flex flex-wrap gap-1">
+                            {collections.slice(0, 2).map((c) => (
+                              <span key={c} className="text-[10px] rounded-md bg-blue-500/10 text-blue-300 border border-blue-400/20 px-1.5 py-0.5 truncate max-w-[80px]">{c}</span>
+                            ))}
+                            {tags.slice(0, 2).map((t) => (
+                              <span key={t} className="text-[10px] rounded-md bg-emerald-500/10 text-emerald-300 border border-emerald-400/20 px-1.5 py-0.5 truncate max-w-[80px]">#{t}</span>
+                            ))}
                           </div>
                         )}
-                      </PopoverContent>
-                    </Popover>
+                        {lastPlayed && (
+                          <p className="text-[10px] text-zinc-500 truncate">Played {lastPlayed}</p>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+              <PaginationBar
+                currentPage={installedPage}
+                totalPages={installedTotalPages}
+                onPageChange={setInstalledPage}
+                wrapperClassName="mt-6"
+              />
+            </div>
+          ) : (
+            <div className="rounded-2xl border border-white/[.07] bg-zinc-900/60 p-8 text-center space-y-2">
+              <p className="text-sm text-zinc-400">No installed titles match the current filters.</p>
+              {(debouncedSearch || selectedCollection !== "all" || selectedTag !== "all") && (
+                <Button variant="ghost" size="sm" className="text-xs" onClick={() => { setLibrarySearch(""); setDebouncedSearch(""); setSelectedCollection("all"); setSelectedTag("all") }}>
+                  Clear all filters
+                </Button>
+              )}
+            </div>
+          )}
+        </section>
+
+        {/* ── Installing section ── */}
+        {(loading || statsLoading || visibleInstalling.length > 0) && (
+          <section className="space-y-4">
+            <h2 className="text-lg font-bold text-zinc-200">Installing</h2>
+            {loading || statsLoading ? (
+              <div className="grid gap-4 grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+                {Array.from({ length: 4 }).map((_, idx) => (
+                  <GameCardSkeleton key={idx} />
+                ))}
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <div className="grid gap-4 grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+                  {pagedInstalling.map((game) => (
+                    <div key={game.appid} className="relative">
+                      <GameCard game={game} stats={stats[game.appid]} size="compact" />
+                      {cancelledAppIds.has(game.appid) ? (
+                        <>
+                          <div className="absolute top-2 left-2 z-20">
+                            <Badge className="rounded-full bg-amber-500/20 text-amber-200 border border-amber-400/40 px-2 py-0.5 text-[11px]">Cancelled</Badge>
+                          </div>
+                          <div className="absolute top-2 right-2 z-20">
+                            <Button size="icon" variant="ghost" onClick={(event) => { event.preventDefault(); event.stopPropagation(); setPendingDeleteGame(game); setPendingDeleteAction("installing") }} className="h-7 w-7 rounded-lg bg-black/60 text-white hover:bg-white/20" title="Remove cancelled download">
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
+                        </>
+                      ) : failedAppIds.has(game.appid) ? (
+                        <>
+                          <div className="absolute top-2 left-2 z-20">
+                            <Badge className="rounded-full bg-destructive/20 text-destructive border border-destructive/40 px-2 py-0.5 text-[11px]">Failed</Badge>
+                          </div>
+                          <div className="absolute top-2 right-2 z-20">
+                            <Button size="icon" variant="ghost" onClick={(event) => { event.preventDefault(); event.stopPropagation(); setPendingDeleteGame(game); setPendingDeleteAction("installing") }} className="h-7 w-7 rounded-lg bg-black/60 text-white hover:bg-white/20" title="Remove failed download">
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
+                        </>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+                {installingTotalPages > 1 && (
+                  <PaginationBar
+                    currentPage={installingPage}
+                    totalPages={installingTotalPages}
+                    onPageChange={setInstallingPage}
+                    wrapperClassName="mt-6"
+                  />
+                )}
+              </div>
+            )}
+          </section>
+        )}
+      </main>
+
+      {/* ──── Modals ──── */}
+            {batchDeleteConfirmOpen && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+                <div className="absolute inset-0 bg-black/70" onClick={() => setBatchDeleteConfirmOpen(false)} />
+                <div className="relative w-full max-w-md rounded-2xl border border-white/[.07] bg-slate-950/95 p-5 text-white shadow-2xl">
+                  <div className="flex items-center gap-2 text-lg font-semibold">
+                    <AlertTriangle className="h-5 w-5 text-destructive" />
+                    Delete selected games
+                  </div>
+                  <p className="mt-2 text-sm text-slate-300">
+                    Delete or unlink {selectedInstalledGames.length} selected game{selectedInstalledGames.length !== 1 ? "s" : ""}? This will remove installed files from disk for non-external games.
+                  </p>
+                  <div className="mt-4 flex justify-end gap-2">
+                    <Button variant="ghost" onClick={() => setBatchDeleteConfirmOpen(false)}>Cancel</Button>
+                    <Button variant="destructive" onClick={() => void executeBatchDelete()}>Delete</Button>
                   </div>
                 </div>
-              ))}
-            </div>
-            <PaginationBar
-              currentPage={installedPage}
-              totalPages={installedTotalPages}
-              onPageChange={setInstalledPage}
-              wrapperClassName="mt-6"
-            />
-          </div>
-        ) : (
-          <div className="rounded-2xl border border-white/[.07] bg-zinc-900/60 p-6 text-sm text-zinc-400">
-            No installed titles yet. Start a download to populate your library.
-          </div>
-        )}
-      </section>
+              </div>
+            )}
 
-      <section className="space-y-4">
-        <h2 className="text-xl font-black ">Installing</h2>
-        {loading || statsLoading ? (
-          <div className="grid gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
-            {Array.from({ length: 24 }).map((_, idx) => (
-              <GameCardSkeleton key={idx} />
-            ))}
-          </div>
-        ) : visibleInstalling.length ? (
-          <div className="space-y-4">
-            <div className="grid gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
-              {pagedInstalling.map((game) => (
-                <div key={game.appid} className="relative">
-                  <GameCard game={game} stats={stats[game.appid]} size="compact" />
-                  {cancelledAppIds.has(game.appid) ? (
-                    <>
-                      <div className="absolute top-2 left-2 z-20">
-                        <Badge className="rounded-full bg-amber-500/20 text-amber-200 border border-amber-400/40 px-2 py-0.5 text-[11px]">
-                          Cancelled
-                        </Badge>
-                      </div>
-                      <div className="absolute top-2 right-2 z-20">
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          onClick={(event) => {
-                            event.preventDefault()
-                            event.stopPropagation()
-                            setPendingDeleteGame(game)
-                            setPendingDeleteAction("installing")
-                          }}
-                          className="h-8 w-8 rounded-full bg-black/60 text-white hover:bg-white/20"
-                          title="Remove cancelled download"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </>
-                  ) : failedAppIds.has(game.appid) ? (
-                    <>
-                      <div className="absolute top-2 left-2 z-20">
-                        <Badge className="rounded-full bg-destructive/20 text-destructive border border-destructive/40 px-2 py-0.5 text-[11px]">
-                          Failed
-                        </Badge>
-                      </div>
-                      <div className="absolute top-2 right-2 z-20">
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          onClick={(event) => {
-                            event.preventDefault()
-                            event.stopPropagation()
-                            setPendingDeleteGame(game)
-                            setPendingDeleteAction("installing")
-                          }}
-                          className="h-8 w-8 rounded-full bg-black/60 text-white hover:bg-white/20"
-                          title="Remove failed download"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </>
-                  ) : null}
-                </div>
-              ))}
-            </div>
-            <PaginationBar
-              currentPage={installingPage}
-              totalPages={installingTotalPages}
-              onPageChange={setInstallingPage}
-              wrapperClassName="mt-6"
-            />
-          </div>
-        ) : (
-          <div className="rounded-2xl border border-white/[.07] bg-zinc-900/60 p-6 text-sm text-zinc-400">
-            No current installs. Downloads will appear here while they install.
-          </div>
-        )}
-      </section>
       {pendingDeleteGame && (
         <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
-          <div
-            className="absolute inset-0 bg-black/70"
-            onClick={() => {
-              setPendingDeleteGame(null)
-              setPendingDeleteAction(null)
-            }}
-          />
+          <div className="absolute inset-0 bg-black/70" onClick={() => { setPendingDeleteGame(null); setPendingDeleteAction(null) }} />
           <div className="relative w-full max-w-md rounded-2xl border border-white/[.07] bg-slate-950/95 p-5 text-white shadow-2xl">
             <div className="flex items-center gap-2 text-lg font-semibold">
               <AlertTriangle className="h-5 w-5 text-destructive" />
-              {pendingDeleteAction === "installing"
-                ? "Remove download"
-                : pendingDeleteGame.isExternal
-                  ? "Unlink game"
-                  : "Delete game"}
+              {pendingDeleteAction === "installing" ? "Remove download" : pendingDeleteGame.isExternal ? "Unlink game" : "Delete game"}
             </div>
             <p className="mt-2 text-sm text-slate-300">
               {pendingDeleteAction === "installing"
@@ -635,32 +1232,18 @@ export function LibraryPage() {
                   : `Delete "${pendingDeleteGame.name}" permanently? This removes the installed files from disk.`}
             </p>
             <div className="mt-4 flex justify-end gap-2">
-              <Button
-                variant="ghost"
-                onClick={() => {
-                  setPendingDeleteGame(null)
-                  setPendingDeleteAction(null)
-                }}
-              >
-                Cancel
-              </Button>
-              <Button
-                variant="destructive"
-                onClick={() => {
-                  const target = pendingDeleteGame
-                  const action = pendingDeleteAction
-                  setPendingDeleteGame(null)
-                  setPendingDeleteAction(null)
-                  if (!target) return
-                  setTimeout(() => {
-                    if (action === "installing") {
-                      void handleDeleteInstalling(target)
-                    } else {
-                      void handleDeleteInstalled(target)
-                    }
-                  }, 0)
-                }}
-              >
+              <Button variant="ghost" onClick={() => { setPendingDeleteGame(null); setPendingDeleteAction(null) }}>Cancel</Button>
+              <Button variant="destructive" onClick={() => {
+                const target = pendingDeleteGame
+                const action = pendingDeleteAction
+                setPendingDeleteGame(null)
+                setPendingDeleteAction(null)
+                if (!target) return
+                setTimeout(() => {
+                  if (action === "installing") void handleDeleteInstalling(target)
+                  else void handleDeleteInstalled(target)
+                }, 0)
+              }}>
                 {pendingDeleteAction === "installing" ? "Remove" : pendingDeleteGame?.isExternal ? "Unlink" : "Delete"}
               </Button>
             </div>
@@ -685,11 +1268,7 @@ export function LibraryPage() {
           onOpenChange={setEditMetadataOpen}
           game={settingsPopupGame}
           onSaved={(updates) => {
-            setInstalled((prev) =>
-              prev.map((g) =>
-                g.appid === settingsPopupGame.appid ? { ...g, ...updates } : g
-              )
-            )
+            setInstalled((prev) => prev.map((g) => g.appid === settingsPopupGame.appid ? { ...g, ...updates } : g))
           }}
         />
       )}
@@ -698,13 +1277,9 @@ export function LibraryPage() {
           open={linuxConfigOpen}
           appid={linuxConfigGame.appid}
           gameName={linuxConfigGame.name}
-          onClose={() => {
-            setLinuxConfigOpen(false)
-            setLinuxConfigGame(null)
-          }}
+          onClose={() => { setLinuxConfigOpen(false); setLinuxConfigGame(null) }}
         />
       )}
     </div>
   )
 }
-

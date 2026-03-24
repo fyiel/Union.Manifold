@@ -46,6 +46,7 @@ contextBridge.exposeInMainWorld('ucDownloads', {
   pickImage: () => ipcRenderer.invoke('uc:pick-image'),
   pickArchiveFiles: () => ipcRenderer.invoke('uc:pick-archive-files'),
   installFromArchive: (payload) => ipcRenderer.invoke('uc:install-from-archive', payload),
+  installDownloadedArchive: (appid) => ipcRenderer.invoke('uc:install-downloaded-archive', appid),
   onUpdate: (callback) => {
     const listener = (_event, data) => {
       try {
@@ -61,6 +62,15 @@ contextBridge.exposeInMainWorld('ucDownloads', {
     const listener = (_event, data) => callback(data)
     ipcRenderer.on('uc:game-quick-exit', listener)
     return () => ipcRenderer.removeListener('uc:game-quick-exit', listener)
+  }
+})
+
+contextBridge.exposeInMainWorld('ucApp', {
+  respondToCloseRequest: (shouldProceed) => ipcRenderer.invoke('uc:app-close-response', shouldProceed),
+  onCloseRequest: (callback) => {
+    const listener = (_event, data) => callback(data)
+    ipcRenderer.on('uc:app-close-requested', listener)
+    return () => ipcRenderer.removeListener('uc:app-close-requested', listener)
   }
 })
 

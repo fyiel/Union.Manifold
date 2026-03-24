@@ -152,9 +152,14 @@ declare global {
         downloadId?: string
         metadata?: Record<string, any>
       }) => Promise<{ ok: boolean; downloadId?: string; extracted?: number; error?: string }>
+      installDownloadedArchive: (appid: string) => Promise<{ ok: boolean; downloadId?: string; extracted?: number; error?: string }>
       browseForGameExe: (defaultPath?: string) => Promise<{ ok: boolean; path?: string }>
       onUpdate: (callback: (update: DownloadUpdatePayload) => void) => () => void
       onGameQuickExit: (callback: (data: { appid: string | null; exePath: string | null; elapsed: number }) => void) => () => void
+    }
+    ucApp?: {
+      respondToCloseRequest: (shouldProceed: boolean) => Promise<{ ok: boolean; proceeded: boolean }>
+      onCloseRequest: (callback: (data: { mode: "quit" | "hide"; extractionCount?: number; appids?: string[] }) => void) => () => void
     }
     ucSettings?: {
       get: (key: string) => Promise<any>

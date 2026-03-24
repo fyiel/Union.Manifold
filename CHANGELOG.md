@@ -1,9 +1,31 @@
 # Changelog
 
+## Unreleased - 2026-03-24
+
+### Fixes & Improvements
+
+- Fixed single-instance behavior so launching the app a second time (e.g. double-clicking the exe) always brings the existing window to the foreground rather than opening a second window. If the app is hidden in the tray it is restored automatically.
+- Fixed Windows focus-stealing prevention blocking the restore: the second-instance handler now briefly sets `alwaysOnTop` to force the window to the front, then immediately clears it.
+- Added a splash screen shown immediately on launch while the main window loads.
+- Added automatic domain detection on startup: the app probes `union-crax.xyz` and the mirror domains in order, picks the first reachable one, and pre-configures the renderer to use it before any requests are made. This ensures the app works on networks that block the primary domain.
+- Added mirror domains `hardquestions.explosionlearning.org` and `note-tool.study` to the candidate list for automatic failover.
+- Splash screen shows live status text during domain detection ("Checking union-crax.xyz...", etc.) so users know what is happening on slow networks.
+
 ## Unreleased - 2026-03-18
 
 ### Fixes & Improvements
 
+- Added a sleep-prevention option that keeps the launcher awake during downloads, extraction, and the first part of game launch handoff.
+- Added library organization tools with collections, tags, recent-install and recent-play sorting, plus batch actions for shortcut creation and cleanup.
+- Added shared Linux launch presets in both global settings and the per-game Linux configuration modal.
+- Added install-ready recovery flows for interrupted archive installs, including a dedicated Activity section, game-page install action, and a main-process path that can continue from already-downloaded archives.
+- Improved download recovery across restarts and long pauses by normalizing stuck manifest states, refreshing stale resume links, preserving resumable paused states, and teaching the UC.Files engine to resume from per-chunk checkpoints instead of trusting preallocated file size.
+- Fixed development shutdown behavior so Ctrl+C and other terminal stop signals trigger a graceful Electron quit, preserving partial downloads and pause state the same way packaged builds do.
+- Fixed interrupt handling so paused or interrupted downloads reopen as resumable instead of failed, while interrupted extraction work is surfaced as install-ready rather than forcing a full re-download.
+- Improved close and quit behavior around active work, keeping normal window-close as a tray hide while still protecting real app quits and persisting download or extraction state correctly.
+- Improved archive install handling by reusing a shared extraction job, tracking extraction state in manifests, cleaning up downloaded archives after successful installs, and exposing install-from-downloaded-archive APIs through preload and renderer types.
+- Fixed Windows game launches that could start hidden with audio only by disabling hidden-window startup for tracked game processes.
+- Improved desktop shortcut consistency and executable detection by using shared shortcut naming and filtering out more helper, anti-cheat, crash-reporting, and engine-side executables from launcher picks.
 - Removed the admin-launch system; games now launch with standard user-level permissions. The launcher maintains all other functionality including executable auto-detection, desktop shortcut creation, and process tracking.
 - Fixed UC.Files compatibility after the stricter hotlink-protection rollout by making the desktop client recognize UC.Files host aliases when selecting mirrors, resolving signed download URLs, and choosing the native range downloader.
 - Fixed Electron-authenticated API calls so the UC.Files resolver endpoints receive the same `X-UC-Client` identity header as the download APIs.

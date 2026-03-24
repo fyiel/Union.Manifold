@@ -13,6 +13,16 @@ delete env.ELECTRON_RUN_AS_NODE
 
 const electronPath = require('electron')
 const child = spawn(electronPath, args, { stdio: 'inherit', env })
+
+// Forward SIGINT/SIGTERM so Electron can shut down gracefully (run before-quit,
+// preserve partial download files, update manifests). Without this, concurrently -k
+// kills the process immediately and downloads are lost.
+for (const sig of ['SIGINT', 'SIGTERM']) {
+  process.on(sig, () => {
+    if (child.pid) child.kill(sig)
+  })
+}
+
 child.on('exit', (code, signal) => {
   if (signal) process.exit(1)
   process.exit(code ?? 0)

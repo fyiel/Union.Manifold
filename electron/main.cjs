@@ -1,4 +1,4 @@
-const { app, BrowserWindow, shell, ipcMain, dialog, Tray, Menu, nativeImage, globalShortcut } = require('electron')
+const { app, BrowserWindow, shell, ipcMain, dialog, Tray, Menu, nativeImage, globalShortcut, powerSaveBlocker } = require('electron')
 const path = require('node:path')
 const fs = require('node:fs')
 const crypto = require('node:crypto')
@@ -123,6 +123,154 @@ const runningGames = new Map()
 const WINDOWS_GAME_HANDOFF_GRACE_MS = 12000
 const WINDOWS_GAME_HANDOFF_POLL_MS = 1000
 const GAME_PID_POLL_MS = 3000
+let operationPowerSaveBlockerId = null
+let launchHandoffBlockUntil = 0
+let launchHandoffRefreshTimer = null
+let pendingCloseRequest = null
+let closeRequestApproved = false
+
+function buildAppExtractionKey(appid) {
+  return `appid:${String(appid || '').toLowerCase()}`
+}
+
+function getActiveExtractionAppids() {
+  const appids = new Set()
+  for (const key of activeExtractions) {
+    const value = String(key || '')
+    if (!value.startsWith('appid:')) continue
+    const appid = value.slice('appid:'.length).trim()
+    if (appid) appids.add(appid)
+  }
+  return [...appids]
+}
+
+function getCloseSensitiveDownloadSnapshots() {
+  return [...latestDownloadState.values()].filter((payload) =>
+    payload?.appid && ['downloading', 'verifying', 'retrying', 'extracting', 'installing'].includes(payload.status)
+  )
+}
+
+function getCloseSensitiveAppids() {
+  const appids = new Set(getActiveExtractionAppids())
+  for (const payload of getCloseSensitiveDownloadSnapshots()) {
+    if (payload?.appid) appids.add(String(payload.appid))
+  }
+  return [...appids]
+}
+
+function hasCloseSensitiveOperations() {
+  return activeExtractions.size > 0 || getCloseSensitiveDownloadSnapshots().length > 0
+}
+
+function hasActiveExtractionForApp(appid) {
+  if (!appid) return false
+  const normalizedAppid = String(appid).toLowerCase()
+  const appKey = buildAppExtractionKey(appid)
+  if (activeExtractions.has(appKey)) return true
+  return [...activeExtractions].some((key) => String(key).toLowerCase().includes(normalizedAppid))
+}
+
+function markInterruptedExtractionsReadyForInstall(reason) {
+  const message = reason || 'Extraction was interrupted when the app closed. The downloaded archives are still available to install.'
+  for (const appid of getActiveExtractionAppids()) {
+    try {
+      updateInstallingManifestStatus(appid, 'downloaded', message)
+    } catch (err) {
+      ucLog(`Failed to mark interrupted extraction as downloaded for ${appid}: ${String(err)}`, 'warn')
+    }
+  }
+}
+
+function markQuitingDownloadsPaused(reason) {
+  const message = reason || 'App closed. Resume to continue downloading.'
+  for (const payload of latestDownloadState.values()) {
+    const appid = payload?.appid
+    const status = payload?.status
+    if (!appid || !['downloading', 'paused', 'verifying', 'retrying'].includes(status)) continue
+    try {
+      updateInstallingManifestStatus(appid, 'paused', message)
+    } catch (err) {
+      ucLog(`Failed to mark paused download state for ${appid}: ${String(err)}`, 'warn')
+    }
+  }
+}
+
+function requestCloseApproval(mode = 'quit') {
+  if (!mainWindow || mainWindow.isDestroyed()) return false
+  if (pendingCloseRequest) return true
+  pendingCloseRequest = { mode }
+  try {
+    if (!mainWindow.isVisible()) mainWindow.show()
+    mainWindow.focus()
+  } catch { }
+  try {
+    mainWindow.webContents.send('uc:app-close-requested', {
+      mode,
+      extractionCount: activeExtractions.size,
+      downloadCount: getCloseSensitiveDownloadSnapshots().length,
+      appids: getCloseSensitiveAppids(),
+    })
+    return true
+  } catch (err) {
+    pendingCloseRequest = null
+    ucLog(`Failed to send close approval request: ${String(err)}`, 'warn')
+    return false
+  }
+}
+
+function hasBlockingDownloadActivity() {
+  for (const entry of activeDownloads.values()) {
+    const item = entry?.item
+    if (!item) continue
+    try {
+      if (typeof item.isPaused === 'function' && item.isPaused()) continue
+    } catch { }
+    return true
+  }
+
+  for (const entry of ucfilesActiveDownloads.values()) {
+    if (!entry?.state?.paused) return true
+  }
+
+  return false
+}
+
+function shouldPreventSleepDuringOperations() {
+  const settings = readSettings() || {}
+  if (settings.preventSleepDuringOperations === false) return false
+  if (hasBlockingDownloadActivity()) return true
+  if (activeExtractions.size > 0) return true
+  if (launchHandoffBlockUntil > Date.now()) return true
+  return false
+}
+
+function refreshOperationPowerSaveBlocker() {
+  const shouldBlock = shouldPreventSleepDuringOperations()
+  if (shouldBlock) {
+    if (operationPowerSaveBlockerId == null || !powerSaveBlocker.isStarted(operationPowerSaveBlockerId)) {
+      operationPowerSaveBlockerId = powerSaveBlocker.start('prevent-app-suspension')
+      ucLog(`[Power] Sleep blocker enabled (${operationPowerSaveBlockerId})`)
+    }
+    return
+  }
+
+  if (operationPowerSaveBlockerId != null && powerSaveBlocker.isStarted(operationPowerSaveBlockerId)) {
+    powerSaveBlocker.stop(operationPowerSaveBlockerId)
+    ucLog(`[Power] Sleep blocker disabled (${operationPowerSaveBlockerId})`)
+  }
+  operationPowerSaveBlockerId = null
+}
+
+function markGameLaunchHandoff(durationMs = WINDOWS_GAME_HANDOFF_GRACE_MS) {
+  launchHandoffBlockUntil = Math.max(launchHandoffBlockUntil, Date.now() + Math.max(0, Number(durationMs) || 0))
+  if (launchHandoffRefreshTimer) clearTimeout(launchHandoffRefreshTimer)
+  const delay = Math.max(0, launchHandoffBlockUntil - Date.now()) + 50
+  launchHandoffRefreshTimer = setTimeout(() => {
+    launchHandoffRefreshTimer = null
+    refreshOperationPowerSaveBlocker()
+  }, delay)
+  refreshOperationPowerSaveBlocker()
+}
 
 // ============================================================
 // In-Game Overlay System (Steam-like)
@@ -822,6 +970,10 @@ function applySettingsDefaults(settings) {
   const next = settings && typeof settings === 'object' ? { ...settings } : {}
   if (typeof next.discordRpcEnabled !== 'boolean') next.discordRpcEnabled = true
   if (typeof next.verboseDownloadLogging !== 'boolean') next.verboseDownloadLogging = false
+  if (typeof next.preventSleepDuringOperations !== 'boolean') next.preventSleepDuringOperations = true
+  if (!next.libraryGameMeta || typeof next.libraryGameMeta !== 'object' || Array.isArray(next.libraryGameMeta)) {
+    next.libraryGameMeta = {}
+  }
   return next
 }
 
@@ -945,8 +1097,17 @@ function registerProcessLogging() {
   process.on('beforeExit', (code) => ucLog('Process beforeExit', 'info', { code }))
   process.on('exit', (code) => ucLog('Process exit', 'info', { code }))
 
+  // Graceful shutdown on SIGINT/SIGTERM (e.g. Ctrl+C in dev terminal).
+  // Without this, the process dies immediately and before-quit never fires,
+  // so partial download files aren't preserved and manifests aren't updated.
+  const gracefulShutdown = (signal) => {
+    ucLog(`Received ${signal}, triggering graceful quit`)
+    app.quit()
+  }
+  process.on('SIGINT', () => gracefulShutdown('SIGINT'))
+  process.on('SIGTERM', () => gracefulShutdown('SIGTERM'))
+
   app.on('before-quit', () => {
-    app.isQuitting = true
     ucLog('App before-quit')
   })
   app.on('will-quit', () => ucLog('App will-quit'))
@@ -1168,6 +1329,62 @@ function createTray() {
 }
 
 const DEFAULT_BASE_URL = 'https://union-crax.xyz'
+
+// Ordered list of base URLs to try on startup. Primary first, then mirrors.
+const BASE_URL_CANDIDATES = [
+  'https://union-crax.xyz',
+  'https://hardquestions.explosionlearning.org',
+  'https://note-tool.study',
+]
+
+// Set during startup by detectBestBaseUrl(); used to pre-configure renderer localStorage.
+let resolvedBaseUrl = DEFAULT_BASE_URL
+
+/**
+ * Probe each candidate with a HEAD request (4 s timeout) and return the first
+ * reachable origin, or the primary as a fallback if none respond.
+ * @param {(status: string) => void} onStatus - callback to push status text to splash
+ */
+async function detectBestBaseUrl(onStatus) {
+  function probe(baseUrl) {
+    return new Promise((resolve) => {
+      let done = false
+      const finish = (ok) => {
+        if (done) return
+        done = true
+        clearTimeout(timer)
+        resolve(ok)
+      }
+      const timer = setTimeout(() => finish(false), 4000)
+      try {
+        const parsed = new URL(baseUrl)
+        const req = https.request(
+          { hostname: parsed.hostname, port: 443, path: '/', method: 'HEAD', timeout: 3500 },
+          (res) => finish(res.statusCode < 500)
+        )
+        req.on('error', () => finish(false))
+        req.on('timeout', () => { try { req.destroy() } catch { } finish(false) })
+        req.end()
+      } catch {
+        finish(false)
+      }
+    })
+  }
+
+  for (const candidate of BASE_URL_CANDIDATES) {
+    const hostname = (() => { try { return new URL(candidate).hostname } catch { return candidate } })()
+    if (typeof onStatus === 'function') onStatus(`Checking ${hostname}...`)
+    ucLog(`detectBestBaseUrl: probing ${candidate}`)
+    const ok = await probe(candidate)
+    if (ok) {
+      ucLog(`detectBestBaseUrl: resolved to ${candidate}`)
+      return candidate
+    }
+  }
+  ucLog('detectBestBaseUrl: all candidates unreachable, defaulting to primary', 'warn')
+  return DEFAULT_BASE_URL
+}
+
 let tray = null
 let mainWindow = null
 
@@ -1206,23 +1423,16 @@ if (!gotTheLock) {
       app.quit()
     } else if (mainWindow && !mainWindow.isDestroyed()) {
       try {
-        // Bring the app to focus
-        if (mainWindow.isMinimized()) {
-          mainWindow.restore()
-        }
-        // Always show the window
-        mainWindow.show()
-        // Use setImmediate to ensure the window is fully ready before focusing
-        setImmediate(() => {
-          try {
-            mainWindow.focus()
-          } catch (e) {
-            ucLog(`Failed to focus window: ${e && e.message ? e.message : String(e)}`, 'warn')
-          }
-        })
+        // Restore from minimized or hidden (tray) state
+        if (mainWindow.isMinimized()) mainWindow.restore()
+        if (!mainWindow.isVisible()) mainWindow.show()
+        // On Windows focus stealing prevention can block focus() alone.
+        // Temporarily set alwaysOnTop to force the window to the foreground.
+        mainWindow.setAlwaysOnTop(true)
+        mainWindow.focus()
+        mainWindow.setAlwaysOnTop(false)
       } catch (e) {
         ucLog(`Error handling second-instance: ${e && e.message ? e.message : String(e)}`, 'warn')
-        // If something goes wrong, try creating a new window
         if (!BrowserWindow.getAllWindows().some(w => !w.isDestroyed())) {
           createWindow()
         }
@@ -1351,6 +1561,27 @@ function writeSettings(next) {
   }
 }
 
+function writeLibraryGameMeta(appid, updates) {
+  if (!appid || !updates || typeof updates !== 'object') return
+  try {
+    const settings = readSettings() || {}
+    const prev = { ...settings }
+    const currentMeta = settings.libraryGameMeta && typeof settings.libraryGameMeta === 'object' ? settings.libraryGameMeta : {}
+    const currentGameMeta = currentMeta[appid] && typeof currentMeta[appid] === 'object' ? currentMeta[appid] : {}
+    settings.libraryGameMeta = {
+      ...currentMeta,
+      [appid]: {
+        ...currentGameMeta,
+        ...updates,
+      },
+    }
+    writeSettings(settings)
+    broadcastSettingsChanges(settings, prev)
+  } catch (error) {
+    ucLog(`Failed to update library metadata for ${appid}: ${error.message}`, 'warn')
+  }
+}
+
 async function getSessionCookies(session, baseUrl) {
   try {
     const origin = normalizeBaseUrl(baseUrl)
@@ -1416,6 +1647,9 @@ ipcMain.handle('uc:setting-set', (_event, key, value) => {
     if (key === 'discordRpcEnabled') {
       updateRpcSettings(s).catch(() => { })
     }
+    if (key === 'preventSleepDuringOperations') {
+      refreshOperationPowerSaveBlocker()
+    }
     broadcastSettingsChanges(s, prev)
     ucLog(`Setting set: ${key}`)
     return { ok: true }
@@ -1433,6 +1667,7 @@ ipcMain.handle('uc:setting-clear-all', () => {
     const defaults = applySettingsDefaults({})
     writeSettings(defaults)
     updateRpcSettings(defaults).catch(() => { })
+    refreshOperationPowerSaveBlocker()
     // broadcast to all renderer windows that settings were cleared
     for (const w of BrowserWindow.getAllWindows()) {
       if (w && !w.isDestroyed()) {
@@ -2350,6 +2585,59 @@ function updateInstallingManifestStatus(appid, status, error) {
   }
 }
 
+function writeInstallingManifest(appid, metadata, status = 'installing', error = null) {
+  try {
+    const downloadRoot = ensureDownloadDir()
+    const folderName = safeFolderName((metadata && (metadata.name || metadata.gameName)) || appid || 'unknown')
+    const installingRoot = ensureSubdir(path.join(downloadRoot, installingDirName), folderName)
+    const manifestPath = path.join(installingRoot, INSTALLED_MANIFEST)
+    const manifest = readJsonFile(manifestPath) || {}
+    manifest.appid = appid
+    manifest.name = metadata?.name || metadata?.gameName || manifest.name || appid
+    manifest.metadata = metadata || manifest.metadata || null
+    manifest.installStatus = status
+    if (error) manifest.installError = String(error)
+    else delete manifest.installError
+    manifest.updatedAt = Date.now()
+    manifest.installedAt = manifest.installedAt || null
+    try {
+      manifest.metadataHash = computeObjectHash(manifest.metadata)
+    } catch { }
+    uc_writeJsonSync(manifestPath, manifest)
+    return { ok: true, installingRoot, manifestPath }
+  } catch (err) {
+    console.error('[UC] writeInstallingManifest failed', err)
+    return { ok: false, installingRoot: null, manifestPath: null }
+  }
+}
+
+function normalizeInstallingManifestForQuery(manifest) {
+  try {
+    if (!manifest || !manifest.appid) return manifest
+    if (findInstalledFolderByAppid(manifest.appid)) return null
+    const status = typeof manifest.installStatus === 'string' ? manifest.installStatus : null
+    if (!status) return manifest
+    if (!['installing', 'extracting', 'downloading', 'verifying', 'retrying', 'paused'].includes(status)) return manifest
+    if (hasActiveDownloadsForApp(manifest.appid) || hasActiveExtractionForApp(manifest.appid)) return manifest
+    if (['downloading', 'verifying', 'retrying', 'paused'].includes(status)) {
+      return {
+        ...manifest,
+        installStatus: 'paused',
+        installError: manifest.installError || 'App closed. Resume to continue downloading.',
+        updatedAt: Date.now(),
+      }
+    }
+    return {
+      ...manifest,
+      installStatus: 'failed',
+      installError: manifest.installError || 'Installation was interrupted when the app closed.',
+      updatedAt: Date.now(),
+    }
+  } catch {
+    return manifest
+  }
+}
+
 function isLinuxExecutableCandidate(entry, fullPath) {
   if (!entry || !entry.isFile || !entry.isFile()) return false
   const lower = entry.name.toLowerCase()
@@ -2633,6 +2921,7 @@ async function visitPixeldrainViewerPage(fileId) {
 
 const UCFILES_CONNECTIONS = 4
 const UCFILES_CHUNK_SIZE = 20 * 1024 * 1024 // 20 MB per range chunk
+const UCFILES_RESUME_STATE_EXT = '.ucfiles-state.json'
 
 // HTTP/1.1 Range request using Node.js networking (not Chromium's fetch).
 // Chromium's fetch multiplexes concurrent requests over a single HTTP/2 connection,
@@ -2674,6 +2963,57 @@ function ucfilesRangeRequest(url, start, end, signal) {
 
 /** Map<downloadId, { abort: AbortController, state: { paused: boolean, pauseResolvers: Function[] } }> */
 const ucfilesActiveDownloads = new Map()
+
+function getUCFilesResumeStatePath(savePath) {
+  return `${savePath}${UCFILES_RESUME_STATE_EXT}`
+}
+
+function readUCFilesResumeState(savePath) {
+  try {
+    const statePath = getUCFilesResumeStatePath(savePath)
+    if (!fs.existsSync(statePath)) return null
+    const raw = fs.readFileSync(statePath, 'utf8')
+    const parsed = JSON.parse(raw)
+    return parsed && typeof parsed === 'object' ? parsed : null
+  } catch {
+    return null
+  }
+}
+
+function writeUCFilesResumeState(savePath, state) {
+  try {
+    const statePath = getUCFilesResumeStatePath(savePath)
+    fs.writeFileSync(statePath, JSON.stringify(state))
+    return true
+  } catch (err) {
+    ucLog(`[UC.Files] Failed to write resume state for ${path.basename(savePath)}: ${String(err)}`, 'warn')
+    return false
+  }
+}
+
+function deleteUCFilesResumeState(savePath) {
+  try {
+    const statePath = getUCFilesResumeStatePath(savePath)
+    if (fs.existsSync(statePath)) fs.unlinkSync(statePath)
+  } catch { }
+}
+
+function buildUCFilesResumeSnapshot(totalBytes, expectedSHA256, chunks) {
+  return {
+    version: 1,
+    chunkSize: UCFILES_CHUNK_SIZE,
+    totalBytes,
+    expectedSHA256: expectedSHA256 || null,
+    completedChunks: chunks
+      .map((chunk, index) => chunk.done && chunk.sha256 ? {
+        index,
+        start: chunk.start,
+        end: chunk.end,
+        sha256: chunk.sha256,
+      } : null)
+      .filter(Boolean),
+  }
+}
 
 function isUCFilesHostName(value) {
   const normalized = String(value || '')
@@ -2736,6 +3076,7 @@ async function ucfilesParallelDownload(win, payload, _retryCount = 0) {
   const ctrl = new AbortController()
   const state = { paused: false, pauseResolvers: [] }
   ucfilesActiveDownloads.set(downloadId, { abort: ctrl, state })
+  refreshOperationPowerSaveBlocker()
 
   // Unblock paused workers on abort so they exit cleanly instead of hanging
   ctrl.signal.addEventListener('abort', () => {
@@ -2778,6 +3119,7 @@ async function ucfilesParallelDownload(win, payload, _retryCount = 0) {
     if (!totalBytes || !acceptsRanges) {
       // Fallback: single-connection download (server doesn't support ranges or unknown size)
       ucfilesActiveDownloads.delete(downloadId)
+      refreshOperationPowerSaveBlocker()
       return null // signal caller to use default Chromium downloader
     }
 
@@ -2801,14 +3143,45 @@ async function ucfilesParallelDownload(win, payload, _retryCount = 0) {
       chunks.push({ start: offset, end, done: false })
     }
 
-    // 3. Pre-allocate output file
-    fd = fs.openSync(finalSavePath, 'w')
-    fs.ftruncateSync(fd, totalBytes)
+    const canResumeFromFile = fs.existsSync(finalSavePath)
+    const savedResumeState = canResumeFromFile ? readUCFilesResumeState(finalSavePath) : null
+    if (!canResumeFromFile) {
+      deleteUCFilesResumeState(finalSavePath)
+    }
+    if (
+      savedResumeState &&
+      savedResumeState.version === 1 &&
+      savedResumeState.chunkSize === UCFILES_CHUNK_SIZE &&
+      savedResumeState.totalBytes === totalBytes &&
+      Array.isArray(savedResumeState.completedChunks)
+    ) {
+      for (const completed of savedResumeState.completedChunks) {
+        const index = Number(completed?.index)
+        if (!Number.isInteger(index) || index < 0 || index >= chunks.length) continue
+        const chunk = chunks[index]
+        if (!chunk) continue
+        if (chunk.start !== completed.start || chunk.end !== completed.end) continue
+        if (typeof completed.sha256 !== 'string' || !completed.sha256) continue
+        chunk.done = true
+        chunk.sha256 = completed.sha256
+      }
+      ucLog(`[UC.Files] Restored resume state: ${savedResumeState.completedChunks.length}/${chunks.length} chunks for ${path.basename(finalSavePath)}`)
+    }
+
+    // 3. Pre-allocate output file for new downloads, or reopen the existing sparse file for resume.
+    const hasResumeChunks = chunks.some((chunk) => chunk.done)
+    if (hasResumeChunks && fs.existsSync(finalSavePath)) {
+      fd = fs.openSync(finalSavePath, 'r+')
+    } else {
+      fd = fs.openSync(finalSavePath, 'w')
+      fs.ftruncateSync(fd, totalBytes)
+      writeUCFilesResumeState(finalSavePath, buildUCFilesResumeSnapshot(totalBytes, expectedSHA256, chunks))
+    }
 
     // 4. Progress tracking
-    let totalReceived = 0
+    let totalReceived = chunks.reduce((sum, chunk) => sum + (chunk.done ? (chunk.end - chunk.start + 1) : 0), 0)
     let lastProgressTime = Date.now()
-    let lastProgressBytes = 0
+    let lastProgressBytes = totalReceived
     let smoothSpeed = 0
 
     let pausedUpdateSent = false
@@ -2930,6 +3303,7 @@ async function ucfilesParallelDownload(win, payload, _retryCount = 0) {
       }
       chunk.done = true
       chunk.sha256 = chunkHasher.digest('hex')
+      writeUCFilesResumeState(finalSavePath, buildUCFilesResumeSnapshot(totalBytes, expectedSHA256, chunks))
     }
 
     // 6. Run workers in parallel (pool of UCFILES_CONNECTIONS)
@@ -2945,6 +3319,7 @@ async function ucfilesParallelDownload(win, payload, _retryCount = 0) {
             if (ctrl.signal.aborted) return
             const ci = chunkIndex++
             if (ci >= chunks.length) return
+            if (chunks[ci].done) continue
             await downloadChunk(chunks[ci])
           }
         } catch (workerErr) {
@@ -2968,6 +3343,7 @@ async function ucfilesParallelDownload(win, payload, _retryCount = 0) {
 
     if (ctrl.signal.aborted) {
       ucfilesActiveDownloads.delete(downloadId)
+      refreshOperationPowerSaveBlocker()
       return { ok: false, cancelled: true }
     }
 
@@ -3120,6 +3496,7 @@ async function ucfilesParallelDownload(win, payload, _retryCount = 0) {
                 error: `Chunk repair failed - full re-download (attempt ${_retryCount + 1}/3)` })
               try { fs.unlinkSync(finalSavePath) } catch {}
               ucfilesActiveDownloads.delete(downloadId)
+              refreshOperationPowerSaveBlocker()
               await new Promise(r => setTimeout(r, 3000))
               return ucfilesParallelDownload(win, payload, _retryCount + 1)
             }
@@ -3131,6 +3508,7 @@ async function ucfilesParallelDownload(win, payload, _retryCount = 0) {
               error: `Same corrupt data from server - full re-download (attempt ${_retryCount + 1}/3)` })
             try { fs.unlinkSync(finalSavePath) } catch {}
             ucfilesActiveDownloads.delete(downloadId)
+            refreshOperationPowerSaveBlocker()
             await new Promise(r => setTimeout(r, 3000))
             return ucfilesParallelDownload(win, payload, _retryCount + 1)
           }
@@ -3145,8 +3523,10 @@ async function ucfilesParallelDownload(win, payload, _retryCount = 0) {
     // 9. Done - mimic the will-download 'done' event flow
     totalReceived = totalBytes
     reportProgress()
+    deleteUCFilesResumeState(finalSavePath)
 
     ucfilesActiveDownloads.delete(downloadId)
+    refreshOperationPowerSaveBlocker()
 
     // Trigger extraction / completion like the normal Chromium download path
     sendUpdate({ status: 'completed', receivedBytes: totalBytes, totalBytes, speedBps: 0, etaSeconds: null })
@@ -3162,6 +3542,7 @@ async function ucfilesParallelDownload(win, payload, _retryCount = 0) {
     if (fd !== null) { try { fs.closeSync(fd) } catch { } }
     clearInterval(progressInterval)
     ucfilesActiveDownloads.delete(downloadId)
+    refreshOperationPowerSaveBlocker()
     if (ctrl.signal.aborted) return { ok: false, cancelled: true }
     const errMsg = (err && err.message) || String(err) || 'Unknown download error'
     ucLog(`[UC.Files] Parallel download error: ${errMsg}`, 'error')
@@ -3964,6 +4345,8 @@ function registerRunningGame(appid, exePath, proc, gameName, showGameName = true
     pid: proc.pid,
     startedAt: Date.now()
   }
+  markGameLaunchHandoff()
+  if (appid) writeLibraryGameMeta(appid, { lastPlayedAt: payload.startedAt })
   if (appid) runningGames.set(appid, payload)
   if (exePath) runningGames.set(exePath, payload)
   if (gameName || appid) {
@@ -4237,14 +4620,53 @@ async function pruneRunningGames() {
   }
 }
 
-function createWindow() {
+function createSplashWindow() {
+  const splashWin = new BrowserWindow({
+    width: 300,
+    height: 320,
+    frame: false,
+    transparent: false,
+    resizable: false,
+    movable: true,
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    focusable: false,
+    backgroundColor: '#09090b',
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      devTools: false,
+    },
+    icon: resolveIcon(),
+  })
+  splashWin.center()
+  splashWin.loadFile(path.join(__dirname, 'splash.html'))
+  return splashWin
+}
+
+/** Push a status string into the splash window's #status element. */
+function setSplashStatus(splashWin, text) {
+  if (!splashWin || splashWin.isDestroyed()) return
+  const escaped = JSON.stringify(String(text))
+  splashWin.webContents.executeJavaScript(
+    `(function(){var el=document.getElementById('status');if(el)el.textContent=${escaped};})()`
+  ).catch(() => {})
+}
+
+function createWindow(existingSplash) {
   ucLog('Creating main window')
   const iconPath = resolveIcon()
+
+  // Use a splash passed in from app.whenReady (where domain detection already ran),
+  // or create a new one for any subsequent createWindow calls.
+  let splashWindow = existingSplash || createSplashWindow()
+
   mainWindow = new BrowserWindow({
     width: 1100,
     height: 800,
-    backgroundColor: '#121212',
+    backgroundColor: '#09090b',
     title: 'UnionCrax.Direct',
+    show: false,
     webPreferences: {
       // This app needs to talk to a remote Next.js server; easiest path is to disable CORS in the desktop shell.
       webSecurity: false,
@@ -4253,6 +4675,38 @@ function createWindow() {
     },
     icon: iconPath
   })
+
+  // Inject the detected base URL into renderer localStorage before any JS runs.
+  // dom-ready fires after HTML is parsed but before deferred/module scripts execute.
+  mainWindow.webContents.once('dom-ready', () => {
+    try {
+      const url = resolvedBaseUrl || DEFAULT_BASE_URL
+      mainWindow.webContents.executeJavaScript(
+        `(function(){try{localStorage.setItem('uc_custom_api_base_url',${JSON.stringify(url)})}catch(e){}})()`
+      ).catch(() => {})
+    } catch { }
+  })
+
+  // Close splash and reveal main window when content is ready
+  let splashClosed = false
+  const closeSplash = () => {
+    if (splashClosed) return
+    splashClosed = true
+    try {
+      if (splashWindow && !splashWindow.isDestroyed()) splashWindow.destroy()
+    } catch { }
+    splashWindow = null
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.show()
+      mainWindow.focus()
+    }
+  }
+
+  mainWindow.once('ready-to-show', () => closeSplash())
+
+  // Fallback: if ready-to-show never fires, show after 20s
+  const splashTimeout = setTimeout(() => closeSplash(), 20000)
+  mainWindow.once('closed', () => clearTimeout(splashTimeout))
 
   attachWindowLogging(mainWindow, 'main')
 
@@ -4355,6 +4809,7 @@ function createWindow() {
     activeDownloads.set(downloadId, {
       item, state, appid: match?.appid, gameName: match?.gameName, url, savePath, partIndex, partTotal,
     })
+    refreshOperationPowerSaveBlocker()
 
     // For interrupted downloads (created by createInterruptedDownload), the item starts
     // in 'interrupted' state and requires an explicit resume() call to begin downloading.
@@ -4431,11 +4886,13 @@ function createWindow() {
       uc_log(`download done handler start - downloadId=${downloadId} state=${state} url=${url}`)
 
       // When the app is quitting, Electron cancels all active/paused DownloadItems and fires
-      // done with state='cancelled'. Don't propagate this to the renderer - the download
-      // was not cancelled by the user. On next startup the renderer will restore it as 'paused'.
-      if (app.isQuitting && state === 'cancelled') {
-        uc_log(`download done during quit - suppressing cancelled status for ${downloadId}`)
+      // done with state='cancelled' (or sometimes 'interrupted'). Don't propagate this to the
+      // renderer - the download was not cancelled by the user. On next startup the renderer will
+      // restore it as 'paused'.
+      if (app.isQuitting && (state === 'cancelled' || state === 'interrupted')) {
+        uc_log(`download done during quit - suppressing ${state} status for ${downloadId}`)
         activeDownloads.delete(downloadId)
+        refreshOperationPowerSaveBlocker()
         return
       }
 
@@ -4449,6 +4906,7 @@ function createWindow() {
       }
 
       activeDownloads.delete(downloadId)
+      refreshOperationPowerSaveBlocker()
       // Clean up pixeldrain auth header for this file
       try {
         const fileId = extractPixeldrainFileIdFromUrl(url)
@@ -4515,6 +4973,9 @@ function createWindow() {
           uc_log(`checking for extraction - installingPath=${entry.savePath} finalPath=${finalPath} archExt=${archExt} maybeArchive=${maybeArchive}`)
 
           const extractArchive = async (archiveToExtract, partFiles, totalBytesOverride, extractionKeyOverride) => {
+            const effectiveExtractionKey = extractionKeyOverride || (entry?.appid ? buildAppExtractionKey(entry.appid) : null)
+            if (effectiveExtractionKey) activeExtractions.add(effectiveExtractionKey)
+            refreshOperationPowerSaveBlocker()
             try {
               const st = fs.existsSync(archiveToExtract) ? fs.statSync(archiveToExtract) : null
               const totalBytes = totalBytesOverride != null ? totalBytesOverride : st ? st.size : 0
@@ -4569,7 +5030,8 @@ function createWindow() {
             })
             try { if (_pollTimer) clearInterval(_pollTimer) } catch (e) { }
             uc_log(`extraction result for ${archiveToExtract}: ${JSON.stringify(res && { ok: res.ok, error: res.error, files: (res.files || []).slice(0, 10) })}`)
-            if (extractionKeyOverride) activeExtractions.delete(extractionKeyOverride)
+            if (effectiveExtractionKey) activeExtractions.delete(effectiveExtractionKey)
+            refreshOperationPowerSaveBlocker()
             if (res && res.ok) {
               const extractedFiles = res.files || []
               const fileEntries = []
@@ -4714,6 +5176,7 @@ function createWindow() {
               uc_log(`multipart extraction already running for ${multipartInfo ? multipartInfo.basePath : finalPath}`)
             } else if (finalPath && fs.existsSync(finalPath)) {
               if (extractionKey) activeExtractions.add(extractionKey)
+              refreshOperationPowerSaveBlocker()
               await extractArchive(multipartInfo.firstPartPath, multipartInfo.partFiles || [], multipartInfo.totalBytes || null, extractionKey)
             }
           } else if (maybeArchive && finalPath && fs.existsSync(finalPath)) {
@@ -4833,18 +5296,25 @@ function createWindow() {
           ucLog(`Extraction error: ${e.message}`, 'error')
         }
       }
+      // Interrupted downloads (e.g. paused download loses connection, network change) are
+      // still resumable through our Level 1/2/3 resume system. Treat as 'paused', not 'failed'.
+      const isInterrupted = state === 'interrupted'
       const terminalStatus = extractionFailed
         ? 'failed'
         : state === 'completed'
           ? 'completed'
           : state === 'cancelled'
             ? 'cancelled'
-            : 'failed'
+            : isInterrupted
+              ? 'paused'
+              : 'failed'
       const terminalError = extractionFailed
         ? extractionError || 'extract_failed'
         : state === 'completed'
           ? null
-          : state
+          : isInterrupted
+            ? 'Download interrupted. Resume to continue.'
+            : state
       sendDownloadUpdate(mainWindow, {
         downloadId,
         status: terminalStatus,
@@ -4858,27 +5328,41 @@ function createWindow() {
         gameName: entry?.gameName || null,
         url,
         error: terminalError,
+        resumeData: isInterrupted ? buildResumeData(item, entry?.savePath) : undefined,
         partIndex: entry?.partIndex,
         partTotal: entry?.partTotal
       })
-      // Update manifest for failed downloads only - completed downloads are moved to installed folder
+      // Update manifest for non-completed downloads
       if (entry?.appid && terminalStatus !== 'completed') {
         updateInstallingManifestStatus(entry.appid, terminalStatus, terminalError)
       }
-      if (entry?.appid) {
-        if (terminalStatus !== 'completed') {
-          flushQueuedDownloads(entry.appid, terminalStatus, terminalError)
-          flushQueuedGlobalDownloads(entry.appid, terminalStatus, terminalError)
-        }
+      // Don't flush queued downloads for interrupted/paused - they can still be resumed.
+      // Only flush for actual failures or cancellations.
+      if (entry?.appid && terminalStatus !== 'completed' && terminalStatus !== 'paused') {
+        flushQueuedDownloads(entry.appid, terminalStatus, terminalError)
+        flushQueuedGlobalDownloads(entry.appid, terminalStatus, terminalError)
       }
       startNextQueuedDownload(entry?.appid)
     })
   })
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   ensureDownloadDir()
-  createWindow()
+
+  // Show splash immediately, then detect the best reachable domain before
+  // the main window loads so the renderer starts with the right API base URL.
+  const splashWin = createSplashWindow()
+
+  resolvedBaseUrl = await detectBestBaseUrl((status) => {
+    setSplashStatus(splashWin, status)
+  })
+
+  // Brief pause so the user can see the final status before the main window appears
+  setSplashStatus(splashWin, 'Almost there...')
+  await new Promise((r) => setTimeout(r, 300))
+
+  createWindow(splashWin)
   createTray()
   configureAutoUpdater()
   
@@ -4985,13 +5469,42 @@ ipcMain.handle('uc:get-version', () => {
   return packageJson.version
 })
 
+ipcMain.handle('uc:app-close-response', async (_event, shouldProceed) => {
+  const request = pendingCloseRequest
+  pendingCloseRequest = null
+
+  if (!shouldProceed) {
+    closeRequestApproved = false
+    app.isQuitting = false
+    return { ok: true, proceeded: false }
+  }
+
+  closeRequestApproved = true
+  if (request?.mode === 'quit') {
+    app.isQuitting = true
+    setImmediate(() => app.quit())
+    return { ok: true, proceeded: true }
+  }
+
+  return { ok: true, proceeded: false }
+})
+
 app.on('window-all-closed', () => {
   if (process.platform === 'darwin') app.quit()
 })
 
-app.on('before-quit', () => {
+app.on('before-quit', (event) => {
+  if (hasCloseSensitiveOperations() && !closeRequestApproved) {
+    event.preventDefault()
+    requestCloseApproval('quit')
+    return
+  }
+
   app.isQuitting = true
+  pendingCloseRequest = null
   shutdownRpcClient()
+  markQuitingDownloadsPaused()
+  markInterruptedExtractionsReadyForInstall()
 
   // Preserve partial download files before Chromium deletes them.
   // When Electron quits it cancels all active/paused DownloadItems, and Chromium's
@@ -5080,6 +5593,7 @@ ipcMain.handle('uc:download-cancel', (_event, downloadId) => {
   if (ucEntry) {
     ucEntry.abort.abort()
     ucfilesActiveDownloads.delete(downloadId)
+    refreshOperationPowerSaveBlocker()
     ucLog(`Download cancelled (UC.Files parallel): ${downloadId}`)
     broadcastCancelled()
     return { ok: true }
@@ -5138,6 +5652,7 @@ ipcMain.handle('uc:download-pause', (event, downloadId) => {
   const ucEntry = ucfilesActiveDownloads.get(downloadId)
   if (ucEntry) {
     ucEntry.state.paused = true
+    refreshOperationPowerSaveBlocker()
     ucLog(`Download paused (UC.Files parallel): ${downloadId}`)
     // Send explicit paused update (reportProgress will skip while paused)
     const snap = latestDownloadState.get(downloadId)
@@ -5174,6 +5689,7 @@ ipcMain.handle('uc:download-pause', (event, downloadId) => {
     }
     entry.speedLimitPaused = false
     if (entry.item && typeof entry.item.pause === 'function') entry.item.pause()
+    refreshOperationPowerSaveBlocker()
     // emit an update to renderer
     sendDownloadUpdate(win, {
       downloadId,
@@ -5212,6 +5728,7 @@ ipcMain.handle('uc:download-resume', (event, downloadId) => {
     ucEntry.state.paused = false
     for (const resolve of ucEntry.state.pauseResolvers) resolve()
     ucEntry.state.pauseResolvers = []
+    refreshOperationPowerSaveBlocker()
     ucLog(`Download resumed (UC.Files parallel): ${downloadId}`)
     const snap = latestDownloadState.get(downloadId)
     sendDownloadUpdate(win, {
@@ -5250,6 +5767,7 @@ ipcMain.handle('uc:download-resume', (event, downloadId) => {
     entry.speedLimitWindow = { startTime: nowMs, startBytes: entry.item.getReceivedBytes() }
     entry.state.speedBps = 0
     if (entry.item && typeof entry.item.resume === 'function') entry.item.resume()
+    refreshOperationPowerSaveBlocker()
     // emit an update to renderer
     sendDownloadUpdate(win, {
       downloadId,
@@ -5367,11 +5885,22 @@ ipcMain.handle('uc:download-resume-with-fresh-url', (event, payload) => {
     return { ok: false, error: 'empty-file' }
   }
 
-  // If the file on disk is already the expected size (or larger), the download
-  // is actually complete.  Chromium's createInterruptedDownload rejects
-  // offset >= length, so tell the renderer the file is already done so it can
-  // skip straight to verification/extraction.
+  // UC.Files preallocates the destination file to its final size before the chunks are
+  // fully written, so file-size equality is not proof of completion. Hand those resumes
+  // back to the UC.Files engine, which can use its chunk checkpoint sidecar.
   if (payload.totalBytes && actualOffset >= payload.totalBytes) {
+    if (isUCFilesUrl(payload.url)) {
+      const resumeState = readUCFilesResumeState(savePath)
+      const completedCount = Array.isArray(resumeState?.completedChunks) ? resumeState.completedChunks.length : 0
+      const expectedChunks = payload.totalBytes > 0 ? Math.ceil(payload.totalBytes / UCFILES_CHUNK_SIZE) : 0
+      if (expectedChunks > 0 && completedCount >= expectedChunks) {
+        ucLog(`resume-with-fresh-url: UC.Files checkpoint shows all ${completedCount} chunks complete, handing off to install`, 'info')
+        return { ok: false, error: 'file-already-complete' }
+      }
+      ucLog(`resume-with-fresh-url: UC.Files file is preallocated (${actualOffset}/${payload.totalBytes}) with ${completedCount}/${expectedChunks || '?'} chunks done, delegating to UC.Files resume`, 'info')
+      return { ok: false, error: 'use-ucfiles-engine-resume' }
+    }
+
     ucLog(`resume-with-fresh-url: file already complete (offset=${actualOffset}, totalBytes=${payload.totalBytes}), skipping re-download`, 'info')
     return { ok: false, error: 'file-already-complete' }
   }
@@ -5476,20 +6005,10 @@ ipcMain.handle('uc:download-cache-clear', async () => {
 ipcMain.handle('uc:installed-save', (_event, appid, metadata) => {
   try {
     const downloadRoot = ensureDownloadDir()
-    const folderName = safeFolderName((metadata && (metadata.name || metadata.gameName)) || appid || 'unknown')
-    const installingRoot = ensureSubdir(path.join(downloadRoot, installingDirName), folderName)
-    const manifestPath = path.join(installingRoot, INSTALLED_MANIFEST)
-    const manifest = readJsonFile(manifestPath) || {}
-    manifest.appid = appid
-    manifest.name = metadata?.name || metadata?.gameName || manifest.name
-    manifest.metadata = metadata
-    manifest.installStatus = 'installing'
-    try {
-      manifest.metadataHash = computeObjectHash(metadata)
-    } catch { }
-    // mark as pending install
-    manifest.installedAt = manifest.installedAt || null
-    uc_writeJsonSync(manifestPath, manifest);
+    const result = writeInstallingManifest(appid, metadata, 'installing', null)
+    if (!result.ok || !result.installingRoot || !result.manifestPath) return { ok: false }
+    const installingRoot = result.installingRoot
+    const manifestPath = result.manifestPath
     // attempt to download and save remote media locally into the installing folder
     ;(async () => {
       try {
@@ -5711,47 +6230,41 @@ ipcMain.handle('uc:pick-archive-files', async () => {
   }
 })
 
-// Install a game from user-provided archive files (single or multipart)
-ipcMain.handle('uc:install-from-archive', async (_event, payload) => {
-  const win = mainWindow
+async function runArchiveInstallJob(win, payload, options = {}) {
   if (!win || win.isDestroyed()) return { ok: false, error: 'no_window' }
   if (!payload || !Array.isArray(payload.archivePaths) || payload.archivePaths.length === 0) {
     return { ok: false, error: 'missing_archive_paths' }
   }
 
+  const preserveSourceFiles = options.preserveSourceFiles !== false
+  const cleanupInstallingRoot = options.cleanupInstallingRoot || null
   const appid = payload.appid || 'manual-install'
   const gameName = payload.gameName || appid
   const archivePaths = payload.archivePaths
   const metadata = payload.metadata || { appid, name: gameName }
   const downloadId = payload.downloadId || `archive-install-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`
 
-  // Validate all paths exist
   for (const fp of archivePaths) {
     if (!fs.existsSync(fp)) {
       return { ok: false, error: `File not found: ${path.basename(fp)}` }
     }
   }
 
-  // For multipart: verify all parts are in the same directory
   const dirs = new Set(archivePaths.map(fp => path.dirname(fp)))
   if (dirs.size > 1) {
     return { ok: false, error: 'All archive parts must be in the same folder. Please move them together and try again.' }
   }
 
-  // Determine the archive to extract
-  // For multipart (.001, .002, etc.), sort and use .001 as the entry point
   const isMultipart = archivePaths.length > 1 || archivePaths.some(fp => isMultipartPartPath(fp))
   let archiveToExtract
   let partFiles = null
 
   if (isMultipart) {
-    // Sort parts numerically
     const sorted = [...archivePaths].sort((a, b) => {
       const numA = parseInt((a.match(/\.(\d{3})$/) || ['', '0'])[1], 10)
       const numB = parseInt((b.match(/\.(\d{3})$/) || ['', '0'])[1], 10)
       return numA - numB
     })
-    // If user only selected .001, scan the folder for sibling parts
     if (sorted.length === 1 && isMultipartPartPath(sorted[0])) {
       const dir = path.dirname(sorted[0])
       const baseName = path.basename(sorted[0]).replace(/\.\d{3}$/, '')
@@ -5780,21 +6293,20 @@ ipcMain.handle('uc:install-from-archive', async (_event, payload) => {
     archiveToExtract = archivePaths[0]
   }
 
-  // Calculate total size
   const allFiles = partFiles || [archiveToExtract]
   let totalBytes = 0
   for (const fp of allFiles) {
     try { totalBytes += fs.statSync(fp).size } catch { }
   }
 
-  // Prepare installed folder
   const downloadRoot = ensureDownloadDir()
   const folderName = safeFolderName(gameName || appid)
+  writeInstallingManifest(appid, { ...metadata, appid, name: gameName }, 'extracting', null)
   const installedRoot = ensureSubdir(path.join(downloadRoot, installedDirName), folderName)
+  const archiveExtractionKey = buildAppExtractionKey(appid)
 
   ucLog(`[Archive Install] Starting: appid=${appid} gameName=${gameName} files=${allFiles.length} totalBytes=${totalBytes} dest=${installedRoot}`)
 
-  // Send initial extracting status
   sendDownloadUpdate(win, {
     downloadId,
     status: 'extracting',
@@ -5808,7 +6320,6 @@ ipcMain.handle('uc:install-from-archive', async (_event, payload) => {
     gameName
   })
 
-  // Run extraction
   let _lastBytes = 0
   let _lastTime = Date.now()
   let _lastSpeed = 0
@@ -5837,71 +6348,146 @@ ipcMain.handle('uc:install-from-archive', async (_event, payload) => {
     }, 500)
   } catch { }
 
-  const res = await run7zExtract(archiveToExtract, installedRoot, ({ percent }) => {
-    try {
-      const received = Math.round((totalBytes * (percent || 0)) / 100)
-      const now = Date.now()
-      const deltaBytes = Math.max(0, received - _lastBytes)
-      const deltaSec = Math.max(0.001, (now - _lastTime) / 1000)
-      const instSpeed = deltaBytes / deltaSec
-      const speedBps = _lastSpeed > 0 ? _lastSpeed * 0.7 + instSpeed * 0.3 : instSpeed
-      _lastSpeed = speedBps
-      _lastBytes = received
-      _lastTime = now
-      const etaSeconds = speedBps > 0 ? Math.max(0, Math.round((totalBytes - received) / speedBps)) : null
-      sendDownloadUpdate(win, {
-        downloadId, status: 'extracting', receivedBytes: received, totalBytes,
-        speedBps: Math.round(speedBps), etaSeconds,
-        filename: path.basename(archiveToExtract), savePath: archiveToExtract, appid, gameName
-      })
-    } catch { }
-  })
+  activeExtractions.add(archiveExtractionKey)
+  refreshOperationPowerSaveBlocker()
 
-  try { if (_pollTimer) clearInterval(_pollTimer) } catch { }
-
-  if (res && res.ok) {
-    ucLog(`[Archive Install] Extraction succeeded: ${(res.files || []).length} files`)
-    const extractedFiles = res.files || []
-    const fileEntries = []
-    for (const ef of extractedFiles) {
+  let res
+  try {
+    res = await run7zExtract(archiveToExtract, installedRoot, ({ percent }) => {
       try {
-        const stats = fs.existsSync(ef) ? fs.statSync(ef) : null
-        fileEntries.push({
-          path: ef, name: path.basename(ef),
-          size: stats ? stats.size : 0, checksum: null, addedAt: Date.now()
+        const received = Math.round((totalBytes * (percent || 0)) / 100)
+        const now = Date.now()
+        const deltaBytes = Math.max(0, received - _lastBytes)
+        const deltaSec = Math.max(0.001, (now - _lastTime) / 1000)
+        const instSpeed = deltaBytes / deltaSec
+        const speedBps = _lastSpeed > 0 ? _lastSpeed * 0.7 + instSpeed * 0.3 : instSpeed
+        _lastSpeed = speedBps
+        _lastBytes = received
+        _lastTime = now
+        const etaSeconds = speedBps > 0 ? Math.max(0, Math.round((totalBytes - received) / speedBps)) : null
+        sendDownloadUpdate(win, {
+          downloadId, status: 'extracting', receivedBytes: received, totalBytes,
+          speedBps: Math.round(speedBps), etaSeconds,
+          filename: path.basename(archiveToExtract), savePath: archiveToExtract, appid, gameName
         })
       } catch { }
-    }
-
-    // Ensure metadata has appid and name
-    const metaForManifest = { ...metadata, appid, name: gameName }
-    if (fileEntries.length > 0) {
-      updateInstalledManifestBulk(installedRoot, metaForManifest, fileEntries)
-    } else {
-      updateInstalledManifest(installedRoot, metaForManifest, null)
-    }
-
-    // Send completion
-    sendDownloadUpdate(win, {
-      downloadId, status: 'extracted', extracted: extractedFiles,
-      savePath: null, appid, gameName
     })
-    sendDownloadUpdate(win, {
-      downloadId, status: 'completed',
-      receivedBytes: totalBytes, totalBytes, speedBps: 0, etaSeconds: 0,
-      filename: path.basename(archiveToExtract), savePath: null, appid, gameName
-    })
+  } finally {
+    try { if (_pollTimer) clearInterval(_pollTimer) } catch { }
+    activeExtractions.delete(archiveExtractionKey)
+    refreshOperationPowerSaveBlocker()
+  }
 
-    return { ok: true, downloadId, extracted: extractedFiles.length }
-  } else {
+  if (!(res && res.ok)) {
     const errorMsg = res && res.error ? res.error : 'Extraction failed'
     ucLog(`[Archive Install] Extraction failed: ${errorMsg}`, 'error')
+    updateInstallingManifestStatus(appid, 'failed', errorMsg)
     sendDownloadUpdate(win, {
       downloadId, status: 'extract_failed', error: errorMsg,
       savePath: archiveToExtract, appid, gameName
     })
     return { ok: false, downloadId, error: errorMsg }
   }
+
+  ucLog(`[Archive Install] Extraction succeeded: ${(res.files || []).length} files`)
+  const extractedFiles = res.files || []
+  const fileEntries = []
+  for (const ef of extractedFiles) {
+    try {
+      const stats = fs.existsSync(ef) ? fs.statSync(ef) : null
+      fileEntries.push({
+        path: ef, name: path.basename(ef),
+        size: stats ? stats.size : 0, checksum: null, addedAt: Date.now()
+      })
+    } catch { }
+  }
+
+  const metaForManifest = { ...metadata, appid, name: gameName }
+  if (fileEntries.length > 0) {
+    updateInstalledManifestBulk(installedRoot, metaForManifest, fileEntries)
+  } else {
+    updateInstalledManifest(installedRoot, metaForManifest, null)
+  }
+
+  updateInstallingManifestStatus(appid, 'completed', null)
+
+  sendDownloadUpdate(win, {
+    downloadId, status: 'extracted', extracted: extractedFiles,
+    savePath: null, appid, gameName
+  })
+  sendDownloadUpdate(win, {
+    downloadId, status: 'completed',
+    receivedBytes: totalBytes, totalBytes, speedBps: 0, etaSeconds: 0,
+    filename: path.basename(archiveToExtract), savePath: null, appid, gameName
+  })
+
+  if (!preserveSourceFiles) {
+    try {
+      const cleanupTargets = partFiles && partFiles.length ? partFiles : [archiveToExtract]
+      for (const target of cleanupTargets) {
+        try {
+          if (target && fs.existsSync(target)) fs.unlinkSync(target)
+        } catch { }
+      }
+    } catch { }
+  }
+
+  if (cleanupInstallingRoot) {
+    try {
+      if (fs.existsSync(cleanupInstallingRoot)) {
+        fs.rmSync(cleanupInstallingRoot, { recursive: true, force: true })
+      }
+    } catch (err) {
+      ucLog(`[Archive Install] Failed to clean up installing root ${cleanupInstallingRoot}: ${String(err)}`, 'warn')
+    }
+  }
+
+  return { ok: true, downloadId, extracted: extractedFiles.length }
+}
+
+// Install a game from user-provided archive files (single or multipart)
+ipcMain.handle('uc:install-from-archive', async (_event, payload) => {
+  const win = mainWindow
+  return runArchiveInstallJob(win, payload, { preserveSourceFiles: true })
+})
+
+ipcMain.handle('uc:install-downloaded-archive', async (_event, appid) => {
+  const win = mainWindow
+  if (!win || win.isDestroyed()) return { ok: false, error: 'no_window' }
+  if (!appid) return { ok: false, error: 'missing_appid' }
+
+  const installingRoot = findInstallingFolderByAppid(appid)
+  if (!installingRoot || !fs.existsSync(installingRoot)) {
+    return { ok: false, error: 'missing_installing_folder' }
+  }
+
+  const manifestPath = path.join(installingRoot, INSTALLED_MANIFEST)
+  const manifest = readJsonFile(manifestPath) || {}
+  const archivePaths = fs.readdirSync(installingRoot)
+    .filter((name) => name !== INSTALLED_MANIFEST && !name.endsWith(RESUME_BACKUP_EXT))
+    .map((name) => path.join(installingRoot, name))
+    .filter((target) => {
+      try {
+        return fs.statSync(target).isFile()
+      } catch {
+        return false
+      }
+    })
+
+  if (!archivePaths.length) {
+    return { ok: false, error: 'No downloaded archive is available to install.' }
+  }
+
+  return runArchiveInstallJob(win, {
+    appid,
+    gameName: manifest?.name || manifest?.metadata?.name || appid,
+    archivePaths,
+    metadata: manifest?.metadata || { appid, name: manifest?.name || appid },
+    downloadId: `install-downloaded-${appid}-${Date.now()}`,
+  }, {
+    preserveSourceFiles: false,
+    cleanupInstallingRoot: installingRoot,
+  })
 })
 
 ipcMain.handle('uc:installing-status-set', (_event, appid, status, error) => {
@@ -5919,11 +6505,7 @@ ipcMain.handle('uc:installing-status-set', (_event, appid, status, error) => {
 // a "paused" item is really still being processed on the backend and should not be resumed.
 ipcMain.handle('uc:download-active-status', (_event, appid) => {
   if (!appid) return { extracting: false, downloading: false }
-  const extracting = [...activeExtractions].some((key) => {
-    // activeExtractions stores archive paths; fall back to checking if the appid folder name matches
-    const lower = String(key).toLowerCase()
-    return lower.includes(String(appid).toLowerCase())
-  })
+  const extracting = hasActiveExtractionForApp(appid)
   const downloading = hasActiveDownloadsForApp(appid)
   return { extracting, downloading }
 })
@@ -6046,6 +6628,8 @@ ipcMain.handle('uc:installing-list', (_event) => {
     const downloadRoot = ensureDownloadDir()
     const root = path.join(downloadRoot, installingDirName)
     const items = listManifestsFromRoot(root, false)
+      .map((item) => normalizeInstallingManifestForQuery(item))
+      .filter(Boolean)
     return items.filter((item) => {
       const status = item && typeof item.installStatus === 'string' ? item.installStatus : null
       return status !== 'completed' && status !== 'extracted' && status !== 'cancelled'
@@ -6062,7 +6646,7 @@ ipcMain.handle('uc:installing-get', (_event, appid) => {
     const root = path.join(downloadRoot, installingDirName)
     for (const { folder } of iterateGameFolders(root)) {
       const manifestPath = path.join(folder, INSTALLED_MANIFEST)
-      const manifest = readJsonFile(manifestPath)
+      const manifest = normalizeInstallingManifestForQuery(readJsonFile(manifestPath))
       if (manifest && manifest.appid === appid) {
         const status = manifest.installStatus
         if (status === 'cancelled' || status === 'completed' || status === 'extracted') return null
@@ -6083,6 +6667,8 @@ ipcMain.handle('uc:installing-list-global', (_event) => {
     for (const root of roots) {
       const installingRoot = path.join(root, installingDirName)
       const items = listManifestsFromRoot(installingRoot, false)
+        .map((item) => normalizeInstallingManifestForQuery(item))
+        .filter(Boolean)
       for (const item of items) {
         const status = item && typeof item.installStatus === 'string' ? item.installStatus : null
         if (status === 'completed' || status === 'extracted' || status === 'cancelled') continue
@@ -6109,7 +6695,7 @@ ipcMain.handle('uc:installing-get-global', (_event, appid) => {
       const installingRoot = path.join(root, installingDirName)
       for (const { folder } of iterateGameFolders(installingRoot)) {
         const manifestPath = path.join(folder, INSTALLED_MANIFEST)
-        const manifest = readJsonFile(manifestPath)
+        const manifest = normalizeInstallingManifestForQuery(readJsonFile(manifestPath))
         if (manifest && manifest.appid === appid) {
           const status = manifest.installStatus
           if (status === 'cancelled' || status === 'completed' || status === 'extracted') return null
@@ -7089,7 +7675,11 @@ function launchTrackedGameProcess({ appid, exePath, gameName, showGameName, comm
         shell: false,
         detached: true,
         stdio: 'ignore',
-        windowsHide: true,
+        // windowsHide must be false for game processes on Windows.
+        // Setting it to true alters the STARTUPINFO wShowWindow flag,
+        // which can cause some games (especially Unity titles) to start
+        // with a hidden window, resulting in audio-only output.
+        windowsHide: false,
         cwd,
         env
       })
@@ -7387,6 +7977,13 @@ function sanitizeDesktopFileName(name) {
   return name.replace(/[\\/:*?"<>|]+/g, '').trim() || 'UnionCrax-Game'
 }
 
+function buildDesktopShortcutName(gameName) {
+  const safeName = sanitizeDesktopFileName(gameName)
+  return process.platform === 'win32'
+    ? `${safeName} - UC.lnk`
+    : `${safeName} - UC.desktop`
+}
+
 function buildDesktopExecLine(exePath) {
   const { command, args } = resolveLaunchCommand(exePath)
   const quote = (value) => `"${String(value).replace(/"/g, '\\"')}"`
@@ -7412,9 +8009,7 @@ ipcMain.handle('uc:delete-desktop-shortcut', async (_event, gameName) => {
     }
 
     const desktopPath = app.getPath('desktop')
-    const shortcutName = process.platform === 'win32'
-      ? `${gameName} - UC.lnk`
-      : `${sanitizeDesktopFileName(gameName)} - UC.desktop`
+    const shortcutName = buildDesktopShortcutName(gameName)
     const shortcutPath = path.join(desktopPath, shortcutName)
 
     if (!fs.existsSync(shortcutPath)) {
@@ -7444,9 +8039,7 @@ ipcMain.handle('uc:create-desktop-shortcut', async (_event, gameName, exePath) =
     }
 
     const desktopPath = app.getPath('desktop')
-    const shortcutName = process.platform === 'win32'
-      ? `${gameName} - UC.lnk`
-      : `${sanitizeDesktopFileName(gameName)} - UC.desktop`
+    const shortcutName = buildDesktopShortcutName(gameName)
     const shortcutPath = path.join(desktopPath, shortcutName)
 
     // Check if shortcut already exists

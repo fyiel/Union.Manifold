@@ -138,27 +138,45 @@ export function isHelperExecutableName(name: string) {
     'install',
     'redist',
     'updater',
-    'patch'
+    'patch',
+    'notification',
+    'easyanticheat',
+    'battleye',
+    'cefhelper',
+    'webengine',
   ].some((token) => lower.includes(token))
 }
 
 export function filterGameExecutables(exes: GameExecutable[]) {
-  // Remove obvious junk: redistributables, crash handlers, uninstallers
+  // Remove obvious junk: redistributables, crash handlers, uninstallers, helpers
   const junkPatterns = [
     /^vc_?redist/i, /^dxsetup/i, /^dxwebsetup/i, /^dotnet/i,
     /^unins\d{3}/i, /^uninstall/i,
     /^crashreport/i, /^bugreport/i, /^senddump/i,
     /^ue4prereqsetup/i, /^UE4-preq/i,
     /^(?:directx|oalinst|physx)/i,
+    // Unity engine helpers
+    /^UnityCrashHandler/i, /^UnityBugReporter/i,
+    // Common non-game executables
+    /^notification_helper/i, /^nacl_helper/i,
+    /^(?:7z|winrar|WinRAR)\.exe$/i,
+    /^(?:CEF|cef)Helper/i,
+    /^(?:QtWeb|QtWebEngine)Process/i,
+    /^(?:CrashReportClient|CrashSender)/i,
+    /^(?:EasyAntiCheat_EOS|EasyAntiCheat_Setup|EasyAntiCheatSetup)/i,
+    /^BEService/i, /^BELauncher/i,
+    /^(?:ffmpeg|ffprobe)\.exe$/i,
+    /^python\d*\.exe$/i,
+    /^(?:steam_api|steamclient)/i,
   ]
 
   return exes.filter((exe) => {
     const lower = exe.name.toLowerCase()
     // Filter known junk patterns
     if (junkPatterns.some((p) => p.test(lower))) return false
-    // Filter exes inside redist/support subdirectories
+    // Filter exes inside redist/support subdirectories or engine internals
     const pathLower = (exe.path || "").toLowerCase()
-    if (/[\\/](?:_?redist|__support|_commonredist|directx|vcredist)[\\/]/i.test(pathLower)) return false
+    if (/[\\/](?:_?redist|__support|_commonredist|directx|vcredist|__installer|bundledtools|easyanticheat)[\\/]/i.test(pathLower)) return false
     return true
   })
 }
