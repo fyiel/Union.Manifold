@@ -1488,11 +1488,13 @@ export function SettingsPage() {
 
   return (
     <div className="container mx-auto max-w-6xl">
-      {/* Page header */}
-      <div className="flex items-center gap-3 mb-8">
-        <h1 className="text-2xl sm:text-3xl font-black ">Settings</h1>
-        <Badge className="rounded-full bg-zinc-800 text-zinc-200 border-zinc-700">UnionCrax.Direct</Badge>
-        {appVersion && <span className="text-xs text-zinc-400 font-mono ml-auto">v{appVersion}</span>}
+      <div className="mb-8">
+        <p className="section-label mb-2">Configuration</p>
+        <div className="flex items-center gap-3">
+          <h1 className="text-2xl sm:text-3xl font-light tracking-tight">Settings</h1>
+          <Badge className="rounded-full bg-zinc-800 text-zinc-200 border-zinc-700">UnionCrax.Direct</Badge>
+          {appVersion && <span className="text-xs text-zinc-400 font-mono ml-auto">v{appVersion}</span>}
+        </div>
       </div>
 
       <div className="flex gap-6 items-start">

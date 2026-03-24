@@ -8,12 +8,17 @@
 - [completed] Add custom extraction-close confirmation instead of silent quit/hide
 - [completed] Surface interrupted extraction as install-ready on game pages
 - [completed] Validate renderer and Electron changes for downloader recovery
+- [completed] Refresh the launcher shell and homepage UI around a desktop-first layout
+- [completed] Remove website-style primary navigation and keep launcher flows in-app
+- [completed] Rework the library page hierarchy, filters, and visual polish
+- [completed] Validate the renderer build for the UI/UX refresh
 
 ## Notes
 
 - `design-reference.md` does not exist in this repo, so implementation follows existing Electron/renderer patterns directly.
 - Skip already-completed work: in-app updates, launch preflight, and overlay diagnostics.
 - Current focus is downloader recovery after long idle periods and app-close behavior during extraction.
+- Current focus for this pass was a launcher-style UI refresh: stronger shell, cleaner browse flow, and a more usable library surface.
 
 ## Review
 
@@ -25,3 +30,6 @@
 - Game detail actions now expose an Install path for interrupted extractions, backed by a dedicated main-process handler that extracts already-downloaded archives.
 - Verified the changed renderer and preload/main-process files with editor diagnostics and a successful `pnpm -s build:renderer` run.
 - Activity now keeps interrupted extractions in a dedicated Install Ready section, with an explicit Install action instead of mixing them into ordinary completed downloads.
+- Replaced the website-style top navigation with a launcher-first shell: persistent desktop rail, route-aware header, stronger background treatment, and no primary links that bounce users out to the web.
+- Rebuilt the browse page around a spotlight hero, in-app quick actions, better search entry, and clearer catalogue stats so the launcher feels closer to a dedicated game hub.
+- Reframed the library page into an overview dashboard plus control rail, while keeping the existing batch actions, collections, tags, and install-management logic intact.

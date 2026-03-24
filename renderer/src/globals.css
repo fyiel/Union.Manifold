@@ -1,34 +1,41 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
-/* UC Universal Design Language - Dark Mode Only */
+/* UC Universal Design Language — Dark Mode Only (synced with union-crax.xyz) */
 
 :root {
-  /* UDL Color Tokens */
-  --background:        #09090b;
-  --foreground:        #f4f4f5;
-  --card:              #18181b;
-  --card-foreground:   #f4f4f5;
-  --popover:           #18181b;
-  --popover-foreground:#f4f4f5;
-  --primary:           #ffffff;
-  --primary-foreground:#09090b;
-  --secondary:         #27272a;
-  --secondary-foreground: #f4f4f5;
-  --muted:             #27272a;
-  --muted-foreground:  #71717a;
-  --accent:            #27272a;
-  --accent-foreground: #f4f4f5;
-  --destructive:       #ef4444;
-  --destructive-foreground: #f4f4f5;
-  --border:            rgba(255, 255, 255, 0.07);
-  --input:             #27272a;
-  --ring:              rgba(255, 255, 255, 0.20);
+  /* UDL Color Tokens — zinc palette, dark-only Electron app */
+  --background:        oklch(0.035 0.002 285);    /* #09090b — zinc-950 */
+  --foreground:        oklch(0.968 0.001 286);    /* #f4f4f5 — zinc-100 */
+  --card:              oklch(0.12 0.002 285);     /* #18181b — zinc-900 */
+  --card-foreground:   oklch(0.968 0.001 286);
+  --popover:           oklch(0.12 0.002 285);
+  --popover-foreground:oklch(0.968 0.001 286);
+  --primary:           oklch(1 0 0);              /* #FFFFFF — white accent */
+  --primary-foreground:oklch(0 0 0);              /* #000000 */
+  --secondary:         oklch(0.16 0.002 285);     /* #27272a — zinc-800 */
+  --secondary-foreground: oklch(0.968 0.001 286);
+  --muted:             oklch(0.16 0.002 285);
+  --muted-foreground:  oklch(0.55 0.003 286);     /* #71717a — zinc-500 */
+  --accent:            oklch(1 0 0);
+  --accent-foreground: oklch(0 0 0);
+  --destructive:       oklch(0.577 0.245 27.325); /* #EF4444 */
+  --destructive-foreground: oklch(1 0 0);
+  --border:            oklch(0.16 0.002 285 / 0.5); /* zinc-800/50 */
+  --input:             oklch(0.16 0.002 285);
+  --ring:              oklch(1 0 0);
   --radius:            0.625rem;
+  --sidebar:           oklch(0.035 0.002 285);
+  --sidebar-foreground:oklch(0.968 0.001 286);
+  --sidebar-primary:   oklch(1 0 0);
+  --sidebar-primary-foreground: oklch(0 0 0);
+  --sidebar-accent:    oklch(0.16 0.002 285);
+  --sidebar-accent-foreground: oklch(0.968 0.001 286);
+  --sidebar-border:    oklch(0.16 0.002 285 / 0.5);
 }
 
 @theme inline {
-  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
   --font-mono: "Geist Mono", ui-monospace, monospace;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -53,6 +60,13 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
 }
 
 /* ── UDL Utility Classes ─────────────────────────────────── */
@@ -87,6 +101,40 @@
   border-radius: 6px;
 }
 
+/* Pop scale - button micro-interaction */
+@keyframes pop-scale {
+  0%   { transform: scale(1); }
+  40%  { transform: scale(1.12); }
+  70%  { transform: scale(0.98); }
+  100% { transform: scale(1); }
+}
+
+@keyframes pop-spin {
+  0%   { transform: scale(1) rotate(0deg); }
+  45%  { transform: scale(1.15) rotate(8deg); }
+  100% { transform: scale(1) rotate(0deg); }
+}
+
+.animate-pop-scale {
+  animation: pop-scale 420ms ease-out both;
+}
+
+.animate-pop-spin {
+  animation: pop-spin 520ms ease-out both;
+}
+
+/* Ambient drift - subtle background movement for hero images */
+@keyframes uc-ambient-drift {
+  0%   { transform: scale(1.08) translate3d(-1.5%, -1%, 0); }
+  50%  { transform: scale(1.14) translate3d(1.5%, -2.5%, 0); }
+  100% { transform: scale(1.1) translate3d(-1%, 1.5%, 0); }
+}
+
+.uc-ambient-drift {
+  animation: uc-ambient-drift 24s ease-in-out infinite alternate;
+  will-change: transform;
+}
+
 /* Slide-up entry animations */
 @keyframes uc-slide-up {
   from { opacity: 0; transform: translateY(12px); }
@@ -99,11 +147,28 @@
 .anim-d3 { animation-delay: 0.19s; }
 .anim-d4 { animation-delay: 0.26s; }
 .anim-d5 { animation-delay: 0.33s; }
+.anim-d6 { animation-delay: 0.40s; }
+
+/* Auto-stagger children in grids */
+.stagger-grid > * {
+  animation: uc-slide-up 0.45s ease-out both;
+}
+.stagger-grid > *:nth-child(1)  { animation-delay: 0s; }
+.stagger-grid > *:nth-child(2)  { animation-delay: 0.04s; }
+.stagger-grid > *:nth-child(3)  { animation-delay: 0.08s; }
+.stagger-grid > *:nth-child(4)  { animation-delay: 0.12s; }
+.stagger-grid > *:nth-child(5)  { animation-delay: 0.16s; }
+.stagger-grid > *:nth-child(6)  { animation-delay: 0.20s; }
+.stagger-grid > *:nth-child(7)  { animation-delay: 0.24s; }
+.stagger-grid > *:nth-child(8)  { animation-delay: 0.28s; }
+.stagger-grid > *:nth-child(9)  { animation-delay: 0.32s; }
+.stagger-grid > *:nth-child(10) { animation-delay: 0.36s; }
+.stagger-grid > *:nth-child(n+11) { animation-delay: 0.40s; }
 
 /* Token chip - monospace metadata pill */
 .token-chip {
   font-size: 11px;
-  font-family: 'Geist Mono', 'SF Mono', 'Fira Code', monospace;
+  font-family: 'SF Mono', 'Fira Code', ui-monospace, monospace;
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 6px;
@@ -126,7 +191,7 @@
 
   body {
     @apply bg-background text-foreground antialiased;
-    font-family: 'Inter', 'Geist', ui-sans-serif, system-ui, -apple-system, sans-serif;
+    font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
     overflow-x: hidden;
   }
 
@@ -137,15 +202,15 @@
   /* Brand wordmark */
   .font-brand {
     font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
-    font-weight: 900;
-    letter-spacing: -0.02em;
+    font-weight: 700;
+    letter-spacing: -0.04em;
   }
 
   /* Keep legacy alias */
   .font-montserrat {
     font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
-    font-weight: 900;
-    letter-spacing: -0.02em;
+    font-weight: 700;
+    letter-spacing: -0.04em;
   }
 
   [data-slot="carousel"] {

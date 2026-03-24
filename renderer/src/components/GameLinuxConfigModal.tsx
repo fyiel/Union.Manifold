@@ -121,7 +121,7 @@ export function GameLinuxConfigModal({ open, appid, gameName, onClose }: Props) 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
       <div className="absolute inset-0 bg-black/70" onClick={onClose} />
-      <div className="relative w-full max-w-lg rounded-2xl border border-white/[.07] bg-slate-950/98 shadow-2xl overflow-hidden">
+      <div className="relative w-full max-w-lg rounded-2xl border border-border/60 bg-card/95 shadow-2xl overflow-hidden">
         {/* Header */}
         <div className="flex items-center gap-3 px-5 py-4 border-b border-white/[.07] bg-white/5">
           <Terminal className="h-5 w-5 text-white shrink-0" />

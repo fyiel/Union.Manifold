@@ -704,100 +704,132 @@ export function LibraryPage() {
   const isAllVisibleSelected = filteredInstalled.length > 0 && filteredInstalled.every((game) => selectedAppIds.has(game.appid))
 
   return (
-    <div className="flex gap-0 min-h-[calc(100vh-4rem)]">
-      {/* ──── Sidebar ──── */}
-      <aside className="hidden lg:flex w-56 flex-shrink-0 flex-col border-r border-white/[.07] bg-zinc-950/60 backdrop-blur-sm overflow-y-auto sticky top-0 max-h-[calc(100vh-4rem)]">
-        <div className="p-4 space-y-5">
-          {/* Sidebar header */}
-          <div className="flex items-center gap-2 text-zinc-200">
-            <Library className="h-5 w-5" />
-            <span className="font-bold text-sm tracking-wide uppercase">Library</span>
+    <div className="space-y-6">
+      <section className="glass-card overflow-hidden rounded-3xl p-6 sm:p-8">
+        <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_420px] xl:items-start">
+          <div className="space-y-4">
+            <div className="inline-flex items-center gap-2 rounded-full border border-white/[.07] bg-zinc-800 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-zinc-300">
+              <Library className="h-3.5 w-3.5" />
+              Installed collection
+            </div>
+            <div className="space-y-3">
+              <h1 className="text-4xl font-light tracking-tight text-white sm:text-5xl">Run your library like a launcher, not a file dump</h1>
+              <p className="max-w-3xl text-base leading-7 text-zinc-300">
+                Installed titles, active installs, tags, collections, and executable actions are now surfaced in a clearer desktop workflow.
+              </p>
+            </div>
           </div>
 
-          {/* Counts */}
-          <div className="text-xs text-zinc-500 space-y-1">
-            <div>{filteredInstalled.length} / {installedWithMeta.length} games</div>
-            {visibleInstalling.length > 0 && <div>{visibleInstalling.length} installing</div>}
-          </div>
-
-          {/* Sort */}
-          <div className="space-y-1.5">
-            <label className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500">Sort by</label>
-            <Select value={sortMode} onValueChange={(value) => setSortMode(value as 'name' | 'recent-install' | 'recent-play')}>
-              <SelectTrigger className="h-8 text-xs bg-zinc-900/60 border-white/[.07]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="name">Name</SelectItem>
-                <SelectItem value="recent-install">Recently installed</SelectItem>
-                <SelectItem value="recent-play">Recently played</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          {/* Collections */}
-          <div className="space-y-1.5">
-            <label className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500">Collections</label>
-            <button
-              type="button"
-              onClick={() => setSelectedCollection("all")}
-              className={`w-full text-left text-xs rounded-lg px-2.5 py-1.5 transition-colors ${selectedCollection === "all" ? "bg-white/10 text-white font-medium" : "text-zinc-400 hover:text-zinc-200 hover:bg-white/5"}`}
-            >
-              All games
-            </button>
-            {availableCollections.map((collection) => (
-              <button
-                key={collection}
-                type="button"
-                onClick={() => setSelectedCollection(selectedCollection === collection ? "all" : collection)}
-                className={`w-full text-left text-xs rounded-lg px-2.5 py-1.5 transition-colors truncate ${selectedCollection === collection ? "bg-blue-500/20 text-blue-200 font-medium" : "text-zinc-400 hover:text-zinc-200 hover:bg-white/5"}`}
-              >
-                {collection}
-              </button>
-            ))}
-            {availableCollections.length === 0 && (
-              <p className="text-[11px] text-zinc-600 px-2.5 italic">No collections yet</p>
-            )}
-          </div>
-
-          {/* Tags */}
-          <div className="space-y-1.5">
-            <label className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500">Tags</label>
-            <button
-              type="button"
-              onClick={() => setSelectedTag("all")}
-              className={`w-full text-left text-xs rounded-lg px-2.5 py-1.5 transition-colors ${selectedTag === "all" ? "bg-white/10 text-white font-medium" : "text-zinc-400 hover:text-zinc-200 hover:bg-white/5"}`}
-            >
-              All tags
-            </button>
-            {availableTags.map((tag) => (
-              <button
-                key={tag}
-                type="button"
-                onClick={() => setSelectedTag(selectedTag === tag ? "all" : tag)}
-                className={`w-full text-left text-xs rounded-lg px-2.5 py-1.5 transition-colors truncate ${selectedTag === tag ? "bg-emerald-500/20 text-emerald-200 font-medium" : "text-zinc-400 hover:text-zinc-200 hover:bg-white/5"}`}
-              >
-                #{tag}
-              </button>
-            ))}
-            {availableTags.length === 0 && (
-              <p className="text-[11px] text-zinc-600 px-2.5 italic">No tags yet</p>
-            )}
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="rounded-2xl border border-white/[.07] bg-zinc-900/60 p-4">
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">Installed</div>
+              <div className="mt-2 text-3xl font-bold text-white">{installedWithMeta.length}</div>
+              <p className="mt-1 text-sm text-zinc-500">Titles ready to launch or organize.</p>
+            </div>
+            <div className="rounded-2xl border border-white/[.07] bg-zinc-900/60 p-4">
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">In progress</div>
+              <div className="mt-2 text-3xl font-bold text-white">{visibleInstalling.length}</div>
+              <p className="mt-1 text-sm text-zinc-500">Downloads or installs still moving.</p>
+            </div>
+            <div className="rounded-2xl border border-white/[.07] bg-zinc-900/60 p-4">
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">Collections</div>
+              <div className="mt-2 text-3xl font-bold text-white">{availableCollections.length}</div>
+              <p className="mt-1 text-sm text-zinc-500">Custom shelves available in your local library.</p>
+            </div>
+            <div className="rounded-2xl border border-white/[.07] bg-zinc-900/60 p-4">
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">Tags</div>
+              <div className="mt-2 text-3xl font-bold text-white">{availableTags.length}</div>
+              <p className="mt-1 text-sm text-zinc-500">Fast labels for filtering and batch actions.</p>
+            </div>
           </div>
         </div>
-      </aside>
+      </section>
 
-      {/* ──── Main content ──── */}
-      <main className="flex-1 min-w-0 px-4 lg:px-6 py-6 space-y-6">
+      <div className="grid gap-6 xl:grid-cols-[280px_minmax(0,1fr)]">
+        <aside className="hidden xl:block">
+          <div className="sticky top-6 space-y-5 rounded-2xl border border-white/[.07] bg-zinc-900/80 p-5">
+            <div>
+              <div className="text-[11px] font-semibold uppercase tracking-[0.24em] text-zinc-600">Control rail</div>
+              <div className="mt-2 text-lg font-semibold text-white">Filter and sort</div>
+              <div className="mt-1 text-sm text-zinc-500">Refine the launcher view without leaving the library.</div>
+            </div>
+
+            <div className="rounded-2xl border border-white/[.07] bg-zinc-900/40 p-4 text-sm text-zinc-300">
+              <div>{filteredInstalled.length} visible of {installedWithMeta.length} installed</div>
+              {visibleInstalling.length > 0 && <div className="mt-1 text-zinc-500">{visibleInstalling.length} still installing</div>}
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-[10px] font-semibold uppercase tracking-[0.24em] text-zinc-500">Sort by</label>
+              <Select value={sortMode} onValueChange={(value) => setSortMode(value as 'name' | 'recent-install' | 'recent-play')}>
+                <SelectTrigger className="h-10 rounded-2xl border-white/[.07] bg-zinc-900/40 text-sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="name">Name</SelectItem>
+                  <SelectItem value="recent-install">Recently installed</SelectItem>
+                  <SelectItem value="recent-play">Recently played</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-[10px] font-semibold uppercase tracking-[0.24em] text-zinc-500">Collections</label>
+              <button
+                type="button"
+                onClick={() => setSelectedCollection("all")}
+                className={`w-full rounded-2xl px-3 py-2 text-left text-sm transition-colors ${selectedCollection === "all" ? "bg-zinc-800 text-white" : "text-zinc-400 hover:bg-white/[.03] hover:text-zinc-100"}`}
+              >
+                All games
+              </button>
+              {availableCollections.map((collection) => (
+                <button
+                  key={collection}
+                  type="button"
+                  onClick={() => setSelectedCollection(selectedCollection === collection ? "all" : collection)}
+                  className={`w-full truncate rounded-2xl px-3 py-2 text-left text-sm transition-colors ${selectedCollection === collection ? "bg-zinc-800 text-white" : "text-zinc-400 hover:bg-white/[.03] hover:text-zinc-100"}`}
+                >
+                  {collection}
+                </button>
+              ))}
+              {availableCollections.length === 0 && <p className="px-1 text-[11px] italic text-zinc-600">No collections yet</p>}
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-[10px] font-semibold uppercase tracking-[0.24em] text-zinc-500">Tags</label>
+              <button
+                type="button"
+                onClick={() => setSelectedTag("all")}
+                className={`w-full rounded-2xl px-3 py-2 text-left text-sm transition-colors ${selectedTag === "all" ? "bg-zinc-800 text-white" : "text-zinc-400 hover:bg-white/[.03] hover:text-zinc-100"}`}
+              >
+                All tags
+              </button>
+              {availableTags.map((tag) => (
+                <button
+                  key={tag}
+                  type="button"
+                  onClick={() => setSelectedTag(selectedTag === tag ? "all" : tag)}
+                  className={`w-full truncate rounded-2xl px-3 py-2 text-left text-sm transition-colors ${selectedTag === tag ? "bg-zinc-800 text-white" : "text-zinc-400 hover:bg-white/[.03] hover:text-zinc-100"}`}
+                >
+                  #{tag}
+                </button>
+              ))}
+              {availableTags.length === 0 && <p className="px-1 text-[11px] italic text-zinc-600">No tags yet</p>}
+            </div>
+          </div>
+        </aside>
+
+        <main className="min-w-0 space-y-6">
         {/* Top bar: search + tools */}
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="rounded-2xl border border-white/[.07] bg-zinc-900/80 p-4 sm:p-5">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="relative flex-1 max-w-md">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500 pointer-events-none" />
             <Input
               value={librarySearch}
               onChange={(event) => handleSearchChange(event.target.value)}
               placeholder="Search games..."
-              className="pl-9 h-9 bg-zinc-900/60 border-white/[.07] text-sm"
+              className="h-10 rounded-2xl border-white/[.07] bg-zinc-900/40 pl-9 text-sm"
             />
             {librarySearch && (
               <button type="button" onClick={() => { setLibrarySearch(""); setDebouncedSearch("") }} className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-200 transition-colors">
@@ -810,7 +842,7 @@ export function LibraryPage() {
             {/* Mobile-only sort selector */}
             <div className="lg:hidden">
               <Select value={sortMode} onValueChange={(value) => setSortMode(value as 'name' | 'recent-install' | 'recent-play')}>
-                <SelectTrigger className="h-9 text-xs bg-zinc-900/60 border-white/[.07] w-36">
+                <SelectTrigger className="h-10 w-36 rounded-2xl border-white/[.07] bg-zinc-900/40 text-xs">
                   <ArrowUpDown className="h-3.5 w-3.5 mr-1.5" />
                   <SelectValue />
                 </SelectTrigger>
@@ -825,7 +857,7 @@ export function LibraryPage() {
             {/* Mobile-only collection/tag filters */}
             <div className="lg:hidden flex gap-2">
               <Select value={selectedCollection} onValueChange={setSelectedCollection}>
-                <SelectTrigger className="h-9 text-xs bg-zinc-900/60 border-white/[.07] w-32">
+                <SelectTrigger className="h-10 w-32 rounded-2xl border-white/[.07] bg-zinc-900/40 text-xs">
                   <Layers3 className="h-3.5 w-3.5 mr-1.5" />
                   <SelectValue />
                 </SelectTrigger>
@@ -835,7 +867,7 @@ export function LibraryPage() {
                 </SelectContent>
               </Select>
               <Select value={selectedTag} onValueChange={setSelectedTag}>
-                <SelectTrigger className="h-9 text-xs bg-zinc-900/60 border-white/[.07] w-28">
+                <SelectTrigger className="h-10 w-28 rounded-2xl border-white/[.07] bg-zinc-900/40 text-xs">
                   <Tags className="h-3.5 w-3.5 mr-1.5" />
                   <SelectValue />
                 </SelectTrigger>
@@ -849,7 +881,7 @@ export function LibraryPage() {
             <Button
               variant={selectionMode ? "secondary" : "outline"}
               size="sm"
-              className="h-9"
+              className="h-10 rounded-2xl"
               onClick={() => {
                 const nextMode = !selectionMode
                 setSelectionMode(nextMode)
@@ -861,18 +893,19 @@ export function LibraryPage() {
             </Button>
           </div>
         </div>
+        </div>
 
         {/* Active filters */}
         {(selectedCollection !== "all" || selectedTag !== "all" || debouncedSearch) && (
           <div className="flex flex-wrap items-center gap-1.5 text-xs">
             {selectedCollection !== "all" && (
-              <Badge className="rounded-full border-blue-400/30 bg-blue-500/15 text-blue-200 pl-2.5 pr-1.5 gap-1.5 cursor-pointer hover:bg-blue-500/25" onClick={() => setSelectedCollection("all")}>
+              <Badge className="rounded-full border-zinc-700/50 bg-zinc-800/50 text-zinc-300 pl-2.5 pr-1.5 gap-1.5 cursor-pointer hover:bg-zinc-700/50" onClick={() => setSelectedCollection("all")}>
                 {selectedCollection}
                 <X className="h-3 w-3" />
               </Badge>
             )}
             {selectedTag !== "all" && (
-              <Badge className="rounded-full border-emerald-400/30 bg-emerald-500/15 text-emerald-200 pl-2.5 pr-1.5 gap-1.5 cursor-pointer hover:bg-emerald-500/25" onClick={() => setSelectedTag("all")}>
+              <Badge className="rounded-full border-zinc-700/50 bg-zinc-800/50 text-zinc-300 pl-2.5 pr-1.5 gap-1.5 cursor-pointer hover:bg-zinc-700/50" onClick={() => setSelectedTag("all")}>
                 #{selectedTag}
                 <X className="h-3 w-3" />
               </Badge>
@@ -910,7 +943,7 @@ export function LibraryPage() {
                     <Layers3 className="h-3.5 w-3.5 mr-1.5" /> Collection
                   </Button>
                 </PopoverTrigger>
-                <PopoverContent className="w-64 p-3 bg-zinc-950 border-white/10 text-white rounded-xl shadow-xl">
+                <PopoverContent className="w-64 p-3 bg-zinc-950 border-white/[.07] text-white rounded-xl shadow-xl">
                   <div className="space-y-2">
                     <p className="text-xs text-zinc-400">Add collection to {selectedAppIds.size} game{selectedAppIds.size !== 1 ? "s" : ""}</p>
                     <div className="flex gap-2">
@@ -926,7 +959,7 @@ export function LibraryPage() {
                     <Tags className="h-3.5 w-3.5 mr-1.5" /> Tag
                   </Button>
                 </PopoverTrigger>
-                <PopoverContent className="w-64 p-3 bg-zinc-950 border-white/10 text-white rounded-xl shadow-xl">
+                <PopoverContent className="w-64 p-3 bg-zinc-950 border-white/[.07] text-white rounded-xl shadow-xl">
                   <div className="space-y-2">
                     <p className="text-xs text-zinc-400">Add tag to {selectedAppIds.size} game{selectedAppIds.size !== 1 ? "s" : ""}</p>
                     <div className="flex gap-2">
@@ -959,7 +992,7 @@ export function LibraryPage() {
               </div>
             )}
             {batchFeedback && !batchProgress && (
-              <div className={`flex items-center gap-1.5 text-xs ${batchFeedback.type === 'success' ? 'text-emerald-400' : 'text-destructive'}`}>
+              <div className={`flex items-center gap-1.5 text-xs ${batchFeedback.type === 'success' ? 'text-zinc-300' : 'text-destructive'}`}>
                 {batchFeedback.type === 'success' ? <Check className="h-3.5 w-3.5" /> : <AlertTriangle className="h-3.5 w-3.5" />}
                 {batchFeedback.message}
               </div>
@@ -998,10 +1031,10 @@ export function LibraryPage() {
 
                       {/* Selection overlay */}
                       {selectionMode && (
-                        <div className={`absolute inset-0 z-20 rounded-xl transition-colors ${isSelected ? "bg-blue-500/10" : "hover:bg-white/5"}`}>
+                        <div className={`absolute inset-0 z-20 rounded-xl transition-colors ${isSelected ? "bg-white/5" : "hover:bg-white/5"}`}>
                           <div className={`absolute top-2.5 right-2.5 h-6 w-6 rounded-md border-2 flex items-center justify-center transition-all ${
                             isSelected
-                              ? "border-blue-500 bg-blue-500 text-white"
+                              ? "border-white bg-white text-black"
                               : "border-zinc-500 bg-black/50"
                           }`}>
                             {isSelected && <Check className="h-4 w-4" />}
@@ -1036,11 +1069,11 @@ export function LibraryPage() {
                                 <Settings className="h-3.5 w-3.5" />
                               </Button>
                             </PopoverTrigger>
-                            <PopoverContent align="start" className="w-56 rounded-2xl p-2 bg-zinc-950 border-white/10 text-white shadow-xl">
-                              <button type="button" onClick={() => { setSettingsPopupOpen(false); void openExecutablePicker(game) }} className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-gray-400 transition-colors hover:text-white hover:bg-white/10">
+                            <PopoverContent align="start" className="w-56 rounded-2xl p-2 bg-zinc-950 border-white/[.07] text-white shadow-xl">
+                              <button type="button" onClick={() => { setSettingsPopupOpen(false); void openExecutablePicker(game) }} className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-zinc-400 transition-colors hover:text-white hover:bg-white/10">
                                 <Settings className="mr-2 h-4 w-4" /> Set Executable
                               </button>
-                              <button type="button" onClick={() => { setSettingsPopupOpen(false); void handleOpenGameFiles(game) }} className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-gray-400 transition-colors hover:text-white hover:bg-white/10">
+                              <button type="button" onClick={() => { setSettingsPopupOpen(false); void handleOpenGameFiles(game) }} className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-zinc-400 transition-colors hover:text-white hover:bg-white/10">
                                 <FolderOpen className="mr-2 h-4 w-4" /> Open Game Files
                               </button>
                               <button
@@ -1075,17 +1108,17 @@ export function LibraryPage() {
                                   }
                                   setTimeout(() => setShortcutFeedback(null), 3000)
                                 }}
-                                className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-gray-400 transition-colors hover:text-white hover:bg-white/10"
+                                className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-zinc-400 transition-colors hover:text-white hover:bg-white/10"
                               >
                                 <ExternalLink className="mr-2 h-4 w-4" /> Create Desktop Shortcut
                               </button>
                               {settingsPopupGame?.isExternal && (
-                                <button type="button" onClick={() => { setSettingsPopupOpen(false); setShortcutFeedback(null); setEditMetadataOpen(true) }} className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-gray-400 transition-colors hover:text-white hover:bg-white/10">
+                                <button type="button" onClick={() => { setSettingsPopupOpen(false); setShortcutFeedback(null); setEditMetadataOpen(true) }} className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-zinc-400 transition-colors hover:text-white hover:bg-white/10">
                                   <Pencil className="mr-2 h-4 w-4" /> Edit Details
                                 </button>
                               )}
                               {isLinux && (
-                                <button type="button" onClick={() => { setSettingsPopupOpen(false); setShortcutFeedback(null); setLinuxConfigGame(game); setLinuxConfigOpen(true) }} className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-gray-400 transition-colors hover:text-white hover:bg-white/10">
+                                <button type="button" onClick={() => { setSettingsPopupOpen(false); setShortcutFeedback(null); setLinuxConfigGame(game); setLinuxConfigOpen(true) }} className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-zinc-400 transition-colors hover:text-white hover:bg-white/10">
                                   <Terminal className="mr-2 h-4 w-4" /> Linux / VR Config
                                 </button>
                               )}
@@ -1094,7 +1127,7 @@ export function LibraryPage() {
                                 {game.isExternal ? (<><Unlink2 className="mr-2 h-4 w-4" /> Unlink Game</>) : (<><Trash2 className="mr-2 h-4 w-4" /> Delete Game</>)}
                               </button>
                               {shortcutFeedback && settingsPopupGame?.appid === game.appid && (
-                                <div className={`mt-2 text-xs ${shortcutFeedback.type === 'success' ? 'text-emerald-400' : 'text-destructive'}`}>{shortcutFeedback.message}</div>
+                                <div className={`mt-2 text-xs ${shortcutFeedback.type === 'success' ? 'text-zinc-300' : 'text-destructive'}`}>{shortcutFeedback.message}</div>
                               )}
                             </PopoverContent>
                           </Popover>
@@ -1106,10 +1139,10 @@ export function LibraryPage() {
                         {(collections.length > 0 || tags.length > 0) && (
                           <div className="flex flex-wrap gap-1">
                             {collections.slice(0, 2).map((c) => (
-                              <span key={c} className="text-[10px] rounded-md bg-blue-500/10 text-blue-300 border border-blue-400/20 px-1.5 py-0.5 truncate max-w-[80px]">{c}</span>
+                              <span key={c} className="text-[10px] rounded-md bg-zinc-800/50 text-zinc-400 border border-zinc-700/50 px-1.5 py-0.5 truncate max-w-[80px]">{c}</span>
                             ))}
                             {tags.slice(0, 2).map((t) => (
-                              <span key={t} className="text-[10px] rounded-md bg-emerald-500/10 text-emerald-300 border border-emerald-400/20 px-1.5 py-0.5 truncate max-w-[80px]">#{t}</span>
+                              <span key={t} className="text-[10px] rounded-md bg-zinc-800/50 text-zinc-400 border border-zinc-700/50 px-1.5 py-0.5 truncate max-w-[80px]">#{t}</span>
                             ))}
                           </div>
                         )}
@@ -1143,7 +1176,8 @@ export function LibraryPage() {
         {/* ── Installing section ── */}
         {(loading || statsLoading || visibleInstalling.length > 0) && (
           <section className="space-y-4">
-            <h2 className="text-lg font-bold text-zinc-200">Installing</h2>
+            <p className="section-label mb-1">Now Installing</p>
+            <h2 className="text-lg font-light tracking-tight text-zinc-200">Installing</h2>
             {loading || statsLoading ? (
               <div className="grid gap-4 grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
                 {Array.from({ length: 4 }).map((_, idx) => (
@@ -1159,7 +1193,7 @@ export function LibraryPage() {
                       {cancelledAppIds.has(game.appid) ? (
                         <>
                           <div className="absolute top-2 left-2 z-20">
-                            <Badge className="rounded-full bg-amber-500/20 text-amber-200 border border-amber-400/40 px-2 py-0.5 text-[11px]">Cancelled</Badge>
+                            <Badge className="rounded-full bg-zinc-800/60 text-zinc-400 border border-zinc-700/50 px-2 py-0.5 text-[11px]">Cancelled</Badge>
                           </div>
                           <div className="absolute top-2 right-2 z-20">
                             <Button size="icon" variant="ghost" onClick={(event) => { event.preventDefault(); event.stopPropagation(); setPendingDeleteGame(game); setPendingDeleteAction("installing") }} className="h-7 w-7 rounded-lg bg-black/60 text-white hover:bg-white/20" title="Remove cancelled download">
@@ -1194,18 +1228,19 @@ export function LibraryPage() {
             )}
           </section>
         )}
-      </main>
+        </main>
+      </div>
 
       {/* ──── Modals ──── */}
             {batchDeleteConfirmOpen && (
               <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
                 <div className="absolute inset-0 bg-black/70" onClick={() => setBatchDeleteConfirmOpen(false)} />
-                <div className="relative w-full max-w-md rounded-2xl border border-white/[.07] bg-slate-950/95 p-5 text-white shadow-2xl">
+                <div className="relative w-full max-w-md rounded-2xl border border-border/60 bg-card/95 p-5 text-foreground shadow-2xl">
                   <div className="flex items-center gap-2 text-lg font-semibold">
                     <AlertTriangle className="h-5 w-5 text-destructive" />
                     Delete selected games
                   </div>
-                  <p className="mt-2 text-sm text-slate-300">
+                  <p className="mt-2 text-sm text-muted-foreground">
                     Delete or unlink {selectedInstalledGames.length} selected game{selectedInstalledGames.length !== 1 ? "s" : ""}? This will remove installed files from disk for non-external games.
                   </p>
                   <div className="mt-4 flex justify-end gap-2">
@@ -1219,12 +1254,12 @@ export function LibraryPage() {
       {pendingDeleteGame && (
         <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
           <div className="absolute inset-0 bg-black/70" onClick={() => { setPendingDeleteGame(null); setPendingDeleteAction(null) }} />
-          <div className="relative w-full max-w-md rounded-2xl border border-white/[.07] bg-slate-950/95 p-5 text-white shadow-2xl">
+          <div className="relative w-full max-w-md rounded-2xl border border-border/60 bg-card/95 p-5 text-foreground shadow-2xl">
             <div className="flex items-center gap-2 text-lg font-semibold">
               <AlertTriangle className="h-5 w-5 text-destructive" />
               {pendingDeleteAction === "installing" ? "Remove download" : pendingDeleteGame.isExternal ? "Unlink game" : "Delete game"}
             </div>
-            <p className="mt-2 text-sm text-slate-300">
+            <p className="mt-2 text-sm text-muted-foreground">
               {pendingDeleteAction === "installing"
                 ? `Remove "${pendingDeleteGame.name}" from the installing list? This will delete any downloaded data.`
                 : pendingDeleteGame.isExternal

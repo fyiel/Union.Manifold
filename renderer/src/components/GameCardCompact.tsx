@@ -2,7 +2,7 @@
 
 import { Link } from "react-router-dom"
 import { memo, useEffect, useState } from "react"
-import { proxyImageUrl } from "@/lib/utils"
+import { getCardImage, proxyImageUrl } from "@/lib/utils"
 import { nsfwRevealedAppids } from "@/lib/nsfw-session"
 
 type CompactGame = {
@@ -52,10 +52,10 @@ export const GameCardCompact = memo(function GameCardCompact({ game }: { game: C
 
   return (
     <Link to={`/game/${game.appid}`} className="group block">
-      <div className="relative overflow-hidden rounded-2xl border border-white/[.07] bg-zinc-900/80 transition hover:border-zinc-500">
+      <div className="relative overflow-hidden rounded-2xl border border-zinc-800/50 bg-zinc-900/80 transition hover:border-zinc-700/50">
         <div className="relative aspect-[3/4]">
           <img
-            src={proxyImageUrl(game.image) || "./banner.png"}
+            src={proxyImageUrl(getCardImage(game.image)) || "./banner.png"}
             alt={game.name}
             loading="lazy"
             className={`h-full w-full object-cover transition duration-500 group-hover:scale-105 ${

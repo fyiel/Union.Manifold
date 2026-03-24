@@ -1,9 +1,8 @@
 import { memo, useCallback, useEffect, useRef, useState, type MouseEvent } from "react"
 import { Link } from "react-router-dom"
-import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Calendar, HardDrive, Download, Eye, Wifi, Flame, Play, Square } from "lucide-react"
-import { formatNumber, hasOnlineMode, pickGameExecutable, proxyImageUrl } from "@/lib/utils"
+import { Calendar, HardDrive, Download, Eye, Wifi, Flame, Play, Square, RefreshCw } from "lucide-react"
+import { formatNumber, getCardImage, hasOnlineMode, isGameVersionUpdate, pickGameExecutable, proxyImageUrl, timeAgo } from "@/lib/utils"
 import { useDownloads, useDownloadsSelector } from "@/context/downloads-context"
 import { apiUrl } from "@/lib/api"
 import { nsfwRevealedAppids } from "@/lib/nsfw-session"
@@ -30,6 +29,8 @@ interface GameCardProps {
     dlc?: string[]
     comment?: string
     hasCoOp?: boolean
+    update_time?: string
+    release_time?: string
   }
   stats?: {
     downloads: number
@@ -433,19 +434,18 @@ export const GameCard = memo(function GameCard({
   return (
     <div className="relative group/container h-full">
       <Link to={`/game/${game.appid}`} className="block h-full">
-        <Card
-          className={`group relative h-full overflow-hidden border border-white/[.07] bg-zinc-900/60 backdrop-blur-md transition-all duration-300 hover:-translate-y-0.5 hover:bg-white/[.03] hover:border-zinc-600 flex flex-col gap-0 py-0 ${isCompact ? "rounded-xl" : "rounded-2xl"
-            }`}
+        <div
+          className="group relative h-full overflow-hidden rounded-2xl glass hover:bg-white/[.03] transition-all duration-300 flex flex-col"
           onMouseEnter={fetchStatsOnHover}
         >
           {/* Image Section */}
           <div className={`relative w-full overflow-hidden ${isCompact ? "aspect-[4/5]" : "aspect-[3/4]"}`}>
-            <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent z-10 opacity-70 transition-opacity duration-300 group-hover:opacity-50" />
+            <div className="absolute inset-0 z-10 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-70 transition-opacity duration-300 group-hover:opacity-50" />
 
             <img
-              src={proxyImageUrl((typeof navigator !== 'undefined' && !navigator.onLine && previewImage) ? previewImage : game.image) || "./banner.png"}
+              src={proxyImageUrl(getCardImage((typeof navigator !== 'undefined' && !navigator.onLine && previewImage) ? previewImage : game.image)) || "./banner.png"}
               alt={game.name}
-              className={`h-full w-full object-cover transition-all duration-700 ease-in-out group-hover:scale-110 ${
+              className={`h-full w-full object-cover transition-all duration-500 ease-in-out group-hover:scale-105 ${
                 isNSFW && !(sessionRevealed || allowNsfwReveal)
                   ? "blur-xl brightness-50"
                   : (isNSFW ? "" : (imageLoaded ? "" : "blur-lg"))
@@ -461,7 +461,7 @@ export const GameCard = memo(function GameCard({
                 <button
                   type="button"
                   aria-label={`Reveal NSFW cover for ${game.name}`}
-                  className="mt-1 bg-white/10 hover:bg-white/20 focus:bg-white/25 text-white text-xs font-semibold px-3 py-1.5 rounded-lg border border-white/20 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
+                  className="mt-1 bg-zinc-800/80 hover:bg-white hover:text-black text-white text-xs font-semibold px-3 py-1.5 rounded-full border border-zinc-700 transition-all active:scale-95 focus-visible:outline-none"
                   onClick={(e) => {
                     e.preventDefault()
                     e.stopPropagation()
@@ -481,7 +481,7 @@ export const GameCard = memo(function GameCard({
               <div className="absolute inset-0 z-30 flex items-center justify-center">
                 <button
                   onClick={handlePlayClick}
-                  className={`group/play relative inline-flex items-center justify-center h-14 w-14 rounded-full transition-transform duration-300 hover:scale-110 active:scale-95 ${isRunning
+                  className={`group/play relative inline-flex h-14 w-14 items-center justify-center rounded-full border border-white/20 shadow-xl transition-transform duration-300 hover:scale-110 active:scale-95 ${isRunning
                     ? "bg-red-600 text-white"
                     : "bg-white text-black"
                     }`}
@@ -494,35 +494,42 @@ export const GameCard = memo(function GameCard({
             {/* Status Badges */}
             <div className="absolute top-3 left-3 z-30 flex flex-col gap-2">
               {(isQueued || isInstalling) && (
-                <Badge className="bg-sky-500 text-white border-none shadow-lg shadow-sky-500/40 animate-pulse">
+                <Badge className="bg-white text-black border-none shadow-lg shadow-white/20 animate-pulse">
                   <Download className="w-3 h-3 mr-1" />
                   {isQueued ? "Queued" : "Installing"}
                 </Badge>
               )}
 
               {isPopular && (
-                <Badge className="bg-zinc-200 text-black border-0 px-2 py-0.5 text-xs font-bold uppercase tracking-wider animate-in fade-in zoom-in duration-300">
+                <Badge className="bg-zinc-800/60 text-white backdrop-blur-sm border border-white/10 px-3 py-1 text-xs font-bold uppercase tracking-wider rounded-full">
                   <Flame className="w-3 h-3 mr-1 fill-current" /> Popular
                 </Badge>
               )}
 
               {hasOnlineMode(game.hasCoOp) && (
-                <Badge variant="online" className="px-2 py-0.5 text-xs font-semibold flex items-center gap-1">
-                  <Wifi className="w-3 h-3 mr-1 text-green-400" />
+                <Badge variant="online" className="bg-zinc-800/60 backdrop-blur-sm border border-white/10 px-3 py-1 text-xs font-semibold flex items-center gap-1 rounded-full">
+                  <Wifi className="w-3 h-3 mr-1 text-white" />
                   <span className="text-white">Online</span>
+                </Badge>
+              )}
+
+              {isGameVersionUpdate(game) && (
+                <Badge className="bg-zinc-800/60 backdrop-blur-sm border border-white/10 px-3 py-1 text-xs font-semibold flex items-center gap-1 rounded-full">
+                  <RefreshCw className="w-3 h-3 mr-1 text-zinc-300" />
+                  <span className="text-zinc-300">Updated {timeAgo(game.update_time)}</span>
                 </Badge>
               )}
             </div>
 
             {/* Hover Stats Overlay */}
-            <div className="absolute bottom-0 left-0 right-0 z-20 p-4 translate-y-full transition-transform duration-300 ease-out group-hover:translate-y-0 bg-gradient-to-t from-black/90 via-black/60 to-transparent pt-10">
+            <div className="absolute bottom-0 left-0 right-0 z-20 p-4 pt-10 translate-y-full bg-gradient-to-t from-black/90 via-black/60 to-transparent transition-transform duration-300 ease-out group-hover:translate-y-0">
               <div className="flex items-center justify-between text-xs font-medium text-white/90">
-                <div className="flex items-center gap-1.5 bg-black/40 rounded-full px-2 py-1 backdrop-blur-sm border border-white/10">
-                  <Download className="w-3.5 h-3.5 text-zinc-300" />
+                <div className="flex items-center gap-1.5 bg-black/50 rounded-full px-2 py-1 border border-zinc-800/50">
+                  <Download className="w-3.5 h-3.5 text-zinc-400" />
                   <span>{formatNumber(displayStats.downloads)}</span>
                 </div>
-                <div className="flex items-center gap-1.5 bg-black/40 rounded-full px-2 py-1 backdrop-blur-sm border border-white/10">
-                  <Eye className="w-3.5 h-3.5 text-blue-400" />
+                <div className="flex items-center gap-1.5 bg-black/50 rounded-full px-2 py-1 border border-zinc-800/50">
+                  <Eye className="w-3.5 h-3.5 text-zinc-400" />
                   <span>{formatNumber(displayStats.views)}</span>
                 </div>
               </div>
@@ -530,19 +537,16 @@ export const GameCard = memo(function GameCard({
           </div>
 
           {/* Content Section */}
-          <CardContent className={`${isCompact ? "p-3" : "p-4"} flex-1 flex flex-col space-y-2 relative z-20 bg-background/5`}>
+          <div className={`${isCompact ? "p-3" : "p-4"} flex flex-col flex-1 space-y-3 relative z-20`}>
             <div className="space-y-1">
-              <h3
-                className={`font-medium leading-tight line-clamp-1 text-zinc-200 group-hover:text-white transition-colors duration-200 ${isCompact ? "text-sm" : "text-base"
-                  }`}
-              >
+              <h3 className="font-medium text-sm leading-tight line-clamp-1 text-white">
                 {game.name}
               </h3>
-              <div className="flex flex-wrap gap-1.5 h-5 overflow-hidden">
-                {displayGenres.slice(0, 2).map((genre) => (
+              <div className="flex flex-wrap gap-1.5 h-6 overflow-hidden">
+                {displayGenres.slice(0, 3).map((genre) => (
                   <span
                     key={genre}
-                    className="text-[10px] uppercase font-bold tracking-wider text-white/50 bg-white/5 px-1.5 py-0.5 rounded-sm whitespace-nowrap"
+                    className="text-[10px] uppercase font-medium tracking-wider text-zinc-400 bg-white/5 border border-white/[.08] px-2 py-0.5 rounded-full whitespace-nowrap"
                   >
                     {genre}
                   </span>
@@ -550,7 +554,7 @@ export const GameCard = memo(function GameCard({
               </div>
             </div>
 
-            <div className="flex items-center justify-between text-xs text-white/60 pt-2 border-t border-white/5 mt-auto">
+            <div className="flex items-center justify-between text-xs text-zinc-500 pt-2 border-t border-white/[.07] mt-auto">
               <div className="flex items-center gap-1.5">
                 <Calendar className="w-3.5 h-3.5" />
                 <span>{game.release_date?.split("-")[0] || "N/A"}</span>
@@ -560,8 +564,8 @@ export const GameCard = memo(function GameCard({
                 <span>{game.size}</span>
               </div>
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       </Link>
       <ExePickerModal
         open={exePickerOpen}

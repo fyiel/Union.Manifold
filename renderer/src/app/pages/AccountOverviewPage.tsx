@@ -6,7 +6,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { MyRequests } from "@/components/MyRequests"
 import { apiFetch, apiUrl, getApiBaseUrl } from "@/lib/api"
 import { useDiscordAccount } from "@/hooks/use-discord-account"
-import { LogIn, MessageCircle, RefreshCw, Shield, Star, Heart, Clock } from "lucide-react"
+import { LogIn, MessageCircle, RefreshCw, Star, Heart, Clock } from "lucide-react"
 
 
 type RecentComment = {
@@ -135,20 +135,16 @@ export function AccountOverviewPage() {
   return (
     <div className="min-h-screen bg-[#09090b]">
       <div className="container mx-auto px-4 py-10 sm:py-12 md:py-14 max-w-6xl">
-        <div className="text-center mb-12">
-          <div className="flex justify-center mb-6">
-            <div className="p-4 sm:p-6 rounded-2xl bg-gradient-to-br from-primary/20 to-primary/5 border border-zinc-700 shadow-lg shadow-primary/10">
-              <Shield className="h-12 w-12 sm:h-14 sm:w-14 text-white" />
-            </div>
-          </div>
-          <h1 className="text-4xl sm:text-5xl md:text-6xl font-black text-zinc-100 mb-4 ">My Profile</h1>
-          <p className="text-base sm:text-lg md:text-xl text-zinc-400 max-w-3xl mx-auto leading-relaxed">
+        <div className="mb-10 anim">
+          <p className="section-label mb-2">Account</p>
+          <h1 className="text-4xl sm:text-5xl font-light tracking-tight text-zinc-100">My Profile</h1>
+          <p className="mt-3 text-base text-zinc-400">
             Track your account activity and stay on top of what you care about.
           </p>
         </div>
 
         {!hasSession && !accountLoading && (
-          <Card className="border-2 border-white/[.07] shadow-xl bg-zinc-900/60 backdrop-blur-sm rounded-2xl">
+          <Card className="glass rounded-2xl">
             <CardContent className="py-12 text-center space-y-4">
               <p className="text-lg font-semibold text-zinc-100">Login to continue.</p>
               <p className="text-sm text-zinc-400">
@@ -164,12 +160,14 @@ export function AccountOverviewPage() {
 
         {hasSession && (
           <div className="space-y-8">
-            <Card className="border-2 border-white/[.07] shadow-xl bg-zinc-900/60 backdrop-blur-sm rounded-2xl">
+            <Card className="glass rounded-2xl anim anim-d1">
               <CardHeader className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                <CardTitle className="text-xl font-bold flex items-center gap-2">
-                  <MessageCircle className="h-5 w-5 text-white" />
-                  Recent Activity
-                </CardTitle>
+                <div>
+                  <p className="section-label mb-1">Activity</p>
+                  <CardTitle className="text-xl font-light tracking-tight">
+                    Recent Activity
+                  </CardTitle>
+                </div>
                 <Button variant="outline" className="gap-2" onClick={handleRefresh} disabled={refreshing}>
                   <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
                   {refreshing ? "Refreshing..." : "Refresh"}
@@ -225,9 +223,10 @@ export function AccountOverviewPage() {
               </CardContent>
             </Card>
 
-            <Card className="border-2 border-white/[.07] shadow-xl bg-zinc-900/60 backdrop-blur-sm rounded-2xl">
+            <Card className="glass rounded-2xl anim anim-d2">
               <CardHeader>
-                <CardTitle className="text-xl font-bold">Your Lists</CardTitle>
+                <p className="section-label mb-1">Overview</p>
+                <CardTitle className="text-xl font-light tracking-tight">Your Lists</CardTitle>
               </CardHeader>
               <CardContent className="grid gap-4 md:grid-cols-2">
                 <div className="rounded-xl border border-white/[.07] bg-zinc-800/20 p-4 space-y-2">
@@ -269,7 +268,7 @@ export function AccountOverviewPage() {
 
         <div className="mt-8">
           {accountLoading ? (
-            <Card className="border-2 border-white/[.07] shadow-xl bg-zinc-900/60 backdrop-blur-sm rounded-2xl">
+            <Card className="glass rounded-2xl">
               <CardHeader className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
                 <Skeleton className="h-6 w-40" />
                 <Skeleton className="h-9 w-32" />
