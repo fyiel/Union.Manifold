@@ -3,21 +3,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { X, Terminal, FolderOpen, FlaskConical, Cpu } from "lucide-react"
-
-type LaunchMode = 'auto' | 'native' | 'wine' | 'proton' | 'inherit'
-
-type GameLinuxConfig = {
-  launchMode?: LaunchMode
-  winePath?: string
-  protonPath?: string
-  winePrefix?: string
-  protonPrefix?: string
-  extraEnv?: string
-  vrEnabled?: boolean
-  vrXrRuntimeJson?: string
-  slsSteamAppId?: string
-  slsSteamEnabled?: boolean
-}
+import { LINUX_PRESETS, applyGameLinuxPreset, type LinuxDetectionOption, type LinuxGameConfig, type LinuxPerGameLaunchMode } from "@/lib/linux-presets"
 
 type Props = {
   open: boolean
@@ -34,6 +20,8 @@ export function GameLinuxConfigModal({ open, appid, gameName, onClose }: Props) 
   const [slsSteamStatus, setSlsSteamStatus] = useState<{ found: boolean; steamAppId?: string } | null>(null)
   const [slsSteamGlobal, setSlsSteamGlobal] = useState<{ found: boolean } | null>(null)
   const [settingUpSls, setSettingUpSls] = useState(false)
+  const [detectedWineVersions, setDetectedWineVersions] = useState<LinuxDetectionOption[]>([])
+  const [detectedProtonVersions, setDetectedProtonVersions] = useState<LinuxDetectionOption[]>([])
 
   useEffect(() => {
     if (!open || !appid) return
@@ -43,10 +31,14 @@ export function GameLinuxConfigModal({ open, appid, gameName, onClose }: Props) 
       window.ucLinux?.getGameConfig?.(appid),
       window.ucLinux?.slsSteamCheckGame?.(appid),
       window.ucLinux?.detectSLSSteam?.(),
-    ]).then(([configResult, slsCheck, slsDetect]) => {
+      window.ucLinux?.detectWine?.(),
+      window.ucLinux?.detectProton?.(),
+    ]).then(([configResult, slsCheck, slsDetect, wineDetect, protonDetect]) => {
       if (configResult?.ok) setConfig((configResult.config as GameLinuxConfig) || {})
       if (slsCheck?.ok) setSlsSteamStatus({ found: slsCheck.found, steamAppId: slsCheck.steamAppId })
       if (slsDetect?.ok) setSlsSteamGlobal({ found: slsDetect.found })
+      if (wineDetect?.ok && Array.isArray(wineDetect.versions)) setDetectedWineVersions(wineDetect.versions)
+      if (protonDetect?.ok && Array.isArray(protonDetect.versions)) setDetectedProtonVersions(protonDetect.versions)
     }).catch(() => {}).finally(() => setLoading(false))
   }, [open, appid])
 
@@ -71,6 +63,12 @@ export function GameLinuxConfigModal({ open, appid, gameName, onClose }: Props) 
     const next: GameLinuxConfig = { ...config, ...patch }
     setConfig(next)
     save(next)
+  }
+
+  const applyPreset = async (presetId: 'auto' | 'native' | 'wine-recommended' | 'proton-recommended') => {
+    const next = applyGameLinuxPreset(presetId, config, detectedWineVersions, detectedProtonVersions)
+    setConfig(next)
+    await save(next)
   }
 
   const handlePickWineBinary = async () => {
@@ -143,11 +141,31 @@ export function GameLinuxConfigModal({ open, appid, gameName, onClose }: Props) 
           ) : (
             <>
               {/* Launch Mode */}
+              <div className="space-y-2 rounded-lg border border-white/[.07] bg-zinc-900/40 p-3">
+                <div>
+                  <label className="text-xs font-medium text-zinc-400 uppercase tracking-wide">Quick Presets</label>
+                  <p className="text-[11px] text-zinc-400 mt-1">Apply a launch setup, then fine-tune individual overrides below.</p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {LINUX_PRESETS.map((preset) => (
+                    <button
+                      key={preset.id}
+                      type="button"
+                      onClick={() => { void applyPreset(preset.id) }}
+                      className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-zinc-200 transition-colors hover:bg-white/10"
+                      title={preset.description}
+                    >
+                      {preset.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               <div className="space-y-1.5">
                 <label className="text-xs font-medium text-zinc-400 uppercase tracking-wide">Launch Mode</label>
                 <Select
                   value={config.launchMode || 'inherit'}
-                  onValueChange={(v) => update({ launchMode: v as LaunchMode })}
+                  onValueChange={(v) => update({ launchMode: v as LinuxPerGameLaunchMode })}
                 >
                   <SelectTrigger className="h-9">
                     <SelectValue />

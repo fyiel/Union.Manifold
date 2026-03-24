@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
 import { pickGameExecutable, proxyImageUrl } from "@/lib/utils"
-import { Download, PauseCircle, Play, XCircle, Square } from "lucide-react"
+import { Download, HardDrive, PauseCircle, Play, XCircle, Square } from "lucide-react"
 import { ExePickerModal } from "@/components/ExePickerModal"
 import { DesktopShortcutModal } from "@/components/DesktopShortcutModal"
 import { GameLaunchPreflightModal, type LaunchPreflightResult } from "@/components/GameLaunchPreflightModal"
@@ -219,6 +219,7 @@ function getPartIndex(filename: string, index: number, total: number, partIndex?
 }
 
 const ACTIVE_DOWNLOAD_STATUSES = ["downloading", "paused", "extracting", "installing", "verifying", "retrying"]
+const INSTALL_READY_STATUS = "install_ready"
 
 export function DownloadsPage() {
   const isWindows = typeof navigator !== 'undefined' && /windows/i.test(navigator.userAgent)
@@ -251,6 +252,9 @@ export function DownloadsPage() {
   })
   const queuedGroups = Object.values(grouped).filter((items) =>
     items.every((item) => item.status === "queued")
+  )
+  const installReadyGroups = Object.values(grouped).filter((items) =>
+    items.some((item) => item.status === INSTALL_READY_STATUS)
   )
   const completedGroups = Object.values(grouped).filter((items) =>
     items.every((item) => ["completed", "extracted"].includes(item.status))
@@ -288,6 +292,7 @@ export function DownloadsPage() {
   const [shortcutModalOpen, setShortcutModalOpen] = useState(false)
   const [launchPreflightOpen, setLaunchPreflightOpen] = useState(false)
   const [launchPreflightResult, setLaunchPreflightResult] = useState<LaunchPreflightResult | null>(null)
+  const [installingAppId, setInstallingAppId] = useState<string | null>(null)
   const primaryStatsRef = useRef<{
     totalBytes: number
     receivedBytes: number
@@ -535,6 +540,22 @@ export function DownloadsPage() {
     }
   }
 
+  const handleInstallReady = async (appid?: string) => {
+    if (!appid || !window.ucDownloads?.installDownloadedArchive) return
+    setInstallingAppId(appid)
+    try {
+      clearByAppid(appid)
+      const result = await window.ucDownloads.installDownloadedArchive(appid)
+      if (!result?.ok) {
+        throw new Error(result?.error || "Failed to install downloaded archive")
+      }
+    } catch (err) {
+      gameLogger.error('Failed to install downloaded archive', { data: { appid, err } })
+    } finally {
+      setInstallingAppId((current) => (current === appid ? null : current))
+    }
+  }
+
   const launchGame = async (appid: string, path: string) => {
     if (!window.ucDownloads?.launchGameExecutable) return
     const game = games.find((g) => g.appid === appid)
@@ -629,7 +650,7 @@ export function DownloadsPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl sm:text-3xl font-black ">Activity</h1>
-          <p className="text-sm text-zinc-400">Track downloads, installs, and completed titles.</p>
+          <p className="text-sm text-zinc-400">Track downloads, installs, install-ready titles, and completed titles.</p>
         </div>
         <Button variant="outline" onClick={clearCompleted}>
           Clear
@@ -983,6 +1004,94 @@ export function DownloadsPage() {
                         return "Installing data"
                       })()}
                     </span>
+                  </div>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      </section>
+
+      <section className="space-y-4">
+        <div className="flex items-center gap-2">
+          <HardDrive className="h-5 w-5 text-amber-300" />
+          <h2 className="text-xl font-black ">Install Ready</h2>
+          <Badge variant="secondary" className="rounded-full">
+            {installReadyGroups.length}
+          </Badge>
+        </div>
+
+        {installReadyGroups.length === 0 && (
+          <div className="rounded-2xl border border-white/[.07] bg-zinc-900/60 p-6 text-sm text-zinc-400">
+            Downloads that finished but still need extraction will appear here.
+          </div>
+        )}
+
+        <div className="space-y-4">
+          {installReadyGroups.map((items) => {
+            const gameName = items[0]?.gameName || "Unknown"
+            const appid = items[0]?.appid
+            const game = appid ? games.find((g) => g.appid === appid) : null
+            const readyAt = items
+              .map((item) => item.completedAt || 0)
+              .sort((a, b) => b - a)[0]
+            const readyNote = items.find((item) => item.error)?.error || "The archive is already downloaded. Install it to finish extraction."
+            const totalParts = getTotalParts(items)
+
+            return (
+              <div
+                key={`install-ready-${items[0].appid}-${gameName}`}
+                className="rounded-xl border border-amber-400/20 bg-gradient-to-b from-amber-950/20 via-slate-950/40 to-slate-900/30 shadow-lg shadow-black/20"
+              >
+                <div className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex items-center gap-4">
+                    <div className="h-14 w-24 overflow-hidden rounded-md border border-white/[.07] bg-zinc-800">
+                      {game?.image ? (
+                        <img
+                          src={proxyImageUrl(game.image)}
+                          alt={gameName}
+                          className="h-full w-full object-cover"
+                        />
+                      ) : null}
+                    </div>
+                    <div>
+                      <h3 className="text-base font-semibold">{gameName}</h3>
+                      <div className="text-xs text-zinc-400">
+                        {game?.version || "Unknown version"} - {game?.source || "Unknown source"} - Ready {readyAt ? new Date(readyAt).toLocaleString() : "now"}
+                      </div>
+                      <div className="mt-2 text-xs text-amber-200/90">{readyNote}</div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <Button
+                      size="sm"
+                      onClick={() => {
+                        void handleInstallReady(appid)
+                      }}
+                      disabled={!appid || installingAppId === appid}
+                    >
+                      <HardDrive className="mr-2 h-4 w-4" />
+                      {installingAppId === appid ? "Starting..." : "Install"}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        if (appid) navigate(`/game/${appid}`)
+                      }}
+                    >
+                      View Game
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="border-t border-white/[.07] px-5 py-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-zinc-400">
+                    <span>{totalParts} {getPartsLabel(items)}</span>
+                    <Badge variant="outline" className="rounded-full border-amber-400/40 text-amber-200">
+                      Install ready
+                    </Badge>
                   </div>
                 </div>
               </div>

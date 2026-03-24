@@ -25,6 +25,7 @@ export type DownloadStatus =
   | "retrying"
   | "extracting"
   | "installing"
+  | "install_ready"
   | "completed"
   | "extracted"
   | "extract_failed"
@@ -123,6 +124,96 @@ function parsePartIndexFromFilename(filename: string) {
   return null
 }
 
+function pickResumeLinkCandidate(target: DownloadItem, links: DownloadHostEntry[]) {
+  if (!links.length) return null
+
+  if (typeof target.partIndex === "number") {
+    const exactPart = links.find((entry) => entry.part === target.partIndex)
+    if (exactPart) return exactPart
+  }
+
+  const filenamePart = parsePartIndexFromFilename(target.filename)
+  if (typeof filenamePart === "number") {
+    const parsedPart = links.find((entry) => entry.part === filenamePart)
+    if (parsedPart) return parsedPart
+  }
+
+  if (typeof target.partIndex === "number") {
+    const ordered = [...links].sort((a, b) => (a.part ?? Number.MAX_SAFE_INTEGER) - (b.part ?? Number.MAX_SAFE_INTEGER))
+    const indexed = ordered[target.partIndex - 1]
+    if (indexed) return indexed
+  }
+
+  return links[0]
+}
+
+function createSyntheticDownloadFromUpdate(update: DownloadUpdate): DownloadItem | null {
+  const appid = typeof update.appid === "string" && update.appid ? update.appid : null
+  const downloadId = typeof update.downloadId === "string" && update.downloadId ? update.downloadId : null
+  if (!appid || !downloadId) return null
+
+  return {
+    id: downloadId,
+    appid,
+    gameName: update.gameName || appid,
+    host: "local",
+    url: update.url || "",
+    originalUrl: update.url || undefined,
+    filename: update.filename || `${safeGameFilename(update.gameName || appid)}.archive`,
+    status: update.status,
+    receivedBytes: update.receivedBytes || 0,
+    totalBytes: update.totalBytes || 0,
+    speedBps: update.speedBps || 0,
+    etaSeconds: update.etaSeconds ?? null,
+    savePath: update.savePath,
+    startedAt: Date.now(),
+    error: update.error ?? null,
+    partIndex: update.partIndex,
+    partTotal: update.partTotal,
+    resumeData: update.resumeData,
+  }
+}
+
+function createSyntheticDownloadFromInstallingManifest(
+  manifest: any,
+  activeStatus?: { extracting: boolean; downloading: boolean }
+): DownloadItem | null {
+  const appid = typeof manifest?.appid === "string" && manifest.appid ? manifest.appid : null
+  if (!appid) return null
+
+  const rawStatus = typeof manifest?.installStatus === "string" ? manifest.installStatus : "installing"
+  const status: DownloadStatus = activeStatus?.downloading
+    ? "downloading"
+    : activeStatus?.extracting
+      ? "extracting"
+      : rawStatus === "paused"
+        ? "paused"
+      : rawStatus === "downloaded"
+        ? "install_ready"
+      : rawStatus === "failed"
+        ? "failed"
+        : rawStatus === "cancelled"
+          ? "cancelled"
+          : "failed"
+  const metadata = manifest?.metadata || {}
+
+  return {
+    id: `installing:${appid}`,
+    appid,
+    gameName: metadata.name || manifest?.name || appid,
+    host: "local",
+    url: "",
+    filename: `${safeGameFilename(metadata.name || manifest?.name || appid)}.archive`,
+    status,
+    receivedBytes: 0,
+    totalBytes: 0,
+    speedBps: 0,
+    etaSeconds: null,
+    startedAt: manifest?.updatedAt || Date.now(),
+    error: manifest?.installError || (status === "failed" ? "Installation was interrupted. Start it again." : null),
+  }
+}
+
 export function DownloadsProvider({ children }: { children: React.ReactNode }) {
   const [downloads, setDownloads] = useState<DownloadItem[]>(() => {
     if (typeof window === "undefined") return []
@@ -148,8 +239,8 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         // But extracting/installing items are handled by the main process independently of the
         // renderer.  Keep them as-is here; the immediate post-mount reconciliation (below) will
         // query the main process and either let extraction continue or mark them completed/paused.
-        if (safeItem.status === "downloading") {
-          return { ...safeItem, status: "paused" as DownloadStatus, error: "App restarted" }
+        if (safeItem.status === "downloading" || safeItem.status === "failed" || safeItem.status === "retrying" || safeItem.status === "verifying") {
+          return { ...safeItem, status: "paused" as DownloadStatus, error: safeItem.status === "failed" ? (safeItem.error || "Download interrupted. Resume to continue.") : "App restarted" }
         }
         return safeItem
       })
@@ -285,6 +376,28 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
           }
         } catch { }
 
+        try {
+          const manifest = await window.ucDownloads?.getInstalling?.(appid)
+          if (manifest?.installStatus === "downloaded") {
+            setDownloads((prev) =>
+              prev.map((item) =>
+                item.appid === appid && ["extracting", "installing"].includes(item.status)
+                  ? {
+                    ...item,
+                    status: "install_ready" as DownloadStatus,
+                    error: manifest.installError || null,
+                    completedAt: Date.now(),
+                    speedBps: 0,
+                    etaSeconds: null,
+                    receivedBytes: item.totalBytes || item.receivedBytes,
+                  }
+                  : item
+              )
+            )
+            continue
+          }
+        } catch { }
+
         // Main process is NOT extracting and game is NOT installed.
         // The extraction likely failed silently or the installing folder was cleaned up.
         // Mark as paused so the user can retry.
@@ -298,6 +411,73 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
       }
     })()
   }, [reconcileInstalledState])
+
+  useEffect(() => {
+    if (!window.ucDownloads) return
+    let cancelled = false
+
+    void (async () => {
+      try {
+        const listInstalling = window.ucDownloads.listInstallingGlobal || window.ucDownloads.listInstalling
+        const getInstalled = window.ucDownloads.getInstalledGlobal || window.ucDownloads.getInstalled
+        if (!listInstalling) return
+
+        const manifests = await listInstalling()
+        if (cancelled || !Array.isArray(manifests) || manifests.length === 0) return
+
+        const hydrated = await Promise.all(
+          manifests
+            .filter((manifest) => manifest?.appid)
+            .map(async (manifest) => {
+              const appid = String(manifest.appid)
+              const [installed, activeStatus] = await Promise.all([
+                getInstalled?.(appid).catch(() => null) || Promise.resolve(null),
+                window.ucDownloads?.getActiveStatus?.(appid).catch(() => ({ extracting: false, downloading: false })) || Promise.resolve({ extracting: false, downloading: false }),
+              ])
+
+              if (installed) return null
+
+              const rawStatus = typeof manifest.installStatus === "string" ? manifest.installStatus : null
+              if (!activeStatus.extracting && !activeStatus.downloading && rawStatus) {
+                if (["downloading", "verifying", "retrying", "paused"].includes(rawStatus)) {
+                  try {
+                    await window.ucDownloads?.setInstallingStatus?.(appid, "paused", manifest.installError || "App closed. Resume to continue downloading.")
+                    manifest = { ...manifest, installStatus: "paused", installError: manifest.installError || "App closed. Resume to continue downloading." }
+                  } catch {}
+                } else if (["installing", "extracting"].includes(rawStatus)) {
+                  try {
+                    await window.ucDownloads?.setInstallingStatus?.(appid, "failed", "Installation was interrupted when the app closed.")
+                    manifest = { ...manifest, installStatus: "failed", installError: "Installation was interrupted when the app closed." }
+                  } catch {}
+                }
+              }
+
+              return createSyntheticDownloadFromInstallingManifest(manifest, activeStatus)
+            })
+        )
+
+        if (cancelled) return
+
+        setDownloads((prev) => {
+          const next = [...prev]
+          const knownAppids = new Set(prev.map((item) => item.appid))
+          for (const item of hydrated) {
+            if (!item || knownAppids.has(item.appid)) continue
+            next.unshift(item)
+            knownAppids.add(item.appid)
+          }
+          downloadsRef.current = next
+          return next
+        })
+      } catch {
+        // ignore hydration failures
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   // Installed metadata is stored by the main process as a file inside the installed folder.
 
@@ -313,6 +493,43 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
       throw err
     }
   }, [])
+
+  const resolveFreshResumeSource = useCallback(
+    async (target: DownloadItem) => {
+      if (!target.appid) return null
+      if (!SUPPORTED_DOWNLOAD_HOSTS.includes(target.host as PreferredDownloadHost)) return null
+
+      try {
+        const token = await requestDownloadToken(target.appid)
+        const linksResult = await fetchDownloadLinks(target.appid, token)
+
+        let links: DownloadHostEntry[] = []
+        if (linksResult.redirectUrl) {
+          links = [{ url: linksResult.redirectUrl, part: null }]
+        } else {
+          const selected = selectHost(linksResult.hosts, target.host as PreferredDownloadHost)
+          if (selected.host !== target.host || !selected.links.length) {
+            return null
+          }
+          links = selected.links
+        }
+
+        const selectedLink = pickResumeLinkCandidate(target, links)
+        if (!selectedLink?.url) return null
+
+        return {
+          host: target.host,
+          sourceUrl: selectedLink.url,
+        }
+      } catch (error) {
+        downloadLogger.warn("Failed to fetch fresh source url for resume", {
+          data: { appid: target.appid, host: target.host, error },
+        })
+        return null
+      }
+    },
+    []
+  )
 
   const prefetchPartSizes = useCallback(
     async (host: string, queue: Array<{ id: string; url: string }>) => {
@@ -472,7 +689,14 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
       let nextDownloads: DownloadItem[] | null = null
       setDownloads((prev) => {
         const idx = prev.findIndex((item) => item.id === update.downloadId)
-        if (idx === -1) return prev
+        if (idx === -1) {
+          const created = createSyntheticDownloadFromUpdate(update)
+          if (!created) return prev
+          const clone = [created, ...prev]
+          nextDownloads = clone
+          downloadsRef.current = clone
+          return clone
+        }
         const existing = prev[idx]
 
         // Terminal states: once an item reaches one of these, don't let it regress
@@ -895,9 +1119,12 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
 
           // Re-resolve using the original (pre-resolve) URL to get a fresh download URL.
           // CDN URLs (e.g. FileQ signed links) expire, so we need a fresh one.
-          const resolveUrl = target.originalUrl || target.url
-          downloadLogger.info("Resume Level 3 (re-resolve)", { data: { host: target.host, resolveUrl } })
-          const resolved = await resolveDownloadUrl(target.host, resolveUrl)
+          const freshSource = await resolveFreshResumeSource(target)
+          const resolveUrl = freshSource?.sourceUrl || target.originalUrl || target.url
+          downloadLogger.info("Resume Level 3 (re-resolve)", {
+            data: { host: freshSource?.host || target.host, resolveUrl, usedFreshSource: Boolean(freshSource?.sourceUrl) },
+          })
+          const resolved = await resolveDownloadUrl(freshSource?.host || target.host, resolveUrl)
           downloadLogger.info("Resume Level 3 resolved", { data: { resolvedUrl: resolved?.url, resolvedOk: resolved?.resolved, hasAuth: Boolean(resolved?.authHeader) } })
           const freshUrl = resolved?.resolved ? resolved.url : target.url
           const freshAuth = resolved?.authHeader || target.authHeader
@@ -924,17 +1151,42 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
                 resumedFromDisk = true
                 ok = true
               } else if (resumeRes && typeof resumeRes === "object" && resumeRes.error === "file-already-complete") {
-                // File on disk is already the full expected size - skip straight to completed.
-                downloadLogger.info("Resume Level 3: file already complete, marking done")
+                // File on disk is already fully downloaded. Continue with extraction instead of
+                // pretending the whole install completed, otherwise the user gets stuck in a fake
+                // completed state until they cancel and redownload.
+                downloadLogger.info("Resume Level 3: file already complete, starting install from downloaded archive")
                 resumedFromDisk = true
-                ok = true
-                setDownloads((prev) =>
-                  prev.map((item) =>
-                    item.id === downloadId
-                      ? { ...item, status: "completed" as DownloadStatus, receivedBytes: item.totalBytes }
-                      : item
+                if (target.appid && window.ucDownloads?.installDownloadedArchive) {
+                  const installRes = await window.ucDownloads.installDownloadedArchive(target.appid)
+                  if (installRes?.ok) {
+                    ok = true
+                    setDownloads((prev) =>
+                      prev.map((item) =>
+                        item.appid === target.appid
+                          ? {
+                            ...item,
+                            status: "extracting" as DownloadStatus,
+                            error: null,
+                            speedBps: 0,
+                            etaSeconds: null,
+                            receivedBytes: item.totalBytes || item.receivedBytes,
+                          }
+                          : item
+                      )
+                    )
+                  } else {
+                    throw new Error(installRes?.error || "Failed to continue install from downloaded archive")
+                  }
+                } else {
+                  ok = true
+                  setDownloads((prev) =>
+                    prev.map((item) =>
+                      item.id === downloadId
+                        ? { ...item, status: "install_ready" as DownloadStatus, receivedBytes: item.totalBytes || item.receivedBytes }
+                        : item
+                    )
                   )
-                )
+                }
               }
             } catch (e) {
               downloadLogger.warn("Resume Level 3 resumeWithFreshUrl failed, falling back to fresh start", { data: e })
@@ -963,6 +1215,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
               item.id === downloadId
                 ? {
                   ...item,
+                  originalUrl: freshSource?.sourceUrl || item.originalUrl || resolveUrl,
                   url: freshUrl,
                   authHeader: freshAuth,
                   status: "downloading",
@@ -988,7 +1241,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         }
       }
     },
-    [downloads]
+    [downloads, resolveFreshResumeSource]
   )
 
   const resumeGroup = useCallback(

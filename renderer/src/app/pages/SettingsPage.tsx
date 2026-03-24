@@ -24,6 +24,7 @@ import {
   type MirrorHost,
   type MirrorHostInfo,
 } from "@/lib/settings-constants"
+import { LINUX_PRESETS, applyGlobalLinuxPreset, type LinuxGlobalSettings, type LinuxPresetId } from "@/lib/linux-presets"
 
 type DiskInfo = {
   id: string
@@ -130,6 +131,7 @@ export function SettingsPage() {
   const [updateCheckResult, setUpdateCheckResult] = useState<string | null>(null)
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus>(INITIAL_UPDATE_STATUS)
   const [alwaysCreateDesktopShortcut, setAlwaysCreateDesktopShortcut] = useState(false)
+  const [preventSleepDuringOperations, setPreventSleepDuringOperations] = useState(true)
   const [linuxLaunchMode, setLinuxLaunchMode] = useState<'auto' | 'native' | 'wine' | 'proton'>('auto')
   const [linuxWinePath, setLinuxWinePath] = useState('')
   const [linuxProtonPath, setLinuxProtonPath] = useState('')
@@ -537,9 +539,13 @@ export function SettingsPage() {
     let mounted = true
     const loadShortcutSetting = async () => {
       try {
-        const value = await window.ucSettings?.get?.('alwaysCreateDesktopShortcut')
+        const [shortcutValue, sleepValue] = await Promise.all([
+          window.ucSettings?.get?.('alwaysCreateDesktopShortcut'),
+          window.ucSettings?.get?.('preventSleepDuringOperations'),
+        ])
         if (mounted) {
-          setAlwaysCreateDesktopShortcut(value || false)
+          setAlwaysCreateDesktopShortcut(shortcutValue || false)
+          setPreventSleepDuringOperations(sleepValue !== false)
         }
       } catch {
         // ignore
@@ -548,8 +554,16 @@ export function SettingsPage() {
     loadShortcutSetting()
     const off = window.ucSettings?.onChanged?.((data: any) => {
       if (!data || !data.key) return
+      if (data.key === '__CLEAR_ALL__') {
+        setAlwaysCreateDesktopShortcut(false)
+        setPreventSleepDuringOperations(true)
+        return
+      }
       if (data.key === 'alwaysCreateDesktopShortcut') {
         setAlwaysCreateDesktopShortcut(data.value || false)
+      }
+      if (data.key === 'preventSleepDuringOperations') {
+        setPreventSleepDuringOperations(data.value !== false)
       }
     })
     return () => {
@@ -1363,6 +1377,41 @@ export function SettingsPage() {
     }
   }
 
+  const handleApplyLinuxPreset = async (presetId: LinuxPresetId) => {
+    const next = applyGlobalLinuxPreset(
+      presetId,
+      {
+        linuxLaunchMode,
+        linuxWinePath,
+        linuxProtonPath,
+        linuxWinePrefix,
+        linuxProtonPrefix,
+        linuxSteamPath,
+        linuxExtraEnv,
+      } satisfies LinuxGlobalSettings,
+      detectedWineVersions,
+      detectedProtonVersions,
+    )
+
+    setLinuxLaunchMode(next.linuxLaunchMode)
+    setLinuxWinePath(next.linuxWinePath)
+    setLinuxProtonPath(next.linuxProtonPath)
+    setLinuxWinePrefix(next.linuxWinePrefix)
+    setLinuxProtonPrefix(next.linuxProtonPrefix)
+    setLinuxSteamPath(next.linuxSteamPath)
+    setLinuxExtraEnv(next.linuxExtraEnv)
+
+    await Promise.all([
+      window.ucSettings?.set?.('linuxLaunchMode', next.linuxLaunchMode),
+      window.ucSettings?.set?.('linuxWinePath', next.linuxWinePath),
+      window.ucSettings?.set?.('linuxProtonPath', next.linuxProtonPath),
+      window.ucSettings?.set?.('linuxWinePrefix', next.linuxWinePrefix),
+      window.ucSettings?.set?.('linuxProtonPrefix', next.linuxProtonPrefix),
+      window.ucSettings?.set?.('linuxSteamPath', next.linuxSteamPath),
+      window.ucSettings?.set?.('linuxExtraEnv', next.linuxExtraEnv),
+    ]).catch(() => { })
+  }
+
   // VR helpers
   const vrToolFeedbackShow = (type: 'success' | 'error', message: string) => {
     setVrToolFeedback({ type, message })
@@ -2076,6 +2125,32 @@ export function SettingsPage() {
                       </button>
                     </div>
 
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <label className="text-sm font-medium cursor-pointer">Prevent system sleep during installs and launch handoff</label>
+                        <p className="text-xs text-zinc-400 mt-1">
+                          Keep the app awake while downloads, extraction, or the first seconds of game launch are in progress.
+                        </p>
+                      </div>
+                      <button
+                        onClick={async () => {
+                          const newValue = !preventSleepDuringOperations
+                          setPreventSleepDuringOperations(newValue)
+                          try {
+                            await window.ucSettings?.set?.('preventSleepDuringOperations', newValue)
+                          } catch { }
+                        }}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${preventSleepDuringOperations ? 'bg-white' : 'bg-zinc-700'
+                          }`}
+                        title="Toggle sleep prevention during active operations"
+                      >
+                        <span
+                          className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${preventSleepDuringOperations ? 'translate-x-6' : 'translate-x-1'
+                            }`}
+                        />
+                      </button>
+                    </div>
+
                     {isWindows && (
                       <div className="rounded-lg border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-xs text-blue-200">
                         The desktop shortcut prompt appears only once per game on first launch unless you enable automatic shortcut creation.
@@ -2090,6 +2165,26 @@ export function SettingsPage() {
                           <div>
                             <div className="text-sm font-semibold">Linux Gaming</div>
                             <div className="text-xs text-zinc-400">Configure Wine, Proton, and compatibility tools for running Windows games on Linux.</div>
+                          </div>
+                        </div>
+
+                        <div className="space-y-2 rounded-lg border border-white/[.07] bg-zinc-900/40 p-3">
+                          <div>
+                            <label className="text-xs font-medium text-zinc-400 uppercase tracking-wide">Quick Presets</label>
+                            <p className="text-[11px] text-zinc-400 mt-1">Apply a base runner setup, then adjust paths and prefixes if a game needs something special.</p>
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            {LINUX_PRESETS.map((preset) => (
+                              <button
+                                key={preset.id}
+                                type="button"
+                                onClick={() => { void handleApplyLinuxPreset(preset.id) }}
+                                className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-zinc-200 transition-colors hover:bg-white/10"
+                                title={preset.description}
+                              >
+                                {preset.label}
+                              </button>
+                            ))}
                           </div>
                         </div>
 

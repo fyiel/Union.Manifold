@@ -3,6 +3,7 @@ import { useEffect, useCallback, useMemo, useRef, useState } from "react"
 import { useParams } from "react-router-dom"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { GameCard } from "@/components/GameCard"
 import { GameComments } from "@/components/GameComments"
 import { useDownloads } from "@/context/downloads-context"
@@ -35,8 +36,10 @@ import {
   X,
   FolderOpen,
   Info,
+  Layers3,
   Loader2,
   Play,
+  Tags,
   Terminal,
 } from "lucide-react"
 import { ExePickerModal } from "@/components/ExePickerModal"
@@ -107,6 +110,12 @@ export function GameDetailPage() {
   const [pendingForceDownload, setPendingForceDownload] = useState(false)
   const [gameStartFailedOpen, setGameStartFailedOpen] = useState(false)
   const [linuxConfigOpen, setLinuxConfigOpen] = useState(false)
+
+  // Collection/tag editing state
+  const [gameMeta, setGameMeta] = useState<{ collections?: string[]; tags?: string[] }>({})
+  const [collectionInput, setCollectionInput] = useState("")
+  const [tagInput, setTagInput] = useState("")
+
   // Ref to track whether a game was just launched (cleared on manual quit)
   // Stores the expiry timestamp of the quick-exit detection window (0 = not watching)
   const gameJustLaunchedRef = useRef<number>(0)
@@ -117,6 +126,56 @@ export function GameDetailPage() {
   const [protonLoading, setProtonLoading] = useState(false)
 
   const appid = params.id || ""
+
+  // ── Load library meta (collections/tags) for this game ──
+  useEffect(() => {
+    if (!appid) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const allMeta = (await window.ucSettings?.get?.("libraryGameMeta")) || {}
+        if (!cancelled) setGameMeta(allMeta[appid] || {})
+      } catch {}
+    })()
+    return () => { cancelled = true }
+  }, [appid])
+
+  const saveGameMeta = useCallback(async (updated: { collections?: string[]; tags?: string[] }) => {
+    setGameMeta(updated)
+    try {
+      const allMeta = (await window.ucSettings?.get?.("libraryGameMeta")) || {}
+      allMeta[appid] = updated
+      await window.ucSettings?.set?.("libraryGameMeta", allMeta)
+    } catch {}
+  }, [appid])
+
+  const addCollection = useCallback(async () => {
+    const val = collectionInput.trim()
+    if (!val) return
+    const existing = gameMeta.collections || []
+    if (existing.includes(val)) { setCollectionInput(""); return }
+    await saveGameMeta({ ...gameMeta, collections: [...existing, val] })
+    setCollectionInput("")
+  }, [collectionInput, gameMeta, saveGameMeta])
+
+  const removeCollection = useCallback(async (name: string) => {
+    const existing = gameMeta.collections || []
+    await saveGameMeta({ ...gameMeta, collections: existing.filter((c) => c !== name) })
+  }, [gameMeta, saveGameMeta])
+
+  const addTag = useCallback(async () => {
+    const val = tagInput.trim()
+    if (!val) return
+    const existing = gameMeta.tags || []
+    if (existing.includes(val)) { setTagInput(""); return }
+    await saveGameMeta({ ...gameMeta, tags: [...existing, val] })
+    setTagInput("")
+  }, [tagInput, gameMeta, saveGameMeta])
+
+  const removeTag = useCallback(async (name: string) => {
+    const existing = gameMeta.tags || []
+    await saveGameMeta({ ...gameMeta, tags: existing.filter((t) => t !== name) })
+  }, [gameMeta, saveGameMeta])
 
   // Fetch ProtonDB summary for this game (proxied through the web API)
   useEffect(() => {
@@ -452,6 +511,24 @@ export function GameDetailPage() {
     }
   }
 
+  const installDownloadedArchive = async () => {
+    if (!game || !window.ucDownloads?.installDownloadedArchive) return
+    setDownloadError(null)
+    setDownloading(true)
+    try {
+      clearByAppid(game.appid)
+      const result = await window.ucDownloads.installDownloadedArchive(game.appid)
+      if (!result?.ok) {
+        throw new Error(result?.error || "Failed to install downloaded archive")
+      }
+      setInstallingManifest((prev) => prev ? { ...prev, installStatus: "extracting", installError: null } : prev)
+    } catch (err) {
+      setDownloadError(err instanceof Error ? err.message : "Failed to install downloaded archive")
+    } finally {
+      setDownloading(false)
+    }
+  }
+
   const launchInstalledGame = async () => {
     if (!game) return
     if (!window.ucDownloads?.listGameExecutables || !window.ucDownloads?.launchGameExecutable) return
@@ -570,6 +647,7 @@ export function GameDetailPage() {
   const isCancelled = downloads.some((item) => item.appid === game.appid && item.status === "cancelled")
   const hasCancelledManifest = installingManifest?.installStatus === "cancelled"
   const isInstalled = hasInstalledVersions
+  const isInstallReady = Boolean(installingManifest) && installingManifest?.installStatus === "downloaded" && !isInstalled
   const hasUpdate = isInstalled && Boolean(game?.version) && installedVersionLabels.length > 0 && !installedVersionLabels.includes(game.version ?? '')
   const showActionMenu = isInstalled
   // Only treat as "installing" from manifest if there are corresponding download items.
@@ -584,6 +662,8 @@ export function GameDetailPage() {
       ? "Checking..."
       : isInstalled
         ? "Play"
+        : isInstallReady
+          ? "Install"
         : isPaused
           ? "Resume"
           : isQueued
@@ -593,7 +673,7 @@ export function GameDetailPage() {
               : isInstalling
                 ? "Installing"
                 : "Download Now"
-  const actionDisabled = !isGameRunning && (isCheckingLinks || isInstalling || isQueued || isFailed)
+  const actionDisabled = !isGameRunning && (isCheckingLinks || isInstalling || isQueued || (isFailed && !isInstallReady))
 
   const getSavedExe = async () => {
     if (!window.ucSettings?.get) return null
@@ -1136,6 +1216,8 @@ export function GameDetailPage() {
                         void stopRunningGame()
                       } else if (isInstalled) {
                         void launchInstalledGame()
+                      } else if (isInstallReady) {
+                        void installDownloadedArchive()
                       } else if (isPaused) {
                         void resumeGroup(game.appid)
                       } else {
@@ -1150,6 +1232,8 @@ export function GameDetailPage() {
                       <Loader2 className="mr-2 h-5 w-5 animate-spin" />
                     ) : isInstalled ? (
                       <Play className="mr-2 h-5 w-5" />
+                    ) : isInstallReady ? (
+                      <HardDrive className="mr-2 h-5 w-5" />
                     ) : (
                       <Download className="mr-2 h-5 w-5" />
                     )}
@@ -1377,6 +1461,77 @@ export function GameDetailPage() {
                       Source
                     </span>
                     <span className="font-semibold text-white">{game?.source || "Unknown"}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* ── Collections & Tags ── */}
+              <div className="p-6 rounded-2xl bg-black/40 border border-white/10 backdrop-blur-md shadow-xl space-y-4">
+                <div className="space-y-3">
+                  <h3 className="font-black text-white flex items-center gap-2">
+                    <Layers3 className="h-4 w-4 text-blue-400" />
+                    Collections
+                  </h3>
+                  <div className="flex flex-wrap gap-1.5">
+                    {(gameMeta.collections || []).map((c) => (
+                      <Badge
+                        key={c}
+                        className="rounded-full border-blue-400/20 bg-blue-500/10 text-blue-200 pl-2.5 pr-1 gap-1 cursor-pointer hover:bg-blue-500/20"
+                        onClick={() => void removeCollection(c)}
+                      >
+                        {c}
+                        <X className="h-3 w-3 ml-0.5" />
+                      </Badge>
+                    ))}
+                    {!(gameMeta.collections?.length) && (
+                      <span className="text-xs text-zinc-500 italic">No collections</span>
+                    )}
+                  </div>
+                  <div className="flex gap-2">
+                    <Input
+                      value={collectionInput}
+                      onChange={(e) => setCollectionInput(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") void addCollection() }}
+                      placeholder="Add collection..."
+                      className="h-8 text-xs flex-1"
+                    />
+                    <Button size="sm" className="h-8 px-3" onClick={() => void addCollection()} disabled={!collectionInput.trim()}>
+                      Add
+                    </Button>
+                  </div>
+                </div>
+                <div className="h-px bg-white/10" />
+                <div className="space-y-3">
+                  <h3 className="font-black text-white flex items-center gap-2">
+                    <Tags className="h-4 w-4 text-emerald-400" />
+                    Tags
+                  </h3>
+                  <div className="flex flex-wrap gap-1.5">
+                    {(gameMeta.tags || []).map((t) => (
+                      <Badge
+                        key={t}
+                        className="rounded-full border-emerald-400/20 bg-emerald-500/10 text-emerald-200 pl-2.5 pr-1 gap-1 cursor-pointer hover:bg-emerald-500/20"
+                        onClick={() => void removeTag(t)}
+                      >
+                        #{t}
+                        <X className="h-3 w-3 ml-0.5" />
+                      </Badge>
+                    ))}
+                    {!(gameMeta.tags?.length) && (
+                      <span className="text-xs text-zinc-500 italic">No tags</span>
+                    )}
+                  </div>
+                  <div className="flex gap-2">
+                    <Input
+                      value={tagInput}
+                      onChange={(e) => setTagInput(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") void addTag() }}
+                      placeholder="Add tag..."
+                      className="h-8 text-xs flex-1"
+                    />
+                    <Button size="sm" className="h-8 px-3" onClick={() => void addTag()} disabled={!tagInput.trim()}>
+                      Add
+                    </Button>
                   </div>
                 </div>
               </div>
