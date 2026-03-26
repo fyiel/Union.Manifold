@@ -25,16 +25,16 @@ export function AppLayout() {
   }, [location.pathname])
 
   return (
-    <div className="relative h-screen w-full overflow-hidden bg-[#09090b] text-zinc-100">
+    <div className="relative h-screen w-full overflow-hidden bg-zinc-950 text-zinc-100">
       <Sidebar mobileOpen={mobileNavOpen} onClose={() => setMobileNavOpen(false)} />
       <div className="relative flex h-full min-h-0 flex-col md:pl-[16rem]">
         <div className="flex-none z-40">
           <TopBar onOpenMenu={() => setMobileNavOpen(true)} />
         </div>
-        <div ref={scrollContainerRef} className="flex-1 min-h-0 w-full overflow-y-auto">
+        <div ref={scrollContainerRef} className="flex-1 min-h-0 w-full overflow-y-auto bg-gradient-to-b from-zinc-950 to-zinc-950/95">
           <div className="relative min-h-full">
             <ScrollProgress />
-              <main className="mx-auto w-full max-w-7xl px-4 py-6 pb-28 md:px-8 xl:px-10">
+            <main className="mx-auto w-full max-w-7xl px-4 py-5 pb-28 md:px-8 xl:px-10">
               <Outlet />
             </main>
           </div>
