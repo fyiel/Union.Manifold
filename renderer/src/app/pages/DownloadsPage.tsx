@@ -651,13 +651,13 @@ export function DownloadsPage() {
       <div className="flex items-end justify-between anim">
         <div className="space-y-1">
           <p className="section-label">Downloads</p>
-          <h1 className="text-3xl font-light tracking-tight text-white sm:text-4xl">Activity</h1>
+          <h1 className="text-3xl font-black tracking-tight text-white sm:text-4xl">Activity</h1>
           <p className="text-sm text-zinc-500">Manage your downloads, installations and running games</p>
         </div>
         <Button 
           variant="outline" 
           onClick={clearCompleted} 
-          className="rounded-full border-zinc-700 px-5 text-sm font-medium text-zinc-300 hover:border-zinc-500 hover:text-white active:scale-95"
+          className="rounded-full border-white/[.07] px-5 text-sm font-medium text-zinc-300 hover:border-zinc-500 hover:text-white active:scale-95"
         >
           Clear history
         </Button>
@@ -768,7 +768,7 @@ export function DownloadsPage() {
                   {/* Game Info */}
                   <div className="space-y-2">
                     <div className="flex flex-wrap items-center gap-2">
-                      <h2 className="text-xl font-semibold tracking-tight text-white sm:text-2xl">
+                      <h2 className="text-xl font-black tracking-tight text-white sm:text-2xl">
                         {primaryGroup[0]?.gameName || "Unknown"}
                       </h2>
                       {primaryGame?.version && (
@@ -796,17 +796,17 @@ export function DownloadsPage() {
                     <div className="flex flex-wrap items-center gap-4 pt-1">
                       <div className="flex items-center gap-2 text-sm">
                         <span className="text-zinc-500">ETA</span>
-                        <span className="font-medium text-white">{formatEta(primaryStats.etaSeconds)}</span>
+                        <span className="font-mono font-bold tabular-nums text-white">{formatEta(primaryStats.etaSeconds)}</span>
                       </div>
                       <div className="h-3 w-px bg-zinc-700" />
                       <div className="flex items-center gap-2 text-sm">
                         <span className="text-zinc-500">{primaryTotalParts > 1 ? "Parts" : "File"}</span>
-                        <span className="font-medium text-white">{primaryTotalParts}</span>
+                        <span className="font-bold text-white">{primaryTotalParts}</span>
                       </div>
                       <div className="h-3 w-px bg-zinc-700" />
                       <div className="flex items-center gap-2 text-sm">
                         <span className="text-zinc-500">Avg</span>
-                        <span className="font-medium text-white">{formatSpeed(averageSpeed)}</span>
+                        <span className="font-mono font-bold tabular-nums text-white">{formatSpeed(averageSpeed)}</span>
                       </div>
                     </div>
                   </div>
@@ -817,7 +817,7 @@ export function DownloadsPage() {
                   {primaryIsPaused ? (
                     <Button 
                       onClick={() => primaryGroup && resumeGroup(primaryGroup[0]?.appid)} 
-                      className="gap-2 rounded-full bg-white px-5 text-sm font-medium text-black hover:bg-zinc-200 active:scale-95"
+                      className="gap-2 rounded-full bg-white px-5 text-sm font-bold text-black hover:bg-zinc-200 active:scale-95"
                     >
                       <Play className="h-4 w-4" />
                       Resume
@@ -826,7 +826,7 @@ export function DownloadsPage() {
                     <Button 
                       variant="outline" 
                       onClick={() => primaryGroup && primaryGroup.forEach((it) => pauseDownload(it.id))} 
-                      className="gap-2 rounded-full border-zinc-700 px-5 text-sm font-medium text-zinc-300 hover:border-zinc-500 hover:text-white active:scale-95"
+                      className="gap-2 rounded-full border-white/[.07] px-5 text-sm font-medium text-zinc-300 hover:border-zinc-500 hover:text-white active:scale-95"
                     >
                       <PauseCircle className="h-4 w-4" />
                       Pause
@@ -835,7 +835,7 @@ export function DownloadsPage() {
                   <Button
                     variant="outline"
                     onClick={() => primaryGroup && cancelGroup(primaryGroup[0]?.appid)}
-                    className="gap-2 rounded-full border-zinc-700 px-5 text-sm font-medium text-zinc-400 hover:border-red-500/40 hover:bg-red-500/10 hover:text-red-400 active:scale-95"
+                    className="gap-2 rounded-full border-white/[.07] px-5 text-sm font-medium text-zinc-400 hover:border-red-500/40 hover:bg-red-500/10 hover:text-red-400 active:scale-95"
                   >
                     <XCircle className="h-4 w-4" />
                     Cancel
@@ -864,7 +864,7 @@ export function DownloadsPage() {
                       return "Downloading game data..."
                     })()}
                   </span>
-                  <span className="font-mono text-sm font-medium text-white">
+                  <span className="font-mono text-sm font-bold tabular-nums text-white">
                     {formatBytes(primaryStats.receivedBytes)} <span className="text-zinc-500">/</span> {formatBytes(primaryStats.totalBytes)}
                   </span>
                 </div>
@@ -911,20 +911,20 @@ export function DownloadsPage() {
               {/* Stats Grid */}
               <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                 <div className="rounded-xl border border-white/[.07] bg-zinc-800/40 p-3">
-                  <div className="text-[11px] font-medium uppercase tracking-wider text-zinc-500">Download</div>
-                  <div className="mt-1 text-lg font-semibold tabular-nums text-white">{formatSpeed(currentNetwork)}</div>
+                  <div className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">Download</div>
+                  <div className="mt-1 font-mono text-lg font-bold tabular-nums text-white">{formatSpeed(currentNetwork)}</div>
                 </div>
                 <div className="rounded-xl border border-white/[.07] bg-zinc-800/40 p-3">
-                  <div className="text-[11px] font-medium uppercase tracking-wider text-zinc-500">Peak</div>
-                  <div className="mt-1 text-lg font-semibold tabular-nums text-white">{formatSpeed(peakNetworkSpeed)}</div>
+                  <div className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">Peak</div>
+                  <div className="mt-1 font-mono text-lg font-bold tabular-nums text-white">{formatSpeed(peakNetworkSpeed)}</div>
                 </div>
                 <div className="rounded-xl border border-white/[.07] bg-zinc-800/40 p-3">
-                  <div className="text-[11px] font-medium uppercase tracking-wider text-zinc-500">Disk Write</div>
-                  <div className="mt-1 text-lg font-semibold tabular-nums text-white">{formatSpeed(currentDisk)}</div>
+                  <div className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">Disk Write</div>
+                  <div className="mt-1 font-mono text-lg font-bold tabular-nums text-white">{formatSpeed(currentDisk)}</div>
                 </div>
                 <div className="rounded-xl border border-white/[.07] bg-zinc-800/40 p-3">
-                  <div className="text-[11px] font-medium uppercase tracking-wider text-zinc-500">Transferred</div>
-                  <div className="mt-1 text-lg font-semibold tabular-nums text-white">{formatBytes(primaryStats.receivedBytes)}</div>
+                  <div className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">Transferred</div>
+                  <div className="mt-1 font-mono text-lg font-bold tabular-nums text-white">{formatBytes(primaryStats.receivedBytes)}</div>
                 </div>
               </div>
             </div>

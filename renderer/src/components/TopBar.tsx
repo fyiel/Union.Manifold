@@ -26,13 +26,16 @@ export function TopBar({ onOpenMenu }: TopBarProps) {
   const { user: accountUser, loading: accountLoading, refresh } = useDiscordAccount()
   const chrome = useMemo(() => getRouteChrome(location.pathname), [location.pathname])
 
+  // Back is only available after the first navigation (location.key is "default" on initial load)
+  const canGoBack = location.key !== "default"
+
   const handleBack = useCallback(() => {
-    window.history.back()
-  }, [])
+    navigate(-1)
+  }, [navigate])
 
   const handleForward = useCallback(() => {
-    window.history.forward()
-  }, [])
+    navigate(1)
+  }, [navigate])
 
   const handleRefresh = useCallback(() => {
     setIsRefreshing(true)
@@ -114,24 +117,30 @@ export function TopBar({ onOpenMenu }: TopBarProps) {
 
   return (
     <>
-        <nav className="sticky top-0 z-40 w-full border-b border-white/[.05] bg-zinc-950/80 backdrop-blur-xl">
+        <nav className="sticky top-0 z-40 w-full border-b border-white/[.07] bg-zinc-950/80 backdrop-blur-xl">
           <div className="mx-auto flex h-14 max-w-7xl items-center gap-4 px-4 md:px-8 xl:px-10">
           {/* Mobile Menu Button */}
           <button
             type="button"
             aria-label="Open navigation"
             onClick={onOpenMenu}
-            className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/[.07] bg-white/[0.04] text-zinc-400 transition hover:bg-white/[0.08] hover:text-white active:scale-95 md:hidden"
+            className="flex h-9 w-9 items-center justify-center rounded-full border border-white/[.07] bg-white/[0.04] text-zinc-400 transition hover:bg-white/[0.08] hover:text-white active:scale-95 md:hidden"
           >
             <Menu className="h-4.5 w-4.5" />
           </button>
 
           {/* Desktop Navigation Controls */}
-          <div className="hidden items-center gap-1 md:flex">
+          <div className="hidden items-center gap-0.5 md:flex">
             <button
               type="button"
               onClick={handleBack}
-              className="flex h-8 w-8 items-center justify-center rounded-lg text-zinc-500 transition-all hover:bg-white/[.06] hover:text-zinc-300 active:scale-95"
+              disabled={!canGoBack}
+              className={cn(
+                "flex h-8 w-8 items-center justify-center rounded-full transition-all active:scale-95",
+                canGoBack
+                  ? "text-zinc-400 hover:bg-white/[.06] hover:text-zinc-200"
+                  : "cursor-default text-zinc-700"
+              )}
               aria-label="Go back"
             >
               <ChevronLeft className="h-4.5 w-4.5" strokeWidth={2.5} />
@@ -139,7 +148,7 @@ export function TopBar({ onOpenMenu }: TopBarProps) {
             <button
               type="button"
               onClick={handleForward}
-              className="flex h-8 w-8 items-center justify-center rounded-lg text-zinc-500 transition-all hover:bg-white/[.06] hover:text-zinc-300 active:scale-95"
+              className="flex h-8 w-8 items-center justify-center rounded-full text-zinc-700 transition-all hover:bg-white/[.06] hover:text-zinc-400 active:scale-95"
               aria-label="Go forward"
             >
               <ChevronRight className="h-4.5 w-4.5" strokeWidth={2.5} />
@@ -147,7 +156,7 @@ export function TopBar({ onOpenMenu }: TopBarProps) {
             <button
               type="button"
               onClick={handleRefresh}
-              className="flex h-8 w-8 items-center justify-center rounded-lg text-zinc-500 transition-all hover:bg-white/[.06] hover:text-zinc-300 active:scale-95"
+              className="flex h-8 w-8 items-center justify-center rounded-full text-zinc-600 transition-all hover:bg-white/[.06] hover:text-zinc-300 active:scale-95"
               aria-label="Refresh"
             >
               <RotateCw className={cn("h-3.5 w-3.5", isRefreshing && "animate-spin")} strokeWidth={2.5} />
@@ -155,7 +164,7 @@ export function TopBar({ onOpenMenu }: TopBarProps) {
           </div>
 
           {/* Separator */}
-          <div className="hidden h-5 w-px bg-white/[.07] md:block" />
+          <div className="hidden h-5 w-px bg-white/[.06] md:block" />
 
           {/* Page Title Section */}
           <div className="min-w-0 flex-1">
@@ -177,13 +186,13 @@ export function TopBar({ onOpenMenu }: TopBarProps) {
             type="button"
             variant="outline"
             onClick={handleSearchShortcut}
-            className="hidden h-9 min-w-[200px] justify-between rounded-xl border-white/[.07] bg-zinc-900/80 px-3 text-zinc-500 hover:border-zinc-700 hover:bg-zinc-800 hover:text-zinc-300 active:scale-[0.98] md:flex"
+            className="hidden h-9 min-w-[200px] justify-between rounded-full border-white/[.07] bg-zinc-900/80 px-4 text-zinc-500 hover:border-zinc-700 hover:bg-zinc-800 hover:text-zinc-300 active:scale-[0.98] md:flex"
           >
             <span className="flex items-center gap-2">
               <Search className="h-3.5 w-3.5" />
               <span className="text-[13px]">Search...</span>
             </span>
-            <kbd className="rounded-md border border-white/[.07] bg-zinc-800 px-1.5 py-0.5 text-[10px] font-medium text-zinc-600">
+            <kbd className="rounded-full border border-white/[.07] bg-zinc-800 px-2 py-0.5 text-[10px] font-medium text-zinc-600">
               Ctrl+K
             </kbd>
           </Button>
@@ -193,37 +202,37 @@ export function TopBar({ onOpenMenu }: TopBarProps) {
             type="button"
             onClick={handleSearchShortcut}
             aria-label="Open search"
-            className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/[.07] bg-zinc-900/80 text-zinc-400 transition hover:bg-zinc-800 hover:text-white active:scale-95 md:hidden"
+            className="flex h-9 w-9 items-center justify-center rounded-full border border-white/[.07] bg-zinc-900/80 text-zinc-400 transition hover:bg-zinc-800 hover:text-white active:scale-95 md:hidden"
           >
             <Search className="h-4 w-4" />
           </button>
 
           {/* Account Menu */}
           {showAccountLoading ? (
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/[.07] bg-zinc-900/80 text-zinc-600">
+            <div className="flex h-9 w-9 items-center justify-center rounded-full border border-white/[.07] bg-zinc-900/80 text-zinc-600">
               <UserRound className="h-4 w-4" />
             </div>
           ) : (
             <Popover>
               <PopoverTrigger
-                className="flex items-center justify-center rounded-xl border border-white/[.07] bg-zinc-900/80 p-0.5 outline-none transition hover:border-zinc-700 hover:bg-zinc-800 focus-visible:ring-1 focus-visible:ring-white/20 active:scale-95"
+                className="flex items-center justify-center rounded-full border border-white/[.07] bg-zinc-900/80 p-0.5 outline-none transition hover:border-zinc-700 hover:bg-zinc-800 focus-visible:ring-1 focus-visible:ring-white/20 active:scale-95"
                 aria-label={`${accountLabel} menu`}
               >
                 {avatarUrl ? (
                   <DiscordAvatar
                     avatarUrl={avatarUrl}
                     alt="Account avatar"
-                    className="h-8 w-8 rounded-lg"
+                    className="h-8 w-8 rounded-full"
                   />
                 ) : (
-                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-zinc-800 text-zinc-500">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-zinc-800 text-zinc-500">
                     <UserRound className="h-4 w-4" />
                   </div>
                 )}
               </PopoverTrigger>
               <PopoverContent
                 align="end"
-                className="w-56 rounded-xl border border-white/[.07] bg-zinc-900/95 p-1.5 shadow-2xl backdrop-blur-xl"
+                className="w-56 rounded-2xl border border-white/[.07] bg-zinc-900/95 p-1.5 shadow-2xl backdrop-blur-xl"
               >
                 <div className="px-3 py-2">
                   <div className="text-sm font-semibold text-zinc-100">{accountLabel}</div>

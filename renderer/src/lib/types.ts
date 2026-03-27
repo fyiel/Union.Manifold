@@ -6,6 +6,9 @@ export interface Game {
   image: string
   screenshots: string[]
   splash?: string
+  hero_image?: string
+  hero_animated?: string
+  hero_logo?: string
   release_date: string
   size: string
   version?: string

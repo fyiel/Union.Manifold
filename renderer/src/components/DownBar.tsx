@@ -161,10 +161,10 @@ export function DownBar() {
             onKeyDown={(e) => {
               if (e.key === "Enter" || e.key === " ") handleClick()
             }}
-            className="pointer-events-auto flex w-full max-w-xl cursor-pointer items-center justify-between gap-3 rounded-2xl border border-white/[.06] bg-zinc-900/95 px-4 py-3 text-sm text-zinc-200 shadow-[0_8px_32px_rgba(0,0,0,0.6)] backdrop-blur-2xl transition-all hover:border-zinc-700 hover:bg-zinc-800/95"
+            className="pointer-events-auto flex w-full max-w-xl cursor-pointer items-center justify-between gap-3 rounded-2xl border border-white/[.07] bg-zinc-900/95 px-4 py-3 text-sm text-zinc-200 shadow-[0_8px_32px_rgba(0,0,0,0.6)] backdrop-blur-2xl transition-all hover:border-white/[.12] hover:bg-zinc-800/95"
           >
             <div className="flex items-center gap-3">
-              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-zinc-800/80 ring-1 ring-white/[.06]">
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-zinc-800/80 ring-1 ring-white/[.07]">
                 <Activity className="h-4 w-4 text-zinc-500" />
               </div>
               <div>
@@ -180,7 +180,7 @@ export function DownBar() {
                 if (e.nativeEvent) e.nativeEvent.stopImmediatePropagation()
                 setAddGameOpen(true)
               }}
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-white/[.06] bg-zinc-800 text-zinc-400 transition-all hover:border-zinc-600 hover:bg-zinc-700 hover:text-white active:scale-95"
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-white/[.07] bg-zinc-800 text-zinc-400 transition-all hover:border-white/[.12] hover:bg-zinc-700 hover:text-white active:scale-95"
               aria-label="Add external game"
             >
               <Plus className="h-4 w-4" />
@@ -224,15 +224,15 @@ export function DownBar() {
           onKeyDown={(e) => {
             if (e.key === "Enter" || e.key === " ") handleClick()
           }}
-          className="pointer-events-auto flex w-full max-w-xl cursor-pointer items-center gap-4 rounded-2xl border border-white/[.06] bg-zinc-900/95 px-4 py-3 text-sm text-zinc-200 shadow-[0_8px_32px_rgba(0,0,0,0.6)] backdrop-blur-2xl transition-all hover:border-zinc-700 hover:bg-zinc-800/95"
+          className="pointer-events-auto flex w-full max-w-xl cursor-pointer items-center gap-4 rounded-2xl border border-white/[.07] bg-zinc-900/95 px-4 py-3 text-sm text-zinc-200 shadow-[0_8px_32px_rgba(0,0,0,0.6)] backdrop-blur-2xl transition-all hover:border-white/[.12] hover:bg-zinc-800/95"
         >
           {/* Game Info */}
           <div className="min-w-0 flex items-center gap-3">
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-white/10 ring-1 ring-white/[.08]">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/10 ring-1 ring-white/[.07]">
               <Activity className="h-4 w-4 text-white" />
             </div>
             <div className="min-w-0">
-              <span className="block max-w-[140px] truncate text-sm font-semibold text-white">{displayName}</span>
+              <span className="block max-w-[140px] truncate text-sm font-bold text-white">{displayName}</span>
               <span className="block text-[11px] text-zinc-500">
                 {isPaused
                   ? `Paused${queuedCount > 0 ? ` · ${queuedCount} queued` : ""}`
@@ -250,7 +250,7 @@ export function DownBar() {
             <div className="flex-1">
               <Progress value={stats.progress} className="h-1.5 bg-zinc-800 [&_[data-slot=progress-indicator]]:bg-white" />
             </div>
-            <span className="shrink-0 text-xs font-medium tabular-nums text-zinc-400">{formatPercent(stats.progress)}</span>
+            <span className="shrink-0 text-xs font-mono font-bold tabular-nums text-zinc-400">{formatPercent(stats.progress)}</span>
           </div>
 
           {/* Actions */}
@@ -258,7 +258,7 @@ export function DownBar() {
             <button
               type="button"
               onClick={handleToggle}
-              className="flex h-8 w-8 items-center justify-center rounded-xl border border-white/[.06] bg-zinc-800 text-zinc-400 transition-all hover:border-zinc-600 hover:bg-zinc-700 hover:text-white active:scale-95"
+              className="flex h-8 w-8 items-center justify-center rounded-full border border-white/[.07] bg-zinc-800 text-zinc-400 transition-all hover:border-white/[.12] hover:bg-zinc-700 hover:text-white active:scale-95"
               aria-label={isPaused ? "Resume downloads" : "Pause downloads"}
             >
               {isPaused ? <Play className="h-4 w-4" /> : <PauseCircle className="h-4 w-4" />}
@@ -271,7 +271,7 @@ export function DownBar() {
                 if (e.nativeEvent) e.nativeEvent.stopImmediatePropagation()
                 setAddGameOpen(true)
               }}
-              className="flex h-8 w-8 items-center justify-center rounded-xl border border-white/[.06] bg-zinc-800 text-zinc-400 transition-all hover:border-zinc-600 hover:bg-zinc-700 hover:text-white active:scale-95"
+              className="flex h-8 w-8 items-center justify-center rounded-full border border-white/[.07] bg-zinc-800 text-zinc-400 transition-all hover:border-white/[.12] hover:bg-zinc-700 hover:text-white active:scale-95"
               aria-label="Add external game"
             >
               <Plus className="h-4 w-4" />
