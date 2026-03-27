@@ -17,6 +17,7 @@ type DownloadUpdatePayload = {
   totalBytes?: number
   speedBps?: number
   etaSeconds?: number | null
+  extractProgress?: number | null
   filename?: string
   savePath?: string
   appid?: string | null

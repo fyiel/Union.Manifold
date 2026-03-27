@@ -9,12 +9,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { PaginationBar } from "@/components/PaginationBar"
 import { useGamesData } from "@/hooks/use-games"
 import type { Game } from "@/lib/types"
-import { pickGameExecutable } from "@/lib/utils"
+import { pickGameExecutable, cn } from "@/lib/utils"
 import { useDownloads } from "@/context/downloads-context"
 import {
   Settings, Trash2, AlertTriangle, FolderOpen, ExternalLink, Unlink2,
   Pencil, Terminal, CheckSquare2, Tags, Layers3, Search, ArrowUpDown,
-  Library, X, Loader2, Check,
+  X, Loader2, Check,
 } from "lucide-react"
 import { ExePickerModal } from "@/components/ExePickerModal"
 import { EditGameMetadataModal } from "@/components/EditGameMetadataModal"
@@ -308,11 +308,22 @@ export function LibraryPage() {
 
   const failedAppIds = useMemo(() => {
     const ids = new Set<string>()
+    const activeOrQueuedAppIds = new Set<string>()
+
     for (const item of downloads) {
-      if ((item.status === "failed" || item.status === "extract_failed") && item.appid) ids.add(item.appid)
+      if (!item.appid) continue
+      if (["queued", "downloading", "paused", "extracting", "installing", "verifying", "retrying"].includes(item.status)) {
+        activeOrQueuedAppIds.add(item.appid)
+      }
+    }
+
+    for (const item of downloads) {
+      if ((item.status === "failed" || item.status === "extract_failed") && item.appid && !activeOrQueuedAppIds.has(item.appid)) {
+        ids.add(item.appid)
+      }
     }
     for (const [appid, meta] of Object.entries(installingMeta)) {
-      if (meta?.status === "failed") ids.add(appid)
+      if (meta?.status === "failed" && !activeOrQueuedAppIds.has(appid)) ids.add(appid)
     }
     return ids
   }, [downloads, installingMeta])
@@ -705,117 +716,126 @@ export function LibraryPage() {
 
   return (
     <div className="space-y-6">
-      <section className="glass-card overflow-hidden rounded-3xl p-6 sm:p-8">
-        <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_420px] xl:items-start">
-          <div className="space-y-4">
-            <div className="inline-flex items-center gap-2 rounded-full border border-white/[.07] bg-zinc-800 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-zinc-300">
-              <Library className="h-3.5 w-3.5" />
-              Installed collection
-            </div>
-            <div className="space-y-3">
-              <h1 className="text-4xl font-light tracking-tight text-white sm:text-5xl">Run your library like a launcher, not a file dump</h1>
-              <p className="max-w-3xl text-base leading-7 text-zinc-300">
-                Installed titles, active installs, tags, collections, and executable actions are now surfaced in a clearer desktop workflow.
-              </p>
-            </div>
-          </div>
-
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="rounded-2xl border border-white/[.07] bg-zinc-900/60 p-4">
-              <div className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">Installed</div>
-              <div className="mt-2 text-3xl font-bold text-white">{installedWithMeta.length}</div>
-              <p className="mt-1 text-sm text-zinc-500">Titles ready to launch or organize.</p>
-            </div>
-            <div className="rounded-2xl border border-white/[.07] bg-zinc-900/60 p-4">
-              <div className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">In progress</div>
-              <div className="mt-2 text-3xl font-bold text-white">{visibleInstalling.length}</div>
-              <p className="mt-1 text-sm text-zinc-500">Downloads or installs still moving.</p>
-            </div>
-            <div className="rounded-2xl border border-white/[.07] bg-zinc-900/60 p-4">
-              <div className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">Collections</div>
-              <div className="mt-2 text-3xl font-bold text-white">{availableCollections.length}</div>
-              <p className="mt-1 text-sm text-zinc-500">Custom shelves available in your local library.</p>
-            </div>
-            <div className="rounded-2xl border border-white/[.07] bg-zinc-900/60 p-4">
-              <div className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">Tags</div>
-              <div className="mt-2 text-3xl font-bold text-white">{availableTags.length}</div>
-              <p className="mt-1 text-sm text-zinc-500">Fast labels for filtering and batch actions.</p>
-            </div>
-          </div>
+      <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight text-white">Library</h1>
+          <p className="mt-1 text-sm text-zinc-500">
+            {loading ? "Loading..." : `${installedWithMeta.length} installed${visibleInstalling.length > 0 ? ` · ${visibleInstalling.length} in progress` : ""}`}
+          </p>
         </div>
-      </section>
+        {!loading && (availableCollections.length > 0 || availableTags.length > 0) && (
+          <div className="flex items-center gap-2 flex-wrap">
+            {availableCollections.length > 0 && (
+              <span className="border border-white/[.07] bg-zinc-800/60 text-zinc-400 text-xs font-medium px-3 py-1 rounded-full">
+                {availableCollections.length} {availableCollections.length === 1 ? "collection" : "collections"}
+              </span>
+            )}
+            {availableTags.length > 0 && (
+              <span className="border border-white/[.07] bg-zinc-800/60 text-zinc-400 text-xs font-medium px-3 py-1 rounded-full">
+                {availableTags.length} {availableTags.length === 1 ? "tag" : "tags"}
+              </span>
+            )}
+          </div>
+        )}
+      </header>
 
       <div className="grid gap-6 xl:grid-cols-[280px_minmax(0,1fr)]">
         <aside className="hidden xl:block">
-          <div className="sticky top-6 space-y-5 rounded-2xl border border-white/[.07] bg-zinc-900/80 p-5">
-            <div>
-              <div className="text-[11px] font-semibold uppercase tracking-[0.24em] text-zinc-600">Control rail</div>
-              <div className="mt-2 text-lg font-semibold text-white">Filter and sort</div>
-              <div className="mt-1 text-sm text-zinc-500">Refine the launcher view without leaving the library.</div>
-            </div>
+          <div className="sticky top-6 rounded-2xl border border-white/[.07] bg-zinc-900/60 overflow-hidden">
+            <div className="p-4 space-y-5">
+              <div className="space-y-1.5">
+                <span className="section-label">Sort</span>
+                <Select value={sortMode} onValueChange={(value) => setSortMode(value as 'name' | 'recent-install' | 'recent-play')}>
+                  <SelectTrigger className="h-9 rounded-xl border-white/[.07] bg-zinc-800/50 text-sm text-zinc-300">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="name">Name</SelectItem>
+                    <SelectItem value="recent-install">Recently installed</SelectItem>
+                    <SelectItem value="recent-play">Recently played</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
 
-            <div className="rounded-2xl border border-white/[.07] bg-zinc-900/40 p-4 text-sm text-zinc-300">
-              <div>{filteredInstalled.length} visible of {installedWithMeta.length} installed</div>
-              {visibleInstalling.length > 0 && <div className="mt-1 text-zinc-500">{visibleInstalling.length} still installing</div>}
-            </div>
+              <div className="h-px bg-white/[.05]" />
 
-            <div className="space-y-2">
-              <label className="text-[10px] font-semibold uppercase tracking-[0.24em] text-zinc-500">Sort by</label>
-              <Select value={sortMode} onValueChange={(value) => setSortMode(value as 'name' | 'recent-install' | 'recent-play')}>
-                <SelectTrigger className="h-10 rounded-2xl border-white/[.07] bg-zinc-900/40 text-sm">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="name">Name</SelectItem>
-                  <SelectItem value="recent-install">Recently installed</SelectItem>
-                  <SelectItem value="recent-play">Recently played</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-[10px] font-semibold uppercase tracking-[0.24em] text-zinc-500">Collections</label>
-              <button
-                type="button"
-                onClick={() => setSelectedCollection("all")}
-                className={`w-full rounded-2xl px-3 py-2 text-left text-sm transition-colors ${selectedCollection === "all" ? "bg-zinc-800 text-white" : "text-zinc-400 hover:bg-white/[.03] hover:text-zinc-100"}`}
-              >
-                All games
-              </button>
-              {availableCollections.map((collection) => (
+              <div className="space-y-0.5">
+                <span className="section-label mb-2 block">Collections</span>
                 <button
-                  key={collection}
                   type="button"
-                  onClick={() => setSelectedCollection(selectedCollection === collection ? "all" : collection)}
-                  className={`w-full truncate rounded-2xl px-3 py-2 text-left text-sm transition-colors ${selectedCollection === collection ? "bg-zinc-800 text-white" : "text-zinc-400 hover:bg-white/[.03] hover:text-zinc-100"}`}
+                  onClick={() => setSelectedCollection("all")}
+                  className={cn(
+                    "w-full rounded-lg px-3 py-1.5 text-left text-sm transition-all duration-150 active:scale-95",
+                    selectedCollection === "all"
+                      ? "bg-white text-black font-medium"
+                      : "text-zinc-400 hover:bg-white/[.04] hover:text-zinc-200"
+                  )}
                 >
-                  {collection}
+                  All games
                 </button>
-              ))}
-              {availableCollections.length === 0 && <p className="px-1 text-[11px] italic text-zinc-600">No collections yet</p>}
-            </div>
+                {availableCollections.map((collection) => (
+                  <button
+                    key={collection}
+                    type="button"
+                    onClick={() => setSelectedCollection(selectedCollection === collection ? "all" : collection)}
+                    className={cn(
+                      "w-full truncate rounded-lg px-3 py-1.5 text-left text-sm transition-all duration-150 active:scale-95",
+                      selectedCollection === collection
+                        ? "bg-white text-black font-medium"
+                        : "text-zinc-400 hover:bg-white/[.04] hover:text-zinc-200"
+                    )}
+                  >
+                    {collection}
+                  </button>
+                ))}
+                {availableCollections.length === 0 && (
+                  <p className="px-3 py-1 text-[11px] text-zinc-600">None yet</p>
+                )}
+              </div>
 
-            <div className="space-y-2">
-              <label className="text-[10px] font-semibold uppercase tracking-[0.24em] text-zinc-500">Tags</label>
-              <button
-                type="button"
-                onClick={() => setSelectedTag("all")}
-                className={`w-full rounded-2xl px-3 py-2 text-left text-sm transition-colors ${selectedTag === "all" ? "bg-zinc-800 text-white" : "text-zinc-400 hover:bg-white/[.03] hover:text-zinc-100"}`}
-              >
-                All tags
-              </button>
-              {availableTags.map((tag) => (
+              <div className="h-px bg-white/[.05]" />
+
+              <div className="space-y-0.5">
+                <span className="section-label mb-2 block">Tags</span>
                 <button
-                  key={tag}
                   type="button"
-                  onClick={() => setSelectedTag(selectedTag === tag ? "all" : tag)}
-                  className={`w-full truncate rounded-2xl px-3 py-2 text-left text-sm transition-colors ${selectedTag === tag ? "bg-zinc-800 text-white" : "text-zinc-400 hover:bg-white/[.03] hover:text-zinc-100"}`}
+                  onClick={() => setSelectedTag("all")}
+                  className={cn(
+                    "w-full rounded-lg px-3 py-1.5 text-left text-sm transition-all duration-150 active:scale-95",
+                    selectedTag === "all"
+                      ? "bg-white text-black font-medium"
+                      : "text-zinc-400 hover:bg-white/[.04] hover:text-zinc-200"
+                  )}
                 >
-                  #{tag}
+                  All tags
                 </button>
-              ))}
-              {availableTags.length === 0 && <p className="px-1 text-[11px] italic text-zinc-600">No tags yet</p>}
+                {availableTags.map((tag) => (
+                  <button
+                    key={tag}
+                    type="button"
+                    onClick={() => setSelectedTag(selectedTag === tag ? "all" : tag)}
+                    className={cn(
+                      "w-full truncate rounded-lg px-3 py-1.5 text-left text-sm transition-all duration-150 active:scale-95",
+                      selectedTag === tag
+                        ? "bg-white text-black font-medium"
+                        : "text-zinc-400 hover:bg-white/[.04] hover:text-zinc-200"
+                    )}
+                  >
+                    #{tag}
+                  </button>
+                ))}
+                {availableTags.length === 0 && (
+                  <p className="px-3 py-1 text-[11px] text-zinc-600">None yet</p>
+                )}
+              </div>
             </div>
+            {(selectedCollection !== "all" || selectedTag !== "all" || filteredInstalled.length !== installedWithMeta.length) && (
+              <div className="border-t border-white/[.05] px-4 py-2.5">
+                <p className="text-[11px] text-zinc-500">
+                  {filteredInstalled.length} of {installedWithMeta.length} shown
+                </p>
+              </div>
+            )}
           </div>
         </aside>
 
@@ -881,7 +901,7 @@ export function LibraryPage() {
             <Button
               variant={selectionMode ? "secondary" : "outline"}
               size="sm"
-              className="h-10 rounded-2xl"
+              className="h-10 rounded-full"
               onClick={() => {
                 const nextMode = !selectionMode
                 setSelectionMode(nextMode)

@@ -48,6 +48,7 @@ export type DownloadItem = {
   totalBytes: number
   speedBps: number
   etaSeconds: number | null
+  extractProgress?: number | null
   savePath?: string
   resumeData?: {
     urlChain?: string[]
@@ -71,6 +72,7 @@ type DownloadUpdate = {
   totalBytes?: number
   speedBps?: number
   etaSeconds?: number | null
+  extractProgress?: number | null
   filename?: string
   savePath?: string
   appid?: string | null
@@ -84,6 +86,9 @@ type DownloadUpdate = {
 
 type DownloadsContextValue = {
   downloads: DownloadItem[]
+}
+
+type DownloadsActionsValue = {
   startGameDownload: (game: Game, preferredHost?: PreferredDownloadHost, config?: DownloadConfig) => Promise<void>
   cancelDownload: (downloadId: string) => Promise<void>
   cancelGroup: (appid: string) => Promise<void>
@@ -98,6 +103,7 @@ type DownloadsContextValue = {
 }
 
 const DownloadsContext = createContext<DownloadsContextValue | null>(null)
+const DownloadsActionsContext = createContext<DownloadsActionsValue | null>(null)
 type DownloadsStore = {
   subscribe: (listener: () => void) => () => void
   getSnapshot: () => DownloadItem[]
@@ -165,6 +171,7 @@ function createSyntheticDownloadFromUpdate(update: DownloadUpdate): DownloadItem
     totalBytes: update.totalBytes || 0,
     speedBps: update.speedBps || 0,
     etaSeconds: update.etaSeconds ?? null,
+    extractProgress: update.extractProgress ?? null,
     savePath: update.savePath,
     startedAt: Date.now(),
     error: update.error ?? null,
@@ -209,6 +216,7 @@ function createSyntheticDownloadFromInstallingManifest(
     totalBytes: 0,
     speedBps: 0,
     etaSeconds: null,
+    extractProgress: null,
     startedAt: manifest?.updatedAt || Date.now(),
     error: manifest?.installError || (status === "failed" ? "Installation was interrupted. Start it again." : null),
   }
@@ -258,9 +266,14 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
     }
   })
 
+  const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
   useEffect(() => {
     if (typeof window === "undefined") return
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(downloads))
+    if (persistTimerRef.current) clearTimeout(persistTimerRef.current)
+    persistTimerRef.current = setTimeout(() => {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(downloads))
+    }, 1500)
   }, [downloads])
 
   const downloadsRef = useRef(downloads)
@@ -274,6 +287,8 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
   const preparingRef = useRef(new Set<string>())
   const sequenceLocksRef = useRef(new Set<string>())
   const reconcileLocksRef = useRef(new Set<string>())
+  const pendingProgressRef = useRef<Map<string, DownloadUpdate>>(new Map())
+  const progressFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const reconcileInstalledState = useCallback(
     async (appid?: string | null) => {
@@ -578,7 +593,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         return
       }
       const hasActive = downloadsRef.current.some((item) =>
-        ["downloading", "extracting", "installing", "verifying", "retrying"].includes(item.status)
+        ["downloading", "verifying", "retrying"].includes(item.status)
       )
       if (hasActive) return
 
@@ -592,6 +607,11 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         })
       if (!queued.length) return
       const next = queued[0]
+      // Don't start a queued item if a different appid has paused downloads.
+      // This prevents a new game from auto-starting while the user has paused another one.
+      const pausedAppids = new Set(downloadsRef.current.filter((i) => i.status === "paused").map((i) => i.appid))
+      if (pausedAppids.size > 0 && !pausedAppids.has(next.appid)) return
+
       sequenceLocksRef.current.add(next.appid)
 
       try {
@@ -686,6 +706,37 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!window.ucDownloads?.onUpdate) return
     return window.ucDownloads.onUpdate((update: DownloadUpdate) => {
+      // Batch pure "downloading" progress events to cap re-renders at ~5fps during active downloads
+      const existingItem = downloadsRef.current.find((item) => item.id === update.downloadId)
+      if (existingItem?.status === "downloading" && update.status === "downloading") {
+        pendingProgressRef.current.set(update.downloadId, update)
+        if (!progressFlushTimerRef.current) {
+          progressFlushTimerRef.current = setTimeout(() => {
+            progressFlushTimerRef.current = null
+            const batch = new Map(pendingProgressRef.current)
+            pendingProgressRef.current.clear()
+            setDownloads((prev) => {
+              let next = prev
+              for (const [, u] of batch) {
+                const idx = next.findIndex((item) => item.id === u.downloadId)
+                if (idx === -1) continue
+                if (next === prev) next = [...prev]
+                next[idx] = {
+                  ...next[idx],
+                  receivedBytes: u.receivedBytes ?? next[idx].receivedBytes,
+                  totalBytes: u.totalBytes ?? next[idx].totalBytes,
+                  speedBps: u.speedBps ?? next[idx].speedBps,
+                  etaSeconds: u.etaSeconds ?? next[idx].etaSeconds,
+                  savePath: u.savePath ?? next[idx].savePath,
+                }
+              }
+              if (next !== prev) downloadsRef.current = next
+              return next
+            })
+          }, 200)
+        }
+        return
+      }
       let nextDownloads: DownloadItem[] | null = null
       setDownloads((prev) => {
         const idx = prev.findIndex((item) => item.id === update.downloadId)
@@ -721,6 +772,12 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
           totalBytes: update.totalBytes ?? existing.totalBytes,
           speedBps: isEnteringTerminal ? 0 : (update.speedBps ?? existing.speedBps),
           etaSeconds: isEnteringTerminal ? null : (update.etaSeconds ?? existing.etaSeconds),
+          extractProgress:
+            finalStatus === "extracting" || finalStatus === "installing"
+              ? (update.extractProgress ?? existing.extractProgress ?? null)
+              : finalStatus === "completed" || finalStatus === "extracted"
+                ? 100
+                : null,
           filename: update.filename ?? existing.filename,
           savePath: update.savePath ?? existing.savePath,
           url: update.url ?? existing.url,
@@ -766,7 +823,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const hasActive = downloads.some((item) =>
-      ["downloading", "extracting", "installing", "verifying", "retrying"].includes(item.status)
+      ["downloading", "verifying", "retrying"].includes(item.status)
     )
     if (hasActive) return
     const hasQueued = downloads.some((item) => item.status === "queued")
@@ -930,6 +987,12 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         return next
       })
 
+      // Clear any stale failed/cancelled manifest state when a fresh queue starts.
+      // The Library page reads install manifests, so this must be updated immediately.
+      try {
+        await window.ucDownloads?.setInstallingStatus?.(game.appid, "queued", null)
+      } catch { }
+
       void prefetchPartSizes(host, queue.map((item) => ({ id: item.downloadId, url: item.sourceUrl })))
       void startNextQueuedPart()
     } catch (err) {
@@ -943,7 +1006,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
   }, [startNextQueuedPart])
 
   const cancelDownload = useCallback(async (downloadId: string) => {
-    const download = downloads.find((d) => d.id === downloadId)
+    const download = downloadsRef.current.find((d) => d.id === downloadId)
     if (window.ucDownloads?.cancel) {
       await window.ucDownloads.cancel(downloadId)
     }
@@ -957,12 +1020,12 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         item.id === downloadId ? { ...item, status: "cancelled", error: "Cancelled" } : item
       )
     )
-  }, [downloads])
+  }, [])
 
   const cancelGroup = useCallback(async (appid: string) => {
     if (!appid) return
     // cancel all downloads with matching appid
-    const toCancel = downloads.filter((d) => d.appid === appid).map((d) => d.id)
+    const toCancel = downloadsRef.current.filter((d) => d.appid === appid).map((d) => d.id)
     for (const id of toCancel) {
       try {
         if (window.ucDownloads?.cancel) await window.ucDownloads.cancel(id)
@@ -978,7 +1041,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         item.appid === appid ? { ...item, status: "cancelled", error: "Cancelled" } : item
       )
     )
-  }, [downloads])
+  }, [])
 
   const pauseDownload = useCallback(async (downloadId: string) => {
     if (window.ucDownloads?.pause) {
@@ -1000,7 +1063,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
 
   const resumeDownload = useCallback(
     async (downloadId: string) => {
-      const target = downloads.find((item) => item.id === downloadId)
+      const target = downloadsRef.current.find((item) => item.id === downloadId)
       if (!target) return
 
       downloadLogger.info("Resume attempt", { data: { downloadId, host: target.host, status: target.status, hasResumeData: Boolean(target.resumeData?.offset) } })
@@ -1241,7 +1304,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         }
       }
     },
-    [downloads, resolveFreshResumeSource]
+    [resolveFreshResumeSource]
   )
 
   const resumeGroup = useCallback(
@@ -1336,9 +1399,8 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
     []
   )
 
-  const value = useMemo(
+  const actionsValue = useMemo<DownloadsActionsValue>(
     () => ({
-      downloads,
       startGameDownload,
       cancelDownload,
       cancelGroup,
@@ -1352,22 +1414,35 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
       clearByAppid,
       clearCompleted,
     }),
-    [downloads, startGameDownload, cancelDownload, cancelGroup, pauseDownload, resumeDownload, resumeGroup, showInFolder, openPath, clearByAppid, clearCompleted]
+    [startGameDownload, cancelDownload, cancelGroup, pauseDownload, resumeDownload, resumeGroup, showInFolder, openPath, clearByAppid, clearCompleted]
   )
+
+  const dataValue = useMemo(() => ({ downloads }), [downloads])
 
   return (
     <DownloadsStoreContext.Provider value={store}>
-      <DownloadsContext.Provider value={value}>{children}</DownloadsContext.Provider>
+      <DownloadsActionsContext.Provider value={actionsValue}>
+        <DownloadsContext.Provider value={dataValue}>{children}</DownloadsContext.Provider>
+      </DownloadsActionsContext.Provider>
     </DownloadsStoreContext.Provider>
   )
 }
 
 export function useDownloads() {
-  const context = useContext(DownloadsContext)
-  if (!context) {
+  const data = useContext(DownloadsContext)
+  const actions = useContext(DownloadsActionsContext)
+  if (!data || !actions) {
     throw new Error("useDownloads must be used within DownloadsProvider")
   }
-  return context
+  return { downloads: data.downloads, ...actions }
+}
+
+export function useDownloadsActions() {
+  const actions = useContext(DownloadsActionsContext)
+  if (!actions) {
+    throw new Error("useDownloadsActions must be used within DownloadsProvider")
+  }
+  return actions
 }
 
 export function useDownloadsSelector<T>(

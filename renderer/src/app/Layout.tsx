@@ -7,6 +7,7 @@ import ScrollProgress from "@/components/ScrollProgress"
 import { UpdateNotification } from "@/components/UpdateNotification"
 import { useDiscordRpcPresence } from "@/hooks/use-discord-rpc"
 import { useAppPreferencesSync } from "@/hooks/use-app-preferences-sync"
+import { cn } from "@/lib/utils"
 
 export function AppLayout() {
   useDiscordRpcPresence()
@@ -14,6 +15,9 @@ export function AppLayout() {
   const location = useLocation()
   const scrollContainerRef = useRef<HTMLDivElement | null>(null)
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try { return localStorage.getItem("uc_sidebar_collapsed") === "true" } catch { return false }
+  })
 
   useEffect(() => {
     if (location.hash) return
@@ -24,10 +28,26 @@ export function AppLayout() {
     setMobileNavOpen(false)
   }, [location.pathname])
 
+  const handleToggleCollapse = () => {
+    setSidebarCollapsed((prev) => {
+      const next = !prev
+      try { localStorage.setItem("uc_sidebar_collapsed", String(next)) } catch {}
+      return next
+    })
+  }
+
   return (
     <div className="relative h-screen w-full overflow-hidden bg-zinc-950 text-zinc-100">
-      <Sidebar mobileOpen={mobileNavOpen} onClose={() => setMobileNavOpen(false)} />
-      <div className="relative flex h-full min-h-0 flex-col md:pl-[16rem]">
+      <Sidebar
+        mobileOpen={mobileNavOpen}
+        onClose={() => setMobileNavOpen(false)}
+        collapsed={sidebarCollapsed}
+        onToggleCollapse={handleToggleCollapse}
+      />
+      <div className={cn(
+        "relative flex h-full min-h-0 flex-col transition-[padding] duration-300 ease-in-out",
+        sidebarCollapsed ? "md:pl-[64px]" : "md:pl-[16rem]"
+      )}>
         <div className="flex-none z-40">
           <TopBar onOpenMenu={() => setMobileNavOpen(true)} />
         </div>
