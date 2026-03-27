@@ -8,13 +8,13 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { ErrorMessage } from "@/components/ErrorMessage"
 import { AnimatedCounter } from "@/components/AnimatedCounter"
 import { OfflineBanner } from "@/components/OfflineBanner"
+import { HeroSlider } from "@/components/HeroSlider"
 import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious } from "@/components/ui/carousel"
 import { PaginationBar } from "@/components/PaginationBar"
 import { apiUrl } from "@/lib/api"
-import { getLauncherHomeMeta } from "@/lib/navigation"
 import { formatNumber, generateErrorCode, ErrorTypes } from "@/lib/utils"
 import { useOnlineStatus } from "@/hooks/use-online-status"
-import { ArrowRight, Search } from "lucide-react"
+import { ArrowRight } from "lucide-react"
 
 const extractDeveloper = (description: string): string => {
   const developerMatch = description.match(/(?:by|from|developer|dev|studio)\s+([^.,\n]+)/i)
@@ -405,152 +405,64 @@ export function LauncherPage() {
 
   const displayTotalSizeTB = (stats as any).totalSizeTB ?? 0
   const displayTotalSizeGB = (stats as any).totalSizeGB ?? Math.round(displayTotalSizeTB * 1024 * 10) / 10
-  const launcherMeta = getLauncherHomeMeta()
-
-  const spotlightLockRef = useRef<Game | null>(null)
-  const spotlightGame = useMemo(() => {
-    const candidate = recentlyInstalledGames[0] || popularReleases[0] || newReleases[0] || featuredGames[0] || null
-    if (!spotlightLockRef.current && candidate) {
-      spotlightLockRef.current = candidate
-    }
-    return spotlightLockRef.current
-  }, [featuredGames, newReleases, popularReleases, recentlyInstalledGames])
-
-  const spotlightStats = spotlightGame ? gameStats[spotlightGame.appid] : undefined
 
   return (
     <div className="space-y-10 pb-4">
-      <section
-        id="hero"
-        className="glass-card relative overflow-hidden rounded-3xl p-6 sm:p-8 xl:p-10"
-      >
-        <div className="relative grid gap-8 xl:grid-cols-[minmax(0,1.2fr)_380px] xl:items-stretch">
-          <div className="space-y-8">
-            <div className="inline-flex items-center gap-2 rounded-full border border-white/[.07] bg-zinc-800 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-zinc-300 anim">
-              <launcherMeta.icon className="h-3.5 w-3.5" />
-              {launcherMeta.eyebrow}
-            </div>
+      {/* Full-width hero slider */}
+      <HeroSlider games={games} gameStats={gameStats} loading={loading} />
 
-            <div className="max-w-4xl space-y-4 anim anim-d1">
-              <h1 className="max-w-3xl text-4xl font-light tracking-tight text-white sm:text-5xl xl:text-6xl">
-                {launcherMeta.title}
-              </h1>
-            </div>
-
-            <div className="grid gap-3 sm:grid-cols-3 anim anim-d2">
-              <div className="rounded-2xl border border-white/[.07] bg-zinc-900/60 p-4">
-                <div className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">Catalogue</div>
-                <div className="mt-2 text-3xl font-bold text-white">
-                  {stats.totalGames === 0 ? "?" : <AnimatedCounter value={stats.totalGames} format={formatNumber} />}
-                </div>
-              </div>
-              <div className="rounded-2xl border border-white/[.07] bg-zinc-900/60 p-4">
-                <div className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">Downloads</div>
-                <div className="mt-2 text-3xl font-bold text-white">
-                  {stats.totalDownloads === 0 ? "?" : <AnimatedCounter value={stats.totalDownloads} format={formatNumber} />}
-                </div>
-              </div>
-              <div className="rounded-2xl border border-white/[.07] bg-zinc-900/60 p-4">
-                <div className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">Storage</div>
-                <div className="mt-2 text-3xl font-bold text-white">
-                  {displayTotalSizeGB >= 1024 ? (
-                    <AnimatedCounter value={displayTotalSizeTB} suffix="TB" />
-                  ) : displayTotalSizeGB && displayTotalSizeGB > 0 ? (
-                    <AnimatedCounter value={displayTotalSizeGB} suffix="GB" />
-                  ) : (
-                    "?"
-                  )}
-                </div>
-              </div>
-            </div>
-
-            <div className="flex flex-col gap-3 sm:flex-row">
-              <Button
-                size="lg"
-                className="h-11 rounded-full bg-white px-6 text-sm font-medium text-black hover:bg-zinc-200 active:scale-95"
-                onClick={() => navigate("/library")}
-              >
-                Open library
-              </Button>
-              <Button
-                size="lg"
-                variant="outline"
-                className="h-11 rounded-full border-zinc-700 px-6 text-sm font-medium text-zinc-200 hover:border-zinc-500 hover:text-white active:scale-95"
-                onClick={() => typeof window !== "undefined" && window.dispatchEvent(new Event("uc_open_search_popup"))}
-              >
-                Search catalogue
-              </Button>
-              <Button
-                size="lg"
-                variant="ghost"
-                className="h-11 rounded-full px-6 text-sm font-medium text-zinc-400 hover:bg-white/[.03] hover:text-white active:scale-95"
-                onClick={() => navigate("/downloads")}
-              >
-                View activity
-              </Button>
-            </div>
-          </div>
-
-          <div className="relative flex h-full flex-col rounded-2xl border border-white/[.07] bg-zinc-900/60 p-4">
-            <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-[0.24em] text-zinc-500">
-              <span>Spotlight</span>
-              <span>{spotlightStats?.downloads ? `${formatNumber(spotlightStats.downloads)} dl` : "Fresh pick"}</span>
-            </div>
-
-            {spotlightGame ? (
-              <>
-                <button
-                  type="button"
-                  onClick={() => navigate(`/game/${spotlightGame.appid}`)}
-                  className="mt-4 overflow-hidden rounded-2xl border border-white/[.07] bg-zinc-900 text-left transition hover:border-zinc-600"
-                >
-                  <div className="aspect-[16/9] overflow-hidden bg-zinc-900">
-                    <img
-                      src={spotlightGame.image || "./banner.png"}
-                      alt={spotlightGame.name}
-                      className="h-full w-full object-cover transition duration-700 hover:scale-105"
-                      loading="lazy"
-                    />
-                  </div>
-                  <div className="space-y-3 p-4">
-                    <div className="text-lg font-semibold text-white">{spotlightGame.name}</div>
-                    <div className="flex flex-wrap gap-2">
-                      {(spotlightGame.genres || []).slice(0, 3).map((genre) => (
-                        <span
-                          key={genre}
-                          className="rounded-full border border-white/[.07] bg-zinc-800 px-2.5 py-1 text-[11px] font-medium uppercase tracking-wider text-zinc-300"
-                        >
-                          {genre}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                </button>
-
-                <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
-                  <button
-                    type="button"
-                    onClick={() => navigate(`/game/${spotlightGame.appid}`)}
-                    className="flex items-center justify-between rounded-2xl border border-white/[.07] bg-zinc-800/50 px-4 py-3 text-left transition hover:bg-zinc-700/50 active:scale-95"
-                  >
-                    <div className="text-sm font-medium text-white">Open game page</div>
-                    <ArrowRight className="h-4 w-4 text-zinc-500" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => document.getElementById("featured")?.scrollIntoView({ behavior: "smooth" })}
-                    className="flex items-center justify-between rounded-2xl border border-white/[.07] bg-zinc-800/50 px-4 py-3 text-left transition hover:bg-zinc-700/50 active:scale-95"
-                  >
-                    <div className="text-sm font-medium text-white">Browse catalogue</div>
-                    <Search className="h-4 w-4 text-zinc-500" />
-                  </button>
-                </div>
-              </>
+      {/* Stats row */}
+      <section className="grid grid-cols-2 gap-3 sm:grid-cols-4 anim anim-d1">
+        <div className="rounded-2xl border border-white/[.07] bg-zinc-900/60 p-4">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-500">Catalogue</div>
+          <div className="mt-2 text-2xl font-bold text-white">
+            {stats.totalGames === 0 ? (
+              <span className="text-zinc-600">—</span>
             ) : (
-              <div className="mt-4 flex flex-1 items-center justify-center rounded-2xl border border-dashed border-white/[.07] bg-zinc-900/40 p-6 text-center text-sm text-zinc-500">
-                Loading...
-              </div>
+              <AnimatedCounter value={stats.totalGames} format={formatNumber} />
             )}
+          </div>
+        </div>
+        <div className="rounded-2xl border border-white/[.07] bg-zinc-900/60 p-4">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-500">Downloads</div>
+          <div className="mt-2 text-2xl font-bold text-white">
+            {stats.totalDownloads === 0 ? (
+              <span className="text-zinc-600">—</span>
+            ) : (
+              <AnimatedCounter value={stats.totalDownloads} format={formatNumber} />
+            )}
+          </div>
+        </div>
+        <div className="rounded-2xl border border-white/[.07] bg-zinc-900/60 p-4">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-500">Storage</div>
+          <div className="mt-2 text-2xl font-bold text-white">
+            {displayTotalSizeGB >= 1024 ? (
+              <AnimatedCounter value={displayTotalSizeTB} suffix="TB" />
+            ) : displayTotalSizeGB > 0 ? (
+              <AnimatedCounter value={displayTotalSizeGB} suffix="GB" />
+            ) : (
+              <span className="text-zinc-600">—</span>
+            )}
+          </div>
+        </div>
+        <div className="rounded-2xl border border-white/[.07] bg-zinc-900/60 p-4 flex flex-col justify-between">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-500">Quick access</div>
+          <div className="mt-3 flex flex-col gap-1.5">
+            <Button
+              size="sm"
+              className="w-full rounded-full bg-white text-[12px] font-semibold text-black hover:bg-zinc-200 active:scale-95"
+              onClick={() => navigate("/library")}
+            >
+              My Library
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="w-full rounded-full text-[12px] text-zinc-400 hover:bg-white/[.04] hover:text-white active:scale-95"
+              onClick={() => typeof window !== "undefined" && window.dispatchEvent(new Event("uc_open_search_popup"))}
+            >
+              Search
+            </Button>
           </div>
         </div>
       </section>
