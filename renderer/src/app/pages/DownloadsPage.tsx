@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react"
-import { useDownloads } from "@/context/downloads-context"
+import { useDownloads, type DownloadItem } from "@/context/downloads-context"
 import { useNavigate } from "react-router-dom"
 import { useGamesData } from "@/hooks/use-games"
 import { Badge } from "@/components/ui/badge"
@@ -102,6 +102,7 @@ function computeGroupStats(
     totalBytes: number
     receivedBytes: number
     speedBps: number
+    extractProgress?: number | null
     filename: string
     partIndex?: number
     partTotal?: number
@@ -168,7 +169,13 @@ function computeGroupStats(
   }
   const effectiveSpeed = phase === "extracting" || phase === "installing" || phase === "paused" ? 0 : speedBps
   const etaSeconds = totalBytes > 0 && effectiveSpeed > 0 ? (totalBytes - receivedBytes) / effectiveSpeed : null
-  const progress = totalBytes > 0 ? (receivedBytes / totalBytes) * 100 : 0
+  const extractionSamples = activeItems
+    .map((item) => item.extractProgress)
+    .filter((value): value is number => typeof value === "number" && Number.isFinite(value))
+  const extractionProgress = extractionSamples.length
+    ? Math.max(0, Math.min(100, Math.max(...extractionSamples)))
+    : null
+  const progress = extractionProgress ?? (totalBytes > 0 ? (receivedBytes / totalBytes) * 100 : 0)
 
   return {
     totalBytes,
@@ -176,6 +183,7 @@ function computeGroupStats(
     speedBps: effectiveSpeed,
     etaSeconds,
     progress,
+    extractionProgress,
     phase,
     overallTotalBytes,
     overallReceivedBytes,
@@ -219,6 +227,15 @@ function getPartIndex(filename: string, index: number, total: number, partIndex?
 }
 
 const ACTIVE_DOWNLOAD_STATUSES = ["downloading", "paused", "extracting", "installing", "verifying", "retrying"]
+
+function getGroupPriority(items: DownloadItem[]) {
+  if (items.some((item) => ["downloading", "verifying", "retrying"].includes(item.status))) return 0
+  if (items.some((item) => ["extracting", "installing"].includes(item.status))) return 1
+  if (items.some((item) => item.status === "paused")) return 2
+  if (items.some((item) => item.status === "queued")) return 3
+  if (items.some((item) => ["completed", "extracted"].includes(item.status))) return 4
+  return 5
+}
 const INSTALL_READY_STATUS = "install_ready"
 
 export function DownloadsPage() {
@@ -245,14 +262,16 @@ export function DownloadsPage() {
     }, {})
   }, [downloads])
 
-  const activeGroups = Object.values(grouped).filter((items) => {
-    const hasActive = items.some((item) => ACTIVE_DOWNLOAD_STATUSES.includes(item.status))
-    const hasCompletedAndQueued = items.some((item) => ["completed", "extracted"].includes(item.status)) && items.some((item) => item.status === "queued")
-    return hasActive || hasCompletedAndQueued
-  })
-  const queuedGroups = Object.values(grouped).filter((items) =>
-    items.every((item) => item.status === "queued")
-  )
+  const activeGroups = Object.values(grouped)
+    .filter((items) => {
+      const hasActive = items.some((item) => ACTIVE_DOWNLOAD_STATUSES.includes(item.status))
+      const hasCompletedAndQueued = items.some((item) => ["completed", "extracted"].includes(item.status)) && items.some((item) => item.status === "queued")
+      return hasActive || hasCompletedAndQueued
+    })
+    .sort((left, right) => getGroupPriority(left) - getGroupPriority(right))
+  const queuedGroups = Object.values(grouped)
+    .filter((items) => items.every((item) => item.status === "queued"))
+    .sort((left, right) => getGroupPriority(left) - getGroupPriority(right))
   const installReadyGroups = Object.values(grouped).filter((items) =>
     items.some((item) => item.status === INSTALL_READY_STATUS)
   )
@@ -264,9 +283,11 @@ export function DownloadsPage() {
   )
 
   const primaryGroup = activeGroups[0] || queuedGroups[0]
+  const secondaryActiveGroups = primaryGroup ? activeGroups.slice(1) : activeGroups
   const primaryGame = primaryGroup ? games.find((game) => game.appid === primaryGroup[0]?.appid) : null
   const primaryIsInstalling = primaryGroup ? primaryGroup.some((it) => it.status === 'installing' || it.status === 'extracting') : false
   const primaryIsPaused = primaryGroup ? primaryGroup.some((it) => it.status === 'paused') : false
+  const primaryCanPause = primaryGroup ? primaryGroup.some((it) => it.status === 'downloading' || it.status === 'retrying') : false
 
   const currentAppId = primaryGroup?.[0]?.appid ?? null
   const [networkHistory, setNetworkHistory] = useState<number[]>(
@@ -737,31 +758,6 @@ export function DownloadsPage() {
                         alt={primaryGroup[0]?.gameName || "Download"}
                         className="h-full w-full object-cover"
                       />
-                      {/* Status Indicator */}
-                      <div className="absolute bottom-2 left-2">
-                        <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
-                          primaryStats?.phase === "paused" 
-                            ? "bg-amber-500/20 text-amber-400 ring-1 ring-amber-500/30"
-                            : primaryStats?.phase === "installing" || primaryStats?.phase === "extracting"
-                              ? "bg-blue-500/20 text-blue-400 ring-1 ring-blue-500/30"
-                              : "bg-white/10 text-white ring-1 ring-white/20"
-                        }`}>
-                          <span className={`h-1.5 w-1.5 rounded-full ${
-                            primaryStats?.phase === "paused"
-                              ? "bg-amber-400"
-                              : "animate-pulse bg-white"
-                          }`} />
-                          {primaryStats?.phase === "queued"
-                            ? "Queued"
-                            : primaryStats?.phase === "paused"
-                              ? "Paused"
-                              : primaryStats?.phase === "installing"
-                                ? "Installing"
-                                : primaryStats?.phase === "extracting"
-                                  ? "Extracting"
-                                  : "Active"}
-                        </span>
-                      </div>
                     </div>
                   )}
                   
@@ -826,10 +822,11 @@ export function DownloadsPage() {
                     <Button 
                       variant="outline" 
                       onClick={() => primaryGroup && primaryGroup.forEach((it) => pauseDownload(it.id))} 
-                      className="gap-2 rounded-full border-white/[.07] px-5 text-sm font-medium text-zinc-300 hover:border-zinc-500 hover:text-white active:scale-95"
+                      disabled={!primaryCanPause}
+                      className="gap-2 rounded-full border-white/[.07] px-5 text-sm font-medium text-zinc-300 hover:border-zinc-500 hover:text-white active:scale-95 disabled:pointer-events-none disabled:opacity-50"
                     >
                       <PauseCircle className="h-4 w-4" />
-                      Pause
+                      {primaryIsInstalling ? "Installing" : "Pause"}
                     </Button>
                   )}
                   <Button
@@ -859,13 +856,19 @@ export function DownloadsPage() {
                       if (primaryStats?.phase === "verifying") return "Verifying archive integrity..."
                       if (primaryStats?.phase === "retrying") return "Verification failed - re-downloading..."
                       if (primaryStats?.phase === "installing" || primaryStats?.phase === "extracting") {
-                        return primaryTotalParts > 1 ? `Installing part ${part} of ${primaryTotalParts}...` : "Installing game data..."
+                        return primaryStats.extractionProgress != null
+                          ? `Installing game data... ${Math.round(primaryStats.extractionProgress)}%`
+                          : primaryTotalParts > 1
+                            ? `Installing part ${part} of ${primaryTotalParts}...`
+                            : "Installing game data..."
                       }
                       return "Downloading game data..."
                     })()}
                   </span>
                   <span className="font-mono text-sm font-bold tabular-nums text-white">
-                    {formatBytes(primaryStats.receivedBytes)} <span className="text-zinc-500">/</span> {formatBytes(primaryStats.totalBytes)}
+                    {primaryStats.phase === "installing" || primaryStats.phase === "extracting"
+                      ? `${Math.round(primaryStats.progress)}%`
+                      : <>{formatBytes(primaryStats.receivedBytes)} <span className="text-zinc-500">/</span> {formatBytes(primaryStats.totalBytes)}</>}
                   </span>
                 </div>
                 
@@ -882,7 +885,9 @@ export function DownloadsPage() {
 
                 {primaryStats.phase !== "downloading" && primaryStats.overallTotalBytes > 0 && (
                   <div className="text-xs text-zinc-500">
-                    Total downloaded: {formatBytes(primaryStats.overallReceivedBytes)} / {formatBytes(primaryStats.overallTotalBytes)}
+                    {primaryStats.phase === "installing" || primaryStats.phase === "extracting"
+                      ? `Archive ready: ${formatBytes(primaryStats.overallReceivedBytes)} / ${formatBytes(primaryStats.overallTotalBytes)}`
+                      : `Total downloaded: ${formatBytes(primaryStats.overallReceivedBytes)} / ${formatBytes(primaryStats.overallTotalBytes)}`}
                   </div>
                 )}
               </div>
@@ -931,6 +936,121 @@ export function DownloadsPage() {
           </div>
         </section>
       )}
+
+      {secondaryActiveGroups.length > 0 && (
+        <section className="space-y-4 anim anim-d2">
+          <div className="flex items-center gap-3">
+            <p className="section-label">Also Running</p>
+            <Badge variant="secondary" className="rounded-full bg-zinc-800 px-2.5 py-0.5 text-[11px] font-medium text-zinc-400">
+              {secondaryActiveGroups.length}
+            </Badge>
+          </div>
+
+          <div className="space-y-3">
+            {secondaryActiveGroups.map((items) => {
+              const { totalBytes, receivedBytes, speedBps, etaSeconds, progress, phase, overallTotalBytes, overallReceivedBytes, extractionProgress, primaryPartFilename, primaryPartIndex } = computeGroupStats(items)
+              const totalParts = getTotalParts(items)
+              const gameName = items[0]?.gameName || "Unknown"
+              const appid = items[0]?.appid
+              const game = appid ? games.find((g) => g.appid === appid) : null
+              const groupStatus = phase === "installing"
+                ? "Installing"
+                : phase === "extracting"
+                  ? "Extracting"
+                  : phase === "paused"
+                    ? "Paused"
+                    : phase === "verifying"
+                      ? "Verifying"
+                      : phase === "retrying"
+                        ? "Retrying"
+                        : "Downloading"
+
+              return (
+                <div
+                  key={`active-${items[0].appid}-${gameName}`}
+                  className="group overflow-hidden rounded-2xl border border-white/[.07] bg-zinc-900/60 backdrop-blur-sm transition-all hover:border-zinc-700"
+                >
+                  <div className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center">
+                    <div className="flex items-center gap-4 sm:w-[280px]">
+                      <div className="relative h-14 w-24 flex-shrink-0 overflow-hidden rounded-lg border border-white/[.07] bg-zinc-800">
+                        {game?.image ? (
+                          <img
+                            src={proxyImageUrl(game.image)}
+                            alt={gameName}
+                            className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+                          />
+                        ) : null}
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/40 to-transparent" />
+                      </div>
+                      <div className="min-w-0">
+                        <h3 className="truncate text-sm font-semibold text-white">{gameName}</h3>
+                        <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-zinc-500">
+                          {game?.version && (
+                            <span className="rounded bg-zinc-800/80 px-1.5 py-0.5 font-mono">{game.version}</span>
+                          )}
+                          <span className="rounded bg-zinc-800/80 px-1.5 py-0.5 text-zinc-400">{groupStatus}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex-1 space-y-2">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-zinc-500">
+                          {phase === "installing" || phase === "extracting"
+                            ? extractionProgress != null
+                              ? `Installing game data... ${Math.round(extractionProgress)}%`
+                              : "Installing game data..."
+                            : phase === "verifying"
+                              ? "Verifying archive integrity..."
+                              : phase === "retrying"
+                                ? "Repairing download..."
+                                : phase === "paused"
+                                  ? "Download paused"
+                                  : "Downloading..."}
+                        </span>
+                        <span className="font-mono text-zinc-400">
+                          {phase === "installing" || phase === "extracting"
+                            ? `${Math.round(progress)}%`
+                            : `${formatBytes(receivedBytes)} / ${formatBytes(totalBytes)}`}
+                        </span>
+                      </div>
+                      <Progress value={progress} className="h-1.5 bg-zinc-800" />
+                      <div className="flex items-center justify-between text-[11px] text-zinc-500">
+                        <span>
+                          {phase === "installing" || phase === "extracting"
+                            ? `Archive ready: ${formatBytes(overallReceivedBytes)} / ${formatBytes(overallTotalBytes)}`
+                            : `ETA: ${formatEta(etaSeconds)}`}
+                        </span>
+                        <span>
+                          {phase === "installing" || phase === "extracting"
+                            ? (() => {
+                                const part = getPartIndex(primaryPartFilename || "", 0, totalParts, primaryPartIndex).partNum
+                                return totalParts > 1 ? `Installing ${part}/${totalParts}` : "Installing"
+                              })()
+                            : formatSpeed(speedBps)}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => cancelGroup(items[0]?.appid)}
+                        className="rounded-full px-3 text-xs text-zinc-500 hover:bg-red-500/10 hover:text-red-400"
+                      >
+                        <XCircle className="mr-1.5 h-3.5 w-3.5" />
+                        Cancel
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </section>
+      )}
+
       {/* Queue Section */}
       <section className="space-y-4 anim anim-d2">
         <div className="flex items-center justify-between">
