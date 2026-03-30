@@ -8,6 +8,8 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { useToast } from "@/context/toast-context"
 import { getApiBaseUrl } from "@/lib/api"
+import { isMirrorAuthBlocked } from "@/lib/auth-origin"
+import { AuthMirrorBlockedCard } from "@/components/AuthMirrorBlockedCard"
 
 export function ResetPasswordPage() {
   const navigate = useNavigate()
@@ -20,6 +22,7 @@ export function ResetPasswordPage() {
   const [confirmPassword, setConfirmPassword] = useState("")
   const [completed, setCompleted] = useState(false)
   const { toast } = useToast()
+  const mirrorAuthBlocked = isMirrorAuthBlocked(getApiBaseUrl())
 
   const token = searchParams.get("token") || ""
 
@@ -87,6 +90,17 @@ export function ResetPasswordPage() {
       setLoading(false)
     }
   }, [token, password, confirmPassword, navigate, toast])
+
+  if (mirrorAuthBlocked) {
+    return (
+      <AuthMirrorBlockedCard
+        title="Password reset is unavailable on this mirror"
+        description="Complete password resets on union-crax.xyz so the full account flow stays on the primary domain."
+        backLabel="Back to Login"
+        onBack={() => navigate("/login")}
+      />
+    )
+  }
 
   if (!token) {
     return (

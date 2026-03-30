@@ -1,5 +1,18 @@
 # Todo
 
+## Mirror auth block policy (2026-03-30)
+
+- [x] Trace Direct auth entry points that still target the active API base URL.
+- [x] Reject mirror-domain auth requests in the Electron auth bridge with the main-site message.
+- [x] Update the primary auth UI to show that mirror login is blocked.
+- [x] Verify renderer diagnostics and `pnpm -s build:renderer`.
+
+### Review
+
+- Added a shared renderer auth-origin helper plus a reusable blocked-auth card, and now the app login, forgot-password, verify-email, and reset-password pages stop immediately with the main-site-only message when the active API base is a mirror.
+- Hardened the Electron auth bridge so mirror-domain login, registration, password-reset, email-verification, and provider-link requests all reject before opening an auth window or posting credentials. OAuth-style flows also surface the same message through a native dialog for secondary login buttons that do not render inline errors.
+- Verification: focused diagnostics reported no errors in the touched renderer and Electron files, and `pnpm -s build:renderer` completed successfully in 4.45s.
+
 ## Screenshot viewer quality + zoom + mobile nav fix (2026-03-30)
 
 - [x] Audit game detail screenshot lightbox behavior and constraints.

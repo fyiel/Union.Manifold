@@ -12,3 +12,4 @@
 - Keep pause semantics explicit. If a user pauses an active download, do not silently advance the queue or auto-resume other paused items later. That scheduler behavior reads like the app ignored the pause request.
 - When adding archive-deletion prompts or post-install behavior, check ALL download completion paths. UC.Files has its own parallel download engine with a separate `handleUCFilesDownloadComplete` handler that bypasses the normal Chromium download done handler. Changes to the normal path do not automatically propagate to UC.Files.
 - For lightbox upgrades, include drag/pan behavior with zoom from the start. Verify the same fix lands in every repo path the user requests, not just one implementation.
+- When mirror domains are download-only, do not rely on renderer pages alone. Reject auth in the Electron main-process bridge too, or secondary login buttons will still open broken mirror auth flows.
