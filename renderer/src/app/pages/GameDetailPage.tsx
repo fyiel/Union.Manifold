@@ -1,5 +1,6 @@
 
 import { useEffect, useCallback, useMemo, useRef, useState } from "react"
+import { createPortal } from "react-dom"
 import { useParams } from "react-router-dom"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -38,6 +39,8 @@ import {
   Info,
   Layers3,
   Loader2,
+  Minus,
+  Plus,
   Play,
   Tags,
   Terminal,
@@ -61,6 +64,18 @@ const PROTON_RANK_COLORS: Record<string, string> = {
   silver: "text-[#c0c0c0] border-[#c0c0c0]/30",
   bronze: "text-[#cd7f32] border-[#cd7f32]/30",
   borked: "text-[#f44336] border-[#f44336]/30",
+}
+
+const MIN_LIGHTBOX_ZOOM = 1
+const MAX_LIGHTBOX_ZOOM = 3
+const LIGHTBOX_ZOOM_STEP = 0.25
+
+function getHighQualityScreenshotUrl(url: string): string {
+  if (!url) return url
+
+  return url
+    .replace('/t_screenshot_med/', '/t_original/')
+    .replace('/t_thumb/', '/t_original/')
 }
 
 export function GameDetailPage() {
@@ -87,6 +102,9 @@ export function GameDetailPage() {
   const [stoppingGame, setStoppingGame] = useState(false)
   const [lightboxOpen, setLightboxOpen] = useState(false)
   const [lightboxIndex, setLightboxIndex] = useState(0)
+  const [lightboxZoom, setLightboxZoom] = useState(1)
+  const [lightboxPan, setLightboxPan] = useState({ x: 0, y: 0 })
+  const [lightboxDragging, setLightboxDragging] = useState(false)
   const [pendingExePath, setPendingExePath] = useState<string | null>(null)
   const [shortcutModalOpen, setShortcutModalOpen] = useState(false)
   const [launchPreflightOpen, setLaunchPreflightOpen] = useState(false)
@@ -120,6 +138,13 @@ export function GameDetailPage() {
   // Stores the expiry timestamp of the quick-exit detection window (0 = not watching)
   const gameJustLaunchedRef = useRef<number>(0)
   const gameQuickExitUnsubRef = useRef<(() => void) | null>(null)
+  const lightboxViewportRef = useRef<HTMLDivElement | null>(null)
+  const lightboxPanPointerRef = useRef<number | null>(null)
+  const lightboxPanStartRef = useRef({ x: 0, y: 0 })
+  const lightboxPanOffsetStartRef = useRef({ x: 0, y: 0 })
+  const suppressLightboxImageClickRef = useRef(false)
+  const importantNoteRef = useRef<HTMLDivElement | null>(null)
+  const [highlightImportantNote, setHighlightImportantNote] = useState(false)
 
   // ProtonDB state
   const [protonData, setProtonData] = useState<any>(null)
@@ -408,23 +433,122 @@ export function GameDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isGameRunning])
 
+  const handleHVTagClick = () => {
+    if (importantNoteRef.current) {
+      importantNoteRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      setHighlightImportantNote(true)
+      setTimeout(() => setHighlightImportantNote(false), 3000)
+    }
+  }
+
+  const clampLightboxPan = (nextX: number, nextY: number, zoomValue = lightboxZoom) => {
+    const viewport = lightboxViewportRef.current
+    if (!viewport || zoomValue <= 1) {
+      return { x: 0, y: 0 }
+    }
+
+    const maxX = ((viewport.clientWidth * zoomValue) - viewport.clientWidth) / 2
+    const maxY = ((viewport.clientHeight * zoomValue) - viewport.clientHeight) / 2
+
+    return {
+      x: Math.min(maxX, Math.max(-maxX, nextX)),
+      y: Math.min(maxY, Math.max(-maxY, nextY)),
+    }
+  }
+
   const openLightbox = (index: number) => {
     setLightboxIndex(index)
+    setLightboxZoom(1)
+    setLightboxPan({ x: 0, y: 0 })
+    setLightboxDragging(false)
+    lightboxPanPointerRef.current = null
     setLightboxOpen(true)
   }
 
   const closeLightbox = () => {
+    setLightboxZoom(1)
+    setLightboxPan({ x: 0, y: 0 })
+    setLightboxDragging(false)
+    lightboxPanPointerRef.current = null
     setLightboxOpen(false)
   }
 
   const nextLightbox = () => {
-    if (!resolvedScreenshots.length) return
-    setLightboxIndex((prev) => (prev + 1) % resolvedScreenshots.length)
+    if (!lightboxScreenshots.length) return
+    setLightboxZoom(1)
+    setLightboxPan({ x: 0, y: 0 })
+    setLightboxIndex((prev) => (prev + 1) % lightboxScreenshots.length)
   }
 
   const prevLightbox = () => {
-    if (!resolvedScreenshots.length) return
-    setLightboxIndex((prev) => (prev - 1 + resolvedScreenshots.length) % resolvedScreenshots.length)
+    if (!lightboxScreenshots.length) return
+    setLightboxZoom(1)
+    setLightboxPan({ x: 0, y: 0 })
+    setLightboxIndex((prev) => (prev - 1 + lightboxScreenshots.length) % lightboxScreenshots.length)
+  }
+
+  const zoomInLightbox = () => {
+    setLightboxZoom((prev) => {
+      const next = Math.min(MAX_LIGHTBOX_ZOOM, prev + LIGHTBOX_ZOOM_STEP)
+      setLightboxPan((pan) => clampLightboxPan(pan.x, pan.y, next))
+      return next
+    })
+  }
+
+  const zoomOutLightbox = () => {
+    setLightboxZoom((prev) => {
+      const next = Math.max(MIN_LIGHTBOX_ZOOM, prev - LIGHTBOX_ZOOM_STEP)
+      setLightboxPan((pan) => clampLightboxPan(pan.x, pan.y, next))
+      return next
+    })
+  }
+
+  const resetLightboxZoom = () => {
+    setLightboxZoom(1)
+    setLightboxPan({ x: 0, y: 0 })
+    setLightboxDragging(false)
+    lightboxPanPointerRef.current = null
+  }
+
+  const handleLightboxPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (lightboxZoom <= 1) return
+
+    event.preventDefault()
+    suppressLightboxImageClickRef.current = false
+    lightboxPanPointerRef.current = event.pointerId
+    lightboxPanStartRef.current = { x: event.clientX, y: event.clientY }
+    lightboxPanOffsetStartRef.current = { ...lightboxPan }
+    setLightboxDragging(true)
+    event.currentTarget.setPointerCapture(event.pointerId)
+  }
+
+  const handleLightboxPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!lightboxDragging || lightboxPanPointerRef.current !== event.pointerId || lightboxZoom <= 1) return
+
+    const deltaX = event.clientX - lightboxPanStartRef.current.x
+    const deltaY = event.clientY - lightboxPanStartRef.current.y
+
+    if (Math.abs(deltaX) > 3 || Math.abs(deltaY) > 3) {
+      suppressLightboxImageClickRef.current = true
+    }
+
+    const next = clampLightboxPan(
+      lightboxPanOffsetStartRef.current.x + deltaX,
+      lightboxPanOffsetStartRef.current.y + deltaY,
+    )
+
+    setLightboxPan(next)
+  }
+
+  const handleLightboxPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (lightboxPanPointerRef.current !== event.pointerId) return
+
+    lightboxPanPointerRef.current = null
+    setLightboxDragging(false)
+
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
   }
 
   useEffect(() => {
@@ -433,10 +557,13 @@ export function GameDetailPage() {
       if (e.key === "Escape") closeLightbox()
       if (e.key === "ArrowRight") nextLightbox()
       if (e.key === "ArrowLeft") prevLightbox()
+      if (e.key === "+" || e.key === "=") zoomInLightbox()
+      if (e.key === "-" || e.key === "_") zoomOutLightbox()
+      if (e.key === "0") resetLightboxZoom()
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [lightboxOpen])
+  }, [lightboxOpen, nextLightbox, prevLightbox, closeLightbox, zoomInLightbox, zoomOutLightbox, resetLightboxZoom])
 
   const openHostSelector = async () => {
     if (!game) return
@@ -599,6 +726,14 @@ export function GameDetailPage() {
     if (!localScreenshots.length) return game.screenshots
     return game.screenshots.map((shot, index) => localScreenshots[index] || shot)
   }, [game?.screenshots, localScreenshots])
+  const lightboxScreenshots = useMemo(() => {
+    if (!game?.screenshots || game.screenshots.length === 0) return resolvedScreenshots
+
+    return game.screenshots.map((shot, index) => {
+      const fallback = resolvedScreenshots[index] || shot
+      return isOnline ? shot || fallback : fallback || shot
+    })
+  }, [game?.screenshots, isOnline, resolvedScreenshots])
 
   if (loading) {
     return (
@@ -1089,10 +1224,7 @@ export function GameDetailPage() {
                   )}
                   {game?.hasHv && (
                     <Badge className="px-3 py-1 rounded-full bg-red-500/20 border-red-500/30 text-red-400 font-semibold backdrop-blur-md cursor-pointer transition-transform hover:scale-105 active:scale-95"
-                      onClick={() => {
-                        const noteEl = document.getElementById("game-important-note")
-                        if (noteEl) noteEl.scrollIntoView({ behavior: "smooth", block: "center" })
-                      }}
+                      onClick={handleHVTagClick}
                       title="Scroll to important notes"
                     >
                       HV
@@ -1179,6 +1311,33 @@ export function GameDetailPage() {
                 </p>
               </div>
 
+              {/* Additional Notes */}
+              {game?.comment && (
+                <div
+                  ref={importantNoteRef}
+                  className={`p-6 rounded-3xl backdrop-blur-md shadow-xl transition-all duration-500 ${
+                    highlightImportantNote
+                      ? 'ring-2 ring-yellow-400/60 scale-[1.02]'
+                      : ''
+                  } ${game.hasHv
+                    ? 'bg-red-950/30 border border-red-500/30'
+                    : 'bg-zinc-800/50 border border-white/[.07]'
+                  }`}
+                >
+                  <div className="flex items-start gap-4">
+                    <div className={`p-2 rounded-full shrink-0 ${
+                      game.hasHv ? 'bg-red-900/50' : 'bg-zinc-800/50'
+                    }`}>
+                      <AlertTriangle className={`h-5 w-5 ${game.hasHv ? 'text-red-400' : 'text-white'}`} />
+                    </div>
+                    <div>
+                      <h3 className={`font-bold mb-1 ${game.hasHv ? 'text-red-300' : 'text-white'}`}>Important Note</h3>
+                      <p className={`text-sm font-medium leading-relaxed ${game.hasHv ? 'text-red-200' : 'text-zinc-300'}`}>{game.comment}</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Linux Experiences (community submissions) */}
               <div className="rounded-3xl overflow-hidden backdrop-blur-md bg-zinc-900/60 border border-white/[.07] shadow-xl">
                 <LinuxExperiences appid={game.appid} />
@@ -1245,25 +1404,7 @@ export function GameDetailPage() {
                 </div>
               )}
 
-              {game?.comment && (
-                <div id="game-important-note" className={`p-6 rounded-3xl backdrop-blur-md shadow-xl ${
-                  game.hasHv
-                    ? 'bg-red-950/30 border border-red-500/30'
-                    : 'bg-zinc-800/50 border border-white/[.07]'
-                }`}>
-                  <div className="flex items-start gap-4">
-                    <div className={`p-2 rounded-full shrink-0 ${
-                      game.hasHv ? 'bg-red-900/50' : 'bg-zinc-800/50'
-                    }`}>
-                      <AlertTriangle className={`h-5 w-5 ${game.hasHv ? 'text-red-400' : 'text-white'}`} />
-                    </div>
-                    <div>
-                      <h3 className={`font-bold mb-1 ${game.hasHv ? 'text-red-300' : 'text-white'}`}>Important Note</h3>
-                      <p className={`text-sm font-medium leading-relaxed ${game.hasHv ? 'text-red-200' : 'text-zinc-300'}`}>{game.comment}</p>
-                    </div>
-                  </div>
-                </div>
-              )}
+
             </div>
             <div className="space-y-6">
               <div className="p-8 rounded-3xl bg-zinc-950/60 border border-white/[.07] backdrop-blur-md shadow-xl">
@@ -1629,12 +1770,12 @@ export function GameDetailPage() {
         </section>
       )}
 
-      {resolvedScreenshots.length > 0 && lightboxOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center">
-          <div className="absolute inset-0 bg-black/90 backdrop-blur-md z-[100]" onClick={closeLightbox} aria-hidden="true" />
+      {lightboxScreenshots.length > 0 && lightboxOpen && typeof document !== "undefined" && createPortal(
+        <div className="fixed inset-0 z-[10000] flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/90 backdrop-blur-md z-[10000]" onClick={closeLightbox} aria-hidden="true" />
 
           <button
-            className="absolute top-6 right-6 z-[110] bg-zinc-800/50 hover:bg-zinc-700 border border-white/[.07] rounded-full p-3 backdrop-blur-md transition-all active:scale-95"
+            className="absolute top-6 right-6 z-[10010] bg-zinc-800/50 hover:bg-zinc-700 border border-white/[.07] rounded-full p-3 backdrop-blur-md transition-all active:scale-95"
             onClick={closeLightbox}
             aria-label="Close"
           >
@@ -1643,19 +1784,56 @@ export function GameDetailPage() {
 
           <button
             onClick={prevLightbox}
-            className="absolute left-6 z-[110] p-4 rounded-full bg-zinc-800/50 hover:bg-zinc-800 border border-white/[.07] backdrop-blur-md transition-all hidden sm:block active:scale-95"
+            className="absolute left-2 sm:left-6 top-1/2 -translate-y-1/2 z-[10010] p-2 sm:p-4 rounded-full bg-zinc-800/60 hover:bg-zinc-800 border border-white/[.07] backdrop-blur-md transition-all active:scale-95"
             aria-label="Previous"
           >
-            <ChevronLeft className="h-8 w-8 text-white" />
+            <ChevronLeft className="h-6 w-6 sm:h-8 sm:w-8 text-white" />
           </button>
 
-          <div className="relative z-[110] max-w-[95vw] max-h-[88vh] flex items-center justify-center px-4 pointer-events-auto">
+          <div
+            className="relative z-[10010] max-w-[98vw] max-h-[92vh] flex items-center justify-center px-2 sm:px-4 pointer-events-auto"
+            onWheel={(event) => {
+              event.preventDefault()
+              if (event.deltaY < 0) {
+                zoomInLightbox()
+              } else {
+                zoomOutLightbox()
+              }
+            }}
+          >
             <div className="w-full h-full flex items-center justify-center">
-              <div className="w-full max-w-[1200px] max-h-[80vh] flex items-center justify-center rounded-2xl overflow-hidden shadow-[0_0_50px_rgba(0,0,0,0.8)] border border-white/[.07]">
+              <div
+                ref={lightboxViewportRef}
+                className="w-full max-w-[1600px] max-h-[88vh] flex items-center justify-center rounded-2xl overflow-hidden shadow-[0_0_50px_rgba(0,0,0,0.8)] border border-white/[.07]"
+                style={{ touchAction: lightboxZoom > 1 ? "none" : "auto" }}
+                onPointerDown={handleLightboxPointerDown}
+                onPointerMove={handleLightboxPointerMove}
+                onPointerUp={handleLightboxPointerUp}
+                onPointerCancel={handleLightboxPointerUp}
+              >
                 <img
-                  src={proxyImageUrl(resolvedScreenshots[lightboxIndex]) || "./banner.png"}
+                  src={proxyImageUrl(getHighQualityScreenshotUrl(lightboxScreenshots[lightboxIndex])) || "./banner.png"}
                   alt={`Screenshot ${lightboxIndex + 1}`}
-                  className="max-w-full max-h-full object-contain mx-auto"
+                  className={cn(
+                    "max-w-full max-h-full object-contain mx-auto transition-transform duration-200 select-none",
+                    lightboxZoom > 1 ? (lightboxDragging ? "cursor-grabbing" : "cursor-grab") : "cursor-zoom-in",
+                  )}
+                  draggable={false}
+                  onDragStart={(event) => event.preventDefault()}
+                  style={{ transform: `translate(${lightboxPan.x}px, ${lightboxPan.y}px) scale(${lightboxZoom})` }}
+                  onClick={() => {
+                    if (suppressLightboxImageClickRef.current) {
+                      suppressLightboxImageClickRef.current = false
+                      return
+                    }
+
+                    if (lightboxZoom > 1) {
+                      resetLightboxZoom()
+                    } else {
+                      setLightboxZoom(2)
+                      setLightboxPan({ x: 0, y: 0 })
+                    }
+                  }}
                 />
               </div>
             </div>
@@ -1663,16 +1841,52 @@ export function GameDetailPage() {
 
           <button
             onClick={nextLightbox}
-            className="absolute right-6 z-[110] p-4 rounded-full bg-zinc-800/50 hover:bg-zinc-800 border border-white/[.07] backdrop-blur-md transition-all hidden sm:block active:scale-95"
+            className="absolute right-2 sm:right-6 top-1/2 -translate-y-1/2 z-[10010] p-2 sm:p-4 rounded-full bg-zinc-800/60 hover:bg-zinc-800 border border-white/[.07] backdrop-blur-md transition-all active:scale-95"
             aria-label="Next"
           >
-            <ChevronRight className="h-8 w-8 text-white" />
+            <ChevronRight className="h-6 w-6 sm:h-8 sm:w-8 text-white" />
           </button>
 
-          <div className="absolute bottom-8 left-1/2 -translate-x-1/2 bg-black/50 backdrop-blur-md px-6 py-2 rounded-full border border-white/[.07] text-sm font-bold text-white z-[110] tracking-widest shadow-lg">
-            {`${lightboxIndex + 1} / ${resolvedScreenshots.length}`}
+          <div className="absolute bottom-5 left-1/2 -translate-x-1/2 bg-black/55 backdrop-blur-md px-3 sm:px-4 py-2 rounded-full border border-white/[.07] text-xs sm:text-sm font-bold text-white z-[10010] tracking-widest shadow-lg flex items-center gap-2 sm:gap-3">
+            <button
+              onClick={prevLightbox}
+              className="md:hidden h-8 w-8 rounded-full border border-white/[.12] bg-zinc-900/70 hover:bg-zinc-800/80 flex items-center justify-center active:scale-95"
+              aria-label="Previous screenshot"
+            >
+              <ChevronLeft className="h-4 w-4 text-white" />
+            </button>
+            <button
+              onClick={zoomOutLightbox}
+              className="h-8 w-8 rounded-full border border-white/[.12] bg-zinc-900/70 hover:bg-zinc-800/80 flex items-center justify-center active:scale-95"
+              aria-label="Zoom out"
+            >
+              <Minus className="h-4 w-4 text-white" />
+            </button>
+            <button
+              onClick={resetLightboxZoom}
+              className="px-3 h-8 rounded-full border border-white/[.12] bg-zinc-900/70 hover:bg-zinc-800/80 text-[11px] sm:text-xs font-black text-white active:scale-95"
+              aria-label="Reset zoom"
+            >
+              {`${Math.round(lightboxZoom * 100)}%`}
+            </button>
+            <button
+              onClick={zoomInLightbox}
+              className="h-8 w-8 rounded-full border border-white/[.12] bg-zinc-900/70 hover:bg-zinc-800/80 flex items-center justify-center active:scale-95"
+              aria-label="Zoom in"
+            >
+              <Plus className="h-4 w-4 text-white" />
+            </button>
+            <span>{`${lightboxIndex + 1} / ${lightboxScreenshots.length}`}</span>
+            <button
+              onClick={nextLightbox}
+              className="md:hidden h-8 w-8 rounded-full border border-white/[.12] bg-zinc-900/70 hover:bg-zinc-800/80 flex items-center justify-center active:scale-95"
+              aria-label="Next screenshot"
+            >
+              <ChevronRight className="h-4 w-4 text-white" />
+            </button>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
       </div>{/* close relative z-10 */}
       <UpdateBackupWarningModal

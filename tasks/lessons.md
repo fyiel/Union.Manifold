@@ -11,3 +11,4 @@
 - Do not make extraction cancel destructive by default. Hydra's archive-management split is the safer model: cancel should stop work and preserve the archive, while archive deletion should be an explicit user action after extraction succeeds.
 - Keep pause semantics explicit. If a user pauses an active download, do not silently advance the queue or auto-resume other paused items later. That scheduler behavior reads like the app ignored the pause request.
 - When adding archive-deletion prompts or post-install behavior, check ALL download completion paths. UC.Files has its own parallel download engine with a separate `handleUCFilesDownloadComplete` handler that bypasses the normal Chromium download done handler. Changes to the normal path do not automatically propagate to UC.Files.
+- For lightbox upgrades, include drag/pan behavior with zoom from the start. Verify the same fix lands in every repo path the user requests, not just one implementation.
