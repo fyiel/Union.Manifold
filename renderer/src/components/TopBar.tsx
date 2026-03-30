@@ -7,7 +7,7 @@ import { useDiscordAccount } from "@/hooks/use-discord-account"
 import { apiFetch, apiUrl, getApiBaseUrl } from "@/lib/api"
 import { getRouteChrome } from "@/lib/navigation"
 import { Button } from "@/components/ui/button"
-import { ChevronLeft, ChevronRight, Hammer, LogIn, LogOut, Menu, RotateCw, Search, Settings, UserRound } from "lucide-react"
+import { ChevronLeft, ChevronRight, Hammer, LogIn, LogOut, Mail, Menu, RotateCw, Search, Settings, UserRound } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 interface TopBarProps {
@@ -117,28 +117,39 @@ export function TopBar({ onOpenMenu }: TopBarProps) {
 
   return (
     <>
-        <nav className="sticky top-0 z-40 w-full border-b border-white/[.07] bg-zinc-950/80 backdrop-blur-xl">
-          <div className="mx-auto flex h-14 max-w-7xl items-center gap-4 px-4 md:px-8 xl:px-10">
+      <div className="pointer-events-auto px-4 pb-3 pt-3 md:px-8 xl:px-10">
+        <nav className="mx-auto flex h-14 w-full max-w-6xl items-center gap-2 rounded-full border border-white/[.12] bg-zinc-950/68 px-2 py-2 shadow-[0_8px_30px_rgba(0,0,0,0.28)] backdrop-blur-2xl">
           {/* Mobile Menu Button */}
           <button
             type="button"
             aria-label="Open navigation"
             onClick={onOpenMenu}
-            className="flex h-9 w-9 items-center justify-center rounded-full border border-white/[.07] bg-white/[0.04] text-zinc-400 transition hover:bg-white/[0.08] hover:text-white active:scale-95 md:hidden"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/[.10] bg-white/[0.04] text-zinc-400 transition hover:bg-white/[0.08] hover:text-white active:scale-95 md:hidden"
           >
             <Menu className="h-4.5 w-4.5" />
           </button>
 
+          <button
+            type="button"
+            onClick={handleLogoNav}
+            aria-label="Go to home"
+            className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white text-black shadow-md transition-all hover:scale-[1.03] hover:bg-zinc-200 active:scale-95 md:flex"
+          >
+            <Hammer className="h-4.5 w-4.5" strokeWidth={2.4} />
+          </button>
+
           {/* Desktop Navigation Controls */}
-          <div className="hidden items-center gap-0.5 md:flex">
+          <div className="hidden h-5 w-px bg-white/[.08] md:block" />
+
+          <div className="hidden items-center gap-1 md:flex">
             <button
               type="button"
               onClick={handleBack}
               disabled={!canGoBack}
               className={cn(
-                "flex h-8 w-8 items-center justify-center rounded-full transition-all active:scale-95",
+                "flex h-9 w-9 items-center justify-center rounded-full transition-all active:scale-95",
                 canGoBack
-                  ? "text-zinc-400 hover:bg-white/[.06] hover:text-zinc-200"
+                  ? "text-zinc-400 hover:bg-white/[.08] hover:text-zinc-100"
                   : "cursor-default text-zinc-700"
               )}
               aria-label="Go back"
@@ -148,7 +159,7 @@ export function TopBar({ onOpenMenu }: TopBarProps) {
             <button
               type="button"
               onClick={handleForward}
-              className="flex h-8 w-8 items-center justify-center rounded-full text-zinc-700 transition-all hover:bg-white/[.06] hover:text-zinc-400 active:scale-95"
+              className="flex h-9 w-9 items-center justify-center rounded-full text-zinc-700 transition-all hover:bg-white/[.08] hover:text-zinc-300 active:scale-95"
               aria-label="Go forward"
             >
               <ChevronRight className="h-4.5 w-4.5" strokeWidth={2.5} />
@@ -156,27 +167,24 @@ export function TopBar({ onOpenMenu }: TopBarProps) {
             <button
               type="button"
               onClick={handleRefresh}
-              className="flex h-8 w-8 items-center justify-center rounded-full text-zinc-600 transition-all hover:bg-white/[.06] hover:text-zinc-300 active:scale-95"
+              className="flex h-9 w-9 items-center justify-center rounded-full text-zinc-600 transition-all hover:bg-white/[.08] hover:text-zinc-200 active:scale-95"
               aria-label="Refresh"
             >
               <RotateCw className={cn("h-3.5 w-3.5", isRefreshing && "animate-spin")} strokeWidth={2.5} />
             </button>
           </div>
 
-          {/* Separator */}
-          <div className="hidden h-5 w-px bg-white/[.06] md:block" />
-
           {/* Page Title Section */}
-          <div className="min-w-0 flex-1">
+          <div className="min-w-0 flex-1 md:px-2">
             <div className="md:hidden">
-              <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-zinc-600">{chrome.eyebrow}</div>
-              <div className="truncate text-sm font-semibold text-white">{chrome.title}</div>
+              <div className="truncate text-[10px] font-semibold uppercase tracking-[0.22em] text-zinc-500">{chrome.eyebrow}</div>
+              <div className="truncate text-sm font-semibold text-zinc-100">{chrome.title}</div>
             </div>
-            <div className="hidden md:block">
-              <div className="flex items-center gap-2">
-                <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-zinc-600">{chrome.eyebrow}</span>
+            <div className="hidden md:flex md:justify-center">
+              <div className="flex min-w-0 max-w-full items-center gap-2 rounded-full border border-white/[.06] bg-white/[.03] px-4 py-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
+                <span className="shrink-0 text-[10px] font-semibold uppercase tracking-[0.22em] text-zinc-500">{chrome.eyebrow}</span>
                 <span className="text-zinc-700">/</span>
-                <span className="text-sm font-medium text-zinc-300">{chrome.title}</span>
+                <span className="truncate text-sm font-semibold text-zinc-100">{chrome.title}</span>
               </div>
             </div>
           </div>
@@ -186,13 +194,13 @@ export function TopBar({ onOpenMenu }: TopBarProps) {
             type="button"
             variant="outline"
             onClick={handleSearchShortcut}
-            className="hidden h-9 min-w-[200px] justify-between rounded-full border-white/[.07] bg-zinc-900/80 px-4 text-zinc-500 hover:border-zinc-700 hover:bg-zinc-800 hover:text-zinc-300 active:scale-[0.98] md:flex"
+            className="hidden h-9 min-w-[220px] justify-between rounded-full border border-white/[.10] bg-black/20 px-4 text-zinc-400 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] backdrop-blur-xl hover:border-white/[.14] hover:bg-white/[.06] hover:text-zinc-100 active:scale-[0.98] md:flex"
           >
             <span className="flex items-center gap-2">
               <Search className="h-3.5 w-3.5" />
               <span className="text-[13px]">Search...</span>
             </span>
-            <kbd className="rounded-full border border-white/[.07] bg-zinc-800 px-2 py-0.5 text-[10px] font-medium text-zinc-600">
+            <kbd className="rounded-full border border-white/[.08] bg-white/[.03] px-2 py-0.5 text-[10px] font-medium text-zinc-500">
               Ctrl+K
             </kbd>
           </Button>
@@ -202,20 +210,20 @@ export function TopBar({ onOpenMenu }: TopBarProps) {
             type="button"
             onClick={handleSearchShortcut}
             aria-label="Open search"
-            className="flex h-9 w-9 items-center justify-center rounded-full border border-white/[.07] bg-zinc-900/80 text-zinc-400 transition hover:bg-zinc-800 hover:text-white active:scale-95 md:hidden"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/[.10] bg-white/[0.04] text-zinc-400 transition hover:bg-white/[0.08] hover:text-white active:scale-95 md:hidden"
           >
             <Search className="h-4 w-4" />
           </button>
 
           {/* Account Menu */}
           {showAccountLoading ? (
-            <div className="flex h-9 w-9 items-center justify-center rounded-full border border-white/[.07] bg-zinc-900/80 text-zinc-600">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/[.10] bg-white/[0.04] text-zinc-600">
               <UserRound className="h-4 w-4" />
             </div>
           ) : (
             <Popover>
               <PopoverTrigger
-                className="flex items-center justify-center rounded-full border border-white/[.07] bg-zinc-900/80 p-0.5 outline-none transition hover:border-zinc-700 hover:bg-zinc-800 focus-visible:ring-1 focus-visible:ring-white/20 active:scale-95"
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/[.10] bg-white/[0.04] p-0.5 outline-none transition hover:border-white/[.16] hover:bg-white/[0.08] focus-visible:ring-1 focus-visible:ring-white/20 active:scale-95"
                 aria-label={`${accountLabel} menu`}
               >
                 {avatarUrl ? (
@@ -232,7 +240,7 @@ export function TopBar({ onOpenMenu }: TopBarProps) {
               </PopoverTrigger>
               <PopoverContent
                 align="end"
-                className="w-56 rounded-2xl border border-white/[.07] bg-zinc-900/95 p-1.5 shadow-2xl backdrop-blur-xl"
+                className="w-56 rounded-[1.5rem] border border-white/[.10] bg-zinc-950/88 p-1.5 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-2xl"
               >
                 <div className="px-3 py-2">
                   <div className="text-sm font-semibold text-zinc-100">{accountLabel}</div>
@@ -260,11 +268,21 @@ export function TopBar({ onOpenMenu }: TopBarProps) {
                   {accountUser ? <LogOut className="h-4 w-4" /> : <LogIn className="h-4 w-4" />}
                   {accountActionLabel}
                 </button>
+                {!accountUser && (
+                  <button
+                    type="button"
+                    onClick={() => navigate("/login")}
+                    className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-[13px] text-zinc-400 transition hover:bg-white/[0.05] hover:text-white"
+                  >
+                    <Mail className="h-4 w-4" />
+                    More sign-in options
+                  </button>
+                )}
               </PopoverContent>
             </Popover>
           )}
-        </div>
-      </nav>
+        </nav>
+      </div>
       <SearchSuggestions
         value={globalSearch}
         onChange={setGlobalSearch}
@@ -276,7 +294,7 @@ export function TopBar({ onOpenMenu }: TopBarProps) {
         placeholder="Search games..."
         popup
         showFiltersButton
-        enableShortcut
+        enableShortcut={false}
         showShortcutHint
         openEventName="uc_open_search_popup"
         hideInputWhenClosed

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
-import { ArrowDownToLine, ChevronDown, FolderOpen, Gamepad2, HardDrive, LogIn, LogOut, Plus, RefreshCw, Settings2, UserRound, Terminal, Cpu, FlaskConical, Zap, Layers } from "lucide-react"
+import { ArrowDownToLine, ChevronDown, FolderOpen, Gamepad2, HardDrive, LogIn, LogOut, Mail, Plus, RefreshCw, Settings2, UserRound, Terminal, Cpu, FlaskConical, Zap, Layers } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -25,6 +25,7 @@ import {
   type MirrorHostInfo,
 } from "@/lib/settings-constants"
 import { LINUX_PRESETS, applyGlobalLinuxPreset, type LinuxGlobalSettings, type LinuxPresetId } from "@/lib/linux-presets"
+import { useToast } from "@/context/toast-context"
 
 type DiskInfo = {
   id: string
@@ -118,6 +119,7 @@ export function SettingsPage() {
   const isWindows = typeof navigator !== 'undefined' && /windows/i.test(navigator.userAgent)
   const isLinux = typeof navigator !== 'undefined' && /linux/i.test(navigator.userAgent)
   const { user: accountUser, loading: accountLoading, authenticated, refresh: refreshAccount } = useDiscordAccount()
+  const { toast } = useToast()
   const [disks, setDisks] = useState<DiskInfo[]>([])
   const [downloadPath, setDownloadPath] = useState("")
   const [selectedDiskId, setSelectedDiskId] = useState("")
@@ -128,7 +130,6 @@ export function SettingsPage() {
   const [defaultHost, setDefaultHost] = useState<MirrorHost>('ucfiles')
   const [checkingUpdate, setCheckingUpdate] = useState(false)
   const [appVersion, setAppVersion] = useState<string>("")
-  const [updateCheckResult, setUpdateCheckResult] = useState<string | null>(null)
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus>(INITIAL_UPDATE_STATUS)
   const [alwaysCreateDesktopShortcut, setAlwaysCreateDesktopShortcut] = useState(false)
   const [preventSleepDuringOperations, setPreventSleepDuringOperations] = useState(true)
@@ -142,7 +143,6 @@ export function SettingsPage() {
   const [linuxWinetricksInput, setLinuxWinetricksInput] = useState('')
   const [linuxProtontricksAppId, setLinuxProtontricksAppId] = useState('')
   const [linuxProtontricksInput, setLinuxProtontricksInput] = useState('')
-  const [linuxToolFeedback, setLinuxToolFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
   const [linuxToolRunning, setLinuxToolRunning] = useState<string | null>(null)
   const [detectedProtonVersions, setDetectedProtonVersions] = useState<Array<{ label: string; path: string }>>([])
   const [detectedWineVersions, setDetectedWineVersions] = useState<Array<{ label: string; path: string }>>([])
@@ -154,7 +154,6 @@ export function SettingsPage() {
   const [slsSteamPath, setSlsSteamPath] = useState('')
   const [slsInjectPath, setSlsInjectPath] = useState('')
   const [slsSteamDetected, setSlsSteamDetected] = useState<{ found: boolean; dir?: string | null } | null>(null)
-  const [slsToolFeedback, setSlsToolFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
   // SteamVR / VR settings
   const [vrEnabled, setVrEnabled] = useState(false)
   const [vrSteamVrPath, setVrSteamVrPath] = useState('')
@@ -164,7 +163,6 @@ export function SettingsPage() {
   const [vrAutoLaunchSteamVr, setVrAutoLaunchSteamVr] = useState(false)
   const [vrDetected, setVrDetected] = useState<{ found: boolean; dir?: string | null } | null>(null)
   const [vrOpenXrDetected, setVrOpenXrDetected] = useState<{ found: boolean; path?: string | null } | null>(null)
-  const [vrToolFeedback, setVrToolFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
   const [vrToolRunning, setVrToolRunning] = useState(false)
   const [showVrAdvanced, setShowVrAdvanced] = useState(false)
   const [discordRpcEnabled, setDiscordRpcEnabled] = useState(true)
@@ -176,15 +174,12 @@ export function SettingsPage() {
   const [rpcShowButtons, setRpcShowButtons] = useState(true)
   const [clearingData, setClearingData] = useState(false)
   const [showClearConfirm, setShowClearConfirm] = useState(false)
-  const [clearDataFeedback, setClearDataFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
   const [developerMode, setDeveloperMode] = useState(false)
   const [copyingDiagnostics, setCopyingDiagnostics] = useState(false)
-  const [diagnosticsFeedback, setDiagnosticsFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
   const [verboseDownloadLogging, setVerboseDownloadLogging] = useState(false)
   const [customApiBaseUrl, setCustomApiBaseUrl] = useState("")
   const [networkTesting, setNetworkTesting] = useState(false)
   const [networkResults, setNetworkResults] = useState<Array<{ label: string; url: string; ok: boolean; status: number; elapsedMs: number; error?: string }> | null>(null)
-  const [devActionFeedback, setDevActionFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
   const [clearingDownloadCache, setClearingDownloadCache] = useState(false)
   const [accountSummaryLoaded, setAccountSummaryLoaded] = useState(false)
   const [accountError, setAccountError] = useState<string | null>(null)
@@ -196,7 +191,6 @@ export function SettingsPage() {
   const [showPublicProfile, setShowPublicProfile] = useState(true)
   const [bioDraft, setBioDraft] = useState("")
   const [bioSaving, setBioSaving] = useState(false)
-  const [bioSaved, setBioSaved] = useState(false)
   const [skipLinkCheck, setSkipLinkCheck] = useState(false)
   const [activeSection, setActiveSection] = useState<'account' | 'downloads' | 'game-launch' | 'overlay' | 'controller' | 'advanced'>('account')
 
@@ -205,6 +199,8 @@ export function SettingsPage() {
   const [overlayAutoShow, setOverlayAutoShow] = useState(true)
   const [overlayHotkey, setOverlayHotkey] = useState('Ctrl+Shift+Tab')
   const [overlayPosition, setOverlayPosition] = useState<'left' | 'right'>('left')
+  const [overlayToastDurationMs, setOverlayToastDurationMs] = useState(5000)
+  const [overlayToastVertical, setOverlayToastVertical] = useState<'top' | 'bottom'>('bottom')
   const [recordingHotkey, setRecordingHotkey] = useState(false)
   const [overlayLoaded, setOverlayLoaded] = useState(false)
   const [overlayDiagnostics, setOverlayDiagnostics] = useState<OverlayDiagnostics | null>(null)
@@ -237,7 +233,6 @@ export function SettingsPage() {
     const off = window.ucUpdater?.onStatusChanged?.((status) => {
       if (!mounted) return
       setUpdateStatus(status)
-      setUpdateCheckResult(getUpdateStatusMessage(status))
     })
 
     return () => {
@@ -785,18 +780,17 @@ export function SettingsPage() {
   const handleCheckForUpdates = async () => {
     if (checkingUpdate) return
     setCheckingUpdate(true)
-    setUpdateCheckResult(null)
     try {
       const result = await window.ucUpdater?.checkForUpdates()
       if (result) {
         setUpdateStatus(result)
-        setUpdateCheckResult(getUpdateStatusMessage(result))
+        toast(getUpdateStatusMessage(result))
       } else {
-        setUpdateCheckResult('Failed to check for updates')
+        toast('Failed to check for updates', 'error')
       }
     } catch (err) {
       console.error("[UC] Failed to check for updates:", err)
-      setUpdateCheckResult("Failed to check for updates")
+      toast('Failed to check for updates', 'error')
     } finally {
       setCheckingUpdate(false)
     }
@@ -805,7 +799,6 @@ export function SettingsPage() {
   const handleCopyDiagnostics = async () => {
     if (copyingDiagnostics) return
     setCopyingDiagnostics(true)
-    setDiagnosticsFeedback(null)
     try {
       const version = await window.ucUpdater?.getVersion?.()
       const downloadPathResult = await window.ucDownloads?.getDownloadPath?.()
@@ -838,15 +831,14 @@ export function SettingsPage() {
 
       if (navigator?.clipboard?.writeText) {
         await navigator.clipboard.writeText(diagnostics)
-        setDiagnosticsFeedback({ type: 'success', message: 'Diagnostics copied to clipboard.' })
+        toast('Diagnostics copied to clipboard.')
       } else {
-        setDiagnosticsFeedback({ type: 'error', message: 'Clipboard API unavailable.' })
+        toast('Clipboard API unavailable.', 'error')
       }
     } catch (err) {
-      setDiagnosticsFeedback({ type: 'error', message: 'Failed to copy diagnostics.' })
+      toast('Failed to copy diagnostics.', 'error')
     } finally {
       setCopyingDiagnostics(false)
-      setTimeout(() => setDiagnosticsFeedback(null), 3000)
     }
   }
 
@@ -854,20 +846,18 @@ export function SettingsPage() {
     if (networkTesting) return
     setNetworkTesting(true)
     setNetworkResults(null)
-    setDevActionFeedback(null)
     try {
       const result = await window.ucSettings?.runNetworkTest?.(getApiBaseUrl())
       if (result?.ok && Array.isArray(result.results)) {
         setNetworkResults(result.results)
-        setDevActionFeedback({ type: 'success', message: 'Network test completed.' })
+        toast('Network test completed.')
       } else {
-        setDevActionFeedback({ type: 'error', message: result?.error || 'Network test failed.' })
+        toast(result?.error || 'Network test failed.', 'error')
       }
     } catch (err) {
-      setDevActionFeedback({ type: 'error', message: 'Network test failed.' })
+      toast('Network test failed.', 'error')
     } finally {
       setNetworkTesting(false)
-      setTimeout(() => setDevActionFeedback(null), 4000)
     }
   }
 
@@ -875,22 +865,16 @@ export function SettingsPage() {
     const raw = customApiBaseUrl.trim()
     const normalized = normalizeApiBaseUrl(raw)
     if (raw && !normalized) {
-      setDevActionFeedback({ type: 'error', message: 'Enter a valid http or https endpoint.' })
-      setTimeout(() => setDevActionFeedback(null), 4000)
+      toast('Enter a valid http or https endpoint.', 'error')
       return
     }
     setCustomApiBaseUrl(normalized)
     setApiBaseUrl(normalized)
     try {
       await window.ucSettings?.set?.('customApiBaseUrl', normalized)
-      setDevActionFeedback({
-        type: 'success',
-        message: normalized ? `Custom API endpoint saved: ${getApiBaseUrl()}` : 'Custom API endpoint cleared.',
-      })
+      toast(normalized ? `Custom API endpoint saved: ${getApiBaseUrl()}` : 'Custom API endpoint cleared.')
     } catch {
-      setDevActionFeedback({ type: 'error', message: 'Failed to save custom API endpoint.' })
-    } finally {
-      setTimeout(() => setDevActionFeedback(null), 4000)
+      toast('Failed to save custom API endpoint.', 'error')
     }
   }
 
@@ -899,80 +883,67 @@ export function SettingsPage() {
     setApiBaseUrl('')
     try {
       await window.ucSettings?.set?.('customApiBaseUrl', '')
-      setDevActionFeedback({ type: 'success', message: 'Custom API endpoint reset to default.' })
+      toast('Custom API endpoint reset to default.')
     } catch {
-      setDevActionFeedback({ type: 'error', message: 'Failed to reset custom API endpoint.' })
-    } finally {
-      setTimeout(() => setDevActionFeedback(null), 4000)
+      toast('Failed to reset custom API endpoint.', 'error')
     }
   }
 
   const handleClearDownloadCache = async () => {
     if (clearingDownloadCache) return
     setClearingDownloadCache(true)
-    setDevActionFeedback(null)
     try {
       const result = await window.ucDownloads?.clearDownloadCache?.()
       if (result?.ok) {
-        setDevActionFeedback({ type: 'success', message: 'Download cache cleared.' })
+        toast('Download cache cleared.')
       } else if (result?.error === 'downloads-active') {
-        setDevActionFeedback({ type: 'error', message: 'Stop active downloads before clearing cache.' })
+        toast('Stop active downloads before clearing cache.', 'error')
       } else {
-        setDevActionFeedback({ type: 'error', message: result?.error || 'Failed to clear download cache.' })
+        toast(result?.error || 'Failed to clear download cache.', 'error')
       }
     } catch (err) {
-      setDevActionFeedback({ type: 'error', message: 'Failed to clear download cache.' })
+      toast('Failed to clear download cache.', 'error')
     } finally {
       setClearingDownloadCache(false)
-      setTimeout(() => setDevActionFeedback(null), 4000)
     }
   }
 
   const handleExportSettings = async () => {
-    setDevActionFeedback(null)
     try {
       const result = await window.ucSettings?.exportSettings?.()
       if (result?.ok) {
-        setDevActionFeedback({ type: 'success', message: 'Settings exported.' })
+        toast('Settings exported.')
       } else if (result?.error && result.error !== 'cancelled') {
-        setDevActionFeedback({ type: 'error', message: result.error || 'Failed to export settings.' })
+        toast(result.error || 'Failed to export settings.', 'error')
       }
     } catch (err) {
-      setDevActionFeedback({ type: 'error', message: 'Failed to export settings.' })
-    } finally {
-      setTimeout(() => setDevActionFeedback(null), 4000)
+      toast('Failed to export settings.', 'error')
     }
   }
 
   const handleImportSettings = async () => {
-    setDevActionFeedback(null)
     try {
       const result = await window.ucSettings?.importSettings?.()
       if (result?.ok) {
-        setDevActionFeedback({ type: 'success', message: 'Settings imported.' })
+        toast('Settings imported.')
       } else if (result?.error && result.error !== 'cancelled') {
-        setDevActionFeedback({ type: 'error', message: result.error || 'Failed to import settings.' })
+        toast(result.error || 'Failed to import settings.', 'error')
       }
     } catch (err) {
-      setDevActionFeedback({ type: 'error', message: 'Failed to import settings.' })
-    } finally {
-      setTimeout(() => setDevActionFeedback(null), 4000)
+      toast('Failed to import settings.', 'error')
     }
   }
 
   const handleOpenLogsFolder = async () => {
-    setDevActionFeedback(null)
     try {
       const result = await (window.ucLogs as any)?.openLogsFolder?.()
       if (result?.ok) {
-        setDevActionFeedback({ type: 'success', message: 'Opened logs folder.' })
+        toast('Opened logs folder.')
       } else {
-        setDevActionFeedback({ type: 'error', message: result?.error || 'Failed to open logs folder.' })
+        toast(result?.error || 'Failed to open logs folder.', 'error')
       }
     } catch (err) {
-      setDevActionFeedback({ type: 'error', message: 'Failed to open logs folder.' })
-    } finally {
-      setTimeout(() => setDevActionFeedback(null), 4000)
+      toast('Failed to open logs folder.', 'error')
     }
   }
 
@@ -1010,7 +981,6 @@ export function SettingsPage() {
   useEffect(() => {
     if (!accountUser || !authenticated) return
     setBioDraft(accountUser.bio ?? "")
-    setBioSaved(false)
   }, [accountUser, authenticated])
 
   useEffect(() => {
@@ -1101,7 +1071,6 @@ export function SettingsPage() {
       const summaryUser = data?.user
       if (summaryUser?.bio !== undefined) {
         setBioDraft(summaryUser.bio ?? "")
-        setBioSaved(false)
       }
 
       setAccountSummaryLoaded(true)
@@ -1152,7 +1121,6 @@ export function SettingsPage() {
       window.dispatchEvent(new Event("uc_discord_logout"))
       setAccountSummaryLoaded(false)
       setBioDraft("")
-      setBioSaved(false)
     } catch {
       // keep current state if logout fails
     } finally {
@@ -1247,7 +1215,6 @@ export function SettingsPage() {
   const saveBio = async () => {
     if (!accountUser) return
     setBioSaving(true)
-    setBioSaved(false)
     try {
       const res = await apiFetch("/api/account/bio", {
         method: "POST",
@@ -1255,7 +1222,7 @@ export function SettingsPage() {
         body: JSON.stringify({ bio: bioDraft.trim().slice(0, TEXT_CONSTRAINTS.MAX_BIO_LENGTH) }),
       })
       if (res.ok) {
-        setBioSaved(true)
+        toast('Bio saved.')
         await refreshAccount().catch(() => { })
       }
     } catch {
@@ -1267,8 +1234,7 @@ export function SettingsPage() {
 
   // Linux tool helpers
   const linuxToolFeedbackShow = (type: 'success' | 'error', message: string) => {
-    setLinuxToolFeedback({ type, message })
-    setTimeout(() => setLinuxToolFeedback(null), 4000)
+    toast(message, type)
   }
 
   const handleRunWinecfg = async () => {
@@ -1414,8 +1380,7 @@ export function SettingsPage() {
 
   // VR helpers
   const vrToolFeedbackShow = (type: 'success' | 'error', message: string) => {
-    setVrToolFeedback({ type, message })
-    setTimeout(() => setVrToolFeedback(null), 4000)
+    toast(message, type)
   }
 
   const handleLaunchSteamVR = async () => {
@@ -1470,6 +1435,8 @@ export function SettingsPage() {
           setOverlayAutoShow(result.autoShow ?? true)
           setOverlayHotkey(result.hotkey || 'Ctrl+Shift+Tab')
           setOverlayPosition((result.position as 'left' | 'right') || 'left')
+          setOverlayToastDurationMs(Math.max(2000, Math.min(12000, Math.round(result.toastDurationMs || 5000))))
+          setOverlayToastVertical((result.toastVertical as 'top' | 'bottom') || 'bottom')
         }
       } catch { }
       setOverlayLoaded(true)
@@ -1529,8 +1496,8 @@ export function SettingsPage() {
               <RefreshCw className={`h-3.5 w-3.5 ${checkingUpdate ? 'animate-spin' : ''}`} />
               {checkingUpdate ? 'Checking...' : updateStatus.state === 'downloaded' ? 'Update ready' : 'Check for updates'}
             </button>
-            {(updateCheckResult || updateStatus.state !== 'idle') && (
-              <div className="mt-2 text-[11px] text-zinc-300">{updateCheckResult || getUpdateStatusMessage(updateStatus)}</div>
+            {updateStatus.state !== 'idle' && updateStatus.state !== 'not-available' && (
+              <div className="mt-2 text-[11px] text-zinc-300">{getUpdateStatusMessage(updateStatus)}</div>
             )}
           </div>
         </aside>
@@ -1548,7 +1515,7 @@ export function SettingsPage() {
                     <div>
                       <h2 className="text-lg font-semibold">Account</h2>
                       <p className="text-sm text-zinc-400">
-                        Manage your Discord profile and preferences right inside the app.
+                        Manage your account and preferences right inside the app.
                       </p>
                     </div>
                     <div className="flex flex-wrap gap-2">
@@ -1574,10 +1541,21 @@ export function SettingsPage() {
                           </Button>
                         </>
                       ) : (
-                        <Button className="gap-2" onClick={handleAccountLogin} disabled={accountBusy}>
-                          <LogIn className="h-4 w-4" />
-                          {loggingIn ? "Connecting..." : "Login with Discord"}
-                        </Button>
+                        <div className="flex flex-wrap gap-2">
+                          <Button className="gap-2" onClick={handleAccountLogin} disabled={accountBusy}>
+                            <LogIn className="h-4 w-4" />
+                            {loggingIn ? "Connecting..." : "Login with Discord"}
+                          </Button>
+                          <Button
+                            variant="outline"
+                            className="gap-2"
+                            onClick={() => { window.location.hash = "#/login" }}
+                            disabled={accountBusy}
+                          >
+                            <Mail className="h-4 w-4" />
+                            Sign in with email
+                          </Button>
+                        </div>
                       )}
                     </div>
                   </div>
@@ -1635,7 +1613,6 @@ export function SettingsPage() {
                           onChange={(event) => {
                             const next = event.target.value.slice(0, TEXT_CONSTRAINTS.MAX_BIO_LENGTH)
                             setBioDraft(next)
-                            setBioSaved(false)
                           }}
                           maxLength={TEXT_CONSTRAINTS.MAX_BIO_LENGTH}
                           rows={4}
@@ -1644,7 +1621,6 @@ export function SettingsPage() {
                         />
                         <div className="flex items-center justify-between text-xs text-zinc-400">
                           <span>{bioDraft.length}/{TEXT_CONSTRAINTS.MAX_BIO_LENGTH} characters</span>
-                          {bioSaved ? <span className="text-zinc-300">Saved</span> : null}
                         </div>
                         <div className="flex flex-wrap gap-2">
                           <Button
@@ -1699,7 +1675,7 @@ export function SettingsPage() {
                             await window.ucSettings?.set?.('discordRpcEnabled', newValue)
                           } catch { }
                         }}
-                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${discordRpcEnabled ? 'bg-white' : 'bg-zinc-700'
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${discordRpcEnabled ? 'bg-zinc-300' : 'bg-zinc-700'
                           }`}
                         title="Toggle Discord Rich Presence"
                       >
@@ -1732,7 +1708,7 @@ export function SettingsPage() {
                               setRpcHideNsfw(newValue)
                               updateRpcHideNsfw(newValue)
                             }}
-                            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${rpcHideNsfw ? 'bg-white' : 'bg-zinc-700'
+                            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${rpcHideNsfw ? 'bg-zinc-300' : 'bg-zinc-700'
                           }`}
                           >
                             <span
@@ -1753,7 +1729,7 @@ export function SettingsPage() {
                               setRpcShowGameName(newValue)
                               updateRpcShowGameName(newValue)
                             }}
-                            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${rpcShowGameName ? 'bg-white' : 'bg-zinc-700'
+                            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${rpcShowGameName ? 'bg-zinc-300' : 'bg-zinc-700'
                           }`}
                           >
                             <span
@@ -1774,7 +1750,7 @@ export function SettingsPage() {
                               setRpcShowDownloadStatus(newValue)
                               updateRpcShowDownloadStatus(newValue)
                             }}
-                            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${rpcShowDownloadStatus ? 'bg-white' : 'bg-zinc-700'
+                            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${rpcShowDownloadStatus ? 'bg-zinc-300' : 'bg-zinc-700'
                           }`}
                           >
                             <span
@@ -1795,7 +1771,7 @@ export function SettingsPage() {
                               setRpcShowBrowseStatus(newValue)
                               updateRpcShowBrowseStatus(newValue)
                             }}
-                            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${rpcShowBrowseStatus ? 'bg-white' : 'bg-zinc-700'
+                            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${rpcShowBrowseStatus ? 'bg-zinc-300' : 'bg-zinc-700'
                           }`}
                           >
                             <span
@@ -1816,7 +1792,7 @@ export function SettingsPage() {
                               setRpcShowButtons(newValue)
                               updateRpcShowButtons(newValue)
                             }}
-                            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${rpcShowButtons ? 'bg-white' : 'bg-zinc-700'
+                            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${rpcShowButtons ? 'bg-zinc-300' : 'bg-zinc-700'
                           }`}
                           >
                             <span
@@ -1955,9 +1931,9 @@ export function SettingsPage() {
                     <span className="text-zinc-400">Updater state</span>
                     <span className="font-medium capitalize">{updateStatus.state.replace(/-/g, ' ')}</span>
                   </div>
-                  {(updateCheckResult || updateStatus.state !== 'idle') && (
+                  {updateStatus.state !== 'idle' && (
                     <div className="rounded-lg border border-zinc-700 bg-zinc-800/50 px-3 py-2 text-sm text-zinc-300">
-                      {updateCheckResult || getUpdateStatusMessage(updateStatus)}
+                      {getUpdateStatusMessage(updateStatus)}
                     </div>
                   )}
                   {updateStatus.state === 'downloading' && (
@@ -1980,7 +1956,6 @@ export function SettingsPage() {
                       onClick={() => window.ucUpdater?.retryUpdate?.().then((status) => {
                         if (status) {
                           setUpdateStatus(status)
-                          setUpdateCheckResult(getUpdateStatusMessage(status))
                         }
                       })}
                       disabled={updateStatus.state !== 'error' && !(updateStatus.available && !updateStatus.downloaded)}
@@ -2070,7 +2045,7 @@ export function SettingsPage() {
                             await window.ucSettings?.set?.('skipLinkCheck', newValue)
                           } catch { }
                         }}
-                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${skipLinkCheck ? 'bg-white' : 'bg-zinc-700'
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${skipLinkCheck ? 'bg-zinc-300' : 'bg-zinc-700'
                           }`}
                         title="Toggle skip link check"
                       >
@@ -2116,7 +2091,7 @@ export function SettingsPage() {
                             await window.ucSettings?.set?.('alwaysCreateDesktopShortcut', newValue)
                           } catch { }
                         }}
-                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${alwaysCreateDesktopShortcut ? 'bg-white' : 'bg-zinc-700'
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${alwaysCreateDesktopShortcut ? 'bg-zinc-300' : 'bg-zinc-700'
                           }`}
                         title="Toggle always create desktop shortcuts"
                       >
@@ -2142,7 +2117,7 @@ export function SettingsPage() {
                             await window.ucSettings?.set?.('preventSleepDuringOperations', newValue)
                           } catch { }
                         }}
-                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${preventSleepDuringOperations ? 'bg-white' : 'bg-zinc-700'
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${preventSleepDuringOperations ? 'bg-zinc-300' : 'bg-zinc-700'
                           }`}
                         title="Toggle sleep prevention during active operations"
                       >
@@ -2489,21 +2464,11 @@ export function SettingsPage() {
                               </div>
                             </div>
 
-                            {/* Tool feedback */}
-                            {linuxToolFeedback && (
-                              <div className={`text-xs rounded-md px-3 py-2 ${linuxToolFeedback.type === 'success' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30' : 'bg-destructive/10 text-destructive border border-destructive/30'}`}>
-                                {linuxToolFeedback.message}
-                              </div>
-                            )}
+                            {/* Tool feedback removed — surfaced via toast */}
                           </div>
                         )}
 
-                        {/* Inline feedback when advanced is closed */}
-                        {!showLinuxAdvanced && linuxToolFeedback && (
-                          <div className={`text-xs rounded-md px-3 py-2 ${linuxToolFeedback.type === 'success' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30' : 'bg-destructive/10 text-destructive border border-destructive/30'}`}>
-                            {linuxToolFeedback.message}
-                          </div>
-                        )}
+
                       </div>
                     )}
                   </div>
@@ -2530,7 +2495,7 @@ export function SettingsPage() {
                         setSlsSteamEnabled(newValue)
                         try { await window.ucSettings?.set?.('slsSteamEnabled', newValue) } catch { }
                       }}
-                      className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${slsSteamEnabled ? 'bg-white' : 'bg-zinc-700'
+                      className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${slsSteamEnabled ? 'bg-zinc-300' : 'bg-zinc-700'
                           }`}
                       title="Toggle SLSsteam integration"
                     >
@@ -2674,7 +2639,7 @@ export function SettingsPage() {
                         setVrEnabled(newValue)
                         try { await window.ucSettings?.set?.('vrEnabled', newValue) } catch { }
                       }}
-                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${vrEnabled ? 'bg-white' : 'bg-zinc-700'
+                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${vrEnabled ? 'bg-zinc-300' : 'bg-zinc-700'
                           }`}
                       title="Toggle VR support"
                     >
@@ -2706,11 +2671,7 @@ export function SettingsPage() {
                     >
                       {vrToolRunning ? 'Launching...' : 'Launch SteamVR'}
                     </Button>
-                    {vrToolFeedback && (
-                      <span className={`text-xs ${vrToolFeedback.type === 'success' ? 'text-emerald-400' : 'text-destructive'}`}>
-                        {vrToolFeedback.message}
-                      </span>
-                    )}
+
                   </div>
 
                   {/* Auto-launch SteamVR toggle */}
@@ -2727,7 +2688,7 @@ export function SettingsPage() {
                         setVrAutoLaunchSteamVr(newValue)
                         try { await window.ucSettings?.set?.('vrAutoLaunchSteamVr', newValue) } catch { }
                       }}
-                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${vrAutoLaunchSteamVr ? 'bg-white' : 'bg-zinc-700'
+                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${vrAutoLaunchSteamVr ? 'bg-zinc-300' : 'bg-zinc-700'
                           }`}
                       title="Toggle auto-launch SteamVR"
                     >
@@ -2891,7 +2852,7 @@ export function SettingsPage() {
                           setOverlayEnabled(next)
                           await window.ucOverlay?.setSettings?.({ overlayEnabled: next })
                         }}
-                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${overlayEnabled ? 'bg-white' : 'bg-zinc-700'
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${overlayEnabled ? 'bg-zinc-300' : 'bg-zinc-700'
                           }`}
                       >
                         <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${overlayEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
@@ -2912,7 +2873,7 @@ export function SettingsPage() {
                           setOverlayAutoShow(next)
                           await window.ucOverlay?.setSettings?.({ overlayAutoShow: next })
                         }}
-                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${overlayAutoShow ? 'bg-white' : 'bg-zinc-700'
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${overlayAutoShow ? 'bg-zinc-300' : 'bg-zinc-700'
                           }`}
                         disabled={!overlayEnabled}
                       >
@@ -3011,6 +2972,75 @@ export function SettingsPage() {
                           disabled={!overlayEnabled}
                         >
                           Right
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Toast duration */}
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <label className="text-sm font-medium">Toast duration</label>
+                        <p className="text-xs text-zinc-400 mt-1">
+                          How long launch toasts stay visible before fading out
+                        </p>
+                      </div>
+                      <div className="flex gap-1 p-1 rounded-lg bg-muted">
+                        {[3000, 5000, 8000].map((duration) => (
+                          <button
+                            key={duration}
+                            onClick={async () => {
+                              setOverlayToastDurationMs(duration)
+                              await window.ucOverlay?.setSettings?.({ overlayToastDurationMs: duration })
+                            }}
+                            className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
+                              overlayToastDurationMs === duration
+                                ? 'bg-background text-zinc-100 shadow-sm'
+                                : 'text-zinc-400 hover:text-zinc-100'
+                            }`}
+                            disabled={!overlayEnabled}
+                          >
+                            {duration / 1000}s
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Toast vertical anchor */}
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <label className="text-sm font-medium">Toast anchor</label>
+                        <p className="text-xs text-zinc-400 mt-1">
+                          Choose whether launch toasts appear at the top or bottom edge
+                        </p>
+                      </div>
+                      <div className="flex gap-1 p-1 rounded-lg bg-muted">
+                        <button
+                          onClick={async () => {
+                            setOverlayToastVertical('top')
+                            await window.ucOverlay?.setSettings?.({ overlayToastVertical: 'top' })
+                          }}
+                          className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
+                            overlayToastVertical === 'top'
+                              ? 'bg-background text-zinc-100 shadow-sm'
+                              : 'text-zinc-400 hover:text-zinc-100'
+                          }`}
+                          disabled={!overlayEnabled}
+                        >
+                          Top
+                        </button>
+                        <button
+                          onClick={async () => {
+                            setOverlayToastVertical('bottom')
+                            await window.ucOverlay?.setSettings?.({ overlayToastVertical: 'bottom' })
+                          }}
+                          className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
+                            overlayToastVertical === 'bottom'
+                              ? 'bg-background text-zinc-100 shadow-sm'
+                              : 'text-zinc-400 hover:text-zinc-100'
+                          }`}
+                          disabled={!overlayEnabled}
+                        >
+                          Bottom
                         </button>
                       </div>
                     </div>
@@ -3116,7 +3146,6 @@ export function SettingsPage() {
                             variant="destructive"
                             onClick={async () => {
                               setClearingData(true)
-                              setClearDataFeedback(null)
                               try {
                                 const result = await window.ucSettings?.clearAll?.()
                                 if (result?.ok) {
@@ -3126,20 +3155,16 @@ export function SettingsPage() {
                                   setDiscordRpcEnabled(true)
                                   setDeveloperMode(false)
                                   setVerboseDownloadLogging(false)
-                                  setClearDataFeedback({ type: 'success', message: 'User data cleared successfully.' })
-                                  // Show success message briefly
+                                  toast('User data cleared successfully.')
                                   setTimeout(() => {
                                     setShowClearConfirm(false)
                                   }, 1500)
-                                  setTimeout(() => {
-                                    setClearDataFeedback(null)
-                                  }, 3000)
                                 } else {
-                                  setClearDataFeedback({ type: 'error', message: 'Failed to clear user data. Please try again.' })
+                                  toast('Failed to clear user data. Please try again.', 'error')
                                 }
                               } catch (err) {
                                 console.error('Failed to clear user data:', err)
-                                setClearDataFeedback({ type: 'error', message: 'Failed to clear user data. Please try again.' })
+                                toast('Failed to clear user data. Please try again.', 'error')
                               } finally {
                                 setClearingData(false)
                               }
@@ -3159,11 +3184,7 @@ export function SettingsPage() {
                       </div>
                     )}
 
-                    {clearDataFeedback && (
-                      <div className={`text-xs ${clearDataFeedback.type === 'success' ? 'text-emerald-400' : 'text-destructive'}`}>
-                        {clearDataFeedback.message}
-                      </div>
-                    )}
+
                   </div>
                 </CardContent>
               </Card>
@@ -3200,7 +3221,7 @@ export function SettingsPage() {
                         }}
                         className="sr-only peer"
                       />
-                      <div className="w-11 h-6 bg-zinc-700 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full after:content-[''] after:absolute after:top-0.5 after:start-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-white"></div>
+                      <div className="w-11 h-6 bg-zinc-700 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full after:content-[''] after:absolute after:top-0.5 after:start-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-zinc-300"></div>
                     </label>
                   </div>
 
@@ -3223,7 +3244,7 @@ export function SettingsPage() {
                                 await window.ucSettings?.set?.('verboseDownloadLogging', next)
                               } catch { }
                             }}
-                            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${verboseDownloadLogging ? 'bg-white' : 'bg-zinc-700'
+                            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${verboseDownloadLogging ? 'bg-zinc-300' : 'bg-zinc-700'
                           }`}
                             title="Toggle verbose download logging"
                           >
@@ -3335,11 +3356,7 @@ export function SettingsPage() {
                             {copyingDiagnostics ? 'Copying...' : 'Copy diagnostics'}
                           </Button>
                         </div>
-                        {diagnosticsFeedback && (
-                          <div className={`text-xs ${diagnosticsFeedback.type === 'success' ? 'text-emerald-400' : 'text-destructive'}`}>
-                            {diagnosticsFeedback.message}
-                          </div>
-                        )}
+
                       </div>
 
                       <div className="border-t border-amber-500/20 pt-4 space-y-3">
@@ -3357,11 +3374,7 @@ export function SettingsPage() {
                         </div>
                       </div>
 
-                      {devActionFeedback && (
-                        <div className={`text-xs ${devActionFeedback.type === 'success' ? 'text-emerald-400' : 'text-destructive'}`}>
-                          {devActionFeedback.message}
-                        </div>
-                      )}
+
                     </div>
                   )}
                 </CardContent>
@@ -3375,6 +3388,7 @@ export function SettingsPage() {
     </div>
   )
 }
+
 
 
 

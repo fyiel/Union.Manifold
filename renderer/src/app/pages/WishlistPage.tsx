@@ -68,8 +68,12 @@ export function WishlistPage() {
       if (window.ucAuth?.login) {
         const result = await window.ucAuth.login(getApiBaseUrl())
         if (result?.ok) {
-          await apiFetch("/api/comments/session", { method: "POST" })
-          await refresh().catch(() => {})
+          // Establish session on the server side
+          const sessionRes = await apiFetch("/api/comments/session", { method: "POST" })
+          // If session fails but we have discordId, user might still be authed
+          // Refresh account state to check
+          await refresh(true).catch(() => {})
+          // Try to load wishlist items
           await loadItems().catch(() => {})
         }
       } else {

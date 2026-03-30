@@ -203,6 +203,37 @@ export function LibraryPage() {
     return () => { if (searchTimerRef.current) clearTimeout(searchTimerRef.current) }
   }, [])
 
+  useEffect(() => {
+    const onCycleSort = () => {
+      setSortMode((prev) => {
+        if (prev === 'name') return 'recent-install'
+        if (prev === 'recent-install') return 'recent-play'
+        return 'name'
+      })
+    }
+
+    window.addEventListener('uc_library_cycle_sort', onCycleSort)
+    return () => window.removeEventListener('uc_library_cycle_sort', onCycleSort)
+  }, [])
+
+  useEffect(() => {
+    if (!batchDeleteConfirmOpen && !pendingDeleteGame) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      if (batchDeleteConfirmOpen) {
+        setBatchDeleteConfirmOpen(false)
+      }
+      if (pendingDeleteGame) {
+        setPendingDeleteGame(null)
+        setPendingDeleteAction(null)
+      }
+    }
+
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [batchDeleteConfirmOpen, pendingDeleteGame])
+
   const persistLibraryGameMeta = async (nextMeta: Record<string, LibraryGameMeta>) => {
     setLibraryGameMeta(nextMeta)
     try {
@@ -1085,6 +1116,7 @@ export function LibraryPage() {
                                 onClick={(event) => { event.stopPropagation() }}
                                 className="h-7 w-7 rounded-lg bg-black/70 text-white hover:bg-white/20 backdrop-blur-sm"
                                 title="Game actions"
+                                aria-label="Open game actions"
                               >
                                 <Settings className="h-3.5 w-3.5" />
                               </Button>
@@ -1216,7 +1248,7 @@ export function LibraryPage() {
                             <Badge className="rounded-full bg-zinc-800/60 text-zinc-400 border border-zinc-700/50 px-2 py-0.5 text-[11px]">Cancelled</Badge>
                           </div>
                           <div className="absolute top-2 right-2 z-20">
-                            <Button size="icon" variant="ghost" onClick={(event) => { event.preventDefault(); event.stopPropagation(); setPendingDeleteGame(game); setPendingDeleteAction("installing") }} className="h-7 w-7 rounded-lg bg-black/60 text-white hover:bg-white/20" title="Remove cancelled download">
+                            <Button size="icon" variant="ghost" onClick={(event) => { event.preventDefault(); event.stopPropagation(); setPendingDeleteGame(game); setPendingDeleteAction("installing") }} className="h-7 w-7 rounded-lg bg-black/60 text-white hover:bg-white/20" title="Remove cancelled download" aria-label="Remove cancelled download">
                               <Trash2 className="h-3.5 w-3.5" />
                             </Button>
                           </div>
@@ -1227,7 +1259,7 @@ export function LibraryPage() {
                             <Badge className="rounded-full bg-destructive/20 text-destructive border border-destructive/40 px-2 py-0.5 text-[11px]">Failed</Badge>
                           </div>
                           <div className="absolute top-2 right-2 z-20">
-                            <Button size="icon" variant="ghost" onClick={(event) => { event.preventDefault(); event.stopPropagation(); setPendingDeleteGame(game); setPendingDeleteAction("installing") }} className="h-7 w-7 rounded-lg bg-black/60 text-white hover:bg-white/20" title="Remove failed download">
+                            <Button size="icon" variant="ghost" onClick={(event) => { event.preventDefault(); event.stopPropagation(); setPendingDeleteGame(game); setPendingDeleteAction("installing") }} className="h-7 w-7 rounded-lg bg-black/60 text-white hover:bg-white/20" title="Remove failed download" aria-label="Remove failed download">
                               <Trash2 className="h-3.5 w-3.5" />
                             </Button>
                           </div>

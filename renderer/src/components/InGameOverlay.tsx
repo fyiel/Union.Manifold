@@ -3,9 +3,17 @@ import { Bell, Camera, Clock, Download, Gamepad2, Hammer, Pause, Play, Square, V
 import { ControllerOverlayFlyout } from './ControllerOverlayFlyout'
 
 type OverlayApi = NonNullable<Window['ucOverlay']> & {
-  onToast?: (callback: (data: { appid: string | null }) => void) => () => void
+  onToast?: (callback: (data: {
+    appid: string | null
+    durationMs?: number
+    vertical?: 'top' | 'bottom'
+  }) => void) => () => void
   getGameInfo?: (appid?: string) => Promise<{ ok: boolean; appid?: string | null; gameName?: string; startedAt?: number; pid?: number; image?: string | null }>
-  onPositionChanged?: (callback: (data: { position: string }) => void) => () => void
+  onPositionChanged?: (callback: (data: {
+    position: string
+    toastDurationMs?: number
+    toastVertical?: 'top' | 'bottom'
+  }) => void) => () => void
 }
 
 interface OverlayDownloadItem {
@@ -45,6 +53,7 @@ interface InstalledGame {
 
 type OverlayMode = 'hidden' | 'toast' | 'panel'
 type OverlayDock = 'left' | 'right'
+type OverlayVertical = 'top' | 'bottom'
 
 const ACTIVE_DOWNLOAD_STATUSES = ['downloading', 'extracting', 'installing', 'queued', 'paused', 'verifying', 'retrying']
 
@@ -129,6 +138,8 @@ export function InGameOverlay() {
   const [screenshotTaken, setScreenshotTaken] = useState(false)
   const [showControllerFlyout, setShowControllerFlyout] = useState(false)
   const [dock, setDock] = useState<OverlayDock>('left')
+  const [toastDurationMs, setToastDurationMs] = useState(5000)
+  const [toastVertical, setToastVertical] = useState<OverlayVertical>('bottom')
   const currentAppidRef = useRef<string | null>(null)
   const modeRef = useRef<OverlayMode>(mode)
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -366,7 +377,7 @@ export function InGameOverlay() {
     if (nextMode === 'toast') {
       setToastProgress(100)
       const start = Date.now()
-      const duration = 5000
+      const duration = Math.max(2000, toastDurationMs)
       toastProgressRef.current = setInterval(() => {
         const progress = Math.max(0, 100 - ((Date.now() - start) / duration) * 100)
         setToastProgress(progress)
@@ -375,13 +386,13 @@ export function InGameOverlay() {
       toastTimerRef.current = setTimeout(() => {
         setAnimated(false)
         hideTimeoutRef.current = setTimeout(() => setMode('hidden'), 180)
-      }, 5150)
+      }, duration + 150)
     }
     if (nextMode === 'panel') {
       refreshDownloads()
       loadInstalledGames()
     }
-  }, [clearToastTimers, loadInstalledGames, refreshDownloads])
+  }, [clearToastTimers, loadInstalledGames, refreshDownloads, toastDurationMs])
 
   useEffect(() => {
     const overlay = getOverlayApi()
@@ -405,6 +416,12 @@ export function InGameOverlay() {
     })
 
     const unsubToast = overlay.onToast?.((data) => {
+      if (typeof data.durationMs === 'number') {
+        setToastDurationMs(Math.max(2000, Math.min(12000, Math.round(data.durationMs))))
+      }
+      if (data.vertical === 'top' || data.vertical === 'bottom') {
+        setToastVertical(data.vertical)
+      }
       setCurrentAppid(data.appid ?? null)
       refreshGameInfo(data.appid)
       enterMode('toast', data.appid)
@@ -448,12 +465,20 @@ export function InGameOverlay() {
 
     const unsubPosition = overlay.onPositionChanged?.((data) => {
       setDock(getDock(data.position))
+      if (typeof data.toastDurationMs === 'number') {
+        setToastDurationMs(Math.max(2000, Math.min(12000, Math.round(data.toastDurationMs))))
+      }
+      if (data.toastVertical === 'top' || data.toastVertical === 'bottom') {
+        setToastVertical(data.toastVertical)
+      }
     })
 
     overlay.getSettings().then((settings) => {
       if (!settings.ok) return
       setHotkey(settings.hotkey || 'Ctrl+Shift+Tab')
       setDock(getDock(settings.position))
+      setToastDurationMs(Math.max(2000, Math.min(12000, Math.round(settings.toastDurationMs || 5000))))
+      setToastVertical(settings.toastVertical === 'top' ? 'top' : 'bottom')
     }).catch(() => {})
 
     overlay.getStatus().then((status) => {
@@ -552,13 +577,14 @@ export function InGameOverlay() {
   const panelSideClass = dock === 'right' ? 'right-6' : 'left-6'
   const quickActionsSideClass = dock === 'right' ? 'left-6' : 'right-6'
   const toastSideStyle = dock === 'right' ? { right: 24 } : { left: 24 }
+  const toastVerticalClass = toastVertical === 'top' ? 'top-6' : 'bottom-6'
 
   if (mode === 'hidden') return null
 
   if (mode === 'toast') {
     return (
       <div
-        className="pointer-events-none fixed bottom-6 z-[9999] w-[280px]"
+        className={`pointer-events-none fixed ${toastVerticalClass} z-[9999] w-[280px]`}
         style={toastSideStyle}
       >
         <div

@@ -5,8 +5,9 @@ import { useGamesData } from "@/hooks/use-games"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { pickGameExecutable, proxyImageUrl } from "@/lib/utils"
-import { Download, HardDrive, PauseCircle, Play, XCircle, Square } from "lucide-react"
+import { AlertTriangle, Download, HardDrive, PauseCircle, Play, XCircle, Square } from "lucide-react"
 import { ExePickerModal } from "@/components/ExePickerModal"
 import { DesktopShortcutModal } from "@/components/DesktopShortcutModal"
 import { GameLaunchPreflightModal, type LaunchPreflightResult } from "@/components/GameLaunchPreflightModal"
@@ -39,6 +40,32 @@ function formatEta(seconds: number | null) {
   }
   if (mins > 0) return `${mins}m ${secs}s`
   return `${secs}s`
+}
+
+type DiskInfo = {
+  id: string
+  name: string
+  path: string
+  totalBytes: number
+  freeBytes: number
+}
+
+type SpaceCheck = NonNullable<DownloadItem["spaceCheck"]>
+
+type SpacePromptState = {
+  appid?: string | null
+  gameName?: string | null
+  downloadId: string
+  spaceCheck: SpaceCheck
+}
+
+function suggestDrivePath(currentPath: string, nextRoot: string) {
+  if (!currentPath) return nextRoot
+  const normalizedRoot = nextRoot.endsWith("\\") || nextRoot.endsWith("/") ? nextRoot : `${nextRoot}\\`
+  const driveMatch = currentPath.match(/^[a-z]:[\\/]/i)
+  if (!driveMatch) return normalizedRoot
+  const relative = currentPath.slice(driveMatch[0].length).replace(/^[\\/]+/, "")
+  return relative ? `${normalizedRoot}${relative}` : normalizedRoot
 }
 
 // Module-level persistence for chart data (survives page navigation unmount/remount)
@@ -167,7 +194,7 @@ function computeGroupStats(
     totalBytes = overallTotalBytes
     receivedBytes = Math.min(overallReceivedBytes, overallTotalBytes)
   }
-  const effectiveSpeed = phase === "extracting" || phase === "installing" || phase === "paused" ? 0 : speedBps
+  const effectiveSpeed = phase === "paused" ? 0 : speedBps
   const etaSeconds = totalBytes > 0 && effectiveSpeed > 0 ? (totalBytes - receivedBytes) / effectiveSpeed : null
   const extractionSamples = activeItems
     .map((item) => item.extractProgress)
@@ -238,18 +265,29 @@ function getGroupPriority(items: DownloadItem[]) {
 }
 const INSTALL_READY_STATUS = "install_ready"
 
+function groupCanPause(items: DownloadItem[]) {
+  return items.some((item) => ["downloading", "retrying", "extracting", "installing", "verifying"].includes(item.status))
+}
+
+function groupIsPaused(items: DownloadItem[], phase?: string | null) {
+  if (phase) return phase === "paused"
+  return !groupCanPause(items) && items.some((item) => item.status === "paused")
+}
+
 export function DownloadsPage() {
   const isWindows = typeof navigator !== 'undefined' && /windows/i.test(navigator.userAgent)
   const {
     downloads,
     startGameDownload,
     cancelGroup,
-    pauseDownload,
-    resumeDownload,
+    pauseGroup,
+    pauseAll,
+    resumeAll,
     resumeGroup,
     openPath,
     clearCompleted,
     clearByAppid,
+    dismissByAppid,
   } = useDownloads()
   const navigate = useNavigate()
   const { games } = useGamesData()
@@ -284,10 +322,16 @@ export function DownloadsPage() {
 
   const primaryGroup = activeGroups[0] || queuedGroups[0]
   const secondaryActiveGroups = primaryGroup ? activeGroups.slice(1) : activeGroups
+  const hasAnyPausableGroups = useMemo(
+    () => Object.values(grouped).some((items) => groupCanPause(items) || items.some((item) => item.status === "queued")),
+    [grouped]
+  )
+  const hasAnyPausedGroups = useMemo(
+    () => Object.values(grouped).some((items) => groupIsPaused(items)),
+    [grouped]
+  )
   const primaryGame = primaryGroup ? games.find((game) => game.appid === primaryGroup[0]?.appid) : null
   const primaryIsInstalling = primaryGroup ? primaryGroup.some((it) => it.status === 'installing' || it.status === 'extracting') : false
-  const primaryIsPaused = primaryGroup ? primaryGroup.some((it) => it.status === 'paused') : false
-  const primaryCanPause = primaryGroup ? primaryGroup.some((it) => it.status === 'downloading' || it.status === 'retrying') : false
 
   const currentAppId = primaryGroup?.[0]?.appid ?? null
   const [networkHistory, setNetworkHistory] = useState<number[]>(
@@ -314,6 +358,9 @@ export function DownloadsPage() {
   const [launchPreflightOpen, setLaunchPreflightOpen] = useState(false)
   const [launchPreflightResult, setLaunchPreflightResult] = useState<LaunchPreflightResult | null>(null)
   const [installingAppId, setInstallingAppId] = useState<string | null>(null)
+  const [spacePrompt, setSpacePrompt] = useState<SpacePromptState | null>(null)
+  const [selectedSpaceDriveId, setSelectedSpaceDriveId] = useState("")
+  const [switchingDrive, setSwitchingDrive] = useState(false)
   const primaryStatsRef = useRef<{
     totalBytes: number
     receivedBytes: number
@@ -327,6 +374,9 @@ export function DownloadsPage() {
     if (!primaryGroup) return null
     return computeGroupStats(primaryGroup)
   }, [primaryGroup])
+  const primaryPhase = primaryStats?.phase ?? null
+  const primaryIsPaused = primaryGroup ? groupIsPaused(primaryGroup, primaryPhase) : false
+  const primaryCanPause = primaryGroup ? groupCanPause(primaryGroup) : false
   const primaryTotalParts = useMemo(() => {
     if (!primaryGroup) return 1
     return getTotalParts(primaryGroup)
@@ -335,6 +385,42 @@ export function DownloadsPage() {
   useEffect(() => {
     primaryStatsRef.current = primaryStats
   }, [primaryStats])
+
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<any>).detail
+      if (!detail?.downloadId || !detail?.spaceCheck) return
+      setSpacePrompt({
+        appid: detail.appid,
+        gameName: detail.gameName,
+        downloadId: detail.downloadId,
+        spaceCheck: detail.spaceCheck,
+      })
+    }
+
+    window.addEventListener("uc_insufficient_space", handler)
+    return () => window.removeEventListener("uc_insufficient_space", handler)
+  }, [])
+
+  useEffect(() => {
+    if (!spacePrompt) return
+    const preferredDrive = spacePrompt.spaceCheck.drives.find((drive) => drive.freeBytes >= spacePrompt.spaceCheck.requiredBytes)
+    const currentDrive = spacePrompt.spaceCheck.drives.find((drive) => spacePrompt.spaceCheck.targetPath.startsWith(drive.path))
+    setSelectedSpaceDriveId(preferredDrive?.id || currentDrive?.id || spacePrompt.spaceCheck.drives[0]?.id || "")
+  }, [spacePrompt])
+
+  useEffect(() => {
+    if (!spacePrompt) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return
+      if (switchingDrive) return
+      event.preventDefault()
+      setSpacePrompt(null)
+    }
+
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [spacePrompt, switchingDrive])
 
   useEffect(() => {
     if (!primaryGroup || !primaryStats) {
@@ -567,6 +653,15 @@ export function DownloadsPage() {
     try {
       clearByAppid(appid)
       const result = await window.ucDownloads.installDownloadedArchive(appid)
+      if ((result?.code === "INSUFFICIENT_SPACE" || result?.error === "insufficient_space") && result.spaceCheck) {
+        setSpacePrompt({
+          appid,
+          gameName: games.find((game) => game.appid === appid)?.name || appid,
+          downloadId: result.downloadId || `installing:${appid}`,
+          spaceCheck: result.spaceCheck,
+        })
+        return
+      }
       if (!result?.ok) {
         throw new Error(result?.error || "Failed to install downloaded archive")
       }
@@ -574,6 +669,44 @@ export function DownloadsPage() {
       gameLogger.error('Failed to install downloaded archive', { data: { appid, err } })
     } finally {
       setInstallingAppId((current) => (current === appid ? null : current))
+    }
+  }
+
+  const handleSwitchInstallDrive = async () => {
+    if (!spacePrompt || !selectedSpaceDriveId || !window.ucDownloads?.setDownloadPath) return
+    const selectedDrive = spacePrompt.spaceCheck.drives.find((drive) => drive.id === selectedSpaceDriveId)
+    if (!selectedDrive) return
+    setSwitchingDrive(true)
+    try {
+      const currentPath = (await window.ucDownloads.getDownloadPath?.())?.path || spacePrompt.spaceCheck.targetPath
+      const nextPath = suggestDrivePath(currentPath, selectedDrive.path)
+      const result = await window.ucDownloads.setDownloadPath(nextPath)
+      if (!result?.ok) {
+        throw new Error("Failed to change install path")
+      }
+      const retryAppId = spacePrompt.appid
+      setSpacePrompt(null)
+      if (retryAppId) await handleInstallReady(retryAppId)
+    } catch (error) {
+      gameLogger.error("Failed to switch install drive", { data: { error, selectedSpaceDriveId } })
+    } finally {
+      setSwitchingDrive(false)
+    }
+  }
+
+  const handlePickInstallFolder = async () => {
+    if (!spacePrompt || !window.ucDownloads?.pickDownloadPath) return
+    setSwitchingDrive(true)
+    try {
+      const result = await window.ucDownloads.pickDownloadPath()
+      if (!result?.ok || !result.path) return
+      const retryAppId = spacePrompt.appid
+      setSpacePrompt(null)
+      if (retryAppId) await handleInstallReady(retryAppId)
+    } catch (error) {
+      gameLogger.error("Failed to pick install folder", { data: { error } })
+    } finally {
+      setSwitchingDrive(false)
     }
   }
 
@@ -675,13 +808,33 @@ export function DownloadsPage() {
           <h1 className="text-3xl font-black tracking-tight text-white sm:text-4xl">Activity</h1>
           <p className="text-sm text-zinc-500">Manage your downloads, installations and running games</p>
         </div>
-        <Button 
-          variant="outline" 
-          onClick={clearCompleted} 
-          className="rounded-full border-white/[.07] px-5 text-sm font-medium text-zinc-300 hover:border-zinc-500 hover:text-white active:scale-95"
-        >
-          Clear history
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            onClick={() => void resumeAll()}
+            disabled={!hasAnyPausedGroups}
+            className="gap-2 rounded-full border-white/[.07] px-4 text-sm font-medium text-zinc-300 hover:border-zinc-500 hover:text-white active:scale-95 disabled:pointer-events-none disabled:opacity-50"
+          >
+            <Play className="h-4 w-4" />
+            Resume all
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => void pauseAll()}
+            disabled={!hasAnyPausableGroups}
+            className="gap-2 rounded-full border-white/[.07] px-4 text-sm font-medium text-zinc-300 hover:border-zinc-500 hover:text-white active:scale-95 disabled:pointer-events-none disabled:opacity-50"
+          >
+            <PauseCircle className="h-4 w-4" />
+            Pause all
+          </Button>
+          <Button
+            variant="outline"
+            onClick={clearCompleted}
+            className="rounded-full border-white/[.07] px-5 text-sm font-medium text-zinc-300 hover:border-zinc-500 hover:text-white active:scale-95"
+          >
+            Clear history
+          </Button>
+        </div>
       </div>
 
       {/* Now Playing Section */}
@@ -821,12 +974,12 @@ export function DownloadsPage() {
                   ) : (
                     <Button 
                       variant="outline" 
-                      onClick={() => primaryGroup && primaryGroup.forEach((it) => pauseDownload(it.id))} 
+                      onClick={() => primaryGroup && void pauseGroup(primaryGroup[0]?.appid)} 
                       disabled={!primaryCanPause}
                       className="gap-2 rounded-full border-white/[.07] px-5 text-sm font-medium text-zinc-300 hover:border-zinc-500 hover:text-white active:scale-95 disabled:pointer-events-none disabled:opacity-50"
                     >
                       <PauseCircle className="h-4 w-4" />
-                      {primaryIsInstalling ? "Installing" : "Pause"}
+                      Pause
                     </Button>
                   )}
                   <Button
@@ -883,13 +1036,6 @@ export function DownloadsPage() {
                   </div>
                 </div>
 
-                {primaryStats.phase !== "downloading" && primaryStats.overallTotalBytes > 0 && (
-                  <div className="text-xs text-zinc-500">
-                    {primaryStats.phase === "installing" || primaryStats.phase === "extracting"
-                      ? `Archive ready: ${formatBytes(primaryStats.overallReceivedBytes)} / ${formatBytes(primaryStats.overallTotalBytes)}`
-                      : `Total downloaded: ${formatBytes(primaryStats.overallReceivedBytes)} / ${formatBytes(primaryStats.overallTotalBytes)}`}
-                  </div>
-                )}
               </div>
 
               {/* Performance Chart */}
@@ -914,7 +1060,7 @@ export function DownloadsPage() {
               </div>
 
               {/* Stats Grid */}
-              <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 <div className="rounded-xl border border-white/[.07] bg-zinc-800/40 p-3">
                   <div className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">Download</div>
                   <div className="mt-1 font-mono text-lg font-bold tabular-nums text-white">{formatSpeed(currentNetwork)}</div>
@@ -926,10 +1072,6 @@ export function DownloadsPage() {
                 <div className="rounded-xl border border-white/[.07] bg-zinc-800/40 p-3">
                   <div className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">Disk Write</div>
                   <div className="mt-1 font-mono text-lg font-bold tabular-nums text-white">{formatSpeed(currentDisk)}</div>
-                </div>
-                <div className="rounded-xl border border-white/[.07] bg-zinc-800/40 p-3">
-                  <div className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">Transferred</div>
-                  <div className="mt-1 font-mono text-lg font-bold tabular-nums text-white">{formatBytes(primaryStats.receivedBytes)}</div>
                 </div>
               </div>
             </div>
@@ -948,11 +1090,13 @@ export function DownloadsPage() {
 
           <div className="space-y-3">
             {secondaryActiveGroups.map((items) => {
-              const { totalBytes, receivedBytes, speedBps, etaSeconds, progress, phase, overallTotalBytes, overallReceivedBytes, extractionProgress, primaryPartFilename, primaryPartIndex } = computeGroupStats(items)
+              const { totalBytes, receivedBytes, speedBps, etaSeconds, progress, phase, extractionProgress } = computeGroupStats(items)
               const totalParts = getTotalParts(items)
               const gameName = items[0]?.gameName || "Unknown"
               const appid = items[0]?.appid
               const game = appid ? games.find((g) => g.appid === appid) : null
+              const canPause = groupCanPause(items)
+              const isPausedGroup = groupIsPaused(items, phase)
               const groupStatus = phase === "installing"
                 ? "Installing"
                 : phase === "extracting"
@@ -1016,23 +1160,33 @@ export function DownloadsPage() {
                       </div>
                       <Progress value={progress} className="h-1.5 bg-zinc-800" />
                       <div className="flex items-center justify-between text-[11px] text-zinc-500">
-                        <span>
-                          {phase === "installing" || phase === "extracting"
-                            ? `Archive ready: ${formatBytes(overallReceivedBytes)} / ${formatBytes(overallTotalBytes)}`
-                            : `ETA: ${formatEta(etaSeconds)}`}
-                        </span>
-                        <span>
-                          {phase === "installing" || phase === "extracting"
-                            ? (() => {
-                                const part = getPartIndex(primaryPartFilename || "", 0, totalParts, primaryPartIndex).partNum
-                                return totalParts > 1 ? `Installing ${part}/${totalParts}` : "Installing"
-                              })()
-                            : formatSpeed(speedBps)}
-                        </span>
+                        <span>ETA: {formatEta(etaSeconds)}</span>
+                        <span>{formatSpeed(speedBps)}</span>
                       </div>
                     </div>
 
                     <div className="flex items-center gap-2">
+                      {appid && (isPausedGroup ? (
+                        <Button
+                          size="sm"
+                          onClick={() => void resumeGroup(appid)}
+                          className="rounded-full bg-white px-3 text-xs font-medium text-black hover:bg-zinc-200 active:scale-95"
+                        >
+                          <Play className="mr-1.5 h-3.5 w-3.5" />
+                          Resume
+                        </Button>
+                      ) : (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => void pauseGroup(appid)}
+                          disabled={!canPause}
+                          className="rounded-full px-3 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-white disabled:pointer-events-none disabled:opacity-50"
+                        >
+                          <PauseCircle className="mr-1.5 h-3.5 w-3.5" />
+                          Pause
+                        </Button>
+                      ))}
                       <Button
                         size="sm"
                         variant="ghost"
@@ -1273,6 +1427,18 @@ export function DownloadsPage() {
                     >
                       View
                     </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => {
+                        if (appid) {
+                          void dismissByAppid(appid)
+                        }
+                      }}
+                      className="rounded-full px-3 text-xs text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
+                    >
+                      Remove
+                    </Button>
                   </div>
                 </div>
 
@@ -1465,7 +1631,9 @@ export function DownloadsPage() {
                       size="sm"
                       variant="ghost"
                       onClick={() => {
-                        if (appid) clearByAppid(appid)
+                        if (appid) {
+                          void dismissByAppid(appid)
+                        }
                       }}
                       className="rounded-full px-3 text-xs text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
                     >
@@ -1488,6 +1656,67 @@ export function DownloadsPage() {
           )}
         </div>
       </section>
+
+      {spacePrompt && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => !switchingDrive && setSpacePrompt(null)} />
+          <div className="relative w-full max-w-lg rounded-2xl border border-white/[.08] bg-zinc-950/95 p-5 shadow-2xl">
+            <div className="flex items-start gap-3">
+              <div className="rounded-full bg-red-500/10 p-2 text-red-400">
+                <AlertTriangle className="h-5 w-5" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-lg font-semibold text-white">Not enough free space</h3>
+                <p className="text-sm text-zinc-400">
+                  {spacePrompt.gameName || "This game"} cannot be extracted on the current install drive yet.
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-4 rounded-xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-zinc-200">
+              <div className="flex items-center justify-between">
+                <span className="text-zinc-400">Required free space</span>
+                <span className="font-mono">{formatBytes(spacePrompt.spaceCheck.requiredBytes)}</span>
+              </div>
+              <div className="mt-2 flex items-center justify-between">
+                <span className="text-zinc-400">Available now</span>
+                <span className="font-mono">{formatBytes(spacePrompt.spaceCheck.freeBytes)}</span>
+              </div>
+              <div className="mt-2 flex items-center justify-between">
+                <span className="text-zinc-400">Shortfall</span>
+                <span className="font-mono text-red-300">{formatBytes(spacePrompt.spaceCheck.shortfallBytes)}</span>
+              </div>
+            </div>
+
+            <div className="mt-4 space-y-2">
+              <label className="text-xs font-medium uppercase tracking-[0.18em] text-zinc-500">Install drive</label>
+              <Select value={selectedSpaceDriveId} onValueChange={setSelectedSpaceDriveId}>
+                <SelectTrigger className="border-white/[.08] bg-zinc-900 text-zinc-100">
+                  <SelectValue placeholder="Choose a drive" />
+                </SelectTrigger>
+                <SelectContent>
+                  {spacePrompt.spaceCheck.drives.map((drive: DiskInfo) => (
+                    <SelectItem key={drive.id} value={drive.id}>
+                      {drive.name} • {formatBytes(drive.freeBytes)} free
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-zinc-500">Choose a drive with enough free space, or free space on the current one and retry.</p>
+            </div>
+
+            <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <Button variant="ghost" onClick={() => setSpacePrompt(null)} disabled={switchingDrive}>Close</Button>
+              <Button variant="outline" onClick={handlePickInstallFolder} disabled={switchingDrive} className="border-white/[.08] text-zinc-200">
+                Choose Folder
+              </Button>
+              <Button onClick={handleSwitchInstallDrive} disabled={switchingDrive || !selectedSpaceDriveId} className="bg-white text-black hover:bg-zinc-200">
+                {switchingDrive ? "Switching..." : "Switch Drive And Retry"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <ExePickerModal
         open={exePickerOpen}

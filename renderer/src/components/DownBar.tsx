@@ -60,6 +60,7 @@ type DownBarData = {
   displayName: string
   phase: string
   progress: number
+  etaSeconds: number | null
   partNum: number
   partTotal: number
   isPaused: boolean
@@ -98,7 +99,7 @@ function selectDownBarData(downloads: DownloadItem[]): DownBarData {
   const queuedCount = visible.filter((item) => item.status === "queued").length
 
   if (!displayGroup) {
-    return { hasDisplay: false, displayName: "", phase: "", progress: 0, partNum: 1, partTotal: 1, isPaused: false, isQueuedOnly: false, queuedCount: 0, primaryAppid: null, firstDownloadingId: null, secondaryActivityLabel: null, secondaryActivityDetail: null, secondaryActivityName: null, secondaryActivityPhase: null, canToggle: false }
+    return { hasDisplay: false, displayName: "", phase: "", progress: 0, etaSeconds: null, partNum: 1, partTotal: 1, isPaused: false, isQueuedOnly: false, queuedCount: 0, primaryAppid: null, firstDownloadingId: null, secondaryActivityLabel: null, secondaryActivityDetail: null, secondaryActivityName: null, secondaryActivityPhase: null, canToggle: false }
   }
 
   const { totalBytes, receivedBytes } = estimateGroupTotals(displayGroup)
@@ -119,6 +120,7 @@ function selectDownBarData(downloads: DownloadItem[]): DownBarData {
     return latest
   }, null)
   const activeItem = downloading || verifying || retrying || extracting || installing || paused || completed || fallbackLatest || displayGroup[0]
+  const etaSeconds = downloading?.etaSeconds ?? verifying?.etaSeconds ?? retrying?.etaSeconds ?? null
   const totalParts = getTotalParts(displayGroup)
   const partInfo = getPartIndex(activeItem?.filename || "", 0, totalParts, activeItem?.partIndex)
   const phase = installing ? "Installing"
@@ -166,6 +168,7 @@ function selectDownBarData(downloads: DownloadItem[]): DownBarData {
     displayName: displayGroup[0]?.gameName || "Download",
     phase,
     progress,
+    etaSeconds,
     partNum: partInfo.partNum,
     partTotal: partInfo.total,
     isPaused,
@@ -187,6 +190,7 @@ function downBarEq(a: DownBarData, b: DownBarData): boolean {
     a.displayName === b.displayName &&
     a.phase === b.phase &&
     Math.abs(a.progress - b.progress) < 0.5 &&
+    a.etaSeconds === b.etaSeconds &&
     a.partNum === b.partNum &&
     a.partTotal === b.partTotal &&
     a.isPaused === b.isPaused &&
@@ -224,7 +228,7 @@ export function DownBar() {
             onKeyDown={(e) => {
               if (e.key === "Enter" || e.key === " ") handleClick()
             }}
-            className="pointer-events-auto flex w-full max-w-xl cursor-pointer items-center justify-between gap-3 rounded-2xl border border-white/[.07] bg-zinc-900/95 px-4 py-3 text-sm text-zinc-200 shadow-[0_8px_32px_rgba(0,0,0,0.6)] backdrop-blur-2xl transition-all hover:border-white/[.12] hover:bg-zinc-800/95"
+            className="glass pointer-events-auto flex w-full max-w-xl cursor-pointer items-center justify-between gap-3 rounded-full border border-white/[.12] bg-zinc-950/68 px-4 py-3 text-sm text-zinc-200 shadow-[0_8px_30px_rgba(0,0,0,0.28)] transition-all hover:border-white/[.16] hover:bg-zinc-950/75 backdrop-blur-2xl"
           >
             <div className="flex items-center gap-3">
                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-zinc-800/80 ring-1 ring-white/[.07]">
@@ -255,7 +259,18 @@ export function DownBar() {
     )
   }
 
-  const { displayName, phase, progress, partNum, partTotal, isPaused, isQueuedOnly, queuedCount, primaryAppid, firstDownloadingId, secondaryActivityLabel, secondaryActivityDetail, secondaryActivityName, secondaryActivityPhase, canToggle } = downBarData
+  const { displayName, phase, progress, etaSeconds, partNum, partTotal, isPaused, isQueuedOnly, queuedCount, primaryAppid, firstDownloadingId, secondaryActivityLabel, secondaryActivityDetail, secondaryActivityName, secondaryActivityPhase, canToggle } = downBarData
+
+  const formatEta = (seconds: number | null) => {
+    if (seconds == null || !Number.isFinite(seconds) || seconds <= 0) return null
+    if (seconds < 60) return `${Math.round(seconds)}s left`
+    if (seconds < 3600) return `${Math.round(seconds / 60)}m left`
+    const hours = Math.floor(seconds / 3600)
+    const minutes = Math.round((seconds % 3600) / 60)
+    return minutes > 0 ? `${hours}h ${minutes}m left` : `${hours}h left`
+  }
+
+  const etaLabel = formatEta(etaSeconds)
 
   const handleToggle = (event: MouseEvent<HTMLButtonElement>) => {
     event.preventDefault()
@@ -277,7 +292,7 @@ export function DownBar() {
           onKeyDown={(e) => {
             if (e.key === "Enter" || e.key === " ") handleClick()
           }}
-          className="pointer-events-auto flex w-full max-w-xl cursor-pointer items-center gap-4 rounded-2xl border border-white/[.07] bg-zinc-900/95 px-4 py-3 text-sm text-zinc-200 shadow-[0_8px_32px_rgba(0,0,0,0.6)] backdrop-blur-2xl transition-all hover:border-white/[.12] hover:bg-zinc-800/95"
+          className="glass pointer-events-auto flex w-full max-w-xl cursor-pointer items-center gap-4 rounded-full border border-white/[.12] bg-zinc-950/68 px-4 py-3 text-sm text-zinc-200 shadow-[0_8px_30px_rgba(0,0,0,0.28)] transition-all hover:border-white/[.16] hover:bg-zinc-950/75 backdrop-blur-2xl"
         >
           <div className="min-w-0 flex-1 space-y-2">
             <div className="flex items-center gap-4">
@@ -296,6 +311,7 @@ export function DownBar() {
                           ? `${phase} · ${partNum}/${partTotal}${secondaryActivityLabel ? ` · ${secondaryActivityLabel}` : ""}`
                           : `${phase}${secondaryActivityLabel ? ` · ${secondaryActivityLabel}` : ""}`}
                   </span>
+                  {etaLabel ? <span className="block text-[10px] text-zinc-600">ETA {etaLabel}</span> : null}
                 </div>
               </div>
 

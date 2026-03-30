@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { ChevronLeft, ChevronRight, Download, Info } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { apiUrl } from '@/lib/api'
-import { formatNumber, cn } from '@/lib/utils'
+import { formatNumber, cn, proxyImageUrl } from '@/lib/utils'
 
 interface Game {
   appid: string
@@ -117,7 +117,7 @@ export function HeroSlider({ games, gameStats = {}, loading = false }: HeroSlide
   const getSliderImageSrc = useCallback(
     (featuredGame: Game) => {
       const resolvedHero = sgdbHeroesByAppid[featuredGame.appid]
-      if (resolvedHero === undefined) return null
+      if (resolvedHero === undefined) return getHeroImage(featuredGame)
       return resolvedHero.heroUrl || getHeroImage(featuredGame)
     },
     [getHeroImage, sgdbHeroesByAppid],
@@ -143,6 +143,35 @@ export function HeroSlider({ games, gameStats = {}, loading = false }: HeroSlide
 
   const next = useCallback(() => goTo(currentIndex + 1), [currentIndex, goTo])
   const prev = useCallback(() => goTo(currentIndex - 1), [currentIndex, goTo])
+
+  useEffect(() => {
+    if (total === 0) {
+      setCurrentIndex(0)
+      return
+    }
+    if (currentIndex >= total) {
+      setCurrentIndex(0)
+    }
+  }, [currentIndex, total])
+
+  useEffect(() => {
+    if (total === 0) return
+    const preloadIndexes = [
+      currentIndex,
+      (currentIndex + 1) % total,
+      (currentIndex - 1 + total) % total,
+    ]
+
+    preloadIndexes.forEach((index) => {
+      const slide = sliderGames[index]
+      if (!slide) return
+      const source = getSliderImageSrc(slide)
+      if (!source) return
+      const image = new window.Image()
+      image.decoding = 'async'
+      image.src = proxyImageUrl(source)
+    })
+  }, [currentIndex, total, sliderGames, getSliderImageSrc])
 
   // Autoplay
   useEffect(() => {
@@ -192,19 +221,33 @@ export function HeroSlider({ games, gameStats = {}, loading = false }: HeroSlide
   if (total === 0) return null
 
   return (
-    <div
+    <section
       className="relative overflow-hidden rounded-3xl w-full select-none"
       style={{ height: 480 }}
       onMouseEnter={() => setIsPaused(true)}
       onMouseLeave={() => setIsPaused(false)}
       onTouchStart={handleTouchStart}
       onTouchEnd={handleTouchEnd}
+      onKeyDown={(event) => {
+        if (event.key === 'ArrowRight') {
+          event.preventDefault()
+          next()
+        }
+        if (event.key === 'ArrowLeft') {
+          event.preventDefault()
+          prev()
+        }
+      }}
+      tabIndex={0}
+      role="region"
+      aria-roledescription="carousel"
+      aria-label="Featured Games Slider"
     >
       {/* Background hero image */}
       {currentHeroSrc ? (
         <img
           key={`hero-${game.appid}-${currentIndex}`}
-          src={currentHeroSrc}
+          src={proxyImageUrl(currentHeroSrc)}
           alt={game.name}
           className={cn(
             'absolute inset-0 h-full w-full object-cover transition-opacity duration-500',
@@ -231,7 +274,7 @@ export function HeroSlider({ games, gameStats = {}, loading = false }: HeroSlide
           {/* Game logo or title */}
           {currentLogoSrc ? (
             <img
-              src={currentLogoSrc}
+              src={proxyImageUrl(currentLogoSrc)}
               alt={`${game.name} logo`}
               className="max-h-[72px] w-auto max-w-[260px] object-contain drop-shadow-2xl"
               draggable={false}
@@ -314,6 +357,6 @@ export function HeroSlider({ games, gameStats = {}, loading = false }: HeroSlide
           </button>
         </div>
       </div>
-    </div>
+    </section>
   )
 }
