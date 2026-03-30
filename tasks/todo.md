@@ -1,5 +1,22 @@
 # Todo
 
+## Screenshot viewer quality + zoom + mobile nav fix (2026-03-30)
+
+- [x] Audit game detail screenshot lightbox behavior and constraints.
+- [x] Upgrade lightbox source to prefer higher-quality screenshot variants.
+- [x] Expand lightbox canvas sizing and add zoom controls with keyboard support.
+- [x] Fix previous and next navigation visibility on smaller screens.
+- [x] Verify renderer diagnostics and summarize behavior changes.
+
+### Review
+
+- Updated game-detail screenshot lightbox URLs to prefer higher-quality IGDB variants (`t_original`) before proxying.
+- Increased the lightbox canvas to `98vw/92vh` with a `1600px` image container cap to allow larger screenshot rendering.
+- Added zoom functionality via buttons, mouse wheel, keyboard shortcuts (`+`, `-`, `0`), and click-to-zoom.
+- Added drag-to-pan support when zoomed in, with bounded panning and drag-safe click behavior.
+- Fixed small-screen navigation reliability by removing hidden side controls and adding mobile fallback prev/next controls in the bottom toolbar.
+- Verification: editor diagnostics report no errors in `renderer/src/app/pages/GameDetailPage.tsx`.
+
 ## Hydra UX Phase 3.1 - UDL chrome polish
 
 - [completed] Replace white enabled toggle tracks in Settings with zinc track color for contrast

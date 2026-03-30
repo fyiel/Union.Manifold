@@ -2848,6 +2848,14 @@ function getUrlExtension(url, fallback = 'jpg') {
   return fallback
 }
 
+function getHighQualityScreenshotUrl(url) {
+  if (!url || typeof url !== 'string') return url
+
+  return url
+    .replace('/t_screenshot_med/', '/t_original/')
+    .replace('/t_thumb/', '/t_original/')
+}
+
 async function cacheRemoteImage(url, targetFolder, baseName) {
   if (!url || typeof url !== 'string' || !/^https?:\/\//i.test(url)) return null
   const ext = getUrlExtension(url)
@@ -2863,16 +2871,17 @@ async function cacheRemoteScreenshots(urls, targetFolder) {
   const shotsFolder = ensureSubdir(targetFolder, 'screenshots')
   const results = []
   for (const url of urls) {
-    if (!url || typeof url !== 'string' || !/^https?:\/\//i.test(url)) {
+    const sourceUrl = getHighQualityScreenshotUrl(url)
+    if (!sourceUrl || typeof sourceUrl !== 'string' || !/^https?:\/\//i.test(sourceUrl)) {
       results.push(null)
       continue
     }
-    const hash = hashString(url)
-    const ext = getUrlExtension(url)
+    const hash = hashString(sourceUrl)
+    const ext = getUrlExtension(sourceUrl)
     const filename = `shot-${(hash || 'unknown').slice(0, 12)}.${ext}`
     const destPath = path.join(shotsFolder, filename)
     if (!fs.existsSync(destPath)) {
-      const ok = await downloadToFile(url, destPath, { headers: IMAGE_DOWNLOAD_HEADERS })
+      const ok = await downloadToFile(sourceUrl, destPath, { headers: IMAGE_DOWNLOAD_HEADERS })
       if (!ok) {
         results.push(null)
         continue
