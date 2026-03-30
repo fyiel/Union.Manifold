@@ -1640,6 +1640,32 @@ function normalizeBaseUrl(baseUrl) {
   }
 }
 
+const MAIN_WEBSITE_ORIGIN = 'https://union-crax.xyz'
+const MIRROR_AUTH_BLOCK_MESSAGE = 'Please login on the main website union-crax.xyz'
+
+function isMainWebsiteBaseUrl(baseUrl) {
+  return normalizeBaseUrl(baseUrl) === MAIN_WEBSITE_ORIGIN
+}
+
+async function maybeBlockMirrorAuth(win, baseUrl, options = {}) {
+  if (isMainWebsiteBaseUrl(baseUrl)) return null
+
+  if (options.showDialog && win && !win.isDestroyed()) {
+    try {
+      await dialog.showMessageBox(win, {
+        type: 'info',
+        buttons: ['OK'],
+        defaultId: 0,
+        noLink: true,
+        title: 'Login unavailable on mirror',
+        message: MIRROR_AUTH_BLOCK_MESSAGE,
+      })
+    } catch { }
+  }
+
+  return { ok: false, error: MIRROR_AUTH_BLOCK_MESSAGE }
+}
+
 function buildAuthUrl(baseUrl, nextPath, action) {
   const origin = normalizeBaseUrl(baseUrl)
   try {
@@ -2365,6 +2391,8 @@ ipcMain.handle('uc:auth-login', async (event, baseUrl, provider) => {
   ucLog(`Auth login initiated (provider: ${provider || 'discord'})`)
   const win = BrowserWindow.fromWebContents(event.sender)
   if (!win || win.isDestroyed()) return { ok: false, error: 'no_window' }
+  const blocked = await maybeBlockMirrorAuth(win, baseUrl, { showDialog: true })
+  if (blocked) return blocked
   const authUrl = buildAuthUrl(baseUrl, provider === 'google' ? 'google' : '/settings')
   const result = await openAuthWindow(win, authUrl)
   if (result?.ok) {
@@ -2406,6 +2434,8 @@ ipcMain.handle('uc:auth-email-login', async (event, payload) => {
   const { baseUrl, email, password } = payload
   const win = BrowserWindow.fromWebContents(event.sender)
   if (!win || win.isDestroyed()) return { ok: false, error: 'no_window' }
+  const blocked = await maybeBlockMirrorAuth(win, baseUrl)
+  if (blocked) return blocked
   try {
     const response = await fetchWithSession(win.webContents.session, baseUrl, '/api/auth/login', {
       method: 'POST',
@@ -2428,6 +2458,8 @@ ipcMain.handle('uc:auth-register', async (event, payload) => {
   const { baseUrl, email, username, password } = payload
   const win = BrowserWindow.fromWebContents(event.sender)
   if (!win || win.isDestroyed()) return { ok: false, error: 'no_window' }
+  const blocked = await maybeBlockMirrorAuth(win, baseUrl)
+  if (blocked) return blocked
   try {
     const response = await fetchWithSession(win.webContents.session, baseUrl, '/api/auth/register', {
       method: 'POST',
@@ -2450,6 +2482,8 @@ ipcMain.handle('uc:auth-verify-email', async (event, payload) => {
   const { baseUrl, token } = payload
   const win = BrowserWindow.fromWebContents(event.sender)
   if (!win || win.isDestroyed()) return { ok: false, error: 'no_window' }
+  const blocked = await maybeBlockMirrorAuth(win, baseUrl)
+  if (blocked) return blocked
   try {
     const response = await fetchWithSession(win.webContents.session, baseUrl, '/api/auth/verify-email', {
       method: 'POST',
@@ -2471,6 +2505,8 @@ ipcMain.handle('uc:auth-forgot-password', async (event, payload) => {
   const { baseUrl, email } = payload
   const win = BrowserWindow.fromWebContents(event.sender)
   if (!win || win.isDestroyed()) return { ok: false, error: 'no_window' }
+  const blocked = await maybeBlockMirrorAuth(win, baseUrl)
+  if (blocked) return blocked
   try {
     const response = await fetchWithSession(win.webContents.session, baseUrl, '/api/auth/forgot-password', {
       method: 'POST',
@@ -2492,6 +2528,8 @@ ipcMain.handle('uc:auth-reset-password', async (event, payload) => {
   const { baseUrl, token, password } = payload
   const win = BrowserWindow.fromWebContents(event.sender)
   if (!win || win.isDestroyed()) return { ok: false, error: 'no_window' }
+  const blocked = await maybeBlockMirrorAuth(win, baseUrl)
+  if (blocked) return blocked
   try {
     const response = await fetchWithSession(win.webContents.session, baseUrl, '/api/auth/reset-password', {
       method: 'POST',
@@ -2531,6 +2569,8 @@ ipcMain.handle('uc:auth-link-provider', async (event, payload) => {
   const { baseUrl, provider } = payload
   const win = BrowserWindow.fromWebContents(event.sender)
   if (!win || win.isDestroyed()) return { ok: false, error: 'no_window' }
+  const blocked = await maybeBlockMirrorAuth(win, baseUrl, { showDialog: true })
+  if (blocked) return blocked
   
   const connectPath = provider === 'discord' ? '/api/discord/connect' : '/api/auth/google/connect'
   const authUrl = buildAuthUrl(baseUrl, connectPath, 'link')

@@ -74,23 +74,7 @@ export function TopBar({ onOpenMenu }: TopBarProps) {
     : (loggingIn ? "Connecting..." : "Log in")
 
   const handleLogin = async () => {
-    const baseUrl = getApiBaseUrl()
-    if (!window.ucAuth?.login) {
-      window.open(apiUrl("/api/discord/connect?next=/settings"), "_blank")
-      return
-    }
-
-    setLoggingIn(true)
-    try {
-      const result = await window.ucAuth.login(baseUrl)
-      if (result?.ok) {
-        await refresh(true)
-      }
-    } catch {
-      // ignore login errors
-    } finally {
-      setLoggingIn(false)
-    }
+    navigate("/login")
   }
 
   const handleLogout = async () => {

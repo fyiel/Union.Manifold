@@ -26,6 +26,7 @@ import {
 } from "@/lib/settings-constants"
 import { LINUX_PRESETS, applyGlobalLinuxPreset, type LinuxGlobalSettings, type LinuxPresetId } from "@/lib/linux-presets"
 import { useToast } from "@/context/toast-context"
+import { useNavigate } from "react-router-dom"
 
 type DiskInfo = {
   id: string
@@ -116,6 +117,7 @@ function formatBytes(bytes: number) {
 }
 
 export function SettingsPage() {
+  const navigate = useNavigate()
   const isWindows = typeof navigator !== 'undefined' && /windows/i.test(navigator.userAgent)
   const isLinux = typeof navigator !== 'undefined' && /linux/i.test(navigator.userAgent)
   const { user: accountUser, loading: accountLoading, authenticated, refresh: refreshAccount } = useDiscordAccount()
@@ -1092,22 +1094,8 @@ export function SettingsPage() {
     setAccountRefreshing(false)
   }
 
-  const handleAccountLogin = async () => {
-    setLoggingIn(true)
-    try {
-      if (window.ucAuth?.login) {
-        const result = await window.ucAuth.login(getApiBaseUrl())
-        if (result?.ok) {
-          await apiFetch("/api/comments/session", { method: "POST" })
-          await refreshAccount().catch(() => { })
-          await loadAccountSummary().catch(() => { })
-        }
-      } else {
-        window.open(apiUrl("/api/discord/connect?next=/settings"), "_blank")
-      }
-    } finally {
-      setLoggingIn(false)
-    }
+  const handleAccountLogin = () => {
+    navigate("/login")
   }
 
   const handleAccountLogout = async () => {

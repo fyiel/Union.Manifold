@@ -39,6 +39,7 @@ import {
   Share2,
   Trash2,
 } from "lucide-react"
+import { useNavigate } from "react-router-dom"
 
 type CommentUser = {
   discordId: string
@@ -215,6 +216,7 @@ export function GameComments({
   appid: string
   gameName: string
 }) {
+  const navigate = useNavigate()
   const [user, setUser] = useState<CommentUser | null>(null)
   const [comments, setComments] = useState<GameComment[]>([])
   const [loading, setLoading] = useState(true)
@@ -394,14 +396,8 @@ export function GameComments({
     setCurrentPage(1)
   }, [sortMode, filterMode])
 
-  const connectDiscord = async (anchorId = "comments") => {
-    const next = encodeURIComponent(`/game/${appid}#${anchorId}`)
-    if (window.ucAuth?.login) {
-      await window.ucAuth.login(getApiBaseUrl())
-      await load()
-      return
-    }
-    window.open(apiUrl(`/api/discord/connect?next=${next}`), "_blank")
+  const connectDiscord = async () => {
+    navigate("/login")
   }
 
   const logout = async () => {

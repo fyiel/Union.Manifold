@@ -8,6 +8,8 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { useToast } from "@/context/toast-context"
 import { getApiBaseUrl } from "@/lib/api"
+import { isMirrorAuthBlocked } from "@/lib/auth-origin"
+import { AuthMirrorBlockedCard } from "@/components/AuthMirrorBlockedCard"
 import type { LoginRequest, RegisterRequest, LoginResponse, RegisterResponse } from "@/lib/auth-types"
 
 type AuthMode = "login" | "register"
@@ -28,6 +30,7 @@ export function LoginPage() {
   const [username, setUsername] = useState("")
 
   const canUseOAuth = typeof window !== "undefined" && Boolean(window.ucAuth)
+  const mirrorAuthBlocked = isMirrorAuthBlocked(getApiBaseUrl())
 
   const validateEmail = (email: string): boolean => {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
@@ -197,6 +200,17 @@ export function LoginPage() {
   const passwordStrength = calculatePasswordStrength(password)
   const isPasswordValid = validatePassword(password)
   const isPasswordsMatch = password === confirmPassword && password.length > 0
+
+  if (mirrorAuthBlocked) {
+    return (
+      <AuthMirrorBlockedCard
+        title="Login is unavailable on this mirror"
+        description="Switch to the primary website to sign in or create an account, then come back here for downloads if you need to."
+        backLabel="Back"
+        onBack={() => navigate(-1)}
+      />
+    )
+  }
 
   return (
     <div className="min-h-screen bg-[#09090b] flex items-center justify-center p-4">

@@ -8,6 +8,8 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { useToast } from "@/context/toast-context"
 import { getApiBaseUrl } from "@/lib/api"
+import { isMirrorAuthBlocked } from "@/lib/auth-origin"
+import { AuthMirrorBlockedCard } from "@/components/AuthMirrorBlockedCard"
 
 export function VerifyEmailPage() {
   const navigate = useNavigate()
@@ -17,6 +19,7 @@ export function VerifyEmailPage() {
   const [error, setError] = useState("")
   const [token, setToken] = useState(searchParams.get("token") || "")
   const { toast } = useToast()
+  const mirrorAuthBlocked = isMirrorAuthBlocked(getApiBaseUrl())
 
   useEffect(() => {
     const urlToken = searchParams.get("token")
@@ -61,6 +64,17 @@ export function VerifyEmailPage() {
     e.preventDefault()
     await handleVerify(token)
   }, [token, handleVerify])
+
+  if (mirrorAuthBlocked) {
+    return (
+      <AuthMirrorBlockedCard
+        title="Email verification is unavailable on this mirror"
+        description="Use the verification link on the main website so account changes stay on the primary domain."
+        backLabel="Back to Login"
+        onBack={() => navigate("/login")}
+      />
+    )
+  }
 
   if (verified) {
     return (
