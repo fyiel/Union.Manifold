@@ -96,7 +96,7 @@ export function UpdateNotification() {
   }
 
   return (
-    <div className="fixed bottom-4 right-4 z-50 max-w-md rounded-xl border border-zinc-700 bg-gradient-to-br from-slate-950/95 via-slate-900/95 to-slate-950/95 p-4 shadow-2xl backdrop-blur-sm">
+    <div className="fixed bottom-4 right-4 z-50 max-w-md rounded-2xl border border-zinc-700 bg-zinc-900/95 p-4 shadow-2xl backdrop-blur-sm">
       <div className="flex items-start gap-3">
         <div className="flex-shrink-0 rounded-full bg-white/20 p-2">
           {isError ? <RefreshCw className="h-5 w-5 text-white" /> : <Download className="h-5 w-5 text-white" />}
@@ -105,7 +105,7 @@ export function UpdateNotification() {
           <h3 className="font-semibold text-white">
             {isError ? "Update failed" : isDownloaded ? "Update ready" : isDownloading ? "Downloading update" : status.state === "checking" ? "Checking for updates" : "Update available"}
           </h3>
-          <p className="mt-1 text-sm text-slate-300">{description}</p>
+          <p className="mt-1 text-sm text-zinc-300">{description}</p>
           <div className="mt-3 flex flex-wrap gap-2">
             {isDownloaded && (
               <Button size="sm" onClick={handleInstall}>Install now</Button>

@@ -32,8 +32,8 @@ export interface ControllerAPI {
   onControllerInput: (callback: (data: unknown) => void) => () => void
   
   // Overlay-specific
-  getOverlaySettings: () => Promise<{ ok: boolean; settings?: { enabled: boolean; hotkey: string; position: string }; error?: string }>
-  setOverlaySettings: (settings: { enabled?: boolean; hotkey?: string; position?: string }) => Promise<{ ok: boolean; error?: string }>
+  getOverlaySettings: () => Promise<{ ok: boolean; settings?: { overlayEnabled: boolean; overlayHotkey: string; overlayPosition: 'left' | 'right' }; error?: string }>
+  setOverlaySettings: (settings: { overlayEnabled?: boolean; overlayHotkey?: string; overlayPosition?: 'left' | 'right' }) => Promise<{ ok: boolean; error?: string }>
 }
 
 declare global {

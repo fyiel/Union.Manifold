@@ -3,6 +3,7 @@ import { Hammer, ChevronDown, ChevronLeft, ChevronRight } from "lucide-react"
 import { primaryNavItems, secondaryNavItems, bottomNavItems } from "@/lib/navigation"
 import { cn } from "@/lib/utils"
 import { useState } from "react"
+import { ScrollArea } from "@/components/ui/scroll-area"
 
 interface SidebarProps {
   mobileOpen: boolean
@@ -32,7 +33,8 @@ export function Sidebar({ mobileOpen, onClose, collapsed, onToggleCollapse }: Si
       <div className={cn("h-px bg-gradient-to-r from-transparent via-white/[.07] to-transparent", isCollapsed ? "mx-2" : "mx-4")} />
 
       {/* Nav */}
-      <nav className={cn("flex-1 overflow-y-auto pt-4 space-y-1", isCollapsed ? "px-2" : "px-3")}>
+      <ScrollArea className="flex-1 min-h-0">
+      <nav className={cn("pt-4 space-y-1", isCollapsed ? "px-2" : "px-3")}>
         {/* Primary */}
         {!isCollapsed && (
           <div className="mb-1.5 px-3">
@@ -101,6 +103,7 @@ export function Sidebar({ mobileOpen, onClose, collapsed, onToggleCollapse }: Si
               <button
                 type="button"
                 onClick={() => setCollectionsOpen(!collectionsOpen)}
+                aria-label={collectionsOpen ? "Collapse collections" : "Expand collections"}
                 className="mb-1.5 flex w-full items-center justify-between px-3 group"
               >
                 <span className="section-label">Collections</span>
@@ -145,6 +148,7 @@ export function Sidebar({ mobileOpen, onClose, collapsed, onToggleCollapse }: Si
           )}
         </div>
       </nav>
+      </ScrollArea>
 
       {/* Bottom */}
       <div className={cn("mt-auto border-t border-white/[.05] py-3 space-y-0.5", isCollapsed ? "px-2" : "px-3")}>
@@ -183,6 +187,7 @@ export function Sidebar({ mobileOpen, onClose, collapsed, onToggleCollapse }: Si
         <button
           type="button"
           onClick={onToggleCollapse}
+          aria-label={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
           title={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
           className={cn(
             "group flex w-full items-center rounded-xl text-[13px] font-medium transition-all duration-200 active:scale-95 text-zinc-600 hover:bg-white/[.04] hover:text-zinc-400",
@@ -208,7 +213,7 @@ export function Sidebar({ mobileOpen, onClose, collapsed, onToggleCollapse }: Si
   return (
     <>
       <aside className={cn(
-        "hidden md:fixed md:inset-y-0 md:z-40 md:flex md:flex-col bg-zinc-950 border-r border-white/[.05] transition-[width] duration-300 ease-in-out overflow-hidden",
+        "hidden md:fixed md:bottom-0 md:left-0 md:top-8 md:z-30 md:flex md:flex-col bg-zinc-950 border-r border-white/[.05] transition-[width] duration-300 ease-in-out overflow-hidden",
         collapsed ? "md:w-[64px]" : "md:w-[16rem]"
       )}>
         {content(collapsed)}

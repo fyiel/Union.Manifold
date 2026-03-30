@@ -1,4 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
+import { Button } from "@/components/ui/button"
 import type { Game } from "@/lib/types"
 import {
   fetchDownloadLinks,
@@ -32,6 +33,17 @@ export type DownloadStatus =
   | "failed"
   | "cancelled"
 
+type DownloadSpaceCheck = {
+  archiveBytes: number
+  estimatedExtractBytes: number
+  requiredBytes: number
+  freeBytes: number
+  shortfallBytes: number
+  targetPath: string
+  drives: Array<{ id: string; name: string; path: string; totalBytes: number; freeBytes: number }>
+  ok: boolean
+}
+
 export type DownloadItem = {
   id: string
   appid: string
@@ -63,6 +75,7 @@ export type DownloadItem = {
   startedAt: number
   completedAt?: number
   error?: string | null
+  spaceCheck?: DownloadSpaceCheck | null
 }
 
 type DownloadUpdate = {
@@ -82,6 +95,14 @@ type DownloadUpdate = {
   partIndex?: number
   partTotal?: number
   resumeData?: DownloadItem["resumeData"]
+  spaceCheck?: DownloadSpaceCheck | null
+}
+
+type ArchiveDeletionPrompt = {
+  appid?: string | null
+  gameName?: string | null
+  archivePaths: string[]
+  totalBytes: number
 }
 
 type DownloadsContextValue = {
@@ -93,12 +114,17 @@ type DownloadsActionsValue = {
   cancelDownload: (downloadId: string) => Promise<void>
   cancelGroup: (appid: string) => Promise<void>
   pauseDownload: (downloadId: string) => Promise<void>
+  pauseGroup: (appid: string) => Promise<void>
+  pauseAll: () => Promise<void>
   resumeDownload: (downloadId: string) => Promise<void>
   resumeGroup: (appid: string) => Promise<void>
+  resumeAll: () => Promise<void>
+  upsertDownload: (download: DownloadItem) => void
   showInFolder: (path: string) => Promise<void>
   openPath: (path: string) => Promise<void>
   removeDownload: (downloadId: string) => void
   clearByAppid: (appid: string) => void
+  dismissByAppid: (appid: string) => Promise<void>
   clearCompleted: () => void
 }
 
@@ -110,7 +136,67 @@ type DownloadsStore = {
 }
 
 const DownloadsStoreContext = createContext<DownloadsStore | null>(null)
-const STORAGE_KEY = "uc_direct_downloads"
+const LEGACY_STORAGE_KEY = "uc_direct_downloads"
+const PAUSABLE_STATUSES: DownloadStatus[] = ["downloading", "retrying", "extracting", "installing", "verifying"]
+
+function coercePersistedDownloadUrl(url: unknown): string {
+  if (typeof url === "string") return url
+  if (url && typeof url === "object" && typeof (url as { url?: unknown }).url === "string") {
+    return (url as { url: string }).url
+  }
+  return String(url ?? "")
+}
+
+function normalizePersistedDownloads(parsed: unknown, sourceLabel: string): DownloadItem[] {
+  if (!Array.isArray(parsed)) return []
+
+  const restored = parsed
+    .filter((item): item is Partial<DownloadItem> => Boolean(item && typeof item === "object"))
+    .filter((item) => !["completed", "extracted", "cancelled"].includes(String(item.status || "")))
+    .map((item) => {
+      const safeItem = typeof item.url !== "string"
+        ? { ...item, url: coercePersistedDownloadUrl(item.url) }
+        : item
+
+      if (["downloading", "failed", "retrying", "verifying"].includes(String(safeItem.status || ""))) {
+        return {
+          ...(safeItem as DownloadItem),
+          status: "paused" as DownloadStatus,
+          error: safeItem.status === "failed"
+            ? safeItem.error || "Download interrupted. Resume to continue."
+            : "App restarted",
+          spaceCheck: safeItem.spaceCheck ?? null,
+        }
+      }
+
+      return {
+        ...(safeItem as DownloadItem),
+        spaceCheck: safeItem.spaceCheck ?? null,
+      }
+    })
+
+  if (restored.length > 0) {
+    downloadLogger.info(`Restored ${restored.length} download(s) from ${sourceLabel}`, {
+      data: restored.map((item) => ({ id: item.id, appid: item.appid, gameName: item.gameName, status: item.status, host: item.host }))
+    })
+  }
+
+  return restored
+}
+
+function mergeHydratedDownloads(current: DownloadItem[], restored: DownloadItem[]): DownloadItem[] {
+  if (!current.length) return restored
+  if (!restored.length) return current
+
+  const knownIds = new Set(current.map((item) => item.id))
+  const merged = [...current]
+  for (const item of restored) {
+    if (knownIds.has(item.id)) continue
+    merged.push(item)
+    knownIds.add(item.id)
+  }
+  return merged
+}
 
 function safeGameFilename(name: string) {
   return (
@@ -178,6 +264,7 @@ function createSyntheticDownloadFromUpdate(update: DownloadUpdate): DownloadItem
     partIndex: update.partIndex,
     partTotal: update.partTotal,
     resumeData: update.resumeData,
+    spaceCheck: update.spaceCheck ?? null,
   }
 }
 
@@ -222,59 +309,32 @@ function createSyntheticDownloadFromInstallingManifest(
   }
 }
 
+function formatArchiveBytes(bytes: number) {
+  if (!bytes) return "0 B"
+  const units = ["B", "KB", "MB", "GB", "TB"]
+  let value = bytes
+  let index = 0
+  while (value >= 1024 && index < units.length - 1) {
+    value /= 1024
+    index += 1
+  }
+  return `${value.toFixed(value >= 10 || index === 0 ? 0 : 1)} ${units[index]}`
+}
+
+function resolveArchiveFolderPath(archivePaths: string[]): string | null {
+  const firstPath = Array.isArray(archivePaths) ? archivePaths.find((value) => typeof value === "string" && value.length > 0) : null
+  if (!firstPath) return null
+  const normalized = firstPath.replace(/[\\/]+$/, "")
+  const separatorIndex = Math.max(normalized.lastIndexOf("\\"), normalized.lastIndexOf("/"))
+  if (separatorIndex <= 0) return null
+  return normalized.slice(0, separatorIndex)
+}
+
 export function DownloadsProvider({ children }: { children: React.ReactNode }) {
-  const [downloads, setDownloads] = useState<DownloadItem[]>(() => {
-    if (typeof window === "undefined") return []
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY)
-      if (!raw) return []
-      const parsed = JSON.parse(raw) as DownloadItem[]
-
-      const coerceUrl = (url: unknown): string => {
-        if (typeof url === "string") return url
-        // DownloadHostEntry object persisted by old builds: { url: string; part: number|null }
-        if (url && typeof url === "object" && typeof (url as any).url === "string") return (url as any).url
-        return String(url ?? "")
-      }
-
-      const restored = parsed
-        // Drop entries that have already completed or been cancelled - no action needed on restart
-        .filter((item) => !["completed", "extracted", "cancelled"].includes(item.status))
-        .map((item) => {
-        // Sanitize url in case it was persisted as a DownloadHostEntry object from an older build
-        const safeItem = typeof item.url !== "string" ? { ...item, url: coerceUrl(item.url) } : item
-        // Downloads lose their Electron DownloadItem on reload - mark as paused so user can resume.
-        // But extracting/installing items are handled by the main process independently of the
-        // renderer.  Keep them as-is here; the immediate post-mount reconciliation (below) will
-        // query the main process and either let extraction continue or mark them completed/paused.
-        if (safeItem.status === "downloading" || safeItem.status === "failed" || safeItem.status === "retrying" || safeItem.status === "verifying") {
-          return { ...safeItem, status: "paused" as DownloadStatus, error: safeItem.status === "failed" ? (safeItem.error || "Download interrupted. Resume to continue.") : "App restarted" }
-        }
-        return safeItem
-      })
-
-      // Log restored downloads so they're visible in app logs
-      if (restored.length > 0) {
-        downloadLogger.info(`Restored ${restored.length} download(s) from localStorage`, {
-          data: restored.map((item) => ({ id: item.id, appid: item.appid, gameName: item.gameName, status: item.status, host: item.host }))
-        })
-      }
-
-      return restored
-    } catch {
-      return []
-    }
-  })
+  const [downloads, setDownloads] = useState<DownloadItem[]>([])
+  const [persistenceReady, setPersistenceReady] = useState(false)
 
   const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  useEffect(() => {
-    if (typeof window === "undefined") return
-    if (persistTimerRef.current) clearTimeout(persistTimerRef.current)
-    persistTimerRef.current = setTimeout(() => {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(downloads))
-    }, 1500)
-  }, [downloads])
 
   const downloadsRef = useRef(downloads)
   useEffect(() => {
@@ -289,6 +349,101 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
   const reconcileLocksRef = useRef(new Set<string>())
   const pendingProgressRef = useRef<Map<string, DownloadUpdate>>(new Map())
   const progressFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [archiveDeletionPrompts, setArchiveDeletionPrompts] = useState<ArchiveDeletionPrompt[]>([])
+  const [archiveDeletionBusy, setArchiveDeletionBusy] = useState(false)
+  const [archiveDeletionError, setArchiveDeletionError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    let cancelled = false
+
+    void (async () => {
+      let restored: DownloadItem[] = []
+      let usedLegacyMigration = false
+
+      try {
+        const result = await window.ucDownloads?.loadPersistedState?.()
+        if (result?.ok) {
+          restored = normalizePersistedDownloads(result.downloads, "LevelDB")
+        } else if (result?.error) {
+          downloadLogger.warn("Failed to load persisted downloads from LevelDB", { data: { error: result.error } })
+        }
+      } catch (error) {
+        downloadLogger.warn("Failed to load persisted downloads from LevelDB", { data: { error: String(error) } })
+      }
+
+      try {
+        const legacyRaw = localStorage.getItem(LEGACY_STORAGE_KEY)
+        if (!restored.length && legacyRaw) {
+          restored = normalizePersistedDownloads(JSON.parse(legacyRaw), "legacy localStorage")
+          usedLegacyMigration = restored.length > 0
+        }
+      } catch (error) {
+        downloadLogger.warn("Failed to read legacy download snapshot", { data: { error: String(error) } })
+      }
+
+      if (cancelled) return
+
+      if (restored.length > 0) {
+        setDownloads((prev) => {
+          const next = mergeHydratedDownloads(prev, restored)
+          downloadsRef.current = next
+          return next
+        })
+      }
+
+      setPersistenceReady(true)
+
+      if (usedLegacyMigration && window.ucDownloads?.savePersistedState) {
+        try {
+          const result = await window.ucDownloads.savePersistedState(restored)
+          if (!result?.ok) throw new Error(result?.error || "migration_failed")
+          localStorage.removeItem(LEGACY_STORAGE_KEY)
+        } catch (error) {
+          downloadLogger.warn("Failed to migrate legacy download snapshot to LevelDB", { data: { error: String(error) } })
+        }
+      } else if (restored.length > 0) {
+        try {
+          localStorage.removeItem(LEGACY_STORAGE_KEY)
+        } catch { }
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !persistenceReady) return
+    if (persistTimerRef.current) clearTimeout(persistTimerRef.current)
+    persistTimerRef.current = setTimeout(() => {
+      const snapshot = downloadsRef.current
+      void (async () => {
+        try {
+          if (window.ucDownloads?.savePersistedState) {
+            const result = await window.ucDownloads.savePersistedState(snapshot)
+            if (!result?.ok) throw new Error(result?.error || "persist_failed")
+            try { localStorage.removeItem(LEGACY_STORAGE_KEY) } catch { }
+            return
+          }
+        } catch (error) {
+          downloadLogger.warn("Failed to persist downloads to LevelDB", { data: { error: String(error) } })
+        }
+
+        try {
+          localStorage.setItem(LEGACY_STORAGE_KEY, JSON.stringify(snapshot))
+        } catch { }
+      })()
+    }, 1500)
+
+    return () => {
+      if (persistTimerRef.current) {
+        clearTimeout(persistTimerRef.current)
+        persistTimerRef.current = null
+      }
+    }
+  }, [downloads, persistenceReady])
 
   const reconcileInstalledState = useCallback(
     async (appid?: string | null) => {
@@ -359,6 +514,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
   // unnecessary re-downloads when the user clicks Resume.
   const mountReconcileRanRef = useRef(false)
   useEffect(() => {
+    if (!persistenceReady) return
     if (mountReconcileRanRef.current) return
     mountReconcileRanRef.current = true
 
@@ -425,9 +581,10 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         )
       }
     })()
-  }, [reconcileInstalledState])
+  }, [persistenceReady, reconcileInstalledState])
 
   useEffect(() => {
+    if (!persistenceReady) return
     if (!window.ucDownloads) return
     let cancelled = false
 
@@ -492,7 +649,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [persistenceReady])
 
   // Installed metadata is stored by the main process as a file inside the installed folder.
 
@@ -706,6 +863,9 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!window.ucDownloads?.onUpdate) return
     return window.ucDownloads.onUpdate((update: DownloadUpdate) => {
+      if (update.spaceCheck && typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("uc_insufficient_space", { detail: update }))
+      }
       // Batch pure "downloading" progress events to cap re-renders at ~5fps during active downloads
       const existingItem = downloadsRef.current.find((item) => item.id === update.downloadId)
       if (existingItem?.status === "downloading" && update.status === "downloading") {
@@ -785,6 +945,12 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
           partIndex: update.partIndex ?? existing.partIndex,
           partTotal: update.partTotal ?? existing.partTotal,
           resumeData: update.resumeData ?? existing.resumeData,
+          spaceCheck:
+            update.spaceCheck !== undefined
+              ? update.spaceCheck
+              : finalStatus === "downloading" || finalStatus === "completed" || finalStatus === "extracted"
+                ? null
+                : existing.spaceCheck ?? null,
           completedAt:
             finalStatus === "completed" ||
               finalStatus === "failed" ||
@@ -822,6 +988,19 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
   }, [startNextQueuedPart])
 
   useEffect(() => {
+    if (!window.ucDownloads?.onArchiveDeletePrompt) return
+    return window.ucDownloads.onArchiveDeletePrompt((payload) => {
+      if (!payload?.archivePaths?.length) return
+      const signature = payload.archivePaths.join("|")
+      setArchiveDeletionPrompts((prev) => {
+        if (prev.some((entry) => entry.archivePaths.join("|") === signature)) return prev
+        return [...prev, payload]
+      })
+    })
+  }, [])
+
+  useEffect(() => {
+    if (!persistenceReady) return
     const hasActive = downloads.some((item) =>
       ["downloading", "verifying", "retrying"].includes(item.status)
     )
@@ -839,7 +1018,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
     queueMicrotask(() => {
       void startNextQueuedPart()
     })
-  }, [downloads, startNextQueuedPart])
+  }, [downloads, persistenceReady, startNextQueuedPart])
 
   useEffect(() => {
     if (typeof window === "undefined") return
@@ -1007,17 +1186,23 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
 
   const cancelDownload = useCallback(async (downloadId: string) => {
     const download = downloadsRef.current.find((d) => d.id === downloadId)
+    let cancelResult: Awaited<ReturnType<NonNullable<typeof window.ucDownloads>['cancel']>> | null = null
     if (window.ucDownloads?.cancel) {
-      await window.ucDownloads.cancel(downloadId)
-    }
-    if (download?.appid && window.ucDownloads?.setInstallingStatus) {
-      try {
-        await window.ucDownloads.setInstallingStatus(download.appid, "cancelled", "Cancelled by user")
-      } catch { }
+      cancelResult = await window.ucDownloads.cancel(downloadId)
     }
     setDownloads((prev) =>
       prev.map((item) =>
-        item.id === downloadId ? { ...item, status: "cancelled", error: "Cancelled" } : item
+        item.id === downloadId
+          ? {
+            ...item,
+            status: cancelResult?.status === "install_ready" ? "install_ready" : "cancelled",
+            error: cancelResult?.error || (cancelResult?.status === "install_ready"
+              ? "Installation stopped. Archive kept. Click Install to continue."
+              : "Cancelled"),
+            savePath: cancelResult?.status === "install_ready" ? (item.savePath || download?.savePath) : item.savePath,
+            completedAt: cancelResult?.status === "install_ready" ? Date.now() : item.completedAt,
+          }
+          : item
       )
     )
   }, [])
@@ -1026,19 +1211,27 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
     if (!appid) return
     // cancel all downloads with matching appid
     const toCancel = downloadsRef.current.filter((d) => d.appid === appid).map((d) => d.id)
+    const cancelResults = new Map<string, Awaited<ReturnType<NonNullable<typeof window.ucDownloads>['cancel']>>>()
     for (const id of toCancel) {
       try {
-        if (window.ucDownloads?.cancel) await window.ucDownloads.cancel(id)
+        if (window.ucDownloads?.cancel) {
+          const result = await window.ucDownloads.cancel(id)
+          cancelResults.set(id, result)
+        }
       } catch (e) { }
-    }
-    if (window.ucDownloads?.setInstallingStatus) {
-      try {
-        await window.ucDownloads.setInstallingStatus(appid, "cancelled", "Cancelled by user")
-      } catch { }
     }
     setDownloads((prev) =>
       prev.map((item) =>
-        item.appid === appid ? { ...item, status: "cancelled", error: "Cancelled" } : item
+        item.appid === appid
+          ? {
+            ...item,
+            status: cancelResults.get(item.id)?.status === "install_ready" ? "install_ready" : "cancelled",
+            error: cancelResults.get(item.id)?.error || (cancelResults.get(item.id)?.status === "install_ready"
+              ? "Installation stopped. Archive kept. Click Install to continue."
+              : "Cancelled"),
+            completedAt: cancelResults.get(item.id)?.status === "install_ready" ? Date.now() : item.completedAt,
+          }
+          : item
       )
     )
   }, [])
@@ -1060,6 +1253,38 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
       )
     }
   }, [])
+
+  const pauseGroup = useCallback(
+    async (appid: string) => {
+      if (!appid) return
+      const current = downloadsRef.current.filter((item) => item.appid === appid)
+      if (!current.length) return
+
+      const toPause = current.filter((item) => PAUSABLE_STATUSES.includes(item.status))
+      for (const item of toPause) {
+        try {
+          if (window.ucDownloads?.pause) {
+            await window.ucDownloads.pause(item.id)
+          }
+        } catch {
+          // best effort
+        }
+      }
+
+      setDownloads((prev) => {
+        const next = prev.map((item) => {
+          if (item.appid !== appid) return item
+          if (item.status === "queued" || PAUSABLE_STATUSES.includes(item.status)) {
+            return { ...item, status: "paused" as DownloadStatus, error: null }
+          }
+          return item
+        })
+        downloadsRef.current = next
+        return next
+      })
+    },
+    []
+  )
 
   const resumeDownload = useCallback(
     async (downloadId: string) => {
@@ -1358,10 +1583,53 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
     [resumeDownload, startNextQueuedPart]
   )
 
+  const pauseAll = useCallback(async () => {
+    const appids = [...new Set(
+      downloadsRef.current
+        .filter((item) => item.status === "queued" || PAUSABLE_STATUSES.includes(item.status))
+        .map((item) => item.appid)
+        .filter(Boolean)
+    )]
+    for (const appid of appids) {
+      await pauseGroup(appid)
+    }
+  }, [pauseGroup])
+
+  const resumeAll = useCallback(async () => {
+    const appids = [...new Set(
+      downloadsRef.current
+        .filter((item) => item.status === "paused")
+        .map((item) => item.appid)
+        .filter(Boolean)
+    )]
+    for (const appid of appids) {
+      await resumeGroup(appid)
+    }
+  }, [resumeGroup])
+
   const showInFolder = useCallback(async (path: string) => {
     if (window.ucDownloads?.showInFolder) {
       await window.ucDownloads.showInFolder(path)
     }
+  }, [])
+
+  const upsertDownload = useCallback((download: DownloadItem) => {
+    setDownloads((prev) => {
+      const idx = prev.findIndex((item) => item.id === download.id)
+      if (idx === -1) {
+        const next = [download, ...prev]
+        downloadsRef.current = next
+        return next
+      }
+      const next = [...prev]
+      next[idx] = {
+        ...next[idx],
+        ...download,
+        startedAt: next[idx].startedAt || download.startedAt,
+      }
+      downloadsRef.current = next
+      return next
+    })
   }, [])
 
   const openPath = useCallback(async (path: string) => {
@@ -1388,6 +1656,55 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
     setDownloads((prev) => prev.filter((item) => item.appid !== appid))
   }, [])
 
+  const dismissByAppid = useCallback(async (appid: string) => {
+    if (!appid) return
+    try {
+      await window.ucDownloads?.dismissInstalling?.(appid)
+    } catch { }
+    setDownloads((prev) => prev.filter((item) => item.appid !== appid))
+  }, [])
+
+  const dismissArchiveDeletionPrompt = useCallback(() => {
+    setArchiveDeletionError(null)
+    setArchiveDeletionPrompts((prev) => prev.slice(1))
+  }, [])
+
+  const currentArchiveDeletionPrompt = archiveDeletionPrompts[0] || null
+  const currentArchiveFolderPath = currentArchiveDeletionPrompt
+    ? resolveArchiveFolderPath(currentArchiveDeletionPrompt.archivePaths)
+    : null
+
+  useEffect(() => {
+    if (!currentArchiveDeletionPrompt) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return
+      if (archiveDeletionBusy) return
+      event.preventDefault()
+      dismissArchiveDeletionPrompt()
+    }
+
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [archiveDeletionBusy, currentArchiveDeletionPrompt, dismissArchiveDeletionPrompt])
+
+  const deletePromptArchives = useCallback(async () => {
+    const currentPrompt = archiveDeletionPrompts[0]
+    if (!currentPrompt || !window.ucDownloads?.deleteArchiveFiles) return
+    setArchiveDeletionBusy(true)
+    setArchiveDeletionError(null)
+    try {
+      const result = await window.ucDownloads.deleteArchiveFiles({ archivePaths: currentPrompt.archivePaths })
+      if (!result?.ok) {
+        throw new Error(result?.error || "Failed to delete archive files")
+      }
+      setArchiveDeletionPrompts((prev) => prev.slice(1))
+    } catch (error) {
+      setArchiveDeletionError(error instanceof Error ? error.message : "Failed to delete archive files")
+    } finally {
+      setArchiveDeletionBusy(false)
+    }
+  }, [archiveDeletionPrompts])
+
   const store = useMemo<DownloadsStore>(
     () => ({
       subscribe: (listener: () => void) => {
@@ -1405,16 +1722,21 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
       cancelDownload,
       cancelGroup,
       pauseDownload,
+      pauseGroup,
+      pauseAll,
       resumeDownload,
       resumeGroup,
+      resumeAll,
+      upsertDownload,
       showInFolder,
       openPath,
       removeDownload: (downloadId: string) =>
         setDownloads((prev) => prev.filter((item) => item.id !== downloadId)),
       clearByAppid,
+      dismissByAppid,
       clearCompleted,
     }),
-    [startGameDownload, cancelDownload, cancelGroup, pauseDownload, resumeDownload, resumeGroup, showInFolder, openPath, clearByAppid, clearCompleted]
+    [startGameDownload, cancelDownload, cancelGroup, pauseDownload, pauseGroup, pauseAll, resumeDownload, resumeGroup, resumeAll, upsertDownload, showInFolder, openPath, clearByAppid, dismissByAppid, clearCompleted]
   )
 
   const dataValue = useMemo(() => ({ downloads }), [downloads])
@@ -1422,7 +1744,56 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
   return (
     <DownloadsStoreContext.Provider value={store}>
       <DownloadsActionsContext.Provider value={actionsValue}>
-        <DownloadsContext.Provider value={dataValue}>{children}</DownloadsContext.Provider>
+        <DownloadsContext.Provider value={dataValue}>
+          {children}
+          {currentArchiveDeletionPrompt && (
+            <div className="fixed inset-0 z-[80] flex items-center justify-center px-4">
+              <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={() => !archiveDeletionBusy && dismissArchiveDeletionPrompt()} />
+              <div className="relative w-full max-w-lg rounded-2xl border border-white/[.08] bg-zinc-950/95 p-5 shadow-2xl">
+                <div className="space-y-1">
+                  <h3 className="text-lg font-semibold text-white">Delete installer archive?</h3>
+                  <p className="text-sm text-zinc-400">
+                    {currentArchiveDeletionPrompt.gameName || "This game"} finished installing. You can keep the installer cache for reinstalling later, or delete it now to free up space.
+                  </p>
+                </div>
+
+                <div className="mt-4 rounded-xl border border-white/[.08] bg-zinc-900/70 p-4 text-sm text-zinc-200">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-zinc-400">Archive size</span>
+                    <span className="font-mono">{formatArchiveBytes(currentArchiveDeletionPrompt.totalBytes)}</span>
+                  </div>
+                  <div className="mt-2 flex items-center justify-between gap-3">
+                    <span className="text-zinc-400">Archive files</span>
+                    <span className="font-mono">{currentArchiveDeletionPrompt.archivePaths.length}</span>
+                  </div>
+                </div>
+
+                {archiveDeletionError ? (
+                  <div className="mt-3 rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+                    {archiveDeletionError}
+                  </div>
+                ) : null}
+
+                <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                  <Button variant="ghost" onClick={dismissArchiveDeletionPrompt} disabled={archiveDeletionBusy}>
+                    Keep archive
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => currentArchiveFolderPath ? void openPath(currentArchiveFolderPath) : undefined}
+                    disabled={archiveDeletionBusy || !currentArchiveFolderPath}
+                    className="border-white/[.08] text-zinc-200"
+                  >
+                    Open archives folder
+                  </Button>
+                  <Button onClick={() => void deletePromptArchives()} disabled={archiveDeletionBusy} className="bg-white text-black hover:bg-zinc-200">
+                    {archiveDeletionBusy ? "Deleting..." : "Delete archive"}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+        </DownloadsContext.Provider>
       </DownloadsActionsContext.Provider>
     </DownloadsStoreContext.Provider>
   )

@@ -5,6 +5,12 @@ const crypto = require('node:crypto')
 const child_process = require('node:child_process')
 const https = require('node:https')
 const http = require('node:http')
+let ClassicLevel = null
+try {
+  ({ ClassicLevel } = require('classic-level'))
+} catch (error) {
+  console.error('[UC] Failed to load classic-level', error)
+}
 const DiscordRPC = require('discord-rpc')
 const { autoUpdater } = require('electron-updater')
 
@@ -13,6 +19,10 @@ const isDev = !app.isPackaged
 const UPDATE_PROVIDER = packageJson?.build?.publish?.[0] || {}
 const UPDATE_OWNER = UPDATE_PROVIDER.owner || 'Union-Crax'
 const UPDATE_REPO = UPDATE_PROVIDER.repo || 'UnionCrax.Direct'
+
+try {
+  app.commandLine.appendSwitch('disable-features', 'OverlayScrollbar')
+} catch { }
 
 const updateState = {
   enabled: !isDev,
@@ -118,6 +128,7 @@ const downloadQueues = new Map()
 const globalDownloadQueue = []
 const cancelledDownloadIds = new Set()
 const activeExtractions = new Set()
+const extractionJobs = new Map()
 const deferredArchives = new Map() // appid → archivePath[] waiting for all parts to finish
 const runningGames = new Map()
 const WINDOWS_GAME_HANDOFF_GRACE_MS = 12000
@@ -131,6 +142,134 @@ let closeRequestApproved = false
 
 function buildAppExtractionKey(appid) {
   return `appid:${String(appid || '').toLowerCase()}`
+}
+
+function uniqueExtractionKeys(appid, extraKey) {
+  const keys = []
+  const appKey = buildAppExtractionKey(appid)
+  if (appid && appKey) keys.push(appKey)
+  if (extraKey && !keys.includes(extraKey)) keys.push(extraKey)
+  return keys
+}
+
+function registerExtractionJob(job) {
+  if (!job || !job.downloadId) return job
+  const keys = uniqueExtractionKeys(job.appid, job.extractionKey)
+  job.keys = keys
+  job.state = 'running'
+  extractionJobs.set(job.downloadId, job)
+  for (const key of keys) activeExtractions.add(key)
+  refreshOperationPowerSaveBlocker()
+  return job
+}
+
+function unregisterExtractionJob(jobOrDownloadId) {
+  const job = typeof jobOrDownloadId === 'string'
+    ? extractionJobs.get(jobOrDownloadId)
+    : jobOrDownloadId
+  if (!job) return null
+  extractionJobs.delete(job.downloadId)
+  for (const key of job.keys || []) activeExtractions.delete(key)
+  refreshOperationPowerSaveBlocker()
+  return job
+}
+
+function formatBytesForHumans(bytes) {
+  const safeBytes = Number.isFinite(bytes) ? Math.max(0, Number(bytes)) : 0
+  if (!safeBytes) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  let value = safeBytes
+  let unitIndex = 0
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024
+    unitIndex += 1
+  }
+  const digits = value >= 10 || unitIndex === 0 ? 0 : 1
+  return `${value.toFixed(digits)} ${units[unitIndex]}`
+}
+
+function parseHumanSizeToBytes(rawValue) {
+  if (rawValue == null) return null
+  const normalized = String(rawValue).trim().replace(/,/g, '')
+  if (!normalized) return null
+  const match = normalized.match(/([0-9]+(?:\.[0-9]+)?)\s*([kmgtp]?i?b)?/i)
+  if (!match) return null
+  const value = Number(match[1])
+  if (!Number.isFinite(value) || value <= 0) return null
+  const unit = (match[2] || 'b').toLowerCase()
+  const multipliers = {
+    b: 1,
+    kb: 1024,
+    kib: 1024,
+    mb: 1024 ** 2,
+    mib: 1024 ** 2,
+    gb: 1024 ** 3,
+    gib: 1024 ** 3,
+    tb: 1024 ** 4,
+    tib: 1024 ** 4,
+    pb: 1024 ** 5,
+    pib: 1024 ** 5,
+  }
+  return Math.round(value * (multipliers[unit] || 1))
+}
+
+function resolveExistingPath(targetPath) {
+  let current = targetPath
+  while (current && !fs.existsSync(current)) {
+    const parent = path.dirname(current)
+    if (!parent || parent === current) break
+    current = parent
+  }
+  return current && fs.existsSync(current) ? current : null
+}
+
+function getFreeSpaceForPath(targetPath) {
+  try {
+    const existingPath = resolveExistingPath(targetPath)
+    if (!existingPath) return null
+    const stats = fs.statfsSync(existingPath)
+    return stats.bavail * stats.bsize
+  } catch {
+    return null
+  }
+}
+
+function estimateExtractionRequirement(archivePaths, metadata) {
+  const allArchivePaths = Array.isArray(archivePaths) ? archivePaths : []
+  let archiveBytes = 0
+  for (const archivePath of allArchivePaths) {
+    try {
+      archiveBytes += fs.statSync(archivePath).size || 0
+    } catch { }
+  }
+  const metadataSize = parseHumanSizeToBytes(
+    metadata?.installedSize || metadata?.installSize || metadata?.size || metadata?.metadata?.size || null
+  )
+  const estimatedExtractBytes = Math.max(metadataSize || 0, archiveBytes * 2)
+  const safetyBuffer = Math.max(2 * 1024 ** 3, Math.round(estimatedExtractBytes * 0.05))
+  return {
+    archiveBytes,
+    estimatedExtractBytes,
+    requiredBytes: estimatedExtractBytes + safetyBuffer,
+  }
+}
+
+function buildExtractionSpaceCheck(targetPath, archivePaths, metadata) {
+  const requirement = estimateExtractionRequirement(archivePaths, metadata)
+  const freeBytes = getFreeSpaceForPath(targetPath) || 0
+  return {
+    ...requirement,
+    freeBytes,
+    shortfallBytes: Math.max(0, requirement.requiredBytes - freeBytes),
+    targetPath,
+    drives: listDisks(),
+    ok: freeBytes >= requirement.requiredBytes,
+  }
+}
+
+function buildExtractionSpaceMessage(spaceCheck) {
+  if (!spaceCheck) return 'Not enough free space to extract this game.'
+  return `Not enough free space to extract this game. Need about ${formatBytesForHumans(spaceCheck.requiredBytes)} free, but only ${formatBytesForHumans(spaceCheck.freeBytes)} is available. Free ${formatBytesForHumans(spaceCheck.shortfallBytes)} or choose another drive.`
 }
 
 function getActiveExtractionAppids() {
@@ -282,6 +421,8 @@ let overlayHotkey = 'Ctrl+Shift+Tab'
 let currentOverlayAppid = null
 let overlayAutoShow = true
 let overlayPosition = 'left'
+let overlayToastDurationMs = 5000
+let overlayToastVertical = 'bottom'
 let overlayMode = 'hidden' // 'hidden' | 'toast' | 'panel'
 let overlayToastTimer = null
 let overlayReady = false // true once overlay webContents finishes loading
@@ -296,6 +437,16 @@ function setOverlayEvent(event) {
 function setOverlayError(error) {
   overlayLastError = error ? String(error) : null
   if (overlayLastError) setOverlayEvent(`error: ${overlayLastError}`)
+}
+
+function normalizeOverlayToastDurationMs(value) {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed)) return overlayToastDurationMs
+  return Math.max(2000, Math.min(12000, Math.round(parsed)))
+}
+
+function normalizeOverlayToastVertical(value) {
+  return value === 'top' ? 'top' : 'bottom'
 }
 
 function getOverlayDiagnostics() {
@@ -317,6 +468,8 @@ function getOverlayDiagnostics() {
     hotkey: overlayHotkey,
     hotkeyRegistered,
     position: overlayPosition,
+    toastDurationMs: overlayToastDurationMs,
+    toastVertical: overlayToastVertical,
     currentMode: overlayMode,
     currentAppid: currentOverlayAppid,
     overlayWindowCreated: Boolean(overlayWindow && !overlayWindow.isDestroyed()),
@@ -571,11 +724,15 @@ function showOverlayToast(appid = null) {
     overlayWindow.setAlwaysOnTop(true, 'screen-saver')
     overlayWindow.showInactive()
     setOverlayEvent(`overlay toast shown for ${appid || 'unknown'}`)
-    overlayWindow.webContents.send('uc:overlay-toast', { appid })
+    overlayWindow.webContents.send('uc:overlay-toast', {
+      appid,
+      durationMs: overlayToastDurationMs,
+      vertical: overlayToastVertical,
+    })
     clearTimeout(overlayToastTimer)
     overlayToastTimer = setTimeout(() => {
       if (overlayMode === 'toast') hideOverlay()
-    }, 5500)
+    }, overlayToastDurationMs + 500)
     ucLog(`Overlay toast shown for game: ${appid || 'unknown'}`)
   }
 }
@@ -664,6 +821,12 @@ function updateOverlaySettings(settings) {
   const newHotkey = settings.overlayHotkey || overlayHotkey
   const newAutoShow = settings.overlayAutoShow !== undefined ? settings.overlayAutoShow : overlayAutoShow
   const newPosition = settings.overlayPosition || overlayPosition
+  const newToastDurationMs = settings.overlayToastDurationMs !== undefined
+    ? normalizeOverlayToastDurationMs(settings.overlayToastDurationMs)
+    : overlayToastDurationMs
+  const newToastVertical = settings.overlayToastVertical !== undefined
+    ? normalizeOverlayToastVertical(settings.overlayToastVertical)
+    : overlayToastVertical
   
   let changed = false
   
@@ -690,6 +853,16 @@ function updateOverlaySettings(settings) {
     overlayPosition = newPosition
     changed = true
   }
+
+  if (newToastDurationMs !== overlayToastDurationMs) {
+    overlayToastDurationMs = newToastDurationMs
+    changed = true
+  }
+
+  if (newToastVertical !== overlayToastVertical) {
+    overlayToastVertical = newToastVertical
+    changed = true
+  }
   
   if (changed && overlayEnabled) {
     registerOverlayHotkey()
@@ -697,7 +870,11 @@ function updateOverlaySettings(settings) {
 
   // Broadcast position to overlay window so the UI can update
   if (overlayWindow && !overlayWindow.isDestroyed()) {
-    overlayWindow.webContents.send('uc:overlay-position-changed', { position: overlayPosition })
+    overlayWindow.webContents.send('uc:overlay-position-changed', {
+      position: overlayPosition,
+      toastDurationMs: overlayToastDurationMs,
+      toastVertical: overlayToastVertical,
+    })
   }
 }
 
@@ -955,12 +1132,21 @@ function cleanupOverlayInjection(pid) {
 const downloadDirName = 'UnionCrax.Direct'
 const installingDirName = 'installing'
 const installedDirName = 'installed'
+const archivesDirName = 'archives'
 const INSTALLED_MANIFEST = 'installed.json'
 const INSTALLED_INDEX = 'installed-index.json'
 const settingsPath = path.join(app.getPath('userData'), 'settings.json')
 const appLogsPath = path.join(app.getPath('userData'), 'app-logs.txt')
+const downloadsStateDbPath = path.join(app.getPath('userData'), 'state-db')
+const downloadsStateSnapshotKey = 'snapshot'
+const downloadsStateCatalogKey = 'catalog_state'
+const downloadsStateInstallingKey = 'installing_records'
+const downloadsStateQueueKey = 'queue_state'
 const LOG_SESSION_ID = crypto.randomBytes(6).toString('hex')
 let cachedSettings = null
+let downloadsStateStorePromise = null
+let persistedInstallingState = new Map()
+let persistedQueueState = { global: [], byApp: {} }
 
 function getAppVersion() {
   return packageJson?.version || (typeof app.getVersion === 'function' ? app.getVersion() : null) || process.env.npm_package_version || '0.0.0'
@@ -1454,29 +1640,61 @@ function normalizeBaseUrl(baseUrl) {
   }
 }
 
-function buildAuthUrl(baseUrl, nextPath) {
+function buildAuthUrl(baseUrl, nextPath, action) {
   const origin = normalizeBaseUrl(baseUrl)
   try {
-    const url = new URL('/api/discord/connect', origin)
-    if (nextPath) url.searchParams.set('next', nextPath)
+    // Support both full paths and provider names
+    let path = nextPath
+    if (nextPath === 'discord') {
+      path = '/api/discord/connect'
+    } else if (nextPath === 'google') {
+      path = '/api/auth/google/connect'
+    }
+    
+    const url = new URL(path, origin)
+    if (action) url.searchParams.set('action', action)
+    if (nextPath && !nextPath.startsWith('/')) {
+      // nextPath is a redirect path, set it as next param
+      url.searchParams.set('next', nextPath)
+    }
     return url.toString()
   } catch {
     return `${DEFAULT_BASE_URL}/api/discord/connect?next=${encodeURIComponent(nextPath || '/settings')}`
   }
 }
 
-function parseAuthResult(urlString) {
-  try {
-    const url = new URL(urlString)
-    const connected = url.searchParams.get('discord_connected')
-    if (connected === 'true' || connected === '1') return { ok: true }
-    const error = url.searchParams.get('error')
-    if (error) return { ok: false, error }
-  } catch {
-    // ignore parse errors
+  function parseAuthResult(urlString) {
+    try {
+      const url = new URL(urlString)
+      // Check for errors first (applies to both Discord and Google)
+      const error = url.searchParams.get('error')
+      if (error) {
+        const errorDesc = url.searchParams.get('error_description') || error
+        return { ok: false, error: errorDesc }
+      }
+      // Check for legacy Discord success format
+      const connected = url.searchParams.get('discord_connected')
+      if (connected === 'true' || connected === '1') {
+        return { ok: true }
+      }
+      // Check for Google/generic OAuth success (auth_connected or google_linked)
+      if (url.searchParams.get('auth_connected') === 'true' || url.searchParams.get('google_linked') === 'true') {
+        return { ok: true }
+      }
+      // Check for generic success redirect (from union-crax.xyz OAuth callbacks)
+      const pathname = url.pathname
+      if (pathname === '/' || pathname.startsWith('/settings') || pathname.startsWith('/launcher')) {
+        return { ok: true }
+      }
+      // Check for authenticated parameter
+      if (url.searchParams.get('authenticated') === 'true') {
+        return { ok: true }
+      }
+    } catch {
+      // ignore parse errors
+    }
+    return null
   }
-  return null
-}
 
 function openAuthWindow(parent, url) {
   return new Promise((resolve) => {
@@ -1558,6 +1776,342 @@ function writeSettings(next) {
     fs.writeFileSync(settingsPath, JSON.stringify(next, null, 2))
   } catch (error) {
     ucLog(`Failed to write settings: ${error.message}`, 'error')
+  }
+}
+
+async function getDownloadsStateStore() {
+  if (!ClassicLevel) {
+    throw new Error('classic_level_unavailable')
+  }
+  if (!downloadsStateStorePromise) {
+    downloadsStateStorePromise = (async () => {
+      const db = new ClassicLevel(downloadsStateDbPath, { valueEncoding: 'json' })
+      await db.open()
+      const store = db.sublevel('downloads', { valueEncoding: 'json' })
+      await store.open()
+      return store
+    })().catch((error) => {
+      downloadsStateStorePromise = null
+      throw error
+    })
+  }
+  return downloadsStateStorePromise
+}
+
+async function readPersistedDownloadsState() {
+  try {
+    const store = await getDownloadsStateStore()
+    const snapshot = await store.get(downloadsStateSnapshotKey)
+    if (Array.isArray(snapshot)) return snapshot
+    if (snapshot && Array.isArray(snapshot.downloads)) return snapshot.downloads
+    return []
+  } catch (error) {
+    if (error && error.code === 'LEVEL_NOT_FOUND') return []
+    throw error
+  }
+}
+
+async function writePersistedDownloadsState(downloads) {
+  const store = await getDownloadsStateStore()
+  const snapshot = {
+    version: 1,
+    updatedAt: Date.now(),
+    downloads: Array.isArray(downloads) ? downloads : [],
+  }
+  await store.put(downloadsStateSnapshotKey, snapshot)
+  return snapshot.downloads.length
+}
+
+async function readPersistedCatalogState() {
+  try {
+    const store = await getDownloadsStateStore()
+    const snapshot = await store.get(downloadsStateCatalogKey)
+    if (!snapshot || typeof snapshot !== 'object') {
+      return { games: [], stats: {}, updatedAt: 0, gamesUpdatedAt: 0, statsUpdatedAt: 0 }
+    }
+    return {
+      games: Array.isArray(snapshot.games) ? snapshot.games : [],
+      stats: snapshot.stats && typeof snapshot.stats === 'object' ? snapshot.stats : {},
+      updatedAt: Number(snapshot.updatedAt || 0),
+      gamesUpdatedAt: Number(snapshot.gamesUpdatedAt || snapshot.updatedAt || 0),
+      statsUpdatedAt: Number(snapshot.statsUpdatedAt || snapshot.updatedAt || 0),
+    }
+  } catch (error) {
+    if (error && error.code === 'LEVEL_NOT_FOUND') {
+      return { games: [], stats: {}, updatedAt: 0, gamesUpdatedAt: 0, statsUpdatedAt: 0 }
+    }
+    throw error
+  }
+}
+
+async function writePersistedCatalogState(payload) {
+  const store = await getDownloadsStateStore()
+  const now = Date.now()
+  const snapshot = {
+    version: 1,
+    updatedAt: now,
+    gamesUpdatedAt: Number(payload?.gamesUpdatedAt || now),
+    statsUpdatedAt: Number(payload?.statsUpdatedAt || now),
+    games: Array.isArray(payload?.games) ? payload.games : [],
+    stats: payload?.stats && typeof payload.stats === 'object' ? payload.stats : {},
+  }
+  await store.put(downloadsStateCatalogKey, snapshot)
+  return snapshot
+}
+
+async function readPersistedInstallingState() {
+  try {
+    const store = await getDownloadsStateStore()
+    const snapshot = await store.get(downloadsStateInstallingKey)
+    return snapshot && typeof snapshot === 'object' ? snapshot : {}
+  } catch (error) {
+    if (error && error.code === 'LEVEL_NOT_FOUND') return {}
+    throw error
+  }
+}
+
+async function writePersistedInstallingState(records) {
+  const store = await getDownloadsStateStore()
+  await store.put(downloadsStateInstallingKey, {
+    version: 1,
+    updatedAt: Date.now(),
+    records: records && typeof records === 'object' ? records : {},
+  })
+}
+
+async function readPersistedQueueState() {
+  try {
+    const store = await getDownloadsStateStore()
+    const snapshot = await store.get(downloadsStateQueueKey)
+    return snapshot && typeof snapshot === 'object' ? snapshot : { global: [], byApp: {} }
+  } catch (error) {
+    if (error && error.code === 'LEVEL_NOT_FOUND') return { global: [], byApp: {} }
+    throw error
+  }
+}
+
+async function writePersistedQueueState(snapshot) {
+  const store = await getDownloadsStateStore()
+  await store.put(downloadsStateQueueKey, {
+    version: 1,
+    updatedAt: Date.now(),
+    global: Array.isArray(snapshot?.global) ? snapshot.global : [],
+    byApp: snapshot?.byApp && typeof snapshot.byApp === 'object' ? snapshot.byApp : {},
+  })
+}
+
+function shouldRetainInstallingStatus(status) {
+  return !['completed', 'extracted', 'cancelled'].includes(String(status || ''))
+}
+
+function normalizeInstallingStateRecord(record) {
+  if (!record || typeof record !== 'object' || !record.appid) return null
+  return {
+    ...record,
+    appid: String(record.appid),
+    name: record.name || record.metadata?.name || record.appid,
+    installingRoot: typeof record.installingRoot === 'string' ? record.installingRoot : null,
+    manifestPath: typeof record.manifestPath === 'string' ? record.manifestPath : null,
+    updatedAt: Number(record.updatedAt || Date.now()),
+  }
+}
+
+function buildPersistedInstallingRecord(manifest, installingRoot, manifestPath) {
+  return normalizeInstallingStateRecord({
+    ...(manifest && typeof manifest === 'object' ? manifest : {}),
+    appid: manifest?.appid,
+    name: manifest?.name || manifest?.metadata?.name || manifest?.appid,
+    installingRoot,
+    manifestPath,
+  })
+}
+
+function snapshotPersistedInstallingState() {
+  const records = {}
+  for (const [appid, record] of persistedInstallingState.entries()) {
+    if (!record) continue
+    records[appid] = record
+  }
+  return records
+}
+
+function persistInstallingStateSoon() {
+  const snapshot = snapshotPersistedInstallingState()
+  void writePersistedInstallingState(snapshot).catch((error) => {
+    ucLog(`[State] Failed to persist installing state: ${String(error)}`, 'warn')
+  })
+}
+
+function setPersistedInstallingRecord(record) {
+  const normalized = normalizeInstallingStateRecord(record)
+  if (!normalized) return false
+  persistedInstallingState.set(normalized.appid, normalized)
+  persistInstallingStateSoon()
+  return true
+}
+
+function deletePersistedInstallingRecord(appid) {
+  if (!appid) return false
+  const existed = persistedInstallingState.delete(String(appid))
+  if (existed) persistInstallingStateSoon()
+  return existed
+}
+
+function syncPersistedInstallingRecordFromFile(installingRoot, manifestPath) {
+  try {
+    const manifest = readJsonFile(manifestPath)
+    if (!manifest || !manifest.appid) return false
+    return setPersistedInstallingRecord(buildPersistedInstallingRecord(manifest, installingRoot, manifestPath))
+  } catch {
+    return false
+  }
+}
+
+function scanInstallingStateFromDisk() {
+  const records = new Map()
+  try {
+    const roots = listDownloadRoots()
+    for (const root of roots) {
+      const installingRoot = path.join(root, installingDirName)
+      for (const { folder } of iterateGameFolders(installingRoot)) {
+        const manifestPath = path.join(folder, INSTALLED_MANIFEST)
+        const manifest = readJsonFile(manifestPath)
+        const record = buildPersistedInstallingRecord(manifest, folder, manifestPath)
+        if (!record || !shouldRetainInstallingStatus(record.installStatus)) continue
+        const existing = records.get(record.appid)
+        if (!existing || Number(record.updatedAt || 0) >= Number(existing.updatedAt || 0)) {
+          records.set(record.appid, record)
+        }
+      }
+    }
+  } catch (error) {
+    ucLog(`[State] Failed to scan installing state from disk: ${String(error)}`, 'warn')
+  }
+  return records
+}
+
+function getPersistedInstallingRecord(appid) {
+  if (!appid) return null
+  const record = persistedInstallingState.get(String(appid)) || null
+  if (!record) return null
+  if (record.installingRoot && fs.existsSync(record.installingRoot)) return record
+  persistedInstallingState.delete(String(appid))
+  persistInstallingStateSoon()
+  return null
+}
+
+function listPersistedInstallingRecords() {
+  const items = []
+  for (const [appid, record] of persistedInstallingState.entries()) {
+    if (record?.installingRoot && fs.existsSync(record.installingRoot)) {
+      items.push(record)
+      continue
+    }
+    persistedInstallingState.delete(appid)
+  }
+  return items
+}
+
+function normalizeQueuePayload(payload) {
+  if (!payload || typeof payload !== 'object' || !payload.downloadId || !payload.url) return null
+  return {
+    downloadId: payload.downloadId,
+    url: payload.url,
+    filename: payload.filename || null,
+    appid: payload.appid || null,
+    gameName: payload.gameName || null,
+    partIndex: payload.partIndex,
+    partTotal: payload.partTotal,
+    authHeader: payload.authHeader,
+    savePath: payload.savePath,
+  }
+}
+
+function queueEntryForPersistence(entry) {
+  const payload = normalizeQueuePayload(entry?.payload)
+  if (!payload) return null
+  return {
+    payload,
+    queuedAt: Number(entry?.queuedAt || Date.now()),
+  }
+}
+
+function snapshotPersistedQueueState() {
+  const byApp = {}
+  for (const [appid, queue] of downloadQueues.entries()) {
+    const items = Array.isArray(queue)
+      ? queue.map((entry) => queueEntryForPersistence(entry)).filter(Boolean)
+      : []
+    if (items.length) byApp[appid] = items
+  }
+  return {
+    global: globalDownloadQueue.map((entry) => queueEntryForPersistence(entry)).filter(Boolean),
+    byApp,
+  }
+}
+
+function persistQueueStateSoon() {
+  persistedQueueState = snapshotPersistedQueueState()
+  void writePersistedQueueState(persistedQueueState).catch((error) => {
+    ucLog(`[State] Failed to persist queue state: ${String(error)}`, 'warn')
+  })
+}
+
+function restorePersistedQueueState(snapshot) {
+  persistedQueueState = {
+    global: Array.isArray(snapshot?.global) ? snapshot.global : [],
+    byApp: snapshot?.byApp && typeof snapshot.byApp === 'object' ? snapshot.byApp : {},
+  }
+
+  globalDownloadQueue.length = 0
+  for (const entry of persistedQueueState.global) {
+    const payload = normalizeQueuePayload(entry?.payload)
+    if (!payload) continue
+    globalDownloadQueue.push({ payload, webContentsId: null, queuedAt: Number(entry?.queuedAt || Date.now()) })
+  }
+
+  downloadQueues.clear()
+  for (const [appid, queue] of Object.entries(persistedQueueState.byApp || {})) {
+    const items = Array.isArray(queue)
+      ? queue.map((entry) => {
+        const payload = normalizeQueuePayload(entry?.payload)
+        if (!payload) return null
+        return { payload, webContentsId: null, queuedAt: Number(entry?.queuedAt || Date.now()) }
+      }).filter(Boolean)
+      : []
+    if (items.length) downloadQueues.set(appid, items)
+  }
+}
+
+async function hydratePersistedLauncherState() {
+  try {
+    const [installingSnapshot, queueSnapshot] = await Promise.all([
+      readPersistedInstallingState(),
+      readPersistedQueueState(),
+    ])
+
+    const hydratedInstalling = new Map()
+    const persistedRecords = installingSnapshot?.records && typeof installingSnapshot.records === 'object'
+      ? installingSnapshot.records
+      : installingSnapshot
+
+    for (const [appid, record] of Object.entries(persistedRecords || {})) {
+      const normalized = normalizeInstallingStateRecord(record)
+      if (normalized && shouldRetainInstallingStatus(normalized.installStatus)) {
+        hydratedInstalling.set(appid, normalized)
+      }
+    }
+
+    const scannedInstalling = scanInstallingStateFromDisk()
+    for (const [appid, record] of scannedInstalling.entries()) {
+      hydratedInstalling.set(appid, record)
+    }
+
+    persistedInstallingState = hydratedInstalling
+    persistInstallingStateSoon()
+    restorePersistedQueueState(queueSnapshot)
+  } catch (error) {
+    ucLog(`[State] Failed to hydrate persisted launcher state: ${String(error)}`, 'warn')
   }
 }
 
@@ -1807,15 +2361,21 @@ ipcMain.handle('uc:rpc-status', async () => {
   return { ok: true, enabled: rpcEnabled, ready: rpcReady, clientId: rpcClientId }
 })
 
-ipcMain.handle('uc:auth-login', async (event, baseUrl) => {
-  ucLog('Auth login initiated')
+ipcMain.handle('uc:auth-login', async (event, baseUrl, provider) => {
+  ucLog(`Auth login initiated (provider: ${provider || 'discord'})`)
   const win = BrowserWindow.fromWebContents(event.sender)
   if (!win || win.isDestroyed()) return { ok: false, error: 'no_window' }
-  const authUrl = buildAuthUrl(baseUrl, '/settings')
+  const authUrl = buildAuthUrl(baseUrl, provider === 'google' ? 'google' : '/settings')
   const result = await openAuthWindow(win, authUrl)
   if (result?.ok) {
-    const sessionData = await getDiscordSession(win.webContents.session, baseUrl)
-    ucLog('Auth login success')
+    // Wait for cookies to be set in the session, with retry logic
+    let sessionData = null
+    for (let attempt = 0; attempt < 5; attempt++) {
+      if (attempt > 0) await new Promise(resolve => setTimeout(resolve, 100))
+      sessionData = await getDiscordSession(win.webContents.session, baseUrl)
+      if (sessionData?.discordId) break
+    }
+    ucLog('Auth login success', sessionData?.discordId ? 'info' : 'warn')
     return { ok: true, ...sessionData }
   }
   ucLog(`Auth login failed: ${result?.error || 'auth_failed'}`, 'warn')
@@ -1839,6 +2399,208 @@ ipcMain.handle('uc:auth-logout', async (event, baseUrl) => {
     return { ok: true }
   } catch (e) {
     return { ok: false, error: 'logout_failed' }
+  }
+})
+
+ipcMain.handle('uc:auth-email-login', async (event, payload) => {
+  const { baseUrl, email, password } = payload
+  const win = BrowserWindow.fromWebContents(event.sender)
+  if (!win || win.isDestroyed()) return { ok: false, error: 'no_window' }
+  try {
+    const response = await fetchWithSession(win.webContents.session, baseUrl, '/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password })
+    })
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}))
+      return { ok: false, error: errorData.error || 'login_failed' }
+    }
+    const data = await response.json()
+    return { ok: true, user: data.user }
+  } catch (e) {
+    ucLog(`Email login failed: ${e.message}`, 'error')
+    return { ok: false, error: 'network_error' }
+  }
+})
+
+ipcMain.handle('uc:auth-register', async (event, payload) => {
+  const { baseUrl, email, username, password } = payload
+  const win = BrowserWindow.fromWebContents(event.sender)
+  if (!win || win.isDestroyed()) return { ok: false, error: 'no_window' }
+  try {
+    const response = await fetchWithSession(win.webContents.session, baseUrl, '/api/auth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, username, password })
+    })
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}))
+      return { ok: false, error: errorData.error || 'register_failed' }
+    }
+    const data = await response.json()
+    return { ok: true, user: data.user }
+  } catch (e) {
+    ucLog(`Register failed: ${e.message}`, 'error')
+    return { ok: false, error: 'network_error' }
+  }
+})
+
+ipcMain.handle('uc:auth-verify-email', async (event, payload) => {
+  const { baseUrl, token } = payload
+  const win = BrowserWindow.fromWebContents(event.sender)
+  if (!win || win.isDestroyed()) return { ok: false, error: 'no_window' }
+  try {
+    const response = await fetchWithSession(win.webContents.session, baseUrl, '/api/auth/verify-email', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token })
+    })
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}))
+      return { ok: false, error: errorData.error || 'verification_failed' }
+    }
+    return { ok: true }
+  } catch (e) {
+    ucLog(`Email verification failed: ${e.message}`, 'error')
+    return { ok: false, error: 'network_error' }
+  }
+})
+
+ipcMain.handle('uc:auth-forgot-password', async (event, payload) => {
+  const { baseUrl, email } = payload
+  const win = BrowserWindow.fromWebContents(event.sender)
+  if (!win || win.isDestroyed()) return { ok: false, error: 'no_window' }
+  try {
+    const response = await fetchWithSession(win.webContents.session, baseUrl, '/api/auth/forgot-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email })
+    })
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}))
+      return { ok: false, error: errorData.error || 'request_failed' }
+    }
+    return { ok: true }
+  } catch (e) {
+    ucLog(`Forgot password request failed: ${e.message}`, 'error')
+    return { ok: false, error: 'network_error' }
+  }
+})
+
+ipcMain.handle('uc:auth-reset-password', async (event, payload) => {
+  const { baseUrl, token, password } = payload
+  const win = BrowserWindow.fromWebContents(event.sender)
+  if (!win || win.isDestroyed()) return { ok: false, error: 'no_window' }
+  try {
+    const response = await fetchWithSession(win.webContents.session, baseUrl, '/api/auth/reset-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token, password })
+    })
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}))
+      return { ok: false, error: errorData.error || 'reset_failed' }
+    }
+    return { ok: true }
+  } catch (e) {
+    ucLog(`Password reset failed: ${e.message}`, 'error')
+    return { ok: false, error: 'network_error' }
+  }
+})
+
+ipcMain.handle('uc:auth-me', async (event, baseUrl) => {
+  const win = BrowserWindow.fromWebContents(event.sender)
+  if (!win || win.isDestroyed()) return { ok: false, error: 'no_window' }
+  try {
+    const response = await fetchWithSession(win.webContents.session, baseUrl, '/api/auth/me', {
+      method: 'GET'
+    })
+    if (!response.ok) {
+      return { ok: false, user: null }
+    }
+    const data = await response.json()
+    return { ok: true, user: data.user, linkedProviders: data.linkedProviders }
+  } catch (e) {
+    ucLog(`Get auth user failed: ${e.message}`, 'warn')
+    return { ok: false, user: null }
+  }
+})
+
+ipcMain.handle('uc:auth-link-provider', async (event, payload) => {
+  const { baseUrl, provider } = payload
+  const win = BrowserWindow.fromWebContents(event.sender)
+  if (!win || win.isDestroyed()) return { ok: false, error: 'no_window' }
+  
+  const connectPath = provider === 'discord' ? '/api/discord/connect' : '/api/auth/google/connect'
+  const authUrl = buildAuthUrl(baseUrl, connectPath, 'link')
+  const result = await openAuthWindow(win, authUrl)
+  if (result?.ok) {
+    return { ok: true }
+  }
+  return result || { ok: false, error: 'auth_failed' }
+})
+
+ipcMain.handle('uc:auth-unlink-provider', async (event, payload) => {
+  const { baseUrl, provider } = payload
+  const win = BrowserWindow.fromWebContents(event.sender)
+  if (!win || win.isDestroyed()) return { ok: false, error: 'no_window' }
+  try {
+    const response = await fetchWithSession(win.webContents.session, baseUrl, `/api/auth/unlink-${provider}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    })
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}))
+      return { ok: false, error: errorData.error || 'unlink_failed' }
+    }
+    return { ok: true }
+  } catch (e) {
+    ucLog(`Unlink provider failed: ${e.message}`, 'error')
+    return { ok: false, error: 'network_error' }
+  }
+})
+
+ipcMain.handle('uc:auth-update-profile', async (event, payload) => {
+  const { baseUrl, data } = payload
+  const win = BrowserWindow.fromWebContents(event.sender)
+  if (!win || win.isDestroyed()) return { ok: false, error: 'no_window' }
+  try {
+    const response = await fetchWithSession(win.webContents.session, baseUrl, '/api/auth/profile', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    })
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}))
+      return { ok: false, error: errorData.error || 'update_failed' }
+    }
+    const resultData = await response.json()
+    return { ok: true, user: resultData.user }
+  } catch (e) {
+    ucLog(`Update profile failed: ${e.message}`, 'error')
+    return { ok: false, error: 'network_error' }
+  }
+})
+
+ipcMain.handle('uc:auth-update-password', async (event, payload) => {
+  const { baseUrl, currentPassword, newPassword } = payload
+  const win = BrowserWindow.fromWebContents(event.sender)
+  if (!win || win.isDestroyed()) return { ok: false, error: 'no_window' }
+  try {
+    const response = await fetchWithSession(win.webContents.session, baseUrl, '/api/auth/update-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ currentPassword, newPassword })
+    })
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}))
+      return { ok: false, error: errorData.error || 'update_failed' }
+    }
+    return { ok: true }
+  } catch (e) {
+    ucLog(`Update password failed: ${e.message}`, 'error')
+    return { ok: false, error: 'network_error' }
   }
 })
 
@@ -1954,7 +2716,7 @@ function normalizeDownloadRoot(targetPath) {
   const baseName = path.basename(trimmed)
   const lowerBase = baseName.toLowerCase()
 
-  if (lowerBase === installingDirName || lowerBase === installedDirName) {
+  if (lowerBase === installingDirName || lowerBase === installedDirName || lowerBase === archivesDirName) {
     trimmed = path.dirname(trimmed)
   }
 
@@ -2333,6 +3095,7 @@ const RESUME_BACKUP_EXT = '.ucresume'
  */
 function restorePreservedFile(savePath) {
   if (!savePath) return false
+  ensureSubdir(target, archivesDirName)
   const backupPath = savePath + RESUME_BACKUP_EXT
   if (fs.existsSync(savePath)) {
     // Original still exists - clean up the backup if present
@@ -2550,6 +3313,8 @@ function findInstalledFolderByAppid(appid) {
 function findInstallingFolderByAppid(appid) {
   try {
     if (!appid) return null
+    const persisted = getPersistedInstallingRecord(appid)
+    if (persisted?.installingRoot && fs.existsSync(persisted.installingRoot)) return persisted.installingRoot
     const roots = listDownloadRoots()
     for (const root of roots) {
       const installingRoot = path.join(root, installingDirName)
@@ -2577,8 +3342,17 @@ function updateInstallingManifestStatus(appid, status, error) {
     manifest.name = manifest.name || path.basename(folder)
     manifest.installStatus = status
     if (error) manifest.installError = String(error)
+    else delete manifest.installError
     manifest.updatedAt = Date.now()
-    return uc_writeJsonSync(manifestPath, manifest)
+    const ok = uc_writeJsonSync(manifestPath, manifest)
+    if (ok) {
+      if (shouldRetainInstallingStatus(status)) {
+        setPersistedInstallingRecord(buildPersistedInstallingRecord(manifest, folder, manifestPath))
+      } else {
+        deletePersistedInstallingRecord(appid)
+      }
+    }
+    return ok
   } catch (err) {
     console.error('[UC] updateInstallingManifestStatus failed', err)
     return false
@@ -2603,8 +3377,11 @@ function writeInstallingManifest(appid, metadata, status = 'installing', error =
     try {
       manifest.metadataHash = computeObjectHash(manifest.metadata)
     } catch { }
-    uc_writeJsonSync(manifestPath, manifest)
-    return { ok: true, installingRoot, manifestPath }
+    const ok = uc_writeJsonSync(manifestPath, manifest)
+    if (ok && shouldRetainInstallingStatus(status)) {
+      setPersistedInstallingRecord(buildPersistedInstallingRecord(manifest, installingRoot, manifestPath))
+    }
+    return { ok, installingRoot, manifestPath }
   } catch (err) {
     console.error('[UC] writeInstallingManifest failed', err)
     return { ok: false, installingRoot: null, manifestPath: null }
@@ -2819,6 +3596,9 @@ function hasQueuedDownloadsForApp(appid) {
 }
 
 function hasAnyActiveOrPendingDownloads() {
+  for (const job of extractionJobs.values()) {
+    if (job && job.state === 'running') return true
+  }
   // Check Chromium active downloads (exclude paused ones)
   for (const entry of activeDownloads.values()) {
     if (entry && entry.item) {
@@ -2861,9 +3641,10 @@ function hasPendingInGlobalQueueForApp(appid) {
 }
 
 function getWindowByWebContentsId(webContentsId) {
-  if (!webContentsId) return null
+  if (!webContentsId) return mainWindow && !mainWindow.isDestroyed() ? mainWindow : null
   const windows = BrowserWindow.getAllWindows()
-  return windows.find((win) => win.webContents && win.webContents.id === webContentsId) || null
+  return windows.find((win) => win.webContents && win.webContents.id === webContentsId)
+    || (mainWindow && !mainWindow.isDestroyed() ? mainWindow : null)
 }
 
 function enqueueDownload(payload, webContentsId) {
@@ -2871,12 +3652,14 @@ function enqueueDownload(payload, webContentsId) {
   const queue = downloadQueues.get(payload.appid) || []
   queue.push({ payload, webContentsId, queuedAt: Date.now() })
   downloadQueues.set(payload.appid, queue)
+  persistQueueStateSoon()
   return true
 }
 
 function enqueueGlobalDownload(payload, webContentsId) {
   if (!payload) return false
   globalDownloadQueue.push({ payload, webContentsId, queuedAt: Date.now() })
+  persistQueueStateSoon()
   return true
 }
 
@@ -3039,7 +3822,7 @@ function isUCFilesUrl(url) {
  * computed during download. Returns array of chunk indices that don't match
  * (i.e. bytes on disk differ from bytes received over the network).
  */
-function verifyChunkHashes(filePath, chunks) {
+async function verifyChunkHashes(filePath, chunks) {
   const READ_BUF_SIZE = 4 * 1024 * 1024 // 4 MB
   const readBuf = Buffer.alloc(READ_BUF_SIZE)
   const verifyFd = fs.openSync(filePath, 'r')
@@ -3059,6 +3842,8 @@ function verifyChunkHashes(filePath, chunks) {
         left -= n
       }
       if (hasher.digest('hex') !== c.sha256) bad.push(i)
+      // Yield after each 20 MB chunk so the event loop can process IPC/UI messages
+      await new Promise(r => setImmediate(r))
     }
   } finally {
     fs.closeSync(verifyFd)
@@ -3347,6 +4132,10 @@ async function ucfilesParallelDownload(win, payload, _retryCount = 0) {
       return { ok: false, cancelled: true }
     }
 
+    // All bytes written — immediately tell the renderer we're verifying so it doesn't
+    // appear frozen at "downloading | 100% | 0 B/s" while SHA-256 / 7z run.
+    sendUpdate({ status: 'verifying', receivedBytes: totalBytes, totalBytes, speedBps: 0, etaSeconds: null })
+
     // Verify file integrity: actual size on disk must match expected
     try {
       const stat = fs.statSync(finalSavePath)
@@ -3364,8 +4153,21 @@ async function ucfilesParallelDownload(win, payload, _retryCount = 0) {
     try {
       const fileHash = crypto.createHash('sha256')
       const hashStream = fs.createReadStream(finalSavePath)
+      // Yield every 64 MB of data so the main process event loop stays responsive
+      // (prevents Electron "not responding" during SHA-256 on large files).
+      let yieldCounter = 0
+      const YIELD_EVERY = 64 * 1024 * 1024 // 64 MB
+      let yieldAccum = 0
       await new Promise((resolve, reject) => {
-        hashStream.on('data', (chunk) => fileHash.update(chunk))
+        hashStream.on('data', async (chunk) => {
+          fileHash.update(chunk)
+          yieldAccum += chunk.length
+          if (yieldAccum >= YIELD_EVERY) {
+            yieldAccum = 0
+            yieldCounter++
+            await new Promise(r => setImmediate(r))
+          }
+        })
         hashStream.on('end', resolve)
         hashStream.on('error', reject)
       })
@@ -3433,8 +4235,12 @@ async function ucfilesParallelDownload(win, payload, _retryCount = 0) {
           try {
             for (let ci = 0; ci < chunks.length; ci++) {
               const chunk = chunks[ci]
-              if (!chunk.sha256) continue
               const chunkBytes = chunk.end - chunk.start + 1
+
+              // Incomplete chunks (pause/cancel interrupted the write) have no sha256.
+              // They contain zero-filled bytes from the pre-allocation — always re-download.
+              // Completed chunks are re-downloaded only when their hash differs.
+              const isIncomplete = !chunk.sha256
 
               // Re-download the full chunk into memory and compute hash
               let freshBuf = Buffer.alloc(chunkBytes)
@@ -3466,12 +4272,16 @@ async function ucfilesParallelDownload(win, payload, _retryCount = 0) {
               }
 
               const freshHash = freshHasher.digest('hex')
-              if (freshHash !== chunk.sha256) {
-                // The fresh download differs from the original - the original was corrupt.
-                // Overwrite with the fresh (hopefully correct) data.
-                ucLog(`[UC.Files] Chunk ${ci} (${chunk.start}-${chunk.end}): hash CHANGED - patching disk`)
+              if (isIncomplete || freshHash !== chunk.sha256) {
+                // Incomplete chunk (never written) or data changed on CDN — patch disk.
+                if (isIncomplete) {
+                  ucLog(`[UC.Files] Chunk ${ci} (${chunk.start}-${chunk.end}): was incomplete (zero-filled) - writing fresh data`)
+                } else {
+                  ucLog(`[UC.Files] Chunk ${ci} (${chunk.start}-${chunk.end}): hash CHANGED - patching disk`)
+                }
                 fs.writeSync(repairFd, freshBuf, 0, chunkBytes, chunk.start)
                 chunk.sha256 = freshHash
+                chunk.done = true
                 patchedCount++
               }
               // Report progress: show which chunk we're verifying
@@ -3580,22 +4390,78 @@ async function handleUCFilesDownloadComplete(win, info) {
         ucLog(`[UC.Files] migrateInstallingExtras warning: ${migErr.message}`, 'warn')
       }
 
-      sendDownloadUpdate(win, makeUpdate({ status: 'extracting' }))
+      // Space check before extraction
+      const archiveInputs = [savePath]
+      const spaceCheck = buildExtractionSpaceCheck(installedRoot, archiveInputs, metadataForInstall)
+      if (!spaceCheck.ok) {
+        const errorMessage = buildExtractionSpaceMessage(spaceCheck)
+        if (appid) updateInstallingManifestStatus(appid, 'downloaded', errorMessage)
+        sendDownloadUpdate(win, makeUpdate({
+          status: 'install_ready',
+          extractProgress: null,
+          error: errorMessage,
+          spaceCheck,
+        }))
+        startNextQueuedDownload(appid)
+        return
+      }
+
+      writeInstallingManifest(appid || 'manual-install', { ...metadataForInstall, appid, name: gameName }, 'extracting', null)
+
+      const progressState = { lastPercent: 0, lastAt: Date.now(), speedBps: 0 }
+      const st = fs.existsSync(savePath) ? fs.statSync(savePath) : null
+      const totalBytes = st ? st.size : 0
+
+      sendDownloadUpdate(win, makeUpdate({ status: 'extracting', totalBytes }))
       const result = await run7zExtract(savePath, installedRoot, ({ percent }) => {
-        sendDownloadUpdate(win, makeUpdate({ status: 'extracting', extractProgress: percent }))
+        const now = Date.now()
+        const safePercent = Math.max(0, Math.min(100, Number(percent) || 0))
+        const received = Math.round((totalBytes * safePercent) / 100)
+        const deltaPercent = Math.max(0, safePercent - progressState.lastPercent)
+        const deltaSec = Math.max(0.001, (now - progressState.lastAt) / 1000)
+        const instantSpeed = totalBytes > 0 ? ((totalBytes * deltaPercent) / 100) / deltaSec : 0
+        progressState.speedBps = progressState.speedBps > 0 ? progressState.speedBps * 0.7 + instantSpeed * 0.3 : instantSpeed
+        progressState.lastPercent = safePercent
+        progressState.lastAt = now
+        const etaSeconds = progressState.speedBps > 0 ? Math.max(0, Math.round((totalBytes - received) / progressState.speedBps)) : null
+        sendDownloadUpdate(win, makeUpdate({
+          status: 'extracting', extractProgress: safePercent,
+          receivedBytes: received, totalBytes,
+          speedBps: Math.round(progressState.speedBps), etaSeconds,
+        }))
       })
       if (!result.ok) throw new Error(result.error || 'Extraction failed')
-      // Remove the archive after extraction
-      try { fs.unlinkSync(savePath) } catch { }
-      // Clean up installing folder
-      try {
-        if (fs.existsSync(installingRoot)) fs.rmSync(installingRoot, { recursive: true, force: true })
-      } catch { }
-      // Update manifest
-      updateInstalledManifest(installedRoot, metadataForInstall, null)
-      sendDownloadUpdate(win, makeUpdate({ status: 'completed', savePath: installedRoot }))
+
+      // Build file entries for manifest
+      const extractedFiles = result.files || []
+      const fileEntries = []
+      for (const ef of extractedFiles) {
+        try {
+          const stats = fs.existsSync(ef) ? fs.statSync(ef) : null
+          fileEntries.push({ path: ef, name: path.basename(ef), size: stats ? stats.size : 0, checksum: null, addedAt: Date.now() })
+        } catch { }
+      }
+      if (fileEntries.length > 0) {
+        updateInstalledManifestBulk(installedRoot, metadataForInstall, fileEntries)
+      } else {
+        updateInstalledManifest(installedRoot, metadataForInstall, null)
+      }
+
+      // Keep archive for the explicit delete prompt instead of auto-deleting
+      const cachedArchivePaths = moveArchivesToCache(appid, gameName, [savePath])
+      const archivePromptPayload = buildArchiveDeletionPromptPayload(appid, gameName, cachedArchivePaths)
+      if (appid) updateInstallingManifestStatus(appid, 'completed', null)
+
+      sendArchiveDeletionPrompt(win, archivePromptPayload)
+
+      sendDownloadUpdate(win, makeUpdate({ status: 'extracted', savePath: null }))
+      sendDownloadUpdate(win, makeUpdate({
+        status: 'completed', savePath: null,
+        receivedBytes: totalBytes, totalBytes, speedBps: 0, etaSeconds: 0,
+      }))
     } catch (err) {
       ucLog(`[UC.Files] Extraction failed: ${err.message}`, 'error')
+      if (appid) updateInstallingManifestStatus(appid, 'failed', `Extraction failed: ${err.message}`)
       sendDownloadUpdate(win, makeUpdate({ status: 'failed', error: `Extraction failed: ${err.message}` }))
     }
   } else {
@@ -3765,6 +4631,11 @@ async function startDownloadNow(win, payload) {
 // Pause the currently-active download (if any), excluding `excludeId`.
 // Returns the downloadId that was paused, or null.
 function pauseActiveDownload(excludeId) {
+  for (const [dlId, job] of extractionJobs) {
+    if (dlId === excludeId || !job || job.state !== 'running') continue
+    const result = interruptExtractionJob(dlId, 'pause', 'Extraction paused so another download can continue.')
+    if (result.ok) return dlId
+  }
   // Check UC Files downloads
   for (const [dlId, ucEntry] of ucfilesActiveDownloads) {
     if (dlId === excludeId) continue
@@ -3915,6 +4786,7 @@ function startNextQueuedDownload(lastCompletedAppid) {
 
     const next = globalDownloadQueue.splice(nextIndex, 1)[0]
     if (!next) return // Safety check in case queue was modified concurrently
+    persistQueueStateSoon()
 
     const win = getWindowByWebContentsId(next.webContentsId)
     if (!win || win.isDestroyed()) return
@@ -3922,8 +4794,6 @@ function startNextQueuedDownload(lastCompletedAppid) {
     return
   }
 
-  // No queued downloads - auto-resume the next paused download
-  autoResumeNextPaused()
 }
 
 function isDownloadIdKnown(downloadId) {
@@ -3966,6 +4836,7 @@ function flushQueuedDownloads(appid, status, error) {
   const queue = downloadQueues.get(appid)
   if (!queue || !queue.length) return
   downloadQueues.delete(appid)
+  persistQueueStateSoon()
   for (const entry of queue) {
     try {
       const win = getWindowByWebContentsId(entry.webContentsId)
@@ -4005,6 +4876,7 @@ function flushQueuedGlobalDownloads(appid, status, error) {
   }
   globalDownloadQueue.length = 0
   for (const entry of remaining) globalDownloadQueue.push(entry)
+  persistQueueStateSoon()
 }
 
 function setDownloadRoot(targetPath) {
@@ -4128,6 +5000,224 @@ function snapshotFiles(rootDir) {
   } catch (e) { }
   return files
 }
+
+function removeEmptyDirectories(rootDir) {
+  if (!rootDir || !fs.existsSync(rootDir)) return
+  let entries = []
+  try {
+    entries = fs.readdirSync(rootDir, { withFileTypes: true })
+  } catch {
+    return
+  }
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue
+    removeEmptyDirectories(path.join(rootDir, entry.name))
+  }
+  try {
+    if (fs.readdirSync(rootDir).length === 0) fs.rmdirSync(rootDir)
+  } catch { }
+}
+
+function buildArchiveDeletionPromptPayload(appid, gameName, archivePaths) {
+  const paths = Array.isArray(archivePaths)
+    ? archivePaths.filter((target) => target && fs.existsSync(target))
+    : []
+  if (!paths.length) return null
+
+  let totalBytes = 0
+  for (const target of paths) {
+    try {
+      totalBytes += fs.statSync(target).size || 0
+    } catch { }
+  }
+
+  return {
+    appid: appid || null,
+    gameName: gameName || appid || null,
+    archivePaths: paths,
+    totalBytes,
+  }
+}
+
+function listInstallerArchiveFiles(installingRoot) {
+  if (!installingRoot || !fs.existsSync(installingRoot)) return []
+  try {
+    return fs.readdirSync(installingRoot)
+      .filter((name) => (
+        name !== INSTALLED_MANIFEST
+        && !name.endsWith(RESUME_BACKUP_EXT)
+        && !name.endsWith(UCFILES_RESUME_STATE_EXT)
+      ))
+      .map((name) => path.join(installingRoot, name))
+      .filter((target) => {
+        try {
+          return fs.statSync(target).isFile()
+        } catch {
+          return false
+        }
+      })
+  } catch {
+    return []
+  }
+}
+
+function dismissInstallingState(appid) {
+  if (!appid) return { ok: false, archivePaths: [], gameName: null }
+
+  const installingRoot = findInstallingFolderByAppid(appid)
+  if (!installingRoot || !fs.existsSync(installingRoot)) {
+    deletePersistedInstallingRecord(appid)
+    return { ok: true, archivePaths: [], gameName: null }
+  }
+
+  const manifestPath = path.join(installingRoot, INSTALLED_MANIFEST)
+  const manifest = readJsonFile(manifestPath) || {}
+  const archivePaths = listInstallerArchiveFiles(installingRoot)
+
+  try {
+    if (fs.existsSync(manifestPath)) fs.unlinkSync(manifestPath)
+  } catch { }
+
+  try {
+    for (const name of fs.readdirSync(installingRoot)) {
+      if (!name.endsWith(RESUME_BACKUP_EXT) && !name.endsWith(UCFILES_RESUME_STATE_EXT)) continue
+      try {
+        fs.unlinkSync(path.join(installingRoot, name))
+      } catch { }
+    }
+  } catch { }
+
+  try {
+    const remaining = fs.existsSync(installingRoot) ? fs.readdirSync(installingRoot) : []
+    if (remaining.length === 0) {
+      fs.rmSync(installingRoot, { recursive: true, force: true })
+    }
+  } catch { }
+
+  deletePersistedInstallingRecord(appid)
+  return {
+    ok: true,
+    archivePaths,
+    gameName: manifest?.name || manifest?.metadata?.name || appid,
+  }
+}
+
+function moveArchivesToCache(appid, gameName, archivePaths) {
+  const targets = Array.isArray(archivePaths)
+    ? archivePaths.filter((target) => target && fs.existsSync(target))
+    : []
+  if (!targets.length) return []
+
+  const downloadRoot = ensureDownloadDir()
+  const folderName = safeFolderName(gameName || appid || 'archive-cache')
+  const archiveRoot = ensureSubdir(path.join(downloadRoot, archivesDirName), folderName)
+  const movedPaths = []
+
+  for (const sourcePath of targets) {
+    try {
+      const targetPath = resolveUniquePath(archiveRoot, path.basename(sourcePath))
+      if (path.resolve(sourcePath) === path.resolve(targetPath)) {
+        movedPaths.push(sourcePath)
+        continue
+      }
+
+      try {
+        fs.renameSync(sourcePath, targetPath)
+      } catch {
+        fs.copyFileSync(sourcePath, targetPath)
+        try { fs.unlinkSync(sourcePath) } catch { }
+      }
+
+      movedPaths.push(targetPath)
+    } catch (error) {
+      ucLog(`[Archive] Failed to move archive ${sourcePath} to cache: ${String(error)}`, 'warn')
+      movedPaths.push(sourcePath)
+    }
+  }
+
+  return movedPaths
+}
+
+function sendArchiveDeletionPrompt(win, payload) {
+  if (!payload || !Array.isArray(payload.archivePaths) || payload.archivePaths.length === 0) return
+  try {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('uc:archive-delete-prompt', payload)
+    }
+    if (win && !win.isDestroyed() && win !== mainWindow) {
+      win.webContents.send('uc:archive-delete-prompt', payload)
+    }
+    if (overlayWindow && !overlayWindow.isDestroyed() && overlayWindow !== win) {
+      overlayWindow.webContents.send('uc:archive-delete-prompt', payload)
+    }
+  } catch (error) {
+    ucLog(`[Archive] Failed to send archive deletion prompt: ${String(error)}`, 'warn')
+  }
+}
+
+function cleanupInstallerCacheRoots(archivePaths) {
+  const roots = new Set(
+    (Array.isArray(archivePaths) ? archivePaths : [])
+      .filter(Boolean)
+      .map((target) => path.dirname(target))
+  )
+
+  for (const root of roots) {
+    try {
+      if (!root || !fs.existsSync(root)) continue
+      const entries = fs.readdirSync(root)
+      const removable = entries.every((name) => (
+        name === INSTALLED_MANIFEST
+        || name.endsWith(RESUME_BACKUP_EXT)
+        || name.endsWith(UCFILES_RESUME_STATE_EXT)
+      ))
+      if (!removable) continue
+      fs.rmSync(root, { recursive: true, force: true })
+    } catch (error) {
+      ucLog(`[Archive] Failed to clean installer cache root ${root}: ${String(error)}`, 'warn')
+    }
+  }
+}
+
+function cleanupInterruptedExtractionArtifacts(job, removeSourceFiles) {
+  if (!job) return
+  const installedRoot = job.installedRoot
+  const beforeFiles = job.beforeFiles instanceof Set ? job.beforeFiles : new Set()
+  if (installedRoot && fs.existsSync(installedRoot)) {
+    const afterFiles = snapshotFiles(installedRoot)
+    for (const filePath of afterFiles) {
+      if (beforeFiles.has(filePath)) continue
+      try {
+        if (fs.existsSync(filePath)) fs.unlinkSync(filePath)
+      } catch { }
+    }
+    removeEmptyDirectories(installedRoot)
+  }
+  if (!removeSourceFiles) return
+  if (job.cleanupInstallingRoot) {
+    try {
+      if (fs.existsSync(job.cleanupInstallingRoot)) fs.rmSync(job.cleanupInstallingRoot, { recursive: true, force: true })
+    } catch { }
+    return
+  }
+  const sourceFiles = Array.isArray(job.partFiles) && job.partFiles.length ? job.partFiles : [job.archiveToExtract]
+  for (const sourceFile of sourceFiles) {
+    try {
+      if (sourceFile && fs.existsSync(sourceFile)) fs.unlinkSync(sourceFile)
+    } catch { }
+  }
+}
+
+function terminateChildProcess(proc) {
+  if (!proc || proc.killed) return
+  try {
+    if (process.platform === 'win32' && proc.pid) {
+      child_process.spawn('taskkill', ['/PID', String(proc.pid), '/T', '/F'], { windowsHide: true })
+      return
+    }
+    proc.kill('SIGTERM')
+  } catch { }
+}
 function resolve7zipBinary() {
   const candidates = []
 
@@ -4173,7 +5263,7 @@ function resolve7zipBinary() {
   return null
 }
 
-function run7zExtract(archivePath, destDir, onProgress) {
+function run7zExtract(archivePath, destDir, onProgress, options = {}) {
   return new Promise((resolve) => {
     try {
       const cmd = resolve7zipBinary()
@@ -4189,10 +5279,29 @@ function run7zExtract(archivePath, destDir, onProgress) {
       uc_log(`spawning 7zip with command: ${cmd} ${args.join(' ')}`)
 
       const proc = child_process.spawn(cmd, args, { windowsHide: true })
+      let settled = false
+      let aborted = false
       let stdout = ''
       let stderr = ''
       let lastPercent = -1
       let lastEmit = 0
+      const finish = (result) => {
+        if (settled) return
+        settled = true
+        resolve(result)
+      }
+      if (typeof options.onSpawn === 'function') {
+        try { options.onSpawn(proc, before) } catch { }
+      }
+      const abortSignal = options.signal
+      const abortListener = () => {
+        aborted = true
+        terminateChildProcess(proc)
+      }
+      if (abortSignal) {
+        if (abortSignal.aborted) abortListener()
+        else abortSignal.addEventListener('abort', abortListener, { once: true })
+      }
       const emitProgress = (p) => {
         try {
           if (typeof onProgress === 'function') {
@@ -4239,21 +5348,38 @@ function run7zExtract(archivePath, destDir, onProgress) {
         }
       })
       proc.on('close', (code) => {
+        if (abortSignal) {
+          try { abortSignal.removeEventListener('abort', abortListener) } catch { }
+        }
+        if (aborted) {
+          finish({ ok: false, aborted: true, error: String(abortSignal?.reason || 'Extraction interrupted') })
+          return
+        }
         if (code !== 0) {
-          const errorMsg = stderr || stdout || `7zip exited with code ${code}`
-          uc_log(`7zip extraction failed: ${errorMsg}`)
-          resolve({ ok: false, error: errorMsg })
+          const details = [stderr.trim(), stdout.trim()].filter(Boolean).join('\n')
+          const errorMsg = details
+            ? `7zip exited with code ${code}: ${details}`
+            : `7zip exited with code ${code}`
+          uc_log(errorMsg)
+          finish({ ok: false, error: errorMsg })
           return
         }
         const after = snapshotFiles(destDir)
         const extracted = []
         for (const f of after) if (!before.has(f)) extracted.push(f)
-        resolve({ ok: true, files: extracted })
+        finish({ ok: true, files: extracted })
       })
       proc.on('error', (err) => {
+        if (abortSignal) {
+          try { abortSignal.removeEventListener('abort', abortListener) } catch { }
+        }
+        if (aborted) {
+          finish({ ok: false, aborted: true, error: String(abortSignal?.reason || 'Extraction interrupted') })
+          return
+        }
         const errorMsg = `7zip process error: ${String(err)}`
         uc_log(errorMsg)
-        resolve({ ok: false, error: errorMsg })
+        finish({ ok: false, error: errorMsg })
       })
     } catch (err) {
       resolve({ ok: false, error: String(err) })
@@ -4334,6 +5460,50 @@ function sendDownloadUpdate(win, payload) {
   } catch (error) {
     ucLog(`[Download] Failed to send update: ${String(error)}`, 'error')
   }
+}
+
+function interruptExtractionJob(downloadId, mode = 'cancel', reason) {
+  const job = extractionJobs.get(downloadId)
+  if (!job) return { ok: false }
+
+  const nextStatus = 'install_ready'
+  const message = reason || (mode === 'pause'
+    ? 'Extraction paused. Install again to continue.'
+    : 'Installation stopped. Archive kept. Click Install to continue.')
+
+  job.abortMode = mode
+  job.abortReason = message
+  job.state = 'stopping'
+  unregisterExtractionJob(job)
+
+  if (job.abortController && !job.abortController.signal.aborted) {
+    try { job.abortController.abort(message) } catch { }
+  }
+
+  if (mode === 'pause' || mode === 'cancel') {
+    try { updateInstallingManifestStatus(job.appid, 'downloaded', message) } catch { }
+  }
+
+  sendDownloadUpdate(mainWindow, {
+    downloadId: job.downloadId,
+    status: nextStatus,
+    receivedBytes: 0,
+    totalBytes: job.totalBytes || 0,
+    speedBps: 0,
+    etaSeconds: null,
+    extractProgress: null,
+    filename: path.basename(job.archiveToExtract || ''),
+    savePath: job.archiveToExtract,
+    appid: job.appid || null,
+    gameName: job.gameName || null,
+    error: message,
+  })
+
+  if (globalDownloadQueue.length > 0 && !hasAnyActiveOrPendingDownloads()) {
+    startNextQueuedDownload(null)
+  }
+
+  return { ok: true, status: nextStatus, preservedArchive: true, error: message, downloadId: job.downloadId, appid: job.appid || null }
 }
 
 function registerRunningGame(appid, exePath, proc, gameName, showGameName = true) {
@@ -4640,7 +5810,9 @@ function createSplashWindow() {
     icon: resolveIcon(),
   })
   splashWin.center()
-  splashWin.loadFile(path.join(__dirname, 'splash.html'))
+  splashWin.loadFile(path.join(__dirname, 'splash.html'), {
+    query: { v: getAppVersion() }
+  })
   return splashWin
 }
 
@@ -4667,6 +5839,7 @@ function createWindow(existingSplash) {
     backgroundColor: '#09090b',
     title: 'UnionCrax.Direct',
     show: false,
+    frame: false,
     webPreferences: {
       // This app needs to talk to a remote Next.js server; easiest path is to disable CORS in the desktop shell.
       webSecurity: false,
@@ -4674,6 +5847,13 @@ function createWindow(existingSplash) {
       preload: path.join(__dirname, 'preload.cjs')
     },
     icon: iconPath
+  })
+
+  mainWindow.on('maximize', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('uc:window-maximized', true)
+  })
+  mainWindow.on('unmaximize', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('uc:window-maximized', false)
   })
 
   // Inject the detected base URL into renderer localStorage before any JS runs.
@@ -4697,6 +5877,7 @@ function createWindow(existingSplash) {
     } catch { }
     splashWindow = null
     if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.maximize()
       mainWindow.show()
       mainWindow.focus()
     }
@@ -4922,6 +6103,7 @@ function createWindow(existingSplash) {
       let finalPath = entry?.savePath
       let extractionFailed = false
       let extractionError = null
+      let extractionTerminalStatus = null
       if (state === 'completed' && entry?.savePath) {
         const folderName = safeFolderName(entry?.gameName || entry?.appid || downloadId)
         const installingRoot = path.join(downloadRoot, installingDirName, folderName)
@@ -4973,65 +6155,117 @@ function createWindow(existingSplash) {
           uc_log(`checking for extraction - installingPath=${entry.savePath} finalPath=${finalPath} archExt=${archExt} maybeArchive=${maybeArchive}`)
 
           const extractArchive = async (archiveToExtract, partFiles, totalBytesOverride, extractionKeyOverride) => {
-            const effectiveExtractionKey = extractionKeyOverride || (entry?.appid ? buildAppExtractionKey(entry.appid) : null)
-            if (effectiveExtractionKey) activeExtractions.add(effectiveExtractionKey)
-            refreshOperationPowerSaveBlocker()
-            try {
-              const st = fs.existsSync(archiveToExtract) ? fs.statSync(archiveToExtract) : null
-              const totalBytes = totalBytesOverride != null ? totalBytesOverride : st ? st.size : 0
-              sendDownloadUpdate(mainWindow, { downloadId, status: 'extracting', receivedBytes: 0, totalBytes, speedBps: 0, etaSeconds: null, filename: path.basename(archiveToExtract), savePath: archiveToExtract, appid: entry?.appid || null })
-            } catch (_) {
-              sendDownloadUpdate(mainWindow, { downloadId, status: 'extracting', receivedBytes: 0, totalBytes: 0, speedBps: 0, etaSeconds: null, filename: path.basename(archiveToExtract), savePath: archiveToExtract, appid: entry?.appid || null })
+            const st = fs.existsSync(archiveToExtract) ? fs.statSync(archiveToExtract) : null
+            const totalBytes = totalBytesOverride != null ? totalBytesOverride : st ? st.size : 0
+            const archiveInputs = Array.isArray(partFiles) && partFiles.length ? partFiles : [archiveToExtract]
+            const spaceCheck = buildExtractionSpaceCheck(installedFolder, archiveInputs, metadataForInstall)
+            if (!spaceCheck.ok) {
+              const errorMessage = buildExtractionSpaceMessage(spaceCheck)
+              if (entry?.appid) updateInstallingManifestStatus(entry.appid, 'downloaded', errorMessage)
+              sendDownloadUpdate(mainWindow, {
+                downloadId,
+                status: 'install_ready',
+                receivedBytes: 0,
+                totalBytes,
+                speedBps: 0,
+                etaSeconds: null,
+                extractProgress: null,
+                filename: path.basename(archiveToExtract),
+                savePath: archiveToExtract,
+                appid: entry?.appid || null,
+                gameName: entry?.gameName || null,
+                error: errorMessage,
+                url: entry?.url || null,
+                partIndex: entry?.partIndex,
+                partTotal: entry?.partTotal,
+                spaceCheck,
+              })
+              extractionFailed = true
+              extractionError = 'insufficient_space'
+              extractionTerminalStatus = 'install_ready'
+              return
             }
+
+            const progressState = {
+              lastPercent: 0,
+              lastAt: Date.now(),
+              speedBps: 0,
+            }
+            const extractionJob = registerExtractionJob({
+              downloadId,
+              appid: entry?.appid || null,
+              gameName: entry?.gameName || null,
+              archiveToExtract,
+              partFiles,
+              totalBytes,
+              installedRoot: installedFolder,
+              cleanupInstallingRoot: installingRoot,
+              preserveSourceFiles: false,
+              extractionKey: extractionKeyOverride || null,
+              beforeFiles: snapshotFiles(installedFolder),
+              abortController: new AbortController(),
+            })
+
+            sendDownloadUpdate(mainWindow, {
+              downloadId,
+              status: 'extracting',
+              receivedBytes: 0,
+              totalBytes,
+              speedBps: 0,
+              etaSeconds: null,
+              extractProgress: 0,
+              filename: path.basename(archiveToExtract),
+              savePath: archiveToExtract,
+              appid: entry?.appid || null,
+              gameName: entry?.gameName || null,
+              url: entry?.url || null,
+              partIndex: entry?.partIndex,
+              partTotal: entry?.partTotal,
+            })
             uc_log(`starting extraction of ${archiveToExtract} to ${installedFolder}`)
-            let _lastBytes = 0
-            let _lastTime = Date.now()
-            let _lastSpeed = 0
-            let _pollTimer = null
-            try {
-              _pollTimer = setInterval(() => {
-                try {
-                  getDirectorySize(installedFolder).then((size) => {
-                    try {
-                      const now = Date.now()
-                      const deltaBytes = Math.max(0, size - _lastBytes)
-                      const deltaSec = Math.max(0.001, (now - _lastTime) / 1000)
-                      const instSpeed = deltaBytes / deltaSec
-                      const speedBps = _lastSpeed > 0 ? _lastSpeed * 0.7 + instSpeed * 0.3 : instSpeed
-                      _lastSpeed = speedBps
-                      _lastBytes = size
-                      _lastTime = now
-                      const st = fs.existsSync(archiveToExtract) ? fs.statSync(archiveToExtract) : null
-                      const totalBytes = totalBytesOverride != null ? totalBytesOverride : st ? st.size : 0
-                      const etaSeconds = speedBps > 0 ? Math.max(0, Math.round((totalBytes - size) / speedBps)) : null
-                      sendDownloadUpdate(mainWindow, { downloadId, status: 'extracting', receivedBytes: size, totalBytes, speedBps: Math.round(speedBps), etaSeconds, filename: path.basename(archiveToExtract), savePath: archiveToExtract, appid: entry?.appid || null })
-                    } catch (e) { }
-                  }).catch(() => { })
-                } catch (e) { }
-              }, 500)
-            } catch (e) { }
 
             const res = await run7zExtract(archiveToExtract, installedFolder, ({ percent }) => {
               try {
-                const st = fs.existsSync(archiveToExtract) ? fs.statSync(archiveToExtract) : null
-                const totalBytes = totalBytesOverride != null ? totalBytesOverride : st ? st.size : 0
-                const received = Math.round((totalBytes * (percent || 0)) / 100)
+                const safePercent = Math.max(0, Math.min(100, Number(percent) || 0))
+                const received = Math.round((totalBytes * safePercent) / 100)
                 const now = Date.now()
-                const deltaBytes = Math.max(0, received - _lastBytes)
-                const deltaSec = Math.max(0.001, (now - _lastTime) / 1000)
-                const instSpeed = deltaBytes / deltaSec
-                const speedBps = _lastSpeed > 0 ? _lastSpeed * 0.7 + instSpeed * 0.3 : instSpeed
-                _lastSpeed = speedBps
-                _lastBytes = received
-                _lastTime = now
-                const etaSeconds = speedBps > 0 ? Math.max(0, Math.round((totalBytes - received) / speedBps)) : null
-                sendDownloadUpdate(mainWindow, { downloadId, status: 'extracting', receivedBytes: received, totalBytes, speedBps: Math.round(speedBps), etaSeconds, filename: path.basename(archiveToExtract), savePath: archiveToExtract, appid: entry?.appid || null })
+                const deltaPercent = Math.max(0, safePercent - progressState.lastPercent)
+                const deltaSec = Math.max(0.001, (now - progressState.lastAt) / 1000)
+                const instantSpeed = totalBytes > 0 ? ((totalBytes * deltaPercent) / 100) / deltaSec : 0
+                progressState.speedBps = progressState.speedBps > 0 ? progressState.speedBps * 0.7 + instantSpeed * 0.3 : instantSpeed
+                progressState.lastPercent = safePercent
+                progressState.lastAt = now
+                const etaSeconds = progressState.speedBps > 0 ? Math.max(0, Math.round((totalBytes - received) / progressState.speedBps)) : null
+                sendDownloadUpdate(mainWindow, {
+                  downloadId,
+                  status: 'extracting',
+                  receivedBytes: received,
+                  totalBytes,
+                  speedBps: Math.round(progressState.speedBps),
+                  etaSeconds,
+                  extractProgress: safePercent,
+                  filename: path.basename(archiveToExtract),
+                  savePath: archiveToExtract,
+                  appid: entry?.appid || null,
+                  gameName: entry?.gameName || null,
+                  url: entry?.url || null,
+                  partIndex: entry?.partIndex,
+                  partTotal: entry?.partTotal,
+                })
               } catch (e) { }
-            })
-            try { if (_pollTimer) clearInterval(_pollTimer) } catch (e) { }
+            }, { signal: extractionJob.abortController.signal })
+
             uc_log(`extraction result for ${archiveToExtract}: ${JSON.stringify(res && { ok: res.ok, error: res.error, files: (res.files || []).slice(0, 10) })}`)
-            if (effectiveExtractionKey) activeExtractions.delete(effectiveExtractionKey)
-            refreshOperationPowerSaveBlocker()
+            unregisterExtractionJob(extractionJob)
+            if (res?.aborted) {
+              cleanupInterruptedExtractionArtifacts(extractionJob, false)
+              extractionTerminalStatus = 'install_ready'
+              extractionFailed = false
+              extractionError = extractionJob.abortReason || (extractionJob.abortMode === 'pause'
+                ? 'Extraction paused. Install again to continue.'
+                : 'Installation stopped. Archive kept. Click Install to continue.')
+              return
+            }
             if (res && res.ok) {
               const extractedFiles = res.files || []
               const fileEntries = []
@@ -5068,23 +6302,19 @@ function createWindow(existingSplash) {
               } catch (e) { }
               uc_log(`extraction success - files: ${extractedFiles.length}`)
               try {
-                const st2 = fs.existsSync(archiveToExtract) ? fs.statSync(archiveToExtract) : null
-                const totalBytes2 = totalBytesOverride != null ? totalBytesOverride : st2 ? st2.size : 0
-                if (totalBytes2 > 0) sendDownloadUpdate(mainWindow, { downloadId, status: 'extracting', receivedBytes: totalBytes2, totalBytes: totalBytes2, speedBps: 0, etaSeconds: 0, filename: path.basename(archiveToExtract), savePath: archiveToExtract, appid: entry?.appid || null })
+                if (totalBytes > 0) sendDownloadUpdate(mainWindow, { downloadId, status: 'extracting', receivedBytes: totalBytes, totalBytes, speedBps: 0, etaSeconds: 0, extractProgress: 100, filename: path.basename(archiveToExtract), savePath: archiveToExtract, appid: entry?.appid || null, gameName: entry?.gameName || null, url: entry?.url || null, partIndex: entry?.partIndex, partTotal: entry?.partTotal })
               } catch (e) { }
-              // Clean up archives first (delete the archive files)
-              try {
-                if (partFiles && partFiles.length) {
-                  for (const part of partFiles) {
-                    try { if (fs.existsSync(part)) fs.unlinkSync(part) } catch (e) { }
-                  }
-                  uc_log(`deleted multipart parts for ${archiveToExtract}`)
-                } else if (archiveToExtract && fs.existsSync(archiveToExtract)) {
-                  try { fs.unlinkSync(archiveToExtract); uc_log(`deleted archive ${archiveToExtract} from installing folder`) } catch (e) { uc_log(`failed to delete archive: ${String(e)}`) }
-                }
-              } catch (e) {
-                uc_log(`error deleting archive: ${String(e)}`)
-              }
+              // Move archives into cache first so keep/delete prompt has stable paths.
+              const cachedArchivePaths = moveArchivesToCache(
+                entry?.appid || null,
+                entry?.gameName || null,
+                partFiles && partFiles.length ? partFiles : [archiveToExtract]
+              )
+              const archivePromptPayload = buildArchiveDeletionPromptPayload(
+                entry?.appid || null,
+                entry?.gameName || null,
+                cachedArchivePaths
+              )
 
               // Move extracted files from installing folder to installed folder
               try {
@@ -5096,46 +6326,13 @@ function createWindow(existingSplash) {
                 uc_log(`failed to migrate extracted files: ${String(e)}`)
               }
 
-              // Update manifest status BEFORE deleting the installing folder to ensure it's saved
+              // Update manifest status and keep installer cache for an explicit delete prompt.
               try {
                 if (entry?.appid) updateInstallingManifestStatus(entry.appid, 'completed', null)
               } catch (e) {
                 uc_log(`failed to update installing manifest status: ${String(e)}`)
               }
-
-              // Use async rm with timeout to prevent hanging on Windows file locks
-              // The folder will be cleaned up on next app restart if deletion fails
-              const deleteInstallingFolder = () => {
-                return new Promise((resolve) => {
-                  if (!fs.existsSync(installingRoot)) {
-                    uc_log(`installing folder already gone for ${entry?.appid}`)
-                    resolve()
-                    return
-                  }
-                  // Try quick delete first
-                  try {
-                    fs.rmSync(installingRoot, { recursive: true, force: true })
-                    uc_log(`deleted installing folder for ${entry?.appid}`)
-                    resolve()
-                  } catch (e) {
-                    uc_log(`initial rmSync failed, trying async: ${String(e)}`)
-                    // Fall back to async with timeout
-                    fs.promises.rm(installingRoot, { recursive: true, force: true, maxRetries: 3, retryDelayMs: 500 })
-                      .then(() => {
-                        uc_log(`deleted installing folder async for ${entry?.appid}`)
-                        resolve()
-                      })
-                      .catch((err) => {
-                        uc_log(`failed to delete installing folder (non-fatal): ${String(err)}`)
-                        // Don't reject - this is not fatal, folder will persist until next restart
-                        resolve()
-                      })
-                  }
-                })
-              }
-
-              // Execute async folder deletion without blocking
-              deleteInstallingFolder()
+              sendArchiveDeletionPrompt(mainWindow, archivePromptPayload)
 
               sendDownloadUpdate(mainWindow, { downloadId, status: 'extracted', extracted: extractedFiles, savePath: null, appid: entry?.appid || null })
               try {
@@ -5164,6 +6361,7 @@ function createWindow(existingSplash) {
               uc_log(`extraction failed for ${archiveToExtract}: ${res && res.error ? res.error : 'unknown'}`)
               extractionFailed = true
               extractionError = res && res.error ? res.error : 'extract_failed'
+              extractionTerminalStatus = 'failed'
               updateInstallingManifestStatus(entry?.appid, 'failed', extractionError)
               sendDownloadUpdate(mainWindow, { downloadId, status: 'extract_failed', error: res && res.error ? res.error : 'unknown', savePath: finalPath, appid: entry?.appid || null })
             }
@@ -5175,8 +6373,6 @@ function createWindow(existingSplash) {
             } else if (extractionKey && activeExtractions.has(extractionKey)) {
               uc_log(`multipart extraction already running for ${multipartInfo ? multipartInfo.basePath : finalPath}`)
             } else if (finalPath && fs.existsSync(finalPath)) {
-              if (extractionKey) activeExtractions.add(extractionKey)
-              refreshOperationPowerSaveBlocker()
               await extractArchive(multipartInfo.firstPartPath, multipartInfo.partFiles || [], multipartInfo.totalBytes || null, extractionKey)
             }
           } else if (maybeArchive && finalPath && fs.existsSync(finalPath)) {
@@ -5292,6 +6488,7 @@ function createWindow(existingSplash) {
         } catch (e) {
           extractionFailed = true
           extractionError = e && e.message ? e.message : 'extract_failed'
+          extractionTerminalStatus = 'failed'
           updateInstallingManifestStatus(entry?.appid, 'failed', extractionError)
           ucLog(`Extraction error: ${e.message}`, 'error')
         }
@@ -5299,7 +6496,7 @@ function createWindow(existingSplash) {
       // Interrupted downloads (e.g. paused download loses connection, network change) are
       // still resumable through our Level 1/2/3 resume system. Treat as 'paused', not 'failed'.
       const isInterrupted = state === 'interrupted'
-      const terminalStatus = extractionFailed
+      const terminalStatus = extractionTerminalStatus || (extractionFailed
         ? 'failed'
         : state === 'completed'
           ? 'completed'
@@ -5308,13 +6505,18 @@ function createWindow(existingSplash) {
             : isInterrupted
               ? 'paused'
               : 'failed'
-      const terminalError = extractionFailed
-        ? extractionError || 'extract_failed'
-        : state === 'completed'
-          ? null
-          : isInterrupted
-            ? 'Download interrupted. Resume to continue.'
-            : state
+      )
+      const terminalError = extractionTerminalStatus === 'install_ready'
+        ? extractionError || 'Extraction paused. Install again to continue.'
+        : extractionTerminalStatus === 'cancelled'
+          ? extractionError || 'Cancelled by user'
+          : extractionFailed
+            ? extractionError || 'extract_failed'
+            : state === 'completed'
+              ? null
+              : isInterrupted
+                ? 'Download interrupted. Resume to continue.'
+                : state
       sendDownloadUpdate(mainWindow, {
         downloadId,
         status: terminalStatus,
@@ -5349,6 +6551,7 @@ function createWindow(existingSplash) {
 
 app.whenReady().then(async () => {
   ensureDownloadDir()
+  await hydratePersistedLauncherState()
 
   // Show splash immediately, then detect the best reachable domain before
   // the main window loads so the renderer starts with the right API base URL.
@@ -5358,21 +6561,28 @@ app.whenReady().then(async () => {
     setSplashStatus(splashWin, status)
   })
 
-  // Brief pause so the user can see the final status before the main window appears
+  // Keep splash visible long enough to be perceptible on fast machines.
   setSplashStatus(splashWin, 'Almost there...')
-  await new Promise((r) => setTimeout(r, 300))
+  await new Promise((r) => setTimeout(r, 900))
 
   createWindow(splashWin)
+  if (globalDownloadQueue.length > 0) {
+    setTimeout(() => {
+      if (!hasAnyActiveOrPendingDownloads()) startNextQueuedDownload(null)
+    }, 1000)
+  }
   createTray()
   configureAutoUpdater()
   
   // Initialize overlay system
   const settings = readSettings()
-  if (settings.overlayEnabled !== false) {
-    overlayEnabled = settings.overlayEnabled !== false
-    overlayHotkey = settings.overlayHotkey || 'Ctrl+Shift+Tab'
-    overlayAutoShow = settings.overlayAutoShow !== false
-    overlayPosition = settings.overlayPosition || 'left'
+  overlayEnabled = settings.overlayEnabled !== false
+  overlayHotkey = settings.overlayHotkey || 'Ctrl+Shift+Tab'
+  overlayAutoShow = settings.overlayAutoShow !== false
+  overlayPosition = settings.overlayPosition || 'left'
+  overlayToastDurationMs = normalizeOverlayToastDurationMs(settings.overlayToastDurationMs ?? 5000)
+  overlayToastVertical = normalizeOverlayToastVertical(settings.overlayToastVertical ?? 'bottom')
+  if (overlayEnabled) {
     createOverlayWindow()
     registerOverlayHotkey()
   }
@@ -5468,6 +6678,14 @@ ipcMain.handle('uc:get-update-status', () => {
 ipcMain.handle('uc:get-version', () => {
   return packageJson.version
 })
+
+ipcMain.handle('uc:window-minimize', () => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.minimize() })
+ipcMain.handle('uc:window-maximize', () => {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  mainWindow.isMaximized() ? mainWindow.unmaximize() : mainWindow.maximize()
+})
+ipcMain.handle('uc:window-close', () => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.close() })
+ipcMain.handle('uc:window-is-maximized', () => mainWindow ? mainWindow.isMaximized() : false)
 
 ipcMain.handle('uc:app-close-response', async (_event, shouldProceed) => {
   const request = pendingCloseRequest
@@ -5588,6 +6806,12 @@ ipcMain.handle('uc:download-cancel', (_event, downloadId) => {
     if (overlayWindow && !overlayWindow.isDestroyed()) overlayWindow.webContents.send('uc:download-update', cancelPayload)
   }
 
+  const extractionResult = interruptExtractionJob(downloadId, 'cancel', 'Installation stopped. Archive kept. Click Install to continue.')
+  if (extractionResult.ok) {
+    ucLog(`Download cancelled (extracting): ${downloadId}`)
+    return extractionResult
+  }
+
   // UC.Files parallel download cancel
   const ucEntry = ucfilesActiveDownloads.get(downloadId)
   if (ucEntry) {
@@ -5627,6 +6851,7 @@ ipcMain.handle('uc:download-cancel', (_event, downloadId) => {
     if (idx >= 0) {
       queue.splice(idx, 1)
       if (!queue.length) downloadQueues.delete(appid)
+      persistQueueStateSoon()
       ucLog(`Download cancelled (app queue): ${downloadId}`)
       broadcastCancelled()
       return { ok: true }
@@ -5636,6 +6861,7 @@ ipcMain.handle('uc:download-cancel', (_event, downloadId) => {
   const idx = globalDownloadQueue.findIndex((item) => item.payload && item.payload.downloadId === downloadId)
   if (idx >= 0) {
     globalDownloadQueue.splice(idx, 1)
+    persistQueueStateSoon()
     ucLog(`Download cancelled (global queue): ${downloadId}`)
     broadcastCancelled()
     return { ok: true }
@@ -5647,6 +6873,9 @@ ipcMain.handle('uc:download-cancel', (_event, downloadId) => {
 
 ipcMain.handle('uc:download-pause', (event, downloadId) => {
   const win = BrowserWindow.fromWebContents(event.sender)
+
+  const extractionResult = interruptExtractionJob(downloadId, 'pause', 'Extraction paused. Install again to continue.')
+  if (extractionResult.ok) return { ok: true }
 
   // UC.Files parallel download pause
   const ucEntry = ucfilesActiveDownloads.get(downloadId)
@@ -5672,10 +6901,6 @@ ipcMain.handle('uc:download-pause', (event, downloadId) => {
       partIndex: snap?.partIndex,
       partTotal: snap?.partTotal,
     })
-    // A paused download no longer blocks the queue - start the next one
-    if (globalDownloadQueue.length > 0 && !hasAnyActiveOrPendingDownloads()) {
-      startNextQueuedDownload(null)
-    }
     return { ok: true }
   }
 
@@ -5708,10 +6933,6 @@ ipcMain.handle('uc:download-pause', (event, downloadId) => {
       partTotal: entry.partTotal
     })
   } catch (e) { }
-  // A paused download no longer blocks the queue - start the next one
-  if (globalDownloadQueue.length > 0 && !hasAnyActiveOrPendingDownloads()) {
-    startNextQueuedDownload(null)
-  }
   return { ok: true }
 })
 
@@ -5731,9 +6952,13 @@ ipcMain.handle('uc:download-resume', (event, downloadId) => {
     refreshOperationPowerSaveBlocker()
     ucLog(`Download resumed (UC.Files parallel): ${downloadId}`)
     const snap = latestDownloadState.get(downloadId)
+    // If workers already completed and we're in the verification phase, don't
+    // downgrade the status back to 'downloading' — keep 'verifying' so the UI
+    // reflects reality while SHA-256 / archive test run in background.
+    const resumeStatus = snap?.status === 'verifying' ? 'verifying' : 'downloading'
     sendDownloadUpdate(win, {
       downloadId,
-      status: 'downloading',
+      status: resumeStatus,
       receivedBytes: snap?.receivedBytes || 0,
       totalBytes: snap?.totalBytes || 0,
       speedBps: 0,
@@ -6025,6 +7250,7 @@ ipcMain.handle('uc:installed-save', (_event, appid, metadata) => {
             }
           }
         }
+        syncPersistedInstallingRecordFromFile(installingRoot, manifestPath)
       } catch {
         // ignore download failures
       }
@@ -6304,6 +7530,48 @@ async function runArchiveInstallJob(win, payload, options = {}) {
   writeInstallingManifest(appid, { ...metadata, appid, name: gameName }, 'extracting', null)
   const installedRoot = ensureSubdir(path.join(downloadRoot, installedDirName), folderName)
   const archiveExtractionKey = buildAppExtractionKey(appid)
+  const spaceCheck = buildExtractionSpaceCheck(installedRoot, allFiles, metadata)
+
+  if (!spaceCheck.ok) {
+    const errorMessage = buildExtractionSpaceMessage(spaceCheck)
+    updateInstallingManifestStatus(appid, 'downloaded', errorMessage)
+    sendDownloadUpdate(win, {
+      downloadId,
+      status: 'install_ready',
+      receivedBytes: 0,
+      totalBytes,
+      speedBps: 0,
+      etaSeconds: null,
+      extractProgress: null,
+      filename: path.basename(archiveToExtract),
+      savePath: archiveToExtract,
+      appid,
+      gameName,
+      error: errorMessage,
+      spaceCheck,
+    })
+    return { ok: false, code: 'INSUFFICIENT_SPACE', error: 'insufficient_space', spaceCheck }
+  }
+
+  const progressState = {
+    lastPercent: 0,
+    lastAt: Date.now(),
+    speedBps: 0,
+  }
+  const extractionJob = registerExtractionJob({
+    downloadId,
+    appid,
+    gameName,
+    archiveToExtract,
+    partFiles,
+    totalBytes,
+    installedRoot,
+    cleanupInstallingRoot,
+    preserveSourceFiles,
+    extractionKey: archiveExtractionKey,
+    beforeFiles: snapshotFiles(installedRoot),
+    abortController: new AbortController(),
+  })
 
   ucLog(`[Archive Install] Starting: appid=${appid} gameName=${gameName} files=${allFiles.length} totalBytes=${totalBytes} dest=${installedRoot}`)
 
@@ -6320,73 +7588,71 @@ async function runArchiveInstallJob(win, payload, options = {}) {
     gameName
   })
 
-  let _lastBytes = 0
-  let _lastTime = Date.now()
-  let _lastSpeed = 0
-  let _pollTimer = null
-
-  try {
-    _pollTimer = setInterval(() => {
-      getDirectorySize(installedRoot).then((size) => {
-        try {
-          const now = Date.now()
-          const deltaBytes = Math.max(0, size - _lastBytes)
-          const deltaSec = Math.max(0.001, (now - _lastTime) / 1000)
-          const instSpeed = deltaBytes / deltaSec
-          const speedBps = _lastSpeed > 0 ? _lastSpeed * 0.7 + instSpeed * 0.3 : instSpeed
-          _lastSpeed = speedBps
-          _lastBytes = size
-          _lastTime = now
-          const etaSeconds = speedBps > 0 ? Math.max(0, Math.round((totalBytes - size) / speedBps)) : null
-          sendDownloadUpdate(win, {
-            downloadId, status: 'extracting', receivedBytes: size, totalBytes,
-            speedBps: Math.round(speedBps), etaSeconds,
-            filename: path.basename(archiveToExtract), savePath: archiveToExtract, appid, gameName
-          })
-        } catch { }
-      }).catch(() => { })
-    }, 500)
-  } catch { }
-
-  activeExtractions.add(archiveExtractionKey)
-  refreshOperationPowerSaveBlocker()
-
   let res
   try {
     res = await run7zExtract(archiveToExtract, installedRoot, ({ percent }) => {
       try {
-        const received = Math.round((totalBytes * (percent || 0)) / 100)
         const now = Date.now()
-        const deltaBytes = Math.max(0, received - _lastBytes)
-        const deltaSec = Math.max(0.001, (now - _lastTime) / 1000)
-        const instSpeed = deltaBytes / deltaSec
-        const speedBps = _lastSpeed > 0 ? _lastSpeed * 0.7 + instSpeed * 0.3 : instSpeed
-        _lastSpeed = speedBps
-        _lastBytes = received
-        _lastTime = now
-        const etaSeconds = speedBps > 0 ? Math.max(0, Math.round((totalBytes - received) / speedBps)) : null
+        const safePercent = Math.max(0, Math.min(100, Number(percent) || 0))
+        const received = Math.round((totalBytes * safePercent) / 100)
+        const deltaPercent = Math.max(0, safePercent - progressState.lastPercent)
+        const deltaSec = Math.max(0.001, (now - progressState.lastAt) / 1000)
+        const instantSpeed = totalBytes > 0 ? ((totalBytes * deltaPercent) / 100) / deltaSec : 0
+        progressState.speedBps = progressState.speedBps > 0 ? progressState.speedBps * 0.7 + instantSpeed * 0.3 : instantSpeed
+        progressState.lastPercent = safePercent
+        progressState.lastAt = now
+        const etaSeconds = progressState.speedBps > 0 ? Math.max(0, Math.round((totalBytes - received) / progressState.speedBps)) : null
         sendDownloadUpdate(win, {
           downloadId, status: 'extracting', receivedBytes: received, totalBytes,
-          speedBps: Math.round(speedBps), etaSeconds,
+          speedBps: Math.round(progressState.speedBps), etaSeconds, extractProgress: safePercent,
           filename: path.basename(archiveToExtract), savePath: archiveToExtract, appid, gameName
         })
       } catch { }
-    })
+    }, { signal: extractionJob.abortController.signal })
   } finally {
-    try { if (_pollTimer) clearInterval(_pollTimer) } catch { }
-    activeExtractions.delete(archiveExtractionKey)
-    refreshOperationPowerSaveBlocker()
+    unregisterExtractionJob(extractionJob)
+  }
+
+  if (res?.aborted) {
+    cleanupInterruptedExtractionArtifacts(extractionJob, false)
+    return {
+      ok: false,
+      code: 'INSTALL_READY',
+      downloadId,
+      preservedArchive: true,
+      error: extractionJob.abortReason || (extractionJob.abortMode === 'pause'
+        ? 'Extraction paused. Install again to continue.'
+        : 'Installation stopped. Archive kept. Click Install to continue.'),
+    }
   }
 
   if (!(res && res.ok)) {
-    const errorMsg = res && res.error ? res.error : 'Extraction failed'
-    ucLog(`[Archive Install] Extraction failed: ${errorMsg}`, 'error')
-    updateInstallingManifestStatus(appid, 'failed', errorMsg)
+    const rawError = res && res.error ? res.error : 'Extraction failed'
+    ucLog(`[Archive Install] Extraction failed: ${rawError}`, 'error')
+
+    // Headers Error / "Can't open as archive" means the archive is structurally corrupt,
+    // almost always caused by an incomplete download (last bytes zero-filled).
+    // Give a clear, actionable message instead of dumping the 7z error wall.
+    const isCorruptArchive = /Headers Error|Can't open as archive|Cannot open the file as/i.test(rawError)
+    if (isCorruptArchive) {
+      const friendlyError = 'The archive is incomplete — the download was interrupted before the last bytes were written. ' +
+        'Delete this file and re-download the game to repair it.'
+      ucLog(`[Archive Install] Incomplete archive detected: ${path.basename(archiveToExtract)}`, 'error')
+      updateInstallingManifestStatus(appid, 'downloaded', friendlyError)
+      sendDownloadUpdate(win, {
+        downloadId, status: 'install_ready', error: friendlyError,
+        savePath: archiveToExtract, appid, gameName,
+        receivedBytes: 0, totalBytes, speedBps: 0, etaSeconds: null,
+      })
+      return { ok: false, code: 'CORRUPT_ARCHIVE', downloadId, error: friendlyError }
+    }
+
+    updateInstallingManifestStatus(appid, 'failed', rawError)
     sendDownloadUpdate(win, {
-      downloadId, status: 'extract_failed', error: errorMsg,
+      downloadId, status: 'extract_failed', error: rawError,
       savePath: archiveToExtract, appid, gameName
     })
-    return { ok: false, downloadId, error: errorMsg }
+    return { ok: false, downloadId, error: rawError }
   }
 
   ucLog(`[Archive Install] Extraction succeeded: ${(res.files || []).length} files`)
@@ -6421,25 +7687,17 @@ async function runArchiveInstallJob(win, payload, options = {}) {
     filename: path.basename(archiveToExtract), savePath: null, appid, gameName
   })
 
+  const sourceArchivePaths = partFiles && partFiles.length ? partFiles : [archiveToExtract]
   if (!preserveSourceFiles) {
-    try {
-      const cleanupTargets = partFiles && partFiles.length ? partFiles : [archiveToExtract]
-      for (const target of cleanupTargets) {
-        try {
-          if (target && fs.existsSync(target)) fs.unlinkSync(target)
-        } catch { }
-      }
-    } catch { }
-  }
-
-  if (cleanupInstallingRoot) {
-    try {
-      if (fs.existsSync(cleanupInstallingRoot)) {
-        fs.rmSync(cleanupInstallingRoot, { recursive: true, force: true })
-      }
-    } catch (err) {
-      ucLog(`[Archive Install] Failed to clean up installing root ${cleanupInstallingRoot}: ${String(err)}`, 'warn')
-    }
+    // Downloaded archives: move to cache folder then prompt
+    const cachedArchivePaths = moveArchivesToCache(appid, gameName, sourceArchivePaths)
+    const archivePromptPayload = buildArchiveDeletionPromptPayload(appid, gameName, cachedArchivePaths)
+    sendArchiveDeletionPrompt(win, archivePromptPayload)
+  } else {
+    // External/user-provided archives: don't move (they're the user's own files),
+    // but still offer deletion so they can reclaim disk space.
+    const archivePromptPayload = buildArchiveDeletionPromptPayload(appid, gameName, sourceArchivePaths)
+    sendArchiveDeletionPrompt(win, archivePromptPayload)
   }
 
   return { ok: true, downloadId, extracted: extractedFiles.length }
@@ -6488,6 +7746,80 @@ ipcMain.handle('uc:install-downloaded-archive', async (_event, appid) => {
     preserveSourceFiles: false,
     cleanupInstallingRoot: installingRoot,
   })
+})
+
+ipcMain.handle('uc:archive-delete', async (_event, payload) => {
+  try {
+    const archivePaths = Array.isArray(payload?.archivePaths)
+      ? payload.archivePaths.filter(Boolean)
+      : []
+    if (!archivePaths.length) return { ok: false, error: 'missing_archive_paths' }
+
+    let deletedCount = 0
+    for (const target of archivePaths) {
+      try {
+        if (target && fs.existsSync(target)) {
+          fs.unlinkSync(target)
+          deletedCount += 1
+        }
+      } catch (error) {
+        ucLog(`[Archive] Failed to delete archive ${target}: ${String(error)}`, 'warn')
+      }
+    }
+
+    cleanupInstallerCacheRoots(archivePaths)
+    return { ok: true, deletedCount }
+  } catch (error) {
+    ucLog(`[Archive] Archive deletion failed: ${String(error)}`, 'error')
+    return { ok: false, error: String(error) }
+  }
+})
+
+ipcMain.handle('uc:downloads-state-load', async () => {
+  try {
+    const downloads = await readPersistedDownloadsState()
+    return { ok: true, downloads }
+  } catch (error) {
+    ucLog(`[Downloads] Failed to load persisted downloads state: ${String(error)}`, 'warn')
+    return { ok: false, downloads: [], error: String(error?.message || error) }
+  }
+})
+
+ipcMain.handle('uc:downloads-state-save', async (_event, downloads) => {
+  try {
+    const count = await writePersistedDownloadsState(downloads)
+    return { ok: true, count }
+  } catch (error) {
+    ucLog(`[Downloads] Failed to save persisted downloads state: ${String(error)}`, 'warn')
+    return { ok: false, error: String(error?.message || error) }
+  }
+})
+
+ipcMain.handle('uc:catalog-state-load', async () => {
+  try {
+    const snapshot = await readPersistedCatalogState()
+    return { ok: true, ...snapshot }
+  } catch (error) {
+    ucLog(`[Catalog] Failed to load persisted catalog state: ${String(error)}`, 'warn')
+    return { ok: false, games: [], stats: {}, updatedAt: 0, gamesUpdatedAt: 0, statsUpdatedAt: 0, error: String(error?.message || error) }
+  }
+})
+
+ipcMain.handle('uc:catalog-state-save', async (_event, payload) => {
+  try {
+    const snapshot = await writePersistedCatalogState(payload)
+    return {
+      ok: true,
+      games: snapshot.games.length,
+      stats: Object.keys(snapshot.stats || {}).length,
+      updatedAt: snapshot.updatedAt,
+      gamesUpdatedAt: snapshot.gamesUpdatedAt,
+      statsUpdatedAt: snapshot.statsUpdatedAt,
+    }
+  } catch (error) {
+    ucLog(`[Catalog] Failed to save persisted catalog state: ${String(error)}`, 'warn')
+    return { ok: false, error: String(error?.message || error) }
+  }
 })
 
 ipcMain.handle('uc:installing-status-set', (_event, appid, status, error) => {
@@ -6625,9 +7957,7 @@ ipcMain.handle('uc:installed-get-global', (_event, appid) => {
 // List installing manifests from installing folder
 ipcMain.handle('uc:installing-list', (_event) => {
   try {
-    const downloadRoot = ensureDownloadDir()
-    const root = path.join(downloadRoot, installingDirName)
-    const items = listManifestsFromRoot(root, false)
+    const items = listPersistedInstallingRecords()
       .map((item) => normalizeInstallingManifestForQuery(item))
       .filter(Boolean)
     return items.filter((item) => {
@@ -6642,18 +7972,11 @@ ipcMain.handle('uc:installing-list', (_event) => {
 
 ipcMain.handle('uc:installing-get', (_event, appid) => {
   try {
-    const downloadRoot = ensureDownloadDir()
-    const root = path.join(downloadRoot, installingDirName)
-    for (const { folder } of iterateGameFolders(root)) {
-      const manifestPath = path.join(folder, INSTALLED_MANIFEST)
-      const manifest = normalizeInstallingManifestForQuery(readJsonFile(manifestPath))
-      if (manifest && manifest.appid === appid) {
-        const status = manifest.installStatus
-        if (status === 'cancelled' || status === 'completed' || status === 'extracted') return null
-        return manifest
-      }
-    }
-    return null
+    const manifest = normalizeInstallingManifestForQuery(getPersistedInstallingRecord(appid))
+    if (!manifest) return null
+    const status = manifest.installStatus
+    if (status === 'cancelled' || status === 'completed' || status === 'extracted') return null
+    return manifest
   } catch (err) {
     console.error('[UC] installing-get failed', err)
     return null
@@ -6662,22 +7985,18 @@ ipcMain.handle('uc:installing-get', (_event, appid) => {
 
 ipcMain.handle('uc:installing-list-global', (_event) => {
   try {
-    const roots = listDownloadRoots()
     const bestByAppid = new Map() // appid -> manifest (keep richest)
-    for (const root of roots) {
-      const installingRoot = path.join(root, installingDirName)
-      const items = listManifestsFromRoot(installingRoot, false)
-        .map((item) => normalizeInstallingManifestForQuery(item))
-        .filter(Boolean)
-      for (const item of items) {
-        const status = item && typeof item.installStatus === 'string' ? item.installStatus : null
-        if (status === 'completed' || status === 'extracted' || status === 'cancelled') continue
-        const key = item && item.appid ? item.appid : null
-        if (!key) continue
-        const existing = bestByAppid.get(key)
-        if (!existing || manifestRichness(item) > manifestRichness(existing)) {
-          bestByAppid.set(key, item)
-        }
+    const items = listPersistedInstallingRecords()
+      .map((item) => normalizeInstallingManifestForQuery(item))
+      .filter(Boolean)
+    for (const item of items) {
+      const status = item && typeof item.installStatus === 'string' ? item.installStatus : null
+      if (status === 'completed' || status === 'extracted' || status === 'cancelled') continue
+      const key = item && item.appid ? item.appid : null
+      if (!key) continue
+      const existing = bestByAppid.get(key)
+      if (!existing || manifestRichness(item) > manifestRichness(existing)) {
+        bestByAppid.set(key, item)
       }
     }
     return Array.from(bestByAppid.values())
@@ -6690,20 +8009,11 @@ ipcMain.handle('uc:installing-list-global', (_event) => {
 ipcMain.handle('uc:installing-get-global', (_event, appid) => {
   try {
     if (!appid) return null
-    const roots = listDownloadRoots()
-    for (const root of roots) {
-      const installingRoot = path.join(root, installingDirName)
-      for (const { folder } of iterateGameFolders(installingRoot)) {
-        const manifestPath = path.join(folder, INSTALLED_MANIFEST)
-        const manifest = normalizeInstallingManifestForQuery(readJsonFile(manifestPath))
-        if (manifest && manifest.appid === appid) {
-          const status = manifest.installStatus
-          if (status === 'cancelled' || status === 'completed' || status === 'extracted') return null
-          return manifest
-        }
-      }
-    }
-    return null
+    const manifest = normalizeInstallingManifestForQuery(getPersistedInstallingRecord(appid))
+    if (!manifest) return null
+    const status = manifest.installStatus
+    if (status === 'cancelled' || status === 'completed' || status === 'extracted') return null
+    return manifest
   } catch (err) {
     console.error('[UC] installing-get-global failed', err)
     return null
@@ -7965,9 +9275,28 @@ ipcMain.handle('uc:installing-delete', async (_event, appid) => {
       const root = path.join(downloadRoot, installingDirName)
       ok = await deleteFolderByAppIdAsync(root, appid)
     }
+    if (ok) deletePersistedInstallingRecord(appid)
     return { ok }
   } catch (err) {
     console.error('[UC] installing-delete failed', err)
+    return { ok: false }
+  }
+})
+
+ipcMain.handle('uc:installing-dismiss', async (event, appid) => {
+  try {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    const result = dismissInstallingState(appid)
+    if (!result.ok) return { ok: false }
+
+    const archivePromptPayload = buildArchiveDeletionPromptPayload(appid, result.gameName, result.archivePaths)
+    if (archivePromptPayload) {
+      sendArchiveDeletionPrompt(win, archivePromptPayload)
+    }
+
+    return { ok: true, prompted: Boolean(archivePromptPayload) }
+  } catch (err) {
+    console.error('[UC] installing-dismiss failed', err)
     return { ok: false }
   }
 })
@@ -8430,7 +9759,9 @@ ipcMain.handle('uc:overlay-status', () => {
       enabled: overlayEnabled,
       hotkey: overlayHotkey,
       autoShow: overlayAutoShow,
-      position: overlayPosition
+      position: overlayPosition,
+      toastDurationMs: overlayToastDurationMs,
+      toastVertical: overlayToastVertical,
     }
   } catch (err) {
     return { ok: false, error: err.message }
@@ -8445,7 +9776,9 @@ ipcMain.handle('uc:overlay-get-settings', () => {
       enabled: overlayEnabled,
       hotkey: overlayHotkey,
       autoShow: overlayAutoShow,
-      position: overlayPosition
+      position: overlayPosition,
+      toastDurationMs: overlayToastDurationMs,
+      toastVertical: overlayToastVertical,
     }
   } catch (err) {
     return { ok: false, error: err.message }
@@ -8466,6 +9799,12 @@ ipcMain.handle('uc:overlay-set-settings', (_event, settings) => {
     if (settings.overlayHotkey) currentSettings.overlayHotkey = settings.overlayHotkey
     if (settings.overlayAutoShow !== undefined) currentSettings.overlayAutoShow = settings.overlayAutoShow
     if (settings.overlayPosition) currentSettings.overlayPosition = settings.overlayPosition
+    if (settings.overlayToastDurationMs !== undefined) {
+      currentSettings.overlayToastDurationMs = normalizeOverlayToastDurationMs(settings.overlayToastDurationMs)
+    }
+    if (settings.overlayToastVertical !== undefined) {
+      currentSettings.overlayToastVertical = normalizeOverlayToastVertical(settings.overlayToastVertical)
+    }
     writeSettings(currentSettings)
     
     return { ok: true }
