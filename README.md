@@ -12,11 +12,11 @@ A fast, standalone Electron desktop application for managing and launching games
 
 - **Fast Downloads**: Direct game downloads with pause/resume support
 - **Game Library**: Browse and manage your installed games
-- **Updates**: Quick check button opens Releases page
+- **Updates**: automatic launcher updates
 - **Settings**: Customize download location and launch executables
 - **Search**: Quick game search with intelligent filtering
 - **History**: Track your recently played games
-- **Lightweight**: Minimal resource usage compared to web browser
+- **Sync**: In sync with the UC Website, browse your liked/wishlisted games and recently viewed directly inside the launcher.
 
 ## System Requirements
 
@@ -35,23 +35,17 @@ A fast, standalone Electron desktop application for managing and launching games
 4. Create desktop/Start Menu shortcuts
 5. Launch UnionCrax.Direct from Start Menu or desktop
 
-**Features**: Auto-uninstaller, Start Menu integration, customizable install location
-
 #### Option 2: Portable Executable
 1. Go to [Releases](https://github.com/Union-Crax/UnionCrax.Direct/releases)
 2. Download `UnionCrax.Direct.X.X.X.exe`
 3. Run directly - no installation needed
 4. Settings and data are stored alongside the executable
 
-**Features**: No installation, run from USB drives, easily movable
-
 #### Option 3: ZIP Archive
 1. Go to [Releases](https://github.com/Union-Crax/UnionCrax.Direct/releases)
 2. Download `UnionCrax.Direct-X.X.X-win.zip`
 3. Extract to your preferred location
 4. Run `UnionCrax.Direct.exe` from the extracted folder
-
-**Features**: Full control over installation location, easy manual updates
 
 ### Linux Installation
 
@@ -88,69 +82,10 @@ This installs the AppImage to `~/.local/share/UnionCrax.Direct` and adds a launc
 3. View storage usage
 4. Check for updates
 
-## Updates
-
-UnionCrax.Direct lets you check for updates and opens the latest Releases page in your browser to download the newest installer.
-
-Manual check: Settings → **Check for Updates** (opens Releases page)
-
-## Configuration
-
-### Custom Download Location
-
-Use **Settings** → **Download Location** in the app to choose where games are installed.
-
-## Uninstall
-
-### Windows
-To uninstall UnionCrax.Direct from Windows:
-
-1. Open **Settings** → **Apps** → **Installed apps** (or **Control Panel** → **Programs and Features**)
-2. Search for **UnionCrax.Direct**
-3. Click **Uninstall** and follow the prompts
-4. The application and shortcuts will be completely removed
-
-Alternatively, if you installed the portable or ZIP version, simply delete the executable or folder.
-
-### Linux
-To uninstall UnionCrax.Direct from Linux:
-
-1. Run the installer again:
-   ```bash
-   curl -sSL https://union-crax.xyz/linux-installer.sh | bash
-   ```
-2. Select **Uninstall** when prompted
-3. The application and desktop entry will be completely removed
-
-## Troubleshooting
-
-### Linux: App icon not showing
-If the app icon doesn't appear correctly on desktop shortcuts or in the application itself:
-
-1. **Reinstall the application** to update the desktop entry and cache:
-   ```bash
-   curl -sSL https://union-crax.xyz/linux-installer.sh | bash
-   ```
-2. Select **Reinstall** when prompted
-3. Restart your desktop environment or log out and log back in
-4. The icon should now display correctly
-
-### App won't start
-- Verify Windows 10+ (64-bit)
-- Reinstall the latest version
-- Check Windows Defender isn't blocking it
-
-### Downloads fail
-- Check internet connection
-- Verify sufficient disk space
+### Downloads fail?
 - Check [UnionCrax Status](https://status.union-crax.xyz)
 
-### Game won't launch
-- Ensure all files are fully extracted
-- Try setting the executable manually in game details
-- Check game-specific requirements
-
-### Still having issues?
+### Having issues?
 - [Report an Issue](https://github.com/Union-Crax/UnionCrax.Direct/issues)
 - [Join Discord](https://union-crax.xyz/discord)
 
@@ -185,13 +120,11 @@ For detailed development information, see [CONTRIBUTING.md](CONTRIBUTING.md).
 - **Desktop**: Electron 33 + Node.js
 - **Styling**: Tailwind CSS v4
 - **Build**: electron-builder (NSIS installer for Windows)
-- **Updates**: Manual via GitHub Releases
 
 ### How It Works
 1. **Main Process**: Electron handles file operations, downloads, and game launching
 2. **Renderer Process**: React UI communicates with main process via IPC
 3. **Backend**: API calls to UnionCrax for game metadata and download links
-4. **Updates**: Opens GitHub Releases for new versions
 
 ## Project Structure
 
@@ -210,32 +143,9 @@ UnionCrax.Direct/
 └── assets/          # App icon
 ```
 
-## Releases
-
-### How Releases Work
-- Tag a commit: `git tag vX.X.X`
-- GitHub Actions automatically builds the installer
-- Release appears on [GitHub Releases](https://github.com/Union-Crax/UnionCrax.Direct/releases)
-- Users can click **Check for Updates** in the app to open the Releases page
-
-### Version Scheme
-We use [Semantic Versioning](https://semver.org/):
-- `MAJOR.MINOR.PATCH` (e.g., 1.2.3)
-- Major: Breaking changes
-- Minor: New features (backward compatible)
-- Patch: Bug fixes
-
 ## License
 
 This project is licensed under the MIT License - see [LICENSE](LICENSE) for details.
-
-## Contributing
-
-Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for:
-- Development setup
-- Code style guidelines
-- Pull request process
-- Reporting issues
 
 ## Support
 

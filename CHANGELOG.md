@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased - 2026-06-27
+
+### Fixes & Improvements
+
+- Replaced all inline per-handler feedback states in Settings with a centralized UDL toast system. Toasts appear as pill-shaped notifications at the bottom of the screen (rounded-full, zinc palette, anim entry, fade exit) with contextual icons for success, error, and info states.
+- Fixed UDL color violations in the update notification banner: replaced all slate-* Tailwind classes with their zinc equivalents and corrected rounded-xl to rounded-2xl.
+- Removed eight stale state declarations from SettingsPage (updateCheckResult, linuxToolFeedback, slsToolFeedback, vrToolFeedback, clearDataFeedback, diagnosticsFeedback, devActionFeedback, bioSaved) and all associated JSX feedback blocks.
+- Added centralized batch download controls in the downloads context: pauseGroup(appid), pauseAll(), and resumeAll().
+- Added global Pause all and Resume all actions in the Activity header, with automatic disabled states when no eligible groups exist.
+- Updated primary and secondary active download cards to use the shared pauseGroup action for consistent queue and pause semantics.
+- Added a global keyboard shortcut registry for launcher navigation and command actions: Ctrl/Cmd+K (search), Ctrl/Cmd+, (settings), and Ctrl/Cmd+1..4 (Browse, Library, Activity, Wishlist).
+- Added a Library productivity shortcut: Ctrl/Cmd+Shift+S cycles sort mode between Name, Recent Install, and Recent Play.
+- Updated keyboard handling to skip non-search shortcuts while typing in editable inputs, reducing accidental route jumps.
+- Added configurable in-game overlay toast behavior with Settings controls for toast duration (3s/5s/8s) and vertical anchor (top/bottom), plus persisted runtime propagation through main-process overlay IPC.
+
+
 ## Unreleased - 2026-03-24
 
 ### Fixes & Improvements

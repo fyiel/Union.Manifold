@@ -6,8 +6,11 @@ type DownloadUpdatePayload = {
   | "queued"
   | "downloading"
   | "paused"
+  | "verifying"
+  | "retrying"
   | "extracting"
   | "installing"
+  | "install_ready"
   | "completed"
   | "extracted"
   | "extract_failed"
@@ -17,6 +20,7 @@ type DownloadUpdatePayload = {
   totalBytes?: number
   speedBps?: number
   etaSeconds?: number | null
+  extractProgress?: number | null
   filename?: string
   savePath?: string
   appid?: string | null
@@ -25,6 +29,16 @@ type DownloadUpdatePayload = {
   error?: string | null
   partIndex?: number
   partTotal?: number
+  spaceCheck?: {
+    archiveBytes: number
+    estimatedExtractBytes: number
+    requiredBytes: number
+    freeBytes: number
+    shortfallBytes: number
+    targetPath: string
+    drives: Array<{ id: string; name: string; path: string; totalBytes: number; freeBytes: number }>
+    ok: boolean
+  } | null
   resumeData?: {
     urlChain?: string[]
     mimeType?: string
@@ -75,7 +89,7 @@ declare global {
         authHeader?: string
         savePath?: string
       }) => Promise<{ ok: boolean; queued?: boolean; error?: string }>
-      cancel: (downloadId: string) => Promise<{ ok: boolean }>
+      cancel: (downloadId: string) => Promise<{ ok: boolean; status?: DownloadUpdatePayload["status"]; preservedArchive?: boolean; error?: string; downloadId?: string; appid?: string | null }>
       pause: (downloadId: string) => Promise<{ ok: boolean }>
       resume: (downloadId: string) => Promise<{ ok: boolean }>
       resumeInterrupted: (payload: {
@@ -112,6 +126,10 @@ declare global {
       pickDownloadPath: () => Promise<{ ok: boolean; path?: string }>
       getDownloadUsage: (targetPath?: string) => Promise<{ ok: boolean; sizeBytes: number; path: string }>
       clearDownloadCache: () => Promise<{ ok: boolean; error?: string }>
+      loadPersistedState: () => Promise<{ ok: boolean; downloads: any[]; error?: string }>
+      savePersistedState: (downloads: any[]) => Promise<{ ok: boolean; count?: number; error?: string }>
+      loadCatalogState: () => Promise<{ ok: boolean; games: any[]; stats: Record<string, { downloads: number; views: number }>; updatedAt: number; gamesUpdatedAt: number; statsUpdatedAt: number; error?: string }>
+      saveCatalogState: (payload: { games: any[]; stats: Record<string, { downloads: number; views: number }>; gamesUpdatedAt?: number; statsUpdatedAt?: number }) => Promise<{ ok: boolean; games?: number; stats?: number; updatedAt?: number; gamesUpdatedAt?: number; statsUpdatedAt?: number; error?: string }>
       // Installed manifests written by the main process. Renderer can read/save installed metadata.
       listInstalled: () => Promise<any[]>
       getInstalled: (appid: string) => Promise<any | null>
@@ -135,6 +153,7 @@ declare global {
       quitGameExecutable: (appid: string) => Promise<{ ok: boolean; stopped?: boolean }>
       deleteInstalled: (appid: string) => Promise<{ ok: boolean }>
       deleteInstalling: (appid: string) => Promise<{ ok: boolean }>
+      dismissInstalling: (appid: string) => Promise<{ ok: boolean; prompted?: boolean }>
       saveInstalledMetadata: (appid: string, metadata: any) => Promise<{ ok: boolean }>
       setInstallingStatus: (appid: string, status: string, error?: string | null) => Promise<{ ok: boolean }>
       getActiveStatus: (appid: string) => Promise<{ extracting: boolean; downloading: boolean }>
@@ -151,11 +170,13 @@ declare global {
         archivePaths: string[]
         downloadId?: string
         metadata?: Record<string, any>
-      }) => Promise<{ ok: boolean; downloadId?: string; extracted?: number; error?: string }>
-      installDownloadedArchive: (appid: string) => Promise<{ ok: boolean; downloadId?: string; extracted?: number; error?: string }>
+      }) => Promise<{ ok: boolean; downloadId?: string; extracted?: number; error?: string; code?: string; spaceCheck?: DownloadUpdatePayload["spaceCheck"] }>
+      installDownloadedArchive: (appid: string) => Promise<{ ok: boolean; downloadId?: string; extracted?: number; error?: string; code?: string; spaceCheck?: DownloadUpdatePayload["spaceCheck"] }>
+      deleteArchiveFiles: (payload: { archivePaths: string[] }) => Promise<{ ok: boolean; deletedCount?: number; error?: string }>
       browseForGameExe: (defaultPath?: string) => Promise<{ ok: boolean; path?: string }>
       onUpdate: (callback: (update: DownloadUpdatePayload) => void) => () => void
       onGameQuickExit: (callback: (data: { appid: string | null; exePath: string | null; elapsed: number }) => void) => () => void
+      onArchiveDeletePrompt: (callback: (payload: { appid?: string | null; gameName?: string | null; archivePaths: string[]; totalBytes: number }) => void) => () => void
     }
     ucApp?: {
       respondToCloseRequest: (shouldProceed: boolean) => Promise<{ ok: boolean; proceeded: boolean }>
@@ -171,9 +192,19 @@ declare global {
       onChanged: (callback: (data: { key: string; value: any }) => void) => () => void
     }
     ucAuth?: {
-      login: (baseUrl?: string) => Promise<{ ok: boolean; error?: string }>
+      login: (baseUrl?: string, provider?: string) => Promise<{ ok: boolean; error?: string }>
       logout: (baseUrl?: string) => Promise<{ ok: boolean; error?: string }>
       getSession: (baseUrl?: string) => Promise<{ ok: boolean; discordId?: string | null }>
+      emailLogin: (baseUrl: string, email: string, password: string) => Promise<{ ok: boolean; error?: string }>
+      register: (baseUrl: string, email: string, username: string, password: string) => Promise<{ ok: boolean; error?: string }>
+      forgotPassword: (baseUrl: string, email: string) => Promise<{ ok: boolean; error?: string }>
+      resetPassword: (baseUrl: string, token: string, password: string) => Promise<{ ok: boolean; error?: string }>
+      verifyEmail: (baseUrl: string, token: string) => Promise<{ ok: boolean; error?: string }>
+      getMe: (baseUrl: string) => Promise<{ ok: boolean; error?: string; user?: any }>
+      linkProvider: (baseUrl: string, provider: string) => Promise<{ ok: boolean; error?: string }>
+      unlinkProvider: (baseUrl: string, provider: string) => Promise<{ ok: boolean; error?: string }>
+      updateProfile: (baseUrl: string, data: any) => Promise<{ ok: boolean; error?: string }>
+      updatePassword: (baseUrl: string, currentPassword: string, newPassword: string) => Promise<{ ok: boolean; error?: string }>
       fetch: (
         baseUrl: string,
         path: string,
@@ -310,6 +341,8 @@ declare global {
         hotkey: string
         autoShow: boolean
         position: 'left' | 'right'
+        toastDurationMs: number
+        toastVertical: 'top' | 'bottom'
         currentAppid: string | null
       }>
       getSettings: () => Promise<{
@@ -318,6 +351,8 @@ declare global {
         hotkey: string
         autoShow: boolean
         position: 'left' | 'right'
+        toastDurationMs: number
+        toastVertical: 'top' | 'bottom'
       }>
       getDiagnostics: () => Promise<{
         ok: boolean
@@ -348,6 +383,8 @@ declare global {
         overlayHotkey?: string
         overlayAutoShow?: boolean
         overlayPosition?: 'left' | 'right'
+        overlayToastDurationMs?: number
+        overlayToastVertical?: 'top' | 'bottom'
       }) => Promise<{ ok: boolean; error?: string }>
       getGameInfo: (appid: string) => Promise<{
         ok: boolean
@@ -378,10 +415,16 @@ declare global {
           etaSeconds?: number | null
         }>
       }>
+      pauseDownload: (downloadId: string) => Promise<{ ok: boolean; error?: string }>
+      resumeDownload: (downloadId: string) => Promise<{ ok: boolean; error?: string }>
       onShow: (callback: (data: { appid: string | null }) => void) => () => void
       onHide: (callback: () => void) => () => void
       onStateChanged: (callback: (data: { visible: boolean; appid: string | null }) => void) => () => void
-      onPositionChanged: (callback: (data: { position: 'left' | 'right' }) => void) => () => void
+      onPositionChanged: (callback: (data: {
+        position: 'left' | 'right'
+        toastDurationMs?: number
+        toastVertical?: 'top' | 'bottom'
+      }) => void) => () => void
       onDownloadUpdate: (callback: (update: DownloadUpdatePayload) => void) => () => void
     }
     ucController?: {

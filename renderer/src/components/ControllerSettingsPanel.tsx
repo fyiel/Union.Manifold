@@ -114,6 +114,15 @@ export function ControllerSettingsPanel() {
   }
 
   const handleProfileSelect = async (profileId: string) => {
+    const nextSettings = {
+      ...localSettings,
+      keyBinding: {
+        ...localSettings.keyBinding,
+        activeProfileId: profileId,
+      },
+    }
+    setLocalSettings(nextSettings)
+    await updateSettings({ keyBinding: nextSettings.keyBinding })
     await setActiveProfile(profileId)
   }
 
@@ -145,18 +154,21 @@ export function ControllerSettingsPanel() {
     const newSettings = { ...localSettings, overlayEnabled: enabled }
     setLocalSettings(newSettings)
     await updateSettings({ overlayEnabled: enabled })
+    await (window.ucController as any)?.setOverlaySettings?.({ overlayEnabled: enabled })
   }
 
   const handleOverlayHotkeyChange = async (hotkey: string) => {
     const newSettings = { ...localSettings, overlayHotkey: hotkey }
     setLocalSettings(newSettings)
     await updateSettings({ overlayHotkey: hotkey })
+    await (window.ucController as any)?.setOverlaySettings?.({ overlayHotkey: hotkey })
   }
 
   const handleOverlayPositionChange = async (position: 'left' | 'right') => {
     const newSettings = { ...localSettings, overlayPosition: position }
     setLocalSettings(newSettings)
     await updateSettings({ overlayPosition: position })
+    await (window.ucController as any)?.setOverlaySettings?.({ overlayPosition: position })
   }
 
   if (loading) {
@@ -702,7 +714,7 @@ export function ControllerSettingsPanel() {
               <div className="rounded-lg bg-gray-800/50 p-4">
                 <div className="flex items-center gap-2 text-sm text-gray-300">
                   <Gamepad2 size={16} className="text-gray-400" />
-                  <span>Press <kbd className="px-1.5 py-0.5 bg-gray-700 rounded text-xs">Ctrl+Shift+Gamepad</kbd> while in-game to open quick controller settings</span>
+                  <span>Press <kbd className="px-1.5 py-0.5 bg-gray-700 rounded text-xs">{localSettings.overlayHotkey || 'Ctrl+Shift+Gamepad'}</kbd> while in-game to open quick controller settings</span>
                 </div>
               </div>
             </>

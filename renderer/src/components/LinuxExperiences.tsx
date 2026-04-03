@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge"
 import { useDiscordAccount } from "@/hooks/use-discord-account"
 import { apiFetch, apiUrl, getApiBaseUrl } from "@/lib/api"
 import { Loader2, Send, Terminal, CheckCircle2, AlertCircle, ChevronDown, Pin } from "lucide-react"
+import { useNavigate } from "react-router-dom"
 
 const RATING_LABELS: Record<number, string> = {
   1: "Broken",
@@ -95,6 +96,7 @@ function ExperienceCard({ exp }: { exp: any }) {
 }
 
 export function LinuxExperiences({ appid }: { appid: string }) {
+  const navigate = useNavigate()
   const [experiences, setExperiences] = useState<any[]>([])
   const [loadingExp, setLoadingExp] = useState(true)
   const [distro, setDistro] = useState("")
@@ -120,11 +122,7 @@ export function LinuxExperiences({ appid }: { appid: string }) {
   useEffect(() => { fetchExperiences() }, [appid])
 
   const connectDiscord = async () => {
-    if (window.ucAuth?.login) {
-      await window.ucAuth.login(getApiBaseUrl())
-      return
-    }
-    window.open(apiUrl(`/api/discord/connect?next=/game/${encodeURIComponent(appid)}`), "_blank")
+    navigate("/login")
   }
 
   const submit = async () => {

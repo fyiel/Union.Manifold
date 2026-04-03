@@ -302,7 +302,7 @@ export function ControllerOverlayFlyout({ visible, onClose, position = 'right' }
                   className="flex w-full items-center justify-center gap-2 rounded-full border border-white/60 bg-white px-3 py-2 text-[12px] font-semibold text-black transition hover:bg-zinc-200 active:scale-95"
                 >
                   <Settings size={14} />
-                  Open Full Settings
+                  Close flyout
                 </button>
               </div>
             )}

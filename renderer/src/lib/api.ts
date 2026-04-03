@@ -55,14 +55,31 @@ export async function apiFetch(path: string, init?: RequestInit) {
     nextInit.credentials = "include"
   }
 
+  // Ensure proper content-type for JSON requests
+  const headers = new Headers(nextInit.headers || {})
+  if (nextInit.body && !headers.has("content-type")) {
+    // Detect if body is JSON
+    if (typeof nextInit.body === "string" && nextInit.body.startsWith("{")) {
+      headers.set("content-type", "application/json")
+    }
+  }
+  
+  // Add user-agent header
+  if (!headers.has("user-agent")) {
+    headers.set("User-Agent", "UnionCrax.Direct/Electron")
+  }
+
+  // Create new init with updated headers
+  const finalInit: RequestInit = { ...nextInit, headers }
+
   const canUseAuthFetch = typeof window !== "undefined" && Boolean(window.ucAuth?.fetch)
   if (canUseAuthFetch) {
-    let body: any = nextInit.body
-    let headers = new Headers(nextInit.headers || {})
+    let body: any = finalInit.body
+    let authHeaders = new Headers(finalInit.headers || {})
 
     if (body instanceof URLSearchParams) {
-      if (!headers.has("content-type")) {
-        headers.set("content-type", "application/x-www-form-urlencoded;charset=UTF-8")
+      if (!authHeaders.has("content-type")) {
+        authHeaders.set("content-type", "application/x-www-form-urlencoded;charset=UTF-8")
       }
       body = body.toString()
     }
@@ -70,8 +87,8 @@ export async function apiFetch(path: string, init?: RequestInit) {
     const hasSerializableBody = body == null || typeof body === "string"
     if (hasSerializableBody) {
       const serializedInit = {
-        ...nextInit,
-        headers: Object.fromEntries(headers.entries()),
+        ...finalInit,
+        headers: Object.fromEntries(authHeaders.entries()),
         body: body ?? null,
       }
 
@@ -91,7 +108,7 @@ export async function apiFetch(path: string, init?: RequestInit) {
     }
   }
 
-  const response = await fetch(apiUrl(path), nextInit)
+  const response = await fetch(apiUrl(path), finalInit)
   return response
 }
 
