@@ -12,6 +12,7 @@ import { addSearchToHistory, getRecentSearches } from "@/lib/user-history"
 import { formatNumber, triggerHapticFeedback, proxyImageUrl } from "@/lib/utils"
 import { apiFetch } from "@/lib/api"
 import { SearchResultSkeleton } from "@/components/SearchResultSkeleton"
+import { ScrollArea } from "@/components/ui/scroll-area"
 
 interface SearchSuggestionsProps {
   value: string
@@ -809,15 +810,19 @@ export function SearchSuggestions({
                   </Button>
                 )}
               </div>
-              <div className="max-h-[360px] overflow-y-auto">{renderResults()}</div>
+              <ScrollArea className="w-full" viewportClassName="max-h-[360px]">
+                {renderResults()}
+              </ScrollArea>
             </div>
           </div>
         </div>
       )}
 
       {!popup && showPanel && (
-        <div className="absolute left-0 right-0 top-[calc(100%+12px)] z-[60] max-h-[420px] overflow-y-auto rounded-2xl border border-border/60 bg-card/95 p-0 backdrop-blur-sm shadow-xl animate-in fade-in slide-in-from-top-2 duration-300 ease-out">
-          {renderResults()}
+        <div className="absolute left-0 right-0 top-[calc(100%+12px)] z-[60] overflow-hidden rounded-2xl border border-border/60 bg-card/95 p-0 backdrop-blur-sm shadow-xl animate-in fade-in slide-in-from-top-2 duration-300 ease-out">
+          <ScrollArea className="w-full" viewportClassName="max-h-[420px]">
+            {renderResults()}
+          </ScrollArea>
         </div>
       )}
     </div>

@@ -1,5 +1,17 @@
 const { contextBridge, ipcRenderer } = require('electron')
 
+contextBridge.exposeInMainWorld('ucWindow', {
+  minimize: () => ipcRenderer.invoke('uc:window-minimize'),
+  maximize: () => ipcRenderer.invoke('uc:window-maximize'),
+  close: () => ipcRenderer.invoke('uc:window-close'),
+  isMaximized: () => ipcRenderer.invoke('uc:window-is-maximized'),
+  onMaximizeChange: (callback) => {
+    const listener = (_event, isMaximized) => callback(isMaximized)
+    ipcRenderer.on('uc:window-maximized', listener)
+    return () => ipcRenderer.removeListener('uc:window-maximized', listener)
+  }
+})
+
 contextBridge.exposeInMainWorld('ucDownloads', {
   start: (payload) => ipcRenderer.invoke('uc:download-start', payload),
   cancel: (downloadId) => ipcRenderer.invoke('uc:download-cancel', downloadId),
@@ -15,6 +27,10 @@ contextBridge.exposeInMainWorld('ucDownloads', {
   pickDownloadPath: () => ipcRenderer.invoke('uc:download-path-pick'),
   getDownloadUsage: (targetPath) => ipcRenderer.invoke('uc:download-usage', targetPath),
   clearDownloadCache: () => ipcRenderer.invoke('uc:download-cache-clear'),
+  loadPersistedState: () => ipcRenderer.invoke('uc:downloads-state-load'),
+  savePersistedState: (downloads) => ipcRenderer.invoke('uc:downloads-state-save', downloads),
+  loadCatalogState: () => ipcRenderer.invoke('uc:catalog-state-load'),
+  saveCatalogState: (payload) => ipcRenderer.invoke('uc:catalog-state-save', payload),
   // Installed manifests (stored next to installed files)
   saveInstalledMetadata: (appid, metadata) => ipcRenderer.invoke('uc:installed-save', appid, metadata),
   listInstalled: () => ipcRenderer.invoke('uc:installed-list'),
@@ -36,6 +52,7 @@ contextBridge.exposeInMainWorld('ucDownloads', {
   quitGameExecutable: (appid) => ipcRenderer.invoke('uc:game-exe-quit', appid),
   deleteInstalled: (appid) => ipcRenderer.invoke('uc:installed-delete', appid),
   deleteInstalling: (appid) => ipcRenderer.invoke('uc:installing-delete', appid),
+  dismissInstalling: (appid) => ipcRenderer.invoke('uc:installing-dismiss', appid),
   setInstallingStatus: (appid, status, error) => ipcRenderer.invoke('uc:installing-status-set', appid, status, error),
   getActiveStatus: (appid) => ipcRenderer.invoke('uc:download-active-status', appid),
   createDesktopShortcut: (gameName, exePath) => ipcRenderer.invoke('uc:create-desktop-shortcut', gameName, exePath),
@@ -47,6 +64,7 @@ contextBridge.exposeInMainWorld('ucDownloads', {
   pickArchiveFiles: () => ipcRenderer.invoke('uc:pick-archive-files'),
   installFromArchive: (payload) => ipcRenderer.invoke('uc:install-from-archive', payload),
   installDownloadedArchive: (appid) => ipcRenderer.invoke('uc:install-downloaded-archive', appid),
+  deleteArchiveFiles: (payload) => ipcRenderer.invoke('uc:archive-delete', payload),
   onUpdate: (callback) => {
     const listener = (_event, data) => {
       try {
@@ -62,6 +80,11 @@ contextBridge.exposeInMainWorld('ucDownloads', {
     const listener = (_event, data) => callback(data)
     ipcRenderer.on('uc:game-quick-exit', listener)
     return () => ipcRenderer.removeListener('uc:game-quick-exit', listener)
+  },
+  onArchiveDeletePrompt: (callback) => {
+    const listener = (_event, data) => callback(data)
+    ipcRenderer.on('uc:archive-delete-prompt', listener)
+    return () => ipcRenderer.removeListener('uc:archive-delete-prompt', listener)
   }
 })
 
@@ -89,9 +112,32 @@ contextBridge.exposeInMainWorld('ucSettings', {
 })
 
 contextBridge.exposeInMainWorld('ucAuth', {
-  login: (baseUrl) => ipcRenderer.invoke('uc:auth-login', baseUrl),
+  // OAuth login (Discord/Google)
+  login: (baseUrl, provider) => ipcRenderer.invoke('uc:auth-login', baseUrl, provider),
+  
+  // Email/password auth
+  emailLogin: (baseUrl, email, password) => ipcRenderer.invoke('uc:auth-email-login', { baseUrl, email, password }),
+  register: (baseUrl, email, username, password) => ipcRenderer.invoke('uc:auth-register', { baseUrl, email, username, password }),
+  
+  // Account recovery
+  forgotPassword: (baseUrl, email) => ipcRenderer.invoke('uc:auth-forgot-password', { baseUrl, email }),
+  resetPassword: (baseUrl, token, password) => ipcRenderer.invoke('uc:auth-reset-password', { baseUrl, token, password }),
+  verifyEmail: (baseUrl, token) => ipcRenderer.invoke('uc:auth-verify-email', { baseUrl, token }),
+  
+  // Session management
   logout: (baseUrl) => ipcRenderer.invoke('uc:auth-logout', baseUrl),
   getSession: (baseUrl) => ipcRenderer.invoke('uc:auth-session', baseUrl),
+  getMe: (baseUrl) => ipcRenderer.invoke('uc:auth-me', baseUrl),
+  
+  // Provider linking
+  linkProvider: (baseUrl, provider) => ipcRenderer.invoke('uc:auth-link-provider', { baseUrl, provider }),
+  unlinkProvider: (baseUrl, provider) => ipcRenderer.invoke('uc:auth-unlink-provider', { baseUrl, provider }),
+  
+  // Profile updates
+  updateProfile: (baseUrl, data) => ipcRenderer.invoke('uc:auth-update-profile', { baseUrl, data }),
+  updatePassword: (baseUrl, currentPassword, newPassword) => ipcRenderer.invoke('uc:auth-update-password', { baseUrl, currentPassword, newPassword }),
+  
+  // HTTP fetch with session
   fetch: (baseUrl, path, init) => ipcRenderer.invoke('uc:auth-fetch', { baseUrl, path, init })
 })
 

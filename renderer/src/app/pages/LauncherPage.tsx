@@ -8,56 +8,22 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { ErrorMessage } from "@/components/ErrorMessage"
 import { AnimatedCounter } from "@/components/AnimatedCounter"
 import { OfflineBanner } from "@/components/OfflineBanner"
+import { HeroSlider } from "@/components/HeroSlider"
 import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious } from "@/components/ui/carousel"
 import { PaginationBar } from "@/components/PaginationBar"
-import { apiUrl } from "@/lib/api"
-import { getLauncherHomeMeta } from "@/lib/navigation"
 import { formatNumber, generateErrorCode, ErrorTypes } from "@/lib/utils"
 import { useOnlineStatus } from "@/hooks/use-online-status"
-import { ArrowRight, Search } from "lucide-react"
+import { fetchCatalogGames, fetchCatalogStats, getCatalogCache, hydrateCatalogCache, isCatalogGamesStale, isCatalogStatsStale, mergeInstalledGames, persistCatalogCache, type CatalogGame } from "@/lib/catalog"
+import { ArrowRight } from "lucide-react"
 
-const extractDeveloper = (description: string): string => {
-  const developerMatch = description.match(/(?:by|from|developer|dev|studio)\s+([^.,\n]+)/i)
-  return developerMatch ? developerMatch[1].trim() : "Unknown"
-}
+type Game = CatalogGame
 
-const normalizeSearchText = (text: string): string =>
-  text
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^\w\s]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-
-const shuffleGames = <T,>(items: T[]) => {
-  const result = [...items]
-  for (let i = result.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(Math.random() * (i + 1))
-      ;[result[i], result[j]] = [result[j], result[i]]
-  }
-  return result
-}
-
-interface Game {
-  appid: string
-  name: string
-  description: string
-  genres: string[]
-  image: string
-  release_date: string
-  size: string
-  source: string
-  version?: string
-  update_time?: string
-  searchText?: string
-  developer?: string
-  hasCoOp?: boolean
-}
+const cardCarouselNavClass = "bg-zinc-800/80 hover:bg-white hover:text-black border-white/[.08] text-zinc-300 backdrop-blur-sm transition-all active:scale-95"
 
 export function LauncherPage() {
   const navigate = useNavigate()
   const isOnline = useOnlineStatus()
+  const initialCatalog = getCatalogCache()
 
   class GamesFetchError extends Error {
     status?: number
@@ -78,18 +44,18 @@ export function LauncherPage() {
 
   const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms))
 
-  const [games, setGames] = useState<Game[]>([])
-  const [loading, setLoading] = useState(true)
+  const [games, setGames] = useState<Game[]>(initialCatalog.games)
+  const [loading, setLoading] = useState(initialCatalog.games.length === 0)
   const [refreshing, setRefreshing] = useState(false)
-  const [gameStats, setGameStats] = useState<Record<string, { downloads: number; views: number }>>({})
+  const [gameStats, setGameStats] = useState<Record<string, { downloads: number; views: number }>>(initialCatalog.stats)
   const [refreshKey, setRefreshKey] = useState(0)
   const [gamesError, setGamesError] = useState<{ type: string; message: string; code: string } | null>(null)
-  const [hasLoadedGames, setHasLoadedGames] = useState(false)
+  const [hasLoadedGames, setHasLoadedGames] = useState(initialCatalog.games.length > 0)
   const [emptyStateReady, setEmptyStateReady] = useState(false)
   const [currentPage, setCurrentPage] = useState(1)
   const [recentlyInstalledGames, setRecentlyInstalledGames] = useState<Game[]>([])
-  const itemsPerPage = 20
-  const [statsCacheTime, setStatsCacheTime] = useState<number>(0)
+  const itemsPerPage = 30
+  const [statsCacheTime, setStatsCacheTime] = useState<number>(initialCatalog.statsUpdatedAt || 0)
 
   const activeLoadIdRef = useRef(0)
 
@@ -191,53 +157,6 @@ export function LauncherPage() {
     }
   }, [])
 
-  const fetchGameStats = async (forceRefresh = false) => {
-    try {
-      if (!forceRefresh && Object.keys(gameStats).length > 0) {
-        const now = Date.now()
-        const recentCache = now - statsCacheTime < 30000
-        if (recentCache) return
-      }
-
-      const response = await fetch(apiUrl("/api/downloads/all"))
-
-      if (!response.ok) {
-        throw new Error(`Stats API route failed: ${response.status}`)
-      }
-
-      const data = await response.json()
-      if (data && typeof data === "object") {
-        startTransition(() => {
-          setGameStats(data)
-          setStatsCacheTime(Date.now())
-        })
-      }
-    } catch (error) {
-      console.error("[UC] Error fetching game stats:", error)
-    }
-  }
-
-  const fetchGames = async (): Promise<Game[]> => {
-    // Check offline before attempting fetch
-    if (typeof navigator !== "undefined" && !navigator.onLine) {
-      // Don't set an error - we'll show the offline banner instead
-      return []
-    }
-
-    const response = await fetch(apiUrl("/api/games"))
-
-    if (!response.ok) {
-      throw new GamesFetchError(`API route failed: ${response.status}`, response.status)
-    }
-
-    const data = await response.json()
-    return data.map((game: any) => ({
-      ...game,
-      searchText: normalizeSearchText(`${game.name} ${game.description} ${game.genres?.join(" ") || ""}`),
-      developer: game.developer && game.developer !== "Unknown" ? game.developer : extractDeveloper(game.description),
-    }))
-  }
-
   const loadGames = async (forceRefresh = false) => {
     const loadId = ++activeLoadIdRef.current
     const isInitialLoad = !hasLoadedGames && games.length === 0
@@ -252,19 +171,49 @@ export function LauncherPage() {
     }
     setGamesError(null)
 
+    const hydrated = await hydrateCatalogCache()
+    if (loadId !== activeLoadIdRef.current) return
+
+    if (hydrated.games.length > 0 || Object.keys(hydrated.stats).length > 0) {
+      startTransition(() => {
+        if (hydrated.games.length > 0) setGames(hydrated.games)
+        setGameStats(hydrated.stats)
+        setHasLoadedGames(hydrated.games.length > 0)
+        setStatsCacheTime(hydrated.statsUpdatedAt || 0)
+      })
+      if (isInitialLoad) setLoading(false)
+    }
+
+    const shouldRefreshGames = forceRefresh || (isOnline && (!hydrated.games.length || isCatalogGamesStale()))
+    const shouldRefreshStats = forceRefresh || (isOnline && (!Object.keys(hydrated.stats).length || isCatalogStatsStale()))
+
+    if (!shouldRefreshGames && !shouldRefreshStats) {
+      setLoading(false)
+      setRefreshing(false)
+      return
+    }
+
     for (let attempt = 0; attempt <= maxAttempts; attempt++) {
       try {
-        const gamesData = await fetchGames()
+        const gamesData = await mergeInstalledGames(
+          shouldRefreshGames ? await fetchCatalogGames() : getCatalogCache().games
+        )
+        const nextStats = shouldRefreshStats ? await fetchCatalogStats() : getCatalogCache().stats
         if (loadId !== activeLoadIdRef.current) return
 
         startTransition(() => {
           setGames(gamesData)
+          setGameStats(nextStats)
           setHasLoadedGames(true)
+          setStatsCacheTime(Date.now())
         })
 
-        if (gamesData.length > 0) {
-          fetchGameStats(forceRefresh)
-        }
+        void persistCatalogCache({
+          games: gamesData,
+          stats: nextStats,
+          gamesUpdatedAt: shouldRefreshGames ? Date.now() : getCatalogCache().gamesUpdatedAt,
+          statsUpdatedAt: shouldRefreshStats ? Date.now() : getCatalogCache().statsUpdatedAt,
+        })
 
         setLoading(false)
         if (refreshStart !== null) {
@@ -284,6 +233,11 @@ export function LauncherPage() {
 
         // If we went offline mid-load, stop retrying and let the offline UI handle it.
         if (typeof navigator !== "undefined" && !navigator.onLine) {
+          if (hydrated.games.length > 0 || Object.keys(hydrated.stats).length > 0) {
+            setLoading(false)
+            setRefreshing(false)
+            return
+          }
           setLoading(false)
           setRefreshing(false)
           return
@@ -299,6 +253,12 @@ export function LauncherPage() {
         }
 
         console.error("Error loading games:", error)
+
+        if (hydrated.games.length > 0 || Object.keys(hydrated.stats).length > 0) {
+          setLoading(false)
+          setRefreshing(false)
+          return
+        }
 
         setGamesError({
             type: "games",
@@ -362,8 +322,8 @@ export function LauncherPage() {
 
   const featuredGames = useMemo(() => {
     if (games.length === 0) return []
-    return refreshKey > 0 ? shuffleGames(games) : games
-  }, [games, refreshKey])
+    return games
+  }, [games])
 
   useEffect(() => {
     setCurrentPage(1)
@@ -405,152 +365,64 @@ export function LauncherPage() {
 
   const displayTotalSizeTB = (stats as any).totalSizeTB ?? 0
   const displayTotalSizeGB = (stats as any).totalSizeGB ?? Math.round(displayTotalSizeTB * 1024 * 10) / 10
-  const launcherMeta = getLauncherHomeMeta()
-
-  const spotlightLockRef = useRef<Game | null>(null)
-  const spotlightGame = useMemo(() => {
-    const candidate = recentlyInstalledGames[0] || popularReleases[0] || newReleases[0] || featuredGames[0] || null
-    if (!spotlightLockRef.current && candidate) {
-      spotlightLockRef.current = candidate
-    }
-    return spotlightLockRef.current
-  }, [featuredGames, newReleases, popularReleases, recentlyInstalledGames])
-
-  const spotlightStats = spotlightGame ? gameStats[spotlightGame.appid] : undefined
 
   return (
     <div className="space-y-10 pb-4">
-      <section
-        id="hero"
-        className="glass-card relative overflow-hidden rounded-3xl p-6 sm:p-8 xl:p-10"
-      >
-        <div className="relative grid gap-8 xl:grid-cols-[minmax(0,1.2fr)_380px] xl:items-stretch">
-          <div className="space-y-8">
-            <div className="inline-flex items-center gap-2 rounded-full border border-white/[.07] bg-zinc-800 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-zinc-300 anim">
-              <launcherMeta.icon className="h-3.5 w-3.5" />
-              {launcherMeta.eyebrow}
-            </div>
+      {/* Full-width hero slider */}
+      <HeroSlider games={games} gameStats={gameStats} loading={loading} />
 
-            <div className="max-w-4xl space-y-4 anim anim-d1">
-              <h1 className="max-w-3xl text-4xl font-light tracking-tight text-white sm:text-5xl xl:text-6xl">
-                {launcherMeta.title}
-              </h1>
-            </div>
-
-            <div className="grid gap-3 sm:grid-cols-3 anim anim-d2">
-              <div className="rounded-2xl border border-white/[.07] bg-zinc-900/60 p-4">
-                <div className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">Catalogue</div>
-                <div className="mt-2 text-3xl font-bold text-white">
-                  {stats.totalGames === 0 ? "?" : <AnimatedCounter value={stats.totalGames} format={formatNumber} />}
-                </div>
-              </div>
-              <div className="rounded-2xl border border-white/[.07] bg-zinc-900/60 p-4">
-                <div className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">Downloads</div>
-                <div className="mt-2 text-3xl font-bold text-white">
-                  {stats.totalDownloads === 0 ? "?" : <AnimatedCounter value={stats.totalDownloads} format={formatNumber} />}
-                </div>
-              </div>
-              <div className="rounded-2xl border border-white/[.07] bg-zinc-900/60 p-4">
-                <div className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">Storage</div>
-                <div className="mt-2 text-3xl font-bold text-white">
-                  {displayTotalSizeGB >= 1024 ? (
-                    <AnimatedCounter value={displayTotalSizeTB} suffix="TB" />
-                  ) : displayTotalSizeGB && displayTotalSizeGB > 0 ? (
-                    <AnimatedCounter value={displayTotalSizeGB} suffix="GB" />
-                  ) : (
-                    "?"
-                  )}
-                </div>
-              </div>
-            </div>
-
-            <div className="flex flex-col gap-3 sm:flex-row">
-              <Button
-                size="lg"
-                className="h-11 rounded-full bg-white px-6 text-sm font-medium text-black hover:bg-zinc-200 active:scale-95"
-                onClick={() => navigate("/library")}
-              >
-                Open library
-              </Button>
-              <Button
-                size="lg"
-                variant="outline"
-                className="h-11 rounded-full border-zinc-700 px-6 text-sm font-medium text-zinc-200 hover:border-zinc-500 hover:text-white active:scale-95"
-                onClick={() => typeof window !== "undefined" && window.dispatchEvent(new Event("uc_open_search_popup"))}
-              >
-                Search catalogue
-              </Button>
-              <Button
-                size="lg"
-                variant="ghost"
-                className="h-11 rounded-full px-6 text-sm font-medium text-zinc-400 hover:bg-white/[.03] hover:text-white active:scale-95"
-                onClick={() => navigate("/downloads")}
-              >
-                View activity
-              </Button>
-            </div>
-          </div>
-
-          <div className="relative flex h-full flex-col rounded-2xl border border-white/[.07] bg-zinc-900/60 p-4">
-            <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-[0.24em] text-zinc-500">
-              <span>Spotlight</span>
-              <span>{spotlightStats?.downloads ? `${formatNumber(spotlightStats.downloads)} dl` : "Fresh pick"}</span>
-            </div>
-
-            {spotlightGame ? (
-              <>
-                <button
-                  type="button"
-                  onClick={() => navigate(`/game/${spotlightGame.appid}`)}
-                  className="mt-4 overflow-hidden rounded-2xl border border-white/[.07] bg-zinc-900 text-left transition hover:border-zinc-600"
-                >
-                  <div className="aspect-[16/9] overflow-hidden bg-zinc-900">
-                    <img
-                      src={spotlightGame.image || "./banner.png"}
-                      alt={spotlightGame.name}
-                      className="h-full w-full object-cover transition duration-700 hover:scale-105"
-                      loading="lazy"
-                    />
-                  </div>
-                  <div className="space-y-3 p-4">
-                    <div className="text-lg font-semibold text-white">{spotlightGame.name}</div>
-                    <div className="flex flex-wrap gap-2">
-                      {(spotlightGame.genres || []).slice(0, 3).map((genre) => (
-                        <span
-                          key={genre}
-                          className="rounded-full border border-white/[.07] bg-zinc-800 px-2.5 py-1 text-[11px] font-medium uppercase tracking-wider text-zinc-300"
-                        >
-                          {genre}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                </button>
-
-                <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
-                  <button
-                    type="button"
-                    onClick={() => navigate(`/game/${spotlightGame.appid}`)}
-                    className="flex items-center justify-between rounded-2xl border border-white/[.07] bg-zinc-800/50 px-4 py-3 text-left transition hover:bg-zinc-700/50 active:scale-95"
-                  >
-                    <div className="text-sm font-medium text-white">Open game page</div>
-                    <ArrowRight className="h-4 w-4 text-zinc-500" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => document.getElementById("featured")?.scrollIntoView({ behavior: "smooth" })}
-                    className="flex items-center justify-between rounded-2xl border border-white/[.07] bg-zinc-800/50 px-4 py-3 text-left transition hover:bg-zinc-700/50 active:scale-95"
-                  >
-                    <div className="text-sm font-medium text-white">Browse catalogue</div>
-                    <Search className="h-4 w-4 text-zinc-500" />
-                  </button>
-                </div>
-              </>
+      {/* Stats row */}
+      <section className="grid grid-cols-2 gap-3 sm:grid-cols-4 anim anim-d1">
+        <div className="rounded-2xl border border-white/[.07] bg-zinc-900/60 p-4">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-500">Catalogue</div>
+          <div className="mt-2 text-2xl font-bold text-white">
+            {stats.totalGames === 0 ? (
+              <span className="text-zinc-600">—</span>
             ) : (
-              <div className="mt-4 flex flex-1 items-center justify-center rounded-2xl border border-dashed border-white/[.07] bg-zinc-900/40 p-6 text-center text-sm text-zinc-500">
-                Loading...
-              </div>
+              <AnimatedCounter value={stats.totalGames} format={formatNumber} />
             )}
+          </div>
+        </div>
+        <div className="rounded-2xl border border-white/[.07] bg-zinc-900/60 p-4">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-500">Downloads</div>
+          <div className="mt-2 text-2xl font-bold text-white">
+            {stats.totalDownloads === 0 ? (
+              <span className="text-zinc-600">—</span>
+            ) : (
+              <AnimatedCounter value={stats.totalDownloads} format={formatNumber} />
+            )}
+          </div>
+        </div>
+        <div className="rounded-2xl border border-white/[.07] bg-zinc-900/60 p-4">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-500">Storage</div>
+          <div className="mt-2 text-2xl font-bold text-white">
+            {displayTotalSizeGB >= 1024 ? (
+              <AnimatedCounter value={displayTotalSizeTB} suffix="TB" />
+            ) : displayTotalSizeGB > 0 ? (
+              <AnimatedCounter value={displayTotalSizeGB} suffix="GB" />
+            ) : (
+              <span className="text-zinc-600">—</span>
+            )}
+          </div>
+        </div>
+        <div className="rounded-2xl border border-white/[.07] bg-zinc-900/60 p-4 flex flex-col justify-between">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-500">Quick access</div>
+          <div className="mt-3 flex flex-col gap-1.5">
+            <Button
+              size="sm"
+              className="w-full rounded-full bg-white text-[12px] font-semibold text-black hover:bg-zinc-200 active:scale-95"
+              onClick={() => navigate("/library")}
+            >
+              My Library
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="w-full rounded-full text-[12px] text-zinc-400 hover:bg-white/[.04] hover:text-white active:scale-95"
+              onClick={() => typeof window !== "undefined" && window.dispatchEvent(new Event("uc_open_search_popup"))}
+            >
+              Search
+            </Button>
           </div>
         </div>
       </section>
@@ -604,8 +476,8 @@ export function LauncherPage() {
                   </button>
                 </CarouselItem>
               </CarouselContent>
-              <CarouselPrevious />
-              <CarouselNext />
+              <CarouselPrevious className={cardCarouselNavClass} />
+              <CarouselNext className={cardCarouselNavClass} />
             </Carousel>
           </div>
         </section>
@@ -695,8 +567,8 @@ export function LauncherPage() {
                       </CarouselItem>
                     ))}
                   </CarouselContent>
-                  <CarouselPrevious />
-                  <CarouselNext />
+                  <CarouselPrevious className={cardCarouselNavClass} />
+                  <CarouselNext className={cardCarouselNavClass} />
                 </Carousel>
               </>
             )}
@@ -750,8 +622,8 @@ export function LauncherPage() {
                     </CarouselItem>
                   ))}
                 </CarouselContent>
-                <CarouselPrevious className="left-0 -translate-x-1/2 bg-black/50 hover:bg-black/80 border-white/10 text-white backdrop-blur-md" />
-                <CarouselNext className="right-0 translate-x-1/2 bg-black/50 hover:bg-black/80 border-white/10 text-white backdrop-blur-md" />
+                <CarouselPrevious className={`left-0 -translate-x-1/2 ${cardCarouselNavClass}`} />
+                <CarouselNext className={`right-0 translate-x-1/2 ${cardCarouselNavClass}`} />
               </Carousel>
             )}
           </div>
@@ -759,15 +631,15 @@ export function LauncherPage() {
       )}
 
       <section id="featured" className="py-16 px-4">
-        <div className="container mx-auto max-w-7xl">
+        <div className="container mx-auto max-w-[1800px]">
           {loading ? (
             <>
               <div className="mb-10">
                 <Skeleton className="h-10 w-56 mb-3 bg-muted/40" />
                 <Skeleton className="h-5 w-96 bg-muted/30" />
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
-                {Array.from({ length: 20 }).map((_, i) => (
+              <div className="grid gap-4 sm:gap-5" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))" }}>
+                {Array.from({ length: itemsPerPage }).map((_, i) => (
                   <GameCardSkeleton key={`skeleton-all-${i}`} />
                 ))}
               </div>
@@ -793,7 +665,7 @@ export function LauncherPage() {
                 </Button>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6 stagger-grid">
+              <div className="stagger-grid grid gap-4 sm:gap-5" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))" }}>
                 {(loading || refreshing) ? (
                   Array.from({ length: itemsPerPage }).map((_, i) => (
                     <GameCardSkeleton key={`skeleton-all-${i}`} />

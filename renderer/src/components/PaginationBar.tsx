@@ -7,6 +7,7 @@ import {
   PaginationPrevious,
 } from "@/components/ui/pagination"
 import { cn } from "@/lib/utils"
+import { ChevronsLeft, ChevronsRight } from "lucide-react"
 
 type PaginationBarProps = {
   currentPage: number
@@ -29,7 +30,7 @@ export function PaginationBar({
   currentPage,
   totalPages,
   onPageChange,
-  maxVisiblePages = 5,
+  maxVisiblePages = 7,
   className,
   wrapperClassName,
   hideIfSingle = true,
@@ -40,28 +41,45 @@ export function PaginationBar({
   const isFirst = currentPage <= 1
   const isLast = currentPage >= totalPages
 
-  const handlePageChange = (e: React.MouseEvent<HTMLElement> | undefined, page: number) => {
+  const handlePageChange = (e: React.MouseEvent | React.TouchEvent, page: number) => {
     e?.preventDefault()
     if (page < 1 || page > totalPages || page === currentPage) return
     onPageChange(page)
   }
 
   return (
-    <div className={cn("mt-10 flex justify-center", wrapperClassName)}>
+    <div className={cn("mt-8 flex flex-col items-center gap-2", wrapperClassName)}>
       <Pagination
         className={cn(
-          "bg-[#09090b]/50 dark:bg-black/40 backdrop-blur-xl border border-white/20 dark:border-white/10 rounded-full px-4 py-2 shadow-lg inline-flex w-auto",
+          "bg-zinc-900/80 backdrop-blur-md border border-zinc-800/50 rounded-full px-3 py-2 shadow-lg inline-flex w-auto",
           className
         )}
       >
         <PaginationContent>
           <PaginationItem>
+            <button
+              type="button"
+              onClick={(e) => handlePageChange(e, 1)}
+              disabled={isFirst}
+              className={cn(
+                "inline-flex h-9 w-9 items-center justify-center rounded-full font-bold transition-all",
+                isFirst
+                  ? "pointer-events-none opacity-30 text-zinc-600"
+                  : "cursor-pointer text-zinc-300 hover:bg-zinc-800 hover:text-white"
+              )}
+              aria-label="First page"
+            >
+              <ChevronsLeft className="h-4 w-4" />
+            </button>
+          </PaginationItem>
+
+          <PaginationItem>
             <PaginationPrevious
               onClick={(e) => handlePageChange(e, currentPage - 1)}
               className={
                 isFirst
-                  ? "pointer-events-none opacity-50 font-bold text-zinc-400"
-                  : "cursor-pointer font-bold text-zinc-100/80 hover:text-zinc-100 hover:bg-white/10 rounded-full"
+                  ? "pointer-events-none opacity-30 font-bold text-zinc-600"
+                  : "cursor-pointer rounded-full font-bold text-zinc-300 hover:bg-zinc-800 hover:text-white"
               }
             />
           </PaginationItem>
@@ -77,8 +95,8 @@ export function PaginationBar({
                   className={cn(
                     "cursor-pointer font-bold rounded-full transition-all",
                     currentPage === pageNumber
-                      ? "bg-white text-black border-white"
-                      : "text-zinc-100/80 hover:text-zinc-100 hover:bg-white/10"
+                      ? "border-white bg-white text-black shadow-[0_0_18px_rgba(255,255,255,0.16)]"
+                      : "text-zinc-300 hover:bg-zinc-800 hover:text-white"
                   )}
                 >
                   {pageNumber}
@@ -92,13 +110,34 @@ export function PaginationBar({
               onClick={(e) => handlePageChange(e, currentPage + 1)}
               className={
                 isLast
-                  ? "pointer-events-none opacity-50 font-bold text-zinc-400"
-                  : "cursor-pointer font-bold text-zinc-100/80 hover:text-zinc-100 hover:bg-white/10 rounded-full"
+                  ? "pointer-events-none opacity-30 font-bold text-zinc-600"
+                  : "cursor-pointer rounded-full font-bold text-zinc-300 hover:bg-zinc-800 hover:text-white"
               }
             />
           </PaginationItem>
+
+          <PaginationItem>
+            <button
+              type="button"
+              onClick={(e) => handlePageChange(e, totalPages)}
+              disabled={isLast}
+              className={cn(
+                "inline-flex h-9 w-9 items-center justify-center rounded-full font-bold transition-all",
+                isLast
+                  ? "pointer-events-none opacity-30 text-zinc-600"
+                  : "cursor-pointer text-zinc-300 hover:bg-zinc-800 hover:text-white"
+              )}
+              aria-label="Last page"
+            >
+              <ChevronsRight className="h-4 w-4" />
+            </button>
+          </PaginationItem>
         </PaginationContent>
       </Pagination>
+
+      <p className="text-xs font-medium text-zinc-500">
+        Page {currentPage} of {totalPages}
+      </p>
     </div>
   )
 }

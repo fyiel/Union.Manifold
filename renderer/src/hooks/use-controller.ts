@@ -74,14 +74,37 @@ export function useController() {
   // Check for connected controllers
   const checkControllers = useCallback(async () => {
     try {
+      let detected = false
       if (window.ucController?.getConnected) {
         const result = await window.ucController.getConnected()
-        setConnected(result.connected)
-        setControllerInfo({
-          id: result.controllerId ?? null,
-          name: result.controllerName ?? null,
-          type: result.controllerType ?? null
-        })
+        if (result.connected) {
+          detected = true
+          setConnected(true)
+          setControllerInfo({
+            id: result.controllerId ?? null,
+            name: result.controllerName ?? null,
+            type: result.controllerType ?? null
+          })
+        }
+      }
+
+      if (!detected && typeof navigator !== 'undefined' && typeof navigator.getGamepads === 'function') {
+        const pads = Array.from(navigator.getGamepads?.() || []).filter(Boolean)
+        const firstPad = pads[0]
+        if (firstPad) {
+          detected = true
+          setConnected(true)
+          setControllerInfo({
+            id: String(firstPad.index),
+            name: firstPad.id || 'Gamepad connected',
+            type: detectControllerType(firstPad.id || 'generic')
+          })
+        }
+      }
+
+      if (!detected) {
+        setConnected(false)
+        setControllerInfo({ id: null, name: null, type: null })
       }
     } catch (err) {
       console.error('Failed to check controllers:', err)

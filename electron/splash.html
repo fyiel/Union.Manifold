@@ -61,6 +61,14 @@
       min-height: 14px;
       transition: opacity 0.2s;
     }
+    .version {
+      font-family: 'Geist', 'Segoe UI', system-ui, sans-serif;
+      font-size: 10px;
+      font-weight: 500;
+      letter-spacing: 0.06em;
+      color: #71717a;
+      min-height: 14px;
+    }
     .bar-track {
       position: absolute;
       bottom: 0;
@@ -90,9 +98,18 @@
     </svg>
     <div class="text-group">
       <span class="app-name">UnionCrax.Direct</span>
+      <span class="version" id="version">v0.0.0</span>
       <span class="status" id="status">Configuring things for you...</span>
     </div>
   </div>
   <div class="bar-track"><div class="bar-fill"></div></div>
+  <script>
+    (function () {
+      var versionEl = document.getElementById('version')
+      if (!versionEl) return
+      var version = new URLSearchParams(window.location.search).get('v')
+      if (version) versionEl.textContent = 'v' + version
+    })()
+  </script>
 </body>
 </html>

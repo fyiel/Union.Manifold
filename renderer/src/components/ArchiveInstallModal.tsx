@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Button } from "@/components/ui/button"
+import { useDownloadsActions } from "@/context/downloads-context"
 import type { Game } from "@/lib/types"
 import {
   AlertTriangle,
@@ -45,6 +46,7 @@ function formatBytes(bytes: number): string {
 }
 
 export function ArchiveInstallModal({ open, game, installMetadata, onInstalled, onClose }: Props) {
+  const { upsertDownload } = useDownloadsActions()
   const [step, setStep] = useState<Step>("method")
   const [mode, setMode] = useState<ArchiveMode>("single")
   const [files, setFiles] = useState<SelectedFile[]>([])
@@ -189,6 +191,31 @@ export function ArchiveInstallModal({ open, game, installMetadata, onInstalled, 
 
     // Generate downloadId client-side so we can subscribe to updates before extraction starts
     const id = `archive-install-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`
+    const appid = resolvedMetadata.appid || "manual-install"
+    const primaryFile = files[0]
+    const partTotal = files.length > 1 ? files.length : undefined
+
+    upsertDownload({
+      id,
+      appid,
+      gameName: resolvedName,
+      host: "local",
+      url: primaryFile?.path || "",
+      originalUrl: primaryFile?.path || undefined,
+      filename: primaryFile?.name || `${resolvedName}.archive`,
+      partIndex: partTotal ? 1 : undefined,
+      partTotal,
+      status: "extracting",
+      receivedBytes: 0,
+      totalBytes: totalSize,
+      speedBps: 0,
+      etaSeconds: null,
+      extractProgress: 0,
+      savePath: primaryFile?.path,
+      startedAt: Date.now(),
+      error: null,
+      spaceCheck: null,
+    })
     setDownloadId(id)
     setStep("installing")
     setProgress({ percent: 0, speedBps: 0, etaSeconds: null, status: "Starting extraction..." })
@@ -202,10 +229,31 @@ export function ArchiveInstallModal({ open, game, installMetadata, onInstalled, 
     })
 
     if (!result.ok) {
+      upsertDownload({
+        id,
+        appid,
+        gameName: resolvedName,
+        host: "local",
+        url: primaryFile?.path || "",
+        originalUrl: primaryFile?.path || undefined,
+        filename: primaryFile?.name || `${resolvedName}.archive`,
+        partIndex: partTotal ? 1 : undefined,
+        partTotal,
+        status: result.error === "insufficient_space" ? "install_ready" : "failed",
+        receivedBytes: 0,
+        totalBytes: totalSize,
+        speedBps: 0,
+        etaSeconds: null,
+        extractProgress: null,
+        savePath: primaryFile?.path,
+        startedAt: Date.now(),
+        error: result.error || "Failed to start installation",
+        spaceCheck: result.spaceCheck ?? null,
+      })
       setErrorMsg(result.error || "Failed to start installation")
       setStep("error")
     }
-  }, [files, resolvedMetadata, resolvedName])
+  }, [files, resolvedMetadata, resolvedName, totalSize, upsertDownload])
 
   if (!open) return null
 

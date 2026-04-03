@@ -63,21 +63,7 @@ export function LikedPage() {
   }, [loadItems])
 
   const handleLogin = async () => {
-    setLoggingIn(true)
-    try {
-      if (window.ucAuth?.login) {
-        const result = await window.ucAuth.login(getApiBaseUrl())
-        if (result?.ok) {
-          await apiFetch("/api/comments/session", { method: "POST" })
-          await refresh().catch(() => {})
-          await loadItems().catch(() => {})
-        }
-      } else {
-        window.open(apiUrl("/api/discord/connect?next=/settings"), "_blank")
-      }
-    } finally {
-      setLoggingIn(false)
-    }
+    navigate("/login")
   }
 
   const handleRefresh = async () => {

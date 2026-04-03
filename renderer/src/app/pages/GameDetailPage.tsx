@@ -1,5 +1,6 @@
 
 import { useEffect, useCallback, useMemo, useRef, useState } from "react"
+import { createPortal } from "react-dom"
 import { useParams } from "react-router-dom"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -38,6 +39,8 @@ import {
   Info,
   Layers3,
   Loader2,
+  Minus,
+  Plus,
   Play,
   Tags,
   Terminal,
@@ -61,6 +64,18 @@ const PROTON_RANK_COLORS: Record<string, string> = {
   silver: "text-[#c0c0c0] border-[#c0c0c0]/30",
   bronze: "text-[#cd7f32] border-[#cd7f32]/30",
   borked: "text-[#f44336] border-[#f44336]/30",
+}
+
+const MIN_LIGHTBOX_ZOOM = 1
+const MAX_LIGHTBOX_ZOOM = 3
+const LIGHTBOX_ZOOM_STEP = 0.25
+
+function getHighQualityScreenshotUrl(url: string): string {
+  if (!url) return url
+
+  return url
+    .replace('/t_screenshot_med/', '/t_original/')
+    .replace('/t_thumb/', '/t_original/')
 }
 
 export function GameDetailPage() {
@@ -87,6 +102,9 @@ export function GameDetailPage() {
   const [stoppingGame, setStoppingGame] = useState(false)
   const [lightboxOpen, setLightboxOpen] = useState(false)
   const [lightboxIndex, setLightboxIndex] = useState(0)
+  const [lightboxZoom, setLightboxZoom] = useState(1)
+  const [lightboxPan, setLightboxPan] = useState({ x: 0, y: 0 })
+  const [lightboxDragging, setLightboxDragging] = useState(false)
   const [pendingExePath, setPendingExePath] = useState<string | null>(null)
   const [shortcutModalOpen, setShortcutModalOpen] = useState(false)
   const [launchPreflightOpen, setLaunchPreflightOpen] = useState(false)
@@ -120,6 +138,13 @@ export function GameDetailPage() {
   // Stores the expiry timestamp of the quick-exit detection window (0 = not watching)
   const gameJustLaunchedRef = useRef<number>(0)
   const gameQuickExitUnsubRef = useRef<(() => void) | null>(null)
+  const lightboxViewportRef = useRef<HTMLDivElement | null>(null)
+  const lightboxPanPointerRef = useRef<number | null>(null)
+  const lightboxPanStartRef = useRef({ x: 0, y: 0 })
+  const lightboxPanOffsetStartRef = useRef({ x: 0, y: 0 })
+  const suppressLightboxImageClickRef = useRef(false)
+  const importantNoteRef = useRef<HTMLDivElement | null>(null)
+  const [highlightImportantNote, setHighlightImportantNote] = useState(false)
 
   // ProtonDB state
   const [protonData, setProtonData] = useState<any>(null)
@@ -408,23 +433,122 @@ export function GameDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isGameRunning])
 
+  const handleHVTagClick = () => {
+    if (importantNoteRef.current) {
+      importantNoteRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      setHighlightImportantNote(true)
+      setTimeout(() => setHighlightImportantNote(false), 3000)
+    }
+  }
+
+  const clampLightboxPan = (nextX: number, nextY: number, zoomValue = lightboxZoom) => {
+    const viewport = lightboxViewportRef.current
+    if (!viewport || zoomValue <= 1) {
+      return { x: 0, y: 0 }
+    }
+
+    const maxX = ((viewport.clientWidth * zoomValue) - viewport.clientWidth) / 2
+    const maxY = ((viewport.clientHeight * zoomValue) - viewport.clientHeight) / 2
+
+    return {
+      x: Math.min(maxX, Math.max(-maxX, nextX)),
+      y: Math.min(maxY, Math.max(-maxY, nextY)),
+    }
+  }
+
   const openLightbox = (index: number) => {
     setLightboxIndex(index)
+    setLightboxZoom(1)
+    setLightboxPan({ x: 0, y: 0 })
+    setLightboxDragging(false)
+    lightboxPanPointerRef.current = null
     setLightboxOpen(true)
   }
 
   const closeLightbox = () => {
+    setLightboxZoom(1)
+    setLightboxPan({ x: 0, y: 0 })
+    setLightboxDragging(false)
+    lightboxPanPointerRef.current = null
     setLightboxOpen(false)
   }
 
   const nextLightbox = () => {
-    if (!resolvedScreenshots.length) return
-    setLightboxIndex((prev) => (prev + 1) % resolvedScreenshots.length)
+    if (!lightboxScreenshots.length) return
+    setLightboxZoom(1)
+    setLightboxPan({ x: 0, y: 0 })
+    setLightboxIndex((prev) => (prev + 1) % lightboxScreenshots.length)
   }
 
   const prevLightbox = () => {
-    if (!resolvedScreenshots.length) return
-    setLightboxIndex((prev) => (prev - 1 + resolvedScreenshots.length) % resolvedScreenshots.length)
+    if (!lightboxScreenshots.length) return
+    setLightboxZoom(1)
+    setLightboxPan({ x: 0, y: 0 })
+    setLightboxIndex((prev) => (prev - 1 + lightboxScreenshots.length) % lightboxScreenshots.length)
+  }
+
+  const zoomInLightbox = () => {
+    setLightboxZoom((prev) => {
+      const next = Math.min(MAX_LIGHTBOX_ZOOM, prev + LIGHTBOX_ZOOM_STEP)
+      setLightboxPan((pan) => clampLightboxPan(pan.x, pan.y, next))
+      return next
+    })
+  }
+
+  const zoomOutLightbox = () => {
+    setLightboxZoom((prev) => {
+      const next = Math.max(MIN_LIGHTBOX_ZOOM, prev - LIGHTBOX_ZOOM_STEP)
+      setLightboxPan((pan) => clampLightboxPan(pan.x, pan.y, next))
+      return next
+    })
+  }
+
+  const resetLightboxZoom = () => {
+    setLightboxZoom(1)
+    setLightboxPan({ x: 0, y: 0 })
+    setLightboxDragging(false)
+    lightboxPanPointerRef.current = null
+  }
+
+  const handleLightboxPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (lightboxZoom <= 1) return
+
+    event.preventDefault()
+    suppressLightboxImageClickRef.current = false
+    lightboxPanPointerRef.current = event.pointerId
+    lightboxPanStartRef.current = { x: event.clientX, y: event.clientY }
+    lightboxPanOffsetStartRef.current = { ...lightboxPan }
+    setLightboxDragging(true)
+    event.currentTarget.setPointerCapture(event.pointerId)
+  }
+
+  const handleLightboxPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!lightboxDragging || lightboxPanPointerRef.current !== event.pointerId || lightboxZoom <= 1) return
+
+    const deltaX = event.clientX - lightboxPanStartRef.current.x
+    const deltaY = event.clientY - lightboxPanStartRef.current.y
+
+    if (Math.abs(deltaX) > 3 || Math.abs(deltaY) > 3) {
+      suppressLightboxImageClickRef.current = true
+    }
+
+    const next = clampLightboxPan(
+      lightboxPanOffsetStartRef.current.x + deltaX,
+      lightboxPanOffsetStartRef.current.y + deltaY,
+    )
+
+    setLightboxPan(next)
+  }
+
+  const handleLightboxPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (lightboxPanPointerRef.current !== event.pointerId) return
+
+    lightboxPanPointerRef.current = null
+    setLightboxDragging(false)
+
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
   }
 
   useEffect(() => {
@@ -433,10 +557,13 @@ export function GameDetailPage() {
       if (e.key === "Escape") closeLightbox()
       if (e.key === "ArrowRight") nextLightbox()
       if (e.key === "ArrowLeft") prevLightbox()
+      if (e.key === "+" || e.key === "=") zoomInLightbox()
+      if (e.key === "-" || e.key === "_") zoomOutLightbox()
+      if (e.key === "0") resetLightboxZoom()
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [lightboxOpen])
+  }, [lightboxOpen, nextLightbox, prevLightbox, closeLightbox, zoomInLightbox, zoomOutLightbox, resetLightboxZoom])
 
   const openHostSelector = async () => {
     if (!game) return
@@ -521,7 +648,7 @@ export function GameDetailPage() {
       if (!result?.ok) {
         throw new Error(result?.error || "Failed to install downloaded archive")
       }
-      setInstallingManifest((prev) => prev ? { ...prev, installStatus: "extracting", installError: null } : prev)
+      setInstallingManifest((prev: any) => prev ? { ...prev, installStatus: "extracting", installError: null } : prev)
     } catch (err) {
       setDownloadError(err instanceof Error ? err.message : "Failed to install downloaded archive")
     } finally {
@@ -599,6 +726,14 @@ export function GameDetailPage() {
     if (!localScreenshots.length) return game.screenshots
     return game.screenshots.map((shot, index) => localScreenshots[index] || shot)
   }, [game?.screenshots, localScreenshots])
+  const lightboxScreenshots = useMemo(() => {
+    if (!game?.screenshots || game.screenshots.length === 0) return resolvedScreenshots
+
+    return game.screenshots.map((shot, index) => {
+      const fallback = resolvedScreenshots[index] || shot
+      return isOnline ? shot || fallback : fallback || shot
+    })
+  }, [game?.screenshots, isOnline, resolvedScreenshots])
 
   if (loading) {
     return (
@@ -1016,60 +1151,87 @@ export function GameDetailPage() {
     setStoppingGame(false)
   }
 
+  // Determine which background to use for the ambient page bg
+  const backgroundImage = game.hero_image || game.splash || game.image
+  const useAnimatedBackground = Boolean(game.hero_animated)
+
   return (
-    <div className="space-y-12">
+    <div className="relative">
+      {/* Ambient page background */}
+      {backgroundImage && (
+        <div className="pointer-events-none fixed inset-0 z-0 overflow-hidden">
+          {useAnimatedBackground ? (
+            <video
+              src={game.hero_animated || ""}
+              className="absolute inset-0 h-full w-full object-cover opacity-25"
+              autoPlay
+              loop
+              muted
+              playsInline
+              preload="metadata"
+            />
+          ) : (
+            <img
+              src={proxyImageUrl(backgroundImage) || "./banner.png"}
+              alt=""
+              aria-hidden="true"
+              className="uc-ambient-drift absolute inset-0 h-full w-full object-cover opacity-30 blur-[8px] scale-110"
+            />
+          )}
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.06),transparent_40%)]" />
+          <div className="absolute inset-0 bg-gradient-to-b from-black/45 via-black/70 to-[#09090b]" />
+        </div>
+      )}
+
+      <div className="relative z-10 space-y-12">
       <section className="relative pt-6">
         <div className="container mx-auto px-4">
           <div className="max-w-6xl mx-auto">
-            <div className="relative rounded-3xl overflow-hidden border border-white/[.07] glass shadow-2xl shadow-black/40">
+            <div className="relative rounded-3xl overflow-hidden border border-white/[.07] bg-[#1A1A1A]/80 backdrop-blur-md shadow-[0_8px_32px_0_rgba(0,0,0,0.5)]">
               <div className="relative aspect-video overflow-hidden">
                 <img
                   src={proxyImageUrl(heroImage || "") || "./banner.png"}
                   alt={game.name}
-                  className="h-full w-full object-cover transition-transform duration-700 hover:scale-[1.02]"
+                  className="h-full w-full object-cover"
                 />
-                <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent" />
+                <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent" />
               </div>
 
-              <div className="absolute bottom-0 left-0 right-0 p-8 space-y-4">
-                <div className="flex flex-wrap gap-2">
+              <div className="absolute bottom-0 left-0 right-0 p-8">
+                <div className="flex flex-wrap gap-2 mb-4">
                   {game?.genres?.map((genre) => (
                     <Badge
                       key={genre}
                       variant={genre.toLowerCase() === "nsfw" ? "destructive" : "default"}
                       className={`px-3 py-1 rounded-full font-semibold backdrop-blur-md border shadow-lg ${genre.toLowerCase() === "nsfw"
                         ? "bg-red-500/20 border-red-500/30 text-red-400"
-                        : "bg-white/10 border-white/10 text-white hover:bg-white/20"
+                        : "bg-zinc-800/50 border-white/[.07] text-white hover:bg-zinc-700"
                         }`}
                     >
                       {genre}
                     </Badge>
                   ))}
                   {isPopular && (
-                    <Badge className="px-3 py-1 rounded-full bg-zinc-800/60 border-white/10 text-white font-semibold flex items-center gap-1.5 backdrop-blur-md shadow-lg animate-pulse">
-                      <Flame className="h-3 w-3" />
-                      Popular
+                    <Badge className="px-3 py-1 rounded-full bg-zinc-800/60 text-white backdrop-blur-sm border border-white/10 text-xs font-bold uppercase tracking-wider shadow-lg">
+                      <Flame className="w-3 h-3 mr-1 fill-current" /> Popular
                     </Badge>
                   )}
                   {hasOnlineMode(game?.hasCoOp) && (
-                    <Badge className="px-3 py-1 rounded-full bg-zinc-800/60 border-white/10 text-white font-semibold flex items-center gap-1.5 backdrop-blur-md shadow-lg">
+                    <Badge className="px-3 py-1 rounded-full bg-emerald-500/20 border-emerald-500/30 text-emerald-400 font-semibold flex items-center gap-1.5 backdrop-blur-md">
                       <Wifi className="h-3 w-3" />
                       Online
                     </Badge>
                   )}
                   {game?.hasHv && (
-                    <Badge className="px-3 py-1 rounded-full bg-red-500/20 border-red-500/30 text-red-400 font-semibold flex items-center gap-1.5 backdrop-blur-md shadow-lg cursor-pointer transition-transform hover:scale-105 active:scale-95"
-                      onClick={() => {
-                        const noteEl = document.getElementById("game-important-note")
-                        if (noteEl) noteEl.scrollIntoView({ behavior: "smooth", block: "center" })
-                      }}
+                    <Badge className="px-3 py-1 rounded-full bg-red-500/20 border-red-500/30 text-red-400 font-semibold backdrop-blur-md cursor-pointer transition-transform hover:scale-105 active:scale-95"
+                      onClick={handleHVTagClick}
                       title="Scroll to important notes"
                     >
                       HV
                     </Badge>
                   )}
                   {isExternalGame && (
-                    <Badge className="px-3 py-1 rounded-full bg-zinc-800/60 border-white/10 text-zinc-300 font-semibold flex items-center gap-1.5 backdrop-blur-md shadow-lg">
+                    <Badge className="px-3 py-1 rounded-full bg-zinc-800/60 border-white/[.07] text-zinc-300 font-semibold flex items-center gap-1.5 backdrop-blur-md">
                       <Info className="h-3 w-3" />
                       Externally Added
                     </Badge>
@@ -1077,7 +1239,7 @@ export function GameDetailPage() {
                   {protonLoading ? (
                     <Badge
                       variant="online"
-                      className="px-3 py-1 rounded-full text-zinc-300 border-white/10 font-semibold flex items-center gap-1.5 backdrop-blur-md shadow-lg"
+                      className="px-3 py-1 rounded-full text-sky-400 border-sky-500/30 font-semibold flex items-center gap-1.5 backdrop-blur-md"
                     >
                       <Loader2 className="h-3 w-3 animate-spin" />
                       Linux: Loading...
@@ -1086,8 +1248,8 @@ export function GameDetailPage() {
                     <Badge
                       variant="online"
                       className={cn(
-                        "px-3 py-1 rounded-full font-semibold flex items-center gap-1.5 backdrop-blur-md shadow-lg cursor-pointer transition-all hover:bg-black/80",
-                        PROTON_RANK_COLORS[protonData.rating?.toLowerCase()] || "text-zinc-300 border-white/10"
+                        "px-3 py-1 rounded-full font-semibold flex items-center gap-1.5 backdrop-blur-md cursor-pointer transition-all hover:bg-black/80",
+                        PROTON_RANK_COLORS[protonData.rating?.toLowerCase()] || "text-sky-400 border-sky-500/30"
                       )}
                       onClick={() => window.open(protonData.url || `https://www.protondb.com/app/${game.appid}`, "_blank")}
                       title="ProtonDB - Linux compatibility rating"
@@ -1098,7 +1260,7 @@ export function GameDetailPage() {
                   ) : protonData && !protonData.success ? (
                     <Badge
                       variant="online"
-                      className="px-3 py-1 rounded-full text-zinc-300 border-white/10 font-semibold flex items-center gap-1.5 backdrop-blur-md shadow-lg cursor-pointer transition-all hover:bg-black/80"
+                      className="px-3 py-1 rounded-full text-sky-400 border-sky-500/30 font-semibold flex items-center gap-1.5 backdrop-blur-md cursor-pointer transition-all hover:bg-black/80"
                       onClick={() => window.open("https://www.protondb.com/", "_blank")}
                       title="ProtonDB - Linux compatibility rating not available"
                     >
@@ -1108,11 +1270,23 @@ export function GameDetailPage() {
                   ) : null}
                 </div>
 
-                <div className="space-y-2">
-                  <h1 className="text-4xl md:text-6xl font-light text-white tracking-tight drop-shadow-lg">
+                <div className="space-y-3">
+                  {game.hero_logo ? (
+                    <div className="relative h-20 w-full max-w-[min(70vw,520px)] md:h-28">
+                      <img
+                        src={proxyImageUrl(game.hero_logo) || ""}
+                        alt={`${game.name} logo`}
+                        className="h-full w-full object-contain object-left drop-shadow-[0_8px_32px_rgba(0,0,0,0.45)]"
+                      />
+                    </div>
+                  ) : null}
+                  <h1 className={cn(
+                    "text-4xl md:text-6xl font-black text-white tracking-tight",
+                    game.hero_logo ? "text-xl md:text-2xl text-white/90" : ""
+                  )}>
                     {game.name}
                   </h1>
-                  <p className="text-lg text-white/70 flex items-center gap-2 font-medium drop-shadow-md">
+                  <p className="text-lg text-white/90 flex items-center gap-2 font-medium">
                     <User className="h-4 w-4" />
                     {game.developer || "Unknown Developer"}
                   </p>
@@ -1130,24 +1304,52 @@ export function GameDetailPage() {
         <div className="max-w-6xl mx-auto">
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             <div className="lg:col-span-2 space-y-8">
-              <div className="p-8 rounded-2xl glass">
-                <p className="section-label mb-2">Overview</p>
-                <h2 className="text-2xl font-light text-white mb-4 tracking-tight">About This Game</h2>
-                <p className="text-base text-zinc-300 leading-relaxed whitespace-pre-wrap">
+              <div className="p-8 rounded-3xl bg-zinc-900/60 border border-white/[.07] backdrop-blur-md shadow-xl">
+                <h2 className="text-2xl font-black text-white mb-4 tracking-tight">About This Game</h2>
+                <p className="text-base text-zinc-300 leading-relaxed whitespace-pre-wrap font-medium">
                   {game.description}
                 </p>
               </div>
 
+              {/* Additional Notes */}
+              {game?.comment && (
+                <div
+                  ref={importantNoteRef}
+                  className={`p-6 rounded-3xl backdrop-blur-md shadow-xl transition-all duration-500 ${
+                    highlightImportantNote
+                      ? 'ring-2 ring-yellow-400/60 scale-[1.02]'
+                      : ''
+                  } ${game.hasHv
+                    ? 'bg-red-950/30 border border-red-500/30'
+                    : 'bg-zinc-800/50 border border-white/[.07]'
+                  }`}
+                >
+                  <div className="flex items-start gap-4">
+                    <div className={`p-2 rounded-full shrink-0 ${
+                      game.hasHv ? 'bg-red-900/50' : 'bg-zinc-800/50'
+                    }`}>
+                      <AlertTriangle className={`h-5 w-5 ${game.hasHv ? 'text-red-400' : 'text-white'}`} />
+                    </div>
+                    <div>
+                      <h3 className={`font-bold mb-1 ${game.hasHv ? 'text-red-300' : 'text-white'}`}>Important Note</h3>
+                      <p className={`text-sm font-medium leading-relaxed ${game.hasHv ? 'text-red-200' : 'text-zinc-300'}`}>{game.comment}</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Linux Experiences (community submissions) */}
-              <LinuxExperiences appid={game.appid} />
+              <div className="rounded-3xl overflow-hidden backdrop-blur-md bg-zinc-900/60 border border-white/[.07] shadow-xl">
+                <LinuxExperiences appid={game.appid} />
+              </div>
 
               {resolvedScreenshots.length > 0 && (
-                <div className="p-6 rounded-2xl glass">
-                  <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-xl font-light text-white tracking-tight">Screenshots</h3>
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm text-zinc-400">{resolvedScreenshots.length} images</span>
-                      <Button variant="outline" size="sm" className="h-8 px-2 border-white/[.07] bg-white/5 hover:bg-white/10 text-white" onClick={() => openLightbox(0)}>
+                <div className="p-8 rounded-3xl bg-zinc-900/60 border border-white/[.07] backdrop-blur-md shadow-xl">
+                  <div className="flex items-center justify-between mb-6">
+                    <h3 className="text-xl font-black text-white">Screenshots</h3>
+                    <div className="flex items-center gap-3">
+                      <span className="text-sm font-medium text-zinc-400">{resolvedScreenshots.length} images</span>
+                      <Button variant="outline" size="sm" className="h-8 px-3 rounded-full border-white/[.07] bg-zinc-900/40 hover:bg-zinc-800 text-white shadow-sm active:scale-95" onClick={() => openLightbox(0)}>
                         View All
                       </Button>
                     </div>
@@ -1158,7 +1360,7 @@ export function GameDetailPage() {
                       <button
                         key={`${screenshot}-${index}`}
                         onClick={() => openLightbox(index)}
-                        className="relative w-full aspect-video rounded-xl overflow-hidden border border-white/[.07] hover:border-zinc-500 hover:scale-[1.02] transition-all shadow-md"
+                        className="relative w-full aspect-video rounded-2xl overflow-hidden border border-white/[.07] hover:border-zinc-600 hover:scale-[1.02] transition-transform shadow-md active:scale-95"
                         aria-label={`Open screenshot ${index + 1}`}
                       >
                         <img
@@ -1173,12 +1375,12 @@ export function GameDetailPage() {
                     {resolvedScreenshots.length > 6 && (
                       <button
                         onClick={() => openLightbox(6)}
-                        className="relative col-span-2 sm:col-auto w-full aspect-video rounded-lg overflow-hidden border border-zinc-800 flex items-center justify-center bg-zinc-900/50"
+                        className="relative col-span-2 sm:col-auto w-full aspect-video rounded-2xl overflow-hidden border border-white/[.07] flex items-center justify-center bg-zinc-900/40 hover:bg-zinc-800 transition-colors backdrop-blur-sm active:scale-95"
                         aria-label="View more screenshots"
                       >
                         <div className="text-center">
-                          <div className="text-lg font-bold">+{resolvedScreenshots.length - 6}</div>
-                          <div className="text-sm text-zinc-400">more</div>
+                          <div className="text-xl font-black text-white">+{resolvedScreenshots.length - 6}</div>
+                          <div className="text-sm font-medium text-zinc-400">more</div>
                         </div>
                       </button>
                     )}
@@ -1187,14 +1389,14 @@ export function GameDetailPage() {
               )}
 
               {game?.dlc && game.dlc.length > 0 && (
-                <div className="p-8 rounded-2xl glass">
-                  <h2 className="text-2xl font-light text-white mb-4 tracking-tight">
+                <div className="p-8 rounded-3xl bg-zinc-900/60 border border-white/[.07] backdrop-blur-md shadow-xl">
+                  <h2 className="text-2xl font-black text-white mb-4">
                     Included DLC ({game.dlc.length})
                   </h2>
-                  <ul className="space-y-2 max-h-[400px] overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-white/20 hover:scrollbar-thumb-white/40">
+                  <ul className="space-y-2 max-h-[400px] overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-foreground/20 hover:scrollbar-thumb-foreground/40">
                     {game.dlc.map((dlc, index) => (
-                      <li key={`${dlc}-${index}`} className="flex items-center gap-2 text-zinc-300 bg-white/5 p-2 rounded-lg border border-white/[.07]">
-                        <span className="h-1.5 w-1.5 rounded-full bg-zinc-400 flex-shrink-0" />
+                      <li key={`${dlc}-${index}`} className="flex items-center gap-3 text-zinc-300 font-medium bg-zinc-900/40 p-3 rounded-2xl border border-white/[.07] shadow-sm">
+                        <span className="h-2 w-2 rounded-full bg-white flex-shrink-0" />
                         {dlc}
                       </li>
                     ))}
@@ -1202,30 +1404,14 @@ export function GameDetailPage() {
                 </div>
               )}
 
-              {game?.comment && (
-                <div id="game-important-note" className={`p-6 rounded-2xl flex items-start gap-3 ${
-                  game.hasHv
-                    ? 'bg-red-950/30 border border-red-500/30'
-                    : 'bg-zinc-800/50 border border-zinc-700/50'
-                }`}>
-                  <div className={`p-1.5 rounded-full shrink-0 mt-0.5 ${
-                    game.hasHv ? 'bg-red-900/30' : 'bg-zinc-800/30'
-                  }`}>
-                    <AlertTriangle className={`h-5 w-5 ${game.hasHv ? 'text-red-400' : 'text-zinc-400'}`} />
-                  </div>
-                  <div>
-                    <h3 className={`font-bold text-sm mb-1 ${game.hasHv ? 'text-red-300' : 'text-zinc-100'}`}>Important Note</h3>
-                    <p className={`text-sm leading-relaxed ${game.hasHv ? 'text-red-200' : 'text-zinc-400'}`}>{game.comment}</p>
-                  </div>
-                </div>
-              )}
+
             </div>
-            <div className="space-y-4">
-              <div className="p-6 rounded-2xl glass">
+            <div className="space-y-6">
+              <div className="p-8 rounded-3xl bg-zinc-950/60 border border-white/[.07] backdrop-blur-md shadow-xl">
                 <div className="flex items-center gap-3">
                   <Button
                     size="lg"
-                    className={`flex-1 font-bold text-lg py-6 rounded-xl shadow-lg transition-all duration-200 ${isGameRunning
+                    className={`flex-1 font-black text-lg py-7 rounded-full shadow-lg transition-all duration-300 active:scale-95 ${isGameRunning
                         ? "bg-destructive hover:bg-destructive/90"
                         : "bg-white text-black hover:bg-zinc-200"
                       }`}
@@ -1264,13 +1450,13 @@ export function GameDetailPage() {
                         <Button
                           variant="outline"
                           size="icon"
-                          className="h-[52px] w-[52px] rounded-xl border-zinc-700 bg-zinc-800 text-zinc-300 hover:bg-zinc-700 hover:text-white"
+                          className="h-[52px] w-[52px] rounded-full border-white/[.07] bg-zinc-900/60 text-zinc-300 hover:bg-zinc-800 hover:text-white backdrop-blur-md active:scale-95"
                           aria-label="Game actions"
                         >
                           <Settings className="h-5 w-5" />
                         </Button>
                       </PopoverTrigger>
-                      <PopoverContent align="end" className="w-56 rounded-2xl p-2 bg-zinc-950 border-white/10 text-white shadow-xl">
+                      <PopoverContent align="end" className="w-56 rounded-2xl p-2 bg-zinc-950/95 border border-white/[.07] text-white shadow-2xl backdrop-blur-xl">
                         <button
                           type="button"
                           onClick={() => {
@@ -1389,27 +1575,27 @@ export function GameDetailPage() {
                 )}
               </div>
 
-              <div className={`grid grid-cols-2 gap-3${isUCMatched ? ' opacity-40 blur-[2px] pointer-events-none select-none' : ''}`}>
-                <div className="p-4 rounded-xl glass text-center">
-                  <Download className="h-5 w-5 text-zinc-400 mx-auto mb-2" />
-                  <div className="text-2xl font-bold text-white">
+              <div className={`grid grid-cols-2 gap-4${isUCMatched ? ' opacity-40 blur-[2px] pointer-events-none select-none' : ''}`}>
+                <div className="p-5 rounded-3xl bg-zinc-900/60 border border-white/[.07] backdrop-blur-md text-center shadow-xl">
+                  <Download className="h-6 w-6 text-white mx-auto mb-3 drop-shadow-md" />
+                  <div className="text-3xl font-black text-white tracking-tight">
                     {formatNumber(effectiveDownloadCount)}
                   </div>
-                  <div className="text-xs text-zinc-400">Downloads</div>
+                  <div className="text-xs font-bold text-zinc-500 uppercase tracking-wider mt-1">Downloads</div>
                 </div>
 
-                <div className="p-4 rounded-xl glass text-center">
-                  <Eye className="h-5 w-5 text-zinc-400 mx-auto mb-2" />
-                  <div className="text-2xl font-bold text-white">
+                <div className="p-5 rounded-3xl bg-zinc-900/60 border border-white/[.07] backdrop-blur-md text-center shadow-xl">
+                  <Eye className="h-6 w-6 text-blue-500 mx-auto mb-3 drop-shadow-md" />
+                  <div className="text-3xl font-black text-white tracking-tight">
                     {formatNumber(effectiveViewCount)}
                   </div>
-                  <div className="text-xs text-zinc-400">Views</div>
+                  <div className="text-xs font-bold text-zinc-500 uppercase tracking-wider mt-1">Views</div>
                 </div>
               </div>
 
-              <div className="p-6 rounded-2xl glass space-y-4">
+              <div className="p-8 rounded-3xl bg-zinc-900/60 border border-white/[.07] backdrop-blur-md space-y-5 shadow-xl">
                 <div className="flex items-center justify-between">
-                  <h3 className="section-label">Details</h3>
+                  <h3 className="font-black text-white tracking-tight">Details</h3>
                   {isExternalGame && (
                     <Button
                       variant="ghost"
@@ -1430,13 +1616,13 @@ export function GameDetailPage() {
                   </div>
                 )}
 
-                <div className={`space-y-3 text-sm${isUCMatched ? ' opacity-50 blur-[1.5px] select-none' : ''}`}>
-                  <div className="flex items-center justify-between">
-                    <span className="text-zinc-400 flex items-center gap-2">
+                <div className={`space-y-4 text-sm font-medium${isUCMatched ? ' opacity-50 blur-[1.5px] select-none' : ''}`}>
+                  <div className="flex items-center justify-between py-1.5 border-b border-white/[.07] pb-3">
+                    <span className="text-zinc-400 flex items-center gap-2.5">
                       <Calendar className="h-4 w-4" />
                       Released
                     </span>
-                    <span className="font-semibold text-white">
+                    <span className="font-bold text-white">
                       {(() => {
                         const date = new Date(game.release_date)
                         return isNaN(date.getTime()) ? game.release_date : date.toLocaleDateString()
@@ -1444,27 +1630,30 @@ export function GameDetailPage() {
                     </span>
                   </div>
 
-                  <div className="flex items-center justify-between">
-                    <span className="text-zinc-400 flex items-center gap-2">
+                  <div className="flex items-center justify-between py-1.5 border-b border-white/[.07] pb-3">
+                    <span className="text-zinc-400 flex items-center gap-2.5">
                       <HardDrive className="h-4 w-4" />
                       Size
                     </span>
-                    <span className="font-semibold text-white">{game?.size || "Unknown"}</span>
+                    <span className="font-bold text-white">{game?.size || "Unknown"}</span>
                   </div>
 
                   {(game.version || installedVersionLabels.length > 0) && (
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-center justify-between py-1.5 border-b border-white/[.07] pb-3">
                       <span className="text-zinc-400">Version</span>
-                      <span className="font-semibold text-white">
+                      <span className="font-bold text-white">
                         {installedVersionLabels[0] || game.version}
                       </span>
                     </div>
                   )}
 
                   {game.update_time && (
-                    <div className="flex items-center justify-between">
-                      <span className="text-zinc-400">Updated</span>
-                      <span className="font-semibold text-white">
+                    <div className="flex items-center justify-between py-1.5 border-b border-white/[.07] pb-3">
+                      <span className="text-zinc-400 flex items-center gap-2.5">
+                        <RefreshCw className="h-4 w-4" />
+                        Updated
+                      </span>
+                      <span className="font-bold text-white">
                         {(() => {
                           const date = new Date(game.update_time)
                           return isNaN(date.getTime()) ? game.update_time : date.toLocaleDateString()
@@ -1473,18 +1662,15 @@ export function GameDetailPage() {
                     </div>
                   )}
 
-                  <div className="flex items-center justify-between">
-                    <span className="text-zinc-400 flex items-center gap-2">
-                      <ShieldCheck className="h-4 w-4" />
-                      Source
-                    </span>
-                    <span className="font-semibold text-white">{game?.source || "Unknown"}</span>
+                  <div className="flex items-center justify-between py-1.5">
+                    <span className="text-zinc-400 flex items-center gap-2.5">Source</span>
+                    <span className="font-bold text-white">{game?.source || "Unknown"}</span>
                   </div>
                 </div>
               </div>
 
               {/* ── Collections & Tags ── */}
-              <div className="p-6 rounded-2xl glass space-y-4">
+              <div className="p-8 rounded-3xl bg-zinc-900/60 border border-white/[.07] backdrop-blur-md space-y-5 shadow-xl">
                 <div className="space-y-3">
                   <h3 className="section-label flex items-center gap-2">
                     <Layers3 className="h-4 w-4 text-zinc-400" />
@@ -1558,13 +1744,16 @@ export function GameDetailPage() {
         </div>
       </section>
 
-      <GameComments appid={game.appid} gameName={game.name} />
+      <div className="container mx-auto px-4 relative z-10">
+        <div className="max-w-6xl mx-auto rounded-3xl overflow-hidden backdrop-blur-md bg-zinc-900/60 border border-white/[.07] shadow-xl">
+          <GameComments appid={game.appid} gameName={game.name} />
+        </div>
+      </div>
 
       {relatedGames.length > 0 && (
-        <section className="py-16 px-4 bg-black/20">
+        <section className="py-20 px-4 relative z-10">
           <div className="container mx-auto max-w-7xl">
-            <p className="section-label mb-2">Related</p>
-            <h2 className="text-2xl font-light tracking-tight text-white mb-8">
+            <h2 className="text-3xl md:text-4xl font-black text-white mb-10 text-center">
               You May Also Like
             </h2>
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6 stagger-grid">
@@ -1581,33 +1770,70 @@ export function GameDetailPage() {
         </section>
       )}
 
-      {resolvedScreenshots.length > 0 && lightboxOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div className="absolute inset-0 bg-black/80 z-50" onClick={closeLightbox} aria-hidden="true" />
+      {lightboxScreenshots.length > 0 && lightboxOpen && typeof document !== "undefined" && createPortal(
+        <div className="fixed inset-0 z-[10000] flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/90 backdrop-blur-md z-[10000]" onClick={closeLightbox} aria-hidden="true" />
 
           <button
-            className="absolute top-6 right-6 z-60 bg-background/60 rounded-full p-2"
+            className="absolute top-6 right-6 z-[10010] bg-zinc-800/50 hover:bg-zinc-700 border border-white/[.07] rounded-full p-3 backdrop-blur-md transition-all active:scale-95"
             onClick={closeLightbox}
             aria-label="Close"
           >
-            <X className="h-5 w-5 text-foreground" />
+            <X className="h-6 w-6 text-white" />
           </button>
 
           <button
             onClick={prevLightbox}
-            className="absolute left-6 z-60 p-2 rounded-full bg-background/60"
+            className="absolute left-2 sm:left-6 top-1/2 -translate-y-1/2 z-[10010] p-2 sm:p-4 rounded-full bg-zinc-800/60 hover:bg-zinc-800 border border-white/[.07] backdrop-blur-md transition-all active:scale-95"
             aria-label="Previous"
           >
-            <ChevronLeft className="h-6 w-6 text-foreground" />
+            <ChevronLeft className="h-6 w-6 sm:h-8 sm:w-8 text-white" />
           </button>
 
-          <div className="relative z-60 max-w-[95vw] max-h-[88vh] flex items-center justify-center px-4 pointer-events-auto">
+          <div
+            className="relative z-[10010] max-w-[98vw] max-h-[92vh] flex items-center justify-center px-2 sm:px-4 pointer-events-auto"
+            onWheel={(event) => {
+              event.preventDefault()
+              if (event.deltaY < 0) {
+                zoomInLightbox()
+              } else {
+                zoomOutLightbox()
+              }
+            }}
+          >
             <div className="w-full h-full flex items-center justify-center">
-              <div className="w-full max-w-[1200px] max-h-[80vh] flex items-center justify-center">
+              <div
+                ref={lightboxViewportRef}
+                className="w-full max-w-[1600px] max-h-[88vh] flex items-center justify-center rounded-2xl overflow-hidden shadow-[0_0_50px_rgba(0,0,0,0.8)] border border-white/[.07]"
+                style={{ touchAction: lightboxZoom > 1 ? "none" : "auto" }}
+                onPointerDown={handleLightboxPointerDown}
+                onPointerMove={handleLightboxPointerMove}
+                onPointerUp={handleLightboxPointerUp}
+                onPointerCancel={handleLightboxPointerUp}
+              >
                 <img
-                  src={proxyImageUrl(resolvedScreenshots[lightboxIndex]) || "./banner.png"}
+                  src={proxyImageUrl(getHighQualityScreenshotUrl(lightboxScreenshots[lightboxIndex])) || "./banner.png"}
                   alt={`Screenshot ${lightboxIndex + 1}`}
-                  className="max-w-full max-h-full object-contain mx-auto"
+                  className={cn(
+                    "max-w-full max-h-full object-contain mx-auto transition-transform duration-200 select-none",
+                    lightboxZoom > 1 ? (lightboxDragging ? "cursor-grabbing" : "cursor-grab") : "cursor-zoom-in",
+                  )}
+                  draggable={false}
+                  onDragStart={(event) => event.preventDefault()}
+                  style={{ transform: `translate(${lightboxPan.x}px, ${lightboxPan.y}px) scale(${lightboxZoom})` }}
+                  onClick={() => {
+                    if (suppressLightboxImageClickRef.current) {
+                      suppressLightboxImageClickRef.current = false
+                      return
+                    }
+
+                    if (lightboxZoom > 1) {
+                      resetLightboxZoom()
+                    } else {
+                      setLightboxZoom(2)
+                      setLightboxPan({ x: 0, y: 0 })
+                    }
+                  }}
                 />
               </div>
             </div>
@@ -1615,17 +1841,54 @@ export function GameDetailPage() {
 
           <button
             onClick={nextLightbox}
-            className="absolute right-6 z-60 p-2 rounded-full bg-background/60"
+            className="absolute right-2 sm:right-6 top-1/2 -translate-y-1/2 z-[10010] p-2 sm:p-4 rounded-full bg-zinc-800/60 hover:bg-zinc-800 border border-white/[.07] backdrop-blur-md transition-all active:scale-95"
             aria-label="Next"
           >
-            <ChevronRight className="h-6 w-6 text-foreground" />
+            <ChevronRight className="h-6 w-6 sm:h-8 sm:w-8 text-white" />
           </button>
 
-          <div className="absolute bottom-6 text-center text-sm text-muted-foreground z-60">
-            {`${lightboxIndex + 1} / ${resolvedScreenshots.length}`}
+          <div className="absolute bottom-5 left-1/2 -translate-x-1/2 bg-black/55 backdrop-blur-md px-3 sm:px-4 py-2 rounded-full border border-white/[.07] text-xs sm:text-sm font-bold text-white z-[10010] tracking-widest shadow-lg flex items-center gap-2 sm:gap-3">
+            <button
+              onClick={prevLightbox}
+              className="md:hidden h-8 w-8 rounded-full border border-white/[.12] bg-zinc-900/70 hover:bg-zinc-800/80 flex items-center justify-center active:scale-95"
+              aria-label="Previous screenshot"
+            >
+              <ChevronLeft className="h-4 w-4 text-white" />
+            </button>
+            <button
+              onClick={zoomOutLightbox}
+              className="h-8 w-8 rounded-full border border-white/[.12] bg-zinc-900/70 hover:bg-zinc-800/80 flex items-center justify-center active:scale-95"
+              aria-label="Zoom out"
+            >
+              <Minus className="h-4 w-4 text-white" />
+            </button>
+            <button
+              onClick={resetLightboxZoom}
+              className="px-3 h-8 rounded-full border border-white/[.12] bg-zinc-900/70 hover:bg-zinc-800/80 text-[11px] sm:text-xs font-black text-white active:scale-95"
+              aria-label="Reset zoom"
+            >
+              {`${Math.round(lightboxZoom * 100)}%`}
+            </button>
+            <button
+              onClick={zoomInLightbox}
+              className="h-8 w-8 rounded-full border border-white/[.12] bg-zinc-900/70 hover:bg-zinc-800/80 flex items-center justify-center active:scale-95"
+              aria-label="Zoom in"
+            >
+              <Plus className="h-4 w-4 text-white" />
+            </button>
+            <span>{`${lightboxIndex + 1} / ${lightboxScreenshots.length}`}</span>
+            <button
+              onClick={nextLightbox}
+              className="md:hidden h-8 w-8 rounded-full border border-white/[.12] bg-zinc-900/70 hover:bg-zinc-800/80 flex items-center justify-center active:scale-95"
+              aria-label="Next screenshot"
+            >
+              <ChevronRight className="h-4 w-4 text-white" />
+            </button>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
+      </div>{/* close relative z-10 */}
       <UpdateBackupWarningModal
         open={updateWarningOpen}
         onProceed={async () => {
