@@ -6,38 +6,259 @@ import { Slider } from './ui/slider'
 import { Button } from './ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs'
 import { useEffect, useState, useCallback } from 'react'
-import { 
-  Gamepad2, Plus, Trash2, Copy, Settings, Keyboard, Mouse, 
-  Save, RefreshCw, ChevronRight, X, Check
+import {
+  Gamepad2, Plus, Trash2, Copy, Settings, Keyboard, Mouse,
+  RefreshCw, ChevronRight, X, Pencil,
 } from 'lucide-react'
-import { createDefaultProfile, ControllerPresets, Xbox360ButtonLabels, NativeButtonLabels, detectControllerType } from '../lib/controller-mappings'
+import {
+  createDefaultProfile,
+  Xbox360ButtonLabels,
+  NativeButtonLabels,
+  NativeButton,
+  InputAction,
+} from '../lib/controller-mappings'
+
+// ─── Button list ─────────────────────────────────────────────────────────────
+
+const BUTTON_GROUPS: Array<{ group: string; buttons: Array<{ key: NativeButton; label: string }> }> = [
+  {
+    group: 'Face',
+    buttons: [
+      { key: NativeButton.A,  label: 'A' },
+      { key: NativeButton.B,  label: 'B' },
+      { key: NativeButton.X,  label: 'X' },
+      { key: NativeButton.Y,  label: 'Y' },
+    ],
+  },
+  {
+    group: 'Bumpers & Triggers',
+    buttons: [
+      { key: NativeButton.LB, label: 'LB (Left Bumper)' },
+      { key: NativeButton.RB, label: 'RB (Right Bumper)' },
+      { key: NativeButton.LT, label: 'LT (Left Trigger)' },
+      { key: NativeButton.RT, label: 'RT (Right Trigger)' },
+    ],
+  },
+  {
+    group: 'Sticks',
+    buttons: [
+      { key: NativeButton.LS, label: 'L3 (Left Stick Click)' },
+      { key: NativeButton.RS, label: 'R3 (Right Stick Click)' },
+    ],
+  },
+  {
+    group: 'Menu',
+    buttons: [
+      { key: NativeButton.START, label: 'Start / Menu' },
+      { key: NativeButton.BACK,  label: 'Back / View' },
+      { key: NativeButton.GUIDE, label: 'Guide / Home' },
+    ],
+  },
+  {
+    group: 'D-Pad',
+    buttons: [
+      { key: NativeButton.DPAD_UP,    label: 'D-Pad Up' },
+      { key: NativeButton.DPAD_DOWN,  label: 'D-Pad Down' },
+      { key: NativeButton.DPAD_LEFT,  label: 'D-Pad Left' },
+      { key: NativeButton.DPAD_RIGHT, label: 'D-Pad Right' },
+    ],
+  },
+  {
+    group: 'Special',
+    buttons: [
+      { key: NativeButton.TOUCHPAD, label: 'Touchpad Click' },
+      { key: NativeButton.SHARE,    label: 'Share / Create' },
+    ],
+  },
+]
+
+// ─── Formatting helpers ───────────────────────────────────────────────────────
+
+function formatAction(action: InputAction | undefined): string {
+  if (!action || action.type === 'none') return ''
+  if (action.type === 'keyboard') {
+    const { key, modifiers } = action.key
+    const parts: string[] = []
+    if (modifiers?.ctrl)  parts.push('Ctrl')
+    if (modifiers?.alt)   parts.push('Alt')
+    if (modifiers?.shift) parts.push('Shift')
+    if (modifiers?.meta)  parts.push('Win')
+    parts.push(key === ' ' ? 'Space' : key)
+    return parts.join('+')
+  }
+  if (action.type === 'mouse') {
+    const { input } = action
+    if (input.type === 'scroll') return input.direction === 'up' ? 'Scroll Up' : 'Scroll Down'
+    if (input.button === 'left')   return 'Left Click'
+    if (input.button === 'right')  return 'Right Click'
+    if (input.button === 'middle') return 'Middle Click'
+    return 'Mouse'
+  }
+  if (action.type === 'xbox360') {
+    if (action.button) return `Xbox: ${action.button.toUpperCase()}`
+    if (action.axis)   return `Axis: ${action.axis}`
+  }
+  return ''
+}
+
+function actionBadgeClass(action: InputAction | undefined): string {
+  if (!action || action.type === 'none') return ''
+  if (action.type === 'keyboard') return 'bg-blue-900/40 text-blue-300 border border-blue-700/40'
+  if (action.type === 'mouse')    return 'bg-green-900/40 text-green-300 border border-green-700/40'
+  return 'bg-purple-900/40 text-purple-300 border border-purple-700/40'
+}
+
+// ─── BindingCapture component ─────────────────────────────────────────────────
+
+interface BindingCaptureProps {
+  buttonLabel: string
+  currentAction: InputAction | undefined
+  onSave: (action: InputAction) => void
+  onCancel: () => void
+}
+
+function BindingCapture({ buttonLabel, currentAction, onSave, onCancel }: BindingCaptureProps) {
+  const [waitingKey, setWaitingKey] = useState(false)
+
+  useEffect(() => {
+    if (!waitingKey) return
+    const handleKeyDown = (e: KeyboardEvent) => {
+      e.preventDefault()
+      e.stopPropagation()
+      if (['Control', 'Alt', 'Shift', 'Meta'].includes(e.key)) return
+      onSave({
+        type: 'keyboard',
+        key: {
+          key: e.key,
+          code: e.code,
+          modifiers: {
+            ctrl:  e.ctrlKey  || undefined,
+            alt:   e.altKey   || undefined,
+            shift: e.shiftKey || undefined,
+            meta:  e.metaKey  || undefined,
+          },
+        },
+      })
+    }
+    window.addEventListener('keydown', handleKeyDown, true)
+    return () => window.removeEventListener('keydown', handleKeyDown, true)
+  }, [waitingKey, onSave])
+
+  return (
+    <div className="rounded-lg border border-blue-500/40 bg-blue-950/30 p-4 space-y-3">
+      <div className="flex items-center justify-between">
+        <span className="text-sm font-medium text-white">
+          Binding: <span className="text-blue-300">{buttonLabel}</span>
+        </span>
+        <button onClick={onCancel} className="text-gray-400 hover:text-white p-0.5">
+          <X size={15} />
+        </button>
+      </div>
+
+      {waitingKey ? (
+        <div className="flex flex-col items-center gap-2 py-4">
+          <Keyboard size={28} className="text-blue-400 animate-pulse" />
+          <p className="text-sm font-medium text-white">Press any key...</p>
+          <p className="text-xs text-gray-400">Ctrl / Alt / Shift combos are supported</p>
+          <button
+            onClick={() => setWaitingKey(false)}
+            className="mt-1 text-xs text-gray-400 hover:text-white underline"
+          >
+            Back
+          </button>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          <p className="text-xs text-gray-400">Choose what this button does:</p>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              onClick={() => setWaitingKey(true)}
+              className="flex items-center gap-2 px-3 py-2.5 rounded-lg bg-gray-700 hover:bg-gray-600 text-sm text-white transition-colors"
+            >
+              <Keyboard size={15} className="text-blue-400" />
+              Keyboard Key
+            </button>
+            <button
+              onClick={() => onSave({ type: 'mouse', input: { type: 'click', button: 'left' } })}
+              className="flex items-center gap-2 px-3 py-2.5 rounded-lg bg-gray-700 hover:bg-gray-600 text-sm text-white transition-colors"
+            >
+              <Mouse size={15} className="text-green-400" />
+              Left Click
+            </button>
+            <button
+              onClick={() => onSave({ type: 'mouse', input: { type: 'right_click', button: 'right' } })}
+              className="flex items-center gap-2 px-3 py-2.5 rounded-lg bg-gray-700 hover:bg-gray-600 text-sm text-white transition-colors"
+            >
+              <Mouse size={15} className="text-yellow-400" />
+              Right Click
+            </button>
+            <button
+              onClick={() => onSave({ type: 'mouse', input: { type: 'middle_click', button: 'middle' } })}
+              className="flex items-center gap-2 px-3 py-2.5 rounded-lg bg-gray-700 hover:bg-gray-600 text-sm text-white transition-colors"
+            >
+              <Mouse size={15} className="text-purple-400" />
+              Middle Click
+            </button>
+            <button
+              onClick={() => onSave({ type: 'mouse', input: { type: 'scroll', direction: 'up' } })}
+              className="flex items-center gap-2 px-3 py-2.5 rounded-lg bg-gray-700 hover:bg-gray-600 text-sm text-white transition-colors"
+            >
+              <Mouse size={15} className="text-cyan-400" />
+              Scroll Up
+            </button>
+            <button
+              onClick={() => onSave({ type: 'mouse', input: { type: 'scroll', direction: 'down' } })}
+              className="flex items-center gap-2 px-3 py-2.5 rounded-lg bg-gray-700 hover:bg-gray-600 text-sm text-white transition-colors"
+            >
+              <Mouse size={15} className="text-cyan-400" />
+              Scroll Down
+            </button>
+          </div>
+          {currentAction && currentAction.type !== 'none' && (
+            <button
+              onClick={() => onSave({ type: 'none' })}
+              className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-red-950/40 hover:bg-red-950/70 border border-red-700/30 text-sm text-red-400 transition-colors"
+            >
+              <X size={13} />
+              Clear Binding
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── Main panel ───────────────────────────────────────────────────────────────
 
 export function ControllerSettingsPanel() {
-  const { 
-    settings, 
-    connected, 
-    controllerInfo, 
-    loading, 
+  const {
+    settings,
+    connected,
+    controllerInfo,
+    loading,
     profiles,
     activeProfile,
-    updateSettings, 
+    updateSettings,
     setEnabled,
     checkControllers,
     setActiveMapping,
     setActiveProfile,
     createProfile,
     updateProfile,
-    deleteProfile
+    deleteProfile,
   } = useController()
-  
+
   const [localSettings, setLocalSettings] = useState<ControllerSettings>(settings)
   const [activeTab, setActiveTab] = useState('general')
-  const [editingProfile, setEditingProfile] = useState<ControllerProfile | null>(null)
   const [profileName, setProfileName] = useState('')
+  const [editingButton, setEditingButton] = useState<NativeButton | null>(null)
 
   useEffect(() => {
     setLocalSettings(settings)
   }, [settings])
+
+  // ── General handlers ──────────────────────────────────────────────────────
 
   const handleEnabledChange = async (enabled: boolean) => {
     setLocalSettings(prev => ({ ...prev, enabled }))
@@ -74,56 +295,47 @@ export function ControllerSettingsPanel() {
     await updateSettings({ buttonLayout: value as ControllerSettings['buttonLayout'] })
   }
 
-  // Input Translation (x360ce-style) handlers
+  // ── Input Translation handlers ────────────────────────────────────────────
+
   const handleInputTranslationToggle = async (enabled: boolean) => {
-    const newSettings = {
-      ...localSettings,
-      inputTranslation: { ...localSettings.inputTranslation, enabled }
-    }
+    const newSettings = { ...localSettings, inputTranslation: { ...localSettings.inputTranslation, enabled } }
     setLocalSettings(newSettings)
     await updateSettings({ inputTranslation: newSettings.inputTranslation })
   }
 
   const handleAutoDetectToggle = async (enabled: boolean) => {
-    const newSettings = {
-      ...localSettings,
-      inputTranslation: { ...localSettings.inputTranslation, autoDetect: enabled }
-    }
-    setLocalSettings(newSettings)
-    await updateSettings({ inputTranslation: newSettings.inputTranslation })
+    const ns = { ...localSettings, inputTranslation: { ...localSettings.inputTranslation, autoDetect: enabled } }
+    setLocalSettings(ns)
+    await updateSettings({ inputTranslation: ns.inputTranslation })
   }
 
   const handleMappingPresetChange = async (preset: string) => {
-    const newSettings = {
+    const ns = {
       ...localSettings,
-      inputTranslation: { ...localSettings.inputTranslation, mappingPreset: preset as ControllerSettings['inputTranslation']['mappingPreset'] }
+      inputTranslation: {
+        ...localSettings.inputTranslation,
+        mappingPreset: preset as ControllerSettings['inputTranslation']['mappingPreset'],
+      },
     }
-    setLocalSettings(newSettings)
-    await updateSettings({ inputTranslation: newSettings.inputTranslation })
+    setLocalSettings(ns)
+    await updateSettings({ inputTranslation: ns.inputTranslation })
     await setActiveMapping(preset)
   }
 
-  // Key Binding (antimicrox-style) handlers
+  // ── Key Binding handlers ──────────────────────────────────────────────────
+
   const handleKeyBindingToggle = async (enabled: boolean) => {
-    const newSettings = {
-      ...localSettings,
-      keyBinding: { ...localSettings.keyBinding, enabled }
-    }
-    setLocalSettings(newSettings)
-    await updateSettings({ keyBinding: newSettings.keyBinding })
+    const ns = { ...localSettings, keyBinding: { ...localSettings.keyBinding, enabled } }
+    setLocalSettings(ns)
+    await updateSettings({ keyBinding: ns.keyBinding })
   }
 
   const handleProfileSelect = async (profileId: string) => {
-    const nextSettings = {
-      ...localSettings,
-      keyBinding: {
-        ...localSettings.keyBinding,
-        activeProfileId: profileId,
-      },
-    }
-    setLocalSettings(nextSettings)
-    await updateSettings({ keyBinding: nextSettings.keyBinding })
+    const ns = { ...localSettings, keyBinding: { ...localSettings.keyBinding, activeProfileId: profileId } }
+    setLocalSettings(ns)
+    await updateSettings({ keyBinding: ns.keyBinding })
     await setActiveProfile(profileId)
+    setEditingButton(null)
   }
 
   const handleCreateProfile = async () => {
@@ -133,40 +345,100 @@ export function ControllerSettingsPanel() {
   }
 
   const handleDeleteProfile = async (profileId: string) => {
-    if (profiles.length <= 1) return // Keep at least one profile
+    if (profiles.length <= 1) return
     await deleteProfile(profileId)
   }
 
   const handleDuplicateProfile = async (profile: ControllerProfile | null) => {
     if (!profile) return
-    const duplicated: ControllerProfile = {
+    const dup: ControllerProfile = {
       ...profile,
       id: `profile_${Date.now()}`,
       name: `${profile.name} (Copy)`,
       createdAt: Date.now(),
-      updatedAt: Date.now()
+      updatedAt: Date.now(),
     }
-    await createProfile(duplicated)
+    await createProfile(dup)
   }
 
-  // Overlay settings
+  // Save a single button's binding inside the active profile
+  const saveButtonBinding = useCallback(async (button: NativeButton, action: InputAction) => {
+    if (!activeProfile) return
+    const updated: ControllerProfile = {
+      ...activeProfile,
+      keyBinding: {
+        ...activeProfile.keyBinding,
+        buttonMappings: {
+          ...activeProfile.keyBinding?.buttonMappings,
+          [button]: action,
+        },
+      },
+      updatedAt: Date.now(),
+    }
+    await updateProfile(updated)
+    setEditingButton(null)
+  }, [activeProfile, updateProfile])
+
+  // ── Stick / Trigger helpers ───────────────────────────────────────────────
+
+  const patchStickToMouse = async (patch: Partial<NonNullable<typeof activeProfile>['keyBinding']['stickToMouse']>) => {
+    if (!activeProfile) return
+    const updated: ControllerProfile = {
+      ...activeProfile,
+      keyBinding: {
+        ...activeProfile.keyBinding,
+        stickToMouse: {
+          leftStick: false,
+          rightStick: false,
+          mouseSpeed: 1.0,
+          mouseAcceleration: false,
+          ...activeProfile.keyBinding?.stickToMouse,
+          ...patch,
+        },
+      },
+      updatedAt: Date.now(),
+    }
+    await updateProfile(updated)
+  }
+
+  const patchTriggerToScroll = async (patch: Partial<NonNullable<typeof activeProfile>['keyBinding']['triggerToScroll']>) => {
+    if (!activeProfile) return
+    const updated: ControllerProfile = {
+      ...activeProfile,
+      keyBinding: {
+        ...activeProfile.keyBinding,
+        triggerToScroll: {
+          leftTrigger: false,
+          rightTrigger: false,
+          scrollSpeed: 1.0,
+          ...activeProfile.keyBinding?.triggerToScroll,
+          ...patch,
+        },
+      },
+      updatedAt: Date.now(),
+    }
+    await updateProfile(updated)
+  }
+
+  // ── Overlay handlers ──────────────────────────────────────────────────────
+
   const handleOverlayToggle = async (enabled: boolean) => {
-    const newSettings = { ...localSettings, overlayEnabled: enabled }
-    setLocalSettings(newSettings)
+    const ns = { ...localSettings, overlayEnabled: enabled }
+    setLocalSettings(ns)
     await updateSettings({ overlayEnabled: enabled })
     await (window.ucController as any)?.setOverlaySettings?.({ overlayEnabled: enabled })
   }
 
   const handleOverlayHotkeyChange = async (hotkey: string) => {
-    const newSettings = { ...localSettings, overlayHotkey: hotkey }
-    setLocalSettings(newSettings)
+    const ns = { ...localSettings, overlayHotkey: hotkey }
+    setLocalSettings(ns)
     await updateSettings({ overlayHotkey: hotkey })
     await (window.ucController as any)?.setOverlaySettings?.({ overlayHotkey: hotkey })
   }
 
   const handleOverlayPositionChange = async (position: 'left' | 'right') => {
-    const newSettings = { ...localSettings, overlayPosition: position }
-    setLocalSettings(newSettings)
+    const ns = { ...localSettings, overlayPosition: position }
+    setLocalSettings(ns)
     await updateSettings({ overlayPosition: position })
     await (window.ucController as any)?.setOverlaySettings?.({ overlayPosition: position })
   }
@@ -179,6 +451,8 @@ export function ControllerSettingsPanel() {
     )
   }
 
+  // ── Render ────────────────────────────────────────────────────────────────
+
   return (
     <div className="space-y-6 p-4">
       <Tabs value={activeTab} onValueChange={setActiveTab}>
@@ -189,24 +463,19 @@ export function ControllerSettingsPanel() {
           <TabsTrigger value="overlay">Overlay</TabsTrigger>
         </TabsList>
 
-        {/* General Tab */}
+        {/* ── General Tab ────────────────────────────────────────────────── */}
         <TabsContent value="general" className="space-y-6 mt-4">
           <div className="flex items-center justify-between">
             <div className="space-y-1">
               <Label className="text-base">Controller Support</Label>
-              <p className="text-sm text-gray-400">
-                Enable controller navigation and gamepad input
-              </p>
+              <p className="text-sm text-gray-400">Enable controller navigation and gamepad input</p>
             </div>
-            <Switch 
-              checked={localSettings.enabled} 
-              onCheckedChange={handleEnabledChange}
-            />
+            <Switch checked={localSettings.enabled} onCheckedChange={handleEnabledChange} />
           </div>
 
           {localSettings.enabled && (
             <>
-              {/* Controller Connection Status */}
+              {/* Connection status */}
               <div className="rounded-lg bg-gray-800/50 p-4">
                 <div className="flex items-center justify-between">
                   <div className="space-y-1">
@@ -214,32 +483,21 @@ export function ControllerSettingsPanel() {
                     <div className="flex items-center gap-2">
                       <div className={`h-2 w-2 rounded-full ${connected ? 'bg-green-500' : 'bg-gray-500'}`} />
                       <span className="text-sm text-gray-300">
-                        {connected 
-                          ? controllerInfo.name || 'Controller connected' 
-                          : 'No controller detected'
-                        }
+                        {connected ? (controllerInfo.name || 'Controller connected') : 'No controller detected'}
                       </span>
                     </div>
                   </div>
-                  <button 
-                    onClick={checkControllers}
-                    className="text-sm text-blue-400 hover:text-blue-300"
-                  >
+                  <button onClick={checkControllers} className="text-sm text-blue-400 hover:text-blue-300">
                     <RefreshCw size={16} />
                   </button>
                 </div>
               </div>
 
-              {/* Controller Type */}
+              {/* Controller type */}
               <div className="space-y-2">
                 <Label>Controller Type</Label>
-                <Select 
-                  value={localSettings.controllerType} 
-                  onValueChange={handleControllerTypeChange}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
+                <Select value={localSettings.controllerType} onValueChange={handleControllerTypeChange}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="generic">Generic</SelectItem>
                     <SelectItem value="xbox">Xbox</SelectItem>
@@ -250,89 +508,54 @@ export function ControllerSettingsPanel() {
                     <SelectItem value="xboxseries">Xbox Series X</SelectItem>
                   </SelectContent>
                 </Select>
-                <p className="text-xs text-gray-400">
-                  Affects button prompts and layout
-                </p>
+                <p className="text-xs text-gray-400">Affects button prompts and layout</p>
               </div>
 
               {/* Vibration */}
               <div className="flex items-center justify-between">
                 <div className="space-y-1">
                   <Label className="text-base">Vibration</Label>
-                  <p className="text-sm text-gray-400">
-                    Enable controller rumble feedback
-                  </p>
+                  <p className="text-sm text-gray-400">Enable controller rumble feedback</p>
                 </div>
-                <Switch 
-                  checked={localSettings.vibrationEnabled} 
-                  onCheckedChange={handleVibrationChange}
-                />
+                <Switch checked={localSettings.vibrationEnabled} onCheckedChange={handleVibrationChange} />
               </div>
 
-              {/* Deadzone */}
+              {/* Stick deadzone */}
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <Label>Stick Deadzone</Label>
-                  <span className="text-sm text-gray-400">
-                    {Math.round(localSettings.deadzone * 100)}%
-                  </span>
+                  <span className="text-sm text-gray-400">{Math.round(localSettings.deadzone * 100)}%</span>
                 </div>
-                <Slider 
-                  value={[localSettings.deadzone]} 
-                  min={0} 
-                  max={0.5} 
-                  step={0.01}
-                  onValueChange={handleDeadzoneChange}
-                />
-                <p className="text-xs text-gray-400">
-                  Minimum stick movement required for input
-                </p>
+                <Slider value={[localSettings.deadzone]} min={0} max={0.5} step={0.01} onValueChange={handleDeadzoneChange} />
+                <p className="text-xs text-gray-400">Minimum stick movement required for input</p>
               </div>
 
-              {/* Trigger Deadzone */}
+              {/* Trigger deadzone */}
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <Label>Trigger Deadzone</Label>
-                  <span className="text-sm text-gray-400">
-                    {Math.round(localSettings.triggerDeadzone * 100)}%
-                  </span>
+                  <span className="text-sm text-gray-400">{Math.round(localSettings.triggerDeadzone * 100)}%</span>
                 </div>
-                <Slider 
-                  value={[localSettings.triggerDeadzone]} 
-                  min={0} 
-                  max={0.5} 
-                  step={0.01}
-                  onValueChange={handleTriggerDeadzoneChange}
-                />
-                <p className="text-xs text-gray-400">
-                  Minimum trigger pressure required for input
-                </p>
+                <Slider value={[localSettings.triggerDeadzone]} min={0} max={0.5} step={0.01} onValueChange={handleTriggerDeadzoneChange} />
+                <p className="text-xs text-gray-400">Minimum trigger pressure required for input</p>
               </div>
 
-              {/* Button Layout */}
+              {/* Button layout */}
               <div className="space-y-2">
                 <Label>Button Layout</Label>
-                <Select 
-                  value={localSettings.buttonLayout} 
-                  onValueChange={handleButtonLayoutChange}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
+                <Select value={localSettings.buttonLayout} onValueChange={handleButtonLayoutChange}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="default">Default</SelectItem>
                     <SelectItem value="legacy">Legacy</SelectItem>
                   </SelectContent>
                 </Select>
-                <p className="text-xs text-gray-400">
-                  Choose button layout for prompts
-                </p>
               </div>
             </>
           )}
         </TabsContent>
 
-        {/* Input Translation Tab (x360ce-style) */}
+        {/* ── Input Translation Tab ───────────────────────────────────────── */}
         <TabsContent value="input-translation" className="space-y-6 mt-4">
           <div className="rounded-lg bg-purple-900/20 border border-purple-500/30 p-4">
             <div className="flex items-center gap-3 mb-2">
@@ -340,51 +563,42 @@ export function ControllerSettingsPanel() {
               <Label className="text-base font-medium">x360ce-Style Input Translation</Label>
             </div>
             <p className="text-sm text-gray-400">
-              Translate unsupported controller inputs (Windows/PS4/PS5) to Xbox 360 format for better game compatibility
+              Translate unsupported controller inputs to Xbox 360 format for better game compatibility
             </p>
           </div>
 
-          {/* Enable Input Translation */}
           <div className="flex items-center justify-between">
             <div className="space-y-1">
               <Label className="text-base">Enable Input Translation</Label>
-              <p className="text-sm text-gray-400">
-                Automatically translate controller inputs
-              </p>
+              <p className="text-sm text-gray-400">Automatically translate controller inputs</p>
             </div>
-            <Switch 
-              checked={localSettings.inputTranslation?.enabled ?? true} 
+            <Switch
+              checked={localSettings.inputTranslation?.enabled ?? true}
               onCheckedChange={handleInputTranslationToggle}
             />
           </div>
 
           {localSettings.inputTranslation?.enabled && (
             <>
-              {/* Auto-Detect */}
               <div className="flex items-center justify-between">
                 <div className="space-y-1">
                   <Label className="text-base">Auto-Detect Controller</Label>
-                  <p className="text-sm text-gray-400">
-                    Automatically detect and apply best mapping
-                  </p>
+                  <p className="text-sm text-gray-400">Automatically detect and apply best mapping</p>
                 </div>
-                <Switch 
-                  checked={localSettings.inputTranslation?.autoDetect ?? true} 
+                <Switch
+                  checked={localSettings.inputTranslation?.autoDetect ?? true}
                   onCheckedChange={handleAutoDetectToggle}
                 />
               </div>
 
-              {/* Mapping Preset */}
               <div className="space-y-2">
                 <Label>Controller Mapping Preset</Label>
-                <Select 
-                  value={localSettings.inputTranslation?.mappingPreset || 'auto'} 
+                <Select
+                  value={localSettings.inputTranslation?.mappingPreset || 'auto'}
                   onValueChange={handleMappingPresetChange}
                   disabled={localSettings.inputTranslation?.autoDetect}
                 >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="auto">Auto-Detect</SelectItem>
                     <SelectItem value="generic">Generic Controller</SelectItem>
@@ -396,12 +610,9 @@ export function ControllerSettingsPanel() {
                     <SelectItem value="xboxseries">Xbox Series X</SelectItem>
                   </SelectContent>
                 </Select>
-                <p className="text-xs text-gray-400">
-                  Select your controller type for proper button mapping
-                </p>
+                <p className="text-xs text-gray-400">Select your controller type for proper button mapping</p>
               </div>
 
-              {/* Current Mapping Display */}
               <div className="rounded-lg bg-gray-800/50 p-4">
                 <Label className="text-sm font-medium mb-3 block">Button Mapping Preview</Label>
                 <div className="grid grid-cols-2 gap-4">
@@ -417,7 +628,7 @@ export function ControllerSettingsPanel() {
                   <div className="space-y-2">
                     <div className="text-xs text-gray-500 uppercase">Xbox 360 Output</div>
                     {Object.entries(Xbox360ButtonLabels).slice(0, 8).map(([key, label]) => (
-                      <div key={key} className="flex items-center justify-between text-sm">
+                      <div key={key} className="text-sm">
                         <span className="text-purple-400 font-medium">{label}</span>
                       </div>
                     ))}
@@ -428,65 +639,58 @@ export function ControllerSettingsPanel() {
           )}
         </TabsContent>
 
-        {/* Key Binding Tab (antimicrox-style) */}
+        {/* ── Key Binding Tab ─────────────────────────────────────────────── */}
         <TabsContent value="key-binding" className="space-y-6 mt-4">
           <div className="rounded-lg bg-blue-900/20 border border-blue-500/30 p-4">
             <div className="flex items-center gap-3 mb-2">
               <Keyboard className="text-blue-400" size={20} />
-              <Label className="text-base font-medium">antimicrox-Style Key Binding</Label>
+              <Label className="text-base font-medium">Controller Remapping</Label>
             </div>
             <p className="text-sm text-gray-400">
-              Remap controller buttons, triggers, and sticks to keyboard and mouse inputs for games without controller support
+              Map any button, trigger, or stick to keyboard keys or mouse inputs.
+              Click a button row and press a key — or choose a mouse action.
             </p>
           </div>
 
-          {/* Enable Key Binding */}
+          {/* Enable toggle */}
           <div className="flex items-center justify-between">
             <div className="space-y-1">
               <Label className="text-base">Enable Key Binding</Label>
-              <p className="text-sm text-gray-400">
-                Map controller inputs to keyboard/mouse
-              </p>
+              <p className="text-sm text-gray-400">Map controller inputs to keyboard / mouse</p>
             </div>
-            <Switch 
-              checked={localSettings.keyBinding?.enabled ?? false} 
+            <Switch
+              checked={localSettings.keyBinding?.enabled ?? false}
               onCheckedChange={handleKeyBindingToggle}
             />
           </div>
 
           {localSettings.keyBinding?.enabled && (
             <>
-              {/* Profile Selection */}
+              {/* ── Profile management ─────────────────────────────────── */}
               <div className="space-y-3">
                 <Label>Active Profile</Label>
                 <div className="flex gap-2">
-                  <Select 
-                    value={localSettings.keyBinding?.activeProfileId || ''} 
+                  <Select
+                    value={localSettings.keyBinding?.activeProfileId || ''}
                     onValueChange={handleProfileSelect}
                   >
-                    <SelectTrigger className="flex-1">
-                      <SelectValue placeholder="Select profile" />
-                    </SelectTrigger>
+                    <SelectTrigger className="flex-1"><SelectValue placeholder="Select profile" /></SelectTrigger>
                     <SelectContent>
-                      {profiles.map(profile => (
-                        <SelectItem key={profile.id} value={profile.id}>
-                          {profile.name}
-                        </SelectItem>
+                      {profiles.map(p => (
+                        <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
-                  <Button 
-                    variant="outline" 
-                    size="icon"
+                  <Button
+                    variant="outline" size="icon"
                     onClick={() => handleDuplicateProfile(activeProfile)}
                     disabled={!activeProfile}
                     title="Duplicate profile"
                   >
                     <Copy size={16} />
                   </Button>
-                  <Button 
-                    variant="outline" 
-                    size="icon"
+                  <Button
+                    variant="outline" size="icon"
                     onClick={() => handleDeleteProfile(activeProfile?.id || '')}
                     disabled={profiles.length <= 1}
                     title="Delete profile"
@@ -494,160 +698,185 @@ export function ControllerSettingsPanel() {
                     <Trash2 size={16} />
                   </Button>
                 </div>
+
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    placeholder="New profile name"
+                    value={profileName}
+                    onChange={e => setProfileName(e.target.value)}
+                    className="flex-1 px-3 py-2 bg-gray-800 border border-gray-700 rounded-md text-white text-sm"
+                  />
+                  <Button onClick={handleCreateProfile}>
+                    <Plus size={16} className="mr-2" />
+                    Create
+                  </Button>
+                </div>
               </div>
 
-              {/* Create New Profile */}
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  placeholder="New profile name"
-                  value={profileName}
-                  onChange={(e) => setProfileName(e.target.value)}
-                  className="flex-1 px-3 py-2 bg-gray-800 border border-gray-700 rounded-md text-white text-sm"
-                />
-                <Button onClick={handleCreateProfile}>
-                  <Plus size={16} className="mr-2" />
-                  Create
-                </Button>
-              </div>
-
-              {/* Mouse Settings */}
               {activeProfile && (
-                <div className="rounded-lg bg-gray-800/50 p-4 space-y-4">
-                  <div className="flex items-center gap-2">
-                    <Mouse size={16} className="text-gray-400" />
-                    <Label className="text-sm font-medium">Stick to Mouse Settings</Label>
-                  </div>
-                  
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm text-gray-300">Left Stick to Mouse</span>
-                    <Switch 
-                      checked={activeProfile.keyBinding?.stickToMouse?.leftStick ?? false} 
-                      onCheckedChange={(checked) => {
-                        const updated = {
-                          ...activeProfile,
-                          keyBinding: {
-                            ...activeProfile.keyBinding,
-                            stickToMouse: {
-                              leftStick: checked,
-                              rightStick: activeProfile.keyBinding?.stickToMouse?.rightStick ?? false,
-                              mouseSpeed: activeProfile.keyBinding?.stickToMouse?.mouseSpeed ?? 1.0,
-                              mouseAcceleration: activeProfile.keyBinding?.stickToMouse?.mouseAcceleration ?? false
-                            }
-                          }
-                        }
-                        updateProfile(updated)
-                      }}
-                    />
-                  </div>
-
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm text-gray-300">Right Stick to Mouse</span>
-                    <Switch 
-                      checked={activeProfile.keyBinding?.stickToMouse?.rightStick ?? false} 
-                      onCheckedChange={(checked) => {
-                        const updated = {
-                          ...activeProfile,
-                          keyBinding: {
-                            ...activeProfile.keyBinding,
-                            stickToMouse: {
-                              leftStick: activeProfile.keyBinding?.stickToMouse?.leftStick ?? false,
-                              rightStick: checked,
-                              mouseSpeed: activeProfile.keyBinding?.stickToMouse?.mouseSpeed ?? 1.0,
-                              mouseAcceleration: activeProfile.keyBinding?.stickToMouse?.mouseAcceleration ?? false
-                            }
-                          }
-                        }
-                        updateProfile(updated)
-                      }}
-                    />
-                  </div>
-
-                  <div className="space-y-2">
+                <>
+                  {/* ── Button remapping table ──────────────────────────── */}
+                  <div className="space-y-4">
                     <div className="flex items-center justify-between">
-                      <Label>Mouse Speed</Label>
-                      <span className="text-sm text-gray-400">
-                        {activeProfile.keyBinding?.stickToMouse?.mouseSpeed ?? 1.0}x
-                      </span>
+                      <Label className="text-sm font-medium">Button &amp; Trigger Bindings</Label>
+                      <span className="text-xs text-gray-500">Click a row to assign a key or mouse action</span>
                     </div>
-                    <Slider 
-                      value={[activeProfile.keyBinding?.stickToMouse?.mouseSpeed ?? 1.0]} 
-                      min={0.1} 
-                      max={3.0} 
-                      step={0.1}
-                      onValueChange={([value]) => {
-                        const updated = {
-                          ...activeProfile,
-                          keyBinding: {
-                            ...activeProfile.keyBinding,
-                            stickToMouse: {
-                              leftStick: activeProfile.keyBinding?.stickToMouse?.leftStick ?? false,
-                              rightStick: activeProfile.keyBinding?.stickToMouse?.rightStick ?? false,
-                              mouseSpeed: value,
-                              mouseAcceleration: activeProfile.keyBinding?.stickToMouse?.mouseAcceleration ?? false
-                            }
-                          }
-                        }
-                        updateProfile(updated)
-                      }}
-                    />
-                  </div>
-                </div>
-              )}
 
-              {/* Scroll Settings */}
-              {activeProfile && (
-                <div className="rounded-lg bg-gray-800/50 p-4 space-y-4">
-                  <Label className="text-sm font-medium">Trigger to Scroll</Label>
-                  
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm text-gray-300">Left Trigger to Scroll</span>
-                    <Switch 
-                      checked={activeProfile.keyBinding?.triggerToScroll?.leftTrigger ?? false} 
-                      onCheckedChange={(checked) => {
-                        const updated = {
-                          ...activeProfile,
-                          keyBinding: {
-                            ...activeProfile.keyBinding,
-                            triggerToScroll: {
-                              leftTrigger: checked,
-                              rightTrigger: activeProfile.keyBinding?.triggerToScroll?.rightTrigger ?? false,
-                              scrollSpeed: activeProfile.keyBinding?.triggerToScroll?.scrollSpeed ?? 1.0
-                            }
+                    {BUTTON_GROUPS.map(({ group, buttons }) => (
+                      <div key={group} className="space-y-1">
+                        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide px-1 pt-1">
+                          {group}
+                        </p>
+                        {buttons.map(({ key: btnKey, label }) => {
+                          const currentAction = (activeProfile.keyBinding?.buttonMappings as Record<string, InputAction | undefined>)?.[btnKey]
+                          const isEditing = editingButton === btnKey
+                          const actionText = formatAction(currentAction)
+                          const hasBinding = !!actionText
+
+                          if (isEditing) {
+                            return (
+                              <BindingCapture
+                                key={btnKey}
+                                buttonLabel={label}
+                                currentAction={currentAction}
+                                onSave={action => saveButtonBinding(btnKey, action)}
+                                onCancel={() => setEditingButton(null)}
+                              />
+                            )
                           }
-                        }
-                        updateProfile(updated)
-                      }}
-                    />
+
+                          return (
+                            <button
+                              key={btnKey}
+                              onClick={() => setEditingButton(btnKey)}
+                              className="w-full flex items-center justify-between px-3 py-2 rounded-lg bg-gray-800/40 hover:bg-gray-800/80 group transition-colors text-left"
+                            >
+                              <div className="flex items-center gap-2">
+                                <Pencil
+                                  size={13}
+                                  className="text-gray-600 group-hover:text-gray-400 transition-colors flex-shrink-0"
+                                />
+                                <span className="text-sm text-gray-300">{label}</span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                {hasBinding ? (
+                                  <>
+                                    <span className={`text-xs font-medium px-2 py-0.5 rounded ${actionBadgeClass(currentAction)}`}>
+                                      {actionText}
+                                    </span>
+                                    <button
+                                      onClick={e => { e.stopPropagation(); saveButtonBinding(btnKey, { type: 'none' }) }}
+                                      className="p-0.5 text-gray-600 hover:text-red-400 transition-colors"
+                                      title="Clear binding"
+                                    >
+                                      <X size={13} />
+                                    </button>
+                                  </>
+                                ) : (
+                                  <span className="text-xs text-gray-600 italic">unbound</span>
+                                )}
+                              </div>
+                            </button>
+                          )
+                        })}
+                      </div>
+                    ))}
                   </div>
 
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm text-gray-300">Right Trigger to Scroll</span>
-                    <Switch 
-                      checked={activeProfile.keyBinding?.triggerToScroll?.rightTrigger ?? false} 
-                      onCheckedChange={(checked) => {
-                        const updated = {
-                          ...activeProfile,
-                          keyBinding: {
-                            ...activeProfile.keyBinding,
-                            triggerToScroll: {
-                              leftTrigger: activeProfile.keyBinding?.triggerToScroll?.leftTrigger ?? false,
-                              rightTrigger: checked,
-                              scrollSpeed: activeProfile.keyBinding?.triggerToScroll?.scrollSpeed ?? 1.0
-                            }
-                          }
-                        }
-                        updateProfile(updated)
-                      }}
-                    />
+                  {/* ── Stick to mouse ─────────────────────────────────── */}
+                  <div className="rounded-lg bg-gray-800/50 p-4 space-y-4">
+                    <div className="flex items-center gap-2 mb-1">
+                      <Mouse size={16} className="text-gray-400" />
+                      <Label className="text-sm font-medium">Stick to Mouse</Label>
+                    </div>
+
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-gray-300">Left Stick → Mouse</span>
+                      <Switch
+                        checked={activeProfile.keyBinding?.stickToMouse?.leftStick ?? false}
+                        onCheckedChange={checked => patchStickToMouse({ leftStick: checked })}
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-gray-300">Right Stick → Mouse</span>
+                      <Switch
+                        checked={activeProfile.keyBinding?.stickToMouse?.rightStick ?? false}
+                        onCheckedChange={checked => patchStickToMouse({ rightStick: checked })}
+                      />
+                    </div>
+
+                    {(activeProfile.keyBinding?.stickToMouse?.leftStick || activeProfile.keyBinding?.stickToMouse?.rightStick) && (
+                      <div className="space-y-2 pt-1">
+                        <div className="flex items-center justify-between">
+                          <Label className="text-sm">Mouse Speed</Label>
+                          <span className="text-sm text-gray-400">
+                            {activeProfile.keyBinding?.stickToMouse?.mouseSpeed?.toFixed(1) ?? '1.0'}×
+                          </span>
+                        </div>
+                        <Slider
+                          value={[activeProfile.keyBinding?.stickToMouse?.mouseSpeed ?? 1.0]}
+                          min={0.1} max={5.0} step={0.1}
+                          onValueChange={([v]) => patchStickToMouse({ mouseSpeed: v })}
+                        />
+                        <div className="flex items-center justify-between pt-1">
+                          <span className="text-sm text-gray-300">Mouse Acceleration</span>
+                          <Switch
+                            checked={activeProfile.keyBinding?.stickToMouse?.mouseAcceleration ?? false}
+                            onCheckedChange={checked => patchStickToMouse({ mouseAcceleration: checked })}
+                          />
+                        </div>
+                      </div>
+                    )}
                   </div>
-                </div>
+
+                  {/* ── Trigger to scroll ──────────────────────────────── */}
+                  <div className="rounded-lg bg-gray-800/50 p-4 space-y-4">
+                    <Label className="text-sm font-medium block">Trigger to Scroll</Label>
+                    <p className="text-xs text-gray-500 -mt-2">
+                      When enabled, the analog trigger axis drives scroll — overrides any button binding for that trigger.
+                    </p>
+
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-gray-300">Left Trigger → Scroll Down</span>
+                      <Switch
+                        checked={activeProfile.keyBinding?.triggerToScroll?.leftTrigger ?? false}
+                        onCheckedChange={checked => patchTriggerToScroll({ leftTrigger: checked })}
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-gray-300">Right Trigger → Scroll Up</span>
+                      <Switch
+                        checked={activeProfile.keyBinding?.triggerToScroll?.rightTrigger ?? false}
+                        onCheckedChange={checked => patchTriggerToScroll({ rightTrigger: checked })}
+                      />
+                    </div>
+
+                    {(activeProfile.keyBinding?.triggerToScroll?.leftTrigger || activeProfile.keyBinding?.triggerToScroll?.rightTrigger) && (
+                      <div className="space-y-2 pt-1">
+                        <div className="flex items-center justify-between">
+                          <Label className="text-sm">Scroll Speed</Label>
+                          <span className="text-sm text-gray-400">
+                            {activeProfile.keyBinding?.triggerToScroll?.scrollSpeed?.toFixed(1) ?? '1.0'}×
+                          </span>
+                        </div>
+                        <Slider
+                          value={[activeProfile.keyBinding?.triggerToScroll?.scrollSpeed ?? 1.0]}
+                          min={0.1} max={5.0} step={0.1}
+                          onValueChange={([v]) => patchTriggerToScroll({ scrollSpeed: v })}
+                        />
+                      </div>
+                    )}
+                  </div>
+                </>
               )}
             </>
           )}
         </TabsContent>
 
-        {/* Overlay Tab */}
+        {/* ── Overlay Tab ─────────────────────────────────────────────────── */}
         <TabsContent value="overlay" className="space-y-6 mt-4">
           <div className="rounded-lg bg-green-900/20 border border-green-500/30 p-4">
             <div className="flex items-center gap-3 mb-2">
@@ -659,62 +888,52 @@ export function ControllerSettingsPanel() {
             </p>
           </div>
 
-          {/* Enable Overlay */}
           <div className="flex items-center justify-between">
             <div className="space-y-1">
               <Label className="text-base">Enable Overlay</Label>
-              <p className="text-sm text-gray-400">
-                Show controller remapping flyout in games
-              </p>
+              <p className="text-sm text-gray-400">Show controller remapping flyout in games</p>
             </div>
-            <Switch 
-              checked={localSettings.overlayEnabled ?? true} 
-              onCheckedChange={handleOverlayToggle}
-            />
+            <Switch checked={localSettings.overlayEnabled ?? true} onCheckedChange={handleOverlayToggle} />
           </div>
 
           {localSettings.overlayEnabled && (
             <>
-              {/* Overlay Hotkey */}
               <div className="space-y-2">
                 <Label>Overlay Hotkey</Label>
                 <input
                   type="text"
                   value={localSettings.overlayHotkey || 'Ctrl+Shift+Gamepad'}
-                  onChange={(e) => handleOverlayHotkeyChange(e.target.value)}
+                  onChange={e => handleOverlayHotkeyChange(e.target.value)}
                   className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-md text-white text-sm"
                   placeholder="Ctrl+Shift+Gamepad"
                 />
-                <p className="text-xs text-gray-400">
-                  Keyboard shortcut to open the controller overlay
-                </p>
+                <p className="text-xs text-gray-400">Keyboard shortcut to open the controller overlay</p>
               </div>
 
-              {/* Overlay Position */}
               <div className="space-y-2">
                 <Label>Overlay Position</Label>
-                <Select 
-                  value={localSettings.overlayPosition || 'right'} 
-                  onValueChange={(value) => handleOverlayPositionChange(value as 'left' | 'right')}
+                <Select
+                  value={localSettings.overlayPosition || 'right'}
+                  onValueChange={v => handleOverlayPositionChange(v as 'left' | 'right')}
                 >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="left">Left Side</SelectItem>
                     <SelectItem value="right">Right Side</SelectItem>
                   </SelectContent>
                 </Select>
-                <p className="text-xs text-gray-400">
-                  Where the overlay panel appears on screen
-                </p>
               </div>
 
-              {/* Overlay Info */}
               <div className="rounded-lg bg-gray-800/50 p-4">
                 <div className="flex items-center gap-2 text-sm text-gray-300">
                   <Gamepad2 size={16} className="text-gray-400" />
-                  <span>Press <kbd className="px-1.5 py-0.5 bg-gray-700 rounded text-xs">{localSettings.overlayHotkey || 'Ctrl+Shift+Gamepad'}</kbd> while in-game to open quick controller settings</span>
+                  <span>
+                    Press{' '}
+                    <kbd className="px-1.5 py-0.5 bg-gray-700 rounded text-xs">
+                      {localSettings.overlayHotkey || 'Ctrl+Shift+Gamepad'}
+                    </kbd>{' '}
+                    while in-game to open quick controller settings
+                  </span>
                 </div>
               </div>
             </>
