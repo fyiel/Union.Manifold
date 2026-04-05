@@ -16,7 +16,12 @@
  *   gcpadOnDisconnect(callback: (slot: number) => void): void
  *
  * ControllerState shape:
- *   { slot, connected, name, battery, charging, buttons: boolean[17], axes: number[6] }
+ *   { slot, connected, name, battery, charging,
+ *     buttons: boolean[18],   // [17] = touchpad click
+ *     axes: number[6],
+ *     gyro: { x, y, z },     // deg/s
+ *     accel: { x, y, z },    // m/s²
+ *     touchpad: [{ active, x, y }, { active, x, y }] }
  */
 
 #include <napi.h>
@@ -28,19 +33,23 @@
 
 // ── Replicated C ABI types ────────────────────────────────────────────────────
 // Mirrors gcpad_c.h without requiring that header to be present at addon build time.
+// MUST be kept in sync with GCPadStateC in gcpad_c.h.
 
-#define GCPAD_BUTTON_COUNT 17
+#define GCPAD_BUTTON_COUNT 18
 #define GCPAD_AXIS_COUNT    6
 
 struct GCPadStateC {
-    uint8_t buttons[GCPAD_BUTTON_COUNT];
-    float   axes[GCPAD_AXIS_COUNT];
-    float   gyro_x,  gyro_y,  gyro_z;
-    float   accel_x, accel_y, accel_z;
-    float   battery_level;
-    uint8_t is_charging;
-    uint8_t is_connected;
-    uint8_t _pad[2];
+    uint8_t  buttons[GCPAD_BUTTON_COUNT]; // buttons[17] = touchpad click
+    uint8_t  _pad0[2];                    // alignment padding
+    float    axes[GCPAD_AXIS_COUNT];
+    float    gyro_x,  gyro_y,  gyro_z;   // deg/s (physical units)
+    float    accel_x, accel_y, accel_z;  // m/s²  (physical units)
+    float    battery_level;
+    uint8_t  is_charging;
+    uint8_t  is_connected;
+    uint8_t  touchpad_active[2];          // 1 = finger touching
+    uint16_t touchpad_x[2];               // finger X (0..1919)
+    uint16_t touchpad_y[2];               // finger Y (0..1079)
 };
 
 typedef void* GCPadManagerHandle;
@@ -273,6 +282,30 @@ Napi::Value GCPadGetStates(const Napi::CallbackInfo& info) {
         for (uint32_t i = 0; i < GCPAD_AXIS_COUNT; ++i)
             axes.Set(i, Napi::Number::New(env, st.axes[i]));
         obj.Set("axes", axes);
+
+        // Motion sensors (in physical units: deg/s and m/s²)
+        auto gyro = Napi::Object::New(env);
+        gyro.Set("x", Napi::Number::New(env, st.gyro_x));
+        gyro.Set("y", Napi::Number::New(env, st.gyro_y));
+        gyro.Set("z", Napi::Number::New(env, st.gyro_z));
+        obj.Set("gyro", gyro);
+
+        auto accel = Napi::Object::New(env);
+        accel.Set("x", Napi::Number::New(env, st.accel_x));
+        accel.Set("y", Napi::Number::New(env, st.accel_y));
+        accel.Set("z", Napi::Number::New(env, st.accel_z));
+        obj.Set("accel", accel);
+
+        // Touchpad contacts (up to 2 fingers)
+        auto touchpad = Napi::Array::New(env, 2);
+        for (uint32_t t = 0; t < 2; ++t) {
+            auto touch = Napi::Object::New(env);
+            touch.Set("active", Napi::Boolean::New(env, st.touchpad_active[t] != 0));
+            touch.Set("x",      Napi::Number::New(env, st.touchpad_x[t]));
+            touch.Set("y",      Napi::Number::New(env, st.touchpad_y[t]));
+            touchpad.Set(t, touch);
+        }
+        obj.Set("touchpad", touchpad);
 
         result.Set(out_idx++, obj);
     }
