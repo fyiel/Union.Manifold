@@ -38,6 +38,12 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
+      - name: Fetch GCPad DLLs (Windows only)
+        if: runner.os == 'Windows'
+        run: node ./scripts/fetch-gcpad.cjs
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Build application
         run: pnpm -s build && pnpm exec electron-builder --publish=never
         env:

@@ -32,15 +32,38 @@ namespace uc_pipe {
     Napi::Value DestroyPipeServer(const Napi::CallbackInfo& info);
 }
 
+namespace uc_gcpad {
+    Napi::Value GCPadLoad(const Napi::CallbackInfo& info);
+    Napi::Value GCPadUnload(const Napi::CallbackInfo& info);
+    Napi::Value GCPadUpdateAll(const Napi::CallbackInfo& info);
+    Napi::Value GCPadGetStates(const Napi::CallbackInfo& info);
+    Napi::Value GCPadSetRumble(const Napi::CallbackInfo& info);
+    Napi::Value GCPadSetLed(const Napi::CallbackInfo& info);
+    Napi::Value GCPadOnConnect(const Napi::CallbackInfo& info);
+    Napi::Value GCPadOnDisconnect(const Napi::CallbackInfo& info);
+}
+
 Napi::Object Init(Napi::Env env, Napi::Object exports) {
-    exports.Set("injectDll", Napi::Function::New(env, uc_injector::InjectDll));
-    exports.Set("ejectDll", Napi::Function::New(env, uc_injector::EjectDll));
+    // Overlay / injection
+    exports.Set("injectDll",         Napi::Function::New(env, uc_injector::InjectDll));
+    exports.Set("ejectDll",          Napi::Function::New(env, uc_injector::EjectDll));
     exports.Set("createSharedFrame", Napi::Function::New(env, uc_shmem::CreateSharedFrame));
-    exports.Set("writeSharedFrame", Napi::Function::New(env, uc_shmem::WriteSharedFrame));
-    exports.Set("destroySharedFrame", Napi::Function::New(env, uc_shmem::DestroySharedFrame));
-    exports.Set("createPipeServer", Napi::Function::New(env, uc_pipe::CreatePipeServer));
-    exports.Set("sendPipeMessage", Napi::Function::New(env, uc_pipe::SendPipeMessage));
+    exports.Set("writeSharedFrame",  Napi::Function::New(env, uc_shmem::WriteSharedFrame));
+    exports.Set("destroySharedFrame",Napi::Function::New(env, uc_shmem::DestroySharedFrame));
+    exports.Set("createPipeServer",  Napi::Function::New(env, uc_pipe::CreatePipeServer));
+    exports.Set("sendPipeMessage",   Napi::Function::New(env, uc_pipe::SendPipeMessage));
     exports.Set("destroyPipeServer", Napi::Function::New(env, uc_pipe::DestroyPipeServer));
+
+    // GCPad controller
+    exports.Set("gcpadLoad",         Napi::Function::New(env, uc_gcpad::GCPadLoad));
+    exports.Set("gcpadUnload",       Napi::Function::New(env, uc_gcpad::GCPadUnload));
+    exports.Set("gcpadUpdateAll",    Napi::Function::New(env, uc_gcpad::GCPadUpdateAll));
+    exports.Set("gcpadGetStates",    Napi::Function::New(env, uc_gcpad::GCPadGetStates));
+    exports.Set("gcpadSetRumble",    Napi::Function::New(env, uc_gcpad::GCPadSetRumble));
+    exports.Set("gcpadSetLed",       Napi::Function::New(env, uc_gcpad::GCPadSetLed));
+    exports.Set("gcpadOnConnect",    Napi::Function::New(env, uc_gcpad::GCPadOnConnect));
+    exports.Set("gcpadOnDisconnect", Napi::Function::New(env, uc_gcpad::GCPadOnDisconnect));
+
     return exports;
 }
 

@@ -1,0 +1,361 @@
+/**
+ * gcpad_bridge.cpp — N-API bridge for the GCPad controller library.
+ *
+ * Loads gcpad.dll at runtime via LoadLibraryExA (LOAD_WITH_ALTERED_SEARCH_PATH
+ * so that SDL2.dll is resolved from the same directory as gcpad.dll) and exposes
+ * its C ABI to Electron's main process.
+ *
+ * Exported N-API functions (registered in addon.cpp):
+ *   gcpadLoad(dllPath: string): boolean
+ *   gcpadUnload(): void
+ *   gcpadUpdateAll(): void
+ *   gcpadGetStates(): Array<ControllerState>
+ *   gcpadSetRumble(slot: number, left: number, right: number): boolean
+ *   gcpadSetLed(slot: number, r: number, g: number, b: number): boolean
+ *   gcpadOnConnect(callback: (slot: number) => void): void
+ *   gcpadOnDisconnect(callback: (slot: number) => void): void
+ *
+ * ControllerState shape:
+ *   { slot, connected, name, battery, charging, buttons: boolean[17], axes: number[6] }
+ */
+
+#include <napi.h>
+#include <windows.h>
+#include <cstdint>
+#include <cstring>
+#include <mutex>
+#include <string>
+
+// ── Replicated C ABI types ────────────────────────────────────────────────────
+// Mirrors gcpad_c.h without requiring that header to be present at addon build time.
+
+#define GCPAD_BUTTON_COUNT 17
+#define GCPAD_AXIS_COUNT    6
+
+struct GCPadStateC {
+    uint8_t buttons[GCPAD_BUTTON_COUNT];
+    float   axes[GCPAD_AXIS_COUNT];
+    float   gyro_x,  gyro_y,  gyro_z;
+    float   accel_x, accel_y, accel_z;
+    float   battery_level;
+    uint8_t is_charging;
+    uint8_t is_connected;
+    uint8_t _pad[2];
+};
+
+typedef void* GCPadManagerHandle;
+typedef void (*GCPadHotplugCallback)(int slot, void* userdata);
+
+// ── Function pointer typedefs ─────────────────────────────────────────────────
+
+typedef GCPadManagerHandle (*Fn_create)  ();
+typedef void               (*Fn_destroy) (GCPadManagerHandle);
+typedef int                (*Fn_init)    (GCPadManagerHandle);
+typedef void               (*Fn_shutdown)(GCPadManagerHandle);
+typedef void               (*Fn_update)  (GCPadManagerHandle);
+typedef int                (*Fn_maxslots)(GCPadManagerHandle);
+typedef int                (*Fn_getstate)(GCPadManagerHandle, int, GCPadStateC*);
+typedef int                (*Fn_getname) (GCPadManagerHandle, int, char*, int);
+typedef int                (*Fn_rumble)  (GCPadManagerHandle, int, uint8_t, uint8_t);
+typedef int                (*Fn_led)     (GCPadManagerHandle, int, uint8_t, uint8_t, uint8_t);
+typedef void               (*Fn_setconn) (GCPadManagerHandle, GCPadHotplugCallback, void*);
+typedef void               (*Fn_setdisc) (GCPadManagerHandle, GCPadHotplugCallback, void*);
+
+// ── Module-level state ────────────────────────────────────────────────────────
+
+static HMODULE            g_dll  = nullptr;
+static GCPadManagerHandle g_mgr  = nullptr;
+
+static Fn_create   g_fn_create   = nullptr;
+static Fn_destroy  g_fn_destroy  = nullptr;
+static Fn_init     g_fn_init     = nullptr;
+static Fn_shutdown g_fn_shutdown = nullptr;
+static Fn_update   g_fn_update   = nullptr;
+static Fn_maxslots g_fn_maxslots = nullptr;
+static Fn_getstate g_fn_getstate = nullptr;
+static Fn_getname  g_fn_getname  = nullptr;
+static Fn_rumble   g_fn_rumble   = nullptr;
+static Fn_led      g_fn_led      = nullptr;
+static Fn_setconn  g_fn_setconn  = nullptr;
+static Fn_setdisc  g_fn_setdisc  = nullptr;
+
+// Thread-safe callbacks: guarded by g_cb_mtx
+static std::mutex              g_cb_mtx;
+static Napi::ThreadSafeFunction g_conn_tsfn;
+static Napi::ThreadSafeFunction g_disc_tsfn;
+static bool                    g_conn_valid = false;
+static bool                    g_disc_valid = false;
+
+// ── Hotplug callbacks (called from GCPad hotplug thread) ─────────────────────
+
+static void gcpad_on_connected(int slot, void*) {
+    std::lock_guard<std::mutex> lk(g_cb_mtx);
+    if (!g_conn_valid) return;
+    int* data = new int(slot);
+    napi_status st = g_conn_tsfn.NonBlockingCall(data,
+        [](Napi::Env env, Napi::Function fn, int* p) {
+            int s = *p; delete p;
+            fn.Call({ Napi::Number::New(env, s) });
+        });
+    if (st != napi_ok) delete data;
+}
+
+static void gcpad_on_disconnected(int slot, void*) {
+    std::lock_guard<std::mutex> lk(g_cb_mtx);
+    if (!g_disc_valid) return;
+    int* data = new int(slot);
+    napi_status st = g_disc_tsfn.NonBlockingCall(data,
+        [](Napi::Env env, Napi::Function fn, int* p) {
+            int s = *p; delete p;
+            fn.Call({ Napi::Number::New(env, s) });
+        });
+    if (st != napi_ok) delete data;
+}
+
+// ── Helper: load a required proc address ─────────────────────────────────────
+
+#define LOAD_PROC(var, T, name)                                          \
+    do {                                                                  \
+        var = reinterpret_cast<T>(GetProcAddress(g_dll, name));           \
+        if (!(var)) {                                                     \
+            FreeLibrary(g_dll); g_dll = nullptr;                          \
+            Napi::Error::New(env, "gcpadLoad: missing export: " name)     \
+                .ThrowAsJavaScriptException();                             \
+            return env.Null();                                            \
+        }                                                                 \
+    } while (0)
+
+// ── N-API exports ─────────────────────────────────────────────────────────────
+
+namespace uc_gcpad {
+
+/**
+ * gcpadLoad(dllPath: string): boolean
+ *
+ * Loads gcpad.dll from dllPath, resolves SDL2.dll from the same directory,
+ * creates and initialises the manager.  Returns true on success.
+ */
+Napi::Value GCPadLoad(const Napi::CallbackInfo& info) {
+    Napi::Env env = info.Env();
+
+    if (info.Length() < 1 || !info[0].IsString()) {
+        Napi::TypeError::New(env, "gcpadLoad: expected (dllPath: string)")
+            .ThrowAsJavaScriptException();
+        return env.Null();
+    }
+
+    if (g_dll) return Napi::Boolean::New(env, true); // already loaded
+
+    std::string dll_path = info[0].As<Napi::String>().Utf8Value();
+
+    // LOAD_WITH_ALTERED_SEARCH_PATH: resolves implicit dependencies (SDL2.dll)
+    // from the directory containing gcpad.dll rather than the CWD.
+    g_dll = LoadLibraryExA(dll_path.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
+    if (!g_dll) {
+        return Napi::Boolean::New(env, false);
+    }
+
+    LOAD_PROC(g_fn_create,   Fn_create,   "gcpad_create_manager");
+    LOAD_PROC(g_fn_destroy,  Fn_destroy,  "gcpad_destroy_manager");
+    LOAD_PROC(g_fn_init,     Fn_init,     "gcpad_initialize");
+    LOAD_PROC(g_fn_shutdown, Fn_shutdown, "gcpad_shutdown");
+    LOAD_PROC(g_fn_update,   Fn_update,   "gcpad_update_all");
+    LOAD_PROC(g_fn_maxslots, Fn_maxslots, "gcpad_get_max_slots");
+    LOAD_PROC(g_fn_getstate, Fn_getstate, "gcpad_get_state");
+    LOAD_PROC(g_fn_getname,  Fn_getname,  "gcpad_get_name");
+    LOAD_PROC(g_fn_rumble,   Fn_rumble,   "gcpad_set_rumble");
+    LOAD_PROC(g_fn_led,      Fn_led,      "gcpad_set_led");
+    LOAD_PROC(g_fn_setconn,  Fn_setconn,  "gcpad_set_connected_callback");
+    LOAD_PROC(g_fn_setdisc,  Fn_setdisc,  "gcpad_set_disconnected_callback");
+
+    g_mgr = g_fn_create();
+    if (!g_mgr) {
+        FreeLibrary(g_dll);
+        g_dll = nullptr;
+        return Napi::Boolean::New(env, false);
+    }
+
+    // Register hotplug callbacks before initialize so initial-connect events arrive
+    g_fn_setconn(g_mgr, gcpad_on_connected,    nullptr);
+    g_fn_setdisc(g_mgr, gcpad_on_disconnected, nullptr);
+
+    if (!g_fn_init(g_mgr)) {
+        g_fn_destroy(g_mgr);
+        g_mgr = nullptr;
+        FreeLibrary(g_dll);
+        g_dll = nullptr;
+        return Napi::Boolean::New(env, false);
+    }
+
+    return Napi::Boolean::New(env, true);
+}
+
+/**
+ * gcpadUnload(): void
+ *
+ * Shuts down the manager, releases thread-safe callbacks, and unloads the DLL.
+ */
+Napi::Value GCPadUnload(const Napi::CallbackInfo& info) {
+    Napi::Env env = info.Env();
+
+    // Stop the hotplug thread first — no more callbacks will fire after this.
+    if (g_mgr && g_fn_shutdown) {
+        g_fn_shutdown(g_mgr);
+    }
+
+    // Now safe to release TSFNs; hotplug thread is dead.
+    {
+        std::lock_guard<std::mutex> lk(g_cb_mtx);
+        if (g_conn_valid) { g_conn_tsfn.Release(); g_conn_valid = false; }
+        if (g_disc_valid) { g_disc_tsfn.Release(); g_disc_valid = false; }
+    }
+
+    if (g_mgr && g_fn_destroy) {
+        g_fn_destroy(g_mgr);
+        g_mgr = nullptr;
+    }
+
+    if (g_dll) {
+        FreeLibrary(g_dll);
+        g_dll = nullptr;
+    }
+
+    g_fn_create = nullptr; g_fn_destroy = nullptr; g_fn_init    = nullptr;
+    g_fn_shutdown = nullptr; g_fn_update = nullptr; g_fn_maxslots = nullptr;
+    g_fn_getstate = nullptr; g_fn_getname = nullptr; g_fn_rumble = nullptr;
+    g_fn_led      = nullptr; g_fn_setconn = nullptr; g_fn_setdisc = nullptr;
+
+    return env.Undefined();
+}
+
+/**
+ * gcpadUpdateAll(): void
+ * Poll all controllers.  Call once per frame before gcpadGetStates.
+ */
+Napi::Value GCPadUpdateAll(const Napi::CallbackInfo& info) {
+    if (g_mgr && g_fn_update) g_fn_update(g_mgr);
+    return info.Env().Undefined();
+}
+
+/**
+ * gcpadGetStates(): Array<ControllerState>
+ * Returns one entry per connected slot (disconnected slots are omitted).
+ */
+Napi::Value GCPadGetStates(const Napi::CallbackInfo& info) {
+    Napi::Env env = info.Env();
+    auto result = Napi::Array::New(env);
+
+    if (!g_mgr || !g_fn_getstate || !g_fn_getname || !g_fn_maxslots) return result;
+
+    int max = g_fn_maxslots(g_mgr);
+    uint32_t out_idx = 0;
+
+    for (int slot = 0; slot < max; ++slot) {
+        GCPadStateC st{};
+        if (!g_fn_getstate(g_mgr, slot, &st)) continue;
+
+        char name_buf[128] = {};
+        g_fn_getname(g_mgr, slot, name_buf, static_cast<int>(sizeof(name_buf)));
+
+        auto obj = Napi::Object::New(env);
+        obj.Set("slot",      Napi::Number::New(env, slot));
+        obj.Set("connected", Napi::Boolean::New(env, true));
+        obj.Set("name",      Napi::String::New(env, name_buf));
+        obj.Set("battery",   Napi::Number::New(env, st.battery_level));
+        obj.Set("charging",  Napi::Boolean::New(env, st.is_charging != 0));
+
+        auto btns = Napi::Array::New(env, GCPAD_BUTTON_COUNT);
+        for (uint32_t i = 0; i < GCPAD_BUTTON_COUNT; ++i)
+            btns.Set(i, Napi::Boolean::New(env, st.buttons[i] != 0));
+        obj.Set("buttons", btns);
+
+        auto axes = Napi::Array::New(env, GCPAD_AXIS_COUNT);
+        for (uint32_t i = 0; i < GCPAD_AXIS_COUNT; ++i)
+            axes.Set(i, Napi::Number::New(env, st.axes[i]));
+        obj.Set("axes", axes);
+
+        result.Set(out_idx++, obj);
+    }
+
+    return result;
+}
+
+/**
+ * gcpadSetRumble(slot: number, left: number, right: number): boolean
+ */
+Napi::Value GCPadSetRumble(const Napi::CallbackInfo& info) {
+    Napi::Env env = info.Env();
+    if (!g_mgr || !g_fn_rumble ||
+        info.Length() < 3 ||
+        !info[0].IsNumber() || !info[1].IsNumber() || !info[2].IsNumber())
+        return Napi::Boolean::New(env, false);
+
+    int slot  = info[0].As<Napi::Number>().Int32Value();
+    int left  = info[1].As<Napi::Number>().Int32Value();
+    int right = info[2].As<Napi::Number>().Int32Value();
+
+    auto clamp = [](int v) -> uint8_t {
+        return static_cast<uint8_t>(v < 0 ? 0 : v > 255 ? 255 : v);
+    };
+
+    return Napi::Boolean::New(env,
+        g_fn_rumble(g_mgr, slot, clamp(left), clamp(right)) != 0);
+}
+
+/**
+ * gcpadSetLed(slot: number, r: number, g: number, b: number): boolean
+ */
+Napi::Value GCPadSetLed(const Napi::CallbackInfo& info) {
+    Napi::Env env = info.Env();
+    if (!g_mgr || !g_fn_led ||
+        info.Length() < 4 ||
+        !info[0].IsNumber() || !info[1].IsNumber() ||
+        !info[2].IsNumber() || !info[3].IsNumber())
+        return Napi::Boolean::New(env, false);
+
+    int slot = info[0].As<Napi::Number>().Int32Value();
+    int r    = info[1].As<Napi::Number>().Int32Value();
+    int g    = info[2].As<Napi::Number>().Int32Value();
+    int b    = info[3].As<Napi::Number>().Int32Value();
+
+    auto clamp = [](int v) -> uint8_t {
+        return static_cast<uint8_t>(v < 0 ? 0 : v > 255 ? 255 : v);
+    };
+
+    return Napi::Boolean::New(env,
+        g_fn_led(g_mgr, slot, clamp(r), clamp(g), clamp(b)) != 0);
+}
+
+/**
+ * gcpadOnConnect(callback: (slot: number) => void): void
+ * Replaces any previously registered connect callback.
+ */
+Napi::Value GCPadOnConnect(const Napi::CallbackInfo& info) {
+    Napi::Env env = info.Env();
+    if (info.Length() < 1 || !info[0].IsFunction()) return env.Undefined();
+
+    std::lock_guard<std::mutex> lk(g_cb_mtx);
+    if (g_conn_valid) { g_conn_tsfn.Release(); g_conn_valid = false; }
+    g_conn_tsfn = Napi::ThreadSafeFunction::New(
+        env, info[0].As<Napi::Function>(), "gcpad_connected", 0, 1);
+    g_conn_valid = true;
+    return env.Undefined();
+}
+
+/**
+ * gcpadOnDisconnect(callback: (slot: number) => void): void
+ * Replaces any previously registered disconnect callback.
+ */
+Napi::Value GCPadOnDisconnect(const Napi::CallbackInfo& info) {
+    Napi::Env env = info.Env();
+    if (info.Length() < 1 || !info[0].IsFunction()) return env.Undefined();
+
+    std::lock_guard<std::mutex> lk(g_cb_mtx);
+    if (g_disc_valid) { g_disc_tsfn.Release(); g_disc_valid = false; }
+    g_disc_tsfn = Napi::ThreadSafeFunction::New(
+        env, info[0].As<Napi::Function>(), "gcpad_disconnected", 0, 1);
+    g_disc_valid = true;
+    return env.Undefined();
+}
+
+} // namespace uc_gcpad
