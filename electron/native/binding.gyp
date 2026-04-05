@@ -6,7 +6,8 @@
         "addon.cpp",
         "injector.cpp",
         "shared_memory.cpp",
-        "pipe_server.cpp"
+        "pipe_server.cpp",
+        "gcpad_bridge.cpp"
       ],
       "include_dirs": [
         "<!@(node -p \"require('node-addon-api').include\")"

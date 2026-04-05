@@ -904,6 +904,85 @@ try {
 // Per-game injection state: pid -> { shmemHandle, pipeHandle, offscreenWindow }
 const overlayInjections = new Map()
 
+// ============================================================
+// GCPad Controller System
+// ============================================================
+// Uses the GCPad C ABI exposed through the uc_overlay_native addon.
+// gcpad.dll is loaded at runtime (with SDL2.dll resolved alongside it).
+//
+// For development: copy gcpad.dll + SDL2.dll to electron/build/gcpad/
+// For production: they are extracted to resourcesPath via extraResources.
+
+const GCPAD_POLL_MS = 16 // ~60 Hz
+
+function getGCPadDllPath() {
+  if (isDev) {
+    // __dirname is electron/ — go up one level to the project root where build/ lives
+    return path.join(__dirname, '..', 'build', 'gcpad', 'gcpad.dll')
+  }
+  return path.join(process.resourcesPath, 'gcpad.dll')
+}
+
+let gcpadPollInterval = null
+
+function gcpadBroadcast(channel, data) {
+  BrowserWindow.getAllWindows().forEach(w => {
+    if (!w.isDestroyed()) w.webContents.send(channel, data)
+  })
+}
+
+function startGCPad() {
+  if (!nativeOverlay || typeof nativeOverlay.gcpadLoad !== 'function') {
+    ucLog('GCPad: native addon not available, controller support disabled', 'warn')
+    return
+  }
+
+  const dllPath = getGCPadDllPath()
+  if (!fs.existsSync(dllPath)) {
+    ucLog(`GCPad: DLL not found at ${dllPath} - controller support unavailable`, 'warn')
+    return
+  }
+
+  nativeOverlay.gcpadOnConnect((slot) => {
+    ucLog(`GCPad: controller connected at slot ${slot}`)
+    gcpadBroadcast('uc:controller-connected', { slot })
+  })
+  nativeOverlay.gcpadOnDisconnect((slot) => {
+    ucLog(`GCPad: controller disconnected from slot ${slot}`)
+    gcpadBroadcast('uc:controller-disconnected', { slot })
+  })
+
+  const ok = nativeOverlay.gcpadLoad(dllPath)
+  if (!ok) {
+    ucLog('GCPad: failed to load or initialize gcpad.dll', 'warn')
+    return
+  }
+
+  ucLog(`GCPad: initialized — polling at ${GCPAD_POLL_MS}ms`)
+
+  gcpadPollInterval = setInterval(() => {
+    if (!nativeOverlay || typeof nativeOverlay.gcpadUpdateAll !== 'function') return
+    nativeOverlay.gcpadUpdateAll()
+    const states = nativeOverlay.gcpadGetStates()
+    if (states && states.length > 0) {
+      gcpadBroadcast('uc:controller-input', states)
+    }
+  }, GCPAD_POLL_MS)
+}
+
+// Start GCPad after Electron is ready (SDL2 needs a running message loop)
+app.whenReady().then(() => setTimeout(startGCPad, 1000))
+
+app.on('will-quit', () => {
+  if (gcpadPollInterval) {
+    clearInterval(gcpadPollInterval)
+    gcpadPollInterval = null
+  }
+  if (nativeOverlay && typeof nativeOverlay.gcpadUnload === 'function') {
+    nativeOverlay.gcpadUnload()
+  }
+})
+
 const OVERLAY_FRAME_WIDTH = 1920
 const OVERLAY_FRAME_HEIGHT = 1080
 
@@ -8268,13 +8347,46 @@ function resolveLaunchCommand(exePath) {
 // ============================================================
 
 /**
+ * Strip AppImage-specific environment variables that contaminate Wine/Proton
+ * child processes when the app is running inside an AppImage bundle.
+ * These variables reference paths inside the AppImage mount point, which
+ * child processes (Wine, Proton) cannot access once they are outside the
+ * AppImage namespace.
+ */
+function cleanAppImageEnv(env) {
+  if (!env || !env.APPIMAGE) return env
+  const result = { ...env }
+  const appdir = env.APPDIR || ''
+  // Remove AppImage identity vars
+  delete result.APPIMAGE
+  delete result.APPDIR
+  delete result.OWD
+  // Strip AppImage-injected entries from dynamic linker env vars
+  if (appdir && result.LD_PRELOAD) {
+    const cleaned = result.LD_PRELOAD.split(':')
+      .filter(p => p && !p.startsWith(appdir))
+      .join(':')
+    if (cleaned) result.LD_PRELOAD = cleaned
+    else delete result.LD_PRELOAD
+  }
+  if (appdir && result.LD_LIBRARY_PATH) {
+    const cleaned = result.LD_LIBRARY_PATH.split(':')
+      .filter(p => p && !p.startsWith(appdir))
+      .join(':')
+    if (cleaned) result.LD_LIBRARY_PATH = cleaned
+    else delete result.LD_LIBRARY_PATH
+  }
+  return result
+}
+
+/**
  * Build the environment object for Wine/Proton launches, merging in
  * WINEPREFIX, STEAM_COMPAT_DATA_PATH, STEAM_COMPAT_CLIENT_INSTALL_PATH,
  * and any user-defined extra env vars from settings.
  */
 function buildLinuxGameEnv(baseEnv) {
   const settings = readSettings() || {}
-  const env = { ...(baseEnv || process.env) }
+  const env = { ...(baseEnv || cleanAppImageEnv(process.env)) }
 
   // WINEPREFIX
   const winePrefix = typeof settings.linuxWinePrefix === 'string' ? settings.linuxWinePrefix.trim() : ''
@@ -10037,14 +10149,19 @@ ipcMain.handle('uc:controller-set-settings', (_event, settings) => {
 // IPC: Get connected controller info
 ipcMain.handle('uc:controller-get-connected', () => {
   try {
-    // In a real implementation, this would detect connected gamepads
-    // For now, return a placeholder that no controller is connected
-    // The actual gamepad detection would happen in the renderer using the Gamepad API
-    return { 
-      connected: false, 
-      controllerId: null, 
-      controllerName: null, 
-      controllerType: null 
+    if (!nativeOverlay || typeof nativeOverlay.gcpadGetStates !== 'function') {
+      return { connected: false, controllerId: null, controllerName: null, controllerType: null }
+    }
+    const states = nativeOverlay.gcpadGetStates()
+    if (!states || states.length === 0) {
+      return { connected: false, controllerId: null, controllerName: null, controllerType: null }
+    }
+    const first = states[0]
+    return {
+      connected: true,
+      controllerId: `gcpad-slot-${first.slot}`,
+      controllerName: first.name || 'Unknown Controller',
+      controllerType: 'gamepad',
     }
   } catch (err) {
     ucLog(`Controller get connected failed: ${err.message}`, 'error')
