@@ -18,6 +18,9 @@ overlay-dll/build/
 # Vendored third-party C++ libraries (MinHook etc. - fetched at build time)
 overlay-dll/vendor/
 
+# GCPad_API stuff (fetched at build time from latest release)
+gcpad-dll/
+
 # Compiled binary artifacts
 *.node
 *.dll
