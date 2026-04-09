@@ -1,8 +1,9 @@
 /**
  * fetch-gcpad.cjs
  *
- * Downloads gcpad.dll and SDL2.dll from the latest veeeanti/GCPad_API
- * GitHub release into build/gcpad/ so that electron-builder can find them.
+ * Downloads the gcpad-unioncrax-direct.zip asset from the latest
+ * veeeanti/GCPad_API GitHub release and extracts gcpad.dll, SDL2.dll,
+ * gcpad.lib, and gcpad_remap.lib into gcpad-dll/.
  *
  * Usage:
  *   node ./scripts/fetch-gcpad.cjs
@@ -17,18 +18,22 @@ const https  = require('node:https')
 const fs     = require('node:fs')
 const path   = require('node:path')
 const url    = require('node:url')
+const { execSync } = require('node:child_process')
 
-const REPO   = 'veeeanti/GCPad_API'
-const ASSETS = ['gcpad.dll', 'SDL2.dll']
-const OUT_DIR = path.join(__dirname, '..', 'build', 'gcpad')
+const REPO      = 'veeeanti/GCPad_API'
+const ZIP_ASSET = 'gcpad-unioncrax-direct.zip'
+const OUT_DIR   = path.join(__dirname, '..', 'gcpad-dll')
 
-// ── CLI args ──────────────────────────────────────────────────────────────────
+// Fallback: if the zip asset doesn't exist, download individual DLLs
+const FALLBACK_ASSETS = ['gcpad.dll', 'SDL2.dll']
+
+// ── CLI args ─────────────────────────────────────────────────────────────────
 
 const tagArg = process.argv.includes('--tag')
   ? process.argv[process.argv.indexOf('--tag') + 1]
   : null
 
-// ── HTTP helpers ──────────────────────────────────────────────────────────────
+// ── HTTP helpers ─────────────────────────────────────────────────────────────
 
 function makeHeaders() {
   const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN
@@ -50,7 +55,6 @@ function httpGet(targetUrl, headers) {
       headers:  headers || makeHeaders(),
     }
     https.get(opts, (res) => {
-      // Follow redirects (GitHub asset downloads redirect to S3)
       if (res.statusCode === 301 || res.statusCode === 302) {
         return resolve(httpGet(res.headers.location, {
           'User-Agent': opts.headers['User-Agent'],
@@ -67,7 +71,20 @@ function httpGet(targetUrl, headers) {
   })
 }
 
-// ── Main ──────────────────────────────────────────────────────────────────────
+// ── Zip extraction (uses PowerShell on Windows, unzip on Linux) ──────────────
+
+function extractZip(zipPath, destDir) {
+  if (process.platform === 'win32') {
+    execSync(
+      `powershell -NoProfile -Command "Expand-Archive -Force -Path '${zipPath}' -DestinationPath '${destDir}'"`,
+      { stdio: 'inherit' }
+    )
+  } else {
+    execSync(`unzip -o "${zipPath}" -d "${destDir}"`, { stdio: 'inherit' })
+  }
+}
+
+// ── Main ─────────────────────────────────────────────────────────────────────
 
 async function main() {
   fs.mkdirSync(OUT_DIR, { recursive: true })
@@ -95,24 +112,44 @@ async function main() {
 
   console.log(`[fetch-gcpad] Using release: ${release.tag_name} — "${release.name}"`)
 
-  for (const assetName of ASSETS) {
-    const asset = (release.assets || []).find(a => a.name === assetName)
-    if (!asset) {
-      console.error(`[fetch-gcpad] Asset "${assetName}" not found in release ${release.tag_name}.`)
-      console.error(`  Available assets: ${(release.assets || []).map(a => a.name).join(', ') || '(none)'}`)
-      process.exit(1)
-    }
+  // Try the unioncrax-direct zip first
+  const zipAsset = (release.assets || []).find(a => a.name === ZIP_ASSET)
 
-    const outPath = path.join(OUT_DIR, assetName)
-    const sizeMB = (asset.size / 1024 / 1024).toFixed(2)
-    process.stdout.write(`[fetch-gcpad] Downloading ${assetName} (${sizeMB} MB)... `)
+  if (zipAsset) {
+    const sizeMB = (zipAsset.size / 1024 / 1024).toFixed(2)
+    process.stdout.write(`[fetch-gcpad] Downloading ${ZIP_ASSET} (${sizeMB} MB)... `)
 
-    const buf = await httpGet(asset.browser_download_url)
-    fs.writeFileSync(outPath, buf)
+    const buf = await httpGet(zipAsset.browser_download_url)
+    const tmpZip = path.join(OUT_DIR, ZIP_ASSET)
+    fs.writeFileSync(tmpZip, buf)
     console.log('done')
+
+    console.log(`[fetch-gcpad] Extracting to ${OUT_DIR}...`)
+    extractZip(tmpZip, OUT_DIR)
+    fs.unlinkSync(tmpZip)
+    console.log(`[fetch-gcpad] Extracted successfully`)
+  } else {
+    // Fallback: download individual DLL files (legacy release format)
+    console.log(`[fetch-gcpad] ${ZIP_ASSET} not found, falling back to individual assets`)
+    for (const assetName of FALLBACK_ASSETS) {
+      const asset = (release.assets || []).find(a => a.name === assetName)
+      if (!asset) {
+        console.error(`[fetch-gcpad] Asset "${assetName}" not found in release ${release.tag_name}.`)
+        console.error(`  Available: ${(release.assets || []).map(a => a.name).join(', ') || '(none)'}`)
+        process.exit(1)
+      }
+
+      const outPath = path.join(OUT_DIR, assetName)
+      const sizeMB = (asset.size / 1024 / 1024).toFixed(2)
+      process.stdout.write(`[fetch-gcpad] Downloading ${assetName} (${sizeMB} MB)... `)
+
+      const buf = await httpGet(asset.browser_download_url)
+      fs.writeFileSync(outPath, buf)
+      console.log('done')
+    }
   }
 
-  console.log(`[fetch-gcpad] All assets written to build/gcpad/`)
+  console.log(`[fetch-gcpad] All assets written to gcpad-dll/`)
 }
 
 main().catch(err => {

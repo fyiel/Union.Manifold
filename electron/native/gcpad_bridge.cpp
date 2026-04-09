@@ -391,4 +391,145 @@ Napi::Value GCPadOnDisconnect(const Napi::CallbackInfo& info) {
     return env.Undefined();
 }
 
+// ── Input injection (SendInput wrappers for remapping) ───────────────────────
+
+/**
+ * gcpadSendKeyboard(virtualKey: number, pressed: boolean): boolean
+ * Injects a keyboard event via SendInput. Uses both virtual key and scan code
+ * so games using DirectInput/RawInput receive the event.
+ */
+Napi::Value GCPadSendKeyboard(const Napi::CallbackInfo& info) {
+    Napi::Env env = info.Env();
+    if (info.Length() < 2 || !info[0].IsNumber() || !info[1].IsBoolean())
+        return Napi::Boolean::New(env, false);
+
+    WORD vk = static_cast<WORD>(info[0].As<Napi::Number>().Uint32Value());
+    bool pressed = info[1].As<Napi::Boolean>().Value();
+
+    INPUT input = {};
+    input.type = INPUT_KEYBOARD;
+    input.ki.wVk   = vk;
+    input.ki.wScan = static_cast<WORD>(MapVirtualKeyW(vk, MAPVK_VK_TO_VSC));
+    input.ki.dwFlags = KEYEVENTF_SCANCODE;
+    if (!pressed) input.ki.dwFlags |= KEYEVENTF_KEYUP;
+
+    // Extended keys (arrows, numpad enter, ins/del/home/end/pgup/pgdn, numlock)
+    if (input.ki.wScan > 0xFF ||
+        vk == VK_RIGHT || vk == VK_LEFT || vk == VK_UP || vk == VK_DOWN ||
+        vk == VK_INSERT || vk == VK_DELETE || vk == VK_HOME || vk == VK_END ||
+        vk == VK_PRIOR || vk == VK_NEXT || vk == VK_NUMLOCK) {
+        input.ki.dwFlags |= KEYEVENTF_EXTENDEDKEY;
+    }
+
+    UINT sent = SendInput(1, &input, sizeof(INPUT));
+    return Napi::Boolean::New(env, sent == 1);
+}
+
+/**
+ * gcpadSendMouseButton(button: number, pressed: boolean): boolean
+ * button: 0=left, 1=right, 2=middle
+ */
+Napi::Value GCPadSendMouseButton(const Napi::CallbackInfo& info) {
+    Napi::Env env = info.Env();
+    if (info.Length() < 2 || !info[0].IsNumber() || !info[1].IsBoolean())
+        return Napi::Boolean::New(env, false);
+
+    int button = info[0].As<Napi::Number>().Int32Value();
+    bool pressed = info[1].As<Napi::Boolean>().Value();
+
+    INPUT input = {};
+    input.type = INPUT_MOUSE;
+    switch (button) {
+        case 0: input.mi.dwFlags = pressed ? MOUSEEVENTF_LEFTDOWN   : MOUSEEVENTF_LEFTUP;   break;
+        case 1: input.mi.dwFlags = pressed ? MOUSEEVENTF_RIGHTDOWN  : MOUSEEVENTF_RIGHTUP;  break;
+        case 2: input.mi.dwFlags = pressed ? MOUSEEVENTF_MIDDLEDOWN : MOUSEEVENTF_MIDDLEUP; break;
+        default: return Napi::Boolean::New(env, false);
+    }
+
+    UINT sent = SendInput(1, &input, sizeof(INPUT));
+    return Napi::Boolean::New(env, sent == 1);
+}
+
+/**
+ * gcpadSendMouseMove(dx: number, dy: number): boolean
+ * Relative mouse movement in pixels.
+ */
+Napi::Value GCPadSendMouseMove(const Napi::CallbackInfo& info) {
+    Napi::Env env = info.Env();
+    if (info.Length() < 2 || !info[0].IsNumber() || !info[1].IsNumber())
+        return Napi::Boolean::New(env, false);
+
+    INPUT input = {};
+    input.type = INPUT_MOUSE;
+    input.mi.dwFlags = MOUSEEVENTF_MOVE;
+    input.mi.dx = info[0].As<Napi::Number>().Int32Value();
+    input.mi.dy = info[1].As<Napi::Number>().Int32Value();
+
+    UINT sent = SendInput(1, &input, sizeof(INPUT));
+    return Napi::Boolean::New(env, sent == 1);
+}
+
+/**
+ * gcpadSendMouseWheel(delta: number): boolean
+ * delta: positive = scroll up, negative = scroll down. Typically 120 per notch.
+ */
+Napi::Value GCPadSendMouseWheel(const Napi::CallbackInfo& info) {
+    Napi::Env env = info.Env();
+    if (info.Length() < 1 || !info[0].IsNumber())
+        return Napi::Boolean::New(env, false);
+
+    INPUT input = {};
+    input.type = INPUT_MOUSE;
+    input.mi.dwFlags = MOUSEEVENTF_WHEEL;
+    input.mi.mouseData = static_cast<DWORD>(info[0].As<Napi::Number>().Int32Value());
+
+    UINT sent = SendInput(1, &input, sizeof(INPUT));
+    return Napi::Boolean::New(env, sent == 1);
+}
+
+/**
+ * gcpadSetTriggerEffect(slot, rightTrigger, mode, start, end, force, p1, p2): boolean
+ * DualSense adaptive trigger effect.
+ */
+Napi::Value GCPadSetTriggerEffect(const Napi::CallbackInfo& info) {
+    Napi::Env env = info.Env();
+    if (!g_mgr || info.Length() < 8) return Napi::Boolean::New(env, false);
+
+    // Resolve the function pointer lazily (only DualSense builds export this)
+    typedef int (*Fn_trigger)(GCPadManagerHandle, int, int, uint8_t, uint8_t, uint8_t, uint8_t, uint8_t, uint8_t);
+    static Fn_trigger fn = nullptr;
+    if (!fn && g_dll) fn = reinterpret_cast<Fn_trigger>(GetProcAddress(g_dll, "gcpad_set_trigger_effect"));
+    if (!fn) return Napi::Boolean::New(env, false);
+
+    int slot  = info[0].As<Napi::Number>().Int32Value();
+    int right = info[1].As<Napi::Boolean>().Value() ? 1 : 0;
+    uint8_t mode  = static_cast<uint8_t>(info[2].As<Napi::Number>().Uint32Value());
+    uint8_t start = static_cast<uint8_t>(info[3].As<Napi::Number>().Uint32Value());
+    uint8_t end   = static_cast<uint8_t>(info[4].As<Napi::Number>().Uint32Value());
+    uint8_t force = static_cast<uint8_t>(info[5].As<Napi::Number>().Uint32Value());
+    uint8_t p1    = static_cast<uint8_t>(info[6].As<Napi::Number>().Uint32Value());
+    uint8_t p2    = static_cast<uint8_t>(info[7].As<Napi::Number>().Uint32Value());
+
+    return Napi::Boolean::New(env, fn(g_mgr, slot, right, mode, start, end, force, p1, p2) != 0);
+}
+
+/**
+ * gcpadSetPlayerLeds(slot, ledMask): boolean
+ * DualSense player indicator LEDs (5-bit mask).
+ */
+Napi::Value GCPadSetPlayerLeds(const Napi::CallbackInfo& info) {
+    Napi::Env env = info.Env();
+    if (!g_mgr || info.Length() < 2) return Napi::Boolean::New(env, false);
+
+    typedef int (*Fn_pleds)(GCPadManagerHandle, int, uint8_t);
+    static Fn_pleds fn = nullptr;
+    if (!fn && g_dll) fn = reinterpret_cast<Fn_pleds>(GetProcAddress(g_dll, "gcpad_set_player_leds"));
+    if (!fn) return Napi::Boolean::New(env, false);
+
+    int slot = info[0].As<Napi::Number>().Int32Value();
+    uint8_t mask = static_cast<uint8_t>(info[1].As<Napi::Number>().Uint32Value());
+
+    return Napi::Boolean::New(env, fn(g_mgr, slot, mask) != 0);
+}
+
 } // namespace uc_gcpad
