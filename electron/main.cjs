@@ -917,7 +917,9 @@ const GCPAD_POLL_MS = 16 // ~60 Hz
 
 function getGCPadDllPath() {
   if (isDev) {
-    // __dirname is electron/ — go up one level to the project root where build/ lives
+    // Check gcpad-dll/ first (vendored DLLs), then legacy build/gcpad/ path
+    const vendored = path.join(__dirname, '..', 'gcpad-dll', 'gcpad.dll')
+    if (fs.existsSync(vendored)) return vendored
     return path.join(__dirname, '..', 'build', 'gcpad', 'gcpad.dll')
   }
   return path.join(process.resourcesPath, 'gcpad.dll')
@@ -966,8 +968,262 @@ function startGCPad() {
     const states = nativeOverlay.gcpadGetStates()
     if (states && states.length > 0) {
       gcpadBroadcast('uc:controller-input', states)
+      // Run input translation if enabled
+      gcpadTranslateInput(states)
     }
   }, GCPAD_POLL_MS)
+}
+
+// ============================================================
+// GCPad Input Translation Engine
+// ============================================================
+// Translates controller state -> keyboard/mouse events via SendInput.
+// Uses the active key binding profile from controller settings.
+
+// Previous frame state per slot (for detecting press/release transitions)
+const gcpadPrevStates = {}
+// Track which axis-triggered keys are currently "held"
+const gcpadAxisKeyState = {} // `${slot}-pos-${axisIdx}` -> boolean
+const gcpadAxisMouseBtnState = {} // `${slot}-${axisIdx}` -> boolean
+// Scroll wheel accumulators per axis
+const gcpadWheelAccum = {}
+
+// GCPad button index -> NativeButton enum string mapping
+const GCPAD_BUTTON_TO_NATIVE = [
+  'native_a', 'native_b', 'native_x', 'native_y',     // 0-3
+  'native_start', 'native_back', 'native_guide',       // 4-6
+  'native_lb', 'native_rb', 'native_lt', 'native_rt',  // 7-10
+  'native_ls', 'native_rs',                             // 11-12
+  'native_dpad_up', 'native_dpad_down',                 // 13-14
+  'native_dpad_left', 'native_dpad_right',              // 15-16
+  'native_touchpad',                                     // 17
+]
+
+// GCPad axis index -> NativeAxis enum string mapping
+const GCPAD_AXIS_TO_NATIVE = [
+  'native_left_x', 'native_left_y',       // 0-1
+  'native_right_x', 'native_right_y',     // 2-3
+  'native_lt_axis', 'native_rt_axis',     // 4-5
+]
+
+// Common key name -> Windows virtual key code
+const KEY_NAME_TO_VK = {
+  // Letters
+  'a': 0x41, 'b': 0x42, 'c': 0x43, 'd': 0x44, 'e': 0x45, 'f': 0x46,
+  'g': 0x47, 'h': 0x48, 'i': 0x49, 'j': 0x4A, 'k': 0x4B, 'l': 0x4C,
+  'm': 0x4D, 'n': 0x4E, 'o': 0x4F, 'p': 0x50, 'q': 0x51, 'r': 0x52,
+  's': 0x53, 't': 0x54, 'u': 0x55, 'v': 0x56, 'w': 0x57, 'x': 0x58,
+  'y': 0x59, 'z': 0x5A,
+  // Numbers
+  '0': 0x30, '1': 0x31, '2': 0x32, '3': 0x33, '4': 0x34,
+  '5': 0x35, '6': 0x36, '7': 0x37, '8': 0x38, '9': 0x39,
+  // Function keys
+  'f1': 0x70, 'f2': 0x71, 'f3': 0x72, 'f4': 0x73, 'f5': 0x74,
+  'f6': 0x75, 'f7': 0x76, 'f8': 0x77, 'f9': 0x78, 'f10': 0x79,
+  'f11': 0x7A, 'f12': 0x7B,
+  // Special keys
+  'space': 0x20, 'enter': 0x0D, 'return': 0x0D, 'escape': 0x1B, 'esc': 0x1B,
+  'tab': 0x09, 'backspace': 0x08, 'delete': 0x2E, 'insert': 0x2D,
+  'home': 0x24, 'end': 0x23, 'pageup': 0x21, 'pagedown': 0x22,
+  // Arrows
+  'arrowup': 0x26, 'arrowdown': 0x28, 'arrowleft': 0x25, 'arrowright': 0x27,
+  'up': 0x26, 'down': 0x28, 'left': 0x25, 'right': 0x27,
+  // Modifiers
+  'shift': 0x10, 'shiftleft': 0xA0, 'shiftright': 0xA1,
+  'control': 0x11, 'controlleft': 0xA2, 'controlright': 0xA3,
+  'ctrl': 0x11, 'ctrlleft': 0xA2, 'ctrlright': 0xA3,
+  'alt': 0x12, 'altleft': 0xA4, 'altright': 0xA5,
+  // Misc
+  'capslock': 0x14, 'numlock': 0x90, 'scrolllock': 0x91,
+  'printscreen': 0x2C, 'pause': 0x13,
+}
+
+function resolveVK(keyObj) {
+  if (!keyObj) return null
+  // keyObj has { key, code, modifiers }
+  const code = (keyObj.code || keyObj.key || '').toLowerCase()
+  // Try code first (e.g. 'KeyW' -> 'w', 'Space' -> 'space')
+  const stripped = code.replace(/^key/i, '').replace(/^digit/i, '').toLowerCase()
+  return KEY_NAME_TO_VK[stripped] || KEY_NAME_TO_VK[code] || null
+}
+
+function applyDeadzoneAndCurve(value, deadzone, curve) {
+  const absVal = Math.abs(value)
+  if (absVal <= deadzone) return 0
+  const normalized = Math.min((absVal - deadzone) / (1 - deadzone), 1)
+  const curved = Math.pow(normalized, curve || 2)
+  return value < 0 ? -curved : curved
+}
+
+function gcpadTranslateInput(states) {
+  if (!nativeOverlay) return
+
+  // Read settings to check if key binding is enabled
+  let settings
+  try {
+    settings = readSettings()
+  } catch { return }
+
+  const ctrlSettings = settings.controllerSettings
+  if (!ctrlSettings || !ctrlSettings.enabled) return
+
+  const kbSettings = ctrlSettings.keyBinding
+  if (!kbSettings || !kbSettings.enabled) return
+
+  // Find active profile
+  const profiles = settings.controllerProfiles || []
+  const activeId = settings.controllerActiveProfileId || kbSettings.activeProfileId
+  const profile = profiles.find(p => p.id === activeId) || profiles[0]
+  if (!profile || !profile.keyBindingEnabled) return
+
+  const binding = profile.keyBinding
+  if (!binding || !binding.enabled) return
+
+  const deadzone = profile.deadzone || 0.15
+  const triggerDeadzone = profile.triggerDeadzone || 0.1
+
+  for (const state of states) {
+    if (!state.connected) continue
+    const slot = state.slot
+    const prev = gcpadPrevStates[slot] || { buttons: new Array(18).fill(false), axes: new Array(6).fill(0) }
+
+    // ── Button -> keyboard/mouse events ──────────────────────────────────
+    for (let i = 0; i < state.buttons.length; i++) {
+      const cur = state.buttons[i]
+      const prv = prev.buttons[i] || false
+      if (cur === prv) continue
+
+      const nativeBtn = GCPAD_BUTTON_TO_NATIVE[i]
+      if (!nativeBtn) continue
+
+      const action = binding.buttonMappings[nativeBtn]
+      if (!action) continue
+
+      if (action.type === 'keyboard' && action.key) {
+        const vk = resolveVK(action.key)
+        if (vk != null) {
+          nativeOverlay.gcpadSendKeyboard(vk, cur)
+        }
+      } else if (action.type === 'mouse' && action.input) {
+        const mi = action.input
+        if (mi.type === 'click' || mi.button === 'left') {
+          nativeOverlay.gcpadSendMouseButton(0, cur)
+        } else if (mi.type === 'right_click' || mi.button === 'right') {
+          nativeOverlay.gcpadSendMouseButton(1, cur)
+        } else if (mi.type === 'middle_click' || mi.button === 'middle') {
+          nativeOverlay.gcpadSendMouseButton(2, cur)
+        }
+      }
+    }
+
+    // ── Axis -> keyboard events (threshold-based, from buttonMappings) ───
+    for (let i = 0; i < state.axes.length; i++) {
+      const value = state.axes[i]
+      const nativeAxis = GCPAD_AXIS_TO_NATIVE[i]
+      if (!nativeAxis) continue
+
+      const action = binding.buttonMappings[nativeAxis]
+      if (!action) continue
+
+      if (action.type === 'keyboard' && action.key) {
+        const vk = resolveVK(action.key)
+        if (vk == null) continue
+        const dz = (i >= 4) ? triggerDeadzone : deadzone
+        const threshold = 0.5
+        const posKey = `${slot}-pos-${i}`
+        const negKey = `${slot}-neg-${i}`
+
+        if (i >= 4) {
+          // Triggers (0..1): fire on threshold
+          const active = value >= threshold
+          if (active && !gcpadAxisKeyState[posKey]) {
+            nativeOverlay.gcpadSendKeyboard(vk, true)
+            gcpadAxisKeyState[posKey] = true
+          } else if (!active && gcpadAxisKeyState[posKey]) {
+            nativeOverlay.gcpadSendKeyboard(vk, false)
+            gcpadAxisKeyState[posKey] = false
+          }
+        } else {
+          // Sticks (-1..1): fire on positive threshold
+          const posActive = value >= threshold
+          const negActive = value <= -threshold
+          if (posActive && !gcpadAxisKeyState[posKey]) {
+            nativeOverlay.gcpadSendKeyboard(vk, true)
+            gcpadAxisKeyState[posKey] = true
+          } else if (!posActive && gcpadAxisKeyState[posKey]) {
+            nativeOverlay.gcpadSendKeyboard(vk, false)
+            gcpadAxisKeyState[posKey] = false
+          }
+        }
+      }
+    }
+
+    // ── Stick -> mouse motion ────────────────────────────────────────────
+    if (binding.stickToMouse) {
+      const stm = binding.stickToMouse
+      const speed = (stm.mouseSpeed || 1.0) * 15 // base sensitivity
+      const curve = stm.mouseAcceleration ? 2.0 : 1.0
+      let dx = 0, dy = 0
+
+      if (stm.leftStick) {
+        dx += applyDeadzoneAndCurve(state.axes[0], deadzone, curve) * speed
+        dy += applyDeadzoneAndCurve(state.axes[1], deadzone, curve) * speed
+      }
+      if (stm.rightStick) {
+        dx += applyDeadzoneAndCurve(state.axes[2], deadzone, curve) * speed
+        dy += applyDeadzoneAndCurve(state.axes[3], deadzone, curve) * speed
+      }
+
+      dx = Math.round(dx)
+      dy = Math.round(dy)
+      if (dx !== 0 || dy !== 0) {
+        nativeOverlay.gcpadSendMouseMove(dx, dy)
+      }
+    }
+
+    // ── Trigger -> scroll wheel ──────────────────────────────────────────
+    if (binding.triggerToScroll) {
+      const tts = binding.triggerToScroll
+      const scrollSpeed = tts.scrollSpeed || 1.0
+      const tickRate = 0.15
+
+      if (tts.leftTrigger) {
+        const val = state.axes[4] // LeftTrigger
+        const key = `${slot}-wheel-4`
+        if (Math.abs(val) > triggerDeadzone) {
+          gcpadWheelAccum[key] = (gcpadWheelAccum[key] || 0) + val * tickRate * scrollSpeed
+          if (Math.abs(gcpadWheelAccum[key]) >= 1) {
+            const ticks = Math.trunc(gcpadWheelAccum[key])
+            gcpadWheelAccum[key] -= ticks
+            nativeOverlay.gcpadSendMouseWheel(ticks * 120)
+          }
+        } else {
+          gcpadWheelAccum[key] = 0
+        }
+      }
+
+      if (tts.rightTrigger) {
+        const val = state.axes[5] // RightTrigger
+        const key = `${slot}-wheel-5`
+        if (Math.abs(val) > triggerDeadzone) {
+          gcpadWheelAccum[key] = (gcpadWheelAccum[key] || 0) - val * tickRate * scrollSpeed
+          if (Math.abs(gcpadWheelAccum[key]) >= 1) {
+            const ticks = Math.trunc(gcpadWheelAccum[key])
+            gcpadWheelAccum[key] -= ticks
+            nativeOverlay.gcpadSendMouseWheel(ticks * 120)
+          }
+        } else {
+          gcpadWheelAccum[key] = 0
+        }
+      }
+    }
+
+    // Save current state as previous for next frame
+    gcpadPrevStates[slot] = {
+      buttons: [...state.buttons],
+      axes: [...state.axes],
+    }
+  }
 }
 
 // Start GCPad after Electron is ready (SDL2 needs a running message loop)
@@ -10150,18 +10406,28 @@ ipcMain.handle('uc:controller-set-settings', (_event, settings) => {
 ipcMain.handle('uc:controller-get-connected', () => {
   try {
     if (!nativeOverlay || typeof nativeOverlay.gcpadGetStates !== 'function') {
-      return { connected: false, controllerId: null, controllerName: null, controllerType: null }
+      return { ok: true, connected: false, controllerId: null, controllerName: null, controllerType: null }
     }
     const states = nativeOverlay.gcpadGetStates()
     if (!states || states.length === 0) {
-      return { connected: false, controllerId: null, controllerName: null, controllerType: null }
+      return { ok: true, connected: false, controllerId: null, controllerName: null, controllerType: null }
     }
     const first = states[0]
+    const name = (first.name || '').toLowerCase()
+    let controllerType = 'generic'
+    if (name.includes('dualsense') || name.includes('ps5'))           controllerType = 'dualsense'
+    else if (name.includes('dualshock') || name.includes('ds4'))      controllerType = 'dualshock4'
+    else if (name.includes('playstation') || name.includes('sony'))   controllerType = 'playstation'
+    else if (name.includes('xbox series'))                            controllerType = 'xboxseries'
+    else if (name.includes('xbox one'))                               controllerType = 'xboxone'
+    else if (name.includes('xbox'))                                   controllerType = 'xbox'
+    else if (name.includes('switch') || name.includes('pro controller') || name.includes('joy-con')) controllerType = 'switch'
     return {
+      ok: true,
       connected: true,
       controllerId: `gcpad-slot-${first.slot}`,
       controllerName: first.name || 'Unknown Controller',
-      controllerType: 'gamepad',
+      controllerType,
     }
   } catch (err) {
     ucLog(`Controller get connected failed: ${err.message}`, 'error')
@@ -10425,16 +10691,14 @@ $_aevGuid=[Guid]"5CDF2C82-841E-4546-9722-0CF74078229A"
 $_a=$null;$_d.Activate([ref]$_aevGuid,1,[IntPtr]::Zero,[ref]$_a)
 `
 
-// IPC: Get system volume (0-100)
+// IPC: Get system volume (0-100) — uses native Core Audio, no PowerShell
 ipcMain.handle('uc:system-get-volume', async () => {
   try {
-    if (process.platform === 'win32') {
-      const script = AUDIO_TYPE_DEF + `$l=0.0;$_a.GetMasterVolumeLevelScalar([ref]$l);[Math]::Round($l*100)`
-      const stdout = await runPsFile(script)
-      const vol = parseInt(stdout, 10)
-      return { ok: true, volume: isNaN(vol) ? 50 : Math.round(vol) }
+    if (nativeOverlay && typeof nativeOverlay.nativeGetVolume === 'function') {
+      const vol = nativeOverlay.nativeGetVolume()
+      return { ok: true, volume: vol >= 0 ? vol : 50 }
     }
-    return { ok: false, error: 'not-supported' }
+    return { ok: false, error: 'native-addon-not-loaded', volume: 50 }
   } catch (err) {
     ucLog(`System get volume failed: ${err.message}`, 'error')
     return { ok: false, error: err.message, volume: 50 }
@@ -10444,13 +10708,11 @@ ipcMain.handle('uc:system-get-volume', async () => {
 // IPC: Set system volume (0-100)
 ipcMain.handle('uc:system-set-volume', async (_event, level) => {
   try {
-    if (process.platform === 'win32') {
-      const vol = Math.max(0, Math.min(100, parseInt(level, 10) || 50))
-      const script = AUDIO_TYPE_DEF + `$_a.SetMasterVolumeLevelScalar(${vol}/100.0,[ref][Guid]::Empty)`
-      await runPsFile(script)
+    if (nativeOverlay && typeof nativeOverlay.nativeSetVolume === 'function') {
+      nativeOverlay.nativeSetVolume(Math.max(0, Math.min(100, parseInt(level, 10) || 50)))
       return { ok: true }
     }
-    return { ok: false, error: 'not-supported' }
+    return { ok: false, error: 'native-addon-not-loaded' }
   } catch (err) {
     ucLog(`System set volume failed: ${err.message}`, 'error')
     return { ok: false, error: err.message }
@@ -10460,12 +10722,10 @@ ipcMain.handle('uc:system-set-volume', async (_event, level) => {
 // IPC: Get mute state
 ipcMain.handle('uc:system-get-muted', async () => {
   try {
-    if (process.platform === 'win32') {
-      const script = AUDIO_TYPE_DEF + `$m=$false;$_a.GetMute([ref]$m);$m`
-      const stdout = await runPsFile(script)
-      return { ok: true, muted: stdout.toLowerCase() === 'true' }
+    if (nativeOverlay && typeof nativeOverlay.nativeGetMuted === 'function') {
+      return { ok: true, muted: nativeOverlay.nativeGetMuted() }
     }
-    return { ok: false, error: 'not-supported' }
+    return { ok: false, error: 'native-addon-not-loaded', muted: false }
   } catch (err) {
     ucLog(`System get muted failed: ${err.message}`, 'error')
     return { ok: false, error: err.message, muted: false }
@@ -10475,13 +10735,11 @@ ipcMain.handle('uc:system-get-muted', async () => {
 // IPC: Set mute state
 ipcMain.handle('uc:system-set-muted', async (_event, muted) => {
   try {
-    if (process.platform === 'win32') {
-      const muteVal = muted ? '$true' : '$false'
-      const script = AUDIO_TYPE_DEF + `$_a.SetMute(${muteVal},[ref][Guid]::Empty)`
-      await runPsFile(script)
+    if (nativeOverlay && typeof nativeOverlay.nativeSetMuted === 'function') {
+      nativeOverlay.nativeSetMuted(!!muted)
       return { ok: true }
     }
-    return { ok: false, error: 'not-supported' }
+    return { ok: false, error: 'native-addon-not-loaded' }
   } catch (err) {
     ucLog(`System set muted failed: ${err.message}`, 'error')
     return { ok: false, error: err.message }

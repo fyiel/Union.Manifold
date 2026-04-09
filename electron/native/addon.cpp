@@ -41,6 +41,21 @@ namespace uc_gcpad {
     Napi::Value GCPadSetLed(const Napi::CallbackInfo& info);
     Napi::Value GCPadOnConnect(const Napi::CallbackInfo& info);
     Napi::Value GCPadOnDisconnect(const Napi::CallbackInfo& info);
+    // Input injection (SendInput wrappers)
+    Napi::Value GCPadSendKeyboard(const Napi::CallbackInfo& info);
+    Napi::Value GCPadSendMouseButton(const Napi::CallbackInfo& info);
+    Napi::Value GCPadSendMouseMove(const Napi::CallbackInfo& info);
+    Napi::Value GCPadSendMouseWheel(const Napi::CallbackInfo& info);
+    // DualSense-specific
+    Napi::Value GCPadSetTriggerEffect(const Napi::CallbackInfo& info);
+    Napi::Value GCPadSetPlayerLeds(const Napi::CallbackInfo& info);
+}
+
+namespace uc_volume {
+    Napi::Value NativeGetVolume(const Napi::CallbackInfo& info);
+    Napi::Value NativeSetVolume(const Napi::CallbackInfo& info);
+    Napi::Value NativeGetMuted(const Napi::CallbackInfo& info);
+    Napi::Value NativeSetMuted(const Napi::CallbackInfo& info);
 }
 
 Napi::Object Init(Napi::Env env, Napi::Object exports) {
@@ -63,6 +78,22 @@ Napi::Object Init(Napi::Env env, Napi::Object exports) {
     exports.Set("gcpadSetLed",       Napi::Function::New(env, uc_gcpad::GCPadSetLed));
     exports.Set("gcpadOnConnect",    Napi::Function::New(env, uc_gcpad::GCPadOnConnect));
     exports.Set("gcpadOnDisconnect", Napi::Function::New(env, uc_gcpad::GCPadOnDisconnect));
+
+    // Input injection
+    exports.Set("gcpadSendKeyboard",    Napi::Function::New(env, uc_gcpad::GCPadSendKeyboard));
+    exports.Set("gcpadSendMouseButton", Napi::Function::New(env, uc_gcpad::GCPadSendMouseButton));
+    exports.Set("gcpadSendMouseMove",   Napi::Function::New(env, uc_gcpad::GCPadSendMouseMove));
+    exports.Set("gcpadSendMouseWheel",  Napi::Function::New(env, uc_gcpad::GCPadSendMouseWheel));
+
+    // DualSense-specific
+    exports.Set("gcpadSetTriggerEffect", Napi::Function::New(env, uc_gcpad::GCPadSetTriggerEffect));
+    exports.Set("gcpadSetPlayerLeds",    Napi::Function::New(env, uc_gcpad::GCPadSetPlayerLeds));
+
+    // Native volume control (replaces PowerShell-based approach)
+    exports.Set("nativeGetVolume", Napi::Function::New(env, uc_volume::NativeGetVolume));
+    exports.Set("nativeSetVolume", Napi::Function::New(env, uc_volume::NativeSetVolume));
+    exports.Set("nativeGetMuted",  Napi::Function::New(env, uc_volume::NativeGetMuted));
+    exports.Set("nativeSetMuted",  Napi::Function::New(env, uc_volume::NativeSetMuted));
 
     return exports;
 }

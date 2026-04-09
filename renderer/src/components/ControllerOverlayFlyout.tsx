@@ -1,7 +1,7 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useController, ControllerProfile } from '../hooks/use-controller'
 import { Switch } from './ui/switch'
-import { Gamepad2, X, RefreshCw, Mouse, Settings, Volume2 } from 'lucide-react'
+import { Gamepad2, X, RefreshCw, Mouse, Settings, Volume2, BatteryFull, BatteryLow, BatteryMedium, BatteryCharging, Zap } from 'lucide-react'
 
 interface ControllerOverlayFlyoutProps {
   visible: boolean
@@ -25,6 +25,8 @@ export function ControllerOverlayFlyout({ visible, onClose, position = 'right' }
   const [activeTab, setActiveTab] = useState<'mapping' | 'mouse' | 'quick'>('quick')
   const [localDeadzone, setLocalDeadzone] = useState(settings?.deadzone ?? 0.1)
   const [localVibration, setLocalVibration] = useState(settings?.vibrationEnabled ?? true)
+  const [batteryLevel, setBatteryLevel] = useState<number | null>(null)
+  const [isCharging, setIsCharging] = useState(false)
 
   useEffect(() => {
     if (settings) {
@@ -32,6 +34,21 @@ export function ControllerOverlayFlyout({ visible, onClose, position = 'right' }
       setLocalVibration(settings.vibrationEnabled)
     }
   }, [settings])
+
+  // Listen for controller input events to get battery info
+  useEffect(() => {
+    if (!visible || !window.ucController) return
+    const unsub = window.ucController.onControllerInput?.((data: any) => {
+      // data is an array of controller states from gcpadGetStates
+      const states = Array.isArray(data) ? data : [data]
+      const first = states[0]
+      if (first && first.connected && first.battery > 0) {
+        setBatteryLevel(Math.round(first.battery * 100))
+        setIsCharging(!!first.charging)
+      }
+    })
+    return () => { unsub?.() }
+  }, [visible])
 
   useEffect(() => {
     if (!visible) return
@@ -126,7 +143,23 @@ export function ControllerOverlayFlyout({ visible, onClose, position = 'right' }
           <div className="min-w-0 flex-1">
             <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-zinc-500">Controller</div>
             <div className="text-base font-black tracking-tight text-white">Input Console</div>
-            <div className={`text-[10px] ${connected ? 'text-emerald-300' : 'text-zinc-500'}`}>{statusLabel}</div>
+            <div className="flex items-center gap-2">
+              <span className={`text-[10px] ${connected ? 'text-emerald-300' : 'text-zinc-500'}`}>{statusLabel}</span>
+              {connected && batteryLevel != null && batteryLevel > 0 && (
+                <span className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[9px] font-bold ${
+                  isCharging ? 'bg-emerald-500/20 text-emerald-300' :
+                  batteryLevel > 60 ? 'bg-emerald-500/15 text-emerald-400' :
+                  batteryLevel > 25 ? 'bg-amber-500/15 text-amber-400' :
+                  'bg-red-500/15 text-red-400'
+                }`}>
+                  {isCharging ? <Zap size={8} /> :
+                   batteryLevel > 60 ? <BatteryFull size={10} /> :
+                   batteryLevel > 25 ? <BatteryMedium size={10} /> :
+                   <BatteryLow size={10} />}
+                  {batteryLevel}%
+                </span>
+              )}
+            </div>
           </div>
           <button
             onClick={(event) => {

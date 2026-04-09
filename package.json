@@ -1,6 +1,6 @@
 {
   "name": "unioncrax-direct",
-  "version": "1.7.2-alpha",
+  "version": "1.7.2-beta",
   "description": "Standalone Electron app for managing and launching games from UnionCrax",
   "type": "module",
   "main": "electron/main.cjs",
@@ -114,11 +114,11 @@
           "to": "uc-overlay-x64.dll"
         },
         {
-          "from": "build/gcpad/gcpad.dll",
+          "from": "gcpad-dll/gcpad.dll",
           "to": "gcpad.dll"
         },
         {
-          "from": "build/gcpad/SDL2.dll",
+          "from": "gcpad-dll/SDL2.dll",
           "to": "SDL2.dll"
         }
       ]
