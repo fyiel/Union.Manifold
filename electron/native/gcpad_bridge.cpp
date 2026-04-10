@@ -532,4 +532,139 @@ Napi::Value GCPadSetPlayerLeds(const Napi::CallbackInfo& info) {
     return Napi::Boolean::New(env, fn(g_mgr, slot, mask) != 0);
 }
 
+// ── Remapper functions ─────────────────────────────────────────────────────────
+
+static void* g_remapper = nullptr;
+
+typedef void* (*Fn_remapper_create)();
+typedef void (*Fn_remapper_destroy)(void*);
+typedef void (*Fn_remapper_map_btn_key)(void*, int, uint16_t);
+typedef void (*Fn_remapper_map_btn_mouse)(void*, int, int);
+typedef void (*Fn_remapper_map_axis_mouse)(void*, int, float, float, int, float);
+typedef void (*Fn_remapper_map_axis_key)(void*, int, uint16_t, float, int);
+typedef void (*Fn_remapper_map_axis_mouse_btn)(void*, int, int, float);
+typedef void (*Fn_remapper_map_axis_wheel)(void*, int, int, float, int, float);
+typedef void (*Fn_remapper_clear_all)(void*);
+typedef int (*Fn_remapper_send_input)(void*, void*, void*);
+typedef void (*Fn_remapper_reset_state)(void*);
+
+static Fn_remapper_create   g_fn_remapper_create   = nullptr;
+static Fn_remapper_destroy  g_fn_remapper_destroy  = nullptr;
+static Fn_remapper_map_btn_key g_fn_remapper_map_btn_key = nullptr;
+static Fn_remapper_map_btn_mouse g_fn_remapper_map_btn_mouse = nullptr;
+static Fn_remapper_map_axis_mouse g_fn_remapper_map_axis_mouse = nullptr;
+static Fn_remapper_map_axis_key g_fn_remapper_map_axis_key = nullptr;
+static Fn_remapper_map_axis_mouse_btn g_fn_remapper_map_axis_mouse_btn = nullptr;
+static Fn_remapper_map_axis_wheel g_fn_remapper_map_axis_wheel = nullptr;
+static Fn_remapper_clear_all g_fn_remapper_clear_all = nullptr;
+static Fn_remapper_send_input g_fn_remapper_send_input = nullptr;
+static Fn_remapper_reset_state g_fn_remapper_reset_state = nullptr;
+
+Napi::Value GCPadRemapperCreate(const Napi::CallbackInfo& info) {
+    Napi::Env env = info.Env();
+    if (!g_dll) return env.Null();
+    
+    if (!g_fn_remapper_create) {
+        g_fn_remapper_create = reinterpret_cast<Fn_remapper_create>(GetProcAddress(g_dll, "gcpad_remapper_create"));
+        g_fn_remapper_destroy = reinterpret_cast<Fn_remapper_destroy>(GetProcAddress(g_dll, "gcpad_remapper_destroy"));
+        g_fn_remapper_map_btn_key = reinterpret_cast<Fn_remapper_map_btn_key>(GetProcAddress(g_dll, "gcpad_remapper_map_button_to_key"));
+        g_fn_remapper_map_btn_mouse = reinterpret_cast<Fn_remapper_map_btn_mouse>(GetProcAddress(g_dll, "gcpad_remapper_map_button_to_mouse"));
+        g_fn_remapper_map_axis_mouse = reinterpret_cast<Fn_remapper_map_axis_mouse>(GetProcAddress(g_dll, "gcpad_remapper_map_axis_to_mouse"));
+        g_fn_remapper_map_axis_key = reinterpret_cast<Fn_remapper_map_axis_key>(GetProcAddress(g_dll, "gcpad_remapper_map_axis_to_key"));
+        g_fn_remapper_map_axis_mouse_btn = reinterpret_cast<Fn_remapper_map_axis_mouse_btn>(GetProcAddress(g_dll, "gcpad_remapper_map_axis_to_mouse_button"));
+        g_fn_remapper_map_axis_wheel = reinterpret_cast<Fn_remapper_map_axis_wheel>(GetProcAddress(g_dll, "gcpad_remapper_map_axis_to_wheel"));
+        g_fn_remapper_clear_all = reinterpret_cast<Fn_remapper_clear_all>(GetProcAddress(g_dll, "gcpad_remapper_clear_all"));
+        g_fn_remapper_send_input = reinterpret_cast<Fn_remapper_send_input>(GetProcAddress(g_dll, "gcpad_remapper_send_input"));
+        g_fn_remapper_reset_state = reinterpret_cast<Fn_remapper_reset_state>(GetProcAddress(g_dll, "gcpad_remapper_reset_state"));
+    }
+    
+    if (!g_fn_remapper_create) return env.Null();
+    
+    g_remapper = g_fn_remapper_create();
+    return Napi::Boolean::New(env, g_remapper != nullptr);
+}
+
+Napi::Value GCPadRemapperDestroy(const Napi::CallbackInfo& info) {
+    Napi::Env env = info.Env();
+    if (g_remapper && g_fn_remapper_destroy) {
+        g_fn_remapper_destroy(g_remapper);
+        g_remapper = nullptr;
+    }
+    return env.Undefined();
+}
+
+Napi::Value GCPadRemapperMapButtonToKey(const Napi::CallbackInfo& info) {
+    Napi::Env env = info.Env();
+    if (!g_remapper || !g_fn_remapper_map_btn_key || info.Length() < 2 || !info[0].IsNumber() || !info[1].IsNumber()) {
+        return env.Undefined();
+    }
+    int button = info[0].As<Napi::Number>().Int32Value();
+    uint16_t vk = static_cast<uint16_t>(info[1].As<Napi::Number>().Uint32Value());
+    g_fn_remapper_map_btn_key(g_remapper, button, vk);
+    return env.Undefined();
+}
+
+Napi::Value GCPadRemapperMapButtonToMouse(const Napi::CallbackInfo& info) {
+    Napi::Env env = info.Env();
+    if (!g_remapper || !g_fn_remapper_map_btn_mouse || info.Length() < 2 || !info[0].IsNumber() || !info[1].IsNumber()) {
+        return env.Undefined();
+    }
+    int button = info[0].As<Napi::Number>().Int32Value();
+    int mouse_btn = info[1].As<Napi::Number>().Int32Value();
+    g_fn_remapper_map_btn_mouse(g_remapper, button, mouse_btn);
+    return env.Undefined();
+}
+
+Napi::Value GCPadRemapperMapAxisToMouse(const Napi::CallbackInfo& info) {
+    Napi::Env env = info.Env();
+    if (!g_remapper || !g_fn_remapper_map_axis_mouse || info.Length() < 5 || !info[0].IsNumber() || !info[1].IsNumber() || !info[2].IsNumber() || !info[3].IsBoolean() || !info[4].IsNumber()) {
+        return env.Undefined();
+    }
+    int axis = info[0].As<Napi::Number>().Int32Value();
+    float sensitivity = static_cast<float>(info[1].As<Napi::Number>().DoubleValue());
+    float deadzone = static_cast<float>(info[2].As<Napi::Number>().DoubleValue());
+    int invert = info[3].As<Napi::Boolean>().Value() ? 1 : 0;
+    float curve = static_cast<float>(info[4].As<Napi::Number>().DoubleValue());
+    g_fn_remapper_map_axis_mouse(g_remapper, axis, sensitivity, deadzone, invert, curve);
+    return env.Undefined();
+}
+
+Napi::Value GCPadRemapperMapAxisToKey(const Napi::CallbackInfo& info) {
+    Napi::Env env = info.Env();
+    if (!g_remapper || !g_fn_remapper_map_axis_key || info.Length() < 4 || !info[0].IsNumber() || !info[1].IsNumber() || !info[2].IsNumber() || !info[3].IsBoolean()) {
+        return env.Undefined();
+    }
+    int axis = info[0].As<Napi::Number>().Int32Value();
+    uint16_t vk = static_cast<uint16_t>(info[1].As<Napi::Number>().Uint32Value());
+    float threshold = static_cast<float>(info[2].As<Napi::Number>().DoubleValue());
+    int neg_dir = info[3].As<Napi::Boolean>().Value() ? 1 : 0;
+    g_fn_remapper_map_axis_key(g_remapper, axis, vk, threshold, neg_dir);
+    return env.Undefined();
+}
+
+Napi::Value GCPadRemapperClearAll(const Napi::CallbackInfo& info) {
+    Napi::Env env = info.Env();
+    if (g_remapper && g_fn_remapper_clear_all) {
+        g_fn_remapper_clear_all(g_remapper);
+    }
+    return env.Undefined();
+}
+
+Napi::Value GCPadRemapperSendInput(const Napi::CallbackInfo& info) {
+    Napi::Env env = info.Env();
+    if (!g_remapper || !g_fn_remapper_send_input) {
+        return Napi::Boolean::New(env, false);
+    }
+    int result = g_fn_remapper_send_input(g_remapper, nullptr, nullptr);
+    return Napi::Boolean::New(env, result != 0);
+}
+
+Napi::Value GCPadRemapperResetState(const Napi::CallbackInfo& info) {
+    Napi::Env env = info.Env();
+    if (g_remapper && g_fn_remapper_reset_state) {
+        g_fn_remapper_reset_state(g_remapper);
+    }
+    return env.Undefined();
+}
+
 } // namespace uc_gcpad

@@ -263,11 +263,11 @@ contextBridge.exposeInMainWorld('ucController', {
   getSettings: () => ipcRenderer.invoke('uc:controller-get-settings'),
   setSettings: (settings) => ipcRenderer.invoke('uc:controller-set-settings', settings),
   getConnected: () => ipcRenderer.invoke('uc:controller-get-connected'),
-  // Input translation (x360ce-style)
+  // Input translation
   getMappingPresets: () => ipcRenderer.invoke('uc:controller-get-mapping-presets'),
   getActiveMapping: () => ipcRenderer.invoke('uc:controller-get-active-mapping'),
   setActiveMapping: (preset, customMapping) => ipcRenderer.invoke('uc:controller-set-active-mapping', preset, customMapping),
-  // Key binding (antimicrox-style)
+  // Key binding
   getProfiles: () => ipcRenderer.invoke('uc:controller-get-profiles'),
   getActiveProfile: () => ipcRenderer.invoke('uc:controller-get-active-profile'),
   setActiveProfile: (profileId) => ipcRenderer.invoke('uc:controller-set-active-profile', profileId),

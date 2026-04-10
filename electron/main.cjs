@@ -908,9 +908,9 @@ const overlayInjections = new Map()
 // GCPad Controller System
 // ============================================================
 // Uses the GCPad C ABI exposed through the uc_overlay_native addon.
-// gcpad.dll is loaded at runtime (with SDL2.dll resolved alongside it).
+// gcpad.dll and gcpad_remap.dll are loaded at runtime (with SDL2.dll resolved alongside).
 //
-// For development: copy gcpad.dll + SDL2.dll to electron/build/gcpad/
+// For development: copy gcpad.dll + gcpad_remap.dll + SDL2.dll to electron/gcpad-dll/
 // For production: they are extracted to resourcesPath via extraResources.
 
 const GCPAD_POLL_MS = 16 // ~60 Hz
@@ -968,6 +968,20 @@ function startGCPad() {
     const states = nativeOverlay.gcpadGetStates()
     if (states && states.length > 0) {
       gcpadBroadcast('uc:controller-input', states)
+      // Check for guide button press to toggle overlay
+      for (const state of states) {
+        if (state.buttons && state.buttons[6]) { // Button 6 = Guide button
+          if (!gcpadGuideButtonPressed) {
+            gcpadGuideButtonPressed = true
+            toggleOverlay(currentOverlayAppid)
+          }
+          break
+        }
+      }
+      // Reset guide button state when not pressed
+      if (!states.some(s => s.buttons && s.buttons[6])) {
+        gcpadGuideButtonPressed = false
+      }
       // Run input translation if enabled
       gcpadTranslateInput(states)
     }
@@ -1161,7 +1175,7 @@ function gcpadTranslateInput(states) {
     // ── Stick -> mouse motion ────────────────────────────────────────────
     if (binding.stickToMouse) {
       const stm = binding.stickToMouse
-      const speed = (stm.mouseSpeed || 1.0) * 15 // base sensitivity
+      const speed = (stm.mouseSpeed || 1.0) * 50 // base sensitivity - increased for better default
       const curve = stm.mouseAcceleration ? 2.0 : 1.0
       let dx = 0, dy = 0
 
@@ -10435,7 +10449,7 @@ ipcMain.handle('uc:controller-get-connected', () => {
   }
 })
 
-// IPC: Get mapping presets (x360ce-style)
+// IPC: Get mapping presets
 ipcMain.handle('uc:controller-get-mapping-presets', () => {
   try {
     const settings = readSettings()
@@ -10479,7 +10493,7 @@ ipcMain.handle('uc:controller-set-active-mapping', (_event, preset, customMappin
   }
 })
 
-// IPC: Get profiles (key binding profiles - antimicrox-style)
+// IPC: Get profiles (key binding profiles)
 ipcMain.handle('uc:controller-get-profiles', () => {
   try {
     const settings = readSettings()
@@ -10621,7 +10635,7 @@ ipcMain.handle('uc:controller-get-overlay-settings', () => {
       ok: true,
       settings: {
         overlayEnabled: settings?.controllerOverlayEnabled ?? true,
-        overlayHotkey: settings?.controllerOverlayHotkey || 'Ctrl+Shift+Gamepad',
+        overlayHotkey: settings?.controllerOverlayHotkey || 'Guide Button',
         overlayPosition: settings?.controllerOverlayPosition || 'right',
       }
     }

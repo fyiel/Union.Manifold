@@ -1,8 +1,11 @@
 /**
  * Controller Input Mapping System
- *
- * x360ce-style: Translates unsupported controller inputs to Xbox 360 inputs
- * antimicrox-style: Remaps controller inputs to keyboard and mouse inputs
+ * 
+ * Uses gcpad_remap to translate native controller inputs into standardized 
+ * Xbox 360-style outputs for maximum game compatibility, seeing as how most
+ * games have better compatibility with controllers if it's that one.
+ * 
+ * Thanks Windows, super appreciative of that.
  */
 
 // Standard Xbox 360 Controller Button/Input IDs
@@ -114,7 +117,7 @@ export interface ControllerMapping {
   }
 }
 
-// Key binding: controller input -> keyboard/mouse output (antimicrox-style)
+// Key binding: controller input -> keyboard/mouse output
 export interface KeyBinding {
   id: string
   name: string
@@ -148,10 +151,8 @@ export interface ControllerProfile {
   appid?: string // Optional game association
   createdAt: number
   updatedAt: number
-  // x360ce-style settings
   mappingEnabled: boolean
   controllerMapping: ControllerMapping
-  // antimicrox-style settings
   keyBindingEnabled: boolean
   keyBinding: KeyBinding
   // General settings
@@ -171,7 +172,6 @@ export interface ControllerSettings {
   triggerDeadzone: number
   buttonLayout: 'default' | 'legacy'
   
-  // x360ce-style input translation
   inputTranslation: {
     enabled: boolean
     // Auto-detect controller type and apply appropriate mapping
@@ -182,7 +182,6 @@ export interface ControllerSettings {
     customMapping?: ControllerMapping
   }
   
-  // antimicrox-style key binding
   keyBinding: {
     enabled: boolean
     // Active profile ID
@@ -439,7 +438,7 @@ export function createDefaultControllerSettings(): ControllerSettings {
       defaultProfileId: defaultProfile.id,
     },
     overlayEnabled: true,
-    overlayHotkey: 'Ctrl+Shift+Gamepad',
+    overlayHotkey: 'Guide Button',
     overlayPosition: 'right',
   }
 }

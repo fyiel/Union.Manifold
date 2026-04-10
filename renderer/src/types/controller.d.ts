@@ -1,8 +1,5 @@
 /**
  * Controller Support API Type Definitions
- *
- * x360ce-style: Translates unsupported controller inputs to Xbox 360 inputs
- * antimicrox-style: Remaps controller inputs to keyboard and mouse inputs
  */
 
 import type { ControllerSettings, ControllerProfile, ControllerMapping } from '../lib/controller-mappings'
@@ -52,12 +49,12 @@ export interface ControllerAPI {
   setSettings: (settings: Partial<ControllerSettings>) => Promise<{ ok: boolean; error?: string }>
   getConnected: () => Promise<{ ok: boolean; connected: boolean; controllerId?: string; controllerName?: string; controllerType?: string; error?: string }>
   
-  // Input translation (x360ce-style)
+  // Input translation
   getMappingPresets: () => Promise<{ ok: boolean; presets?: ControllerMapping[]; error?: string }>
   getActiveMapping: () => Promise<{ ok: boolean; mapping?: ControllerMapping; error?: string }>
   setActiveMapping: (preset: string, customMapping?: ControllerMapping) => Promise<{ ok: boolean; error?: string }>
   
-  // Key binding (antimicrox-style)
+  // Key binding
   getProfiles: () => Promise<{ ok: boolean; profiles?: ControllerProfile[]; error?: string }>
   getActiveProfile: () => Promise<{ ok: boolean; profile?: ControllerProfile; error?: string }>
   setActiveProfile: (profileId: string) => Promise<{ ok: boolean; error?: string }>

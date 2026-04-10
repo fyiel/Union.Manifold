@@ -17,6 +17,7 @@ import {
   NativeButton,
   InputAction,
 } from '../lib/controller-mappings'
+import { CompactRemapSection } from './CompactRemapSection'
 
 // ─── Button list ─────────────────────────────────────────────────────────────
 
@@ -560,7 +561,7 @@ export function ControllerSettingsPanel() {
           <div className="rounded-lg bg-purple-900/20 border border-purple-500/30 p-4">
             <div className="flex items-center gap-3 mb-2">
               <Gamepad2 className="text-purple-400" size={20} />
-              <Label className="text-base font-medium">x360ce-Style Input Translation</Label>
+              <Label className="text-base font-medium">Xbox 360 Input Translation (GCPad_Remap)</Label>
             </div>
             <p className="text-sm text-gray-400">
               Translate unsupported controller inputs to Xbox 360 format for better game compatibility
@@ -716,160 +717,11 @@ export function ControllerSettingsPanel() {
 
               {activeProfile && (
                 <>
-                  {/* ── Button remapping table ──────────────────────────── */}
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-between">
-                      <Label className="text-sm font-medium">Button &amp; Trigger Bindings</Label>
-                      <span className="text-xs text-gray-500">Click a row to assign a key or mouse action</span>
-                    </div>
-
-                    {BUTTON_GROUPS.map(({ group, buttons }) => (
-                      <div key={group} className="space-y-1">
-                        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide px-1 pt-1">
-                          {group}
-                        </p>
-                        {buttons.map(({ key: btnKey, label }) => {
-                          const currentAction = (activeProfile.keyBinding?.buttonMappings as Record<string, InputAction | undefined>)?.[btnKey]
-                          const isEditing = editingButton === btnKey
-                          const actionText = formatAction(currentAction)
-                          const hasBinding = !!actionText
-
-                          if (isEditing) {
-                            return (
-                              <BindingCapture
-                                key={btnKey}
-                                buttonLabel={label}
-                                currentAction={currentAction}
-                                onSave={action => saveButtonBinding(btnKey, action)}
-                                onCancel={() => setEditingButton(null)}
-                              />
-                            )
-                          }
-
-                          return (
-                            <button
-                              key={btnKey}
-                              onClick={() => setEditingButton(btnKey)}
-                              className="w-full flex items-center justify-between px-3 py-2 rounded-lg bg-gray-800/40 hover:bg-gray-800/80 group transition-colors text-left"
-                            >
-                              <div className="flex items-center gap-2">
-                                <Pencil
-                                  size={13}
-                                  className="text-gray-600 group-hover:text-gray-400 transition-colors flex-shrink-0"
-                                />
-                                <span className="text-sm text-gray-300">{label}</span>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                {hasBinding ? (
-                                  <>
-                                    <span className={`text-xs font-medium px-2 py-0.5 rounded ${actionBadgeClass(currentAction)}`}>
-                                      {actionText}
-                                    </span>
-                                    <button
-                                      onClick={e => { e.stopPropagation(); saveButtonBinding(btnKey, { type: 'none' }) }}
-                                      className="p-0.5 text-gray-600 hover:text-red-400 transition-colors"
-                                      title="Clear binding"
-                                    >
-                                      <X size={13} />
-                                    </button>
-                                  </>
-                                ) : (
-                                  <span className="text-xs text-gray-600 italic">unbound</span>
-                                )}
-                              </div>
-                            </button>
-                          )
-                        })}
-                      </div>
-                    ))}
-                  </div>
-
-                  {/* ── Stick to mouse ─────────────────────────────────── */}
-                  <div className="rounded-lg bg-gray-800/50 p-4 space-y-4">
-                    <div className="flex items-center gap-2 mb-1">
-                      <Mouse size={16} className="text-gray-400" />
-                      <Label className="text-sm font-medium">Stick to Mouse</Label>
-                    </div>
-
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm text-gray-300">Left Stick → Mouse</span>
-                      <Switch
-                        checked={activeProfile.keyBinding?.stickToMouse?.leftStick ?? false}
-                        onCheckedChange={checked => patchStickToMouse({ leftStick: checked })}
-                      />
-                    </div>
-
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm text-gray-300">Right Stick → Mouse</span>
-                      <Switch
-                        checked={activeProfile.keyBinding?.stickToMouse?.rightStick ?? false}
-                        onCheckedChange={checked => patchStickToMouse({ rightStick: checked })}
-                      />
-                    </div>
-
-                    {(activeProfile.keyBinding?.stickToMouse?.leftStick || activeProfile.keyBinding?.stickToMouse?.rightStick) && (
-                      <div className="space-y-2 pt-1">
-                        <div className="flex items-center justify-between">
-                          <Label className="text-sm">Mouse Speed</Label>
-                          <span className="text-sm text-gray-400">
-                            {activeProfile.keyBinding?.stickToMouse?.mouseSpeed?.toFixed(1) ?? '1.0'}×
-                          </span>
-                        </div>
-                        <Slider
-                          value={[activeProfile.keyBinding?.stickToMouse?.mouseSpeed ?? 1.0]}
-                          min={0.1} max={5.0} step={0.1}
-                          onValueChange={([v]) => patchStickToMouse({ mouseSpeed: v })}
-                        />
-                        <div className="flex items-center justify-between pt-1">
-                          <span className="text-sm text-gray-300">Mouse Acceleration</span>
-                          <Switch
-                            checked={activeProfile.keyBinding?.stickToMouse?.mouseAcceleration ?? false}
-                            onCheckedChange={checked => patchStickToMouse({ mouseAcceleration: checked })}
-                          />
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* ── Trigger to scroll ──────────────────────────────── */}
-                  <div className="rounded-lg bg-gray-800/50 p-4 space-y-4">
-                    <Label className="text-sm font-medium block">Trigger to Scroll</Label>
-                    <p className="text-xs text-gray-500 -mt-2">
-                      When enabled, the analog trigger axis drives scroll — overrides any button binding for that trigger.
-                    </p>
-
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm text-gray-300">Left Trigger → Scroll Down</span>
-                      <Switch
-                        checked={activeProfile.keyBinding?.triggerToScroll?.leftTrigger ?? false}
-                        onCheckedChange={checked => patchTriggerToScroll({ leftTrigger: checked })}
-                      />
-                    </div>
-
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm text-gray-300">Right Trigger → Scroll Up</span>
-                      <Switch
-                        checked={activeProfile.keyBinding?.triggerToScroll?.rightTrigger ?? false}
-                        onCheckedChange={checked => patchTriggerToScroll({ rightTrigger: checked })}
-                      />
-                    </div>
-
-                    {(activeProfile.keyBinding?.triggerToScroll?.leftTrigger || activeProfile.keyBinding?.triggerToScroll?.rightTrigger) && (
-                      <div className="space-y-2 pt-1">
-                        <div className="flex items-center justify-between">
-                          <Label className="text-sm">Scroll Speed</Label>
-                          <span className="text-sm text-gray-400">
-                            {activeProfile.keyBinding?.triggerToScroll?.scrollSpeed?.toFixed(1) ?? '1.0'}×
-                          </span>
-                        </div>
-                        <Slider
-                          value={[activeProfile.keyBinding?.triggerToScroll?.scrollSpeed ?? 1.0]}
-                          min={0.1} max={5.0} step={0.1}
-                          onValueChange={([v]) => patchTriggerToScroll({ scrollSpeed: v })}
-                        />
-                      </div>
-                    )}
-                  </div>
+                  {/* ── Compact Remap Section ─────────────────────────────────── */}
+                  <CompactRemapSection 
+                    activeProfile={activeProfile} 
+                    onUpdateProfile={updateProfile}
+                  />
                 </>
               )}
             </>
@@ -902,12 +754,12 @@ export function ControllerSettingsPanel() {
                 <Label>Overlay Hotkey</Label>
                 <input
                   type="text"
-                  value={localSettings.overlayHotkey || 'Ctrl+Shift+Gamepad'}
+                  value={localSettings.overlayHotkey || 'Guide Button'}
                   onChange={e => handleOverlayHotkeyChange(e.target.value)}
                   className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-md text-white text-sm"
-                  placeholder="Ctrl+Shift+Gamepad"
+                  placeholder="Guide Button"
                 />
-                <p className="text-xs text-gray-400">Keyboard shortcut to open the controller overlay</p>
+                <p className="text-xs text-gray-400">Press the guide button on your controller to open the overlay</p>
               </div>
 
               <div className="space-y-2">
