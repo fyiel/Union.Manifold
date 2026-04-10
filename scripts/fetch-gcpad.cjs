@@ -2,8 +2,8 @@
  * fetch-gcpad.cjs
  *
  * Downloads the gcpad-unioncrax-direct.zip asset from the latest
- * veeeanti/GCPad_API GitHub release and extracts gcpad.dll, SDL2.dll,
- * gcpad.lib, and gcpad_remap.lib into gcpad-dll/.
+ * veeeanti/GCPad_API GitHub release and extracts gcpad.dll and SDL2.dll
+ * into gcpad-dll/.
  *
  * Usage:
  *   node ./scripts/fetch-gcpad.cjs
@@ -25,7 +25,7 @@ const ZIP_ASSET = 'gcpad-unioncrax-direct.zip'
 const OUT_DIR   = path.join(__dirname, '..', 'gcpad-dll')
 
 // Fallback: if the zip asset doesn't exist, download individual DLLs
-const FALLBACK_ASSETS = ['gcpad.dll', 'gcpad_remap.dll', 'SDL2.dll']
+const FALLBACK_ASSETS = ['gcpad.dll', 'SDL2.dll']
 
 // ── CLI args ─────────────────────────────────────────────────────────────────
 
