@@ -85,9 +85,6 @@ importers:
       lucide-react:
         specifier: ^0.454.0
         version: 0.454.0(react@19.2.3)
-      node-addon-api:
-        specifier: ^7.1.0
-        version: 7.1.1
       react:
         specifier: 19.2.3
         version: 19.2.3
@@ -122,6 +119,9 @@ importers:
       electron-builder:
         specifier: ^25.1.8
         version: 25.1.8(electron-builder-squirrel-windows@25.1.8)
+      node-addon-api:
+        specifier: ^7.1.0
+        version: 7.1.1
       node-gyp:
         specifier: ^10.2.0
         version: 10.3.1

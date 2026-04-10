@@ -908,9 +908,9 @@ const overlayInjections = new Map()
 // GCPad Controller System
 // ============================================================
 // Uses the GCPad C ABI exposed through the uc_overlay_native addon.
-// gcpad.dll and gcpad_remap.dll are loaded at runtime (with SDL2.dll resolved alongside).
+// gcpad.dll is loaded at runtime (with SDL2.dll resolved alongside it).
 //
-// For development: copy gcpad.dll + gcpad_remap.dll + SDL2.dll to electron/gcpad-dll/
+// For development: copy gcpad.dll + SDL2.dll to electron/gcpad-dll/
 // For production: they are extracted to resourcesPath via extraResources.
 
 const GCPAD_POLL_MS = 16 // ~60 Hz
