@@ -124,7 +124,7 @@ export function useController() {
     await updateSettings({ enabled })
   }, [updateSettings])
 
-  // Input translation (x360ce-style) methods
+  // Input translation methods
   const getMappingPresets = useCallback(async () => {
     try {
       if (window.ucController?.getMappingPresets) {
@@ -152,7 +152,7 @@ export function useController() {
     }
   }, [])
 
-  // Key binding (antimicrox-style) methods
+  // Key binding methods
   const getActiveProfile = useCallback(async () => {
     try {
       if (window.ucController?.getActiveProfile) {

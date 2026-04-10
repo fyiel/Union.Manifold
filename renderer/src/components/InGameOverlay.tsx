@@ -140,6 +140,7 @@ export function InGameOverlay() {
   const [dock, setDock] = useState<OverlayDock>('left')
   const [toastDurationMs, setToastDurationMs] = useState(5000)
   const [toastVertical, setToastVertical] = useState<OverlayVertical>('bottom')
+  const [screenDimmed, setScreenDimmed] = useState(false)  
   const currentAppidRef = useRef<string | null>(null)
   const modeRef = useRef<OverlayMode>(mode)
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -193,6 +194,15 @@ export function InGameOverlay() {
       window.ucSystem.getNotifications().then((result) => {
         if (result.ok) setNotifications(result.notifications || [])
       }).catch(() => {})
+    }
+  }, [mode])
+
+  // Dim screen when overlay is visible
+  useEffect(() => {
+    if (mode === 'panel') {
+      setScreenDimmed(true)
+    } else if (mode === 'hidden') {
+      setScreenDimmed(false)
     }
   }, [mode])
 
@@ -624,7 +634,12 @@ export function InGameOverlay() {
   }
 
   return (
-    <div className="fixed inset-0 z-[9998]" onClick={closePanelAndHide}>
+    <div 
+      className={`fixed inset-0 z-[9998] transition-all duration-300 ${
+        screenDimmed ? 'bg-black/50' : ''
+      }`}
+      onClick={closePanelAndHide}
+    >
       <div
         className={`pointer-events-auto absolute top-5 left-1/2 -translate-x-1/2 transition-all duration-200 ${
           animated ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-2'

@@ -25,7 +25,7 @@ const ZIP_ASSET = 'gcpad-unioncrax-direct.zip'
 const OUT_DIR   = path.join(__dirname, '..', 'gcpad-dll')
 
 // Fallback: if the zip asset doesn't exist, download individual DLLs
-const FALLBACK_ASSETS = ['gcpad.dll', 'SDL2.dll']
+const FALLBACK_ASSETS = ['gcpad.dll', 'gcpad_remap.dll', 'SDL2.dll']
 
 // ── CLI args ─────────────────────────────────────────────────────────────────
 
