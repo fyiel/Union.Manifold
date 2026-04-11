@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useController } from '../hooks/use-controller'
+import type { RawControllerState } from '../types/controller.d'
 
 interface ControllerDiagramProps {
   onButtonClick?: (button: string) => void
@@ -7,35 +8,30 @@ interface ControllerDiagramProps {
 }
 
 const BUTTON_IMAGE_MAP: Record<string, string> = {
-  '0': 'a pressed.webp',
-  '1': 'b pressed.webp',
-  '2': 'x pressed.webp',
-  '3': 'y pressed.webp',
-  '4': 'start pressed.webp',
-  '5': 'select pressed.webp',
-  '6': 'guide pressed.webp',
-  '7': 'lb pressed.webp',
-  '8': 'rb pressed.webp',
-  '9': 'lt pressed.webp',
-  '10': 'rt pressed.webp',
-  '11': 'lsclick.webp',
-  '12': 'rsclick.webp',
-  '13': 'dpup pressed.webp',
-  '14': 'dpdown pressed.webp',
-  '15': 'dpleft pressed.webp',
-  '16': 'dpright pressed.webp',
-  '17': 'dpupright pressed.webp',
-  '18': 'dpleftup pressed.webp',
-  '19': 'dprightdown pressed.webp',
-  '20': 'dpdownleft pressed.webp',
-  '21': 'lsmove.webp',
-  '22': 'rsmove.webp',
+  '0': 'a-pressed.webp',
+  '1': 'b-pressed.webp',
+  '2': 'x-pressed.webp',
+  '3': 'y-pressed.webp',
+  '4': 'select-pressed.webp',
+  '5': 'start-pressed.webp',
+  '6': 'lb-pressed.webp',
+  '7': 'rb-pressed.webp',
+  '8': 'lt-pressed.webp',
+  '9': 'rt-pressed.webp',
+  '10': 'lsclick.webp',
+  '11': 'rsclick.webp',
+  '12': 'dpup-pressed.webp',
+  '13': 'dpright-pressed.webp',
+  '14': 'dpdown-pressed.webp',
+  '15': 'dpleft-pressed.webp',
+  '16': 'guide-pressed.webp',
+  '17': 'touchpad-pressed.webp',
 }
 
 const CONTROLLER_PATH = '/controller/'
 
 export function ControllerDiagram({ onButtonClick, compact = false }: ControllerDiagramProps) {
-  const { connected, controllerInfo } = useController()
+  const { connected } = useController()
   const [pressedButtons, setPressedButtons] = useState<Set<number>>(new Set())
   const [axisValues, setAxisValues] = useState<number[]>(new Array(6).fill(0))
 
@@ -46,22 +42,17 @@ export function ControllerDiagram({ onButtonClick, compact = false }: Controller
       return
     }
 
-    const handleInput = (event: CustomEvent) => {
-      const states = event.detail
-      if (states && states.length > 0) {
-        const state = states[0]
-        if (state.buttons) {
-          setPressedButtons(new Set(state.buttons.map((b: boolean, i: number) => b ? i : -1).filter((i: number) => i >= 0)))
-        }
-        if (state.axes) {
-          setAxisValues(state.axes)
-        }
+    const unsubInput = window.ucController?.onControllerInput?.((data: RawControllerState) => {
+      if (data.buttons) {
+        setPressedButtons(new Set(data.buttons.map((pressed, idx) => pressed ? idx : -1).filter(idx => idx >= 0)))
       }
-    }
+      if (data.axes) {
+        setAxisValues(data.axes)
+      }
+    })
 
-    window.addEventListener('uc:controller-input', handleInput as EventListener)
     return () => {
-      window.removeEventListener('uc:controller-input', handleInput as EventListener)
+      unsubInput?.()
     }
   }, [connected])
 
@@ -69,16 +60,41 @@ export function ControllerDiagram({ onButtonClick, compact = false }: Controller
 
   const getActiveImage = (): string => {
     if (pressedButtons.size === 0) {
-      return 'whole controller.webp'
+      // Check for stick movement
+      const leftStickMoved = axisValues[0] !== 0 || axisValues[1] !== 0
+      const rightStickMoved = axisValues[2] !== 0 || axisValues[3] !== 0
+      
+      if (leftStickMoved && rightStickMoved) {
+        return 'whole-controller.webp' // Both sticks moved - could add combo image
+      }
+      if (leftStickMoved) {
+        return 'lsmove.webp'
+      }
+      if (rightStickMoved) {
+        return 'rsmove.webp'
+      }
+      return 'whole-controller.webp'
     }
     
     const pressedArray = Array.from(pressedButtons)
+    
+    // D-pad diagonals take priority over single directions
+    const hasUpRight = pressedArray.includes(12) && pressedArray.includes(13)
+    const hasLeftUp = pressedArray.includes(12) && pressedArray.includes(14)
+    const hasRightDown = pressedArray.includes(13) && pressedArray.includes(15)
+    const hasDownLeft = pressedArray.includes(14) && pressedArray.includes(15)
+    
+    if (hasUpRight) return 'dpupright-pressed.webp'
+    if (hasLeftUp) return 'dpleftup-pressed.webp'
+    if (hasRightDown) return 'dprightdown-pressed.webp'
+    if (hasDownLeft) return 'dpdownleft-pressed.webp'
+    
     for (const btn of pressedArray) {
       const img = BUTTON_IMAGE_MAP[btn.toString()]
       if (img) return img
     }
     
-    return 'whole controller.webp'
+    return 'whole-controller.webp'
   }
 
   const activeImage = getActiveImage()

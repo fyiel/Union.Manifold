@@ -5,12 +5,12 @@ Professional in-game overlay (like Steam/Discord) that injects into game process
 ## Architecture
 
 ```
-┌─────────────────────┐     Shared Memory      ┌──────────────────────┐
-│  Electron Main      │ ───────────────────────▶│  Injected DLL        │
+┌─────────────────────┐     Shared Memory       ┌──────────────────────┐
+│  Electron Main      │ ──────────────────────> │  Injected DLL        │
 │  (offscreen render) │     (BGRA pixels)       │  (game process)      │
 │                     │                         │                      │
 │  Overlay React UI   │     Named Pipe          │  D3D9/D3D11/GL Hook  │
-│  → BrowserWindow    │ ◀──────────────────────▶│  → Texture Upload    │
+│  → BrowserWindow    │ <─────────────────────> │  → Texture Upload    │
 │    (offscreen:true) │     (input events)      │  → Fullscreen Quad   │
 └─────────────────────┘                         └──────────────────────┘
 ```
