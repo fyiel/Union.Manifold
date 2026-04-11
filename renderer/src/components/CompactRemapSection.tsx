@@ -1,4 +1,4 @@
-import { useController, ControllerProfile, InputAction, NativeButton } from '../hooks/use-controller'
+import { useController, ControllerProfile } from '../hooks/use-controller'
 import { Switch } from './ui/switch'
 import { Label } from './ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select'
@@ -102,10 +102,11 @@ export function CompactRemapSection({ activeProfile, onUpdateProfile }: CompactR
     }
     
     const key = e.key === ' ' ? ' ' : e.key
+    const code = e.code
     
     const action: InputAction = {
       type: 'keyboard',
-      key: { key, modifiers },
+      key: { key, code, modifiers },
     }
     
     setTempBinding(action)
@@ -148,7 +149,7 @@ export function CompactRemapSection({ activeProfile, onUpdateProfile }: CompactR
       <div className="flex items-start gap-4">
         {/* Controller Diagram */}
         <div className="flex-shrink-0">
-          <ControllerDiagram onButtonClick={handleButtonClick} />
+          <ControllerDiagram onButtonClick={(button) => handleButtonClick(button as NativeButton)} />
         </div>
         
         {/* Button mapping list */}
@@ -282,8 +283,10 @@ export function CompactRemapSection({ activeProfile, onUpdateProfile }: CompactR
                   keyBinding: {
                     ...activeProfile.keyBinding,
                     stickToMouse: {
-                      ...activeProfile.keyBinding?.stickToMouse,
                       leftStick: checked,
+                      rightStick: activeProfile.keyBinding?.stickToMouse?.rightStick ?? false,
+                      mouseSpeed: activeProfile.keyBinding?.stickToMouse?.mouseSpeed ?? 1.0,
+                      mouseAcceleration: activeProfile.keyBinding?.stickToMouse?.mouseAcceleration ?? true,
                     },
                   },
                   updatedAt: Date.now(),
@@ -303,8 +306,10 @@ export function CompactRemapSection({ activeProfile, onUpdateProfile }: CompactR
                   keyBinding: {
                     ...activeProfile.keyBinding,
                     stickToMouse: {
-                      ...activeProfile.keyBinding?.stickToMouse,
+                      leftStick: activeProfile.keyBinding?.stickToMouse?.leftStick ?? false,
                       rightStick: checked,
+                      mouseSpeed: activeProfile.keyBinding?.stickToMouse?.mouseSpeed ?? 1.0,
+                      mouseAcceleration: activeProfile.keyBinding?.stickToMouse?.mouseAcceleration ?? true,
                     },
                   },
                   updatedAt: Date.now(),
@@ -331,8 +336,10 @@ export function CompactRemapSection({ activeProfile, onUpdateProfile }: CompactR
                     keyBinding: {
                       ...activeProfile.keyBinding,
                       stickToMouse: {
-                        ...activeProfile.keyBinding?.stickToMouse,
+                        leftStick: activeProfile.keyBinding?.stickToMouse?.leftStick ?? false,
+                        rightStick: activeProfile.keyBinding?.stickToMouse?.rightStick ?? false,
                         mouseSpeed: v,
+                        mouseAcceleration: activeProfile.keyBinding?.stickToMouse?.mouseAcceleration ?? true,
                       },
                     },
                     updatedAt: Date.now(),
