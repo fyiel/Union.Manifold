@@ -167,6 +167,7 @@ export interface ControllerSettings {
   // Basic settings
   enabled: boolean
   controllerType: 'xbox' | 'playstation' | 'generic' | 'dualsense' | 'xboxone' | 'xboxseries'
+  controllerSlot: number | null  // User-selected slot, null = auto-detect
   vibrationEnabled: boolean
   deadzone: number
   triggerDeadzone: number
@@ -422,6 +423,7 @@ export function createDefaultControllerSettings(): ControllerSettings {
   return {
     enabled: false,
     controllerType: 'generic',
+    controllerSlot: null,
     vibrationEnabled: true,
     deadzone: 0.15,
     triggerDeadzone: 0.1,
