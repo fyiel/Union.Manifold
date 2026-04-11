@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   ControllerSettings,
   ControllerProfile,
@@ -22,6 +22,39 @@ export function useController() {
   const [loading, setLoading] = useState(true)
   const [profiles, setProfiles] = useState<ControllerProfile[]>([])
   const [activeProfile, setActiveProfile] = useState<ControllerProfile | null>(null)
+  
+  // Debounce ref to prevent rapid connect/disconnect due to USB enumeration issues
+  const connectionDebounceRef = useRef<{
+    timeout: ReturnType<typeof setTimeout> | null
+    pendingConnected: boolean
+    pendingInfo: { id: string | null; name: string | null; type: string | null }
+  }>({
+    timeout: null,
+    pendingConnected: false,
+    pendingInfo: { id: null, name: null, type: null }
+  })
+
+  // Debounced update for connection state
+  const updateConnectionState = useCallback((isConnected: boolean, info: { id: string | null; name: string | null; type: string | null }) => {
+    const debounce = connectionDebounceRef.current
+    
+    // Clear any pending timeout
+    if (debounce.timeout) {
+      clearTimeout(debounce.timeout)
+    }
+    
+    // If already in the same state, do nothing
+    if (isConnected === connected && info.id === controllerInfo.id) {
+      return
+    }
+    
+    // Debounce for 750ms to handle USB controller enumeration flakiness
+    debounce.timeout = setTimeout(() => {
+      setConnected(isConnected)
+      setControllerInfo(info)
+      debounce.timeout = null
+    }, 750)
+  }, [connected, controllerInfo.id])
 
   // Load settings from main process
   useEffect(() => {
@@ -125,12 +158,10 @@ export function useController() {
           // If user selected a slot, check if it matches
           if (selectedSlot !== null && controllerIndex !== selectedSlot) {
             // User selected a different slot, try to connect to that one
-            setConnected(false)
-            setControllerInfo({ id: null, name: null, type: null })
+            updateConnectionState(false, { id: null, name: null, type: null })
           } else {
             detected = true
-            setConnected(true)
-            setControllerInfo({
+            updateConnectionState(true, {
               id: result.controllerId ?? null,
               name: result.controllerName ?? null,
               type: result.controllerType ?? null
@@ -154,8 +185,7 @@ export function useController() {
         
         if (targetPad) {
           detected = true
-          setConnected(true)
-          setControllerInfo({
+          updateConnectionState(true, {
             id: String(targetPad.index),
             name: targetPad.id || 'Gamepad connected',
             type: detectControllerType({ id: targetPad.id || 'generic', axes: [], buttons: [] })
@@ -164,14 +194,13 @@ export function useController() {
       }
 
       if (!detected) {
-        setConnected(false)
-        setControllerInfo({ id: null, name: null, type: null })
+        updateConnectionState(false, { id: null, name: null, type: null })
       }
     } catch (err) {
       console.error('Failed to check controllers:', err)
-      setConnected(false)
+      updateConnectionState(false, { id: null, name: null, type: null })
     }
-  }, [settings.controllerSlot])
+  }, [settings.controllerSlot, updateConnectionState])
 
   // Poll for controller connections
   useEffect(() => {
@@ -310,8 +339,7 @@ export function useController() {
     if (!window.ucController) return
 
     const unsubConnected = (window.ucController as ControllerAPI).onControllerConnected?.((data) => {
-      setConnected(true)
-      setControllerInfo({
+      updateConnectionState(true, {
         id: data.controllerId ?? null,
         name: data.controllerName ?? null,
         type: data.controllerType ?? null
@@ -319,15 +347,14 @@ export function useController() {
     })
 
     const unsubDisconnected = (window.ucController as ControllerAPI).onControllerDisconnected?.(() => {
-      setConnected(false)
-      setControllerInfo({ id: null, name: null, type: null })
+      updateConnectionState(false, { id: null, name: null, type: null })
     })
 
     return () => {
       unsubConnected?.()
       unsubDisconnected?.()
     }
-  }, [])
+  }, [updateConnectionState])
 
   return {
     settings,

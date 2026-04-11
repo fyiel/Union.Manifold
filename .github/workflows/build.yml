@@ -44,6 +44,14 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Build Overlay DLL (Windows only)
+        if: runner.os == 'Windows'
+        run: |
+          cmake -B overlay-dll/build -S overlay-dll -G "Visual Studio 17 2022" -A x64
+          cmake --build overlay-dll/build --config Release
+        env:
+          VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+
       - name: Build application
         run: pnpm -s build && pnpm exec electron-builder --publish=never
         env:

@@ -1,6 +1,6 @@
 {
   "name": "unioncrax-direct",
-  "version": "1.7.2-blackrose",
+  "version": "1.7.2-mistral",
   "description": "Standalone Electron app for managing and launching games from UnionCrax",
   "type": "module",
   "main": "electron/main.cjs",
@@ -132,7 +132,8 @@
     },
     "linux": {
       "target": [
-        "AppImage"
+        "AppImage",
+        "tar.gz"
       ],
       "icon": "assets/icons"
     }

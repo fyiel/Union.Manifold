@@ -135,6 +135,7 @@ const WINDOWS_GAME_HANDOFF_GRACE_MS = 12000
 const WINDOWS_GAME_HANDOFF_POLL_MS = 1000
 const GAME_PID_POLL_MS = 3000
 let operationPowerSaveBlockerId = null
+let controllerPowerSaveBlockerId = null
 let launchHandoffBlockUntil = 0
 let launchHandoffRefreshTimer = null
 let pendingCloseRequest = null
@@ -7106,7 +7107,37 @@ ipcMain.handle('uc:app-close-response', async (_event, shouldProceed) => {
 })
 
 app.on('window-all-closed', () => {
-  if (process.platform === 'darwin') app.quit()
+  // Don't quit on macOS or when controller support is enabled
+  // Keep the app running in the background for controller remapping
+  if (process.platform === 'darwin') {
+    app.quit()
+    return
+  }
+  
+  // Keep running in background if controller support is enabled
+  const settings = readSettings()
+  if (settings.controllerSettings?.enabled) {
+    ucLog('All windows closed — keeping app running in background for controller support')
+    
+    // Start power save blocker to prevent system sleep while controller is active
+    if (controllerPowerSaveBlockerId == null || !powerSaveBlocker.isStarted(controllerPowerSaveBlockerId)) {
+      controllerPowerSaveBlockerId = powerSaveBlocker.start('prevent-app-suspension')
+      ucLog(`[Power] Controller sleep blocker enabled (${controllerPowerSaveBlockerId})`)
+    }
+    
+    // Ensure GCPad is running
+    if (!gcpadPollInterval) {
+      startGCPad()
+    }
+    return
+  }
+  
+  // Stop controller power save blocker if controller is disabled
+  if (controllerPowerSaveBlockerId != null && powerSaveBlocker.isStarted(controllerPowerSaveBlockerId)) {
+    powerSaveBlocker.stop(controllerPowerSaveBlockerId)
+    ucLog(`[Power] Controller sleep blocker disabled (${controllerPowerSaveBlockerId})`)
+  }
+  controllerPowerSaveBlockerId = null
 })
 
 app.on('before-quit', (event) => {
@@ -10401,7 +10432,10 @@ ipcMain.handle('uc:controller-set-settings', (_event, settings) => {
     if (!settings || typeof settings !== 'object') {
       return { ok: false, error: 'invalid-settings' }
     }
+    
+    const wasEnabled = controllerSettings.enabled
     controllerSettings = { ...controllerSettings, ...settings }
+    const isEnabled = controllerSettings.enabled
     
     // Persist to settings
     const currentSettings = readSettings()
@@ -10409,6 +10443,22 @@ ipcMain.handle('uc:controller-set-settings', (_event, settings) => {
     writeSettings(currentSettings)
     
     ucLog(`Controller settings updated: ${JSON.stringify(controllerSettings)}`)
+    
+    // If controller was just enabled and windows are closed, restart GCPad
+    if (isEnabled && !wasEnabled) {
+      const windows = BrowserWindow.getAllWindows()
+      if (windows.length === 0) {
+        ucLog('Controller enabled while app in background - starting GCPad')
+        startGCPad()
+        
+        // Start power save blocker
+        if (controllerPowerSaveBlockerId == null || !powerSaveBlocker.isStarted(controllerPowerSaveBlockerId)) {
+          controllerPowerSaveBlockerId = powerSaveBlocker.start('prevent-app-suspension')
+          ucLog(`[Power] Controller sleep blocker enabled (${controllerPowerSaveBlockerId})`)
+        }
+      }
+    }
+    
     return { ok: true }
   } catch (err) {
     ucLog(`Controller set settings failed: ${err.message}`, 'error')
