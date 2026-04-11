@@ -19,6 +19,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          submodules: true
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -47,6 +49,7 @@ jobs:
       - name: Build Overlay DLL (Windows only)
         if: runner.os == 'Windows'
         run: |
+          powershell -ExecutionPolicy Bypass -File overlay-dll/setup-minhook.ps1
           cmake -B overlay-dll/build -S overlay-dll -G "Visual Studio 17 2022" -A x64
           cmake --build overlay-dll/build --config Release
         env:
