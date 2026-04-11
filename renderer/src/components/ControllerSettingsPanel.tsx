@@ -243,6 +243,8 @@ export function ControllerSettingsPanel() {
     updateSettings,
     setEnabled,
     checkControllers,
+    getAvailableControllers,
+    setControllerSlot,
     setActiveMapping,
     setActiveProfile,
     createProfile,
@@ -271,6 +273,33 @@ export function ControllerSettingsPanel() {
     setLocalSettings(newSettings)
     await updateSettings({ controllerType: value as ControllerSettings['controllerType'] })
   }
+
+  const handleControllerSlotChange = async (slot: number | null) => {
+    const newSettings = { ...localSettings, controllerSlot: slot }
+    setLocalSettings(newSettings)
+    await setControllerSlot(slot)
+  }
+
+  const [availableControllers, setAvailableControllers] = useState<Array<{ index: number; id: string; name: string }>>([])
+  const [loadingControllers, setLoadingControllers] = useState(false)
+
+  const loadAvailableControllers = async () => {
+    setLoadingControllers(true)
+    try {
+      const controllers = await getAvailableControllers()
+      setAvailableControllers(controllers)
+    } catch (err) {
+      console.error('Failed to load controllers:', err)
+    } finally {
+      setLoadingControllers(false)
+    }
+  }
+
+  useEffect(() => {
+    if (localSettings.enabled) {
+      loadAvailableControllers()
+    }
+  }, [localSettings.enabled])
 
   const handleVibrationChange = async (enabled: boolean) => {
     const newSettings = { ...localSettings, vibrationEnabled: enabled }
@@ -492,6 +521,41 @@ export function ControllerSettingsPanel() {
                     <RefreshCw size={16} />
                   </button>
                 </div>
+              </div>
+
+              {/* Controller Selection */}
+              <div className="space-y-2">
+                <Label>Controller</Label>
+                <Select 
+                  value={localSettings.controllerSlot?.toString() ?? 'auto'} 
+                  onValueChange={(value) => {
+                    if (value === 'auto') {
+                      handleControllerSlotChange(null)
+                    } else {
+                      handleControllerSlotChange(parseInt(value, 10))
+                    }
+                  }}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder={loadingControllers ? 'Scanning...' : 'Auto-detect'} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="auto">Auto-detect</SelectItem>
+                    {availableControllers.map((ctrl) => (
+                      <SelectItem key={ctrl.index} value={ctrl.index.toString()}>
+                        {ctrl.name || `Controller ${ctrl.index}`}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-gray-400">Select a specific controller or auto-detect</p>
+                <button 
+                  onClick={loadAvailableControllers} 
+                  className="text-xs text-blue-400 hover:text-blue-300"
+                  disabled={loadingControllers}
+                >
+                  {loadingControllers ? 'Scanning...' : 'Refresh Controller List'}
+                </button>
               </div>
 
               {/* Controller type */}

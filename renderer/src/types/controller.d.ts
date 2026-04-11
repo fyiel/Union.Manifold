@@ -49,6 +49,10 @@ export interface ControllerAPI {
   setSettings: (settings: Partial<ControllerSettings>) => Promise<{ ok: boolean; error?: string }>
   getConnected: () => Promise<{ ok: boolean; connected: boolean; controllerId?: string; controllerName?: string; controllerType?: string; error?: string }>
   
+  // Controller selection
+  getAvailableControllers: () => Promise<{ ok: boolean; controllers?: Array<{ index: number; id: string; name: string }>; error?: string }>
+  setControllerSlot: (slot: number | null) => Promise<{ ok: boolean; error?: string }>
+  
   // Input translation
   getMappingPresets: () => Promise<{ ok: boolean; presets?: ControllerMapping[]; error?: string }>
   getActiveMapping: () => Promise<{ ok: boolean; mapping?: ControllerMapping; error?: string }>
