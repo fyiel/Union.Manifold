@@ -25,7 +25,6 @@ const BUTTON_IMAGE_MAP: Record<string, string> = {
   '14': 'dpdown-pressed.webp',
   '15': 'dpleft-pressed.webp',
   '16': 'guide-pressed.webp',
-  '17': 'touchpad-pressed.webp',
 }
 
 const CONTROLLER_PATH = '/controller/'
