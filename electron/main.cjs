@@ -915,6 +915,22 @@ const overlayInjections = new Map()
 // For production: they are extracted to resourcesPath via extraResources.
 
 const GCPAD_POLL_MS = 16 // ~60 Hz
+const GCPAD_BUTTON_INDEX = Object.freeze({
+  GUIDE: 6,
+})
+let gcpadGuideButtonPressed = false
+
+function getControllerTypeFromName(rawName) {
+  const name = String(rawName || '').toLowerCase()
+  if (name.includes('dualsense') || name.includes('ps5')) return 'dualsense'
+  if (name.includes('dualshock') || name.includes('ds4')) return 'dualshock4'
+  if (name.includes('playstation') || name.includes('sony')) return 'playstation'
+  if (name.includes('xbox series')) return 'xboxseries'
+  if (name.includes('xbox one')) return 'xboxone'
+  if (name.includes('xbox')) return 'xbox'
+  if (name.includes('switch') || name.includes('pro controller') || name.includes('joy-con')) return 'switch'
+  return 'generic'
+}
 
 function getGCPadDllPath() {
   if (isDev) {
@@ -948,7 +964,15 @@ function startGCPad() {
 
   nativeOverlay.gcpadOnConnect((slot) => {
     ucLog(`GCPad: controller connected at slot ${slot}`)
-    gcpadBroadcast('uc:controller-connected', { slot })
+    const connectedState = typeof nativeOverlay.gcpadGetStates === 'function'
+      ? (nativeOverlay.gcpadGetStates() || []).find(s => s && Number(s.slot) === Number(slot))
+      : null
+    gcpadBroadcast('uc:controller-connected', {
+      slot,
+      controllerId: `gcpad-slot-${slot}`,
+      controllerName: connectedState?.name || 'Unknown Controller',
+      controllerType: getControllerTypeFromName(connectedState?.name),
+    })
   })
   nativeOverlay.gcpadOnDisconnect((slot) => {
     ucLog(`GCPad: controller disconnected from slot ${slot}`)
@@ -971,7 +995,7 @@ function startGCPad() {
       gcpadBroadcast('uc:controller-input', states)
       // Check for guide button press to toggle overlay
       for (const state of states) {
-        if (state.buttons && state.buttons[6]) { // Button 6 = Guide button
+        if (state.buttons && state.buttons[GCPAD_BUTTON_INDEX.GUIDE]) {
           if (!gcpadGuideButtonPressed) {
             gcpadGuideButtonPressed = true
             toggleOverlay(currentOverlayAppid)
@@ -980,11 +1004,13 @@ function startGCPad() {
         }
       }
       // Reset guide button state when not pressed
-      if (!states.some(s => s.buttons && s.buttons[6])) {
+      if (!states.some(s => s.buttons && s.buttons[GCPAD_BUTTON_INDEX.GUIDE])) {
         gcpadGuideButtonPressed = false
       }
       // Run input translation if enabled
       gcpadTranslateInput(states)
+    } else {
+      gcpadGuideButtonPressed = false
     }
   }, GCPAD_POLL_MS)
 }
@@ -1249,6 +1275,7 @@ app.on('will-quit', () => {
     clearInterval(gcpadPollInterval)
     gcpadPollInterval = null
   }
+  gcpadGuideButtonPressed = false
   if (nativeOverlay && typeof nativeOverlay.gcpadUnload === 'function') {
     nativeOverlay.gcpadUnload()
   }
@@ -10477,21 +10504,12 @@ ipcMain.handle('uc:controller-get-connected', () => {
       return { ok: true, connected: false, controllerId: null, controllerName: null, controllerType: null }
     }
     const first = states[0]
-    const name = (first.name || '').toLowerCase()
-    let controllerType = 'generic'
-    if (name.includes('dualsense') || name.includes('ps5'))           controllerType = 'dualsense'
-    else if (name.includes('dualshock') || name.includes('ds4'))      controllerType = 'dualshock4'
-    else if (name.includes('playstation') || name.includes('sony'))   controllerType = 'playstation'
-    else if (name.includes('xbox series'))                            controllerType = 'xboxseries'
-    else if (name.includes('xbox one'))                               controllerType = 'xboxone'
-    else if (name.includes('xbox'))                                   controllerType = 'xbox'
-    else if (name.includes('switch') || name.includes('pro controller') || name.includes('joy-con')) controllerType = 'switch'
     return {
       ok: true,
       connected: true,
       controllerId: `gcpad-slot-${first.slot}`,
       controllerName: first.name || 'Unknown Controller',
-      controllerType,
+      controllerType: getControllerTypeFromName(first.name),
     }
   } catch (err) {
     ucLog(`Controller get connected failed: ${err.message}`, 'error')
@@ -10964,4 +10982,3 @@ ipcMain.handle('uc:system-notification-activated', async (_event, notificationId
     return { ok: false, error: err.message }
   }
 })
-

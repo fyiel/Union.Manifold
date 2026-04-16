@@ -12,19 +12,19 @@ const BUTTON_IMAGE_MAP: Record<string, string> = {
   '1': 'b-pressed.webp',
   '2': 'x-pressed.webp',
   '3': 'y-pressed.webp',
-  '4': 'select-pressed.webp',
-  '5': 'start-pressed.webp',
-  '6': 'lb-pressed.webp',
-  '7': 'rb-pressed.webp',
-  '8': 'lt-pressed.webp',
-  '9': 'rt-pressed.webp',
-  '10': 'lsclick.webp',
-  '11': 'rsclick.webp',
-  '12': 'dpup-pressed.webp',
-  '13': 'dpright-pressed.webp',
+  '4': 'start-pressed.webp',
+  '5': 'select-pressed.webp',
+  '6': 'guide-pressed.webp',
+  '7': 'lb-pressed.webp',
+  '8': 'rb-pressed.webp',
+  '9': 'lt-pressed.webp',
+  '10': 'rt-pressed.webp',
+  '11': 'lsclick.webp',
+  '12': 'rsclick.webp',
+  '13': 'dpup-pressed.webp',
   '14': 'dpdown-pressed.webp',
   '15': 'dpleft-pressed.webp',
-  '16': 'guide-pressed.webp',
+  '16': 'dpright-pressed.webp',
 }
 
 const CONTROLLER_PATH = '/controller/'
@@ -78,9 +78,9 @@ export function ControllerDiagram({ onButtonClick, compact = false }: Controller
     const pressedArray = Array.from(pressedButtons)
     
     // D-pad diagonals take priority over single directions
-    const hasUpRight = pressedArray.includes(12) && pressedArray.includes(13)
-    const hasLeftUp = pressedArray.includes(12) && pressedArray.includes(14)
-    const hasRightDown = pressedArray.includes(13) && pressedArray.includes(15)
+    const hasUpRight = pressedArray.includes(13) && pressedArray.includes(16)
+    const hasLeftUp = pressedArray.includes(13) && pressedArray.includes(15)
+    const hasRightDown = pressedArray.includes(16) && pressedArray.includes(14)
     const hasDownLeft = pressedArray.includes(14) && pressedArray.includes(15)
     
     if (hasUpRight) return 'dpupright-pressed.webp'
