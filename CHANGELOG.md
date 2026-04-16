@@ -1,5 +1,12 @@
 # Changelog
 
+## Version 1.8.0 - 2026-04-16
+
+### Fixes & Improvements
+
+- Fixed Linux CI failures in `rebuild-native` by making `electron/native/binding.gyp` platform-aware: Windows-only native sources now compile only on Windows.
+- Added non-Windows native stubs (`electron/native/stubs_nonwin.cpp`) so the addon still links and loads on Linux/macOS, with unsupported Windows-only features returning clear runtime errors.
+
 ## Version 1.7.3 - 2026-04-16
 
 ### Fixes & Improvements
