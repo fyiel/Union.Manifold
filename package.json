@@ -1,6 +1,6 @@
 {
   "name": "unioncrax-direct",
-  "version": "1.7.1-beta",
+  "version": "1.7.2-helba",
   "description": "Standalone Electron app for managing and launching games from UnionCrax",
   "type": "module",
   "main": "electron/main.cjs",
@@ -22,7 +22,8 @@
     "build": "pnpm -s build:renderer && pnpm -s build:electron",
     "build:renderer": "vite build --config renderer/vite.config.ts",
     "build:electron": "node ./scripts/build-electron.cjs",
-    "pack": "pnpm -s build && electron-builder",
+    "fetch-gcpad": "node ./scripts/fetch-gcpad.cjs",
+    "pack": "pnpm -s fetch-gcpad && pnpm -s build && electron-builder",
     "rebuild-native": "cd electron/native && node-gyp rebuild",
     "postinstall": "pnpm rebuild-native || echo 'Native overlay addon build skipped (install C++ build tools to enable)'"
   },
@@ -51,7 +52,6 @@
     "fuse.js": "^7.1.0",
     "geist": "^1.5.1",
     "lucide-react": "^0.454.0",
-    "node-addon-api": "^7.1.0",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-router-dom": "^7.0.2",
@@ -65,6 +65,7 @@
     "concurrently": "^9.2.1",
     "electron": "^33.4.11",
     "electron-builder": "^25.1.8",
+    "node-addon-api": "^7.1.0",
     "node-gyp": "^10.2.0",
     "postcss": "^8.5.6",
     "tailwindcss": "^4.1.9",
@@ -100,18 +101,26 @@
       "node_modules/7zip-bin",
       "electron/native/build/**/*"
     ],
-    "extraResources": [
-      {
-        "from": "build/uc-overlay-x64.dll",
-        "to": "uc-overlay-x64.dll"
-      }
-    ],
     "win": {
       "icon": "assets/icon.ico",
       "target": [
         "nsis",
         "portable",
         "zip"
+      ],
+      "extraResources": [
+        {
+          "from": "build/Release/uc-overlay-x64.dll",
+          "to": "uc-overlay-x64.dll"
+        },
+        {
+          "from": "gcpad-dll/gcpad.dll",
+          "to": "gcpad.dll"
+        },
+        {
+          "from": "gcpad-dll/SDL2.dll",
+          "to": "SDL2.dll"
+        }
       ]
     },
     "nsis": {
@@ -123,7 +132,8 @@
     },
     "linux": {
       "target": [
-        "AppImage"
+        "AppImage",
+        "tar.gz"
       ],
       "icon": "assets/icons"
     }
