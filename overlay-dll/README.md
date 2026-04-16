@@ -81,7 +81,7 @@ If you previously configured with `NMake Makefiles`, remove the old cache first:
 Remove-Item -Recurse -Force .\build
 ```
 
-The DLL is output to `build/uc-overlay-x64.dll`.
+The DLL is output to `build/Release/uc-overlay-x64.dll` when using the Visual Studio generator.
 
 ### 3. Build the Native Addon
 

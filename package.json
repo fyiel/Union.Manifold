@@ -110,7 +110,7 @@
       ],
       "extraResources": [
         {
-          "from": "build/uc-overlay-x64.dll",
+          "from": "build/Release/uc-overlay-x64.dll",
           "to": "uc-overlay-x64.dll"
         },
         {

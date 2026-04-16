@@ -46,6 +46,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
+      - name: Build native overlay addon
+        run: pnpm rebuild-native
+
       - name: Fetch GCPad DLLs (Windows only)
         if: runner.os == 'Windows'
         run: node ./scripts/fetch-gcpad.cjs
@@ -60,6 +63,14 @@ jobs:
           cmake --build overlay-dll/build --config Release
         env:
           VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+
+      - name: Verify Overlay DLL output (Windows only)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (!(Test-Path "build/Release/uc-overlay-x64.dll")) {
+            throw "Expected overlay DLL at build/Release/uc-overlay-x64.dll"
+          }
 
       - name: Build application
         run: pnpm -s build && pnpm exec electron-builder --publish=never
