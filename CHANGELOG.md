@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased - 2026-04-16
+
+### Fixes & Improvements
+
+- Updated game Details panel metadata flow to include `Date Added` and relative `Edited` timestamps for clearer change visibility.
+- Reordered game Details fields for better scan order: Released, Date Added, Edited, Version, Size, Source.
+- Matched Source display behavior to web parity in game Details: outlined source badge plus hover tooltip (`Source: ...`) with truncation and Unknown fallback.
+
 ## Version 1.8.0 - 2026-04-16
 
 ### Fixes & Improvements

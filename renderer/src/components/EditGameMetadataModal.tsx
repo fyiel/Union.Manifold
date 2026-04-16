@@ -102,6 +102,7 @@ export function EditGameMetadataModal({ open, onOpenChange, game, onSaved }: Edi
         image: cardImage.trim(),
         splash: bannerImage.trim(),
         genres: parsedGenres,
+        update_time: new Date().toISOString(),
       }
 
       const result = await window.ucDownloads?.updateInstalledMetadata?.(game.appid, updates)
