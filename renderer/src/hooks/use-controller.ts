@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   ControllerSettings,
   ControllerProfile,
@@ -22,6 +22,39 @@ export function useController() {
   const [loading, setLoading] = useState(true)
   const [profiles, setProfiles] = useState<ControllerProfile[]>([])
   const [activeProfile, setActiveProfile] = useState<ControllerProfile | null>(null)
+  
+  // Debounce ref to prevent rapid connect/disconnect due to USB enumeration issues
+  const connectionDebounceRef = useRef<{
+    timeout: ReturnType<typeof setTimeout> | null
+    pendingConnected: boolean
+    pendingInfo: { id: string | null; name: string | null; type: string | null }
+  }>({
+    timeout: null,
+    pendingConnected: false,
+    pendingInfo: { id: null, name: null, type: null }
+  })
+
+  // Debounced update for connection state
+  const updateConnectionState = useCallback((isConnected: boolean, info: { id: string | null; name: string | null; type: string | null }) => {
+    const debounce = connectionDebounceRef.current
+    
+    // Clear any pending timeout
+    if (debounce.timeout) {
+      clearTimeout(debounce.timeout)
+    }
+    
+    // If already in the same state, do nothing
+    if (isConnected === connected && info.id === controllerInfo.id) {
+      return
+    }
+    
+    // Debounce for 750ms to handle USB controller enumeration flakiness
+    debounce.timeout = setTimeout(() => {
+      setConnected(isConnected)
+      setControllerInfo(info)
+      debounce.timeout = null
+    }, 750)
+  }, [connected, controllerInfo.id])
 
   // Load settings from main process
   useEffect(() => {
@@ -71,46 +104,103 @@ export function useController() {
     }
   }, [settings])
 
+  // Get available controllers
+  const getAvailableControllers = useCallback(async () => {
+    try {
+      if (window.ucController?.getAvailableControllers) {
+        const result = await (window.ucController as ControllerAPI).getAvailableControllers()
+        if (result?.ok && result.controllers) {
+          return result.controllers
+        }
+      }
+      // Fallback to browser gamepad API
+      if (typeof navigator !== 'undefined' && typeof navigator.getGamepads === 'function') {
+        const pads = Array.from(navigator.getGamepads() || []).filter((p): p is Gamepad => p !== null)
+        return pads.map(pad => ({
+          index: pad.index,
+          id: pad.id || 'Unknown',
+          name: pad.id || 'Unknown Gamepad'
+        }))
+      }
+      return []
+    } catch (err) {
+      console.error('Failed to get available controllers:', err)
+      return []
+    }
+  }, [])
+
+  // Set controller slot
+  const setControllerSlot = useCallback(async (slot: number | null) => {
+    try {
+      if (window.ucController?.setControllerSlot) {
+        await (window.ucController as ControllerAPI).setControllerSlot(slot)
+      }
+      // Update local settings
+      await updateSettings({ controllerSlot: slot })
+    } catch (err) {
+      console.error('Failed to set controller slot:', err)
+    }
+  }, [updateSettings])
+
   // Check for connected controllers
   const checkControllers = useCallback(async () => {
     try {
       let detected = false
+      
+      // Check if user has selected a specific slot
+      const selectedSlot = settings.controllerSlot
+      
       if (window.ucController?.getConnected) {
         const result = await window.ucController.getConnected()
         if (result.connected) {
-          detected = true
-          setConnected(true)
-          setControllerInfo({
-            id: result.controllerId ?? null,
-            name: result.controllerName ?? null,
-            type: result.controllerType ?? null
-          })
+          const controllerIndex = result.controllerId ? parseInt(result.controllerId, 10) : null
+          
+          // If user selected a slot, check if it matches
+          if (selectedSlot !== null && controllerIndex !== selectedSlot) {
+            // User selected a different slot, try to connect to that one
+            updateConnectionState(false, { id: null, name: null, type: null })
+          } else {
+            detected = true
+            updateConnectionState(true, {
+              id: result.controllerId ?? null,
+              name: result.controllerName ?? null,
+              type: result.controllerType ?? null
+            })
+          }
         }
       }
 
+      // If no backend controller or using browser gamepad API
       if (!detected && typeof navigator !== 'undefined' && typeof navigator.getGamepads === 'function') {
-        const pads = Array.from(navigator.getGamepads?.() || []).filter(Boolean)
-        const firstPad = pads[0]
-        if (firstPad) {
+        const pads = Array.from(navigator.getGamepads() || []).filter((p): p is Gamepad => p !== null)
+        
+        // Find controller at the selected slot (or first available if no selection)
+        let targetPad: Gamepad | null = null
+        if (selectedSlot !== null) {
+          targetPad = pads.find(pad => pad.index === selectedSlot) ?? null
+        }
+        if (!targetPad && pads.length > 0) {
+          targetPad = pads[0] ?? null
+        }
+        
+        if (targetPad) {
           detected = true
-          setConnected(true)
-          setControllerInfo({
-            id: String(firstPad.index),
-            name: firstPad.id || 'Gamepad connected',
-            type: detectControllerType(firstPad.id || 'generic')
+          updateConnectionState(true, {
+            id: String(targetPad.index),
+            name: targetPad.id || 'Gamepad connected',
+            type: detectControllerType({ id: targetPad.id || 'generic', axes: [], buttons: [] })
           })
         }
       }
 
       if (!detected) {
-        setConnected(false)
-        setControllerInfo({ id: null, name: null, type: null })
+        updateConnectionState(false, { id: null, name: null, type: null })
       }
     } catch (err) {
       console.error('Failed to check controllers:', err)
-      setConnected(false)
+      updateConnectionState(false, { id: null, name: null, type: null })
     }
-  }, [])
+  }, [settings.controllerSlot, updateConnectionState])
 
   // Poll for controller connections
   useEffect(() => {
@@ -124,7 +214,7 @@ export function useController() {
     await updateSettings({ enabled })
   }, [updateSettings])
 
-  // Input translation (x360ce-style) methods
+  // Input translation methods
   const getMappingPresets = useCallback(async () => {
     try {
       if (window.ucController?.getMappingPresets) {
@@ -152,7 +242,7 @@ export function useController() {
     }
   }, [])
 
-  // Key binding (antimicrox-style) methods
+  // Key binding methods
   const getActiveProfile = useCallback(async () => {
     try {
       if (window.ucController?.getActiveProfile) {
@@ -249,8 +339,7 @@ export function useController() {
     if (!window.ucController) return
 
     const unsubConnected = (window.ucController as ControllerAPI).onControllerConnected?.((data) => {
-      setConnected(true)
-      setControllerInfo({
+      updateConnectionState(true, {
         id: data.controllerId ?? null,
         name: data.controllerName ?? null,
         type: data.controllerType ?? null
@@ -258,15 +347,14 @@ export function useController() {
     })
 
     const unsubDisconnected = (window.ucController as ControllerAPI).onControllerDisconnected?.(() => {
-      setConnected(false)
-      setControllerInfo({ id: null, name: null, type: null })
+      updateConnectionState(false, { id: null, name: null, type: null })
     })
 
     return () => {
       unsubConnected?.()
       unsubDisconnected?.()
     }
-  }, [])
+  }, [updateConnectionState])
 
   return {
     settings,
@@ -278,6 +366,8 @@ export function useController() {
     updateSettings,
     setEnabled,
     checkControllers,
+    getAvailableControllers,
+    setControllerSlot,
     // Input translation
     getMappingPresets,
     setActiveMapping,
