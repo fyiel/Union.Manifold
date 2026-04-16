@@ -52,6 +52,7 @@ contextBridge.exposeInMainWorld('ucDownloads', {
   quitGameExecutable: (appid) => ipcRenderer.invoke('uc:game-exe-quit', appid),
   deleteInstalled: (appid) => ipcRenderer.invoke('uc:installed-delete', appid),
   deleteInstalling: (appid) => ipcRenderer.invoke('uc:installing-delete', appid),
+  createUpdateBackup: (appid) => ipcRenderer.invoke('uc:installed-backup-create', appid),
   dismissInstalling: (appid) => ipcRenderer.invoke('uc:installing-dismiss', appid),
   setInstallingStatus: (appid, status, error) => ipcRenderer.invoke('uc:installing-status-set', appid, status, error),
   getActiveStatus: (appid) => ipcRenderer.invoke('uc:download-active-status', appid),
@@ -158,7 +159,8 @@ contextBridge.exposeInMainWorld('ucLogs', {
   log: (level, message, data) => ipcRenderer.invoke('uc:log', level, message, data),
   getLogs: () => ipcRenderer.invoke('uc:logs-get'),
   clearLogs: () => ipcRenderer.invoke('uc:logs-clear'),
-  openLogsFolder: () => ipcRenderer.invoke('uc:logs-open-folder')
+  openLogsFolder: () => ipcRenderer.invoke('uc:logs-open-folder'),
+  shareLogs: (payload) => ipcRenderer.invoke('uc:logs-share', payload)
 })
 
 contextBridge.exposeInMainWorld('ucRpc', {

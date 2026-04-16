@@ -178,6 +178,7 @@ export function SettingsPage() {
   const [showClearConfirm, setShowClearConfirm] = useState(false)
   const [developerMode, setDeveloperMode] = useState(false)
   const [copyingDiagnostics, setCopyingDiagnostics] = useState(false)
+  const [autoShareErrorLogs, setAutoShareErrorLogs] = useState(false)
   const [verboseDownloadLogging, setVerboseDownloadLogging] = useState(false)
   const [customApiBaseUrl, setCustomApiBaseUrl] = useState("")
   const [networkTesting, setNetworkTesting] = useState(false)
@@ -536,13 +537,15 @@ export function SettingsPage() {
     let mounted = true
     const loadShortcutSetting = async () => {
       try {
-        const [shortcutValue, sleepValue] = await Promise.all([
+        const [shortcutValue, sleepValue, autoShareValue] = await Promise.all([
           window.ucSettings?.get?.('alwaysCreateDesktopShortcut'),
           window.ucSettings?.get?.('preventSleepDuringOperations'),
+          window.ucSettings?.get?.('autoShareErrorLogs'),
         ])
         if (mounted) {
           setAlwaysCreateDesktopShortcut(shortcutValue || false)
           setPreventSleepDuringOperations(sleepValue !== false)
+          setAutoShareErrorLogs(autoShareValue === true)
         }
       } catch {
         // ignore
@@ -561,6 +564,9 @@ export function SettingsPage() {
       }
       if (data.key === 'preventSleepDuringOperations') {
         setPreventSleepDuringOperations(data.value !== false)
+      }
+      if (data.key === 'autoShareErrorLogs') {
+        setAutoShareErrorLogs(data.value === true)
       }
     })
     return () => {
@@ -1663,12 +1669,12 @@ export function SettingsPage() {
                             await window.ucSettings?.set?.('discordRpcEnabled', newValue)
                           } catch { }
                         }}
-                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${discordRpcEnabled ? 'bg-zinc-300' : 'bg-zinc-700'
+                        className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${discordRpcEnabled ? 'bg-white' : 'bg-zinc-700'
                           }`}
                         title="Toggle Discord Rich Presence"
                       >
                         <span
-                          className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${discordRpcEnabled ? 'translate-x-6' : 'translate-x-1'
+                          className={`inline-block h-4 w-4 transform rounded-full transition-transform ${discordRpcEnabled ? 'bg-black translate-x-6' : 'bg-white translate-x-1'
                             }`}
                         />
                       </button>
@@ -1696,11 +1702,11 @@ export function SettingsPage() {
                               setRpcHideNsfw(newValue)
                               updateRpcHideNsfw(newValue)
                             }}
-                            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${rpcHideNsfw ? 'bg-zinc-300' : 'bg-zinc-700'
+                            className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${rpcHideNsfw ? 'bg-white' : 'bg-zinc-700'
                           }`}
                           >
                             <span
-                              className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${rpcHideNsfw ? 'translate-x-6' : 'translate-x-1'
+                              className={`inline-block h-4 w-4 transform rounded-full transition-transform ${rpcHideNsfw ? 'bg-black translate-x-6' : 'bg-white translate-x-1'
                                 }`}
                             />
                           </button>
@@ -1717,11 +1723,11 @@ export function SettingsPage() {
                               setRpcShowGameName(newValue)
                               updateRpcShowGameName(newValue)
                             }}
-                            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${rpcShowGameName ? 'bg-zinc-300' : 'bg-zinc-700'
+                            className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${rpcShowGameName ? 'bg-white' : 'bg-zinc-700'
                           }`}
                           >
                             <span
-                              className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${rpcShowGameName ? 'translate-x-6' : 'translate-x-1'
+                              className={`inline-block h-4 w-4 transform rounded-full transition-transform ${rpcShowGameName ? 'bg-black translate-x-6' : 'bg-white translate-x-1'
                                 }`}
                             />
                           </button>
@@ -1738,11 +1744,11 @@ export function SettingsPage() {
                               setRpcShowDownloadStatus(newValue)
                               updateRpcShowDownloadStatus(newValue)
                             }}
-                            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${rpcShowDownloadStatus ? 'bg-zinc-300' : 'bg-zinc-700'
+                            className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${rpcShowDownloadStatus ? 'bg-white' : 'bg-zinc-700'
                           }`}
                           >
                             <span
-                              className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${rpcShowDownloadStatus ? 'translate-x-6' : 'translate-x-1'
+                              className={`inline-block h-4 w-4 transform rounded-full transition-transform ${rpcShowDownloadStatus ? 'bg-black translate-x-6' : 'bg-white translate-x-1'
                                 }`}
                             />
                           </button>
@@ -1759,11 +1765,11 @@ export function SettingsPage() {
                               setRpcShowBrowseStatus(newValue)
                               updateRpcShowBrowseStatus(newValue)
                             }}
-                            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${rpcShowBrowseStatus ? 'bg-zinc-300' : 'bg-zinc-700'
+                            className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${rpcShowBrowseStatus ? 'bg-white' : 'bg-zinc-700'
                           }`}
                           >
                             <span
-                              className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${rpcShowBrowseStatus ? 'translate-x-6' : 'translate-x-1'
+                              className={`inline-block h-4 w-4 transform rounded-full transition-transform ${rpcShowBrowseStatus ? 'bg-black translate-x-6' : 'bg-white translate-x-1'
                                 }`}
                             />
                           </button>
@@ -1780,11 +1786,11 @@ export function SettingsPage() {
                               setRpcShowButtons(newValue)
                               updateRpcShowButtons(newValue)
                             }}
-                            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${rpcShowButtons ? 'bg-zinc-300' : 'bg-zinc-700'
+                            className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${rpcShowButtons ? 'bg-white' : 'bg-zinc-700'
                           }`}
                           >
                             <span
-                              className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${rpcShowButtons ? 'translate-x-6' : 'translate-x-1'
+                              className={`inline-block h-4 w-4 transform rounded-full transition-transform ${rpcShowButtons ? 'bg-black translate-x-6' : 'bg-white translate-x-1'
                                 }`}
                             />
                           </button>
@@ -2033,12 +2039,12 @@ export function SettingsPage() {
                             await window.ucSettings?.set?.('skipLinkCheck', newValue)
                           } catch { }
                         }}
-                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${skipLinkCheck ? 'bg-zinc-300' : 'bg-zinc-700'
+                        className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${skipLinkCheck ? 'bg-white' : 'bg-zinc-700'
                           }`}
                         title="Toggle skip link check"
                       >
                         <span
-                          className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${skipLinkCheck ? 'translate-x-6' : 'translate-x-1'
+                          className={`inline-block h-4 w-4 transform rounded-full transition-transform ${skipLinkCheck ? 'bg-black translate-x-6' : 'bg-white translate-x-1'
                             }`}
                         />
                       </button>
@@ -2079,12 +2085,12 @@ export function SettingsPage() {
                             await window.ucSettings?.set?.('alwaysCreateDesktopShortcut', newValue)
                           } catch { }
                         }}
-                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${alwaysCreateDesktopShortcut ? 'bg-zinc-300' : 'bg-zinc-700'
+                        className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${alwaysCreateDesktopShortcut ? 'bg-white' : 'bg-zinc-700'
                           }`}
                         title="Toggle always create desktop shortcuts"
                       >
                         <span
-                          className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${alwaysCreateDesktopShortcut ? 'translate-x-6' : 'translate-x-1'
+                          className={`inline-block h-4 w-4 transform rounded-full transition-transform ${alwaysCreateDesktopShortcut ? 'bg-black translate-x-6' : 'bg-white translate-x-1'
                             }`}
                         />
                       </button>
@@ -2105,12 +2111,12 @@ export function SettingsPage() {
                             await window.ucSettings?.set?.('preventSleepDuringOperations', newValue)
                           } catch { }
                         }}
-                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${preventSleepDuringOperations ? 'bg-zinc-300' : 'bg-zinc-700'
+                        className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${preventSleepDuringOperations ? 'bg-white' : 'bg-zinc-700'
                           }`}
                         title="Toggle sleep prevention during active operations"
                       >
                         <span
-                          className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${preventSleepDuringOperations ? 'translate-x-6' : 'translate-x-1'
+                          className={`inline-block h-4 w-4 transform rounded-full transition-transform ${preventSleepDuringOperations ? 'bg-black translate-x-6' : 'bg-white translate-x-1'
                             }`}
                         />
                       </button>
@@ -2483,11 +2489,11 @@ export function SettingsPage() {
                         setSlsSteamEnabled(newValue)
                         try { await window.ucSettings?.set?.('slsSteamEnabled', newValue) } catch { }
                       }}
-                      className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${slsSteamEnabled ? 'bg-zinc-300' : 'bg-zinc-700'
+                      className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${slsSteamEnabled ? 'bg-white' : 'bg-zinc-700'
                           }`}
                       title="Toggle SLSsteam integration"
                     >
-                      <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${slsSteamEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
+                      <span className={`inline-block h-4 w-4 transform rounded-full transition-transform ${slsSteamEnabled ? 'bg-black translate-x-6' : 'bg-white translate-x-1'}`} />
                     </button>
                   </div>
 
@@ -2627,11 +2633,11 @@ export function SettingsPage() {
                         setVrEnabled(newValue)
                         try { await window.ucSettings?.set?.('vrEnabled', newValue) } catch { }
                       }}
-                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${vrEnabled ? 'bg-zinc-300' : 'bg-zinc-700'
+                      className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${vrEnabled ? 'bg-white' : 'bg-zinc-700'
                           }`}
                       title="Toggle VR support"
                     >
-                      <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${vrEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
+                      <span className={`inline-block h-4 w-4 transform rounded-full transition-transform ${vrEnabled ? 'bg-black translate-x-6' : 'bg-white translate-x-1'}`} />
                     </button>
                   </div>
 
@@ -2676,11 +2682,11 @@ export function SettingsPage() {
                         setVrAutoLaunchSteamVr(newValue)
                         try { await window.ucSettings?.set?.('vrAutoLaunchSteamVr', newValue) } catch { }
                       }}
-                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${vrAutoLaunchSteamVr ? 'bg-zinc-300' : 'bg-zinc-700'
+                      className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${vrAutoLaunchSteamVr ? 'bg-white' : 'bg-zinc-700'
                           }`}
                       title="Toggle auto-launch SteamVR"
                     >
-                      <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${vrAutoLaunchSteamVr ? 'translate-x-6' : 'translate-x-1'}`} />
+                      <span className={`inline-block h-4 w-4 transform rounded-full transition-transform ${vrAutoLaunchSteamVr ? 'bg-black translate-x-6' : 'bg-white translate-x-1'}`} />
                     </button>
                   </div>
 
@@ -2840,10 +2846,10 @@ export function SettingsPage() {
                           setOverlayEnabled(next)
                           await window.ucOverlay?.setSettings?.({ overlayEnabled: next })
                         }}
-                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${overlayEnabled ? 'bg-zinc-300' : 'bg-zinc-700'
+                        className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${overlayEnabled ? 'bg-white' : 'bg-zinc-700'
                           }`}
                       >
-                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${overlayEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
+                        <span className={`inline-block h-4 w-4 transform rounded-full transition-transform ${overlayEnabled ? 'bg-black translate-x-6' : 'bg-white translate-x-1'}`} />
                       </button>
                     </div>
 
@@ -2861,11 +2867,11 @@ export function SettingsPage() {
                           setOverlayAutoShow(next)
                           await window.ucOverlay?.setSettings?.({ overlayAutoShow: next })
                         }}
-                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${overlayAutoShow ? 'bg-zinc-300' : 'bg-zinc-700'
+                        className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${overlayAutoShow ? 'bg-white' : 'bg-zinc-700'
                           }`}
                         disabled={!overlayEnabled}
                       >
-                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${overlayAutoShow ? 'translate-x-6' : 'translate-x-1'}`} />
+                        <span className={`inline-block h-4 w-4 transform rounded-full transition-transform ${overlayAutoShow ? 'bg-black translate-x-6' : 'bg-white translate-x-1'}`} />
                       </button>
                     </div>
 
@@ -3143,6 +3149,19 @@ export function SettingsPage() {
                                   setDiscordRpcEnabled(true)
                                   setDeveloperMode(false)
                                   setVerboseDownloadLogging(false)
+                                  setShowMika(true)
+                                  setShowNsfw(false)
+                                  setShowPublicProfile(true)
+                                  // Wipe localStorage settings so views like the log popup start fresh
+                                  try {
+                                    localStorage.removeItem(SETTINGS_KEYS.MIKA)
+                                    localStorage.removeItem(SETTINGS_KEYS.NSFW)
+                                    localStorage.removeItem(SETTINGS_KEYS.PUBLIC_PROFILE)
+                                    localStorage.removeItem('uc_custom_api_base_url')
+                                    localStorage.removeItem('uc_sidebar_collapsed')
+                                    window.dispatchEvent(new Event('uc_mika_pref'))
+                                    window.dispatchEvent(new Event('uc_nsfw_pref'))
+                                  } catch { }
                                   toast('User data cleared successfully.')
                                   setTimeout(() => {
                                     setShowClearConfirm(false)
@@ -3177,6 +3196,36 @@ export function SettingsPage() {
                 </CardContent>
               </Card>
 
+              <Card className="border-white/[.07]">
+                <CardContent className="p-6 space-y-4">
+                  <div>
+                    <h2 className="text-lg font-semibold">Privacy</h2>
+                    <p className="text-sm text-zinc-400">
+                      Control what data is shared with UC Development.
+                    </p>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <label className="text-sm font-medium cursor-pointer">Send error reports automatically</label>
+                      <p className="text-xs text-zinc-400 mt-1">
+                        When an error occurs, a redacted log snapshot is sent to the UC Development team to help fix bugs. No personal data or file paths are included.
+                      </p>
+                    </div>
+                    <button
+                      onClick={async () => {
+                        const newValue = !autoShareErrorLogs
+                        setAutoShareErrorLogs(newValue)
+                        try { await window.ucSettings?.set?.('autoShareErrorLogs', newValue) } catch {}
+                      }}
+                      className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${autoShareErrorLogs ? 'bg-white' : 'bg-zinc-700'}`}
+                      title="Toggle automatic error report sharing"
+                    >
+                      <span className={`inline-block h-4 w-4 transform rounded-full transition-transform ${autoShareErrorLogs ? 'bg-black translate-x-6' : 'bg-white translate-x-1'}`} />
+                    </button>
+                  </div>
+                </CardContent>
+              </Card>
+
               <Card className="border-amber-500/40">
                 <CardContent className="p-6 space-y-4">
                   <div>
@@ -3189,7 +3238,7 @@ export function SettingsPage() {
                   <div className="flex items-center justify-between">
                     <div className="flex-1">
                       <div className="flex items-center gap-2">
-                        <label htmlFor="developer-mode-toggle" className="text-sm font-medium">
+                        <label className="text-sm font-medium">
                           Enable Developer Mode
                         </label>
                       </div>
@@ -3197,20 +3246,17 @@ export function SettingsPage() {
                         Unlock advanced settings and customization options.
                       </p>
                     </div>
-                    <label className="relative inline-flex items-center cursor-pointer">
-                      <input
-                        id="developer-mode-toggle"
-                        type="checkbox"
-                        checked={developerMode}
-                        onChange={async (e) => {
-                          const checked = e.target.checked
-                          setDeveloperMode(checked)
-                          await window.ucSettings?.set?.('developerMode', checked)
-                        }}
-                        className="sr-only peer"
-                      />
-                      <div className="w-11 h-6 bg-zinc-700 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full after:content-[''] after:absolute after:top-0.5 after:start-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-zinc-300"></div>
-                    </label>
+                    <button
+                      onClick={async () => {
+                        const checked = !developerMode
+                        setDeveloperMode(checked)
+                        await window.ucSettings?.set?.('developerMode', checked)
+                      }}
+                      className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${developerMode ? 'bg-white' : 'bg-zinc-700'}`}
+                      title="Toggle Developer Mode"
+                    >
+                      <span className={`inline-block h-4 w-4 transform rounded-full transition-transform ${developerMode ? 'bg-black translate-x-6' : 'bg-white translate-x-1'}`} />
+                    </button>
                   </div>
 
                   {developerMode && (
@@ -3232,12 +3278,12 @@ export function SettingsPage() {
                                 await window.ucSettings?.set?.('verboseDownloadLogging', next)
                               } catch { }
                             }}
-                            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${verboseDownloadLogging ? 'bg-zinc-300' : 'bg-zinc-700'
+                            className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${verboseDownloadLogging ? 'bg-white' : 'bg-zinc-700'
                           }`}
                             title="Toggle verbose download logging"
                           >
                             <span
-                              className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${verboseDownloadLogging ? 'translate-x-6' : 'translate-x-1'
+                              className={`inline-block h-4 w-4 transform rounded-full transition-transform ${verboseDownloadLogging ? 'bg-black translate-x-6' : 'bg-white translate-x-1'
                                 }`}
                             />
                           </button>

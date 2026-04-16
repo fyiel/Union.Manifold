@@ -105,6 +105,46 @@ type ArchiveDeletionPrompt = {
   totalBytes: number
 }
 
+function normalizeArchivePathList(paths: unknown): string[] {
+  if (!Array.isArray(paths)) return []
+  const seen = new Set<string>()
+  const next: string[] = []
+  for (const entry of paths) {
+    if (typeof entry !== "string") continue
+    const trimmed = entry.trim()
+    if (!trimmed || seen.has(trimmed)) continue
+    seen.add(trimmed)
+    next.push(trimmed)
+  }
+  return next
+}
+
+function basenameFromArchivePath(targetPath: string): string {
+  const normalized = targetPath.replace(/\\/g, "/")
+  const parts = normalized.split("/").filter(Boolean)
+  return (parts[parts.length - 1] || normalized).toLowerCase()
+}
+
+function archivePromptIdentityKey(prompt: ArchiveDeletionPrompt): string {
+  const appKey = String(prompt.appid || prompt.gameName || "unknown").toLowerCase()
+  const fileSig = [...prompt.archivePaths]
+    .map(basenameFromArchivePath)
+    .sort()
+    .join("|")
+  return `${appKey}::${prompt.totalBytes || 0}::${fileSig}`
+}
+
+function normalizeArchivePromptPayload(payload: ArchiveDeletionPrompt): ArchiveDeletionPrompt | null {
+  const archivePaths = normalizeArchivePathList(payload?.archivePaths)
+  if (!archivePaths.length) return null
+  return {
+    appid: payload?.appid || null,
+    gameName: payload?.gameName || payload?.appid || null,
+    archivePaths,
+    totalBytes: Number.isFinite(Number(payload?.totalBytes)) ? Number(payload.totalBytes) : 0,
+  }
+}
+
 type DownloadsContextValue = {
   downloads: DownloadItem[]
 }
@@ -990,11 +1030,12 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!window.ucDownloads?.onArchiveDeletePrompt) return
     return window.ucDownloads.onArchiveDeletePrompt((payload) => {
-      if (!payload?.archivePaths?.length) return
-      const signature = payload.archivePaths.join("|")
+      const normalized = normalizeArchivePromptPayload(payload)
+      if (!normalized) return
+      const signature = archivePromptIdentityKey(normalized)
       setArchiveDeletionPrompts((prev) => {
-        if (prev.some((entry) => entry.archivePaths.join("|") === signature)) return prev
-        return [...prev, payload]
+        if (prev.some((entry) => archivePromptIdentityKey(entry) === signature)) return prev
+        return [...prev, normalized]
       })
     })
   }, [])
@@ -1690,10 +1731,15 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
   const deletePromptArchives = useCallback(async () => {
     const currentPrompt = archiveDeletionPrompts[0]
     if (!currentPrompt || !window.ucDownloads?.deleteArchiveFiles) return
+    const safeArchivePaths = normalizeArchivePathList(currentPrompt.archivePaths)
+    if (!safeArchivePaths.length) {
+      setArchiveDeletionPrompts((prev) => prev.slice(1))
+      return
+    }
     setArchiveDeletionBusy(true)
     setArchiveDeletionError(null)
     try {
-      const result = await window.ucDownloads.deleteArchiveFiles({ archivePaths: currentPrompt.archivePaths })
+      const result = await window.ucDownloads.deleteArchiveFiles({ archivePaths: safeArchivePaths })
       if (!result?.ok) {
         throw new Error(result?.error || "Failed to delete archive files")
       }

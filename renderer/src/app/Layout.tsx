@@ -10,7 +10,10 @@ import { UpdateNotification } from "@/components/UpdateNotification"
 import { useDiscordRpcPresence } from "@/hooks/use-discord-rpc"
 import { useAppPreferencesSync } from "@/hooks/use-app-preferences-sync"
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts"
+import { logger } from "@/lib/logger"
 import { cn } from "@/lib/utils"
+import { LogSharingConsentModal } from "@/components/LogSharingConsentModal"
+import { getApiBaseUrl } from "@/lib/api"
 
 export function AppLayout() {
   useDiscordRpcPresence()
@@ -22,11 +25,94 @@ export function AppLayout() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     try { return localStorage.getItem("uc_sidebar_collapsed") === "true" } catch { return false }
   })
+  const [logConsentOpen, setLogConsentOpen] = useState(false)
+  const autoShareEnabledRef = useRef<boolean>(false)
+  const lastLogShareRef = useRef<number>(0)
+
+  // Check if the user has been asked about error log sharing yet
+  useEffect(() => {
+    let mounted = true
+    const check = async () => {
+      try {
+        const val = await window.ucSettings?.get?.('autoShareErrorLogs')
+        if (!mounted) return
+        if (val === true) {
+          autoShareEnabledRef.current = true
+        } else if (val === false) {
+          autoShareEnabledRef.current = false
+        } else {
+          // Not yet decided — show the consent dialog
+          setLogConsentOpen(true)
+        }
+      } catch {
+        // ignore — don't block app load
+      }
+    }
+    check()
+    // Keep ref in sync with any setting changes (e.g. from SettingsPage toggle)
+    const off = window.ucSettings?.onChanged?.((data: any) => {
+      if (data?.key === 'autoShareErrorLogs') {
+        autoShareEnabledRef.current = data.value === true
+      }
+    })
+    return () => {
+      mounted = false
+      if (typeof off === 'function') off()
+    }
+  }, [])
+
+  const triggerAutoShareLogs = () => {
+    if (!autoShareEnabledRef.current) return
+    const now = Date.now()
+    // Throttle: at most once per 10 minutes
+    if (now - lastLogShareRef.current < 10 * 60 * 1000) return
+    lastLogShareRef.current = now
+    try {
+      window.ucLogs?.shareLogs?.({ baseUrl: getApiBaseUrl() }).catch(() => {})
+    } catch {
+      // ignore
+    }
+  }
 
   useEffect(() => {
     if (location.hash) return
     scrollContainerRef.current?.scrollTo({ top: 0, behavior: "auto" })
   }, [location.pathname, location.hash])
+
+  useEffect(() => {
+    const handleWindowError = (event: ErrorEvent) => {
+      logger.error("Unhandled renderer error", {
+        context: "Window",
+        data: {
+          message: event.message,
+          filename: event.filename,
+          lineno: event.lineno,
+          colno: event.colno,
+          stack: event.error?.stack,
+        },
+      })
+      triggerAutoShareLogs()
+    }
+
+    const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
+      logger.error("Unhandled promise rejection", {
+        context: "Window",
+        data: {
+          reason: event.reason instanceof Error
+            ? { message: event.reason.message, stack: event.reason.stack }
+            : event.reason,
+        },
+      })
+      triggerAutoShareLogs()
+    }
+
+    window.addEventListener("error", handleWindowError)
+    window.addEventListener("unhandledrejection", handleUnhandledRejection)
+    return () => {
+      window.removeEventListener("error", handleWindowError)
+      window.removeEventListener("unhandledrejection", handleUnhandledRejection)
+    }
+  }, [])
 
   useEffect(() => {
     setMobileNavOpen(false)
@@ -69,6 +155,19 @@ export function AppLayout() {
           <UpdateNotification />
         </div>
       </div>
+      <LogSharingConsentModal
+        open={logConsentOpen}
+        onAccept={async () => {
+          setLogConsentOpen(false)
+          autoShareEnabledRef.current = true
+          try { await window.ucSettings?.set?.('autoShareErrorLogs', true) } catch {}
+        }}
+        onDecline={async () => {
+          setLogConsentOpen(false)
+          autoShareEnabledRef.current = false
+          try { await window.ucSettings?.set?.('autoShareErrorLogs', false) } catch {}
+        }}
+      />
     </div>
   )
 }

@@ -1520,6 +1520,9 @@ const downloadsStateCatalogKey = 'catalog_state'
 const downloadsStateInstallingKey = 'installing_records'
 const downloadsStateQueueKey = 'queue_state'
 const LOG_SESSION_ID = crypto.randomBytes(6).toString('hex')
+const ARCHIVE_PROMPT_DEDUPE_WINDOW_MS = 120000
+const LOG_SHARE_ENDPOINTS = ['/api/account/diagnostics/logs', '/api/account/logs/share']
+const recentArchivePromptSignatures = new Map()
 let cachedSettings = null
 let downloadsStateStorePromise = null
 let persistedInstallingState = new Map()
@@ -1579,6 +1582,16 @@ function normalizeLogData(data) {
   if (data instanceof Error) return { name: data.name, message: data.message, stack: data.stack }
   if (data && typeof data === 'object' && data.name && data.message && data.stack) return data
   return data
+}
+
+function redactLogText(input) {
+  if (typeof input !== 'string' || !input) return ''
+  return input
+    .replace(/([?&](?:token|auth|access_token|refresh_token|key|apikey|api_key|password|pass|secret)=)[^&\s]+/gi, '$1[REDACTED]')
+    .replace(/(authorization\s*[:=]\s*(?:bearer\s+)?)['"]?[^\s'";]+/gi, '$1[REDACTED]')
+    .replace(/(cookie\s*[:=]\s*)[^\n\r]+/gi, '$1[REDACTED]')
+    .replace(/([a-z]:\\users\\)[^\\\n\r]+/gi, '$1[REDACTED_USER]')
+    .replace(/((?:\/home\/|\/users\/))[^\/\n\r]+/gi, '$1[REDACTED_USER]')
 }
 
 function ucLog(message, level = 'info', data = null) {
@@ -2625,6 +2638,8 @@ ipcMain.handle('uc:setting-clear-all', () => {
     writeSettings(defaults)
     updateRpcSettings(defaults).catch(() => { })
     refreshOperationPowerSaveBlocker()
+    // Clear the log file so the share-logs popup starts fresh
+    clearLogs()
     // broadcast to all renderer windows that settings were cleared
     for (const w of BrowserWindow.getAllWindows()) {
       if (w && !w.isDestroyed()) {
@@ -3734,6 +3749,42 @@ function findInstalledFolderByAppid(appid) {
     console.error('[UC] findInstalledFolderByAppid failed', err)
   }
   return null
+}
+
+const UC_UPDATE_BACKUP_SUFFIX = '.uc-update-backup'
+
+function getUpdateBackupPath(installedFolderPath) {
+  return installedFolderPath + UC_UPDATE_BACKUP_SUFFIX
+}
+
+function clearUpdateBackup(installedFolderPath) {
+  try {
+    const backupPath = getUpdateBackupPath(installedFolderPath)
+    if (fs.existsSync(backupPath)) {
+      fs.promises.rm(backupPath, { recursive: true, force: true }).catch(e => {
+        uc_log(`[update-backup] Failed to clear backup ${backupPath}: ${e.message}`)
+      })
+    }
+  } catch (e) {
+    uc_log(`[update-backup] clearUpdateBackup error: ${e.message}`)
+  }
+}
+
+function restoreUpdateBackup(installedFolderPath) {
+  try {
+    const backupPath = getUpdateBackupPath(installedFolderPath)
+    if (!fs.existsSync(backupPath)) return false
+    // Remove partial extraction result if it exists
+    if (fs.existsSync(installedFolderPath)) {
+      try { fs.rmSync(installedFolderPath, { recursive: true, force: true }) } catch { }
+    }
+    fs.renameSync(backupPath, installedFolderPath)
+    uc_log(`[update-backup] Restored backup from ${backupPath} to ${installedFolderPath}`)
+    return true
+  } catch (e) {
+    uc_log(`[update-backup] restoreUpdateBackup error: ${e.message}`)
+    return false
+  }
 }
 
 function findInstallingFolderByAppid(appid) {
@@ -4880,6 +4931,9 @@ async function handleUCFilesDownloadComplete(win, info) {
 
       sendArchiveDeletionPrompt(win, archivePromptPayload)
 
+      // Clear update backup on successful extraction
+      clearUpdateBackup(installedRoot)
+
       sendDownloadUpdate(win, makeUpdate({ status: 'extracted', savePath: null }))
       sendDownloadUpdate(win, makeUpdate({
         status: 'completed', savePath: null,
@@ -4887,6 +4941,8 @@ async function handleUCFilesDownloadComplete(win, info) {
       }))
     } catch (err) {
       ucLog(`[UC.Files] Extraction failed: ${err.message}`, 'error')
+      // Restore the old installed game if a backup exists (update failure recovery)
+      restoreUpdateBackup(installedRoot)
       if (appid) updateInstallingManifestStatus(appid, 'failed', `Extraction failed: ${err.message}`)
       sendDownloadUpdate(win, makeUpdate({ status: 'failed', error: `Extraction failed: ${err.message}` }))
     }
@@ -5445,8 +5501,16 @@ function removeEmptyDirectories(rootDir) {
 }
 
 function buildArchiveDeletionPromptPayload(appid, gameName, archivePaths) {
+  const seenPaths = new Set()
   const paths = Array.isArray(archivePaths)
-    ? archivePaths.filter((target) => target && fs.existsSync(target))
+    ? archivePaths
+      .filter((target) => target && fs.existsSync(target))
+      .filter((target) => {
+        const normalized = path.resolve(target)
+        if (seenPaths.has(normalized)) return false
+        seenPaths.add(normalized)
+        return true
+      })
     : []
   if (!paths.length) return null
 
@@ -5566,6 +5630,26 @@ function moveArchivesToCache(appid, gameName, archivePaths) {
 
 function sendArchiveDeletionPrompt(win, payload) {
   if (!payload || !Array.isArray(payload.archivePaths) || payload.archivePaths.length === 0) return
+
+  const appKey = String(payload.appid || payload.gameName || 'unknown').toLowerCase()
+  const fileSig = payload.archivePaths
+    .map((target) => path.basename(String(target || '')).toLowerCase())
+    .sort()
+    .join('|')
+  const signature = `${appKey}::${Number(payload.totalBytes) || 0}::${fileSig}`
+  const now = Date.now()
+  for (const [key, ts] of recentArchivePromptSignatures.entries()) {
+    if ((now - Number(ts)) > ARCHIVE_PROMPT_DEDUPE_WINDOW_MS) {
+      recentArchivePromptSignatures.delete(key)
+    }
+  }
+  const existing = recentArchivePromptSignatures.get(signature)
+  if (existing && (now - Number(existing)) <= ARCHIVE_PROMPT_DEDUPE_WINDOW_MS) {
+    ucLog(`[Archive] Skipping duplicate archive deletion prompt: ${signature}`, 'info')
+    return
+  }
+  recentArchivePromptSignatures.set(signature, now)
+
   try {
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('uc:archive-delete-prompt', payload)
@@ -6251,6 +6335,78 @@ function setSplashStatus(splashWin, text) {
   ).catch(() => {})
 }
 
+/** Set the splash progress bar to a concrete percentage (0-100), stopping the infinite animation. */
+function setSplashProgress(splashWin, pct) {
+  if (!splashWin || splashWin.isDestroyed()) return
+  const safePct = Math.max(0, Math.min(100, Number(pct) || 0))
+  splashWin.webContents.executeJavaScript(
+    `(function(p){var fill=document.querySelector('.bar-fill');if(!fill)return;fill.style.animation='none';fill.style.transform='translateX(0)';fill.style.width=p+'%';fill.style.background='#71717a';})(${safePct})`
+  ).catch(() => {})
+}
+
+/**
+ * Check for updates during the splash window, Discord-style:
+ * - Shows "Checking for updates..." status
+ * - If an update is found: shows download progress, then installs and restarts
+ * - If up-to-date or error: proceeds after a brief pause
+ */
+async function checkForUpdatesDuringSplash(splashWin) {
+  return new Promise((resolve) => {
+    if (!splashWin || splashWin.isDestroyed()) { resolve(); return }
+
+    let settled = false
+    const progressListener = (progress) => {
+      const pct = Math.round(progress?.percent || 0)
+      setSplashStatus(splashWin, `Downloading update... ${pct}%`)
+      setSplashProgress(splashWin, pct)
+    }
+
+    const settle = (delay = 0) => {
+      if (settled) return
+      settled = true
+      autoUpdater.removeListener('download-progress', progressListener)
+      clearTimeout(safetyTimer)
+      setTimeout(resolve, delay)
+    }
+
+    // Safety net: if nothing happens within 20s just proceed
+    const safetyTimer = setTimeout(() => {
+      setSplashStatus(splashWin, 'Almost there...')
+      settle()
+    }, 20000)
+
+    autoUpdater.once('update-not-available', () => {
+      setSplashStatus(splashWin, 'Up to date.')
+      settle(600)
+    })
+
+    autoUpdater.once('update-available', (info) => {
+      const ver = String(info?.version || '').replace(/^v/i, '')
+      setSplashStatus(splashWin, ver ? `Update v${ver} found. Downloading...` : 'Update found. Downloading...')
+      autoUpdater.on('download-progress', progressListener)
+    })
+
+    autoUpdater.once('update-downloaded', () => {
+      clearTimeout(safetyTimer)
+      autoUpdater.removeListener('download-progress', progressListener)
+      setSplashProgress(splashWin, 100)
+      setSplashStatus(splashWin, 'Installing update...')
+      // App will restart; no need to resolve
+      setTimeout(() => {
+        try { autoUpdater.quitAndInstall(false, true) } catch { settle() }
+      }, 1200)
+    })
+
+    autoUpdater.once('error', () => {
+      setSplashStatus(splashWin, 'Almost there...')
+      settle(600)
+    })
+
+    setSplashStatus(splashWin, 'Checking for updates...')
+    autoUpdater.checkForUpdates().catch(() => settle())
+  })
+}
+
 function createWindow(existingSplash) {
   ucLog('Creating main window')
   const iconPath = resolveIcon()
@@ -6760,6 +6916,9 @@ function createWindow(existingSplash) {
               }
               sendArchiveDeletionPrompt(mainWindow, archivePromptPayload)
 
+              // Clear update backup on successful extraction
+              clearUpdateBackup(installedRoot)
+
               sendDownloadUpdate(mainWindow, { downloadId, status: 'extracted', extracted: extractedFiles, savePath: null, appid: entry?.appid || null })
               try {
                 const stDone = archiveToExtract && fs.existsSync(archiveToExtract) ? fs.statSync(archiveToExtract) : null
@@ -6788,6 +6947,8 @@ function createWindow(existingSplash) {
               extractionFailed = true
               extractionError = res && res.error ? res.error : 'extract_failed'
               extractionTerminalStatus = 'failed'
+              // Restore the old installed game if a backup exists (update failure recovery)
+              restoreUpdateBackup(installedRoot)
               updateInstallingManifestStatus(entry?.appid, 'failed', extractionError)
               sendDownloadUpdate(mainWindow, { downloadId, status: 'extract_failed', error: res && res.error ? res.error : 'unknown', savePath: finalPath, appid: entry?.appid || null })
             }
@@ -6960,6 +7121,12 @@ function createWindow(existingSplash) {
         partIndex: entry?.partIndex,
         partTotal: entry?.partTotal
       })
+      // Log download failures so they always appear in the log viewer
+      if (terminalStatus === 'failed') {
+        ucLog(`Download failed: ${entry?.gameName || entry?.appid || downloadId} — ${terminalError || 'unknown error'} (url: ${url})`, 'error')
+      } else if (terminalStatus === 'cancelled') {
+        ucLog(`Download cancelled: ${entry?.gameName || entry?.appid || downloadId} (url: ${url})`, 'warn')
+      }
       // Update manifest for non-completed downloads
       if (entry?.appid && terminalStatus !== 'completed') {
         updateInstallingManifestStatus(entry.appid, terminalStatus, terminalError)
@@ -6987,9 +7154,14 @@ app.whenReady().then(async () => {
     setSplashStatus(splashWin, status)
   })
 
-  // Keep splash visible long enough to be perceptible on fast machines.
-  setSplashStatus(splashWin, 'Almost there...')
-  await new Promise((r) => setTimeout(r, 900))
+  configureAutoUpdater()
+  if (!isDev) {
+    // Check for updates during splash (Discord-style: download and install before main window opens)
+    await checkForUpdatesDuringSplash(splashWin)
+  } else {
+    setSplashStatus(splashWin, 'Almost there...')
+    await new Promise((r) => setTimeout(r, 600))
+  }
 
   createWindow(splashWin)
   if (globalDownloadQueue.length > 0) {
@@ -6998,7 +7170,6 @@ app.whenReady().then(async () => {
     }, 1000)
   }
   createTray()
-  configureAutoUpdater()
   
   // Initialize overlay system
   const settings = readSettings()
@@ -7055,9 +7226,7 @@ app.whenReady().then(async () => {
   }, 15000)
 
   if (!isDev) {
-    setTimeout(() => {
-      triggerAutoUpdateCheck().catch(() => { })
-    }, 10000)
+    // Splash already ran the initial check; schedule background hourly re-checks
     setInterval(() => {
       triggerAutoUpdateCheck().catch(() => { })
     }, 60 * 60 * 1000)
@@ -7094,6 +7263,66 @@ ipcMain.handle('uc:install-update', () => {
   } catch (err) {
     setUpdateStatus({ state: 'error', error: err?.message || String(err) })
     return { ok: false, error: err?.message || String(err) }
+  }
+})
+
+ipcMain.handle('uc:logs-share', async (event, payload) => {
+  try {
+    const baseUrl = payload?.baseUrl || resolvedBaseUrl || DEFAULT_BASE_URL
+    const rawLogs = getLogs()
+    const logs = redactLogText(rawLogs || '')
+    const diagnosticsPayload = {
+      source: 'unioncrax-direct',
+      sessionId: LOG_SESSION_ID,
+      sharedAt: new Date().toISOString(),
+      app: {
+        version: getAppVersion(),
+        platform: process.platform,
+        arch: process.arch,
+        electron: process.versions.electron,
+        node: process.versions.node,
+      },
+      logs,
+    }
+
+    let lastError = null
+    for (const endpoint of LOG_SHARE_ENDPOINTS) {
+      let response = null
+      try {
+        response = await fetchWithSession(event.sender.session, baseUrl, endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-UC-Client': 'unioncrax-direct',
+          },
+          body: JSON.stringify(diagnosticsPayload),
+        })
+      } catch (err) {
+        lastError = String(err)
+        continue
+      }
+
+      if (!response) continue
+      if (response.status === 404) {
+        lastError = `Endpoint not found: ${endpoint}`
+        continue
+      }
+
+      const responseText = await response.text().catch(() => '')
+      if (!response.ok) {
+        lastError = responseText || `${response.status} ${response.statusText}`
+        ucLog('Log share failed', 'warn', { endpoint, status: response.status, body: responseText })
+        return { ok: false, error: lastError, status: response.status }
+      }
+
+      ucLog('Logs shared with UC Dev team', 'info', { endpoint, status: response.status })
+      return { ok: true, endpoint, status: response.status }
+    }
+
+    return { ok: false, error: lastError || 'No log sharing endpoint available' }
+  } catch (err) {
+    ucLog(`Failed to share logs: ${String(err)}`, 'error')
+    return { ok: false, error: String(err) }
   }
 })
 
@@ -9744,6 +9973,26 @@ ipcMain.handle('uc:installed-delete', async (_event, appid) => {
   } catch (err) {
     console.error('[UC] installed-delete failed', err)
     return { ok: false }
+  }
+})
+
+ipcMain.handle('uc:installed-backup-create', async (_event, appid) => {
+  try {
+    const installedFolder = findInstalledFolderByAppid(appid)
+    if (!installedFolder || !fs.existsSync(installedFolder)) {
+      return { ok: true } // Nothing to back up
+    }
+    const backupPath = getUpdateBackupPath(installedFolder)
+    // Remove stale backup if one exists from a previous failed update
+    if (fs.existsSync(backupPath)) {
+      try { fs.rmSync(backupPath, { recursive: true, force: true }) } catch { }
+    }
+    fs.renameSync(installedFolder, backupPath)
+    uc_log(`[update-backup] Created backup: ${installedFolder} → ${backupPath}`)
+    return { ok: true, backupPath }
+  } catch (err) {
+    uc_log(`[update-backup] backup-create failed: ${err.message}`)
+    return { ok: false, error: err.message }
   }
 })
 

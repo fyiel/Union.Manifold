@@ -355,6 +355,7 @@ export function DownloadsPage() {
   const [pendingExePath, setPendingExePath] = useState<string | null>(null)
   const [pendingAppId, setPendingAppId] = useState<string | null>(null);
   const [shortcutModalOpen, setShortcutModalOpen] = useState(false)
+  const [shortcutModalAlwaysCreate, setShortcutModalAlwaysCreate] = useState(false)
   const [launchPreflightOpen, setLaunchPreflightOpen] = useState(false)
   const [launchPreflightResult, setLaunchPreflightResult] = useState<LaunchPreflightResult | null>(null)
   const [installingAppId, setInstallingAppId] = useState<string | null>(null)
@@ -581,6 +582,13 @@ export function DownloadsPage() {
     }
   }
 
+  const setAlwaysCreateShortcut = async (value: boolean) => {
+    if (!window.ucSettings?.set) return
+    try {
+      await window.ucSettings.set('alwaysCreateDesktopShortcut', value)
+    } catch {}
+  }
+
   const createDesktopShortcut = async (appid: string, exePath: string) => {
     if (!window.ucDownloads?.createDesktopShortcut) return
     const game = games.find((g) => g.appid === appid)
@@ -744,6 +752,7 @@ export function DownloadsPage() {
       // Show the shortcut prompt BEFORE launching
       setPendingExePath(path)
       setPendingAppId(appid)
+      setShortcutModalAlwaysCreate(false)
       setExePickerOpen(false)
       setShortcutModalOpen(true)
     } else {
@@ -1731,14 +1740,21 @@ export function DownloadsPage() {
       <DesktopShortcutModal
         open={shortcutModalOpen}
         gameName={games.find((g) => g.appid === pendingAppId)?.name || "Game"}
-        onCreateShortcut={async () => {
+        defaultAlwaysCreate={shortcutModalAlwaysCreate}
+        onCreateShortcut={async (alwaysCreate) => {
+          if (alwaysCreate) {
+            await setAlwaysCreateShortcut(true)
+          }
           if (pendingExePath && pendingAppId) {
             await createDesktopShortcut(pendingAppId, pendingExePath)
             await setShortcutAskedForGame(pendingAppId)
             await launchGame(pendingAppId, pendingExePath)
           }
         }}
-        onSkip={async () => {
+        onSkip={async (alwaysCreate) => {
+          if (alwaysCreate) {
+            await setAlwaysCreateShortcut(true)
+          }
           if (pendingAppId) {
             await setShortcutAskedForGame(pendingAppId)
           }
@@ -1746,13 +1762,17 @@ export function DownloadsPage() {
             await launchGame(pendingAppId, pendingExePath)
           }
         }}
-        onClose={async () => {
+        onClose={async (alwaysCreate) => {
+          if (alwaysCreate) {
+            await setAlwaysCreateShortcut(true)
+          }
           if (pendingAppId) {
             await setShortcutAskedForGame(pendingAppId)
           }
           setShortcutModalOpen(false)
           setPendingExePath(null)
           setPendingAppId(null)
+          setShortcutModalAlwaysCreate(false)
         }}
       />
       <GameLaunchPreflightModal
