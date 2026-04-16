@@ -103,11 +103,13 @@ jobs:
         with:
           path: dist-packaged
 
-      - name: Create Release
-        uses: softprops/action-gh-release@v1
+      - name: Create or Update Release
+        uses: ncipollo/release-action@v1
         with:
-          tag_name: ${{ github.event.inputs.tag || github.ref }}
-          files: |
+          tag: ${{ github.event.inputs.tag || github.ref_name }}
+          allowUpdates: true
+          replacesArtifacts: true
+          artifacts: |
             dist-packaged/**/*.exe
             dist-packaged/**/*.blockmap
             dist-packaged/**/*.zip
