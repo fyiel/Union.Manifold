@@ -4,10 +4,6 @@
       "target_name": "uc_overlay_native",
       "sources": [
         "addon.cpp",
-        "injector.cpp",
-        "shared_memory.cpp",
-        "pipe_server.cpp",
-        "gcpad_bridge.cpp",
         "volume_control.cpp"
       ],
       "include_dirs": [
@@ -15,17 +11,26 @@
       ],
       "defines": [
         "NAPI_VERSION=8",
-        "NAPI_DISABLE_CPP_EXCEPTIONS",
-        "WIN32_LEAN_AND_MEAN",
-        "NOMINMAX"
+        "NAPI_DISABLE_CPP_EXCEPTIONS"
       ],
       "conditions": [
         ["OS=='win'", {
+          "sources": [
+            "injector.cpp",
+            "shared_memory.cpp",
+            "pipe_server.cpp",
+            "gcpad_bridge.cpp"
+          ],
           "libraries": [
             "-luser32.lib",
             "-lkernel32.lib",
             "-ladvapi32.lib",
             "-lole32.lib"
+          ]
+        }],
+        ["OS!='win'", {
+          "sources": [
+            "stubs_nonwin.cpp"
           ]
         }]
       ],
