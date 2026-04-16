@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased - 2026-06-27
+## Version 1.7.3 - 2026-04-16
 
 ### Fixes & Improvements
 
