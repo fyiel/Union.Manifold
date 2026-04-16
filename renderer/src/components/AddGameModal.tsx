@@ -207,6 +207,7 @@ export function AddGameModal({ open, onOpenChange }: AddGameModalProps) {
         image: matchedGame?.image || "",
         screenshots: [],
         release_date: "",
+        release_time: new Date().toISOString(),
         size: matchedGame?.size || "",
         version: "",
         developer: matchedGame?.developer || "Unknown",

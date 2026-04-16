@@ -18,6 +18,8 @@ export interface Game {
   comment?: string
   dlc: string[]
   update_time?: string
+  release_time?: string
+  addedAt?: number
   hasCoOp?: boolean
   hasHv?: boolean
   isExternal?: boolean

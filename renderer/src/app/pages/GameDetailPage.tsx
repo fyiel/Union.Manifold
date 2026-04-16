@@ -10,7 +10,7 @@ import { GameComments } from "@/components/GameComments"
 import { useDownloads } from "@/context/downloads-context"
 import { apiUrl, apiFetch } from "@/lib/api"
 import { getPreferredDownloadHost, setPreferredDownloadHost, requestDownloadToken, type PreferredDownloadHost, type DownloadConfig } from "@/lib/downloads"
-import { formatNumber, hasOnlineMode, pickGameExecutable, proxyImageUrl, cn } from "@/lib/utils"
+import { formatNumber, hasOnlineMode, pickGameExecutable, proxyImageUrl, cn, timeAgoLong } from "@/lib/utils"
 import type { Game } from "@/lib/types"
 import { useGamesData } from "@/hooks/use-games"
 import { addViewedGameToHistory, hasCookieConsent } from "@/lib/user-history"
@@ -771,6 +771,14 @@ export function GameDetailPage() {
   const isPopular = popularAppIds.has(game.appid)
   const isExternalGame = Boolean(installedManifest?.isExternal)
   const isUCMatched = isExternalGame && game.source !== "external"
+  const dateAdded = game.release_time
+    ? new Date(game.release_time)
+    : typeof game.addedAt === "number"
+      ? new Date(game.addedAt)
+      : null
+  const dateAddedLabel = dateAdded && !isNaN(dateAdded.getTime())
+    ? dateAdded.toLocaleDateString()
+    : "Unknown"
   const heroImage = selectedImage || installedMeta?.localSplash || installedMeta?.localImage || game.splash || game.image
   const appDownloads = downloads.filter((item) => item.appid === game.appid)
   const isActiveDownload = appDownloads.some((item) =>
@@ -1648,11 +1656,25 @@ export function GameDetailPage() {
 
                   <div className="flex items-center justify-between py-1.5 border-b border-white/[.07] pb-3">
                     <span className="text-zinc-400 flex items-center gap-2.5">
-                      <HardDrive className="h-4 w-4" />
-                      Size
+                      <Calendar className="h-4 w-4" />
+                      Date Added
                     </span>
-                    <span className="font-bold text-white">{game?.size || "Unknown"}</span>
+                    <span className="font-bold text-white">
+                      {dateAddedLabel}
+                    </span>
                   </div>
+
+                  {game.update_time && (
+                    <div className="flex items-center justify-between py-1.5 border-b border-white/[.07] pb-3">
+                      <span className="text-zinc-400 flex items-center gap-2.5">
+                        <RefreshCw className="h-4 w-4" />
+                        Edited
+                      </span>
+                      <span className="font-bold text-white">
+                        {timeAgoLong(game.update_time) || "just now"}
+                      </span>
+                    </div>
+                  )}
 
                   {(game.version || installedVersionLabels.length > 0) && (
                     <div className="flex items-center justify-between py-1.5 border-b border-white/[.07] pb-3">
@@ -1663,24 +1685,30 @@ export function GameDetailPage() {
                     </div>
                   )}
 
-                  {game.update_time && (
-                    <div className="flex items-center justify-between py-1.5 border-b border-white/[.07] pb-3">
-                      <span className="text-zinc-400 flex items-center gap-2.5">
-                        <RefreshCw className="h-4 w-4" />
-                        Updated
-                      </span>
-                      <span className="font-bold text-white">
-                        {(() => {
-                          const date = new Date(game.update_time)
-                          return isNaN(date.getTime()) ? game.update_time : date.toLocaleDateString()
-                        })()}
-                      </span>
-                    </div>
-                  )}
+                  <div className="flex items-center justify-between py-1.5 border-b border-white/[.07] pb-3">
+                    <span className="text-zinc-400 flex items-center gap-2.5">
+                      <HardDrive className="h-4 w-4" />
+                      Size
+                    </span>
+                    <span className="font-bold text-white">{game?.size || "Unknown"}</span>
+                  </div>
 
                   <div className="flex items-center justify-between py-1.5">
                     <span className="text-zinc-400 flex items-center gap-2.5">Source</span>
-                    <span className="font-bold text-white">{game?.source || "Unknown"}</span>
+                    <span className="font-bold text-white">
+                      {game?.source ? (
+                        <span className="relative group/source inline-flex">
+                          <Badge variant="outline" className="px-2.5 py-1 text-xs max-w-[200px] border-white/[.07] bg-zinc-900/40 shadow-sm">
+                            <span className="truncate inline-block">{game.source}</span>
+                          </Badge>
+                          <span className="pointer-events-none absolute left-1/2 top-full z-30 mt-2 w-64 -translate-x-1/2 rounded-2xl border border-white/[.07] bg-zinc-950/95 px-3 py-2 text-[11px] leading-relaxed text-zinc-400 shadow-xl opacity-0 transition-opacity duration-150 group-hover/source:opacity-100 group-focus-within/source:opacity-100">
+                            Source: {game.source}
+                          </span>
+                        </span>
+                      ) : (
+                        "Unknown"
+                      )}
+                    </span>
                   </div>
                 </div>
               </div>
