@@ -5,12 +5,12 @@ Professional in-game overlay (like Steam/Discord) that injects into game process
 ## Architecture
 
 ```
-┌─────────────────────┐     Shared Memory      ┌──────────────────────┐
-│  Electron Main      │ ───────────────────────▶│  Injected DLL        │
+┌─────────────────────┐     Shared Memory       ┌──────────────────────┐
+│  Electron Main      │ ──────────────────────> │  Injected DLL        │
 │  (offscreen render) │     (BGRA pixels)       │  (game process)      │
 │                     │                         │                      │
 │  Overlay React UI   │     Named Pipe          │  D3D9/D3D11/GL Hook  │
-│  → BrowserWindow    │ ◀──────────────────────▶│  → Texture Upload    │
+│  → BrowserWindow    │ <─────────────────────> │  → Texture Upload    │
 │    (offscreen:true) │     (input events)      │  → Fullscreen Quad   │
 └─────────────────────┘                         └──────────────────────┘
 ```
@@ -81,7 +81,7 @@ If you previously configured with `NMake Makefiles`, remove the old cache first:
 Remove-Item -Recurse -Force .\build
 ```
 
-The DLL is output to `build/uc-overlay-x64.dll`.
+The DLL is output to `build/Release/uc-overlay-x64.dll` when using the Visual Studio generator.
 
 ### 3. Build the Native Addon
 
