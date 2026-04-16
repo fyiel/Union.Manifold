@@ -57,6 +57,9 @@ import { GameLinuxConfigModal } from "@/components/GameLinuxConfigModal"
 import { gameLogger } from "@/lib/logger"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { GamePageSkeleton } from "@/components/GamePageSkeleton"
+import { SystemRequirements } from "@/components/SystemRequirements"
+import { GameVersionStatus } from "@/components/GameVersionStatus"
+import { useAuth } from "@/hooks/useAuth"
 
 const PROTON_RANK_COLORS: Record<string, string> = {
   platinum: "text-[#b3e5fc] border-[#b3e5fc]/30",
@@ -83,6 +86,7 @@ export function GameDetailPage() {
   const isLinux = typeof navigator !== 'undefined' && /linux/i.test(navigator.userAgent)
   const isOnline = useOnlineStatus()
   const params = useParams()
+  const [authState] = useAuth()
   const { startGameDownload, resumeGroup, downloads, clearByAppid } = useDownloads()
   const { games, stats } = useGamesData()
   const [game, setGame] = useState<Game | null>(null)
@@ -107,6 +111,7 @@ export function GameDetailPage() {
   const [lightboxDragging, setLightboxDragging] = useState(false)
   const [pendingExePath, setPendingExePath] = useState<string | null>(null)
   const [shortcutModalOpen, setShortcutModalOpen] = useState(false)
+  const [shortcutModalAlwaysCreate, setShortcutModalAlwaysCreate] = useState(false)
   const [launchPreflightOpen, setLaunchPreflightOpen] = useState(false)
   const [launchPreflightResult, setLaunchPreflightResult] = useState<LaunchPreflightResult | null>(null)
   const [hostSelectorOpen, setHostSelectorOpen] = useState(false)
@@ -851,6 +856,13 @@ export function GameDetailPage() {
     }
   }
 
+  const setAlwaysCreateShortcut = async (value: boolean) => {
+    if (!window.ucSettings?.set) return
+    try {
+      await window.ucSettings.set('alwaysCreateDesktopShortcut', value)
+    } catch { }
+  }
+
   const dirname = (targetPath: string | null | undefined) => {
     if (!targetPath) return null
     const parts = targetPath.split(/[/\\]+/).filter(Boolean)
@@ -1118,6 +1130,7 @@ export function GameDetailPage() {
     } else if (!alreadyAsked && !alwaysCreate) {
       // Show the shortcut prompt BEFORE launching
       setPendingExePath(path)
+      setShortcutModalAlwaysCreate(false)
       setExePickerOpen(false)
       setShortcutModalOpen(true)
     } else {
@@ -1404,6 +1417,9 @@ export function GameDetailPage() {
                 </div>
               )}
 
+              {game?.appid && (
+                <SystemRequirements appid={game.appid} />
+              )}
 
             </div>
             <div className="space-y-6">
@@ -1669,6 +1685,15 @@ export function GameDetailPage() {
                 </div>
               </div>
 
+              {game?.appid && (
+                <GameVersionStatus
+                  appid={game.appid}
+                  gameName={game.name}
+                  localVersionString={installedVersionLabels[0] || game.version || undefined}
+                  isAuthed={authState.isAuthenticated}
+                />
+              )}
+
               {/* ── Collections & Tags ── */}
               <div className="p-8 rounded-3xl bg-zinc-900/60 border border-white/[.07] backdrop-blur-md space-y-5 shadow-xl">
                 <div className="space-y-3">
@@ -1914,7 +1939,9 @@ export function GameDetailPage() {
           const shouldForce = pendingForceDownload
           if (shouldForce) {
             try {
-              await window.ucDownloads?.deleteInstalled?.(game.appid)
+              // Back up the installed folder instead of deleting it outright.
+              // If the download/extraction fails, main.cjs will restore from backup.
+              await window.ucDownloads?.createUpdateBackup?.(game.appid)
               setInstalledManifest(null)
             } catch { }
           }
@@ -1985,23 +2012,34 @@ export function GameDetailPage() {
       <DesktopShortcutModal
         open={shortcutModalOpen}
         gameName={game.name}
-        onCreateShortcut={async () => {
+        defaultAlwaysCreate={shortcutModalAlwaysCreate}
+        onCreateShortcut={async (alwaysCreate) => {
+          if (alwaysCreate) {
+            await setAlwaysCreateShortcut(true)
+          }
           if (pendingExePath) {
             await createDesktopShortcut(pendingExePath)
             await setShortcutAskedForGame()
             await launchGame(pendingExePath)
           }
         }}
-        onSkip={async () => {
+        onSkip={async (alwaysCreate) => {
+          if (alwaysCreate) {
+            await setAlwaysCreateShortcut(true)
+          }
           await setShortcutAskedForGame()
           if (pendingExePath) {
             await launchGame(pendingExePath)
           }
         }}
-        onClose={async () => {
+        onClose={async (alwaysCreate) => {
+          if (alwaysCreate) {
+            await setAlwaysCreateShortcut(true)
+          }
           await setShortcutAskedForGame()
           setShortcutModalOpen(false)
           setPendingExePath(null)
+          setShortcutModalAlwaysCreate(false)
         }}
       />
       <GameLaunchPreflightModal

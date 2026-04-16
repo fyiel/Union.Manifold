@@ -5,6 +5,7 @@ import { AlertTriangle, RefreshCw, Home } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { APIFallback } from "@/components/api-fallback"
+import { logger } from "@/lib/logger"
 
 interface ErrorBoundaryState {
   hasError: boolean
@@ -29,6 +30,14 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
     console.error("ErrorBoundary caught an error:", error, errorInfo)
+    logger.error("React error boundary caught an error", {
+      context: "ErrorBoundary",
+      data: {
+        message: error?.message,
+        stack: error?.stack,
+        componentStack: errorInfo?.componentStack,
+      },
+    })
     this.setState({
       error,
       errorInfo,
@@ -125,6 +134,14 @@ export class APIErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorB
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
     console.error("API ErrorBoundary caught an error:", error, errorInfo)
+    logger.error("API error boundary caught an error", {
+      context: "APIErrorBoundary",
+      data: {
+        message: error?.message,
+        stack: error?.stack,
+        componentStack: errorInfo?.componentStack,
+      },
+    })
     this.setState({
       error,
       errorInfo,

@@ -90,6 +90,7 @@ export const GameCard = memo(function GameCard({
   const [exePickerFolder, setExePickerFolder] = useState<string | null>(null)
   const [pendingExePath, setPendingExePath] = useState<string | null>(null)
   const [shortcutModalOpen, setShortcutModalOpen] = useState(false)
+  const [shortcutModalAlwaysCreate, setShortcutModalAlwaysCreate] = useState(false)
   const [gameStartFailedOpen, setGameStartFailedOpen] = useState(false)
   const [launchPreflightOpen, setLaunchPreflightOpen] = useState(false)
   const [launchPreflightResult, setLaunchPreflightResult] = useState<LaunchPreflightResult | null>(null)
@@ -266,6 +267,13 @@ export const GameCard = memo(function GameCard({
     }
   }
 
+  const setAlwaysCreateShortcut = async (value: boolean) => {
+    if (!window.ucSettings?.set) return
+    try {
+      await window.ucSettings.set('alwaysCreateDesktopShortcut', value)
+    } catch { }
+  }
+
   const createDesktopShortcut = async (exePath: string) => {
     if (!window.ucDownloads?.createDesktopShortcut) return
     try {
@@ -367,6 +375,7 @@ export const GameCard = memo(function GameCard({
     } else if (!alreadyAsked && !alwaysCreate) {
       // Show the shortcut prompt BEFORE launching
       setPendingExePath(path)
+      setShortcutModalAlwaysCreate(false)
       setExePickerOpen(false)
       setShortcutModalOpen(true)
     } else {
@@ -580,23 +589,34 @@ export const GameCard = memo(function GameCard({
       <DesktopShortcutModal
         open={shortcutModalOpen}
         gameName={game.name}
-        onCreateShortcut={async () => {
+        defaultAlwaysCreate={shortcutModalAlwaysCreate}
+        onCreateShortcut={async (alwaysCreate) => {
+          if (alwaysCreate) {
+            await setAlwaysCreateShortcut(true)
+          }
           if (pendingExePath) {
             await createDesktopShortcut(pendingExePath)
             await setShortcutAskedForGame()
             await launchGame(pendingExePath)
           }
         }}
-        onSkip={async () => {
+        onSkip={async (alwaysCreate) => {
+          if (alwaysCreate) {
+            await setAlwaysCreateShortcut(true)
+          }
           await setShortcutAskedForGame()
           if (pendingExePath) {
             await launchGame(pendingExePath)
           }
         }}
-        onClose={async () => {
+        onClose={async (alwaysCreate) => {
+          if (alwaysCreate) {
+            await setAlwaysCreateShortcut(true)
+          }
           await setShortcutAskedForGame()
           setShortcutModalOpen(false)
           setPendingExePath(null)
+          setShortcutModalAlwaysCreate(false)
         }}
       />
       <GameLaunchPreflightModal

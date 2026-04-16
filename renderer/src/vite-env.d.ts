@@ -153,6 +153,7 @@ declare global {
       quitGameExecutable: (appid: string) => Promise<{ ok: boolean; stopped?: boolean }>
       deleteInstalled: (appid: string) => Promise<{ ok: boolean }>
       deleteInstalling: (appid: string) => Promise<{ ok: boolean }>
+      createUpdateBackup: (appid: string) => Promise<{ ok: boolean; backupPath?: string; error?: string }>
       dismissInstalling: (appid: string) => Promise<{ ok: boolean; prompted?: boolean }>
       saveInstalledMetadata: (appid: string, metadata: any) => Promise<{ ok: boolean }>
       setInstallingStatus: (appid: string, status: string, error?: string | null) => Promise<{ ok: boolean }>
@@ -270,6 +271,7 @@ declare global {
       getLogs: () => Promise<string>
       clearLogs: () => Promise<void>
       openLogsFolder: () => Promise<{ ok: boolean; error?: string }>
+      shareLogs: (payload?: { baseUrl?: string }) => Promise<{ ok: boolean; error?: string; endpoint?: string; status?: number }>
     }
     ucRpc?: {
       setActivity: (payload: {

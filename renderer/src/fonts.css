@@ -1,4 +1,4 @@
-/* UC Universal Design Language — Geist typeface (bundled, works offline in Electron) */
+/* UC Universal Design Language - Geist typeface (bundled, works offline in Electron) */
 @font-face {
 	font-family: 'Geist';
 	src: url('/fonts/Geist-Variable.woff2') format('woff2-variations');

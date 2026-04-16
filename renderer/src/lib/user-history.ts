@@ -123,6 +123,12 @@ export function hasCookieConsent(): boolean {
   return true
 }
 
+export function clearSearchHistory(): void {
+  const history = getUserHistory()
+  history.searches = []
+  saveUserHistory(history)
+}
+
 export function clearUserHistory(): void {
   if (typeof window === "undefined") return
 
