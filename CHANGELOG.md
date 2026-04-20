@@ -7,6 +7,7 @@
 - Updated game Details panel metadata flow to include `Date Added` and relative `Edited` timestamps for clearer change visibility.
 - Reordered game Details fields for better scan order: Released, Date Added, Edited, Version, Size, Source.
 - Matched Source display behavior to web parity in game Details: outlined source badge plus hover tooltip (`Source: ...`) with truncation and Unknown fallback.
+- Redesigned threaded comments for scale and mobile readability: capped visual nesting depth, added mobile flat-thread presentation with `Replying to @...` context labels, introduced progressive reply reveal (`View X more replies`), and added deep-thread continuation controls (`Continue thread ->`) to prevent long-thread overload.
 
 ## Version 1.8.0 - 2026-04-16
 
