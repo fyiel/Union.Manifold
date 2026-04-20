@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useDeferredValue, useEffect, useMemo, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Textarea } from "@/components/ui/textarea"
@@ -237,11 +237,16 @@ export function GameComments({
   const [reportSubmitting, setReportSubmitting] = useState(false)
   const [reportedId, setReportedId] = useState<string | null>(null)
   const [expandedReplies, setExpandedReplies] = useState<Set<string>>(new Set())
+  const [expandedContinuations, setExpandedContinuations] = useState<Set<string>>(new Set())
+  const [visibleReplyCounts, setVisibleReplyCounts] = useState<Record<string, number>>({})
   const [likingId, setLikingId] = useState<string | null>(null)
   const [sortMode, setSortMode] = useState<SortMode>("pinned")
   const [filterMode, setFilterMode] = useState<FilterMode>("all")
   const [revealedDeletedIds, setRevealedDeletedIds] = useState<Set<string>>(new Set())
   const itemsPerPage = 10
+  const MAX_VISUAL_DEPTH = 3
+  const CONTINUATION_DEPTH = 5
+  const INITIAL_VISIBLE_REPLIES = 3
 
   const remaining = useMemo(() => 1000 - body.length, [body.length])
   const sortedComments = useMemo(() => sortThread(comments, 0, sortMode, filterMode), [comments, sortMode, filterMode])
@@ -250,6 +255,7 @@ export function GameComments({
     const start = (currentPage - 1) * itemsPerPage
     return sortedComments.slice(start, start + itemsPerPage)
   }, [sortedComments, currentPage])
+  const deferredPaginatedComments = useDeferredValue(paginatedComments)
 
   const loadFallbackUser = async () => {
     try {
@@ -560,8 +566,38 @@ export function GameComments({
     }
   }
 
-  const toggleReplies = (commentId: string) => {
+  const toggleReplies = (commentId: string, totalReplies: number) => {
     setExpandedReplies((prev) => {
+      const next = new Set(prev)
+      if (next.has(commentId)) {
+        next.delete(commentId)
+      } else {
+        next.add(commentId)
+      }
+      return next
+    })
+
+    setVisibleReplyCounts((prev) => {
+      if (prev[commentId]) return prev
+      return {
+        ...prev,
+        [commentId]: Math.min(totalReplies, INITIAL_VISIBLE_REPLIES),
+      }
+    })
+  }
+
+  const showMoreReplies = (commentId: string, totalReplies: number) => {
+    setVisibleReplyCounts((prev) => {
+      const current = prev[commentId] ?? Math.min(totalReplies, INITIAL_VISIBLE_REPLIES)
+      return {
+        ...prev,
+        [commentId]: Math.min(totalReplies, current + INITIAL_VISIBLE_REPLIES),
+      }
+    })
+  }
+
+  const toggleContinuation = (commentId: string) => {
+    setExpandedContinuations((prev) => {
       const next = new Set(prev)
       if (next.has(commentId)) {
         next.delete(commentId)
@@ -572,7 +608,37 @@ export function GameComments({
     })
   }
 
-  const renderComment = (comment: GameComment, depth = 0) => {
+  const renderBodyWithMentions = (text: string) => {
+    const parts = text.split(/(@[A-Za-z0-9_]{2,32})/g)
+    return parts.map((part, idx) => {
+      const mention = /^@([A-Za-z0-9_]{2,32})$/.exec(part)
+      if (!mention) {
+        return <span key={`txt-${idx}`}>{part}</span>
+      }
+      const username = mention[1]
+      return (
+        <button
+          key={`mention-${username}-${idx}`}
+          type="button"
+          className="font-semibold text-primary hover:underline"
+          onClick={() => navigate(`/user/${encodeURIComponent(username)}`)}
+        >
+          @{username}
+        </button>
+      )
+    })
+  }
+
+  // Reddit-style thread line colors by depth
+  const threadLineColors = [
+    "border-blue-500/40",
+    "border-violet-500/40",
+    "border-emerald-500/40",
+    "border-amber-500/40",
+    "border-rose-500/40",
+  ]
+
+  const renderComment = (comment: GameComment, depth = 0, parentAuthorName?: string) => {
     const hasReplies = comment.replies.length > 0
     const isExpanded = expandedReplies.has(comment.id)
     const isHighlighted = highlightedCommentId === comment.id
@@ -580,6 +646,18 @@ export function GameComments({
     const isDeleted = Boolean(comment.deletedBy)
     const isContentRevealed = revealedDeletedIds.has(comment.id)
     const authorRole = comment.author?.role
+    const visualDepth = Math.min(depth, MAX_VISUAL_DEPTH)
+    const isContinuationCollapsed = depth >= CONTINUATION_DEPTH && hasReplies && !expandedContinuations.has(comment.id)
+    const visibleReplyCount = Math.min(comment.replies.length, visibleReplyCounts[comment.id] ?? INITIAL_VISIBLE_REPLIES)
+    const hiddenReplyCount = Math.max(0, comment.replies.length - visibleReplyCount)
+    const visibleReplies = comment.replies.slice(0, visibleReplyCount)
+    const threadColor = depth > 0 ? threadLineColors[(depth - 1) % threadLineColors.length] : ""
+    const replyNestClass = depth > 0
+      ? `ml-0.5 border-l-2 ${threadColor} pl-1 md:ml-4 md:border-l md:border-white/[.07] md:pl-4`
+      : ""
+    const mobileReplyLabel = depth > 0
+    const desktopReplyLabel = depth >= MAX_VISUAL_DEPTH
+    const replyingToLabel = parentAuthorName ? `Replying to @${parentAuthorName}` : "Replying in thread"
 
     const toggleRevealDeleted = () => {
       setRevealedDeletedIds((prev) => {
@@ -593,6 +671,56 @@ export function GameComments({
       })
     }
 
+    const repliesSection = hasReplies ? (
+      <div className="mt-4">
+        {isContinuationCollapsed ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 px-2 text-xs text-zinc-400 hover:text-zinc-100"
+              onClick={() => toggleContinuation(comment.id)}
+            >
+              Continue thread {"->"} {comment.replies.length} {comment.replies.length === 1 ? "reply" : "replies"}
+            </Button>
+        ) : (
+          <>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 px-2 text-xs"
+              onClick={() => toggleReplies(comment.id, comment.replies.length)}
+            >
+              <ChevronDown className={`h-4 w-4 mr-1 transition-transform ${isExpanded ? "rotate-180" : ""}`} />
+              {isExpanded
+                ? "Hide replies"
+                : `View replies (${Math.min(comment.replies.length, INITIAL_VISIBLE_REPLIES)} of ${comment.replies.length})`}
+            </Button>
+            {isExpanded && (
+              <div className={`mt-3 space-y-3 ${replyNestClass}`}>
+                {visibleReplies.map((reply) =>
+                  renderComment(
+                    reply,
+                    depth + 1,
+                    comment.author?.username || comment.author?.displayName || "user"
+                  )
+                )}
+                {hiddenReplyCount > 0 && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 px-2 text-xs text-zinc-400 hover:text-zinc-100"
+                    onClick={() => showMoreReplies(comment.id, comment.replies.length)}
+                  >
+                    View {hiddenReplyCount} more {hiddenReplyCount === 1 ? "reply" : "replies"}
+                  </Button>
+                )}
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    ) : null
+
     if (isDeleted) {
       const deletedLabel = comment.deletedBy === "moderator"
         ? "Comment was deleted by moderator"
@@ -602,22 +730,26 @@ export function GameComments({
         <div
           key={comment.id}
           id={`comment-${comment.id}`}
-          className={`rounded-2xl border border-white/[.07] bg-zinc-900/20 p-4 sm:p-5 transition-shadow ${depth > 0 ? "ml-4 sm:ml-10" : ""
-            } ${isHighlighted ? "shadow-lg shadow-primary/30" : ""}`}
+          className={`w-full max-w-full overflow-x-hidden rounded-2xl border border-white/[.07] md:bg-zinc-900/20 p-4 sm:p-5 transition-shadow ${isHighlighted ? "shadow-lg shadow-primary/30" : ""}`}
         >
           <div className="flex items-start gap-3">
             <div className="h-10 w-10 rounded-full bg-zinc-800/30 flex items-center justify-center shrink-0">
               <Trash2 className="h-5 w-5 text-zinc-400/50" />
             </div>
-            <div className="flex-1">
+            <div className="flex-1 min-w-0">
+              {(mobileReplyLabel || desktopReplyLabel) && (
+                <p className={`mb-1 text-[11px] font-medium text-zinc-400/80 ${desktopReplyLabel ? "" : "md:hidden"}`}>
+                  {replyingToLabel}
+                </p>
+              )}
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-sm text-zinc-400 italic">{deletedLabel}</span>
               </div>
 
               {isContentRevealed ? (
                 <div className="mt-2">
-                  <p className="text-sm text-zinc-400/70 whitespace-pre-wrap leading-relaxed italic">
-                    {comment.body}
+                  <p className="text-sm text-zinc-400/70 whitespace-pre-wrap break-words leading-relaxed italic">
+                    {renderBodyWithMentions(comment.body)}
                   </p>
                   <button
                     type="button"
@@ -637,26 +769,7 @@ export function GameComments({
                 </button>
               )}
 
-              {hasReplies && (
-                <div className="mt-4">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 px-2 text-xs"
-                    onClick={() => toggleReplies(comment.id)}
-                  >
-                    <ChevronDown
-                      className={`h-4 w-4 mr-1 transition-transform ${isExpanded ? "rotate-180" : ""}`}
-                    />
-                    {isExpanded ? "Hide" : "Show"} {comment.replies.length} replies
-                  </Button>
-                  {isExpanded && (
-                    <div className="mt-3 space-y-3">
-                      {comment.replies.map((reply) => renderComment(reply, depth + 1))}
-                    </div>
-                  )}
-                </div>
-              )}
+              {repliesSection}
             </div>
           </div>
         </div>
@@ -667,8 +780,7 @@ export function GameComments({
       <div
         key={comment.id}
         id={`comment-${comment.id}`}
-        className={`rounded-2xl border border-white/[.07] bg-zinc-900/40 p-4 sm:p-5 transition-shadow ${depth > 0 ? "ml-4 sm:ml-10" : ""
-          } ${isPinned ? "ring-1 ring-primary/40" : ""} ${isHighlighted ? "shadow-lg shadow-primary/30" : ""}`}
+        className={`w-full max-w-full overflow-x-hidden rounded-2xl border border-white/[.07] md:bg-zinc-900/40 p-4 sm:p-5 transition-shadow ${isPinned ? "ring-1 ring-primary/40" : ""} ${isHighlighted ? "shadow-lg shadow-primary/30" : ""}`}
       >
         <div className="flex items-start gap-3">
           <DiscordAvatar
@@ -678,7 +790,14 @@ export function GameComments({
             className="h-10 w-10 rounded-full"
           />
           <div className="flex-1">
-            <div className="flex flex-wrap items-center gap-2">
+            {(mobileReplyLabel || desktopReplyLabel) && (
+              <p className={`mb-1 text-[11px] font-medium text-zinc-400/80 ${desktopReplyLabel ? "" : "md:hidden"}`}>
+                {replyingToLabel}
+              </p>
+            )}
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
               <span className="font-semibold text-zinc-100">
                 {comment.author?.displayName || comment.author?.username || "Discord user"}
               </span>
@@ -693,12 +812,14 @@ export function GameComments({
                   Pinned
                 </span>
               )}
-              <span className="text-xs text-zinc-400">
+              </div>
+              <span className="mt-1 block text-xs text-zinc-400">
                 {new Date(comment.createdAt).toLocaleString()}
               </span>
+              </div>
             </div>
-            <p className="mt-2 text-sm text-zinc-400 whitespace-pre-wrap leading-relaxed">
-              {comment.body}
+            <p className="mt-2 text-sm text-zinc-400 whitespace-pre-wrap break-words leading-relaxed">
+              {renderBodyWithMentions(comment.body)}
             </p>
             <div className="mt-3 flex flex-wrap items-center gap-2">
               <Button
@@ -794,29 +915,32 @@ export function GameComments({
               </div>
             )}
 
-            {hasReplies && (
-              <div className="mt-4">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 px-2 text-xs"
-                  onClick={() => toggleReplies(comment.id)}
-                >
-                  <ChevronDown className={`h-4 w-4 mr-1 transition-transform ${isExpanded ? "rotate-180" : ""}`} />
-                  {isExpanded ? "Hide" : "Show"} {comment.replies.length} replies
-                </Button>
-                {isExpanded && (
-                  <div className="mt-3 space-y-3">
-                    {comment.replies.map((reply) => renderComment(reply, depth + 1))}
-                  </div>
-                )}
-              </div>
-            )}
+            {repliesSection}
           </div>
         </div>
       </div>
     )
   }
+
+  const renderedComments = useMemo(
+    () => deferredPaginatedComments.map((comment) => renderComment(comment)),
+    [
+      deferredPaginatedComments,
+      highlightedCommentId,
+      expandedReplies,
+      expandedContinuations,
+      visibleReplyCounts,
+      revealedDeletedIds,
+      copiedCommentId,
+      reportingId,
+      user,
+      deleting,
+      likingId,
+      activeReplyParent,
+      replyDrafts,
+      replying,
+    ]
+  )
 
   return (
     <section className="container mx-auto px-4 py-16" id="comments">
@@ -923,7 +1047,7 @@ export function GameComments({
           </div>
         ) : (
           <div className="space-y-4">
-            {paginatedComments.map((comment) => renderComment(comment))}
+            {renderedComments}
             <PaginationBar
               currentPage={currentPage}
               totalPages={totalPages}
