@@ -10,7 +10,7 @@ import { GameComments } from "@/components/GameComments"
 import { useDownloads } from "@/context/downloads-context"
 import { apiUrl, apiFetch } from "@/lib/api"
 import { getPreferredDownloadHost, setPreferredDownloadHost, requestDownloadToken, type PreferredDownloadHost, type DownloadConfig } from "@/lib/downloads"
-import { formatNumber, hasOnlineMode, pickGameExecutable, proxyImageUrl, cn, timeAgoLong } from "@/lib/utils"
+import { formatNumber, hasOnlineMode, pickGameExecutable, proxyImageUrl, proxyMediaUrl, cn, timeAgoLong } from "@/lib/utils"
 import type { Game } from "@/lib/types"
 import { useGamesData } from "@/hooks/use-games"
 import { addViewedGameToHistory, hasCookieConsent } from "@/lib/user-history"
@@ -1183,7 +1183,7 @@ export function GameDetailPage() {
         <div className="pointer-events-none fixed inset-0 z-0 overflow-hidden">
           {useAnimatedBackground ? (
             <video
-              src={game.hero_animated || ""}
+              src={proxyMediaUrl(game.hero_animated || "")}
               className="absolute inset-0 h-full w-full object-cover opacity-25"
               autoPlay
               loop

@@ -1,6 +1,7 @@
 import { type ClassValue, clsx } from "clsx"
 import { twMerge } from "tailwind-merge"
-import { apiUrl } from "@/lib/api"
+import { isMainWebsiteBaseUrl } from "@/lib/auth-origin"
+import { apiUrl, getApiBaseUrl } from "@/lib/api"
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
@@ -93,35 +94,69 @@ export const ErrorTypes = {
   RELATED_FETCH: "REL",
 }
 
-export function proxyImageUrl(imageUrl: string): string {
-  if (!imageUrl) return imageUrl
+function normalizeHostname(raw: string): string {
+  return raw.toLowerCase().replace(/^www\./, "")
+}
+
+function isUcFilesHostname(host: string): boolean {
+  const normalized = normalizeHostname(host)
+  if (normalized === "ucfiles" || normalized === "uc.files" || normalized === "files.union-crax.xyz") {
+    return true
+  }
+  return normalized.startsWith("files") && normalized.endsWith(".union-crax.xyz")
+}
+
+function isUcFilesUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url.includes("://") ? url : `https://${url}`)
+    return isUcFilesHostname(parsed.hostname)
+  } catch {
+    return false
+  }
+}
+
+function normalizeRemoteMediaUrl(url: string): string {
+  const trimmed = String(url || "").trim()
+  if (!trimmed) return trimmed
+  if (/^https?:\/\//i.test(trimmed)) return trimmed
+  if (trimmed.startsWith("//")) return `https:${trimmed}`
+  if (isUcFilesUrl(trimmed)) return `https://${trimmed.replace(/^https?:\/\//i, "")}`
+  return trimmed
+}
+
+function shouldProxyUcFilesMedia(): boolean {
+  return !isMainWebsiteBaseUrl(getApiBaseUrl())
+}
+
+export function proxyMediaUrl(mediaUrl: string): string {
+  if (!mediaUrl) return mediaUrl
   // already a relative path or data/blob URL served by the app
-  if (imageUrl.startsWith("/") || imageUrl.startsWith("data:") || imageUrl.startsWith("blob:") || imageUrl.startsWith("file://")) {
-    return imageUrl
+  if (mediaUrl.startsWith("/") || mediaUrl.startsWith("data:") || mediaUrl.startsWith("blob:") || mediaUrl.startsWith("file://")) {
+    return mediaUrl
   }
 
   // detect absolute Windows paths like C:\ or UNC paths starting with \\ and convert to file:// URL
   try {
-    if (/^[A-Za-z]:\\/.test(imageUrl) || imageUrl.startsWith('\\')) {
+    if (/^[A-Za-z]:\\/.test(mediaUrl) || mediaUrl.startsWith('\\')) {
       // normalize backslashes to forward slashes and ensure proper file:// prefix
-      const normalized = imageUrl.replace(/\\/g, '/')
+      const normalized = mediaUrl.replace(/\\/g, '/')
       return `file:///${encodeURI(normalized)}`
     }
   } catch {}
 
-  // Electron can load remote images directly - no need to proxy through union-crax.xyz
-  // This avoids 403s from the remote proxy and is faster (no double hop)
-  if (imageUrl.startsWith("http://") || imageUrl.startsWith("https://")) {
-    return imageUrl
+  const normalizedRemoteUrl = normalizeRemoteMediaUrl(mediaUrl)
+  if (normalizedRemoteUrl.startsWith("http://") || normalizedRemoteUrl.startsWith("https://")) {
+    if (isUcFilesUrl(normalizedRemoteUrl) && shouldProxyUcFilesMedia()) {
+      return apiUrl(`/api/ucfiles/media?url=${encodeURIComponent(normalizedRemoteUrl)}`)
+    }
+    return normalizedRemoteUrl
   }
 
-  try {
-    const encodedUrl = encodeURIComponent(imageUrl)
-    return apiUrl(`/api/images/${encodedUrl}`)
-  } catch (error) {
-    // Error encoding image URL - silently fail
-    return imageUrl
-  }
+  return mediaUrl
+}
+
+export function proxyImageUrl(imageUrl: string): string {
+  return proxyMediaUrl(imageUrl)
 }
 
 export type GameExecutable = { name: string; path: string; size?: number; depth?: number }
