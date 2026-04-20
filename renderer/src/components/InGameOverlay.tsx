@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { Bell, Camera, Clock, Download, Gamepad2, Hammer, Pause, Play, Square, Volume2, VolumeX, X } from 'lucide-react'
 import { ControllerOverlayFlyout } from './ControllerOverlayFlyout'
+import { proxyImageUrl } from '@/lib/utils'
 
 type OverlayApi = NonNullable<Window['ucOverlay']> & {
   onToast?: (callback: (data: {
@@ -605,7 +606,7 @@ export function InGameOverlay() {
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-xl bg-white text-black">
               {gameInfo?.image ? (
-                <img src={gameInfo.image} alt="" className="h-full w-full object-cover" />
+                <img src={proxyImageUrl(gameInfo.image)} alt="" className="h-full w-full object-cover" />
               ) : (
                 <Hammer size={15} />
               )}
@@ -802,7 +803,7 @@ export function InGameOverlay() {
                 <div className="overflow-hidden rounded-xl border border-white/[.06] bg-white/[.03]">
                   {gameInfo?.image && (
                     <div className="h-20 w-full overflow-hidden">
-                      <img src={gameInfo.image} alt="" className="h-full w-full object-cover" />
+                      <img src={proxyImageUrl(gameInfo.image)} alt="" className="h-full w-full object-cover" />
                     </div>
                   )}
                   <div className="p-3">
@@ -937,7 +938,7 @@ export function InGameOverlay() {
                     >
                       <div className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-lg bg-white/[.05] text-zinc-400">
                         {game.metadata?.image ? (
-                          <img src={game.metadata.image} alt="" className="h-full w-full object-cover" />
+                          <img src={proxyImageUrl(game.metadata.image)} alt="" className="h-full w-full object-cover" />
                         ) : (
                           <Gamepad2 size={14} />
                         )}

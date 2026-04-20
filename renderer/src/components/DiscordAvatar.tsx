@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import { proxyImageUrl } from "@/lib/utils"
 
 interface DiscordAvatarProps {
   avatarUrl?: string | null
@@ -17,6 +18,7 @@ export function DiscordAvatar({ avatarUrl, fallback, alt, className }: DiscordAv
   }, [avatarUrl, fallback])
 
   const src = (imageError || !avatarUrl ? fallback : avatarUrl) || undefined
+  const proxiedSrc = src ? proxyImageUrl(src) : undefined
   const showImage = Boolean(src)
 
   return (
@@ -25,7 +27,7 @@ export function DiscordAvatar({ avatarUrl, fallback, alt, className }: DiscordAv
     >
       <div className="h-full w-full border border-white/20 hover:border-primary/50 rounded-full bg-zinc-900/95 backdrop-blur-sm transition-all duration-300">
         {showImage ? (
-          <img src={src} alt={alt} onError={() => setImageError(true)} className="h-full w-full object-cover" />
+          <img src={proxiedSrc} alt={alt} onError={() => setImageError(true)} className="h-full w-full object-cover" />
         ) : (
           <div aria-hidden className="h-full w-full bg-gradient-to-br from-primary/10 to-primary/5" />
         )}

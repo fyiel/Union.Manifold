@@ -4,6 +4,7 @@
 
 ### Fixes & Improvements
 
+- Fixed UC.Files-backed artwork and animated hero media on mirror domains by routing them through the active website domain instead of loading `files.union-crax.xyz` directly. This also covers remaining overlay and avatar media paths that were still bypassing the shared proxy helper.
 - Updated game Details panel metadata flow to include `Date Added` and relative `Edited` timestamps for clearer change visibility.
 - Reordered game Details fields for better scan order: Released, Date Added, Edited, Version, Size, Source.
 - Matched Source display behavior to web parity in game Details: outlined source badge plus hover tooltip (`Source: ...`) with truncation and Unknown fallback.
