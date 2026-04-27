@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { AlertTriangle, RefreshCw, WifiOff } from "lucide-react"
+import { LoadingAnimated } from "@/components/brand/brand-assets"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 
@@ -134,7 +135,7 @@ export function LoadingState({ message = "Loading..." }: { message?: string }) {
   return (
     <div className="flex flex-col items-center justify-center p-12 space-y-4">
       <div className="relative p-6 rounded-2xl bg-gradient-to-br from-primary/20 to-primary/5 border border-zinc-700">
-        <RefreshCw className="h-10 w-10 animate-spin text-white" />
+        <LoadingAnimated className="h-10 w-10" />
       </div>
       <p className="text-zinc-400 text-base">{message}</p>
     </div>

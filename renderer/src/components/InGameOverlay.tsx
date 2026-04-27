@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { Bell, Camera, Clock, Download, Gamepad2, Hammer, Pause, Play, Square, Volume2, VolumeX, X } from 'lucide-react'
+import { Bell, Camera, Clock, Download, Gamepad2, Pause, Play, Square, Volume2, VolumeX, X } from 'lucide-react'
 import { ControllerOverlayFlyout } from './ControllerOverlayFlyout'
+import { LogoStaticDark } from './brand/brand-assets'
 import { proxyImageUrl } from '@/lib/utils'
 
 type OverlayApi = NonNullable<Window['ucOverlay']> & {
@@ -608,7 +609,7 @@ export function InGameOverlay() {
               {gameInfo?.image ? (
                 <img src={proxyImageUrl(gameInfo.image)} alt="" className="h-full w-full object-cover" />
               ) : (
-                <Hammer size={15} />
+                <LogoStaticDark className="h-[15px] w-[15px]" />
               )}
             </div>
             <div className="min-w-0 flex-1">
@@ -778,7 +779,7 @@ export function InGameOverlay() {
         <div className="glass flex h-full flex-col overflow-hidden rounded-2xl border border-white/[.08] !bg-zinc-950/92 shadow-[0_28px_80px_rgba(0,0,0,0.7)]">
           <div className="flex items-center gap-3 border-b border-white/[.06] px-4 py-3">
             <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-white text-black">
-              <Hammer size={15} />
+              <LogoStaticDark className="h-[15px] w-[15px]" />
             </div>
             <div className="min-w-0 flex-1">
               <div className="text-sm font-brand text-white">UnionCrax.Direct</div>

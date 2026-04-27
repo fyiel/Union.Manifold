@@ -1,5 +1,6 @@
 import { NavLink } from "react-router-dom"
-import { Hammer, ChevronDown, ChevronLeft, ChevronRight } from "lucide-react"
+import { ChevronDown, ChevronLeft, ChevronRight } from "lucide-react"
+import { LogoStaticDark } from "@/components/brand/brand-assets"
 import { primaryNavItems, secondaryNavItems, bottomNavItems } from "@/lib/navigation"
 import { cn } from "@/lib/utils"
 import { useState } from "react"
@@ -20,7 +21,7 @@ export function Sidebar({ mobileOpen, onClose, collapsed, onToggleCollapse }: Si
       {/* Logo */}
       <div className={cn("flex items-center pt-5 pb-4", isCollapsed ? "justify-center px-3" : "px-4")}>
         <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white shadow shadow-white/10">
-          <Hammer className="h-[18px] w-[18px] text-black" />
+          <LogoStaticDark className="h-[18px] w-[18px]" />
         </div>
         {!isCollapsed && (
           <div className="ml-3 min-w-0">

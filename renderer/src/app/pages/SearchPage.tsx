@@ -19,6 +19,7 @@ import { hasOnlineMode, generateErrorCode, ErrorTypes, proxyImageUrl } from "@/l
 import { addSearchToHistory } from "@/lib/user-history"
 import { APIErrorBoundary } from "@/components/error-boundary"
 import { GamesGridSkeleton } from "@/components/api-fallback"
+import { LoadingAnimated } from "@/components/brand/brand-assets"
 import { ErrorMessage } from "@/components/ErrorMessage"
 import { OfflineBanner } from "@/components/OfflineBanner"
 import { apiFetch } from "@/lib/api"
@@ -1071,7 +1072,7 @@ export function SearchPage() {
                   {filtering && (
                     <div className="absolute inset-0 bg-[#09090b]/80 backdrop-blur-sm z-10 flex items-center justify-center rounded-lg">
                       <div className="flex items-center gap-3 bg-zinc-900 p-4 rounded-lg shadow-lg border border-white/[.07]">
-                        <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-white"></div>
+                        <LoadingAnimated className="h-6 w-6" />
                         <span className="text-sm font-medium">Filtering games...</span>
                       </div>
                     </div>
@@ -1180,4 +1181,3 @@ export function SearchPage() {
     </div>
   )
 }
-
