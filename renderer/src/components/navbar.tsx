@@ -1,4 +1,4 @@
-import { Hammer } from 'lucide-react'
+import { LogoStatic } from "@/components/brand/brand-assets"
 
 export function Navbar() {
   return (
@@ -6,7 +6,7 @@ export function Navbar() {
       <div className="container mx-auto px-4">
         <div className="flex h-16 items-center justify-between">
           <div className="flex items-center space-x-2">
-            <Hammer className="h-8 w-8 text-white" />
+            <LogoStatic className="h-8 w-8" />
             <span className="font-black text-xl text-foreground">UnionCrax.Team</span>
           </div>
           <div className="text-sm text-muted-foreground">UC Mirror Uploader</div>

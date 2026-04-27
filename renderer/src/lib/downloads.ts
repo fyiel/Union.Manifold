@@ -280,7 +280,7 @@ export function extractUCFilesFileId(url: string): string | null {
   try {
     const parsed = new URL(url)
     if (!isUCFilesHostValue(parsed.hostname)) return null
-    const fMatch = parsed.pathname.match(/\/(?:f|file)\/([A-Za-z0-9_-]{1,64})(?:[/?#]|$)/)
+    const fMatch = parsed.pathname.match(/\/(?:f|file|download)\/([A-Za-z0-9_-]{1,64})(?:[/?#]|$)/)
     if (fMatch?.[1]) return fMatch[1]
     // Matches /dl/{token} - already a direct download URL, no fileId to extract
     const dlMatch = parsed.pathname.match(/\/dl\/([A-Za-z0-9_-]{1,64})(?:[/?#]|$)/)
@@ -312,6 +312,15 @@ function isUCFilesDlTokenUrl(url: string): boolean {
   }
 }
 
+function isUCFilesShareDownloadUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url)
+    return isUCFilesHostValue(parsed.hostname) && /^\/download\/[^/?#]+/.test(parsed.pathname)
+  } catch {
+    return false
+  }
+}
+
 export async function resolveUCFilesDownload(url: string): Promise<ResolvedDownload> {
   if (!url) return { url, resolved: false }
 
@@ -325,13 +334,14 @@ export async function resolveUCFilesDownload(url: string): Promise<ResolvedDownl
   }
 
   const fileId = extractUCFilesFileId(url)
-  if (!fileId) return { url, resolved: false }
+  const shareDownloadUrl = isUCFilesShareDownloadUrl(url) ? url : null
+  if (!fileId && !shareDownloadUrl) return { url, resolved: false }
 
   try {
     const response = await apiFetch("/api/ucfiles/resolve", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ fileId }),
+      body: JSON.stringify(fileId ? { fileId } : { downloadUrl: shareDownloadUrl }),
     })
 
     if (response.status === 404) {

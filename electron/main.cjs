@@ -3536,7 +3536,6 @@ const RESUME_BACKUP_EXT = '.ucresume'
  */
 function restorePreservedFile(savePath) {
   if (!savePath) return false
-  ensureSubdir(target, archivesDirName)
   const backupPath = savePath + RESUME_BACKUP_EXT
   if (fs.existsSync(savePath)) {
     // Original still exists - clean up the backup if present

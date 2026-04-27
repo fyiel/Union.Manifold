@@ -1,15 +1,39 @@
 <svg version="1.0" xmlns="http://www.w3.org/2000/svg"
  width="500pt" height="500pt" viewBox="0 0 1254.000000 1254.000000"
  preserveAspectRatio="xMidYMid meet">
-  <g
-    fill="#FFFFFF"
-    stroke="#FFFFFF"
-    stroke-width="20"
-    stroke-linecap="round"
-    stroke-linejoin="round"
-    transform="translate(0.000000,1254.000000) scale(0.100000,-0.100000)"
-  >
-    <path d="M11195 10354 c-71 -12 -341 -59 -600 -103 -258 -45 -519 -90 -580
+  <style>
+    .loading-path {
+      stroke: #FFFFFF; /* Changed to White */
+      stroke-width: 20;
+      fill: none;
+      stroke-dasharray: 5000;
+      stroke-dashoffset: 5000;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      animation: drawLines 3s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
+    }
+
+    @keyframes drawLines {
+      0% {
+        stroke-dashoffset: 5000;
+      }
+      40% {
+        stroke-dashoffset: 0;
+        fill: rgba(255, 255, 255, 0); /* Transparent white */
+      }
+      60% {
+        stroke-dashoffset: 0;
+        fill: rgba(255, 255, 255, 1); /* Solid white fill */
+      }
+      100% {
+        stroke-dashoffset: -5000;
+        fill: rgba(255, 255, 255, 0);
+      }
+    }
+  </style>
+
+  <g transform="translate(0.000000,1254.000000) scale(0.100000,-0.100000)">
+    <path class="loading-path" d="M11195 10354 c-71 -12 -341 -59 -600 -103 -258 -45 -519 -90 -580
     -101 -146 -26 -1271 -219 -1572 -270 -494 -82 -839 -141 -865 -146 -21 -4 -48
     -34 -113 -122 -80 -111 -288 -393 -649 -877 -90 -121 -288 -388 -440 -592
     l-276 -373 0 -724 0 -724 -684 -695 -685 -695 52 -59 c78 -90 285 -320 432
@@ -23,7 +47,7 @@
     187 338 455 442 597 105 142 201 270 215 285 l25 27 445 42 c245 23 491 46
     546 51 126 11 464 41 774 69 l235 21 450 452 c659 662 920 927 909 926 -5 -1
     -67 -12 -139 -25z"/>
-    <path d="M1381 10153 c101 -104 186 -190 189 -193 62 -63 422 -434 631 -650
+    <path class="loading-path" d="M1381 10153 c101 -104 186 -190 189 -193 62 -63 422 -434 631 -650
     152 -157 389 -402 527 -545 l252 -260 0 -860 0 -860 802 -802 803 -802 85 82
     c47 45 340 333 653 640 l567 559 0 683 0 682 68 104 c85 130 215 335 309 486
     l71 116 -230 171 c-127 94 -375 278 -552 410 -598 445 -696 517 -712 523 -12

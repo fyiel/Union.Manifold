@@ -3,11 +3,12 @@ import { useLocation, useNavigate, useSearchParams } from "react-router-dom"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { SearchSuggestions } from "@/components/SearchSuggestions"
 import { DiscordAvatar } from "@/components/DiscordAvatar"
+import { LoadingAnimated, LogoStaticDark } from "@/components/brand/brand-assets"
 import { useDiscordAccount } from "@/hooks/use-discord-account"
 import { apiFetch, apiUrl, getApiBaseUrl } from "@/lib/api"
 import { getRouteChrome } from "@/lib/navigation"
 import { Button } from "@/components/ui/button"
-import { ChevronLeft, ChevronRight, Hammer, LogIn, LogOut, Mail, Menu, RotateCw, Search, Settings, UserRound } from "lucide-react"
+import { ChevronLeft, ChevronRight, LogIn, LogOut, Mail, Menu, RotateCw, Search, Settings, UserRound } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 interface TopBarProps {
@@ -119,7 +120,7 @@ export function TopBar({ onOpenMenu }: TopBarProps) {
             aria-label="Go to home"
             className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white text-black shadow-md transition-all hover:scale-[1.03] hover:bg-zinc-200 active:scale-95 md:flex"
           >
-            <Hammer className="h-4.5 w-4.5" strokeWidth={2.4} />
+            <LogoStaticDark className="h-4.5 w-4.5" />
           </button>
 
           {/* Desktop Navigation Controls */}
@@ -202,7 +203,7 @@ export function TopBar({ onOpenMenu }: TopBarProps) {
           {/* Account Menu */}
           {showAccountLoading ? (
             <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/[.10] bg-white/[0.04] text-zinc-600">
-              <UserRound className="h-4 w-4" />
+              <LoadingAnimated className="h-4 w-4 opacity-70" />
             </div>
           ) : (
             <Popover>

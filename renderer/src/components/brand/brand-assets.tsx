@@ -1,0 +1,110 @@
+import { cn } from "@/lib/utils"
+
+type BrandAssetProps = {
+  className?: string
+  alt?: string
+}
+
+type AnimatedBrandAssetProps = BrandAssetProps & {
+  nonce?: number
+}
+
+function BrandImage({ src, className, alt }: { src: string } & BrandAssetProps) {
+  return (
+    <img
+      src={src}
+      alt={alt ?? "UnionCrax"}
+      className={cn("block h-6 w-6 shrink-0 object-contain", className)}
+      draggable={false}
+      decoding="async"
+    />
+  )
+}
+
+export function LogoStatic({ className, alt }: BrandAssetProps) {
+  return <BrandImage src="/apr2026/static_white.svg" className={className} alt={alt ?? "UnionCrax logo"} />
+}
+
+export function LogoStaticLight({ className, alt }: BrandAssetProps) {
+  return <BrandImage src="/apr2026/static_white.svg" className={className} alt={alt ?? "UnionCrax logo"} />
+}
+
+export function LogoStaticDark({ className, alt }: BrandAssetProps) {
+  return <BrandImage src="/apr2026/static_black.svg" className={className} alt={alt ?? "UnionCrax logo"} />
+}
+
+export function LogoHoverUC({ className, alt, nonce }: AnimatedBrandAssetProps) {
+  const src = nonce == null ? "/apr2026/logo_hover_uc.svg" : `/apr2026/logo_hover_uc.svg?v=${nonce}`
+  return <BrandImage src={src} className={className} alt={alt ?? "UnionCrax logo animation"} />
+}
+
+export function UCStatic({ className, alt }: BrandAssetProps) {
+  return <BrandImage src="/apr2026/static_white.svg" className={className} alt={alt ?? "UnionCrax mark"} />
+}
+
+export function UCStaticLight({ className, alt }: BrandAssetProps) {
+  return <BrandImage src="/apr2026/static_white.svg" className={className} alt={alt ?? "UnionCrax mark"} />
+}
+
+export function UCStaticDark({ className, alt }: BrandAssetProps) {
+  return <BrandImage src="/apr2026/static_black.svg" className={className} alt={alt ?? "UnionCrax mark"} />
+}
+
+export function LoadingStatic({ className, alt }: BrandAssetProps) {
+  return <BrandImage src="/apr2026/static_white.svg" className={className} alt={alt ?? "Loading"} />
+}
+
+export function LoadingAnimated({ className, alt }: BrandAssetProps) {
+  return (
+    <svg
+      viewBox="0 0 1254 1254"
+      role="img"
+      aria-label={alt ?? "Loading"}
+      className={cn("block h-6 w-6 shrink-0 object-contain", className)}
+    >
+      <style>{`
+        .uc-loading-path {
+          stroke: #FFFFFF;
+          stroke-width: 20;
+          fill: none;
+          stroke-dasharray: 5000;
+          stroke-dashoffset: 5000;
+          stroke-linecap: round;
+          stroke-linejoin: round;
+          animation: ucDrawLines 1.4s cubic-bezier(0.35, 0, 0.25, 1) infinite;
+        }
+
+        @keyframes ucDrawLines {
+          0% { stroke-dashoffset: 5000; fill: rgba(255, 255, 255, 0); }
+          55% { stroke-dashoffset: 0; fill: rgba(255, 255, 255, 0); }
+          72% { stroke-dashoffset: 0; fill: rgba(255, 255, 255, 1); }
+          90% { stroke-dashoffset: -5000; fill: rgba(255, 255, 255, 0); }
+          100% { stroke-dashoffset: -5000; fill: rgba(255, 255, 255, 0); }
+        }
+      `}</style>
+      <g transform="translate(0,1254) scale(0.1,-0.1)">
+        <path className="uc-loading-path" d="M11195 10354 c-71 -12 -341 -59 -600 -103 -258 -45 -519 -90 -580
+    -101 -146 -26 -1271 -219 -1572 -270 -494 -82 -839 -141 -865 -146 -21 -4 -48
+    -34 -113 -122 -80 -111 -288 -393 -649 -877 -90 -121 -288 -388 -440 -592
+    l-276 -373 0 -724 0 -724 -684 -695 -685 -695 52 -59 c78 -90 285 -320 432
+    -483 72 -80 213 -237 313 -349 l182 -203 0 -1064 c0 -585 3 -1064 8 -1064 6 0
+    47 74 191 340 205 379 534 953 843 1470 l158 266 1 519 c0 286 0 564 0 618
+    l-1 99 -147 -153 c-391 -407 -486 -504 -494 -507 -5 -2 -9 105 -9 237 l0 240
+    108 119 c59 65 219 241 356 390 l250 272 486 0 487 0 69 73 c67 70 404 447
+    494 552 73 85 315 355 935 1043 165 183 302 337 303 342 2 6 -205 10 -556 10
+    l-559 0 -59 -63 c-32 -34 -165 -177 -294 -317 -129 -140 -272 -293 -317 -340
+    l-82 -85 -348 -3 c-191 -2 -381 -1 -420 3 l-73 7 0 364 0 363 253 340 c138
+    187 338 455 442 597 105 142 201 270 215 285 l25 27 445 42 c245 23 491 46
+    546 51 126 11 464 41 774 69 l235 21 450 452 c659 662 920 927 909 926 -5 -1
+    -67 -12 -139 -25z"/>
+        <path className="uc-loading-path" d="M1381 10153 c101 -104 186 -190 189 -193 62 -63 422 -434 631 -650
+    152 -157 389 -402 527 -545 l252 -260 0 -860 0 -860 802 -802 803 -802 85 82
+    c47 45 340 333 653 640 l567 559 0 683 0 682 68 104 c85 130 215 335 309 486
+    l71 116 -230 171 c-127 94 -375 278 -552 410 -598 445 -696 517 -712 523 -12
+    4 -14 -198 -14 -1360 l0 -1365 -134 -116 c-73 -64 -137 -116 -141 -116 -4 0
+    -128 118 -276 261 l-269 262 0 1288 0 1288 -37 7 c-59 10 -655 130 -1413 284
+    -1142 232 -1333 270 -1349 270 -8 0 68 -84 170 -187z"/>
+      </g>
+    </svg>
+  )
+}
