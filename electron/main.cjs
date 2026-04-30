@@ -2201,8 +2201,32 @@ async function getDownloadsStateStore() {
   }
   if (!downloadsStateStorePromise) {
     downloadsStateStorePromise = (async () => {
-      const db = new ClassicLevel(downloadsStateDbPath, { valueEncoding: 'json' })
-      await db.open()
+      async function openDbWithRecovery() {
+        let db = new ClassicLevel(downloadsStateDbPath, { valueEncoding: 'json' })
+        try {
+          await db.open()
+          return db
+        } catch {
+          // Step 1: stale LOCK file from a previous crash — delete and retry
+          const lockPath = path.join(downloadsStateDbPath, 'LOCK')
+          if (fs.existsSync(lockPath)) {
+            try { fs.unlinkSync(lockPath) } catch { }
+            try {
+              await db.open()
+              ucLog('[State] Recovered LevelDB after stale LOCK removal', 'warn')
+              return db
+            } catch { }
+          }
+          // Step 2: DB is corrupted / unrecoverable — wipe directory and start fresh
+          ucLog('[State] LevelDB unrecoverable, wiping state-db and starting fresh', 'warn')
+          try { await db.close() } catch { }
+          try { fs.rmSync(downloadsStateDbPath, { recursive: true, force: true }) } catch { }
+          db = new ClassicLevel(downloadsStateDbPath, { valueEncoding: 'json' })
+          await db.open()
+          return db
+        }
+      }
+      const db = await openDbWithRecovery()
       const store = db.sublevel('downloads', { valueEncoding: 'json' })
       await store.open()
       return store
@@ -6490,11 +6514,17 @@ function createWindow(existingSplash) {
     const url = item.getURL()
     const normalizedUrl = normalizeDownloadUrl(url)
     const itemFilename = item.getFilename()
+    // Collect all URLs in the redirect chain (original + any intermediate + final CDN URL)
+    const itemUrlChain = (item.getURLChain ? item.getURLChain() : [url]).filter(Boolean)
+    const itemNormalizedChain = new Set(itemUrlChain.map(normalizeDownloadUrl))
     const matchIndex = pendingDownloads.findIndex((entry) =>
       entry.url === url ||
       (entry.normalizedUrl && entry.normalizedUrl === normalizedUrl) ||
       (entry.filename && entry.filename === itemFilename) ||
-      (Array.isArray(entry.urlChain) && entry.urlChain.includes(url))
+      (Array.isArray(entry.urlChain) && entry.urlChain.some((u) => itemUrlChain.includes(u))) ||
+      // Match original pending URL against any URL in the redirect chain (handles CDN redirects)
+      (entry.url && itemNormalizedChain.has(normalizeDownloadUrl(entry.url))) ||
+      (entry.normalizedUrl && itemNormalizedChain.has(entry.normalizedUrl))
     )
     const match = matchIndex >= 0 ? pendingDownloads.splice(matchIndex, 1)[0] : null
     const downloadId = match?.downloadId || `${Date.now()}-${Math.random().toString(16).slice(2)}`
@@ -6506,8 +6536,11 @@ function createWindow(existingSplash) {
       return
     }
 
-    // Always use match.filename if available to ensure consistency with parser logic, even if server sends different Content-Disposition
-    const filename = match?.filename ? match.filename : itemFilename
+    // Prefer the CDN-served filename (has a real extension from Content-Disposition) over match.filename,
+    // which may be a token hash with no extension (e.g. redirect via files.union-crax.xyz/download/<token>).
+    const filename = (itemFilename && path.extname(itemFilename))
+      ? itemFilename
+      : (match?.filename || itemFilename || 'download')
     uc_log(`will-download - url=${item.getURL()}`)
     uc_log(`will-download - match.filename=${match?.filename}, item.getFilename()=${item.getFilename()}, final filename=${filename}`)
     const partIndex = match?.partIndex

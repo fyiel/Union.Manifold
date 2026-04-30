@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from "react"
+import { GameActionContextMenu, GameActionMenuPanel } from "@/components/GameActionMenu"
 import { GameCard } from "@/components/GameCard"
 import { GameCardSkeleton } from "@/components/GameCardSkeleton"
 import { Badge } from "@/components/ui/badge"
@@ -12,9 +13,9 @@ import type { Game } from "@/lib/types"
 import { pickGameExecutable, cn } from "@/lib/utils"
 import { useDownloads } from "@/context/downloads-context"
 import {
-  Settings, Trash2, AlertTriangle, FolderOpen, ExternalLink, Unlink2,
-  Pencil, Terminal, CheckSquare2, Tags, Layers3, Search, ArrowUpDown,
-  X, Loader2, Check,
+  Trash2, AlertTriangle, FolderOpen, ExternalLink, Unlink2,
+  Terminal, CheckSquare2, Tags, Layers3, Search, ArrowUpDown,
+  X, Loader2, Check, MoreHorizontal,
 } from "lucide-react"
 import { ExePickerModal } from "@/components/ExePickerModal"
 import { EditGameMetadataModal } from "@/components/EditGameMetadataModal"
@@ -169,7 +170,8 @@ export function LibraryPage() {
   const [exePickerFolder, setExePickerFolder] = useState<string | null>(null)
   const [settingsPopupOpen, setSettingsPopupOpen] = useState(false)
   const [settingsPopupGame, setSettingsPopupGame] = useState<LibraryGame | null>(null)
-  const [shortcutFeedback, setShortcutFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
+  const [shortcutFeedback, setShortcutFeedback] = useState<{ appid: string; type: 'success' | 'error'; message: string } | null>(null)
+  const [cardContextMenu, setCardContextMenu] = useState<{ game: LibraryGame; position: { x: number; y: number } } | null>(null)
   const [editMetadataOpen, setEditMetadataOpen] = useState(false)
   const [linuxConfigOpen, setLinuxConfigOpen] = useState(false)
   const [linuxConfigGame, setLinuxConfigGame] = useState<LibraryGame | null>(null)
@@ -233,6 +235,13 @@ export function LibraryPage() {
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [batchDeleteConfirmOpen, pendingDeleteGame])
+
+  useEffect(() => {
+    if (!selectionMode) return
+    setSettingsPopupOpen(false)
+    setCardContextMenu(null)
+    setShortcutFeedback(null)
+  }, [selectionMode])
 
   const persistLibraryGameMeta = async (nextMeta: Record<string, LibraryGameMeta>) => {
     setLibraryGameMeta(nextMeta)
@@ -491,22 +500,26 @@ export function LibraryPage() {
   }
 
   const handleDeleteInstalling = async (game: Game) => {
+    // Optimistically hide and remove from local state immediately
     setHiddenAppIds((prev) => {
       const next = new Set(prev)
       next.add(game.appid)
       return next
     })
     setInstalling((prev) => prev.filter((item) => item.appid !== game.appid))
+    setInstallingMeta((prev) => {
+      const next = { ...prev }
+      delete next[game.appid]
+      return next
+    })
     try {
       await window.ucDownloads?.deleteInstalling?.(game.appid)
       clearByAppid(game.appid)
     } finally {
+      // Trigger a reload — but do NOT remove from hiddenAppIds here.
+      // If the backend is slow, the next list response may still return
+      // this game; keeping it in hiddenAppIds ensures it stays invisible.
       setRefreshTick((tick) => tick + 1)
-      setHiddenAppIds((prev) => {
-        const next = new Set(prev)
-        next.delete(game.appid)
-        return next
-      })
     }
   }
 
@@ -594,10 +607,77 @@ export function LibraryPage() {
     }
   }
 
+  const handleCreateShortcutForGame = async (game: LibraryGame) => {
+    setShortcutFeedback(null)
+
+    let savedExe = await getSavedExe(game.appid)
+    if (!savedExe && window.ucDownloads?.listGameExecutables) {
+      try {
+        const result = await window.ucDownloads.listGameExecutables(game.appid)
+        const exes = result?.exes || []
+        const folder = result?.folder || null
+        const { pick } = pickGameExecutable(exes, game.name, game.source, folder)
+        savedExe = pick?.path || null
+      } catch {
+        savedExe = null
+      }
+    }
+
+    if (!savedExe) {
+      gameLogger.warn('No saved exe found for creating shortcut', { appid: game.appid })
+      setShortcutFeedback({ appid: game.appid, type: 'error', message: 'Select an executable first.' })
+      void openExecutablePicker(game)
+      window.setTimeout(() => {
+        setShortcutFeedback((current) => current?.appid === game.appid ? null : current)
+      }, 3000)
+      return
+    }
+
+    try {
+      await window.ucDownloads?.deleteDesktopShortcut?.(game.name)
+    } catch { }
+
+    try {
+      const result = await window.ucDownloads?.createDesktopShortcut?.(game.name, savedExe)
+      if (result?.ok) {
+        gameLogger.info('Desktop shortcut created manually', { appid: game.appid })
+        setShortcutFeedback({ appid: game.appid, type: 'success', message: 'Desktop shortcut created.' })
+      } else {
+        setShortcutFeedback({ appid: game.appid, type: 'error', message: 'Failed to create desktop shortcut.' })
+      }
+    } catch {
+      setShortcutFeedback({ appid: game.appid, type: 'error', message: 'Failed to create desktop shortcut.' })
+    }
+
+    window.setTimeout(() => {
+      setShortcutFeedback((current) => current?.appid === game.appid ? null : current)
+    }, 3000)
+  }
+
   const handleExePicked = async (path: string) => {
     if (!exePickerAppId) return
     await setSavedExe(exePickerAppId, path)
     setExePickerCurrentPath(path)
+  }
+
+  const openGameActionPopover = (game: LibraryGame) => {
+    setCardContextMenu(null)
+    setShortcutFeedback(null)
+    setSettingsPopupGame(game)
+    setSettingsPopupOpen(true)
+  }
+
+  const closeGameActionMenus = () => {
+    setSettingsPopupOpen(false)
+    setCardContextMenu(null)
+    setShortcutFeedback(null)
+  }
+
+  const openGameActionContextMenu = (game: LibraryGame, position: { x: number; y: number }) => {
+    setSettingsPopupOpen(false)
+    setShortcutFeedback(null)
+    setSettingsPopupGame(game)
+    setCardContextMenu({ game, position })
   }
 
   const toggleSelected = (appid: string) => {
@@ -747,27 +827,13 @@ export function LibraryPage() {
 
   return (
     <div className="space-y-6">
-      <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+      <header className="flex items-end justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-white">Library</h1>
           <p className="mt-1 text-sm text-zinc-500">
-            {loading ? "Loading..." : `${installedWithMeta.length} installed${visibleInstalling.length > 0 ? ` · ${visibleInstalling.length} in progress` : ""}`}
+            {loading ? "Loading..." : `${installedWithMeta.length} installed${visibleInstalling.length > 0 ? ` · ${visibleInstalling.length} downloading` : ""}`}
           </p>
         </div>
-        {!loading && (availableCollections.length > 0 || availableTags.length > 0) && (
-          <div className="flex items-center gap-2 flex-wrap">
-            {availableCollections.length > 0 && (
-              <span className="border border-white/[.07] bg-zinc-800/60 text-zinc-400 text-xs font-medium px-3 py-1 rounded-full">
-                {availableCollections.length} {availableCollections.length === 1 ? "collection" : "collections"}
-              </span>
-            )}
-            {availableTags.length > 0 && (
-              <span className="border border-white/[.07] bg-zinc-800/60 text-zinc-400 text-xs font-medium px-3 py-1 rounded-full">
-                {availableTags.length} {availableTags.length === 1 ? "tag" : "tags"}
-              </span>
-            )}
-          </div>
-        )}
       </header>
 
       <div className="grid gap-6 xl:grid-cols-[280px_minmax(0,1fr)]">
@@ -872,78 +938,74 @@ export function LibraryPage() {
 
         <main className="min-w-0 space-y-6">
         {/* Top bar: search + tools */}
-        <div className="rounded-2xl border border-white/[.07] bg-zinc-900/80 p-4 sm:p-5">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="relative flex-1 max-w-md">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500 pointer-events-none" />
-            <Input
-              value={librarySearch}
-              onChange={(event) => handleSearchChange(event.target.value)}
-              placeholder="Search games..."
-              className="h-10 rounded-2xl border-white/[.07] bg-zinc-900/40 pl-9 text-sm"
-            />
-            {librarySearch && (
-              <button type="button" onClick={() => { setLibrarySearch(""); setDebouncedSearch("") }} className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-200 transition-colors">
-                <X className="h-3.5 w-3.5" />
-              </button>
-            )}
-          </div>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="relative flex-1 max-w-md">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500 pointer-events-none" />
+                <Input
+                  value={librarySearch}
+                  onChange={(event) => handleSearchChange(event.target.value)}
+                  placeholder="Search games, collections, or tags..."
+                  className="h-10 rounded-2xl border-white/[.07] bg-zinc-900/40 pl-9 text-sm"
+                />
+                {librarySearch && (
+                  <button type="button" onClick={() => { setLibrarySearch(""); setDebouncedSearch("") }} className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-200 transition-colors">
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
 
           <div className="flex items-center gap-2 flex-shrink-0">
-            {/* Mobile-only sort selector */}
-            <div className="lg:hidden">
-              <Select value={sortMode} onValueChange={(value) => setSortMode(value as 'name' | 'recent-install' | 'recent-play')}>
-                <SelectTrigger className="h-10 w-36 rounded-2xl border-white/[.07] bg-zinc-900/40 text-xs">
-                  <ArrowUpDown className="h-3.5 w-3.5 mr-1.5" />
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="name">Name</SelectItem>
-                  <SelectItem value="recent-install">Recently installed</SelectItem>
-                  <SelectItem value="recent-play">Recently played</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+                <div className="lg:hidden">
+                  <Select value={sortMode} onValueChange={(value) => setSortMode(value as 'name' | 'recent-install' | 'recent-play')}>
+                    <SelectTrigger className="h-10 w-36 rounded-2xl border-white/[.07] bg-zinc-900/40 text-xs">
+                      <ArrowUpDown className="h-3.5 w-3.5 mr-1.5" />
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="name">Name</SelectItem>
+                      <SelectItem value="recent-install">Recently installed</SelectItem>
+                      <SelectItem value="recent-play">Recently played</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
 
-            {/* Mobile-only collection/tag filters */}
-            <div className="lg:hidden flex gap-2">
-              <Select value={selectedCollection} onValueChange={setSelectedCollection}>
-                <SelectTrigger className="h-10 w-32 rounded-2xl border-white/[.07] bg-zinc-900/40 text-xs">
-                  <Layers3 className="h-3.5 w-3.5 mr-1.5" />
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All collections</SelectItem>
-                  {availableCollections.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
-                </SelectContent>
-              </Select>
-              <Select value={selectedTag} onValueChange={setSelectedTag}>
-                <SelectTrigger className="h-10 w-28 rounded-2xl border-white/[.07] bg-zinc-900/40 text-xs">
-                  <Tags className="h-3.5 w-3.5 mr-1.5" />
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All tags</SelectItem>
-                  {availableTags.map((t) => <SelectItem key={t} value={t}>#{t}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
+                <div className="lg:hidden flex gap-2">
+                  <Select value={selectedCollection} onValueChange={setSelectedCollection}>
+                    <SelectTrigger className="h-10 w-32 rounded-2xl border-white/[.07] bg-zinc-900/40 text-xs">
+                      <Layers3 className="h-3.5 w-3.5 mr-1.5" />
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All collections</SelectItem>
+                      {availableCollections.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                  <Select value={selectedTag} onValueChange={setSelectedTag}>
+                    <SelectTrigger className="h-10 w-28 rounded-2xl border-white/[.07] bg-zinc-900/40 text-xs">
+                      <Tags className="h-3.5 w-3.5 mr-1.5" />
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All tags</SelectItem>
+                      {availableTags.map((t) => <SelectItem key={t} value={t}>#{t}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
 
-            <Button
-              variant={selectionMode ? "secondary" : "outline"}
-              size="sm"
-              className="h-10 rounded-full"
-              onClick={() => {
-                const nextMode = !selectionMode
-                setSelectionMode(nextMode)
-                if (!nextMode) setSelectedAppIds(new Set())
-              }}
-            >
-              <CheckSquare2 className="h-4 w-4 mr-1.5" />
-              {selectionMode ? `${selectedAppIds.size} selected` : 'Select'}
-            </Button>
+                <Button
+                  variant={selectionMode ? "secondary" : "outline"}
+                  size="sm"
+                  className="h-10 rounded-full"
+                  onClick={() => {
+                    const nextMode = !selectionMode
+                    setSelectionMode(nextMode)
+                    if (!nextMode) setSelectedAppIds(new Set())
+                  }}
+                >
+                  <CheckSquare2 className="h-4 w-4 mr-1.5" />
+                  {selectionMode ? `${selectedAppIds.size} selected` : 'Select'}
+                </Button>
           </div>
-        </div>
         </div>
 
         {/* Active filters */}
@@ -1073,6 +1135,11 @@ export function LibraryPage() {
                       className={`group/tile relative rounded-xl transition-all duration-200 ${
                         selectionMode ? "cursor-pointer" : ""
                       } ${isSelected ? "ring-2 ring-blue-500/60 ring-offset-1 ring-offset-zinc-950" : ""}`}
+                      onContextMenu={!selectionMode ? (event) => {
+                        event.preventDefault()
+                        event.stopPropagation()
+                        openGameActionContextMenu(game, { x: event.clientX, y: event.clientY })
+                      } : undefined}
                       onClick={selectionMode ? (e) => { e.preventDefault(); e.stopPropagation(); toggleSelected(game.appid) } : undefined}
                     >
                       {/* Game card wrapper - disable navigation in selection mode */}
@@ -1095,92 +1162,82 @@ export function LibraryPage() {
 
                       {/* Settings button - only when NOT in selection mode */}
                       {!selectionMode && (
-                        <div className="absolute top-2 left-2 z-20 opacity-0 group-hover/tile:opacity-100 transition-opacity">
+                        <div className="absolute inset-x-2 top-2 z-20 flex items-center justify-end gap-2 opacity-0 transition-all duration-200 group-hover/tile:opacity-100">
                           <Popover
                             open={settingsPopupOpen && settingsPopupGame?.appid === game.appid}
                             onOpenChange={(open) => {
                               if (open) {
-                                setSettingsPopupGame(game)
-                                setShortcutFeedback(null)
-                                setSettingsPopupOpen(true)
+                                openGameActionPopover(game)
                               } else {
-                                setSettingsPopupOpen(false)
-                                setShortcutFeedback(null)
+                                closeGameActionMenus()
                               }
                             }}
                           >
-                            <PopoverTrigger asChild>
+                            <div className="flex items-center gap-1.5">
                               <Button
                                 size="icon"
                                 variant="ghost"
-                                onClick={(event) => { event.stopPropagation() }}
-                                className="h-7 w-7 rounded-lg bg-black/70 text-white hover:bg-white/20 backdrop-blur-sm"
-                                title="Game actions"
-                                aria-label="Open game actions"
-                              >
-                                <Settings className="h-3.5 w-3.5" />
-                              </Button>
-                            </PopoverTrigger>
-                            <PopoverContent align="start" className="w-56 rounded-2xl p-2 bg-zinc-950 border-white/[.07] text-white shadow-xl">
-                              <button type="button" onClick={() => { setSettingsPopupOpen(false); void openExecutablePicker(game) }} className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-zinc-400 transition-colors hover:text-white hover:bg-white/10">
-                                <Settings className="mr-2 h-4 w-4" /> Set Executable
-                              </button>
-                              <button type="button" onClick={() => { setSettingsPopupOpen(false); void handleOpenGameFiles(game) }} className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-zinc-400 transition-colors hover:text-white hover:bg-white/10">
-                                <FolderOpen className="mr-2 h-4 w-4" /> Open Game Files
-                              </button>
-                              <button
-                                type="button"
-                                onClick={async () => {
-                                  if (!settingsPopupGame) return
-                                  setShortcutFeedback(null)
-                                  let savedExe = await getSavedExe(settingsPopupGame.appid)
-                                  if (!savedExe && window.ucDownloads?.listGameExecutables) {
-                                    try {
-                                      const result = await window.ucDownloads.listGameExecutables(settingsPopupGame.appid)
-                                      const exes = result?.exes || []
-                                      const folder = result?.folder || null
-                                      const { pick } = pickGameExecutable(exes, settingsPopupGame.name, settingsPopupGame.source, folder)
-                                      savedExe = pick?.path || null
-                                    } catch { }
-                                  }
-                                  if (savedExe) {
-                                    try { await window.ucDownloads?.deleteDesktopShortcut?.(settingsPopupGame.name) } catch { }
-                                    const result = await window.ucDownloads?.createDesktopShortcut?.(settingsPopupGame.name, savedExe)
-                                    if (result?.ok) {
-                                      gameLogger.info('Desktop shortcut created manually', { appid: settingsPopupGame.appid })
-                                      setShortcutFeedback({ type: 'success', message: 'Desktop shortcut created.' })
-                                    } else {
-                                      setShortcutFeedback({ type: 'error', message: 'Failed to create desktop shortcut.' })
-                                    }
-                                  } else {
-                                    gameLogger.warn('No saved exe found for creating shortcut', { appid: settingsPopupGame.appid })
-                                    setShortcutFeedback({ type: 'error', message: 'Select an executable first.' })
-                                    void openExecutablePicker(settingsPopupGame)
-                                    setSettingsPopupOpen(false)
-                                  }
-                                  setTimeout(() => setShortcutFeedback(null), 3000)
+                                onClick={(event) => {
+                                  event.stopPropagation()
+                                  closeGameActionMenus()
+                                  void handleOpenGameFiles(game)
                                 }}
-                                className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-zinc-400 transition-colors hover:text-white hover:bg-white/10"
+                                className="h-8 w-8 rounded-full border border-white/[.08] bg-black/70 text-white hover:bg-white/20 backdrop-blur-md"
+                                title="Open game files"
+                                aria-label="Open game files"
                               >
-                                <ExternalLink className="mr-2 h-4 w-4" /> Create Desktop Shortcut
-                              </button>
-                              {settingsPopupGame?.isExternal && (
-                                <button type="button" onClick={() => { setSettingsPopupOpen(false); setShortcutFeedback(null); setEditMetadataOpen(true) }} className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-zinc-400 transition-colors hover:text-white hover:bg-white/10">
-                                  <Pencil className="mr-2 h-4 w-4" /> Edit Details
-                                </button>
-                              )}
-                              {isLinux && (
-                                <button type="button" onClick={() => { setSettingsPopupOpen(false); setShortcutFeedback(null); setLinuxConfigGame(game); setLinuxConfigOpen(true) }} className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-zinc-400 transition-colors hover:text-white hover:bg-white/10">
-                                  <Terminal className="mr-2 h-4 w-4" /> Linux / VR Config
-                                </button>
-                              )}
-                              <div className="my-1 h-px bg-white/10" />
-                              <button type="button" onClick={() => { setSettingsPopupOpen(false); setShortcutFeedback(null); setPendingDeleteGame(game); setPendingDeleteAction("installed") }} className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-destructive transition-colors hover:bg-destructive/10">
-                                {game.isExternal ? (<><Unlink2 className="mr-2 h-4 w-4" /> Unlink Game</>) : (<><Trash2 className="mr-2 h-4 w-4" /> Delete Game</>)}
-                              </button>
-                              {shortcutFeedback && settingsPopupGame?.appid === game.appid && (
-                                <div className={`mt-2 text-xs ${shortcutFeedback.type === 'success' ? 'text-zinc-300' : 'text-destructive'}`}>{shortcutFeedback.message}</div>
-                              )}
+                                <FolderOpen className="h-3.5 w-3.5" />
+                              </Button>
+                              <PopoverTrigger asChild>
+                                <Button
+                                  size="icon"
+                                  variant="ghost"
+                                  onClick={(event) => { event.stopPropagation() }}
+                                  className="h-8 w-8 rounded-full border border-white/[.08] bg-black/70 text-white hover:bg-white/20 backdrop-blur-md"
+                                  title="More game actions"
+                                  aria-label="Open game actions"
+                                >
+                                  <MoreHorizontal className="h-3.5 w-3.5" />
+                                </Button>
+                              </PopoverTrigger>
+                            </div>
+                            <PopoverContent align="start" sideOffset={8} className="w-auto border-none bg-transparent p-0 shadow-none">
+                              <GameActionMenuPanel
+                                gameName={game.name}
+                                gameSource={game.source}
+                                isExternal={game.isExternal}
+                                isLinux={isLinux}
+                                shortcutFeedback={shortcutFeedback?.appid === game.appid ? { type: shortcutFeedback.type, message: shortcutFeedback.message } : null}
+                                onSetExecutable={() => {
+                                  setSettingsPopupOpen(false)
+                                  void openExecutablePicker(game)
+                                }}
+                                onOpenFiles={() => {
+                                  setSettingsPopupOpen(false)
+                                  void handleOpenGameFiles(game)
+                                }}
+                                onCreateShortcut={() => {
+                                  void handleCreateShortcutForGame(game)
+                                }}
+                                onEditDetails={game.isExternal ? () => {
+                                  setSettingsPopupOpen(false)
+                                  setShortcutFeedback(null)
+                                  setSettingsPopupGame(game)
+                                  setEditMetadataOpen(true)
+                                } : undefined}
+                                onLinuxConfig={isLinux ? () => {
+                                  setSettingsPopupOpen(false)
+                                  setShortcutFeedback(null)
+                                  setLinuxConfigGame(game)
+                                  setLinuxConfigOpen(true)
+                                } : undefined}
+                                onDelete={() => {
+                                  setSettingsPopupOpen(false)
+                                  setShortcutFeedback(null)
+                                  setPendingDeleteGame(game)
+                                  setPendingDeleteAction("installed")
+                                }}
+                              />
                             </PopoverContent>
                           </Popover>
                         </div>
@@ -1225,11 +1282,62 @@ export function LibraryPage() {
           )}
         </section>
 
+        <GameActionContextMenu
+          open={Boolean(cardContextMenu)}
+          position={cardContextMenu?.position || null}
+          onClose={() => setCardContextMenu(null)}
+          gameName={cardContextMenu?.game.name || "Game"}
+          gameSource={cardContextMenu?.game.source}
+          isExternal={Boolean(cardContextMenu?.game.isExternal)}
+          isLinux={isLinux}
+          shortcutFeedback={cardContextMenu && shortcutFeedback?.appid === cardContextMenu.game.appid ? { type: shortcutFeedback.type, message: shortcutFeedback.message } : null}
+          onSetExecutable={() => {
+            if (!cardContextMenu) return
+            setCardContextMenu(null)
+            void openExecutablePicker(cardContextMenu.game)
+          }}
+          onOpenFiles={() => {
+            if (!cardContextMenu) return
+            setCardContextMenu(null)
+            void handleOpenGameFiles(cardContextMenu.game)
+          }}
+          onCreateShortcut={() => {
+            if (!cardContextMenu) return
+            const { game } = cardContextMenu
+            setCardContextMenu(null)
+            void handleCreateShortcutForGame(game)
+          }}
+          onEditDetails={cardContextMenu?.game.isExternal ? () => {
+            if (!cardContextMenu) return
+            setSettingsPopupGame(cardContextMenu.game)
+            setCardContextMenu(null)
+            setEditMetadataOpen(true)
+          } : undefined}
+          onLinuxConfig={isLinux ? () => {
+            if (!cardContextMenu) return
+            setLinuxConfigGame(cardContextMenu.game)
+            setCardContextMenu(null)
+            setLinuxConfigOpen(true)
+          } : undefined}
+          onDelete={() => {
+            if (!cardContextMenu) return
+            setPendingDeleteGame(cardContextMenu.game)
+            setPendingDeleteAction("installed")
+            setCardContextMenu(null)
+          }}
+        />
+
         {/* ── Installing section ── */}
         {(loading || statsLoading || visibleInstalling.length > 0) && (
-          <section className="space-y-4">
-            <p className="section-label mb-1">Now Installing</p>
-            <h2 className="text-lg font-light tracking-tight text-zinc-200">Installing</h2>
+          <section className="space-y-3">
+            <div className="flex items-center gap-2">
+              <h2 className="text-sm font-medium text-zinc-400">Downloading</h2>
+              {!loading && !statsLoading && visibleInstalling.length > 0 && (
+                <span className="rounded-full border border-white/[.06] bg-white/[.04] px-2 py-0.5 text-[11px] text-zinc-500">
+                  {visibleInstalling.length}
+                </span>
+              )}
+            </div>
             {loading || statsLoading ? (
               <div className="grid gap-4 grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
                 {Array.from({ length: 4 }).map((_, idx) => (
@@ -1239,34 +1347,54 @@ export function LibraryPage() {
             ) : (
               <div className="space-y-4">
                 <div className="grid gap-4 grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-                  {pagedInstalling.map((game) => (
-                    <div key={game.appid} className="relative">
-                      <GameCard game={game} stats={stats[game.appid]} size="compact" />
-                      {cancelledAppIds.has(game.appid) ? (
-                        <>
-                          <div className="absolute top-2 left-2 z-20">
-                            <Badge className="rounded-full bg-zinc-800/60 text-zinc-400 border border-zinc-700/50 px-2 py-0.5 text-[11px]">Cancelled</Badge>
+                  {pagedInstalling.map((game) => {
+                    const isFailed = failedAppIds.has(game.appid)
+                    const isCancelled = cancelledAppIds.has(game.appid)
+                    return (
+                      <div
+                        key={game.appid}
+                        className="group/tile relative"
+                        onContextMenu={(event) => {
+                          event.preventDefault()
+                          event.stopPropagation()
+                          openGameActionContextMenu(game, { x: event.clientX, y: event.clientY })
+                        }}
+                      >
+                        <GameCard game={game} stats={stats[game.appid]} size="compact" />
+                        {/* Status badge — always visible for cancelled/failed */}
+                        {(isCancelled || isFailed) && (
+                          <div className="pointer-events-none absolute left-2 top-2 z-20">
+                            <span className={cn(
+                              "rounded-full border px-2 py-0.5 text-[11px] font-medium backdrop-blur-sm",
+                              isFailed
+                                ? "border-red-500/30 bg-black/70 text-red-400"
+                                : "border-zinc-700/50 bg-black/70 text-zinc-400"
+                            )}>
+                              {isFailed ? "Failed" : "Cancelled"}
+                            </span>
                           </div>
-                          <div className="absolute top-2 right-2 z-20">
-                            <Button size="icon" variant="ghost" onClick={(event) => { event.preventDefault(); event.stopPropagation(); setPendingDeleteGame(game); setPendingDeleteAction("installing") }} className="h-7 w-7 rounded-lg bg-black/60 text-white hover:bg-white/20" title="Remove cancelled download" aria-label="Remove cancelled download">
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </Button>
-                          </div>
-                        </>
-                      ) : failedAppIds.has(game.appid) ? (
-                        <>
-                          <div className="absolute top-2 left-2 z-20">
-                            <Badge className="rounded-full bg-destructive/20 text-destructive border border-destructive/40 px-2 py-0.5 text-[11px]">Failed</Badge>
-                          </div>
-                          <div className="absolute top-2 right-2 z-20">
-                            <Button size="icon" variant="ghost" onClick={(event) => { event.preventDefault(); event.stopPropagation(); setPendingDeleteGame(game); setPendingDeleteAction("installing") }} className="h-7 w-7 rounded-lg bg-black/60 text-white hover:bg-white/20" title="Remove failed download" aria-label="Remove failed download">
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </Button>
-                          </div>
-                        </>
-                      ) : null}
-                    </div>
-                  ))}
+                        )}
+                        {/* Remove button — hover-visible for all cards (including stuck downloads) */}
+                        <div className="absolute right-2 top-2 z-20 opacity-0 transition-opacity group-hover/tile:opacity-100">
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            onClick={(e) => {
+                              e.preventDefault()
+                              e.stopPropagation()
+                              setPendingDeleteGame(game)
+                              setPendingDeleteAction("installing")
+                            }}
+                            className="h-7 w-7 rounded-full border border-white/[.08] bg-black/70 text-zinc-400 backdrop-blur-sm hover:bg-red-500/10 hover:text-red-400"
+                            title="Remove"
+                            aria-label="Remove download"
+                          >
+                            <X className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      </div>
+                    )
+                  })}
                 </div>
                 {installingTotalPages > 1 && (
                   <PaginationBar
@@ -1287,17 +1415,17 @@ export function LibraryPage() {
             {batchDeleteConfirmOpen && (
               <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
                 <div className="absolute inset-0 bg-black/70" onClick={() => setBatchDeleteConfirmOpen(false)} />
-                <div className="relative w-full max-w-md rounded-2xl border border-border/60 bg-card/95 p-5 text-foreground shadow-2xl">
-                  <div className="flex items-center gap-2 text-lg font-semibold">
-                    <AlertTriangle className="h-5 w-5 text-destructive" />
-                    Delete selected games
+                <div className="relative w-full max-w-md rounded-2xl border border-white/[.07] bg-zinc-900 p-5 text-white shadow-2xl">
+                  <div className="flex items-center gap-2 text-base font-semibold">
+                    <AlertTriangle className="h-4 w-4 text-red-400" />
+                    Delete {selectedInstalledGames.length} game{selectedInstalledGames.length !== 1 ? "s" : ""}
                   </div>
-                  <p className="mt-2 text-sm text-muted-foreground">
-                    Delete or unlink {selectedInstalledGames.length} selected game{selectedInstalledGames.length !== 1 ? "s" : ""}? This will remove installed files from disk for non-external games.
+                  <p className="mt-2 text-sm text-zinc-400">
+                    This will permanently remove the installed files from disk.
                   </p>
                   <div className="mt-4 flex justify-end gap-2">
-                    <Button variant="ghost" onClick={() => setBatchDeleteConfirmOpen(false)}>Cancel</Button>
-                    <Button variant="destructive" onClick={() => void executeBatchDelete()}>Delete</Button>
+                    <Button variant="ghost" size="sm" onClick={() => setBatchDeleteConfirmOpen(false)}>Cancel</Button>
+                    <Button variant="destructive" size="sm" onClick={() => void executeBatchDelete()}>Delete</Button>
                   </div>
                 </div>
               </div>
@@ -1306,21 +1434,20 @@ export function LibraryPage() {
       {pendingDeleteGame && (
         <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
           <div className="absolute inset-0 bg-black/70" onClick={() => { setPendingDeleteGame(null); setPendingDeleteAction(null) }} />
-          <div className="relative w-full max-w-md rounded-2xl border border-border/60 bg-card/95 p-5 text-foreground shadow-2xl">
-            <div className="flex items-center gap-2 text-lg font-semibold">
-              <AlertTriangle className="h-5 w-5 text-destructive" />
+          <div className="relative w-full max-w-md rounded-2xl border border-white/[.07] bg-zinc-900 p-5 text-white shadow-2xl">
+            <div className="text-base font-semibold">
               {pendingDeleteAction === "installing" ? "Remove download" : pendingDeleteGame.isExternal ? "Unlink game" : "Delete game"}
             </div>
-            <p className="mt-2 text-sm text-muted-foreground">
+            <p className="mt-2 text-sm text-zinc-400">
               {pendingDeleteAction === "installing"
-                ? `Remove "${pendingDeleteGame.name}" from the installing list? This will delete any downloaded data.`
+                ? `Remove “${pendingDeleteGame.name}”? Any downloaded data will be deleted.`
                 : pendingDeleteGame.isExternal
-                  ? `Unlink "${pendingDeleteGame.name}" from UnionCrax? This only removes it from your library - your game files won't be touched.`
-                  : `Delete "${pendingDeleteGame.name}" permanently? This removes the installed files from disk.`}
+                  ? `Unlink “${pendingDeleteGame.name}” from your library? Your files won’t be touched.`
+                  : `Delete “${pendingDeleteGame.name}”? This removes the installed files from disk.`}
             </p>
             <div className="mt-4 flex justify-end gap-2">
-              <Button variant="ghost" onClick={() => { setPendingDeleteGame(null); setPendingDeleteAction(null) }}>Cancel</Button>
-              <Button variant="destructive" onClick={() => {
+              <Button variant="ghost" size="sm" onClick={() => { setPendingDeleteGame(null); setPendingDeleteAction(null) }}>Cancel</Button>
+              <Button variant="destructive" size="sm" onClick={() => {
                 const target = pendingDeleteGame
                 const action = pendingDeleteAction
                 setPendingDeleteGame(null)

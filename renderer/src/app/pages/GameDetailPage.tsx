@@ -1,5 +1,5 @@
 
-import { useEffect, useCallback, useMemo, useRef, useState } from "react"
+import { useEffect, useCallback, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react"
 import { createPortal } from "react-dom"
 import { useParams } from "react-router-dom"
 import { Badge } from "@/components/ui/badge"
@@ -40,6 +40,7 @@ import {
   Layers3,
   Loader2,
   Minus,
+  MoreHorizontal,
   Plus,
   Play,
   Tags,
@@ -52,6 +53,7 @@ import { LinuxExperiences } from "@/components/LinuxExperiences"
 import { DownloadCheckModal } from "@/components/DownloadCheckModal"
 import { DesktopShortcutModal } from "@/components/DesktopShortcutModal"
 import { EditGameMetadataModal } from "@/components/EditGameMetadataModal"
+import { GameActionContextMenu, GameActionMenuPanel } from "@/components/GameActionMenu"
 import { UpdateBackupWarningModal } from "@/components/VersionConflictModal"
 import { GameLinuxConfigModal } from "@/components/GameLinuxConfigModal"
 import { gameLogger } from "@/lib/logger"
@@ -126,6 +128,7 @@ export function GameDetailPage() {
   const [exePickerFolder, setExePickerFolder] = useState<string | null>(null)
   const [exePickerMode, setExePickerMode] = useState<"launch" | "set">("launch")
   const [actionMenuOpen, setActionMenuOpen] = useState(false)
+  const [actionMenuContextPosition, setActionMenuContextPosition] = useState<{ x: number; y: number } | null>(null)
   const [shortcutFeedback, setShortcutFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
   const [pendingDeleteAction, setPendingDeleteAction] = useState<"installed" | "installing" | null>(null)
   const [editMetadataOpen, setEditMetadataOpen] = useState(false)
@@ -1065,6 +1068,13 @@ export function GameDetailPage() {
     setPendingDeleteAction("installed")
   }
 
+  const handleActionCardContextMenu = (event: ReactMouseEvent<HTMLDivElement>) => {
+    if (!showActionMenu) return
+    event.preventDefault()
+    setActionMenuOpen(false)
+    setActionMenuContextPosition({ x: event.clientX, y: event.clientY })
+  }
+
   const runDeleteGame = async (action: "installed" | "installing") => {
     if (!game) return
     try {
@@ -1431,7 +1441,10 @@ export function GameDetailPage() {
 
             </div>
             <div className="space-y-6">
-              <div className="p-8 rounded-3xl bg-zinc-950/60 border border-white/[.07] backdrop-blur-md shadow-xl">
+              <div
+                className={`p-8 rounded-3xl bg-zinc-950/60 border border-white/[.07] backdrop-blur-md shadow-xl ${showActionMenu ? "cursor-context-menu" : ""}`}
+                onContextMenu={handleActionCardContextMenu}
+              >
                 <div className="flex items-center gap-3">
                   <Button
                     size="lg"
@@ -1473,93 +1486,46 @@ export function GameDetailPage() {
                       <PopoverTrigger asChild>
                         <Button
                           variant="outline"
-                          size="icon"
-                          className="h-[52px] w-[52px] rounded-full border-white/[.07] bg-zinc-900/60 text-zinc-300 hover:bg-zinc-800 hover:text-white backdrop-blur-md active:scale-95"
+                          size="lg"
+                          onClick={() => setActionMenuContextPosition(null)}
+                          className="h-[52px] rounded-full border-white/[.07] bg-zinc-900/60 px-4 text-zinc-300 hover:bg-zinc-800 hover:text-white backdrop-blur-md active:scale-95"
                           aria-label="Game actions"
                         >
-                          <Settings className="h-5 w-5" />
+                          <MoreHorizontal className="h-4.5 w-4.5" />
+                          <span className="text-sm font-medium">Actions</span>
                         </Button>
                       </PopoverTrigger>
-                      <PopoverContent align="end" className="w-56 rounded-2xl p-2 bg-zinc-950/95 border border-white/[.07] text-white shadow-2xl backdrop-blur-xl">
-                        <button
-                          type="button"
-                          onClick={() => {
+                      <PopoverContent align="end" className="w-auto border-none bg-transparent p-0 shadow-none">
+                        <GameActionMenuPanel
+                          gameName={game?.name || "Game"}
+                          gameSource={game?.source}
+                          isExternal={Boolean(installedManifest?.isExternal)}
+                          isLinux={isLinux}
+                          shortcutFeedback={shortcutFeedback}
+                          onSetExecutable={() => {
+                            setActionMenuOpen(false)
                             void openExecutablePicker()
                           }}
-                          className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-zinc-400 transition-colors hover:text-white hover:bg-white/10"
-                        >
-                          <Settings className="mr-2 h-4 w-4" />
-                          Set Executable
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setActionMenuOpen(false)
-                            void handleCreateShortcut()
-                          }}
-                          className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-zinc-400 transition-colors hover:text-white hover:bg-white/10"
-                        >
-                          <ExternalLink className="mr-2 h-4 w-4" />
-                          Create Desktop Shortcut
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
+                          onOpenFiles={() => {
                             setActionMenuOpen(false)
                             void openGameFiles()
                           }}
-                          className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-zinc-400 transition-colors hover:text-white hover:bg-white/10"
-                        >
-                          <FolderOpen className="mr-2 h-4 w-4" />
-                          Open Game Files
-                        </button>
-                        {isExternalGame && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setActionMenuOpen(false)
-                              setEditMetadataOpen(true)
-                            }}
-                            className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-zinc-400 transition-colors hover:text-white hover:bg-white/10"
-                          >
-                            <Settings className="mr-2 h-4 w-4" />
-                            Edit Details
-                          </button>
-                        )}
-                        {isLinux && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setActionMenuOpen(false)
-                              setLinuxConfigOpen(true)
-                            }}
-                            className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-zinc-400 transition-colors hover:text-white hover:bg-white/10"
-                          >
-                            <Terminal className="mr-2 h-4 w-4" />
-                            Linux / VR Config
-                          </button>
-                        )}
-                        <div className="my-1 h-px bg-white/10" />
-                        <button
-                          type="button"
-                          onClick={() => {
+                          onCreateShortcut={() => {
+                            void handleCreateShortcut()
+                          }}
+                          onEditDetails={isExternalGame ? () => {
+                            setActionMenuOpen(false)
+                            setEditMetadataOpen(true)
+                          } : undefined}
+                          onLinuxConfig={isLinux ? () => {
+                            setActionMenuOpen(false)
+                            setLinuxConfigOpen(true)
+                          } : undefined}
+                          onDelete={() => {
                             setActionMenuOpen(false)
                             void handleDeleteGame()
                           }}
-                          className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-destructive transition-colors hover:bg-destructive/10"
-                        >
-                          {installedManifest?.isExternal ? (
-                            <>
-                              <Unlink2 className="mr-2 h-4 w-4" />
-                              Unlink Game
-                            </>
-                          ) : (
-                            <>
-                              <Trash2 className="mr-2 h-4 w-4" />
-                              Delete Game
-                            </>
-                          )}
-                        </button>
+                        />
                       </PopoverContent>
                     </Popover>
                   ) : null}
@@ -1598,6 +1564,41 @@ export function GameDetailPage() {
                   <div className="mt-3 text-xs text-destructive">{downloadError || failedDownload?.error}</div>
                 )}
               </div>
+
+              <GameActionContextMenu
+                open={Boolean(actionMenuContextPosition && showActionMenu)}
+                position={actionMenuContextPosition}
+                onClose={() => setActionMenuContextPosition(null)}
+                gameName={game?.name || "Game"}
+                gameSource={game?.source}
+                isExternal={Boolean(installedManifest?.isExternal)}
+                isLinux={isLinux}
+                shortcutFeedback={null}
+                onSetExecutable={() => {
+                  setActionMenuContextPosition(null)
+                  void openExecutablePicker()
+                }}
+                onOpenFiles={() => {
+                  setActionMenuContextPosition(null)
+                  void openGameFiles()
+                }}
+                onCreateShortcut={() => {
+                  setActionMenuContextPosition(null)
+                  void handleCreateShortcut()
+                }}
+                onEditDetails={isExternalGame ? () => {
+                  setActionMenuContextPosition(null)
+                  setEditMetadataOpen(true)
+                } : undefined}
+                onLinuxConfig={isLinux ? () => {
+                  setActionMenuContextPosition(null)
+                  setLinuxConfigOpen(true)
+                } : undefined}
+                onDelete={() => {
+                  setActionMenuContextPosition(null)
+                  void handleDeleteGame()
+                }}
+              />
 
               <div className={`grid grid-cols-2 gap-4${isUCMatched ? ' opacity-40 blur-[2px] pointer-events-none select-none' : ''}`}>
                 <div className="p-5 rounded-3xl bg-zinc-900/60 border border-white/[.07] backdrop-blur-md text-center shadow-xl">
