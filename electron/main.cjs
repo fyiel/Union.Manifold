@@ -5057,52 +5057,9 @@ async function startDownloadNow(win, payload) {
     }
   }
 
-  // UC.Files parallel download engine - bypass Chromium single-connection downloader
-  if (isUCFilesUrl(payload.url)) {
-    uc_log(`startDownloadNow: using UC.Files parallel engine - downloadId=${payload.downloadId}`)
-    // Remove from pending since we're handling it directly (won't hit will-download)
-    const pendIdx = pendingDownloads.findIndex(p => p.downloadId === payload.downloadId)
-    if (pendIdx >= 0) pendingDownloads.splice(pendIdx, 1)
-
-    // Immediately notify the renderer that this download is active, before the async
-    // parallel download starts. Without this, the renderer sees the item as still "queued"
-    // and may call startNextQueuedPart again, causing a double-resolve.
-    sendDownloadUpdate(win, {
-      downloadId: payload.downloadId,
-      status: 'downloading',
-      receivedBytes: 0,
-      totalBytes: 0,
-      speedBps: 0,
-      etaSeconds: null,
-      filename: payload.filename || null,
-      savePath: null,
-      appid: payload.appid || null,
-      gameName: payload.gameName || null,
-      url: payload.url,
-      partIndex: payload.partIndex,
-      partTotal: payload.partTotal,
-      resumeData: null,
-    })
-
-    ucfilesParallelDownload(win, payload).then(result => {
-      if (!result) {
-        // Fallback: server didn't support ranges, use Chromium
-        uc_log(`[UC.Files] Range not supported, falling back to Chromium downloader`)
-        pendingDownloads.push({
-          url: payload.url, normalizedUrl: normalizeDownloadUrl(payload.url),
-          downloadId: payload.downloadId, filename: payload.filename,
-          appid: payload.appid, gameName: payload.gameName,
-          partIndex: payload.partIndex, partTotal: payload.partTotal,
-          authHeader: payload.authHeader, savePath: payload.savePath,
-          _addedAt: Date.now()
-        })
-        win.webContents.downloadURL(payload.url)
-      }
-    }).catch(err => {
-      ucLog(`[UC.Files] Parallel download unexpected error: ${err.message}`, 'error')
-    })
-    return { ok: true }
-  }
+  // UC.Files now uses the same Electron downloader path as other hosts.
+  // files.union-crax.xyz serves Backblaze-backed links, so we no longer need
+  // the custom parallel downloader path here.
 
   uc_log(`startDownloadNow: calling downloadURL - downloadId=${payload.downloadId} url=${payload.url}`)
   win.webContents.downloadURL(payload.url)
@@ -5655,9 +5612,6 @@ function sendArchiveDeletionPrompt(win, payload) {
     }
     if (win && !win.isDestroyed() && win !== mainWindow) {
       win.webContents.send('uc:archive-delete-prompt', payload)
-    }
-    if (overlayWindow && !overlayWindow.isDestroyed() && overlayWindow !== win) {
-      overlayWindow.webContents.send('uc:archive-delete-prompt', payload)
     }
   } catch (error) {
     ucLog(`[Archive] Failed to send archive deletion prompt: ${String(error)}`, 'warn')
