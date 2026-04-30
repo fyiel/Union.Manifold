@@ -280,7 +280,8 @@ export function extractUCFilesFileId(url: string): string | null {
   try {
     const parsed = new URL(url)
     if (!isUCFilesHostValue(parsed.hostname)) return null
-    const fMatch = parsed.pathname.match(/\/(?:f|file|download)\/([A-Za-z0-9_-]{1,64})(?:[/?#]|$)/)
+    // /download/{token} is a share token URL, not a file id.
+    const fMatch = parsed.pathname.match(/\/(?:f|file)\/([A-Za-z0-9_-]{1,64})(?:[/?#]|$)/)
     if (fMatch?.[1]) return fMatch[1]
     // Matches /dl/{token} - already a direct download URL, no fileId to extract
     const dlMatch = parsed.pathname.match(/\/dl\/([A-Za-z0-9_-]{1,64})(?:[/?#]|$)/)

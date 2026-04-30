@@ -4,6 +4,8 @@
 
 ### Fixes & Improvements
 
+- Simplified UC.Files download behavior to use Electron's standard downloader path (same flow as other hosts) now that storage is Backblaze-backed, removing reliance on the custom parallel UC.Files path.
+- Fixed UC.Files share-link resolution for `/download/{token}` URLs by treating them as share tokens (not file IDs), preventing false "link could not be resolved" failures during game downloads.
 - Fixed UC.Files-backed artwork and animated hero media on mirror domains by routing them through the active website domain instead of loading `files.union-crax.xyz` directly. This also covers remaining overlay and avatar media paths that were still bypassing the shared proxy helper.
 - Updated game Details panel metadata flow to include `Date Added` and relative `Edited` timestamps for clearer change visibility.
 - Reordered game Details fields for better scan order: Released, Date Added, Edited, Version, Size, Source.
