@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { GameCard } from "@/components/GameCard"
 import { GameComments } from "@/components/GameComments"
+import { CommentMarkdown } from "@/components/CommentMarkdown"
 import { useDownloads } from "@/context/downloads-context"
 import { apiUrl, apiFetch } from "@/lib/api"
 import { getPreferredDownloadHost, setPreferredDownloadHost, requestDownloadToken, type PreferredDownloadHost, type DownloadConfig } from "@/lib/downloads"
@@ -1363,7 +1364,7 @@ export function GameDetailPage() {
                     </div>
                     <div>
                       <h3 className={`font-bold mb-1 ${game.hasHv ? 'text-red-300' : 'text-white'}`}>Important Note</h3>
-                      <p className={`text-sm font-medium leading-relaxed ${game.hasHv ? 'text-red-200' : 'text-zinc-300'}`}>{game.comment}</p>
+                      <CommentMarkdown text={game.comment} className={`text-sm font-medium ${game.hasHv ? 'text-red-200' : 'text-zinc-300'}`} />
                     </div>
                   </div>
                 </div>

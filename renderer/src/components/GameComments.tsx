@@ -20,6 +20,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { DiscordAvatar } from "@/components/DiscordAvatar"
+import { CommentMarkdown } from "@/components/CommentMarkdown"
 
 import { PaginationBar } from "@/components/PaginationBar"
 import { apiFetch, apiUrl, getApiBaseUrl } from "@/lib/api"
@@ -608,27 +609,6 @@ export function GameComments({
     })
   }
 
-  const renderBodyWithMentions = (text: string) => {
-    const parts = text.split(/(@[A-Za-z0-9_]{2,32})/g)
-    return parts.map((part, idx) => {
-      const mention = /^@([A-Za-z0-9_]{2,32})$/.exec(part)
-      if (!mention) {
-        return <span key={`txt-${idx}`}>{part}</span>
-      }
-      const username = mention[1]
-      return (
-        <button
-          key={`mention-${username}-${idx}`}
-          type="button"
-          className="font-semibold text-primary hover:underline"
-          onClick={() => navigate(`/user/${encodeURIComponent(username)}`)}
-        >
-          @{username}
-        </button>
-      )
-    })
-  }
-
   // Reddit-style thread line colors by depth
   const threadLineColors = [
     "border-blue-500/40",
@@ -748,9 +728,7 @@ export function GameComments({
 
               {isContentRevealed ? (
                 <div className="mt-2">
-                  <p className="text-sm text-zinc-400/70 whitespace-pre-wrap break-words leading-relaxed italic">
-                    {renderBodyWithMentions(comment.body)}
-                  </p>
+                  <CommentMarkdown text={comment.body} className="text-zinc-400/70 italic" />
                   <button
                     type="button"
                     onClick={toggleRevealDeleted}
@@ -818,9 +796,7 @@ export function GameComments({
               </span>
               </div>
             </div>
-            <p className="mt-2 text-sm text-zinc-400 whitespace-pre-wrap break-words leading-relaxed">
-              {renderBodyWithMentions(comment.body)}
-            </p>
+            <CommentMarkdown text={comment.body} className="mt-2 text-zinc-400" />
             <div className="mt-3 flex flex-wrap items-center gap-2">
               <Button
                 variant="ghost"

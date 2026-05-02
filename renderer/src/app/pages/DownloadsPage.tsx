@@ -11,6 +11,7 @@ import { AlertTriangle, Download, HardDrive, PauseCircle, Play, XCircle, Square 
 import { ExePickerModal } from "@/components/ExePickerModal"
 import { DesktopShortcutModal } from "@/components/DesktopShortcutModal"
 import { GameLaunchPreflightModal, type LaunchPreflightResult } from "@/components/GameLaunchPreflightModal"
+import { CommentMarkdown } from "@/components/CommentMarkdown"
 import { gameLogger } from "@/lib/logger"
 
 function formatBytes(bytes: number) {
@@ -1527,9 +1528,10 @@ export function DownloadsPage() {
                         <span>{finishedAt ? new Date(finishedAt).toLocaleDateString() : "Completed"}</span>
                       </div>
                       {game?.comment && (
-                        <p className="mt-1.5 max-w-md text-[11px] text-amber-400/80">
-                          Note: {game.comment}
-                        </p>
+                        <div className="mt-1.5 max-w-md text-[11px] text-amber-400/80">
+                          <strong className="text-amber-300">Note:</strong>
+                          <CommentMarkdown text={game.comment} className="mt-1 text-[11px] text-amber-400/80" />
+                        </div>
                       )}
                     </div>
                   </div>
