@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { CommentMarkdown } from "@/components/CommentMarkdown"
 import { Skeleton } from "@/components/ui/skeleton"
 import { MyRequests } from "@/components/MyRequests"
 import { apiFetch, apiUrl, getApiBaseUrl } from "@/lib/api"
@@ -378,7 +379,7 @@ export function AccountOverviewPage() {
                             {new Date(comment.createdAt).toLocaleDateString()}
                           </span>
                         </p>
-                        <p className="text-sm text-zinc-100 mt-2 line-clamp-3">{comment.body}</p>
+                        <CommentMarkdown text={comment.body} className="mt-2 max-h-24 overflow-hidden text-zinc-100" />
                       </div>
                     ))}
                   </div>
