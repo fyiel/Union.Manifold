@@ -310,42 +310,42 @@ function buildUCFilesDownloadUrl(token: string): string {
   return `https://files.union-crax.xyz/download/${encodeURIComponent(token)}`
 }
 
+function sanitizeUCFilesUrl(url: string): string {
+  try {
+    const parsed = new URL(url)
+    if (!isUCFilesHostValue(parsed.hostname)) return url
+    parsed.searchParams.delete("b2ContentDisposition")
+    return parsed.toString()
+  } catch {
+    return url
+  }
+}
+
 function getUCFilesResolvePayload(value: string): UCFilesResolvePayload | null {
   const trimmed = String(value || "").trim()
   if (!trimmed) return null
 
-  if (isUCFilesUrl(trimmed)) {
-    return { downloadUrl: trimmed }
+  const sanitized = sanitizeUCFilesUrl(trimmed)
+
+  if (isUCFilesUrl(sanitized)) {
+    return { downloadUrl: sanitized }
   }
 
-  if (!UCFILES_IDENTIFIER_RE.test(trimmed)) {
+  if (!UCFILES_IDENTIFIER_RE.test(sanitized)) {
     return null
   }
 
-  if (/^\d+$/.test(trimmed)) {
-    return { fileId: trimmed }
+  if (/^\d+$/.test(sanitized)) {
+    return { fileId: sanitized }
   }
 
-  return { downloadUrl: buildUCFilesDownloadUrl(trimmed) }
-}
-
-/**
- * Returns true if the UC.Files URL is already a signed /dl/ token URL
- * (i.e. it was already resolved and doesn't need re-resolution).
- */
-function isUCFilesDlTokenUrl(url: string): boolean {
-  try {
-    const parsed = new URL(url)
-    return isUCFilesHostValue(parsed.hostname) && /^\/dl\//.test(parsed.pathname)
-  } catch {
-    return false
-  }
+  return { downloadUrl: buildUCFilesDownloadUrl(sanitized) }
 }
 
 function isUCFilesShareDownloadUrl(url: string): boolean {
   try {
     const parsed = new URL(url)
-    return isUCFilesHostValue(parsed.hostname) && /^\/download\/[^/?#]+/.test(parsed.pathname)
+    return isUCFilesHostValue(parsed.hostname) && /^\/(?:download|dl)\/[^/?#]+/.test(parsed.pathname)
   } catch {
     return false
   }
@@ -354,23 +354,16 @@ function isUCFilesShareDownloadUrl(url: string): boolean {
 export async function resolveUCFilesDownload(url: string): Promise<ResolvedDownload> {
   if (!url) return { url, resolved: false }
 
-  // If the URL is already a signed /dl/ token, it's already resolved - pass it through
-  if (isUCFilesDlTokenUrl(url)) {
-    return {
-      url,
-      filename: inferFilenameFromUrl(url, ""),
-      resolved: true,
-    }
-  }
+  const sanitizedUrl = sanitizeUCFilesUrl(url)
 
-  const fileId = extractUCFilesFileId(url)
-  const shareDownloadUrl = isUCFilesShareDownloadUrl(url) ? url : null
+  const fileId = extractUCFilesFileId(sanitizedUrl)
+  const shareDownloadUrl = isUCFilesShareDownloadUrl(sanitizedUrl) ? sanitizedUrl : null
   const payload = fileId
     ? { fileId }
     : shareDownloadUrl
       ? { downloadUrl: shareDownloadUrl }
-      : getUCFilesResolvePayload(url)
-  if (!payload) return { url, resolved: false }
+      : getUCFilesResolvePayload(sanitizedUrl)
+  if (!payload) return { url: sanitizedUrl, resolved: false }
 
   try {
     const response = await apiFetch("/api/ucfiles/resolve", {
@@ -386,7 +379,7 @@ export async function resolveUCFilesDownload(url: string): Promise<ResolvedDownl
     const data = await response.json().catch(() => null)
     if (!response.ok || !data?.success || !data?.data?.url) {
       downloadLogger.warn("UC.Files resolve failed", { data: { status: response.status, body: data } })
-      return { url, resolved: false }
+      return { url: sanitizedUrl, resolved: false }
     }
 
     const result = data.data as Record<string, any>
@@ -399,7 +392,7 @@ export async function resolveUCFilesDownload(url: string): Promise<ResolvedDownl
   } catch (err) {
     if (err instanceof Error && err.message === UCFILES_404_MESSAGE) throw err
     downloadLogger.warn("UC.Files resolve error", { data: err })
-    return { url, resolved: false }
+    return { url: sanitizedUrl, resolved: false }
   }
 }
 
