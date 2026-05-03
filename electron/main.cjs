@@ -6536,11 +6536,18 @@ function createWindow(existingSplash) {
       return
     }
 
-    // Prefer the CDN-served filename (has a real extension from Content-Disposition) over match.filename,
-    // which may be a token hash with no extension (e.g. redirect via files.union-crax.xyz/download/<token>).
-    const filename = (itemFilename && path.extname(itemFilename))
-      ? itemFilename
-      : (match?.filename || itemFilename || 'download')
+    // For UC.Files redirects, the final CDN URL can expose an opaque object-key filename.
+    // Prefer resolver metadata when available so saved files keep the original display name.
+    const isUCFilesDownload = Boolean(
+      (match?.url && isUCFilesUrl(match.url)) ||
+      itemUrlChain.some((u) => isUCFilesUrl(u))
+    )
+    const resolvedFilename = typeof match?.filename === 'string' ? match.filename.trim() : ''
+    const filename = (isUCFilesDownload && resolvedFilename)
+      ? resolvedFilename
+      : (itemFilename && path.extname(itemFilename))
+        ? itemFilename
+        : (resolvedFilename || itemFilename || 'download')
     uc_log(`will-download - url=${item.getURL()}`)
     uc_log(`will-download - match.filename=${match?.filename}, item.getFilename()=${item.getFilename()}, final filename=${filename}`)
     const partIndex = match?.partIndex
