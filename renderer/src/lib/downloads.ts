@@ -57,6 +57,12 @@ export const SUPPORTED_DOWNLOAD_HOSTS: PreferredDownloadHost[] = ["ucfiles", "pi
 const PREFERRED_HOSTS: PreferredDownloadHost[] = ["ucfiles", "pixeldrain"]
 const PIXELDRAIN_404_MESSAGE = "Pixeldrain returned 404. The link appears to be dead."
 const UCFILES_404_MESSAGE = "UC.Files returned 404. The link appears to be dead."
+const UCFILES_IDENTIFIER_RE = /^[A-Za-z0-9_-]{1,64}$/
+
+type UCFilesResolvePayload = {
+  fileId?: string
+  downloadUrl?: string
+}
 
 function normalizeUCFilesHostValue(value: string): string {
   return String(value || "")
@@ -300,6 +306,29 @@ export function isUCFilesUrl(url: string): boolean {
   }
 }
 
+function buildUCFilesDownloadUrl(token: string): string {
+  return `https://files.union-crax.xyz/download/${encodeURIComponent(token)}`
+}
+
+function getUCFilesResolvePayload(value: string): UCFilesResolvePayload | null {
+  const trimmed = String(value || "").trim()
+  if (!trimmed) return null
+
+  if (isUCFilesUrl(trimmed)) {
+    return { downloadUrl: trimmed }
+  }
+
+  if (!UCFILES_IDENTIFIER_RE.test(trimmed)) {
+    return null
+  }
+
+  if (/^\d+$/.test(trimmed)) {
+    return { fileId: trimmed }
+  }
+
+  return { downloadUrl: buildUCFilesDownloadUrl(trimmed) }
+}
+
 /**
  * Returns true if the UC.Files URL is already a signed /dl/ token URL
  * (i.e. it was already resolved and doesn't need re-resolution).
@@ -336,13 +365,18 @@ export async function resolveUCFilesDownload(url: string): Promise<ResolvedDownl
 
   const fileId = extractUCFilesFileId(url)
   const shareDownloadUrl = isUCFilesShareDownloadUrl(url) ? url : null
-  if (!fileId && !shareDownloadUrl) return { url, resolved: false }
+  const payload = fileId
+    ? { fileId }
+    : shareDownloadUrl
+      ? { downloadUrl: shareDownloadUrl }
+      : getUCFilesResolvePayload(url)
+  if (!payload) return { url, resolved: false }
 
   try {
     const response = await apiFetch("/api/ucfiles/resolve", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(fileId ? { fileId } : { downloadUrl: shareDownloadUrl }),
+      body: JSON.stringify(payload),
     })
 
     if (response.status === 404) {
@@ -475,7 +509,7 @@ export async function resolveDownloadUrl(host: string, url: string): Promise<Res
         ? String((url as any).url)
         : String(url ?? "")
 
-  if (host === "ucfiles" || isUCFilesUrl(normalizedUrl)) {
+  if (host === "ucfiles" || isUCFilesUrl(normalizedUrl) || Boolean(getUCFilesResolvePayload(normalizedUrl))) {
     return resolveUCFilesDownload(normalizedUrl)
   }
   if (host === "pixeldrain" || isPixeldrainUrl(normalizedUrl)) {
