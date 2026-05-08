@@ -103,6 +103,17 @@ function isUcFilesHostname(host: string): boolean {
   if (normalized === "ucfiles" || normalized === "uc.files" || normalized === "files.union-crax.xyz") {
     return true
   }
+  if (normalized === "cdn.union-crax.xyz") return true
+  return normalized.startsWith("files") && normalized.endsWith(".union-crax.xyz")
+}
+
+/** True for app-server URLs that may require proxying (not the public CDN). */
+function isUcFilesAppUrl(host: string): boolean {
+  const normalized = normalizeHostname(host)
+  if (normalized === "ucfiles" || normalized === "uc.files" || normalized === "files.union-crax.xyz") {
+    return true
+  }
+  // cdn.union-crax.xyz is a public Backblaze CDN – no proxying needed
   return normalized.startsWith("files") && normalized.endsWith(".union-crax.xyz")
 }
 
@@ -146,9 +157,14 @@ export function proxyMediaUrl(mediaUrl: string): string {
 
   const normalizedRemoteUrl = normalizeRemoteMediaUrl(mediaUrl)
   if (normalizedRemoteUrl.startsWith("http://") || normalizedRemoteUrl.startsWith("https://")) {
-    if (isUcFilesUrl(normalizedRemoteUrl) && shouldProxyUcFilesMedia()) {
-      return apiUrl(`/api/ucfiles/media?url=${encodeURIComponent(normalizedRemoteUrl)}`)
-    }
+    // Only proxy through app-server URLs (files.union-crax.xyz).
+    // Direct CDN URLs (cdn.union-crax.xyz) are public Backblaze and never need proxying.
+    try {
+      const parsed = new URL(normalizedRemoteUrl)
+      if (isUcFilesAppUrl(parsed.hostname) && shouldProxyUcFilesMedia()) {
+        return apiUrl(`/api/ucfiles/media?url=${encodeURIComponent(normalizedRemoteUrl)}`)
+      }
+    } catch {}
     return normalizedRemoteUrl
   }
 
