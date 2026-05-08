@@ -314,7 +314,6 @@ function sanitizeUCFilesUrl(url: string): string {
   try {
     const parsed = new URL(url)
     if (!isUCFilesHostValue(parsed.hostname)) return url
-    parsed.searchParams.delete("b2ContentDisposition")
     return parsed.toString()
   } catch {
     return url

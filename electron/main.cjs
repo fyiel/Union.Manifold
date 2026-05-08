@@ -1630,6 +1630,18 @@ function clearLogs() {
 function attachWindowLogging(win, label = 'window') {
   if (!win) return
   const wc = win.webContents
+  const shouldIgnoreDevConsoleNoise = (message) => {
+    if (!isDev) return false
+    const text = String(message || '')
+    return (
+      text.includes('Autofill.enable failed') ||
+      text.includes('Autofill.setAddresses failed') ||
+      text.includes('Electron Security Warning (Disabled webSecurity)') ||
+      text.includes('Electron Security Warning (allowRunningInsecureContent)') ||
+      text.includes('Electron Security Warning (Insecure Content-Security-Policy)')
+    )
+  }
+
   ucLog(`Window created: ${label}`)
   win.on('show', () => {
     ucLog(`Window show: ${label}`)
@@ -1659,6 +1671,7 @@ function attachWindowLogging(win, label = 'window') {
   wc.on('responsive', () => ucLog(`Window responsive: ${label}`))
   wc.on('crashed', () => ucLog(`WebContents crashed: ${label}`, 'error'))
   wc.on('console-message', (_event, level, message, line, sourceId) => {
+    if (shouldIgnoreDevConsoleNoise(message)) return
     if (level >= 1) {
       const mappedLevel = level >= 2 ? 'error' : 'warn'
       ucLog(`Renderer console (${label})`, mappedLevel, { level, message, line, sourceId })
@@ -6458,7 +6471,10 @@ function createWindow(existingSplash) {
 
   if (isDev) {
     mainWindow.loadURL('http://localhost:5173')
-    mainWindow.webContents.openDevTools({ mode: 'detach' })
+    const shouldOpenDevTools = /^(1|true)$/i.test(String(process.env.UC_OPEN_DEVTOOLS || '').trim())
+    if (shouldOpenDevTools) {
+      mainWindow.webContents.openDevTools({ mode: 'detach' })
+    }
   } else {
     mainWindow.loadFile(path.join(__dirname, '..', 'renderer', 'dist', 'index.html'))
   }
