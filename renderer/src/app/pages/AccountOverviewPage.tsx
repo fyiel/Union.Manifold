@@ -1,13 +1,26 @@
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { CommentMarkdown } from "@/components/CommentMarkdown"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Textarea } from "@/components/ui/textarea"
 import { MyRequests } from "@/components/MyRequests"
-import { apiFetch, apiUrl, getApiBaseUrl } from "@/lib/api"
+import { apiFetch, apiUrl } from "@/lib/api"
 import { useAuth } from "@/hooks/useAuth"
-import { LogIn, MessageCircle, RefreshCw, Star, Heart, Clock, LogOut, Link2, Unlink, Loader2 } from "lucide-react"
+import { LogIn, RefreshCw, Star, Heart, Clock, LogOut, Link2, Unlink, Loader2, Upload, ImageIcon, Pencil, X, Check } from "lucide-react"
+
+const MAX_BIO_LENGTH = 240
+
+type ProfileImages = {
+  avatarUrl: string | null
+  customAvatarUrl: string | null
+  bannerUrl: string | null
+  avatarCooldownActive: boolean
+  bannerCooldownActive: boolean
+  avatarNextChangeAt: string | null
+  bannerNextChangeAt: string | null
+}
 
 
 type RecentComment = {
@@ -27,11 +40,19 @@ export function AccountOverviewPage() {
   const [recentComments, setRecentComments] = useState<RecentComment[]>([])
   const [recentLoading, setRecentLoading] = useState(false)
   const [recentError, setRecentError] = useState<string | null>(null)
-  const [loggingIn, setLoggingIn] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [linkingProvider, setLinkingProvider] = useState<string | null>(null)
   const [unlinkingProvider, setUnlinkingProvider] = useState<string | null>(null)
   const [loggingOut, setLoggingOut] = useState(false)
+  const [profileImages, setProfileImages] = useState<ProfileImages | null>(null)
+  const [avatarUploading, setAvatarUploading] = useState(false)
+  const [bannerUploading, setBannerUploading] = useState(false)
+  const [profileUploadError, setProfileUploadError] = useState<string | null>(null)
+  const [editingProfile, setEditingProfile] = useState(false)
+  const [bioDraft, setBioDraft] = useState("")
+  const [bioSaving, setBioSaving] = useState(false)
+  const avatarInputRef = useRef<HTMLInputElement>(null)
+  const bannerInputRef = useRef<HTMLInputElement>(null)
   
   const hasSession = authState.isAuthenticated && authState.user !== null
   const linkedProviders = authState.linkedProviders || []
@@ -54,6 +75,9 @@ export function AccountOverviewPage() {
       }
       const data = await res.json()
       setSummary(data)
+      if (data?.user?.bio !== undefined) {
+        setBioDraft(data.user.bio ?? "")
+      }
     } catch {
       setSummaryError("Unable to load account overview.")
       setSummary(null)
@@ -94,25 +118,100 @@ export function AccountOverviewPage() {
     void loadRecentComments()
   }, [authState.user, authState.isAuthenticated, loadSummary, loadRecentComments])
 
+  const loadProfileImages = useCallback(async () => {
+    try {
+      const res = await apiFetch("/api/account/profile-images")
+      if (!res.ok) return
+      const data = await res.json()
+      setProfileImages({
+        avatarUrl: data.avatarUrl ?? null,
+        customAvatarUrl: data.customAvatarUrl ?? null,
+        bannerUrl: data.bannerUrl ?? null,
+        avatarCooldownActive: Boolean(data.avatarCooldownActive),
+        bannerCooldownActive: Boolean(data.bannerCooldownActive),
+        avatarNextChangeAt: data.avatarNextChangeAt ?? null,
+        bannerNextChangeAt: data.bannerNextChangeAt ?? null,
+      })
+    } catch {
+      // ignore
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!authState.user || !authState.isAuthenticated) return
+    void loadProfileImages()
+  }, [authState.user, authState.isAuthenticated, loadProfileImages])
+
+  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setProfileUploadError(null)
+    setAvatarUploading(true)
+    try {
+      const form = new FormData()
+      form.append("file", file)
+      form.append("kind", "avatar")
+      const res = await fetch(apiUrl("/api/account/profile-images"), {
+        method: "POST",
+        body: form,
+        credentials: "include",
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        setProfileUploadError(data?.error || "Failed to upload avatar.")
+      } else {
+        await loadProfileImages()
+      }
+    } catch {
+      setProfileUploadError("Failed to upload avatar.")
+    } finally {
+      setAvatarUploading(false)
+      if (avatarInputRef.current) avatarInputRef.current.value = ""
+    }
+  }
+
+  const handleBannerUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setProfileUploadError(null)
+    setBannerUploading(true)
+    try {
+      const form = new FormData()
+      form.append("file", file)
+      form.append("kind", "banner")
+      const res = await fetch(apiUrl("/api/account/profile-images"), {
+        method: "POST",
+        body: form,
+        credentials: "include",
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        setProfileUploadError(data?.error || "Failed to upload banner.")
+      } else {
+        await loadProfileImages()
+      }
+    } catch {
+      setProfileUploadError("Failed to upload banner.")
+    } finally {
+      setBannerUploading(false)
+      if (bannerInputRef.current) bannerInputRef.current.value = ""
+    }
+  }
+
   useEffect(() => {
     if (hasSession) return
     setSummary(null)
     setSummaryError(null)
     setRecentComments([])
     setRecentError(null)
+    setProfileImages(null)
+    setProfileUploadError(null)
+    setBioDraft("")
+    setEditingProfile(false)
   }, [hasSession])
 
   const handleLogin = async () => {
-    setLoggingIn(true)
-    try {
-      await authActions.loginWithOAuth("discord")
-      await loadSummary().catch(() => {})
-      await loadRecentComments().catch(() => {})
-    } catch (err) {
-      // Error already handled by authActions
-    } finally {
-      setLoggingIn(false)
-    }
+    navigate("/login")
   }
 
   const handleLinkProvider = async (provider: "discord" | "google") => {
@@ -152,10 +251,29 @@ export function AccountOverviewPage() {
 
   const handleRefresh = async () => {
     setRefreshing(true)
-    await refresh().catch(() => {})
+    await authActions.refresh(true).catch(() => {})
     await loadSummary().catch(() => {})
     await loadRecentComments().catch(() => {})
+    await loadProfileImages().catch(() => {})
     setRefreshing(false)
+  }
+
+  const saveBio = async () => {
+    setBioSaving(true)
+    try {
+      const res = await apiFetch("/api/account/bio", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ bio: bioDraft.trim().slice(0, MAX_BIO_LENGTH) }),
+      })
+      if (res.ok) {
+        setEditingProfile(false)
+      }
+    } catch {
+      // ignore
+    } finally {
+      setBioSaving(false)
+    }
   }
 
 
@@ -178,16 +296,16 @@ export function AccountOverviewPage() {
           </p>
         </div>
 
-        {!hasSession && !accountLoading && (
+        {!hasSession && !authState.isLoading && (
           <Card className="glass rounded-2xl">
             <CardContent className="py-12 text-center space-y-4">
               <p className="text-lg font-semibold text-zinc-100">Login to continue.</p>
               <p className="text-sm text-zinc-400">
                 Sign in to see your saved lists and recent activity.
               </p>
-              <Button className="w-full md:w-auto" onClick={handleLogin} disabled={loggingIn}>
+              <Button className="w-full md:w-auto" onClick={handleLogin}>
                 <LogIn className="h-4 w-4 mr-2" />
-                {loggingIn ? "Connecting..." : "Login with Discord"}
+                Sign In
               </Button>
             </CardContent>
           </Card>
@@ -324,7 +442,179 @@ export function AccountOverviewPage() {
               </CardContent>
             </Card>
 
-            <Card className="glass rounded-2xl anim anim-d1">
+            <Card className="glass rounded-2xl anim anim-d1 overflow-hidden">
+              <input ref={bannerInputRef} type="file" accept="image/*" className="hidden" onChange={handleBannerUpload} />
+              <input ref={avatarInputRef} type="file" accept="image/*" className="hidden" onChange={handleAvatarUpload} />
+
+              {/* Banner + Avatar Hero */}
+              <div className="relative">
+                <div className="w-full h-32 bg-zinc-800/40 overflow-hidden">
+                  {profileImages?.bannerUrl ? (
+                    <img src={profileImages.bannerUrl} alt="Profile banner" className="w-full h-full object-cover" />
+                  ) : (
+                    <div className="w-full h-full bg-gradient-to-r from-zinc-800 to-zinc-700" />
+                  )}
+                </div>
+                <div className="px-5 pb-4">
+                  <div className="flex items-end justify-between -mt-8">
+                    <div className="h-16 w-16 rounded-full border-2 border-[#09090b] bg-zinc-800/80 overflow-hidden flex items-center justify-center shrink-0">
+                      {profileImages?.customAvatarUrl || profileImages?.avatarUrl ? (
+                        <img
+                          src={profileImages.customAvatarUrl ?? profileImages.avatarUrl ?? ""}
+                          alt="Avatar"
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <ImageIcon className="h-6 w-6 text-zinc-500" />
+                      )}
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="gap-2 mb-1"
+                      onClick={() => {
+                        if (!editingProfile) setBioDraft(summary?.user?.bio ?? bioDraft)
+                        setEditingProfile((v) => !v)
+                        setProfileUploadError(null)
+                      }}
+                    >
+                      {editingProfile ? <X className="h-3.5 w-3.5" /> : <Pencil className="h-3.5 w-3.5" />}
+                      {editingProfile ? "Cancel" : "Edit Profile"}
+                    </Button>
+                  </div>
+                  <div className="mt-2">
+                    <p className="font-semibold text-zinc-100">
+                      {authState.user?.displayName || authState.user?.username || "Your Account"}
+                    </p>
+                    {authState.user?.username && authState.user?.displayName && (
+                      <p className="text-xs text-zinc-500">@{authState.user.username}</p>
+                    )}
+                    {!editingProfile && summary?.user?.bio && (
+                      <p className="mt-1 text-sm text-zinc-400 line-clamp-2">{summary.user.bio}</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Edit Mode */}
+              {editingProfile && (
+                <div className="px-5 pb-5 pt-1 space-y-4 border-t border-white/[.07]">
+                  {profileUploadError && (
+                    <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+                      {profileUploadError}
+                    </div>
+                  )}
+
+                  {/* Banner upload */}
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Banner</p>
+                    <button
+                      type="button"
+                      disabled={bannerUploading || Boolean(profileImages?.bannerCooldownActive)}
+                      onClick={() => bannerInputRef.current?.click()}
+                      className="relative w-full h-24 rounded-xl overflow-hidden border border-white/[.07] bg-zinc-800/30 flex items-center justify-center group transition-opacity disabled:opacity-50"
+                    >
+                      {profileImages?.bannerUrl ? (
+                        <img src={profileImages.bannerUrl} alt="Banner" className="w-full h-full object-cover" />
+                      ) : null}
+                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity rounded-xl">
+                        {bannerUploading ? (
+                          <Loader2 className="h-5 w-5 text-white animate-spin" />
+                        ) : (
+                          <Upload className="h-5 w-5 text-white" />
+                        )}
+                      </div>
+                      {!profileImages?.bannerUrl && !bannerUploading && (
+                        <div className="flex flex-col items-center gap-1 text-zinc-500">
+                          <Upload className="h-5 w-5" />
+                          <span className="text-xs">Click to upload banner</span>
+                        </div>
+                      )}
+                    </button>
+                    {profileImages?.bannerCooldownActive && profileImages.bannerNextChangeAt && (
+                      <p className="text-xs text-zinc-500">
+                        Next change available after {new Date(profileImages.bannerNextChangeAt).toLocaleDateString()}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Avatar upload */}
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Profile Picture</p>
+                    <div className="flex items-center gap-4">
+                      <button
+                        type="button"
+                        disabled={avatarUploading || Boolean(profileImages?.avatarCooldownActive)}
+                        onClick={() => avatarInputRef.current?.click()}
+                        className="relative h-16 w-16 rounded-full overflow-hidden border border-white/[.07] bg-zinc-800/30 flex items-center justify-center group shrink-0 transition-opacity disabled:opacity-50"
+                      >
+                        {profileImages?.customAvatarUrl || profileImages?.avatarUrl ? (
+                          <img
+                            src={profileImages.customAvatarUrl ?? profileImages.avatarUrl ?? ""}
+                            alt="Avatar"
+                            className="w-full h-full object-cover"
+                          />
+                        ) : null}
+                        <div className="absolute inset-0 rounded-full bg-black/50 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                          {avatarUploading ? (
+                            <Loader2 className="h-4 w-4 text-white animate-spin" />
+                          ) : (
+                            <Upload className="h-4 w-4 text-white" />
+                          )}
+                        </div>
+                        {!profileImages?.customAvatarUrl && !profileImages?.avatarUrl && !avatarUploading && (
+                          <ImageIcon className="h-6 w-6 text-zinc-500" />
+                        )}
+                      </button>
+                      <div className="space-y-1 text-xs text-zinc-500">
+                        <p>Click the circle to upload a new profile picture.</p>
+                        {profileImages?.avatarCooldownActive && profileImages.avatarNextChangeAt && (
+                          <p>Next change available after {new Date(profileImages.avatarNextChangeAt).toLocaleDateString()}</p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Bio */}
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Bio</p>
+                    <Textarea
+                      value={bioDraft}
+                      onChange={(e) => setBioDraft(e.target.value.slice(0, MAX_BIO_LENGTH))}
+                      placeholder="Tell the community about you..."
+                      rows={3}
+                      maxLength={MAX_BIO_LENGTH}
+                    />
+                    <p className="text-xs text-zinc-500 text-right">{bioDraft.length}/{MAX_BIO_LENGTH}</p>
+                  </div>
+
+                  <div className="flex gap-2 pt-1">
+                    <Button
+                      size="sm"
+                      className="gap-2"
+                      onClick={saveBio}
+                      disabled={bioSaving || avatarUploading || bannerUploading}
+                    >
+                      {bioSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                      {bioSaving ? "Saving..." : "Save"}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setEditingProfile(false)
+                        setProfileUploadError(null)
+                        setBioDraft(summary?.user?.bio ?? "")
+                      }}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </Card>
+
+            <Card className="glass rounded-2xl anim anim-d2">
               <CardHeader className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
                 <div>
                   <p className="section-label mb-1">Activity</p>
@@ -387,7 +677,7 @@ export function AccountOverviewPage() {
               </CardContent>
             </Card>
 
-            <Card className="glass rounded-2xl anim anim-d2">
+            <Card className="glass rounded-2xl anim anim-d3">
               <CardHeader>
                 <p className="section-label mb-1">Overview</p>
                 <CardTitle className="text-xl font-light tracking-tight">Your Lists</CardTitle>

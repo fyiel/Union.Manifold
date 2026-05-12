@@ -71,7 +71,7 @@ export function LogViewer() {
           View Logs
         </Button>
       </DialogTrigger>
-      <DialogContent className="max-w-none w-[min(95vw,1400px)] h-[85vh] max-h-[85vh] min-h-[60vh] flex flex-col overflow-hidden rounded-2xl border-white/[.07] bg-zinc-900/95 backdrop-blur-md p-0">
+      <DialogContent className="max-w-none w-[min(95vw,1400px)] h-[85vh] max-h-[85vh] min-h-[60vh] flex flex-col overflow-hidden p-0">
         <div className="flex flex-col h-full min-h-0 p-5 gap-0">
           <DialogHeader className="pb-3 shrink-0">
             <DialogTitle className="text-base font-semibold">Application Logs</DialogTitle>

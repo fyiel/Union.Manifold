@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from "react"
-import { ArrowDownToLine, ChevronDown, FolderOpen, Gamepad2, HardDrive, LogIn, LogOut, Mail, Plus, RefreshCw, Settings2, UserRound, Terminal, Cpu, FlaskConical, Zap, Layers } from "lucide-react"
+import { useEffect, useMemo, useRef, useState } from "react"
+import { ArrowDownToLine, ChevronDown, Check, ExternalLink, FolderOpen, Gamepad2, HardDrive, ImageIcon, Loader2, LogIn, LogOut, Pencil, Plus, RefreshCw, Settings2, Sparkles, Upload, UserRound, Terminal, Cpu, FlaskConical, X, Zap, Layers } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -14,6 +15,8 @@ import {
   setPreferredDownloadHost,
 } from "@/lib/downloads"
 import { LogViewer } from "@/components/LogViewer"
+import { SessionManager } from "@/components/SessionManager"
+import { ProfileMediaCropDialog } from "@/components/ProfileMediaCropDialog"
 import { useDiscordAccount } from "@/hooks/use-discord-account"
 import { ControllerSettingsPanel } from "@/components/ControllerSettingsPanel"
 import {
@@ -27,6 +30,11 @@ import {
 import { LINUX_PRESETS, applyGlobalLinuxPreset, type LinuxGlobalSettings, type LinuxPresetId } from "@/lib/linux-presets"
 import { useToast } from "@/context/toast-context"
 import { useNavigate } from "react-router-dom"
+import {
+  useMotionPreferences,
+  setAnimatedBackgroundsEnabled as persistAnimatedBackgrounds,
+  setReducedMotionEnabled as persistReducedMotion,
+} from "@/hooks/use-motion-preferences"
 
 type DiskInfo = {
   id: string
@@ -195,7 +203,29 @@ export function SettingsPage() {
   const [bioDraft, setBioDraft] = useState("")
   const [bioSaving, setBioSaving] = useState(false)
   const [skipLinkCheck, setSkipLinkCheck] = useState(false)
+  const [profileImages, setProfileImages] = useState<{
+    avatarUrl: string | null
+    customAvatarUrl: string | null
+    bannerUrl: string | null
+    avatarCooldownActive: boolean
+    bannerCooldownActive: boolean
+    avatarNextChangeAt: string | null
+    bannerNextChangeAt: string | null
+  } | null>(null)
+  const [avatarUploading, setAvatarUploading] = useState(false)
+  const [bannerUploading, setBannerUploading] = useState(false)
+  const [profileUploadError, setProfileUploadError] = useState<string | null>(null)
+  const [editingProfile, setEditingProfile] = useState(false)
+  const avatarInputRef = useRef<HTMLInputElement>(null)
+  const bannerInputRef = useRef<HTMLInputElement>(null)
+  const [cropOpen, setCropOpen] = useState(false)
+  const [cropKind, setCropKind] = useState<"avatar" | "banner">("avatar")
+  const [cropSourceFile, setCropSourceFile] = useState<File | null>(null)
   const [activeSection, setActiveSection] = useState<'account' | 'downloads' | 'game-launch' | 'overlay' | 'controller' | 'advanced'>('account')
+
+  // Motion preferences (animated backgrounds + reduced motion). Hook reads
+  // from electron-store + localStorage; setters below persist + sync.
+  const { animatedBackgroundsEnabled, reducedMotionEnabled } = useMotionPreferences()
 
   // Overlay settings state
   const [overlayEnabled, setOverlayEnabled] = useState(true)
@@ -987,6 +1017,16 @@ export function SettingsPage() {
   }, [])
 
   useEffect(() => {
+    if (!accountUser || !authenticated) {
+      setProfileImages(null)
+      setEditingProfile(false)
+      setProfileUploadError(null)
+      return
+    }
+    void loadProfileImages()
+  }, [accountUser, authenticated])
+
+  useEffect(() => {
     if (!accountUser || !authenticated) return
     setBioDraft(accountUser.bio ?? "")
   }, [accountUser, authenticated])
@@ -1161,6 +1201,41 @@ export function SettingsPage() {
     }).catch(() => { })
   }
 
+  // Animated backgrounds + reduced motion. Persisting via the helpers in
+  // use-motion-preferences updates electron-store + localStorage and fires
+  // the cross-window event; useAppPreferencesSync picks that up and POSTs
+  // to /api/account/app-preferences so the value syncs to the web app too.
+  const updateAnimatedBackgroundsEnabled = (checked: boolean) => {
+    void persistAnimatedBackgrounds(checked)
+    apiFetch("/api/account/app-preferences", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ animatedBackgroundsEnabled: checked }),
+    }).catch(() => { })
+  }
+
+  const updateReducedMotionEnabled = (checked: boolean) => {
+    void persistReducedMotion(checked)
+    apiFetch("/api/account/app-preferences", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reducedMotionEnabled: checked }),
+    }).catch(() => { })
+  }
+
+  const openWebSettings = () => {
+    try {
+      // Electron's window-open handler in main.cjs routes http(s) URLs through
+      // shell.openExternal, so this lands in the user's default browser. The
+      // API and the web app share an origin, so getApiBaseUrl is the right
+      // base for the /settings route.
+      const baseUrl = getApiBaseUrl().replace(/\/$/, "")
+      window.open(`${baseUrl}/settings`, "_blank", "noopener,noreferrer")
+    } catch {
+      // ignore
+    }
+  }
+
   const updateRpcHideNsfw = (checked: boolean) => {
     window.ucSettings?.set?.('rpcHideNsfw', checked).catch(() => { })
     apiFetch("/api/account/preferences", {
@@ -1223,6 +1298,91 @@ export function SettingsPage() {
       // ignore
     } finally {
       setBioSaving(false)
+    }
+  }
+
+  const loadProfileImages = async () => {
+    try {
+      const res = await apiFetch("/api/account/profile-images")
+      if (!res.ok) return
+      const data = await res.json()
+      setProfileImages({
+        avatarUrl: data.avatarUrl ?? null,
+        customAvatarUrl: data.customAvatarUrl ?? null,
+        bannerUrl: data.bannerUrl ?? null,
+        avatarCooldownActive: Boolean(data.avatarCooldownActive),
+        bannerCooldownActive: Boolean(data.bannerCooldownActive),
+        avatarNextChangeAt: data.avatarNextChangeAt ?? null,
+        bannerNextChangeAt: data.bannerNextChangeAt ?? null,
+      })
+    } catch { }
+  }
+
+  const handleAvatarFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setCropKind("avatar")
+    setCropSourceFile(file)
+    setCropOpen(true)
+    if (avatarInputRef.current) avatarInputRef.current.value = ""
+  }
+
+  const handleBannerFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setCropKind("banner")
+    setCropSourceFile(file)
+    setCropOpen(true)
+    if (bannerInputRef.current) bannerInputRef.current.value = ""
+  }
+
+  const doAvatarUpload = async (file: File) => {
+    setProfileUploadError(null)
+    setAvatarUploading(true)
+    try {
+      const form = new FormData()
+      form.append("file", file)
+      form.append("kind", "avatar")
+      const res = await fetch(apiUrl("/api/account/profile-images"), {
+        method: "POST",
+        body: form,
+        credentials: "include",
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        setProfileUploadError(data?.error || "Failed to upload avatar.")
+      } else {
+        await loadProfileImages()
+      }
+    } catch {
+      setProfileUploadError("Failed to upload avatar.")
+    } finally {
+      setAvatarUploading(false)
+    }
+  }
+
+  const doBannerUpload = async (file: File) => {
+    setProfileUploadError(null)
+    setBannerUploading(true)
+    try {
+      const form = new FormData()
+      form.append("file", file)
+      form.append("kind", "banner")
+      const res = await fetch(apiUrl("/api/account/profile-images"), {
+        method: "POST",
+        body: form,
+        credentials: "include",
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        setProfileUploadError(data?.error || "Failed to upload banner.")
+      } else {
+        await loadProfileImages()
+      }
+    } catch {
+      setProfileUploadError("Failed to upload banner.")
+    } finally {
+      setBannerUploading(false)
     }
   }
 
@@ -1448,7 +1608,7 @@ export function SettingsPage() {
   ]
 
   return (
-    <div className="container mx-auto max-w-6xl">
+    <div className="container mx-auto max-w-4xl">
       <div className="mb-8">
         <p className="section-label mb-2">Configuration</p>
         <div className="flex items-center gap-3">
@@ -1503,55 +1663,96 @@ export function SettingsPage() {
           {activeSection === 'account' && (
             <>
 
-              <Card className="border-white/[.07]">
-                <CardContent className="p-6 space-y-6">
-                  <div className="flex flex-wrap items-start justify-between gap-4">
-                    <div>
-                      <h2 className="text-lg font-semibold">Account</h2>
-                      <p className="text-sm text-zinc-400">
-                        Manage your account and preferences right inside the app.
-                      </p>
+              <Card className="border-white/[.07] overflow-hidden">
+                <input ref={bannerInputRef} type="file" accept="image/*" className="hidden" onChange={handleBannerFileChange} />
+                <input ref={avatarInputRef} type="file" accept="image/*" className="hidden" onChange={handleAvatarFileChange} />
+
+                {/* Banner */}
+                <div className="relative w-full aspect-[3/1] bg-zinc-900">
+                  {profileImages?.bannerUrl ? (
+                    <img
+                      src={profileImages.bannerUrl}
+                      alt="Profile banner"
+                      className="w-full h-full object-cover"
+                    />
+                  ) : showAccountControls ? (
+                    <div className="w-full h-full bg-gradient-to-br from-zinc-800 via-zinc-800 to-zinc-700" />
+                  ) : (
+                    <div className="w-full h-full bg-zinc-900" />
+                  )}
+                  <div className="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-black/60 to-transparent pointer-events-none" />
+                </div>
+
+                {/* Avatar + action row */}
+                <div className="px-5 pt-0 pb-0">
+                  <div className="flex items-end justify-between -mt-7">
+                    <div className="h-14 w-14 rounded-full border-2 border-card bg-zinc-800 overflow-hidden flex items-center justify-center shrink-0 shadow-lg">
+                      {profileImages?.customAvatarUrl || profileImages?.avatarUrl ? (
+                        <img
+                          src={profileImages.customAvatarUrl ?? profileImages.avatarUrl ?? ""}
+                          alt="Avatar"
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <DiscordAvatar avatarUrl={accountAvatarUrl} alt="Avatar" className="h-full w-full rounded-full" />
+                      )}
                     </div>
-                    <div className="flex flex-wrap gap-2">
+                    <div className="flex flex-wrap gap-2 mb-1">
                       {showAccountControls ? (
                         <>
                           <Button
                             variant="outline"
-                            className="gap-2"
+                            size="sm"
+                            className="gap-1.5"
+                            onClick={() => {
+                              if (!editingProfile) setBioDraft(accountUser?.bio ?? bioDraft)
+                              setEditingProfile((v) => !v)
+                              setProfileUploadError(null)
+                            }}
+                          >
+                            {editingProfile ? <X className="h-3.5 w-3.5" /> : <Pencil className="h-3.5 w-3.5" />}
+                            {editingProfile ? "Cancel" : "Edit Profile"}
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="gap-1.5"
                             onClick={refreshAccountSummary}
                             disabled={accountBusy}
                           >
-                            <RefreshCw className={`h-4 w-4 ${accountRefreshing ? "animate-spin" : ""}`} />
+                            <RefreshCw className={`h-3.5 w-3.5 ${accountRefreshing ? "animate-spin" : ""}`} />
                             {accountRefreshing ? "Refreshing..." : "Refresh"}
                           </Button>
                           <Button
                             variant="outline"
-                            className="gap-2"
+                            size="sm"
+                            className="gap-1.5"
                             onClick={handleAccountLogout}
                             disabled={accountBusy}
                           >
-                            <LogOut className="h-4 w-4" />
+                            <LogOut className="h-3.5 w-3.5" />
                             {loggingOut ? "Signing out..." : "Logout"}
                           </Button>
                         </>
                       ) : (
-                        <div className="flex flex-wrap gap-2">
-                          <Button className="gap-2" onClick={handleAccountLogin} disabled={accountBusy}>
-                            <LogIn className="h-4 w-4" />
-                            {loggingIn ? "Connecting..." : "Login with Discord"}
+                        <>
+                          <Button size="sm" className="gap-1.5" onClick={handleAccountLogin} disabled={accountBusy}>
+                            <LogIn className="h-3.5 w-3.5" />
+                            {loggingIn ? "Connecting..." : "Sign In"}
                           </Button>
-                          <Button
-                            variant="outline"
-                            className="gap-2"
-                            onClick={() => { window.location.hash = "#/login" }}
-                            disabled={accountBusy}
-                          >
-                            <Mail className="h-4 w-4" />
-                            Sign in with email
-                          </Button>
-                        </div>
+                        </>
                       )}
                     </div>
+                  </div>
+                </div>
+
+                {/* Name + bio preview */}
+                <div className="px-5 pt-3 pb-5 space-y-4">
+                  <div>
+                    <p className="font-semibold text-zinc-100 leading-tight">{accountLabel}</p>
+                    {accountUser?.bio && (
+                      <p className="mt-1 text-sm text-zinc-400 line-clamp-2">{accountUser.bio}</p>
+                    )}
                   </div>
 
                   {accountError && (
@@ -1560,89 +1761,208 @@ export function SettingsPage() {
                     </div>
                   )}
 
-                  <div className="flex items-center gap-4">
-                    <DiscordAvatar avatarUrl={accountAvatarUrl} alt="Account avatar" className="h-12 w-12 rounded-full" />
-                    <div>
-                      <div className="text-sm font-semibold text-zinc-100">{accountLabel}</div>
-                      <div className="text-xs text-zinc-400">Discord account</div>
-                    </div>
-                  </div>
-
+                  {/* Preferences */}
                   {showAccountControls && (
-                    <div className="grid gap-4 md:grid-cols-2">
-                      <div className="rounded-xl border border-white/[.07] bg-zinc-900/50 p-4 space-y-4">
-                        <div className="flex items-center gap-2 text-sm font-semibold">
-                          <UserRound className="h-4 w-4 text-zinc-400" />
-                          Preferences
+                    <div className="rounded-xl border border-white/[.07] bg-zinc-900/50 p-4 space-y-1">
+                      <div className="flex items-center gap-2 text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-3">
+                        <UserRound className="h-3.5 w-3.5" />
+                        Preferences
+                      </div>
+                      <div className="divide-y divide-white/[.05]">
+                        <div className="flex items-center justify-between gap-4 py-3">
+                          <div className="min-w-0">
+                            <div className="text-sm font-medium leading-tight">Show NSFW covers</div>
+                            <div className="text-xs text-zinc-400 mt-0.5">Unblur NSFW game cover images.</div>
+                          </div>
+                          <Switch checked={showNsfw} onCheckedChange={updateNsfwVisibility} className="shrink-0" />
                         </div>
-                        <div className="space-y-3">
-                          <div className="flex items-center justify-between gap-3">
-                            <div>
-                              <div className="text-sm font-medium">Show NSFW covers</div>
-                              <div className="text-xs text-zinc-400">Unblur NSFW game cover images.</div>
-                            </div>
-                            <Switch checked={showNsfw} onCheckedChange={updateNsfwVisibility} />
+                        <div className="flex items-center justify-between gap-4 py-3">
+                          <div className="min-w-0">
+                            <div className="text-sm font-medium leading-tight">Show Mika art</div>
+                            <div className="text-xs text-zinc-400 mt-0.5">Hide the Mika mascot artwork.</div>
                           </div>
-                          <div className="flex items-center justify-between gap-3">
-                            <div>
-                              <div className="text-sm font-medium">Show Mika art</div>
-                              <div className="text-xs text-zinc-400">Hide the Mika mascot artwork.</div>
-                            </div>
-                            <Switch checked={showMika} onCheckedChange={updateMikaVisibility} />
+                          <Switch checked={showMika} onCheckedChange={updateMikaVisibility} className="shrink-0" />
+                        </div>
+                        <div className="flex items-center justify-between gap-4 py-3">
+                          <div className="min-w-0">
+                            <div className="text-sm font-medium leading-tight">Public profile</div>
+                            <div className="text-xs text-zinc-400 mt-0.5">Let others view your profile page.</div>
                           </div>
-                          <div className="flex items-center justify-between gap-3">
-                            <div>
-                              <div className="text-sm font-medium">Public profile</div>
-                              <div className="text-xs text-zinc-400">Let others view your profile page.</div>
-                            </div>
-                            <Switch checked={showPublicProfile} onCheckedChange={updatePublicProfileVisibility} />
-                          </div>
+                          <Switch checked={showPublicProfile} onCheckedChange={updatePublicProfileVisibility} className="shrink-0" />
                         </div>
                       </div>
-
-                      <div className="rounded-xl border border-white/[.07] bg-zinc-900/50 p-4 space-y-3 md:col-span-2">
-                        <div className="text-sm font-semibold">Profile bio</div>
-                        <Textarea
-                          value={bioDraft}
-                          onChange={(event) => {
-                            const next = event.target.value.slice(0, TEXT_CONSTRAINTS.MAX_BIO_LENGTH)
-                            setBioDraft(next)
-                          }}
-                          maxLength={TEXT_CONSTRAINTS.MAX_BIO_LENGTH}
-                          rows={4}
-                          placeholder={showAccountControls ? "Share something about you..." : "Login to edit your bio"}
-                          disabled={!showAccountControls || accountBusy}
-                        />
-                        <div className="flex items-center justify-between text-xs text-zinc-400">
-                          <span>{bioDraft.length}/{TEXT_CONSTRAINTS.MAX_BIO_LENGTH} characters</span>
-                        </div>
-                        <div className="flex flex-wrap gap-2">
-                          <Button
-                            type="button"
-                            variant="outline"
-                            className="gap-2"
-                            onClick={saveBio}
-                            disabled={!showAccountControls || bioSaving || accountBusy}
-                          >
-                            {bioSaving ? "Saving..." : "Save bio"}
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            className="gap-2"
-                            onClick={() => setBioDraft(accountUser?.bio ?? "")}
-                            disabled={!showAccountControls || accountBusy}
-                          >
-                            Reset
-                          </Button>
-                        </div>
-                      </div>
-
-
                     </div>
                   )}
-                </CardContent>
+                </div>
               </Card>
+
+              {/* Edit Profile Dialog */}
+              <Dialog
+                open={editingProfile}
+                onOpenChange={(open) => {
+                  if (!open) {
+                    setEditingProfile(false)
+                    setProfileUploadError(null)
+                    setBioDraft(accountUser?.bio ?? "")
+                  }
+                }}
+              >
+                <DialogContent className="max-w-lg">
+                  <DialogHeader>
+                    <DialogTitle>Edit Profile</DialogTitle>
+                  </DialogHeader>
+
+                  <div className="space-y-5">
+                    {profileUploadError && (
+                      <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+                        {profileUploadError}
+                      </div>
+                    )}
+
+                    {/* Banner */}
+                    <div className="space-y-2">
+                      <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Banner</p>
+                      <button
+                        type="button"
+                        disabled={bannerUploading || Boolean(profileImages?.bannerCooldownActive)}
+                        onClick={() => bannerInputRef.current?.click()}
+                        className="relative w-full aspect-[3/1] rounded-xl overflow-hidden border border-white/[.07] bg-zinc-900 flex items-center justify-center group transition-opacity disabled:opacity-50"
+                      >
+                        {profileImages?.bannerUrl ? (
+                          <img src={profileImages.bannerUrl} alt="Banner" className="w-full h-full object-cover" />
+                        ) : null}
+                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity rounded-xl">
+                          {bannerUploading ? (
+                            <Loader2 className="h-5 w-5 text-white animate-spin" />
+                          ) : (
+                            <div className="flex flex-col items-center gap-1 text-white">
+                              <Upload className="h-5 w-5" />
+                              <span className="text-xs">Click to change</span>
+                            </div>
+                          )}
+                        </div>
+                        {!profileImages?.bannerUrl && !bannerUploading && (
+                          <div className="flex flex-col items-center gap-1 text-zinc-500">
+                            <Upload className="h-5 w-5" />
+                            <span className="text-xs">Click to upload banner</span>
+                          </div>
+                        )}
+                      </button>
+                      {profileImages?.bannerCooldownActive && profileImages.bannerNextChangeAt && (
+                        <p className="text-xs text-zinc-500">
+                          Next change after {new Date(profileImages.bannerNextChangeAt).toLocaleDateString()}
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Avatar */}
+                    <div className="space-y-2">
+                      <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Profile Picture</p>
+                      <div className="flex items-center gap-4">
+                        <button
+                          type="button"
+                          disabled={avatarUploading || Boolean(profileImages?.avatarCooldownActive)}
+                          onClick={() => avatarInputRef.current?.click()}
+                          className="relative h-16 w-16 rounded-full overflow-hidden border border-white/[.07] bg-zinc-800/30 flex items-center justify-center group shrink-0 transition-opacity disabled:opacity-50"
+                        >
+                          {profileImages?.customAvatarUrl || profileImages?.avatarUrl ? (
+                            <img
+                              src={profileImages.customAvatarUrl ?? profileImages.avatarUrl ?? ""}
+                              alt="Avatar"
+                              className="w-full h-full object-cover"
+                            />
+                          ) : null}
+                          <div className="absolute inset-0 rounded-full bg-black/50 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                            {avatarUploading ? (
+                              <Loader2 className="h-4 w-4 text-white animate-spin" />
+                            ) : (
+                              <Upload className="h-4 w-4 text-white" />
+                            )}
+                          </div>
+                          {!profileImages?.customAvatarUrl && !profileImages?.avatarUrl && !avatarUploading && (
+                            <ImageIcon className="h-6 w-6 text-zinc-500" />
+                          )}
+                        </button>
+                        <div className="text-xs text-zinc-500 space-y-0.5">
+                          <p>Click to upload a new profile picture.</p>
+                          {profileImages?.avatarCooldownActive && profileImages.avatarNextChangeAt && (
+                            <p>Next change after {new Date(profileImages.avatarNextChangeAt).toLocaleDateString()}</p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Bio */}
+                    <div className="space-y-2">
+                      <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Bio</p>
+                      <Textarea
+                        value={bioDraft}
+                        onChange={(e) => setBioDraft(e.target.value.slice(0, TEXT_CONSTRAINTS.MAX_BIO_LENGTH))}
+                        placeholder="Share something about you..."
+                        rows={3}
+                        maxLength={TEXT_CONSTRAINTS.MAX_BIO_LENGTH}
+                        disabled={bioSaving || accountBusy}
+                      />
+                      <p className="text-xs text-zinc-500 text-right">{bioDraft.length}/{TEXT_CONSTRAINTS.MAX_BIO_LENGTH}</p>
+                    </div>
+
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        className="gap-2"
+                        onClick={async () => {
+                          await saveBio()
+                          setEditingProfile(false)
+                        }}
+                        disabled={bioSaving || avatarUploading || bannerUploading || accountBusy}
+                      >
+                        {bioSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                        {bioSaving ? "Saving..." : "Save bio"}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          setEditingProfile(false)
+                          setProfileUploadError(null)
+                          setBioDraft(accountUser?.bio ?? "")
+                        }}
+                      >
+                        Close
+                      </Button>
+                    </div>
+                  </div>
+                </DialogContent>
+              </Dialog>
+
+              {/* Crop dialog */}
+              <ProfileMediaCropDialog
+                open={cropOpen}
+                kind={cropKind}
+                file={cropSourceFile}
+                onOpenChange={(open) => {
+                  setCropOpen(open)
+                  if (!open) setCropSourceFile(null)
+                }}
+                onApply={(file) => {
+                  if (cropKind === "avatar") void doAvatarUpload(file)
+                  else void doBannerUpload(file)
+                }}
+              />
+
+              {showAccountControls && (
+                <Card className="border-white/[.07]">
+                  <CardContent className="p-6 space-y-4">
+                    <div>
+                      <h2 className="text-lg font-semibold">Sessions &amp; Devices</h2>
+                      <p className="text-sm text-zinc-400">
+                        Manage active sign-in sessions across all your devices.
+                      </p>
+                    </div>
+                    <SessionManager />
+                  </CardContent>
+                </Card>
+              )}
 
               <Card className="border-white/[.07]">
                 <CardContent className="p-6 space-y-6">
@@ -1798,6 +2118,67 @@ export function SettingsPage() {
                       </div>
                     )}
 
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* ── Appearance & motion ──────────────────────────────
+                  Mirrors union-crax.xyz's appearance section. Toggles persist
+                  to electron-store + localStorage AND sync to /api/account/
+                  app-preferences so the web app picks them up. The animated
+                  background on GameDetailPage is gated by these. */}
+              <Card className="border-white/[.07]">
+                <CardContent className="p-6 space-y-5">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-semibold text-zinc-100 flex items-center gap-2">
+                        <Sparkles className="h-4 w-4 text-zinc-400" />
+                        Appearance & motion
+                      </div>
+                      <div className="text-xs text-zinc-400 mt-0.5">
+                        Controls game-page background animation and motion intensity. Synced with your account.
+                      </div>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={openWebSettings}
+                      className="rounded-full gap-2 shrink-0"
+                      title="Open the full settings page in your browser"
+                    >
+                      <ExternalLink className="h-3.5 w-3.5" />
+                      <span className="hidden sm:inline">Open web settings</span>
+                      <span className="sm:hidden">Web</span>
+                    </Button>
+                  </div>
+
+                  <div className="rounded-xl border border-white/[.07] bg-zinc-900/50 p-4 divide-y divide-white/[.05]">
+                    <div className="flex items-center justify-between gap-4 py-3">
+                      <div className="min-w-0">
+                        <div className="text-sm font-medium leading-tight">Animated backgrounds</div>
+                        <div className="text-xs text-zinc-400 mt-0.5">
+                          Subtle ambient motion on game pages.
+                        </div>
+                      </div>
+                      <Switch
+                        checked={animatedBackgroundsEnabled}
+                        onCheckedChange={updateAnimatedBackgroundsEnabled}
+                        className="shrink-0"
+                      />
+                    </div>
+                    <div className="flex items-center justify-between gap-4 py-3">
+                      <div className="min-w-0">
+                        <div className="text-sm font-medium leading-tight">Reduced motion</div>
+                        <div className="text-xs text-zinc-400 mt-0.5">
+                          Tones animations down site-wide. Overrides animated backgrounds.
+                        </div>
+                      </div>
+                      <Switch
+                        checked={reducedMotionEnabled}
+                        onCheckedChange={updateReducedMotionEnabled}
+                        className="shrink-0"
+                      />
+                    </div>
                   </div>
                 </CardContent>
               </Card>

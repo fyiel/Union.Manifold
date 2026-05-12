@@ -1,20 +1,48 @@
-import { useCallback, useEffect, useState, useSyncExternalStore } from "react"
+import { useSyncExternalStore } from "react"
+import { getApiConnectivitySnapshot, resetApiReachability, subscribeApiConnectivity } from "@/lib/api"
+
+type ConnectivityStatus = ReturnType<typeof getApiConnectivitySnapshot>
 
 function subscribe(callback: () => void) {
-  window.addEventListener("online", callback)
-  window.addEventListener("offline", callback)
+  const handleOnline = () => {
+    resetApiReachability()
+    callback()
+  }
+  const handleOffline = () => callback()
+
+  window.addEventListener("online", handleOnline)
+  window.addEventListener("offline", handleOffline)
+  const unsubscribeConnectivity = subscribeApiConnectivity(callback)
+
   return () => {
-    window.removeEventListener("online", callback)
-    window.removeEventListener("offline", callback)
+    window.removeEventListener("online", handleOnline)
+    window.removeEventListener("offline", handleOffline)
+    unsubscribeConnectivity()
   }
 }
 
 function getSnapshot() {
-  return typeof navigator !== "undefined" ? navigator.onLine : true
+  return getApiConnectivitySnapshot().isOnline
 }
 
 function getServerSnapshot() {
   return true
+}
+
+function getConnectivitySnapshot(): ConnectivityStatus {
+  return getApiConnectivitySnapshot()
+}
+
+function getConnectivityServerSnapshot(): ConnectivityStatus {
+  return {
+    browserOnline: true,
+    serviceReachable: true,
+    isOnline: true,
+  }
+}
+
+export function useConnectivityStatus(): ConnectivityStatus {
+  return useSyncExternalStore(subscribe, getConnectivitySnapshot, getConnectivityServerSnapshot)
 }
 
 /**

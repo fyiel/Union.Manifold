@@ -227,7 +227,7 @@ export function useAuth(): [AuthState, AuthActions] {
           throw new Error("Auth handler not available")
         }
 
-        const response = await window.ucAuth.login(getApiBaseUrl())
+        const response = await window.ucAuth.login(getApiBaseUrl(), provider)
         if (!response.ok) {
           throw new Error(response.error || "OAuth login failed")
         }

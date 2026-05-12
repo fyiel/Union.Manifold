@@ -5,6 +5,7 @@ import { LauncherPage } from "@/app/pages/LauncherPage"
 import { SearchPage } from "@/app/pages/SearchPage"
 import { GameDetailPage } from "@/app/pages/GameDetailPage"
 import { LibraryPage } from "@/app/pages/LibraryPage"
+import { CollectionsPage } from "@/app/pages/CollectionsPage"
 import { DownloadsPage } from "@/app/pages/DownloadsPage"
 import { SettingsPage } from "@/app/pages/SettingsPage"
 import { WishlistPage } from "@/app/pages/WishlistPage"
@@ -57,7 +58,7 @@ function ExtractionCloseGuard() {
 
   return (
     <Dialog open={Boolean(request)} onOpenChange={(open) => { if (!open) void handleResponse(false) }}>
-      <DialogContent className="sm:max-w-md rounded-2xl border-white/[.07] bg-zinc-900/95 text-white shadow-2xl" showCloseButton={false}>
+      <DialogContent className="sm:max-w-md" showCloseButton={false}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <AlertTriangle className="h-5 w-5 text-amber-400" />
@@ -117,6 +118,7 @@ export default function App() {
               <Route path="/search" element={<SearchPage />} />
               <Route path="/game/:id" element={<GameDetailPage />} />
               <Route path="/library" element={<LibraryPage />} />
+              <Route path="/collections" element={<CollectionsPage />} />
               <Route path="/downloads" element={<DownloadsPage />} />
               <Route path="/settings" element={<SettingsPage />} />
               <Route path="/wishlist" element={<WishlistPage />} />

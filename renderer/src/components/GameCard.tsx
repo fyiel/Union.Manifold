@@ -1,8 +1,12 @@
-import { memo, useCallback, useEffect, useRef, useState, type MouseEvent } from "react"
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react"
 import { Link } from "react-router-dom"
 import { Badge } from "@/components/ui/badge"
 import { Calendar, HardDrive, Download, Eye, Wifi, Flame, Play, Square, RefreshCw } from "lucide-react"
 import { formatNumber, getCardImage, hasOnlineMode, isGameVersionUpdate, pickGameExecutable, proxyImageUrl, timeAgo } from "@/lib/utils"
+import { reportPlayEvent } from "@/lib/cloud-collections"
+import { GameActionContextMenu, type CollectionPickerEntry } from "@/components/GameActionMenu"
+import { useAccountLists } from "@/hooks/use-account-lists"
+import { useUserCollections } from "@/hooks/use-user-collections"
 import { useDownloads, useDownloadsSelector } from "@/context/downloads-context"
 import { apiUrl } from "@/lib/api"
 import { nsfwRevealedAppids } from "@/lib/nsfw-session"
@@ -23,6 +27,14 @@ interface GameCardProps {
     size: string
     source: string
     version?: string
+    splash?: string
+    hero_image?: string
+    background_image?: string
+    hero_logo?: string
+    localImage?: string
+    localSplash?: string
+    localHeroImage?: string
+    localBackgroundImage?: string
     developer?: string
     store?: string
     link?: string
@@ -83,7 +95,6 @@ export const GameCard = memo(function GameCard({
   const [installedPath, setInstalledPath] = useState<string | null>(null)
   const [isInstalled, setIsInstalled] = useState(false)
   const [isRunning, setIsRunning] = useState(false)
-  const [previewImage, setPreviewImage] = useState<string | null>(null)
   const [imageLoaded, setImageLoaded] = useState(false)
   const [exePickerOpen, setExePickerOpen] = useState(false)
   const [exePickerExes, setExePickerExes] = useState<Array<{ name: string; path: string; size?: number; depth?: number }>>([])
@@ -139,13 +150,6 @@ export const GameCard = memo(function GameCard({
             const manifest = await (window.ucDownloads.getInstalledGlobal?.(game.appid) || window.ucDownloads.getInstalled(game.appid))
             if (!mounted) return
             if (manifest) setIsInstalled(true)
-            if (manifest && manifest.metadata) {
-              // if manifest saved a local image, prefer it for display when offline
-              const localImg = manifest.metadata.localImage || manifest.metadata.image
-              if (localImg) {
-                setPreviewImage(localImg)
-              }
-            }
             if (manifest && Array.isArray(manifest.files) && manifest.files.length) {
               // prefer first file path for Open action
               setInstalledPath(manifest.files[0].path || null)
@@ -274,13 +278,13 @@ export const GameCard = memo(function GameCard({
     } catch { }
   }
 
-  const createDesktopShortcut = async (exePath: string) => {
+  const createDesktopShortcut = async (exePath?: string | null) => {
     if (!window.ucDownloads?.createDesktopShortcut) return
     try {
       try {
         await window.ucDownloads?.deleteDesktopShortcut?.(game.name)
       } catch { }
-      const result = await window.ucDownloads.createDesktopShortcut(game.name, exePath)
+      const result = await window.ucDownloads.createDesktopShortcut(game.name, game.appid, exePath || undefined)
       if (result?.ok) {
         gameLogger.info('Desktop shortcut created', { appid: game.appid })
       } else {
@@ -330,6 +334,9 @@ export const GameCard = memo(function GameCard({
     const showGameName = await window.ucSettings?.get?.('rpcShowGameName') ?? true
     const res = await window.ucDownloads.launchGameExecutable(game.appid, path, game.name, showGameName)
     if (res && res.ok) {
+      // Fire-and-forget: record a 'play' event for the account so the
+      // recently-played view stays current across devices.
+      void reportPlayEvent(game.appid, "play")
       await setSavedExe(path)
       setIsRunning(true)
       setExePickerOpen(false)
@@ -440,8 +447,56 @@ export const GameCard = memo(function GameCard({
     }
   }
 
+  // Universal right-click menu. Works on every GameCard regardless of
+  // installed/uninstalled state — picks up the relevant action set:
+  //  - Wishlist + Liked toggles for any game
+  //  - Add to collection (cloud-synced when authed)
+  //  - Open Files when installed
+  const accountLists = useAccountLists()
+  const userCollections = useUserCollections()
+  const [contextMenuPos, setContextMenuPos] = useState<{ x: number; y: number } | null>(null)
+  const closeContextMenu = useCallback(() => setContextMenuPos(null), [])
+
+  const collectionPicker = useMemo(() => ({
+    collections: userCollections.collections.map<CollectionPickerEntry>((c) => ({
+      id: c.id,
+      name: c.name,
+      included: c.appids.includes(game.appid),
+    })),
+    onAddToCollection: async (collectionId: string) => {
+      const target = userCollections.collections.find((c) => c.id === collectionId)
+      if (!target) return
+      if (!target.appids.includes(game.appid)) {
+        await userCollections.setMembership(target, [...target.appids, game.appid])
+      }
+    },
+    onRemoveFromCollection: async (collectionId: string) => {
+      const target = userCollections.collections.find((c) => c.id === collectionId)
+      if (!target) return
+      await userCollections.setMembership(
+        target,
+        target.appids.filter((id) => id !== game.appid)
+      )
+    },
+    onCreateCollection: async (name: string) => {
+      await userCollections.create(name, [game.appid])
+    },
+  }), [userCollections, game.appid])
+
+  const cardImageSrc = proxyImageUrl(getCardImage(game.image || "")) || "./banner.png"
+
+  useEffect(() => {
+    setImageLoaded(false)
+  }, [cardImageSrc])
+
   return (
-    <div className="relative group/container h-full">
+    <div className="relative group/container h-full"
+      onContextMenu={(event) => {
+        event.preventDefault()
+        event.stopPropagation()
+        setContextMenuPos({ x: event.clientX, y: event.clientY })
+      }}
+    >
       <Link to={`/game/${game.appid}`} className="block h-full">
         <div
           className="group relative h-full overflow-hidden rounded-2xl glass hover:bg-white/[.03] transition-all duration-300 flex flex-col"
@@ -451,16 +506,19 @@ export const GameCard = memo(function GameCard({
           <div className={`relative w-full overflow-hidden ${isCompact ? "aspect-[4/5]" : "aspect-[3/4]"}`}>
             <div className="absolute inset-0 z-10 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-70 transition-opacity duration-300 group-hover:opacity-50" />
 
+            {!imageLoaded && <div className="udl-skeleton absolute inset-0 z-0 rounded-none" />}
+
             <img
-              src={proxyImageUrl(getCardImage((typeof navigator !== 'undefined' && !navigator.onLine && previewImage) ? previewImage : game.image)) || "./banner.png"}
+              src={cardImageSrc}
               alt={game.name}
               className={`h-full w-full object-cover transition-all duration-500 ease-in-out group-hover:scale-105 ${
                 isNSFW && !(sessionRevealed || allowNsfwReveal)
                   ? "blur-xl brightness-50"
-                  : (isNSFW ? "" : (imageLoaded ? "" : "blur-lg"))
+                  : ""
                 }`}
               loading="lazy"
               onLoad={() => setImageLoaded(true)}
+              onError={() => setImageLoaded(true)}
             />
 
             {/* NSFW overlay: show Reveal button when not revealed */}
@@ -485,19 +543,36 @@ export const GameCard = memo(function GameCard({
               </div>
             )}
 
-            {/* Play Button Overlay */}
+            {/* Play Button Overlay — running state always visible, otherwise hover-only */}
             {isInstalled && (
-              <div className="absolute inset-0 z-30 flex items-center justify-center">
-                <button
-                  onClick={handlePlayClick}
-                  className={`group/play relative inline-flex h-14 w-14 items-center justify-center rounded-full border border-white/20 shadow-xl transition-transform duration-300 hover:scale-110 active:scale-95 ${isRunning
-                    ? "bg-red-600 text-white"
-                    : "bg-white text-black"
-                    }`}
+              <>
+                <div
+                  className={`pointer-events-none absolute inset-0 z-20 bg-black/40 transition-opacity duration-200 ${
+                    isRunning ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+                  }`}
+                />
+                <div
+                  className={`absolute inset-0 z-30 flex items-center justify-center transition-all duration-200 ${
+                    isRunning
+                      ? "opacity-100"
+                      : "opacity-0 scale-90 group-hover:opacity-100 group-hover:scale-100"
+                  }`}
                 >
-                  {isRunning ? <Square className="relative h-6 w-6 fill-current" /> : <Play className="relative h-6 w-6 fill-current ml-1" />}
-                </button>
-              </div>
+                  <button
+                    onClick={handlePlayClick}
+                    aria-label={isRunning ? "Stop game" : "Launch game"}
+                    className={`group/play relative inline-flex h-12 w-12 items-center justify-center rounded-full border border-white/20 shadow-xl transition-transform duration-200 hover:scale-110 active:scale-95 ${
+                      isRunning ? "bg-red-600 text-white" : "bg-white text-black"
+                    }`}
+                  >
+                    {isRunning ? (
+                      <Square className="relative h-5 w-5 fill-current" />
+                    ) : (
+                      <Play className="relative h-5 w-5 fill-current ml-0.5" />
+                    )}
+                  </button>
+                </div>
+              </>
             )}
 
             {/* Status Badges */}
@@ -642,6 +717,32 @@ export const GameCard = memo(function GameCard({
         open={gameStartFailedOpen}
         gameName={game.name}
         onClose={() => setGameStartFailedOpen(false)}
+      />
+
+      {/* Universal right-click menu — appears on every card site-wide. */}
+      <GameActionContextMenu
+        open={contextMenuPos != null}
+        position={contextMenuPos}
+        onClose={closeContextMenu}
+        gameName={game.name}
+        gameSource={game.source}
+        isExternal={false}
+        // Library-only actions are not wired here — the LibraryPage's own
+        // context menu (with delete, executable picker, etc.) takes over
+        // when right-clicking inside the library grid.
+        onSetExecutable={null}
+        onOpenFiles={isInstalled && installedPath ? () => { closeContextMenu(); openPath(installedPath) } : null}
+        onCreateShortcut={null}
+        onDelete={null}
+        wishlist={accountLists.authed === false ? undefined : {
+          inList: accountLists.wishlist.has(game.appid),
+          toggle: () => { void accountLists.toggleWishlist(game.appid, game.name) },
+        }}
+        favorites={accountLists.authed === false ? undefined : {
+          inList: accountLists.favorites.has(game.appid),
+          toggle: () => { void accountLists.toggleFavorite(game.appid, game.name) },
+        }}
+        collectionPicker={collectionPicker}
       />
     </div>
   )

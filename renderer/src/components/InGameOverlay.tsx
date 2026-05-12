@@ -333,7 +333,19 @@ export function InGameOverlay() {
     const overlay = getOverlayApi()
     if (!overlay?.getDownloads) return
     const result = await overlay.getDownloads()
-    if (result.ok) setDownloads(result.downloads || [])
+    if (result.ok) {
+      const items: OverlayDownloadItem[] = (result.downloads || []).map((d: any) => ({
+        id: d.id ?? d.downloadId ?? d.appid ?? "",
+        appid: d.appid ?? "",
+        gameName: d.gameName ?? d.filename ?? "",
+        status: d.status ?? "queued",
+        receivedBytes: d.receivedBytes ?? 0,
+        totalBytes: d.totalBytes ?? 0,
+        speedBps: d.speedBps ?? 0,
+        etaSeconds: d.etaSeconds ?? null,
+      }))
+      setDownloads(items)
+    }
   }, [])
 
   const loadInstalledGames = useCallback(async () => {

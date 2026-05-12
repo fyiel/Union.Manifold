@@ -9,6 +9,7 @@
       font-weight: 100 900;
       font-style: normal;
     }
+
     * {
       margin: 0;
       padding: 0;
@@ -17,12 +18,15 @@
       -webkit-user-select: none;
       -webkit-app-region: drag;
     }
+
     html, body {
       width: 100%;
       height: 100%;
       background: #09090b;
       overflow: hidden;
+      font-family: 'Geist', system-ui, sans-serif;
     }
+
     .wrap {
       width: 100%;
       height: 100%;
@@ -30,126 +34,172 @@
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      gap: 28px;
-      padding-bottom: 40px;
+      gap: 32px;
+      padding-bottom: 60px;
     }
+
+    .logo-container {
+      position: relative;
+      animation: logoBreath 4s ease-in-out infinite;
+    }
+
     .logo {
-      width: 64px;
-      height: 64px;
-      opacity: 0.95;
+      width: 72px;
+      height: 72px;
+      filter: drop-shadow(0 0 20px rgba(255, 255, 255, 0.15));
     }
+
     .splash-loading-path {
-      stroke: #FFFFFF;
-      stroke-width: 20;
+      stroke: #e4e4e7;
+      stroke-width: 18;
       fill: none;
-      stroke-dasharray: 5000;
-      stroke-dashoffset: 5000;
+      stroke-dasharray: 5200;
+      stroke-dashoffset: 5200;
       stroke-linecap: round;
       stroke-linejoin: round;
-      animation: splashDrawLines 1.4s cubic-bezier(0.35, 0, 0.25, 1) infinite;
+      animation: splashDraw 2.8s cubic-bezier(0.4, 0, 0.2, 1) infinite;
     }
+
     .text-group {
       display: flex;
       flex-direction: column;
       align-items: center;
-      gap: 6px;
+      gap: 8px;
+      text-align: center;
     }
+
     .app-name {
-      font-family: 'Geist', 'Segoe UI', system-ui, sans-serif;
-      font-size: 10px;
+      font-size: 11px;
       font-weight: 700;
-      letter-spacing: 0.14em;
+      letter-spacing: 0.18em;
       text-transform: uppercase;
-      color: #3f3f46;
+      color: #a1a1aa;
+      margin-bottom: 2px;
     }
+
+    .version {
+      font-size: 10px;
+      font-weight: 500;
+      letter-spacing: 0.08em;
+      color: #52525b;
+    }
+
     .status {
-      font-family: 'Geist', 'Segoe UI', system-ui, sans-serif;
       font-size: 10px;
       font-weight: 400;
       letter-spacing: 0.06em;
-      color: #52525b;
-      min-height: 14px;
-      transition: opacity 0.2s;
-    }
-    .version {
-      font-family: 'Geist', 'Segoe UI', system-ui, sans-serif;
-      font-size: 10px;
-      font-weight: 500;
-      letter-spacing: 0.06em;
       color: #71717a;
-      min-height: 14px;
+      min-height: 16px;
+      transition: all 0.3s ease;
     }
+
+    /* Progress Bar */
     .bar-track {
       position: absolute;
       bottom: 0;
       left: 0;
       right: 0;
-      height: 2px;
-      background: rgba(255,255,255,0.04);
+      height: 3px;
+      background: rgba(255,255,255,0.06);
       overflow: hidden;
     }
+
     .bar-fill {
       height: 100%;
-      width: 40%;
-      background: #3f3f46;
-      border-radius: 1px;
-      animation: slide 1.8s ease-in-out infinite;
-      transition: width 0.25s ease, background 0.2s ease;
+      width: 35%;
+      background: linear-gradient(90deg, 
+        rgba(163, 163, 163, 0.9) 0%, 
+        #e4e4e7 50%, 
+        rgba(163, 163, 163, 0.9) 100%);
+      border-radius: 3px;
+      animation: progressSlide 2.2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+      box-shadow: 0 0 12px rgba(228, 228, 231, 0.5);
     }
-    @keyframes slide {
-      0%   { transform: translateX(-100%); }
-      100% { transform: translateX(350%); }
+
+    @keyframes progressSlide {
+      0%   { transform: translateX(-280%); }
+      100% { transform: translateX(380%); }
     }
-    @keyframes splashDrawLines {
-      0% { stroke-dashoffset: 5000; fill: rgba(255, 255, 255, 0); }
-      55% { stroke-dashoffset: 0; fill: rgba(255, 255, 255, 0); }
-      72% { stroke-dashoffset: 0; fill: rgba(255, 255, 255, 1); }
-      90% { stroke-dashoffset: -5000; fill: rgba(255, 255, 255, 0); }
-      100% { stroke-dashoffset: -5000; fill: rgba(255, 255, 255, 0); }
+
+    @keyframes splashDraw {
+      0%   { stroke-dashoffset: 5200; fill: transparent; }
+      45%  { stroke-dashoffset: 0; fill: transparent; }
+      65%  { stroke-dashoffset: 0; fill: #e4e4e7; }
+      85%  { stroke-dashoffset: -5200; fill: transparent; }
+      100% { stroke-dashoffset: -5200; fill: transparent; }
+    }
+
+    @keyframes logoBreath {
+      0%, 100% { transform: scale(1); }
+      50%      { transform: scale(1.04); }
+    }
+
+    /* Fade in animation */
+    .fade-in {
+      animation: fadeIn 0.8s ease forwards;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(12px); }
+      to   { opacity: 1; transform: translateY(0); }
     }
   </style>
 </head>
 <body>
   <div class="wrap">
-    <svg class="logo" viewBox="0 0 1254 1254" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-      <g transform="translate(0,1254) scale(0.1,-0.1)">
-        <path class="splash-loading-path" d="M11195 10354 c-71 -12 -341 -59 -600 -103 -258 -45 -519 -90 -580
-    -101 -146 -26 -1271 -219 -1572 -270 -494 -82 -839 -141 -865 -146 -21 -4 -48
-    -34 -113 -122 -80 -111 -288 -393 -649 -877 -90 -121 -288 -388 -440 -592
-    l-276 -373 0 -724 0 -724 -684 -695 -685 -695 52 -59 c78 -90 285 -320 432
-    -483 72 -80 213 -237 313 -349 l182 -203 0 -1064 c0 -585 3 -1064 8 -1064 6 0
-    47 74 191 340 205 379 534 953 843 1470 l158 266 1 519 c0 286 0 564 0 618
-    l-1 99 -147 -153 c-391 -407 -486 -504 -494 -507 -5 -2 -9 105 -9 237 l0 240
-    108 119 c59 65 219 241 356 390 l250 272 486 0 487 0 69 73 c67 70 404 447
-    494 552 73 85 315 355 935 1043 165 183 302 337 303 342 2 6 -205 10 -556 10
-    l-559 0 -59 -63 c-32 -34 -165 -177 -294 -317 -129 -140 -272 -293 -317 -340
-    l-82 -85 -348 -3 c-191 -2 -381 -1 -420 3 l-73 7 0 364 0 363 253 340 c138
-    187 338 455 442 597 105 142 201 270 215 285 l25 27 445 42 c245 23 491 46
-    546 51 126 11 464 41 774 69 l235 21 450 452 c659 662 920 927 909 926 -5 -1
-    -67 -12 -139 -25z"/>
-        <path class="splash-loading-path" d="M1381 10153 c101 -104 186 -190 189 -193 62 -63 422 -434 631 -650
-    152 -157 389 -402 527 -545 l252 -260 0 -860 0 -860 802 -802 803 -802 85 82
-    c47 45 340 333 653 640 l567 559 0 683 0 682 68 104 c85 130 215 335 309 486
-    l71 116 -230 171 c-127 94 -375 278 -552 410 -598 445 -696 517 -712 523 -12
-    4 -14 -198 -14 -1360 l0 -1365 -134 -116 c-73 -64 -137 -116 -141 -116 -4 0
-    -128 118 -276 261 l-269 262 0 1288 0 1288 -37 7 c-59 10 -655 130 -1413 284
-    -1142 232 -1333 270 -1349 270 -8 0 68 -84 170 -187z"/>
-      </g>
-    </svg>
-    <div class="text-group">
+    <div class="logo-container">
+      <svg class="logo" viewBox="0 0 1254 1254" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <g transform="translate(0,1254) scale(0.1,-0.1)">
+          <path class="splash-loading-path" d="M11195 10354 c-71 -12 -341 -59 -600 -103 -258 -45 -519 -90 -580
+          -101 -146 -26 -1271 -219 -1572 -270 -494 -82 -839 -141 -865 -146 -21 -4 -48
+          -34 -113 -122 -80 -111 -288 -393 -649 -877 -90 -121 -288 -388 -440 -592
+          l-276 -373 0 -724 0 -724 -684 -695 -685 -695 52 -59 c78 -90 285 -320 432
+          -483 72 -80 213 -237 313 -349 l182 -203 0 -1064 c0 -585 3 -1064 8 -1064 6 0
+          47 74 191 340 205 379 534 953 843 1470 l158 266 1 519 c0 286 0 564 0 618
+          l-1 99 -147 -153 c-391 -407 -486 -504 -494 -507 -5 -2 -9 105 -9 237 l0 240
+          108 119 c59 65 219 241 356 390 l250 272 486 0 487 0 69 73 c67 70 404 447
+          494 552 73 85 315 355 935 1043 165 183 302 337 303 342 2 6 -205 10 -556 10
+          l-559 0 -59 -63 c-32 -34 -165 -177 -294 -317 -129 -140 -272 -293 -317 -340
+          l-82 -85 -348 -3 c-191 -2 -381 -1 -420 3 l-73 7 0 364 0 363 253 340 c138
+          187 338 455 442 597 105 142 201 270 215 285 l25 27 445 42 c245 23 491 46
+          546 51 126 11 464 41 774 69 l235 21 450 452 c659 662 920 927 909 926 -5 -1
+          -67 -12 -139 -25z"/>
+          <path class="splash-loading-path" d="M1381 10153 c101 -104 186 -190 189 -193 62 -63 422 -434 631 -650
+          152 -157 389 -402 527 -545 l252 -260 0 -860 0 -860 802 -802 803 -802 85 82
+          c47 45 340 333 653 640 l567 559 0 683 0 682 68 104 c85 130 215 335 309 486
+          l71 116 -230 171 c-127 94 -375 278 -552 410 -598 445 -696 517 -712 523 -12
+          4 -14 -198 -14 -1360 l0 -1365 -134 -116 c-73 -64 -137 -116 -141 -116 -4 0
+          -128 118 -276 261 l-269 262 0 1288 0 1288 -37 7 c-59 10 -655 130 -1413 284
+          -1142 232 -1333 270 -1349 270 -8 0 68 -84 170 -187z"/>
+        </g>
+      </svg>
+    </div>
+
+    <div class="text-group fade-in" style="animation-delay: 200ms">
       <span class="app-name">UnionCrax.Direct</span>
       <span class="version" id="version">v0.0.0</span>
-      <span class="status" id="status">Configuring things for you...</span>
+      <span class="status" id="status">Preparing your workspace...</span>
     </div>
   </div>
-  <div class="bar-track"><div class="bar-fill"></div></div>
+
+  <div class="bar-track">
+    <div class="bar-fill"></div>
+  </div>
+
   <script>
+    // Version handling
     (function () {
-      var versionEl = document.getElementById('version')
+      const versionEl = document.getElementById('version')
       if (!versionEl) return
-      var version = new URLSearchParams(window.location.search).get('v')
+      const version = new URLSearchParams(window.location.search).get('v')
       if (version) versionEl.textContent = 'v' + version
     })()
+
+    // Optional: Allow updating status from main process
+    window.updateStatus = function(text) {
+      const statusEl = document.getElementById('status')
+      if (statusEl) statusEl.textContent = text
+    }
   </script>
 </body>
 </html>

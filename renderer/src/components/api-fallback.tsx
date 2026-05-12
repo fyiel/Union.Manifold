@@ -1,10 +1,11 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState } from "react"
 import { AlertTriangle, RefreshCw, WifiOff } from "lucide-react"
 import { LoadingAnimated } from "@/components/brand/brand-assets"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { useConnectivityStatus } from "@/hooks/use-online-status"
 
 interface APIFallbackProps {
   onRetry?: () => void
@@ -17,23 +18,8 @@ export function APIFallback({
   message = "Failed to load content",
   showOfflineMessage = true,
 }: APIFallbackProps) {
-  const [isOnline, setIsOnline] = useState(true)
+  const { browserOnline, isOnline } = useConnectivityStatus()
   const [retrying, setRetrying] = useState(false)
-
-  useEffect(() => {
-    const handleOnline = () => setIsOnline(true)
-    const handleOffline = () => setIsOnline(false)
-
-    window.addEventListener("online", handleOnline)
-    window.addEventListener("offline", handleOffline)
-
-    setIsOnline(navigator.onLine)
-
-    return () => {
-      window.removeEventListener("online", handleOnline)
-      window.removeEventListener("offline", handleOffline)
-    }
-  }, [])
 
   const handleRetry = async () => {
     if (!onRetry) return
@@ -51,7 +37,7 @@ export function APIFallback({
       <Card className="w-full max-w-md rounded-2xl">
         <CardHeader className="text-center p-8">
           <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/20 to-primary/5 border border-zinc-700">
-            {showOfflineMessage && !isOnline ? (
+            {showOfflineMessage && !isOnline && !browserOnline ? (
               <WifiOff className="h-7 w-7 text-orange-500" />
             ) : (
               <AlertTriangle className="h-7 w-7 text-white" />
@@ -60,10 +46,16 @@ export function APIFallback({
           <CardTitle className="text-xl">{message}</CardTitle>
           <CardDescription className="text-base mt-2">
             {showOfflineMessage && !isOnline ? (
-              <span className="flex items-center justify-center gap-2 text-orange-500">
-                <WifiOff className="h-5 w-5" />
-                You're currently offline
-              </span>
+              browserOnline ? (
+                <span className="text-orange-500">
+                  Union Crax is unreachable right now
+                </span>
+              ) : (
+                <span className="flex items-center justify-center gap-2 text-orange-500">
+                  <WifiOff className="h-5 w-5" />
+                  You're currently offline
+                </span>
+              )
             ) : (
               "We're having trouble loading this content. Please try again."
             )}
@@ -73,7 +65,7 @@ export function APIFallback({
           {onRetry && (
             <Button
               onClick={handleRetry}
-              disabled={retrying || (!isOnline && showOfflineMessage)}
+              disabled={retrying || (!browserOnline && showOfflineMessage)}
               className="w-full rounded-full h-12"
             >
               {retrying ? (
@@ -93,7 +85,9 @@ export function APIFallback({
           {showOfflineMessage && !isOnline && (
             <div className="text-center">
               <p className="text-sm text-zinc-400 leading-relaxed">
-                Check your internet connection and try again when you're back online.
+                {browserOnline
+                  ? "Your internet connection is up, but the website or mirrors did not respond. Try again when the service is reachable."
+                  : "Check your internet connection and try again when you're back online."}
               </p>
             </div>
           )}
@@ -115,14 +109,14 @@ export function GamesGridSkeleton({ count = 12 }: { count?: number }) {
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-6">
       {Array.from({ length: count }).map((_, index) => (
-        <Card key={index} className="overflow-hidden rounded-2xl">
-          <div className="aspect-[3/4] bg-zinc-800 animate-pulse" />
+        <Card key={index} className="overflow-hidden rounded-2xl border border-white/[.07] bg-zinc-900/60">
+          <div className="udl-skeleton aspect-[3/4] rounded-none" />
           <CardContent className="p-5 space-y-3">
-            <div className="h-4 bg-zinc-800 animate-pulse rounded-lg" />
-            <div className="h-3 bg-zinc-800 animate-pulse rounded-lg w-3/4" />
+            <div className="udl-skeleton h-4 rounded-md" />
+            <div className="udl-skeleton h-3 rounded-md w-3/4" />
             <div className="flex justify-between items-center">
-              <div className="h-3 bg-zinc-800 animate-pulse rounded-lg w-1/4" />
-              <div className="h-3 bg-zinc-800 animate-pulse rounded-lg w-1/3" />
+              <div className="udl-skeleton h-3 rounded-md w-1/4" />
+              <div className="udl-skeleton h-3 rounded-md w-1/3" />
             </div>
           </CardContent>
         </Card>

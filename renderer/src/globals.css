@@ -89,18 +89,37 @@
   color: #3f3f46;
 }
 
-/* UDL skeleton shimmer - never use animate-pulse */
+/* UDL skeleton shimmer — synced with union-crax.xyz. Never use animate-pulse.
+   Wide 1400px gradient + narrow 48-52% highlight + eased 1.4s loop gives a
+   subtle sheen instead of a harsh dark→light→dark band. */
 @keyframes udl-shimmer {
-  0%   { background-position: -400px 0; }
-  100% { background-position:  400px 0; }
+  from { background-position: -700px 0; }
+  to   { background-position:  700px 0; }
 }
 
 .udl-skeleton {
-  background: linear-gradient(90deg, #27272a 25%, #3f3f46 50%, #27272a 75%);
-  background-size: 800px 100%;
-  animation: udl-shimmer 1.6s infinite linear;
+  background: linear-gradient(
+    90deg,
+    #27272a 0%,
+    #27272a 30%,
+    #3a3a3f 48%,
+    #4a4a52 50%,
+    #3a3a3f 52%,
+    #27272a 70%,
+    #27272a 100%
+  );
+  background-size: 1400px 100%;
+  animation: udl-shimmer 1.4s ease-in-out infinite;
   border-radius: 6px;
+  will-change: background-position;
 }
+
+/* Stagger helpers for multi-element skeleton groups */
+.udl-skeleton-d1 { animation-delay: 0.08s; }
+.udl-skeleton-d2 { animation-delay: 0.16s; }
+.udl-skeleton-d3 { animation-delay: 0.24s; }
+.udl-skeleton-d4 { animation-delay: 0.32s; }
+.udl-skeleton-d5 { animation-delay: 0.40s; }
 
 /* Pop scale - button micro-interaction */
 @keyframes pop-scale {
@@ -124,16 +143,63 @@
   animation: pop-spin 520ms ease-out both;
 }
 
-/* Ambient drift - subtle background movement for hero images */
+/* ── Ambient page background ───────────────────────────────
+   Lightweight CSS-only animation for game pages. Works for every game
+   (no need for hero_animated video), GPU-only transforms, and falls back
+   to a static frame when the user prefers reduced motion. */
 @keyframes uc-ambient-drift {
-  0%   { transform: scale(1.08) translate3d(-1.5%, -1%, 0); }
-  50%  { transform: scale(1.14) translate3d(1.5%, -2.5%, 0); }
-  100% { transform: scale(1.1) translate3d(-1%, 1.5%, 0); }
+  0%   { transform: scale(1.10) translate3d(-1.5%, -1%, 0); }
+  50%  { transform: scale(1.16) translate3d(1.8%, -2.8%, 0); }
+  100% { transform: scale(1.12) translate3d(-1%, 1.8%, 0); }
+}
+
+/* Soft brightness/saturation breathe paired with drift to feel "alive" */
+@keyframes uc-ambient-breathe {
+  0%, 100% { filter: brightness(1)    saturate(1); }
+  50%      { filter: brightness(1.08) saturate(1.12); }
 }
 
 .uc-ambient-drift {
-  animation: uc-ambient-drift 24s ease-in-out infinite alternate;
-  will-change: transform;
+  animation: uc-ambient-drift   28s ease-in-out infinite alternate,
+             uc-ambient-breathe 18s ease-in-out infinite;
+  will-change: transform, filter;
+}
+
+/* Colour-aware glow blobs.  Three large radial blobs slowly drift around
+   the viewport, each tinted with a dominant colour extracted from the game
+   cover (set as inline styles by useImageColors).  GPU-composited because
+   every keyframe is pure translate3d + scale. */
+@keyframes uc-blob-1 {
+  0%   { transform: translate3d(-20%, -25%, 0) scale(1.1); }
+  25%  { transform: translate3d(25%,  -10%,  0) scale(1.2); }
+  50%  { transform: translate3d(10%,   28%,  0) scale(1.0); }
+  75%  { transform: translate3d(-28%, 18%,   0) scale(1.15); }
+  100% { transform: translate3d(-20%, -25%, 0) scale(1.1); }
+}
+@keyframes uc-blob-2 {
+  0%   { transform: translate3d(22%,  20%,  0) scale(1.15); }
+  25%  { transform: translate3d(-18%,  32%,  0) scale(1.0); }
+  50%  { transform: translate3d(-30%, -18%,  0) scale(1.2); }
+  75%  { transform: translate3d(20%,  -28%, 0) scale(1.05); }
+  100% { transform: translate3d(22%,  20%,  0) scale(1.15); }
+}
+@keyframes uc-blob-3 {
+  0%   { transform: translate3d(-10%,   30%,  0) scale(1.0); }
+  25%  { transform: translate3d(20%,  -25%,  0) scale(1.1); }
+  50%  { transform: translate3d(-25%, -15%,  0) scale(1.05); }
+  75%  { transform: translate3d(15%, 25%, 0) scale(1.2); }
+  100% { transform: translate3d(-10%,   30%,  0) scale(1.0); }
+}
+
+/* Honour the OS-level reduced motion preference even when the per-account
+   toggle hasn't been touched. Apps that gate on `effectiveAnimatedBackgrounds`
+   already skip rendering the blobs — this is a belt-and-braces guard for any
+   element that happens to use these classes. */
+@media (prefers-reduced-motion: reduce) {
+  .uc-ambient-drift,
+  .uc-blob {
+    animation: none !important;
+  }
 }
 
 /* Slide-up entry animations */
@@ -166,6 +232,77 @@
 .stagger-grid > *:nth-child(10) { animation-delay: 0.36s; }
 .stagger-grid > *:nth-child(n+11) { animation-delay: 0.40s; }
 
+/* Route transition - fade in new page content. Mounted on every route change.
+   Opacity-only — adding a `transform` would create a containing block for any
+   `position: fixed` descendant (e.g. the GameDetailPage ambient background),
+   trapping it inside the constrained <main> width. */
+@keyframes uc-page-fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.uc-page-transition {
+  animation: uc-page-fade 0.28s ease-out both;
+  min-height: 100%;
+}
+
+/* ── Window control buttons ──────────────────────────────────────
+   Live inside the nav pill itself (Steam-style integrated top bar)
+   instead of a separate detached title bar. Sized to match the
+   neighbouring pill buttons (28×28) so they blend in. */
+
+.uc-winctl {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 9999px;
+  background: transparent;
+  color: rgb(161 161 170 / 0.75);
+  outline: none;
+  cursor: default;
+  transition:
+    background-color 180ms cubic-bezier(0.22, 1, 0.36, 1),
+    color 160ms ease,
+    transform 120ms ease,
+    box-shadow 180ms ease;
+  -webkit-app-region: no-drag;
+}
+
+.uc-winctl:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+  color: rgb(244 244 245);
+}
+
+.uc-winctl:active {
+  background-color: rgba(255, 255, 255, 0.12);
+  transform: scale(0.92);
+}
+
+.uc-winctl:focus-visible {
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.25);
+}
+
+.uc-winctl--close:hover {
+  background: linear-gradient(180deg, rgba(239, 68, 68, 0.95), rgba(220, 38, 38, 0.95));
+  color: #fff;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.08),
+    0 0 16px -4px rgba(239, 68, 68, 0.55);
+}
+
+.uc-winctl--close:active {
+  background: linear-gradient(180deg, rgba(220, 38, 38, 1), rgba(185, 28, 28, 1));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .uc-winctl {
+    transition: none;
+  }
+}
+
 /* Token chip - monospace metadata pill */
 .token-chip {
   font-size: 11px;
@@ -197,6 +334,49 @@
   }
 
   button {
+    cursor: pointer;
+  }
+
+  /* Prevent cursor flicker on interactive elements with children */
+  button *,
+  button:hover *,
+  button:active *,
+  button:focus-visible *,
+  [role="button"] *,
+  .cursor-pointer * {
+    cursor: pointer;
+  }
+
+  /* Restore correct cursor on form inputs nested inside clickable containers */
+  .cursor-pointer input,
+  .cursor-pointer textarea,
+  .cursor-pointer [contenteditable="true"],
+  button input,
+  button textarea {
+    cursor: text;
+  }
+
+  .cursor-pointer .cursor-not-allowed,
+  .cursor-pointer .cursor-not-allowed *,
+  button .cursor-not-allowed,
+  button .cursor-not-allowed * {
+    cursor: not-allowed;
+  }
+
+  .cursor-pointer .cursor-default,
+  .cursor-pointer .cursor-default *,
+  button .cursor-default,
+  button .cursor-default * {
+    cursor: default;
+  }
+
+  /* Pseudo-elements should inherit cursor from parent to avoid flicker */
+  .cursor-pointer::before,
+  .cursor-pointer::after,
+  button::before,
+  button::after,
+  [role="button"]::before,
+  [role="button"]::after {
     cursor: pointer;
   }
 
@@ -308,4 +488,96 @@ body::-webkit-scrollbar-corner,
 
 .search-popup-scrollbar::-webkit-scrollbar-corner {
   background: transparent;
+}
+
+/* ========== Global Custom Tooltip ========== */
+.uc-global-tooltip {
+  position: fixed;
+  z-index: 1200;
+  max-width: min(300px, calc(100vw - 16px));
+  background: #1e1e1e;
+  color: rgba(255, 255, 255, 0.96);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  padding: 8px 10px;
+  font-size: 13px;
+  line-height: 1.35;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(2px) scale(0.985);
+  transition: opacity 160ms ease, transform 180ms cubic-bezier(0.2, 0.7, 0.2, 1);
+  will-change: opacity, transform, top, left;
+}
+
+.uc-global-tooltip[data-state="visible"] {
+  opacity: 1;
+}
+
+.uc-global-tooltip[data-side="top"] {
+  transform: translateY(2px) scale(0.985);
+}
+
+.uc-global-tooltip[data-side="bottom"] {
+  transform: translateY(-2px) scale(0.985);
+}
+
+.uc-global-tooltip[data-side="left"] {
+  transform: translateX(2px) scale(0.985);
+}
+
+.uc-global-tooltip[data-side="right"] {
+  transform: translateX(-2px) scale(0.985);
+}
+
+.uc-global-tooltip[data-state="visible"][data-side="top"],
+.uc-global-tooltip[data-state="visible"][data-side="bottom"],
+.uc-global-tooltip[data-state="visible"][data-side="left"],
+.uc-global-tooltip[data-state="visible"][data-side="right"] {
+  transform: translate(0, 0) scale(1);
+}
+
+.uc-global-tooltip__content {
+  display: block;
+  word-break: break-word;
+}
+
+.uc-global-tooltip__arrow {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  background: #1e1e1e;
+  transform: rotate(45deg);
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.2);
+}
+
+.uc-global-tooltip[data-arrow="false"] .uc-global-tooltip__arrow {
+  display: none;
+}
+
+.uc-global-tooltip[data-side="top"] .uc-global-tooltip__arrow {
+  left: calc(50% - 4px);
+  bottom: -4px;
+}
+
+.uc-global-tooltip[data-side="bottom"] .uc-global-tooltip__arrow {
+  left: calc(50% - 4px);
+  top: -4px;
+}
+
+.uc-global-tooltip[data-side="left"] .uc-global-tooltip__arrow {
+  right: -4px;
+  top: calc(50% - 4px);
+}
+
+.uc-global-tooltip[data-side="right"] .uc-global-tooltip__arrow {
+  left: -4px;
+  top: calc(50% - 4px);
+}
+
+@keyframes uc-sparkle-anim {
+  0% { transform: translate(0, 0); }
+  25% { transform: translate(-5px, 5px); }
+  50% { transform: translate(5px, -5px); }
+  75% { transform: translate(5px, 5px); }
+  100% { transform: translate(0, 0); }
 }

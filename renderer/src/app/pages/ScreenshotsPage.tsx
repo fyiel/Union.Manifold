@@ -126,8 +126,10 @@ export function ScreenshotsPage() {
             {Array.from({ length: 10 }).map((_, i) => (
               <div
                 key={i}
-                className="aspect-video rounded-lg bg-white/5 animate-pulse"
-              />
+                className="aspect-video rounded-lg overflow-hidden ring-1 ring-white/[.07]"
+              >
+                <div className="udl-skeleton h-full w-full" />
+              </div>
             ))}
           </div>
         ) : screenshots.length === 0 ? (
@@ -182,7 +184,7 @@ export function ScreenshotsPage() {
 
       {/* Delete confirmation dialog */}
       <Dialog open={Boolean(deleteConfirm)} onOpenChange={(open) => !open && setDeleteConfirm(null)}>
-        <DialogContent className="sm:max-w-md rounded-2xl border-border/60 bg-card/95 shadow-2xl">
+        <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Delete Screenshot</DialogTitle>
             <DialogDescription className="text-left pt-1">

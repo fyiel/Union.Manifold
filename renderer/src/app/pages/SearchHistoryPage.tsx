@@ -33,6 +33,10 @@ export function SearchHistoryPage() {
           res = await apiFetch("/api/search-history")
         }
       }
+      if (res.status === 401) {
+        setItems([])
+        return
+      }
       if (!res.ok) {
         setError("Unable to load search history.")
         setItems([])
@@ -106,22 +110,28 @@ export function SearchHistoryPage() {
               <p className="text-sm text-zinc-400">Sign in to sync search history across devices.</p>
               <Button className="gap-2" onClick={handleLogin} disabled={loggingIn}>
                 <LogIn className="h-4 w-4" />
-                {loggingIn ? "Connecting..." : "Login with Discord"}
+                {loggingIn ? "Redirecting..." : "Sign In to see search history"}
               </Button>
             </CardContent>
           </Card>
         )}
 
-        {error && (
+        {error && accountUser && (
           <div className="mb-4 rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
             {error}
           </div>
         )}
 
-        {loading ? (
-          <div className="space-y-3">
+        {!accountUser && !accountLoading ? null : loading || accountLoading ? (
+          <div className="space-y-2.5">
             {Array.from({ length: 6 }).map((_, idx) => (
-              <div key={idx} className="h-12 rounded-xl bg-zinc-800/30" />
+              <div key={idx} className="rounded-xl border border-white/[.07] bg-zinc-900/40 p-4 flex items-center justify-between">
+                <div className="space-y-1.5 flex-1">
+                  <div className="udl-skeleton h-3.5 w-1/3 rounded" />
+                  <div className="udl-skeleton h-2.5 w-1/4 rounded" />
+                </div>
+                <div className="udl-skeleton h-8 w-24 rounded-full" />
+              </div>
             ))}
           </div>
         ) : items.length === 0 ? (

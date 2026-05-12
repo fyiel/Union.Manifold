@@ -1,9 +1,10 @@
 import { Outlet, useLocation } from "react-router-dom"
+import type { CSSProperties } from "react"
 import { useEffect, useRef, useState } from "react"
 import { DownBar } from "@/components/DownBar"
 import { Sidebar } from "@/components/Sidebar"
 import { TopBar } from "@/components/TopBar"
-import { TitleBar } from "@/components/TitleBar"
+import { CustomTooltipManager } from "@/components/CustomTooltipManager"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import ScrollProgress from "@/components/ScrollProgress"
 import { UpdateNotification } from "@/components/UpdateNotification"
@@ -128,7 +129,15 @@ export function AppLayout() {
 
   return (
     <div className="relative h-screen w-full overflow-hidden bg-zinc-950 text-zinc-100 flex flex-col">
-      <TitleBar />
+      {/* Top-edge drag strip — gives the user a reliable place to grab and
+          drag the window from above the sidebar (the integrated nav pill
+          only covers part of the top row). Invisible, sits above the
+          sidebar visually but underneath any positioned UI. */}
+      <div
+        className="pointer-events-none absolute inset-x-0 top-0 z-30 h-2"
+        style={{ WebkitAppRegion: "drag" } as CSSProperties}
+        aria-hidden="true"
+      />
       <div className="relative flex min-h-0 flex-1 overflow-hidden">
         <Sidebar
           mobileOpen={mobileNavOpen}
@@ -140,14 +149,26 @@ export function AppLayout() {
           "relative flex min-h-0 flex-1 min-w-0 flex-col transition-[padding] duration-300 ease-in-out",
           sidebarCollapsed ? "md:pl-[64px]" : "md:pl-[16rem]"
         )}>
-          <div className="pointer-events-none absolute inset-x-0 top-0 z-40">
+          <div
+            className={cn(
+              "pointer-events-none absolute top-0 z-40 right-0",
+              sidebarCollapsed ? "left-[64px]" : "left-[16rem]"
+            )}
+          >
             <TopBar onOpenMenu={() => setMobileNavOpen(true)} />
           </div>
           <ScrollArea ref={scrollContainerRef} className="flex-1 min-h-0 min-w-0 w-full bg-gradient-to-b from-zinc-950 to-zinc-950/95">
             <div className="relative min-h-full w-full">
               <ScrollProgress />
               <main className="mx-auto w-full max-w-7xl px-4 pt-24 pb-28 md:px-8 xl:px-10">
-                <Outlet />
+                {/* `key={pathname}` remounts on every route change so the
+                    entering page replays the uc-page-transition fade-up.
+                    The wrapper claims `min-height: 100%` so React can't
+                    collapse the layout to 0 between mounts, which kills
+                    the blank-flash + scroll-jump combo. */}
+                <div key={location.pathname} className="uc-page-transition">
+                  <Outlet />
+                </div>
               </main>
             </div>
           </ScrollArea>
@@ -168,6 +189,7 @@ export function AppLayout() {
           try { await window.ucSettings?.set?.('autoShareErrorLogs', false) } catch {}
         }}
       />
+      <CustomTooltipManager />
     </div>
   )
 }

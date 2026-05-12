@@ -57,6 +57,18 @@ export function normalizeCatalogGame(game: any): CatalogGame {
   const developer = game?.developer && game.developer !== "Unknown"
     ? game.developer
     : extractDeveloper(normalizedDescription)
+  const hasCoOp = typeof game?.hasCoOp === "boolean"
+    ? game.hasCoOp
+    : typeof game?.has_coop === "boolean"
+      ? game.has_coop
+      : typeof game?.online_fix === "boolean"
+        ? game.online_fix
+        : undefined
+  const hasHv = typeof game?.hasHv === "boolean"
+    ? game.hasHv
+    : typeof game?.has_hv === "boolean"
+      ? game.has_hv
+      : undefined
 
   return {
     ...game,
@@ -71,6 +83,8 @@ export function normalizeCatalogGame(game: any): CatalogGame {
     source: typeof game?.source === "string" && game.source ? game.source : "local",
     store: typeof game?.store === "string" ? game.store : "",
     developer,
+    hasCoOp,
+    hasHv,
     dlc: Array.isArray(game?.dlc) ? game.dlc : [],
     searchText: normalizeSearchText(`${normalizedName} ${normalizedDescription} ${(Array.isArray(game?.genres) ? game.genres.join(" ") : "")} ${developer}`),
   }
@@ -200,22 +214,79 @@ export async function readInstalledGames(): Promise<CatalogGame[]> {
   return []
 }
 
+function withPreferredInstalledMedia(game: CatalogGame): CatalogGame {
+  const meta: any = game as any
+  const localImage = typeof meta?.localImage === "string" && meta.localImage
+    ? meta.localImage
+    : typeof meta?.metadata?.localImage === "string" && meta.metadata.localImage
+      ? meta.metadata.localImage
+      : ""
+  const localSplash = typeof meta?.localSplash === "string" && meta.localSplash
+    ? meta.localSplash
+    : typeof meta?.metadata?.localSplash === "string" && meta.metadata.localSplash
+      ? meta.metadata.localSplash
+      : ""
+  const localScreenshots = Array.isArray(meta?.localScreenshots)
+    ? meta.localScreenshots.filter((entry: unknown): entry is string => typeof entry === "string" && entry.length > 0)
+    : Array.isArray(meta?.metadata?.localScreenshots)
+      ? meta.metadata.localScreenshots.filter((entry: unknown): entry is string => typeof entry === "string" && entry.length > 0)
+      : []
+
+  return normalizeCatalogGame({
+    ...game,
+    image: localImage || game.image,
+    splash: localSplash || game.splash,
+    screenshots: localScreenshots.length > 0 ? localScreenshots : game.screenshots,
+    localImage: localImage || meta?.localImage || meta?.metadata?.localImage,
+    localSplash: localSplash || meta?.localSplash || meta?.metadata?.localSplash,
+    localScreenshots: localScreenshots.length > 0 ? localScreenshots : meta?.localScreenshots || meta?.metadata?.localScreenshots,
+  })
+}
+
 export async function mergeInstalledGames(games: CatalogGame[]): Promise<CatalogGame[]> {
   const installed = await readInstalledGames()
-  const installedNormalized = installed.map((game) => {
-    const meta: any = game as any
-    const isOffline = typeof navigator !== "undefined" && !navigator.onLine
-    if (isOffline) {
-      if (meta?.localImage) return normalizeCatalogGame({ ...game, image: meta.localImage })
-      if (meta?.metadata?.localImage) return normalizeCatalogGame({ ...game, image: meta.metadata.localImage })
-    }
-    return game
-  })
+  const installedNormalized = installed.map((game) => withPreferredInstalledMedia(game))
 
   const mergedByAppid = new Map<string, CatalogGame>()
   for (const game of games) mergedByAppid.set(game.appid, normalizeCatalogGame(game))
   for (const game of installedNormalized) {
-    if (game?.appid && !mergedByAppid.has(game.appid)) mergedByAppid.set(game.appid, normalizeCatalogGame(game))
+    if (!game?.appid) continue
+
+    const existing = mergedByAppid.get(game.appid)
+    if (!existing) {
+      mergedByAppid.set(game.appid, normalizeCatalogGame(game))
+      continue
+    }
+
+    const installedMeta: any = game as any
+    const existingMeta: any = existing as any
+    const gameMedia: any = game as any
+    const localScreenshots = Array.isArray(installedMeta?.localScreenshots) && installedMeta.localScreenshots.length > 0
+      ? installedMeta.localScreenshots
+      : Array.isArray(existingMeta?.localScreenshots)
+        ? existingMeta.localScreenshots
+        : existing.screenshots
+
+    mergedByAppid.set(
+      game.appid,
+      normalizeCatalogGame({
+        ...existing,
+        hero_image: installedMeta?.localHeroImage || gameMedia?.hero_image || existingMeta?.hero_image,
+        background_image: installedMeta?.localBackgroundImage || gameMedia?.background_image || existingMeta?.background_image,
+        hero_logo: installedMeta?.localHeroLogo || gameMedia?.hero_logo || existingMeta?.hero_logo,
+        hero_animated: installedMeta?.localHeroAnimated || gameMedia?.hero_animated || existingMeta?.hero_animated,
+        image: installedMeta?.localImage || game.image || existing.image,
+        splash: installedMeta?.localSplash || game.splash || existing.splash,
+        screenshots: localScreenshots,
+        localImage: installedMeta?.localImage || existingMeta?.localImage,
+        localSplash: installedMeta?.localSplash || existingMeta?.localSplash,
+        localHeroImage: installedMeta?.localHeroImage || existingMeta?.localHeroImage,
+        localBackgroundImage: installedMeta?.localBackgroundImage || existingMeta?.localBackgroundImage,
+        localHeroLogo: installedMeta?.localHeroLogo || existingMeta?.localHeroLogo,
+        localHeroAnimated: installedMeta?.localHeroAnimated || existingMeta?.localHeroAnimated,
+        localScreenshots,
+      })
+    )
   }
   return Array.from(mergedByAppid.values())
 }

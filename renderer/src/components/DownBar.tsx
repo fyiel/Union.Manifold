@@ -228,7 +228,7 @@ export function DownBar() {
             onKeyDown={(e) => {
               if (e.key === "Enter" || e.key === " ") handleClick()
             }}
-            className="glass pointer-events-auto flex w-full max-w-xl cursor-pointer items-center justify-between gap-3 rounded-full border border-white/[.12] bg-zinc-950/68 px-4 py-3 text-sm text-zinc-200 shadow-[0_8px_30px_rgba(0,0,0,0.28)] transition-all hover:border-white/[.16] hover:bg-zinc-950/75 backdrop-blur-2xl"
+            className="glass pointer-events-auto flex w-full max-w-xl cursor-pointer items-center justify-between gap-3 rounded-full border border-white/[.12] bg-zinc-950/68 px-4 py-3 text-sm text-zinc-200 shadow-[0_8px_30px_rgba(0,0,0,0.28),inset_0_1px_0_rgba(255,255,255,0.04)] transition-all hover:border-white/[.16] hover:bg-zinc-950/75 backdrop-blur-2xl"
           >
             <div className="flex items-center gap-3">
                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-zinc-800/80 ring-1 ring-white/[.07]">
@@ -236,7 +236,7 @@ export function DownBar() {
               </div>
               <div>
                 <span className="font-medium text-zinc-300">Activity</span>
-                <p className="text-[11px] text-zinc-600">No active downloads</p>
+                <p className="text-[11px] text-zinc-400">No active downloads</p>
               </div>
             </div>
             <button
@@ -292,7 +292,7 @@ export function DownBar() {
           onKeyDown={(e) => {
             if (e.key === "Enter" || e.key === " ") handleClick()
           }}
-          className="glass pointer-events-auto flex w-full max-w-xl cursor-pointer items-center gap-4 rounded-full border border-white/[.12] bg-zinc-950/68 px-4 py-3 text-sm text-zinc-200 shadow-[0_8px_30px_rgba(0,0,0,0.28)] transition-all hover:border-white/[.16] hover:bg-zinc-950/75 backdrop-blur-2xl"
+          className="glass pointer-events-auto flex w-full max-w-xl cursor-pointer items-center gap-4 rounded-full border border-white/[.12] bg-zinc-950/68 px-4 py-3 text-sm text-zinc-200 shadow-[0_8px_30px_rgba(0,0,0,0.28),inset_0_1px_0_rgba(255,255,255,0.04)] transition-all hover:border-white/[.16] hover:bg-zinc-950/75 backdrop-blur-2xl"
         >
           <div className="min-w-0 flex-1 space-y-2">
             <div className="flex items-center gap-4">

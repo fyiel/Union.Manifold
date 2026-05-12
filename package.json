@@ -1,7 +1,7 @@
 {
   "name": "unioncrax-direct",
-  "version": "1.8.5-BETA",
-  "description": "Standalone Electron app for managing and launching games from UnionCrax",
+  "version": "2.0.0",
+  "description": "UC.D",
   "type": "module",
   "main": "electron/main.cjs",
   "author": "UnionCrax",
@@ -103,6 +103,14 @@
       "node_modules/7zip-bin",
       "electron/native/build/**/*"
     ],
+    "protocols": [
+      {
+        "name": "UnionCrax",
+        "schemes": [
+          "unioncrax"
+        ]
+      }
+    ],
     "win": {
       "icon": "assets/icon.ico",
       "target": [
@@ -130,7 +138,9 @@
       "oneClick": false,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "UnionCrax.Direct"
+      "shortcutName": "UnionCrax.Direct",
+      "installerIcon": "assets/icon.ico",
+      "uninstallerIcon": "assets/icon.ico"
     },
     "linux": {
       "target": [

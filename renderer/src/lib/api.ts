@@ -3,6 +3,64 @@ import { apiLogger } from "./logger"
 const DEFAULT_BASE_URL = "https://union-crax.xyz"
 const CUSTOM_API_BASE_URL_STORAGE_KEY = "uc_custom_api_base_url"
 
+type ApiConnectivitySnapshot = {
+  browserOnline: boolean
+  serviceReachable: boolean
+  isOnline: boolean
+}
+
+const connectivityListeners = new Set<() => void>()
+let serviceReachable = true
+let cachedConnectivitySnapshot: ApiConnectivitySnapshot | null = null
+
+function readBrowserOnline(): boolean {
+  return typeof navigator !== "undefined" ? navigator.onLine : true
+}
+
+function emitConnectivityChange(): void {
+  for (const listener of connectivityListeners) {
+    listener()
+  }
+}
+
+function setServiceReachable(nextValue: boolean): void {
+  if (serviceReachable === nextValue) return
+  serviceReachable = nextValue
+  emitConnectivityChange()
+}
+
+export function resetApiReachability(): void {
+  setServiceReachable(true)
+}
+
+export function subscribeApiConnectivity(callback: () => void): () => void {
+  connectivityListeners.add(callback)
+  return () => {
+    connectivityListeners.delete(callback)
+  }
+}
+
+export function getApiConnectivitySnapshot(): ApiConnectivitySnapshot {
+  const browserOnline = readBrowserOnline()
+  const nextSnapshot = {
+    browserOnline,
+    serviceReachable,
+    isOnline: browserOnline && serviceReachable,
+  }
+
+  if (
+    cachedConnectivitySnapshot &&
+    cachedConnectivitySnapshot.browserOnline === nextSnapshot.browserOnline &&
+    cachedConnectivitySnapshot.serviceReachable === nextSnapshot.serviceReachable &&
+    cachedConnectivitySnapshot.isOnline === nextSnapshot.isOnline
+  ) {
+    return cachedConnectivitySnapshot
+  }
+
+  cachedConnectivitySnapshot = nextSnapshot
+  return cachedConnectivitySnapshot
+}
+
 export function normalizeApiBaseUrl(url: string): string {
   const trimmed = String(url || "").trim()
   if (!trimmed) return ""
@@ -41,6 +99,7 @@ export function setApiBaseUrl(url: string): void {
   } catch {
     // ignore storage errors
   }
+  resetApiReachability()
 }
 
 export function apiUrl(path: string): string {
@@ -93,6 +152,7 @@ export async function apiFetch(path: string, init?: RequestInit) {
       }
 
       const result = await window.ucAuth!.fetch(getApiBaseUrl(), path, serializedInit)
+      setServiceReachable(!(result.status === 0 || result.statusText === "fetch_failed"))
       const bytes = result.body ? base64ToUint8Array(result.body) : new Uint8Array()
       // Response status must be in [200, 599]. A status of 0 means a network
       // error (DNS failure, server unreachable, CORS block, etc.).  Map it to
@@ -108,8 +168,14 @@ export async function apiFetch(path: string, init?: RequestInit) {
     }
   }
 
-  const response = await fetch(apiUrl(path), finalInit)
-  return response
+  try {
+    const response = await fetch(apiUrl(path), finalInit)
+    setServiceReachable(true)
+    return response
+  } catch (error) {
+    setServiceReachable(false)
+    throw error
+  }
 }
 
 function base64ToUint8Array(base64: string): Uint8Array {
