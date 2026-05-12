@@ -10,7 +10,7 @@ type LogSharingConsentModalProps = {
 export function LogSharingConsentModal({ open, onAccept, onDecline }: LogSharingConsentModalProps) {
   return (
     <Dialog open={open} onOpenChange={(isOpen) => !isOpen && onDecline()}>
-      <DialogContent className="sm:max-w-md rounded-2xl border-white/[.07] bg-zinc-900/95 shadow-2xl" showCloseButton={false}>
+      <DialogContent className="sm:max-w-md" showCloseButton={false}>
         <DialogHeader>
           <DialogTitle>Share error reports?</DialogTitle>
           <DialogDescription className="text-left pt-2">

@@ -10,6 +10,8 @@ type AppPreferences = {
   linuxLaunchMode?: "auto" | "native" | "wine" | "proton"
   developerMode?: boolean
   verboseDownloadLogging?: boolean
+  animatedBackgroundsEnabled?: boolean
+  reducedMotionEnabled?: boolean
 }
 
 const ALLOWED_KEYS = new Set<keyof AppPreferences>([
@@ -19,6 +21,8 @@ const ALLOWED_KEYS = new Set<keyof AppPreferences>([
   "linuxLaunchMode",
   "developerMode",
   "verboseDownloadLogging",
+  "animatedBackgroundsEnabled",
+  "reducedMotionEnabled",
 ])
 
 function normalizePreferences(input: unknown): AppPreferences {
@@ -46,6 +50,12 @@ function normalizePreferences(input: unknown): AppPreferences {
   }
   if (typeof record.verboseDownloadLogging === "boolean") {
     prefs.verboseDownloadLogging = record.verboseDownloadLogging
+  }
+  if (typeof record.animatedBackgroundsEnabled === "boolean") {
+    prefs.animatedBackgroundsEnabled = record.animatedBackgroundsEnabled
+  }
+  if (typeof record.reducedMotionEnabled === "boolean") {
+    prefs.reducedMotionEnabled = record.reducedMotionEnabled
   }
 
   const linuxLaunchMode = record.linuxLaunchMode
@@ -93,12 +103,35 @@ async function readLocalPreferences(): Promise<AppPreferences> {
     if (typeof verbose === "boolean") prefs.verboseDownloadLogging = verbose
   } catch {}
 
+  try {
+    const bg = await window.ucSettings.get("animatedBackgroundsEnabled")
+    if (typeof bg === "boolean") prefs.animatedBackgroundsEnabled = bg
+  } catch {}
+
+  try {
+    const rm = await window.ucSettings.get("reducedMotionEnabled")
+    if (typeof rm === "boolean") prefs.reducedMotionEnabled = rm
+  } catch {}
+
   return prefs
 }
 
 async function applyPreferences(prefs: AppPreferences) {
   if (prefs.defaultMirrorHost) {
     setPreferredDownloadHost(prefs.defaultMirrorHost)
+  }
+
+  // Motion prefs also live in localStorage so non-electron reads (e.g. tabs
+  // pre-hydration, the prefers-reduced-motion fallback) stay consistent.
+  if (typeof window !== "undefined") {
+    if (typeof prefs.animatedBackgroundsEnabled === "boolean") {
+      try { localStorage.setItem("uc_enable_bg", prefs.animatedBackgroundsEnabled ? "1" : "0") } catch {}
+      try { window.dispatchEvent(new Event("uc_enable_bg_pref")) } catch {}
+    }
+    if (typeof prefs.reducedMotionEnabled === "boolean") {
+      try { localStorage.setItem("uc_reduced_motion", prefs.reducedMotionEnabled ? "1" : "0") } catch {}
+      try { window.dispatchEvent(new Event("uc_reduce_motion_pref")) } catch {}
+    }
   }
 
   if (typeof window === "undefined" || !window.ucSettings?.set) return

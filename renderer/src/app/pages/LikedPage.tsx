@@ -43,6 +43,10 @@ export function LikedPage() {
           res = await apiFetch("/api/account/favorites")
         }
       }
+      if (res.status === 401) {
+        setItems([])
+        return
+      }
       if (!res.ok) {
         setError("Unable to load liked games.")
         setItems([])
@@ -107,21 +111,21 @@ export function LikedPage() {
               <p className="text-sm text-zinc-400">Sign in to sync favorites across devices.</p>
               <Button className="gap-2" onClick={handleLogin} disabled={loggingIn}>
                 <LogIn className="h-4 w-4" />
-                {loggingIn ? "Connecting..." : "Login with Discord"}
+                {loggingIn ? "Redirecting..." : "Sign In"}
               </Button>
             </CardContent>
           </Card>
         )}
 
-        {error && (
+        {error && accountUser && (
           <div className="mb-4 rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
             {error}
           </div>
         )}
 
-        {loading ? (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {Array.from({ length: 6 }).map((_, idx) => (
+        {!accountUser && !accountLoading ? null : loading || accountLoading ? (
+          <div className="grid gap-4 grid-cols-2 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+            {Array.from({ length: 10 }).map((_, idx) => (
               <GameCardSkeleton key={idx} />
             ))}
           </div>
@@ -132,7 +136,7 @@ export function LikedPage() {
             </CardContent>
           </Card>
         ) : (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid gap-4 grid-cols-2 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
             {items.map((game) => (
               <GameCard key={game.appid} game={game} />
             ))}

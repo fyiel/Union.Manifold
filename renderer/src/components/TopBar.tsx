@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react"
 import { useEffect, useMemo, useState, useCallback } from "react"
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -8,8 +9,23 @@ import { useDiscordAccount } from "@/hooks/use-discord-account"
 import { apiFetch, apiUrl, getApiBaseUrl } from "@/lib/api"
 import { getRouteChrome } from "@/lib/navigation"
 import { Button } from "@/components/ui/button"
-import { ChevronLeft, ChevronRight, LogIn, LogOut, Mail, Menu, RotateCw, Search, Settings, UserRound } from "lucide-react"
+import { ChevronLeft, ChevronRight, LogIn, LogOut, Menu, Minus, RotateCw, Search, Settings, UserRound, X } from "lucide-react"
 import { cn } from "@/lib/utils"
+
+const dragRegion = { WebkitAppRegion: "drag" } as CSSProperties
+const noDragRegion = { WebkitAppRegion: "no-drag" } as CSSProperties
+
+declare global {
+  interface Window {
+    ucWindow?: {
+      minimize: () => void
+      maximize: () => void
+      close: () => void
+      isMaximized: () => Promise<boolean>
+      onMaximizeChange: (cb: (isMaximized: boolean) => void) => () => void
+    }
+  }
+}
 
 interface TopBarProps {
   onOpenMenu: () => void
@@ -26,6 +42,18 @@ export function TopBar({ onOpenMenu }: TopBarProps) {
   const [isRefreshing, setIsRefreshing] = useState(false)
   const { user: accountUser, loading: accountLoading, refresh } = useDiscordAccount()
   const chrome = useMemo(() => getRouteChrome(location.pathname), [location.pathname])
+
+  // Window controls live inside the nav pill now so the top of the app reads as
+  // a single Steam-style bar instead of detached title bar + nav strip.
+  const hasWindowControls = typeof window !== "undefined" && !!window.ucWindow
+  const [isMaximized, setIsMaximized] = useState(false)
+
+  useEffect(() => {
+    if (!hasWindowControls) return
+    window.ucWindow?.isMaximized().then(setIsMaximized)
+    const unsub = window.ucWindow?.onMaximizeChange(setIsMaximized)
+    return () => unsub?.()
+  }, [hasWindowControls])
 
   // Back is only available after the first navigation (location.key is "default" on initial load)
   const canGoBack = location.key !== "default"
@@ -69,7 +97,7 @@ export function TopBar({ onOpenMenu }: TopBarProps) {
   const accountLabel = accountUser ? accountUser.displayName || accountUser.username : "Account"
   const avatarUrl = accountUser?.avatarUrl
   const showAccountLoading = accountLoading
-  const accountSubtitle = accountUser ? "Discord account" : "Login to continue"
+  const accountSubtitle = accountUser ? "Your account" : "Login to continue"
   const accountActionLabel = accountUser
     ? (loggingOut ? "Signing out..." : "Logout")
     : (loggingIn ? "Connecting..." : "Log in")
@@ -102,13 +130,20 @@ export function TopBar({ onOpenMenu }: TopBarProps) {
 
   return (
     <>
-      <div className="pointer-events-auto px-4 pb-3 pt-3 md:px-8 xl:px-10">
-        <nav className="mx-auto flex h-14 w-full max-w-6xl items-center gap-2 rounded-full border border-white/[.12] bg-zinc-950/68 px-2 py-2 shadow-[0_8px_30px_rgba(0,0,0,0.28)] backdrop-blur-2xl">
+      <div
+        className="pointer-events-auto px-4 pb-3 pt-2 md:px-8 xl:px-10"
+        style={hasWindowControls ? dragRegion : undefined}
+      >
+        <nav
+          className="mx-auto flex h-[60px] w-full max-w-6xl items-center gap-2 rounded-full border border-white/[.10] bg-zinc-950/72 px-2 py-2 shadow-[0_10px_32px_-12px_rgba(0,0,0,0.55),inset_0_1px_0_rgba(255,255,255,0.04)] backdrop-blur-2xl supports-[backdrop-filter]:bg-zinc-950/60"
+          style={hasWindowControls ? dragRegion : undefined}
+        >
           {/* Mobile Menu Button */}
           <button
             type="button"
             aria-label="Open navigation"
             onClick={onOpenMenu}
+            style={noDragRegion}
             className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/[.10] bg-white/[0.04] text-zinc-400 transition hover:bg-white/[0.08] hover:text-white active:scale-95 md:hidden"
           >
             <Menu className="h-4.5 w-4.5" />
@@ -118,15 +153,16 @@ export function TopBar({ onOpenMenu }: TopBarProps) {
             type="button"
             onClick={handleLogoNav}
             aria-label="Go to home"
-            className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white text-black shadow-md transition-all hover:scale-[1.03] hover:bg-zinc-200 active:scale-95 md:flex"
+            style={noDragRegion}
+            className="hidden h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white text-black shadow-md transition-all hover:scale-[1.03] hover:bg-zinc-200 active:scale-95 md:flex"
           >
-            <LogoStaticDark className="h-4.5 w-4.5" />
+            <LogoStaticDark className="h-7 w-7" />
           </button>
 
           {/* Desktop Navigation Controls */}
           <div className="hidden h-5 w-px bg-white/[.08] md:block" />
 
-          <div className="hidden items-center gap-1 md:flex">
+          <div className="hidden items-center gap-1 md:flex" style={noDragRegion}>
             <button
               type="button"
               onClick={handleBack}
@@ -166,10 +202,13 @@ export function TopBar({ onOpenMenu }: TopBarProps) {
               <div className="truncate text-sm font-semibold text-zinc-100">{chrome.title}</div>
             </div>
             <div className="hidden md:flex md:justify-center">
-              <div className="flex min-w-0 max-w-full items-center gap-2 rounded-full border border-white/[.06] bg-white/[.03] px-4 py-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
+              <div
+                className="flex min-w-0 max-w-full items-center gap-2.5 rounded-full border border-white/[.07] bg-gradient-to-b from-white/[.04] to-white/[.015] px-4 py-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04),0_1px_0_rgba(0,0,0,0.25)] transition-colors hover:border-white/[.10]"
+                style={hasWindowControls ? dragRegion : undefined}
+              >
                 <span className="shrink-0 text-[10px] font-semibold uppercase tracking-[0.22em] text-zinc-500">{chrome.eyebrow}</span>
-                <span className="text-zinc-700">/</span>
-                <span className="truncate text-sm font-semibold text-zinc-100">{chrome.title}</span>
+                <span className="h-3 w-px bg-white/[.08]" aria-hidden="true" />
+                <span className="truncate text-[13px] font-semibold text-zinc-100">{chrome.title}</span>
               </div>
             </div>
           </div>
@@ -179,6 +218,7 @@ export function TopBar({ onOpenMenu }: TopBarProps) {
             type="button"
             variant="outline"
             onClick={handleSearchShortcut}
+            style={noDragRegion}
             className="hidden h-9 min-w-[220px] justify-between rounded-full border border-white/[.10] bg-black/20 px-4 text-zinc-400 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] backdrop-blur-xl hover:border-white/[.14] hover:bg-white/[.06] hover:text-zinc-100 active:scale-[0.98] md:flex"
           >
             <span className="flex items-center gap-2">
@@ -195,6 +235,7 @@ export function TopBar({ onOpenMenu }: TopBarProps) {
             type="button"
             onClick={handleSearchShortcut}
             aria-label="Open search"
+            style={noDragRegion}
             className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/[.10] bg-white/[0.04] text-zinc-400 transition hover:bg-white/[0.08] hover:text-white active:scale-95 md:hidden"
           >
             <Search className="h-4 w-4" />
@@ -208,6 +249,7 @@ export function TopBar({ onOpenMenu }: TopBarProps) {
           ) : (
             <Popover>
               <PopoverTrigger
+                style={noDragRegion}
                 className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/[.10] bg-white/[0.04] p-0.5 outline-none transition hover:border-white/[.16] hover:bg-white/[0.08] focus-visible:ring-1 focus-visible:ring-white/20 active:scale-95"
                 aria-label={`${accountLabel} menu`}
               >
@@ -225,7 +267,7 @@ export function TopBar({ onOpenMenu }: TopBarProps) {
               </PopoverTrigger>
               <PopoverContent
                 align="end"
-                className="w-56 rounded-[1.5rem] border border-white/[.10] bg-zinc-950/88 p-1.5 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-2xl"
+                className="w-56 p-1.5"
               >
                 <div className="px-3 py-2">
                   <div className="text-sm font-semibold text-zinc-100">{accountLabel}</div>
@@ -253,18 +295,50 @@ export function TopBar({ onOpenMenu }: TopBarProps) {
                   {accountUser ? <LogOut className="h-4 w-4" /> : <LogIn className="h-4 w-4" />}
                   {accountActionLabel}
                 </button>
-                {!accountUser && (
-                  <button
-                    type="button"
-                    onClick={() => navigate("/login")}
-                    className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-[13px] text-zinc-400 transition hover:bg-white/[0.05] hover:text-white"
-                  >
-                    <Mail className="h-4 w-4" />
-                    More sign-in options
-                  </button>
-                )}
+
               </PopoverContent>
             </Popover>
+          )}
+
+          {hasWindowControls && (
+            <div
+              className="ml-1 hidden items-center gap-0.5 border-l border-white/[.08] pl-1.5 md:flex"
+              style={noDragRegion}
+            >
+              <button
+                type="button"
+                aria-label="Minimize"
+                onClick={() => window.ucWindow?.minimize()}
+                className="uc-winctl"
+              >
+                <Minus className="h-3.5 w-3.5" strokeWidth={2} />
+              </button>
+              <button
+                type="button"
+                aria-label={isMaximized ? "Restore" : "Maximize"}
+                onClick={() => window.ucWindow?.maximize()}
+                className="uc-winctl"
+              >
+                {isMaximized ? (
+                  <svg viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth={1.2} className="h-3 w-3">
+                    <rect x="2.5" y="2.5" width="6" height="6" rx="0.6" />
+                    <path d="M1.5 6.5V1.5h5" />
+                  </svg>
+                ) : (
+                  <svg viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth={1.2} className="h-3 w-3">
+                    <rect x="1.5" y="1.5" width="7" height="7" rx="0.6" />
+                  </svg>
+                )}
+              </button>
+              <button
+                type="button"
+                aria-label="Close"
+                onClick={() => window.ucWindow?.close()}
+                className="uc-winctl uc-winctl--close"
+              >
+                <X className="h-3.5 w-3.5" strokeWidth={2} />
+              </button>
+            </div>
           )}
         </nav>
       </div>

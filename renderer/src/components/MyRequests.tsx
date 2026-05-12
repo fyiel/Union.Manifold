@@ -209,7 +209,7 @@ export function MyRequests({
                 className="border-zinc-700 bg-white/10 text-white hover:bg-white/20"
                 onClick={() => navigate("/settings")}
               >
-                Login with Discord
+                Sign In
               </Button>
             </AlertDescription>
           </Alert>

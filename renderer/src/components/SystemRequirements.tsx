@@ -30,23 +30,23 @@ export function SystemRequirements({ appid }: SystemRequirementsProps) {
   if (loading) {
     return (
       <div className="p-8 rounded-3xl bg-zinc-900/60 border border-white/[.07] backdrop-blur-md shadow-xl space-y-4">
-        <div className="h-3 w-36 rounded bg-zinc-800 animate-pulse" />
+        <div className="udl-skeleton h-3 w-36 rounded" />
         <div className="grid md:grid-cols-2 gap-4">
           <div className="rounded-2xl bg-zinc-800/50 border border-white/[.07] p-5 space-y-2">
-            <div className="h-2.5 w-16 rounded bg-zinc-700 animate-pulse mb-3" />
-            <div className="h-2.5 w-full rounded bg-zinc-700 animate-pulse" />
-            <div className="h-2.5 w-5/6 rounded bg-zinc-700 animate-pulse" />
-            <div className="h-2.5 w-4/6 rounded bg-zinc-700 animate-pulse" />
-            <div className="h-2.5 w-full rounded bg-zinc-700 animate-pulse" />
-            <div className="h-2.5 w-3/4 rounded bg-zinc-700 animate-pulse" />
+            <div className="udl-skeleton h-2.5 w-16 rounded mb-3" />
+            <div className="udl-skeleton h-2.5 w-full rounded" />
+            <div className="udl-skeleton h-2.5 w-5/6 rounded" />
+            <div className="udl-skeleton h-2.5 w-4/6 rounded" />
+            <div className="udl-skeleton h-2.5 w-full rounded" />
+            <div className="udl-skeleton h-2.5 w-3/4 rounded" />
           </div>
           <div className="rounded-2xl bg-zinc-800/50 border border-white/[.07] p-5 space-y-2">
-            <div className="h-2.5 w-20 rounded bg-zinc-700 animate-pulse mb-3" />
-            <div className="h-2.5 w-full rounded bg-zinc-700 animate-pulse" />
-            <div className="h-2.5 w-5/6 rounded bg-zinc-700 animate-pulse" />
-            <div className="h-2.5 w-4/6 rounded bg-zinc-700 animate-pulse" />
-            <div className="h-2.5 w-full rounded bg-zinc-700 animate-pulse" />
-            <div className="h-2.5 w-3/4 rounded bg-zinc-700 animate-pulse" />
+            <div className="udl-skeleton h-2.5 w-20 rounded mb-3" />
+            <div className="udl-skeleton h-2.5 w-full rounded" />
+            <div className="udl-skeleton h-2.5 w-5/6 rounded" />
+            <div className="udl-skeleton h-2.5 w-4/6 rounded" />
+            <div className="udl-skeleton h-2.5 w-full rounded" />
+            <div className="udl-skeleton h-2.5 w-3/4 rounded" />
           </div>
         </div>
       </div>

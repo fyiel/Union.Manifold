@@ -9,13 +9,22 @@ type CompactGame = {
   appid: string
   name: string
   image: string
+  splash?: string
+  hero_image?: string
+  background_image?: string
+  localImage?: string
+  localSplash?: string
+  localHeroImage?: string
+  localBackgroundImage?: string
   genres: string[]
 }
 
 export const GameCardCompact = memo(function GameCardCompact({ game }: { game: CompactGame }) {
   const [allowNsfwReveal, setAllowNsfwReveal] = useState(false)
   const [sessionRevealed, setSessionRevealed] = useState(false)
+  const [imageLoaded, setImageLoaded] = useState(false)
   const isNSFW = game.genres?.some((genre) => genre.toLowerCase() === "nsfw")
+  const cardImageSrc = proxyImageUrl(getCardImage(game.image || "")) || "./banner.png"
 
   useEffect(() => {
     const syncPreference = () => {
@@ -50,12 +59,18 @@ export const GameCardCompact = memo(function GameCardCompact({ game }: { game: C
     return () => window.removeEventListener("uc_nsfw_session_changed", checkSession)
   }, [game.appid])
 
+  useEffect(() => {
+    setImageLoaded(false)
+  }, [cardImageSrc])
+
   return (
     <Link to={`/game/${game.appid}`} className="group block">
       <div className="relative overflow-hidden rounded-2xl border border-zinc-800/50 bg-zinc-900/80 transition hover:border-zinc-700/50">
         <div className="relative aspect-[3/4]">
+          {!imageLoaded && <div className="udl-skeleton absolute inset-0 z-0 rounded-none" />}
+
           <img
-            src={proxyImageUrl(getCardImage(game.image)) || "./banner.png"}
+            src={cardImageSrc}
             alt={game.name}
             loading="lazy"
             className={`h-full w-full object-cover transition duration-500 group-hover:scale-105 ${
@@ -63,6 +78,8 @@ export const GameCardCompact = memo(function GameCardCompact({ game }: { game: C
                 ? "blur-xl brightness-50"
                 : ""
             }`}
+            onLoad={() => setImageLoaded(true)}
+            onError={() => setImageLoaded(true)}
           />
           {/* NSFW overlay: show Reveal button when not revealed */}
           {isNSFW && !(sessionRevealed || allowNsfwReveal) && (

@@ -982,9 +982,9 @@ export function GameComments({
               <div className="flex flex-col sm:flex-row sm:items-center gap-3">
                 <div className="flex items-center gap-2 text-sm text-zinc-400">
                   <MessageCircle className="h-4 w-4" />
-                  Sign in with Discord to post and like comments.
+                  Sign in to post and like comments.
                 </div>
-                <Button size="sm" onClick={() => connectDiscord("comments")}>Login with Discord</Button>
+                <Button size="sm" onClick={() => connectDiscord()}>Sign In</Button>
               </div>
             )}
 

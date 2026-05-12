@@ -86,6 +86,7 @@ if (process.platform === 'win32') {
     app.setAppUserModelId(packageJson?.build?.appId || 'xyz.unioncrax.direct')
   } catch { }
 }
+const WINDOW_DISPLAY_NAME = 'UnionCrax.Direct'
 try {
   if (typeof app.setName === 'function') app.setName('UnionCrax.Direct')
   else app.name = 'UnionCrax.Direct'
@@ -1869,21 +1870,40 @@ function resolveIcon() {
   return path.join(__dirname, '..', 'assets', asset)
 }
 
+function resolveRasterIconPath() {
+  const asset = 'icon.png'
+
+  if (app.isPackaged) {
+    const packagedPath = path.join(process.resourcesPath, 'assets', asset)
+    if (fs.existsSync(packagedPath)) return packagedPath
+  }
+
+  return path.join(__dirname, '..', 'assets', asset)
+}
+
+function resolveWindowIcon() {
+  const rasterPath = resolveRasterIconPath()
+  const rasterImage = nativeImage.createFromPath(rasterPath)
+  if (!rasterImage.isEmpty()) return rasterImage
+
+  const fallbackPath = resolveIcon()
+  const fallbackImage = nativeImage.createFromPath(fallbackPath)
+  return fallbackImage.isEmpty() ? fallbackPath : fallbackImage
+}
+
 function resolveTrayIcon() {
-  // Use the same resolution logic as resolveIcon
-  return resolveIcon()
+  return resolveWindowIcon()
 }
 
 function createTray() {
   if (tray) return
-  const iconPath = resolveTrayIcon()
-  const image = nativeImage.createFromPath(iconPath)
-  tray = new Tray(image.isEmpty() ? resolveIcon() : image)
-  tray.setToolTip('UnionCrax.Direct')
-  tray.setTitle('UnionCrax.Direct')
+  const iconImage = resolveTrayIcon()
+  tray = new Tray(iconImage)
+  tray.setToolTip(WINDOW_DISPLAY_NAME)
+  tray.setTitle(WINDOW_DISPLAY_NAME)
   const contextMenu = Menu.buildFromTemplate([
     {
-      label: 'Show UnionCrax.Direct',
+      label: `Show ${WINDOW_DISPLAY_NAME}`,
       click: () => {
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.show()
@@ -1976,6 +1996,327 @@ async function detectBestBaseUrl(onStatus) {
 
 let tray = null
 let mainWindow = null
+const UC_DEEP_LINK_SCHEME = 'unioncrax'
+let pendingAppLaunchRequests = []
+let processingLaunchQueue = false
+
+function normalizeAppid(value) {
+  if (value == null) return null
+  const normalized = String(value).trim()
+  return normalized || null
+}
+
+function parseLaunchAppidFromArgv(argv) {
+  if (!Array.isArray(argv)) return null
+  for (let i = 0; i < argv.length; i += 1) {
+    const current = String(argv[i] || '')
+    const lower = current.toLowerCase()
+    if (lower.startsWith('--launch-appid=')) {
+      return normalizeAppid(current.slice('--launch-appid='.length))
+    }
+    if (lower === '--launch-appid') {
+      return normalizeAppid(argv[i + 1])
+    }
+  }
+  return null
+}
+
+function parseLaunchRequestFromDeepLink(rawUrl) {
+  try {
+    const parsed = new URL(String(rawUrl || ''))
+    if (parsed.protocol !== `${UC_DEEP_LINK_SCHEME}:`) return null
+    let action = String(parsed.hostname || '').toLowerCase()
+    if (!action && parsed.pathname) {
+      action = String(parsed.pathname.replace(/^\/+/, '').split('/')[0] || '').toLowerCase()
+    }
+    if (action !== 'launch') return null
+    const appid = normalizeAppid(parsed.searchParams.get('appid'))
+    if (!appid) return null
+    return { appid, rawUrl: String(rawUrl) }
+  } catch {
+    return null
+  }
+}
+
+function parseLaunchRequestFromArgv(argv) {
+  const appidFromFlag = parseLaunchAppidFromArgv(argv)
+  if (appidFromFlag) return { appid: appidFromFlag, source: 'cli-flag' }
+  if (!Array.isArray(argv)) return null
+  for (const arg of argv) {
+    const maybe = parseLaunchRequestFromDeepLink(arg)
+    if (maybe?.appid) {
+      return { appid: maybe.appid, source: 'protocol-argv', rawUrl: maybe.rawUrl }
+    }
+  }
+  return null
+}
+
+function enqueueAppLaunchRequest(appid, source = 'unknown') {
+  const normalizedAppid = normalizeAppid(appid)
+  if (!normalizedAppid) return
+  const alreadyQueued = pendingAppLaunchRequests.some((entry) => entry.appid === normalizedAppid)
+  if (alreadyQueued) return
+  pendingAppLaunchRequests.push({ appid: normalizedAppid, source, queuedAt: Date.now() })
+  ucLog(`Queued app launch request for ${normalizedAppid} (${source})`, 'info')
+}
+
+function focusPrimaryWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  if (mainWindow.isMinimized()) mainWindow.restore()
+  if (!mainWindow.isVisible()) mainWindow.show()
+  mainWindow.setAlwaysOnTop(true)
+  mainWindow.focus()
+  mainWindow.setAlwaysOnTop(false)
+}
+
+function ensureMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createWindow()
+  }
+  focusPrimaryWindow()
+}
+
+async function navigateToGameDetailRoute(appid, options = {}) {
+  ensureMainWindow()
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  const autoLaunch = options?.autoLaunch === true
+  const route = autoLaunch
+    ? `/game/${encodeURIComponent(appid)}?launch=1`
+    : `/game/${encodeURIComponent(appid)}`
+  try {
+    await mainWindow.webContents.executeJavaScript(`window.location.hash = ${JSON.stringify(route)};`, true)
+  } catch (err) {
+    ucLog(`Failed to navigate to game route for ${appid}: ${err?.message || String(err)}`, 'warn')
+  }
+}
+
+function readInstalledManifestByAppidSync(appid) {
+  if (!appid) return null
+  try {
+    const downloadRoot = ensureDownloadDir()
+    const root = path.join(downloadRoot, installedDirName)
+    for (const { folder } of iterateGameFolders(root)) {
+      const manifestPath = path.join(folder, INSTALLED_MANIFEST)
+      const manifest = readJsonFile(manifestPath)
+      if (manifest && manifest.appid === appid) return manifest
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
+function getStoredLibraryGameName(appid) {
+  if (!appid) return null
+  try {
+    const settings = readSettings() || {}
+    const libraryMeta = settings.libraryGameMeta && typeof settings.libraryGameMeta === 'object'
+      ? settings.libraryGameMeta
+      : null
+    const entry = libraryMeta && typeof libraryMeta[appid] === 'object' ? libraryMeta[appid] : null
+    const name = typeof entry?.name === 'string' ? entry.name.trim() : ''
+    return name || null
+  } catch {
+    return null
+  }
+}
+
+function resolveGameNameForAppid(appid) {
+  const storedName = getStoredLibraryGameName(appid)
+  const manifest = readInstalledManifestByAppidSync(appid)
+  if (manifest) {
+    const meta = manifest.metadata || {}
+    return meta.name || manifest.name || manifest.gameName || storedName || appid
+  }
+  return storedName || appid
+}
+
+function sanitizeAppidForLaunchArg(appid) {
+  const s = normalizeAppid(appid)
+  if (!s) return null
+  if (!/^[\w.-]+$/.test(s)) return null
+  return s
+}
+
+function getUcDesktopLauncherPath() {
+  return process.execPath
+}
+
+function formatWindowsIconLocation(iconPath) {
+  if (!iconPath || typeof iconPath !== 'string') return null
+  const trimmed = iconPath.trim()
+  if (!trimmed) return null
+  const ext = path.extname(trimmed).toLowerCase()
+  if (ext === '.exe' || ext === '.dll' || ext === '.icl') {
+    return `${trimmed},0`
+  }
+  return trimmed
+}
+
+function resolveShortcutIconLocation(appid, preferredExePath = null) {
+  const preferred = typeof preferredExePath === 'string' ? preferredExePath.trim() : ''
+  if (preferred && fs.existsSync(preferred) && path.extname(preferred).toLowerCase() !== '.lnk') {
+    return formatWindowsIconLocation(preferred)
+  }
+
+  try {
+    const settings = readSettings() || {}
+    const configuredExePath = settings[`gameExe:${appid}`]
+    if (
+      typeof configuredExePath === 'string' &&
+      configuredExePath.trim() &&
+      fs.existsSync(configuredExePath) &&
+      path.extname(configuredExePath).toLowerCase() !== '.lnk'
+    ) {
+      return formatWindowsIconLocation(configuredExePath)
+    }
+  } catch { }
+
+  const appIconPath = resolveIcon()
+  if (appIconPath && fs.existsSync(appIconPath)) {
+    return formatWindowsIconLocation(appIconPath)
+  }
+
+  const launcherPath = getUcDesktopLauncherPath()
+  if (launcherPath && fs.existsSync(launcherPath)) {
+    return formatWindowsIconLocation(launcherPath)
+  }
+
+  return null
+}
+
+function getDeepLinkProtocolDisplayName() {
+  // Short label — Chrome/Edge show this in the "Open <name>?" handler prompt.
+  // Long product/description strings produce truncated, ugly dialog text.
+  return 'UC.D'
+}
+
+function addWindowsRegistryValue(keyPath, valueName, valueData) {
+  try {
+    const args = ['add', keyPath, '/f']
+    if (valueName === null) {
+      args.push('/ve')
+    } else {
+      args.push('/v', valueName)
+    }
+    args.push('/t', 'REG_SZ', '/d', String(valueData ?? ''))
+    const result = child_process.spawnSync('reg.exe', args, {
+      windowsHide: true,
+      encoding: 'utf8'
+    })
+    if (result.status !== 0) {
+      ucLog(`Failed to stamp registry value ${keyPath}${valueName ? ` (${valueName})` : ''}: ${result.stderr || result.stdout || `exit ${result.status}`}`, 'warn')
+      return false
+    }
+    return true
+  } catch (err) {
+    ucLog(`Failed to stamp registry value ${keyPath}${valueName ? ` (${valueName})` : ''}: ${err?.message || String(err)}`, 'warn')
+    return false
+  }
+}
+
+function ensureWindowsDeepLinkMetadata() {
+  if (process.platform !== 'win32' || isDev) return
+  const launcherPath = getUcDesktopLauncherPath()
+  if (!launcherPath || !fs.existsSync(launcherPath)) return
+
+  const protocolRoot = `HKCU\\Software\\Classes\\${UC_DEEP_LINK_SCHEME}`
+  const displayName = getDeepLinkProtocolDisplayName()
+  const iconLocation = resolveShortcutIconLocation(null, launcherPath)
+  const command = `"${launcherPath}" "%1"`
+
+  addWindowsRegistryValue(protocolRoot, null, `URL:${displayName}`)
+  addWindowsRegistryValue(protocolRoot, 'URL Protocol', '')
+  addWindowsRegistryValue(protocolRoot, 'FriendlyTypeName', displayName)
+  if (iconLocation) {
+    addWindowsRegistryValue(`${protocolRoot}\\DefaultIcon`, null, iconLocation)
+  }
+  addWindowsRegistryValue(`${protocolRoot}\\shell\\open\\command`, null, command)
+}
+
+function buildUcOwnedLinuxDesktopExec(ucExePath, appid) {
+  const safeAppid = sanitizeAppidForLaunchArg(appid)
+  if (!safeAppid) return null
+  const exe = String(ucExePath || '')
+  const escapedExe = exe
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
+  return `"${escapedExe}" --launch-appid=${safeAppid}`
+}
+
+async function processPendingAppLaunchRequests() {
+  if (processingLaunchQueue) return
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    ensureMainWindow()
+  }
+  if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents.isLoading()) {
+    mainWindow.webContents.once('did-finish-load', () => {
+      setTimeout(() => {
+        void processPendingAppLaunchRequests()
+      }, 0)
+    })
+    return
+  }
+
+  processingLaunchQueue = true
+  try {
+    focusPrimaryWindow()
+    while (pendingAppLaunchRequests.length > 0) {
+      const entry = pendingAppLaunchRequests.shift()
+      const appid = entry?.appid
+      if (!appid) continue
+
+      const settings = readSettings() || {}
+      const exeKey = `gameExe:${appid}`
+      const exePath = settings[exeKey]
+      const installedManifest = readInstalledManifestByAppidSync(appid)
+      const canAttemptLaunchFromGamePage = Boolean(installedManifest)
+      const gameName = resolveGameNameForAppid(appid)
+
+      if (!exePath || typeof exePath !== 'string' || !fs.existsSync(exePath)) {
+        ucLog(`Deep link / shortcut launch: no saved exe for ${appid}, opening game page`, 'info')
+        await navigateToGameDetailRoute(appid, { autoLaunch: canAttemptLaunchFromGamePage })
+        continue
+      }
+
+      const preflight = buildGameLaunchPreflight(appid, exePath)
+      if (!preflight.canLaunch) {
+        ucLog(`Deep link / shortcut launch: exe not launchable for ${appid}, opening game page`, 'info')
+        await navigateToGameDetailRoute(appid, { autoLaunch: canAttemptLaunchFromGamePage })
+        continue
+      }
+
+      const showGameName = settings.rpcShowGameName !== false
+      const launchResult = await launchGameExecutableFromMain(appid, exePath, gameName, showGameName)
+      if (!launchResult?.ok) {
+        await navigateToGameDetailRoute(appid)
+      }
+    }
+  } finally {
+    processingLaunchQueue = false
+  }
+}
+
+function registerDeepLinkProtocol() {
+  if (isDev) {
+    ucLog(`Skipping protocol registration for ${UC_DEEP_LINK_SCHEME}:// in development`, 'debug')
+    return
+  }
+  try {
+    let ok = false
+    if (process.platform === 'win32' && process.defaultApp) {
+      ok = app.setAsDefaultProtocolClient(UC_DEEP_LINK_SCHEME, process.execPath, [path.resolve(process.argv[1])])
+    } else {
+      ok = app.setAsDefaultProtocolClient(UC_DEEP_LINK_SCHEME)
+    }
+    if (ok) {
+      ensureWindowsDeepLinkMetadata()
+    }
+    ucLog(`Protocol registration ${ok ? 'succeeded' : 'failed'} for ${UC_DEEP_LINK_SCHEME}://`, ok ? 'info' : 'warn')
+  } catch (err) {
+    ucLog(`Protocol registration failed: ${err?.message || String(err)}`, 'warn')
+  }
+}
 
 // In development, allow multiple instances so `pnpm dev` is not blocked by a
 // hidden tray instance from a prior run.
@@ -1984,7 +2325,17 @@ const gotTheLock = enforceSingleInstance ? app.requestSingleInstanceLock() : tru
 if (!gotTheLock) {
   app.quit()
 } else {
+  const initialLaunchRequest = parseLaunchRequestFromArgv(process.argv)
+  if (initialLaunchRequest?.appid) {
+    enqueueAppLaunchRequest(initialLaunchRequest.appid, initialLaunchRequest.source || 'initial-argv')
+  }
+
   app.on('second-instance', (event, argv) => {
+    const launchRequest = parseLaunchRequestFromArgv(argv)
+    if (launchRequest?.appid) {
+      enqueueAppLaunchRequest(launchRequest.appid, launchRequest.source || 'second-instance')
+    }
+
     // Check if this second instance is from the setup/installer
     let isSetupRun = false
     if (argv && Array.isArray(argv)) {
@@ -2012,14 +2363,12 @@ if (!gotTheLock) {
       app.quit()
     } else if (mainWindow && !mainWindow.isDestroyed()) {
       try {
-        // Restore from minimized or hidden (tray) state
-        if (mainWindow.isMinimized()) mainWindow.restore()
-        if (!mainWindow.isVisible()) mainWindow.show()
-        // On Windows focus stealing prevention can block focus() alone.
-        // Temporarily set alwaysOnTop to force the window to the foreground.
-        mainWindow.setAlwaysOnTop(true)
-        mainWindow.focus()
-        mainWindow.setAlwaysOnTop(false)
+        focusPrimaryWindow()
+        if (pendingAppLaunchRequests.length > 0) {
+          setTimeout(() => {
+            void processPendingAppLaunchRequests()
+          }, 50)
+        }
       } catch (e) {
         ucLog(`Error handling second-instance: ${e && e.message ? e.message : String(e)}`, 'warn')
         if (!BrowserWindow.getAllWindows().some(w => !w.isDestroyed())) {
@@ -2029,8 +2378,18 @@ if (!gotTheLock) {
     } else {
       // If there's no valid window, create one
       createWindow()
+      if (pendingAppLaunchRequests.length > 0) {
+        setTimeout(() => {
+          void processPendingAppLaunchRequests()
+        }, 75)
+      }
     }
   })
+
+  // Note: app.on('open-url') is macOS-only; UC.D only supports Windows and Linux.
+  // Protocol activation on Linux is handled via the second-instance argv path.
+
+  registerDeepLinkProtocol()
 }
 
 function normalizeBaseUrl(baseUrl) {
@@ -2822,7 +3181,7 @@ ipcMain.handle('uc:auth-login', async (event, baseUrl, provider) => {
   if (!win || win.isDestroyed()) return { ok: false, error: 'no_window' }
   const blocked = await maybeBlockMirrorAuth(win, baseUrl, { showDialog: true })
   if (blocked) return blocked
-  const authUrl = buildAuthUrl(baseUrl, provider === 'google' ? 'google' : '/settings')
+  const authUrl = buildAuthUrl(baseUrl, provider === 'google' ? 'google' : 'discord')
   const result = await openAuthWindow(win, authUrl)
   if (result?.ok) {
     // Wait for cookies to be set in the session, with retry logic
@@ -3325,13 +3684,33 @@ function getHighQualityScreenshotUrl(url) {
     .replace('/t_thumb/', '/t_original/')
 }
 
+function normalizeRemoteMediaUrl(url) {
+  const value = typeof url === 'string' ? url.trim() : ''
+  if (!value) return ''
+  if (/^https?:\/\//i.test(value)) return value
+  if (value.startsWith('//')) return `https:${value}`
+  if (/^(data:|blob:|file:|[a-zA-Z]:\\|\\\\)/i.test(value)) return ''
+  if (/[\s]/.test(value)) return ''
+  return `https://${value.replace(/^https?:\/\//i, '')}`
+}
+
+const MEDIA_CACHE_FIELDS = [
+  { source: 'image', local: 'localImage', file: 'image' },
+  { source: 'splash', local: 'localSplash', file: 'splash' },
+  { source: 'hero_image', local: 'localHeroImage', file: 'hero-image' },
+  { source: 'background_image', local: 'localBackgroundImage', file: 'background-image' },
+  { source: 'hero_logo', local: 'localHeroLogo', file: 'hero-logo' },
+  { source: 'hero_animated', local: 'localHeroAnimated', file: 'hero-animated' },
+]
+
 async function cacheRemoteImage(url, targetFolder, baseName) {
-  if (!url || typeof url !== 'string' || !/^https?:\/\//i.test(url)) return null
-  const ext = getUrlExtension(url)
+  const normalizedUrl = normalizeRemoteMediaUrl(url)
+  if (!normalizedUrl) return null
+  const ext = getUrlExtension(normalizedUrl)
   const filename = `${baseName}.${ext}`
   const destPath = path.join(targetFolder, filename)
   if (fs.existsSync(destPath)) return destPath
-  const ok = await downloadToFile(url, destPath, { headers: IMAGE_DOWNLOAD_HEADERS })
+  const ok = await downloadToFile(normalizedUrl, destPath, { headers: IMAGE_DOWNLOAD_HEADERS })
   return ok ? destPath : null
 }
 
@@ -3340,8 +3719,8 @@ async function cacheRemoteScreenshots(urls, targetFolder) {
   const shotsFolder = ensureSubdir(targetFolder, 'screenshots')
   const results = []
   for (const url of urls) {
-    const sourceUrl = getHighQualityScreenshotUrl(url)
-    if (!sourceUrl || typeof sourceUrl !== 'string' || !/^https?:\/\//i.test(sourceUrl)) {
+    const sourceUrl = normalizeRemoteMediaUrl(getHighQualityScreenshotUrl(url))
+    if (!sourceUrl) {
       results.push(null)
       continue
     }
@@ -3366,16 +3745,21 @@ async function cacheMetadataAssets(metadata, targetFolder, manifestPath, downloa
   let updated = false
   const nextMeta = { ...metadata }
 
-  const localImage = await cacheRemoteImage(metadata.image, targetFolder, 'image')
-  if (localImage) {
-    nextMeta.localImage = localImage
-    updated = true
-  }
-
-  const localSplash = await cacheRemoteImage(metadata.splash, targetFolder, 'splash')
-  if (localSplash) {
-    nextMeta.localSplash = localSplash
-    updated = true
+  for (const field of MEDIA_CACHE_FIELDS) {
+    const localPath = await cacheRemoteImage(metadata[field.source], targetFolder, field.file)
+    if (localPath) {
+      if (nextMeta[field.local] !== localPath) {
+        nextMeta[field.local] = localPath
+        updated = true
+      }
+      // Keep legacy aliases for existing renderer lookups.
+      if (field.source === 'hero_image' && !nextMeta.localSplash) {
+        nextMeta.localSplash = localPath
+      }
+      if (field.source === 'background_image' && !nextMeta.localImage) {
+        nextMeta.localImage = localPath
+      }
+    }
   }
 
   if (Array.isArray(metadata.screenshots) && metadata.screenshots.length > 0) {
@@ -3403,11 +3787,13 @@ async function cacheMetadataAssets(metadata, targetFolder, manifestPath, downloa
 
 function needsMediaCache(metadata) {
   if (!metadata || typeof metadata !== 'object') return false
-  const hasRemoteImage = typeof metadata.image === 'string' && /^https?:\/\//i.test(metadata.image)
-  const hasRemoteSplash = typeof metadata.splash === 'string' && /^https?:\/\//i.test(metadata.splash)
-  const hasRemoteScreens = Array.isArray(metadata.screenshots) && metadata.screenshots.some((s) => typeof s === 'string' && /^https?:\/\//i.test(s))
+  const missingFieldCache = MEDIA_CACHE_FIELDS.some((field) => {
+    const remote = normalizeRemoteMediaUrl(metadata[field.source])
+    return Boolean(remote) && !metadata[field.local]
+  })
+  const hasRemoteScreens = Array.isArray(metadata.screenshots) && metadata.screenshots.some((s) => Boolean(normalizeRemoteMediaUrl(s)))
   const hasLocalScreens = Array.isArray(metadata.localScreenshots) && metadata.localScreenshots.some(Boolean)
-  return (hasRemoteImage && !metadata.localImage) || (hasRemoteSplash && !metadata.localSplash) || (hasRemoteScreens && !hasLocalScreens)
+  return missingFieldCache || (hasRemoteScreens && !hasLocalScreens)
 }
 
 async function fetchPixeldrainInfo(fileId) {
@@ -4330,6 +4716,78 @@ function isUCFilesUrl(url) {
   } catch { return false }
 }
 
+function parseContentDispositionFilename(headerValue) {
+  const header = String(headerValue || '').trim()
+  if (!header) return null
+
+  let match = header.match(/filename\*=(?:UTF-8''|utf-8'')([^;\s]+)/i)
+  if (match?.[1]) {
+    const raw = match[1].trim().replace(/^["']|["']$/g, '')
+    try {
+      return decodeURIComponent(raw)
+    } catch {
+      return raw
+    }
+  }
+
+  match = header.match(/filename\s*=\s*"((?:\\.|[^"\\])*)"/i)
+  if (match?.[1]) return match[1].replace(/\\"/g, '"')
+
+  match = header.match(/filename\s*=\s*([^;\s]+)/i)
+  if (match?.[1]) return match[1].replace(/^["']|["']$/g, '')
+
+  return null
+}
+
+function isUCFilesTokenPlaceholderFilename(downloadUrl, filename) {
+  const candidate = String(filename || '').trim()
+  if (!candidate) return true
+
+  try {
+    const parsed = new URL(downloadUrl)
+    if (!isUCFilesHostName(parsed.hostname) || !/^\/(?:download|dl)\//.test(parsed.pathname)) {
+      return false
+    }
+
+    const parts = parsed.pathname.split('/').filter(Boolean)
+    if (parts.length !== 2) return false
+
+    const token = decodeURIComponent(parts[1] || '').trim()
+    if (!token || !/^[A-Za-z0-9_-]{16,}$/.test(token)) return false
+
+    return candidate === token
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Returns true when `filename` looks like a placeholder identifier (file token,
+ * UUID, B2 object key) rather than a user-facing name. Used when the URL was
+ * resolved to a direct CDN link and the renderer's pre-resolve filename is a
+ * UC.Files share token without an extension.
+ *
+ * Real filenames generally carry an extension; bare hex/base64 strings without
+ * one are treated as placeholders so the downloader prefers Content-Disposition
+ * or the URL path basename instead.
+ */
+function isLikelyPlaceholderFilename(filename) {
+  const candidate = String(filename || '').trim()
+  if (!candidate) return true
+  if (path.extname(candidate)) return false
+  if (/^[A-Za-z0-9_-]{16,128}$/.test(candidate)) return true
+  return false
+}
+
+function filenameFromUrlPath(downloadUrl) {
+  try {
+    const parsed = new URL(downloadUrl)
+    const last = decodeURIComponent(parsed.pathname.split('/').filter(Boolean).pop() || '').trim()
+    if (last && path.extname(last)) return last
+  } catch {}
+  return null
+}
+
 /**
  * Re-read downloaded chunks from disk and compare SHA-256 against the hashes
  * computed during download. Returns array of chunk indices that don't match
@@ -4421,12 +4879,24 @@ async function ucfilesParallelDownload(win, payload, _retryCount = 0) {
       return null // signal caller to use default Chromium downloader
     }
 
-    // Derive filename from Content-Disposition if we don't have one
+    // Derive filename from Content-Disposition when the renderer did not know
+    // the name yet, only had a token placeholder from /download/{token}, or
+    // the URL was rewritten to a direct CDN URL leaving the renderer-side
+    // placeholder (UC.Files file token) attached.
     let finalFilename = filename
+    if (
+      isUCFilesTokenPlaceholderFilename(url, finalFilename) ||
+      isLikelyPlaceholderFilename(finalFilename)
+    ) {
+      finalFilename = null
+    }
     if (!finalFilename) {
-      const cd = headRes.headers.get('content-disposition') || ''
-      const m = cd.match(/filename\*?=(?:UTF-8''|"?)([^";]+)"?/i)
-      if (m?.[1]) finalFilename = decodeURIComponent(m[1])
+      finalFilename = parseContentDispositionFilename(headRes.headers.get('content-disposition'))
+    }
+    if (!finalFilename) {
+      // Direct B2/CDN URLs carry the real object name (= display name) in the
+      // last path segment. Use it as the next-best source before giving up.
+      finalFilename = filenameFromUrlPath(url)
     }
     if (!finalFilename) finalFilename = 'download'
     const finalSavePath = payload.savePath || path.join(installingRoot, finalFilename)
@@ -6307,7 +6777,7 @@ function createSplashWindow() {
       nodeIntegration: false,
       devTools: false,
     },
-    icon: resolveIcon(),
+    icon: resolveWindowIcon(),
   })
   splashWin.center()
   splashWin.loadFile(path.join(__dirname, 'splash.html'), {
@@ -6399,7 +6869,7 @@ async function checkForUpdatesDuringSplash(splashWin) {
 
 function createWindow(existingSplash) {
   ucLog('Creating main window')
-  const iconPath = resolveIcon()
+  const iconPath = resolveWindowIcon()
 
   // Use a splash passed in from app.whenReady (where domain detection already ran),
   // or create a new one for any subsequent createWindow calls.
@@ -6409,7 +6879,7 @@ function createWindow(existingSplash) {
     width: 1100,
     height: 800,
     backgroundColor: '#09090b',
-    title: 'UnionCrax.Direct',
+    title: WINDOW_DISPLAY_NAME,
     show: false,
     frame: false,
     webPreferences: {
@@ -6478,6 +6948,12 @@ function createWindow(existingSplash) {
   } else {
     mainWindow.loadFile(path.join(__dirname, '..', 'renderer', 'dist', 'index.html'))
   }
+
+  mainWindow.webContents.once('did-finish-load', () => {
+    setTimeout(() => {
+      void processPendingAppLaunchRequests()
+    }, 0)
+  })
 
   mainWindow.on('close', (event) => {
     if (!app.isQuitting) {
@@ -6558,12 +7034,16 @@ function createWindow(existingSplash) {
       (match?.url && isUCFilesUrl(match.url)) ||
       itemUrlChain.some((u) => isUCFilesUrl(u))
     )
-    const resolvedFilename = typeof match?.filename === 'string' ? match.filename.trim() : ''
+    const rawResolvedFilename = typeof match?.filename === 'string' ? match.filename.trim() : ''
+    // Drop placeholder fileId/token style names with no extension — Chromium's
+    // parsed Content-Disposition or the CDN URL path are better sources.
+    const resolvedFilename = isLikelyPlaceholderFilename(rawResolvedFilename) ? '' : rawResolvedFilename
+    const urlPathFilename = filenameFromUrlPath(item.getURL()) || ''
     const filename = (isUCFilesDownload && resolvedFilename)
       ? resolvedFilename
-      : (itemFilename && path.extname(itemFilename))
+      : (itemFilename && path.extname(itemFilename) && !isLikelyPlaceholderFilename(itemFilename))
         ? itemFilename
-        : (resolvedFilename || itemFilename || 'download')
+        : (resolvedFilename || urlPathFilename || itemFilename || 'download')
     uc_log(`will-download - url=${item.getURL()}`)
     uc_log(`will-download - match.filename=${match?.filename}, item.getFilename()=${item.getFilename()}, final filename=${filename}`)
     const partIndex = match?.partIndex
@@ -9848,22 +10328,26 @@ ipcMain.handle('uc:game-exe-preflight', async (_event, appid, exePath) => {
   }
 })
 
-ipcMain.handle('uc:game-exe-launch', async (_event, appid, exePath, gameName, showGameName) => {
+async function launchGameExecutableFromMain(appid, exePath, gameName, showGameName) {
   try {
     if (!exePath || typeof exePath !== 'string') return { ok: false }
     if (!fs.existsSync(exePath)) {
       ucLog(`Game launch failed: ${appid} - executable not found at ${exePath}`, 'error')
       return { ok: false, error: 'exe-not-found' }
     }
+    const resolvedGameName = typeof gameName === 'string' && gameName.trim()
+      ? gameName.trim()
+      : resolveGameNameForAppid(appid)
+    if (appid && resolvedGameName && resolvedGameName !== appid) {
+      writeLibraryGameMeta(appid, { name: resolvedGameName })
+    }
     ucLog(`Launching game: ${appid} at ${exePath}`)
 
     try {
-      // Use per-game config overrides if available
       const { command, args, cwd } = appid
         ? resolveLaunchCommandWithGameConfig(exePath, appid)
         : resolveLaunchCommand(exePath)
 
-      // Verbose logging
       const settings = readSettings() || {}
       if (settings.verboseDownloadLogging) {
         ucLog(`  Working directory: ${cwd}`, 'info')
@@ -9871,7 +10355,6 @@ ipcMain.handle('uc:game-exe-launch', async (_event, appid, exePath, gameName, sh
         ucLog(`  Args: ${JSON.stringify(args)}`, 'info')
       }
 
-      // Windows (non-admin): spawn the exe directly so we track the actual game process.
       if (process.platform === 'win32') {
         const env = { ...process.env }
         env.PATH = `${cwd};${env.PATH || ''}`
@@ -9879,7 +10362,7 @@ ipcMain.handle('uc:game-exe-launch', async (_event, appid, exePath, gameName, sh
         return await launchTrackedGameProcess({
           appid,
           exePath,
-          gameName,
+          gameName: resolvedGameName,
           showGameName,
           command,
           args,
@@ -9888,14 +10371,13 @@ ipcMain.handle('uc:game-exe-launch', async (_event, appid, exePath, gameName, sh
         })
       }
 
-      // Non-Windows path (Linux/macOS) - apply per-game + global Wine/Proton/VR/SLSsteam env vars
       const env = buildGameLaunchEnv(appid, process.env)
       env.PATH = `${cwd}:${env.PATH || ''}`
 
       return await launchTrackedGameProcess({
         appid,
         exePath,
-        gameName,
+        gameName: resolvedGameName,
         showGameName,
         command,
         args,
@@ -9915,6 +10397,10 @@ ipcMain.handle('uc:game-exe-launch', async (_event, appid, exePath, gameName, sh
     ucLog(`Game launch error: ${appid} - ${err.message}`, 'error')
     return { ok: false }
   }
+}
+
+ipcMain.handle('uc:game-exe-launch', async (_event, appid, exePath, gameName, showGameName) => {
+  return await launchGameExecutableFromMain(appid, exePath, gameName, showGameName)
 })
 
 ipcMain.handle('uc:game-exe-running', async (_event, appid) => {
@@ -10060,23 +10546,6 @@ function buildDesktopShortcutName(gameName) {
     : `${safeName} - UC.desktop`
 }
 
-function buildDesktopExecLine(exePath) {
-  const { command, args } = resolveLaunchCommand(exePath)
-  const quote = (value) => `"${String(value).replace(/"/g, '\\"')}"`
-
-  // For Wine/Proton on Linux, we need to ensure the working directory is set via environment
-  // The Path= field in .desktop files should handle this, but we also wrap it to be safe
-  const workingDir = path.dirname(exePath)
-
-  // If using Wine/Proton, prepend cd command to ensure working directory
-  if (process.platform === 'linux' && (command.includes('wine') || command.includes('proton'))) {
-    const fullCmd = [command, ...args].map(quote).join(' ')
-    return `sh -c 'cd "${workingDir.replace(/"/g, '\\"')}" && ${fullCmd}'`
-  }
-
-  return [command, ...args].map(quote).join(' ')
-}
-
 ipcMain.handle('uc:delete-desktop-shortcut', async (_event, gameName) => {
   try {
     if (!gameName || typeof gameName !== 'string') {
@@ -10102,48 +10571,62 @@ ipcMain.handle('uc:delete-desktop-shortcut', async (_event, gameName) => {
   }
 })
 
-ipcMain.handle('uc:create-desktop-shortcut', async (_event, gameName, exePath) => {
+ipcMain.handle('uc:create-desktop-shortcut', async (_event, gameName, appid, selectedExePath) => {
   try {
-    if (!gameName || !exePath || typeof gameName !== 'string' || typeof exePath !== 'string') {
+    if (!gameName || !appid || typeof gameName !== 'string' || typeof appid !== 'string') {
       ucLog('Invalid parameters for desktop shortcut creation', 'error')
       return { ok: false, error: 'Invalid parameters' }
     }
 
-    if (!fs.existsSync(exePath)) {
-      ucLog(`Executable not found for shortcut: ${exePath}`, 'error')
-      return { ok: false, error: 'Executable not found' }
+    const safeAppid = sanitizeAppidForLaunchArg(appid)
+    if (!safeAppid) {
+      ucLog('Invalid appid for desktop shortcut creation', 'error')
+      return { ok: false, error: 'Invalid appid' }
+    }
+
+    const ucExePath = getUcDesktopLauncherPath()
+    if (!ucExePath || !fs.existsSync(ucExePath)) {
+      ucLog('UnionCrax.Direct executable not found for shortcut target', 'error')
+      return { ok: false, error: 'Launcher not found' }
     }
 
     const desktopPath = app.getPath('desktop')
     const shortcutName = buildDesktopShortcutName(gameName)
     const shortcutPath = path.join(desktopPath, shortcutName)
-
-    // Check if shortcut already exists
-    if (fs.existsSync(shortcutPath)) {
-      ucLog(`Desktop shortcut already exists: ${shortcutPath}`)
-      return { ok: true, existed: true }
+    const workingDir = path.dirname(ucExePath)
+    const desktopNameSafe = String(gameName).replace(/[\r\n]+/g, ' ').trim() || 'Game'
+    if (desktopNameSafe && desktopNameSafe !== safeAppid) {
+      writeLibraryGameMeta(safeAppid, { name: desktopNameSafe })
     }
 
-    // On Windows, create a .lnk shortcut using PowerShell
     if (process.platform === 'win32') {
-      const safeExePath = exePath.replace(/'/g, "''")
+      const safeTarget = ucExePath.replace(/'/g, "''")
       const safeShortcutPath = shortcutPath.replace(/'/g, "''")
-      const workingDir = path.dirname(exePath).replace(/'/g, "''")
+      const safeWorkDir = workingDir.replace(/'/g, "''")
+      const args = `--launch-appid=${safeAppid}`
+      const iconLocation = resolveShortcutIconLocation(safeAppid, selectedExePath)
+      const safeIconLocation = iconLocation ? iconLocation.replace(/'/g, "''") : null
+      const safeDescription = `Launch ${desktopNameSafe} via UnionCrax.Direct`.replace(/'/g, "''")
 
-      // Log shortcut creation details
       const settings = readSettings() || {}
       if (settings.verboseDownloadLogging) {
-        ucLog(`Creating Windows shortcut:`, 'info')
-        ucLog(`  Target: ${exePath}`, 'info')
-        ucLog(`  Working Dir: ${workingDir}`, 'info')
+        ucLog(`Creating Windows shortcut (UC.D launcher):`, 'info')
+        ucLog(`  Target: ${ucExePath}`, 'info')
+        ucLog(`  Arguments: ${args}`, 'info')
         ucLog(`  Shortcut Path: ${shortcutPath}`, 'info')
+        if (iconLocation) {
+          ucLog(`  Icon: ${iconLocation}`, 'info')
+        }
       }
 
       const psScript = `
         $WshShell = New-Object -ComObject WScript.Shell
         $Shortcut = $WshShell.CreateShortcut('${safeShortcutPath}')
-        $Shortcut.TargetPath = '${safeExePath}'
-        $Shortcut.WorkingDirectory = '${workingDir}'
+        $Shortcut.TargetPath = '${safeTarget}'
+        $Shortcut.Arguments = '${args.replace(/'/g, "''")}'
+        $Shortcut.WorkingDirectory = '${safeWorkDir}'
+        $Shortcut.Description = '${safeDescription}'
+        ${safeIconLocation ? `$Shortcut.IconLocation = '${safeIconLocation}'` : ''}
         $Shortcut.Save()
       `
 
@@ -10186,12 +10669,16 @@ ipcMain.handle('uc:create-desktop-shortcut', async (_event, gameName, exePath) =
           resolve({ ok: false, error: err.message })
         })
       })
-    } else {
+    }
+
+    if (process.platform === 'linux') {
       try {
         const iconPath = resolveIcon()
-        const execLine = buildDesktopExecLine(exePath)
-        const workingDir = path.dirname(exePath)
-        const desktopEntry = `[Desktop Entry]\nType=Application\nName=${gameName}\nExec=${execLine}\nPath=${workingDir}\nIcon=${iconPath}\nTerminal=false\nCategories=Game;\n`;
+        const execLine = buildUcOwnedLinuxDesktopExec(ucExePath, safeAppid)
+        if (!execLine) {
+          return { ok: false, error: 'Invalid appid' }
+        }
+        const desktopEntry = `[Desktop Entry]\nType=Application\nName=${desktopNameSafe}\nExec=${execLine}\nPath=${workingDir}\nIcon=${iconPath}\nTerminal=false\nCategories=Game;\n`
         fs.writeFileSync(shortcutPath, desktopEntry, 'utf8')
         try { fs.chmodSync(shortcutPath, 0o755) } catch { }
         ucLog(`Desktop shortcut created successfully: ${shortcutPath}`)
@@ -10201,6 +10688,9 @@ ipcMain.handle('uc:create-desktop-shortcut', async (_event, gameName, exePath) =
         return { ok: false, error: err.message }
       }
     }
+
+    ucLog('Desktop shortcuts are only supported on Windows and Linux', 'warn')
+    return { ok: false, error: 'platform-not-supported' }
   } catch (err) {
     ucLog(`Desktop shortcut creation error: ${err.message}`, 'error')
     return { ok: false, error: err.message }

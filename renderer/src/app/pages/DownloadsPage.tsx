@@ -14,6 +14,22 @@ import { GameLaunchPreflightModal, type LaunchPreflightResult } from "@/componen
 import { CommentMarkdown } from "@/components/CommentMarkdown"
 import { gameLogger } from "@/lib/logger"
 
+// Pick the best-available cover image for a download row, falling back to the
+// bundled banner asset when the catalog row is missing entirely (offline boot,
+// catalog refresh pending, external/installing-only games not in /api/games).
+// Avoids the "no thumbnail, blank box" symptom on the activity list.
+function downloadItemImageSrc(game: any | null | undefined): string {
+  const candidate =
+    game?.hero_image ||
+    game?.splash ||
+    game?.image ||
+    game?.localHeroImage ||
+    game?.localSplash ||
+    game?.localImage ||
+    "./banner.png"
+  return proxyImageUrl(candidate) || candidate
+}
+
 function formatBytes(bytes: number) {
   if (!bytes) return "0 B"
   const units = ["B", "KB", "MB", "GB", "TB"]
@@ -590,12 +606,12 @@ export function DownloadsPage() {
     } catch {}
   }
 
-  const createDesktopShortcut = async (appid: string, exePath: string) => {
+  const createDesktopShortcut = async (appid: string, exePath?: string | null) => {
     if (!window.ucDownloads?.createDesktopShortcut) return
     const game = games.find((g) => g.appid === appid)
     if (!game) return
     try {
-      const result = await window.ucDownloads.createDesktopShortcut(game.name, exePath)
+      const result = await window.ucDownloads.createDesktopShortcut(game.name, appid, exePath || undefined)
       if (result?.ok) {
         gameLogger.info('Desktop shortcut created', { appid })
       } else {
@@ -898,13 +914,11 @@ export function DownloadsPage() {
           <div className="relative overflow-hidden rounded-3xl border border-white/[.07] bg-zinc-900/70 shadow-2xl shadow-black/40 backdrop-blur-xl">
             {/* Background Image with Gradient Overlay */}
             <div className="absolute inset-0">
-              {primaryGame?.image && (
-                <img
-                  src={proxyImageUrl(primaryGame.image)}
-                  alt={primaryGroup[0]?.gameName || "Download"}
-                  className="h-full w-full scale-110 object-cover opacity-20 blur-3xl saturate-50"
-                />
-              )}
+              <img
+                src={downloadItemImageSrc(primaryGame)}
+                alt={primaryGroup[0]?.gameName || "Download"}
+                className="h-full w-full scale-110 object-cover opacity-20 blur-3xl saturate-50"
+              />
               <div className="absolute inset-0 bg-gradient-to-br from-zinc-950/80 via-zinc-900/90 to-zinc-950/80" />
               <div className="absolute inset-0 bg-gradient-to-t from-zinc-950/60 via-transparent to-transparent" />
             </div>
@@ -914,15 +928,13 @@ export function DownloadsPage() {
               <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
                 <div className="flex items-start gap-4">
                   {/* Game Thumbnail */}
-                  {primaryGame?.image && (
-                    <div className="relative h-20 w-32 flex-shrink-0 overflow-hidden rounded-xl border border-white/[.07] bg-zinc-900/80 shadow-lg">
-                      <img
-                        src={proxyImageUrl(primaryGame.image)}
-                        alt={primaryGroup[0]?.gameName || "Download"}
-                        className="h-full w-full object-cover"
-                      />
-                    </div>
-                  )}
+                  <div className="relative h-20 w-32 flex-shrink-0 overflow-hidden rounded-xl border border-white/[.07] bg-zinc-900/80 shadow-lg">
+                    <img
+                      src={downloadItemImageSrc(primaryGame)}
+                      alt={primaryGroup[0]?.gameName || "Download"}
+                      className="h-full w-full object-cover"
+                    />
+                  </div>
                   
                   {/* Game Info */}
                   <div className="space-y-2">
@@ -1127,13 +1139,11 @@ export function DownloadsPage() {
                   <div className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center">
                     <div className="flex items-center gap-4 sm:w-[280px]">
                       <div className="relative h-14 w-24 flex-shrink-0 overflow-hidden rounded-lg border border-white/[.07] bg-zinc-800">
-                        {game?.image ? (
-                          <img
-                            src={proxyImageUrl(game.image)}
-                            alt={gameName}
-                            className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
-                          />
-                        ) : null}
+                        <img
+                          src={downloadItemImageSrc(game)}
+                          alt={gameName}
+                          className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+                        />
                         <div className="absolute inset-0 bg-gradient-to-t from-black/40 to-transparent" />
                       </div>
                       <div className="min-w-0">
@@ -1271,13 +1281,11 @@ export function DownloadsPage() {
                   {/* Game Info */}
                   <div className="flex items-center gap-4 sm:w-[280px]">
                     <div className="relative h-14 w-24 flex-shrink-0 overflow-hidden rounded-lg border border-white/[.07] bg-zinc-800">
-                      {game?.image ? (
-                        <img
-                          src={proxyImageUrl(game.image)}
-                          alt={gameName}
-                          className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
-                        />
-                      ) : null}
+                      <img
+                        src={downloadItemImageSrc(game)}
+                        alt={gameName}
+                        className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+                      />
                       <div className="absolute inset-0 bg-gradient-to-t from-black/40 to-transparent" />
                     </div>
                     <div className="min-w-0">
@@ -1391,13 +1399,11 @@ export function DownloadsPage() {
                 <div className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between">
                   <div className="flex items-center gap-4">
                     <div className="relative h-14 w-24 flex-shrink-0 overflow-hidden rounded-lg border border-white/[.07] bg-zinc-800">
-                      {game?.image ? (
-                        <img
-                          src={proxyImageUrl(game.image)}
-                          alt={gameName}
-                          className="h-full w-full object-cover"
-                        />
-                      ) : null}
+                      <img
+                        src={downloadItemImageSrc(game)}
+                        alt={gameName}
+                        className="h-full w-full object-cover"
+                      />
                       <div className="absolute bottom-1 right-1 rounded bg-blue-500/90 px-1.5 py-0.5 text-[9px] font-bold text-white">
                         READY
                       </div>
@@ -1505,13 +1511,11 @@ export function DownloadsPage() {
                 <div className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between">
                   <div className="flex items-center gap-4">
                     <div className="relative h-14 w-24 flex-shrink-0 overflow-hidden rounded-lg border border-white/[.07] bg-zinc-800">
-                      {game?.image ? (
-                        <img
-                          src={proxyImageUrl(game.image)}
-                          alt={gameName}
-                          className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
-                        />
-                      ) : null}
+                      <img
+                        src={downloadItemImageSrc(game)}
+                        alt={gameName}
+                        className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+                      />
                       <div className="absolute bottom-1 right-1 flex h-5 w-5 items-center justify-center rounded-full bg-green-500 text-white">
                         <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
                           <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
@@ -1602,13 +1606,11 @@ export function DownloadsPage() {
                 <div className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between">
                   <div className="flex items-center gap-4">
                     <div className="relative h-14 w-24 flex-shrink-0 overflow-hidden rounded-lg border border-white/[.07] bg-zinc-800 grayscale">
-                      {game?.image ? (
-                        <img
-                          src={proxyImageUrl(game.image)}
-                          alt={gameName}
-                          className="h-full w-full object-cover opacity-50"
-                        />
-                      ) : null}
+                      <img
+                        src={downloadItemImageSrc(game)}
+                        alt={gameName}
+                        className="h-full w-full object-cover opacity-50"
+                      />
                       <div className="absolute inset-0 flex items-center justify-center bg-black/40">
                         <XCircle className="h-6 w-6 text-red-400/80" />
                       </div>

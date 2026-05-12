@@ -2,8 +2,31 @@
 
 ## Unreleased - 2026-04-16
 
+### New Features
+
+- Added `unioncrax://` deep-link protocol support. Clicking `unioncrax://launch?appid=<appid>` from a browser or shortcut opens UC.D and launches (or prompts for) that game.
+- Registered `unioncrax://` protocol handler in electron-builder config for Windows and Linux packaged builds.
+- Desktop shortcuts now target UC.D itself (`--launch-appid=<appid>`) rather than the game executable directly, making shortcuts work regardless of where the game is installed.
+- Added deep-link intake queue (`pendingAppLaunchRequests`) that processes on first window load, on second-instance activation, and on macOS `open-url` events.
+
 ### Fixes & Improvements
 
+- Regenerate `icon.ico` with a dark background so the UC mark is visible in the NSIS installer title bar and on light-themed Windows surfaces (previously white-on-white).
+- Remove auto-detected custom installer BMP assets; NSIS installer now uses standard electron-builder UI without custom header/sidebar bitmaps.
+- Fix custom title bar icon in packaged builds: `TitleBar.tsx` now loads `icon.svg` via `import.meta.env.BASE_URL` so it resolves correctly under `file://`; also labels the title bar as `UC.D`.
+- Stop `unioncrax://launch` from forcing an EXE lookup for games that are not installed; undownloaded games now open their UC.D detail page without the misleading no-EXE flow.
+- Resolve packaged brand image paths relative to the bundled renderer base so navbar/loading logos keep rendering in packaged Windows builds.
+- Add dedicated NSIS branding assets and refresh the Windows `.ico` bundle so installer screens, shortcuts, and shell surfaces use clearer high-resolution branding.
+- Shorten Windows shell-facing titles and installer copy to `UC.D`, while keeping the app's internal identity stable so existing user data paths continue to resolve.
+- Prevent development builds from re-registering `unioncrax://` on Windows, so local packaged installs keep the intended handler instead of Electron dev metadata.
+- Stamp Windows deep-link metadata with a friendly UC.D label/icon, and make owned desktop shortcuts prefer the selected game executable icon instead of the UC.D app icon.
+- Persist known game names during shortcut creation and launch so deep-link launches and Discord/Now Playing surfaces stop falling back to raw appids.
+- Improved game-media parity between UC.D and the website by enriching install metadata with the full `/api/games/:appid` payload before downloads start, so installed manifests keep richer artwork and metadata fields.
+- Expanded local media caching during install to persist additional assets (`hero_image`, `background_image`, `hero_logo`, `hero_animated`) plus screenshots, with URL normalization for scheme-less media hosts.
+- Updated launcher card-art selection to prioritize richer current media fields (`hero_image`, `background_image`, `splash`) before legacy/stale local cover paths, with local cache paths retained as fallback.
+- Matched launcher card artwork selection to website parity and replaced in-card old-image fallback flashes with skeleton-first loading, so cards no longer briefly show stale/local low-quality art before the final image resolves.
+- Hardened catalog normalization for co-op/HV flags by accepting `hasCoOp`/`has_coop` (and legacy `online_fix`) so Online badges render consistently across launcher cards and filters.
+- Improved offline/installed screenshot behavior on game Details pages by falling back to locally cached screenshots when API screenshot arrays are missing.
 - Reworked installed-game actions so Library covers now support right-click context menus, visible hover tools, and a shared action surface across Library and game Details instead of hiding everything behind a tiny settings gear.
 - Polished the Library command header with clearer hierarchy, better search guidance, and direct affordance hints so advanced actions are easier to discover.
 - Simplified UC.Files download behavior to use Electron's standard downloader path (same flow as other hosts) now that storage is Backblaze-backed, removing reliance on the custom parallel UC.Files path.

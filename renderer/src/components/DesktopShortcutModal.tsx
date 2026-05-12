@@ -31,7 +31,7 @@ export function DesktopShortcutModal({
 
   return (
     <Dialog open={open} onOpenChange={(isOpen) => !isOpen && onClose(alwaysCreate)}>
-      <DialogContent className="sm:max-w-md rounded-2xl border-white/[.07] bg-zinc-900/95 shadow-2xl">
+      <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <ExternalLink className="h-5 w-5 text-white" />

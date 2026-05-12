@@ -13,7 +13,7 @@ type Props = {
 }
 
 export function GameLinuxConfigModal({ open, appid, gameName, onClose }: Props) {
-  const [config, setConfig] = useState<GameLinuxConfig>({})
+  const [config, setConfig] = useState<LinuxGameConfig>({})
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
@@ -34,7 +34,7 @@ export function GameLinuxConfigModal({ open, appid, gameName, onClose }: Props) 
       window.ucLinux?.detectWine?.(),
       window.ucLinux?.detectProton?.(),
     ]).then(([configResult, slsCheck, slsDetect, wineDetect, protonDetect]) => {
-      if (configResult?.ok) setConfig((configResult.config as GameLinuxConfig) || {})
+      if (configResult?.ok) setConfig((configResult.config as LinuxGameConfig) || {})
       if (slsCheck?.ok) setSlsSteamStatus({ found: slsCheck.found, steamAppId: slsCheck.steamAppId })
       if (slsDetect?.ok) setSlsSteamGlobal({ found: slsDetect.found })
       if (wineDetect?.ok && Array.isArray(wineDetect.versions)) setDetectedWineVersions(wineDetect.versions)
@@ -42,7 +42,7 @@ export function GameLinuxConfigModal({ open, appid, gameName, onClose }: Props) 
     }).catch(() => {}).finally(() => setLoading(false))
   }, [open, appid])
 
-  const save = async (next: GameLinuxConfig) => {
+  const save = async (next: LinuxGameConfig) => {
     setSaving(true)
     try {
       const result = await window.ucLinux?.setGameConfig?.(appid, next as any)
@@ -59,8 +59,8 @@ export function GameLinuxConfigModal({ open, appid, gameName, onClose }: Props) 
     }
   }
 
-  const update = (patch: Partial<GameLinuxConfig>) => {
-    const next: GameLinuxConfig = { ...config, ...patch }
+  const update = (patch: Partial<LinuxGameConfig>) => {
+    const next: LinuxGameConfig = { ...config, ...patch }
     setConfig(next)
     save(next)
   }
@@ -111,7 +111,7 @@ export function GameLinuxConfigModal({ open, appid, gameName, onClose }: Props) 
   }
 
   const handleReset = async () => {
-    const next: GameLinuxConfig = {}
+    const next: LinuxGameConfig = {}
     setConfig(next)
     await save(next)
   }

@@ -1,7 +1,7 @@
 
 import { useEffect, useCallback, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react"
 import { createPortal } from "react-dom"
-import { useParams } from "react-router-dom"
+import { useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -11,12 +11,13 @@ import { CommentMarkdown } from "@/components/CommentMarkdown"
 import { useDownloads } from "@/context/downloads-context"
 import { apiUrl, apiFetch } from "@/lib/api"
 import { getPreferredDownloadHost, setPreferredDownloadHost, requestDownloadToken, type PreferredDownloadHost, type DownloadConfig } from "@/lib/downloads"
-import { formatNumber, hasOnlineMode, pickGameExecutable, proxyImageUrl, proxyMediaUrl, cn, timeAgoLong } from "@/lib/utils"
+import { formatNumber, hasOnlineMode, pickGameExecutable, proxyImageUrl, cn, timeAgoLong } from "@/lib/utils"
 import type { Game } from "@/lib/types"
 import { useGamesData } from "@/hooks/use-games"
 import { addViewedGameToHistory, hasCookieConsent } from "@/lib/user-history"
 import { useOnlineStatus } from "@/hooks/use-online-status"
 import { OfflineBanner } from "@/components/OfflineBanner"
+import { CriticalLoadModal } from "@/components/CriticalLoadModal"
 import {
   AlertTriangle,
   Calendar,
@@ -63,6 +64,8 @@ import { GamePageSkeleton } from "@/components/GamePageSkeleton"
 import { SystemRequirements } from "@/components/SystemRequirements"
 import { GameVersionStatus } from "@/components/GameVersionStatus"
 import { useAuth } from "@/hooks/useAuth"
+import { useMotionPreferences } from "@/hooks/use-motion-preferences"
+import { useImageColors } from "@/hooks/use-image-colors"
 
 const PROTON_RANK_COLORS: Record<string, string> = {
   platinum: "text-[#b3e5fc] border-[#b3e5fc]/30",
@@ -88,18 +91,32 @@ export function GameDetailPage() {
   const isWindows = typeof navigator !== 'undefined' && /windows/i.test(navigator.userAgent)
   const isLinux = typeof navigator !== 'undefined' && /linux/i.test(navigator.userAgent)
   const isOnline = useOnlineStatus()
+  const navigate = useNavigate()
   const params = useParams()
+  const [searchParams, setSearchParams] = useSearchParams()
   const [authState] = useAuth()
   const { startGameDownload, resumeGroup, downloads, clearByAppid } = useDownloads()
   const { games, stats } = useGamesData()
+  // Hooks must run before any early-return branch below, so hoist motion
+  // prefs up here next to the other top-level hook calls. The result is
+  // only consumed by the ambient-background JSX further down.
+  const { effectiveAnimatedBackgrounds } = useMotionPreferences()
   const [game, setGame] = useState<Game | null>(null)
+  // Colour extraction for the ambient background — must be hoisted here so
+  // the hook count is stable across renders (game may be null while loading).
+  const ambientImageSrc = game ? proxyImageUrl(game.hero_image || game.splash || game.image) : undefined
+  const imageColors = useImageColors(ambientImageSrc)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [criticalLoadOpen, setCriticalLoadOpen] = useState(false)
+  const [reloadNonce, setReloadNonce] = useState(0)
   const [downloadCount, setDownloadCount] = useState(0)
   const [viewCount, setViewCount] = useState(0)
   const [downloading, setDownloading] = useState(false)
   const [downloadError, setDownloadError] = useState<string | null>(null)
   const [selectedImage, setSelectedImage] = useState<string>("")
+  const [heroImageLoaded, setHeroImageLoaded] = useState(false)
+  const [logoLoaded, setLogoLoaded] = useState(false)
   const [installedManifest, setInstalledManifest] = useState<any | null>(null)
   const [installedVersions, setInstalledVersions] = useState<any[]>([])
   const [installingManifest, setInstallingManifest] = useState<any | null>(null)
@@ -118,6 +135,10 @@ export function GameDetailPage() {
   const [launchPreflightOpen, setLaunchPreflightOpen] = useState(false)
   const [launchPreflightResult, setLaunchPreflightResult] = useState<LaunchPreflightResult | null>(null)
   const [hostSelectorOpen, setHostSelectorOpen] = useState(false)
+
+  useEffect(() => {
+    setCriticalLoadOpen(Boolean(error) && isOnline)
+  }, [error, isOnline])
   const [selectedHost, setSelectedHost] = useState<PreferredDownloadHost>("pixeldrain")
   const [defaultHost, setDefaultHost] = useState<PreferredDownloadHost>("pixeldrain")
   const [downloadToken, setDownloadToken] = useState<string | null>(null)
@@ -154,12 +175,26 @@ export function GameDetailPage() {
   const suppressLightboxImageClickRef = useRef(false)
   const importantNoteRef = useRef<HTMLDivElement | null>(null)
   const [highlightImportantNote, setHighlightImportantNote] = useState(false)
+  const deepLinkLaunchHandledRef = useRef(false)
 
   // ProtonDB state
   const [protonData, setProtonData] = useState<any>(null)
   const [protonLoading, setProtonLoading] = useState(false)
 
   const appid = params.id || ""
+
+  useEffect(() => {
+    deepLinkLaunchHandledRef.current = false
+  }, [appid])
+
+  // Reset loaded states when the game changes or selected image changes
+  useEffect(() => {
+    setHeroImageLoaded(false)
+  }, [selectedImage, appid])
+
+  useEffect(() => {
+    setLogoLoaded(false)
+  }, [appid])
 
   // ── Load library meta (collections/tags) for this game ──
   useEffect(() => {
@@ -255,7 +290,7 @@ export function GameDetailPage() {
         const isExternalId = appid.startsWith('external-')
 
         if (!isExternalId) {
-          const response = await fetch(apiUrl(`/api/games/${encodeURIComponent(appid)}`))
+          const response = await apiFetch(`/api/games/${encodeURIComponent(appid)}`)
           if (!response.ok) {
             throw new Error(`Unable to load game (${response.status})`)
           }
@@ -263,7 +298,7 @@ export function GameDetailPage() {
           setGame(data)
           persistGameName(appid, data?.name)
           window.dispatchEvent(new CustomEvent("uc_game_name", { detail: { appid, name: data?.name, genres: data?.genres } }))
-          setSelectedImage(data.splash || data.image)
+          setSelectedImage(data.hero_image || data.splash || data.image)
           return
         }
 
@@ -275,13 +310,11 @@ export function GameDetailPage() {
           if (window.ucDownloads?.getInstalledGlobal || window.ucDownloads?.getInstalled) {
             const manifest = await (window.ucDownloads.getInstalledGlobal?.(appid) || window.ucDownloads.getInstalled(appid))
             if (manifest && manifest.metadata) {
-              // prefer a locally stored image when offline
               const meta = manifest.metadata
-              const localImg = meta.localImage || meta.image
               setGame(meta)
               persistGameName(appid, meta?.name)
               window.dispatchEvent(new CustomEvent("uc_game_name", { detail: { appid, name: meta?.name, genres: meta?.genres } }))
-              setSelectedImage(localImg || meta.splash || meta.image)
+              setSelectedImage(meta.hero_image || meta.splash || meta.image || "")
               setError(null)
               return
             }
@@ -299,7 +332,7 @@ export function GameDetailPage() {
     if (appid) {
       load()
     }
-  }, [appid])
+  }, [appid, reloadNonce])
 
   useEffect(() => {
     if (!appid) return
@@ -324,15 +357,6 @@ export function GameDetailPage() {
       mounted = false
     }
   }, [appid, downloads])
-
-  useEffect(() => {
-    if (!installedManifest?.metadata || !game) return
-    const meta = installedManifest.metadata
-    const localHero = meta.localSplash || meta.localImage
-    if (!localHero) return
-    const isDefaultSelected = !selectedImage || selectedImage === game.splash || selectedImage === game.image
-    if (isDefaultSelected) setSelectedImage(localHero)
-  }, [installedManifest, game, selectedImage])
 
   useEffect(() => {
     if (!appid) return
@@ -360,12 +384,12 @@ export function GameDetailPage() {
 
     const fetchCounts = async () => {
       try {
-        const downloadsRes = await fetch(apiUrl(`/api/downloads/count/${encodeURIComponent(appid)}`))
+        const downloadsRes = await apiFetch(`/api/downloads/count/${encodeURIComponent(appid)}`)
         if (downloadsRes.ok) {
           const data = await downloadsRes.json()
           if (data.success) setDownloadCount(data.downloads || 0)
         }
-        const viewsRes = await fetch(apiUrl(`/api/views/${encodeURIComponent(appid)}`))
+        const viewsRes = await apiFetch(`/api/views/${encodeURIComponent(appid)}`)
         if (viewsRes.ok) {
           const data = await viewsRes.json()
           if (data.success) setViewCount(data.viewCount || 0)
@@ -383,7 +407,7 @@ export function GameDetailPage() {
     let cancelled = false
     const run = async () => {
       try {
-        const res = await fetch(apiUrl(`/api/views/${encodeURIComponent(appid)}`), {
+        const res = await apiFetch(`/api/views/${encodeURIComponent(appid)}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
         })
@@ -688,6 +712,19 @@ export function GameDetailPage() {
       await openExePicker(exes, { mode: "launch", actionLabel: "Launch", folder: browseFolder })
     } catch { }
   }
+
+  const launchInstalledGameRef = useRef(launchInstalledGame)
+  launchInstalledGameRef.current = launchInstalledGame
+
+  useEffect(() => {
+    if (searchParams.get("launch") !== "1") return
+    if (!game || loading) return
+    if (deepLinkLaunchHandledRef.current) return
+    deepLinkLaunchHandledRef.current = true
+    setSearchParams({}, { replace: true })
+    void launchInstalledGameRef.current()
+  }, [game, loading, searchParams, setSearchParams])
+
   const popularAppIds = useMemo(() => {
     const withStats = games.filter((g) => {
       const st = stats[g.appid]
@@ -729,8 +766,13 @@ export function GameDetailPage() {
   const hasInstalledVersions = installedVersions.length > 0 || Boolean(installedManifest)
 
   const installedMeta = installedManifest?.metadata || null
-  const localScreenshots = Array.isArray(installedMeta?.localScreenshots) ? installedMeta.localScreenshots : []
-  const resolvedScreenshots = useMemo(() => {
+  const localScreenshots: string[] = Array.isArray(installedMeta?.localScreenshots)
+    ? installedMeta.localScreenshots.filter((entry: unknown): entry is string => typeof entry === "string" && entry.length > 0)
+    : []
+  const resolvedScreenshots = useMemo<string[]>(() => {
+    if ((!game?.screenshots || game.screenshots.length === 0) && localScreenshots.length) {
+      return localScreenshots
+    }
     if (!game?.screenshots || game.screenshots.length === 0) return []
     if (!localScreenshots.length) return game.screenshots
     return game.screenshots.map((shot, index) => localScreenshots[index] || shot)
@@ -764,8 +806,34 @@ export function GameDetailPage() {
       )
     }
     return (
-      <div className="rounded-2xl border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-        {error || "Unable to load this game."}
+      <div className="space-y-5">
+        <CriticalLoadModal
+          open={Boolean(error) && isOnline && criticalLoadOpen}
+          onOpenChange={setCriticalLoadOpen}
+          title="Critical Data Load Failure"
+          message={error || "Unable to load this game."}
+          onRetry={() => {
+            setError(null)
+            setLoading(true)
+            setReloadNonce((prev) => prev + 1)
+          }}
+          onContinue={() => setCriticalLoadOpen(false)}
+        />
+
+        <div className="rounded-2xl border border-zinc-800 bg-zinc-900/55 px-4 py-3 text-sm text-zinc-300">
+          We could not load this page right now. You can continue browsing or head back home.
+        </div>
+
+        <div className="flex justify-center">
+          <Button
+            variant="secondary"
+            className="rounded-full px-7"
+            onClick={() => navigate("/")}
+          >
+            <ChevronLeft className="mr-2 h-4 w-4" />
+            Back to Home
+          </Button>
+        </div>
       </div>
     )
   }
@@ -783,7 +851,14 @@ export function GameDetailPage() {
   const dateAddedLabel = dateAdded && !isNaN(dateAdded.getTime())
     ? dateAdded.toLocaleDateString()
     : "Unknown"
-  const heroImage = selectedImage || installedMeta?.localSplash || installedMeta?.localImage || game.splash || game.image
+  const heroImage =
+    selectedImage ||
+    game.hero_image ||
+    game.splash ||
+    game.image ||
+    installedMeta?.localSplash ||
+    installedMeta?.localImage ||
+    ""
   const appDownloads = downloads.filter((item) => item.appid === game.appid)
   const isActiveDownload = appDownloads.some((item) =>
     ["downloading", "paused", "extracting", "installing"].includes(item.status)
@@ -882,13 +957,13 @@ export function GameDetailPage() {
     return parts.length ? parts.join("\\") : null
   }
 
-  const createDesktopShortcut = async (exePath: string) => {
+  const createDesktopShortcut = async (exePath?: string | null) => {
     if (!window.ucDownloads?.createDesktopShortcut || !game) return null
     try {
       try {
         await window.ucDownloads?.deleteDesktopShortcut?.(game.name)
       } catch { }
-      const result = await window.ucDownloads.createDesktopShortcut(game.name, exePath)
+      const result = await window.ucDownloads.createDesktopShortcut(game.name, game.appid, exePath || undefined)
       if (result?.ok) {
         gameLogger.info('Desktop shortcut created', { appid: game.appid })
       } else {
@@ -1015,36 +1090,7 @@ export function GameDetailPage() {
     if (!game || !window.ucDownloads?.createDesktopShortcut) return
     try {
       setShortcutFeedback(null)
-      let targetExe = await getSavedExe()
-      let exes: Array<{ name: string; path: string; size?: number; depth?: number }> = []
-      let folder: string | null = null
-
-      if (!targetExe && window.ucDownloads?.listGameExecutables) {
-        const result = await window.ucDownloads.listGameExecutables(game.appid)
-        exes = result?.exes || []
-        folder = result?.folder || null
-
-        // Try auto-detection before asking the user
-        const { pick, confident } = pickGameExecutable(exes, game.name, game.source, folder)
-        if (pick && confident) {
-          targetExe = pick.path
-        }
-      }
-
-      if (!targetExe) {
-        await openExePicker(exes, {
-          title: "Set launch executable",
-          message: `Select the exe before creating a shortcut for "${game.name}".`,
-          actionLabel: "Set",
-          folder,
-          mode: "set",
-          currentPath: null,
-        })
-        setShortcutFeedback({ type: 'error', message: 'Select an executable before creating a shortcut.' })
-        return
-      }
-
-      const res = await createDesktopShortcut(targetExe)
+      const res = await createDesktopShortcut()
       if (res?.ok) {
         gameLogger.info('Desktop shortcut created (details)', { appid: game.appid })
         setShortcutFeedback({ type: 'success', message: 'Desktop shortcut created.' })
@@ -1183,35 +1229,85 @@ export function GameDetailPage() {
     setStoppingGame(false)
   }
 
-  // Determine which background to use for the ambient page bg
+  // Background source. Two mutually exclusive modes:
+  //   • Animated backgrounds ON  → colour glow blobs only (no image)
+  //   • Animated backgrounds OFF → static blurred cover image only
   const backgroundImage = game.hero_image || game.splash || game.image
-  const useAnimatedBackground = Boolean(game.hero_animated)
+  const showBlobs = effectiveAnimatedBackgrounds && !!imageColors
 
   return (
     <div className="relative">
-      {/* Ambient page background */}
+      {/* Ambient page background. `fixed inset-0` covers the whole window
+          (behind the translucent sidebar/titlebar). */}
       {backgroundImage && (
         <div className="pointer-events-none fixed inset-0 z-0 overflow-hidden">
-          {useAnimatedBackground ? (
-            <video
-              src={proxyMediaUrl(game.hero_animated || "")}
-              className="absolute inset-0 h-full w-full object-cover opacity-25"
-              autoPlay
-              loop
-              muted
-              playsInline
-              preload="metadata"
-            />
-          ) : (
+          {/* Static blurred cover — only when animations are OFF */}
+          {!showBlobs && (
             <img
               src={proxyImageUrl(backgroundImage) || "./banner.png"}
               alt=""
               aria-hidden="true"
-              className="uc-ambient-drift absolute inset-0 h-full w-full object-cover opacity-30 blur-[8px] scale-110"
+              className="absolute inset-0 h-full w-full object-cover opacity-35 blur-[24px] scale-125"
             />
           )}
+          {/* Colour-aware glow blobs — only when animations are ON */}
+          {showBlobs && (
+            <div className="absolute inset-0 overflow-hidden" aria-hidden="true">
+              <div
+                className="uc-blob absolute rounded-full"
+                style={{
+                  width: "80%", height: "70%", top: "0%", left: "-10%",
+                  background: `radial-gradient(circle, rgba(${imageColors![0].join(",")}, 0.7) 0%, transparent 65%)`,
+                  filter: "blur(100px)",
+                  animation: "uc-blob-1 20s ease-in-out infinite",
+                  opacity: 0.6,
+                }}
+              />
+              <div
+                className="uc-blob absolute rounded-full"
+                style={{
+                  width: "70%", height: "65%", top: "20%", right: "-15%",
+                  background: `radial-gradient(circle, rgba(${imageColors![1].join(",")}, 0.7) 0%, transparent 65%)`,
+                  filter: "blur(120px)",
+                  animation: "uc-blob-2 28s ease-in-out infinite",
+                  opacity: 0.55,
+                }}
+              />
+              <div
+                className="uc-blob absolute rounded-full"
+                style={{
+                  width: "65%", height: "60%", bottom: "0%", left: "10%",
+                  background: `radial-gradient(circle, rgba(${imageColors![2].join(",")}, 0.65) 0%, transparent 65%)`,
+                  filter: "blur(90px)",
+                  animation: "uc-blob-3 24s ease-in-out infinite",
+                  opacity: 0.5,
+                }}
+              />
+              <div
+                className="uc-sparkle absolute"
+                style={{
+                  width: '100%',
+                  height: '100%',
+                  top: 0,
+                  left: 0,
+                  background: 'url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyMCIgaGVpZ2h0PSIyMCI+PGZpbHRlciBpZD0iZSI+PGZlVHVyYnVsZW5jZSBiYXNlRnJlcXVlbmN5PSIuNiIgZGF0YS1zZWVkPSIyIi8+PGZlU3BlY3VsYXJMaWdodGluZyBpbl9yYWRpdXNfcz0iMjAiIGxpZ2h0aW5nLWNvbG9yPSIjZmZmIj48ZmVEaXN0YW50TGlnaHQgYXppbXV0aD0iNDUiIGVsZXZhdGlvbj0iNjAiLz48L2ZlU3BlY3VsYXJMaWdodGluZz48L2ZpbHRlcj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWx0ZXI9InVybCgjZSkiIG9wYWNpdHk9Ii4xNSIvPjwvc3ZnPg==)',
+                  animation: 'uc-sparkle-anim 4s linear infinite',
+                }}
+              />
+              <div
+                className="uc-blob absolute rounded-full"
+                style={{
+                  width: "65%", height: "50%", bottom: "0%", left: "10%",
+                  background: `radial-gradient(circle, rgba(${imageColors![2].join(",")}, 0.6) 0%, transparent 70%)`,
+                  filter: "blur(90px)",
+                  animation: "uc-blob-3 28s ease-in-out infinite",
+                  opacity: 0.35,
+                }}
+              />
+            </div>
+          )}
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.06),transparent_40%)]" />
-          <div className="absolute inset-0 bg-gradient-to-b from-black/45 via-black/70 to-[#09090b]" />
+          <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-black/65 to-[#09090b]" />
         </div>
       )}
 
@@ -1221,10 +1317,13 @@ export function GameDetailPage() {
           <div className="max-w-6xl mx-auto">
             <div className="relative rounded-3xl overflow-hidden border border-white/[.07] bg-[#1A1A1A]/80 backdrop-blur-md shadow-[0_8px_32px_0_rgba(0,0,0,0.5)]">
               <div className="relative aspect-video overflow-hidden">
+                {!heroImageLoaded && <div className="udl-skeleton absolute inset-0 z-0 rounded-none" />}
                 <img
                   src={proxyImageUrl(heroImage || "") || "./banner.png"}
                   alt={game.name}
                   className="h-full w-full object-cover"
+                  onLoad={() => setHeroImageLoaded(true)}
+                  onError={() => setHeroImageLoaded(true)}
                 />
                 <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent" />
               </div>
@@ -1305,10 +1404,13 @@ export function GameDetailPage() {
                 <div className="space-y-3">
                   {game.hero_logo ? (
                     <div className="relative h-20 w-full max-w-[min(70vw,520px)] md:h-28">
+                      {!logoLoaded && <div className="udl-skeleton absolute inset-0 rounded-lg" />}
                       <img
                         src={proxyImageUrl(game.hero_logo) || ""}
                         alt={`${game.name} logo`}
                         className="h-full w-full object-contain object-left drop-shadow-[0_8px_32px_rgba(0,0,0,0.45)]"
+                        onLoad={() => setLogoLoaded(true)}
+                        onError={() => setLogoLoaded(true)}
                       />
                     </div>
                   ) : null}

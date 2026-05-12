@@ -9,10 +9,21 @@ type AnimatedBrandAssetProps = BrandAssetProps & {
   nonce?: number
 }
 
+const BRAND_ASSET_BASE = (() => {
+  const base = typeof import.meta !== "undefined" && import.meta.env?.BASE_URL
+    ? String(import.meta.env.BASE_URL)
+    : "./"
+  return base.endsWith("/") ? base : `${base}/`
+})()
+
+function resolveBrandAssetPath(src: string) {
+  return `${BRAND_ASSET_BASE}${src.replace(/^\/+/, "")}`
+}
+
 function BrandImage({ src, className, alt }: { src: string } & BrandAssetProps) {
   return (
     <img
-      src={src}
+      src={resolveBrandAssetPath(src)}
       alt={alt ?? "UnionCrax"}
       className={cn("block h-6 w-6 shrink-0 object-contain", className)}
       draggable={false}

@@ -15,7 +15,7 @@ export function OfflineBanner({ variant = "full", onRetry }: OfflineBannerProps)
         <div className="min-w-0 flex-1">
           <span className="text-sm font-medium text-zinc-100">Using offline mode</span>
           <span className="ml-2 text-xs text-zinc-400">
-            Come back online to browse our collection.
+            Installed games still work. Retry when you're back online or Union Crax is reachable again.
           </span>
         </div>
         {onRetry && (
@@ -40,7 +40,7 @@ export function OfflineBanner({ variant = "full", onRetry }: OfflineBannerProps)
           Using Offline Mode
         </h2>
         <p className="text-base sm:text-lg text-zinc-400 mb-6 max-w-md mx-auto leading-relaxed">
-          You're currently offline. Come back online to browse our full collection of games.
+          We couldn't reach Union Crax right now. Retry when you're back online or the service is reachable again to browse the full collection of games.
         </p>
         <p className="text-sm text-zinc-400/70 mb-8">
           Your installed games are still available in your Library.

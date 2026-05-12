@@ -8,7 +8,6 @@ import {
   Star,
   Heart,
   Clock,
-  History,
   Camera,
 } from "lucide-react"
 

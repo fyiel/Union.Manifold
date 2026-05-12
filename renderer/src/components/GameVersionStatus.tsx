@@ -147,7 +147,7 @@ export function GameVersionStatus({ appid, gameName, localVersionString, isAuthe
             <span className="text-zinc-500">Latest Build</span>
             <span className="font-semibold text-emerald-400">
               {initialLoading
-                ? <span className="inline-block h-3.5 w-16 rounded bg-zinc-700 animate-pulse" />
+                ? <span className="udl-skeleton inline-block h-3.5 w-16 rounded align-middle" />
                 : (hasChecked ? (latestBuild ?? "—") : "—")}
             </span>
           </div>
@@ -155,7 +155,7 @@ export function GameVersionStatus({ appid, gameName, localVersionString, isAuthe
             <span className="text-zinc-500">Last Steam Update</span>
             <span className="text-zinc-400">
               {initialLoading
-                ? <span className="inline-block h-3.5 w-24 rounded bg-zinc-700 animate-pulse" />
+                ? <span className="udl-skeleton inline-block h-3.5 w-24 rounded align-middle" />
                 : (hasChecked ? (updateDate ?? "—") : "—")}
             </span>
           </div>

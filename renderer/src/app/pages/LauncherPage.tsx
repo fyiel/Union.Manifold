@@ -8,13 +8,16 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { ErrorMessage } from "@/components/ErrorMessage"
 import { AnimatedCounter } from "@/components/AnimatedCounter"
 import { OfflineBanner } from "@/components/OfflineBanner"
+import { CriticalLoadModal } from "@/components/CriticalLoadModal"
 import { HeroSlider } from "@/components/HeroSlider"
 import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious } from "@/components/ui/carousel"
 import { PaginationBar } from "@/components/PaginationBar"
-import { formatNumber, generateErrorCode, ErrorTypes } from "@/lib/utils"
+import { formatNumber, generateErrorCode, ErrorTypes, proxyImageUrl } from "@/lib/utils"
 import { useOnlineStatus } from "@/hooks/use-online-status"
 import { fetchCatalogGames, fetchCatalogStats, getCatalogCache, hydrateCatalogCache, isCatalogGamesStale, isCatalogStatsStale, mergeInstalledGames, persistCatalogCache, type CatalogGame } from "@/lib/catalog"
-import { ArrowRight } from "lucide-react"
+import { ArrowRight, Layers3, PlayCircle } from "lucide-react"
+import { usePlayHistory } from "@/hooks/use-play-history"
+import { useUserCollections } from "@/hooks/use-user-collections"
 
 type Game = CatalogGame
 
@@ -24,6 +27,8 @@ export function LauncherPage() {
   const navigate = useNavigate()
   const isOnline = useOnlineStatus()
   const initialCatalog = getCatalogCache()
+  const playHistory = usePlayHistory(12)
+  const userCollections = useUserCollections()
 
   class GamesFetchError extends Error {
     status?: number
@@ -50,6 +55,7 @@ export function LauncherPage() {
   const [gameStats, setGameStats] = useState<Record<string, { downloads: number; views: number }>>(initialCatalog.stats)
   const [refreshKey, setRefreshKey] = useState(0)
   const [gamesError, setGamesError] = useState<{ type: string; message: string; code: string } | null>(null)
+  const [criticalLoadOpen, setCriticalLoadOpen] = useState(false)
   const [hasLoadedGames, setHasLoadedGames] = useState(initialCatalog.games.length > 0)
   const [emptyStateReady, setEmptyStateReady] = useState(false)
   const [currentPage, setCurrentPage] = useState(1)
@@ -84,6 +90,10 @@ export function LauncherPage() {
   }, [isOnline])
 
   useEffect(() => {
+    setCriticalLoadOpen(Boolean(gamesError) && isOnline)
+  }, [gamesError, isOnline])
+
+  useEffect(() => {
     if (typeof window === "undefined") return
     const handleHomeNav = () => {
       document.getElementById("featured")?.scrollIntoView({ behavior: "smooth" })
@@ -114,11 +124,10 @@ export function LauncherPage() {
           for (const entry of installedList) {
             const meta = (entry && (entry.metadata || entry.game)) || entry
             if (meta && meta.appid) {
-              // Use remote image only; localImage is a file path that can't be used in web context
               installedMap.set(meta.appid, {
                 ...meta,
                 name: meta.name || meta.appid,
-                image: meta.image || "./banner.png",
+                image: meta.localImage || meta.image || "./banner.png",
                 genres: Array.isArray(meta.genres) ? meta.genres : [],
               })
             }
@@ -367,7 +376,21 @@ export function LauncherPage() {
   const displayTotalSizeGB = (stats as any).totalSizeGB ?? Math.round(displayTotalSizeTB * 1024 * 10) / 10
 
   return (
-    <div className="space-y-10 pb-4">
+    <div className="space-y-12 pb-4">
+      <CriticalLoadModal
+        open={Boolean(gamesError) && isOnline && criticalLoadOpen}
+        onOpenChange={setCriticalLoadOpen}
+        title="Critical Data Load Failure"
+        message={gamesError?.message || "Unable to load game data right now."}
+        errorCode={gamesError?.code}
+        onRetry={() => {
+          setGamesError(null)
+          setLoading(true)
+          loadGames(true)
+        }}
+        onContinue={() => setCriticalLoadOpen(false)}
+      />
+
       {/* Full-width hero slider */}
       <HeroSlider games={games} gameStats={gameStats} loading={loading} />
 
@@ -419,23 +442,70 @@ export function LauncherPage() {
               size="sm"
               variant="ghost"
               className="w-full rounded-full text-[12px] text-zinc-400 hover:bg-white/[.04] hover:text-white active:scale-95"
-              onClick={() => typeof window !== "undefined" && window.dispatchEvent(new Event("uc_open_search_popup"))}
+              onClick={() => navigate("/collections")}
             >
-              Search
+              <Layers3 className="h-3 w-3 mr-1" />
+              Collections
+              {userCollections.collections.length > 0 && (
+                <span className="ml-1 rounded-full bg-white/[.06] px-1.5 text-[10px] text-zinc-300">
+                  {userCollections.collections.length}
+                </span>
+              )}
             </Button>
           </div>
         </div>
       </section>
 
-      {recentlyInstalledGames.length > 0 && (
-        <section className="py-12 sm:py-16 md:py-20 px-4">
-          <div className="container mx-auto max-w-7xl">
-            <div className="mb-10">
-              <p className="section-label mb-2">Your Games</p>
-              <h2 className="text-2xl font-light tracking-tight text-white">
-                Recently Installed
-              </h2>
-            </div>
+      {/* Continue playing — cloud-synced when signed in, falls back to local
+          recently-installed below for everyone else. */}
+      {playHistory.authed && playHistory.items && playHistory.items.length > 0 && (
+        <section className="overflow-visible">
+          <SectionHeading
+            eyebrow="From the cloud"
+            title="Continue playing"
+            icon={<PlayCircle className="h-4 w-4" />}
+            actionLabel="Open library"
+            onAction={() => navigate("/library")}
+          />
+          <Carousel
+            opts={{ align: "start", loop: false, skipSnaps: false, dragFree: true }}
+            className="w-full"
+          >
+            <CarouselContent className="-ml-2 md:-ml-4">
+              {playHistory.items
+                .filter((entry) => Boolean(entry.game))
+                .slice(0, 12)
+                .map((entry) => (
+                  <CarouselItem
+                    key={entry.appid}
+                    className="pl-2 md:pl-4 basis-1/2 sm:basis-1/3 md:basis-1/4 lg:basis-1/5"
+                  >
+                    <GameCardCompact
+                      game={{
+                        appid: entry.appid,
+                        name: entry.game!.name,
+                        image: entry.game!.image,
+                        genres: Array.isArray(entry.game!.genres) ? entry.game!.genres : [],
+                      }}
+                    />
+                  </CarouselItem>
+                ))}
+            </CarouselContent>
+            <CarouselPrevious className={cardCarouselNavClass} />
+            <CarouselNext className={cardCarouselNavClass} />
+          </Carousel>
+        </section>
+      )}
+
+      {recentlyInstalledGames.length > 0 && !(playHistory.authed && playHistory.items && playHistory.items.length > 0) && (
+        <section>
+          <div>
+            <SectionHeading
+              eyebrow="Your games"
+              title="Recently installed"
+              actionLabel="View all"
+              onAction={() => navigate("/library")}
+            />
 
             <Carousel
               opts={{
@@ -508,33 +578,14 @@ export function LauncherPage() {
         </section>
       )}
 
-      {gamesError && isOnline && !loading && (
-        <section className="py-6 px-4">
-          <div className="container mx-auto max-w-4xl">
-            <div className="mb-6">
-              <ErrorMessage
-                title="Games Loading Issue"
-                message={gamesError.message}
-                errorCode={gamesError.code}
-                retry={() => {
-                  setGamesError(null)
-                  setLoading(true)
-                  loadGames(true)
-                }}
-              />
-            </div>
-          </div>
-        </section>
-      )}
-
       {(loading || newReleases.length > 0) && (
-        <section className="py-12 sm:py-16 md:py-20 px-4 overflow-visible">
-          <div className="container mx-auto max-w-7xl">
+        <section className="overflow-visible">
+          <div>
             {loading ? (
               <>
-                <div className="mb-10">
-                  <Skeleton className="h-10 w-48 mb-3" />
-                  <Skeleton className="h-5 w-80" />
+                <div className="mb-5">
+                  <Skeleton className="h-7 w-48 mb-2" />
+                  <Skeleton className="h-4 w-80" />
                 </div>
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                   {Array.from({ length: 4 }).map((_, index) => (
@@ -544,10 +595,12 @@ export function LauncherPage() {
               </>
             ) : (
               <>
-                <div className="mb-10">
-                  <p className="section-label mb-2">New</p>
-                  <h2 className="text-2xl font-light tracking-tight text-white">Latest Games</h2>
-                </div>
+                <SectionHeading
+                  eyebrow="New"
+                  title="Latest games"
+                  actionLabel="Browse all"
+                  onAction={() => navigate("/search?sort=added")}
+                />
                 <Carousel
                   opts={{
                     align: "start",
@@ -577,22 +630,20 @@ export function LauncherPage() {
       )}
 
       {(loading || popularReleases.length > 0) && (
-        <section className="relative py-16 sm:py-20 md:py-24 px-4 overflow-hidden">
-          <div className="container relative z-10 mx-auto max-w-7xl">
+        <section className="overflow-visible">
+          <div>
             {loading ? (
-              <div className="mb-12">
-                <Skeleton className="h-12 w-64 mb-4" />
-                <Skeleton className="h-6 w-96" />
+              <div className="mb-5">
+                <Skeleton className="h-7 w-64 mb-2" />
+                <Skeleton className="h-4 w-96" />
               </div>
             ) : (
-              <div className="mb-12 flex flex-col md:flex-row md:items-end justify-between gap-4">
-                <div>
-                  <p className="section-label mb-2">Trending</p>
-                  <h2 className="text-2xl font-light tracking-tight text-white">
-                    Most Popular
-                  </h2>
-                </div>
-              </div>
+              <SectionHeading
+                eyebrow="Trending"
+                title="Most popular"
+                actionLabel="Browse all"
+                onAction={() => navigate("/search?sort=downloads-desc")}
+              />
             )}
 
             {loading ? (
@@ -612,7 +663,7 @@ export function LauncherPage() {
                 }}
                 className="w-full"
               >
-                <CarouselContent className="-ml-2 md:-ml-4 pb-10">
+                <CarouselContent className="-ml-2 md:-ml-4">
                   {popularReleases.map((game) => (
                     <CarouselItem
                       key={game.appid}
@@ -622,21 +673,86 @@ export function LauncherPage() {
                     </CarouselItem>
                   ))}
                 </CarouselContent>
-                <CarouselPrevious className={`left-0 -translate-x-1/2 ${cardCarouselNavClass}`} />
-                <CarouselNext className={`right-0 translate-x-1/2 ${cardCarouselNavClass}`} />
+                <CarouselPrevious className={cardCarouselNavClass} />
+                <CarouselNext className={cardCarouselNavClass} />
               </Carousel>
             )}
           </div>
         </section>
       )}
 
-      <section id="featured" className="py-16 px-4">
-        <div className="container mx-auto max-w-[1800px]">
+      {/* From your collections — surface the user's curated bundles inline. */}
+      {userCollections.collections.length > 0 && (
+        <section className="overflow-visible">
+          <SectionHeading
+            eyebrow="Curated by you"
+            title="From your collections"
+            icon={<Layers3 className="h-4 w-4" />}
+            actionLabel="Manage"
+            onAction={() => navigate("/collections")}
+          />
+          <div className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {userCollections.collections.slice(0, 4).map((collection) => {
+              const previewIds = collection.appids.slice(0, 4)
+              const previews = previewIds
+                .map((id) => games.find((g) => g.appid === id))
+                .filter(Boolean) as Game[]
+              return (
+                <button
+                  key={collection.id}
+                  type="button"
+                  onClick={() => navigate(`/library?collection=${encodeURIComponent(collection.name)}`)}
+                  className="group flex flex-col rounded-3xl border border-white/[.07] bg-zinc-900/40 backdrop-blur-md overflow-hidden transition-colors hover:border-white/[.14] text-left"
+                >
+                  <div className="relative aspect-[16/10] w-full overflow-hidden bg-zinc-900">
+                    {previews.length === 0 ? (
+                      <div className="absolute inset-0 flex items-center justify-center text-zinc-700">
+                        <Layers3 className="h-10 w-10" />
+                      </div>
+                    ) : (
+                      <div className="absolute inset-0 grid grid-cols-2 grid-rows-2 gap-px bg-zinc-950">
+                        {previews.map((g) => (
+                          <div key={g.appid} className="relative overflow-hidden">
+                            <img
+                              src={proxyImageUrl(g.image) || "./banner.png"}
+                              alt=""
+                              className="h-full w-full object-cover"
+                              loading="lazy"
+                            />
+                          </div>
+                        ))}
+                        {Array.from({ length: Math.max(0, 4 - previews.length) }).map((_, idx) => (
+                          <div key={`empty-${idx}`} className="bg-zinc-900" />
+                        ))}
+                      </div>
+                    )}
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/10 to-transparent" />
+                    <div className="absolute bottom-3 left-3 right-3 flex items-end justify-between gap-2">
+                      <span className="rounded-full border border-white/10 bg-black/60 backdrop-blur-sm px-2 py-0.5 text-[10px] font-semibold text-zinc-100">
+                        {collection.appids.length} games
+                      </span>
+                      <span className="rounded-full border border-white/10 bg-black/60 backdrop-blur-sm px-2 py-0.5 text-[10px] font-semibold text-zinc-100 opacity-0 group-hover:opacity-100 transition-opacity inline-flex items-center gap-1">
+                        Open <ArrowRight className="h-2.5 w-2.5" />
+                      </span>
+                    </div>
+                  </div>
+                  <div className="px-4 py-3 border-t border-white/[.05]">
+                    <p className="truncate text-sm font-semibold text-white">{collection.name}</p>
+                  </div>
+                </button>
+              )
+            })}
+          </div>
+        </section>
+      )}
+
+      <section id="featured">
+        <div>
           {loading ? (
             <>
-              <div className="mb-10">
-                <Skeleton className="h-10 w-56 mb-3 bg-muted/40" />
-                <Skeleton className="h-5 w-96 bg-muted/30" />
+              <div className="mb-5">
+                <Skeleton className="h-7 w-56 mb-2 bg-muted/40" />
+                <Skeleton className="h-4 w-96 bg-muted/30" />
               </div>
               <div className="grid gap-4 sm:gap-5" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))" }}>
                 {Array.from({ length: itemsPerPage }).map((_, i) => (
@@ -646,11 +762,12 @@ export function LauncherPage() {
             </>
           ) : (
             <>
-              <div className="mb-10 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                <div>
-                  <p className="section-label mb-2">Library</p>
-                  <h2 className="text-2xl font-light tracking-tight text-white">All Games</h2>
-                </div>
+              <div className="mb-5 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                <SectionHeading
+                  eyebrow="Library"
+                  title="All games"
+                  className="mb-0"
+                />
                 <Button
                   variant="outline"
                   size="sm"
@@ -702,17 +819,13 @@ export function LauncherPage() {
             </div>
           )}
 
-          {featuredGames.length === 0 && hasLoadedGames && emptyStateReady && !loading && isOnline && (
+          {featuredGames.length === 0 && emptyStateReady && !loading && isOnline && (
             <div className="text-center py-20">
               <div className="max-w-xl mx-auto">
                 <ErrorMessage
-                  title={gamesError ? "Games Loading Issue" : "No Games Available"}
-                  message={
-                    gamesError
-                      ? gamesError.message
-                      : "We couldn't find any games at the moment. Please try again later or contact support if the issue persists."
-                  }
-                  errorCode={gamesError ? gamesError.code : generateErrorCode(ErrorTypes.GAME_FETCH, "launcher-empty")}
+                  title="No Games Available"
+                  message="We couldn't find any games at the moment. Please try again later or contact support if the issue persists."
+                  errorCode={generateErrorCode(ErrorTypes.GAME_FETCH, "launcher-empty")}
                   retry={() => {
                     setGamesError(null)
                     setLoading(true)
@@ -724,6 +837,44 @@ export function LauncherPage() {
           )}
         </div>
       </section>
+    </div>
+  )
+}
+
+function SectionHeading({
+  eyebrow,
+  title,
+  icon,
+  actionLabel,
+  onAction,
+  className,
+}: {
+  eyebrow?: string
+  title: string
+  icon?: React.ReactNode
+  actionLabel?: string
+  onAction?: () => void
+  className?: string
+}) {
+  return (
+    <div className={`mb-5 flex flex-wrap items-end justify-between gap-3 ${className ?? ""}`}>
+      <div className="space-y-1">
+        {eyebrow && <p className="section-label">{eyebrow}</p>}
+        <h2 className="text-xl font-bold tracking-tight text-white flex items-center gap-2">
+          {icon}
+          {title}
+        </h2>
+      </div>
+      {actionLabel && onAction && (
+        <button
+          type="button"
+          onClick={onAction}
+          className="inline-flex items-center gap-1.5 rounded-full border border-white/[.07] bg-white/[.03] px-3 py-1 text-xs font-medium text-zinc-300 hover:bg-white/[.07] hover:text-white transition-colors"
+        >
+          {actionLabel}
+          <ArrowRight className="h-3 w-3" />
+        </button>
+      )}
     </div>
   )
 }

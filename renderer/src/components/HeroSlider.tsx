@@ -5,6 +5,11 @@ import { Button } from '@/components/ui/button'
 import { apiUrl } from '@/lib/api'
 import { formatNumber, cn, proxyImageUrl } from '@/lib/utils'
 
+type SliderHeroAsset = {
+  heroUrl: string | null
+  logoUrl: string | null
+}
+
 interface Game {
   appid: string
   name: string
@@ -12,6 +17,8 @@ interface Game {
   genres: string[]
   image: string
   splash?: string
+  hero_image?: string
+  hero_logo?: string
   release_date?: string
   size?: string
   source?: string
@@ -30,11 +37,6 @@ interface HeroSliderProps {
   loading?: boolean
 }
 
-type SliderHeroAsset = {
-  heroUrl: string | null
-  logoUrl: string | null
-}
-
 export function HeroSlider({ games, gameStats = {}, loading = false }: HeroSliderProps) {
   const navigate = useNavigate()
   const [currentIndex, setCurrentIndex] = useState(0)
@@ -44,6 +46,8 @@ export function HeroSlider({ games, gameStats = {}, loading = false }: HeroSlide
   const autoPlayRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const touchStartXRef = useRef<number | null>(null)
 
+  // Mirrors union-crax.xyz HeroGameSlider: IGDB splash → cover fallback with
+  // legacy size-token rewrites; SGDB hero/logo lookup layered on top.
   const getHeroImage = useCallback((featuredGame: Game) => {
     const imageUrl = featuredGame.splash?.trim() || featuredGame.image
     return imageUrl
@@ -76,22 +80,20 @@ export function HeroSlider({ games, gameStats = {}, loading = false }: HeroSlide
 
     const withDedicated = sortedGames.filter(hasDedicatedHeroAsset)
     const withoutDedicated = sortedGames.filter((g) => !hasDedicatedHeroAsset(g))
-
     return [...withDedicated, ...withoutDedicated].slice(0, 10)
   }, [games, gameStats, hasDedicatedHeroAsset])
 
   const total = sliderGames.length
   const game = sliderGames[currentIndex]
 
-  // Fetch SteamGridDB heroes
+  // SGDB lookup — same endpoint + shape as union-crax.xyz.
   useEffect(() => {
     let cancelled = false
-    const loadSteamGridHeroes = async () => {
+    const load = async () => {
       const appids = sliderGames.map((g) => g.appid)
       if (appids.length === 0) return
       const missing = appids.filter((appid) => !(appid in sgdbHeroesByAppid))
       if (missing.length === 0) return
-
       try {
         const params = new URLSearchParams()
         missing.forEach((appid) => params.append('appid', appid))
@@ -107,24 +109,26 @@ export function HeroSlider({ games, gameStats = {}, loading = false }: HeroSlide
         }
         if (!cancelled) setSgdbHeroesByAppid((prev) => ({ ...prev, ...updates }))
       } catch {
-        // Ignore lookup failures; fall back to IGDB splash art
+        // Ignore lookup failures; getSliderImageSrc handles null gracefully.
       }
     }
-    loadSteamGridHeroes()
+    load()
     return () => { cancelled = true }
   }, [sliderGames, sgdbHeroesByAppid])
 
+  // Return null until SGDB lookup resolves so we render a skeleton instead of
+  // flashing the IGDB cover first. After resolve, prefer SGDB hero then IGDB.
   const getSliderImageSrc = useCallback(
     (featuredGame: Game) => {
-      const resolvedHero = sgdbHeroesByAppid[featuredGame.appid]
-      if (resolvedHero === undefined) return getHeroImage(featuredGame)
-      return resolvedHero.heroUrl || getHeroImage(featuredGame)
+      const resolved = sgdbHeroesByAppid[featuredGame.appid]
+      if (resolved === undefined) return null
+      return resolved.heroUrl || getHeroImage(featuredGame)
     },
     [getHeroImage, sgdbHeroesByAppid],
   )
 
   const getSliderLogoSrc = useCallback(
-    (featuredGame: Game) => sgdbHeroesByAppid[featuredGame.appid]?.logoUrl || null,
+    (featuredGame: Game) => sgdbHeroesByAppid[featuredGame.appid]?.logoUrl || featuredGame.hero_logo || null,
     [sgdbHeroesByAppid],
   )
 
@@ -243,10 +247,14 @@ export function HeroSlider({ games, gameStats = {}, loading = false }: HeroSlide
       aria-roledescription="carousel"
       aria-label="Featured Games Slider"
     >
-      {/* Background hero image */}
-      {currentHeroSrc ? (
+      {/* Background hero image. Skeleton stays visible until SGDB lookup
+          resolves so the IGDB cover never flashes first. */}
+      {!currentHeroSrc && (
+        <div className="udl-skeleton absolute inset-0 bg-zinc-900" />
+      )}
+      {currentHeroSrc && (
         <img
-          key={`hero-${game.appid}-${currentIndex}`}
+          key={`hero-${game.appid}-${currentHeroSrc}`}
           src={proxyImageUrl(currentHeroSrc)}
           alt={game.name}
           className={cn(
@@ -255,8 +263,6 @@ export function HeroSlider({ games, gameStats = {}, loading = false }: HeroSlide
           )}
           draggable={false}
         />
-      ) : (
-        <div className="absolute inset-0 bg-zinc-900" />
       )}
 
       {/* Gradient overlays */}

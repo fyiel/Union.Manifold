@@ -158,7 +158,7 @@ declare global {
       saveInstalledMetadata: (appid: string, metadata: any) => Promise<{ ok: boolean }>
       setInstallingStatus: (appid: string, status: string, error?: string | null) => Promise<{ ok: boolean }>
       getActiveStatus: (appid: string) => Promise<{ extracting: boolean; downloading: boolean }>
-      createDesktopShortcut: (gameName: string, exePath: string) => Promise<{ ok: boolean; error?: string }>
+      createDesktopShortcut: (gameName: string, appid: string, exePath?: string) => Promise<{ ok: boolean; error?: string; existed?: boolean }>
       deleteDesktopShortcut: (gameName: string) => Promise<{ ok: boolean; error?: string }>
       addExternalGame: (appid: string, metadata: any, gamePath: string) => Promise<{ ok: boolean; error?: string }>
       updateInstalledMetadata: (appid: string, updates: Record<string, any>) => Promise<{ ok: boolean; error?: string }>

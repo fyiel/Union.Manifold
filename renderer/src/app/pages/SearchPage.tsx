@@ -1,26 +1,25 @@
-import { useState, useEffect, useMemo, useCallback } from "react"
+import { useState, useEffect, useMemo, useCallback, useRef } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
 import { GameCard } from "@/components/GameCard"
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
-import { Slider } from "@/components/ui/slider"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
 import { PaginationBar } from "@/components/PaginationBar"
-import { Filter, Wifi, X, SlidersHorizontal, RefreshCw, Heart, Star, ChevronRight } from "lucide-react"
+import { Filter, Wifi, X, SlidersHorizontal, RefreshCw, Heart, Star, ChevronRight, Search } from "lucide-react"
 import { useDebounce } from "@/hooks/use-debounce"
 import { parseSize } from "@/lib/search-utils"
 import { hasOnlineMode, generateErrorCode, ErrorTypes, proxyImageUrl } from "@/lib/utils"
+import { cn } from "@/lib/utils"
 import { addSearchToHistory } from "@/lib/user-history"
 import { APIErrorBoundary } from "@/components/error-boundary"
 import { GamesGridSkeleton } from "@/components/api-fallback"
 import { LoadingAnimated } from "@/components/brand/brand-assets"
-import { ErrorMessage } from "@/components/ErrorMessage"
+import { CriticalLoadModal } from "@/components/CriticalLoadModal"
 import { OfflineBanner } from "@/components/OfflineBanner"
 import { apiFetch } from "@/lib/api"
 import { useOnlineStatus } from "@/hooks/use-online-status"
@@ -52,9 +51,19 @@ interface Filters {
   nsfwOnly?: boolean
 }
 
+const DEFAULT_FILTERS: Filters = {
+  searchTerm: "",
+  genres: [],
+  developers: [],
+  sizeRange: [0, 500],
+  sortBy: "random",
+  online: false,
+  nsfwOnly: false,
+}
+
 export function SearchPage() {
   const navigate = useNavigate()
-  const [searchParams] = useSearchParams()
+  const [searchParams, setSearchParams] = useSearchParams()
   const [isFiltersOpen, setIsFiltersOpen] = useState(false)
   const [developerQuery, setDeveloperQuery] = useState("")
   const isOnline = useOnlineStatus()
@@ -80,6 +89,23 @@ export function SearchPage() {
     return developerMatch ? developerMatch[1].trim() : "Unknown"
   }
 
+  const initialFilters: Filters = useMemo(() => ({
+    ...DEFAULT_FILTERS,
+    searchTerm: searchParams.get("q") || "",
+    sortBy: normalizeSort(searchParams.get("sort")),
+    online: searchParams.get("online") === "1",
+    nsfwOnly: searchParams.get("nsfw") === "1",
+  }), [])
+
+  const [filters, setFilters] = useState<Filters>(initialFilters)
+  const [searchInput, setSearchInput] = useState<string>(initialFilters.searchTerm)
+  const debouncedSearchInput = useDebounce(searchInput, 400)
+
+  useEffect(() => {
+    setFilters((prev) => prev.searchTerm === debouncedSearchInput ? prev : { ...prev, searchTerm: debouncedSearchInput })
+    setIsSearching(false)
+  }, [debouncedSearchInput])
+
   const [games, setGames] = useState<Game[]>([])
   const [totalGames, setTotalGames] = useState(0)
   const [meta, setMeta] = useState<{ genres: string[]; developers: string[] }>({ genres: [], developers: [] })
@@ -88,66 +114,78 @@ export function SearchPage() {
   const [filtering, setFiltering] = useState(false)
   const [isSearching, setIsSearching] = useState(false)
   const [gameStats, setGameStats] = useState<Record<string, { downloads: number; views: number }>>({})
-  const [refreshKey, setRefreshKey] = useState(0)
   const [gamesError, setGamesError] = useState<{ type: string; message: string; code: string } | null>(null)
-  const [statsError, setStatsError] = useState<{ type: string; message: string; code: string } | null>(null)
+  const [_statsError, setStatsError] = useState<{ type: string; message: string; code: string } | null>(null)
+  const [criticalLoadOpen, setCriticalLoadOpen] = useState(false)
   const [didYouMeanResults, setDidYouMeanResults] = useState<any[]>([])
 
   const [currentPage, setCurrentPage] = useState(1)
   const itemsPerPage = 20
+  const isInitialMount = useRef(true)
 
-  const [draftFilters, setDraftFilters] = useState<Filters>({
-    searchTerm: searchParams.get("q") || "",
-    genres: [],
-    developers: [],
-    sizeRange: [0, 500],
-    sortBy: normalizeSort(searchParams.get("sort")),
-    online: searchParams.get("online") === "1",
-    nsfwOnly: searchParams.get("nsfw") === "1",
-  })
+  const syncFiltersToUrl = useCallback((f: Filters) => {
+    const params = new URLSearchParams()
+    if (f.searchTerm) params.set("q", f.searchTerm)
+    if (f.sortBy && f.sortBy !== "random") params.set("sort", f.sortBy)
+    if (f.online) params.set("online", "1")
+    if (f.nsfwOnly) params.set("nsfw", "1")
+    setSearchParams(params, { replace: true })
+  }, [setSearchParams])
 
-  const [appliedFilters, setAppliedFilters] = useState<Filters>({
-    searchTerm: searchParams.get("q") || "",
-    genres: [],
-    developers: [],
-    sizeRange: [0, 500],
-    sortBy: normalizeSort(searchParams.get("sort")),
-    online: searchParams.get("online") === "1",
-    nsfwOnly: searchParams.get("nsfw") === "1",
-  })
+  const updateFilter = useCallback(<K extends keyof Filters>(key: K, value: Filters[K]) => {
+    setFilters((prev) => {
+      const next = { ...prev, [key]: value }
+      syncFiltersToUrl(next)
+      return next
+    })
+  }, [syncFiltersToUrl])
 
-  const debouncedSearchTerm = useDebounce(appliedFilters.searchTerm, 300)
-  const debouncedDraftSearchTerm = useDebounce(draftFilters.searchTerm, 500)
-  const searchParamsKey = searchParams.toString()
+  const toggleGenre = useCallback((genre: string) => {
+    setFilters((prev) => {
+      const genres = prev.genres.includes(genre) ? prev.genres.filter((g) => g !== genre) : [...prev.genres, genre]
+      const next = { ...prev, genres }
+      syncFiltersToUrl(next)
+      return next
+    })
+  }, [syncFiltersToUrl])
+
+  const toggleDeveloper = useCallback((developer: string) => {
+    setFilters((prev) => {
+      const developers = prev.developers.includes(developer)
+        ? prev.developers.filter((d) => d !== developer)
+        : [...prev.developers, developer]
+      const next = { ...prev, developers }
+      syncFiltersToUrl(next)
+      return next
+    })
+  }, [syncFiltersToUrl])
 
   useEffect(() => {
     loadGames()
-  }, [appliedFilters, currentPage, searchParamsKey])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filters, currentPage])
 
   useEffect(() => {
-    const sortBy = normalizeSort(searchParams.get("sort"))
-    setDraftFilters((prev) => ({ ...prev, sortBy }))
-    setAppliedFilters((prev) => ({ ...prev, sortBy }))
-  }, [searchParamsKey, normalizeSort, searchParams])
+    if (!isInitialMount.current) {
+      // scroll to top of main scroll container if any; safe no-op otherwise
+      try { window.scrollTo({ top: 0, behavior: "smooth" }) } catch {}
+    }
+  }, [currentPage])
 
   useEffect(() => {
     setCurrentPage(1)
-  }, [appliedFilters, debouncedSearchTerm])
-
-  useEffect(() => {
-    setAppliedFilters((prev) => ({ ...prev, searchTerm: debouncedDraftSearchTerm }))
-    setIsSearching(false)
-  }, [debouncedDraftSearchTerm])
+  }, [filters])
 
   useEffect(() => {
     fetchMeta()
+    isInitialMount.current = false
   }, [])
 
   useEffect(() => {
-    const q = appliedFilters.searchTerm.trim()
+    const q = filters.searchTerm.trim()
     if (!loading && q.length >= 2 && games.length === 0) {
       apiFetch(`/api/games/suggestions?q=${encodeURIComponent(q)}&limit=8&nsfw=true`)
-        .then((r) => r.ok ? r.json() : null)
+        .then((r) => (r.ok ? r.json() : null))
         .then((data) => {
           if (data) setDidYouMeanResults(Array.isArray(data.didYouMean) ? data.didYouMean : [])
         })
@@ -155,7 +193,11 @@ export function SearchPage() {
     } else {
       setDidYouMeanResults([])
     }
-  }, [loading, games, appliedFilters.searchTerm])
+  }, [loading, games, filters.searchTerm])
+
+  useEffect(() => {
+    setCriticalLoadOpen(Boolean(gamesError) && isOnline)
+  }, [gamesError, isOnline])
 
   const fetchMeta = async () => {
     try {
@@ -169,28 +211,24 @@ export function SearchPage() {
   }
 
   const fetchGames = async (): Promise<{ items: Game[]; total: number }> => {
-    // Don't attempt API calls when offline
     if (typeof navigator !== "undefined" && !navigator.onLine) {
       return { items: [], total: 0 }
     }
 
     try {
       const params = new URLSearchParams()
-      if (appliedFilters.searchTerm) params.set("q", appliedFilters.searchTerm)
+      if (filters.searchTerm) params.set("q", filters.searchTerm)
+      filters.genres.forEach((g) => params.append("genres", g))
+      filters.developers.forEach((d) => params.append("developers", d))
+      if (filters.online) params.set("online", "true")
 
-      appliedFilters.genres.forEach((g) => params.append("genres", g))
-      appliedFilters.developers.forEach((d) => params.append("developers", d))
-      if (appliedFilters.online) params.set("online", "true")
-
-      // nsfwOnly=true  → send dedicated param so server filters to NSFW-only results.
-      // nsfwOnly=false → send nsfw=false so server excludes NSFW from default results.
-      if (appliedFilters.nsfwOnly) {
+      if (filters.nsfwOnly) {
         params.set("nsfwOnly", "true")
       } else {
         params.set("nsfw", "false")
       }
 
-      if (appliedFilters.sortBy) params.set("sort", appliedFilters.sortBy)
+      if (filters.sortBy) params.set("sort", filters.sortBy)
 
       params.set("page", currentPage.toString())
       params.set("limit", itemsPerPage.toString())
@@ -226,7 +264,6 @@ export function SearchPage() {
     setLoading(true)
     try {
       setGamesError(null)
-
       const { items, total } = await fetchGames()
       setGames(items)
       setTotalGames(total)
@@ -249,18 +286,15 @@ export function SearchPage() {
   const fetchGameStats = async () => {
     try {
       setStatsError(null)
-
       const response = await apiFetch("/api/downloads/all")
 
       if (!response.ok) {
         const errorCode = generateErrorCode(ErrorTypes.STATS_FETCH, "search-page")
-
         setStatsError({
           type: "stats",
           message: `Unable to load game statistics (Status: ${response.status}). The games are still available.`,
           code: errorCode,
         })
-
         throw new Error(`Stats API route failed: ${response.status}`)
       }
 
@@ -286,11 +320,6 @@ export function SearchPage() {
       setTotalGames(total)
     } catch (error) {
       console.error("Error refreshing games:", error)
-      setGamesError({
-        type: "games",
-        message: "Unable to refresh games. Please try again or contact support if the issue persists.",
-        code: generateErrorCode(ErrorTypes.SEARCH_FETCH, "search-page-refresh"),
-      })
     } finally {
       if (!filtering) setRefreshing(false)
     }
@@ -298,7 +327,6 @@ export function SearchPage() {
 
   const isValidDeveloperName = (developer: string | undefined): boolean => {
     if (!developer || developer === "Unknown" || developer.trim() === "") return false
-
     const trimmed = developer.trim()
     if (trimmed.length < 2 || trimmed.length > 50) return false
 
@@ -312,29 +340,14 @@ export function SearchPage() {
       /http[s]?:\/\//,
       /\b(description|about|story|plot|features?|overview|summary)\b/i,
     ]
-
-    if (descriptionPatterns.some((pattern) => pattern.test(trimmed))) {
-      return false
-    }
+    if (descriptionPatterns.some((pattern) => pattern.test(trimmed))) return false
 
     const validNamePattern = /^[\w\s\-\.,'&()]+$/u
-    if (!validNamePattern.test(trimmed)) {
-      return false
-    }
+    if (!validNamePattern.test(trimmed)) return false
 
     const words = trimmed.split(/\s+/)
-    if (words.length > 6) {
-      return false
-    }
-
-    if (trimmed.includes(" is ") || trimmed.includes(" was ") || trimmed.includes(" has ")) {
-      return false
-    }
-
-    const capitalizedWords = words.filter((word) => /^[A-Z]/.test(word))
-    if (capitalizedWords.length === words.length && words.length > 1) {
-      return true
-    }
+    if (words.length > 6) return false
+    if (trimmed.includes(" is ") || trimmed.includes(" was ") || trimmed.includes(" has ")) return false
 
     return true
   }
@@ -349,23 +362,22 @@ export function SearchPage() {
   const filteredGames = useMemo(() => {
     let filtered = games
 
-    if (appliedFilters.sizeRange[0] > 0 || appliedFilters.sizeRange[1] < 500) {
-      const minSizeBytes = appliedFilters.sizeRange[0] * 1024 * 1024 * 1024
-      const maxSizeBytes = appliedFilters.sizeRange[1] * 1024 * 1024 * 1024
-
+    if (filters.sizeRange[0] > 0 || filters.sizeRange[1] < 500) {
+      const minSizeBytes = filters.sizeRange[0] * 1024 * 1024 * 1024
+      const maxSizeBytes = filters.sizeRange[1] * 1024 * 1024 * 1024
       filtered = filtered.filter((game) => {
         const gameSize = parseSize(game.size)
         return gameSize > 0 && gameSize >= minSizeBytes && gameSize <= maxSizeBytes
       })
     }
 
-    if (appliedFilters.online) {
+    if (filters.online) {
       filtered = filtered.filter((game) => hasOnlineMode(game.hasCoOp))
     }
 
-    if (appliedFilters.sortBy !== "random") {
+    if (filters.sortBy !== "random") {
       filtered.sort((a, b) => {
-        switch (appliedFilters.sortBy) {
+        switch (filters.sortBy) {
           case "added":
             return (a.addedOrder ?? 0) - (b.addedOrder ?? 0) || a.name.localeCompare(b.name)
           case "date":
@@ -403,23 +415,20 @@ export function SearchPage() {
       })
     }
 
-    if (appliedFilters.sortBy === "random") {
+    if (filters.sortBy === "random") {
       const shuffled = [...filtered]
       const seed = Date.now()
       let random = seed
-
       for (let i = shuffled.length - 1; i > 0; i--) {
         random = (random * 9301 + 49297) % 233280
         const j = Math.floor((random / 233280) * (i + 1))
-          ;[shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]]
+        ;[shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]]
       }
       return shuffled
     }
 
     return filtered
-  }, [games, debouncedSearchTerm, appliedFilters, gameStats])
-
-  const paginatedGames = filteredGames
+  }, [games, filters, gameStats])
 
   const totalPages = Math.ceil(totalGames / itemsPerPage)
   const startItem = (currentPage - 1) * itemsPerPage + 1
@@ -431,149 +440,48 @@ export function SearchPage() {
     }
   }, [currentPage, totalPages])
 
-  const updateDraftFilter = useCallback((key: keyof Filters, value: any) => {
-    setDraftFilters((prev) => ({ ...prev, [key]: value }))
-  }, [])
-
-  const toggleDraftGenre = useCallback((genre: string) => {
-    setDraftFilters((prev) => ({
-      ...prev,
-      genres: prev.genres.includes(genre) ? prev.genres.filter((g) => g !== genre) : [...prev.genres, genre],
-    }))
-  }, [])
-
-  const toggleDraftDeveloper = useCallback((developer: string) => {
-    setDraftFilters((prev) => ({
-      ...prev,
-      developers: prev.developers.includes(developer)
-        ? prev.developers.filter((d) => d !== developer)
-        : [...prev.developers, developer],
-    }))
-  }, [])
-
-  const removeAppliedGenre = useCallback((genre: string) => {
-    setAppliedFilters((prev) => ({
-      ...prev,
-      genres: prev.genres.filter((g) => g !== genre),
-    }))
-    setDraftFilters((prev) => ({
-      ...prev,
-      genres: prev.genres.filter((g) => g !== genre),
-    }))
-  }, [])
-
-  const removeAppliedDeveloper = useCallback((developer: string) => {
-    setAppliedFilters((prev) => ({
-      ...prev,
-      developers: prev.developers.filter((d) => d !== developer),
-    }))
-    setDraftFilters((prev) => ({
-      ...prev,
-      developers: prev.developers.filter((d) => d !== developer),
-    }))
-  }, [])
-
-  const removeAppliedOnline = useCallback(() => {
-    setAppliedFilters((prev) => ({
-      ...prev,
-      online: false,
-    }))
-    setDraftFilters((prev) => ({
-      ...prev,
-      online: false,
-    }))
-  }, [])
-
-  const removeAppliedNsfwOnly = useCallback(() => {
-    setAppliedFilters((prev) => ({ ...prev, nsfwOnly: false }))
-    setDraftFilters((prev) => ({ ...prev, nsfwOnly: false }))
-  }, [])
-
   const removeAppliedSearch = useCallback(() => {
-    setAppliedFilters((prev) => ({ ...prev, searchTerm: "" }))
-    setDraftFilters((prev) => ({ ...prev, searchTerm: "" }))
-  }, [])
+    setSearchInput("")
+    updateFilter("searchTerm", "")
+  }, [updateFilter])
 
-  const removeAppliedSizeRange = useCallback(() => {
-    setAppliedFilters((prev) => ({ ...prev, sizeRange: [0, 500] }))
-    setDraftFilters((prev) => ({ ...prev, sizeRange: [0, 500] }))
-  }, [])
-
-  const removeAppliedSort = useCallback(() => {
-    setAppliedFilters((prev) => ({ ...prev, sortBy: "random" }))
-    setDraftFilters((prev) => ({ ...prev, sortBy: "random" }))
-  }, [])
-
-  const applyFilters = useCallback(async () => {
-    setFiltering(true)
-
-    // Apply the draft filters. The useEffect on appliedFilters will trigger
-    // loadGames with the correct (updated) state, avoiding the stale-closure
-    // race condition that occurred when refreshGames() was called here directly.
-    setAppliedFilters({ ...draftFilters })
-
-    if (draftFilters.searchTerm.trim()) {
-      addSearchToHistory(draftFilters.searchTerm.trim())
-    }
-
-    setTimeout(() => setFiltering(false), 200)
-  }, [draftFilters])
+  const removeSizeRange = useCallback(() => {
+    updateFilter("sizeRange", [0, 500])
+  }, [updateFilter])
 
   const clearFilters = useCallback(() => {
-    const clearedFilters = {
-      searchTerm: "",
-      genres: [],
-      developers: [],
-      sizeRange: [0, 500] as [number, number],
-      sortBy: "random",
-      online: false,
-      nsfwOnly: false,
-    }
     setDeveloperQuery("")
-    setDraftFilters(clearedFilters)
-    setAppliedFilters(clearedFilters)
-  }, [])
-
-  const hasUnappliedChanges = useMemo(() => {
-    return JSON.stringify(draftFilters) !== JSON.stringify(appliedFilters)
-  }, [draftFilters, appliedFilters])
+    setSearchInput("")
+    setFilters(DEFAULT_FILTERS)
+    setSearchParams(new URLSearchParams(), { replace: true })
+  }, [setSearchParams])
 
   const appliedFilterCount = useMemo(() => {
     let count = 0
-    if (appliedFilters.searchTerm.trim()) count++
-    count += appliedFilters.genres.length
-    count += appliedFilters.developers.length
-    if (appliedFilters.online) count++
-    if (appliedFilters.nsfwOnly) count++
-    if (appliedFilters.sortBy !== "random") count++
-    if (appliedFilters.sizeRange[0] !== 0 || appliedFilters.sizeRange[1] !== 500) count++
+    if (filters.searchTerm.trim()) count++
+    count += filters.genres.length
+    count += filters.developers.length
+    if (filters.online) count++
+    if (filters.nsfwOnly) count++
+    if (filters.sortBy !== "random") count++
+    if (filters.sizeRange[0] !== 0 || filters.sizeRange[1] !== 500) count++
     return count
-  }, [appliedFilters])
+  }, [filters])
 
   const sortLabel = useMemo(() => {
-    switch (appliedFilters.sortBy) {
-      case "added":
-        return "Last Added"
-      case "name":
-        return "Name"
-      case "date":
-        return "Release Date"
-      case "updated":
-        return "Last Updated"
-      case "size":
-        return "Size"
-      case "downloads-desc":
-        return "Most Downloads"
-      case "downloads-asc":
-        return "Least Downloads"
-      case "views-desc":
-        return "Most Views"
-      case "views-asc":
-        return "Least Views"
-      default:
-        return "Random"
+    switch (filters.sortBy) {
+      case "added": return "Last Added"
+      case "name": return "Name"
+      case "date": return "Release Date"
+      case "updated": return "Last Updated"
+      case "size": return "Size"
+      case "downloads-desc": return "Most Downloads"
+      case "downloads-asc": return "Least Downloads"
+      case "views-desc": return "Most Views"
+      case "views-asc": return "Least Views"
+      default: return "Random"
     }
-  }, [appliedFilters.sortBy])
+  }, [filters.sortBy])
 
   const filteredDevelopers = useMemo(() => {
     const q = developerQuery.trim().toLowerCase()
@@ -581,603 +489,548 @@ export function SearchPage() {
     return filterOptions.allDevelopers.filter((developer) => developer.toLowerCase().includes(q))
   }, [developerQuery, filterOptions.allDevelopers])
 
-  return (
-    <div className={`min-h-screen bg-[#09090b] ${loading ? "min-h-[200vh]" : ""}`}>
-      <div className="container mx-auto max-w-7xl px-3 sm:px-4 py-6 sm:py-8">
-        <div className="mb-6 sm:mb-8 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
-          <div>
-            <h1 className="text-2xl sm:text-3xl font-bold text-white mb-1 sm:mb-2">
-              Advanced Search
-            </h1>
-            <p className="text-sm sm:text-base text-zinc-400">
-              Find exactly what you're looking for with detailed filters
-            </p>
+  const FilterPanel = () => (
+    <div className="space-y-6">
+      {/* Genres */}
+      <FilterSection
+        title="Genres"
+        action={
+          filters.genres.length > 0 ? (
+            <button
+              type="button"
+              onClick={() => updateFilter("genres", [])}
+              className="text-xs text-zinc-400 hover:text-zinc-100 transition-colors"
+            >
+              Clear ({filters.genres.length})
+            </button>
+          ) : null
+        }
+      >
+        <div className="flex flex-wrap gap-1.5">
+          {filterOptions.allGenres.map((genre) => {
+            const active = filters.genres.includes(genre)
+            return (
+              <button
+                key={genre}
+                type="button"
+                onClick={() => toggleGenre(genre)}
+                className={cn(
+                  "rounded-full px-3 py-1.5 text-xs font-medium transition-all border active:scale-95",
+                  active
+                    ? "bg-white text-black border-white"
+                    : "bg-white/[.03] text-zinc-300 border-white/[.07] hover:bg-white/[.07] hover:text-white"
+                )}
+              >
+                {genre}
+              </button>
+            )
+          })}
+        </div>
+      </FilterSection>
+
+      {/* Modes */}
+      <FilterSection title="Modes">
+        <div className="space-y-2">
+          <ModeToggle
+            label="Online Only"
+            description="Show only games with online/co-op."
+            checked={Boolean(filters.online)}
+            onCheckedChange={(v) => updateFilter("online", v)}
+          />
+          <ModeToggle
+            label="NSFW Only"
+            description={filters.nsfwOnly ? "Showing only NSFW results." : "NSFW is hidden from results."}
+            checked={Boolean(filters.nsfwOnly)}
+            onCheckedChange={(v) => updateFilter("nsfwOnly", v)}
+          />
+        </div>
+      </FilterSection>
+
+      {/* Size range */}
+      <FilterSection title="Size Range (GB)">
+        <div className="grid grid-cols-2 gap-2">
+          <div className="space-y-1">
+            <label className="text-[10px] text-zinc-400 font-semibold uppercase tracking-wider">Min</label>
+            <Input
+              type="number"
+              min={0}
+              value={filters.sizeRange[0] === 0 ? "" : filters.sizeRange[0]}
+              onChange={(e) => {
+                const val = e.target.value === "" ? 0 : Math.max(0, parseInt(e.target.value) || 0)
+                updateFilter("sizeRange", [val, filters.sizeRange[1]])
+              }}
+              className="h-9 rounded-xl bg-white/[.03] border-white/[.07]"
+            />
           </div>
+          <div className="space-y-1">
+            <label className="text-[10px] text-zinc-400 font-semibold uppercase tracking-wider">Max</label>
+            <Input
+              type="number"
+              min={0}
+              value={filters.sizeRange[1] === 0 ? "" : filters.sizeRange[1]}
+              onChange={(e) => {
+                const val = e.target.value === "" ? 0 : Math.max(0, parseInt(e.target.value) || 0)
+                updateFilter("sizeRange", [filters.sizeRange[0], val])
+              }}
+              className="h-9 rounded-xl bg-white/[.03] border-white/[.07]"
+            />
+          </div>
+        </div>
+      </FilterSection>
+
+      {/* Developers */}
+      <FilterSection
+        title="Developers"
+        action={
+          filters.developers.length > 0 ? (
+            <button
+              type="button"
+              onClick={() => updateFilter("developers", [])}
+              className="text-xs text-zinc-400 hover:text-zinc-100 transition-colors"
+            >
+              Clear ({filters.developers.length})
+            </button>
+          ) : null
+        }
+      >
+        <div className="space-y-2">
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-zinc-400" />
+            <Input
+              value={developerQuery}
+              onChange={(e) => setDeveloperQuery(e.target.value)}
+              placeholder="Search developers"
+              className="h-9 rounded-xl bg-white/[.03] border-white/[.07] pl-8"
+            />
+          </div>
+          <ScrollArea className="h-44 rounded-xl border border-white/[.07] bg-white/[.02] p-1">
+            <div className="grid grid-cols-1 gap-0.5">
+              {filteredDevelopers.slice(0, 200).map((developer) => {
+                const active = filters.developers.includes(developer)
+                return (
+                  <button
+                    key={developer}
+                    type="button"
+                    onClick={() => toggleDeveloper(developer)}
+                    className={cn(
+                      "text-left px-2.5 py-1.5 rounded-lg text-xs transition-colors",
+                      active
+                        ? "bg-white text-black font-semibold"
+                        : "text-zinc-300 hover:bg-white/[.05]"
+                    )}
+                  >
+                    {developer}
+                  </button>
+                )
+              })}
+              {filteredDevelopers.length > 200 && (
+                <p className="px-2.5 py-1.5 text-[11px] text-zinc-500 italic">
+                  Showing first 200. Refine your search.
+                </p>
+              )}
+            </div>
+          </ScrollArea>
+        </div>
+      </FilterSection>
+    </div>
+  )
+
+  return (
+    <div className="relative">
+      {/* Header */}
+      <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
+        <div className="min-w-0">
+          <h1 className="text-2xl sm:text-3xl font-bold text-zinc-100 mb-1">Search</h1>
+          <p className="text-sm text-zinc-400">Find your next adventure with detailed filters.</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" size="sm" className="gap-1.5" onClick={() => navigate("/wishlist")}>
+            <Star className="h-3.5 w-3.5" /> Wishlist
+          </Button>
+          <Button variant="outline" size="sm" className="gap-1.5" onClick={() => navigate("/liked")}>
+            <Heart className="h-3.5 w-3.5" /> Liked
+          </Button>
           <Button
             variant="outline"
+            size="sm"
             onClick={refreshGames}
             disabled={refreshing}
-            className="flex items-center gap-2 bg-transparent w-full sm:w-auto justify-center sm:justify-start"
+            className="gap-1.5"
           >
-            <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
-            <span className="hidden xs:inline">Refresh</span>
+            <RefreshCw className={cn("h-3.5 w-3.5", refreshing && "animate-spin")} />
+            Refresh
           </Button>
         </div>
+      </div>
 
-        <div className="mb-5">
-          <Card className="border border-white/[.07] bg-zinc-900/50">
-            <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <CardTitle className="text-lg">Your Lists</CardTitle>
-                <p className="text-sm text-zinc-400">Jump to wishlist or liked games.</p>
+      {/* Two-column layout */}
+      <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-6">
+        {/* Desktop sidebar */}
+        <aside className="hidden lg:block">
+          <div className="sticky top-4 max-h-[calc(100vh-7rem)] overflow-hidden rounded-3xl border border-white/[.07] bg-zinc-950/60 backdrop-blur-md flex flex-col">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-white/[.07]">
+              <div className="flex items-center gap-2">
+                <SlidersHorizontal className="h-4 w-4 text-zinc-400" />
+                <h2 className="text-sm font-semibold tracking-tight">Filters</h2>
+                {appliedFilterCount > 0 && (
+                  <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">{appliedFilterCount}</Badge>
+                )}
               </div>
-              <div className="flex flex-wrap gap-2">
-                <Button variant="outline" className="gap-2" onClick={() => navigate("/wishlist")}>
-                  <Star className="h-4 w-4" />
-                  Wishlist
-                </Button>
-                <Button variant="outline" className="gap-2" onClick={() => navigate("/liked")}>
-                  <Heart className="h-4 w-4" />
-                  Liked
-                </Button>
-              </div>
-            </CardHeader>
-          </Card>
-        </div>
-
-        <div className="mb-5">
-          <Card className="border border-white/[.07] bg-zinc-900/50 backdrop-blur-sm">
-            <CardHeader className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-              <div className="space-y-1">
-                <CardTitle className="text-lg flex items-center gap-2">
-                  <SlidersHorizontal className="h-5 w-5" />
-                  Search & Filters
-                </CardTitle>
-                <p className="text-sm text-zinc-400">
-                  Quick search + sort is always visible. Open the filter panel for genres, developers, size, and online-only.
-                </p>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <Sheet open={isFiltersOpen} onOpenChange={setIsFiltersOpen}>
-                  <SheetTrigger asChild>
-                    <Button variant="outline" className="gap-2">
-                      <SlidersHorizontal className="h-4 w-4" />
-                      Filters
-                      {appliedFilterCount > 0 && (
-                        <Badge variant="secondary" className="ml-1">
-                          {appliedFilterCount}
-                        </Badge>
-                      )}
-                    </Button>
-                  </SheetTrigger>
-                  <SheetContent side="right" className="w-full sm:max-w-lg">
-                    <SheetHeader>
-                      <SheetTitle>Filters</SheetTitle>
-                      <SheetDescription>Refine results, then apply changes.</SheetDescription>
-                    </SheetHeader>
-
-                    <div className="flex-1 overflow-y-auto px-4 pb-4">
-                      <div className="space-y-5">
-                        <div className="space-y-2">
-                          <label className="text-sm font-medium">Online Only</label>
-                          <div className="flex items-center justify-between gap-3 rounded-xl border border-zinc-800 bg-zinc-900/50 px-4 py-3">
-                            <div className="space-y-0.5">
-                              <p className="text-sm font-semibold text-zinc-100">Show online games</p>
-                              <p className="text-xs text-zinc-400">Filters using the online/co-op badge.</p>
-                            </div>
-                            <Switch
-                              checked={Boolean(draftFilters.online)}
-                              onCheckedChange={(checked) => updateDraftFilter("online", Boolean(checked))}
-                            />
-                          </div>
-                        </div>
-
-                        <div className="space-y-2">
-                          <label className="text-sm font-medium">NSFW Mode</label>
-                          <div className="flex items-center justify-between gap-3 rounded-xl border border-zinc-800 bg-zinc-900/50 px-4 py-3">
-                            <div className="space-y-0.5">
-                              <p className="text-sm font-semibold text-zinc-100">NSFW Mode</p>
-                              <p className="text-xs text-zinc-400">
-                                {draftFilters.nsfwOnly
-                                  ? "Show only NSFW results"
-                                  : "Hide NSFW from search results"}
-                              </p>
-                            </div>
-                            <Switch
-                              checked={Boolean(draftFilters.nsfwOnly)}
-                              onCheckedChange={(checked) => updateDraftFilter("nsfwOnly", Boolean(checked))}
-                            />
-                          </div>
-                        </div>
-
-                        <div className="space-y-2">
-                          <label className="text-sm font-medium">Size Range</label>
-                          <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4 space-y-3">
-                            <p className="text-xs text-zinc-400">
-                              {draftFilters.sizeRange[0]}GB - {draftFilters.sizeRange[1]}GB
-                            </p>
-                            <Slider
-                              value={draftFilters.sizeRange}
-                              onValueChange={(value) => updateDraftFilter("sizeRange", value)}
-                              max={500}
-                              min={0}
-                              step={5}
-                              className="w-full"
-                            />
-                          </div>
-                        </div>
-
-                        <div className="space-y-2">
-                          <label className="text-sm font-medium">Genres</label>
-                          <ScrollArea className="h-56 rounded-xl border border-zinc-800 bg-zinc-900/50 p-2">
-                            <div className="grid grid-cols-1 gap-1">
-                              {filterOptions.allGenres.map((genre) => (
-                                <button
-                                  key={genre}
-                                  type="button"
-                                  className={`text-left px-3 py-2 rounded-lg text-sm transition-colors ${draftFilters.genres.includes(genre)
-                                    ? "bg-zinc-700 text-white"
-                                    : "hover:bg-zinc-800"
-                                    }`}
-                                  onClick={() => toggleDraftGenre(genre)}
-                                >
-                                  {genre}
-                                </button>
-                              ))}
-                            </div>
-                          </ScrollArea>
-                        </div>
-
-                        <div className="space-y-2">
-                          <label className="text-sm font-medium">Developers</label>
-                          <Input
-                            value={developerQuery}
-                            onChange={(e) => setDeveloperQuery(e.target.value)}
-                            placeholder="Search developers..."
-                          />
-                          <ScrollArea className="h-56 rounded-xl border border-zinc-800 bg-zinc-900/50 p-2">
-                            <div className="grid grid-cols-1 gap-1">
-                              {filteredDevelopers.slice(0, 200).map((developer) => (
-                                <button
-                                  key={developer}
-                                  type="button"
-                                  className={`text-left px-3 py-2 rounded-lg text-sm transition-colors ${draftFilters.developers.includes(developer)
-                                    ? "bg-zinc-700 text-white"
-                                    : "hover:bg-zinc-800"
-                                    }`}
-                                  onClick={() => toggleDraftDeveloper(developer)}
-                                >
-                                  {developer}
-                                </button>
-                              ))}
-                              {filteredDevelopers.length > 200 && (
-                                <p className="px-3 py-2 text-xs text-zinc-400">
-                                  Showing first 200 matches. Refine your search to narrow it down.
-                                </p>
-                              )}
-                            </div>
-                          </ScrollArea>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="mt-auto border-t border-border/60 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80 px-4 pt-4 pb-[calc(env(safe-area-inset-bottom)+16px)] flex flex-col sm:flex-row gap-2">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={clearFilters}
-                        disabled={filtering}
-                        className="w-full sm:w-auto sm:flex-1"
-                      >
-                        Reset
-                      </Button>
-                      <Button
-                        size="sm"
-                        onClick={async () => {
-                          await applyFilters()
-                          setIsFiltersOpen(false)
-                        }}
-                        disabled={!hasUnappliedChanges || filtering}
-                        className="w-full sm:w-auto sm:flex-1"
-                        variant={hasUnappliedChanges ? "default" : "secondary"}
-                      >
-                        {filtering ? "Applying..." : `Apply${hasUnappliedChanges ? " *" : ""}`}
-                      </Button>
-                    </div>
-                  </SheetContent>
-                </Sheet>
-
-                <Button onClick={applyFilters} disabled={!hasUnappliedChanges || filtering} variant={hasUnappliedChanges ? "default" : "secondary"}>
-                  {filtering ? "Applying..." : `Apply${hasUnappliedChanges ? " *" : ""}`}
-                </Button>
-
-                <Button variant="ghost" onClick={clearFilters} disabled={filtering}>
-                  <X className="h-4 w-4 mr-2" />
-                  Reset
-                </Button>
-              </div>
-            </CardHeader>
-
-            <CardContent className="space-y-3">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="text-sm font-medium">Search</label>
-                  <div className="relative">
-                    <Input
-                      value={draftFilters.searchTerm}
-                      onChange={(e) => {
-                        setIsSearching(true)
-                        updateDraftFilter("searchTerm", e.target.value)
-                      }}
-                      placeholder="Search games..."
-                    />
-                    {isSearching && (
-                      <div className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400">
-                        <RefreshCw className="h-4 w-4 animate-spin" />
-                      </div>
-                    )}
-                  </div>
-                </div>
-                <div className="space-y-1">
-                  <label className="text-sm font-medium">Sort By</label>
-                  <Select value={draftFilters.sortBy} onValueChange={(value) => updateDraftFilter("sortBy", value)}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="random">Random</SelectItem>
-                      <SelectItem value="added">Last Added</SelectItem>
-                      <SelectItem value="name">Name</SelectItem>
-                      <SelectItem value="date">Release Date</SelectItem>
-                      <SelectItem value="updated">Last Updated</SelectItem>
-                      <SelectItem value="size">Size</SelectItem>
-                      <SelectItem value="downloads-desc">Most Downloads</SelectItem>
-                      <SelectItem value="downloads-asc">Least Downloads</SelectItem>
-                      <SelectItem value="views-desc">Most Views</SelectItem>
-                      <SelectItem value="views-asc">Least Views</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-
               {appliedFilterCount > 0 && (
-                <div className="flex flex-wrap gap-2 pt-1">
-                  {appliedFilters.searchTerm.trim() && (
-                    <Badge
-                      variant="outline"
-                      className="gap-2 text-xs sm:text-sm rounded-full border-border/60 bg-muted/40 px-3 py-1 shadow-sm"
-                    >
-                      <span className="text-zinc-400">Search:</span>
-                      <span className="max-w-[240px] truncate">{appliedFilters.searchTerm.trim()}</span>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-5 w-5 p-0 rounded-full hover:bg-foreground/10"
-                        onMouseDown={(e) => e.preventDefault()}
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          removeAppliedSearch()
-                        }}
-                      >
-                        <X className="h-3 w-3" />
-                      </Button>
-                    </Badge>
-                  )}
-
-                  {appliedFilters.sortBy !== "random" && (
-                    <Badge
-                      variant="outline"
-                      className="gap-2 text-xs sm:text-sm rounded-full border-border/60 bg-muted/40 px-3 py-1 shadow-sm"
-                    >
-                      <span className="text-zinc-400">Sort:</span>
-                      <span className="truncate">{sortLabel}</span>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-5 w-5 p-0 rounded-full hover:bg-foreground/10"
-                        onMouseDown={(e) => e.preventDefault()}
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          removeAppliedSort()
-                        }}
-                      >
-                        <X className="h-3 w-3" />
-                      </Button>
-                    </Badge>
-                  )}
-
-                  {(appliedFilters.sizeRange[0] !== 0 || appliedFilters.sizeRange[1] !== 500) && (
-                    <Badge
-                      variant="outline"
-                      className="gap-2 text-xs sm:text-sm rounded-full border-border/60 bg-muted/40 px-3 py-1 shadow-sm"
-                    >
-                      <span className="text-zinc-400">Size:</span>
-                      <span className="truncate">
-                        {appliedFilters.sizeRange[0]}-{appliedFilters.sizeRange[1]}GB
-                      </span>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-5 w-5 p-0 rounded-full hover:bg-foreground/10"
-                        onMouseDown={(e) => e.preventDefault()}
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          removeAppliedSizeRange()
-                        }}
-                      >
-                        <X className="h-3 w-3" />
-                      </Button>
-                    </Badge>
-                  )}
-
-                  {appliedFilters.online && (
-                    <Badge
-                      variant="outline"
-                      className="gap-2 text-xs sm:text-sm rounded-full bg-gradient-to-r from-emerald-600/90 to-green-600/90 text-white border-emerald-500/40 px-3 py-1.5 shadow-lg shadow-emerald-500/30"
-                    >
-                      <Wifi className="h-3 w-3" />
-                      Online
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-5 w-5 p-0 rounded-full hover:bg-white/15"
-                        onMouseDown={(e) => e.preventDefault()}
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          removeAppliedOnline()
-                        }}
-                      >
-                        <X className="h-3 w-3" />
-                      </Button>
-                    </Badge>
-                  )}
-
-                  {appliedFilters.nsfwOnly && (
-                    <Badge
-                      variant="outline"
-                      className="gap-2 text-xs sm:text-sm rounded-full border-border/60 bg-red-500/10 text-red-600 dark:text-red-400 px-3 py-1 shadow-sm"
-                    >
-                      NSFW
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-5 w-5 p-0 rounded-full hover:bg-red-500/15"
-                        onMouseDown={(e) => e.preventDefault()}
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          removeAppliedNsfwOnly()
-                        }}
-                      >
-                        <X className="h-3 w-3" />
-                      </Button>
-                    </Badge>
-                  )}
-
-                  {appliedFilters.genres.filter((genre) => String(genre).toLowerCase() !== "nsfw").map((genre) => (
-                    <Badge
-                      key={genre}
-                      variant="outline"
-                      className="gap-2 text-xs sm:text-sm rounded-full border-border/60 bg-muted/40 px-3 py-1 shadow-sm"
-                    >
-                      <span className="truncate">{genre}</span>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-5 w-5 p-0 rounded-full hover:bg-foreground/10"
-                        onMouseDown={(e) => e.preventDefault()}
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          removeAppliedGenre(genre)
-                        }}
-                      >
-                        <X className="h-3 w-3" />
-                      </Button>
-                    </Badge>
-                  ))}
-
-                  {appliedFilters.developers.map((developer) => (
-                    <Badge
-                      key={developer}
-                      variant="outline"
-                      className="gap-2 text-xs sm:text-sm rounded-full border-border/60 bg-muted/40 px-3 py-1 shadow-sm"
-                    >
-                      <span className="max-w-[240px] truncate">{developer}</span>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-5 w-5 p-0 rounded-full hover:bg-foreground/10"
-                        onMouseDown={(e) => e.preventDefault()}
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          removeAppliedDeveloper(developer)
-                        }}
-                      >
-                        <X className="h-3 w-3" />
-                      </Button>
-                    </Badge>
-                  ))}
-                </div>
+                <button
+                  type="button"
+                  onClick={clearFilters}
+                  className="text-xs text-zinc-400 hover:text-zinc-100 transition-colors"
+                >
+                  Reset all
+                </button>
               )}
-            </CardContent>
-          </Card>
-        </div>
-
-        <div>
-          {!isOnline && games.length === 0 && !loading && (
-            <div className="mb-6">
-              <OfflineBanner
-                onRetry={() => {
-                  setGamesError(null)
-                  setLoading(true)
-                  loadGames()
-                }}
-              />
             </div>
-          )}
-
-          {!isOnline && (games.length > 0 || loading) && (
-            <div className="mb-6">
-              <OfflineBanner
-                variant="compact"
-                onRetry={() => {
-                  setGamesError(null)
-                  setLoading(true)
-                  loadGames()
-                }}
-              />
+            <div className="flex-1 overflow-y-auto px-5 py-4 uc-scrollbar">
+              <FilterPanel />
             </div>
-          )}
+          </div>
+        </aside>
 
-          {gamesError && isOnline && (
-            <div className="mb-6">
+        {/* Results column */}
+        <div className="min-w-0 space-y-4">
+          {/* Search + sort + mobile filter button */}
+          <div className="rounded-3xl border border-white/[.07] bg-zinc-950/60 backdrop-blur-md p-3 sm:p-4 space-y-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="relative flex-1 min-w-[240px]">
+                <Search className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-400" />
+                <Input
+                  value={searchInput}
+                  onChange={(e) => {
+                    setIsSearching(true)
+                    setSearchInput(e.target.value)
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && searchInput.trim()) {
+                      addSearchToHistory(searchInput.trim())
+                    }
+                  }}
+                  placeholder="Search games…"
+                  className="rounded-2xl bg-white/[.03] border-white/[.07] pl-10 h-11"
+                />
+                {isSearching && (
+                  <div className="pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2 text-zinc-400">
+                    <RefreshCw className="h-4 w-4 animate-spin" />
+                  </div>
+                )}
+              </div>
+              <Select value={filters.sortBy} onValueChange={(v) => updateFilter("sortBy", v)}>
+                <SelectTrigger className="rounded-2xl bg-white/[.03] border-white/[.07] h-11 w-full sm:w-48">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="random">Random</SelectItem>
+                  <SelectItem value="added">Last Added</SelectItem>
+                  <SelectItem value="name">Name</SelectItem>
+                  <SelectItem value="date">Release Date</SelectItem>
+                  <SelectItem value="updated">Last Updated</SelectItem>
+                  <SelectItem value="size">Size</SelectItem>
+                  <SelectItem value="downloads-desc">Most Downloads</SelectItem>
+                  <SelectItem value="downloads-asc">Least Downloads</SelectItem>
+                  <SelectItem value="views-desc">Most Views</SelectItem>
+                  <SelectItem value="views-asc">Least Views</SelectItem>
+                </SelectContent>
+              </Select>
+
+              <Sheet open={isFiltersOpen} onOpenChange={setIsFiltersOpen}>
+                <SheetTrigger asChild>
+                  <Button variant="outline" className="lg:hidden rounded-2xl h-11 gap-2">
+                    <SlidersHorizontal className="h-4 w-4" />
+                    Filters
+                    {appliedFilterCount > 0 && (
+                      <Badge variant="secondary" className="ml-1 h-5 px-1.5 text-[10px]">{appliedFilterCount}</Badge>
+                    )}
+                  </Button>
+                </SheetTrigger>
+                <SheetContent side="right" className="w-full sm:max-w-md flex flex-col h-full p-0">
+                  <SheetHeader className="px-5 py-4 border-b border-white/[.07]">
+                    <SheetTitle>Filters</SheetTitle>
+                    <SheetDescription>Changes apply instantly.</SheetDescription>
+                  </SheetHeader>
+                  <div className="flex-1 overflow-y-auto px-5 py-4 uc-scrollbar">
+                    <FilterPanel />
+                  </div>
+                  <div className="px-5 py-3 border-t border-white/[.07] flex gap-2">
+                    <Button variant="outline" onClick={clearFilters} className="flex-1 rounded-2xl h-11">
+                      Reset
+                    </Button>
+                    <Button onClick={() => setIsFiltersOpen(false)} className="flex-[2] rounded-2xl h-11">
+                      Done
+                    </Button>
+                  </div>
+                </SheetContent>
+              </Sheet>
+            </div>
+
+            {/* Applied filter chips */}
+            {appliedFilterCount > 0 && (
+              <div className="flex flex-wrap gap-1.5 pt-1">
+                {filters.searchTerm.trim() && (
+                  <FilterChip label={`Search: ${filters.searchTerm.trim()}`} onRemove={removeAppliedSearch} />
+                )}
+                {filters.sortBy !== "random" && (
+                  <FilterChip label={`Sort: ${sortLabel}`} onRemove={() => updateFilter("sortBy", "random")} />
+                )}
+                {(filters.sizeRange[0] !== 0 || filters.sizeRange[1] !== 500) && (
+                  <FilterChip
+                    label={`${filters.sizeRange[0]}–${filters.sizeRange[1]}GB`}
+                    onRemove={removeSizeRange}
+                  />
+                )}
+                {filters.online && (
+                  <FilterChip
+                    label="Online"
+                    icon={<Wifi className="h-3 w-3" />}
+                    tone="emerald"
+                    onRemove={() => updateFilter("online", false)}
+                  />
+                )}
+                {filters.nsfwOnly && (
+                  <FilterChip label="NSFW" tone="red" onRemove={() => updateFilter("nsfwOnly", false)} />
+                )}
+                {filters.genres.filter((g) => g.toLowerCase() !== "nsfw").map((genre) => (
+                  <FilterChip key={genre} label={genre} onRemove={() => toggleGenre(genre)} />
+                ))}
+                {filters.developers.map((developer) => (
+                  <FilterChip key={developer} label={developer} onRemove={() => toggleDeveloper(developer)} />
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Results */}
+          <div>
+            <CriticalLoadModal
+              open={Boolean(gamesError) && isOnline && criticalLoadOpen}
+              onOpenChange={setCriticalLoadOpen}
+              title="Critical Data Load Failure"
+              message={gamesError?.message || "Unable to load game data right now."}
+              errorCode={gamesError?.code}
+              onRetry={() => {
+                setGamesError(null)
+                setLoading(true)
+                loadGames()
+              }}
+              onContinue={() => setCriticalLoadOpen(false)}
+            />
+
+            {!isOnline && games.length === 0 && !loading && (
               <div className="mb-6">
-                <ErrorMessage
-                  title="Games Loading Issue"
-                  message={gamesError.message}
-                  errorCode={gamesError.code}
-                  retry={() => {
+                <OfflineBanner
+                  onRetry={() => {
                     setGamesError(null)
                     setLoading(true)
                     loadGames()
                   }}
                 />
               </div>
-            </div>
-          )}
+            )}
 
-          <APIErrorBoundary>
-            {loading ? (
-              <>
-                <div className="mb-6">
-                  <Skeleton className="h-7 w-48 mb-3 bg-muted/40" />
-                  <Skeleton className="h-4 w-32 bg-muted/30" />
+            {!isOnline && (games.length > 0 || loading) && (
+              <div className="mb-6">
+                <OfflineBanner
+                  variant="compact"
+                  onRetry={() => {
+                    setGamesError(null)
+                    setLoading(true)
+                    loadGames()
+                  }}
+                />
+              </div>
+            )}
+
+            <APIErrorBoundary>
+              {loading ? (
+                <div className="space-y-4">
+                  <Skeleton className="h-7 w-48 rounded-lg udl-skeleton-d1" />
+                  <GamesGridSkeleton count={Math.min(itemsPerPage, filteredGames.length || itemsPerPage)} />
                 </div>
-
-                <GamesGridSkeleton count={Math.min(itemsPerPage, filteredGames.length || itemsPerPage)} />
-              </>
-            ) : (
-              <>
-                <div className="mb-4 sm:mb-6">
-                  <h2 className="text-lg sm:text-xl font-semibold text-zinc-100 mb-2 flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2">
-                    Search Results ({filteredGames.length} games)
-                    {filteredGames.length > itemsPerPage && (
-                      <span className="text-xs sm:text-sm text-zinc-400 font-normal">
-                        • Showing {startItem}-{endItem} of {filteredGames.length}
+              ) : (
+                <>
+                  <div className="mb-4 flex items-baseline gap-3">
+                    <h2 className="text-lg sm:text-xl font-bold text-zinc-100">Results</h2>
+                    <span className="text-xs sm:text-sm font-medium text-zinc-400 bg-white/[.05] px-2.5 py-0.5 rounded-full border border-white/[.07]">
+                      {totalGames.toLocaleString()} {totalGames === 1 ? "game" : "games"}
+                    </span>
+                    {totalGames > itemsPerPage && (
+                      <span className="text-xs text-zinc-400 italic hidden sm:inline">
+                        {startItem}–{endItem}
                       </span>
                     )}
-                  </h2>
-                </div>
-
-                <div className="relative">
-                  {filtering && (
-                    <div className="absolute inset-0 bg-[#09090b]/80 backdrop-blur-sm z-10 flex items-center justify-center rounded-lg">
-                      <div className="flex items-center gap-3 bg-zinc-900 p-4 rounded-lg shadow-lg border border-white/[.07]">
-                        <LoadingAnimated className="h-6 w-6" />
-                        <span className="text-sm font-medium">Filtering games...</span>
-                      </div>
-                    </div>
-                  )}
-                  <div className="grid grid-cols-1 xs:grid-cols-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-4 lg:gap-6">
-                    {paginatedGames.map((game) => (
-                      <GameCard key={game.appid} game={game} stats={gameStats[game.appid]} />
-                    ))}
                   </div>
 
-                  <PaginationBar
-                    currentPage={currentPage}
-                    totalPages={totalPages}
-                    onPageChange={setCurrentPage}
-                    wrapperClassName="mt-6 sm:mt-8 overflow-x-auto"
-                  />
-                </div>
+                  <div className="relative">
+                    {filtering && (
+                      <div className="absolute inset-0 bg-zinc-900/40 backdrop-blur-md z-40 flex items-center justify-center rounded-3xl transition-all duration-300">
+                        <div className="flex flex-col items-center gap-4 bg-black/60 p-8 rounded-3xl border border-white/[.07] shadow-2xl">
+                          <LoadingAnimated className="h-12 w-12" />
+                          <span className="text-sm font-semibold tracking-wider uppercase text-white">Filtering…</span>
+                        </div>
+                      </div>
+                    )}
 
-                {filteredGames.length === 0 && games.length === 0 && (
-                  <div className="text-center py-12 sm:py-20">
-                    <div className="max-w-xl mx-auto">
-                      {gamesError ? (
-                        <ErrorMessage
-                          title="Games Loading Issue"
-                          message="We couldn't load any games. Please try again or contact support if the issue persists."
-                          errorCode={gamesError.code}
-                          retry={() => {
-                            setGamesError(null)
-                            setLoading(true)
-                            loadGames()
-                          }}
-                        />
-                      ) : (
-                        <div className="flex flex-col items-center gap-4">
-                          <div className="p-4 rounded-full bg-muted">
-                            <Filter className="h-8 w-8 text-zinc-400" />
+                    <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-4">
+                      {filteredGames.map((game) => (
+                        <GameCard key={game.appid} game={game} stats={gameStats[game.appid]} />
+                      ))}
+                    </div>
+
+                    {filteredGames.length === 0 && (
+                      <div className="text-center py-20 rounded-3xl bg-white/[.02] border border-dashed border-white/[.07]">
+                        <div className="max-w-md mx-auto flex flex-col items-center gap-6">
+                          <div className="h-20 w-20 rounded-full bg-white/[.04] flex items-center justify-center border border-white/[.07] shadow-inner">
+                            <Filter className="h-10 w-10 text-zinc-400" />
                           </div>
-                          <div>
-                            <h3 className="text-lg sm:text-xl font-semibold text-zinc-100 mb-2">No games found</h3>
-                            <p className="text-sm sm:text-base text-zinc-400">
-                              No games match your search criteria. Try adjusting your filters or search terms.
+                          <div className="space-y-2">
+                            <h3 className="text-2xl font-bold">No games found</h3>
+                            <p className="text-zinc-400">
+                              No games match your search criteria. Try adjusting your filters.
                             </p>
                           </div>
+
                           {didYouMeanResults.length > 0 && (
-                            <div className="w-full mt-2 text-left">
-                              <p className="text-xs uppercase tracking-wide text-zinc-400 mb-3">Did you mean</p>
-                              <div className="flex flex-col gap-1">
+                            <div className="w-full space-y-4 pt-4">
+                              <div className="flex items-center gap-2">
+                                <div className="h-px flex-1 bg-gradient-to-r from-transparent to-white/10" />
+                                <span className="text-xs font-bold uppercase tracking-widest text-zinc-400 px-2">Suggestions</span>
+                                <div className="h-px flex-1 bg-gradient-to-l from-transparent to-white/10" />
+                              </div>
+                              <div className="grid grid-cols-1 gap-2">
                                 {didYouMeanResults.map((game) => (
                                   <button
                                     key={game.appid}
                                     type="button"
-                                    className="group flex items-center gap-3 rounded-xl px-3 py-2 text-left transition-all duration-200 hover:bg-foreground/5"
                                     onClick={() => navigate(`/game/${game.appid}`)}
+                                    className="group flex items-center gap-4 p-3 rounded-2xl bg-white/[.03] border border-white/[.07] hover:bg-white/[.06] transition-all duration-300 text-left"
                                   >
-                                    <div className="h-12 w-12 flex-shrink-0 overflow-hidden rounded-lg bg-muted/40">
+                                    <div className="h-14 w-14 shrink-0 overflow-hidden rounded-xl border border-white/[.07] shadow-lg">
                                       {game.image ? (
                                         <img
                                           src={proxyImageUrl(game.image)}
                                           alt={game.name}
-                                          className="h-full w-full object-cover"
+                                          className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-110"
                                         />
                                       ) : (
-                                        <div className="h-full w-full bg-muted" />
+                                        <div className="h-full w-full bg-zinc-800" />
                                       )}
                                     </div>
-                                    <div className="min-w-0 flex-1">
-                                      <div className="text-sm font-semibold text-zinc-100 line-clamp-1">{game.name}</div>
+                                    <div className="flex-1 min-w-0">
+                                      <h4 className="font-bold text-zinc-100 truncate group-hover:text-white transition-colors">{game.name}</h4>
                                       {game.developer && (
-                                        <div className="text-xs text-zinc-400 line-clamp-1">by {game.developer}</div>
+                                        <p className="text-xs text-zinc-400 truncate">{game.developer}</p>
                                       )}
                                     </div>
-                                    <ChevronRight className="h-4 w-4 text-zinc-400 transition-transform duration-200 group-hover:translate-x-1" />
+                                    <ChevronRight className="h-5 w-5 text-zinc-400 group-hover:text-white transition-all duration-300 group-hover:translate-x-1" />
                                   </button>
                                 ))}
                               </div>
                             </div>
                           )}
                         </div>
-                      )}
-                    </div>
-                  </div>
-                )}
-
-                {filteredGames.length === 0 && games.length > 0 && (
-                  <div className="text-center py-12 sm:py-20">
-                    <div className="max-w-xl mx-auto">
-                      <div className="flex flex-col items-center gap-4">
-                        <div className="p-4 rounded-full bg-muted">
-                          <Filter className="h-8 w-8 text-zinc-400" />
-                        </div>
-                        <div>
-                          <h3 className="text-lg sm:text-xl font-semibold text-zinc-100 mb-2">No games found</h3>
-                          <p className="text-sm sm:text-base text-zinc-400">
-                            No games match your search criteria. Try adjusting your filters or search terms.
-                          </p>
-                        </div>
                       </div>
-                    </div>
+                    )}
+
+                    {totalGames > itemsPerPage && (
+                      <PaginationBar
+                        currentPage={currentPage}
+                        totalPages={totalPages}
+                        onPageChange={setCurrentPage}
+                        wrapperClassName="mt-10"
+                      />
+                    )}
                   </div>
-                )}
-              </>
-            )}
-          </APIErrorBoundary>
+                </>
+              )}
+            </APIErrorBoundary>
+          </div>
         </div>
       </div>
     </div>
+  )
+}
+
+function FilterSection({
+  title,
+  action,
+  children,
+}: {
+  title: string
+  action?: React.ReactNode
+  children: React.ReactNode
+}) {
+  return (
+    <div className="space-y-2.5">
+      <div className="flex items-center justify-between">
+        <label className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-400">{title}</label>
+        {action}
+      </div>
+      {children}
+    </div>
+  )
+}
+
+function ModeToggle({
+  label,
+  description,
+  checked,
+  onCheckedChange,
+}: {
+  label: string
+  description: string
+  checked: boolean
+  onCheckedChange: (v: boolean) => void
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-xl border border-white/[.07] bg-white/[.02] hover:bg-white/[.04] transition-colors">
+      <div className="min-w-0 space-y-0.5">
+        <p className="text-xs font-semibold text-zinc-100">{label}</p>
+        <p className="text-[10px] text-zinc-400 leading-snug">{description}</p>
+      </div>
+      <Switch checked={checked} onCheckedChange={onCheckedChange} />
+    </div>
+  )
+}
+
+function FilterChip({
+  label,
+  icon,
+  tone,
+  onRemove,
+}: {
+  label: string
+  icon?: React.ReactNode
+  tone?: "emerald" | "red"
+  onRemove: () => void
+}) {
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium border backdrop-blur-md",
+        tone === "emerald" && "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
+        tone === "red" && "bg-red-500/10 text-red-400 border-red-500/20",
+        !tone && "bg-white/[.04] text-zinc-200 border-white/[.07]"
+      )}
+    >
+      {icon}
+      <span className="max-w-[180px] truncate">{label}</span>
+      <button
+        type="button"
+        onClick={onRemove}
+        className={cn(
+          "ml-0.5 inline-flex items-center justify-center h-4 w-4 rounded-full transition-colors",
+          tone === "emerald" && "hover:bg-emerald-500/20",
+          tone === "red" && "hover:bg-red-500/20",
+          !tone && "hover:bg-white/[.08]"
+        )}
+        aria-label={`Remove ${label}`}
+      >
+        <X className="h-3 w-3" />
+      </button>
+    </span>
   )
 }

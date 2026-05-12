@@ -15,8 +15,10 @@ import {
   type DownloadHostEntry,
   type PreferredDownloadHost,
 } from "@/lib/downloads"
+import { apiFetch } from "@/lib/api"
 import { addDownloadedGameToHistory, hasCookieConsent } from "@/lib/user-history"
 import { downloadLogger } from "@/lib/logger"
+import { reportPlayEvent } from "@/lib/cloud-collections"
 
 export type DownloadStatus =
   | "queued"
@@ -630,8 +632,10 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
 
     void (async () => {
       try {
-        const listInstalling = window.ucDownloads.listInstallingGlobal || window.ucDownloads.listInstalling
-        const getInstalled = window.ucDownloads.getInstalledGlobal || window.ucDownloads.getInstalled
+        const uc = window.ucDownloads
+        if (!uc) return
+        const listInstalling = uc.listInstallingGlobal || uc.listInstalling
+        const getInstalled = uc.getInstalledGlobal || uc.getInstalled
         if (!listInstalling) return
 
         const manifests = await listInstalling()
@@ -1014,6 +1018,11 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         if (typeof window !== "undefined") {
           window.dispatchEvent(new CustomEvent("uc_game_installed", { detail: { appid: update.appid } }))
         }
+        // Record an install event in the account's cloud history (no-op when
+        // unauthenticated — failures are swallowed by the helper).
+        if (update.appid) {
+          void reportPlayEvent(update.appid as string, "install")
+        }
       }
 
       // Only reconcile installed state AFTER extraction/install is fully done.
@@ -1098,13 +1107,27 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
     preparingRef.current.add(game.appid)
 
     try {
+      let metadataForInstall: Game = game
+      try {
+        const detailResponse = await apiFetch(`/api/games/${encodeURIComponent(game.appid)}`)
+        if (detailResponse.ok) {
+          const detailed = await detailResponse.json()
+          metadataForInstall = {
+            ...game,
+            ...(detailed && typeof detailed === "object" ? detailed : {}),
+          }
+        }
+      } catch {
+        // Keep using the list payload when detail fetch fails.
+      }
+
       // save initial metadata to installing folder so it's available offline even before completion
       try {
         if (window.ucDownloads?.saveInstalledMetadata) {
           // pass the full game object as metadata, with downloadedVersion from config
           const metadataWithVersion = {
-            ...game,
-            downloadedVersion: game.version || undefined,
+            ...metadataForInstall,
+            downloadedVersion: metadataForInstall.version || game.version || undefined,
           }
           await window.ucDownloads.saveInstalledMetadata(game.appid, metadataWithVersion)
         }

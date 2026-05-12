@@ -44,6 +44,11 @@ export function ViewHistoryPage() {
           res = await apiFetch("/api/view-history")
         }
       }
+      if (res.status === 401) {
+        // Not logged in — the login prompt is the empty state. Don't double up with an error banner.
+        setItems([])
+        return
+      }
       if (!res.ok) {
         setError("Unable to load view history.")
         setItems([])
@@ -103,21 +108,21 @@ export function ViewHistoryPage() {
               <p className="text-sm text-zinc-400">Sign in to sync view history across devices.</p>
               <Button className="gap-2" onClick={handleLogin} disabled={loggingIn}>
                 <LogIn className="h-4 w-4" />
-                {loggingIn ? "Connecting..." : "Login with Discord"}
+                {loggingIn ? "Connecting..." : "Sign In"}
               </Button>
             </CardContent>
           </Card>
         )}
 
-        {error && (
+        {error && accountUser && (
           <div className="mb-4 rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
             {error}
           </div>
         )}
 
-        {loading ? (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {Array.from({ length: 6 }).map((_, idx) => (
+        {!accountUser && !accountLoading ? null : loading || accountLoading ? (
+          <div className="grid gap-4 grid-cols-2 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+            {Array.from({ length: 10 }).map((_, idx) => (
               <GameCardSkeleton key={idx} />
             ))}
           </div>
@@ -128,14 +133,14 @@ export function ViewHistoryPage() {
             </CardContent>
           </Card>
         ) : (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid gap-4 grid-cols-2 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
             {items.map((game) => (
               <div key={game.appid} className="space-y-2">
-                <div className="text-xs text-zinc-400 flex items-center gap-2">
-                  <Clock className="h-3 w-3" />
-                  Viewed {new Date(game.lastViewedAt).toLocaleDateString()}
-                </div>
                 <GameCard game={game} />
+                <div className="text-[11px] text-zinc-500 flex items-center gap-1.5 px-1">
+                  <Clock className="h-3 w-3" />
+                  {new Date(game.lastViewedAt).toLocaleDateString()}
+                </div>
               </div>
             ))}
           </div>

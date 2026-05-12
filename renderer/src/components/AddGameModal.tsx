@@ -238,7 +238,7 @@ export function AddGameModal({ open, onOpenChange }: AddGameModalProps) {
 
   return (
     <Dialog open={open && !archiveInstallOpen} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg rounded-2xl border-white/[.07] bg-zinc-900/95 shadow-2xl">
+      <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Plus className="h-5 w-5 text-white" />
