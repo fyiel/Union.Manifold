@@ -91,14 +91,25 @@ async function promptYesNo(question, defaultValue) {
 
 async function promptMultiline(question) {
   printStep(question)
-  console.log('Press Enter on an empty line to finish.')
+  console.log('Press Enter twice to finish. Single blank lines are kept in the description.')
   const lines = []
+  let blankLineCount = 0
   for (;;) {
     const line = await ask('> ')
-    if (!line && lines.length > 0) break
-    if (!line && lines.length === 0) return ''
+    if (!line) {
+      blankLineCount += 1
+      if (blankLineCount >= 2) break
+      lines.push('')
+      continue
+    }
+    blankLineCount = 0
     lines.push(line)
   }
+
+  while (lines.length > 0 && lines[lines.length - 1] === '') {
+    lines.pop()
+  }
+
   return lines.join('\n').trim()
 }
 
