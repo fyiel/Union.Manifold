@@ -420,7 +420,7 @@ export function InGameOverlay() {
     const toastVClass = toastVertical === 'top' ? 'top-5' : 'bottom-5'
     return (
       <div className={`pointer-events-none fixed ${toastVClass} z-[9999] w-72`} style={toastStyle}>
-        <div className={`glass rounded-2xl border border-white/[.07] bg-zinc-950/90 p-3 shadow-[0_20px_64px_rgba(0,0,0,0.75)] transition-all duration-200 ${animated ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'}`}>
+        <div className={`glass rounded-2xl p-3 shadow-[0_16px_48px_rgba(0,0,0,0.55)] transition-all duration-200 ${animated ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'}`}>
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-white">
               {gameInfo?.image
@@ -428,7 +428,7 @@ export function InGameOverlay() {
                 : <LogoStaticDark className="h-[15px] w-[15px]" />}
             </div>
             <div className="min-w-0 flex-1">
-              <div className="text-[9px] font-bold uppercase tracking-[0.2em] text-zinc-500">Now Playing</div>
+              <div className="section-label !text-zinc-400">Now Playing</div>
               <div className="truncate text-sm font-semibold text-white leading-tight">
                 {gameInfo?.gameName || currentAppid || 'Game session'}
               </div>
@@ -464,7 +464,7 @@ export function InGameOverlay() {
         {/* Screenshot */}
         <button
           onClick={handleScreenshot}
-          className={`glass flex h-9 w-9 items-center justify-center rounded-xl border border-white/[.08] bg-zinc-950/90 shadow-[0_8px_24px_rgba(0,0,0,0.5)] transition hover:bg-white/[.06] hover:text-white active:scale-95 ${screenshotFlash ? 'text-emerald-300 bg-emerald-500/10' : 'text-zinc-400'}`}
+          className={`glass flex h-9 w-9 items-center justify-center rounded-xl shadow-[0_8px_24px_rgba(0,0,0,0.45)] transition hover:bg-white/[.06] hover:text-white active:scale-95 ${screenshotFlash ? 'text-emerald-300' : 'text-zinc-400'}`}
           title="Screenshot"
         >
           <Camera size={14} />
@@ -473,7 +473,7 @@ export function InGameOverlay() {
         {/* Notifications */}
         <button
           onClick={() => setShowNotifications(v => !v)}
-          className={`glass relative flex h-9 w-9 items-center justify-center rounded-xl border border-white/[.08] bg-zinc-950/90 shadow-[0_8px_24px_rgba(0,0,0,0.5)] transition hover:bg-white/[.06] hover:text-white active:scale-95 ${showNotifications ? 'text-sky-300 bg-sky-500/10' : 'text-zinc-400'}`}
+          className={`glass relative flex h-9 w-9 items-center justify-center rounded-xl shadow-[0_8px_24px_rgba(0,0,0,0.45)] transition hover:bg-white/[.06] hover:text-white active:scale-95 ${showNotifications ? 'text-sky-300' : 'text-zinc-400'}`}
           title="Notifications"
         >
           <Bell size={14} />
@@ -487,7 +487,7 @@ export function InGameOverlay() {
         {/* Controller */}
         <button
           onClick={() => setShowController(v => !v)}
-          className={`glass flex h-9 w-9 items-center justify-center rounded-xl border border-white/[.08] bg-zinc-950/90 shadow-[0_8px_24px_rgba(0,0,0,0.5)] transition hover:bg-white/[.06] hover:text-white active:scale-95 ${showController ? 'text-violet-300 bg-violet-500/10' : 'text-zinc-400'}`}
+          className={`glass flex h-9 w-9 items-center justify-center rounded-xl shadow-[0_8px_24px_rgba(0,0,0,0.45)] transition hover:bg-white/[.06] hover:text-white active:scale-95 ${showController ? 'text-violet-300' : 'text-zinc-400'}`}
           title="Controller"
         >
           <Gamepad2 size={14} />
@@ -497,7 +497,7 @@ export function InGameOverlay() {
       {/* ── Notifications dropdown ──────────────────────────────── */}
       {showNotifications && (
         <div
-          className={`pointer-events-auto absolute top-[60px] ${actionsPos} w-72 overflow-hidden rounded-2xl border border-white/[.07] bg-zinc-950/95 shadow-[0_24px_64px_rgba(0,0,0,0.75)] backdrop-blur-xl transition-all duration-200 ${animated ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-2'}`}
+          className={`glass pointer-events-auto absolute top-[60px] ${actionsPos} w-72 overflow-hidden rounded-2xl shadow-[0_16px_48px_rgba(0,0,0,0.55)] transition-all duration-200 ${animated ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-2'}`}
           onClick={e => e.stopPropagation()}
         >
           <div className="flex items-center justify-between border-b border-white/[.06] px-3 py-2.5">
@@ -537,7 +537,7 @@ export function InGameOverlay() {
         className={`pointer-events-auto absolute top-4 ${panelPos} w-80 max-h-[calc(100vh-32px)] transition-all duration-200 ${panelSlide}`}
         onClick={e => e.stopPropagation()}
       >
-        <div className="flex h-full flex-col overflow-hidden rounded-2xl border border-white/[.07] bg-zinc-950/95 shadow-[0_32px_80px_rgba(0,0,0,0.8)] backdrop-blur-xl">
+        <div className="glass flex h-full flex-col overflow-hidden rounded-2xl shadow-[0_24px_64px_rgba(0,0,0,0.6)]">
 
           {/* Header */}
           <div className="flex items-center gap-2.5 px-4 py-3 border-b border-white/[.06]">
@@ -576,7 +576,7 @@ export function InGameOverlay() {
                     <div className="absolute inset-0 bg-gradient-to-t from-zinc-950/80 to-transparent" />
                     <div className="absolute bottom-2 left-3 flex items-center gap-1.5">
                       <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-                      <span className="text-[9px] font-bold uppercase tracking-[0.18em] text-emerald-300">Live</span>
+                      <span className="section-label !text-emerald-300">Live</span>
                     </div>
                   </div>
                 )}
@@ -585,7 +585,7 @@ export function InGameOverlay() {
                     {!gameInfo?.image && (
                       <div className="mb-1 flex items-center gap-1.5">
                         <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-                        <span className="text-[9px] font-bold uppercase tracking-[0.18em] text-emerald-400">Live</span>
+                        <span className="section-label !text-emerald-400">Live</span>
                       </div>
                     )}
                     <div className="truncate text-sm font-semibold text-white">
@@ -609,7 +609,7 @@ export function InGameOverlay() {
               <section className="px-4 py-3 border-b border-white/[.05]">
                 <div className="mb-2.5 flex items-center gap-1.5">
                   <Download size={11} className="text-sky-400" />
-                  <span className="text-[9px] font-bold uppercase tracking-[0.18em] text-sky-400">Downloads</span>
+                  <span className="section-label !text-sky-400">Downloads</span>
                   <span className="ml-auto text-[10px] text-zinc-600">{activeDl.length}</span>
                 </div>
                 <div className="space-y-2">
@@ -713,7 +713,7 @@ export function InGameOverlay() {
               <section className="px-4 py-3">
                 <div className="mb-2 flex items-center gap-1.5">
                   <Gamepad2 size={11} className="text-violet-400" />
-                  <span className="text-[9px] font-bold uppercase tracking-[0.18em] text-violet-400">Recent games</span>
+                  <span className="section-label !text-violet-400">Recent games</span>
                 </div>
                 <div className="space-y-0.5">
                   {installedGames.map(game => (

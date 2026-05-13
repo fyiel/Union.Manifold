@@ -44,12 +44,9 @@ target_link_libraries(uc-overlay-x64 PRIVATE
   kernel32
 )
 
-# Output to build/ in the project root so electron-builder can find it
-set_target_properties(uc-overlay-x64 PROPERTIES
-  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/../build"
-  LIBRARY_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/../build"
-  ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/../build"
-)
+# DLL output stays inside overlay-dll/build/<Config>/ (CMake default for
+# multi-config generators). package.json extraResources + the GitHub Actions
+# Verify step + electron/main.cjs getDllPath all read from this path.
 
 # MSVC-specific flags
 if(MSVC)

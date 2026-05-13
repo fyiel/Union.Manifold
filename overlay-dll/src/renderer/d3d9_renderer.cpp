@@ -115,6 +115,22 @@ void render(IDirect3DDevice9* dev) {
     }
 }
 
+// D3DPOOL_DEFAULT resources die on device Reset. Drop them before the
+// Reset call so the runtime doesn't fail the reset.
+void onResetPre() {
+    if (g_tex) { g_tex->Release(); g_tex = nullptr; }
+    if (g_savedState) { g_savedState->Release(); g_savedState = nullptr; }
+    g_lastSeq = 0;
+}
+
+// After a successful Reset the device is live again with new params.
+// Recreate the upload texture against the (possibly resized) frame.
+void onResetPost(IDirect3DDevice9* dev) {
+    const auto* hdr = uc_shmem::header();
+    if (!hdr || hdr->magic != UC_FRAME_MAGIC) return;
+    init(dev, hdr->width, hdr->height);
+}
+
 void cleanup() {
     if (g_tex) { g_tex->Release(); g_tex = nullptr; }
     if (g_savedState) { g_savedState->Release(); g_savedState = nullptr; }

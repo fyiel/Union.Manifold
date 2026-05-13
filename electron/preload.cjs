@@ -163,9 +163,10 @@ contextBridge.exposeInMainWorld('ucLogs', {
   shareLogs: (payload) => ipcRenderer.invoke('uc:logs-share', payload)
 })
 
-contextBridge.exposeInMainWorld('ucSystem', {
-  openExternal: (target) => ipcRenderer.invoke('uc:system-open-external', target),
-})
+// ucSystem is exposed once at the bottom of this file (merged: openExternal
+// + volume/screenshot/notifications). Calling exposeInMainWorld twice with
+// the same key throws, which previously silently dropped every method in
+// the second registration.
 
 contextBridge.exposeInMainWorld('ucRpc', {
   setActivity: (payload) => ipcRenderer.invoke('uc:rpc-set-activity', payload),
@@ -301,8 +302,9 @@ contextBridge.exposeInMainWorld('ucController', {
   setOverlaySettings: (settings) => ipcRenderer.invoke('uc:controller-set-overlay-settings', settings),
 })
 
-// System Notifications API
+// System API (volume, screenshot, notifications, openExternal)
 contextBridge.exposeInMainWorld('ucSystem', {
+  openExternal: (target) => ipcRenderer.invoke('uc:system-open-external', target),
   // Volume control
   getVolume: () => ipcRenderer.invoke('uc:system-get-volume'),
   setVolume: (level) => ipcRenderer.invoke('uc:system-set-volume', level),
