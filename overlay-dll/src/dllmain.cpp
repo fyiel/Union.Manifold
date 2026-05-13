@@ -10,8 +10,12 @@
  *   5. Subclasses the game window's WndProc for input isolation.
  */
 
+#ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
 #define NOMINMAX
+#endif
 #include <Windows.h>
 #include <cstdio>
 #include <thread>
@@ -20,7 +24,7 @@
 #include "overlay_protocol.h"
 
 // Forward declarations from other translation units
-namespace uc_ipc    { bool init(uint32_t pid); void shutdown(); void pumpMessages(); }
+namespace uc_ipc    { bool init(uint32_t pid); void shutdown(); void pumpMessages(); void sendConnected(const char* api); }
 namespace uc_shmem  { bool open(uint32_t pid); void close(); const UCFrameHeader* header(); const uint8_t* pixels(); }
 namespace uc_d3d9   { bool tryHook(); void unhook(); }
 namespace uc_d3d11  { bool tryHook(); void unhook(); }

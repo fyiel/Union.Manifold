@@ -11,8 +11,12 @@
  * re-init. Pattern mirrored from hiitiger/goverlay (d3d9hook.cc).
  */
 
+#ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
 #define NOMINMAX
+#endif
 #include <Windows.h>
 #include <d3d9.h>
 #include <cstdio>

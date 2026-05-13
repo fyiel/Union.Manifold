@@ -4,8 +4,12 @@
  * and maps it read-only. The graphics hooks read pixels from here.
  */
 
+#ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
 #define NOMINMAX
+#endif
 #include <Windows.h>
 #include <cstdio>
 
