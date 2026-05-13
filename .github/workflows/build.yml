@@ -70,8 +70,8 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          if (!(Test-Path "build/Release/uc-overlay-x64.dll")) {
-            throw "Expected overlay DLL at build/Release/uc-overlay-x64.dll"
+          if (!(Test-Path "overlay-dll/build/Release/uc-overlay-x64.dll")) {
+            throw "Expected overlay DLL at overlay-dll/build/Release/uc-overlay-x64.dll"
           }
 
       - name: Build application

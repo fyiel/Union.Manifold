@@ -22,7 +22,7 @@ import { LoadingAnimated } from "@/components/brand/brand-assets"
 import { CriticalLoadModal } from "@/components/CriticalLoadModal"
 import { OfflineBanner } from "@/components/OfflineBanner"
 import { apiFetch } from "@/lib/api"
-import { useOnlineStatus } from "@/hooks/use-online-status"
+import { useConnectivityStatus } from "@/hooks/use-online-status"
 
 interface Game {
   appid: string
@@ -66,7 +66,8 @@ export function SearchPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const [isFiltersOpen, setIsFiltersOpen] = useState(false)
   const [developerQuery, setDeveloperQuery] = useState("")
-  const isOnline = useOnlineStatus()
+  const { isOnline, browserOnline, serviceReachable } = useConnectivityStatus()
+  const hasCriticalServiceInterruption = browserOnline && !serviceReachable
 
   const normalizeSort = useCallback((value: string | null) => {
     const allowed = new Set([
@@ -238,8 +239,8 @@ export function SearchPage() {
   }, [loading, games, filters.searchTerm])
 
   useEffect(() => {
-    setCriticalLoadOpen(Boolean(gamesError) && isOnline)
-  }, [gamesError, isOnline])
+    setCriticalLoadOpen(Boolean(gamesError) && hasCriticalServiceInterruption)
+  }, [gamesError, hasCriticalServiceInterruption])
 
   const fetchMeta = async () => {
     try {
@@ -848,7 +849,7 @@ export function SearchPage() {
           {/* Results */}
           <div>
             <CriticalLoadModal
-              open={Boolean(gamesError) && isOnline && criticalLoadOpen}
+              open={Boolean(gamesError) && hasCriticalServiceInterruption && criticalLoadOpen}
               onOpenChange={setCriticalLoadOpen}
               title="Critical Data Load Failure"
               message={gamesError?.message || "Unable to load game data right now."}

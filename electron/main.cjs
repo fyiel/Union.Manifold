@@ -1287,7 +1287,7 @@ const OVERLAY_FRAME_HEIGHT = 1080
 
 function getDllPath() {
   if (isDev) {
-    return path.join(__dirname, '..', 'build', 'Release', 'uc-overlay-x64.dll')
+    return path.join(__dirname, '..', 'overlay-dll', 'build', 'Release', 'uc-overlay-x64.dll')
   }
   return path.join(process.resourcesPath, 'uc-overlay-x64.dll')
 }
@@ -1330,18 +1330,21 @@ function injectOverlayIntoGame(pid, appid) {
       }
     })
 
-    // When the offscreen window paints, write pixels to shared memory
-    offscreenWin.webContents.on('paint', (event, dirty, image) => {
+    // When the offscreen window paints, write pixels to shared memory.
+    // Rate-limited to 30 fps to keep event-loop overhead low (~250 MB/s vs 500).
+    // image.toBitmap() already returns a Buffer – no extra Buffer.from() copy needed.
+    let lastPaintMs = 0
+    offscreenWin.webContents.on('paint', (_event, _dirty, image) => {
+      const now = Date.now()
+      if (now - lastPaintMs < 33) return
+      lastPaintMs = now
       const injection = overlayInjections.get(pid)
       if (!injection) return
       const bitmap = image.toBitmap()
-      const size = image.getSize()
-      // Only write if dimensions match (or close enough)
-      if (size.width === OVERLAY_FRAME_WIDTH && size.height === OVERLAY_FRAME_HEIGHT) {
-        try {
-          nativeOverlay.writeSharedFrame(injection.shmemHandle, Buffer.from(bitmap), injection.visible)
-        } catch {}
-      }
+      if (bitmap.length !== OVERLAY_FRAME_WIDTH * OVERLAY_FRAME_HEIGHT * 4) return
+      try {
+        nativeOverlay.writeSharedFrame(injection.shmemHandle, bitmap, injection.visible)
+      } catch {}
     })
 
     offscreenWin.webContents.setFrameRate(60)
@@ -1412,6 +1415,10 @@ function handleDllMessage(pid, msg) {
       ucLog(`Overlay DLL connected from PID ${pid}`)
       break
 
+    case 'disconnected':
+      ucLog(`Overlay DLL disconnected from PID ${pid}`)
+      break
+
     case 'key': {
       // Forward key event to offscreen renderer
       const keyEvent = {
@@ -1462,12 +1469,9 @@ function toggleInjectedOverlay(pid) {
     }
   }
 
-  // Send visibility command to DLL via pipe
+  // Send visibility command to DLL via pipe (JSON protocol, matches overlay_protocol.h)
   if (nativeOverlay && injection.pipeHandle) {
-    const cmd = Buffer.alloc(4)
-    cmd[0] = 0x10 // show/hide command
-    cmd.writeUInt16LE(1, 1) // payload length
-    cmd[3] = injection.visible ? 1 : 0
+    const cmd = Buffer.from(JSON.stringify({ cmd: injection.visible ? 'show' : 'hide' }) + '\n', 'utf8')
     try {
       nativeOverlay.sendPipeMessage(injection.pipeHandle, cmd)
     } catch {}
@@ -6693,13 +6697,10 @@ $candidates | Sort-Object CreationDate | ForEach-Object { $_.ProcessId }`
   // Auto-show overlay when game launches
   if (appid) checkAndShowOverlayForGame(appid)
 
-  // Native DLL injection is disabled - the transparent window overlay works without it.
-  // The offscreen-rendering + shared-memory pipeline (~480 MB/s memcpy at 60fps) blocks
-  // the main process event loop, causing Electron to stop responding.
-  // TODO: move frame writing to a worker thread before re-enabling.
-  // if (nativeOverlay && proc.pid) {
-  //   setTimeout(() => injectOverlayIntoGame(proc.pid, appid), 2000)
-  // }
+  // Inject overlay DLL into the game process so it works in exclusive fullscreen.
+  if (nativeOverlay && proc.pid) {
+    setTimeout(() => injectOverlayIntoGame(proc.pid, appid), 2000)
+  }
 
   proc.on('exit', () => {
     handleTrackedExit(proc.pid)

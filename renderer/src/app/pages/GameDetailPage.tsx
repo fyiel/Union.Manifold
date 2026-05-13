@@ -15,7 +15,7 @@ import { formatNumber, hasOnlineMode, pickGameExecutable, proxyImageUrl, cn, tim
 import type { Game } from "@/lib/types"
 import { useGamesData } from "@/hooks/use-games"
 import { addViewedGameToHistory, hasCookieConsent } from "@/lib/user-history"
-import { useOnlineStatus } from "@/hooks/use-online-status"
+import { useConnectivityStatus } from "@/hooks/use-online-status"
 import { OfflineBanner } from "@/components/OfflineBanner"
 import { CriticalLoadModal } from "@/components/CriticalLoadModal"
 import {
@@ -90,7 +90,7 @@ function getHighQualityScreenshotUrl(url: string): string {
 export function GameDetailPage() {
   const isWindows = typeof navigator !== 'undefined' && /windows/i.test(navigator.userAgent)
   const isLinux = typeof navigator !== 'undefined' && /linux/i.test(navigator.userAgent)
-  const isOnline = useOnlineStatus()
+  const { isOnline, browserOnline, serviceReachable } = useConnectivityStatus()
   const navigate = useNavigate()
   const params = useParams()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -109,6 +109,7 @@ export function GameDetailPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [criticalLoadOpen, setCriticalLoadOpen] = useState(false)
+  const hasCriticalServiceInterruption = browserOnline && !serviceReachable
   const [reloadNonce, setReloadNonce] = useState(0)
   const [downloadCount, setDownloadCount] = useState(0)
   const [viewCount, setViewCount] = useState(0)
@@ -137,8 +138,8 @@ export function GameDetailPage() {
   const [hostSelectorOpen, setHostSelectorOpen] = useState(false)
 
   useEffect(() => {
-    setCriticalLoadOpen(Boolean(error) && isOnline)
-  }, [error, isOnline])
+    setCriticalLoadOpen(Boolean(error) && hasCriticalServiceInterruption)
+  }, [error, hasCriticalServiceInterruption])
   const [selectedHost, setSelectedHost] = useState<PreferredDownloadHost>("pixeldrain")
   const [defaultHost, setDefaultHost] = useState<PreferredDownloadHost>("pixeldrain")
   const [downloadToken, setDownloadToken] = useState<string | null>(null)
@@ -808,7 +809,7 @@ export function GameDetailPage() {
     return (
       <div className="space-y-5">
         <CriticalLoadModal
-          open={Boolean(error) && isOnline && criticalLoadOpen}
+          open={Boolean(error) && hasCriticalServiceInterruption && criticalLoadOpen}
           onOpenChange={setCriticalLoadOpen}
           title="Critical Data Load Failure"
           message={error || "Unable to load this game."}

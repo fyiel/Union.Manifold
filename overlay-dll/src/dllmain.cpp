@@ -108,6 +108,9 @@ static void overlayThread() {
     snprintf(msg, sizeof(msg), "[UC-Overlay] Hooked: %s\n", hookedApi);
     OutputDebugStringA(msg);
 
+    // Notify Electron which API was hooked
+    uc_ipc::sendConnected(hookedApi);
+
     // 5. Subclass WndProc for input isolation
     uc_wndproc::hook(g_gameWindow);
 
