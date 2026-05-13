@@ -1,11 +1,14 @@
 /**
- * D3D9 Present Hook - intercepts IDirect3DDevice9::Present.
+ * D3D9 hook installer.
  *
- * Strategy:
- *   1. Load d3d9.dll
- *   2. Create dummy Direct3D9 + device to get Present vtable address (index 17)
- *   3. Hook via MinHook
- *   4. In hook: read overlay pixels from shared memory, upload to D3D9 texture, draw sprite
+ * Hooks installed (vtable indices per IDirect3DDevice9):
+ *   - Reset    (vtable[16])
+ *   - Present  (vtable[17])
+ *
+ * Reset hook is required because D3DPOOL_DEFAULT resources (our overlay
+ * texture) are destroyed by the runtime on device-lost / fullscreen
+ * alt-tab / resolution change. After Reset the next Present triggers a
+ * re-init. Pattern mirrored from hiitiger/goverlay (d3d9hook.cc).
  */
 
 #define WIN32_LEAN_AND_MEAN
@@ -18,13 +21,21 @@
 #include "overlay_protocol.h"
 
 namespace uc_shmem { const UCFrameHeader* header(); const uint8_t* pixels(); }
-namespace uc_d3d9_renderer { void render(IDirect3DDevice9* device); bool init(IDirect3DDevice9* device, uint32_t w, uint32_t h); void cleanup(); }
+namespace uc_d3d9_renderer {
+    void render(IDirect3DDevice9* device);
+    bool init(IDirect3DDevice9* device, uint32_t w, uint32_t h);
+    void onResetPre();
+    void onResetPost(IDirect3DDevice9* device);
+    void cleanup();
+}
 
 namespace uc_d3d9 {
 
-// Present signature: HRESULT (STDMETHODCALLTYPE*)(IDirect3DDevice9*, RECT*, RECT*, HWND, RGNDATA*)
 typedef HRESULT(STDMETHODCALLTYPE* PFN_Present)(IDirect3DDevice9*, const RECT*, const RECT*, HWND, const RGNDATA*);
+typedef HRESULT(STDMETHODCALLTYPE* PFN_Reset)(IDirect3DDevice9*, D3DPRESENT_PARAMETERS*);
+
 static PFN_Present g_origPresent = nullptr;
+static PFN_Reset   g_origReset   = nullptr;
 static bool g_hooked = false;
 static bool g_rendererInitialized = false;
 
@@ -41,6 +52,16 @@ static HRESULT STDMETHODCALLTYPE hookedPresent(IDirect3DDevice9* device, const R
     return g_origPresent(device, src, dst, hwndOverride, dirty);
 }
 
+static HRESULT STDMETHODCALLTYPE hookedReset(IDirect3DDevice9* device, D3DPRESENT_PARAMETERS* pp) {
+    uc_d3d9_renderer::onResetPre();
+    g_rendererInitialized = false;
+    HRESULT hr = g_origReset(device, pp);
+    if (SUCCEEDED(hr)) {
+        uc_d3d9_renderer::onResetPost(device);
+    }
+    return hr;
+}
+
 bool tryHook() {
     HMODULE hD3D9 = GetModuleHandleA("d3d9.dll");
     if (!hD3D9) return false;
@@ -52,7 +73,6 @@ bool tryHook() {
     IDirect3D9* d3d = pDirect3DCreate9(D3D_SDK_VERSION);
     if (!d3d) return false;
 
-    // Create dummy window
     WNDCLASSA wc = {};
     wc.lpfnWndProc = DefWindowProcA;
     wc.hInstance = GetModuleHandleA(nullptr);
@@ -76,8 +96,8 @@ bool tryHook() {
         return false;
     }
 
-    // Get Present vtable address (index 17)
     void** vtable = *reinterpret_cast<void***>(dummyDevice);
+    void* resetAddr   = vtable[16];
     void* presentAddr = vtable[17];
 
     dummyDevice->Release();
@@ -85,12 +105,16 @@ bool tryHook() {
     DestroyWindow(dummyHwnd);
     UnregisterClassA("UCOverlayD3D9Dummy", wc.hInstance);
 
-    if (MH_Initialize() != MH_OK && MH_Initialize() != MH_ERROR_ALREADY_INITIALIZED) return false;
+    MH_STATUS initStatus = MH_Initialize();
+    if (initStatus != MH_OK && initStatus != MH_ERROR_ALREADY_INITIALIZED) return false;
+
     if (MH_CreateHook(presentAddr, (void*)&hookedPresent, (void**)&g_origPresent) != MH_OK) return false;
+    if (MH_CreateHook(resetAddr,   (void*)&hookedReset,   (void**)&g_origReset)   != MH_OK) return false;
     if (MH_EnableHook(presentAddr) != MH_OK) return false;
+    if (MH_EnableHook(resetAddr)   != MH_OK) return false;
 
     g_hooked = true;
-    OutputDebugStringA("[UC-D3D9] Present hooked.\n");
+    OutputDebugStringA("[UC-D3D9] Hooks installed (Present, Reset).\n");
     return true;
 }
 

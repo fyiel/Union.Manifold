@@ -1,12 +1,22 @@
 /**
- * D3D11/DXGI Present Hook - intercepts IDXGISwapChain::Present.
- * This covers both D3D11 and D3D12 games (both go through DXGI).
+ * D3D11/DXGI hook installer.
  *
- * Strategy:
- *   1. Load dxgi.dll + d3d11.dll
- *   2. Create dummy device + swapchain to get the vtable address of Present
- *   3. Hook Present via MinHook
- *   4. In the hook: read overlay pixels from shared memory, upload to texture, draw quad
+ * Hooks installed (vtable indices per IDXGISwapChain/IDXGISwapChain1):
+ *   - Present         (vtable[8],  IDXGISwapChain)
+ *   - ResizeBuffers   (vtable[13], IDXGISwapChain)
+ *   - ResizeTarget    (vtable[14], IDXGISwapChain)
+ *   - Present1        (vtable[22], IDXGISwapChain1)   -- DXGI 1.2+
+ *
+ * Strategy follows hiitiger/goverlay:
+ *   1. Create dummy HWND + device + swapchain.
+ *   2. Read vtable slots to get original function addresses.
+ *   3. MinHook trampolines installed at those addresses, hitting every
+ *      future swapchain in-process.
+ *   4. Query IDXGISwapChain1 from the dummy to hook Present1 (skipped on
+ *      DXGI 1.1 only).
+ *
+ * On ResizeBuffers we tell the renderer to drop cached frame state so the
+ * next Present recreates the RTV against the new backbuffer.
  */
 
 #define WIN32_LEAN_AND_MEAN
@@ -14,59 +24,99 @@
 #include <Windows.h>
 #include <d3d11.h>
 #include <dxgi.h>
+#include <dxgi1_2.h>
 #include <cstdio>
 
 #include <MinHook.h>
 #include "overlay_protocol.h"
 
-// Forward declarations
 namespace uc_shmem { const UCFrameHeader* header(); const uint8_t* pixels(); }
-namespace uc_d3d11_renderer { void render(ID3D11DeviceContext* ctx, IDXGISwapChain* swapChain); bool init(ID3D11Device* device); void cleanup(); }
+namespace uc_d3d11_renderer {
+    void render(ID3D11DeviceContext* ctx, IDXGISwapChain* swapChain);
+    bool init(ID3D11Device* device);
+    void onResize();
+    void cleanup();
+}
 
 namespace uc_d3d11 {
 
-// Present signature: HRESULT (STDMETHODCALLTYPE*)(IDXGISwapChain*, UINT, UINT)
-typedef HRESULT(STDMETHODCALLTYPE* PFN_Present)(IDXGISwapChain* swapChain, UINT syncInterval, UINT flags);
-static PFN_Present g_origPresent = nullptr;
+typedef HRESULT(STDMETHODCALLTYPE* PFN_Present)(IDXGISwapChain*, UINT, UINT);
+typedef HRESULT(STDMETHODCALLTYPE* PFN_Present1)(IDXGISwapChain1*, UINT, UINT, const DXGI_PRESENT_PARAMETERS*);
+typedef HRESULT(STDMETHODCALLTYPE* PFN_ResizeBuffers)(IDXGISwapChain*, UINT, UINT, UINT, DXGI_FORMAT, UINT);
+typedef HRESULT(STDMETHODCALLTYPE* PFN_ResizeTarget)(IDXGISwapChain*, const DXGI_MODE_DESC*);
+
+static PFN_Present        g_origPresent        = nullptr;
+static PFN_Present1       g_origPresent1       = nullptr;
+static PFN_ResizeBuffers  g_origResizeBuffers  = nullptr;
+static PFN_ResizeTarget   g_origResizeTarget   = nullptr;
+
 static bool g_hooked = false;
 static bool g_rendererInitialized = false;
 
-static HRESULT STDMETHODCALLTYPE hookedPresent(IDXGISwapChain* swapChain, UINT syncInterval, UINT flags) {
+static void drawOverlay(IDXGISwapChain* swapChain) {
     const auto* hdr = uc_shmem::header();
-    if (hdr && hdr->magic == UC_FRAME_MAGIC && hdr->visible) {
-        // Lazy-init renderer on first visible frame
-        if (!g_rendererInitialized) {
-            ID3D11Device* device = nullptr;
-            if (SUCCEEDED(swapChain->GetDevice(__uuidof(ID3D11Device), (void**)&device))) {
-                g_rendererInitialized = uc_d3d11_renderer::init(device);
-                device->Release();
-            }
-        }
+    if (!hdr || hdr->magic != UC_FRAME_MAGIC || !hdr->visible) return;
 
-        if (g_rendererInitialized) {
-            ID3D11Device* device = nullptr;
-            ID3D11DeviceContext* ctx = nullptr;
-            if (SUCCEEDED(swapChain->GetDevice(__uuidof(ID3D11Device), (void**)&device))) {
-                device->GetImmediateContext(&ctx);
-                if (ctx) {
-                    uc_d3d11_renderer::render(ctx, swapChain);
-                    ctx->Release();
-                }
-                device->Release();
-            }
+    ID3D11Device* device = nullptr;
+    if (FAILED(swapChain->GetDevice(__uuidof(ID3D11Device), (void**)&device)) || !device) return;
+
+    if (!g_rendererInitialized) {
+        g_rendererInitialized = uc_d3d11_renderer::init(device);
+    }
+
+    if (g_rendererInitialized) {
+        ID3D11DeviceContext* ctx = nullptr;
+        device->GetImmediateContext(&ctx);
+        if (ctx) {
+            uc_d3d11_renderer::render(ctx, swapChain);
+            ctx->Release();
         }
     }
 
+    device->Release();
+}
+
+static HRESULT STDMETHODCALLTYPE hookedPresent(IDXGISwapChain* swapChain, UINT syncInterval, UINT flags) {
+    drawOverlay(swapChain);
     return g_origPresent(swapChain, syncInterval, flags);
 }
 
+static HRESULT STDMETHODCALLTYPE hookedPresent1(IDXGISwapChain1* swapChain, UINT syncInterval, UINT flags, const DXGI_PRESENT_PARAMETERS* params) {
+    drawOverlay(swapChain);
+    return g_origPresent1(swapChain, syncInterval, flags, params);
+}
+
+static HRESULT STDMETHODCALLTYPE hookedResizeBuffers(IDXGISwapChain* swapChain, UINT bufferCount, UINT w, UINT h, DXGI_FORMAT fmt, UINT swapChainFlags) {
+    uc_d3d11_renderer::onResize();
+    return g_origResizeBuffers(swapChain, bufferCount, w, h, fmt, swapChainFlags);
+}
+
+static HRESULT STDMETHODCALLTYPE hookedResizeTarget(IDXGISwapChain* swapChain, const DXGI_MODE_DESC* mode) {
+    uc_d3d11_renderer::onResize();
+    return g_origResizeTarget(swapChain, mode);
+}
+
+static bool installHook(void* target, void* detour, void** trampoline, const char* tag) {
+    if (MH_CreateHook(target, detour, trampoline) != MH_OK) {
+        char buf[128];
+        wsprintfA(buf, "[UC-D3D11] CreateHook failed for %s\n", tag);
+        OutputDebugStringA(buf);
+        return false;
+    }
+    if (MH_EnableHook(target) != MH_OK) {
+        char buf[128];
+        wsprintfA(buf, "[UC-D3D11] EnableHook failed for %s\n", tag);
+        OutputDebugStringA(buf);
+        return false;
+    }
+    return true;
+}
+
 bool tryHook() {
-    // Check if DXGI is loaded
     HMODULE hDXGI = GetModuleHandleA("dxgi.dll");
     HMODULE hD3D11 = GetModuleHandleA("d3d11.dll");
     if (!hDXGI || !hD3D11) return false;
 
-    // Create a dummy window for the dummy device
     WNDCLASSA wc = {};
     wc.lpfnWndProc = DefWindowProcA;
     wc.hInstance = GetModuleHandleA(nullptr);
@@ -75,16 +125,16 @@ bool tryHook() {
     HWND dummyHwnd = CreateWindowA("UCOverlayDummy", "", WS_OVERLAPPEDWINDOW, 0, 0, 100, 100, nullptr, nullptr, wc.hInstance, nullptr);
     if (!dummyHwnd) return false;
 
-    // Create dummy D3D11 device + swapchain
     DXGI_SWAP_CHAIN_DESC sd = {};
     sd.BufferCount = 1;
-    sd.BufferDesc.Width = 100;
-    sd.BufferDesc.Height = 100;
+    sd.BufferDesc.Width = 2;
+    sd.BufferDesc.Height = 2;
     sd.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
     sd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
     sd.OutputWindow = dummyHwnd;
     sd.SampleDesc.Count = 1;
     sd.Windowed = TRUE;
+    sd.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
 
     IDXGISwapChain* dummySwapChain = nullptr;
     ID3D11Device* dummyDevice = nullptr;
@@ -102,25 +152,37 @@ bool tryHook() {
         return false;
     }
 
-    // Get vtable pointer for Present (index 8 in IDXGISwapChain vtable)
     void** vtable = *reinterpret_cast<void***>(dummySwapChain);
-    void* presentAddr = vtable[8];
+    void* presentAddr       = vtable[8];
+    void* resizeBuffersAddr = vtable[13];
+    void* resizeTargetAddr  = vtable[14];
 
-    // Clean up dummy objects
+    void* present1Addr = nullptr;
+    IDXGISwapChain1* dummySwapChain1 = nullptr;
+    if (SUCCEEDED(dummySwapChain->QueryInterface(__uuidof(IDXGISwapChain1), (void**)&dummySwapChain1)) && dummySwapChain1) {
+        void** vtable1 = *reinterpret_cast<void***>(dummySwapChain1);
+        present1Addr = vtable1[22];
+        dummySwapChain1->Release();
+    }
+
     dummySwapChain->Release();
     dummyDevice->Release();
     dummyCtx->Release();
     DestroyWindow(dummyHwnd);
     UnregisterClassA("UCOverlayDummy", wc.hInstance);
 
-    // Install hook
-    if (MH_Initialize() != MH_OK && MH_Initialize() != MH_ERROR_ALREADY_INITIALIZED) return false;
+    MH_STATUS initStatus = MH_Initialize();
+    if (initStatus != MH_OK && initStatus != MH_ERROR_ALREADY_INITIALIZED) return false;
 
-    if (MH_CreateHook(presentAddr, (void*)&hookedPresent, (void**)&g_origPresent) != MH_OK) return false;
-    if (MH_EnableHook(presentAddr) != MH_OK) return false;
+    if (!installHook(presentAddr,       (void*)&hookedPresent,       (void**)&g_origPresent,       "Present"))       return false;
+    if (!installHook(resizeBuffersAddr, (void*)&hookedResizeBuffers, (void**)&g_origResizeBuffers, "ResizeBuffers")) return false;
+    if (!installHook(resizeTargetAddr,  (void*)&hookedResizeTarget,  (void**)&g_origResizeTarget,  "ResizeTarget"))  return false;
+    if (present1Addr) {
+        installHook(present1Addr, (void*)&hookedPresent1, (void**)&g_origPresent1, "Present1");
+    }
 
     g_hooked = true;
-    OutputDebugStringA("[UC-D3D11] Present hooked.\n");
+    OutputDebugStringA("[UC-D3D11] Hooks installed (Present, ResizeBuffers, ResizeTarget, Present1).\n");
     return true;
 }
 

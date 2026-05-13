@@ -24,7 +24,8 @@
     "build:electron": "node ./scripts/build-electron.cjs",
     "fetch-gcpad": "node ./scripts/fetch-gcpad.cjs",
     "pack": "pnpm -s fetch-gcpad && pnpm -s build && electron-builder",
-    "rebuild-native": "cd electron/native && node-gyp rebuild",
+    "release:version": "node ./scripts/release-version.cjs",
+    "rebuild-native": "node scripts/rebuild-native.cjs",
     "postinstall": "pnpm rebuild-native || echo 'Native overlay addon build skipped (install C++ build tools to enable)'"
   },
   "dependencies": {
@@ -120,7 +121,7 @@
       ],
       "extraResources": [
         {
-          "from": "build/Release/uc-overlay-x64.dll",
+          "from": "overlay-dll/build/Release/uc-overlay-x64.dll",
           "to": "uc-overlay-x64.dll"
         },
         {
