@@ -13,8 +13,12 @@
  * blend/raster/depth state stomped each present -> visual corruption.
  */
 
+#ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
 #define NOMINMAX
+#endif
 #include <Windows.h>
 #include <d3d11.h>
 #include <d3dcompiler.h>
@@ -26,6 +30,8 @@
 namespace uc_shmem { const UCFrameHeader* header(); const uint8_t* pixels(); }
 
 namespace uc_d3d11_renderer {
+
+void cleanup();
 
 static ID3D11Device*             g_device    = nullptr;
 static ID3D11Texture2D*          g_tex       = nullptr;
