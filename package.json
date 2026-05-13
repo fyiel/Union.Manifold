@@ -1,6 +1,6 @@
 {
   "name": "unioncrax-direct",
-  "version": "2.0.1",
+  "version": "2.0.0",
   "description": "UC.D",
   "type": "module",
   "main": "electron/main.cjs",
