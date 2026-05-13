@@ -14,6 +14,7 @@ import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts"
 import { logger } from "@/lib/logger"
 import { cn } from "@/lib/utils"
 import { LogSharingConsentModal } from "@/components/LogSharingConsentModal"
+import { WindowsDefenderPromptModal } from "@/components/WindowsDefenderPromptModal"
 import { getApiBaseUrl } from "@/lib/api"
 
 export function AppLayout() {
@@ -27,6 +28,8 @@ export function AppLayout() {
     try { return localStorage.getItem("uc_sidebar_collapsed") === "true" } catch { return false }
   })
   const [logConsentOpen, setLogConsentOpen] = useState(false)
+  const [defenderPromptOpen, setDefenderPromptOpen] = useState(false)
+  const [defenderPromptPath, setDefenderPromptPath] = useState("")
   const autoShareEnabledRef = useRef<boolean>(false)
   const lastLogShareRef = useRef<number>(0)
 
@@ -59,6 +62,33 @@ export function AppLayout() {
     return () => {
       mounted = false
       if (typeof off === 'function') off()
+    }
+  }, [])
+
+  useEffect(() => {
+    if (typeof navigator === "undefined" || !/windows/i.test(navigator.userAgent)) return
+
+    let mounted = true
+    const checkDefenderPrompt = async () => {
+      try {
+        const seen = await window.ucSettings?.get?.('windowsDefenderPromptSeen')
+        if (!mounted || seen) return
+
+        const pathResult = await window.ucDownloads?.getDownloadPath?.()
+        if (!mounted) return
+
+        const resolvedPath = pathResult?.path || ""
+        setDefenderPromptPath(resolvedPath)
+        setDefenderPromptOpen(true)
+      } catch {
+        // ignore
+      }
+    }
+
+    void checkDefenderPrompt()
+
+    return () => {
+      mounted = false
     }
   }, [])
 
@@ -127,6 +157,11 @@ export function AppLayout() {
     })
   }
 
+  const dismissDefenderPrompt = async () => {
+    setDefenderPromptOpen(false)
+    try { await window.ucSettings?.set?.('windowsDefenderPromptSeen', true) } catch {}
+  }
+
   return (
     <div className="relative h-screen w-full overflow-hidden bg-zinc-950 text-zinc-100 flex flex-col">
       {/* Top-edge drag strip — gives the user a reliable place to grab and
@@ -187,6 +222,29 @@ export function AppLayout() {
           setLogConsentOpen(false)
           autoShareEnabledRef.current = false
           try { await window.ucSettings?.set?.('autoShareErrorLogs', false) } catch {}
+        }}
+      />
+      <WindowsDefenderPromptModal
+        open={defenderPromptOpen}
+        downloadPath={defenderPromptPath}
+        onOpenSecurity={() => {
+          void (async () => {
+            const primary = await window.ucSystem?.openExternal?.('windowsdefender://threatsettings/')
+            if (!primary?.ok) {
+              await window.ucSystem?.openExternal?.('ms-settings:windowsdefender')
+            }
+          })()
+        }}
+        onDismiss={() => {
+          void dismissDefenderPrompt()
+        }}
+        onOpenFolder={() => {
+          void (async () => {
+            if (defenderPromptPath) {
+              try { await window.ucDownloads?.openPath?.(defenderPromptPath) } catch {}
+            }
+            await dismissDefenderPrompt()
+          })()
         }}
       />
       <CustomTooltipManager />

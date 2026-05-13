@@ -12,7 +12,7 @@ import { CriticalLoadModal } from "@/components/CriticalLoadModal"
 import { HeroSlider } from "@/components/HeroSlider"
 import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious } from "@/components/ui/carousel"
 import { PaginationBar } from "@/components/PaginationBar"
-import { formatNumber, generateErrorCode, ErrorTypes, proxyImageUrl } from "@/lib/utils"
+import { formatNumber, generateErrorCode, ErrorTypes, getInstalledVersionLabel, hasInstalledVersionUpdate, proxyImageUrl } from "@/lib/utils"
 import { useOnlineStatus } from "@/hooks/use-online-status"
 import { fetchCatalogGames, fetchCatalogStats, getCatalogCache, hydrateCatalogCache, isCatalogGamesStale, isCatalogStatsStale, mergeInstalledGames, persistCatalogCache, type CatalogGame } from "@/lib/catalog"
 import { ArrowRight, Layers3, PlayCircle } from "lucide-react"
@@ -60,6 +60,7 @@ export function LauncherPage() {
   const [emptyStateReady, setEmptyStateReady] = useState(false)
   const [currentPage, setCurrentPage] = useState(1)
   const [recentlyInstalledGames, setRecentlyInstalledGames] = useState<Game[]>([])
+  const [installedVersionMap, setInstalledVersionMap] = useState<Record<string, string[]>>({})
   const itemsPerPage = 30
   const [statsCacheTime, setStatsCacheTime] = useState<number>(initialCatalog.statsUpdatedAt || 0)
 
@@ -114,6 +115,7 @@ export function LauncherPage() {
     let ignore = false
     const loadInstalled = async () => {
       const installedMap = new Map<string, Game>()
+      const nextInstalledVersions: Record<string, string[]> = {}
       try {
         if (typeof window !== "undefined") {
           const installedList =
@@ -124,6 +126,10 @@ export function LauncherPage() {
           for (const entry of installedList) {
             const meta = (entry && (entry.metadata || entry.game)) || entry
             if (meta && meta.appid) {
+              const versionLabel = getInstalledVersionLabel(entry)
+              if (versionLabel) {
+                nextInstalledVersions[meta.appid] = Array.from(new Set([...(nextInstalledVersions[meta.appid] || []), versionLabel]))
+              }
               installedMap.set(meta.appid, {
                 ...meta,
                 name: meta.name || meta.appid,
@@ -144,6 +150,7 @@ export function LauncherPage() {
 
       if (!ignore) {
         setRecentlyInstalledGames(resolved)
+        setInstalledVersionMap(nextInstalledVersions)
       }
     }
 
@@ -616,7 +623,12 @@ export function LauncherPage() {
                         key={game.appid}
                         className="pl-2 md:pl-4 basis-full sm:basis-1/2 md:basis-1/3 lg:basis-1/3 xl:basis-1/4"
                       >
-                        <GameCard game={game} stats={gameStats[game.appid]} />
+                        <GameCard
+                          game={game}
+                          stats={gameStats[game.appid]}
+                          updateAvailable={hasInstalledVersionUpdate(game.version, installedVersionMap[game.appid] || [])}
+                          updateLabel={game.version ? `Update available - ${game.version}` : "Update available"}
+                        />
                       </CarouselItem>
                     ))}
                   </CarouselContent>
@@ -669,7 +681,13 @@ export function LauncherPage() {
                       key={game.appid}
                       className="pl-2 md:pl-4 basis-full sm:basis-1/2 md:basis-1/3 lg:basis-1/3 xl:basis-1/4"
                     >
-                      <GameCard game={game} stats={gameStats[game.appid]} isPopular />
+                      <GameCard
+                        game={game}
+                        stats={gameStats[game.appid]}
+                        isPopular
+                        updateAvailable={hasInstalledVersionUpdate(game.version, installedVersionMap[game.appid] || [])}
+                        updateLabel={game.version ? `Update available - ${game.version}` : "Update available"}
+                      />
                     </CarouselItem>
                   ))}
                 </CarouselContent>

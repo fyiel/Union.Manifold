@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { PaginationBar } from "@/components/PaginationBar"
 import { useGamesData } from "@/hooks/use-games"
 import type { Game } from "@/lib/types"
-import { pickGameExecutable, cn } from "@/lib/utils"
+import { hasInstalledVersionUpdate, pickGameExecutable, cn } from "@/lib/utils"
 import { useDownloads } from "@/context/downloads-context"
 import {
   Trash2, AlertTriangle, FolderOpen, ExternalLink, Unlink2,
@@ -330,6 +330,10 @@ export function LibraryPage() {
     })
     return next
   }, [installedWithMeta, debouncedSearch, selectedCollection, sortMode])
+
+  const catalogVersionByAppid = useMemo(() => {
+    return new Map(games.map((game) => [game.appid, game.version || ""]))
+  }, [games])
 
   const visibleInstalling = useMemo(() => {
     return installing.filter((game) => {
@@ -1096,7 +1100,13 @@ export function LibraryPage() {
                     onClick={selectionMode ? (e) => { e.preventDefault(); e.stopPropagation(); toggleSelected(game.appid) } : undefined}
                   >
                     <div className={selectionMode ? "pointer-events-none" : ""}>
-                      <GameCard game={game} stats={stats[game.appid]} size="compact" />
+                      <GameCard
+                        game={game}
+                        stats={stats[game.appid]}
+                        size="compact"
+                        updateAvailable={hasInstalledVersionUpdate(catalogVersionByAppid.get(game.appid), [game.version])}
+                        updateLabel={catalogVersionByAppid.get(game.appid) ? `Update available - ${catalogVersionByAppid.get(game.appid)}` : "Update available"}
+                      />
                     </div>
 
                     {selectionMode && (
@@ -1303,7 +1313,13 @@ export function LibraryPage() {
                         openGameActionContextMenu(game, { x: event.clientX, y: event.clientY })
                       }}
                     >
-                      <GameCard game={game} stats={stats[game.appid]} size="compact" />
+                      <GameCard
+                        game={game}
+                        stats={stats[game.appid]}
+                        size="compact"
+                        updateAvailable={hasInstalledVersionUpdate(catalogVersionByAppid.get(game.appid), [game.version])}
+                        updateLabel={catalogVersionByAppid.get(game.appid) ? `Update available - ${catalogVersionByAppid.get(game.appid)}` : "Update available"}
+                      />
                       {(isCancelled || isFailed) && (
                         <div className="pointer-events-none absolute left-2 top-2 z-20">
                           <span className={cn(

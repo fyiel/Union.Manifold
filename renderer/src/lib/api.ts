@@ -2,6 +2,7 @@ import { apiLogger } from "./logger"
 
 const DEFAULT_BASE_URL = "https://union-crax.xyz"
 const CUSTOM_API_BASE_URL_STORAGE_KEY = "uc_custom_api_base_url"
+const API_REACHABILITY_STORAGE_KEY = "uc_api_service_reachable"
 
 type ApiConnectivitySnapshot = {
   browserOnline: boolean
@@ -10,8 +11,29 @@ type ApiConnectivitySnapshot = {
 }
 
 const connectivityListeners = new Set<() => void>()
-let serviceReachable = true
+let serviceReachable = readPersistedServiceReachability()
 let cachedConnectivitySnapshot: ApiConnectivitySnapshot | null = null
+
+function readPersistedServiceReachability(): boolean {
+  if (typeof window === "undefined") return true
+  try {
+    const stored = window.localStorage.getItem(API_REACHABILITY_STORAGE_KEY)
+    if (stored === "0") return false
+    if (stored === "1") return true
+  } catch {
+    // ignore storage errors
+  }
+  return true
+}
+
+function persistServiceReachability(value: boolean): void {
+  if (typeof window === "undefined") return
+  try {
+    window.localStorage.setItem(API_REACHABILITY_STORAGE_KEY, value ? "1" : "0")
+  } catch {
+    // ignore storage errors
+  }
+}
 
 function readBrowserOnline(): boolean {
   return typeof navigator !== "undefined" ? navigator.onLine : true
@@ -26,6 +48,7 @@ function emitConnectivityChange(): void {
 function setServiceReachable(nextValue: boolean): void {
   if (serviceReachable === nextValue) return
   serviceReachable = nextValue
+  persistServiceReachability(nextValue)
   emitConnectivityChange()
 }
 

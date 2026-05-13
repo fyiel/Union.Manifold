@@ -273,6 +273,9 @@ declare global {
       openLogsFolder: () => Promise<{ ok: boolean; error?: string }>
       shareLogs: (payload?: { baseUrl?: string }) => Promise<{ ok: boolean; error?: string; endpoint?: string; status?: number }>
     }
+    ucSystem?: {
+      openExternal: (target: string) => Promise<{ ok: boolean; error?: string }>
+    }
     ucRpc?: {
       setActivity: (payload: {
         details?: string

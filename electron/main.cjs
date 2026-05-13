@@ -6245,7 +6245,11 @@ function run7zExtract(archivePath, destDir, onProgress, options = {}) {
       }
 
       const before = snapshotFiles(destDir)
-      const args = ['x', archivePath, `-o${destDir}`, '-y']
+      // -bsp1 forces 7z to emit progress (NN%) on stdout — without it 7z is
+      // silent and the regex below never matches, so the UI stays at 0%.
+      // -bso1 keeps normal output on stdout; -bse1 keeps errors on stderr;
+      // -bb1 includes the filename for each extracted entry so we can report it.
+      const args = ['x', archivePath, `-o${destDir}`, '-y', '-bsp1', '-bso1', '-bse1', '-bb1']
       uc_log(`spawning 7zip with command: ${cmd} ${args.join(' ')}`)
 
       const proc = child_process.spawn(cmd, args, { windowsHide: true })
@@ -6253,8 +6257,13 @@ function run7zExtract(archivePath, destDir, onProgress, options = {}) {
       let aborted = false
       let stdout = ''
       let stderr = ''
+      let stdoutTail = ''
       let lastPercent = -1
       let lastEmit = 0
+      let lastFilename = ''
+      // 7z streams progress with carriage returns (\r) — keep the parser
+      // tail-buffered so a percent token split across two chunks is still seen.
+      const TAIL_KEEP = 256
       const finish = (result) => {
         if (settled) return
         settled = true
@@ -6272,33 +6281,63 @@ function run7zExtract(archivePath, destDir, onProgress, options = {}) {
         if (abortSignal.aborted) abortListener()
         else abortSignal.addEventListener('abort', abortListener, { once: true })
       }
-      const emitProgress = (p) => {
+      const emitProgress = (patch) => {
         try {
-          if (typeof onProgress === 'function') {
-            const now = Date.now()
-            // throttle updates to at most ~3 per second or when percent increases
-            if (p !== lastPercent && (now - lastEmit > 300 || p > lastPercent)) {
-              lastPercent = p
-              lastEmit = now
-              try {
-                onProgress({ percent: p })
-              } catch (e) { }
-            }
+          if (typeof onProgress !== 'function') return
+          const now = Date.now()
+          const p = typeof patch.percent === 'number' ? patch.percent : lastPercent
+          const filenameChanged = patch.filename && patch.filename !== lastFilename
+          // Throttle to ~5/sec, but always emit when percent rises or filename changes.
+          if (
+            (typeof patch.percent === 'number' && p !== lastPercent) ||
+            filenameChanged ||
+            now - lastEmit > 200
+          ) {
+            if (typeof patch.percent === 'number') lastPercent = p
+            if (filenameChanged) lastFilename = patch.filename
+            lastEmit = now
+            try {
+              onProgress({
+                percent: Math.max(0, lastPercent),
+                ...(lastFilename ? { filename: lastFilename } : {}),
+              })
+            } catch (e) { }
           }
         } catch (e) { }
+      }
+
+      const parseStream = (chunk) => {
+        // 7z uses \r to overwrite the progress line. Treat \r as a line break
+        // when scanning so we always see the most recent percent token.
+        stdoutTail = (stdoutTail + chunk).slice(-TAIL_KEEP * 4)
+        const lines = chunk.split(/[\r\n]+/)
+        for (const line of lines) {
+          if (!line) continue
+          // "  17% 12 - path\to\file.ext" style tokens
+          const pctMatch = line.match(/(?:^|\s)(\d{1,3})%/)
+          if (pctMatch) {
+            const p = Math.min(100, Math.max(0, Number(pctMatch[1] || 0)))
+            // Optional filename: "  17% 12 - some\file.ext"
+            const fnMatch = line.match(/\d{1,3}%\s+\d+\s+-\s+(.+)$/)
+            emitProgress({
+              percent: p,
+              ...(fnMatch ? { filename: fnMatch[1].trim() } : {}),
+            })
+            continue
+          }
+          // "- some\file.ext" or "+ some\file.ext" from -bb1 file-name reporting
+          const onlyFnMatch = line.match(/^\s*[-+]\s+(.+\.[A-Za-z0-9]{1,8})\s*$/)
+          if (onlyFnMatch) {
+            emitProgress({ filename: onlyFnMatch[1].trim() })
+          }
+        }
       }
 
       proc.stdout && proc.stdout.on('data', (d) => {
         try {
           const s = d.toString()
           stdout += s
-          // parse percent tokens like "12%" that 7z emits
-          const re = /(\d{1,3})%/g
-          let m
-          while ((m = re.exec(s)) !== null) {
-            const p = Math.min(100, Math.max(0, Number(m[1] || 0)))
-            emitProgress(p)
-          }
+          parseStream(s)
         } catch (e) {
           stdout += String(d)
         }
@@ -6307,12 +6346,7 @@ function run7zExtract(archivePath, destDir, onProgress, options = {}) {
         try {
           const s = d.toString()
           stderr += s
-          const re = /(\d{1,3})%/g
-          let m
-          while ((m = re.exec(s)) !== null) {
-            const p = Math.min(100, Math.max(0, Number(m[1] || 0)))
-            emitProgress(p)
-          }
+          parseStream(s)
         } catch (e) {
           stderr += String(d)
         }
@@ -8358,6 +8392,18 @@ ipcMain.handle('uc:download-open', async (_event, targetPath) => {
     await shell.openPath(targetPath)
   }
   return { ok: true }
+})
+
+ipcMain.handle('uc:system-open-external', async (_event, target) => {
+  if (typeof target !== 'string' || !target) {
+    return { ok: false, error: 'missing-target' }
+  }
+  try {
+    await shell.openExternal(target)
+    return { ok: true }
+  } catch (error) {
+    return { ok: false, error: error?.message || String(error) }
+  }
 })
 
 ipcMain.handle('uc:disk-list', () => {

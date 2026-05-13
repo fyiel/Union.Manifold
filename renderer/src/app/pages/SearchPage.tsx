@@ -13,7 +13,7 @@ import { PaginationBar } from "@/components/PaginationBar"
 import { Filter, Wifi, X, SlidersHorizontal, RefreshCw, Heart, Star, ChevronRight, Search } from "lucide-react"
 import { useDebounce } from "@/hooks/use-debounce"
 import { parseSize } from "@/lib/search-utils"
-import { hasOnlineMode, generateErrorCode, ErrorTypes, proxyImageUrl } from "@/lib/utils"
+import { getInstalledVersionLabel, hasInstalledVersionUpdate, hasOnlineMode, generateErrorCode, ErrorTypes, proxyImageUrl } from "@/lib/utils"
 import { cn } from "@/lib/utils"
 import { addSearchToHistory } from "@/lib/user-history"
 import { APIErrorBoundary } from "@/components/error-boundary"
@@ -118,6 +118,7 @@ export function SearchPage() {
   const [_statsError, setStatsError] = useState<{ type: string; message: string; code: string } | null>(null)
   const [criticalLoadOpen, setCriticalLoadOpen] = useState(false)
   const [didYouMeanResults, setDidYouMeanResults] = useState<any[]>([])
+  const [installedVersionMap, setInstalledVersionMap] = useState<Record<string, string[]>>({})
 
   const [currentPage, setCurrentPage] = useState(1)
   const itemsPerPage = 20
@@ -179,6 +180,47 @@ export function SearchPage() {
   useEffect(() => {
     fetchMeta()
     isInitialMount.current = false
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+
+    const loadInstalledVersions = async () => {
+      try {
+        const installedList =
+          ((await window.ucDownloads?.listInstalledGlobal?.()) as any[]) ||
+          ((await window.ucDownloads?.listInstalled?.()) as any[]) ||
+          []
+
+        if (cancelled) return
+
+        const nextVersions: Record<string, string[]> = {}
+        for (const entry of installedList) {
+          const meta = (entry && (entry.metadata || entry.game)) || entry
+          if (!meta?.appid) continue
+          const versionLabel = getInstalledVersionLabel(entry)
+          if (!versionLabel) continue
+          nextVersions[meta.appid] = Array.from(new Set([...(nextVersions[meta.appid] || []), versionLabel]))
+        }
+
+        setInstalledVersionMap(nextVersions)
+      } catch {
+        if (!cancelled) setInstalledVersionMap({})
+      }
+    }
+
+    const handleRefresh = () => {
+      void loadInstalledVersions()
+    }
+
+    void loadInstalledVersions()
+    window.addEventListener("focus", handleRefresh)
+    window.addEventListener("uc_game_installed", handleRefresh)
+    return () => {
+      cancelled = true
+      window.removeEventListener("focus", handleRefresh)
+      window.removeEventListener("uc_game_installed", handleRefresh)
+    }
   }, [])
 
   useEffect(() => {
@@ -876,7 +918,13 @@ export function SearchPage() {
 
                     <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-4">
                       {filteredGames.map((game) => (
-                        <GameCard key={game.appid} game={game} stats={gameStats[game.appid]} />
+                        <GameCard
+                          key={game.appid}
+                          game={game}
+                          stats={gameStats[game.appid]}
+                          updateAvailable={hasInstalledVersionUpdate(game.version, installedVersionMap[game.appid] || [])}
+                          updateLabel={game.version ? `Update available - ${game.version}` : "Update available"}
+                        />
                       ))}
                     </div>
 

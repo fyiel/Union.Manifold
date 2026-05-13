@@ -367,6 +367,31 @@ export function getCardImage(imageUrl: string): string {
     .replace('/t_cover_big/', '/t_cover_big_2x/')
 }
 
+export function getInstalledVersionLabel(manifest: any): string | null {
+  const label = manifest?.metadata?.downloadedVersion || manifest?.metadata?.version || manifest?.version
+  if (!label) return null
+  const normalized = String(label).trim()
+  return normalized || null
+}
+
+export function hasInstalledVersionUpdate(
+  catalogVersion?: string | null,
+  installedVersions: Array<string | null | undefined> = []
+): boolean {
+  const normalizedCatalog = String(catalogVersion || "").trim().toLowerCase()
+  if (!normalizedCatalog) return false
+
+  const normalizedInstalled = Array.from(
+    new Set(
+      installedVersions
+        .map((label) => String(label || "").trim().toLowerCase())
+        .filter(Boolean)
+    )
+  )
+
+  return normalizedInstalled.length > 0 && !normalizedInstalled.includes(normalizedCatalog)
+}
+
 export function timeAgo(dateStr?: string | null): string {
   if (!dateStr) return ""
   const date = new Date(dateStr)
