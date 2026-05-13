@@ -8,8 +8,12 @@
  *   4. In hook: read overlay pixels from shared memory, upload to GL texture, draw fullscreen quad
  */
 
+#ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
 #define NOMINMAX
+#endif
 #include <Windows.h>
 #include <GL/gl.h>
 #include <cstdio>

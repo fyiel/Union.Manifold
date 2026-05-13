@@ -4,8 +4,12 @@
  * Protocol: newline-delimited JSON messages in both directions.
  */
 
+#ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
 #define NOMINMAX
+#endif
 #include <Windows.h>
 #include <atomic>
 #include <cstdio>
