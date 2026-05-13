@@ -31,8 +31,9 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { proxyImageUrl, getCardImage, cn } from "@/lib/utils"
+import { getInstalledVersionLabel, hasInstalledVersionUpdate, proxyImageUrl, getCardImage, cn } from "@/lib/utils"
 import { useUserCollections, type UserCollection } from "@/hooks/use-user-collections"
+import { useGamesData } from "@/hooks/use-games"
 import { forkCloudCollection, shareUrlFor } from "@/lib/cloud-collections"
 import { useFollowedCollections, type FollowedCollection } from "@/hooks/use-followed-collections"
 import { useDownloadsActions } from "@/context/downloads-context"
@@ -43,6 +44,7 @@ type InstalledGame = {
   appid: string
   name: string
   image?: string
+  version?: string
 }
 
 export function CollectionsPage() {
@@ -80,8 +82,13 @@ export function CollectionsPage() {
   const [forkError, setForkError] = useState<string | null>(null)
   const renameInputRef = useRef<HTMLInputElement | null>(null)
   const { startGameDownload } = useDownloadsActions()
+  const { games: catalogGames } = useGamesData()
   const followed = useFollowedCollections()
   const pageError = error || forkError
+  const catalogVersionByAppid = useMemo(() => {
+    const source = catalogGames.length > 0 ? catalogGames : getCatalogCache().games
+    return new Map(source.map((game) => [game.appid, game.version || ""]))
+  }, [catalogGames])
 
   // ---- Load installed games for the picker + cover mosaics ----
   useEffect(() => {
@@ -101,6 +108,7 @@ export function CollectionsPage() {
             appid: item.appid,
             name: item.name || item.appid,
             image: item.image || item.localImage || "",
+            version: getInstalledVersionLabel(entry) || item.version || "",
           })
         }
         games.sort((a, b) => a.name.localeCompare(b.name))
@@ -354,6 +362,7 @@ export function CollectionsPage() {
               key={collection.id}
               collection={collection}
               installedById={installedById}
+                catalogVersionByAppid={catalogVersionByAppid}
               renaming={renameTarget?.id === collection.id}
               renameDraft={renameDraft}
               renameInputRef={renameInputRef}
@@ -515,6 +524,7 @@ function SyncStatus({ authed, loading }: { authed: boolean | null; loading: bool
 function CollectionCard({
   collection,
   installedById,
+  catalogVersionByAppid,
   renaming,
   renameDraft,
   renameInputRef,
@@ -530,6 +540,7 @@ function CollectionCard({
 }: {
   collection: UserCollection
   installedById: Map<string, InstalledGame>
+  catalogVersionByAppid: Map<string, string>
   renaming: boolean
   renameDraft: string
   renameInputRef: React.MutableRefObject<HTMLInputElement | null>
@@ -545,6 +556,10 @@ function CollectionCard({
 }) {
   const installedAppids = collection.appids.filter((id) => installedById.has(id))
   const missingCount = collection.appids.length - installedAppids.length
+  const updateCount = installedAppids.filter((appid) => {
+    const installed = installedById.get(appid)
+    return hasInstalledVersionUpdate(catalogVersionByAppid.get(appid), [installed?.version])
+  }).length
   const cover = installedAppids.slice(0, 4).map((id) => installedById.get(id)?.image).filter(Boolean) as string[]
 
   return (
@@ -578,6 +593,11 @@ function CollectionCard({
             {missingCount > 0 && (
               <span className="ml-1 rounded-full bg-white/10 px-1 text-[9px] uppercase">
                 {missingCount} missing
+              </span>
+            )}
+            {updateCount > 0 && (
+              <span className="ml-1 rounded-full bg-emerald-500/20 px-1.5 text-[9px] uppercase text-emerald-200">
+                {updateCount} update{updateCount === 1 ? "" : "s"}
               </span>
             )}
           </span>

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react"
+import { useConnectivityStatus } from "@/hooks/use-online-status"
 import type { GameStats } from "@/lib/types"
 import { gameLogger } from "@/lib/logger"
 import {
@@ -22,6 +23,7 @@ type GamesDataState = {
 }
 
 export function useGamesData() {
+  const connectivity = useConnectivityStatus()
   const initialCache = getCatalogCache()
   const [state, setState] = useState<GamesDataState>(() => ({
     games: initialCache.games,
@@ -46,10 +48,8 @@ export function useGamesData() {
         })
       }
 
-      const shouldRefreshGames = typeof navigator === "undefined" || navigator.onLine
-        ? isCatalogGamesStale()
-        : false
-      const shouldRefreshStats = typeof navigator === "undefined" || navigator.onLine
+      const shouldRefreshGames = connectivity.isOnline
+      const shouldRefreshStats = connectivity.isOnline
         ? isCatalogStatsStale()
         : false
 
@@ -122,7 +122,7 @@ export function useGamesData() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [connectivity.isOnline])
 
   return state
 }

@@ -887,6 +887,8 @@ export function GameDetailPage() {
     ? "Quit"
     : isCheckingLinks
       ? "Checking..."
+      : hasUpdate
+        ? "Update"
       : isInstalled
         ? "Play"
         : isInstallReady
@@ -1133,6 +1135,8 @@ export function GameDetailPage() {
         await window.ucDownloads?.deleteInstalled?.(game.appid)
         await window.ucDownloads?.deleteDesktopShortcut?.(game.name)
         setInstalledManifest(null)
+        setInstalledVersions([])
+        setSelectedImage("")
       }
       clearByAppid(game.appid)
       setIsGameRunning(false)

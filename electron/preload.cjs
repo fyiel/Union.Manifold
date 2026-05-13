@@ -163,6 +163,10 @@ contextBridge.exposeInMainWorld('ucLogs', {
   shareLogs: (payload) => ipcRenderer.invoke('uc:logs-share', payload)
 })
 
+contextBridge.exposeInMainWorld('ucSystem', {
+  openExternal: (target) => ipcRenderer.invoke('uc:system-open-external', target),
+})
+
 contextBridge.exposeInMainWorld('ucRpc', {
   setActivity: (payload) => ipcRenderer.invoke('uc:rpc-set-activity', payload),
   clearActivity: () => ipcRenderer.invoke('uc:rpc-clear'),

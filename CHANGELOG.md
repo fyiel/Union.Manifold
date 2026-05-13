@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased - 2026-05-13
+
+### Fixes & Improvements
+
+- Persisted API reachability across app restarts and switched shared catalog refresh logic to the app's connectivity state, preventing offline mode from briefly loading online content or immediately retrying stale catalog fetches on startup.
+- Extended update visibility beyond the game details page: launcher, search, library, and custom collection cards now surface update-available state, with collection tiles showing per-collection update counts for installed games.
+- Hardened game-card media fallback behavior and cleared stale installed-image/version state after delete actions, so removed games stop trying to render missing local artwork and cards recover more cleanly from bad cached assets.
+- Added a one-time Windows Defender guidance prompt on Windows first launch, including quick actions to open the configured game folder and jump directly into Windows Security exclusion settings.
+
 ## v2.0.0 - 2026-04-16 - 2026-05-13
 
 ### New Features
