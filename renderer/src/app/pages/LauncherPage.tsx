@@ -13,7 +13,7 @@ import { HeroSlider } from "@/components/HeroSlider"
 import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious } from "@/components/ui/carousel"
 import { PaginationBar } from "@/components/PaginationBar"
 import { formatNumber, generateErrorCode, ErrorTypes, getInstalledVersionLabel, hasInstalledVersionUpdate, proxyImageUrl } from "@/lib/utils"
-import { useOnlineStatus } from "@/hooks/use-online-status"
+import { useConnectivityStatus } from "@/hooks/use-online-status"
 import { fetchCatalogGames, fetchCatalogStats, getCatalogCache, hydrateCatalogCache, isCatalogGamesStale, isCatalogStatsStale, mergeInstalledGames, persistCatalogCache, type CatalogGame } from "@/lib/catalog"
 import { ArrowRight, Layers3, PlayCircle } from "lucide-react"
 import { usePlayHistory } from "@/hooks/use-play-history"
@@ -25,7 +25,7 @@ const cardCarouselNavClass = "bg-zinc-800/80 hover:bg-white hover:text-black bor
 
 export function LauncherPage() {
   const navigate = useNavigate()
-  const isOnline = useOnlineStatus()
+  const { isOnline, browserOnline, serviceReachable } = useConnectivityStatus()
   const initialCatalog = getCatalogCache()
   const playHistory = usePlayHistory(12)
   const userCollections = useUserCollections()
@@ -65,6 +65,7 @@ export function LauncherPage() {
   const [statsCacheTime, setStatsCacheTime] = useState<number>(initialCatalog.statsUpdatedAt || 0)
 
   const activeLoadIdRef = useRef(0)
+  const hasCriticalServiceInterruption = browserOnline && !serviceReachable
 
   useEffect(() => {
     loadGames()
@@ -91,8 +92,8 @@ export function LauncherPage() {
   }, [isOnline])
 
   useEffect(() => {
-    setCriticalLoadOpen(Boolean(gamesError) && isOnline)
-  }, [gamesError, isOnline])
+    setCriticalLoadOpen(Boolean(gamesError) && hasCriticalServiceInterruption)
+  }, [gamesError, hasCriticalServiceInterruption])
 
   useEffect(() => {
     if (typeof window === "undefined") return
@@ -385,7 +386,7 @@ export function LauncherPage() {
   return (
     <div className="space-y-12 pb-4">
       <CriticalLoadModal
-        open={Boolean(gamesError) && isOnline && criticalLoadOpen}
+        open={Boolean(gamesError) && hasCriticalServiceInterruption && criticalLoadOpen}
         onOpenChange={setCriticalLoadOpen}
         title="Critical Data Load Failure"
         message={gamesError?.message || "Unable to load game data right now."}
