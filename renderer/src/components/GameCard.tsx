@@ -50,6 +50,8 @@ interface GameCardProps {
   }
   isPopular?: boolean
   size?: "default" | "compact"
+  updateAvailable?: boolean
+  updateLabel?: string
 }
 
 export const GameCard = memo(function GameCard({
@@ -57,6 +59,8 @@ export const GameCard = memo(function GameCard({
   stats: initialStats,
   isPopular = false,
   size = "default",
+  updateAvailable = false,
+  updateLabel = "Update available",
 }: GameCardProps) {
   const isWindows = typeof navigator !== 'undefined' && /windows/i.test(navigator.userAgent)
   const [hoveredStats, setHoveredStats] = useState<{ downloads: number; views: number } | null>(null)
@@ -96,6 +100,7 @@ export const GameCard = memo(function GameCard({
   const [isInstalled, setIsInstalled] = useState(false)
   const [isRunning, setIsRunning] = useState(false)
   const [imageLoaded, setImageLoaded] = useState(false)
+  const [imageCandidateIndex, setImageCandidateIndex] = useState(0)
   const [exePickerOpen, setExePickerOpen] = useState(false)
   const [exePickerExes, setExePickerExes] = useState<Array<{ name: string; path: string; size?: number; depth?: number }>>([])
   const [exePickerFolder, setExePickerFolder] = useState<string | null>(null)
@@ -483,11 +488,33 @@ export const GameCard = memo(function GameCard({
     },
   }), [userCollections, game.appid])
 
-  const cardImageSrc = proxyImageUrl(getCardImage(game.image || "")) || "./banner.png"
+  const cardImageCandidates = useMemo(() => {
+    const candidates = [
+      game.localImage,
+      game.image,
+      game.hero_image,
+      game.background_image,
+      game.splash,
+      "./banner.png",
+    ]
+    const seen = new Set<string>()
+    return candidates.reduce<string[]>((next, candidate) => {
+      const raw = String(candidate || "").trim()
+      if (!raw) return next
+      const resolved = proxyImageUrl(getCardImage(raw)) || proxyImageUrl(raw) || raw
+      if (!resolved || seen.has(resolved)) return next
+      seen.add(resolved)
+      next.push(resolved)
+      return next
+    }, [])
+  }, [game.background_image, game.hero_image, game.image, game.localImage, game.splash])
+
+  const cardImageSrc = cardImageCandidates[imageCandidateIndex] || "./banner.png"
 
   useEffect(() => {
+    setImageCandidateIndex(0)
     setImageLoaded(false)
-  }, [cardImageSrc])
+  }, [cardImageCandidates])
 
   return (
     <div className="relative group/container h-full"
@@ -518,7 +545,13 @@ export const GameCard = memo(function GameCard({
                 }`}
               loading="lazy"
               onLoad={() => setImageLoaded(true)}
-              onError={() => setImageLoaded(true)}
+              onError={() => {
+                if (imageCandidateIndex < cardImageCandidates.length - 1) {
+                  setImageCandidateIndex((current) => current + 1)
+                  return
+                }
+                setImageLoaded(true)
+              }}
             />
 
             {/* NSFW overlay: show Reveal button when not revealed */}
@@ -560,7 +593,7 @@ export const GameCard = memo(function GameCard({
                 >
                   <button
                     onClick={handlePlayClick}
-                    aria-label={isRunning ? "Stop game" : "Launch game"}
+                    aria-label={isRunning ? "Stop game" : updateAvailable ? "Update game" : "Launch game"}
                     className={`group/play relative inline-flex h-12 w-12 items-center justify-center rounded-full border border-white/20 shadow-xl transition-transform duration-200 hover:scale-110 active:scale-95 ${
                       isRunning ? "bg-red-600 text-white" : "bg-white text-black"
                     }`}
@@ -568,7 +601,9 @@ export const GameCard = memo(function GameCard({
                     {isRunning ? (
                       <Square className="relative h-5 w-5 fill-current" />
                     ) : (
-                      <Play className="relative h-5 w-5 fill-current ml-0.5" />
+                      updateAvailable
+                        ? <RefreshCw className="relative h-5 w-5" />
+                        : <Play className="relative h-5 w-5 fill-current ml-0.5" />
                     )}
                   </button>
                 </div>
@@ -594,6 +629,13 @@ export const GameCard = memo(function GameCard({
                 <Badge variant="online" className="bg-zinc-800/60 backdrop-blur-sm border border-white/10 px-3 py-1 text-xs font-semibold flex items-center gap-1 rounded-full">
                   <Wifi className="w-3 h-3 mr-1 text-white" />
                   <span className="text-white">Online</span>
+                </Badge>
+              )}
+
+              {updateAvailable && isInstalled && (
+                <Badge className="bg-emerald-500/15 backdrop-blur-sm border border-emerald-400/25 px-3 py-1 text-xs font-semibold flex items-center gap-1 rounded-full text-emerald-100">
+                  <RefreshCw className="w-3 h-3 mr-1 text-emerald-200" />
+                  <span>{updateLabel}</span>
                 </Badge>
               )}
 
