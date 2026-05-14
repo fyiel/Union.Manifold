@@ -575,8 +575,8 @@ export function SearchPage() {
       <FilterSection title="Modes">
         <div className="space-y-2">
           <ModeToggle
-            label="Online Only"
-            description="Show only games with online/co-op."
+            label="Multiplayer Only"
+            description="Show only games with multiplayer."
             checked={Boolean(filters.online)}
             onCheckedChange={(v) => updateFilter("online", v)}
           />
@@ -827,7 +827,7 @@ export function SearchPage() {
                 )}
                 {filters.online && (
                   <FilterChip
-                    label="Online"
+                    label="Multiplayer"
                     icon={<Wifi className="h-3 w-3" />}
                     tone="emerald"
                     onRemove={() => updateFilter("online", false)}
