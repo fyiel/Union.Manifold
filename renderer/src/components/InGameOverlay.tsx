@@ -420,7 +420,7 @@ export function InGameOverlay() {
     const toastVClass = toastVertical === 'top' ? 'top-5' : 'bottom-5'
     return (
       <div className={`pointer-events-none fixed ${toastVClass} z-[9999] w-72`} style={toastStyle}>
-        <div className={`glass rounded-2xl p-3 shadow-[0_16px_48px_rgba(0,0,0,0.55)] transition-all duration-200 ${animated ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'}`}>
+        <div className={`overlay-panel rounded-2xl p-3 shadow-[0_16px_48px_rgba(0,0,0,0.7)] transition-all duration-200 ${animated ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'}`}>
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-white">
               {gameInfo?.image
@@ -464,7 +464,7 @@ export function InGameOverlay() {
         {/* Screenshot */}
         <button
           onClick={handleScreenshot}
-          className={`glass flex h-9 w-9 items-center justify-center rounded-xl shadow-[0_8px_24px_rgba(0,0,0,0.45)] transition hover:bg-white/[.06] hover:text-white active:scale-95 ${screenshotFlash ? 'text-emerald-300' : 'text-zinc-400'}`}
+          className={`overlay-panel flex h-9 w-9 items-center justify-center rounded-xl shadow-[0_8px_24px_rgba(0,0,0,0.6)] transition hover:bg-zinc-700/80 hover:text-white active:scale-95 ${screenshotFlash ? 'text-emerald-300' : 'text-zinc-400'}`}
           title="Screenshot"
         >
           <Camera size={14} />
@@ -473,7 +473,7 @@ export function InGameOverlay() {
         {/* Notifications */}
         <button
           onClick={() => setShowNotifications(v => !v)}
-          className={`glass relative flex h-9 w-9 items-center justify-center rounded-xl shadow-[0_8px_24px_rgba(0,0,0,0.45)] transition hover:bg-white/[.06] hover:text-white active:scale-95 ${showNotifications ? 'text-sky-300' : 'text-zinc-400'}`}
+          className={`overlay-panel relative flex h-9 w-9 items-center justify-center rounded-xl shadow-[0_8px_24px_rgba(0,0,0,0.6)] transition hover:bg-zinc-700/80 hover:text-white active:scale-95 ${showNotifications ? 'text-sky-300' : 'text-zinc-400'}`}
           title="Notifications"
         >
           <Bell size={14} />
@@ -487,7 +487,7 @@ export function InGameOverlay() {
         {/* Controller */}
         <button
           onClick={() => setShowController(v => !v)}
-          className={`glass flex h-9 w-9 items-center justify-center rounded-xl shadow-[0_8px_24px_rgba(0,0,0,0.45)] transition hover:bg-white/[.06] hover:text-white active:scale-95 ${showController ? 'text-violet-300' : 'text-zinc-400'}`}
+          className={`overlay-panel flex h-9 w-9 items-center justify-center rounded-xl shadow-[0_8px_24px_rgba(0,0,0,0.6)] transition hover:bg-zinc-700/80 hover:text-white active:scale-95 ${showController ? 'text-violet-300' : 'text-zinc-400'}`}
           title="Controller"
         >
           <Gamepad2 size={14} />
@@ -497,7 +497,7 @@ export function InGameOverlay() {
       {/* ── Notifications dropdown ──────────────────────────────── */}
       {showNotifications && (
         <div
-          className={`glass pointer-events-auto absolute top-[60px] ${actionsPos} w-72 overflow-hidden rounded-2xl shadow-[0_16px_48px_rgba(0,0,0,0.55)] transition-all duration-200 ${animated ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-2'}`}
+          className={`overlay-panel pointer-events-auto absolute top-[60px] ${actionsPos} w-72 overflow-hidden rounded-2xl shadow-[0_16px_48px_rgba(0,0,0,0.7)] transition-all duration-200 ${animated ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-2'}`}
           onClick={e => e.stopPropagation()}
         >
           <div className="flex items-center justify-between border-b border-white/[.06] px-3 py-2.5">
@@ -537,12 +537,12 @@ export function InGameOverlay() {
         className={`pointer-events-auto absolute top-4 ${panelPos} w-80 max-h-[calc(100vh-32px)] transition-all duration-200 ${panelSlide}`}
         onClick={e => e.stopPropagation()}
       >
-        <div className="glass flex h-full flex-col overflow-hidden rounded-2xl shadow-[0_24px_64px_rgba(0,0,0,0.6)]">
+<div className="overlay-panel flex h-full flex-col overflow-hidden rounded-2xl shadow-[0_24px_64px_rgba(0,0,0,0.8)]">
 
           {/* Header */}
           <div className="flex items-center gap-2.5 px-4 py-3 border-b border-white/[.06]">
             {/* Time pill */}
-            <div className="flex items-center gap-1.5 rounded-lg bg-white/[.05] px-2 py-1">
+            <div className="flex items-center gap-1.5 rounded-lg bg-zinc-800 px-2 py-1">
               <Clock size={11} className="text-zinc-500" />
               <span className="font-mono text-xs text-zinc-300">{formatTime(currentTime)}</span>
             </div>
@@ -623,7 +623,7 @@ export function InGameOverlay() {
                       : dl.status === 'paused' ? 'Paused'
                       : `${formatSpeed(dl.speedBps)} · ${formatBytes(dl.receivedBytes)} / ${formatBytes(dl.totalBytes)}`
                     return (
-                      <div key={dl.id} className="rounded-xl border border-white/[.05] bg-white/[.03] p-2.5">
+                        <div key={dl.id} className="rounded-xl border border-zinc-800 bg-zinc-900 p-2.5">
                         <div className="flex items-center gap-2">
                           <div className="min-w-0 flex-1">
                             <div className="truncate text-xs font-medium text-white">{dl.gameName || dl.appid}</div>
@@ -686,7 +686,7 @@ export function InGameOverlay() {
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     onClick={closePanelAndHide}
-                    className="flex items-center gap-2 rounded-xl border border-white/[.08] bg-white/[.05] px-3 py-2 text-left text-white transition hover:bg-white/[.1] active:scale-95"
+                    className="flex items-center gap-2 rounded-xl border border-zinc-700/60 bg-zinc-800 px-3 py-2 text-left text-white transition hover:bg-zinc-700 active:scale-95"
                   >
                     <Play size={13} />
                     <div>

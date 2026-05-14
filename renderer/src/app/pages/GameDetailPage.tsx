@@ -55,7 +55,8 @@ import { LinuxExperiences } from "@/components/LinuxExperiences"
 import { DownloadCheckModal } from "@/components/DownloadCheckModal"
 import { DesktopShortcutModal } from "@/components/DesktopShortcutModal"
 import { EditGameMetadataModal } from "@/components/EditGameMetadataModal"
-import { GameActionContextMenu, GameActionMenuPanel } from "@/components/GameActionMenu"
+import { GameActionContextMenu, GameActionMenuPanel, type CollectionPickerEntry } from "@/components/GameActionMenu"
+import { useUserCollections } from "@/hooks/use-user-collections"
 import { UpdateBackupWarningModal } from "@/components/VersionConflictModal"
 import { GameLinuxConfigModal } from "@/components/GameLinuxConfigModal"
 import { gameLogger } from "@/lib/logger"
@@ -787,6 +788,35 @@ export function GameDetailPage() {
     })
   }, [game?.screenshots, isOnline, resolvedScreenshots])
 
+  // Must be hoisted before any early return to keep the hook call count stable.
+  const userCollections = useUserCollections()
+
+  const collectionPicker = useMemo(() => ({
+    collections: userCollections.collections.map<CollectionPickerEntry>((c) => ({
+      id: c.id,
+      name: c.name,
+      included: game ? c.appids.includes(game.appid) : false,
+    })),
+    onAddToCollection: async (collectionId: string) => {
+      if (!game) return
+      const target = userCollections.collections.find((c) => c.id === collectionId)
+      if (!target) return
+      if (!target.appids.includes(game.appid)) {
+        await userCollections.setMembership(target, [...target.appids, game.appid])
+      }
+    },
+    onRemoveFromCollection: async (collectionId: string) => {
+      if (!game) return
+      const target = userCollections.collections.find((c) => c.id === collectionId)
+      if (!target) return
+      await userCollections.setMembership(target, target.appids.filter((id) => id !== game.appid))
+    },
+    onCreateCollection: async (name: string) => {
+      if (!game) return
+      await userCollections.create(name, [game.appid])
+    },
+  }), [userCollections, game])
+
   if (loading) {
     return (
       <div className="min-h-screen bg-[#09090b] pb-12">
@@ -963,9 +993,6 @@ export function GameDetailPage() {
   const createDesktopShortcut = async (exePath?: string | null) => {
     if (!window.ucDownloads?.createDesktopShortcut || !game) return null
     try {
-      try {
-        await window.ucDownloads?.deleteDesktopShortcut?.(game.name)
-      } catch { }
       const result = await window.ucDownloads.createDesktopShortcut(game.name, game.appid, exePath || undefined)
       if (result?.ok) {
         gameLogger.info('Desktop shortcut created', { appid: game.appid })
@@ -1093,7 +1120,8 @@ export function GameDetailPage() {
     if (!game || !window.ucDownloads?.createDesktopShortcut) return
     try {
       setShortcutFeedback(null)
-      const res = await createDesktopShortcut()
+      const exePath = await getSavedExe()
+      const res = await createDesktopShortcut(exePath)
       if (res?.ok) {
         gameLogger.info('Desktop shortcut created (details)', { appid: game.appid })
         setShortcutFeedback({ type: 'success', message: 'Desktop shortcut created.' })
@@ -1118,8 +1146,7 @@ export function GameDetailPage() {
     setPendingDeleteAction("installed")
   }
 
-  const handleActionCardContextMenu = (event: ReactMouseEvent<HTMLDivElement>) => {
-    if (!showActionMenu) return
+  const handleActionCardContextMenu= (event: ReactMouseEvent<HTMLDivElement>) => {
     event.preventDefault()
     setActionMenuOpen(false)
     setActionMenuContextPosition({ x: event.clientX, y: event.clientY })
@@ -1507,6 +1534,17 @@ export function GameDetailPage() {
                           alt={`Screenshot ${index + 1}`}
                           className="h-full w-full object-cover"
                           loading="lazy"
+                          onError={(e) => {
+                            const el = e.currentTarget
+                            const r = parseInt(el.dataset.retries ?? "0")
+                            if (r < 2) {
+                              el.dataset.retries = String(r + 1)
+                              const base = proxyImageUrl(screenshot)
+                              setTimeout(() => { el.src = base + (base.includes("?") ? "&" : "?") + `_r=${r + 1}` }, 1500 * (r + 1))
+                            } else {
+                              el.src = "./banner.png"
+                            }
+                          }}
                         />
                       </button>
                     ))}
@@ -1550,7 +1588,7 @@ export function GameDetailPage() {
             </div>
             <div className="space-y-6">
               <div
-                className={`p-8 rounded-3xl bg-zinc-950/60 border border-white/[.07] backdrop-blur-md shadow-xl ${showActionMenu ? "cursor-context-menu" : ""}`}
+                className="p-8 rounded-3xl bg-zinc-950/60 border border-white/[.07] backdrop-blur-md shadow-xl cursor-context-menu"
                 onContextMenu={handleActionCardContextMenu}
               >
                 <div className="flex items-center gap-3">
@@ -1674,7 +1712,7 @@ export function GameDetailPage() {
               </div>
 
               <GameActionContextMenu
-                open={Boolean(actionMenuContextPosition && showActionMenu)}
+                open={Boolean(actionMenuContextPosition)}
                 position={actionMenuContextPosition}
                 onClose={() => setActionMenuContextPosition(null)}
                 gameName={game?.name || "Game"}
@@ -1682,30 +1720,31 @@ export function GameDetailPage() {
                 isExternal={Boolean(installedManifest?.isExternal)}
                 isLinux={isLinux}
                 shortcutFeedback={null}
-                onSetExecutable={() => {
+                onSetExecutable={showActionMenu ? () => {
                   setActionMenuContextPosition(null)
                   void openExecutablePicker()
-                }}
-                onOpenFiles={() => {
+                } : undefined}
+                onOpenFiles={showActionMenu ? () => {
                   setActionMenuContextPosition(null)
                   void openGameFiles()
-                }}
-                onCreateShortcut={() => {
+                } : undefined}
+                onCreateShortcut={showActionMenu ? () => {
                   setActionMenuContextPosition(null)
                   void handleCreateShortcut()
-                }}
+                } : undefined}
                 onEditDetails={isExternalGame ? () => {
                   setActionMenuContextPosition(null)
                   setEditMetadataOpen(true)
                 } : undefined}
-                onLinuxConfig={isLinux ? () => {
+                onLinuxConfig={isLinux && showActionMenu ? () => {
                   setActionMenuContextPosition(null)
                   setLinuxConfigOpen(true)
                 } : undefined}
-                onDelete={() => {
+                onDelete={showActionMenu ? () => {
                   setActionMenuContextPosition(null)
                   void handleDeleteGame()
-                }}
+                } : undefined}
+                collectionPicker={collectionPicker}
               />
 
               <div className={`grid grid-cols-2 gap-4${isUCMatched ? ' opacity-40 blur-[2px] pointer-events-none select-none' : ''}`}>
@@ -1982,6 +2021,17 @@ export function GameDetailPage() {
                   )}
                   draggable={false}
                   onDragStart={(event) => event.preventDefault()}
+                  onError={(e) => {
+                    const el = e.currentTarget
+                    const r = parseInt(el.dataset.retries ?? "0")
+                    if (r < 2) {
+                      el.dataset.retries = String(r + 1)
+                      const base = proxyImageUrl(getHighQualityScreenshotUrl(lightboxScreenshots[lightboxIndex]))
+                      setTimeout(() => { el.src = base + (base.includes("?") ? "&" : "?") + `_r=${r + 1}` }, 1500 * (r + 1))
+                    } else {
+                      el.src = "./banner.png"
+                    }
+                  }}
                   style={{ transform: `translate(${lightboxPan.x}px, ${lightboxPan.y}px) scale(${lightboxZoom})` }}
                   onClick={() => {
                     if (suppressLightboxImageClickRef.current) {

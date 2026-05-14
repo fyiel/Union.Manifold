@@ -652,6 +652,8 @@ function createOverlayWindow() {
   overlayWindow.setIgnoreMouseEvents(true, { forward: true })
   overlayWindow.setVisibleOnAllWorkspaces(true)
   overlayWindow.setAlwaysOnTop(true, 'screen-saver')
+  // Prevent DRM/content-protection hooks in games from suppressing the overlay
+  overlayWindow.setContentProtection(false)
 
   overlayWindow.webContents.once('did-finish-load', () => {
     overlayReady = true
@@ -1322,6 +1324,8 @@ function injectOverlayIntoGame(pid, appid) {
       width: OVERLAY_FRAME_WIDTH,
       height: OVERLAY_FRAME_HEIGHT,
       show: false,
+      transparent: true,
+      backgroundColor: '#00000000',
       webPreferences: {
         contextIsolation: true,
         nodeIntegration: false,
@@ -6365,9 +6369,18 @@ function run7zExtract(archivePath, destDir, onProgress, options = {}) {
         }
         if (code !== 0) {
           const details = [stderr.trim(), stdout.trim()].filter(Boolean).join('\n')
-          const errorMsg = details
-            ? `7zip exited with code ${code}: ${details}`
-            : `7zip exited with code ${code}`
+
+          // Windows Defender (or other AV) quarantines game archives because they
+          // contain cracked executables. 7-Zip exits with code 2 and its output
+          // includes the phrase "virus or potentially unwanted software".
+          // Detect this and surface an actionable message instead of raw 7zip output.
+          const isAvBlock = /virus|potentially unwanted software|malicious/i.test(details)
+          const errorMsg = isAvBlock
+            ? 'Windows Defender blocked the archive. Open Windows Security → Virus & threat protection → Manage settings → Add or remove exclusions, add your UnionCrax install folder, then retry the download.'
+            : details
+              ? `7zip exited with code ${code}: ${details}`
+              : `7zip exited with code ${code}`
+
           uc_log(errorMsg)
           finish({ ok: false, error: errorMsg })
           return

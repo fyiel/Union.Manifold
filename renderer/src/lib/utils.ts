@@ -136,7 +136,10 @@ function normalizeRemoteMediaUrl(url: string): string {
 }
 
 function shouldProxyUcFilesMedia(): boolean {
-  return !isMainWebsiteBaseUrl(getApiBaseUrl())
+  // Always proxy files.union-crax.xyz URLs through the API server.
+  // The Electron renderer has no session cookies for files.union-crax.xyz,
+  // so direct fetches of private paths fail even when using the main API URL.
+  return true
 }
 
 export function proxyMediaUrl(mediaUrl: string): string {

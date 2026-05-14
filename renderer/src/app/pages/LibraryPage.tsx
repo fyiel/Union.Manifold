@@ -12,11 +12,12 @@ import { PaginationBar } from "@/components/PaginationBar"
 import { useGamesData } from "@/hooks/use-games"
 import type { Game } from "@/lib/types"
 import { hasInstalledVersionUpdate, pickGameExecutable, cn } from "@/lib/utils"
-import { useDownloads } from "@/context/downloads-context"
+import { useDownloads, useDownloadsActions } from "@/context/downloads-context"
+import { getCatalogCache, type CatalogGame } from "@/lib/catalog"
 import {
   Trash2, AlertTriangle, FolderOpen, ExternalLink, Unlink2,
   Terminal, CheckSquare2, Layers3, Search, ArrowUpDown, Settings2,
-  X, Loader2, Check, MoreHorizontal,
+  X, Loader2, Check, MoreHorizontal, Download,
 } from "lucide-react"
 import { ExePickerModal } from "@/components/ExePickerModal"
 import { EditGameMetadataModal } from "@/components/EditGameMetadataModal"
@@ -154,7 +155,7 @@ function formatRelativeTimestamp(timestamp?: number) {
 }
 
 export function LibraryPage() {
-  const { stats, loading: statsLoading } = useGamesData()
+  const { games, stats, loading: statsLoading } = useGamesData()
   const { downloads, clearByAppid } = useDownloads()
   const [loading, setLoading] = useState(true)
   const [installed, setInstalled] = useState<LibraryGame[]>([])
@@ -630,11 +631,8 @@ export function LibraryPage() {
     setShortcutFeedback(null)
 
     try {
-      await window.ucDownloads?.deleteDesktopShortcut?.(game.name)
-    } catch { }
-
-    try {
-      const result = await window.ucDownloads?.createDesktopShortcut?.(game.name, game.appid)
+      const exePath = await getSavedExe(game.appid)
+      const result = await window.ucDownloads?.createDesktopShortcut?.(game.name, game.appid, exePath || undefined)
       if (result?.ok) {
         gameLogger.info('Desktop shortcut created manually', { appid: game.appid })
         setShortcutFeedback({ appid: game.appid, type: 'success', message: 'Desktop shortcut created.' })
@@ -694,8 +692,8 @@ export function LibraryPage() {
       onProgress?.(i, total)
 
       try {
-        await window.ucDownloads?.deleteDesktopShortcut?.(game.name)
-        const result = await window.ucDownloads?.createDesktopShortcut?.(game.name, game.appid)
+        const exePath = await getSavedExe(game.appid)
+        const result = await window.ucDownloads?.createDesktopShortcut?.(game.name, game.appid, exePath || undefined)
         if (result?.ok) ok += 1
         else failed += 1
       } catch {
@@ -794,6 +792,23 @@ export function LibraryPage() {
   // adding a game from the right-click menu writes through to the account
   // database when signed in (and the local store either way).
   const userCollections = useUserCollections()
+  const { startGameDownload } = useDownloadsActions()
+
+  // When a collection filter is active, find members that are NOT installed so
+  // we can show them below the installed grid with a download button.
+  const uninstalledCollectionMembers = useMemo(() => {
+    if (selectedCollection === "all") return [] as CatalogGame[]
+    const collection = userCollections.collections.find(
+      (c) => c.name.toLowerCase() === selectedCollection.toLowerCase()
+    )
+    if (!collection) return [] as CatalogGame[]
+    const installedSet = new Set(installedWithMeta.map((g) => g.appid))
+    const missingAppids = collection.appids.filter((id) => !installedSet.has(id))
+    if (missingAppids.length === 0) return [] as CatalogGame[]
+    const catalogSource = games.length > 0 ? games : getCatalogCache().games
+    const catalogMap = new Map(catalogSource.map((g) => [g.appid, g]))
+    return missingAppids.map((id) => catalogMap.get(id)).filter(Boolean) as CatalogGame[]
+  }, [selectedCollection, userCollections.collections, installedWithMeta, games])
 
   const buildCollectionPicker = useCallback(
     (game: LibraryGame) => {
@@ -1057,7 +1072,10 @@ export function LibraryPage() {
       {/* Filter status + clear */}
       {(selectedCollection !== "all" || debouncedSearch) && (
         <div className="text-xs text-zinc-500">
-          {filteredInstalled.length} of {installedWithMeta.length} games shown
+          {filteredInstalled.length} of {installedWithMeta.length} games installed
+          {uninstalledCollectionMembers.length > 0 && (
+            <span className="ml-1">· {uninstalledCollectionMembers.length} not installed</span>
+          )}
           <button
             type="button"
             onClick={() => { setLibrarySearch(""); setDebouncedSearch(""); setSelectedCollection("all") }}
@@ -1235,6 +1253,35 @@ export function LibraryPage() {
           </div>
         )}
       </section>
+
+      {/* Uninstalled collection members — shown when filtering by a specific collection */}
+      {uninstalledCollectionMembers.length > 0 && !loading && !statsLoading && (
+        <section className="space-y-3">
+          <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500 flex items-center gap-1.5">
+            <Download className="h-3 w-3" />
+            Not installed ({uninstalledCollectionMembers.length})
+          </p>
+          <div className="grid gap-4 grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+            {uninstalledCollectionMembers.map((game) => (
+              <div key={game.appid} className="group/tile relative rounded-xl opacity-60 hover:opacity-100 transition-opacity duration-200">
+                <GameCard game={game} size="compact" />
+                <div className="absolute inset-x-2 top-2 z-20 flex items-center justify-end opacity-0 transition-all duration-200 group-hover/tile:opacity-100">
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); void startGameDownload(game as any) }}
+                    className="h-8 w-8 rounded-full border border-white/[.08] bg-black/70 text-white hover:bg-white/20 backdrop-blur-md"
+                    title="Download game"
+                    aria-label="Download game"
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       <GameActionContextMenu
         open={Boolean(cardContextMenu)}
