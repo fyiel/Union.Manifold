@@ -307,6 +307,14 @@ export function GameDetailPage() {
         // For external (or offline fallback), load from installed manifest
         throw new Error('load from manifest')
       } catch (err) {
+        gameLogger.warn("Game detail API load failed; attempting manifest fallback", {
+          context: "Game",
+          data: {
+            appid,
+            isExternal: appid.startsWith('external-'),
+            error: err instanceof Error ? err.message : String(err),
+          },
+        })
         // Try fallback: ask main process for installed manifest
         try {
           if (window.ucDownloads?.getInstalledGlobal || window.ucDownloads?.getInstalled) {
@@ -318,6 +326,12 @@ export function GameDetailPage() {
               window.dispatchEvent(new CustomEvent("uc_game_name", { detail: { appid, name: meta?.name, genres: meta?.genres } }))
               setSelectedImage(meta.hero_image || meta.splash || meta.image || "")
               setError(null)
+              gameLogger.info("Game detail fallback loaded from local manifest", {
+                context: "Game",
+                data: {
+                  appid,
+                },
+              })
               return
             }
           }
@@ -1276,7 +1290,7 @@ export function GameDetailPage() {
           {/* Static blurred cover — only when animations are OFF */}
           {!showBlobs && (
             <img
-              src={proxyImageUrl(backgroundImage) || "./banner.png"}
+              src={proxyImageUrl(backgroundImage) || "./fallbacks/game-hero-16x9.svg"}
               alt=""
               aria-hidden="true"
               className="absolute inset-0 h-full w-full object-cover opacity-35 blur-[24px] scale-125"
@@ -1351,7 +1365,7 @@ export function GameDetailPage() {
               <div className="relative aspect-video overflow-hidden">
                 {!heroImageLoaded && <div className="udl-skeleton absolute inset-0 z-0 rounded-none" />}
                 <img
-                  src={proxyImageUrl(heroImage || "") || "./banner.png"}
+                  src={proxyImageUrl(heroImage || "") || "./fallbacks/game-hero-16x9.svg"}
                   alt={game.name}
                   className="h-full w-full object-cover"
                   onLoad={() => setHeroImageLoaded(true)}
@@ -1530,7 +1544,7 @@ export function GameDetailPage() {
                         aria-label={`Open screenshot ${index + 1}`}
                       >
                         <img
-                          src={proxyImageUrl(screenshot) || "./banner.png"}
+                          src={proxyImageUrl(screenshot) || "./fallbacks/game-shot-16x9.svg"}
                           alt={`Screenshot ${index + 1}`}
                           className="h-full w-full object-cover"
                           loading="lazy"
@@ -1542,7 +1556,7 @@ export function GameDetailPage() {
                               const base = proxyImageUrl(screenshot)
                               setTimeout(() => { el.src = base + (base.includes("?") ? "&" : "?") + `_r=${r + 1}` }, 1500 * (r + 1))
                             } else {
-                              el.src = "./banner.png"
+                              el.src = "./fallbacks/game-shot-16x9.svg"
                             }
                           }}
                         />
@@ -2013,7 +2027,7 @@ export function GameDetailPage() {
                 onPointerCancel={handleLightboxPointerUp}
               >
                 <img
-                  src={proxyImageUrl(getHighQualityScreenshotUrl(lightboxScreenshots[lightboxIndex])) || "./banner.png"}
+                  src={proxyImageUrl(getHighQualityScreenshotUrl(lightboxScreenshots[lightboxIndex])) || "./fallbacks/game-shot-16x9.svg"}
                   alt={`Screenshot ${lightboxIndex + 1}`}
                   className={cn(
                     "max-w-full max-h-full object-contain mx-auto transition-transform duration-200 select-none",
@@ -2029,7 +2043,7 @@ export function GameDetailPage() {
                       const base = proxyImageUrl(getHighQualityScreenshotUrl(lightboxScreenshots[lightboxIndex]))
                       setTimeout(() => { el.src = base + (base.includes("?") ? "&" : "?") + `_r=${r + 1}` }, 1500 * (r + 1))
                     } else {
-                      el.src = "./banner.png"
+                      el.src = "./fallbacks/game-shot-16x9.svg"
                     }
                   }}
                   style={{ transform: `translate(${lightboxPan.x}px, ${lightboxPan.y}px) scale(${lightboxZoom})` }}

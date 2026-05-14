@@ -134,7 +134,7 @@ export function LauncherPage() {
               installedMap.set(meta.appid, {
                 ...meta,
                 name: meta.name || meta.appid,
-                image: meta.localImage || meta.image || "./banner.png",
+                image: meta.localImage || meta.image || "./fallbacks/game-card-3x4.svg",
                 genres: Array.isArray(meta.genres) ? meta.genres : [],
               })
             }
@@ -733,7 +733,7 @@ export function LauncherPage() {
                         {previews.map((g) => (
                           <div key={g.appid} className="relative overflow-hidden">
                             <img
-                              src={proxyImageUrl(g.image) || "./banner.png"}
+                              src={proxyImageUrl(g.image) || "./fallbacks/game-hero-16x9.svg"}
                               alt=""
                               className="h-full w-full object-cover"
                               loading="lazy"

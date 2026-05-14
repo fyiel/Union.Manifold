@@ -26,7 +26,7 @@ export const GameCardCompact = memo(function GameCardCompact({ game }: { game: C
   const [sessionRevealed, setSessionRevealed] = useState(false)
   const [imageLoaded, setImageLoaded] = useState(false)
   const isNSFW = game.genres?.some((genre) => genre.toLowerCase() === "nsfw")
-  const cardImageSrc = proxyImageUrl(getCardImage(game.image || "")) || "./banner.png"
+  const cardImageSrc = proxyImageUrl(getCardImage(game.image || "")) || "./fallbacks/game-card-3x4.svg"
 
   const userCollections = useUserCollections()
   const [contextMenuPos, setContextMenuPos] = useState<{ x: number; y: number } | null>(null)

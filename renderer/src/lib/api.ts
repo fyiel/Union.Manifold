@@ -14,6 +14,44 @@ const connectivityListeners = new Set<() => void>()
 let serviceReachable = readPersistedServiceReachability()
 let cachedConnectivitySnapshot: ApiConnectivitySnapshot | null = null
 
+function classifyApiPath(path: string): string {
+  if (!path) return "unknown"
+  if (path.startsWith("/api/games/")) return "games-detail"
+  if (path.startsWith("/api/games")) return "games-list"
+  if (path.startsWith("/api/ucfiles/media")) return "media-proxy"
+  if (path.startsWith("/api/health")) return "health"
+  return "other"
+}
+
+function logApiFailure(event: {
+  stage: "auth-fetch" | "window-fetch"
+  path: string
+  method: string
+  status: number
+  statusText: string
+  error?: string
+}) {
+  const baseUrl = getApiBaseUrl()
+  const snapshot = getApiConnectivitySnapshot()
+  apiLogger.warn("apiFetch request failed", {
+    context: "API",
+    data: {
+      stage: event.stage,
+      class: classifyApiPath(event.path),
+      path: event.path,
+      method: event.method,
+      status: event.status,
+      statusText: event.statusText,
+      error: event.error,
+      baseUrl,
+      browserOnline: snapshot.browserOnline,
+      serviceReachable: snapshot.serviceReachable,
+      isOnline: snapshot.isOnline,
+      ts: new Date().toISOString(),
+    },
+  })
+}
+
 function readPersistedServiceReachability(): boolean {
   if (typeof window === "undefined") return true
   try {
@@ -155,6 +193,7 @@ export async function apiFetch(path: string, init?: RequestInit) {
   const finalInit: RequestInit = { ...nextInit, headers }
 
   const canUseAuthFetch = typeof window !== "undefined" && Boolean(window.ucAuth?.fetch)
+  const method = String(finalInit.method || "GET").toUpperCase()
   if (canUseAuthFetch) {
     let body: any = finalInit.body
     let authHeaders = new Headers(finalInit.headers || {})
@@ -183,6 +222,24 @@ export async function apiFetch(path: string, init?: RequestInit) {
       // runs instead of throwing an uncaught RangeError.
       const rawStatus = result.status || 0
       const safeStatus = rawStatus >= 200 && rawStatus <= 599 ? rawStatus : 503
+      if (rawStatus === 0 || String(result.statusText || "").toLowerCase() === "fetch_failed") {
+        logApiFailure({
+          stage: "auth-fetch",
+          path,
+          method,
+          status: 0,
+          statusText: "fetch_failed",
+          error: "ipc_auth_fetch_failed",
+        })
+      } else if (safeStatus >= 400) {
+        logApiFailure({
+          stage: "auth-fetch",
+          path,
+          method,
+          status: safeStatus,
+          statusText: result.statusText || "",
+        })
+      }
       return new Response(bytes as any, {
         status: safeStatus,
         statusText: result.statusText || (safeStatus !== rawStatus ? "Network Error" : ""),
@@ -194,9 +251,26 @@ export async function apiFetch(path: string, init?: RequestInit) {
   try {
     const response = await fetch(apiUrl(path), finalInit)
     setServiceReachable(true)
+    if (!response.ok) {
+      logApiFailure({
+        stage: "window-fetch",
+        path,
+        method,
+        status: response.status,
+        statusText: response.statusText || "",
+      })
+    }
     return response
   } catch (error) {
     setServiceReachable(false)
+    logApiFailure({
+      stage: "window-fetch",
+      path,
+      method,
+      status: 0,
+      statusText: "fetch_error",
+      error: error instanceof Error ? error.message : String(error),
+    })
     throw error
   }
 }
