@@ -1,5 +1,11 @@
 # Changelog
 
+## v2.0.2 - 2026-05-14
+
+### Fixes & Improvements
+
+- Fixed overlay DLL stability issues across multiple graphics APIs (D3D9, D3D11, OpenGL) and improved memory management in shared frame buffer and IPC pipe client.
+
 ## v2.0.1 - 2026-05-13
 
 ### Fixes & Improvements
