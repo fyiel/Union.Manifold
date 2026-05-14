@@ -89,7 +89,7 @@ function manifestToGame(entry: LibraryEntry): LibraryGame | null {
       name: entry.name || entry.appid,
       description: "",
       genres: [],
-      image: "./banner.png",
+      image: "./fallbacks/game-card-3x4.svg",
       release_date: "",
       size: "",
       source: "local",
@@ -110,7 +110,7 @@ function scoreLibraryGame(game: Game): number {
   if (game.source && game.source !== "local") score += 3
   if (game.name && game.name !== game.appid) score += 1
   if (game.description) score += 1
-  if (game.image && game.image !== "./banner.png") score += 1
+  if (game.image && game.image !== "./fallbacks/game-card-3x4.svg") score += 1
   if (game.release_date) score += 1
   if (game.size) score += 1
   if (game.genres && game.genres.length > 0) score += 1

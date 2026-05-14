@@ -1958,45 +1958,75 @@ const BASE_URL_CANDIDATES = [
 let resolvedBaseUrl = DEFAULT_BASE_URL
 
 /**
- * Probe each candidate with a HEAD request (4 s timeout) and return the first
- * reachable origin, or the primary as a fallback if none respond.
+ * Probe each candidate with app-specific readiness checks and return the first
+ * usable origin, or the primary as a fallback if none respond.
  * @param {(status: string) => void} onStatus - callback to push status text to splash
  */
 async function detectBestBaseUrl(onStatus) {
-  function probe(baseUrl) {
-    return new Promise((resolve) => {
-      let done = false
-      const finish = (ok) => {
-        if (done) return
-        done = true
-        clearTimeout(timer)
-        resolve(ok)
+  async function fetchJsonWithTimeout(url, timeoutMs) {
+    const response = await fetch(url, { method: 'GET', signal: AbortSignal.timeout(timeoutMs) })
+    const text = await response.text()
+    let json = null
+    try {
+      json = text ? JSON.parse(text) : null
+    } catch {
+      json = null
+    }
+    return { response, json }
+  }
+
+  async function probe(baseUrl) {
+    const origin = normalizeBaseUrl(baseUrl)
+
+    // Primary path: dedicated launcher readiness contract.
+    try {
+      const readyUrl = new URL('/api/client-ready', origin).toString()
+      const { response, json } = await fetchJsonWithTimeout(readyUrl, 3500)
+      if (response.ok && json && typeof json === 'object' && json.ready === true) {
+        return { ok: true, reason: 'client-ready endpoint passed' }
       }
-      const timer = setTimeout(() => finish(false), 4000)
-      try {
-        const parsed = new URL(baseUrl)
-        const req = https.request(
-          { hostname: parsed.hostname, port: 443, path: '/', method: 'HEAD', timeout: 3500 },
-          (res) => finish(res.statusCode < 500)
-        )
-        req.on('error', () => finish(false))
-        req.on('timeout', () => { try { req.destroy() } catch { } finish(false) })
-        req.end()
-      } catch {
-        finish(false)
+      if (response.status !== 404) {
+        return { ok: false, reason: `client-ready returned ${response.status}` }
       }
-    })
+    } catch (err) {
+      const msg = err && err.name === 'AbortError' ? 'timeout' : String(err)
+      return { ok: false, reason: `client-ready failed (${msg})` }
+    }
+
+    // Backward-compatible fallback: require both /api/health and /api/games shape checks.
+    try {
+      const [health, games] = await Promise.all([
+        fetchJsonWithTimeout(new URL('/api/health', origin).toString(), 3500),
+        fetchJsonWithTimeout(new URL('/api/games?limit=1', origin).toString(), 3500),
+      ])
+
+      const healthOk = health.response.ok && health.json && typeof health.json === 'object' && (health.json.status === 'up' || health.json.status === 'degraded')
+      const gamesOk = games.response.ok && Array.isArray(games.json)
+
+      if (healthOk && gamesOk) {
+        return { ok: true, reason: 'health+games fallback checks passed' }
+      }
+
+      const reasons = []
+      if (!healthOk) reasons.push(`health=${health.response.status}`)
+      if (!gamesOk) reasons.push(`games=${games.response.status}`)
+      return { ok: false, reason: reasons.join(', ') || 'fallback checks failed' }
+    } catch (err) {
+      const msg = err && err.name === 'AbortError' ? 'timeout' : String(err)
+      return { ok: false, reason: `fallback probes failed (${msg})` }
+    }
   }
 
   for (const candidate of BASE_URL_CANDIDATES) {
     const hostname = (() => { try { return new URL(candidate).hostname } catch { return candidate } })()
     if (typeof onStatus === 'function') onStatus(`Checking ${hostname}...`)
-    ucLog(`detectBestBaseUrl: probing ${candidate}`)
-    const ok = await probe(candidate)
-    if (ok) {
-      ucLog(`detectBestBaseUrl: resolved to ${candidate}`)
+    ucLog(`detectBestBaseUrl: probing ${candidate} (api readiness)`)
+    const result = await probe(candidate)
+    if (result.ok) {
+      ucLog(`detectBestBaseUrl: resolved to ${candidate} (${result.reason})`)
       return candidate
     }
+    ucLog(`detectBestBaseUrl: rejected ${candidate} (${result.reason})`, 'warn')
   }
   ucLog('detectBestBaseUrl: all candidates unreachable, defaulting to primary', 'warn')
   return DEFAULT_BASE_URL
@@ -3154,6 +3184,9 @@ ipcMain.handle('uc:network-test', async (_event, baseUrl) => {
     const origin = normalizeBaseUrl(baseUrl || DEFAULT_BASE_URL)
     const targets = [
       { label: 'API base', url: origin },
+      { label: 'API client-ready', url: new URL('/api/client-ready', origin).toString() },
+      { label: 'API health', url: new URL('/api/health', origin).toString() },
+      { label: 'API games', url: new URL('/api/games?limit=1', origin).toString() },
       { label: 'API downloads', url: new URL('/api/downloads/all', origin).toString() },
       { label: 'UC-Files', url: 'https://files.union-crax.xyz' }
     ]
@@ -6952,7 +6985,7 @@ function createWindow(existingSplash) {
     try {
       const url = resolvedBaseUrl || DEFAULT_BASE_URL
       mainWindow.webContents.executeJavaScript(
-        `(function(){try{localStorage.setItem('uc_custom_api_base_url',${JSON.stringify(url)})}catch(e){}})()`
+        `(function(){try{const existing=localStorage.getItem('uc_custom_api_base_url');if(!existing||!String(existing).trim()){localStorage.setItem('uc_custom_api_base_url',${JSON.stringify(url)})}}catch(e){}})()`
       ).catch(() => {})
     } catch { }
   })

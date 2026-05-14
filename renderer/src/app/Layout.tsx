@@ -125,6 +125,24 @@ export function AppLayout() {
       triggerAutoShareLogs()
     }
 
+    const handleResourceError = (event: Event) => {
+      const target = event.target as (HTMLImageElement | HTMLSourceElement | null)
+      if (!target) return
+      const tagName = (target as Element).tagName?.toLowerCase?.() || "unknown"
+      const src = (target as HTMLImageElement).currentSrc || (target as HTMLImageElement).src || ""
+      if (!src) return
+
+      logger.warn("Resource load failed", {
+        context: "Window",
+        data: {
+          tagName,
+          src,
+          page: window.location.pathname,
+        },
+      })
+      triggerAutoShareLogs()
+    }
+
     const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
       logger.error("Unhandled promise rejection", {
         context: "Window",
@@ -138,9 +156,11 @@ export function AppLayout() {
     }
 
     window.addEventListener("error", handleWindowError)
+    window.addEventListener("error", handleResourceError, true)
     window.addEventListener("unhandledrejection", handleUnhandledRejection)
     return () => {
       window.removeEventListener("error", handleWindowError)
+      window.removeEventListener("error", handleResourceError, true)
       window.removeEventListener("unhandledrejection", handleUnhandledRejection)
     }
   }, [])

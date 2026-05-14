@@ -66,6 +66,7 @@ export const GameCard = memo(function GameCard({
   const [hoveredStats, setHoveredStats] = useState<{ downloads: number; views: number } | null>(null)
   const [isLoadingStats, setIsLoadingStats] = useState(false)
   const isCompact = size === "compact"
+  const cardFallbackImage = isCompact ? "./fallbacks/game-card-4x5.svg" : "./fallbacks/game-card-3x4.svg"
 
   const genres = Array.isArray(game.genres) ? game.genres : []
   const displayGenres = genres.filter((genre) => String(genre).toLowerCase() !== "nsfw")
@@ -492,7 +493,7 @@ export const GameCard = memo(function GameCard({
       game.hero_image,
       game.background_image,
       game.splash,
-      "./banner.png",
+      cardFallbackImage,
     ]
     const seen = new Set<string>()
     return candidates.reduce<string[]>((next, candidate) => {
@@ -504,9 +505,9 @@ export const GameCard = memo(function GameCard({
       next.push(resolved)
       return next
     }, [])
-  }, [game.background_image, game.hero_image, game.image, game.localImage, game.splash])
+  }, [cardFallbackImage, game.background_image, game.hero_image, game.image, game.localImage, game.splash])
 
-  const cardImageSrc = cardImageCandidates[imageCandidateIndex] || "./banner.png"
+  const cardImageSrc = cardImageCandidates[imageCandidateIndex] || cardFallbackImage
 
   useEffect(() => {
     setImageCandidateIndex(0)

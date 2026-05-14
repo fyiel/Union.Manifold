@@ -26,7 +26,7 @@ function downloadItemImageSrc(game: any | null | undefined): string {
     game?.localHeroImage ||
     game?.localSplash ||
     game?.localImage ||
-    "./banner.png"
+    "./fallbacks/game-hero-16x9.svg"
   return proxyImageUrl(candidate) || candidate
 }
 
