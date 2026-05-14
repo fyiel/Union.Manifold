@@ -286,9 +286,6 @@ export const GameCard = memo(function GameCard({
   const createDesktopShortcut = async (exePath?: string | null) => {
     if (!window.ucDownloads?.createDesktopShortcut) return
     try {
-      try {
-        await window.ucDownloads?.deleteDesktopShortcut?.(game.name)
-      } catch { }
       const result = await window.ucDownloads.createDesktopShortcut(game.name, game.appid, exePath || undefined)
       if (result?.ok) {
         gameLogger.info('Desktop shortcut created', { appid: game.appid })

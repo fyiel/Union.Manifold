@@ -80,6 +80,15 @@
   border: 1px solid rgba(255, 255, 255, 0.07);
 }
 
+/* In-game overlay panels — no backdrop-filter so the GPU isn't forced to
+   composite the game framebuffer every frame (prevents lag / FPS drops).
+   Uses the UDL zinc-950 (#09090b) base with 96% opacity for a solid,
+   legible surface that still reads as a native dark panel over any game. */
+.overlay-panel {
+  background: rgba(9, 9, 11, 0.96);
+  border: 1px solid rgba(63, 63, 70, 0.55);
+}
+
 /* Section label - used for category headings */
 .section-label {
   font-size: 0.65rem;

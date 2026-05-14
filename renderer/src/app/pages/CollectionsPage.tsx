@@ -90,6 +90,34 @@ export function CollectionsPage() {
     return new Map(source.map((game) => [game.appid, game.version || ""]))
   }, [catalogGames])
 
+  const catalogById = useMemo(() => {
+    const source = catalogGames.length > 0 ? catalogGames : getCatalogCache().games
+    return new Map(source.map((g) => [g.appid, g]))
+  }, [catalogGames])
+
+  // Combined list for the collection editor: installed games first, then every
+  // catalog game not already installed so users can add uninstalled titles.
+  const allGamesForPicker = useMemo(() => {
+    const installedSet = new Set(installed.map((g) => g.appid))
+    const result: Array<{ appid: string; name: string; image?: string; installed: boolean }> = installed.map((g) => ({
+      appid: g.appid,
+      name: g.name,
+      image: g.image,
+      installed: true,
+    }))
+    catalogById.forEach((g, appid) => {
+      if (!installedSet.has(appid)) {
+        result.push({
+          appid,
+          name: g.name,
+          image: g.image || g.hero_image || g.splash || "",
+          installed: false,
+        })
+      }
+    })
+    return result
+  }, [installed, catalogById])
+
   // ---- Load installed games for the picker + cover mosaics ----
   useEffect(() => {
     let mounted = true
@@ -153,6 +181,32 @@ export function CollectionsPage() {
     [installedById, startGameDownload]
   )
 
+  const handleUpdateAll = useCallback(
+    async (collection: UserCollection) => {
+      const catalog = getCatalogCache().games as CatalogGame[]
+      const byId = new Map(catalog.map((g) => [g.appid, g]))
+      const outdatedAppids = collection.appids.filter((id) => {
+        const inst = installedById.get(id)
+        if (!inst) return false
+        return hasInstalledVersionUpdate(catalogVersionByAppid.get(id), [inst.version])
+      })
+      let queued = 0
+      let skipped = 0
+      for (const appid of outdatedAppids) {
+        const game = byId.get(appid)
+        if (!game) { skipped += 1; continue }
+        try {
+          await startGameDownload(game as any)
+          queued += 1
+        } catch {
+          skipped += 1
+        }
+      }
+      setBatchInstallStatus({ name: collection.name, queued, skipped })
+    },
+    [installedById, catalogVersionByAppid, startGameDownload]
+  )
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
     if (!q) return collections
@@ -182,7 +236,6 @@ export function CollectionsPage() {
           <Button
             className="rounded-2xl gap-2 h-10"
             onClick={() => setCreateOpen(true)}
-            disabled={installed.length === 0 && collections.length === 0}
           >
             <Plus className="h-4 w-4" />
             New collection
@@ -326,11 +379,19 @@ export function CollectionsPage() {
 
       {/* Body */}
       <section className="space-y-3">
-        <div>
+        <div className="flex items-end justify-between gap-3">
           <h2 className="text-lg font-bold tracking-tight text-white flex items-center gap-2">
             <Layers3 className="h-4 w-4" />
             Made by you
           </h2>
+          <button
+            type="button"
+            onClick={() => void refresh()}
+            className="inline-flex items-center gap-1 rounded-full border border-white/[.07] bg-white/[.03] px-2.5 py-1 text-[11px] text-zinc-300 hover:bg-white/[.07] hover:text-white transition-colors"
+          >
+            <RefreshCw className={cn("h-3 w-3", loading && "animate-spin")} />
+            Refresh
+          </button>
         </div>
       </section>
       {loading || installedLoading ? (
@@ -341,7 +402,6 @@ export function CollectionsPage() {
         </div>
       ) : collections.length === 0 ? (
         <EmptyState
-          installedCount={installed.length}
           onCreate={() => setCreateOpen(true)}
         />
       ) : filtered.length === 0 ? (
@@ -362,7 +422,8 @@ export function CollectionsPage() {
               key={collection.id}
               collection={collection}
               installedById={installedById}
-                catalogVersionByAppid={catalogVersionByAppid}
+              catalogById={catalogById}
+              catalogVersionByAppid={catalogVersionByAppid}
               renaming={renameTarget?.id === collection.id}
               renameDraft={renameDraft}
               renameInputRef={renameInputRef}
@@ -381,6 +442,7 @@ export function CollectionsPage() {
               onDelete={() => setDeleteTarget(collection)}
               onShare={() => setShareTarget(collection)}
               onInstallMissing={() => void handleInstallMissing(collection)}
+              onUpdateOutdated={() => void handleUpdateAll(collection)}
             />
           ))}
         </div>
@@ -416,7 +478,7 @@ export function CollectionsPage() {
         open={createOpen}
         title="Create a collection"
         description="Pick a name and the games that belong to it."
-        installed={installed}
+        games={allGamesForPicker}
         initialName=""
         initialMembers={new Set()}
         confirmLabel="Create"
@@ -433,7 +495,7 @@ export function CollectionsPage() {
         open={editTarget != null}
         title={editTarget ? `Edit "${editTarget.name}"` : ""}
         description="Add or remove games. The change syncs to your other devices when signed in."
-        installed={installed}
+        games={allGamesForPicker}
         initialName={editTarget?.name || ""}
         initialMembers={new Set(editTarget?.appids || [])}
         confirmLabel="Save"
@@ -524,6 +586,7 @@ function SyncStatus({ authed, loading }: { authed: boolean | null; loading: bool
 function CollectionCard({
   collection,
   installedById,
+  catalogById,
   catalogVersionByAppid,
   renaming,
   renameDraft,
@@ -537,9 +600,11 @@ function CollectionCard({
   onDelete,
   onShare,
   onInstallMissing,
+  onUpdateOutdated,
 }: {
   collection: UserCollection
   installedById: Map<string, InstalledGame>
+  catalogById: Map<string, CatalogGame>
   catalogVersionByAppid: Map<string, string>
   renaming: boolean
   renameDraft: string
@@ -553,6 +618,7 @@ function CollectionCard({
   onDelete: () => void
   onShare: () => void
   onInstallMissing: () => void
+  onUpdateOutdated: () => void
 }) {
   const installedAppids = collection.appids.filter((id) => installedById.has(id))
   const missingCount = collection.appids.length - installedAppids.length
@@ -560,7 +626,17 @@ function CollectionCard({
     const installed = installedById.get(appid)
     return hasInstalledVersionUpdate(catalogVersionByAppid.get(appid), [installed?.version])
   }).length
-  const cover = installedAppids.slice(0, 4).map((id) => installedById.get(id)?.image).filter(Boolean) as string[]
+  // Cover mosaic: prefer installed images, fall back to catalog images for uninstalled members
+  const coverCandidates: string[] = []
+  for (const id of collection.appids) {
+    if (coverCandidates.length >= 4) break
+    const installedImg = installedById.get(id)?.image
+    if (installedImg) { coverCandidates.push(installedImg); continue }
+    const catalogGame = catalogById.get(id)
+    const catalogImg = catalogGame?.image || catalogGame?.hero_image || catalogGame?.splash
+    if (catalogImg) coverCandidates.push(catalogImg)
+  }
+  const cover = coverCandidates
 
   return (
     <div className="group/card flex flex-col rounded-3xl border border-white/[.07] bg-zinc-900/40 backdrop-blur-md overflow-hidden transition-colors hover:border-white/[.14]">
@@ -635,6 +711,14 @@ function CollectionCard({
               onClick={onInstallMissing}
             >
               <Download className="h-3.5 w-3.5" />
+            </IconButton>
+          )}
+          {updateCount > 0 && (
+            <IconButton
+              title={`Update ${updateCount} game${updateCount === 1 ? "" : "s"}`}
+              onClick={onUpdateOutdated}
+            >
+              <RefreshCw className="h-3.5 w-3.5" />
             </IconButton>
           )}
           <IconButton title="Edit games" onClick={onEditMembers}>
@@ -993,10 +1077,8 @@ function IconButton({
 }
 
 function EmptyState({
-  installedCount,
   onCreate,
 }: {
-  installedCount: number
   onCreate: () => void
 }) {
   return (
@@ -1007,16 +1089,12 @@ function EmptyState({
       <div className="space-y-1.5">
         <h2 className="text-xl font-bold text-white">No collections yet</h2>
         <p className="text-sm text-zinc-400 max-w-md mx-auto">
-          Bundle installed games — by genre, vibe, party night, anything — and reach them from the sidebar. Sign in and they'll sync to every device.
+          Bundle games — by genre, vibe, party night, anything — and reach them from the sidebar. Sign in and they'll sync to every device.
         </p>
       </div>
-      {installedCount === 0 ? (
-        <p className="text-xs text-zinc-500">Install at least one game to start grouping.</p>
-      ) : (
-        <Button onClick={onCreate} className="rounded-2xl gap-2 h-10">
-          <Plus className="h-4 w-4" /> Create your first collection
-        </Button>
-      )}
+      <Button onClick={onCreate} className="rounded-2xl gap-2 h-10">
+        <Plus className="h-4 w-4" /> Create your first collection
+      </Button>
     </div>
   )
 }
@@ -1210,7 +1288,7 @@ function CollectionEditorDialog({
   open,
   title,
   description,
-  installed,
+  games,
   initialName,
   initialMembers,
   confirmLabel,
@@ -1221,7 +1299,7 @@ function CollectionEditorDialog({
   open: boolean
   title: string
   description?: string
-  installed: InstalledGame[]
+  games: Array<{ appid: string; name: string; image?: string; installed: boolean }>
   initialName: string
   initialMembers: Set<string>
   confirmLabel: string
@@ -1253,11 +1331,18 @@ function CollectionEditorDialog({
     })
   }
 
+  // When no search: show installed games + already-selected uninstalled games.
+  // When searching: show all matching games (installed or not).
   const filtered = useMemo(() => {
     const q = filter.trim().toLowerCase()
-    if (!q) return installed
-    return installed.filter((g) => g.name.toLowerCase().includes(q) || g.appid.toLowerCase().includes(q))
-  }, [filter, installed])
+    return games.filter((g) => {
+      const matches = !q || g.name.toLowerCase().includes(q) || g.appid.toLowerCase().includes(q)
+      if (!matches) return false
+      if (g.installed) return true
+      // Uninstalled: always show if already selected, otherwise only when searching
+      return selected.has(g.appid) || Boolean(q)
+    })
+  }, [filter, games, selected])
 
   const canConfirm = Boolean(name.trim()) && selected.size > 0 && !submitting
 
@@ -1293,7 +1378,7 @@ function CollectionEditorDialog({
               <Input
                 value={filter}
                 onChange={(e) => setFilter(e.target.value)}
-                placeholder="Search your library…"
+                placeholder="Search games… (type to find uninstalled)"
                 className="h-9 rounded-xl bg-white/[.03] border-white/[.07] pl-8"
               />
             </div>
@@ -1301,8 +1386,8 @@ function CollectionEditorDialog({
         </div>
 
         <ScrollArea className="flex-1 px-6 min-h-[180px]">
-          {installed.length === 0 ? (
-            <p className="text-sm text-zinc-500 text-center py-12">You don't have any installed games yet.</p>
+          {games.length === 0 ? (
+            <p className="text-sm text-zinc-500 text-center py-12">No games available.</p>
           ) : filtered.length === 0 ? (
             <p className="text-sm text-zinc-500 text-center py-12">No games match "{filter}".</p>
           ) : (
@@ -1333,6 +1418,9 @@ function CollectionEditorDialog({
                     </div>
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-xs font-semibold text-zinc-100">{game.name}</p>
+                      {!game.installed && (
+                        <p className="text-[10px] text-zinc-500">Not installed</p>
+                      )}
                     </div>
                     <div
                       className={cn(

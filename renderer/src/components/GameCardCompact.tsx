@@ -1,9 +1,11 @@
 "use client"
 
 import { Link } from "react-router-dom"
-import { memo, useEffect, useState } from "react"
+import { memo, useCallback, useEffect, useMemo, useState } from "react"
 import { getCardImage, proxyImageUrl } from "@/lib/utils"
 import { nsfwRevealedAppids } from "@/lib/nsfw-session"
+import { GameActionContextMenu, type CollectionPickerEntry } from "@/components/GameActionMenu"
+import { useUserCollections } from "@/hooks/use-user-collections"
 
 type CompactGame = {
   appid: string
@@ -25,6 +27,33 @@ export const GameCardCompact = memo(function GameCardCompact({ game }: { game: C
   const [imageLoaded, setImageLoaded] = useState(false)
   const isNSFW = game.genres?.some((genre) => genre.toLowerCase() === "nsfw")
   const cardImageSrc = proxyImageUrl(getCardImage(game.image || "")) || "./banner.png"
+
+  const userCollections = useUserCollections()
+  const [contextMenuPos, setContextMenuPos] = useState<{ x: number; y: number } | null>(null)
+  const closeContextMenu = useCallback(() => setContextMenuPos(null), [])
+
+  const collectionPicker = useMemo(() => ({
+    collections: userCollections.collections.map<CollectionPickerEntry>((c) => ({
+      id: c.id,
+      name: c.name,
+      included: c.appids.includes(game.appid),
+    })),
+    onAddToCollection: async (collectionId: string) => {
+      const target = userCollections.collections.find((c) => c.id === collectionId)
+      if (!target) return
+      if (!target.appids.includes(game.appid)) {
+        await userCollections.setMembership(target, [...target.appids, game.appid])
+      }
+    },
+    onRemoveFromCollection: async (collectionId: string) => {
+      const target = userCollections.collections.find((c) => c.id === collectionId)
+      if (!target) return
+      await userCollections.setMembership(target, target.appids.filter((id) => id !== game.appid))
+    },
+    onCreateCollection: async (name: string) => {
+      await userCollections.create(name, [game.appid])
+    },
+  }), [userCollections, game.appid])
 
   useEffect(() => {
     const syncPreference = () => {
@@ -64,7 +93,15 @@ export const GameCardCompact = memo(function GameCardCompact({ game }: { game: C
   }, [cardImageSrc])
 
   return (
-    <Link to={`/game/${game.appid}`} className="group block">
+    <div
+      className="relative"
+      onContextMenu={(e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        setContextMenuPos({ x: e.clientX, y: e.clientY })
+      }}
+    >
+      <Link to={`/game/${game.appid}`} className="group block">
       <div className="relative overflow-hidden rounded-2xl border border-zinc-800/50 bg-zinc-900/80 transition hover:border-zinc-700/50">
         <div className="relative aspect-[3/4]">
           {!imageLoaded && <div className="udl-skeleton absolute inset-0 z-0 rounded-none" />}
@@ -110,7 +147,19 @@ export const GameCardCompact = memo(function GameCardCompact({ game }: { game: C
           </div>
         </div>
       </div>
-    </Link>
+      </Link>
+      <GameActionContextMenu
+        open={contextMenuPos != null}
+        position={contextMenuPos}
+        onClose={closeContextMenu}
+        gameName={game.name}
+        onSetExecutable={null}
+        onOpenFiles={null}
+        onCreateShortcut={null}
+        onDelete={null}
+        collectionPicker={collectionPicker}
+      />
+    </div>
   )
 })
 
