@@ -1264,7 +1264,7 @@ export function LibraryPage() {
           <div className="grid gap-4 grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
             {uninstalledCollectionMembers.map((game) => (
               <div key={game.appid} className="group/tile relative rounded-xl opacity-60 hover:opacity-100 transition-opacity duration-200">
-                <GameCard game={game} size="compact" />
+                <GameCard game={game} stats={stats[game.appid]} size="compact" />
                 <div className="absolute inset-x-2 top-2 z-20 flex items-center justify-end opacity-0 transition-all duration-200 group-hover/tile:opacity-100">
                   <Button
                     size="icon"

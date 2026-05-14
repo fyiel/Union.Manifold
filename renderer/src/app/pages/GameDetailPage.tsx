@@ -1396,7 +1396,7 @@ export function GameDetailPage() {
                   {hasOnlineMode(game?.hasCoOp) && (
                     <Badge className="px-3 py-1 rounded-full bg-emerald-500/20 border-emerald-500/30 text-emerald-400 font-semibold flex items-center gap-1.5 backdrop-blur-md">
                       <Wifi className="h-3 w-3" />
-                      Online
+                      Multiplayer
                     </Badge>
                   )}
                   {game?.hasHv && (

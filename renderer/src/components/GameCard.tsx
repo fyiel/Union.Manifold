@@ -626,7 +626,7 @@ export const GameCard = memo(function GameCard({
               {hasOnlineMode(game.hasCoOp) && (
                 <Badge variant="online" className="bg-zinc-800/60 backdrop-blur-sm border border-white/10 px-3 py-1 text-xs font-semibold flex items-center gap-1 rounded-full">
                   <Wifi className="w-3 h-3 mr-1 text-white" />
-                  <span className="text-white">Online</span>
+                  <span className="text-white">MP</span>
                 </Badge>
               )}
 
