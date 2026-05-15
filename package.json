@@ -125,11 +125,11 @@
           "to": "uc-overlay-x64.dll"
         },
         {
-          "from": "gcpad-dll/gcpad.dll",
+          "from": "gcpad-lib/gcpad.dll",
           "to": "gcpad.dll"
         },
         {
-          "from": "gcpad-dll/SDL2.dll",
+          "from": "gcpad-lib/SDL2.dll",
           "to": "SDL2.dll"
         }
       ]
@@ -148,7 +148,17 @@
         "AppImage",
         "tar.gz"
       ],
-      "icon": "assets/icons"
+      "icon": "assets/icons",
+      "extraResources": [
+        {
+          "from": "gcpad-lib/libgcpad.so",
+          "to": "libgcpad.so"
+        },
+        {
+          "from": "gcpad-lib/libSDL2-2.0.so.0",
+          "to": "libSDL2-2.0.so.0"
+        }
+      ]
     }
   },
   "pnpm": {

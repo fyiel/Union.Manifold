@@ -894,7 +894,7 @@ function checkAndShowOverlayForGame(appid) {
 // ============================================================
 // Native Overlay Injection System
 // ============================================================
-// Loads the C++ native addon for DLL injection, shared memory,
+// Loads the C++ native addon for LIB injection, shared memory,
 // and named pipes. Falls back gracefully to transparent-window-only mode.
 
 let nativeOverlay = null
@@ -912,9 +912,9 @@ const overlayInjections = new Map()
 // GCPad Controller System
 // ============================================================
 // Uses the GCPad C ABI exposed through the uc_overlay_native addon.
-// gcpad.dll is loaded at runtime (with SDL2.dll resolved alongside it).
+// libgcpad.so is loaded at runtime (with SDL2.dll resolved alongside it).
 //
-// For development: copy gcpad.dll + SDL2.dll to electron/gcpad-dll/
+// For development: copy libgcpad.so + SDL2.dll to electron/gcpad-lib/
 // For production: they are extracted to resourcesPath via extraResources.
 
 const GCPAD_POLL_MS = 16 // ~60 Hz
@@ -935,14 +935,15 @@ function getControllerTypeFromName(rawName) {
   return 'generic'
 }
 
-function getGCPadDllPath() {
+function getGCPadLibPath() {
+  const isWin = process.platform === 'win32'
+  const libName = isWin ? 'gcpad.dll' : 'libgcpad.so'
   if (isDev) {
-    // Check gcpad-dll/ first (vendored DLLs), then legacy build/gcpad/ path
-    const vendored = path.join(__dirname, '..', 'gcpad-dll', 'gcpad.dll')
+    const vendored = path.join(__dirname, '..', 'gcpad-lib', libName)
     if (fs.existsSync(vendored)) return vendored
-    return path.join(__dirname, '..', 'build', 'gcpad', 'gcpad.dll')
+    return path.join(__dirname, '..', 'build', 'gcpad', libName)
   }
-  return path.join(process.resourcesPath, 'gcpad.dll')
+  return path.join(process.resourcesPath, libName)
 }
 
 let gcpadPollInterval = null
@@ -959,9 +960,9 @@ function startGCPad() {
     return
   }
 
-  const dllPath = getGCPadDllPath()
+  const dllPath = getGCPadLibPath()
   if (!fs.existsSync(dllPath)) {
-    ucLog(`GCPad: DLL not found at ${dllPath} - controller support unavailable`, 'warn')
+    ucLog(`GCPad: LIB not found at ${dllPath} - controller support unavailable`, 'warn')
     return
   }
 
@@ -984,7 +985,7 @@ function startGCPad() {
 
   const ok = nativeOverlay.gcpadLoad(dllPath)
   if (!ok) {
-    ucLog('GCPad: failed to load or initialize gcpad.dll', 'warn')
+    ucLog('GCPad: failed to load or initialize libgcpad.so', 'warn')
     return
   }
 
@@ -1295,7 +1296,7 @@ function getDllPath() {
 }
 
 /**
- * Inject the overlay DLL into a running game process.
+ * Inject the overlay LIB into a running game process.
  * Creates shared memory, pipe server, and an offscreen BrowserWindow
  * that paints the overlay UI into the shared memory region.
  */
@@ -1305,8 +1306,8 @@ function injectOverlayIntoGame(pid, appid) {
 
   const dllPath = getDllPath()
   if (!fs.existsSync(dllPath)) {
-    ucLog(`Overlay DLL not found at ${dllPath} - skipping injection`, 'warn')
-    setOverlayError(`Overlay DLL not found at ${dllPath}`)
+    ucLog(`Overlay LIB not found at ${dllPath} - skipping injection`, 'warn')
+    setOverlayError(`Overlay LIB not found at ${dllPath}`)
     return
   }
 
@@ -1314,7 +1315,7 @@ function injectOverlayIntoGame(pid, appid) {
     // 1. Create shared memory for frame data
     const shmemHandle = nativeOverlay.createSharedFrame(pid, OVERLAY_FRAME_WIDTH, OVERLAY_FRAME_HEIGHT)
 
-    // 2. Create pipe server to receive input from DLL
+    // 2. Create pipe server to receive input from LIB
     const pipeHandle = nativeOverlay.createPipeServer(pid, (msg) => {
       handleDllMessage(pid, msg)
     })
@@ -1377,23 +1378,23 @@ function injectOverlayIntoGame(pid, appid) {
     }
     overlayInjections.set(pid, injection)
 
-    // 4. Inject the DLL - do this after everything else is ready
+    // 4. Inject the LIB - do this after everything else is ready
     // Small delay to let pipe server start listening
     setTimeout(() => {
       try {
         const success = nativeOverlay.injectDll(pid, dllPath)
         if (success) {
-          ucLog(`Overlay DLL injected into PID ${pid} for game ${appid}`)
+          ucLog(`Overlay LIB injected into PID ${pid} for game ${appid}`)
           setOverlayError(null)
           setOverlayEvent(`overlay injected into pid ${pid} (${appid || 'unknown'})`)
         } else {
-          ucLog(`Failed to inject overlay DLL into PID ${pid}`, 'warn')
-          setOverlayError(`Failed to inject overlay DLL into PID ${pid}`)
+          ucLog(`Failed to inject overlay LIB into PID ${pid}`, 'warn')
+          setOverlayError(`Failed to inject overlay LIB into PID ${pid}`)
           cleanupOverlayInjection(pid)
         }
       } catch (e) {
-        ucLog(`Error injecting overlay DLL: ${e.message}`, 'error')
-        setOverlayError(`Error injecting overlay DLL into PID ${pid}: ${e.message}`)
+        ucLog(`Error injecting overlay LIB: ${e.message}`, 'error')
+        setOverlayError(`Error injecting overlay LIB into PID ${pid}: ${e.message}`)
         cleanupOverlayInjection(pid)
       }
     }, 500)
@@ -1406,7 +1407,7 @@ function injectOverlayIntoGame(pid, appid) {
 }
 
 /**
- * Handle input messages coming from the injected DLL via pipe.
+ * Handle input messages coming from the injected LIB via pipe.
  */
 function handleDllMessage(pid, msg) {
   const injection = overlayInjections.get(pid)
@@ -1416,11 +1417,11 @@ function handleDllMessage(pid, msg) {
 
   switch (msg.type) {
     case 'connected':
-      ucLog(`Overlay DLL connected from PID ${pid}`)
+      ucLog(`Overlay LIB connected from PID ${pid}`)
       break
 
     case 'disconnected':
-      ucLog(`Overlay DLL disconnected from PID ${pid}`)
+      ucLog(`Overlay LIB disconnected from PID ${pid}`)
       break
 
     case 'key': {
@@ -1473,7 +1474,7 @@ function toggleInjectedOverlay(pid) {
     }
   }
 
-  // Send visibility command to DLL via pipe (JSON protocol, matches overlay_protocol.h)
+  // Send visibility command to LIB via pipe (JSON protocol, matches overlay_protocol.h)
   if (nativeOverlay && injection.pipeHandle) {
     const cmd = Buffer.from(JSON.stringify({ cmd: injection.visible ? 'show' : 'hide' }) + '\n', 'utf8')
     try {
@@ -1490,7 +1491,7 @@ function cleanupOverlayInjection(pid) {
   if (!injection) return
 
   try {
-    // Eject DLL
+    // Eject LIB
     if (nativeOverlay) {
       try { nativeOverlay.ejectDll(pid, getDllPath()) } catch {}
     }
@@ -6743,7 +6744,7 @@ $candidates | Sort-Object CreationDate | ForEach-Object { $_.ProcessId }`
   // Auto-show overlay when game launches
   if (appid) checkAndShowOverlayForGame(appid)
 
-  // Inject overlay DLL into the game process so it works in exclusive fullscreen.
+  // Inject overlay LIB into the game process so it works in exclusive fullscreen.
   if (nativeOverlay && proc.pid) {
     setTimeout(() => injectOverlayIntoGame(proc.pid, appid), 2000)
   }

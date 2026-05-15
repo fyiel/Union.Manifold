@@ -14,7 +14,8 @@
         "NAPI_DISABLE_CPP_EXCEPTIONS"
       ],
       "conditions": [
-        ["OS=='win'", {
+        {
+          "conditions": ["OS=='win'"],
           "sources": [
             "injector.cpp",
             "shared_memory.cpp",
@@ -22,23 +23,31 @@
             "gcpad_bridge.cpp"
           ],
           "libraries": [
-            "-luser32.lib",
-            "-lkernel32.lib",
-            "-ladvapi32.lib",
-            "-lole32.lib"
+            "<(PRODUCT_DIR)user32.lib",
+            "<(PRODUCT_DIR)kernel32.lib",
+            "<(PRODUCT_DIR)advapi32.lib",
+            "<(PRODUCT_DIR)ole32.lib"
           ]
-        }],
-        ["OS!='win'", {
+        },
+        {
+          "conditions": ["OS!='win'"],
           "sources": [
-            "stubs_nonwin.cpp"
+            "gcpad_bridge_posix.cpp"
+          ],
+          "libraries": [
+            "-lX11",
+            "-lXtst",
+            "-ldl",
+            "-lpthread"
+          ],
+          "conditions": [
+            {
+              "conditions": ["OS=='mac'"],
+              "sources": ["stubs_nonwin.cpp"]
+            }
           ]
-        }]
-      ],
-      "msvs_settings": {
-        "VCCLCompilerTool": {
-          "RuntimeLibrary": 2
         }
-      }
+      ]
     }
   ]
 }
