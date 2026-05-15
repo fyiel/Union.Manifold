@@ -1374,7 +1374,7 @@ function injectOverlayIntoGame(pid, appid) {
       offscreenWindow: offscreenWin,
       pid,
       appid,
-      visible: overlayAutoShow
+      visible: false
     }
     overlayInjections.set(pid, injection)
 
