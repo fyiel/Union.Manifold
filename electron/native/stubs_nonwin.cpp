@@ -1,3 +1,17 @@
+/**
+ * stubs_nonwin.cpp — Windows-only features stubbed out for macOS (and non-Windows posix).
+ *
+ * These APIs require Windows-specific kernel features:
+ * - DLL injection / shared memory overlays (in-progress games)
+ * - Named pipe server for IPC with injected payloads
+ * - Inject/eject control surfaces
+ *
+ * GCPad functions are NOT stubbed here — they are implemented in
+ * gcpad_bridge_posix.cpp for Linux. If this file is included on Linux,
+ * it will cause duplicate symbol errors (addon.cpp expects exactly one
+ * implementation per namespace).
+ */
+
 #include <napi.h>
 
 namespace {
@@ -45,96 +59,6 @@ Napi::Value DestroyPipeServer(const Napi::CallbackInfo& info) {
 }
 } // namespace uc_pipe
 
-namespace uc_gcpad {
-Napi::Value GCPadLoad(const Napi::CallbackInfo& info) {
-    return Unsupported(info.Env(), "gcpadLoad");
-}
-
-Napi::Value GCPadUnload(const Napi::CallbackInfo& info) {
-    return Unsupported(info.Env(), "gcpadUnload");
-}
-
-Napi::Value GCPadUpdateAll(const Napi::CallbackInfo& info) {
-    return Unsupported(info.Env(), "gcpadUpdateAll");
-}
-
-Napi::Value GCPadGetStates(const Napi::CallbackInfo& info) {
-    return Unsupported(info.Env(), "gcpadGetStates");
-}
-
-Napi::Value GCPadSetRumble(const Napi::CallbackInfo& info) {
-    return Unsupported(info.Env(), "gcpadSetRumble");
-}
-
-Napi::Value GCPadSetLed(const Napi::CallbackInfo& info) {
-    return Unsupported(info.Env(), "gcpadSetLed");
-}
-
-Napi::Value GCPadOnConnect(const Napi::CallbackInfo& info) {
-    return Unsupported(info.Env(), "gcpadOnConnect");
-}
-
-Napi::Value GCPadOnDisconnect(const Napi::CallbackInfo& info) {
-    return Unsupported(info.Env(), "gcpadOnDisconnect");
-}
-
-Napi::Value GCPadSendKeyboard(const Napi::CallbackInfo& info) {
-    return Unsupported(info.Env(), "gcpadSendKeyboard");
-}
-
-Napi::Value GCPadSendMouseButton(const Napi::CallbackInfo& info) {
-    return Unsupported(info.Env(), "gcpadSendMouseButton");
-}
-
-Napi::Value GCPadSendMouseMove(const Napi::CallbackInfo& info) {
-    return Unsupported(info.Env(), "gcpadSendMouseMove");
-}
-
-Napi::Value GCPadSendMouseWheel(const Napi::CallbackInfo& info) {
-    return Unsupported(info.Env(), "gcpadSendMouseWheel");
-}
-
-Napi::Value GCPadSetTriggerEffect(const Napi::CallbackInfo& info) {
-    return Unsupported(info.Env(), "gcpadSetTriggerEffect");
-}
-
-Napi::Value GCPadSetPlayerLeds(const Napi::CallbackInfo& info) {
-    return Unsupported(info.Env(), "gcpadSetPlayerLeds");
-}
-
-Napi::Value GCPadRemapperCreate(const Napi::CallbackInfo& info) {
-    return Unsupported(info.Env(), "gcpadRemapperCreate");
-}
-
-Napi::Value GCPadRemapperDestroy(const Napi::CallbackInfo& info) {
-    return Unsupported(info.Env(), "gcpadRemapperDestroy");
-}
-
-Napi::Value GCPadRemapperMapButtonToKey(const Napi::CallbackInfo& info) {
-    return Unsupported(info.Env(), "gcpadRemapperMapButtonToKey");
-}
-
-Napi::Value GCPadRemapperMapButtonToMouse(const Napi::CallbackInfo& info) {
-    return Unsupported(info.Env(), "gcpadRemapperMapButtonToMouse");
-}
-
-Napi::Value GCPadRemapperMapAxisToMouse(const Napi::CallbackInfo& info) {
-    return Unsupported(info.Env(), "gcpadRemapperMapAxisToMouse");
-}
-
-Napi::Value GCPadRemapperMapAxisToKey(const Napi::CallbackInfo& info) {
-    return Unsupported(info.Env(), "gcpadRemapperMapAxisToKey");
-}
-
-Napi::Value GCPadRemapperClearAll(const Napi::CallbackInfo& info) {
-    return Unsupported(info.Env(), "gcpadRemapperClearAll");
-}
-
-Napi::Value GCPadRemapperSendInput(const Napi::CallbackInfo& info) {
-    return Unsupported(info.Env(), "gcpadRemapperSendInput");
-}
-
-Napi::Value GCPadRemapperResetState(const Napi::CallbackInfo& info) {
-    return Unsupported(info.Env(), "gcpadRemapperResetState");
-}
-} // namespace uc_gcpad
+// NOTE: GCPad functions are NOT provided here for Linux (they are in gcpad_bridge_posix.cpp).
+// If this file IS included on Linux, we'd get duplicate symbols. The binding.gyp ensures
+// that for OS=='linux', only gcpad_bridge_posix.cpp is compiled (not this file).

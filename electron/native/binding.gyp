@@ -15,7 +15,7 @@
       ],
       "conditions": [
         {
-          "condition": "OS=='win'",
+          "conditions": [ "OS=='win'" ],
           "sources": [
             "injector.cpp",
             "shared_memory.cpp",
@@ -23,14 +23,14 @@
             "gcpad_bridge.cpp"
           ],
           "libraries": [
-            "<(PRODUCT_DIR)user32.lib",
-            "<(PRODUCT_DIR)kernel32.lib",
-            "<(PRODUCT_DIR)advapi32.lib",
-            "<(PRODUCT_DIR)ole32.lib"
+            "-luser32",
+            "-lkernel32",
+            "-ladvapi32",
+            "-lole32"
           ]
         },
         {
-          "condition": "OS=='linux'",
+          "conditions": [ "OS=='linux'" ],
           "sources": [
             "gcpad_bridge_posix.cpp"
           ],
@@ -42,12 +42,17 @@
           ]
         },
         {
-          "condition": "OS=='mac'",
+          "conditions": [ "OS=='mac'" ],
           "sources": [
             "stubs_nonwin.cpp"
           ]
         }
-      ]
+      ],
+      "msvs_settings": {
+        "VCCLCompilerTool": {
+          "RuntimeLibrary": 2
+        }
+      }
     }
   ]
 }
