@@ -756,6 +756,7 @@ export function InGameOverlay() {
         onClose={() => setShowController(false)}
         position={dock === 'right' ? 'left' : 'right'}
       />
+      <SteamAchievementOverlay />
     </div>
   )
 }
