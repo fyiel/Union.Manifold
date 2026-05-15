@@ -14,8 +14,7 @@
         "NAPI_DISABLE_CPP_EXCEPTIONS"
       ],
       "conditions": [
-        {
-          "conditions": [ "OS=='win'" ],
+        ["OS=='win'", {
           "sources": [
             "injector.cpp",
             "shared_memory.cpp",
@@ -28,9 +27,8 @@
             "-ladvapi32",
             "-lole32"
           ]
-        },
-        {
-          "conditions": [ "OS=='linux'" ],
+        }],
+        ["OS=='linux'", {
           "sources": [
             "gcpad_bridge_posix.cpp"
           ],
@@ -40,13 +38,12 @@
             "-ldl",
             "-lpthread"
           ]
-        },
-        {
-          "conditions": [ "OS=='mac'" ],
+        }],
+        ["OS=='mac'", {
           "sources": [
             "stubs_nonwin.cpp"
           ]
-        }
+        }]
       ],
       "msvs_settings": {
         "VCCLCompilerTool": {
