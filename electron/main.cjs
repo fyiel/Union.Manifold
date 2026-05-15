@@ -5511,6 +5511,7 @@ async function handleUCFilesDownloadComplete(win, info) {
         path: destPath, name: path.basename(destPath),
         size: stats ? stats.size : 0, addedAt: Date.now(),
       })
+      trackDownloadCompleted(downloadId)
       sendDownloadUpdate(win, makeUpdate({ status: 'completed', filename: path.basename(destPath), savePath: destPath }))
     } catch (err) {
       ucLog(`[UC.Files] Post-download move failed: ${err.message}`, 'error')
@@ -10295,6 +10296,8 @@ function launchTrackedGameProcess({ appid, exePath, gameName, showGameName, comm
         env
       })
 
+      /* Achievement tracking */
+      trackGameLaunch(appid, exePath)
       proc.once('spawn', () => {
         proc.unref()
         registerRunningGame(appid, exePath, proc, gameName, showGameName)
@@ -11823,4 +11826,54 @@ ipcMain.handle('uc:system-notification-activated', async (_event, notificationId
   } catch (err) {
     return { ok: false, error: err.message }
   }
+})
+
+// ============================================================
+// Achievements System
+// ============================================================
+
+const achievementStats = {
+  totalPlaytime: 0,      // accumulated seconds
+  installedGames: 0,     // count of installed games
+  totalDownloads: 0,     // completed downloads
+  gameLaunches: 0,       // total game launches
+  consecutiveDays: 0,    // login streak
+}
+
+// Track game launch for achievements
+function trackGameLaunch(appid, exePath) {
+  achievementStats.gameLaunches++
+  ucLog(`[Achievement] Game launch tracked: ${appid} (total: ${achievementStats.gameLaunches})`)
+}
+
+// Track completed download for achievements
+function trackDownloadCompleted(downloadId) {
+  achievementStats.totalDownloads++
+  ucLog(`[Achievement] Download completed: ${downloadId} (total: ${achievementStats.totalDownloads})`)
+}
+
+// Track installed game count
+async function updateInstalledGameCount() {
+  try {
+    const list = await ucDownloads?.listInstalledGlobal?.()
+    achievementStats.installedGames = Array.isArray(list) ? list.length : achievementStats.installedGames
+    ucLog(`[Achievement] Installed games: ${achievementStats.installedGames}`)
+  } catch (e) {
+    ucLog(`[Achievement] Failed to count installed games: ${e.message}`, 'warn')
+  }
+}
+
+// IPC: Get achievement stats
+ipcMain.handle('uc:achievements-get-stats', () => {
+  return { ok: true, stats: achievementStats }
+})
+
+// IPC: Reset achievement stats (for testing)
+ipcMain.handle('uc:achievements-reset-stats', () => {
+  achievementStats.totalPlaytime = 0
+  achievementStats.installedGames = 0
+  achievementStats.totalDownloads = 0
+  achievementStats.gameLaunches = 0
+  achievementStats.consecutiveDays = 0
+  return { ok: true }
 })

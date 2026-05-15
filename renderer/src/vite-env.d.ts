@@ -473,6 +473,19 @@ declare global {
       getNotifications: () => Promise<{ ok: boolean; notifications: SystemNotification[] }>
       onNotificationActivated: (callback: (data: { id: string }) => void) => () => void
     }
+    ucAchievements?: {
+      getStats: () => Promise<{
+        ok: boolean
+        stats: {
+          totalPlaytime: number
+          installedGames: number
+          totalDownloads: number
+          gameLaunches: number
+          consecutiveDays: number
+        }
+      }>
+      resetStats: () => Promise<{ ok: boolean }>
+    }
   }
 }
 
