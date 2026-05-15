@@ -48,6 +48,12 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libx11-dev libxtst-dev
+
       - name: Build native overlay addon
         run: pnpm rebuild-native
 
