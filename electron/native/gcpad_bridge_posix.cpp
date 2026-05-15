@@ -398,6 +398,7 @@ typedef void  (*Fn_remapper_map_btn_key)(void*, int, uint16_t);
 typedef void  (*Fn_remapper_map_btn_mouse)(void*, int, int);
 typedef void  (*Fn_remapper_map_axis_mouse)(void*, int, float, float, int, float);
 typedef void  (*Fn_remapper_map_axis_key)(void*, int, uint16_t, float, int);
+typedef void  (*Fn_remapper_map_axis_mouse_btn)(void*, int, int, float);
 typedef void  (*Fn_remapper_clear_all)(void*);
 typedef void  (*Fn_remapper_send_input)(void*, void*, void*);
 typedef void  (*Fn_remapper_reset_state)(void*);
@@ -408,6 +409,7 @@ static Fn_remapper_map_btn_key   g_fn_remapper_map_btn_key   = nullptr;
 static Fn_remapper_map_btn_mouse g_fn_remapper_map_btn_mouse = nullptr;
 static Fn_remapper_map_axis_mouse g_fn_remapper_map_axis_mouse = nullptr;
 static Fn_remapper_map_axis_key  g_fn_remapper_map_axis_key  = nullptr;
+static Fn_remapper_map_axis_mouse_btn g_fn_remapper_map_axis_mouse_btn = nullptr;
 static Fn_remapper_clear_all     g_fn_remapper_clear_all     = nullptr;
 static Fn_remapper_send_input    g_fn_remapper_send_input    = nullptr;
 static Fn_remapper_reset_state   g_fn_remapper_reset_state   = nullptr;
@@ -420,6 +422,7 @@ static void resolve_remapper_fns() {
     g_fn_remapper_map_btn_mouse = reinterpret_cast<Fn_remapper_map_btn_mouse>(dlsym(g_lib, "gcpad_remapper_map_button_to_mouse"));
     g_fn_remapper_map_axis_mouse = reinterpret_cast<Fn_remapper_map_axis_mouse>(dlsym(g_lib, "gcpad_remapper_map_axis_to_mouse"));
     g_fn_remapper_map_axis_key  = reinterpret_cast<Fn_remapper_map_axis_key>(dlsym(g_lib, "gcpad_remapper_map_axis_to_key"));
+    g_fn_remapper_map_axis_mouse_btn = reinterpret_cast<Fn_remapper_map_axis_mouse_btn>(dlsym(g_lib, "gcpad_remapper_map_axis_to_mouse_button"));
     g_fn_remapper_clear_all     = reinterpret_cast<Fn_remapper_clear_all>(dlsym(g_lib, "gcpad_remapper_clear_all"));
     g_fn_remapper_send_input    = reinterpret_cast<Fn_remapper_send_input>(dlsym(g_lib, "gcpad_remapper_send_input"));
     g_fn_remapper_reset_state   = reinterpret_cast<Fn_remapper_reset_state>(dlsym(g_lib, "gcpad_remapper_reset_state"));
@@ -486,6 +489,17 @@ Napi::Value GCPadRemapperMapAxisToKey(const Napi::CallbackInfo& info) {
         static_cast<uint16_t>(info[1].As<Napi::Number>().Uint32Value()),
         static_cast<float>(info[2].As<Napi::Number>().DoubleValue()),
         info[3].As<Napi::Boolean>().Value() ? 1 : 0);
+    return env.Undefined();
+}
+
+Napi::Value GCPadRemapperMapAxisToMouseButton(const Napi::CallbackInfo& info) {
+    Napi::Env env = info.Env();
+    if (!g_remapper || !g_fn_remapper_map_axis_mouse_btn || info.Length() < 3 ||
+        !info[0].IsNumber() || !info[1].IsNumber() || !info[2].IsNumber()) return env.Undefined();
+    g_fn_remapper_map_axis_mouse_btn(g_remapper,
+        info[0].As<Napi::Number>().Int32Value(),
+        info[1].As<Napi::Number>().Int32Value(),
+        static_cast<float>(info[2].As<Napi::Number>().DoubleValue()));
     return env.Undefined();
 }
 
