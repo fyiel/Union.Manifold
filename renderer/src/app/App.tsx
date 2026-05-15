@@ -14,6 +14,7 @@ import { AccountOverviewPage } from "@/app/pages/AccountOverviewPage"
 import { ViewHistoryPage } from "@/app/pages/ViewHistoryPage"
 import { SearchHistoryPage } from "@/app/pages/SearchHistoryPage"
 import { ScreenshotsPage } from "@/app/pages/ScreenshotsPage"
+import { AchievementsPage } from "@/pages/AchievementsPage"
 import { LoginPage } from "@/app/pages/LoginPage"
 import { VerifyEmailPage } from "@/app/pages/VerifyEmailPage"
 import { ForgotPasswordPage } from "@/app/pages/ForgotPasswordPage"
@@ -135,6 +136,7 @@ export default function App() {
                 <Route path="/view-history" element={<ViewHistoryPage />} />
                 <Route path="/search-history" element={<SearchHistoryPage />} />
                 <Route path="/screenshots" element={<ScreenshotsPage />} />
+                <Route path="/achievements" element={<AchievementsPage />} />
               </Route>
 
               {/* Fallback */}

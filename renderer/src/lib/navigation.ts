@@ -9,6 +9,7 @@ import {
   Heart,
   Clock,
   Camera,
+  Trophy,
 } from "lucide-react"
 
 export type PrimaryNavItem = {
@@ -63,6 +64,12 @@ export const secondaryNavItems: PrimaryNavItem[] = [
     to: "/screenshots",
     icon: Camera,
     description: "Review in-game captures",
+  },
+  {
+    label: "Achievements",
+    to: "/achievements",
+    icon: Trophy,
+    description: "Your unlocked achievements from Steam emulators",
   },
 ]
 
@@ -129,6 +136,14 @@ export function getRouteChrome(pathname: string) {
       eyebrow: "Media",
       title: "Screenshots",
       description: "Review captures stored by the desktop client.",
+    }
+  }
+
+  if (pathname.startsWith("/achievements")) {
+    return {
+      eyebrow: "Achievements",
+      title: "Your Achievements",
+      description: "All achievements you've unlocked across your games.",
     }
   }
 

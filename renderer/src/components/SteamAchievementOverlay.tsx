@@ -58,6 +58,10 @@ export function SteamAchievementOverlay({ className = '' }: Props) {
       const achievement = event.detail
       setUnlockedAchievements(prev => [...prev, achievement])
       setActiveToast(achievement)
+      // Record in user achievements for the achievements page
+      import('@/lib/user-achievements').then(({ recordAchievementUnlock }) => {
+        recordAchievementUnlock(achievement, achievement.appid)
+      })
     }
     window.addEventListener('steam-achievement-unlock', handler as any)
     return () => window.removeEventListener('steam-achievement-unlock', handler as any)

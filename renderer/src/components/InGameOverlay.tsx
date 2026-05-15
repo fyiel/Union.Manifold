@@ -4,6 +4,7 @@ import {
   Pause, Play, Square, Volume2, VolumeX, X, Zap,
 } from 'lucide-react'
 import { ControllerOverlayFlyout } from './ControllerOverlayFlyout'
+import { SteamAchievementOverlay } from './SteamAchievementOverlay'
 import { LogoStaticDark } from './brand/brand-assets'
 import { proxyImageUrl } from '@/lib/utils'
 

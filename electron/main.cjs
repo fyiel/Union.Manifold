@@ -11926,6 +11926,8 @@ function startSteamAchievementWatcher(appid, gamePath) {
               // Send to renderer via IPC
               for (const win of BrowserWindow.getAllWindows()) {
                 win.webContents.send('uc:steam-achievement-unlock', achievement)
+                // Also record for user achievements page
+                win.webContents.send('uc:user-achievement-unlock', { appid, achievement })
               }
             }
           }
@@ -11948,4 +11950,24 @@ function stopSteamAchievementWatcher(appid) {
     entry.watcher.close()
   }
   steamAchievementWatchers.delete(appid)
+}
+
+// Track user achievements for the achievements page
+function recordUserAchievement(appid, achievement) {
+  // Send to renderer to save in localStorage
+  for (const win of BrowserWindow.getAllWindows()) {
+    win.webContents.send('uc:user-achievement-unlock', {
+      appid,
+      achievement: {
+        id: achievement.id,
+        appid: appid,
+        name: achievement.name,
+        displayName: achievement.displayName,
+        description: achievement.description,
+        icon: achievement.icon,
+        achieved: true,
+        unlockTime: achievement.unlockTime || Date.now(),
+      }
+    })
+  }
 }
