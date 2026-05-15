@@ -56,6 +56,7 @@ namespace uc_gcpad {
     Napi::Value GCPadRemapperMapButtonToMouse(const Napi::CallbackInfo& info);
     Napi::Value GCPadRemapperMapAxisToMouse(const Napi::CallbackInfo& info);
     Napi::Value GCPadRemapperMapAxisToKey(const Napi::CallbackInfo& info);
+    Napi::Value GCPadRemapperMapAxisToMouseButton(const Napi::CallbackInfo& info);
     Napi::Value GCPadRemapperClearAll(const Napi::CallbackInfo& info);
     Napi::Value GCPadRemapperSendInput(const Napi::CallbackInfo& info);
     Napi::Value GCPadRemapperResetState(const Napi::CallbackInfo& info);
