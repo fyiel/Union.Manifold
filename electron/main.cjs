@@ -2347,7 +2347,9 @@ function registerDeepLinkProtocol() {
     } else {
       ok = app.setAsDefaultProtocolClient(UC_DEEP_LINK_SCHEME)
     }
-    if (ok) {
+    if (process.platform === 'win32') {
+      // Keep handler label/icon fresh even if protocol registration already
+      // exists or setAsDefaultProtocolClient returns false.
       ensureWindowsDeepLinkMetadata()
     }
     ucLog(`Protocol registration ${ok ? 'succeeded' : 'failed'} for ${UC_DEEP_LINK_SCHEME}://`, ok ? 'info' : 'warn')

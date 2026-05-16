@@ -1,10 +1,11 @@
 # Changelog
 
-## Unreleased - 2026-05-14
+## Unreleased - 2026-05-14 - 2026-05-16
 
 ### Fixes & Improvements
 
 - Updated multiplayer wording across game surfaces for consistency: game detail badges now read `Multiplayer`, compact game-card badges now read `MP`, and search filter labels/chips now use `Multiplayer` language on both website and desktop search pages.
+- Always refresh Windows `unioncrax://` protocol metadata at startup, even when protocol re-registration returns false, so browser "Open this application" prompts keep showing the short `UC.D` label instead of stale long handler names from older installs.
 
 ## v2.0.2 - 2026-05-14
 
