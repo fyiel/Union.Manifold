@@ -1101,6 +1101,10 @@ function applyDeadzoneAndCurve(value, deadzone, curve) {
 }
 
 function gcpadTranslateInput(states) {
+  // Input translation via SendInput is Windows-only.
+  // On Linux/macOS, use the remapper API instead.
+  if (process.platform !== 'win32') return
+
   if (!nativeOverlay) return
 
   // Read settings to check if key binding is enabled
@@ -1299,8 +1303,17 @@ function getDllPath() {
  * Inject the overlay LIB into a running game process.
  * Creates shared memory, pipe server, and an offscreen BrowserWindow
  * that paints the overlay UI into the shared memory region.
+ *
+ * NOTE: Overlay injection is Windows-only. On Linux/macOS, this function
+ * returns early since the native addon stubs throw "Windows only" errors.
  */
 function injectOverlayIntoGame(pid, appid) {
+  // Overlay injection is Windows-only - skip on other platforms
+  if (process.platform !== 'win32') {
+    ucLog(`[Overlay] Skipping injection on ${process.platform} (Windows only)`)
+    return
+  }
+
   if (!nativeOverlay || !overlayEnabled) return
   if (overlayInjections.has(pid)) return
 
@@ -6746,7 +6759,8 @@ $candidates | Sort-Object CreationDate | ForEach-Object { $_.ProcessId }`
   if (appid) checkAndShowOverlayForGame(appid)
 
   // Inject overlay LIB into the game process so it works in exclusive fullscreen.
-  if (nativeOverlay && proc.pid) {
+  // This is Windows-only; injectOverlayIntoGame also guards with platform check.
+  if (process.platform === 'win32' && nativeOverlay && proc.pid) {
     setTimeout(() => injectOverlayIntoGame(proc.pid, appid), 2000)
   }
 

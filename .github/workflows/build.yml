@@ -57,8 +57,7 @@ jobs:
       - name: Build native overlay addon
         run: pnpm rebuild-native
 
-      - name: Fetch GCPad DLLs (Windows only)
-        if: runner.os == 'Windows'
+      - name: Fetch GCPad libraries
         run: node ./scripts/fetch-gcpad.cjs
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -79,6 +78,19 @@ jobs:
           if (!(Test-Path "overlay-dll/build/Release/uc-overlay-x64.dll")) {
             throw "Expected overlay DLL at overlay-dll/build/Release/uc-overlay-x64.dll"
           }
+
+      - name: Verify GCPad Linux libraries (Linux only)
+        if: runner.os == 'Linux'
+        run: |
+          if [ ! -f "gcpad-lib/libgcpad.so" ]; then
+            echo "ERROR: libgcpad.so not found in gcpad-lib/"
+            exit 1
+          fi
+          if [ ! -f "gcpad-lib/libSDL2-2.0.so.0" ]; then
+            echo "ERROR: libSDL2-2.0.so.0 not found in gcpad-lib/"
+            exit 1
+          fi
+          echo "GCPad Linux libraries verified"
 
       - name: Build application
         run: pnpm -s build && pnpm exec electron-builder --publish=never

@@ -30,7 +30,8 @@
         }],
         ["OS=='linux'", {
           "sources": [
-            "gcpad_bridge_posix.cpp"
+            "gcpad_bridge_posix.cpp",
+            "stubs_linux.cpp"
           ],
           "libraries": [
             "-lX11",
