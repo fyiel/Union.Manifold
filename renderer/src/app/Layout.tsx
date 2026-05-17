@@ -122,6 +122,24 @@ export function AppLayout() {
           stack: event.error?.stack,
         },
       })
+
+      // Defensive recovery for stale runtime bundles that can throw
+      // "ReferenceError: games is not defined" during route render.
+      // Reload only once per session to avoid loops.
+      if (event.message?.includes("games is not defined")) {
+        try {
+          const key = "uc_recovered_games_referror"
+          const recovered = sessionStorage.getItem(key) === "1"
+          if (!recovered) {
+            sessionStorage.setItem(key, "1")
+            window.location.reload()
+            return
+          }
+        } catch {
+          // ignore
+        }
+      }
+
       triggerAutoShareLogs()
     }
 
