@@ -431,6 +431,7 @@ let overlayReady = false // true once overlay webContents finishes loading
 let overlayDeferredToastAppid = undefined // set when toast requested before overlay ready
 let overlayLastEvent = 'not-initialized'
 let overlayLastError = null
+const overlayInjectionDenylistAppids = new Set()
 
 function setOverlayEvent(event) {
   overlayLastEvent = `${new Date().toISOString()} ${event}`
@@ -481,6 +482,7 @@ function getOverlayDiagnostics() {
     dllPath,
     dllExists: fs.existsSync(dllPath),
     injectionCount: overlayInjections.size,
+    injectionDenylistCount: overlayInjectionDenylistAppids.size,
     injections,
     runningGameCount: runningGames.size,
     lastEvent: overlayLastEvent,
@@ -686,6 +688,8 @@ function showOverlay(appid = null) {
   if (!appid) {
     appid = currentOverlayAppid || (runningGames.size > 0 ? [...runningGames.values()].find(g => g.appid)?.appid || null : null)
   }
+  // Keep panel open path non-blocking. Native injection is intentionally
+  // not triggered here because synchronous setup can stall/freeze the app.
   if (!overlayWindow || overlayWindow.isDestroyed()) createOverlayWindow()
   if (overlayWindow && !overlayWindow.isDestroyed()) {
     clearTimeout(overlayToastTimer)
@@ -1302,6 +1306,10 @@ function getDllPath() {
 function injectOverlayIntoGame(pid, appid) {
   if (!nativeOverlay || !overlayEnabled) return
   if (overlayInjections.has(pid)) return
+  if (appid && overlayInjectionDenylistAppids.has(appid)) {
+    ucLog(`Overlay injection skipped for ${appid} (session safety denylist)`, 'warn')
+    return
+  }
 
   const dllPath = getDllPath()
   if (!fs.existsSync(dllPath)) {
@@ -1373,7 +1381,8 @@ function injectOverlayIntoGame(pid, appid) {
       offscreenWindow: offscreenWin,
       pid,
       appid,
-      visible: overlayAutoShow
+      visible: overlayAutoShow,
+      injectedAt: 0,
     }
     overlayInjections.set(pid, injection)
 
@@ -1383,6 +1392,8 @@ function injectOverlayIntoGame(pid, appid) {
       try {
         const success = nativeOverlay.injectDll(pid, dllPath)
         if (success) {
+          const state = overlayInjections.get(pid)
+          if (state) state.injectedAt = Date.now()
           ucLog(`Overlay DLL injected into PID ${pid} for game ${appid}`)
           setOverlayError(null)
           setOverlayEvent(`overlay injected into pid ${pid} (${appid || 'unknown'})`)
@@ -6609,10 +6620,17 @@ function registerRunningGame(appid, exePath, proc, gameName, showGameName = true
   function finalizeTrackedExit(exitedPid) {
     if (!isTrackedPayloadCurrent()) return
     const elapsed = Date.now() - payload.startedAt
+    const injection = exitedPid ? overlayInjections.get(exitedPid) : null
+    const injectedRecently = Boolean(injection?.injectedAt && (Date.now() - injection.injectedAt) < 15000)
     ucLog(`[Game] ${payload.appid || 'unknown'} exited (PID ${exitedPid}, elapsed=${elapsed}ms)`)
     clearTrackedPayload()
     if (runningGames.size === 0) clearGameRpcActivity()
     if (exitedPid) cleanupOverlayInjection(exitedPid)
+    if (injectedRecently && payload.appid) {
+      overlayInjectionDenylistAppids.add(payload.appid)
+      ucLog(`Overlay injection auto-disabled for ${payload.appid} this session (game exited shortly after injection)`, 'warn')
+      setOverlayEvent(`overlay injection safety denylist added for ${payload.appid}`)
+    }
     if (runningGames.size === 0) hideOverlay()
     if (elapsed < 5000) {
       ucLog(`Game quick-exit detected: ${payload.appid} (elapsed=${elapsed}ms)`, 'warn')
@@ -6744,11 +6762,6 @@ $candidates | Sort-Object CreationDate | ForEach-Object { $_.ProcessId }`
 
   // Auto-show overlay when game launches
   if (appid) checkAndShowOverlayForGame(appid)
-
-  // Inject overlay DLL into the game process so it works in exclusive fullscreen.
-  if (nativeOverlay && proc.pid) {
-    setTimeout(() => injectOverlayIntoGame(proc.pid, appid), 2000)
-  }
 
   proc.on('exit', () => {
     handleTrackedExit(proc.pid)
