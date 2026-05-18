@@ -1968,6 +1968,12 @@ const BASE_URL_CANDIDATES = [
 // Set during startup by detectBestBaseUrl(); used to pre-configure renderer localStorage.
 let resolvedBaseUrl = DEFAULT_BASE_URL
 
+// Must match CLIENT_READY_MARKER in union-crax.xyz app/api/client-ready/route.ts.
+// School / ISP filters that intercept the request and respond with their own
+// JSON-looking interstitial cannot forge this token, so verifying it here
+// rules out "reachable but not the real Union Crax" scenarios.
+const CLIENT_READY_MARKER = 'union-crax-api-ready-v1'
+
 /**
  * Probe each candidate with app-specific readiness checks and return the first
  * usable origin, or the primary as a fallback if none respond.
@@ -1975,7 +1981,15 @@ let resolvedBaseUrl = DEFAULT_BASE_URL
  */
 async function detectBestBaseUrl(onStatus) {
   async function fetchJsonWithTimeout(url, timeoutMs) {
-    const response = await fetch(url, { method: 'GET', signal: AbortSignal.timeout(timeoutMs) })
+    const response = await fetch(url, {
+      method: 'GET',
+      signal: AbortSignal.timeout(timeoutMs),
+      // Some captive portals send a redirect with their own HTML. We want to
+      // see that as "not ours" rather than silently following it to a domain
+      // that happens to be reachable.
+      redirect: 'manual',
+      cache: 'no-store',
+    })
     const text = await response.text()
     let json = null
     try {
@@ -1993,8 +2007,20 @@ async function detectBestBaseUrl(onStatus) {
     try {
       const readyUrl = new URL('/api/client-ready', origin).toString()
       const { response, json } = await fetchJsonWithTimeout(readyUrl, 3500)
-      if (response.ok && json && typeof json === 'object' && json.ready === true) {
-        return { ok: true, reason: 'client-ready endpoint passed' }
+      if (
+        response.ok &&
+        json &&
+        typeof json === 'object' &&
+        json.ready === true &&
+        json.marker === CLIENT_READY_MARKER &&
+        json.service === 'union-crax-api'
+      ) {
+        return { ok: true, reason: 'client-ready endpoint passed (marker verified)' }
+      }
+      if (response.ok && json && json.ready === true && json.marker !== CLIENT_READY_MARKER) {
+        // Response shape looks valid but the marker is missing or wrong - this
+        // is the classic school/ISP intercept that forwards a fake JSON page.
+        return { ok: false, reason: `client-ready marker mismatch (got ${JSON.stringify(json.marker)})` }
       }
       if (response.status !== 404) {
         return { ok: false, reason: `client-ready returned ${response.status}` }
