@@ -1,4 +1,4 @@
-import { Outlet, useLocation } from "react-router-dom"
+import { Outlet, useLocation, useNavigate } from "react-router-dom"
 import type { CSSProperties } from "react"
 import { useEffect, useRef, useState } from "react"
 import { DownBar } from "@/components/DownBar"
@@ -22,6 +22,22 @@ export function AppLayout() {
   useAppPreferencesSync()
   useKeyboardShortcuts()
   const location = useLocation()
+  const navigate = useNavigate()
+
+  // Listen for one-shot deep-link navigation actions delivered by the
+  // main process (e.g. `unioncrax://scan` from the website's "Scan in
+  // UC.Direct" buttons). Currently the only action is 'open-system-profile'
+  // which routes to /settings with the System Profile section preselected.
+  useEffect(() => {
+    const off = window.ucApp?.onNavigationAction?.((data) => {
+      if (!data || data.action !== "open-system-profile") return
+      const params = new URLSearchParams()
+      params.set("section", "system")
+      if (data.autoScan) params.set("autoScan", "1")
+      navigate(`/settings?${params.toString()}`)
+    })
+    return () => { off?.() }
+  }, [navigate])
   const scrollContainerRef = useRef<HTMLDivElement | null>(null)
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {

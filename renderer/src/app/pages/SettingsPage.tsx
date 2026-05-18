@@ -19,6 +19,7 @@ import { SessionManager } from "@/components/SessionManager"
 import { ProfileMediaCropDialog } from "@/components/ProfileMediaCropDialog"
 import { useDiscordAccount } from "@/hooks/use-discord-account"
 import { ControllerSettingsPanel } from "@/components/ControllerSettingsPanel"
+import { SystemProfilePanel } from "@/components/SystemProfilePanel"
 import {
   SETTINGS_KEYS,
   TEXT_CONSTRAINTS,
@@ -29,7 +30,7 @@ import {
 } from "@/lib/settings-constants"
 import { LINUX_PRESETS, applyGlobalLinuxPreset, type LinuxGlobalSettings, type LinuxPresetId } from "@/lib/linux-presets"
 import { useToast } from "@/context/toast-context"
-import { useNavigate } from "react-router-dom"
+import { useNavigate, useSearchParams } from "react-router-dom"
 import {
   useMotionPreferences,
   setAnimatedBackgroundsEnabled as persistAnimatedBackgrounds,
@@ -221,7 +222,19 @@ export function SettingsPage() {
   const [cropOpen, setCropOpen] = useState(false)
   const [cropKind, setCropKind] = useState<"avatar" | "banner">("avatar")
   const [cropSourceFile, setCropSourceFile] = useState<File | null>(null)
-  const [activeSection, setActiveSection] = useState<'account' | 'downloads' | 'game-launch' | 'overlay' | 'controller' | 'advanced'>('account')
+  const [searchParams, setSearchParams] = useSearchParams()
+  // Allow deep links / route navigations to preselect a section via `?section=…`
+  // (used by the `unioncrax://scan` flow from the website).
+  const initialSection = (() => {
+    const raw = searchParams.get('section')
+    if (raw === 'account' || raw === 'downloads' || raw === 'game-launch' || raw === 'overlay' ||
+        raw === 'controller' || raw === 'system' || raw === 'advanced') {
+      return raw
+    }
+    return 'account' as const
+  })()
+  const [activeSection, setActiveSection] = useState<'account' | 'downloads' | 'game-launch' | 'overlay' | 'controller' | 'system' | 'advanced'>(initialSection)
+  const autoScanRequested = searchParams.get('autoScan') === '1'
 
   // Motion preferences (animated backgrounds + reduced motion). Hook reads
   // from electron-store + localStorage; setters below persist + sync.
@@ -1604,6 +1617,7 @@ export function SettingsPage() {
     { id: 'game-launch' as const, label: 'Game Launch', icon: Gamepad2, description: 'Launch & compatibility' },
     { id: 'controller' as const, label: 'Controller', icon: Gamepad2, description: 'Controller support' },
     { id: 'overlay' as const, label: 'Overlay', icon: Layers, description: 'In-game overlay' },
+    { id: 'system' as const, label: 'System Profile', icon: Cpu, description: 'Hardware specs & sharing' },
     { id: 'advanced' as const, label: 'Advanced', icon: Settings2, description: 'Dev tools & danger zone' },
   ]
 
@@ -3481,6 +3495,16 @@ export function SettingsPage() {
             </>
           )}
 
+          {/* ====== SYSTEM PROFILE ====== */}
+          {activeSection === 'system' && (
+            <SystemProfilePanel autoScanOnMount={autoScanRequested} onAutoScanConsumed={() => {
+              // Strip the autoScan flag so refreshing the page doesn't re-trigger.
+              const next = new URLSearchParams(searchParams)
+              next.delete('autoScan')
+              setSearchParams(next, { replace: true })
+            }} />
+          )}
+
           {/* ====== ADVANCED ====== */}
           {activeSection === 'advanced' && (
             <>
@@ -3604,6 +3628,7 @@ export function SettingsPage() {
                       <span className={`inline-block h-4 w-4 transform rounded-full transition-transform ${autoShareErrorLogs ? 'bg-black translate-x-6' : 'bg-white translate-x-1'}`} />
                     </button>
                   </div>
+                  <AttachSystemProfileToLogsToggle />
                 </CardContent>
               </Card>
 
@@ -3800,6 +3825,45 @@ export function SettingsPage() {
 
         </main>
       </div>
+    </div>
+  )
+}
+
+/**
+ * Toggle for attaching the user's spec summary to crash/log share reports.
+ * Lives in the Privacy card, default ON because it's already opt-in at the
+ * "share my logs at all" level — this just controls whether the dev team
+ * can see "GTX 1060 / 16GB / Win10" alongside the log.
+ */
+function AttachSystemProfileToLogsToggle() {
+  const [attach, setAttach] = useState(true)
+  useEffect(() => {
+    (async () => {
+      try {
+        const v = await window.ucSettings?.get?.('attachSystemProfileToLogs')
+        if (typeof v === 'boolean') setAttach(v)
+      } catch { }
+    })()
+  }, [])
+  return (
+    <div className="flex items-center justify-between pt-2 mt-2 border-t border-white/[.05]">
+      <div>
+        <label className="text-sm font-medium cursor-pointer">Include hardware summary in error reports</label>
+        <p className="text-xs text-zinc-400 mt-1">
+          Adds a one-line spec ("RTX 4070 · 32GB · Win11") to shared logs. Helps the team reproduce platform-specific bugs. No personal info — see Settings → System Profile.
+        </p>
+      </div>
+      <button
+        onClick={async () => {
+          const next = !attach
+          setAttach(next)
+          try { await window.ucSettings?.set?.('attachSystemProfileToLogs', next) } catch { }
+        }}
+        className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${attach ? 'bg-white' : 'bg-zinc-700'}`}
+        title="Toggle hardware summary in logs"
+      >
+        <span className={`inline-block h-4 w-4 transform rounded-full transition-transform ${attach ? 'bg-black translate-x-6' : 'bg-white translate-x-1'}`} />
+      </button>
     </div>
   )
 }

@@ -70,6 +70,24 @@ export function normalizeCatalogGame(game: any): CatalogGame {
       ? game.has_hv
       : undefined
 
+  // Snake_case → camelCase passthroughs for the structured system requirements
+  // (the website serves them straight from Postgres). Empty/null is preserved
+  // so the DownloadCheckModal can detect "no sysreq data".
+  const minRequirements = game?.minRequirements ?? game?.min_requirements ?? null
+  const recommendedRequirements = game?.recommendedRequirements ?? game?.recommended_requirements ?? null
+  const sizeBytes = typeof game?.sizeBytes === "number"
+    ? game.sizeBytes
+    : typeof game?.size_bytes === "number"
+      ? game.size_bytes
+      : typeof game?.size_bytes === "string" && /^\d+$/.test(game.size_bytes)
+        ? Number(game.size_bytes)
+        : undefined
+  const installedSizeBytes = typeof game?.installedSizeBytes === "number"
+    ? game.installedSizeBytes
+    : typeof game?.installed_size_bytes === "number"
+      ? game.installed_size_bytes
+      : undefined
+
   return {
     ...game,
     appid: String(game?.appid || ""),
@@ -80,12 +98,16 @@ export function normalizeCatalogGame(game: any): CatalogGame {
     screenshots: Array.isArray(game?.screenshots) ? game.screenshots : [],
     release_date: typeof game?.release_date === "string" ? game.release_date : "",
     size: typeof game?.size === "string" ? game.size : "",
+    sizeBytes,
+    installedSizeBytes,
     source: typeof game?.source === "string" && game.source ? game.source : "local",
     store: typeof game?.store === "string" ? game.store : "",
     developer,
     hasCoOp,
     hasHv,
     dlc: Array.isArray(game?.dlc) ? game.dlc : [],
+    minRequirements,
+    recommendedRequirements,
     searchText: normalizeSearchText(`${normalizedName} ${normalizedDescription} ${(Array.isArray(game?.genres) ? game.genres.join(" ") : "")} ${developer}`),
   }
 }

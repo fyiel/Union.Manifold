@@ -13,6 +13,8 @@ try {
 }
 const DiscordRPC = require('discord-rpc')
 const { autoUpdater } = require('electron-updater')
+const systemProfileScanner = require('./system-profile.cjs')
+const storageReservation = require('./storage-reservation.cjs')
 
 const packageJson = require('../package.json')
 const isDev = !app.isPackaged
@@ -172,6 +174,7 @@ function unregisterExtractionJob(jobOrDownloadId) {
   if (!job) return null
   extractionJobs.delete(job.downloadId)
   for (const key of job.keys || []) activeExtractions.delete(key)
+  try { storageReservation.release(job.downloadId) } catch { }
   refreshOperationPowerSaveBlocker()
   return job
 }
@@ -1560,6 +1563,20 @@ function applySettingsDefaults(settings) {
   if (!next.libraryGameMeta || typeof next.libraryGameMeta !== 'object' || Array.isArray(next.libraryGameMeta)) {
     next.libraryGameMeta = {}
   }
+  if (!next.systemProfileVisibility || typeof next.systemProfileVisibility !== 'object' || Array.isArray(next.systemProfileVisibility)) {
+    // Tiered visibility per surface. Defaults are conservative: scanner
+    // results stay private until the user opts in on each surface.
+    next.systemProfileVisibility = {
+      comments: 'off',       // off | summary | full
+      forums: 'off',
+      profilePublic: 'off',
+      sysreqCheck: 'on',     // local pre-download check — no PII leaves device
+    }
+  }
+  if (typeof next.systemProfileSyncEnabled !== 'boolean') next.systemProfileSyncEnabled = false
+  // When sharing error logs / diagnostics, optionally include a one-line hardware
+  // summary so the dev team can see what platform the issue happened on.
+  if (typeof next.attachSystemProfileToLogs !== 'boolean') next.attachSystemProfileToLogs = true
   return next
 }
 
@@ -2074,6 +2091,10 @@ let mainWindow = null
 const UC_DEEP_LINK_SCHEME = 'unioncrax'
 let pendingAppLaunchRequests = []
 let processingLaunchQueue = false
+// Queued one-shot navigation actions delivered to the renderer once the
+// main window is ready. Currently just 'system-profile' from the web's
+// "Scan with UC.Direct" button.
+let pendingNavigationActions = []
 
 function normalizeAppid(value) {
   if (value == null) return null
@@ -2113,6 +2134,34 @@ function parseLaunchRequestFromDeepLink(rawUrl) {
   }
 }
 
+/**
+ * Parse `unioncrax://scan` (or `://settings/system-profile`) deep links
+ * from the web's "Scan in UC.Direct" buttons. Returns a navigation action
+ * the renderer can act on once it loads.
+ */
+function parseNavigationActionFromDeepLink(rawUrl) {
+  try {
+    const parsed = new URL(String(rawUrl || ''))
+    if (parsed.protocol !== `${UC_DEEP_LINK_SCHEME}:`) return null
+    const segment = String(parsed.hostname || parsed.pathname.replace(/^\/+/, '').split('/')[0] || '').toLowerCase()
+    if (segment === 'scan' || segment === 'system-profile') {
+      return { action: 'open-system-profile', autoScan: segment === 'scan' || parsed.searchParams.get('rescan') === '1' }
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
+function enqueueNavigationAction(action) {
+  if (!action || !action.action) return
+  // Collapse duplicates — a queued open-system-profile request shouldn't fire twice.
+  const exists = pendingNavigationActions.some((a) => a.action === action.action)
+  if (exists) return
+  pendingNavigationActions.push({ ...action, queuedAt: Date.now() })
+  ucLog(`Queued navigation action: ${action.action}${action.autoScan ? ' (autoScan)' : ''}`)
+}
+
 function parseLaunchRequestFromArgv(argv) {
   const appidFromFlag = parseLaunchAppidFromArgv(argv)
   if (appidFromFlag) return { appid: appidFromFlag, source: 'cli-flag' }
@@ -2122,6 +2171,15 @@ function parseLaunchRequestFromArgv(argv) {
     if (maybe?.appid) {
       return { appid: maybe.appid, source: 'protocol-argv', rawUrl: maybe.rawUrl }
     }
+  }
+  return null
+}
+
+function parseNavigationActionFromArgv(argv) {
+  if (!Array.isArray(argv)) return null
+  for (const arg of argv) {
+    const maybe = parseNavigationActionFromDeepLink(arg)
+    if (maybe) return maybe
   }
   return null
 }
@@ -2319,6 +2377,32 @@ function buildUcOwnedLinuxDesktopExec(ucExePath, appid) {
   return `"${escapedExe}" --launch-appid=${safeAppid}`
 }
 
+/**
+ * Drain any queued one-shot navigation actions to the renderer once the
+ * window is ready. Used by `unioncrax://scan` to bounce the user straight
+ * to Settings → System Profile (with optional auto-scan).
+ */
+function drainNavigationActions() {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  if (pendingNavigationActions.length === 0) return
+  const deliver = () => {
+    while (pendingNavigationActions.length > 0) {
+      const next = pendingNavigationActions.shift()
+      try {
+        mainWindow.webContents.send('uc:navigation-action', next)
+        ucLog(`Delivered navigation action: ${next.action}`)
+      } catch (e) {
+        ucLog(`Failed to send navigation action: ${e?.message || e}`, 'warn')
+      }
+    }
+  }
+  if (mainWindow.webContents.isLoading()) {
+    mainWindow.webContents.once('did-finish-load', () => setTimeout(deliver, 0))
+  } else {
+    deliver()
+  }
+}
+
 async function processPendingAppLaunchRequests() {
   if (processingLaunchQueue) return
   if (!mainWindow || mainWindow.isDestroyed()) {
@@ -2406,11 +2490,22 @@ if (!gotTheLock) {
   if (initialLaunchRequest?.appid) {
     enqueueAppLaunchRequest(initialLaunchRequest.appid, initialLaunchRequest.source || 'initial-argv')
   }
+  const initialNavigationAction = parseNavigationActionFromArgv(process.argv)
+  if (initialNavigationAction) enqueueNavigationAction(initialNavigationAction)
 
   app.on('second-instance', (event, argv) => {
     const launchRequest = parseLaunchRequestFromArgv(argv)
     if (launchRequest?.appid) {
       enqueueAppLaunchRequest(launchRequest.appid, launchRequest.source || 'second-instance')
+    }
+    const navAction = parseNavigationActionFromArgv(argv)
+    if (navAction) {
+      enqueueNavigationAction(navAction)
+      // Fire-and-forget delivery: focusPrimaryWindow runs below and the
+      // renderer listener will drain the queue once the window is ready.
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        setTimeout(() => drainNavigationActions(), 50)
+      }
     }
 
     // Check if this second instance is from the setup/installer
@@ -7074,6 +7169,7 @@ function createWindow(existingSplash) {
   mainWindow.webContents.once('did-finish-load', () => {
     setTimeout(() => {
       void processPendingAppLaunchRequests()
+      drainNavigationActions()
     }, 0)
   })
 
@@ -7882,6 +7978,27 @@ ipcMain.handle('uc:logs-share', async (event, payload) => {
     const baseUrl = payload?.baseUrl || resolvedBaseUrl || DEFAULT_BASE_URL
     const rawLogs = getLogs()
     const logs = redactLogText(rawLogs || '')
+
+    // Optionally attach the user's hardware spec summary to the diagnostic
+    // report so the support team can see what they're running on. Opt-in
+    // via settings.attachSystemProfileToLogs (default: true — same as
+    // autoShareErrorLogs in spirit). PII-free: only the short summary string.
+    let systemSummary = null
+    let systemFingerprint = null
+    try {
+      const settings = readSettings() || {}
+      const attachEnabled = settings.attachSystemProfileToLogs !== false
+      if (attachEnabled) {
+        const cached = systemProfileScanner.readCachedProfile(app.getPath('userData'))
+        if (cached) {
+          systemSummary = systemProfileScanner.buildSummary(cached)
+          systemFingerprint = cached.fingerprint
+        }
+      }
+    } catch (e) {
+      ucLog(`[logs-share] system-profile attach skipped: ${e?.message || e}`, 'warn')
+    }
+
     const diagnosticsPayload = {
       source: 'unioncrax-direct',
       sessionId: LOG_SESSION_ID,
@@ -7893,6 +8010,8 @@ ipcMain.handle('uc:logs-share', async (event, payload) => {
         electron: process.versions.electron,
         node: process.versions.node,
       },
+      // Hardware context (opt-in, no full spec — just the summary line).
+      system: systemSummary ? { summary: systemSummary, fingerprint: systemFingerprint } : null,
       logs,
     }
 
@@ -8062,6 +8181,38 @@ ipcMain.handle('uc:download-start', (event, payload) => {
 
   const appid = payload.appid
   ucLog(`Download start: ${appid} (${payload.downloadId})`)
+
+  // Storage reservation: refuse to start the download if there isn't
+  // enough free space *after* accounting for download bytes + extraction
+  // overhead + any other in-flight reservations on the same drive.
+  // The renderer can bypass with payload.skipReservation=true (used by
+  // the resume-interrupted flow where the file is already on disk).
+  if (!payload.skipReservation) {
+    try {
+      const downloadRoot = ensureDownloadDir()
+      const expectedBytes = Number(payload.expectedSizeBytes) || Number(payload.totalBytes) || 0
+      const declaredInstallBytes = parseHumanSizeToBytes(payload.installedSize || payload.installSize) || 0
+      if (expectedBytes > 0) {
+        const check = storageReservation.reserve(payload.downloadId, {
+          targetPath: downloadRoot,
+          downloadBytes: expectedBytes,
+          declaredInstallBytes,
+        })
+        if (!check.ok) {
+          ucLog(`Download rejected — insufficient storage: ${appid} need=${check.requiredBytes} short=${check.shortfallBytes}`, 'warn')
+          return {
+            ok: false,
+            error: 'insufficient-storage',
+            storage: check,
+            message: `Not enough free space on the download drive. Need ~${formatBytesForHumans(check.requiredBytes)} (download + extract), only ~${formatBytesForHumans(check.availableAfterReservation)} available after other in-flight downloads.`,
+          }
+        }
+      }
+    } catch (err) {
+      ucLog(`Storage reservation precheck failed: ${err?.message || err}`, 'warn')
+    }
+  }
+
   if (hasAnyActiveOrPendingDownloads() || globalDownloadQueue.length > 0) {
     enqueueGlobalDownload(payload, win.webContents.id)
     ucLog(`Download queued: ${appid}`)
@@ -8093,6 +8244,7 @@ ipcMain.handle('uc:download-cancel', (_event, downloadId) => {
   cancelledDownloadIds.add(downloadId)
   // Auto-clean after 5 minutes to avoid memory leak
   setTimeout(() => cancelledDownloadIds.delete(downloadId), 5 * 60 * 1000)
+  try { storageReservation.release(downloadId) } catch { }
 
   // Helper: broadcast cancelled status so overlay/renderer remove the item
   const broadcastCancelled = () => {
@@ -11863,4 +12015,250 @@ ipcMain.handle('uc:system-notification-activated', async (_event, notificationId
   } catch (err) {
     return { ok: false, error: err.message }
   }
+})
+
+// ── System profile (UC ecosystem hardware scanner) ──────────────────────────
+
+let systemProfileScanInFlight = null
+
+ipcMain.handle('uc:system-profile-get-cached', () => {
+  try {
+    const cached = systemProfileScanner.readCachedProfile(app.getPath('userData'))
+    return { ok: true, profile: cached }
+  } catch (err) {
+    return { ok: false, error: err?.message || String(err) }
+  }
+})
+
+ipcMain.handle('uc:system-profile-scan', async (_event, opts = {}) => {
+  const force = Boolean(opts?.force)
+  if (!force) {
+    const cached = systemProfileScanner.readCachedProfile(app.getPath('userData'))
+    if (cached?.spec) return { ok: true, profile: cached, cached: true }
+  }
+  // Deduplicate concurrent scans (UI may fire twice on click).
+  if (systemProfileScanInFlight) {
+    const profile = await systemProfileScanInFlight
+    return { ok: true, profile, cached: false }
+  }
+  systemProfileScanInFlight = (async () => {
+    try {
+      const profile = await systemProfileScanner.scanSystemProfile()
+      systemProfileScanner.writeCachedProfile(app.getPath('userData'), profile)
+      ucLog(`System profile scan complete (${profile.scanDurationMs}ms, fingerprint=${profile.fingerprint})`)
+      return profile
+    } finally {
+      systemProfileScanInFlight = null
+    }
+  })()
+  try {
+    const profile = await systemProfileScanInFlight
+    return { ok: true, profile, cached: false }
+  } catch (err) {
+    ucLog(`System profile scan failed: ${err?.message || err}`, 'error')
+    return { ok: false, error: err?.message || String(err) }
+  }
+})
+
+ipcMain.handle('uc:system-profile-summary', () => {
+  try {
+    const cached = systemProfileScanner.readCachedProfile(app.getPath('userData'))
+    if (!cached) return { ok: true, summary: null }
+    return { ok: true, summary: systemProfileScanner.buildSummary(cached), fingerprint: cached.fingerprint }
+  } catch (err) {
+    return { ok: false, error: err?.message || String(err) }
+  }
+})
+
+ipcMain.handle('uc:system-profile-clear-cache', () => {
+  try {
+    const p = path.join(app.getPath('userData'), 'system-profile.json')
+    if (fs.existsSync(p)) fs.unlinkSync(p)
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, error: err?.message || String(err) }
+  }
+})
+
+// Upload the locally-cached profile to the UC backend. Caller is responsible
+// for deciding *whether* to upload (i.e. visibility-gated in the renderer).
+ipcMain.handle('uc:system-profile-upload', async (event, { baseUrl } = {}) => {
+  const win = BrowserWindow.fromWebContents(event.sender)
+  if (!win || win.isDestroyed()) return { ok: false, error: 'no-window' }
+  try {
+    const cached = systemProfileScanner.readCachedProfile(app.getPath('userData'))
+    if (!cached) return { ok: false, error: 'no-profile' }
+    const settings = readSettings()
+    const deviceName = typeof settings?.systemProfileDeviceName === 'string' && settings.systemProfileDeviceName.trim()
+      ? settings.systemProfileDeviceName.trim()
+      : (require('os').hostname() || null)
+    const payload = {
+      version: cached.version,
+      fingerprint: cached.fingerprint,
+      capturedAt: cached.capturedAt,
+      sourceAppVersion: getAppVersion(),
+      deviceName,
+      spec: cached.spec,
+    }
+    const response = await fetchWithSession(win.webContents.session, baseUrl, '/api/profile/system', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+    const body = await response.text()
+    let parsed = null
+    try { parsed = JSON.parse(body) } catch { /* swallow */ }
+    if (!response.ok) {
+      ucLog(`System profile upload failed: ${response.status} ${body.slice(0, 200)}`, 'warn')
+      return { ok: false, status: response.status, error: parsed?.error || `HTTP ${response.status}` }
+    }
+    return { ok: true, fingerprint: parsed?.fingerprint, summary: parsed?.summary }
+  } catch (err) {
+    ucLog(`System profile upload error: ${err?.message || err}`, 'error')
+    return { ok: false, error: err?.message || String(err) }
+  }
+})
+
+// Server-side visibility get/set (mirrors local settings but stored on server).
+ipcMain.handle('uc:system-profile-server-visibility-get', async (event, { baseUrl } = {}) => {
+  const win = BrowserWindow.fromWebContents(event.sender)
+  if (!win || win.isDestroyed()) return { ok: false, error: 'no-window' }
+  try {
+    const response = await fetchWithSession(win.webContents.session, baseUrl, '/api/profile/system/visibility', {
+      method: 'GET',
+    })
+    if (!response.ok) return { ok: false, status: response.status }
+    const data = await response.json()
+    return { ok: true, visibility: data?.visibility || null }
+  } catch (err) {
+    return { ok: false, error: err?.message || String(err) }
+  }
+})
+
+ipcMain.handle('uc:system-profile-server-visibility-set', async (event, { baseUrl, patch } = {}) => {
+  const win = BrowserWindow.fromWebContents(event.sender)
+  if (!win || win.isDestroyed()) return { ok: false, error: 'no-window' }
+  try {
+    const response = await fetchWithSession(win.webContents.session, baseUrl, '/api/profile/system/visibility', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch || {}),
+    })
+    if (!response.ok) return { ok: false, status: response.status }
+    const data = await response.json()
+    return { ok: true, visibility: data?.visibility || null }
+  } catch (err) {
+    return { ok: false, error: err?.message || String(err) }
+  }
+})
+
+// Delete the server-side profile (used when user clears specs locally).
+ipcMain.handle('uc:system-profile-server-delete', async (event, { baseUrl } = {}) => {
+  const win = BrowserWindow.fromWebContents(event.sender)
+  if (!win || win.isDestroyed()) return { ok: false, error: 'no-window' }
+  try {
+    const response = await fetchWithSession(win.webContents.session, baseUrl, '/api/profile/system', {
+      method: 'DELETE',
+    })
+    return { ok: response.ok, status: response.status }
+  } catch (err) {
+    return { ok: false, error: err?.message || String(err) }
+  }
+})
+
+// ── Multi-rig device list ──
+async function passthroughJson(sender, baseUrl, path, init) {
+  const win = BrowserWindow.fromWebContents(sender)
+  if (!win || win.isDestroyed()) return { ok: false, error: 'no-window' }
+  try {
+    const response = await fetchWithSession(win.webContents.session, baseUrl, path, init)
+    const text = await response.text()
+    let parsed = null
+    try { parsed = JSON.parse(text) } catch { /* swallow */ }
+    if (!response.ok) {
+      return { ok: false, status: response.status, error: parsed?.error || `HTTP ${response.status}` }
+    }
+    return { ok: true, status: response.status, ...(parsed || {}) }
+  } catch (err) {
+    return { ok: false, error: err?.message || String(err) }
+  }
+}
+
+ipcMain.handle('uc:system-profile-list-devices', (event, { baseUrl } = {}) =>
+  passthroughJson(event.sender, baseUrl, '/api/profile/system/devices', { method: 'GET' })
+)
+
+ipcMain.handle('uc:system-profile-rename-device', (event, { baseUrl, fingerprint, name } = {}) =>
+  passthroughJson(event.sender, baseUrl, `/api/profile/system/devices/${encodeURIComponent(String(fingerprint || ''))}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ deviceName: name || null }),
+  })
+)
+
+ipcMain.handle('uc:system-profile-delete-device', (event, { baseUrl, fingerprint } = {}) =>
+  passthroughJson(event.sender, baseUrl, `/api/profile/system/devices/${encodeURIComponent(String(fingerprint || ''))}`, {
+    method: 'DELETE',
+  })
+)
+
+ipcMain.handle('uc:system-profile-activate-device', (event, { baseUrl, fingerprint } = {}) =>
+  passthroughJson(event.sender, baseUrl, `/api/profile/system/devices/${encodeURIComponent(String(fingerprint || ''))}/activate`, {
+    method: 'POST',
+  })
+)
+
+// ── Share-a-spec links ──
+ipcMain.handle('uc:system-profile-list-shares', (event, { baseUrl } = {}) =>
+  passthroughJson(event.sender, baseUrl, '/api/profile/system/share', { method: 'GET' })
+)
+
+ipcMain.handle('uc:system-profile-create-share', (event, { baseUrl, opts } = {}) =>
+  passthroughJson(event.sender, baseUrl, '/api/profile/system/share', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(opts || {}),
+  })
+)
+
+ipcMain.handle('uc:system-profile-revoke-share', (event, { baseUrl, shortCode } = {}) =>
+  passthroughJson(event.sender, baseUrl, `/api/profile/system/share/${encodeURIComponent(String(shortCode || ''))}`, {
+    method: 'DELETE',
+  })
+)
+
+// Upgrade suggester — compares wishlist vs active profile.
+ipcMain.handle('uc:system-profile-upgrade-suggest', (event, { baseUrl } = {}) =>
+  passthroughJson(event.sender, baseUrl, '/api/profile/system/upgrade-suggest', { method: 'GET' })
+)
+
+// ── Storage reservation (used by sysreq UI + concurrency safety) ────────────
+
+ipcMain.handle('uc:storage-precheck', (_event, opts) => {
+  try {
+    const downloadRoot = ensureDownloadDir()
+    const result = storageReservation.precheck({
+      targetPath: opts?.targetPath || downloadRoot,
+      downloadBytes: Number(opts?.downloadBytes) || 0,
+      declaredInstallBytes: Number(opts?.declaredInstallBytes) || 0,
+    })
+    return { ok: true, ...result, humanRequired: formatBytesForHumans(result.requiredBytes), humanFree: formatBytesForHumans(result.freeBytes), humanShortfall: formatBytesForHumans(result.shortfallBytes), humanAvailable: formatBytesForHumans(result.availableAfterReservation) }
+  } catch (err) {
+    return { ok: false, error: err?.message || String(err) }
+  }
+})
+
+ipcMain.handle('uc:storage-summary', (_event, targetPath) => {
+  try {
+    const downloadRoot = targetPath || ensureDownloadDir()
+    const summary = storageReservation.summaryForPath(downloadRoot)
+    return { ok: true, ...summary, humanFree: formatBytesForHumans(summary.freeBytes), humanReserved: formatBytesForHumans(summary.reservedBytes), humanAvailable: formatBytesForHumans(summary.availableBytes) }
+  } catch (err) {
+    return { ok: false, error: err?.message || String(err) }
+  }
+})
+
+ipcMain.handle('uc:storage-snapshot', () => {
+  try { return { ok: true, reservations: storageReservation.snapshot() } }
+  catch (err) { return { ok: false, error: err?.message || String(err) } }
 })
