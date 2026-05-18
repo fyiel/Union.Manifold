@@ -95,6 +95,12 @@ contextBridge.exposeInMainWorld('ucApp', {
     const listener = (_event, data) => callback(data)
     ipcRenderer.on('uc:app-close-requested', listener)
     return () => ipcRenderer.removeListener('uc:app-close-requested', listener)
+  },
+  // One-shot navigation actions from deep links (e.g. unioncrax://scan).
+  onNavigationAction: (callback) => {
+    const listener = (_event, data) => callback(data)
+    ipcRenderer.on('uc:navigation-action', listener)
+    return () => ipcRenderer.removeListener('uc:navigation-action', listener)
   }
 })
 
@@ -300,6 +306,35 @@ contextBridge.exposeInMainWorld('ucController', {
   // Overlay-specific
   getOverlaySettings: () => ipcRenderer.invoke('uc:controller-get-overlay-settings'),
   setOverlaySettings: (settings) => ipcRenderer.invoke('uc:controller-set-overlay-settings', settings),
+})
+
+// System hardware profile (UC ecosystem scanner)
+contextBridge.exposeInMainWorld('ucSystemProfile', {
+  getCached: () => ipcRenderer.invoke('uc:system-profile-get-cached'),
+  scan: (opts) => ipcRenderer.invoke('uc:system-profile-scan', opts || {}),
+  summary: () => ipcRenderer.invoke('uc:system-profile-summary'),
+  clearCache: () => ipcRenderer.invoke('uc:system-profile-clear-cache'),
+  // Server-sync (visibility-gated; renderer decides when to call)
+  upload: (baseUrl) => ipcRenderer.invoke('uc:system-profile-upload', { baseUrl }),
+  serverGetVisibility: (baseUrl) => ipcRenderer.invoke('uc:system-profile-server-visibility-get', { baseUrl }),
+  serverSetVisibility: (baseUrl, patch) => ipcRenderer.invoke('uc:system-profile-server-visibility-set', { baseUrl, patch }),
+  serverDelete: (baseUrl) => ipcRenderer.invoke('uc:system-profile-server-delete', { baseUrl }),
+  // Multi-rig + share-a-spec
+  listDevices: (baseUrl) => ipcRenderer.invoke('uc:system-profile-list-devices', { baseUrl }),
+  renameDevice: (baseUrl, fingerprint, name) => ipcRenderer.invoke('uc:system-profile-rename-device', { baseUrl, fingerprint, name }),
+  deleteDevice: (baseUrl, fingerprint) => ipcRenderer.invoke('uc:system-profile-delete-device', { baseUrl, fingerprint }),
+  activateDevice: (baseUrl, fingerprint) => ipcRenderer.invoke('uc:system-profile-activate-device', { baseUrl, fingerprint }),
+  listShares: (baseUrl) => ipcRenderer.invoke('uc:system-profile-list-shares', { baseUrl }),
+  createShare: (baseUrl, opts) => ipcRenderer.invoke('uc:system-profile-create-share', { baseUrl, opts }),
+  revokeShare: (baseUrl, shortCode) => ipcRenderer.invoke('uc:system-profile-revoke-share', { baseUrl, shortCode }),
+  upgradeSuggest: (baseUrl) => ipcRenderer.invoke('uc:system-profile-upgrade-suggest', { baseUrl }),
+})
+
+// Storage reservation API (pre-download space checks)
+contextBridge.exposeInMainWorld('ucStorage', {
+  precheck: (opts) => ipcRenderer.invoke('uc:storage-precheck', opts),
+  summary: (targetPath) => ipcRenderer.invoke('uc:storage-summary', targetPath),
+  snapshot: () => ipcRenderer.invoke('uc:storage-snapshot'),
 })
 
 // System API (volume, screenshot, notifications, openExternal)

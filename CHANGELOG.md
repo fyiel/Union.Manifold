@@ -1,6 +1,25 @@
 # Changelog
 
-## Unreleased - 2026-05-14 - 2026-05-16
+## Unreleased - 2026-05-14 - 2026-05-18
+
+### New Features — UC System Profile
+
+The launcher can now scan your PC's hardware and use it across the whole UC ecosystem: pre-download requirement checks, library filtering, opt-in spec badges on comments/forums, multi-rig device switching, and crash-report enrichment. Nothing leaves your machine until you flip an online sharing switch.
+
+- **Hardware scanner** (Settings → System Profile → Scan now). Detects CPU, GPU(s) with VRAM and driver date, RAM (total / speed / channels), all drives with NVMe/SSD/HDD media type, OS build, displays (resolution + refresh rate), and DirectX/Vulkan versions. Uses platform-native tools only — no new npm dependencies, no native rebuild required. PowerShell-based on Windows, `/proc` + `lscpu`/`lspci` on Linux. A fingerprint hash detects when the PC has changed and prompts for a rescan.
+- **Pre-download requirement check** in the Download dialog. When a game has system requirements published, the modal now shows a per-component pass/warn/fail comparison against your scanned hardware. Can be disabled from Settings → System Profile → Pre-download requirement check.
+- **Storage reservation for downloads**. UC.D now refuses to start a download when the target drive doesn't have room for the archive PLUS the extracted install (estimated as 2× archive size, or the declared install size when known, plus a 5%/2GB safety buffer). Concurrent downloads now correctly account for each other's reservations on the same drive — no more double-booking free space. Reservations are released on cancel, error, or extraction completion.
+- **Storage-type hint** in the Download dialog. When you're installing a 30GB+ game to an HDD and you have an SSD/NVMe drive available, the dialog now suggests switching the download path. Best-effort on Windows (uses Storage Spaces cmdlets to map drive letters to physical media); not yet wired on Linux.
+- **GPU driver staleness warning** in the Download dialog. Warns when your GPU driver is more than 6 months old and links to the NVIDIA / AMD / Intel / Apple driver page based on the detected vendor.
+- **System Profile settings panel** (new section in Settings sidebar) with per-surface visibility toggles: Comment badge / Forum posts (off · summary) and Public profile card (off · summary · full). The pre-download check toggle is local-only and on by default.
+- **Server sync** — when at least one online surface is set above "Off", scans are automatically uploaded to UC. Visibility state is mirrored to the server so other UC surfaces (game pages, forum posts) can render your specs at the tier you allowed. Clearing the local cache or flipping every surface back to "Off" deletes the server copy.
+- **Multi-rig device picker** — when you've scanned more than one device, a "My PCs" card lets you pick which rig is treated as your active profile. Rename and forget controls per device. Uploads tag the device with `hostname()` by default.
+- **Share-a-spec links** — mint a short URL (`/specs/abc12345`) anyone can open to see your specs frozen at create time. Useful for "can your friend's PC run this?" conversations. Summary or Full tier per link, revokable from Settings.
+- **Upgrade suggester** — analyses your UC wishlist against your active profile, identifies the biggest bottleneck component, and suggests a coarse next-tier upgrade (e.g. "Upgrade GTX 1060 → RTX 3060 / RX 6700-class card · would unlock 7 wishlisted games"). Only shown when at least one online surface is on.
+- **Per-post specs toggle** on comment and forum forms — each post can override the global visibility setting. Defaults match your global tier so unchanged behavior stays consistent.
+- **Crash report enrichment** — when sharing diagnostics (Settings → Account → Privacy → Send error reports), an optional one-line hardware summary ("RTX 4070 · 32GB · Win11") is attached so the dev team can reproduce platform-specific issues. Opt-out via the new "Include hardware summary in error reports" toggle.
+- **`unioncrax://scan` deep link** — clicking "Scan in UC.Direct" from the website now opens UC.D, navigates straight to Settings → System Profile, and triggers a fresh scan. Extends the existing `unioncrax://launch` handler with a navigation-action queue that drains once the main window finishes loading.
+- **Website parity surfaces** (cross-repo with `union-crax.xyz`): the website's download dialog now shows the same per-component pass/warn/fail sysreq comparison UC.D's download modal does, the `/settings` page gains a full "System Profile" section mirroring UC.D's panel (visibility toggles, multi-rig device picker, share-a-spec links, upgrade suggestions) — minus scanning, which it delegates back to UC.D via the deep link. Web "Scan in UC.Direct" buttons follow the same install-detection pattern as the existing "Open in UC.D" button.
 
 ### Fixes & Improvements
 
