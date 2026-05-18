@@ -1326,12 +1326,35 @@ function injectOverlayIntoGame(pid, appid) {
 
   try {
     // 1. Create shared memory for frame data
-    const shmemHandle = nativeOverlay.createSharedFrame(pid, OVERLAY_FRAME_WIDTH, OVERLAY_FRAME_HEIGHT)
+    let shmemHandle
+    try {
+      shmemHandle = nativeOverlay.createSharedFrame(pid, OVERLAY_FRAME_WIDTH, OVERLAY_FRAME_HEIGHT)
+      if (shmemHandle === null || shmemHandle === undefined) {
+        throw new Error('createSharedFrame returned null')
+      }
+    } catch (e) {
+      ucLog(`Failed to create shared frame: ${e.message}`, 'error')
+      setOverlayError(`Failed to create shared frame: ${e.message}`)
+      return
+    }
 
     // 2. Create pipe server to receive input from LIB
-    const pipeHandle = nativeOverlay.createPipeServer(pid, (msg) => {
-      handleDllMessage(pid, msg)
-    })
+    let pipeHandle
+    try {
+      pipeHandle = nativeOverlay.createPipeServer(pid, (msg) => {
+        handleDllMessage(pid, msg)
+      })
+      if (pipeHandle === null || pipeHandle === undefined) {
+        throw new Error('createPipeServer returned null')
+      }
+    } catch (e) {
+      ucLog(`Failed to create pipe server: ${e.message}`, 'error')
+      if (shmemHandle !== undefined) {
+        try { nativeOverlay.destroySharedFrame(shmemHandle) } catch {}
+      }
+      setOverlayError(`Failed to create pipe server: ${e.message}`)
+      return
+    }
 
     // 3. Create offscreen BrowserWindow for rendering overlay
     const offscreenWin = new BrowserWindow({
@@ -11912,6 +11935,12 @@ function startSteamAchievementWatcher(appid, gamePath) {
   
   if (steamAchievementWatchers.has(appid)) return
   
+  // Achievement file must exist before we can watch it
+  if (!fs.existsSync(achievementsPath)) {
+    ucLog(`[SteamAchievement] Achievements file not found at ${achievementsPath} - will retry on next launch`, 'debug')
+    return
+  }
+  
   try {
     // Watch for achievement file changes (Goldberg-style)
     const watcher = fs.watch(achievementsPath, (eventType) => {
@@ -11952,7 +11981,7 @@ function startSteamAchievementWatcher(appid, gamePath) {
     })
     
     steamAchievementWatchers.set(appid, { pid: null, path: steamEmuPath, watcher })
-    ucLog(`[SteamAchievement] Started watching ${appid} at ${steamEmuPath}`)
+    ucLog(`[SteamAchievement] Started watching ${appid} at ${achievementsPath}`)
   } catch (e) {
     ucLog(`[SteamAchievement] Failed to start watcher: ${e.message}`, 'warn')
   }
