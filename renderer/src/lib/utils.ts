@@ -142,6 +142,36 @@ function shouldProxyUcFilesMedia(): boolean {
   return true
 }
 
+// Public image CDNs that the launcher should route through the active mirror's
+// /api/image-proxy endpoint instead of hitting directly. When the user is on a
+// mirror because their network blocks union-crax.xyz, those same blocks usually
+// also cover cdn.union-crax.xyz, so direct image fetches fail even though the
+// API base is reachable. Keep this in sync with the website's
+// lib/utils.ts PUBLIC_IMAGE_HOST_SUFFIXES and the route's allowlist.
+const PUBLIC_IMAGE_HOST_SUFFIXES = [
+  "cdn.union-crax.xyz",
+  "images.igdb.com",
+  "steamgriddb.com",
+  "cdn.steamgriddb.com",
+  "akamai.steamstatic.com",
+  "cloudflare.steamstatic.com",
+  "steamcdn-a.akamaihd.net",
+  "steamstatic.com",
+  "steampowered.com",
+  "discordapp.com",
+  "discordapp.net",
+  "discord.com",
+  "githubusercontent.com",
+  "scdn.co",
+]
+
+function isPublicImageHost(host: string): boolean {
+  const normalized = normalizeHostname(host)
+  return PUBLIC_IMAGE_HOST_SUFFIXES.some(
+    (suffix) => normalized === suffix || normalized.endsWith(`.${suffix}`),
+  )
+}
+
 export function proxyMediaUrl(mediaUrl: string): string {
   if (!mediaUrl) return mediaUrl
   // already a relative path or data/blob URL served by the app
@@ -160,12 +190,18 @@ export function proxyMediaUrl(mediaUrl: string): string {
 
   const normalizedRemoteUrl = normalizeRemoteMediaUrl(mediaUrl)
   if (normalizedRemoteUrl.startsWith("http://") || normalizedRemoteUrl.startsWith("https://")) {
-    // Only proxy through app-server URLs (files.union-crax.xyz).
-    // Direct CDN URLs (cdn.union-crax.xyz) are public Backblaze and never need proxying.
     try {
       const parsed = new URL(normalizedRemoteUrl)
+      // Private UC.Files app URLs use the authenticated bridge proxy.
       if (isUcFilesAppUrl(parsed.hostname) && shouldProxyUcFilesMedia()) {
         return apiUrl(`/api/ucfiles/media?url=${encodeURIComponent(normalizedRemoteUrl)}`)
+      }
+      // Public image CDNs go through the mirror's /api/image-proxy so the
+      // launcher inherits whatever network reachability the active API base
+      // already has (e.g. note-tool.study still loads images when school
+      // blocks cdn.union-crax.xyz and images.igdb.com).
+      if (isPublicImageHost(parsed.hostname)) {
+        return apiUrl(`/api/image-proxy?url=${encodeURIComponent(normalizedRemoteUrl)}`)
       }
     } catch {}
     return normalizedRemoteUrl
