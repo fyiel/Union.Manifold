@@ -21,6 +21,7 @@ export type UserCollection = CloudCollection & {
 }
 
 const MIGRATED_FLAG_KEY = "uc_collections_migrated_v1"
+const COLLECTIONS_CHANGED_EVENT = "uc:user-collections-changed"
 
 function dedupeCaseInsensitive(values: string[]): string[] {
   const seen = new Set<string>()
@@ -66,6 +67,11 @@ function localToUser(collection: { name: string; appids: string[] }, idx: number
     updatedAt: "",
     cloud: false,
   }
+}
+
+function notifyCollectionsChanged() {
+  if (typeof window === "undefined") return
+  window.dispatchEvent(new Event(COLLECTIONS_CHANGED_EVENT))
 }
 
 /**
@@ -152,6 +158,15 @@ export function useUserCollections() {
     return () => {
       mounted = false
     }
+  }, [refreshCloud])
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const onChanged = () => {
+      void refreshCloud()
+    }
+    window.addEventListener(COLLECTIONS_CHANGED_EVENT, onChanged)
+    return () => window.removeEventListener(COLLECTIONS_CHANGED_EVENT, onChanged)
   }, [refreshCloud])
 
   // ---- One-shot migration: local → cloud on first auth ----
@@ -284,6 +299,7 @@ export function useUserCollections() {
         if (authed) {
           const created = await createCloudCollection(name, appids)
           setCloudCollections((prev) => prev ? [...prev, created] : [created])
+          notifyCollectionsChanged()
           return { ...created, cloud: true }
         }
       } catch (err) {
@@ -314,6 +330,7 @@ export function useUserCollections() {
           setCloudCollections((prev) =>
             prev ? prev.map((c) => (c.id === collection.id ? { ...c, appids } : c)) : prev
           )
+          notifyCollectionsChanged()
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : "Could not update collection")
@@ -333,6 +350,7 @@ export function useUserCollections() {
           setCloudCollections((prev) =>
             prev ? prev.map((c) => (c.id === collection.id ? { ...c, name: target } : c)) : prev
           )
+          notifyCollectionsChanged()
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : "Could not rename collection")
@@ -350,6 +368,7 @@ export function useUserCollections() {
           setCloudCollections((prev) =>
             prev ? prev.filter((c) => c.id !== collection.id) : prev
           )
+          notifyCollectionsChanged()
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : "Could not delete collection")
@@ -375,6 +394,7 @@ export function useUserCollections() {
               )
             : prev
         )
+        notifyCollectionsChanged()
         return result
       } catch (err) {
         setError(err instanceof Error ? err.message : "Could not share collection")
@@ -398,6 +418,7 @@ export function useUserCollections() {
               )
             : prev
         )
+        notifyCollectionsChanged()
       } catch (err) {
         setError(err instanceof Error ? err.message : "Could not unshare collection")
       }
