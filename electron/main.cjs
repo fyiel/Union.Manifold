@@ -1,10 +1,11 @@
-const { app, BrowserWindow, shell, ipcMain, dialog, Tray, Menu, nativeImage, globalShortcut, powerSaveBlocker } = require('electron')
+const { app, BrowserWindow, shell, ipcMain, dialog, Tray, Menu, nativeImage, globalShortcut, powerSaveBlocker, protocol, net } = require('electron')
 const path = require('node:path')
 const fs = require('node:fs')
 const crypto = require('node:crypto')
 const child_process = require('node:child_process')
 const https = require('node:https')
 const http = require('node:http')
+const { pathToFileURL } = require('node:url')
 let ClassicLevel = null
 try {
   ({ ClassicLevel } = require('classic-level'))
@@ -25,6 +26,20 @@ const UPDATE_REPO = UPDATE_PROVIDER.repo || 'UnionCrax.Direct'
 try {
   app.commandLine.appendSwitch('disable-features', 'OverlayScrollbar')
 } catch { }
+
+if (!isDev) {
+  protocol.registerSchemesAsPrivileged([
+    {
+      scheme: 'ucd',
+      privileges: {
+        standard: true,
+        secure: true,
+        supportFetchAPI: true,
+        corsEnabled: true,
+      },
+    },
+  ])
+}
 
 const updateState = {
   enabled: !isDev,
@@ -840,7 +855,7 @@ function createOverlayWindow() {
   if (isDev) {
     overlayWindow.loadURL('http://localhost:5173/#/overlay')
   } else {
-    overlayWindow.loadFile(path.join(__dirname, '..', 'renderer', 'dist', 'index.html'), { hash: '/overlay' })
+    overlayWindow.loadURL('ucd://renderer/index.html#/overlay')
   }
 
   // Make the overlay transparent and ignore mouse events when hidden
@@ -1558,7 +1573,7 @@ function injectOverlayIntoGame(pid, appid) {
     if (isDev) {
       offscreenWin.loadURL('http://localhost:5173/#/overlay')
     } else {
-      offscreenWin.loadFile(path.join(__dirname, '..', 'renderer', 'dist', 'index.html'), { hash: '/overlay' })
+      offscreenWin.loadURL('ucd://renderer/index.html#/overlay')
     }
 
     // Show the overlay initially if auto-show is on
@@ -1905,6 +1920,36 @@ function attachWindowLogging(win, label = 'window') {
     if (level >= 1) {
       const mappedLevel = level >= 2 ? 'error' : 'warn'
       ucLog(`Renderer console (${label})`, mappedLevel, { level, message, line, sourceId })
+    }
+  })
+}
+
+function getRendererDistDir() {
+  return path.join(__dirname, '..', 'renderer', 'dist')
+}
+
+function registerRendererAssetProtocol() {
+  if (isDev) return
+  protocol.handle('ucd', (request) => {
+    try {
+      const url = new URL(request.url)
+      if (url.hostname !== 'renderer') {
+        return new Response('Not found', { status: 404 })
+      }
+
+      const baseDir = getRendererDistDir()
+      const requestPath = decodeURIComponent(url.pathname || '/index.html')
+      const relativePath = requestPath === '/' ? 'index.html' : requestPath.replace(/^\/+/, '')
+      const filePath = path.resolve(baseDir, relativePath)
+      const normalizedBase = path.resolve(baseDir)
+      if (filePath !== normalizedBase && !filePath.startsWith(normalizedBase + path.sep)) {
+        return new Response('Forbidden', { status: 403 })
+      }
+
+      return net.fetch(pathToFileURL(filePath).toString())
+    } catch (err) {
+      ucLog(`Renderer protocol failed: ${err?.message || err}`, 'error')
+      return new Response('Internal error', { status: 500 })
     }
   })
 }
@@ -7539,7 +7584,7 @@ function createWindow(existingSplash) {
       mainWindow.webContents.openDevTools({ mode: 'detach' })
     }
   } else {
-    mainWindow.loadFile(path.join(__dirname, '..', 'renderer', 'dist', 'index.html'))
+    mainWindow.loadURL('ucd://renderer/index.html')
   }
 
   mainWindow.webContents.once('did-finish-load', () => {
@@ -8227,6 +8272,7 @@ function createWindow(existingSplash) {
 
 app.whenReady().then(async () => {
   ensureDownloadDir()
+  registerRendererAssetProtocol()
   await hydratePersistedLauncherState()
 
   // Show splash immediately, then detect the best reachable domain before

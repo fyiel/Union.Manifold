@@ -162,7 +162,7 @@ function pushTag(tagName) {
 }
 
 function upsertGitHubRelease(tagName, releaseName, releaseNotes) {
-  const notesFile = writeTempNotes(releaseNotes || releaseName || tagName)
+  const notesFile = releaseNotes ? writeTempNotes(releaseNotes) : null
   try {
     const existing = spawnSync('gh', ['release', 'view', tagName], {
       cwd: rootDir,
@@ -170,12 +170,16 @@ function upsertGitHubRelease(tagName, releaseName, releaseNotes) {
       encoding: 'utf8',
     })
     if (existing.status === 0) {
-      run('gh', ['release', 'edit', tagName, '--title', releaseName, '--notes-file', notesFile])
+      const args = ['release', 'edit', tagName, '--title', releaseName]
+      if (notesFile) args.push('--notes-file', notesFile)
+      run('gh', args)
       return
     }
-    run('gh', ['release', 'create', tagName, '--title', releaseName, '--notes-file', notesFile])
+    const args = ['release', 'create', tagName, '--title', releaseName]
+    if (notesFile) args.push('--notes-file', notesFile)
+    run('gh', args)
   } finally {
-    fs.unlinkSync(notesFile)
+    if (notesFile) fs.unlinkSync(notesFile)
   }
 }
 
