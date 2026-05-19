@@ -1,6 +1,15 @@
 # Changelog
 
-## Unreleased - 2026-05-14 - 2026-05-18
+## Unreleased - 2026-05-14 - 2026-05-19
+
+### UC System Profile — UC.D consumer-side parity (2026-05-19)
+
+Round-trip on the System Profile work: the launcher now consumes the same hardware data that's already being scanned and shared with the website, so users don't need to bounce to the web to benefit from their scan.
+
+- **"Can my PC run" filter on Search** — `/search` gains a new "My PC" filter section with three pill buttons (All games · Can run (min) · Smooth (rec)). Filtered results come from the website's `/api/games?canRun=...` endpoint, which resolves the caller's session and active profile server-side. When the filter is selected without a scan on file, an inline banner offers a one-click "Scan now" CTA that deep-links to `/settings?section=system&autoScan=1`.
+- **Per-game requirement check on game pages** — game detail pages now render a "Will it run on my PC?" card above the raw Steam-HTML requirements block when the game has structured `min_requirements` / `recommended_requirements` published. Comparison runs locally against the cached profile (no network roundtrip), shows per-component pass/warn/fail (CPU, GPU, RAM, Storage, OS, DirectX), and the same scan CTA when no profile is cached.
+- **"Attach my specs" toggle on comments** — comment forms (both top-level and reply) now render a per-post specs toggle next to the Post button when the viewer is signed in and has an active profile. The toggle defaults to the user's global comment-visibility tier and only overrides it for the current post — the persistent setting in Settings is untouched. Posted comments from any UC surface now render an inline `Cpu · RTX 4070 · 32GB · Win11` chip next to the author's name when the poster opted in for that post.
+- **Shared spec landing page** — `/specs/:shortCode` links minted from Settings → System Profile → Share-a-spec now open inside UC.D and render the same summary/full spec card as the website. Previously the link could only be viewed on the web.
 
 ### New Features — UC System Profile
 

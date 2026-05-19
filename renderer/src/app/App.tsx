@@ -14,12 +14,14 @@ import { AccountOverviewPage } from "@/app/pages/AccountOverviewPage"
 import { ViewHistoryPage } from "@/app/pages/ViewHistoryPage"
 import { SearchHistoryPage } from "@/app/pages/SearchHistoryPage"
 import { ScreenshotsPage } from "@/app/pages/ScreenshotsPage"
+import { SharedSpecPage } from "@/app/pages/SharedSpecPage"
 import { LoginPage } from "@/app/pages/LoginPage"
 import { VerifyEmailPage } from "@/app/pages/VerifyEmailPage"
 import { ForgotPasswordPage } from "@/app/pages/ForgotPasswordPage"
 import { ResetPasswordPage } from "@/app/pages/ResetPasswordPage"
 import { DownloadsProvider, useDownloads } from "@/context/downloads-context"
 import { ToastProvider } from "@/context/toast-context"
+import { AuthProvider } from "@/context/auth-context"
 import { InGameOverlay } from "@/components/InGameOverlay"
 import { Toaster } from "@/components/Toaster"
 import { Button } from "@/components/ui/button"
@@ -101,6 +103,7 @@ export default function App() {
   return (
     <HashRouter>
       <ToastProvider>
+        <AuthProvider>
         <DownloadsProvider>
           <Routes>
             <Route path="/overlay" element={<InGameOverlay />} />
@@ -127,12 +130,14 @@ export default function App() {
               <Route path="/view-history" element={<ViewHistoryPage />} />
               <Route path="/search-history" element={<SearchHistoryPage />} />
               <Route path="/screenshots" element={<ScreenshotsPage />} />
+              <Route path="/specs/:shortCode" element={<SharedSpecPage />} />
             </Route>
 
             {/* Fallback */}
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </DownloadsProvider>
+        </AuthProvider>
         <Toaster />
       </ToastProvider>
     </HashRouter>

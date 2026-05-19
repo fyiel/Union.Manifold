@@ -284,6 +284,7 @@ declare global {
       login: (baseUrl?: string, provider?: string) => Promise<{ ok: boolean; error?: string }>
       logout: (baseUrl?: string) => Promise<{ ok: boolean; error?: string }>
       getSession: (baseUrl?: string) => Promise<{ ok: boolean; discordId?: string | null }>
+      websiteLogin: (baseUrl?: string) => Promise<{ ok: boolean; user?: any; error?: string }>
       emailLogin: (baseUrl: string, email: string, password: string) => Promise<{ ok: boolean; error?: string }>
       register: (baseUrl: string, email: string, username: string, password: string) => Promise<{ ok: boolean; error?: string }>
       forgotPassword: (baseUrl: string, email: string) => Promise<{ ok: boolean; error?: string }>
