@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased - 2026-05-14 - 2026-05-19
+## v2.1.0 — System Profile - 2026-05-14 - 2026-05-19
 
 ### UC System Profile — UC.D consumer-side parity (2026-05-19)
 
