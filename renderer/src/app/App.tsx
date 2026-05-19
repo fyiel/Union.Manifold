@@ -1,31 +1,36 @@
-import { useEffect, useMemo, useState } from "react"
+import { lazy, Suspense, useEffect, useMemo, useState } from "react"
 import { HashRouter, Route, Routes, Navigate } from "react-router-dom"
 import { AppLayout } from "@/app/Layout"
-import { LauncherPage } from "@/app/pages/LauncherPage"
-import { SearchPage } from "@/app/pages/SearchPage"
-import { GameDetailPage } from "@/app/pages/GameDetailPage"
-import { LibraryPage } from "@/app/pages/LibraryPage"
-import { CollectionsPage } from "@/app/pages/CollectionsPage"
-import { DownloadsPage } from "@/app/pages/DownloadsPage"
-import { SettingsPage } from "@/app/pages/SettingsPage"
-import { WishlistPage } from "@/app/pages/WishlistPage"
-import { LikedPage } from "@/app/pages/LikedPage"
-import { AccountOverviewPage } from "@/app/pages/AccountOverviewPage"
-import { ViewHistoryPage } from "@/app/pages/ViewHistoryPage"
-import { SearchHistoryPage } from "@/app/pages/SearchHistoryPage"
-import { ScreenshotsPage } from "@/app/pages/ScreenshotsPage"
-import { LoginPage } from "@/app/pages/LoginPage"
-import { VerifyEmailPage } from "@/app/pages/VerifyEmailPage"
-import { ForgotPasswordPage } from "@/app/pages/ForgotPasswordPage"
-import { ResetPasswordPage } from "@/app/pages/ResetPasswordPage"
 import { DownloadsProvider, useDownloads } from "@/context/downloads-context"
 import { ToastProvider } from "@/context/toast-context"
 import { AuthProvider } from "@/context/auth-context"
-import { InGameOverlay } from "@/components/InGameOverlay"
 import { Toaster } from "@/components/Toaster"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { AlertTriangle } from "lucide-react"
+
+const LauncherPage = lazy(() => import("@/app/pages/LauncherPage").then((m) => ({ default: m.LauncherPage })))
+const SearchPage = lazy(() => import("@/app/pages/SearchPage").then((m) => ({ default: m.SearchPage })))
+const GameDetailPage = lazy(() => import("@/app/pages/GameDetailPage").then((m) => ({ default: m.GameDetailPage })))
+const LibraryPage = lazy(() => import("@/app/pages/LibraryPage").then((m) => ({ default: m.LibraryPage })))
+const CollectionsPage = lazy(() => import("@/app/pages/CollectionsPage").then((m) => ({ default: m.CollectionsPage })))
+const DownloadsPage = lazy(() => import("@/app/pages/DownloadsPage").then((m) => ({ default: m.DownloadsPage })))
+const SettingsPage = lazy(() => import("@/app/pages/SettingsPage").then((m) => ({ default: m.SettingsPage })))
+const WishlistPage = lazy(() => import("@/app/pages/WishlistPage").then((m) => ({ default: m.WishlistPage })))
+const LikedPage = lazy(() => import("@/app/pages/LikedPage").then((m) => ({ default: m.LikedPage })))
+const AccountOverviewPage = lazy(() => import("@/app/pages/AccountOverviewPage").then((m) => ({ default: m.AccountOverviewPage })))
+const ViewHistoryPage = lazy(() => import("@/app/pages/ViewHistoryPage").then((m) => ({ default: m.ViewHistoryPage })))
+const SearchHistoryPage = lazy(() => import("@/app/pages/SearchHistoryPage").then((m) => ({ default: m.SearchHistoryPage })))
+const ScreenshotsPage = lazy(() => import("@/app/pages/ScreenshotsPage").then((m) => ({ default: m.ScreenshotsPage })))
+const LoginPage = lazy(() => import("@/app/pages/LoginPage").then((m) => ({ default: m.LoginPage })))
+const VerifyEmailPage = lazy(() => import("@/app/pages/VerifyEmailPage").then((m) => ({ default: m.VerifyEmailPage })))
+const ForgotPasswordPage = lazy(() => import("@/app/pages/ForgotPasswordPage").then((m) => ({ default: m.ForgotPasswordPage })))
+const ResetPasswordPage = lazy(() => import("@/app/pages/ResetPasswordPage").then((m) => ({ default: m.ResetPasswordPage })))
+const InGameOverlay = lazy(() => import("@/components/InGameOverlay").then((m) => ({ default: m.InGameOverlay })))
+
+function RouteFallback() {
+  return <div className="min-h-screen bg-[#09090b]" />
+}
 
 function ExtractionCloseGuard() {
   const { downloads } = useDownloads()
@@ -104,36 +109,38 @@ export default function App() {
       <ToastProvider>
         <AuthProvider>
         <DownloadsProvider>
-          <Routes>
-            <Route path="/overlay" element={<InGameOverlay />} />
+          <Suspense fallback={<RouteFallback />}>
+            <Routes>
+              <Route path="/overlay" element={<InGameOverlay />} />
 
-            {/* Auth pages (inside app layout) */}
-            <Route path="/login" element={<LoginPage />} />
-            <Route path="/verify-email" element={<VerifyEmailPage />} />
-            <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-            <Route path="/reset-password" element={<ResetPasswordPage />} />
+              {/* Auth pages (inside app layout) */}
+              <Route path="/login" element={<LoginPage />} />
+              <Route path="/verify-email" element={<VerifyEmailPage />} />
+              <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+              <Route path="/reset-password" element={<ResetPasswordPage />} />
 
-            {/* App routes - no login required */}
-            <Route element={<AppWithDownloads />}>
-              <Route path="/" element={<LauncherPage />} />
-              <Route path="/launcher" element={<LauncherPage />} />
-              <Route path="/search" element={<SearchPage />} />
-              <Route path="/game/:id" element={<GameDetailPage />} />
-              <Route path="/library" element={<LibraryPage />} />
-              <Route path="/collections" element={<CollectionsPage />} />
-              <Route path="/downloads" element={<DownloadsPage />} />
-              <Route path="/settings" element={<SettingsPage />} />
-              <Route path="/wishlist" element={<WishlistPage />} />
-              <Route path="/liked" element={<LikedPage />} />
-              <Route path="/account" element={<AccountOverviewPage />} />
-              <Route path="/view-history" element={<ViewHistoryPage />} />
-              <Route path="/search-history" element={<SearchHistoryPage />} />
-              <Route path="/screenshots" element={<ScreenshotsPage />} />
-            </Route>
+              {/* App routes - no login required */}
+              <Route element={<AppWithDownloads />}>
+                <Route path="/" element={<LauncherPage />} />
+                <Route path="/launcher" element={<LauncherPage />} />
+                <Route path="/search" element={<SearchPage />} />
+                <Route path="/game/:id" element={<GameDetailPage />} />
+                <Route path="/library" element={<LibraryPage />} />
+                <Route path="/collections" element={<CollectionsPage />} />
+                <Route path="/downloads" element={<DownloadsPage />} />
+                <Route path="/settings" element={<SettingsPage />} />
+                <Route path="/wishlist" element={<WishlistPage />} />
+                <Route path="/liked" element={<LikedPage />} />
+                <Route path="/account" element={<AccountOverviewPage />} />
+                <Route path="/view-history" element={<ViewHistoryPage />} />
+                <Route path="/search-history" element={<SearchHistoryPage />} />
+                <Route path="/screenshots" element={<ScreenshotsPage />} />
+              </Route>
 
-            {/* Fallback */}
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
+              {/* Fallback */}
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </Suspense>
         </DownloadsProvider>
         </AuthProvider>
         <Toaster />

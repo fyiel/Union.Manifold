@@ -127,7 +127,9 @@ export function WishlistPage() {
         )}
 
         {accountUser && (
-          <UpgradeSuggesterSection baseUrl={baseUrl} />
+          <div className="mb-6">
+            <UpgradeSuggesterSection baseUrl={baseUrl} />
+          </div>
         )}
 
         {!accountUser && !accountLoading ? null : loading || accountLoading ? (

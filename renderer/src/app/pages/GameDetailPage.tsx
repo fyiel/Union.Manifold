@@ -4,7 +4,6 @@ import { createPortal } from "react-dom"
 import { useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { GameCard } from "@/components/GameCard"
 import { GameComments } from "@/components/GameComments"
 import { CommentMarkdown } from "@/components/CommentMarkdown"
@@ -39,13 +38,11 @@ import {
   X,
   FolderOpen,
   Info,
-  Layers3,
   Loader2,
   Minus,
   MoreHorizontal,
   Plus,
   Play,
-  Tags,
   Terminal,
 } from "lucide-react"
 import { ExePickerModal } from "@/components/ExePickerModal"
@@ -162,11 +159,6 @@ export function GameDetailPage() {
   const [gameStartFailedOpen, setGameStartFailedOpen] = useState(false)
   const [linuxConfigOpen, setLinuxConfigOpen] = useState(false)
 
-  // Collection/tag editing state
-  const [gameMeta, setGameMeta] = useState<{ collections?: string[]; tags?: string[] }>({})
-  const [collectionInput, setCollectionInput] = useState("")
-  const [tagInput, setTagInput] = useState("")
-
   // Ref to track whether a game was just launched (cleared on manual quit)
   // Stores the expiry timestamp of the quick-exit detection window (0 = not watching)
   const gameJustLaunchedRef = useRef<number>(0)
@@ -198,56 +190,6 @@ export function GameDetailPage() {
   useEffect(() => {
     setLogoLoaded(false)
   }, [appid])
-
-  // ── Load library meta (collections/tags) for this game ──
-  useEffect(() => {
-    if (!appid) return
-    let cancelled = false
-    ;(async () => {
-      try {
-        const allMeta = (await window.ucSettings?.get?.("libraryGameMeta")) || {}
-        if (!cancelled) setGameMeta(allMeta[appid] || {})
-      } catch {}
-    })()
-    return () => { cancelled = true }
-  }, [appid])
-
-  const saveGameMeta = useCallback(async (updated: { collections?: string[]; tags?: string[] }) => {
-    setGameMeta(updated)
-    try {
-      const allMeta = (await window.ucSettings?.get?.("libraryGameMeta")) || {}
-      allMeta[appid] = updated
-      await window.ucSettings?.set?.("libraryGameMeta", allMeta)
-    } catch {}
-  }, [appid])
-
-  const addCollection = useCallback(async () => {
-    const val = collectionInput.trim()
-    if (!val) return
-    const existing = gameMeta.collections || []
-    if (existing.includes(val)) { setCollectionInput(""); return }
-    await saveGameMeta({ ...gameMeta, collections: [...existing, val] })
-    setCollectionInput("")
-  }, [collectionInput, gameMeta, saveGameMeta])
-
-  const removeCollection = useCallback(async (name: string) => {
-    const existing = gameMeta.collections || []
-    await saveGameMeta({ ...gameMeta, collections: existing.filter((c) => c !== name) })
-  }, [gameMeta, saveGameMeta])
-
-  const addTag = useCallback(async () => {
-    const val = tagInput.trim()
-    if (!val) return
-    const existing = gameMeta.tags || []
-    if (existing.includes(val)) { setTagInput(""); return }
-    await saveGameMeta({ ...gameMeta, tags: [...existing, val] })
-    setTagInput("")
-  }, [tagInput, gameMeta, saveGameMeta])
-
-  const removeTag = useCallback(async (name: string) => {
-    const existing = gameMeta.tags || []
-    await saveGameMeta({ ...gameMeta, tags: existing.filter((t) => t !== name) })
-  }, [gameMeta, saveGameMeta])
 
   // Fetch ProtonDB summary for this game (proxied through the web API)
   useEffect(() => {
@@ -1893,76 +1835,6 @@ export function GameDetailPage() {
                 />
               )}
 
-              {/* ── Collections & Tags ── */}
-              <div className="p-8 rounded-3xl bg-zinc-900/60 border border-white/[.07] backdrop-blur-md space-y-5 shadow-xl">
-                <div className="space-y-3">
-                  <h3 className="section-label flex items-center gap-2">
-                    <Layers3 className="h-4 w-4 text-zinc-400" />
-                    Collections
-                  </h3>
-                  <div className="flex flex-wrap gap-1.5">
-                    {(gameMeta.collections || []).map((c) => (
-                      <Badge
-                        key={c}
-                        className="rounded-full border-zinc-700/50 bg-zinc-800/50 text-zinc-300 pl-2.5 pr-1 gap-1 cursor-pointer hover:bg-zinc-700/50"
-                        onClick={() => void removeCollection(c)}
-                      >
-                        {c}
-                        <X className="h-3 w-3 ml-0.5" />
-                      </Badge>
-                    ))}
-                    {!(gameMeta.collections?.length) && (
-                      <span className="text-xs text-zinc-500 italic">No collections</span>
-                    )}
-                  </div>
-                  <div className="flex gap-2">
-                    <Input
-                      value={collectionInput}
-                      onChange={(e) => setCollectionInput(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === "Enter") void addCollection() }}
-                      placeholder="Add collection..."
-                      className="h-8 text-xs flex-1"
-                    />
-                    <Button size="sm" className="h-8 px-3" onClick={() => void addCollection()} disabled={!collectionInput.trim()}>
-                      Add
-                    </Button>
-                  </div>
-                </div>
-                <div className="h-px bg-white/10" />
-                <div className="space-y-3">
-                  <h3 className="section-label flex items-center gap-2">
-                    <Tags className="h-4 w-4 text-zinc-400" />
-                    Tags
-                  </h3>
-                  <div className="flex flex-wrap gap-1.5">
-                    {(gameMeta.tags || []).map((t) => (
-                      <Badge
-                        key={t}
-                        className="rounded-full border-zinc-700/50 bg-zinc-800/50 text-zinc-300 pl-2.5 pr-1 gap-1 cursor-pointer hover:bg-zinc-700/50"
-                        onClick={() => void removeTag(t)}
-                      >
-                        #{t}
-                        <X className="h-3 w-3 ml-0.5" />
-                      </Badge>
-                    ))}
-                    {!(gameMeta.tags?.length) && (
-                      <span className="text-xs text-zinc-500 italic">No tags</span>
-                    )}
-                  </div>
-                  <div className="flex gap-2">
-                    <Input
-                      value={tagInput}
-                      onChange={(e) => setTagInput(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === "Enter") void addTag() }}
-                      placeholder="Add tag..."
-                      className="h-8 text-xs flex-1"
-                    />
-                    <Button size="sm" className="h-8 px-3" onClick={() => void addTag()} disabled={!tagInput.trim()}>
-                      Add
-                    </Button>
-                  </div>
-                </div>
-              </div>
             </div>
           </div>
         </div>

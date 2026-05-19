@@ -11071,8 +11071,16 @@ ipcMain.handle('uc:game-exe-running', async (_event, appid) => {
     if (!running) return { ok: true, running: false }
     const alive = await isProcessRunning(running.pid)
     if (!alive) {
-      if (running.appid) runningGames.delete(running.appid)
-      if (running.exePath) runningGames.delete(running.exePath)
+      // Route dead processes through the tracked-exit finalizer so playtime is
+      // recorded before the bookkeeping entry is removed.
+      if (typeof running.handleDead === 'function') {
+        try { running.handleDead(running.pid) } catch (err) {
+          ucLog(`[Game] running check finalizer failed for ${running.appid || running.pid}: ${err?.message || err}`, 'warn')
+        }
+      } else {
+        if (running.appid) runningGames.delete(running.appid)
+        if (running.exePath) runningGames.delete(running.exePath)
+      }
       return { ok: true, running: false }
     }
     return { ok: true, running: true, pid: running.pid, exePath: running.exePath }
@@ -11092,9 +11100,17 @@ ipcMain.handle('uc:game-exe-quit', async (_event, appid) => {
       if (!alive) stopped = true
     }
     if (stopped) {
-      if (running.appid) runningGames.delete(running.appid)
-      if (running.exePath) runningGames.delete(running.exePath)
-      if (runningGames.size === 0) clearGameRpcActivity()
+      // Let the normal exit finalizer record the completed playtime session.
+      // Direct deletion here drops the only in-memory start time.
+      if (typeof running.handleDead === 'function') {
+        try { running.handleDead(running.pid) } catch (err) {
+          ucLog(`[Game] quit finalizer failed for ${running.appid || running.pid}: ${err?.message || err}`, 'warn')
+        }
+      } else {
+        if (running.appid) runningGames.delete(running.appid)
+        if (running.exePath) runningGames.delete(running.exePath)
+        if (runningGames.size === 0) clearGameRpcActivity()
+      }
     }
     return { ok: true, stopped }
   } catch (err) {
