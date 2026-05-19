@@ -1761,7 +1761,10 @@ function applySettingsDefaults(settings) {
       forums: 'off',
       profilePublic: 'off',
       sysreqCheck: 'on',     // local pre-download check — no PII leaves device
+      shareGamePlaytime: true, // when false, user is excluded from playtime leaderboard + public playtime card
     }
+  } else if (typeof next.systemProfileVisibility.shareGamePlaytime !== 'boolean') {
+    next.systemProfileVisibility.shareGamePlaytime = true
   }
   if (typeof next.systemProfileSyncEnabled !== 'boolean') next.systemProfileSyncEnabled = false
   // When sharing error logs / diagnostics, optionally include a one-line hardware

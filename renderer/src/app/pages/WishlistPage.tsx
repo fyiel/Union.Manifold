@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -7,6 +7,7 @@ import { GameCardSkeleton } from "@/components/GameCardSkeleton"
 import { apiFetch, apiUrl, getApiBaseUrl } from "@/lib/api"
 import { useDiscordAccount } from "@/hooks/use-discord-account"
 import { Heart, LogIn, RefreshCw, Star } from "lucide-react"
+import { UpgradeSuggesterSection } from "@/components/SystemProfilePanel"
 
 interface Game {
   appid: string
@@ -31,6 +32,8 @@ export function WishlistPage() {
   const [error, setError] = useState<string | null>(null)
   const [loggingIn, setLoggingIn] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
+
+  const baseUrl = useMemo(() => { try { return getApiBaseUrl() } catch { return undefined } }, [])
 
   const loadItems = useCallback(async (retrySession = true) => {
     setError(null)
@@ -121,6 +124,10 @@ export function WishlistPage() {
           <div className="mb-4 rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
             {error}
           </div>
+        )}
+
+        {accountUser && (
+          <UpgradeSuggesterSection baseUrl={baseUrl} />
         )}
 
         {!accountUser && !accountLoading ? null : loading || accountLoading ? (

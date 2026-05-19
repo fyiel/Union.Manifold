@@ -131,6 +131,10 @@ declare global {
     forums: SystemProfileVisibilityTier
     profilePublic: SystemProfileVisibilityTier
     sysreqCheck: 'off' | 'on'
+    /** When false, user is excluded from the playtime leaderboard and the
+     *  playtime card on their public profile. Sessions still record locally
+     *  and on the server, so flipping back on restores everything. */
+    shareGamePlaytime: boolean
   }
 
   /** Pre-download storage reservation check result from window.ucStorage.precheck. */

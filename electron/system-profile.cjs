@@ -12,7 +12,7 @@ const path = require('node:path')
 const crypto = require('node:crypto')
 const child_process = require('node:child_process')
 
-const SPEC_VERSION = 2
+const SPEC_VERSION = 3
 
 // PowerShell on Windows has a meaningful cold-start cost (CLR init + WMI
 // service spin-up can easily blow past 5s on the first call after boot),
@@ -139,8 +139,101 @@ try {
   }
 } catch { }
 
+# Real VRAM via the display-adapter class key. Win32_VideoController.AdapterRAM
+# is a DWORD and is capped at 4GB (and often outright wrong on modern cards);
+# the kernel writes the 64-bit truth into HardwareInformation.qwMemorySize.
+# We collect every adapter subkey and let the JS side correlate by PNPDeviceID
+# (MatchingDeviceId) so we can attach VRAM to the right Win32_VideoController row.
+$adapters = @()
+try {
+  $classRoot = 'HKLM:\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}'
+  if (Test-Path $classRoot) {
+    $adapters = Get-ChildItem $classRoot -ErrorAction SilentlyContinue | Where-Object { $_.PSChildName -match '^\d{4}$' } | ForEach-Object {
+      $vals = $null
+      try { $vals = Get-ItemProperty -Path $_.PSPath -ErrorAction Stop } catch { }
+      if ($vals) {
+        @{
+          subkey       = $_.PSChildName
+          driverDesc   = "$($vals.DriverDesc)"
+          matchingDevId = "$($vals.MatchingDeviceId)"
+          # qwMemorySize is the 64-bit value; HardwareInformation.MemorySize is the
+          # legacy DWORD. Prefer the QWORD when present.
+          qwMemorySize = if ($vals.'HardwareInformation.qwMemorySize') { [int64]$vals.'HardwareInformation.qwMemorySize' } else { $null }
+          dwMemorySize = if ($vals.'HardwareInformation.MemorySize')   { [int64]$vals.'HardwareInformation.MemorySize'   } else { $null }
+        }
+      }
+    }
+  }
+} catch { }
+
+# Physical monitors (panels actually attached) via the WMI monitor namespace.
+# Win32_VideoController only knows about adapters; a single GPU can drive 1..N
+# monitors. We pull EDID-derived manufacturer/product strings + the largest
+# supported source mode (proxy for the panel's native resolution) so the
+# scanner reports every attached monitor, not just "the GPU's primary".
+$monitors = @()
+try {
+  $ids = Get-CimInstance -Namespace root/wmi -ClassName WmiMonitorID -ErrorAction Stop
+  $modes = @()
+  try { $modes = Get-CimInstance -Namespace root/wmi -ClassName WmiMonitorListedSupportedSourceModes -ErrorAction Stop } catch { }
+  $modesByInstance = @{}
+  foreach ($m in $modes) {
+    $modesByInstance[$m.InstanceName] = $m
+  }
+  foreach ($id in $ids) {
+    $name = ''
+    if ($id.UserFriendlyName) {
+      $name = -join ($id.UserFriendlyName | Where-Object { $_ -gt 0 } | ForEach-Object { [char]$_ })
+    }
+    $manuf = ''
+    if ($id.ManufacturerName) {
+      $manuf = -join ($id.ManufacturerName | Where-Object { $_ -gt 0 } | ForEach-Object { [char]$_ })
+    }
+    $product = ''
+    if ($id.ProductCodeID) {
+      $product = -join ($id.ProductCodeID | Where-Object { $_ -gt 0 } | ForEach-Object { [char]$_ })
+    }
+    $serial = ''
+    if ($id.SerialNumberID) {
+      $serial = -join ($id.SerialNumberID | Where-Object { $_ -gt 0 } | ForEach-Object { [char]$_ })
+    }
+    # Native mode = largest preferred mode. The list is unordered; pick the one
+    # with the highest horizontal active pixels and matching vertical.
+    $w = $null; $h = $null; $hz = $null
+    $sm = $modesByInstance[$id.InstanceName]
+    if ($sm -and $sm.MonitorSourceModes) {
+      $best = $sm.MonitorSourceModes | Sort-Object -Property HorizontalActivePixels -Descending | Select-Object -First 1
+      if ($best) {
+        $w = [int]$best.HorizontalActivePixels
+        $h = [int]$best.VerticalActivePixels
+        if ($best.VerticalRefreshRateNumerator -and $best.VerticalRefreshRateDenominator) {
+          $hz = [int][math]::Round($best.VerticalRefreshRateNumerator / $best.VerticalRefreshRateDenominator)
+        }
+      }
+    }
+    $monitors += @{
+      instance = $id.InstanceName
+      name     = $name
+      manuf    = $manuf
+      product  = $product
+      serial   = $serial
+      yearOfManufacture = $id.YearOfManufacture
+      active   = [bool]$id.Active
+      width    = $w
+      height   = $h
+      refreshHz = $hz
+    }
+  }
+} catch { }
+
+# DPI / current-mode pass: Win32_DesktopMonitor has the *current* (not native)
+# resolution for whichever monitor each Win32_VideoController is currently
+# driving. Useful as a fallback when WmiMonitor* isn't accessible (some
+# locked-down corporate images).
+$desktopMonitors = Try-CIM 'Win32_DesktopMonitor' $null | Select-Object Name,ScreenWidth,ScreenHeight,DeviceID,PNPDeviceID,MonitorManufacturer,MonitorType
+
 $out = @{
-  cs=$cs; os=$os_; cpu=$cpu; gpu=$gpu; mem=$mem; disk=$disk; vol=$vol; volMedia=$volMedia; pdisks=$pdisks
+  cs=$cs; os=$os_; cpu=$cpu; gpu=$gpu; mem=$mem; disk=$disk; vol=$vol; volMedia=$volMedia; pdisks=$pdisks; adapters=$adapters; monitors=$monitors; desktopMonitors=$desktopMonitors
 }
 $out | ConvertTo-Json -Depth 8 -Compress
 `
@@ -172,6 +265,31 @@ async function scanWindows() {
   const cpu = cpus[0] || {}
   const archMap = { 0: 'x86', 5: 'arm', 6: 'ia64', 9: 'x64', 12: 'arm64' }
 
+  // Build a lookup of "real" VRAM from the registry. AdapterRAM (DWORD) is
+  // capped at 4GB and outright wrong on most modern cards. The display class
+  // key stores the 64-bit HardwareInformation.qwMemorySize that we trust over
+  // the WMI value. Correlate by PNPDeviceID prefix.
+  const vramByPnpPrefix = new Map()
+  for (const a of toArray(parsed.adapters)) {
+    const matching = String(a?.matchingDevId || '').toUpperCase()
+    if (!matching) continue
+    const bytes = Number(a?.qwMemorySize) || Number(a?.dwMemorySize) || 0
+    if (!bytes) continue
+    // Strip the subsys/rev suffix so we match "PCI\VEN_10DE&DEV_2786" against
+    // both shortened PnP IDs and full ones.
+    const key = matching.split('&').slice(0, 2).join('&')
+    vramByPnpPrefix.set(key, bytes)
+    vramByPnpPrefix.set(matching, bytes)
+  }
+  function lookupRealVram(pnp) {
+    if (!pnp) return null
+    const up = String(pnp).toUpperCase()
+    if (vramByPnpPrefix.has(up)) return vramByPnpPrefix.get(up)
+    const short = up.split('&').slice(0, 2).join('&')
+    if (vramByPnpPrefix.has(short)) return vramByPnpPrefix.get(short)
+    return null
+  }
+
   // Rank GPUs so virtual / paravirtual adapters (Meta Oculus Virtual,
   // Parsec, Microsoft Basic Display, IddSampleDriver, RDP, Hyper-V) lose
   // to real silicon when the renderer reads `gpus[0]`.
@@ -179,7 +297,7 @@ async function scanWindows() {
     .filter((g) => g && (g.Name || g.PNPDeviceID))
     .map((g) => ({
       name: g?.Name || null,
-      vramBytes: Number(g?.AdapterRAM) || null,
+      vramBytes: lookupRealVram(g?.PNPDeviceID) || Number(g?.AdapterRAM) || null,
       vendor: detectGpuVendor(g?.Name || ''),
       driverVersion: g?.DriverVersion || null,
       driverDate: g?.DriverDate || null,
@@ -258,23 +376,77 @@ async function scanWindows() {
     }
   })
 
-  // Re-derive displays from the same Win32_VideoController rows (they
-  // carry CurrentHorizontalResolution/Refresh). Filter to active adapters
-  // so a disabled Oculus virtual display doesn't show up as your monitor.
-  const displays = toArray(parsed.gpu)
-    .filter((d) => d?.CurrentHorizontalResolution && d?.CurrentVerticalResolution)
-    .map((d) => ({
-      label: d?.Name || null,
-      width: Number(d.CurrentHorizontalResolution) || null,
-      height: Number(d.CurrentVerticalResolution) || null,
-      refreshHz: Number(d.CurrentRefreshRate) || null,
-    }))
-    // Same virtual-adapter pushdown as GPUs.
+  // Enumerate every *physical* monitor attached to the machine. The previous
+  // implementation derived displays from Win32_VideoController, which is
+  // per-adapter and only ever reported one entry (the GPU's primary surface)
+  // — multi-monitor setups appeared as a single 1080p panel. Now we use
+  // root/wmi → WmiMonitorID for the panel list and WmiMonitorListedSupported-
+  // SourceModes for the native resolution, falling back to Win32_DesktopMonitor
+  // and finally Win32_VideoController for locked-down systems where the WMI
+  // monitor namespace is blocked.
+  const monitorRows = toArray(parsed.monitors).filter((m) => m && (m.name || m.product || m.manuf))
+  let displays = monitorRows.map((m) => ({
+    label: (m.name && m.name.trim()) || [m.manuf, m.product].filter(Boolean).join(' ').trim() || null,
+    width: Number(m.width) || null,
+    height: Number(m.height) || null,
+    refreshHz: Number(m.refreshHz) || null,
+    manufacturer: m.manuf || null,
+    product: m.product || null,
+    serial: m.serial || null,
+    active: m.active !== false,
+  }))
+
+  if (displays.length === 0) {
+    // Win32_DesktopMonitor fallback. Multiple rows per machine on multi-head
+    // rigs; sometimes one ghost row with zero dimensions — filter those.
+    displays = toArray(parsed.desktopMonitors)
+      .filter((d) => Number(d?.ScreenWidth) && Number(d?.ScreenHeight))
+      .map((d) => ({
+        label: d?.Name || d?.MonitorType || null,
+        width: Number(d.ScreenWidth) || null,
+        height: Number(d.ScreenHeight) || null,
+        refreshHz: null,
+        manufacturer: d?.MonitorManufacturer || null,
+        product: null,
+        serial: null,
+        active: true,
+      }))
+  }
+
+  if (displays.length === 0) {
+    // Last-resort fallback: the old per-adapter view. Only fires when both
+    // monitor namespaces are unavailable (rare).
+    displays = toArray(parsed.gpu)
+      .filter((d) => d?.CurrentHorizontalResolution && d?.CurrentVerticalResolution)
+      .map((d) => ({
+        label: d?.Name || null,
+        width: Number(d.CurrentHorizontalResolution) || null,
+        height: Number(d.CurrentVerticalResolution) || null,
+        refreshHz: Number(d.CurrentRefreshRate) || null,
+        manufacturer: null,
+        product: null,
+        serial: null,
+        active: true,
+      }))
+  }
+
+  // Push virtual / inactive monitors to the back, and dedupe entries that
+  // share width+height+label (Win32_DesktopMonitor sometimes lists the same
+  // monitor twice once via DDC and once via EDID).
+  const seen = new Set()
+  displays = displays
     .sort((a, b) => {
+      if (a.active !== b.active) return a.active ? -1 : 1
       const av = isVirtualGpu(a.label || '', '')
       const bv = isVirtualGpu(b.label || '', '')
       if (av !== bv) return av ? 1 : -1
-      return 0
+      return (b.width || 0) - (a.width || 0)
+    })
+    .filter((d) => {
+      const k = `${d.label}|${d.width}|${d.height}|${d.serial || ''}`
+      if (seen.has(k)) return false
+      seen.add(k)
+      return true
     })
 
   return {
