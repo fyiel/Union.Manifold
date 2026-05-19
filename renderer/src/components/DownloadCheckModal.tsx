@@ -232,7 +232,9 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, onC
         }
       }
 
-      const hasReqs = game.minRequirements || game.recommendedRequirements
+      const hasWindowsReqs = game.minRequirements || game.recommendedRequirements
+      const hasLinuxReqs = game.linuxMinRequirements || game.linuxRecommendedRequirements
+      const hasReqs = hasWindowsReqs || hasLinuxReqs
       if (window.ucSystemProfile?.getCached) {
         try {
           const res = await window.ucSystemProfile.getCached()
@@ -242,8 +244,17 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, onC
             return
           }
           if (hasReqs) {
-            const target = game.recommendedRequirements || game.minRequirements || null
-            setSysreqVerdict(compareToProfile(res.profile.spec, target))
+            // Pick the platform that matches the user's scanned OS. Fall
+            // back to the other side when the preferred platform isn't
+            // published — a Linux user on a Windows-only title still gets
+            // a meaningful "does my hardware clear it" verdict against the
+            // Windows specs (relevant for Proton).
+            const platform = String(res.profile.spec?.os?.platform || "").toLowerCase()
+            const preferLinux = platform === "linux" && hasLinuxReqs
+            const target = preferLinux
+              ? (game.linuxRecommendedRequirements || game.linuxMinRequirements || null)
+              : (game.recommendedRequirements || game.minRequirements || null)
+            if (target) setSysreqVerdict(compareToProfile(res.profile.spec, target))
           }
           // Driver status is independent of game sysreq — we can warn even
           // for games whose specs aren't published yet.
@@ -655,7 +666,7 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, onC
             )}
 
             {/* System requirement comparison */}
-            {sysreqProfileMissing && (game?.minRequirements || game?.recommendedRequirements) && (
+            {sysreqProfileMissing && (game?.minRequirements || game?.recommendedRequirements || game?.linuxMinRequirements || game?.linuxRecommendedRequirements) && (
               <div className="rounded-lg border border-white/[.07] bg-zinc-800/30 px-3 py-2 text-xs text-zinc-300">
                 <div className="flex items-center gap-1.5 font-medium">
                   <Cpu className="h-3.5 w-3.5" />

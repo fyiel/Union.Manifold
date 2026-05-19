@@ -1,19 +1,25 @@
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { AlertTriangle, CheckCircle2, CircleX, Cpu, HelpCircle } from "lucide-react"
 import { compareToProfile, type RequirementVerdict, type RequirementCheck } from "@/lib/system-requirements"
 import type { GameRequirements } from "@/lib/types"
 
+type Platform = "windows" | "linux"
+
 type Props = {
+  /** Windows. */
   minRequirements?: GameRequirements | null
   recommendedRequirements?: GameRequirements | null
+  /** Linux peers — null for Windows-only titles. */
+  linuxMinRequirements?: GameRequirements | null
+  linuxRecommendedRequirements?: GameRequirements | null
 }
 
 type State =
   | { kind: "loading" }
-  | { kind: "no-profile" }
+  | { kind: "no-profile"; defaultPlatform: Platform }
   | { kind: "no-requirements" }
-  | { kind: "ready"; verdict: RequirementVerdict; tier: "minimum" | "recommended" }
+  | { kind: "ready"; spec: any; defaultPlatform: Platform }
 
 const COMPONENT_LABEL: Record<RequirementCheck["component"], string> = {
   cpu: "CPU",
@@ -32,15 +38,38 @@ function statusIcon(status: RequirementCheck["status"]) {
   return <HelpCircle className="h-4 w-4 text-zinc-500" />
 }
 
-export function SystemRequirementsCheck({ minRequirements, recommendedRequirements }: Props) {
+function detectPlatformFromSpec(spec: any): Platform {
+  // Prefer the scanned profile's OS — that's the same machine the user is
+  // currently sitting at. Falls back to the renderer-side process.platform
+  // if the spec didn't capture it (very old caches).
+  const p = String(spec?.os?.platform || "").toLowerCase()
+  if (p === "linux") return "linux"
+  if (p === "win32" || p === "darwin") return "windows"
+  // Last resort: read window.process if available (Electron renderer).
+  try {
+    const w = window as unknown as { process?: { platform?: string } }
+    if (w.process?.platform === "linux") return "linux"
+  } catch { /* not Electron */ }
+  return "windows"
+}
+
+export function SystemRequirementsCheck({
+  minRequirements,
+  recommendedRequirements,
+  linuxMinRequirements,
+  linuxRecommendedRequirements,
+}: Props) {
   const navigate = useNavigate()
   const [state, setState] = useState<State>({ kind: "loading" })
+  /** User's manual override. Null = OS-detected default. */
+  const [overridePlatform, setOverridePlatform] = useState<Platform | null>(null)
+
+  const hasWindows = Boolean(minRequirements || recommendedRequirements)
+  const hasLinux = Boolean(linuxMinRequirements || linuxRecommendedRequirements)
 
   useEffect(() => {
     let cancelled = false
-    const target = recommendedRequirements || minRequirements
-    const tier: "minimum" | "recommended" = recommendedRequirements ? "recommended" : "minimum"
-    if (!target) {
+    if (!hasWindows && !hasLinux) {
       setState({ kind: "no-requirements" })
       return
     }
@@ -51,20 +80,69 @@ export function SystemRequirementsCheck({ minRequirements, recommendedRequiremen
         if (cancelled) return
         const profile = res?.ok ? res.profile : null
         if (!profile?.spec) {
-          setState({ kind: "no-profile" })
+          setState({ kind: "no-profile", defaultPlatform: detectPlatformFromSpec(null) })
           return
         }
-        const verdict = compareToProfile(profile.spec, target)
-        setState({ kind: "ready", verdict, tier })
+        setState({ kind: "ready", spec: profile.spec, defaultPlatform: detectPlatformFromSpec(profile.spec) })
       } catch {
-        if (!cancelled) setState({ kind: "no-profile" })
+        if (!cancelled) setState({ kind: "no-profile", defaultPlatform: detectPlatformFromSpec(null) })
       }
     })()
 
     return () => { cancelled = true }
-  }, [minRequirements, recommendedRequirements])
+  }, [hasWindows, hasLinux])
+
+  /** Resolved platform: explicit override, else OS-detected default, with
+   *  a cross-platform fallback if the preferred one publishes nothing. */
+  const selectedPlatform: Platform = useMemo(() => {
+    const def = state.kind === "ready" || state.kind === "no-profile" ? state.defaultPlatform : "windows"
+    const requested = overridePlatform ?? def
+    if (requested === "linux" && !hasLinux && hasWindows) return "windows"
+    if (requested === "windows" && !hasWindows && hasLinux) return "linux"
+    return requested
+  }, [state, overridePlatform, hasWindows, hasLinux])
+
+  const verdictData = useMemo<{ verdict: RequirementVerdict; tier: "minimum" | "recommended" } | null>(() => {
+    if (state.kind !== "ready") return null
+    const target = selectedPlatform === "linux"
+      ? (linuxRecommendedRequirements || linuxMinRequirements)
+      : (recommendedRequirements || minRequirements)
+    if (!target) return null
+    const tier: "minimum" | "recommended" =
+      (selectedPlatform === "linux" ? linuxRecommendedRequirements : recommendedRequirements) ? "recommended" : "minimum"
+    return { verdict: compareToProfile(state.spec, target), tier }
+  }, [state, selectedPlatform, minRequirements, recommendedRequirements, linuxMinRequirements, linuxRecommendedRequirements])
 
   if (state.kind === "loading" || state.kind === "no-requirements") return null
+
+  // Pill is rendered whenever the game publishes both platforms. When only
+  // one is available, we still display a static label so the user knows
+  // which OS the comparison is against — important on Linux where reqs
+  // sometimes differ markedly from Windows.
+  const platformLabel = (
+    <>
+      {(hasWindows && hasLinux) ? (
+        <div className="inline-flex items-center gap-0.5 rounded-full border border-white/[.07] bg-zinc-900/60 p-0.5 text-[10px]">
+          <button
+            type="button"
+            onClick={() => setOverridePlatform("windows")}
+            className={`px-2 py-0.5 rounded-full transition ${selectedPlatform === "windows" ? "bg-zinc-700 text-white" : "text-zinc-400 hover:text-zinc-200"}`}
+            title="Compare against Windows requirements"
+          >Windows</button>
+          <button
+            type="button"
+            onClick={() => setOverridePlatform("linux")}
+            className={`px-2 py-0.5 rounded-full transition ${selectedPlatform === "linux" ? "bg-zinc-700 text-white" : "text-zinc-400 hover:text-zinc-200"}`}
+            title="Compare against Linux requirements"
+          >Linux</button>
+        </div>
+      ) : (
+        <span className="rounded-full border border-white/10 bg-white/[.04] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
+          {selectedPlatform === "linux" ? "Linux" : "Windows"}
+        </span>
+      )}
+    </>
+  )
 
   if (state.kind === "no-profile") {
     return (
@@ -74,7 +152,10 @@ export function SystemRequirementsCheck({ minRequirements, recommendedRequiremen
             <Cpu className="h-5 w-5 text-zinc-300" />
           </div>
           <div className="flex-1 min-w-0">
-            <h3 className="text-sm font-bold text-white">Can my PC run this?</h3>
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="text-sm font-bold text-white">Can my PC run this?</h3>
+              {platformLabel}
+            </div>
             <p className="mt-1 text-xs text-zinc-400 leading-relaxed">
               Scan your hardware once and we'll compare your PC against every game's requirements automatically.
             </p>
@@ -91,7 +172,8 @@ export function SystemRequirementsCheck({ minRequirements, recommendedRequiremen
     )
   }
 
-  const { verdict, tier } = state
+  if (!verdictData) return null
+  const { verdict, tier } = verdictData
   const verdictTone =
     verdict.status === "pass" ? "emerald" :
     verdict.status === "warn" ? "amber" :
@@ -106,15 +188,18 @@ export function SystemRequirementsCheck({ minRequirements, recommendedRequiremen
     <div className="p-6 rounded-3xl bg-zinc-900/60 border border-white/[.07] backdrop-blur-md shadow-xl space-y-4">
       <div className="flex items-center justify-between gap-3">
         <h3 className="text-xs font-bold text-white uppercase tracking-widest">Will it run on my PC?</h3>
-        <span className={
-          "rounded-full border px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider " +
-          (verdictTone === "emerald" ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300" :
-           verdictTone === "amber"   ? "border-amber-500/40 bg-amber-500/10 text-amber-300" :
-           verdictTone === "rose"    ? "border-rose-500/40 bg-rose-500/10 text-rose-300" :
-                                       "border-white/10 bg-white/[.04] text-zinc-300")
-        }>
-          {tier}
-        </span>
+        <div className="flex items-center gap-2">
+          {platformLabel}
+          <span className={
+            "rounded-full border px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider " +
+            (verdictTone === "emerald" ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300" :
+             verdictTone === "amber"   ? "border-amber-500/40 bg-amber-500/10 text-amber-300" :
+             verdictTone === "rose"    ? "border-rose-500/40 bg-rose-500/10 text-rose-300" :
+                                         "border-white/10 bg-white/[.04] text-zinc-300")
+          }>
+            {tier}
+          </span>
+        </div>
       </div>
       <p className={
         "text-sm font-medium " +

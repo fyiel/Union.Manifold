@@ -292,12 +292,12 @@ export function SystemProfilePanel({ autoScanOnMount = false, onAutoScanConsumed
                   primaryGpu.vramBytes ? `${formatBytes(primaryGpu.vramBytes)} VRAM` : null,
                   primaryGpu.driverVersion ? `driver ${primaryGpu.driverVersion}` : null,
                 ].filter(Boolean).join(" · ") : null} />
-              <SpecTile icon={<MemoryStick className="h-4 w-4" />} label="RAM" value={ramGib ? `${ramGib} GB` : "Unknown"}
-                sub={spec.ram.speedMhz ? `${spec.ram.speedMhz} MHz · ${spec.ram.channels || ""}` : null} />
+              <SpecTile icon={<MemoryStick className="h-4 w-4" />} label="RAM" value={ramGib ? `${ramGib} GB${spec.ram.type ? ` ${spec.ram.type}` : ""}` : "Unknown"}
+                sub={[spec.ram.speedMhz ? `${spec.ram.speedMhz} MHz` : null, spec.ram.channels, spec.ram.formFactor].filter(Boolean).join(" · ") || null} />
               <SpecTile icon={<Monitor className="h-4 w-4" />} label="OS" value={`${spec.os.name} ${spec.os.version || ""}`}
                 sub={spec.os.build ? `build ${spec.os.build}` : null} />
               <SpecTile icon={<HardDrive className="h-4 w-4" />} label="Storage" value={`${spec.storage.drives.length} drive${spec.storage.drives.length === 1 ? "" : "s"}`}
-                sub={spec.storage.drives.slice(0, 2).map((d) => `${d.mediaType?.toUpperCase() || ""} ${formatBytes(d.sizeBytes)}`).join(" · ") || null} />
+                sub={spec.storage.drives.map((d) => `${d.mediaType?.toUpperCase() || "DRIVE"} ${formatBytes(d.sizeBytes)}${d.model ? ` (${d.model.length > 24 ? d.model.slice(0, 24) + "…" : d.model})` : ""}`).join(" · ") || null} />
               <SpecTile icon={<Monitor className="h-4 w-4" />} label="Display" value={spec.displays[0] ? `${spec.displays[0].width}×${spec.displays[0].height}` : "Unknown"}
                 sub={spec.displays[0]?.refreshHz ? `${spec.displays[0].refreshHz} Hz · DX${spec.graphics.directx || "?"}${spec.graphics.vulkan ? ` · Vulkan ${spec.graphics.vulkan}` : ""}` : null} />
             </div>
@@ -354,7 +354,7 @@ export function SystemProfilePanel({ autoScanOnMount = false, onAutoScanConsumed
               <div className="flex-1 min-w-0">
                 <div className="text-sm font-medium">Pre-download requirement check</div>
                 <div className="text-xs text-zinc-400 mt-0.5">
-                  Compare a game's minimum and recommended specs to your hardware before downloading. Stays on your device.
+                  Compare a game's minimum and recommended specs to your hardware before downloading. Also powers the &ldquo;Can my PC run&rdquo; check on union-crax.xyz when you&rsquo;re signed in.
                 </div>
               </div>
               <Select value={sysreqCheck} onValueChange={(v) => updateVisibility({ sysreqCheck: v as "on" | "off" })}>
