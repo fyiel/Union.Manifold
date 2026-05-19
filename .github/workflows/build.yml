@@ -110,6 +110,7 @@ jobs:
         with:
           tag: ${{ github.event.inputs.tag || github.ref_name }}
           allowUpdates: true
+          omitBodyDuringUpdate: true
           replacesArtifacts: true
           artifacts: |
             dist-packaged/**/*.exe
