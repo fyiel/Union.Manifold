@@ -144,6 +144,173 @@ let launchHandoffRefreshTimer = null
 let pendingCloseRequest = null
 let closeRequestApproved = false
 
+// ─── Playtime tracking ──────────────────────────────────────────────────────
+// Sessions are recorded locally as games exit and flushed to the UC backend
+// when the user is authed (mirror of system-profile upload). We keep a
+// pending-queue file in userData so a session survives an app crash, and we
+// retain a 90-day local archive so the renderer can show offline totals.
+const PLAYTIME_MIN_SESSION_MS = 30 * 1000
+const PLAYTIME_MAX_SESSION_MS = 36 * 60 * 60 * 1000
+const PLAYTIME_PENDING_RETENTION_MS = 60 * 24 * 60 * 60 * 1000 // 60 days
+let playtimePendingMemo = null
+
+function getPlaytimePath() {
+  try { return path.join(app.getPath('userData'), 'playtime.json') } catch { return null }
+}
+
+function readPlaytimeStore() {
+  if (playtimePendingMemo) return playtimePendingMemo
+  const p = getPlaytimePath()
+  if (!p) return { pending: [], totals: {}, archive: [] }
+  try {
+    if (!fs.existsSync(p)) {
+      playtimePendingMemo = { pending: [], totals: {}, archive: [] }
+      return playtimePendingMemo
+    }
+    const raw = JSON.parse(fs.readFileSync(p, 'utf8'))
+    playtimePendingMemo = {
+      pending: Array.isArray(raw?.pending) ? raw.pending.filter(Boolean) : [],
+      totals: raw?.totals && typeof raw.totals === 'object' ? raw.totals : {},
+      archive: Array.isArray(raw?.archive) ? raw.archive.filter(Boolean) : [],
+    }
+    return playtimePendingMemo
+  } catch (err) {
+    ucLog(`[Playtime] Failed to read playtime store: ${err?.message || err}`, 'warn')
+    playtimePendingMemo = { pending: [], totals: {}, archive: [] }
+    return playtimePendingMemo
+  }
+}
+
+function writePlaytimeStore(store) {
+  const p = getPlaytimePath()
+  if (!p) return
+  playtimePendingMemo = store
+  try {
+    fs.writeFileSync(p, JSON.stringify(store), 'utf8')
+  } catch (err) {
+    ucLog(`[Playtime] Failed to write playtime store: ${err?.message || err}`, 'warn')
+  }
+}
+
+function newPlaytimeSessionId() {
+  // 16 hex bytes = 32 chars. Stable id sent to server for idempotent upserts.
+  return crypto.randomBytes(16).toString('hex')
+}
+
+/**
+ * Persist a finished play session. Drops sessions shorter than the floor
+ * and clamps absurd ones. Updates per-appid totals + appends to the archive
+ * (UC.D shows these in the library) and to the pending-upload queue.
+ */
+function recordPlaytimeSession({ appid, gameName, startedAt, endedAt }) {
+  if (!appid) return null
+  const start = Number(startedAt)
+  const end = Number(endedAt)
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return null
+  const durationMs = Math.min(PLAYTIME_MAX_SESSION_MS, end - start)
+  if (durationMs < PLAYTIME_MIN_SESSION_MS) return null
+
+  const store = readPlaytimeStore()
+  const session = {
+    id: newPlaytimeSessionId(),
+    appid: String(appid),
+    gameName: typeof gameName === 'string' && gameName.trim() ? gameName.trim() : null,
+    startedAt: new Date(start).toISOString(),
+    endedAt: new Date(start + durationMs).toISOString(),
+    durationSeconds: Math.floor(durationMs / 1000),
+    sourceAppVersion: getAppVersion(),
+    recordedAt: new Date().toISOString(),
+  }
+
+  store.pending.push(session)
+  store.archive.push(session)
+  const cutoff = Date.now() - PLAYTIME_PENDING_RETENTION_MS
+  store.archive = store.archive.filter((s) => {
+    const ts = s?.endedAt ? Date.parse(s.endedAt) : 0
+    return Number.isFinite(ts) && ts >= cutoff
+  })
+
+  const totals = store.totals || (store.totals = {})
+  const existing = totals[appid] && typeof totals[appid] === 'object' ? totals[appid] : {}
+  totals[appid] = {
+    gameName: session.gameName || existing.gameName || null,
+    totalSeconds: Number(existing.totalSeconds || 0) + session.durationSeconds,
+    sessionCount: Number(existing.sessionCount || 0) + 1,
+    firstPlayedAt: existing.firstPlayedAt || session.startedAt,
+    lastPlayedAt: session.endedAt,
+  }
+  writePlaytimeStore(store)
+
+  // Persist per-game total into libraryGameMeta so the library UI can show
+  // a "12h played" chip without consulting the server.
+  try {
+    writeLibraryGameMeta(appid, {
+      lastPlayedAt: end,
+      playtimeSeconds: totals[appid].totalSeconds,
+      playtimeSessions: totals[appid].sessionCount,
+    })
+  } catch {}
+
+  ucLog(`[Playtime] Recorded session: appid=${appid} duration=${session.durationSeconds}s (pending=${store.pending.length})`)
+
+  // Notify any open renderer windows so the library/profile UI can refresh.
+  try {
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (win && !win.isDestroyed()) {
+        win.webContents.send('uc:playtime-session-recorded', { session, totals: totals[appid] })
+      }
+    }
+  } catch {}
+
+  return session
+}
+
+function getPlaytimePending() {
+  const store = readPlaytimeStore()
+  return Array.isArray(store.pending) ? store.pending.slice() : []
+}
+
+function ackPlaytimePending(sessionIds) {
+  if (!Array.isArray(sessionIds) || sessionIds.length === 0) return 0
+  const idSet = new Set(sessionIds.map(String))
+  const store = readPlaytimeStore()
+  const before = store.pending.length
+  store.pending = store.pending.filter((s) => !idSet.has(String(s?.id)))
+  writePlaytimeStore(store)
+  return before - store.pending.length
+}
+
+function getPlaytimeLocalSummary() {
+  const store = readPlaytimeStore()
+  const totals = store.totals || {}
+  const archive = Array.isArray(store.archive) ? store.archive : []
+  let totalSeconds = 0
+  let sessionCount = 0
+  for (const appid of Object.keys(totals)) {
+    totalSeconds += Number(totals[appid]?.totalSeconds || 0)
+    sessionCount += Number(totals[appid]?.sessionCount || 0)
+  }
+  const weekCutoff = Date.now() - 7 * 24 * 60 * 60 * 1000
+  let weekSeconds = 0
+  for (const s of archive) {
+    const ts = s?.endedAt ? Date.parse(s.endedAt) : 0
+    if (Number.isFinite(ts) && ts >= weekCutoff) {
+      weekSeconds += Number(s.durationSeconds || 0)
+    }
+  }
+  const topGames = Object.keys(totals)
+    .map((appid) => ({
+      appid,
+      gameName: totals[appid]?.gameName || null,
+      totalSeconds: Number(totals[appid]?.totalSeconds || 0),
+      sessionCount: Number(totals[appid]?.sessionCount || 0),
+      lastPlayedAt: totals[appid]?.lastPlayedAt || null,
+    }))
+    .filter((g) => g.totalSeconds > 0)
+    .sort((a, b) => b.totalSeconds - a.totalSeconds)
+  return { totalSeconds, weekSeconds, sessionCount, pendingCount: store.pending.length, topGames }
+}
+
 function buildAppExtractionKey(appid) {
   return `appid:${String(appid || '').toLowerCase()}`
 }
@@ -6852,10 +7019,28 @@ function registerRunningGame(appid, exePath, proc, gameName, showGameName = true
 
   function finalizeTrackedExit(exitedPid) {
     if (!isTrackedPayloadCurrent()) return
-    const elapsed = Date.now() - payload.startedAt
+    const endedAt = Date.now()
+    const elapsed = endedAt - payload.startedAt
     const injection = exitedPid ? overlayInjections.get(exitedPid) : null
     const injectedRecently = Boolean(injection?.injectedAt && (Date.now() - injection.injectedAt) < 15000)
     ucLog(`[Game] ${payload.appid || 'unknown'} exited (PID ${exitedPid}, elapsed=${elapsed}ms)`)
+
+    // Persist the finished session — recordPlaytimeSession drops anything
+    // shorter than the floor (5s quick-exit case below) so we don't pollute
+    // totals with misfires.
+    if (payload.appid && elapsed >= PLAYTIME_MIN_SESSION_MS) {
+      try {
+        recordPlaytimeSession({
+          appid: payload.appid,
+          gameName: payload.gameName,
+          startedAt: payload.startedAt,
+          endedAt,
+        })
+      } catch (err) {
+        ucLog(`[Playtime] Failed to record session for ${payload.appid}: ${err?.message || err}`, 'warn')
+      }
+    }
+
     clearTrackedPayload()
     if (runningGames.size === 0) clearGameRpcActivity()
     if (exitedPid) cleanupOverlayInjection(exitedPid)
@@ -6996,9 +7181,22 @@ $candidates | Sort-Object CreationDate | ForEach-Object { $_.ProcessId }`
   // Auto-show overlay when game launches
   if (appid) checkAndShowOverlayForGame(appid)
 
+  // The spawn handle's `exit` event is our primary signal, but on Windows
+  // with `detached: true` + `unref()` it can miss firings (e.g. the user
+  // quits the game from inside its own UI and Electron never sees a real
+  // exit on the launcher handle). We also poll the PID and let
+  // pruneRunningGames sweep up any payloads whose PID has vanished — both
+  // paths funnel back through handleTrackedExit, which is idempotent via
+  // isTrackedPayloadCurrent().
   proc.on('exit', () => {
     handleTrackedExit(proc.pid)
   })
+  monitorTrackedPid(proc.pid)
+
+  // Expose the tracked-exit closure on the payload so the global
+  // pruneRunningGames sweeper can finalise the session (record playtime,
+  // clear RPC, hide overlay) instead of just deleting the entry.
+  payload.handleDead = handleTrackedExit
 }
 
 function getRunningGame(appid) {
@@ -7078,10 +7276,26 @@ async function pruneRunningGames() {
       continue
     }
     const alive = await isProcessRunning(payload.pid)
-    if (!alive) {
-      if (payload.appid) runningGames.delete(payload.appid)
-      if (payload.exePath) runningGames.delete(payload.exePath)
+    if (alive) continue
+
+    // Route through the registerRunningGame closure when available so the
+    // playtime session gets recorded, RPC is cleared, the overlay hides,
+    // and the Windows successor-PID handoff is attempted before we give up.
+    // The closure is idempotent (guarded by isTrackedPayloadCurrent()), so
+    // a duplicate fire from proc.on('exit') is harmless.
+    if (typeof payload.handleDead === 'function') {
+      try { payload.handleDead(payload.pid) } catch (err) {
+        ucLog(`[Game] pruneRunningGames handleDead failed for ${payload.appid || payload.pid}: ${err?.message || err}`, 'warn')
+      }
+      continue
     }
+
+    // Fallback for entries hydrated from disk after a UC.D restart — no
+    // closure available, just clean up the bookkeeping. Library "last
+    // played" was already persisted at launch.
+    ucLog(`[Game] pruneRunningGames cleaning orphan entry (no handleDead): appid=${payload.appid || 'unknown'} pid=${payload.pid}`, 'warn')
+    if (payload.appid) runningGames.delete(payload.appid)
+    if (payload.exePath) runningGames.delete(payload.exePath)
   }
 
   if (runningGames.size === 0 && rpcGameActivity) {
@@ -12342,6 +12556,79 @@ ipcMain.handle('uc:system-profile-revoke-share', (event, { baseUrl, shortCode } 
 // Upgrade suggester — compares wishlist vs active profile.
 ipcMain.handle('uc:system-profile-upgrade-suggest', (event, { baseUrl } = {}) =>
   passthroughJson(event.sender, baseUrl, '/api/profile/system/upgrade-suggest', { method: 'GET' })
+)
+
+// ── Playtime ───────────────────────────────────────────────────────────────
+ipcMain.handle('uc:playtime-local-summary', () => {
+  try { return { ok: true, summary: getPlaytimeLocalSummary() } }
+  catch (err) { return { ok: false, error: err?.message || String(err) } }
+})
+
+ipcMain.handle('uc:playtime-pending', () => {
+  try { return { ok: true, sessions: getPlaytimePending() } }
+  catch (err) { return { ok: false, error: err?.message || String(err) } }
+})
+
+ipcMain.handle('uc:playtime-ack', (_event, sessionIds) => {
+  try {
+    const cleared = ackPlaytimePending(Array.isArray(sessionIds) ? sessionIds : [])
+    return { ok: true, cleared, remaining: getPlaytimePending().length }
+  } catch (err) {
+    return { ok: false, error: err?.message || String(err) }
+  }
+})
+
+// Server-side flush — push all pending sessions in one batch. Caller owns
+// the decision of *whether* to upload (auth state, settings, etc.).
+ipcMain.handle('uc:playtime-flush', async (event, { baseUrl } = {}) => {
+  const win = BrowserWindow.fromWebContents(event.sender)
+  if (!win || win.isDestroyed()) return { ok: false, error: 'no-window' }
+  try {
+    const pending = getPlaytimePending()
+    if (pending.length === 0) return { ok: true, uploaded: 0, remaining: 0 }
+    // Chunk to honour the API's batch ceiling. Server caps at 200/batch.
+    const CHUNK_SIZE = 100
+    let uploaded = 0
+    for (let i = 0; i < pending.length; i += CHUNK_SIZE) {
+      const chunk = pending.slice(i, i + CHUNK_SIZE)
+      const payload = {
+        sourceAppVersion: getAppVersion(),
+        sessions: chunk.map((s) => ({
+          appid: s.appid,
+          gameName: s.gameName,
+          durationSeconds: s.durationSeconds,
+          startedAt: s.startedAt,
+          endedAt: s.endedAt,
+          clientSessionId: s.id,
+          sourceAppVersion: s.sourceAppVersion,
+        })),
+      }
+      const response = await fetchWithSession(win.webContents.session, baseUrl, '/api/playtime/sessions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      const body = await response.text()
+      let parsed = null
+      try { parsed = JSON.parse(body) } catch { /* swallow */ }
+      if (!response.ok) {
+        ucLog(`[Playtime] Upload failed: ${response.status} ${body.slice(0, 200)}`, 'warn')
+        return { ok: false, status: response.status, error: parsed?.error || `HTTP ${response.status}`, uploaded }
+      }
+      const acked = Array.isArray(parsed?.ackedClientSessionIds) ? parsed.ackedClientSessionIds : []
+      ackPlaytimePending(acked)
+      uploaded += Number(parsed?.inserted || 0)
+    }
+    return { ok: true, uploaded, remaining: getPlaytimePending().length }
+  } catch (err) {
+    ucLog(`[Playtime] Flush error: ${err?.message || err}`, 'error')
+    return { ok: false, error: err?.message || String(err) }
+  }
+})
+
+// Pass-through for server reads (the renderer's profile UI uses these).
+ipcMain.handle('uc:playtime-server-totals', (event, { baseUrl } = {}) =>
+  passthroughJson(event.sender, baseUrl, '/api/playtime/sessions', { method: 'GET' })
 )
 
 // ── Storage reservation (used by sysreq UI + concurrency safety) ────────────

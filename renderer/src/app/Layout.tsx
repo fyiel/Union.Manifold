@@ -11,6 +11,7 @@ import { UpdateNotification } from "@/components/UpdateNotification"
 import { useDiscordRpcPresence } from "@/hooks/use-discord-rpc"
 import { useAppPreferencesSync } from "@/hooks/use-app-preferences-sync"
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts"
+import { usePlaytimeFlush } from "@/hooks/use-playtime-flush"
 import { logger } from "@/lib/logger"
 import { cn } from "@/lib/utils"
 import { LogSharingConsentModal } from "@/components/LogSharingConsentModal"
@@ -21,6 +22,7 @@ export function AppLayout() {
   useDiscordRpcPresence()
   useAppPreferencesSync()
   useKeyboardShortcuts()
+  usePlaytimeFlush()
   const location = useLocation()
   const navigate = useNavigate()
 

@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased — Community Leaderboard + Playtime tracking (2026-05-19)
+
+- **Playtime tracking in UC.D** — sessions are now timed on every game launch (with proper accounting for the Windows successor-PID handoff used by Unity-style launchers) and persisted in a local `playtime.json` queue. Per-game totals and session counts are written into `libraryGameMeta` so library UI can show a "12h played" chip without a network roundtrip. Sessions shorter than 30s are dropped to avoid polluting totals; sessions longer than 36h are clamped.
+- **Server sync** — when signed in, UC.D auto-flushes pending sessions to a new `/api/playtime/sessions` endpoint every 5 minutes and immediately after each game exit. Uploads are idempotent on a UC.D-generated `clientSessionId` so a flaky network can't double-count.
+- **`/leaderboard` page** (replaces `/stats/hardware`) — community leaderboard with two tabs:
+  - **Playtime** — all-time and this-week boards with rank, avatar, total/week split, a horizontal bar, and the user's top-3 most-played games as inline chips. Restricted to users with the Public profile tier set to summary or full.
+  - **Hardware** — top GPUs, CPUs, vendors, RAM buckets, OS, and storage media. Top GPU and CPU rows now surface the usernames + avatars of owners who opted into a public profile (anonymous contributors still count toward percentages but don't appear in the owner chip list).
+- **Public profile playtime card** (`/user/[username]`) — when a user has a public profile and any recorded playtime, their profile shows total + this-week totals, both ranks vs. the rest of the community, session count, last session date, and their top-5 most-played games with cover-art-friendly progress bars. Old `/stats/hardware` URLs redirect to `/leaderboard?tab=hardware`.
+- **Stuck "currently playing" fix** — when a game was closed from inside its own UI, UC.D could continue thinking the game was running (the spawned launcher handle's `exit` event sometimes never fired under `detached: true` + `unref()` on Windows). Tracked PIDs are now actively polled every 3s, and the 15s `pruneRunningGames` sweep routes dead PIDs through the same finalisation path as `proc.on('exit')` — so the playtime session is recorded, RPC clears, and the overlay hides whether the game exits cleanly or vanishes silently.
+
 ## v2.1.0 — System Profile - 2026-05-14 - 2026-05-19
 
 ### UC System Profile — UC.D consumer-side parity (2026-05-19)
