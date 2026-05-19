@@ -12,12 +12,14 @@ const path = require('node:path')
 const crypto = require('node:crypto')
 const child_process = require('node:child_process')
 
-const SPEC_VERSION = 1
+const SPEC_VERSION = 2
 
-// PowerShell on Windows can be slow on cold starts; give each probe a
-// generous budget but never block forever.
-const WIN_PS_TIMEOUT_MS = 8000
-const NIX_CMD_TIMEOUT_MS = 4000
+// PowerShell on Windows has a meaningful cold-start cost (CLR init + WMI
+// service spin-up can easily blow past 5s on the first call after boot),
+// so we budget generously. The previous 8s limit was tripping on cold
+// boots and producing half-empty scans that the user "fixed" by retrying.
+const WIN_PS_TIMEOUT_MS = 30000
+const NIX_CMD_TIMEOUT_MS = 6000
 
 function runCommand(cmd, args, opts = {}) {
   return new Promise((resolve) => {
@@ -54,10 +56,13 @@ function runCommand(cmd, args, opts = {}) {
   })
 }
 
-async function runPS(script) {
-  // -NoProfile keeps cold start fast; ConvertTo-Json gives us structured output.
+async function runPS(script, timeoutMs = WIN_PS_TIMEOUT_MS) {
+  // -NoProfile keeps cold start fast; ConvertTo-Json gives us structured
+  // output. We deliberately do NOT set $ErrorActionPreference globally —
+  // letting individual probes throw lets a single bad query (e.g. Storage
+  // Spaces cmdlets on Windows Server Core) fail without erasing the rest.
   return runCommand('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
-    timeoutMs: WIN_PS_TIMEOUT_MS,
+    timeoutMs,
   })
 }
 
@@ -77,72 +82,166 @@ function readFileSafe(p) {
 
 // ── Windows probes ──────────────────────────────────────────────────────────
 
-async function scanWindows() {
-  const script = `
-$ErrorActionPreference = 'SilentlyContinue'
-$cs   = Get-CimInstance Win32_ComputerSystem
-$os_  = Get-CimInstance Win32_OperatingSystem
-$cpu  = Get-CimInstance Win32_Processor | Select-Object Name,NumberOfCores,NumberOfLogicalProcessors,MaxClockSpeed,Manufacturer,Architecture
-$gpu  = Get-CimInstance Win32_VideoController | Select-Object Name,AdapterRAM,DriverVersion,DriverDate,VideoProcessor
-$mem  = Get-CimInstance Win32_PhysicalMemory | Select-Object Capacity,Speed,ConfiguredClockSpeed,Manufacturer,PartNumber
-$disk = Get-CimInstance Win32_DiskDrive | Select-Object Model,Size,MediaType,InterfaceType
-$vol  = Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3' | Select-Object DeviceID,Size,FreeSpace,FileSystem
-# Storage-Spaces-aware drive-letter → physical-media map. Storage cmdlets are
-# present on Win8+; we ignore failures so older systems still produce a result.
-$volMedia = @()
+// Single comprehensive PS script. We correlate physical disks to logical
+// disks server-side here (in PS) so we don't need a second round-trip. We
+// also pull SMBIOSMemoryType so the renderer can show DDR4/DDR5 instead
+// of a bare clock speed.
+const WIN_SCAN_SCRIPT = `
+$ProgressPreference = 'SilentlyContinue'
+$WarningPreference  = 'SilentlyContinue'
+
+function Try-CIM($class, $filter) {
+  try {
+    if ($filter) { Get-CimInstance -ClassName $class -Filter $filter -ErrorAction Stop }
+    else         { Get-CimInstance -ClassName $class -ErrorAction Stop }
+  } catch { @() }
+}
+
+$cs   = Try-CIM 'Win32_ComputerSystem' $null
+$os_  = Try-CIM 'Win32_OperatingSystem' $null
+$cpu  = Try-CIM 'Win32_Processor' $null | Select-Object Name,NumberOfCores,NumberOfLogicalProcessors,MaxClockSpeed,Manufacturer,Architecture
+$gpu  = Try-CIM 'Win32_VideoController' $null | Select-Object Name,AdapterRAM,DriverVersion,DriverDate,VideoProcessor,PNPDeviceID,CurrentHorizontalResolution,CurrentVerticalResolution,CurrentRefreshRate,Status,Availability,ConfigManagerErrorCode
+$mem  = Try-CIM 'Win32_PhysicalMemory' $null | Select-Object Capacity,Speed,ConfiguredClockSpeed,Manufacturer,PartNumber,SMBIOSMemoryType,MemoryType,FormFactor,DeviceLocator
+$disk = Try-CIM 'Win32_DiskDrive' $null | Select-Object Model,Size,MediaType,InterfaceType,SerialNumber,DeviceID,Index,PNPDeviceID
+$vol  = Try-CIM 'Win32_LogicalDisk' 'DriveType=3' | Select-Object DeviceID,Size,FreeSpace,FileSystem,VolumeName
+
+# Physical-disk metadata via Storage cmdlets (Win8+). Correlate by Number
+# to Win32_DiskDrive.Index. Wrapped in try/catch so older systems still
+# produce a result.
+$pdisks = @()
 try {
-  $volMedia = Get-Partition -ErrorAction SilentlyContinue | Where-Object { $_.DriveLetter } | ForEach-Object {
-    $disk = $_ | Get-Disk -ErrorAction SilentlyContinue
-    $pdisk = $null
-    if ($disk) { $pdisk = $disk | Get-PhysicalDisk -ErrorAction SilentlyContinue }
+  $pdisks = Get-PhysicalDisk -ErrorAction Stop | ForEach-Object {
     @{
-      Letter    = "$($_.DriveLetter):"
-      MediaType = if ($pdisk) { $pdisk.MediaType } else { $null }
-      BusType   = if ($pdisk) { $pdisk.BusType }   else { $null }
+      Number     = $_.DeviceId
+      MediaType  = "$($_.MediaType)"
+      BusType    = "$($_.BusType)"
+      Model      = $_.Model
+      Size       = $_.Size
+      FriendlyName = $_.FriendlyName
+      SerialNumber = $_.SerialNumber
     }
   }
 } catch { }
-$mon  = Get-CimInstance Win32_VideoController | ForEach-Object { @{ Name=$_.Name; HRes=$_.CurrentHorizontalResolution; VRes=$_.CurrentVerticalResolution; Refresh=$_.CurrentRefreshRate } }
+
+# Drive-letter → physical media. Same caveat re: Storage Spaces.
+$volMedia = @()
+try {
+  $volMedia = Get-Partition -ErrorAction Stop | Where-Object { $_.DriveLetter } | ForEach-Object {
+    $d = $null; $pd = $null
+    try { $d = $_ | Get-Disk -ErrorAction Stop } catch { }
+    if ($d) { try { $pd = $d | Get-PhysicalDisk -ErrorAction Stop } catch { } }
+    @{
+      Letter    = "$($_.DriveLetter):"
+      DiskNumber = if ($d) { $d.Number } else { $null }
+      MediaType = if ($pd) { "$($pd.MediaType)" } else { $null }
+      BusType   = if ($pd) { "$($pd.BusType)" }   else { $null }
+    }
+  }
+} catch { }
+
 $out = @{
-  cs=$cs; os=$os_; cpu=$cpu; gpu=$gpu; mem=$mem; disk=$disk; vol=$vol; display=$mon; volMedia=$volMedia
+  cs=$cs; os=$os_; cpu=$cpu; gpu=$gpu; mem=$mem; disk=$disk; vol=$vol; volMedia=$volMedia; pdisks=$pdisks
 }
-$out | ConvertTo-Json -Depth 5 -Compress
+$out | ConvertTo-Json -Depth 8 -Compress
 `
-  const result = await runPS(script)
-  const parsed = safeJsonParse(result.stdout) || {}
+
+async function runWinScanWithRetry() {
+  // First attempt with full budget; if the result is structurally empty
+  // (CPU or RAM missing — those should never legitimately be missing on
+  // Windows), retry once. WMI sometimes returns nothing on the first call
+  // after a cold boot while the service is still warming up.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const result = await runPS(WIN_SCAN_SCRIPT)
+    const parsed = safeJsonParse(result.stdout)
+    if (parsed && (toArray(parsed.cpu).length > 0 || parsed.cpu?.Name)) {
+      return parsed
+    }
+    if (attempt === 0) {
+      // small backoff before retry
+      await new Promise((r) => setTimeout(r, 500))
+    }
+  }
+  // Last-resort empty shape so downstream code doesn't NPE.
+  return {}
+}
+
+async function scanWindows() {
+  const parsed = await runWinScanWithRetry()
 
   const cpus = toArray(parsed.cpu)
   const cpu = cpus[0] || {}
   const archMap = { 0: 'x86', 5: 'arm', 6: 'ia64', 9: 'x64', 12: 'arm64' }
 
-  const gpus = toArray(parsed.gpu).map((g) => ({
-    name: g?.Name || null,
-    vramBytes: Number(g?.AdapterRAM) || null,
-    vendor: detectGpuVendor(g?.Name || ''),
-    driverVersion: g?.DriverVersion || null,
-    driverDate: g?.DriverDate || null,
-    videoProcessor: g?.VideoProcessor || null,
-  }))
+  // Rank GPUs so virtual / paravirtual adapters (Meta Oculus Virtual,
+  // Parsec, Microsoft Basic Display, IddSampleDriver, RDP, Hyper-V) lose
+  // to real silicon when the renderer reads `gpus[0]`.
+  const rawGpus = toArray(parsed.gpu)
+    .filter((g) => g && (g.Name || g.PNPDeviceID))
+    .map((g) => ({
+      name: g?.Name || null,
+      vramBytes: Number(g?.AdapterRAM) || null,
+      vendor: detectGpuVendor(g?.Name || ''),
+      driverVersion: g?.DriverVersion || null,
+      driverDate: g?.DriverDate || null,
+      videoProcessor: g?.VideoProcessor || null,
+      isVirtual: isVirtualGpu(g?.Name || '', g?.PNPDeviceID || ''),
+      isActive: Number(g?.ConfigManagerErrorCode) === 0 && (Number(g?.Availability) || 3) <= 8,
+      currentRes: Number(g?.CurrentHorizontalResolution) || 0,
+      pnp: g?.PNPDeviceID || null,
+    }))
+
+  // Sort: real before virtual; active before inactive; then by VRAM desc;
+  // then by current resolution desc (the adapter actually driving a panel
+  // is usually the one the user cares about). NVIDIA/AMD/Intel discrete-
+  // class names get a small boost too.
+  const gpus = [...rawGpus].sort((a, b) => {
+    if (a.isVirtual !== b.isVirtual) return a.isVirtual ? 1 : -1
+    const aReal = a.vendor === 'nvidia' || a.vendor === 'amd' || a.vendor === 'intel' || a.vendor === 'apple'
+    const bReal = b.vendor === 'nvidia' || b.vendor === 'amd' || b.vendor === 'intel' || b.vendor === 'apple'
+    if (aReal !== bReal) return aReal ? -1 : 1
+    if (a.isActive !== b.isActive) return a.isActive ? -1 : 1
+    if ((b.vramBytes || 0) !== (a.vramBytes || 0)) return (b.vramBytes || 0) - (a.vramBytes || 0)
+    return b.currentRes - a.currentRes
+  }).map(({ isVirtual, isActive, currentRes, pnp, ...keep }) => keep)
 
   const memModules = toArray(parsed.mem)
   const ramTotalBytes = memModules.reduce((sum, m) => sum + (Number(m?.Capacity) || 0), 0)
     || (Number(parsed.cs?.TotalPhysicalMemory) || os.totalmem() || 0)
   const ramSpeedMhz = memModules.length
-    ? Math.max(...memModules.map((m) => Number(m?.ConfiguredClockSpeed) || Number(m?.Speed) || 0))
+    ? Math.max(...memModules.map((m) => Number(m?.ConfiguredClockSpeed) || Number(m?.Speed) || 0)) || null
     : null
+  const ramTypes = memModules.map((m) => decodeMemoryType(m?.SMBIOSMemoryType, m?.MemoryType)).filter(Boolean)
+  // Take the most common DDR generation across slots — mixed-RAM rigs are
+  // rare enough that this rounds to "the rig's RAM type".
+  const ramType = pickMostCommon(ramTypes)
+  const ramFormFactor = pickMostCommon(memModules.map((m) => decodeFormFactor(m?.FormFactor)).filter(Boolean))
 
-  const drives = toArray(parsed.disk).map((d) => ({
-    model: d?.Model || null,
-    sizeBytes: Number(d?.Size) || null,
-    mediaType: normalizeWindowsMediaType(d?.MediaType, d?.Model),
-    interfaceType: d?.InterfaceType || null,
-  }))
+  // Index physical disks by Number so we can enrich Win32_DiskDrive rows
+  // (which lie about MediaType — every SSD reports "Fixed hard disk media").
+  const pdiskByNumber = new Map()
+  for (const pd of toArray(parsed.pdisks)) {
+    if (pd?.Number != null) pdiskByNumber.set(Number(pd.Number), pd)
+  }
+
+  const drives = toArray(parsed.disk).map((d) => {
+    const idx = Number(d?.Index)
+    const pd = Number.isFinite(idx) ? pdiskByNumber.get(idx) : null
+    const mediaType = normalizeStorageMediaType(pd?.MediaType) ?? normalizeWindowsMediaType(d?.MediaType, d?.Model)
+    return {
+      model: (d?.Model || pd?.FriendlyName || null)?.trim() || null,
+      sizeBytes: Number(d?.Size) || Number(pd?.Size) || null,
+      mediaType,
+      interfaceType: d?.InterfaceType || normalizeBusType(pd?.BusType) || null,
+      busType: normalizeBusType(pd?.BusType) || null,
+      serial: (d?.SerialNumber || pd?.SerialNumber || '').trim() || null,
+    }
+  })
 
   const volMediaMap = new Map()
   for (const entry of toArray(parsed.volMedia)) {
     if (entry?.Letter) volMediaMap.set(String(entry.Letter).toUpperCase(), {
       mediaType: normalizeStorageMediaType(entry.MediaType),
-      busType: entry.BusType || null,
+      busType: normalizeBusType(entry.BusType),
     })
   }
 
@@ -159,14 +258,24 @@ $out | ConvertTo-Json -Depth 5 -Compress
     }
   })
 
-  const displays = toArray(parsed.display)
-    .filter((d) => d?.HRes && d?.VRes)
+  // Re-derive displays from the same Win32_VideoController rows (they
+  // carry CurrentHorizontalResolution/Refresh). Filter to active adapters
+  // so a disabled Oculus virtual display doesn't show up as your monitor.
+  const displays = toArray(parsed.gpu)
+    .filter((d) => d?.CurrentHorizontalResolution && d?.CurrentVerticalResolution)
     .map((d) => ({
       label: d?.Name || null,
-      width: Number(d.HRes) || null,
-      height: Number(d.VRes) || null,
-      refreshHz: Number(d.Refresh) || null,
+      width: Number(d.CurrentHorizontalResolution) || null,
+      height: Number(d.CurrentVerticalResolution) || null,
+      refreshHz: Number(d.CurrentRefreshRate) || null,
     }))
+    // Same virtual-adapter pushdown as GPUs.
+    .sort((a, b) => {
+      const av = isVirtualGpu(a.label || '', '')
+      const bv = isVirtualGpu(b.label || '', '')
+      if (av !== bv) return av ? 1 : -1
+      return 0
+    })
 
   return {
     cpu: {
@@ -180,9 +289,11 @@ $out | ConvertTo-Json -Depth 5 -Compress
     gpus,
     ram: {
       totalBytes: ramTotalBytes,
-      modules: memModules.length,
+      modules: memModules.length || null,
       speedMhz: ramSpeedMhz,
       channels: inferRamChannels(memModules.length),
+      type: ramType,
+      formFactor: ramFormFactor,
     },
     storage: { drives, volumes },
     os: {
@@ -200,19 +311,29 @@ $out | ConvertTo-Json -Depth 5 -Compress
 
 /**
  * Map the value returned by Storage Spaces' Get-PhysicalDisk into our
- * canonical `'nvme' | 'ssd' | 'hdd' | 'unspecified' | null` tagging.
- * Get-PhysicalDisk's MediaType property uses numeric codes (3=HDD, 4=SSD,
- * 5=SCM) or strings depending on Windows version, so we accept both.
+ * canonical `'nvme' | 'ssd' | 'hdd' | 'scm' | null` tagging. The cmdlet's
+ * MediaType property uses numeric codes (3=HDD, 4=SSD, 5=SCM) on older
+ * Windows and strings on newer Windows, so we accept both.
  */
 function normalizeStorageMediaType(value) {
   if (value == null) return null
-  const text = String(value).toLowerCase()
+  const text = String(value).toLowerCase().trim()
+  if (!text || text === 'unspecified' || text === '0') return null
   if (text.includes('nvme')) return 'nvme'
   if (text === 'ssd' || text === '4' || text.includes('solid state')) return 'ssd'
   if (text === 'hdd' || text === '3' || text.includes('hard disk') || text.includes('rotational')) return 'hdd'
   if (text === '5' || text === 'scm') return 'scm'
-  if (text === '0' || text === 'unspecified') return null
   return null
+}
+
+function normalizeBusType(value) {
+  if (value == null) return null
+  const text = String(value).toLowerCase().trim()
+  if (!text || text === 'unknown' || text === '0') return null
+  // PowerShell sometimes returns numeric codes; map the common ones.
+  const numMap = { '1': 'scsi', '3': 'ata', '7': 'usb', '8': 'raid', '11': 'sata', '17': 'nvme', '18': 'sas' }
+  if (numMap[text]) return numMap[text]
+  return text
 }
 
 function normalizeWindowsMediaType(media, model) {
@@ -221,7 +342,68 @@ function normalizeWindowsMediaType(media, model) {
   if (text.includes('ssd') || text.includes('solid state')) return 'ssd'
   if (text.includes('hdd') || text.includes('hard disk') || text.includes('fixed hard')) return 'hdd'
   if (text.includes('removable')) return 'removable'
-  return media || null
+  return null
+}
+
+/**
+ * SMBIOSMemoryType / MemoryType → human label. Codes per the DMTF SMBIOS
+ * spec (and Microsoft's Win32_PhysicalMemory docs). We only label the
+ * generations users actually run — anything older than DDR returns null.
+ */
+function decodeMemoryType(smbios, fallback) {
+  const code = Number(smbios) || Number(fallback) || 0
+  // SMBIOS codes
+  if (code === 34) return 'DDR5'
+  if (code === 35) return 'LPDDR5'
+  if (code === 26) return 'DDR4'
+  if (code === 30) return 'LPDDR4'
+  if (code === 24) return 'DDR3'
+  if (code === 29) return 'LPDDR3'
+  if (code === 21 || code === 22) return 'DDR2'
+  if (code === 20) return 'DDR'
+  return null
+}
+
+function decodeFormFactor(code) {
+  const n = Number(code) || 0
+  if (n === 8) return 'DIMM'
+  if (n === 12) return 'SODIMM'
+  if (n === 13) return 'SRIMM'
+  if (n === 11) return 'RIMM'
+  return null
+}
+
+function pickMostCommon(arr) {
+  if (!arr || arr.length === 0) return null
+  const counts = new Map()
+  for (const v of arr) counts.set(v, (counts.get(v) || 0) + 1)
+  let best = null; let bestCount = 0
+  for (const [v, c] of counts) {
+    if (c > bestCount) { best = v; bestCount = c }
+  }
+  return best
+}
+
+/**
+ * Identify virtual / paravirtual GPUs so the picker doesn't crown them
+ * as primary. Catches Meta/Oculus Virtual, Parsec, Microsoft Basic
+ * Display, IddSampleDriver, Hyper-V, RDP, VMware/VirtualBox, NVIDIA's
+ * "USB-C/DisplayLink"-style virtual adapters, and anything tagged
+ * obviously "virtual" / "remote".
+ */
+function isVirtualGpu(name, pnpId) {
+  const text = `${name || ''} ${pnpId || ''}`.toLowerCase()
+  if (!text.trim()) return false
+  const needles = [
+    'oculus', 'meta virtual', 'virtual desktop', 'parsec',
+    'microsoft basic display', 'microsoft remote display',
+    'iddsampledriver', 'idd ', 'usbmmidd', 'displaylink',
+    'remote desktop', 'rdp', 'hyper-v', 'hyperv',
+    'vmware', 'virtualbox', 'qxl', 'cirrus',
+    'virtual display', 'virtual monitor', 'virtual audio',
+    'spacedesk', 'duet display', 'air display', 'splashtop',
+  ]
+  return needles.some((n) => text.includes(n))
 }
 
 async function detectGraphicsApisWindows() {
@@ -300,50 +482,251 @@ async function probeLinuxCpu() {
 async function probeLinuxMemory() {
   const meminfo = readFileSafe('/proc/meminfo') || ''
   const totalKb = Number((meminfo.match(/MemTotal:\s+(\d+)/) || [])[1] || 0)
+
+  // Try dmidecode for DDR generation + speed. This needs root on most
+  // distros; we run it best-effort and silently skip if it fails.
+  let modules = null
+  let speedMhz = null
+  let type = null
+  let formFactor = null
+  const dmi = await runCommand('dmidecode', ['-t', 'memory'], { timeoutMs: 4000 })
+  if (dmi.ok && dmi.stdout) {
+    const blocks = dmi.stdout.split(/\n(?=Memory Device\b)/)
+    const populated = blocks.filter((b) => /Size:\s*\d+\s*[KMG]B/i.test(b) && !/Size:\s*No Module/i.test(b))
+    if (populated.length) {
+      modules = populated.length
+      const speeds = populated.map((b) => Number((b.match(/Configured (?:Memory|Clock) Speed:\s*(\d+)/i) || b.match(/Speed:\s*(\d+)/i) || [])[1]) || 0).filter(Boolean)
+      if (speeds.length) speedMhz = Math.max(...speeds)
+      const types = populated.map((b) => (b.match(/^\s*Type:\s*(\S+)/m) || [])[1]).filter((t) => t && t !== 'Unknown')
+      type = pickMostCommon(types) || null
+      const ffs = populated.map((b) => (b.match(/Form Factor:\s*(\S+)/) || [])[1]).filter(Boolean)
+      formFactor = pickMostCommon(ffs) || null
+    }
+  }
+
   return {
     totalBytes: totalKb ? totalKb * 1024 : (os.totalmem() || 0),
-    modules: null,
-    speedMhz: null,
-    channels: null,
+    modules,
+    speedMhz,
+    channels: inferRamChannels(modules),
+    type,
+    formFactor,
   }
 }
 
+/**
+ * Linux GPU detection. The previous implementation parsed `lspci -mm`,
+ * which returns the *literal* "Device 1111" placeholder string when the
+ * local pci.ids database doesn't have an entry for the silicon — this
+ * happens routinely on rolling-release distros, fresh chromebooks, and
+ * anything running a kernel newer than the installed pciutils package.
+ *
+ * We now do three things in order and pick the best name:
+ *  1. `lspci -nn -mm` — gives us "Vendor [v:d]" + "Device [v:d]" with the
+ *     vendor:device IDs alongside, so a stale pci.ids never strips the
+ *     numeric fallback.
+ *  2. /sys/class/drm/cardN/device — the kernel-resolved driver and PCI
+ *     IDs are always available even when userspace pci.ids is stale.
+ *  3. glxinfo / vulkaninfo renderer string — when both above produce
+ *     only numeric IDs, this gives us the marketing name the GL/Vulkan
+ *     loader resolved from the binary driver itself.
+ */
 async function probeLinuxGpus() {
-  const lspci = await runCommand('lspci', ['-mm'], {})
-  if (!lspci.ok) return []
-  const lines = lspci.stdout.split('\n')
   const gpus = []
-  for (const line of lines) {
-    if (!/VGA|3D|Display/i.test(line)) continue
-    // Format: "00:02.0 "VGA compatible controller" "Intel Corporation" "Device Name" ...
-    const parts = line.match(/"([^"]*)"/g)?.map((s) => s.slice(1, -1)) || []
-    const vendor = parts[1] || null
-    const name = parts[2] || null
-    if (!name) continue
-    gpus.push({
-      name,
-      vendor: detectGpuVendor(`${vendor} ${name}`),
-      vramBytes: null,
-      driverVersion: null,
-      driverDate: null,
-    })
+
+  // 1. lspci with numeric IDs alongside names.
+  const lspci = await runCommand('lspci', ['-nn', '-mm'], { timeoutMs: 4000 })
+  if (lspci.ok) {
+    for (const line of lspci.stdout.split('\n')) {
+      if (!/VGA|3D|Display/i.test(line)) continue
+      // "00:02.0 "VGA compatible controller [0300]" "Intel [8086]" "Device [9a49]" ..."
+      const quoted = line.match(/"([^"]*)"/g)?.map((s) => s.slice(1, -1)) || []
+      const slot = (line.match(/^(\S+)/) || [])[1] || null
+      const vendorRaw = quoted[1] || ''
+      const nameRaw = quoted[2] || ''
+      const vendorIdMatch = vendorRaw.match(/\[([0-9a-f]{4})\]\s*$/i)
+      const deviceIdMatch = nameRaw.match(/\[([0-9a-f]{4})\]\s*$/i)
+      const vendorName = vendorRaw.replace(/\s*\[[0-9a-f]{4}\]\s*$/i, '').trim()
+      let deviceName = nameRaw.replace(/\s*\[[0-9a-f]{4}\]\s*$/i, '').trim()
+      // "Device 1111" → null, so the renderer falls through to other sources.
+      if (/^Device$/i.test(deviceName) || /^Device\s+[0-9a-f]{4}$/i.test(deviceName)) deviceName = ''
+      if (!vendorName && !deviceName) continue
+      gpus.push({
+        slot,
+        name: deviceName || null,
+        vendor: detectGpuVendor(`${vendorName} ${deviceName}`),
+        vendorName: vendorName || null,
+        vendorId: vendorIdMatch ? vendorIdMatch[1].toLowerCase() : null,
+        deviceId: deviceIdMatch ? deviceIdMatch[1].toLowerCase() : null,
+        vramBytes: null,
+        driverVersion: null,
+        driverDate: null,
+      })
+    }
   }
+
+  // 2. Enrich from /sys/class/drm — kernel-resolved driver + PCI IDs.
+  try {
+    for (const entry of fs.readdirSync('/sys/class/drm')) {
+      if (!/^card\d+$/.test(entry)) continue
+      const devLink = `/sys/class/drm/${entry}/device`
+      const uevent = readFileSafe(`${devLink}/uevent`) || ''
+      const pciSlot = (uevent.match(/^PCI_SLOT_NAME=(.+)$/m) || [])[1] || null
+      const pciId = (uevent.match(/^PCI_ID=([0-9A-F]{4}):([0-9A-F]{4})$/m) || [])
+      const driver = (uevent.match(/^DRIVER=(.+)$/m) || [])[1] || null
+      const vendor = pciId[1]?.toLowerCase() || null
+      const device = pciId[2]?.toLowerCase() || null
+
+      // Match to the lspci row by slot when possible.
+      let target = gpus.find((g) => g.slot && pciSlot && g.slot === pciSlot)
+      if (!target && vendor && device) target = gpus.find((g) => g.vendorId === vendor && g.deviceId === device)
+      if (!target) {
+        target = { slot: pciSlot, name: null, vendor: 'unknown', vendorName: null, vendorId: vendor, deviceId: device, vramBytes: null, driverVersion: null, driverDate: null }
+        gpus.push(target)
+      }
+      if (!target.vendorId && vendor) target.vendorId = vendor
+      if (!target.deviceId && device) target.deviceId = device
+      if (!target.driver && driver) target.driver = driver
+
+      // VRAM hint for AMD/Intel via debugfs-style files. Cheap if present.
+      const vramTotalRaw = readFileSafe(`${devLink}/mem_info_vram_total`)
+      const vram = vramTotalRaw ? Number(vramTotalRaw.trim()) : 0
+      if (vram && !target.vramBytes) target.vramBytes = vram
+    }
+  } catch { /* /sys/class/drm absent — non-fatal */ }
+
+  // 3. glxinfo renderer string for the actively-used GPU. Use this to
+  // upgrade any "name: null" placeholder we still have.
+  const gl = await runCommand('glxinfo', ['-B'], { timeoutMs: 3000 })
+  let glRenderer = null
+  if (gl.ok) {
+    const m = gl.stdout.match(/OpenGL renderer string:\s*([^\n]+)/i)
+    if (m) glRenderer = m[1].trim()
+  }
+
+  // 4. nvidia-smi for NVIDIA cards (gives proper marketing name + VRAM +
+  // driver version even when pci.ids is stale).
+  const nvsmi = await runCommand('nvidia-smi', ['--query-gpu=index,name,memory.total,driver_version,pci.bus_id', '--format=csv,noheader,nounits'], { timeoutMs: 3000 })
+  const nvCards = []
+  if (nvsmi.ok) {
+    for (const line of nvsmi.stdout.split('\n')) {
+      const parts = line.split(',').map((s) => s.trim())
+      if (parts.length < 4 || !parts[1]) continue
+      nvCards.push({
+        name: parts[1],
+        vramBytes: Number(parts[2]) ? Number(parts[2]) * 1024 * 1024 : null,
+        driverVersion: parts[3] || null,
+        pciBusId: (parts[4] || '').toLowerCase(),
+      })
+    }
+  }
+
+  // Stitch nvidia-smi names back to the matching slot.
+  for (const nv of nvCards) {
+    // nvidia-smi bus IDs look like "00000000:01:00.0" — strip the domain.
+    const trimmed = nv.pciBusId.replace(/^0+:/, '').replace(/^([0-9a-f]{4}):/, '')
+    let target = gpus.find((g) => g.slot && (g.slot === trimmed || trimmed.endsWith(g.slot)))
+    if (!target) target = gpus.find((g) => g.vendor === 'nvidia' && !g.name)
+    if (!target) target = gpus.find((g) => g.vendor === 'nvidia')
+    if (!target) {
+      target = { slot: null, name: nv.name, vendor: 'nvidia', vendorName: 'NVIDIA Corporation', vendorId: '10de', deviceId: null, vramBytes: nv.vramBytes, driverVersion: nv.driverVersion, driverDate: null }
+      gpus.push(target)
+    } else {
+      target.name = nv.name
+      if (!target.vramBytes) target.vramBytes = nv.vramBytes
+      if (!target.driverVersion) target.driverVersion = nv.driverVersion
+    }
+  }
+
+  // Fall back to glxinfo renderer when we still have placeholder names.
+  for (const g of gpus) {
+    if (!g.name && glRenderer && (g.vendor === detectGpuVendor(glRenderer) || g.vendor === 'unknown')) {
+      g.name = glRenderer.replace(/\s*\(.*?\)\s*$/, '').trim() || glRenderer
+    }
+    // Last-resort label so the UI never has to print "Device 1111".
+    if (!g.name) {
+      if (g.vendorId && g.deviceId) g.name = `${g.vendorName || g.vendor || 'Unknown vendor'} [${g.vendorId}:${g.deviceId}]`
+      else if (g.vendorName) g.name = `${g.vendorName} GPU`
+    }
+  }
+
+  // Sort virtual / paravirtual GPUs to the back, real silicon first.
   return gpus
+    .filter((g) => g.name || g.vendorId)
+    .map(({ slot, vendorName, vendorId, deviceId, driver, ...keep }) => ({
+      ...keep,
+      vendorName: vendorName || null,
+      vendorId: vendorId || null,
+      deviceId: deviceId || null,
+      driver: driver || null,
+    }))
+    .sort((a, b) => {
+      const av = isVirtualGpu(a.name || '', '')
+      const bv = isVirtualGpu(b.name || '', '')
+      if (av !== bv) return av ? 1 : -1
+      return 0
+    })
 }
 
 async function probeLinuxDrives() {
-  const lsblk = await runCommand('lsblk', ['-bdJ', '-o', 'NAME,SIZE,ROTA,TYPE,MODEL,TRAN'], {})
-  if (!lsblk.ok) return []
-  const parsed = safeJsonParse(lsblk.stdout)
-  if (!parsed?.blockdevices) return []
-  return parsed.blockdevices
-    .filter((d) => d.type === 'disk')
-    .map((d) => ({
-      model: d.model || null,
-      sizeBytes: Number(d.size) || null,
-      mediaType: d.tran === 'nvme' ? 'nvme' : (d.rota === '0' || d.rota === false) ? 'ssd' : 'hdd',
-      interfaceType: d.tran || null,
-    }))
+  // First try lsblk JSON — fast and well-supported. Include SERIAL and
+  // VENDOR so we can disambiguate identical models, and don't filter to
+  // type=disk too aggressively (nvme namespaces are sometimes reported
+  // as different types depending on lsblk version).
+  const lsblk = await runCommand('lsblk', ['-bdJ', '-o', 'NAME,SIZE,ROTA,TYPE,MODEL,TRAN,VENDOR,SERIAL'], { timeoutMs: 4000 })
+  const drives = []
+  if (lsblk.ok) {
+    const parsed = safeJsonParse(lsblk.stdout)
+    if (parsed?.blockdevices) {
+      for (const d of parsed.blockdevices) {
+        if (d.type && d.type !== 'disk' && d.type !== 'rom' && !/^nvme/i.test(d.name || '')) continue
+        if (d.type === 'rom') continue
+        // Skip loop / ram / dm devices.
+        if (/^(loop|ram|dm-|sr|fd)/.test(d.name || '')) continue
+        const rota = d.rota === '0' || d.rota === false || d.rota === 0
+        drives.push({
+          model: (d.model || d.vendor || null)?.trim() || null,
+          sizeBytes: Number(d.size) || null,
+          mediaType: d.tran === 'nvme' ? 'nvme' : (rota ? 'hdd' : 'ssd'),
+          interfaceType: d.tran || null,
+          busType: d.tran || null,
+          serial: (d.serial || '').trim() || null,
+        })
+      }
+    }
+  }
+
+  // Cross-check with /sys/block — catches drives that lsblk hid (e.g.
+  // mmcblk on chromebooks, virtio-blk, NVMe namespaces reported with an
+  // unexpected type). We only add ones not already seen by serial+model.
+  try {
+    for (const name of fs.readdirSync('/sys/block')) {
+      if (/^(loop|ram|dm-|sr|fd)/.test(name)) continue
+      const sizeRaw = readFileSafe(`/sys/block/${name}/size`)
+      const rotaRaw = readFileSafe(`/sys/block/${name}/queue/rotational`)
+      const model = (readFileSafe(`/sys/block/${name}/device/model`) || '').trim()
+      const vendor = (readFileSafe(`/sys/block/${name}/device/vendor`) || '').trim()
+      const serial = (readFileSafe(`/sys/block/${name}/device/serial`) || '').trim()
+      const isNvme = /^nvme/i.test(name)
+      const sizeBytes = sizeRaw ? Number(sizeRaw.trim()) * 512 : null
+      if (!sizeBytes) continue
+      const already = drives.find((d) =>
+        (serial && d.serial === serial)
+        || (model && d.model === model && d.sizeBytes === sizeBytes)
+      )
+      if (already) continue
+      drives.push({
+        model: model || vendor || null,
+        sizeBytes,
+        mediaType: isNvme ? 'nvme' : (rotaRaw?.trim() === '0' ? 'ssd' : 'hdd'),
+        interfaceType: isNvme ? 'nvme' : null,
+        busType: isNvme ? 'nvme' : null,
+        serial: serial || null,
+      })
+    }
+  } catch { /* /sys/block missing — non-fatal */ }
+
+  return drives
 }
 
 function probeLinuxVolumes() {
@@ -415,9 +798,9 @@ async function probeLinuxDistro() {
 
 function detectGpuVendor(name) {
   const lower = (name || '').toLowerCase()
-  if (lower.includes('nvidia') || lower.includes('geforce') || lower.includes('quadro') || lower.includes('rtx') || lower.includes('gtx')) return 'nvidia'
-  if (lower.includes('amd') || lower.includes('radeon') || lower.includes('ati')) return 'amd'
-  if (lower.includes('intel') || lower.includes('arc ') || lower.includes('iris') || lower.includes('uhd')) return 'intel'
+  if (lower.includes('nvidia') || lower.includes('geforce') || lower.includes('quadro') || lower.includes('rtx') || lower.includes('gtx') || lower.includes('10de')) return 'nvidia'
+  if (lower.includes('amd') || lower.includes('radeon') || lower.includes('ati') || lower.includes('1002')) return 'amd'
+  if (lower.includes('intel') || lower.includes('arc ') || lower.includes('iris') || lower.includes('uhd') || lower.includes('8086')) return 'intel'
   if (lower.includes('apple')) return 'apple'
   return 'unknown'
 }
@@ -464,7 +847,7 @@ async function scanSystemProfile() {
     spec = {
       cpu: { model: os.cpus()[0]?.model || null, vendor: null, arch: os.arch(), cores: null, threads: os.cpus().length, baseClockMhz: os.cpus()[0]?.speed || null },
       gpus: [],
-      ram: { totalBytes: os.totalmem(), modules: null, speedMhz: null, channels: null },
+      ram: { totalBytes: os.totalmem(), modules: null, speedMhz: null, channels: null, type: null, formFactor: null },
       storage: { drives: [], volumes: [] },
       os: { platform: process.platform, name: os.type(), version: os.release(), build: null, arch: os.arch(), locale: null },
       displays: [],
@@ -509,8 +892,9 @@ function buildSummary(profile) {
   const cpu = (s.cpu?.model || 'Unknown CPU').replace(/\s+/g, ' ').trim()
   const gpu = s.gpus?.[0]?.name?.replace(/\s+/g, ' ').trim() || 'Unknown GPU'
   const ramGib = Math.round((s.ram?.totalBytes || 0) / (1024 ** 3))
+  const ramType = s.ram?.type ? ` ${s.ram.type}` : ''
   const osName = s.os?.name || ''
-  return `${gpu} · ${cpu} · ${ramGib}GB · ${osName}`.trim()
+  return `${gpu} · ${cpu} · ${ramGib}GB${ramType} · ${osName}`.trim()
 }
 
 module.exports = {

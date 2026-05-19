@@ -104,9 +104,11 @@ declare global {
         modules: number | null
         speedMhz: number | null
         channels: string | null
+        type?: string | null
+        formFactor?: string | null
       }
       storage: {
-        drives: Array<{ model: string | null; sizeBytes: number | null; mediaType: string | null; interfaceType: string | null }>
+        drives: Array<{ model: string | null; sizeBytes: number | null; mediaType: string | null; interfaceType: string | null; busType?: string | null; serial?: string | null }>
         volumes: Array<{ mount: string | null; sizeBytes: number | null; freeBytes: number | null; fs: string | null; mediaType?: string | null; busType?: string | null }>
       }
       os: {
@@ -602,6 +604,9 @@ declare global {
       flush: (baseUrl: string) => Promise<{ ok: boolean; uploaded?: number; remaining?: number; status?: number; error?: string }>
       serverTotals: (baseUrl: string) => Promise<{ ok: boolean; totals?: { totalSeconds: number; weekSeconds: number; sessionCount: number; lastPlayedAt: string | null }; topGames?: Array<{ appid: string; gameName: string | null; totalSeconds: number; sessionCount: number; lastPlayedAt: string | null }>; error?: string }>
       onSessionRecorded: (callback: (data: { session: { id: string; appid: string; gameName: string | null; durationSeconds: number; startedAt: string; endedAt: string }; totals?: { totalSeconds: number; sessionCount: number } | null }) => void) => () => void
+    }
+    ucPresence?: {
+      heartbeat: (baseUrl: string, appVersion?: string) => Promise<{ ok: boolean; status?: number; error?: string }>
     }
     ucSystem?: {
       getVolume: () => Promise<{ ok: boolean; volume: number }>

@@ -1601,6 +1601,8 @@ export function GameDetailPage() {
                   <SystemRequirementsCheck
                     minRequirements={game.minRequirements}
                     recommendedRequirements={game.recommendedRequirements}
+                    linuxMinRequirements={game.linuxMinRequirements}
+                    linuxRecommendedRequirements={game.linuxRecommendedRequirements}
                   />
                   <SystemRequirements appid={game.appid} />
                 </>

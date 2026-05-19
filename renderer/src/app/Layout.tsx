@@ -12,6 +12,7 @@ import { useDiscordRpcPresence } from "@/hooks/use-discord-rpc"
 import { useAppPreferencesSync } from "@/hooks/use-app-preferences-sync"
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts"
 import { usePlaytimeFlush } from "@/hooks/use-playtime-flush"
+import { usePresenceHeartbeat } from "@/hooks/use-presence-heartbeat"
 import { logger } from "@/lib/logger"
 import { cn } from "@/lib/utils"
 import { LogSharingConsentModal } from "@/components/LogSharingConsentModal"
@@ -23,6 +24,7 @@ export function AppLayout() {
   useAppPreferencesSync()
   useKeyboardShortcuts()
   usePlaytimeFlush()
+  usePresenceHeartbeat()
   const location = useLocation()
   const navigate = useNavigate()
 

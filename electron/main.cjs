@@ -660,6 +660,12 @@ function getOverlayDiagnostics() {
   }
 }
 
+// True while `checkForUpdatesDuringSplash` has live listeners registered.
+// Used by the global error handler to swallow splash-phase failures so a
+// transient mid-publish GitHub release doesn't leave a stuck "Update failed"
+// pill in the running app.
+let splashUpdateCheckInFlight = false
+
 function configureAutoUpdater() {
   if (isDev) {
     setUpdateStatus({ enabled: false, state: 'disabled' })
@@ -667,7 +673,12 @@ function configureAutoUpdater() {
   }
 
   autoUpdater.autoDownload = true
-  autoUpdater.autoInstallOnAppQuit = true
+  // Click-to-install only: closing the app must NOT silently install a
+  // downloaded update. The user explicitly wants the "Restart to update"
+  // pill to be the sole install trigger, both during runtime and after
+  // a quit. The splash-time check still installs eagerly (Discord-style)
+  // because that path is intentionally interactive.
+  autoUpdater.autoInstallOnAppQuit = false
   autoUpdater.allowPrerelease = false
   autoUpdater.setFeedURL({
     provider: 'github',
@@ -733,6 +744,18 @@ function configureAutoUpdater() {
   autoUpdater.on('error', (err) => {
     const message = err?.message || String(err)
     ucLog(`Auto-update failed: ${message}`, 'warn')
+    // While the splash check is in flight, suppress errors from the global
+    // update state. If a new release is mid-publish on GitHub (latest.yml is
+    // up but the .exe is still uploading, or vice versa), the updater will
+    // throw a download/signature error that previously surfaced as a long
+    // "unable to install update" pill the moment the main window painted.
+    // The splash flow has its own error path (settle quietly and proceed),
+    // and the in-app pill will get its own chance to retry once the release
+    // is fully published.
+    if (splashUpdateCheckInFlight) {
+      ucLog('[updater] suppressing splash-phase error from global state', 'warn')
+      return
+    }
     setUpdateStatus({ state: 'error', error: message })
   })
 }
@@ -7358,52 +7381,76 @@ async function checkForUpdatesDuringSplash(splashWin) {
     if (!splashWin || splashWin.isDestroyed()) { resolve(); return }
 
     let settled = false
+    splashUpdateCheckInFlight = true
+
     const progressListener = (progress) => {
       const pct = Math.round(progress?.percent || 0)
       setSplashStatus(splashWin, `Downloading update... ${pct}%`)
       setSplashProgress(splashWin, pct)
     }
 
+    // Listeners we register below — tracked so `settle()` can detach every
+    // one. Previously the `.once('update-downloaded', …)` listener was left
+    // dangling after the safety timer fired: the download kept going in the
+    // background, the main window opened and showed the "Restart to update"
+    // pill, and then the stale listener triggered `quitAndInstall` the
+    // moment the download finished — making the app appear to ignore the
+    // user's click-to-install button.
+    const notAvailable = () => {
+      setSplashStatus(splashWin, 'Up to date.')
+      settle(600)
+    }
+    const available = (info) => {
+      const ver = String(info?.version || '').replace(/^v/i, '')
+      setSplashStatus(splashWin, ver ? `Update v${ver} found. Downloading...` : 'Update found. Downloading...')
+      autoUpdater.on('download-progress', progressListener)
+    }
+    const downloaded = () => {
+      if (settled) return
+      setSplashProgress(splashWin, 100)
+      setSplashStatus(splashWin, 'Installing update...')
+      // App will restart inside quitAndInstall; if that fails (e.g. the
+      // downloaded artefact was corrupted by a mid-publish release), fall
+      // through to settle so the main window still opens.
+      setTimeout(() => {
+        try { autoUpdater.quitAndInstall(false, true) } catch { settle() }
+      }, 1200)
+    }
+    const errored = (err) => {
+      // Mid-publish releases (yml present, .exe still uploading, or a SHA-512
+      // mismatch on a partial file) land here. Quietly proceed; the next
+      // launch will retry, and the in-app pill is suppressed by
+      // `splashUpdateCheckInFlight` in the global error handler.
+      ucLog(`[updater] splash check error: ${err?.message || err}`, 'warn')
+      setSplashStatus(splashWin, 'Almost there...')
+      settle(600)
+    }
+
     const settle = (delay = 0) => {
       if (settled) return
       settled = true
-      autoUpdater.removeListener('download-progress', progressListener)
+      splashUpdateCheckInFlight = false
       clearTimeout(safetyTimer)
+      autoUpdater.removeListener('download-progress', progressListener)
+      autoUpdater.removeListener('update-not-available', notAvailable)
+      autoUpdater.removeListener('update-available', available)
+      autoUpdater.removeListener('update-downloaded', downloaded)
+      autoUpdater.removeListener('error', errored)
       setTimeout(resolve, delay)
     }
 
-    // Safety net: if nothing happens within 20s just proceed
+    // Safety net: if nothing happens within 20s just proceed. We intentionally
+    // do NOT call `quitAndInstall` after this — the in-flight download (if
+    // any) will finish in the background and the renderer's pill takes over.
     const safetyTimer = setTimeout(() => {
       setSplashStatus(splashWin, 'Almost there...')
       settle()
     }, 20000)
 
-    autoUpdater.once('update-not-available', () => {
-      setSplashStatus(splashWin, 'Up to date.')
-      settle(600)
-    })
-
-    autoUpdater.once('update-available', (info) => {
-      const ver = String(info?.version || '').replace(/^v/i, '')
-      setSplashStatus(splashWin, ver ? `Update v${ver} found. Downloading...` : 'Update found. Downloading...')
-      autoUpdater.on('download-progress', progressListener)
-    })
-
-    autoUpdater.once('update-downloaded', () => {
-      clearTimeout(safetyTimer)
-      autoUpdater.removeListener('download-progress', progressListener)
-      setSplashProgress(splashWin, 100)
-      setSplashStatus(splashWin, 'Installing update...')
-      // App will restart; no need to resolve
-      setTimeout(() => {
-        try { autoUpdater.quitAndInstall(false, true) } catch { settle() }
-      }, 1200)
-    })
-
-    autoUpdater.once('error', () => {
-      setSplashStatus(splashWin, 'Almost there...')
-      settle(600)
-    })
+    autoUpdater.once('update-not-available', notAvailable)
+    autoUpdater.once('update-available', available)
+    autoUpdater.once('update-downloaded', downloaded)
+    autoUpdater.once('error', errored)
 
     setSplashStatus(splashWin, 'Checking for updates...')
     autoUpdater.checkForUpdates().catch(() => settle())
@@ -12611,6 +12658,30 @@ ipcMain.handle('uc:playtime-flush', async (event, { baseUrl } = {}) => {
 ipcMain.handle('uc:playtime-server-totals', (event, { baseUrl } = {}) =>
   passthroughJson(event.sender, baseUrl, '/api/playtime/sessions', { method: 'GET' })
 )
+
+// ── Presence heartbeat ────────────────────────────────────────────────────────
+// Sends a lightweight ping to /api/playtime/heartbeat so the website can show
+// a real-time "Playing now" counter.  Called by the renderer every ~2.5 min.
+ipcMain.handle('uc:presence-heartbeat', async (event, { baseUrl, appVersion } = {}) => {
+  const win = BrowserWindow.fromWebContents(event.sender)
+  if (!win || win.isDestroyed()) return { ok: false, error: 'no-window' }
+  try {
+    const payload = { appVersion: appVersion || getAppVersion() }
+    const response = await fetchWithSession(win.webContents.session, baseUrl, '/api/playtime/heartbeat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+    if (!response.ok) {
+      ucLog(`[Presence] Heartbeat failed: ${response.status}`, 'warn')
+      return { ok: false, status: response.status }
+    }
+    return { ok: true }
+  } catch (err) {
+    ucLog(`[Presence] Heartbeat error: ${err?.message || err}`, 'error')
+    return { ok: false, error: err?.message || String(err) }
+  }
+})
 
 // ── Storage reservation (used by sysreq UI + concurrency safety) ────────────
 
