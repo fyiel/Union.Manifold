@@ -1,28 +1,46 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { ArrowLeft, ExternalLink, LogIn } from "lucide-react"
+import { ArrowLeft, Loader2, LogIn, AlertCircle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
+import { useAuth } from "@/hooks/useAuth"
 
 export function LoginPage() {
   const navigate = useNavigate()
-  const [redirecting, setRedirecting] = useState(false)
+  const [{ isAuthenticated, isLoading }, { signInWithWebsite }] = useAuth()
+  const [signingIn, setSigningIn] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
-  const continueUrl = "https://union-crax.xyz/direct/continue?source=ucd"
+  // Once we're authenticated, leave this page automatically.
+  useEffect(() => {
+    if (isAuthenticated) {
+      navigate("/account", { replace: true })
+    }
+  }, [isAuthenticated, navigate])
 
-  const handleWebsiteLogin = () => {
-    setRedirecting(true)
-    if (typeof window !== "undefined") {
-      window.location.href = continueUrl
+  const handleSignIn = async () => {
+    if (signingIn) return
+    setError(null)
+    setSigningIn(true)
+    try {
+      const result = await signInWithWebsite()
+      if (!result.ok) {
+        // Don't show a banner for the user simply closing the window — that's a
+        // normal cancel path, not an error.
+        if (result.error && result.error !== "cancelled") {
+          setError(result.error)
+        }
+      }
+    } finally {
+      setSigningIn(false)
     }
   }
 
   return (
     <div className="min-h-screen bg-[#09090b] flex items-center justify-center p-4">
       <div className="w-full max-w-md space-y-4">
-        {/* Back button */}
         <Button
           variant="ghost"
           onClick={() => navigate(-1)}
@@ -39,23 +57,42 @@ export function LoginPage() {
                 Sign in to UnionCrax.Direct
               </h1>
               <p className="text-sm text-zinc-500">
-                Continue on union-crax.xyz, then come back to UC.D.
+                Sign in with your UnionCrax account. A secure window will open
+                so you can complete the login.
               </p>
             </div>
 
+            {error ? (
+              <div
+                role="alert"
+                className="flex items-start gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200"
+              >
+                <AlertCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
+                <span>{error}</span>
+              </div>
+            ) : null}
+
             <Button
               type="button"
-              onClick={handleWebsiteLogin}
-              disabled={redirecting}
+              onClick={handleSignIn}
+              disabled={signingIn || isLoading}
               className="w-full gap-2 bg-white text-black hover:bg-zinc-200"
             >
-              <LogIn className="h-4 w-4" />
-              {redirecting ? "Redirecting..." : "Sign In on union-crax.xyz"}
-              <ExternalLink className="h-4 w-4" />
+              {signingIn ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Waiting for sign in…
+                </>
+              ) : (
+                <>
+                  <LogIn className="h-4 w-4" />
+                  Sign in with UnionCrax
+                </>
+              )}
             </Button>
 
             <p className="text-xs text-zinc-500 text-center">
-              This opens the official website login flow with UC.D continuation.
+              Your session stays on this device. Closing the sign-in window cancels the flow.
             </p>
           </CardContent>
         </Card>

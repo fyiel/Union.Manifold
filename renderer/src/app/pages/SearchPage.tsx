@@ -10,7 +10,7 @@ import { Switch } from "@/components/ui/switch"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
 import { PaginationBar } from "@/components/PaginationBar"
-import { Filter, Wifi, X, SlidersHorizontal, RefreshCw, Heart, Star, ChevronRight, Search } from "lucide-react"
+import { Filter, Wifi, X, SlidersHorizontal, RefreshCw, Heart, Star, ChevronRight, Search, Cpu } from "lucide-react"
 import { useDebounce } from "@/hooks/use-debounce"
 import { parseSize } from "@/lib/search-utils"
 import { getInstalledVersionLabel, hasInstalledVersionUpdate, hasOnlineMode, generateErrorCode, ErrorTypes, proxyImageUrl } from "@/lib/utils"
@@ -49,6 +49,7 @@ interface Filters {
   sortBy: string
   online?: boolean
   nsfwOnly?: boolean
+  canRun?: "off" | "playable" | "smooth"
 }
 
 const DEFAULT_FILTERS: Filters = {
@@ -59,7 +60,10 @@ const DEFAULT_FILTERS: Filters = {
   sortBy: "random",
   online: false,
   nsfwOnly: false,
+  canRun: "off",
 }
+
+type CanRunStatus = "off" | "applied" | "unauthenticated" | "no-profile"
 
 export function SearchPage() {
   const navigate = useNavigate()
@@ -90,13 +94,18 @@ export function SearchPage() {
     return developerMatch ? developerMatch[1].trim() : "Unknown"
   }
 
-  const initialFilters: Filters = useMemo(() => ({
-    ...DEFAULT_FILTERS,
-    searchTerm: searchParams.get("q") || "",
-    sortBy: normalizeSort(searchParams.get("sort")),
-    online: searchParams.get("online") === "1",
-    nsfwOnly: searchParams.get("nsfw") === "1",
-  }), [])
+  const initialFilters: Filters = useMemo(() => {
+    const rawCanRun = searchParams.get("canRun")
+    const canRun: Filters["canRun"] = rawCanRun === "playable" || rawCanRun === "smooth" ? rawCanRun : "off"
+    return {
+      ...DEFAULT_FILTERS,
+      searchTerm: searchParams.get("q") || "",
+      sortBy: normalizeSort(searchParams.get("sort")),
+      online: searchParams.get("online") === "1",
+      nsfwOnly: searchParams.get("nsfw") === "1",
+      canRun,
+    }
+  }, [])
 
   const [filters, setFilters] = useState<Filters>(initialFilters)
   const [searchInput, setSearchInput] = useState<string>(initialFilters.searchTerm)
@@ -120,6 +129,7 @@ export function SearchPage() {
   const [criticalLoadOpen, setCriticalLoadOpen] = useState(false)
   const [didYouMeanResults, setDidYouMeanResults] = useState<any[]>([])
   const [installedVersionMap, setInstalledVersionMap] = useState<Record<string, string[]>>({})
+  const [canRunStatus, setCanRunStatus] = useState<CanRunStatus>("off")
 
   const [currentPage, setCurrentPage] = useState(1)
   const itemsPerPage = 20
@@ -131,6 +141,7 @@ export function SearchPage() {
     if (f.sortBy && f.sortBy !== "random") params.set("sort", f.sortBy)
     if (f.online) params.set("online", "1")
     if (f.nsfwOnly) params.set("nsfw", "1")
+    if (f.canRun && f.canRun !== "off") params.set("canRun", f.canRun)
     setSearchParams(params, { replace: true })
   }, [setSearchParams])
 
@@ -264,6 +275,7 @@ export function SearchPage() {
       filters.genres.forEach((g) => params.append("genres", g))
       filters.developers.forEach((d) => params.append("developers", d))
       if (filters.online) params.set("online", "true")
+      if (filters.canRun && filters.canRun !== "off") params.set("canRun", filters.canRun)
 
       if (filters.nsfwOnly) {
         params.set("nsfwOnly", "true")
@@ -283,6 +295,12 @@ export function SearchPage() {
       }
 
       const total = Number(response.headers.get("X-Total-Count") || 0)
+      const headerStatus = response.headers.get("X-Can-Run-Status")
+      if (headerStatus === "applied" || headerStatus === "unauthenticated" || headerStatus === "no-profile") {
+        setCanRunStatus(headerStatus)
+      } else {
+        setCanRunStatus("off")
+      }
 
       const data = await response.json()
       const items = data.map((game: any, index: number) => ({
@@ -506,6 +524,7 @@ export function SearchPage() {
     count += filters.developers.length
     if (filters.online) count++
     if (filters.nsfwOnly) count++
+    if (filters.canRun && filters.canRun !== "off") count++
     if (filters.sortBy !== "random") count++
     if (filters.sizeRange[0] !== 0 || filters.sizeRange[1] !== 500) count++
     return count
@@ -568,6 +587,53 @@ export function SearchPage() {
               </button>
             )
           })}
+        </div>
+      </FilterSection>
+
+      {/* "Can my PC run" — gated on a scanned system profile. */}
+      <FilterSection title="My PC">
+        <div className="space-y-2">
+          <p className="text-[11px] text-zinc-400 leading-snug">
+            Filter to games your scanned PC can run. Scan once in Settings → System Profile to enable.
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {(["off", "playable", "smooth"] as const).map((mode) => {
+              const active = (filters.canRun ?? "off") === mode
+              const label = mode === "off" ? "All games" : mode === "playable" ? "Can run (min)" : "Smooth (rec)"
+              return (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => updateFilter("canRun", mode)}
+                  className={cn(
+                    "rounded-full px-3 py-1.5 text-xs font-medium transition-all border active:scale-95",
+                    active
+                      ? "bg-white text-black border-white"
+                      : "bg-white/[.03] text-zinc-300 border-white/[.07] hover:bg-white/[.07] hover:text-white"
+                  )}
+                >
+                  {label}
+                </button>
+              )
+            })}
+          </div>
+          {filters.canRun && filters.canRun !== "off" && canRunStatus === "unauthenticated" && (
+            <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-200">
+              Sign in to use this filter.
+            </div>
+          )}
+          {filters.canRun && filters.canRun !== "off" && canRunStatus === "no-profile" && (
+            <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-200 space-y-2">
+              <p>No PC scan on file yet.</p>
+              <button
+                type="button"
+                onClick={() => navigate("/settings?section=system&autoScan=1")}
+                className="inline-flex items-center gap-1 rounded-full bg-amber-200/20 hover:bg-amber-200/30 px-2 py-0.5 text-[11px] font-semibold text-amber-100 transition-colors"
+              >
+                <Cpu className="h-3 w-3" /> Scan now
+              </button>
+            </div>
+          )}
         </div>
       </FilterSection>
 
@@ -835,6 +901,14 @@ export function SearchPage() {
                 )}
                 {filters.nsfwOnly && (
                   <FilterChip label="NSFW" tone="red" onRemove={() => updateFilter("nsfwOnly", false)} />
+                )}
+                {filters.canRun && filters.canRun !== "off" && (
+                  <FilterChip
+                    label={filters.canRun === "smooth" ? "My PC: smooth" : "My PC: playable"}
+                    icon={<Cpu className="h-3 w-3" />}
+                    tone="emerald"
+                    onRemove={() => updateFilter("canRun", "off")}
+                  />
                 )}
                 {filters.genres.filter((g) => g.toLowerCase() !== "nsfw").map((genre) => (
                   <FilterChip key={genre} label={genre} onRemove={() => toggleGenre(genre)} />
