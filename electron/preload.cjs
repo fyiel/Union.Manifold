@@ -333,6 +333,20 @@ contextBridge.exposeInMainWorld('ucSystemProfile', {
   upgradeSuggest: (baseUrl) => ipcRenderer.invoke('uc:system-profile-upgrade-suggest', { baseUrl }),
 })
 
+// Playtime (UC.D tracks sessions on game exit; renderer flushes to server)
+contextBridge.exposeInMainWorld('ucPlaytime', {
+  localSummary: () => ipcRenderer.invoke('uc:playtime-local-summary'),
+  pending: () => ipcRenderer.invoke('uc:playtime-pending'),
+  ack: (sessionIds) => ipcRenderer.invoke('uc:playtime-ack', sessionIds),
+  flush: (baseUrl) => ipcRenderer.invoke('uc:playtime-flush', { baseUrl }),
+  serverTotals: (baseUrl) => ipcRenderer.invoke('uc:playtime-server-totals', { baseUrl }),
+  onSessionRecorded: (callback) => {
+    const listener = (_event, data) => callback(data)
+    ipcRenderer.on('uc:playtime-session-recorded', listener)
+    return () => ipcRenderer.removeListener('uc:playtime-session-recorded', listener)
+  },
+})
+
 // Storage reservation API (pre-download space checks)
 contextBridge.exposeInMainWorld('ucStorage', {
   precheck: (opts) => ipcRenderer.invoke('uc:storage-precheck', opts),

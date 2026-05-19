@@ -588,6 +588,24 @@ declare global {
       summary: (targetPath?: string) => Promise<StorageSummaryResult>
       snapshot: () => Promise<{ ok: boolean; reservations?: Array<{ id: string; mountRoot: string; downloadBytes: number; extractBytes: number; status: string; createdAt: number }>; error?: string }>
     }
+    ucPlaytime?: {
+      localSummary: () => Promise<{
+        ok: boolean
+        summary?: {
+          totalSeconds: number
+          weekSeconds: number
+          sessionCount: number
+          pendingCount: number
+          topGames: Array<{ appid: string; gameName: string | null; totalSeconds: number; sessionCount: number; lastPlayedAt: string | null }>
+        }
+        error?: string
+      }>
+      pending: () => Promise<{ ok: boolean; sessions?: Array<{ id: string; appid: string; gameName: string | null; durationSeconds: number; startedAt: string; endedAt: string; sourceAppVersion?: string | null }>; error?: string }>
+      ack: (sessionIds: string[]) => Promise<{ ok: boolean; cleared?: number; remaining?: number; error?: string }>
+      flush: (baseUrl: string) => Promise<{ ok: boolean; uploaded?: number; remaining?: number; status?: number; error?: string }>
+      serverTotals: (baseUrl: string) => Promise<{ ok: boolean; totals?: { totalSeconds: number; weekSeconds: number; sessionCount: number; lastPlayedAt: string | null }; topGames?: Array<{ appid: string; gameName: string | null; totalSeconds: number; sessionCount: number; lastPlayedAt: string | null }>; error?: string }>
+      onSessionRecorded: (callback: (data: { session: { id: string; appid: string; gameName: string | null; durationSeconds: number; startedAt: string; endedAt: string }; totals?: { totalSeconds: number; sessionCount: number } | null }) => void) => () => void
+    }
     ucSystem?: {
       getVolume: () => Promise<{ ok: boolean; volume: number }>
       openExternal?: (target: string) => Promise<{ ok: boolean; error?: string }>
