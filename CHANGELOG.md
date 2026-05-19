@@ -1,11 +1,5 @@
 # Changelog
 
-## Unreleased - 2026-05-19
-
-### Wishlist
-
-- **PC compatibility card on the Wishlist page** — the upgrade-suggestions card from Settings → System Profile is now surfaced directly on the Wishlist page. When all wishlisted games pass minimum requirements it shows the "Your PC clears every wishlist game" good-news banner; otherwise it shows the bottleneck breakdown with per-component suggestions. The card is skipped entirely when no system profile has been scanned or the wishlist has no evaluable games.
-
 ## v2.2.0 — Crossroads · 2026-05-19
 
 Linux gets first-class treatment across the launcher, the system scanner gets sharper teeth, and the updater + installer stop tripping over themselves. Picks up the system-profile groundwork laid in v2.1.0 and makes that data actually matter cross-platform — sysreq panels auto-pick your OS, the runnable filter respects it, the scanner reports DDR/NVMe types correctly on both platforms, and the launcher no longer pretends a Linux user lives in a Windows world.
@@ -43,6 +37,10 @@ Linux gets first-class treatment across the launcher, the system scanner gets sh
   - **Hardware** — top GPUs, CPUs, vendors, RAM buckets, OS, and storage media. Top GPU and CPU rows now surface the usernames + avatars of owners who opted into a public profile (anonymous contributors still count toward percentages but don't appear in the owner chip list).
 - **Public profile playtime card** (`/user/[username]`) — when a user has a public profile and any recorded playtime, their profile shows total + this-week totals, both ranks vs. the rest of the community, session count, last session date, and their top-5 most-played games with cover-art-friendly progress bars. Old `/stats/hardware` URLs redirect to `/leaderboard?tab=hardware`.
 - **Stuck "currently playing" fix** — when a game was closed from inside its own UI, UC.D could continue thinking the game was running (the spawned launcher handle's `exit` event sometimes never fired under `detached: true` + `unref()` on Windows). Tracked PIDs are now actively polled every 3s, and the 15s `pruneRunningGames` sweep routes dead PIDs through the same finalisation path as `proc.on('exit')` — so the playtime session is recorded, RPC clears, and the overlay hides whether the game exits cleanly or vanishes silently.
+
+### Wishlist
+
+- **PC compatibility card on the Wishlist page** — the upgrade-suggestions card from Settings → System Profile is now surfaced directly on the Wishlist page. When all wishlisted games pass minimum requirements it shows the "Your PC clears every wishlist game" good-news banner; otherwise it shows the bottleneck breakdown with per-component suggestions. The card is skipped entirely when no system profile has been scanned or the wishlist has no evaluable games.
 
 ## v2.1.0 — System Profile - 2026-05-14 - 2026-05-19
 
