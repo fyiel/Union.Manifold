@@ -206,8 +206,8 @@ export function SystemProfilePanel({ autoScanOnMount = false, onAutoScanConsumed
       if (window.ucSystemProfile?.serverSetVisibility) {
         try {
           await window.ucSystemProfile.serverSetVisibility(baseUrlRef.current, {
-            comments: next.comments === "summary" ? "summary" : "off",
-            forums: next.forums === "summary" ? "summary" : "off",
+            comments: next.comments,
+            forums: next.forums,
             profilePublic: next.profilePublic,
             shareGamePlaytime: next.shareGamePlaytime,
           })
@@ -327,25 +327,23 @@ export function SystemProfilePanel({ autoScanOnMount = false, onAutoScanConsumed
             <div>
               <h2 className="text-lg font-semibold">Sharing &amp; visibility</h2>
               <p className="text-sm text-zinc-400 mt-1">
-                Choose where your specs are visible. <b>Summary</b> shows a short string like &ldquo;RTX 4070 · 32GB · Win11&rdquo;. <b>Full spec</b> shows the detailed sheet. Existing comments and forum posts keep the specs they had when posted.
+                Choose where your specs are visible. <b>Summary</b> shows a short text line like &ldquo;RTX 4070 · 32GB · Win11&rdquo;. <b>Full spec</b> enables full detail support for that surface. Existing comments and forum posts keep the specs they had when posted.
               </p>
             </div>
           </div>
 
           <div className="divide-y divide-white/[.06]">
             <VisibilityRow
-              label="Comment badge"
-              description="Show a spec chip next to your comments on game pages."
+              label="Comments"
+              description="Show your system specs under the date on game-page comments."
               value={visibility.comments}
               onChange={(v) => updateVisibility({ comments: v })}
-              allowFull={false}
             />
             <VisibilityRow
               label="Forum posts"
-              description="Show a spec chip on your forum posts."
+              description="Show your system specs under the date on forum posts."
               value={visibility.forums}
               onChange={(v) => updateVisibility({ forums: v })}
-              allowFull={false}
             />
             <VisibilityRow
               label="Public profile"
