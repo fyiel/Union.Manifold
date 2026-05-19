@@ -3,7 +3,8 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Cpu, Loader2, RefreshCw, Monitor, HardDrive, Zap, MemoryStick, Trash2, ShieldCheck, CloudUpload, CloudOff, CheckCircle2, Laptop, X, Check, Pencil, TrendingUp } from "lucide-react"
+import { Cpu, Loader2, RefreshCw, Monitor, HardDrive, Zap, MemoryStick, Trash2, ShieldCheck, CloudUpload, CloudOff, CheckCircle2, Laptop, X, Check, Pencil, TrendingUp, Clock3 } from "lucide-react"
+import { Switch } from "@/components/ui/switch"
 import { Input } from "@/components/ui/input"
 import { getApiBaseUrl } from "@/lib/api"
 
@@ -12,6 +13,7 @@ const DEFAULT_VISIBILITY: SystemProfileVisibility = {
   forums: "off",
   profilePublic: "off",
   sysreqCheck: "on",
+  shareGamePlaytime: true,
 }
 
 function formatBytes(bytes: number | null | undefined): string {
@@ -207,6 +209,7 @@ export function SystemProfilePanel({ autoScanOnMount = false, onAutoScanConsumed
             comments: next.comments === "summary" ? "summary" : "off",
             forums: next.forums === "summary" ? "summary" : "off",
             profilePublic: next.profilePublic,
+            shareGamePlaytime: next.shareGamePlaytime,
           })
         } catch { /* swallow, will retry on next scan/visibility change */ }
       }
@@ -352,6 +355,22 @@ export function SystemProfilePanel({ autoScanOnMount = false, onAutoScanConsumed
             />
             <div className="flex items-start justify-between gap-4 py-2">
               <div className="flex-1 min-w-0">
+                <div className="text-sm font-medium flex items-center gap-1.5">
+                  <Clock3 className="h-3.5 w-3.5 text-zinc-400" />
+                  Game playtime sharing
+                </div>
+                <div className="text-xs text-zinc-400 mt-0.5">
+                  When on, your playtime appears on the public leaderboard and the playtime card on your profile (with which games you've played). <b>When off, you're removed from the playtime leaderboard and the card is hidden</b> — but your sessions are still tracked, so flipping this back on later restores everything without losing any playtime.
+                </div>
+              </div>
+              <Switch
+                checked={visibility.shareGamePlaytime}
+                onCheckedChange={(v) => updateVisibility({ shareGamePlaytime: v })}
+                aria-label="Share game playtime publicly"
+              />
+            </div>
+            <div className="flex items-start justify-between gap-4 py-2">
+              <div className="flex-1 min-w-0">
                 <div className="text-sm font-medium">Pre-download requirement check</div>
                 <div className="text-xs text-zinc-400 mt-0.5">
                   Compare a game's minimum and recommended specs to your hardware before downloading. Also powers the &ldquo;Can my PC run&rdquo; check on union-crax.xyz when you&rsquo;re signed in.
@@ -397,7 +416,7 @@ type UpgradeReport = {
   }>
 }
 
-function UpgradeSuggesterSection({ baseUrl }: { baseUrl: string | undefined }) {
+export function UpgradeSuggesterSection({ baseUrl }: { baseUrl: string | undefined }) {
   const [report, setReport] = useState<UpgradeReport | null>(null)
   const [reason, setReason] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -418,6 +437,8 @@ function UpgradeSuggesterSection({ baseUrl }: { baseUrl: string | undefined }) {
           setReason(res.reason || res.error || null)
         }
       } catch (err: any) {
+        // ignore
+      } finally {
         setLoading(false)
       }
     })()
