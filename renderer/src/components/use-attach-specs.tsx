@@ -37,7 +37,7 @@ export function useAttachSpecsToggle(surface: "comment" | "forum") {
         const tier = surface === "comment"
           ? data?.visibility?.comments
           : data?.visibility?.forums
-        setDefaultOn(tier === "summary")
+        setDefaultOn(tier !== "off")
         setAttachSpecs(undefined)
       } catch {
         if (!cancelled) setAvailable(false)

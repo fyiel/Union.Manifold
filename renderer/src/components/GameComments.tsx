@@ -21,7 +21,6 @@ import {
 } from "@/components/ui/select"
 import { DiscordAvatar } from "@/components/DiscordAvatar"
 import { CommentMarkdown } from "@/components/CommentMarkdown"
-import { SystemSpecChip } from "@/components/SystemSpecChip"
 import { AttachSpecsToggle, useAttachSpecsToggle } from "@/components/use-attach-specs"
 
 import { PaginationBar } from "@/components/PaginationBar"
@@ -757,10 +756,6 @@ export function GameComments({
                   {authorRole}
                 </span>
               )}
-              <SystemSpecChip
-                summary={comment.systemSpec?.summary}
-                fingerprint={comment.systemSpec?.fingerprint}
-              />
               {isPinned && (
                 <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 border border-amber-400/40 px-2 py-0.5 text-[11px] font-semibold text-amber-300">
                   <Pin className="h-3 w-3" />
@@ -768,9 +763,16 @@ export function GameComments({
                 </span>
               )}
               </div>
-              <span className="mt-1 block text-xs text-zinc-400">
-                {new Date(comment.createdAt).toLocaleString()}
-              </span>
+              <div className="mt-1">
+                <span className="text-xs text-zinc-400">
+                  {new Date(comment.createdAt).toLocaleString()}
+                </span>
+                {comment.systemSpec && (
+                  <p className="mt-0.5 text-xs text-zinc-300/85 break-words">
+                    {comment.systemSpec.summary}
+                  </p>
+                )}
+              </div>
               </div>
             </div>
             <CommentMarkdown text={comment.body} className="mt-2 text-zinc-400" />

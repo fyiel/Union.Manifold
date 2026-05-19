@@ -558,8 +558,8 @@ declare global {
       summary: () => Promise<{ ok: boolean; summary?: string | null; fingerprint?: string; error?: string }>
       clearCache: () => Promise<{ ok: boolean; error?: string }>
       upload: (baseUrl?: string) => Promise<{ ok: boolean; status?: number; fingerprint?: string; summary?: string; error?: string }>
-      serverGetVisibility: (baseUrl?: string) => Promise<{ ok: boolean; status?: number; visibility?: { comments: 'off' | 'summary'; forums: 'off' | 'summary'; profilePublic: 'off' | 'summary' | 'full' } | null; error?: string }>
-      serverSetVisibility: (baseUrl: string | undefined, patch: Partial<{ comments: 'off' | 'summary'; forums: 'off' | 'summary'; profilePublic: 'off' | 'summary' | 'full' }>) => Promise<{ ok: boolean; status?: number; visibility?: { comments: 'off' | 'summary'; forums: 'off' | 'summary'; profilePublic: 'off' | 'summary' | 'full' } | null; error?: string }>
+      serverGetVisibility: (baseUrl?: string) => Promise<{ ok: boolean; status?: number; visibility?: { comments: 'off' | 'summary' | 'full'; forums: 'off' | 'summary' | 'full'; profilePublic: 'off' | 'summary' | 'full' } | null; error?: string }>
+      serverSetVisibility: (baseUrl: string | undefined, patch: Partial<{ comments: 'off' | 'summary' | 'full'; forums: 'off' | 'summary' | 'full'; profilePublic: 'off' | 'summary' | 'full' }>) => Promise<{ ok: boolean; status?: number; visibility?: { comments: 'off' | 'summary' | 'full'; forums: 'off' | 'summary' | 'full'; profilePublic: 'off' | 'summary' | 'full' } | null; error?: string }>
       serverDelete: (baseUrl?: string) => Promise<{ ok: boolean; status?: number; error?: string }>
       // Multi-rig
       listDevices: (baseUrl?: string) => Promise<{ ok: boolean; devices?: Array<{ fingerprint: string; deviceName: string | null; summary: string | null; sourceAppVersion: string | null; capturedAt: string; isActive: boolean }>; error?: string }>
