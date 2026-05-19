@@ -1,5 +1,8 @@
 const { contextBridge, ipcRenderer } = require('electron')
 
+// Local fan-out set for uc:setting-changed — see ucSettings.onChanged below.
+let settingsChangedSubs = null
+
 contextBridge.exposeInMainWorld('ucWindow', {
   minimize: () => ipcRenderer.invoke('uc:window-minimize'),
   maximize: () => ipcRenderer.invoke('uc:window-maximize'),
@@ -112,9 +115,19 @@ contextBridge.exposeInMainWorld('ucSettings', {
   importSettings: () => ipcRenderer.invoke('uc:settings-import'),
   runNetworkTest: (baseUrl) => ipcRenderer.invoke('uc:network-test', baseUrl),
   onChanged: (callback) => {
-    const listener = (_event, data) => callback(data)
-    ipcRenderer.on('uc:setting-changed', listener)
-    return () => ipcRenderer.removeListener('uc:setting-changed', listener)
+    // Fan out through one ipcRenderer listener so N renderer subscribers
+    // don't trip Node's EventEmitter MaxListeners warning. The first call
+    // installs the bridge; later calls just join the local Set.
+    if (!settingsChangedSubs) {
+      settingsChangedSubs = new Set()
+      ipcRenderer.on('uc:setting-changed', (_event, data) => {
+        for (const fn of settingsChangedSubs) {
+          try { fn(data) } catch {}
+        }
+      })
+    }
+    settingsChangedSubs.add(callback)
+    return () => { settingsChangedSubs?.delete(callback) }
   }
 })
 
@@ -342,6 +355,11 @@ contextBridge.exposeInMainWorld('ucPlaytime', {
     ipcRenderer.on('uc:playtime-session-recorded', listener)
     return () => ipcRenderer.removeListener('uc:playtime-session-recorded', listener)
   },
+})
+
+// Presence heartbeat — lets the website show a real-time "Playing now" counter
+contextBridge.exposeInMainWorld('ucPresence', {
+  heartbeat: (baseUrl, appVersion) => ipcRenderer.invoke('uc:presence-heartbeat', { baseUrl, appVersion }),
 })
 
 // Storage reservation API (pre-download space checks)

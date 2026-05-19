@@ -75,6 +75,10 @@ export function normalizeCatalogGame(game: any): CatalogGame {
   // so the DownloadCheckModal can detect "no sysreq data".
   const minRequirements = game?.minRequirements ?? game?.min_requirements ?? null
   const recommendedRequirements = game?.recommendedRequirements ?? game?.recommended_requirements ?? null
+  // Linux peers — populated by the website from the new linux_*
+  // columns. Either side may be null (Windows-only / Linux-native title).
+  const linuxMinRequirements = game?.linuxMinRequirements ?? game?.linux_min_requirements ?? null
+  const linuxRecommendedRequirements = game?.linuxRecommendedRequirements ?? game?.linux_recommended_requirements ?? null
   const sizeBytes = typeof game?.sizeBytes === "number"
     ? game.sizeBytes
     : typeof game?.size_bytes === "number"
@@ -108,6 +112,8 @@ export function normalizeCatalogGame(game: any): CatalogGame {
     dlc: Array.isArray(game?.dlc) ? game.dlc : [],
     minRequirements,
     recommendedRequirements,
+    linuxMinRequirements,
+    linuxRecommendedRequirements,
     searchText: normalizeSearchText(`${normalizedName} ${normalizedDescription} ${(Array.isArray(game?.genres) ? game.genres.join(" ") : "")} ${developer}`),
   }
 }
