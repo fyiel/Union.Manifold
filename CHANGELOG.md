@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased - 2026-05-19
+
+### Wishlist
+
+- **PC compatibility card on the Wishlist page** — the upgrade-suggestions card from Settings → System Profile is now surfaced directly on the Wishlist page. When all wishlisted games pass minimum requirements it shows the "Your PC clears every wishlist game" good-news banner; otherwise it shows the bottleneck breakdown with per-component suggestions. The card is skipped entirely when no system profile has been scanned or the wishlist has no evaluable games.
+
 ## v2.2.0 — Crossroads · 2026-05-19
 
 Linux gets first-class treatment across the launcher, the system scanner gets sharper teeth, and the updater + installer stop tripping over themselves. Picks up the system-profile groundwork laid in v2.1.0 and makes that data actually matter cross-platform — sysreq panels auto-pick your OS, the runnable filter respects it, the scanner reports DDR/NVMe types correctly on both platforms, and the launcher no longer pretends a Linux user lives in a Windows world.
