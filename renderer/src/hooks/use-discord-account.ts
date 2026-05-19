@@ -1,7 +1,7 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
-import { apiFetch, getApiBaseUrl } from "@/lib/api"
+import { useMemo } from "react"
+import { useAuthContext } from "@/context/auth-context"
 
 export type DiscordAccount = {
   discordId: string
@@ -18,157 +18,32 @@ type DiscordAccountState = {
   refresh: (forceAccountFetch?: boolean) => Promise<void>
 }
 
+/**
+ * Thin wrapper over the unified auth context, kept for backwards compatibility
+ * with components that consume the legacy {user, loading, authenticated, refresh}
+ * shape. Source of truth is /api/auth/me — there is no Discord-only fallback,
+ * so the avatar always reflects the actual signed-in user (or null).
+ */
 export function useDiscordAccount(): DiscordAccountState {
-  const [user, setUser] = useState<DiscordAccount | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [authenticated, setAuthenticated] = useState(false)
+  const ctx = useAuthContext()
 
-  const hasLoginHint = () => {
-    if (typeof window === "undefined") return false
-    try {
-      return Boolean(localStorage.getItem("discord_id"))
-    } catch {
-      return false
-    }
-  }
-
-  const getAuthState = () => {
-    if (typeof window === "undefined") return null
-    try {
-      return sessionStorage.getItem("uc_auth_state")
-    } catch {
-      return null
-    }
-  }
-
-  const setAuthState = (state: "logged_in" | "logged_out") => {
-    if (typeof window === "undefined") return
-    try {
-      sessionStorage.setItem("uc_auth_state", state)
-    } catch {
-      // ignore storage errors
-    }
-  }
-
-  const fetchFallbackAccount = useCallback(async () => {
-    let discordId: string | null = null
-    try {
-      const res = await apiFetch("/api/discord/session")
-      if (res.ok) {
-        const data = await res.json()
-        if (data?.discordId) discordId = data.discordId
-      }
-    } catch {
-      // ignore
-    }
-    if (!discordId && window.ucAuth?.getSession) {
-      try {
-        const res = await window.ucAuth.getSession(getApiBaseUrl())
-        if (res?.discordId) discordId = res.discordId
-      } catch {
-        // ignore
-      }
-    }
-    if (!discordId) return null
-    try {
-      const res = await apiFetch(`/api/discord-avatar/${encodeURIComponent(discordId)}`)
-      if (res.ok) {
-        const data = await res.json()
-        return {
-          discordId,
-          username: data?.username || "Discord user",
-          displayName: data?.displayName || null,
-          avatarUrl: data?.avatar || null,
-        } as DiscordAccount
-      }
-    } catch {
-      // fall back below
-    }
+  const user = useMemo<DiscordAccount | null>(() => {
+    if (!ctx.user) return null
     return {
-      discordId,
-      username: "Discord user",
-      displayName: null,
-      avatarUrl: null,
-    } as DiscordAccount
-  }, [])
-
-  const refresh = useCallback(async (forceAccountFetch = false) => {
-    const authState = getAuthState()
-    const hasHint = hasLoginHint()
-    if (!forceAccountFetch && !hasHint && authState === "logged_out") {
-      setUser(null)
-      setAuthenticated(false)
-      setLoading(false)
-      return
+      discordId: ctx.user.discordId,
+      username: ctx.user.username,
+      displayName: ctx.user.displayName,
+      avatarUrl: ctx.user.avatarUrl,
+      bio: ctx.user.bio,
     }
+  }, [ctx.user])
 
-    setLoading(true)
-    try {
-      const summaryRes = await apiFetch("/api/account/summary")
-      if (summaryRes.ok) {
-        const summary = await summaryRes.json()
-        const nextUser = summary?.user ?? null
-        setUser(nextUser)
-        setAuthenticated(Boolean(nextUser))
-        setAuthState(nextUser ? "logged_in" : "logged_out")
-        return
-      }
-
-      const res = await apiFetch("/api/comments/me")
-      if (!res.ok) {
-        const fallback = await fetchFallbackAccount()
-        setUser(fallback)
-        setAuthenticated(false)
-        setAuthState(fallback ? "logged_in" : "logged_out")
-        return
-      }
-      const data = await res.json()
-      const nextUser = data?.user ?? null
-      setUser(nextUser)
-      setAuthenticated(Boolean(nextUser))
-      setAuthState(nextUser ? "logged_in" : "logged_out")
-    } catch {
-      const fallback = await fetchFallbackAccount()
-      setUser(fallback)
-      setAuthenticated(false)
-      setAuthState(fallback ? "logged_in" : "logged_out")
-    } finally {
-      setLoading(false)
-    }
-  }, [fetchFallbackAccount])
-
-  useEffect(() => {
-    void refresh()
-  }, [refresh])
-
-  useEffect(() => {
-    if (typeof window === "undefined") return
-    if (user?.discordId) {
-      try {
-        localStorage.setItem("discord_id", user.discordId)
-      } catch {
-        // ignore storage errors
-      }
-    } else {
-      try {
-        localStorage.removeItem("discord_id")
-      } catch {
-        // ignore storage errors
-      }
-    }
-  }, [user])
-
-  useEffect(() => {
-    const handleLogout = () => {
-      setUser(null)
-      setAuthenticated(false)
-      setLoading(false)
-      setAuthState("logged_out")
-    }
-
-    window.addEventListener("uc_discord_logout", handleLogout)
-    return () => window.removeEventListener("uc_discord_logout", handleLogout)
-  }, [])
-
-  return { user, loading, authenticated, refresh }
+  return {
+    user,
+    loading: ctx.isLoading,
+    authenticated: ctx.isAuthenticated,
+    refresh: async () => {
+      await ctx.refresh()
+    },
+  }
 }

@@ -3607,6 +3607,118 @@ ipcMain.handle('uc:auth-update-password', async (event, payload) => {
   }
 })
 
+function openWebsiteLoginWindow(parent, baseUrl) {
+  const origin = normalizeBaseUrl(baseUrl)
+  let loginUrl
+  try {
+    const url = new URL('/login', origin)
+    url.searchParams.set('next', '/direct/continue')
+    url.searchParams.set('source', 'ucd')
+    loginUrl = url.toString()
+  } catch {
+    loginUrl = `${origin}/login`
+  }
+
+  return new Promise((resolve) => {
+    let settled = false
+    let win = null
+    const finish = (payload) => {
+      if (settled) return
+      settled = true
+      try {
+        if (win && !win.isDestroyed()) {
+          setTimeout(() => {
+            try { if (win && !win.isDestroyed()) win.close() } catch { }
+          }, 50)
+        }
+      } catch { }
+      resolve(payload)
+    }
+
+    win = new BrowserWindow({
+      width: 520,
+      height: 720,
+      resizable: false,
+      minimizable: false,
+      maximizable: false,
+      parent,
+      modal: false,
+      show: false,
+      title: 'Sign in to UnionCrax',
+      backgroundColor: '#09090b',
+      webPreferences: {
+        contextIsolation: true,
+        nodeIntegration: false,
+        session: parent.webContents.session
+      },
+      icon: resolveIcon()
+    })
+
+    try {
+      win.setMenuBarVisibility(false)
+      win.setAutoHideMenuBar(true)
+    } catch { }
+
+    const verifySession = async () => {
+      try {
+        const response = await fetchWithSession(parent.webContents.session, baseUrl, '/api/auth/me', { method: 'GET' })
+        if (!response.ok) return null
+        const data = await response.json()
+        return data?.user || null
+      } catch {
+        return null
+      }
+    }
+
+    const handleUrl = async (nextUrl) => {
+      if (settled) return
+      try {
+        const parsed = new URL(nextUrl)
+        // The continue page is the success target we passed as ?next=
+        if (parsed.pathname === '/direct/continue' || parsed.pathname.startsWith('/direct/continue/')) {
+          const user = await verifySession()
+          if (user) {
+            finish({ ok: true, user })
+          }
+          // If not logged in yet, leave the window open so the user can complete the flow.
+        }
+      } catch { }
+    }
+
+    win.webContents.on('did-navigate', (_event, nextUrl) => handleUrl(nextUrl))
+    win.webContents.on('did-redirect-navigation', (_event, nextUrl) => handleUrl(nextUrl))
+    win.webContents.on('did-fail-load', (_event, errorCode, _errorDesc, validatedUrl, isMainFrame) => {
+      if (!isMainFrame) return
+      // -3 = ABORTED (common during redirects); ignore.
+      if (errorCode === -3) return
+      ucLog(`Website login window failed to load ${validatedUrl}: ${errorCode}`, 'warn')
+      finish({ ok: false, error: 'load_failed' })
+    })
+    win.webContents.on('render-process-gone', () => finish({ ok: false, error: 'render_gone' }))
+    win.once('ready-to-show', () => {
+      try { win.show() } catch { }
+    })
+    win.on('closed', () => finish({ ok: false, error: 'cancelled' }))
+
+    win.loadURL(loginUrl)
+  })
+}
+
+ipcMain.handle('uc:auth-website-login', async (event, baseUrl) => {
+  ucLog('Website login initiated')
+  const win = BrowserWindow.fromWebContents(event.sender)
+  if (!win || win.isDestroyed()) return { ok: false, error: 'no_window' }
+  const blocked = await maybeBlockMirrorAuth(win, baseUrl, { showDialog: true })
+  if (blocked) return blocked
+  const result = await openWebsiteLoginWindow(win, baseUrl)
+  if (result?.ok) {
+    ucLog(`Website login success (user ${result.user?.username || result.user?.id || 'unknown'})`)
+  } else {
+    ucLog(`Website login ended: ${result?.error || 'unknown'}`, 'warn')
+  }
+  return result || { ok: false, error: 'auth_failed' }
+})
+
 ipcMain.handle('uc:auth-fetch', async (event, payload) => {
   const win = BrowserWindow.fromWebContents(event.sender)
   if (!win || win.isDestroyed()) {

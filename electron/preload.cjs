@@ -122,9 +122,12 @@ contextBridge.exposeInMainWorld('ucAuth', {
   // OAuth login (Discord/Google)
   login: (baseUrl, provider) => ipcRenderer.invoke('uc:auth-login', baseUrl, provider),
   
-  // Email/password auth
+  // Email/password auth (legacy — kept for password recovery flows below)
   emailLogin: (baseUrl, email, password) => ipcRenderer.invoke('uc:auth-email-login', { baseUrl, email, password }),
   register: (baseUrl, email, username, password) => ipcRenderer.invoke('uc:auth-register', { baseUrl, email, username, password }),
+
+  // Website sign-in (embedded BrowserWindow loading union-crax.xyz/login)
+  websiteLogin: (baseUrl) => ipcRenderer.invoke('uc:auth-website-login', baseUrl),
   
   // Account recovery
   forgotPassword: (baseUrl, email) => ipcRenderer.invoke('uc:auth-forgot-password', { baseUrl, email }),

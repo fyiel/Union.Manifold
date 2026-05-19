@@ -21,6 +21,8 @@ import {
 } from "@/components/ui/select"
 import { DiscordAvatar } from "@/components/DiscordAvatar"
 import { CommentMarkdown } from "@/components/CommentMarkdown"
+import { SystemSpecChip } from "@/components/SystemSpecChip"
+import { AttachSpecsToggle, useAttachSpecsToggle } from "@/components/use-attach-specs"
 
 import { PaginationBar } from "@/components/PaginationBar"
 import { apiFetch, apiUrl, getApiBaseUrl } from "@/lib/api"
@@ -52,6 +54,11 @@ type CommentUser = {
   permissions?: string[]
 }
 
+type CommentSystemSpec = {
+  summary: string
+  fingerprint: string
+}
+
 type ThreadCommentPayload = {
   id: string
   body: string
@@ -63,6 +70,7 @@ type ThreadCommentPayload = {
   deletedBy?: string | null
   author: CommentUser | null
   replies?: ThreadCommentPayload[]
+  systemSpec?: CommentSystemSpec | null
 }
 
 type GameComment = {
@@ -76,6 +84,7 @@ type GameComment = {
   deletedBy: string | null
   author: CommentUser | null
   replies: GameComment[]
+  systemSpec: CommentSystemSpec | null
 }
 
 const normalizeComment = (comment: ThreadCommentPayload): GameComment => ({
@@ -86,6 +95,9 @@ const normalizeComment = (comment: ThreadCommentPayload): GameComment => ({
   deletedBy: comment.deletedBy ?? null,
   author: comment.author ?? null,
   replies: (comment.replies ?? []).map(normalizeComment),
+  systemSpec: comment.systemSpec && comment.systemSpec.summary
+    ? { summary: comment.systemSpec.summary, fingerprint: comment.systemSpec.fingerprint || "" }
+    : null,
 })
 
 const addCommentToTree = (tree: GameComment[], parentId: string | null, newComment: GameComment): GameComment[] => {
@@ -244,6 +256,7 @@ export function GameComments({
   const [sortMode, setSortMode] = useState<SortMode>("pinned")
   const [filterMode, setFilterMode] = useState<FilterMode>("all")
   const [revealedDeletedIds, setRevealedDeletedIds] = useState<Set<string>>(new Set())
+  const specsToggle = useAttachSpecsToggle("comment")
   const itemsPerPage = 10
   const MAX_VISUAL_DEPTH = 3
   const CONTINUATION_DEPTH = 5
@@ -258,44 +271,6 @@ export function GameComments({
   }, [sortedComments, currentPage])
   const deferredPaginatedComments = useDeferredValue(paginatedComments)
 
-  const loadFallbackUser = async () => {
-    try {
-      let discordId: string | null = null
-      try {
-        const sessionRes = await apiFetch("/api/discord/session")
-        if (sessionRes.ok) {
-          const sessionData = await sessionRes.json()
-          if (sessionData?.discordId) discordId = sessionData.discordId
-        }
-      } catch {
-        // ignore
-      }
-
-      if (!discordId && window.ucAuth?.getSession) {
-        try {
-          const res = await window.ucAuth.getSession(getApiBaseUrl())
-          if (res?.discordId) discordId = res.discordId
-        } catch {
-          // ignore
-        }
-      }
-
-      if (!discordId) return null
-      if (!discordId) return null
-      const avatarRes = await apiFetch(`/api/discord-avatar/${encodeURIComponent(discordId)}`)
-      if (!avatarRes.ok) return null
-      const avatarData = await avatarRes.json()
-      return {
-        discordId,
-        username: avatarData?.username || "Discord user",
-        displayName: avatarData?.displayName || null,
-        avatarUrl: avatarData?.avatar || null,
-      } as CommentUser
-    } catch {
-      return null
-    }
-  }
-
   const load = async () => {
     setError(null)
     setLoading(true)
@@ -305,24 +280,15 @@ export function GameComments({
         apiFetch(`/api/comments/${appid}`),
       ])
 
+      // The signed-in user is whatever /api/comments/me says — no Discord-only
+      // fallback. The old fallback would render a stale avatar from a leftover
+      // discord_session cookie even after sign-out, which made it look like
+      // the user was still logged in.
       if (meRes.ok) {
         const meData = await meRes.json()
-        setUser(meData.user)
+        setUser(meData.user || null)
       } else {
-        const sessionRes = await apiFetch("/api/comments/session", { method: "POST" })
-        if (sessionRes.ok) {
-          const nextMe = await apiFetch("/api/comments/me")
-          if (nextMe.ok) {
-            const meData = await nextMe.json()
-            setUser(meData.user)
-          } else {
-            const fallback = await loadFallbackUser()
-            setUser(fallback)
-          }
-        } else {
-          const fallback = await loadFallbackUser()
-          setUser(fallback)
-        }
+        setUser(null)
       }
 
       if (!listRes.ok) {
@@ -423,7 +389,10 @@ export function GameComments({
       const res = await apiFetch(`/api/comments/${appid}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ body: trimmedBody }),
+        body: JSON.stringify({
+          body: trimmedBody,
+          ...(specsToggle.payloadValue !== undefined ? { attachSpecs: specsToggle.payloadValue } : {}),
+        }),
       })
 
       const data = await res.json().catch(() => ({}))
@@ -452,7 +421,11 @@ export function GameComments({
       const res = await apiFetch(`/api/comments/${appid}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ body: trimmedReply, parentId }),
+        body: JSON.stringify({
+          body: trimmedReply,
+          parentId,
+          ...(specsToggle.payloadValue !== undefined ? { attachSpecs: specsToggle.payloadValue } : {}),
+        }),
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
@@ -784,6 +757,10 @@ export function GameComments({
                   {authorRole}
                 </span>
               )}
+              <SystemSpecChip
+                summary={comment.systemSpec?.summary}
+                fingerprint={comment.systemSpec?.fingerprint}
+              />
               {isPinned && (
                 <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 border border-amber-400/40 px-2 py-0.5 text-[11px] font-semibold text-amber-300">
                   <Pin className="h-3 w-3" />
@@ -869,9 +846,12 @@ export function GameComments({
                   placeholder={`Reply to ${comment.author?.displayName || comment.author?.username || "user"}...`}
                   maxLength={1000}
                 />
-                <div className="flex items-center justify-between text-xs text-zinc-400">
+                <div className="flex items-center justify-between gap-2 flex-wrap text-xs text-zinc-400">
                   <span>{(replyDrafts[comment.id] ?? "").length} / 1000</span>
-                  <div className="flex gap-2">
+                  <div className="flex items-center gap-2">
+                    {user && specsToggle.available && (
+                      <AttachSpecsToggle value={specsToggle.displayedValue} onChange={specsToggle.onChange} />
+                    )}
                     <Button
                       variant="ghost"
                       size="sm"
@@ -915,6 +895,8 @@ export function GameComments({
       activeReplyParent,
       replyDrafts,
       replying,
+      specsToggle.available,
+      specsToggle.displayedValue,
     ]
   )
 
@@ -996,11 +978,16 @@ export function GameComments({
               className="min-h-[120px]"
               maxLength={1000}
             />
-            <div className="flex items-center justify-between text-xs text-zinc-400">
+            <div className="flex items-center justify-between gap-2 flex-wrap text-xs text-zinc-400">
               <span>{remaining} characters remaining</span>
-              <Button size="sm" onClick={submit} disabled={!user || posting}>
-                {posting ? "Posting..." : "Post comment"}
-              </Button>
+              <div className="flex items-center gap-2">
+                {user && specsToggle.available && (
+                  <AttachSpecsToggle value={specsToggle.displayedValue} onChange={specsToggle.onChange} />
+                )}
+                <Button size="sm" onClick={submit} disabled={!user || posting}>
+                  {posting ? "Posting..." : "Post comment"}
+                </Button>
+              </div>
             </div>
 
             {error && (

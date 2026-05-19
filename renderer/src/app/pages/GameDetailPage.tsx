@@ -63,6 +63,7 @@ import { gameLogger } from "@/lib/logger"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { GamePageSkeleton } from "@/components/GamePageSkeleton"
 import { SystemRequirements } from "@/components/SystemRequirements"
+import { SystemRequirementsCheck } from "@/components/SystemRequirementsCheck"
 import { GameVersionStatus } from "@/components/GameVersionStatus"
 import { useAuth } from "@/hooks/useAuth"
 import { useMotionPreferences } from "@/hooks/use-motion-preferences"
@@ -1596,7 +1597,13 @@ export function GameDetailPage() {
               )}
 
               {game?.appid && (
-                <SystemRequirements appid={game.appid} />
+                <>
+                  <SystemRequirementsCheck
+                    minRequirements={game.minRequirements}
+                    recommendedRequirements={game.recommendedRequirements}
+                  />
+                  <SystemRequirements appid={game.appid} />
+                </>
               )}
 
             </div>
