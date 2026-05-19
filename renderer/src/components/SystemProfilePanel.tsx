@@ -3,7 +3,7 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Cpu, Loader2, RefreshCw, Monitor, HardDrive, Zap, MemoryStick, Trash2, ShieldCheck, CloudUpload, CloudOff, CheckCircle2, Laptop, Link2, X, Check, Pencil, TrendingUp } from "lucide-react"
+import { Cpu, Loader2, RefreshCw, Monitor, HardDrive, Zap, MemoryStick, Trash2, ShieldCheck, CloudUpload, CloudOff, CheckCircle2, Laptop, X, Check, Pencil, TrendingUp } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { getApiBaseUrl } from "@/lib/api"
 
@@ -376,7 +376,6 @@ export function SystemProfilePanel({ autoScanOnMount = false, onAutoScanConsumed
       </Card>
 
       {anyOnlineSurfaceOn(visibility) && <DevicesSection baseUrl={baseUrlRef.current} currentFingerprint={profile?.fingerprint ?? null} />}
-      {anyOnlineSurfaceOn(visibility) && <SharesSection baseUrl={baseUrlRef.current} />}
       {profile && anyOnlineSurfaceOn(visibility) && <UpgradeSuggesterSection baseUrl={baseUrlRef.current} />}
     </div>
   )
@@ -419,8 +418,6 @@ function UpgradeSuggesterSection({ baseUrl }: { baseUrl: string | undefined }) {
           setReason(res.reason || res.error || null)
         }
       } catch (err: any) {
-        setReason(err?.message || String(err))
-      } finally {
         setLoading(false)
       }
     })()
@@ -603,99 +600,6 @@ function DevicesSection({ baseUrl, currentFingerprint }: { baseUrl: string | und
             </div>
           ))}
         </div>
-      </CardContent>
-    </Card>
-  )
-}
-
-// ─── Share-a-spec ───────────────────────────────────────────────────────────
-
-type ShareRow = { shortCode: string; tier: "summary" | "full"; viewCount: number; expiresAt: string | null; createdAt: string }
-
-function SharesSection({ baseUrl }: { baseUrl: string | undefined }) {
-  const [shares, setShares] = useState<ShareRow[] | null>(null)
-  const [creating, setCreating] = useState(false)
-  const [copied, setCopied] = useState<string | null>(null)
-
-  const reload = useCallback(async () => {
-    if (!window.ucSystemProfile?.listShares) return
-    const res = await window.ucSystemProfile.listShares(baseUrl)
-    setShares(res.ok ? res.shares ?? [] : [])
-  }, [baseUrl])
-
-  useEffect(() => { void reload() }, [reload])
-
-  const create = useCallback(async (tier: "summary" | "full") => {
-    setCreating(true)
-    try {
-      await window.ucSystemProfile?.createShare?.(baseUrl, { tier })
-      await reload()
-    } finally {
-      setCreating(false)
-    }
-  }, [baseUrl, reload])
-
-  const buildShareUrl = (code: string) => {
-    const apiBase = baseUrl?.replace(/\/$/, "") || ""
-    return apiBase ? `${apiBase}/specs/${code}` : `/specs/${code}`
-  }
-
-  return (
-    <Card className="border-white/[.07]">
-      <CardContent className="p-6 space-y-4">
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex items-start gap-2">
-            <Link2 className="h-4 w-4 text-zinc-300 mt-1" />
-            <div>
-              <h2 className="text-lg font-semibold">Shared spec links</h2>
-              <p className="text-sm text-zinc-400 mt-1">
-                Mint a short URL anyone can open to see your specs (frozen at create time). Useful for &ldquo;can your friend&apos;s PC run this?&rdquo; conversations. Revokeable any time.
-              </p>
-            </div>
-          </div>
-          <div className="flex gap-1.5 shrink-0">
-            <Button size="sm" variant="outline" disabled={creating} onClick={() => create("summary")}>Summary</Button>
-            <Button size="sm" disabled={creating} onClick={() => create("full")}>{creating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Full spec"}</Button>
-          </div>
-        </div>
-
-        {shares && shares.length === 0 && (
-          <p className="text-xs text-zinc-500">No links yet. Click <span className="text-zinc-300">Summary</span> or <span className="text-zinc-300">Full spec</span> to create one.</p>
-        )}
-
-        {shares && shares.length > 0 && (
-          <div className="divide-y divide-white/[.06]">
-            {shares.map((s) => {
-              const url = buildShareUrl(s.shortCode)
-              return (
-                <div key={s.shortCode} className="flex items-center gap-3 py-2 text-sm">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <code className="text-xs font-mono text-zinc-200">{url}</code>
-                      <Badge className="bg-zinc-800 text-zinc-300 border-zinc-700 text-[10px]">{s.tier}</Badge>
-                    </div>
-                    <div className="text-[11px] text-zinc-400 mt-0.5">
-                      {s.viewCount} view{s.viewCount === 1 ? "" : "s"} · created {new Date(s.createdAt).toLocaleDateString()}
-                      {s.expiresAt && ` · expires ${new Date(s.expiresAt).toLocaleDateString()}`}
-                    </div>
-                  </div>
-                  <Button size="sm" variant="outline" onClick={async () => {
-                    try { await navigator.clipboard.writeText(url); setCopied(s.shortCode); setTimeout(() => setCopied(null), 1500) } catch { /* swallow */ }
-                  }}>
-                    {copied === s.shortCode ? "Copied!" : "Copy"}
-                  </Button>
-                  <Button size="sm" variant="ghost" onClick={async () => {
-                    if (!confirm("Revoke this share link? Anyone with it will get a 404.")) return
-                    await window.ucSystemProfile?.revokeShare?.(baseUrl, s.shortCode)
-                    void reload()
-                  }} title="Revoke">
-                    <Trash2 className="h-3.5 w-3.5 text-red-400" />
-                  </Button>
-                </div>
-              )
-            })}
-          </div>
-        )}
       </CardContent>
     </Card>
   )

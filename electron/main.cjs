@@ -12534,25 +12534,6 @@ ipcMain.handle('uc:system-profile-activate-device', (event, { baseUrl, fingerpri
   })
 )
 
-// ── Share-a-spec links ──
-ipcMain.handle('uc:system-profile-list-shares', (event, { baseUrl } = {}) =>
-  passthroughJson(event.sender, baseUrl, '/api/profile/system/share', { method: 'GET' })
-)
-
-ipcMain.handle('uc:system-profile-create-share', (event, { baseUrl, opts } = {}) =>
-  passthroughJson(event.sender, baseUrl, '/api/profile/system/share', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(opts || {}),
-  })
-)
-
-ipcMain.handle('uc:system-profile-revoke-share', (event, { baseUrl, shortCode } = {}) =>
-  passthroughJson(event.sender, baseUrl, `/api/profile/system/share/${encodeURIComponent(String(shortCode || ''))}`, {
-    method: 'DELETE',
-  })
-)
-
 // Upgrade suggester — compares wishlist vs active profile.
 ipcMain.handle('uc:system-profile-upgrade-suggest', (event, { baseUrl } = {}) =>
   passthroughJson(event.sender, baseUrl, '/api/profile/system/upgrade-suggest', { method: 'GET' })
