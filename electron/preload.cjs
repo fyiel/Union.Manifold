@@ -322,14 +322,11 @@ contextBridge.exposeInMainWorld('ucSystemProfile', {
   serverGetVisibility: (baseUrl) => ipcRenderer.invoke('uc:system-profile-server-visibility-get', { baseUrl }),
   serverSetVisibility: (baseUrl, patch) => ipcRenderer.invoke('uc:system-profile-server-visibility-set', { baseUrl, patch }),
   serverDelete: (baseUrl) => ipcRenderer.invoke('uc:system-profile-server-delete', { baseUrl }),
-  // Multi-rig + share-a-spec
+  // Multi-rig
   listDevices: (baseUrl) => ipcRenderer.invoke('uc:system-profile-list-devices', { baseUrl }),
   renameDevice: (baseUrl, fingerprint, name) => ipcRenderer.invoke('uc:system-profile-rename-device', { baseUrl, fingerprint, name }),
   deleteDevice: (baseUrl, fingerprint) => ipcRenderer.invoke('uc:system-profile-delete-device', { baseUrl, fingerprint }),
   activateDevice: (baseUrl, fingerprint) => ipcRenderer.invoke('uc:system-profile-activate-device', { baseUrl, fingerprint }),
-  listShares: (baseUrl) => ipcRenderer.invoke('uc:system-profile-list-shares', { baseUrl }),
-  createShare: (baseUrl, opts) => ipcRenderer.invoke('uc:system-profile-create-share', { baseUrl, opts }),
-  revokeShare: (baseUrl, shortCode) => ipcRenderer.invoke('uc:system-profile-revoke-share', { baseUrl, shortCode }),
   upgradeSuggest: (baseUrl) => ipcRenderer.invoke('uc:system-profile-upgrade-suggest', { baseUrl }),
 })
 

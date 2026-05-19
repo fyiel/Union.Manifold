@@ -555,14 +555,11 @@ declare global {
       serverGetVisibility: (baseUrl?: string) => Promise<{ ok: boolean; status?: number; visibility?: { comments: 'off' | 'summary'; forums: 'off' | 'summary'; profilePublic: 'off' | 'summary' | 'full' } | null; error?: string }>
       serverSetVisibility: (baseUrl: string | undefined, patch: Partial<{ comments: 'off' | 'summary'; forums: 'off' | 'summary'; profilePublic: 'off' | 'summary' | 'full' }>) => Promise<{ ok: boolean; status?: number; visibility?: { comments: 'off' | 'summary'; forums: 'off' | 'summary'; profilePublic: 'off' | 'summary' | 'full' } | null; error?: string }>
       serverDelete: (baseUrl?: string) => Promise<{ ok: boolean; status?: number; error?: string }>
-      // Multi-rig + share-a-spec (Phase 5)
+      // Multi-rig
       listDevices: (baseUrl?: string) => Promise<{ ok: boolean; devices?: Array<{ fingerprint: string; deviceName: string | null; summary: string | null; sourceAppVersion: string | null; capturedAt: string; isActive: boolean }>; error?: string }>
       renameDevice: (baseUrl: string | undefined, fingerprint: string, name: string | null) => Promise<{ ok: boolean; error?: string }>
       deleteDevice: (baseUrl: string | undefined, fingerprint: string) => Promise<{ ok: boolean; error?: string }>
       activateDevice: (baseUrl: string | undefined, fingerprint: string) => Promise<{ ok: boolean; fingerprint?: string; error?: string }>
-      listShares: (baseUrl?: string) => Promise<{ ok: boolean; shares?: Array<{ shortCode: string; tier: 'summary' | 'full'; viewCount: number; expiresAt: string | null; createdAt: string }>; error?: string }>
-      createShare: (baseUrl: string | undefined, opts: { tier?: 'summary' | 'full'; expiresInDays?: number | null }) => Promise<{ ok: boolean; shortCode?: string; tier?: 'summary' | 'full'; expiresAt?: string | null; error?: string }>
-      revokeShare: (baseUrl: string | undefined, shortCode: string) => Promise<{ ok: boolean; error?: string }>
       upgradeSuggest: (baseUrl?: string) => Promise<{
         ok: boolean
         status?: number
