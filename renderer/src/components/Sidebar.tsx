@@ -5,7 +5,7 @@ import { primaryNavItems, secondaryNavItems, bottomNavItems } from "@/lib/naviga
 import { cn } from "@/lib/utils"
 import { useState } from "react"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { useLibraryCollections } from "@/hooks/use-library-collections"
+import { useUserCollections } from "@/hooks/use-user-collections"
 import { useFollowedCollections } from "@/hooks/use-followed-collections"
 
 interface SidebarProps {
@@ -20,7 +20,7 @@ export function Sidebar({ mobileOpen, onClose, collapsed, onToggleCollapse }: Si
   const [collectionsOpen, setCollectionsOpen] = useState(true)
   const location = useLocation()
   const navigate = useNavigate()
-  const { collections } = useLibraryCollections()
+  const { collections } = useUserCollections()
   const followed = useFollowedCollections()
   const followedUpdateCount = followed.items?.filter((c) => c.hasUpdates).length || 0
 
@@ -201,10 +201,10 @@ export function Sidebar({ mobileOpen, onClose, collapsed, onToggleCollapse }: Si
                 const isActive = activeCollection?.toLowerCase() === collection.name.toLowerCase()
                 return (
                   <NavLink
-                    key={collection.name}
+                    key={collection.id}
                     to={`/library?collection=${encodeURIComponent(collection.name)}`}
                     onClick={onClose}
-                    title={`${collection.name} (${collection.count})`}
+                    title={`${collection.name} (${collection.appids.length})`}
                     className={cn(
                       "flex justify-center items-center rounded-lg p-2.5 transition-colors duration-150",
                       isActive
@@ -277,7 +277,7 @@ export function Sidebar({ mobileOpen, onClose, collapsed, onToggleCollapse }: Si
                           const isActive = activeCollection?.toLowerCase() === collection.name.toLowerCase()
                           return (
                             <NavLink
-                              key={collection.name}
+                              key={collection.id}
                               to={`/library?collection=${encodeURIComponent(collection.name)}`}
                               onClick={onClose}
                               className={cn(
@@ -293,7 +293,7 @@ export function Sidebar({ mobileOpen, onClose, collapsed, onToggleCollapse }: Si
                                 "text-[10px] font-medium tabular-nums",
                                 isActive ? "text-zinc-400" : "text-zinc-700 group-hover:text-zinc-500"
                               )}>
-                                {collection.count}
+                                {collection.appids.length}
                               </span>
                             </NavLink>
                           )
