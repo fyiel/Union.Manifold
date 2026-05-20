@@ -684,6 +684,11 @@ export function GameDetailPage() {
     void launchInstalledGameRef.current()
   }, [game, loading, searchParams, setSearchParams])
 
+  // Forward-declared so the auto-open effect below can reference it; the
+  // ref is wired to the real `hasUpdate` value further down the file.
+  const hasUpdateRef = useRef(false)
+  const deepLinkUpdateHandledRef = useRef(false)
+
   const popularAppIds = useMemo(() => {
     const withStats = games.filter((g) => {
       const st = stats[g.appid]
@@ -864,6 +869,28 @@ export function GameDetailPage() {
   const isInstalled = hasInstalledVersions
   const isInstallReady = Boolean(installingManifest) && installingManifest?.installStatus === "downloaded" && !isInstalled
   const hasUpdate = isInstalled && Boolean(game?.version) && installedVersionLabels.length > 0 && !installedVersionLabels.includes(game.version ?? '')
+  hasUpdateRef.current = hasUpdate
+
+  // Auto-open the update flow when GameCard hands us off via `?update=1`.
+  // Sits after hasUpdate is declared so it can read it directly. Gated on
+  // hasUpdate so a stale URL doesn't surprise the user with a modal for a
+  // game that's no longer outdated; we also strip the param so refreshing
+  // the page doesn't re-trigger it.
+  useEffect(() => {
+    if (searchParams.get("update") !== "1") return
+    if (!game || loading) return
+    // Wait until install state has resolved before deciding — otherwise we
+    // could miss the chance because hasUpdate is still false on first render.
+    if (installedVersionLabels.length === 0 && isInstalled) return
+    if (deepLinkUpdateHandledRef.current) return
+    deepLinkUpdateHandledRef.current = true
+    const next = new URLSearchParams(searchParams)
+    next.delete("update")
+    setSearchParams(next, { replace: true })
+    if (hasUpdate) {
+      setUpdateWarningOpen(true)
+    }
+  }, [game, loading, isInstalled, hasUpdate, installedVersionLabels, searchParams, setSearchParams])
   const showActionMenu = isInstalled
   // Only treat as "installing" from manifest if there are corresponding download items.
   // If the manifest exists but no download items remain (e.g. items were lost), it's a stale
@@ -1566,6 +1593,12 @@ export function GameDetailPage() {
                     onClick={() => {
                       if (isGameRunning) {
                         void stopRunningGame()
+                      } else if (hasUpdate) {
+                        // White "Update" button now actually triggers the
+                        // update flow (via the backup warning modal) instead
+                        // of launching the installed game. The yellow
+                        // duplicate CTA below has been removed.
+                        setUpdateWarningOpen(true)
                       } else if (isInstalled) {
                         void launchInstalledGame()
                       } else if (isInstallReady) {
@@ -1582,6 +1615,8 @@ export function GameDetailPage() {
                       <Square className="mr-2 h-5 w-5" />
                     ) : isCheckingLinks ? (
                       <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                    ) : hasUpdate ? (
+                      <RefreshCw className="mr-2 h-5 w-5" />
                     ) : isInstalled ? (
                       <Play className="mr-2 h-5 w-5" />
                     ) : isInstallReady ? (
@@ -1654,16 +1689,10 @@ export function GameDetailPage() {
                   </Button>
                 )}
 
-                {hasUpdate && !isInstalling && !isGameRunning && (
-                  <Button
-                    variant="outline"
-                    className="mt-2 w-full border-amber-500/40 bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 hover:text-amber-300"
-                    onClick={() => setUpdateWarningOpen(true)}
-                  >
-                    <RefreshCw className="mr-2 h-4 w-4" />
-                    Update available - {game.version}
-                  </Button>
-                )}
+                {/* The previous yellow "Update available - X.Y" CTA used to live here.
+                    It's been removed: the white main button now drives the update flow
+                    directly when hasUpdate is true, and the version diff has moved into
+                    the UpdateBackupWarningModal. */}
 
                 {shortcutFeedback && (
                   <div className={`mt-2 text-xs ${shortcutFeedback.type === 'success' ? 'text-zinc-300' : 'text-destructive'}`}>
@@ -1998,6 +2027,10 @@ export function GameDetailPage() {
       </div>{/* close relative z-10 */}
       <UpdateBackupWarningModal
         open={updateWarningOpen}
+        currentVersion={installedVersionLabels[0] ?? null}
+        newVersion={game?.version ?? null}
+        releasedAt={game?.update_time ?? null}
+        gameName={game?.name ?? null}
         onProceed={async () => {
           setUpdateWarningOpen(false)
           setPendingForceDownload(true)

@@ -15,7 +15,7 @@ import { PaginationBar } from "@/components/PaginationBar"
 import { formatNumber, generateErrorCode, ErrorTypes, getInstalledVersionLabel, hasInstalledVersionUpdate, proxyImageUrl } from "@/lib/utils"
 import { useConnectivityStatus } from "@/hooks/use-online-status"
 import { fetchCatalogGames, fetchCatalogStats, getCatalogCache, hydrateCatalogCache, isCatalogGamesStale, isCatalogStatsStale, mergeInstalledGames, persistCatalogCache, type CatalogGame } from "@/lib/catalog"
-import { ArrowRight, Layers3, PlayCircle } from "lucide-react"
+import { ArrowRight, Cloud, Download, Layers3 } from "lucide-react"
 import { usePlayHistory } from "@/hooks/use-play-history"
 import { useUserCollections } from "@/hooks/use-user-collections"
 
@@ -60,6 +60,10 @@ export function LauncherPage() {
   const [emptyStateReady, setEmptyStateReady] = useState(false)
   const [currentPage, setCurrentPage] = useState(1)
   const [recentlyInstalledGames, setRecentlyInstalledGames] = useState<Game[]>([])
+  // Full set of locally-installed appids so the cloud carousel can subtract
+  // them — kept separate from `recentlyInstalledGames` (which is sliced to 10
+  // for the carousel itself).
+  const [installedAppidSet, setInstalledAppidSet] = useState<Set<string>>(() => new Set())
   const [installedVersionMap, setInstalledVersionMap] = useState<Record<string, string[]>>({})
   const itemsPerPage = 30
   const [statsCacheTime, setStatsCacheTime] = useState<number>(initialCatalog.statsUpdatedAt || 0)
@@ -151,6 +155,7 @@ export function LauncherPage() {
 
       if (!ignore) {
         setRecentlyInstalledGames(resolved)
+        setInstalledAppidSet(new Set(installedGames.map((g) => String(g.appid))))
         setInstalledVersionMap(nextInstalledVersions)
       }
     }
@@ -295,6 +300,17 @@ export function LauncherPage() {
   const newReleases = useMemo(() => {
     return games.slice(0, 8)
   }, [games])
+
+  // Games the user has installed or played on *another* device (from cloud
+  // play history) that are NOT currently installed on this PC. Surface them
+  // so the user can one-click install on this device. Prefers entries with
+  // recent activity; falls back to install-only rows when those exist.
+  const cloudUninstalled = useMemo(() => {
+    if (!playHistory.items || playHistory.items.length === 0) return []
+    return playHistory.items
+      .filter((entry) => entry.game && !installedAppidSet.has(entry.appid))
+      .slice(0, 12)
+  }, [playHistory.items, installedAppidSet])
 
   const popularReleases = useMemo(() => {
     if (Object.keys(gameStats).length === 0) return []
@@ -464,48 +480,11 @@ export function LauncherPage() {
         </div>
       </section>
 
-      {/* Continue playing — cloud-synced when signed in, falls back to local
-          recently-installed below for everyone else. */}
-      {playHistory.authed && playHistory.items && playHistory.items.length > 0 && (
-        <section className="overflow-visible">
-          <SectionHeading
-            eyebrow="From the cloud"
-            title="Continue playing"
-            icon={<PlayCircle className="h-4 w-4" />}
-            actionLabel="Open library"
-            onAction={() => navigate("/library")}
-          />
-          <Carousel
-            opts={{ align: "start", loop: false, skipSnaps: false, dragFree: true }}
-            className="w-full"
-          >
-            <CarouselContent className="-ml-2 md:-ml-4">
-              {playHistory.items
-                .filter((entry) => Boolean(entry.game))
-                .slice(0, 12)
-                .map((entry) => (
-                  <CarouselItem
-                    key={entry.appid}
-                    className="pl-2 md:pl-4 basis-1/2 sm:basis-1/3 md:basis-1/4 lg:basis-1/5"
-                  >
-                    <GameCardCompact
-                      game={{
-                        appid: entry.appid,
-                        name: entry.game!.name,
-                        image: entry.game!.image,
-                        genres: Array.isArray(entry.game!.genres) ? entry.game!.genres : [],
-                      }}
-                    />
-                  </CarouselItem>
-                ))}
-            </CarouselContent>
-            <CarouselPrevious className={cardCarouselNavClass} />
-            <CarouselNext className={cardCarouselNavClass} />
-          </Carousel>
-        </section>
-      )}
-
-      {recentlyInstalledGames.length > 0 && !(playHistory.authed && playHistory.items && playHistory.items.length > 0) && (
+      {/* Recently installed — always rendered when we have any local installs,
+          independent of the cloud carousel below. Previously this section was
+          hidden whenever the cloud history had any rows, which made it fight
+          for screen space with the cloud strip. */}
+      {recentlyInstalledGames.length > 0 && (
         <section>
           <div>
             <SectionHeading
@@ -558,6 +537,70 @@ export function LauncherPage() {
               <CarouselNext className={cardCarouselNavClass} />
             </Carousel>
           </div>
+        </section>
+      )}
+
+      {/* From your cloud library — games this account has installed or played
+          on *another* device that aren't on this PC yet. Filtered so it's
+          actionable (one-click install on this device) rather than a noisy
+          mirror of the local "Recently installed" strip. */}
+      {playHistory.authed && cloudUninstalled.length > 0 && (
+        <section className="overflow-visible">
+          <SectionHeading
+            eyebrow="From your cloud library"
+            title="Install on this PC"
+            icon={<Cloud className="h-4 w-4" />}
+            actionLabel="See all"
+            onAction={() => navigate("/library")}
+          />
+          <p className="-mt-1 mb-3 text-xs text-zinc-500">
+            On your account but not installed here. Click any game to install it on this device.
+          </p>
+          <Carousel
+            opts={{ align: "start", loop: false, skipSnaps: false, dragFree: true }}
+            className="w-full"
+          >
+            <CarouselContent className="-ml-2 md:-ml-4">
+              {cloudUninstalled.map((entry) => {
+                const playedHere = (entry.playCount ?? 0) > 0
+                const installedElsewhere = Boolean(entry.installedAt)
+                const subtitle = playedHere
+                  ? "Played on another device"
+                  : installedElsewhere
+                    ? "Installed on another device"
+                    : "On your account"
+                return (
+                  <CarouselItem
+                    key={entry.appid}
+                    className="pl-2 md:pl-4 basis-1/2 sm:basis-1/3 md:basis-1/4 lg:basis-1/5"
+                  >
+                    <div className="relative">
+                      <GameCardCompact
+                        game={{
+                          appid: entry.appid,
+                          name: entry.game!.name,
+                          image: entry.game!.image,
+                          genres: Array.isArray(entry.game!.genres) ? entry.game!.genres : [],
+                        }}
+                      />
+                      {/* Inline overlay so the carousel item still looks like a
+                          regular catalog card but signals "available to pull
+                          down from cloud". */}
+                      <div
+                        className="pointer-events-none absolute top-2 left-2 z-10 inline-flex items-center gap-1 rounded-full border border-sky-500/40 bg-sky-500/15 px-2 py-0.5 text-[10px] font-semibold text-sky-200 backdrop-blur-sm"
+                        title={subtitle}
+                      >
+                        <Download className="h-2.5 w-2.5" />
+                        <span>Not on this PC</span>
+                      </div>
+                    </div>
+                  </CarouselItem>
+                )
+              })}
+            </CarouselContent>
+            <CarouselPrevious className={cardCarouselNavClass} />
+            <CarouselNext className={cardCarouselNavClass} />
+          </Carousel>
         </section>
       )}
 

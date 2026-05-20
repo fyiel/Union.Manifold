@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react"
-import { Link } from "react-router-dom"
+import { Link, useNavigate } from "react-router-dom"
 import { Badge } from "@/components/ui/badge"
 import { Calendar, HardDrive, Download, Eye, Wifi, Flame, Play, Square, RefreshCw } from "lucide-react"
 import { formatNumber, getCardImage, hasOnlineMode, isGameVersionUpdate, pickGameExecutable, proxyImageUrl, timeAgo } from "@/lib/utils"
@@ -75,6 +75,7 @@ export const GameCard = memo(function GameCard({
   const [sessionRevealed, setSessionRevealed] = useState(false)
   const displayStats = initialStats || hoveredStats || { downloads: 0, views: 0 }
 
+  const navigate = useNavigate()
   const { openPath } = useDownloads()
   const downloadState = useDownloadsSelector(
     useCallback(
@@ -402,6 +403,16 @@ export const GameCard = memo(function GameCard({
   const handlePlayClick = async (event: MouseEvent) => {
     event.preventDefault()
     event.stopPropagation()
+
+    // If an update is available, the white button must update the game — not
+    // launch it. We don't have the host-selector / backup flow available in a
+    // card, so hand off to the detail page with an auto-open update query
+    // parameter. The detail page knows how to show the changelog, run the
+    // backup, and queue the download.
+    if (updateAvailable && isInstalled && !isRunning) {
+      navigate(`/game/${encodeURIComponent(game.appid)}?update=1`)
+      return
+    }
 
     // If game is running, stop it
     if (isRunning && window.ucDownloads?.quitGameExecutable) {

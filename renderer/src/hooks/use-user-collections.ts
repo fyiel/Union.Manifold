@@ -145,6 +145,60 @@ export function useUserCollections() {
       }
       setAuthed(true)
       setCloudCollections(result.collections)
+      // Mirror the cloud memberships down into libraryGameMeta so that
+      // LibraryPage's collection filter (which reads from local meta) shows
+      // games added via the website without needing the user to mutate the
+      // collection in UC.D first.  Without this, a game added on the website
+      // to "Couch night" would not appear under that filter on the desktop
+      // until the user manually re-added it locally.
+      try {
+        const current = (await window.ucSettings?.get?.("libraryGameMeta")) as Record<string, { collections?: string[] }> | undefined
+        const meta = current && typeof current === "object" ? { ...current } : {}
+        // Build "name → appids set" from the cloud listing.
+        const cloudMembership = new Map<string, Set<string>>()
+        for (const c of result.collections) {
+          const set = new Set(c.appids)
+          cloudMembership.set(c.name, set)
+        }
+        const knownNamesLower = new Set(Array.from(cloudMembership.keys()).map((n) => n.toLowerCase()))
+        let mutated = false
+        // For every appid in the cloud-known collections, make sure local
+        // meta lists it. Also strip stale entries that refer to a known
+        // cloud collection but where the cloud no longer has them.
+        const allCloudAppids = new Set<string>()
+        for (const [name, ids] of cloudMembership) {
+          for (const appid of ids) {
+            allCloudAppids.add(appid)
+            const entry = meta[appid] || {}
+            const cols = entry.collections || []
+            const has = cols.some((c) => c.toLowerCase() === name.toLowerCase())
+            if (!has) {
+              meta[appid] = { ...entry, collections: [...cols, name] }
+              mutated = true
+            }
+          }
+        }
+        // Remove memberships for known cloud collections that have since
+        // dropped this appid (so removals propagate too). Untouched names
+        // are left alone — they might be local-only.
+        for (const [appid, entry] of Object.entries(meta)) {
+          const cols = entry?.collections || []
+          const next = cols.filter((c) => {
+            const lower = c.toLowerCase()
+            if (!knownNamesLower.has(lower)) return true // local-only collection name
+            const cloudSet = cloudMembership.get(c) || Array.from(cloudMembership.entries()).find(([n]) => n.toLowerCase() === lower)?.[1]
+            return cloudSet ? cloudSet.has(appid) : true
+          })
+          if (next.length !== cols.length) {
+            meta[appid] = { ...entry, collections: next }
+            mutated = true
+          }
+        }
+        if (mutated) {
+          await window.ucSettings?.set?.("libraryGameMeta", meta)
+          setMeta(meta as any)
+        }
+      } catch { /* meta sync is best-effort */ }
       return { authed: true as const, collections: result.collections }
     } catch (err) {
       // Treat network errors as "not authed for now" so the UI degrades gracefully.
