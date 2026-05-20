@@ -12,18 +12,19 @@ A fast, standalone Electron desktop application for managing and launching games
 
 - **Fast Downloads**: Direct game downloads with pause/resume support
 - **Game Library**: Browse and manage your installed games
-- **Updates**: automatic launcher updates
+- **Updates**: game updates download system
 - **Settings**: Customize download location and launch executables
 - **Search**: Quick game search with intelligent filtering
 - **History**: Track your recently played games
 - **Sync**: In sync with the UC Website, browse your liked/wishlisted games and recently viewed directly inside the launcher.
 
 ## System Requirements
-
+Windows:
 - **OS**: Windows 10 or later (64-bit)
 - **RAM**: 2GB minimum (4GB recommended)
-- **Storage**: 500MB for app, plus space for game downloads
-
+- **Storage**: 500MB for standalone app.
+Linux:
+yes 👍
 ## Installation
 
 ### Windows Installation Options
@@ -57,37 +58,12 @@ curl -sSL https://union-crax.xyz/linux-installer.sh | bash
 
 This installs the AppImage to `~/.local/share/UnionCrax.Direct` and adds a launcher in your applications menu.
 
-## Usage
-
-### Downloading Games
-1. Browse the game library
-2. Click **Download**
-3. Wait for download to complete
-4. Extraction begins automatically
-
-### Launching Games
-1. Go to **Library**
-2. Click the **Play button** on an installed game
-3. Choose the game executable if prompted
-4. Game launches directly
-
-### Managing Downloads
-1. Go to **Activity**
-2. View active, completed, and failed downloads
-3. Pause/resume/cancel downloads as needed (currenlty the host **rootz** does not support download resume)
-
-### Settings
-1. Click **Settings** (gear icon)
-2. Change download location
-3. View storage usage
-4. Check for updates
-
 ### Downloads fail?
 - Check [UnionCrax Status](https://status.union-crax.xyz)
 
 ### Having issues?
 - [Report an Issue](https://github.com/Union-Crax/UnionCrax.Direct/issues)
-- [Join Discord](https://union-crax.xyz/discord)
+- [Post on our socials](https://union-crax.xyz/discord)
 
 ## Development
 
@@ -111,47 +87,10 @@ pnpm dev
 pnpm run pack
 ```
 
-For detailed development information, see [CONTRIBUTING.md](CONTRIBUTING.md).
-
-## Architecture
-
-### Technology Stack
-- **Frontend**: React 18 + TypeScript + Vite
-- **Desktop**: Electron 33 + Node.js
-- **Styling**: Tailwind CSS v4
-- **Build**: electron-builder (NSIS installer for Windows)
-
-### How It Works
-1. **Main Process**: Electron handles file operations, downloads, and game launching
-2. **Renderer Process**: React UI communicates with main process via IPC
-3. **Backend**: API calls to UnionCrax for game metadata and download links
-
-## Project Structure
-
-```
-UnionCrax.Direct/
-├── electron/          # Main Electron process
-├── renderer/          # React UI (Vite)
-│   ├── src/
-│   │   ├── app/      # Pages and routes
-│   │   ├── components/ # UI components
-│   │   ├── lib/      # Utilities and helpers
-│   │   └── context/  # React context
-│   └── public/       # Static assets
-├── scripts/          # Build and dev scripts
-├── .github/workflows/# GitHub Actions CI/CD
-└── assets/          # App icon
-```
-
 ## License
 
 This project is licensed under the MIT License - see [LICENSE](LICENSE) for details.
 
-## Support
-
-- **GitHub Issues**: [Report bugs or suggest features](https://github.com/Union-Crax/UnionCrax.Direct/issues)
-- **Discord**: [Join UnionCrax Community](https://union-crax.xyz/discord)
-- **Website**: [union-crax.xyz](https://union-crax.xyz)
 
 ## Acknowledgments
 
