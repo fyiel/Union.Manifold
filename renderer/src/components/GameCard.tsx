@@ -1,7 +1,19 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react"
 import { Link, useNavigate } from "react-router-dom"
 import { Badge } from "@/components/ui/badge"
-import { Calendar, HardDrive, Download, Eye, Wifi, Flame, Play, Square, RefreshCw } from "lucide-react"
+import {
+  Calendar,
+  HardDrive,
+  Square,
+  RefreshCw,
+} from "lucide-react"
+import {
+  Download,
+  Eye,
+  Wifi,
+  Flame,
+  Play,
+} from "@/components/icons"
 import { formatNumber, getCardImage, hasOnlineMode, isGameVersionUpdate, pickGameExecutable, proxyImageUrl, timeAgo } from "@/lib/utils"
 import { reportPlayEvent } from "@/lib/cloud-collections"
 import { GameActionContextMenu, type CollectionPickerEntry } from "@/components/GameActionMenu"
@@ -14,6 +26,7 @@ import { ExePickerModal } from "@/components/ExePickerModal"
 import { DesktopShortcutModal } from "@/components/DesktopShortcutModal"
 import { GameLaunchFailedModal } from "@/components/GameLaunchFailedModal"
 import { GameLaunchPreflightModal, type LaunchPreflightResult } from "@/components/GameLaunchPreflightModal"
+import { GameArtAura } from "@/components/game-art-aura"
 import { gameLogger } from "@/lib/logger"
 
 interface GameCardProps {
@@ -539,7 +552,8 @@ export const GameCard = memo(function GameCard({
   ])
 
   return (
-    <div className="relative group/container h-full"
+    <GameArtAura src={cardImageSrc} scopeKey={game.appid} className="group/container h-full">
+    <div className="relative h-full"
       onContextMenu={(event) => {
         event.preventDefault()
         event.stopPropagation()
@@ -809,5 +823,6 @@ export const GameCard = memo(function GameCard({
         collectionPicker={collectionPicker}
       />
     </div>
+    </GameArtAura>
   )
 })

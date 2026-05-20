@@ -7,7 +7,7 @@ import {
   PaginationPrevious,
 } from "@/components/ui/pagination"
 import { cn } from "@/lib/utils"
-import { ChevronsLeft, ChevronsRight } from "lucide-react"
+import { ChevronsLeft, ChevronsRight } from "@/components/icons"
 
 type PaginationBarProps = {
   currentPage: number

@@ -2,7 +2,17 @@
 
 import { useCallback, useState } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
-import { Lock, Loader2, AlertCircle, CheckCircle, Eye, EyeOff, ArrowLeft } from "lucide-react"
+import {
+  AlertCircle,
+  CheckCircle,
+  ArrowLeft,
+} from "lucide-react"
+import {
+  Lock,
+  Loader2,
+  Eye,
+  EyeOff,
+} from "@/components/icons"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"

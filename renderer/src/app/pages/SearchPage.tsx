@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
 import { GameCard } from "@/components/GameCard"
+import { PageAura } from "@/components/page-aura"
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
@@ -10,9 +11,23 @@ import { Switch } from "@/components/ui/switch"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
 import { PaginationBar } from "@/components/PaginationBar"
-import { Filter, Wifi, X, SlidersHorizontal, RefreshCw, Heart, Star, ChevronRight, Search, Cpu } from "lucide-react"
+import {
+  Filter,
+  X,
+  RefreshCw,
+  Cpu,
+} from "lucide-react"
+import {
+  Wifi,
+  SlidersHorizontal,
+  Heart,
+  Star,
+  ChevronRight,
+  Search,
+} from "@/components/icons"
 import { useDebounce } from "@/hooks/use-debounce"
 import { parseSize } from "@/lib/search-utils"
+import { buildGenreWeights } from "@/lib/genre-utils"
 import { getInstalledVersionLabel, hasInstalledVersionUpdate, hasOnlineMode, generateErrorCode, ErrorTypes, proxyImageUrl } from "@/lib/utils"
 import { cn } from "@/lib/utils"
 import { addSearchToHistory } from "@/lib/user-history"
@@ -40,6 +55,8 @@ interface Game {
   hasCoOp?: boolean
   addedOrder?: number
 }
+
+type FavoriteGame = { appid: string; genres?: unknown }
 
 interface Filters {
   searchTerm: string
@@ -70,12 +87,14 @@ export function SearchPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const [isFiltersOpen, setIsFiltersOpen] = useState(false)
   const [developerQuery, setDeveloperQuery] = useState("")
+  const favoriteGamesCacheRef = useRef<FavoriteGame[] | null>(null)
   const { isOnline, browserOnline, serviceReachable } = useConnectivityStatus()
   const hasCriticalServiceInterruption = browserOnline && !serviceReachable
 
   const normalizeSort = useCallback((value: string | null) => {
     const allowed = new Set([
       "random",
+      "recommended",
       "added",
       "name",
       "date",
@@ -87,6 +106,26 @@ export function SearchPage() {
       "views-asc",
     ])
     return value && allowed.has(value) ? value : "random"
+  }, [])
+
+  const loadFavoriteGames = useCallback(async (): Promise<FavoriteGame[]> => {
+    if (favoriteGamesCacheRef.current !== null) {
+      return favoriteGamesCacheRef.current
+    }
+    try {
+      const response = await apiFetch("/api/account/favorites")
+      if (response.status === 401) {
+        favoriteGamesCacheRef.current = []
+        return []
+      }
+      if (!response.ok) return []
+      const data = await response.json()
+      const items: FavoriteGame[] = Array.isArray(data) ? data : []
+      favoriteGamesCacheRef.current = items
+      return items
+    } catch {
+      return []
+    }
   }, [])
 
   const extractDeveloper = (description: string): string => {
@@ -284,6 +323,14 @@ export function SearchPage() {
       }
 
       if (filters.sortBy) params.set("sort", filters.sortBy)
+      if (filters.sortBy === "recommended") {
+        const recommendationWeights = buildGenreWeights(await loadFavoriteGames())
+        for (const [genreKey, weight] of Object.entries(recommendationWeights)) {
+          if (weight > 0) {
+            params.append("preferredGenres", `${genreKey}:${weight}`)
+          }
+        }
+      }
 
       params.set("page", currentPage.toString())
       params.set("limit", itemsPerPage.toString())
@@ -470,6 +517,9 @@ export function SearchPage() {
             const viewsAscB = gameStats[b.appid]?.views || 0
             return viewsAscA - viewsAscB || b.name.localeCompare(a.name)
           }
+          case "recommended":
+            // server already sorted by recommendation score; preserve order
+            return (a.addedOrder ?? 0) - (b.addedOrder ?? 0)
           default:
             return a.name.localeCompare(b.name)
         }
@@ -532,6 +582,7 @@ export function SearchPage() {
 
   const sortLabel = useMemo(() => {
     switch (filters.sortBy) {
+      case "recommended": return "Recommended"
       case "added": return "Last Added"
       case "name": return "Name"
       case "date": return "Release Date"
@@ -746,6 +797,7 @@ export function SearchPage() {
 
   return (
     <div className="relative">
+      <PageAura />
       {/* Header */}
       <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
         <div className="min-w-0">
@@ -834,6 +886,7 @@ export function SearchPage() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="random">Random</SelectItem>
+                  <SelectItem value="recommended">Recommended</SelectItem>
                   <SelectItem value="added">Last Added</SelectItem>
                   <SelectItem value="name">Name</SelectItem>
                   <SelectItem value="date">Release Date</SelectItem>

@@ -1,4 +1,5 @@
-import { AlertTriangle, CheckCircle2, ShieldAlert } from "lucide-react"
+import { CheckCircle2, ShieldAlert } from "lucide-react"
+import { AlertTriangle } from "@/components/icons"
 import { Button } from "@/components/ui/button"
 
 export type LaunchPreflightCheck = {

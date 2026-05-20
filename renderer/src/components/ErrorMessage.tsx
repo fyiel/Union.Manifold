@@ -6,7 +6,13 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { AlertTriangle, Check, ChevronDown, Copy, ExternalLink } from "lucide-react"
+import {
+  AlertTriangle,
+  Check,
+  ChevronDown,
+  Copy,
+  ExternalLink,
+} from "@/components/icons"
 
 interface ErrorMessageProps {
   title?: string

@@ -1,5 +1,11 @@
 import { createPortal } from "react-dom"
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
+import type { ComponentType } from "react"
+import { Pencil } from "lucide-react"
+
+/** Permissive icon component type — accepts both Lucide icons and our
+ *  animated wrappers from `@/components/icons`. */
+type MenuIconComponent = ComponentType<{ className?: string }>
 import {
   Check,
   ChevronRight,
@@ -7,15 +13,13 @@ import {
   FolderOpen,
   Heart,
   Layers3,
-  Pencil,
   Plus,
   Settings,
   Star,
   Terminal,
   Trash2,
   Unlink2,
-  type LucideIcon,
-} from "lucide-react"
+} from "@/components/icons"
 
 import { cn } from "@/lib/utils"
 
@@ -77,14 +81,19 @@ type GameActionContextMenuProps = GameActionMenuPanelProps & {
 }
 
 type MenuItemProps = {
-  icon: LucideIcon
+  icon: MenuIconComponent
   label: string
   destructive?: boolean
+  /** Override icon color when the action is "triggered" (e.g. already in list). */
+  iconClassName?: string
+  /** When true, marks the icon's active row — currently signalled by a tinted
+   *  dot under the icon since the animated SVGs don't accept `fill`. */
+  iconFilled?: boolean
   trailing?: React.ReactNode
   onClick: () => void | Promise<void>
 }
 
-function MenuItem({ icon: Icon, label, destructive = false, trailing, onClick }: MenuItemProps) {
+function MenuItem({ icon: Icon, label, destructive = false, iconClassName, iconFilled = false, trailing, onClick }: MenuItemProps) {
   return (
     <button
       type="button"
@@ -96,7 +105,12 @@ function MenuItem({ icon: Icon, label, destructive = false, trailing, onClick }:
           : "text-zinc-300 hover:bg-white/[.06] hover:text-white"
       )}
     >
-      <Icon className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
+      <span className={cn("relative inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center transition-colors", iconClassName ?? "text-zinc-500")}>
+        <Icon className="h-3.5 w-3.5" />
+        {iconFilled ? (
+          <span className="pointer-events-none absolute inset-0 rounded-full bg-current opacity-15" aria-hidden="true" />
+        ) : null}
+      </span>
       <span className="flex-1 text-left truncate">{label}</span>
       {trailing}
     </button>
@@ -258,6 +272,8 @@ export function GameActionMenuPanel({
               <MenuItem
                 icon={Star}
                 label={wishlist.inList ? "Remove from wishlist" : "Add to wishlist"}
+                iconClassName={wishlist.inList ? "text-amber-400" : undefined}
+                iconFilled={wishlist.inList}
                 onClick={wishlist.toggle}
               />
             ) : null}
@@ -265,6 +281,8 @@ export function GameActionMenuPanel({
               <MenuItem
                 icon={Heart}
                 label={favorites.inList ? "Remove from liked" : "Add to liked"}
+                iconClassName={favorites.inList ? "text-rose-400" : undefined}
+                iconFilled={favorites.inList}
                 onClick={favorites.toggle}
               />
             ) : null}
@@ -275,9 +293,14 @@ export function GameActionMenuPanel({
       {collectionPicker ? (
         <>
           {(hasLibraryGroup || hasListGroup) && <div className="my-1 h-px bg-white/[.06]" />}
+          {(() => {
+            const includedCount = collectionPicker.collections.filter((c) => c.included).length
+            return (
+          <>
           <MenuItem
             icon={Layers3}
-            label="Add to collection"
+            label={includedCount > 0 ? `In ${includedCount} collection${includedCount === 1 ? "" : "s"}` : "Add to collection"}
+            iconClassName={includedCount > 0 ? "text-sky-400" : undefined}
             trailing={
               <ChevronRight
                 className={cn(
@@ -296,6 +319,9 @@ export function GameActionMenuPanel({
               onCreateCollection={collectionPicker.onCreateCollection}
             />
           )}
+          </>
+            )
+          })()}
         </>
       ) : null}
 

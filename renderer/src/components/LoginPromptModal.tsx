@@ -1,6 +1,13 @@
+import type { ComponentType } from "react"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
-import { Cloud, Layers3, Share2, Bell, Heart, LogIn } from "lucide-react"
+import { Cloud, Share2 } from "lucide-react"
+import {
+  Layers3,
+  Bell,
+  Heart,
+  LogIn,
+} from "@/components/icons"
 
 type LoginPromptModalProps = {
   open: boolean
@@ -9,7 +16,10 @@ type LoginPromptModalProps = {
   signingIn?: boolean
 }
 
-const benefits: Array<{ icon: typeof Cloud; label: string; desc: string }> = [
+/** Permissive icon type — Lucide icons and our animated wrappers both fit. */
+type BenefitIcon = ComponentType<{ className?: string }>
+
+const benefits: Array<{ icon: BenefitIcon; label: string; desc: string }> = [
   { icon: Cloud, label: "Cloud sync", desc: "Your collections, wishlist and library follow you to every device." },
   { icon: Layers3, label: "Collections", desc: "Create, share, and follow curated game collections." },
   { icon: Share2, label: "Friends & sharing", desc: "Share what you're playing and see what others recommend." },

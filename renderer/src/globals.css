@@ -174,41 +174,67 @@
   will-change: transform, filter;
 }
 
-/* Colour-aware glow blobs.  Three large radial blobs slowly drift around
-   the viewport, each tinted with a dominant colour extracted from the game
-   cover (set as inline styles by useImageColors).  GPU-composited because
-   every keyframe is pure translate3d + scale. */
-@keyframes uc-blob-1 {
-  0%   { transform: translate3d(-20%, -25%, 0) scale(1.1); }
-  25%  { transform: translate3d(25%,  -10%,  0) scale(1.2); }
-  50%  { transform: translate3d(10%,   28%,  0) scale(1.0); }
-  75%  { transform: translate3d(-28%, 18%,   0) scale(1.15); }
-  100% { transform: translate3d(-20%, -25%, 0) scale(1.1); }
+/* Apple-style ambient color pools.  Four large blurred pools drift slowly
+   around the viewport, each tinted with a dominant colour extracted from the
+   game image.  GPU-composited: every keyframe is pure translate3d + scale.
+   Animations are disabled via inline style when the user's in-app
+   reduced-motion toggle is on; the CSS rule below covers the OS preference. */
+@keyframes aura-drift-1 {
+  0%   { transform: translate3d(0, 0, 0)         scale(1)    rotate(0deg); }
+  50%  { transform: translate3d(12vw, 10vh, 0)   scale(1.15) rotate(120deg); }
+  100% { transform: translate3d(-8vw, 18vh, 0)   scale(0.9)  rotate(240deg); }
 }
-@keyframes uc-blob-2 {
-  0%   { transform: translate3d(22%,  20%,  0) scale(1.15); }
-  25%  { transform: translate3d(-18%,  32%,  0) scale(1.0); }
-  50%  { transform: translate3d(-30%, -18%,  0) scale(1.2); }
-  75%  { transform: translate3d(20%,  -28%, 0) scale(1.05); }
-  100% { transform: translate3d(22%,  20%,  0) scale(1.15); }
+@keyframes aura-drift-2 {
+  0%   { transform: translate3d(0, 0, 0)         scale(1)    rotate(0deg); }
+  50%  { transform: translate3d(-15vw, -8vh, 0)  scale(1.2)  rotate(-180deg); }
+  100% { transform: translate3d(8vw, -15vh, 0)   scale(0.95) rotate(-360deg); }
 }
-@keyframes uc-blob-3 {
-  0%   { transform: translate3d(-10%,   30%,  0) scale(1.0); }
-  25%  { transform: translate3d(20%,  -25%,  0) scale(1.1); }
-  50%  { transform: translate3d(-25%, -15%,  0) scale(1.05); }
-  75%  { transform: translate3d(15%, 25%, 0) scale(1.2); }
-  100% { transform: translate3d(-10%,   30%,  0) scale(1.0); }
+@keyframes aura-drift-3 {
+  0%   { transform: translate3d(0, 0, 0)         scale(1)    rotate(0deg); }
+  50%  { transform: translate3d(18vw, -12vh, 0)  scale(0.85) rotate(90deg); }
+  100% { transform: translate3d(-10vw, -18vh, 0) scale(1.1)  rotate(180deg); }
+}
+@keyframes aura-drift-4 {
+  0%   { transform: translate3d(0, 0, 0)         scale(1)    rotate(0deg); }
+  50%  { transform: translate3d(-10vw, 18vh, 0)  scale(1.1)  rotate(-120deg); }
+  100% { transform: translate3d(15vw, 8vh, 0)    scale(0.85) rotate(-240deg); }
 }
 
 /* Honour the OS-level reduced motion preference even when the per-account
-   toggle hasn't been touched. Apps that gate on `effectiveAnimatedBackgrounds`
-   already skip rendering the blobs — this is a belt-and-braces guard for any
-   element that happens to use these classes. */
+   toggle hasn't been touched. Apps that gate on `colorAuraEffective` already
+   skip rendering the blobs — this is a belt-and-braces guard for any element
+   that happens to use these classes. */
 @media (prefers-reduced-motion: reduce) {
   .uc-ambient-drift,
-  .uc-blob {
+  .uc-blob,
+  .aura-pool {
     animation: none !important;
   }
+}
+
+/* Site-wide reduced-motion damper.
+   `useMotionPreferences` mirrors the effective reduced-motion state to
+   <html data-reduced-motion="1">. Any animation that should be tamed by
+   the in-app toggle (not just the OS media query) can opt in by living
+   under this selector.
+
+   `*` is intentionally NOT zeroed here — that would kill essential
+   indicator animations (spinners, etc). Add specific selectors instead. */
+html[data-reduced-motion="1"] .uc-anim-pop,
+html[data-reduced-motion="1"] .uc-anim-wiggle,
+html[data-reduced-motion="1"] .uc-anim-sheen,
+html[data-reduced-motion="1"] .uc-anim-shimmer,
+html[data-reduced-motion="1"] .uc-ambient-drift,
+html[data-reduced-motion="1"] .uc-blob,
+html[data-reduced-motion="1"] .aura-pool {
+  animation: none !important;
+}
+html[data-reduced-motion="1"] .uc-anim-pop:hover,
+html[data-reduced-motion="1"] .uc-sidebar-icon,
+html[data-reduced-motion="1"] .uc-sidebar-row::before,
+html[data-reduced-motion="1"] .uc-sidebar-row::after {
+  transition: none !important;
+  transform: none !important;
 }
 
 /* Slide-up entry animations */
@@ -589,4 +615,108 @@ body::-webkit-scrollbar-corner,
   50% { transform: translate(5px, -5px); }
   75% { transform: translate(5px, 5px); }
   100% { transform: translate(0, 0); }
+}
+
+/* Subtle bell-shake for the Following sidebar entries that have updates.
+   Origin-top is set inline so the icon swings from its top edge. */
+@keyframes uc-bell-wiggle {
+  0%, 60%, 100% { transform: rotate(0deg); }
+  68% { transform: rotate(-10deg); }
+  76% { transform: rotate(8deg); }
+  84% { transform: rotate(-5deg); }
+  92% { transform: rotate(3deg); }
+}
+
+/* ---- Sidebar nav animations ----------------------------------------- */
+
+/* Icon "pop" — used on first hover. Plays once via `animation` on hover,
+   so the user gets a snappy bounce instead of a static scale. */
+@keyframes uc-icon-pop {
+  0%   { transform: scale(1)    rotate(0deg); }
+  40%  { transform: scale(1.22) rotate(-6deg); }
+  70%  { transform: scale(0.94) rotate(3deg); }
+  100% { transform: scale(1.08) rotate(0deg); }
+}
+
+/* Sheen sweep — a soft white gradient that travels left → right across
+   a nav row on hover. Pseudo-element with overflow:hidden on the parent. */
+@keyframes uc-sheen-sweep {
+  0%   { transform: translateX(-120%) skewX(-15deg); opacity: 0; }
+  20%  { opacity: 1; }
+  100% { transform: translateX(220%)  skewX(-15deg); opacity: 0; }
+}
+
+/* Active accent bar — a 2px vertical bar that grows in from the top
+   when the nav row becomes active. */
+@keyframes uc-accent-grow {
+  from { transform: scaleY(0); opacity: 0; }
+  to   { transform: scaleY(1); opacity: 1; }
+}
+
+/* Nav row — owns the hover sheen and the active accent bar. */
+.uc-sidebar-row {
+  position: relative;
+  overflow: hidden;
+}
+.uc-sidebar-row::before {
+  /* active accent bar (left edge) */
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 18%;
+  bottom: 18%;
+  width: 2px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.95), rgba(255,255,255,0.4));
+  transform: scaleY(0);
+  transform-origin: center;
+  opacity: 0;
+  transition: transform 220ms cubic-bezier(0.2, 0.9, 0.3, 1.2), opacity 220ms ease-out;
+  pointer-events: none;
+}
+.uc-sidebar-row.is-active::before {
+  transform: scaleY(1);
+  opacity: 1;
+}
+/* Inverted active bar against the white pill of the primary-nav active state. */
+.uc-sidebar-row.is-active-inverse::before {
+  background: linear-gradient(180deg, rgba(20,20,23,0.95), rgba(20,20,23,0.5));
+}
+.uc-sidebar-row::after {
+  /* hover sheen */
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    100deg,
+    transparent 0%,
+    rgba(255,255,255,0.06) 45%,
+    rgba(255,255,255,0.12) 50%,
+    rgba(255,255,255,0.06) 55%,
+    transparent 100%
+  );
+  transform: translateX(-120%) skewX(-15deg);
+  opacity: 0;
+  pointer-events: none;
+}
+.uc-sidebar-row:hover::after {
+  animation: uc-sheen-sweep 700ms ease-out;
+}
+
+/* Sidebar icon — the @animateicons/react components run their own
+   on-hover SVG animation, so the wrapper only needs to handle color
+   transitions. Leaving the box untransformed avoids fighting the inner
+   SVG's morph/rotate animations. */
+.uc-sidebar-icon {
+  display: inline-flex;
+  transition: color 200ms ease;
+}
+
+/* The text label slides a hair to the right on hover for parallax against
+   the icon pop — keeps the row feeling alive without thrashing layout. */
+.uc-sidebar-row .uc-sidebar-label {
+  transition: transform 220ms cubic-bezier(0.2, 0.9, 0.3, 1.2);
+}
+.uc-sidebar-row:hover .uc-sidebar-label {
+  transform: translateX(2px);
 }

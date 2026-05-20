@@ -2,7 +2,12 @@
 
 import { useCallback, useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { Mail, Loader2, AlertCircle, CheckCircle, ArrowLeft } from "lucide-react"
+import {
+  AlertCircle,
+  CheckCircle,
+  ArrowLeft,
+} from "lucide-react"
+import { Mail, Loader2 } from "@/components/icons"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"

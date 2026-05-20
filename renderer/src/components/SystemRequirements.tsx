@@ -12,6 +12,27 @@ function stripLabel(html: string, label: string): string {
   return html.replace(new RegExp(`<strong>${label}:<\\/strong><br\\s*\\/?>`, "i"), "")
 }
 
+function cleanRequirements(html: string | undefined, label: string): string {
+  if (!html) return ""
+  let cleaned = stripLabel(html, label).trim()
+  cleaned = cleaned.replace(/^(<br\s*\/?>)+/i, "")
+  cleaned = cleaned.replace(/(<br\s*\/?>)+$/i, "")
+  return cleaned
+}
+
+function hasMeaningfulHtml(html: string | undefined, label: string): boolean {
+  const cleaned = cleanRequirements(html, label)
+  const text = cleaned.replace(/<[^>]*>/g, " ").replace(/&nbsp;/gi, " ").trim()
+  return text.length > 0
+}
+
+function hasMeaningfulContent(r: ReqBlock | null | undefined): r is ReqBlock {
+  if (!r) return false
+  const hasMin = hasMeaningfulHtml(r.minimum, "Minimum")
+  const hasRec = hasMeaningfulHtml(r.recommended, "Recommended")
+  return hasMin || hasRec
+}
+
 /** Read the scanned profile's OS once. Fall back to renderer-side process.platform
  *  when the cache is empty (very first launch). Windows is the conservative default
  *  — matches what Steam's store page does for an anonymous visitor. */
@@ -50,8 +71,8 @@ export function SystemRequirements({ appid }: SystemRequirementsProps) {
         if (!mounted) return
         const win = json?.data?.requirements as ReqBlock | null
         const lin = json?.data?.linuxRequirements as ReqBlock | null
-        if (win && (win.minimum || win.recommended)) setReqs(win)
-        if (lin && (lin.minimum || lin.recommended)) setLinuxReqs(lin)
+        if (hasMeaningfulContent(win)) setReqs(win)
+        if (hasMeaningfulContent(lin)) setLinuxReqs(lin)
       })
       .catch(() => {})
       .finally(() => { if (mounted) setLoading(false) })
@@ -103,6 +124,12 @@ export function SystemRequirements({ appid }: SystemRequirementsProps) {
   // for cross-platform fallback, so this is never null when at least one
   // platform's specs are published.
   const active: ReqBlock = (selectedPlatform === "linux" ? linuxReqs : reqs) ?? (linuxReqs ?? reqs)!
+  const minHtml = cleanRequirements(active.minimum, "Minimum")
+  const recHtml = cleanRequirements(active.recommended, "Recommended")
+
+  if (!hasMeaningfulHtml(active.minimum, "Minimum") && !hasMeaningfulHtml(active.recommended, "Recommended")) {
+    return null
+  }
 
   return (
     <div className="p-8 rounded-3xl bg-zinc-900/60 border border-white/[.07] backdrop-blur-md shadow-xl space-y-4">
@@ -133,21 +160,21 @@ export function SystemRequirements({ appid }: SystemRequirementsProps) {
         )}
       </div>
       <div className="grid md:grid-cols-2 gap-4">
-        {active.minimum && (
+        {hasMeaningfulHtml(active.minimum, "Minimum") && (
           <div className="rounded-2xl bg-zinc-800/50 border border-white/[.07] p-5">
             <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 mb-3">Minimum</p>
             <div
               className="text-xs text-zinc-400 leading-relaxed [&_strong]:text-zinc-200 [&_strong]:font-semibold [&_ul]:list-disc [&_ul]:pl-4 [&_ul]:mt-1 [&_li]:mt-1"
-              dangerouslySetInnerHTML={{ __html: stripLabel(active.minimum, "Minimum") }}
+              dangerouslySetInnerHTML={{ __html: minHtml }}
             />
           </div>
         )}
-        {active.recommended && (
+        {hasMeaningfulHtml(active.recommended, "Recommended") && (
           <div className="rounded-2xl bg-zinc-800/50 border border-white/[.07] p-5">
             <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 mb-3">Recommended</p>
             <div
               className="text-xs text-zinc-400 leading-relaxed [&_strong]:text-zinc-200 [&_strong]:font-semibold [&_ul]:list-disc [&_ul]:pl-4 [&_ul]:mt-1 [&_li]:mt-1"
-              dangerouslySetInnerHTML={{ __html: stripLabel(active.recommended, "Recommended") }}
+              dangerouslySetInnerHTML={{ __html: recHtml }}
             />
           </div>
         )}

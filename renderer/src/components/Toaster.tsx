@@ -1,5 +1,10 @@
 import { useEffect, useState } from "react"
-import { CheckCircle2, Info, X, XCircle } from "lucide-react"
+import {
+  CheckCircle2,
+  X,
+  XCircle,
+} from "lucide-react"
+import { Info } from "@/components/icons"
 import { type ToastItem, type ToastType, useToast } from "@/context/toast-context"
 
 function ToastItemView({ item }: { item: ToastItem }) {

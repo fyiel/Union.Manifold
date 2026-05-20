@@ -27,20 +27,22 @@ import { PaginationBar } from "@/components/PaginationBar"
 import { apiFetch, apiUrl, getApiBaseUrl } from "@/lib/api"
 import { CommentSkeleton } from "@/components/CommentSkeleton"
 import {
-  AlertTriangle,
-  Check,
-  ChevronDown,
-  ExternalLink,
   Flag,
-  Heart,
   MessageCircle,
   MessageSquare,
   Pin,
   RefreshCw,
   Reply,
   Share2,
-  Trash2,
 } from "lucide-react"
+import {
+  AlertTriangle,
+  Check,
+  ChevronDown,
+  ExternalLink,
+  Heart,
+  Trash2,
+} from "@/components/icons"
 import { useNavigate } from "react-router-dom"
 
 type CommentUser = {

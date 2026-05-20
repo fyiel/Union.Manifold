@@ -1,5 +1,14 @@
 import { NavLink, useLocation, useNavigate } from "react-router-dom"
-import { Bell, ChevronDown, ChevronLeft, ChevronRight, Layers3, Plus, Settings2, Sparkles } from "lucide-react"
+import {
+  Bell,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  Layers3,
+  Plus,
+  Settings2,
+  Sparkles,
+} from "@/components/icons"
 import { LogoStaticDark } from "@/components/brand/brand-assets"
 import { primaryNavItems, secondaryNavItems, bottomNavItems } from "@/lib/navigation"
 import { cn } from "@/lib/utils"
@@ -202,19 +211,22 @@ export function Sidebar({ mobileOpen, onClose, collapsed, onToggleCollapse }: Si
                 title={isCollapsed ? item.label : undefined}
                 className={({ isActive }) =>
                   cn(
-                    "group flex items-center rounded-lg text-[13px] font-medium transition-colors duration-150",
+                    "uc-sidebar-row group flex items-center rounded-lg text-[13px] font-medium transition-colors duration-150",
                     isCollapsed ? "justify-center p-2.5" : "gap-2.5 px-2.5 py-2",
                     isActive
-                      ? "bg-white text-zinc-900"
+                      ? "is-active is-active-inverse bg-white text-zinc-900"
                       : "text-zinc-400 hover:bg-white/[.05] hover:text-zinc-100"
                   )
                 }
               >
                 {({ isActive }) => (
                   <>
-                    <item.icon className={cn("h-4 w-4 shrink-0", isActive ? "text-zinc-900" : "text-zinc-500 group-hover:text-zinc-300")} />
+                    <item.icon className={cn(
+                      "uc-sidebar-icon h-4 w-4 shrink-0",
+                      isActive ? "text-zinc-900" : "text-zinc-500 group-hover:text-zinc-300"
+                    )} />
                     {!isCollapsed && (
-                      <span className={cn("font-semibold", isActive ? "text-zinc-900" : "")}>{item.label}</span>
+                      <span className={cn("uc-sidebar-label font-semibold", isActive ? "text-zinc-900" : "")}>{item.label}</span>
                     )}
                   </>
                 )}
@@ -273,17 +285,20 @@ export function Sidebar({ mobileOpen, onClose, collapsed, onToggleCollapse }: Si
                           onClick={onClose}
                           className={({ isActive }) =>
                             cn(
-                              "group flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[13px] font-medium transition-colors duration-150",
+                              "uc-sidebar-row group flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[13px] font-medium transition-colors duration-150",
                               isActive
-                                ? "bg-white/[.07] text-white"
+                                ? "is-active bg-white/[.07] text-white"
                                 : "text-zinc-500 hover:bg-white/[.04] hover:text-zinc-200"
                             )
                           }
                         >
                           {({ isActive }) => (
                             <>
-                              <item.icon className={cn("h-3.5 w-3.5 shrink-0", isActive ? "text-zinc-200" : "text-zinc-600 group-hover:text-zinc-400")} />
-                              <span>{item.label}</span>
+                              <item.icon className={cn(
+                                "uc-sidebar-icon h-3.5 w-3.5 shrink-0",
+                                isActive ? "text-zinc-200" : "text-zinc-600 group-hover:text-zinc-400"
+                              )} />
+                              <span className="uc-sidebar-label">{item.label}</span>
                             </>
                           )}
                         </NavLink>
@@ -427,14 +442,17 @@ export function Sidebar({ mobileOpen, onClose, collapsed, onToggleCollapse }: Si
                                 setOwnedContextMenu({ collection, point: { x: e.clientX, y: e.clientY } })
                               }}
                               className={cn(
-                                "group flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[13px] font-medium transition-colors duration-150",
+                                "uc-sidebar-row group flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[13px] font-medium transition-colors duration-150",
                                 isActive
-                                  ? "bg-white/[.07] text-white"
+                                  ? "is-active bg-white/[.07] text-white"
                                   : "text-zinc-500 hover:bg-white/[.04] hover:text-zinc-200"
                               )}
                             >
-                              <Layers3 className={cn("h-3.5 w-3.5 shrink-0", isActive ? "text-zinc-300" : "text-zinc-700 group-hover:text-zinc-500")} />
-                              <span className="truncate flex-1">{collection.name}</span>
+                              <Layers3 className={cn(
+                                "uc-sidebar-icon h-3.5 w-3.5 shrink-0",
+                                isActive ? "text-zinc-300" : "text-zinc-700 group-hover:text-zinc-500"
+                              )} />
+                              <span className="uc-sidebar-label truncate flex-1">{collection.name}</span>
                               <span className={cn(
                                 "text-[10px] font-medium tabular-nums",
                                 isActive ? "text-zinc-400" : "text-zinc-700 group-hover:text-zinc-500"
@@ -504,13 +522,15 @@ export function Sidebar({ mobileOpen, onClose, collapsed, onToggleCollapse }: Si
                                 setFollowedContextMenu({ collection, point: { x: e.clientX, y: e.clientY } })
                               }}
                               title={`${collection.name} — by ${ownerLabel}`}
-                              className="group flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[13px] font-medium transition-colors duration-150 text-zinc-500 hover:bg-white/[.04] hover:text-zinc-200"
+                              className="uc-sidebar-row group flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[13px] font-medium transition-colors duration-150 text-zinc-500 hover:bg-white/[.04] hover:text-zinc-200"
                             >
                               <Bell className={cn(
-                                "h-3.5 w-3.5 shrink-0",
-                                collection.hasUpdates ? "text-amber-400" : "text-zinc-700 group-hover:text-zinc-500"
+                                "uc-sidebar-icon h-3.5 w-3.5 shrink-0",
+                                collection.hasUpdates
+                                  ? "uc-anim-wiggle text-amber-400 animate-[uc-bell-wiggle_1.6s_ease-in-out_infinite] origin-top"
+                                  : "text-zinc-700 group-hover:text-zinc-500"
                               )} />
-                              <span className="truncate flex-1">{collection.name}</span>
+                              <span className="uc-sidebar-label truncate flex-1">{collection.name}</span>
                               <span className="text-[10px] font-medium tabular-nums text-zinc-700 group-hover:text-zinc-500">
                                 {collection.gameCount}
                               </span>
@@ -537,18 +557,21 @@ export function Sidebar({ mobileOpen, onClose, collapsed, onToggleCollapse }: Si
             title={isCollapsed ? item.label : undefined}
             className={({ isActive }) =>
               cn(
-                "group flex items-center rounded-lg text-[13px] font-medium transition-colors duration-150",
+                "uc-sidebar-row group flex items-center rounded-lg text-[13px] font-medium transition-colors duration-150",
                 isCollapsed ? "justify-center p-2.5" : "gap-2.5 px-2.5 py-2",
                 isActive
-                  ? "bg-white/[.07] text-white"
+                  ? "is-active bg-white/[.07] text-white"
                   : "text-zinc-500 hover:bg-white/[.05] hover:text-zinc-200"
               )
             }
           >
             {({ isActive }) => (
               <>
-                <item.icon className={cn("h-4 w-4 shrink-0", isActive ? "text-white" : "text-zinc-600 group-hover:text-zinc-400")} />
-                {!isCollapsed && <span>{item.label}</span>}
+                <item.icon className={cn(
+                  "uc-sidebar-icon h-4 w-4 shrink-0",
+                  isActive ? "text-white" : "text-zinc-600 group-hover:text-zinc-400"
+                )} />
+                {!isCollapsed && <span className="uc-sidebar-label">{item.label}</span>}
               </>
             )}
           </NavLink>

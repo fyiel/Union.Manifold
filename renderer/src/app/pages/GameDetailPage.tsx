@@ -1,7 +1,7 @@
 
 import { useEffect, useCallback, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react"
 import { createPortal } from "react-dom"
-import { useNavigate, useParams, useSearchParams } from "react-router-dom"
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { GameCard } from "@/components/GameCard"
@@ -18,24 +18,26 @@ import { useConnectivityStatus } from "@/hooks/use-online-status"
 import { OfflineBanner } from "@/components/OfflineBanner"
 import { CriticalLoadModal } from "@/components/CriticalLoadModal"
 import {
-  AlertTriangle,
   Calendar,
+  HardDrive,
+  RefreshCw,
+  Square,
+  X,
+} from "lucide-react"
+import {
+  AlertTriangle,
   ChevronLeft,
   ChevronRight,
   Download,
   Eye,
   ExternalLink,
   Flame,
-  HardDrive,
-  RefreshCw,
   ShieldCheck,
   Settings,
-  Square,
   Trash2,
   Unlink2,
   User,
   Wifi,
-  X,
   FolderOpen,
   Info,
   Loader2,
@@ -44,7 +46,7 @@ import {
   Plus,
   Play,
   Terminal,
-} from "lucide-react"
+} from "@/components/icons"
 import { ExePickerModal } from "@/components/ExePickerModal"
 import { GameLaunchFailedModal } from "@/components/GameLaunchFailedModal"
 import { GameLaunchPreflightModal, type LaunchPreflightResult } from "@/components/GameLaunchPreflightModal"
@@ -65,7 +67,8 @@ import { GameVersionStatus } from "@/components/GameVersionStatus"
 import { useAuth } from "@/hooks/useAuth"
 import { useMotionPreferences } from "@/hooks/use-motion-preferences"
 import { useImageColors } from "@/hooks/use-image-colors"
-import { AuraBackground } from "@/components/AuraBackground"
+import { AuraBackground } from "@/components/aura-background"
+import { PageAura } from "@/components/page-aura"
 
 const PROTON_RANK_COLORS: Record<string, string> = {
   platinum: "text-[#b3e5fc] border-[#b3e5fc]/30",
@@ -100,12 +103,12 @@ export function GameDetailPage() {
   // Hooks must run before any early-return branch below, so hoist motion
   // prefs up here next to the other top-level hook calls. The result is
   // only consumed by the ambient-background JSX further down.
-  const { effectiveAnimatedBackgrounds } = useMotionPreferences()
+  const { colorAuraEnabled, reducedMotionEffective } = useMotionPreferences()
   const [game, setGame] = useState<Game | null>(null)
   // Colour extraction for the ambient background — must be hoisted here so
   // the hook count is stable across renders (game may be null while loading).
   const ambientImageSrc = game ? proxyImageUrl(game.hero_image || game.splash || game.image) : undefined
-  const imageColors = useImageColors(ambientImageSrc)
+  const imageColors = useImageColors(ambientImageSrc, game?.appid)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [criticalLoadOpen, setCriticalLoadOpen] = useState(false)
@@ -136,10 +139,6 @@ export function GameDetailPage() {
   const [launchPreflightOpen, setLaunchPreflightOpen] = useState(false)
   const [launchPreflightResult, setLaunchPreflightResult] = useState<LaunchPreflightResult | null>(null)
   const [hostSelectorOpen, setHostSelectorOpen] = useState(false)
-
-  useEffect(() => {
-    setCriticalLoadOpen(Boolean(error) && hasCriticalServiceInterruption)
-  }, [error, hasCriticalServiceInterruption])
   const [selectedHost, setSelectedHost] = useState<PreferredDownloadHost>("pixeldrain")
   const [defaultHost, setDefaultHost] = useState<PreferredDownloadHost>("pixeldrain")
   const [downloadToken, setDownloadToken] = useState<string | null>(null)
@@ -178,6 +177,12 @@ export function GameDetailPage() {
   const [protonLoading, setProtonLoading] = useState(false)
 
   const appid = params.id || ""
+
+  // Sync critical-load modal open state — placed here (after all state/ref
+  // declarations) so the hook order is stable across renders (Rules of Hooks).
+  useEffect(() => {
+    setCriticalLoadOpen(Boolean(error) && hasCriticalServiceInterruption)
+  }, [error, hasCriticalServiceInterruption])
 
   useEffect(() => {
     deepLinkLaunchHandledRef.current = false
@@ -1254,82 +1259,24 @@ export function GameDetailPage() {
   //   • Animated backgrounds ON  → colour glow blobs only (no image)
   //   • Animated backgrounds OFF → static blurred cover image only
   const backgroundImage = game.hero_image || game.splash || game.image
-  const showBlobs = effectiveAnimatedBackgrounds && !!imageColors
 
   return (
     <div className="relative">
-      {/* Ambient page background. `fixed inset-0` covers the whole window
-          (behind the translucent sidebar/titlebar). */}
-      {backgroundImage && (
-        <div className="pointer-events-none fixed inset-0 z-0 overflow-hidden">
-          {/* Static blurred cover — only when animations are OFF */}
-          {!showBlobs && (
-            <img
-              src={proxyImageUrl(backgroundImage) || "./fallbacks/game-hero-16x9.svg"}
-              alt=""
-              aria-hidden="true"
-              className="absolute inset-0 h-full w-full object-cover opacity-35 blur-[24px] scale-125"
-            />
-          )}
-          {/* Colour-aware glow blobs — only when animations are ON */}
-          {showBlobs && (
-            <div className="absolute inset-0 overflow-hidden" aria-hidden="true">
-              <div
-                className="uc-blob absolute rounded-full"
-                style={{
-                  width: "80%", height: "70%", top: "0%", left: "-10%",
-                  background: `radial-gradient(circle, rgba(${imageColors![0].join(",")}, 0.7) 0%, transparent 65%)`,
-                  filter: "blur(100px)",
-                  animation: "uc-blob-1 20s ease-in-out infinite",
-                  opacity: 0.6,
-                }}
-              />
-              <div
-                className="uc-blob absolute rounded-full"
-                style={{
-                  width: "70%", height: "65%", top: "20%", right: "-15%",
-                  background: `radial-gradient(circle, rgba(${imageColors![1].join(",")}, 0.7) 0%, transparent 65%)`,
-                  filter: "blur(120px)",
-                  animation: "uc-blob-2 28s ease-in-out infinite",
-                  opacity: 0.55,
-                }}
-              />
-              <div
-                className="uc-blob absolute rounded-full"
-                style={{
-                  width: "65%", height: "60%", bottom: "0%", left: "10%",
-                  background: `radial-gradient(circle, rgba(${imageColors![2].join(",")}, 0.65) 0%, transparent 65%)`,
-                  filter: "blur(90px)",
-                  animation: "uc-blob-3 24s ease-in-out infinite",
-                  opacity: 0.5,
-                }}
-              />
-              <div
-                className="uc-sparkle absolute"
-                style={{
-                  width: '100%',
-                  height: '100%',
-                  top: 0,
-                  left: 0,
-                  background: 'url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyMCIgaGVpZ2h0PSIyMCI+PGZpbHRlciBpZD0iZSI+PGZlVHVyYnVsZW5jZSBiYXNlRnJlcXVlbmN5PSIuNiIgZGF0YS1zZWVkPSIyIi8+PGZlU3BlY3VsYXJMaWdodGluZyBpbl9yYWRpdXNfcz0iMjAiIGxpZ2h0aW5nLWNvbG9yPSIjZmZmIj48ZmVEaXN0YW50TGlnaHQgYXppbXV0aD0iNDUiIGVsZXZhdGlvbj0iNjAiLz48L2ZlU3BlY3VsYXJMaWdodGluZz48L2ZpbHRlcj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWx0ZXI9InVybCgjZSkiIG9wYWNpdHk9Ii4xNSIvPjwvc3ZnPg==)',
-                  animation: 'uc-sparkle-anim 4s linear infinite',
-                }}
-              />
-              <div
-                className="uc-blob absolute rounded-full"
-                style={{
-                  width: "65%", height: "50%", bottom: "0%", left: "10%",
-                  background: `radial-gradient(circle, rgba(${imageColors![2].join(",")}, 0.6) 0%, transparent 70%)`,
-                  filter: "blur(90px)",
-                  animation: "uc-blob-3 28s ease-in-out infinite",
-                  opacity: 0.35,
-                }}
-              />
-            </div>
-          )}
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.06),transparent_40%)]" />
-          <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-black/65 to-[#09090b]" />
-        </div>
+      {/* Ambient page background */}
+      {game && (
+        <>
+          {/* Base layer: the game's own ambient aura, always visible. */}
+          <AuraBackground
+            colors={imageColors}
+            show={colorAuraEnabled}
+            reducedMotion={reducedMotionEffective}
+            fallbackImageSrc={backgroundImage ? (proxyImageUrl(backgroundImage) || "./fallbacks/game-hero-16x9.svg") : "./fallbacks/game-hero-16x9.svg"}
+          />
+          {/* Overlay: fades in with hovered related-card colors. Stacking (vs
+              swapping the base layer's colors) avoids triggering its internal
+              slot crossfade on every hover, which read as a flash. */}
+          <PageAura />
+        </>
       )}
 
       <div className="relative z-10 space-y-12">
@@ -1886,6 +1833,14 @@ export function GameDetailPage() {
             <h2 className="text-3xl md:text-4xl font-black text-white mb-10 text-center">
               You May Also Like
             </h2>
+            <div className="mb-6 text-center">
+              <Link
+                to="/search?sort=recommended"
+                className="text-sm font-semibold text-zinc-300 underline decoration-zinc-500/60 underline-offset-4 transition hover:text-white hover:decoration-white"
+              >
+                More Recommended
+              </Link>
+            </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6 stagger-grid">
               {relatedGames.map((relatedGame) => (
                 <GameCard

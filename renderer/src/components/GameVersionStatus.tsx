@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react"
-import { RefreshCw, ExternalLink, LogIn } from "lucide-react"
+import { RefreshCw } from "lucide-react"
+import { ExternalLink, LogIn } from "@/components/icons"
 import { useNavigate } from "react-router-dom"
 import { apiFetch } from "@/lib/api"
 
