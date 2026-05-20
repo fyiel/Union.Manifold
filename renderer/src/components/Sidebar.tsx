@@ -1,12 +1,18 @@
 import { NavLink, useLocation, useNavigate } from "react-router-dom"
-import { ChevronDown, ChevronLeft, ChevronRight, Layers3, Plus, Settings2 } from "lucide-react"
+import { Bell, ChevronDown, ChevronLeft, ChevronRight, Layers3, Plus, Settings2, Sparkles } from "lucide-react"
 import { LogoStaticDark } from "@/components/brand/brand-assets"
 import { primaryNavItems, secondaryNavItems, bottomNavItems } from "@/lib/navigation"
 import { cn } from "@/lib/utils"
 import { useState } from "react"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { useUserCollections } from "@/hooks/use-user-collections"
-import { useFollowedCollections } from "@/hooks/use-followed-collections"
+import { useUserCollections, type UserCollection } from "@/hooks/use-user-collections"
+import { useFollowedCollections, type FollowedCollection } from "@/hooks/use-followed-collections"
+import {
+  CollectionActionContextMenu,
+  COLLECTION_MENU_ICONS,
+  type CollectionMenuPoint,
+  type CollectionMenuSection,
+} from "@/components/CollectionActionMenu"
 
 interface SidebarProps {
   mobileOpen: boolean
@@ -18,11 +24,114 @@ interface SidebarProps {
 export function Sidebar({ mobileOpen, onClose, collapsed, onToggleCollapse }: SidebarProps) {
   const [libraryOpen, setLibraryOpen] = useState(true)
   const [collectionsOpen, setCollectionsOpen] = useState(true)
+  const [followingOpen, setFollowingOpen] = useState(true)
   const location = useLocation()
   const navigate = useNavigate()
   const { collections } = useUserCollections()
   const followed = useFollowedCollections()
-  const followedUpdateCount = followed.items?.filter((c) => c.hasUpdates).length || 0
+  const followedItems = followed.items || []
+  const followedUpdateCount = followedItems.filter((c) => c.hasUpdates).length
+  const [ownedContextMenu, setOwnedContextMenu] = useState<
+    { collection: UserCollection; point: CollectionMenuPoint } | null
+  >(null)
+  const [followedContextMenu, setFollowedContextMenu] = useState<
+    { collection: FollowedCollection; point: CollectionMenuPoint } | null
+  >(null)
+
+  const buildOwnedContextSections = (collection: UserCollection): CollectionMenuSection[] => {
+    const isOwner = collection.role === "owner"
+    const manage: CollectionMenuSection["items"] = [
+      {
+        id: "open",
+        icon: COLLECTION_MENU_ICONS.open,
+        label: "Open",
+        onSelect: () => {
+          onClose()
+          navigate(`/collections/view/${encodeURIComponent(collection.id)}`)
+        },
+      },
+      {
+        id: "edit",
+        icon: COLLECTION_MENU_ICONS.edit,
+        label: "Edit games",
+        onSelect: () => {
+          onClose()
+          navigate(`/collections?edit=${encodeURIComponent(collection.id)}`)
+        },
+      },
+    ]
+    const sharing: CollectionMenuSection["items"] = []
+    if (isOwner) {
+      sharing.push({
+        id: "share",
+        icon: COLLECTION_MENU_ICONS.share,
+        label: collection.shareToken ? "Sharing settings" : "Share",
+        disabled: !collection.cloud,
+        onSelect: () => {
+          onClose()
+          navigate(`/collections?share=${encodeURIComponent(collection.id)}`)
+        },
+      })
+      sharing.push({
+        id: "contributors",
+        icon: COLLECTION_MENU_ICONS.contributors,
+        label: "Manage contributors",
+        onSelect: () => {
+          onClose()
+          navigate(`/collections?contributors=${encodeURIComponent(collection.id)}`)
+        },
+      })
+    }
+    const danger: CollectionMenuSection["items"] = []
+    if (isOwner) {
+      danger.push({
+        id: "delete",
+        icon: COLLECTION_MENU_ICONS.delete,
+        label: "Delete collection",
+        destructive: true,
+        onSelect: () => {
+          onClose()
+          navigate(`/collections/view/${encodeURIComponent(collection.id)}?action=delete`)
+        },
+      })
+    }
+    const out: CollectionMenuSection[] = [{ id: "manage", items: manage }]
+    if (sharing.length > 0) out.push({ id: "sharing", label: "Sharing", items: sharing })
+    if (danger.length > 0) out.push({ id: "danger", items: danger })
+    return out
+  }
+
+  const buildFollowedContextSections = (collection: FollowedCollection): CollectionMenuSection[] => [
+    {
+      id: "actions",
+      items: [
+        {
+          id: "open",
+          icon: COLLECTION_MENU_ICONS.open,
+          label: "Open in Collections",
+          onSelect: () => {
+            onClose()
+            navigate(`/collections#followed-${collection.id}`)
+          },
+        },
+        ...(collection.hasUpdates
+          ? [{
+              id: "mark-seen",
+              icon: COLLECTION_MENU_ICONS.update,
+              label: "Mark as seen",
+              onSelect: () => { void followed.markSeen(collection) },
+            }]
+          : []),
+        {
+          id: "unfollow",
+          icon: COLLECTION_MENU_ICONS.unfollow,
+          label: "Unfollow",
+          destructive: true,
+          onSelect: () => { void followed.unfollow(collection) },
+        },
+      ],
+    },
+  ]
 
   const handleLogoNav = () => {
     onClose()
@@ -35,9 +144,16 @@ export function Sidebar({ mobileOpen, onClose, collapsed, onToggleCollapse }: Si
     }
   }
 
-  const activeCollection = location.pathname.startsWith("/library")
+  // Active collection: either the legacy /library?collection=<name> filter or
+  // the new /collections/view/<id> dedicated page.
+  const activeCollectionName = location.pathname.startsWith("/library")
     ? new URLSearchParams(location.search).get("collection")
     : null
+  const activeCollectionId = (() => {
+    const match = location.pathname.match(/^\/collections\/view\/([^/?#]+)/)
+    if (!match) return null
+    try { return decodeURIComponent(match[1]) } catch { return match[1] }
+  })()
 
   const content = (isCollapsed: boolean) => (
     <div className="flex h-full flex-col">
@@ -198,12 +314,18 @@ export function Sidebar({ mobileOpen, onClose, collapsed, onToggleCollapse }: Si
                 <Layers3 className="h-4 w-4 shrink-0" />
               </NavLink>
               {collections.slice(0, 6).map((collection) => {
-                const isActive = activeCollection?.toLowerCase() === collection.name.toLowerCase()
+                const isActive =
+                  activeCollectionId === collection.id ||
+                  activeCollectionName?.toLowerCase() === collection.name.toLowerCase()
                 return (
                   <NavLink
                     key={collection.id}
-                    to={`/library?collection=${encodeURIComponent(collection.name)}`}
+                    to={`/collections/view/${encodeURIComponent(collection.id)}`}
                     onClick={onClose}
+                    onContextMenu={(e) => {
+                      e.preventDefault()
+                      setOwnedContextMenu({ collection, point: { x: e.clientX, y: e.clientY } })
+                    }}
                     title={`${collection.name} (${collection.appids.length})`}
                     className={cn(
                       "flex justify-center items-center rounded-lg p-2.5 transition-colors duration-150",
@@ -218,6 +340,24 @@ export function Sidebar({ mobileOpen, onClose, collapsed, onToggleCollapse }: Si
                   </NavLink>
                 )
               })}
+              {followedItems.slice(0, 4).map((collection) => (
+                <NavLink
+                  key={`f-${collection.id}`}
+                  to={`/collections#followed-${collection.id}`}
+                  onClick={onClose}
+                  onContextMenu={(e) => {
+                    e.preventDefault()
+                    setFollowedContextMenu({ collection, point: { x: e.clientX, y: e.clientY } })
+                  }}
+                  title={`${collection.name} (following${collection.hasUpdates ? " — updated" : ""})`}
+                  className="relative flex justify-center items-center rounded-lg p-2.5 transition-colors duration-150 text-zinc-600 hover:bg-white/[.05] hover:text-zinc-300"
+                >
+                  <Bell className="h-3.5 w-3.5" />
+                  {collection.hasUpdates && (
+                    <span className="absolute top-1 right-1 h-1.5 w-1.5 rounded-full bg-amber-500" />
+                  )}
+                </NavLink>
+              ))}
             </div>
           ) : (
             <div className="mt-5">
@@ -274,12 +414,18 @@ export function Sidebar({ mobileOpen, onClose, collapsed, onToggleCollapse }: Si
                     ) : (
                       <>
                         {collections.map((collection) => {
-                          const isActive = activeCollection?.toLowerCase() === collection.name.toLowerCase()
+                          const isActive =
+                            activeCollectionId === collection.id ||
+                            activeCollectionName?.toLowerCase() === collection.name.toLowerCase()
                           return (
                             <NavLink
                               key={collection.id}
-                              to={`/library?collection=${encodeURIComponent(collection.name)}`}
+                              to={`/collections/view/${encodeURIComponent(collection.id)}`}
                               onClick={onClose}
+                              onContextMenu={(e) => {
+                                e.preventDefault()
+                                setOwnedContextMenu({ collection, point: { x: e.clientX, y: e.clientY } })
+                              }}
                               className={cn(
                                 "group flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[13px] font-medium transition-colors duration-150",
                                 isActive
@@ -311,6 +457,71 @@ export function Sidebar({ mobileOpen, onClose, collapsed, onToggleCollapse }: Si
                   </div>
                 </div>
               </div>
+
+              {/* Following — collections the user follows from other people */}
+              {followedItems.length > 0 && (
+                <div className="mt-5">
+                  <div className="mb-1 flex items-center justify-between px-2.5 py-1">
+                    <button
+                      type="button"
+                      onClick={() => setFollowingOpen(!followingOpen)}
+                      aria-label={followingOpen ? "Collapse following" : "Expand following"}
+                      className="flex items-center gap-1.5 group"
+                    >
+                      <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-600 group-hover:text-zinc-400 transition-colors duration-150">
+                        Following
+                      </span>
+                      <span className="rounded-full bg-white/[.06] px-1 text-[9px] font-bold text-zinc-500 leading-4 tabular-nums">
+                        {followedItems.length}
+                      </span>
+                      {followedUpdateCount > 0 && (
+                        <span className="inline-flex items-center gap-0.5 rounded-full bg-amber-500/15 text-amber-300 px-1 text-[9px] font-bold leading-4">
+                          <Sparkles className="h-2 w-2" />
+                          {followedUpdateCount}
+                        </span>
+                      )}
+                      <ChevronDown className={cn(
+                        "h-3 w-3 text-zinc-700 group-hover:text-zinc-500 transition-[transform,color] duration-150",
+                        followingOpen ? "rotate-0" : "-rotate-90"
+                      )} />
+                    </button>
+                  </div>
+                  <div className={cn(
+                    "grid transition-[grid-template-rows] duration-200 ease-in-out",
+                    followingOpen ? "grid-rows-[1fr]" : "grid-rows-[0fr]"
+                  )}>
+                    <div className="overflow-hidden">
+                      <div className="space-y-px pb-1">
+                        {followedItems.map((collection) => {
+                          const ownerLabel = collection.owner.displayName || collection.owner.username || "Unknown"
+                          return (
+                            <NavLink
+                              key={collection.id}
+                              to={`/collections#followed-${collection.id}`}
+                              onClick={onClose}
+                              onContextMenu={(e) => {
+                                e.preventDefault()
+                                setFollowedContextMenu({ collection, point: { x: e.clientX, y: e.clientY } })
+                              }}
+                              title={`${collection.name} — by ${ownerLabel}`}
+                              className="group flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[13px] font-medium transition-colors duration-150 text-zinc-500 hover:bg-white/[.04] hover:text-zinc-200"
+                            >
+                              <Bell className={cn(
+                                "h-3.5 w-3.5 shrink-0",
+                                collection.hasUpdates ? "text-amber-400" : "text-zinc-700 group-hover:text-zinc-500"
+                              )} />
+                              <span className="truncate flex-1">{collection.name}</span>
+                              <span className="text-[10px] font-medium tabular-nums text-zinc-700 group-hover:text-zinc-500">
+                                {collection.gameCount}
+                              </span>
+                            </NavLink>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </nav>
@@ -389,6 +600,30 @@ export function Sidebar({ mobileOpen, onClose, collapsed, onToggleCollapse }: Si
           </div>
         </div>
       )}
+      <CollectionActionContextMenu
+        open={ownedContextMenu != null}
+        position={ownedContextMenu?.point ?? null}
+        onClose={() => setOwnedContextMenu(null)}
+        title={ownedContextMenu?.collection.name}
+        subtitle={
+          ownedContextMenu?.collection.role === "contributor"
+            ? `by ${ownedContextMenu.collection.owner?.displayName || ownedContextMenu.collection.owner?.username || "Someone"}`
+            : "Your collection"
+        }
+        sections={ownedContextMenu ? buildOwnedContextSections(ownedContextMenu.collection) : []}
+      />
+      <CollectionActionContextMenu
+        open={followedContextMenu != null}
+        position={followedContextMenu?.point ?? null}
+        onClose={() => setFollowedContextMenu(null)}
+        title={followedContextMenu?.collection.name}
+        subtitle={
+          followedContextMenu
+            ? `by ${followedContextMenu.collection.owner.displayName || followedContextMenu.collection.owner.username || "Someone"}`
+            : undefined
+        }
+        sections={followedContextMenu ? buildFollowedContextSections(followedContextMenu.collection) : []}
+      />
     </>
   )
 }

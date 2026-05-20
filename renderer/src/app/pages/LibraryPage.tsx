@@ -17,7 +17,8 @@ import { getCatalogCache, type CatalogGame } from "@/lib/catalog"
 import {
   Trash2, AlertTriangle, FolderOpen, ExternalLink, Unlink2,
   Terminal, CheckSquare2, Layers3, Search, ArrowUpDown, Settings2,
-  X, Loader2, Check, MoreHorizontal, Download,
+  X, Loader2, Check, MoreHorizontal, Download, ChevronLeft, ChevronRight,
+  ChevronDown,
 } from "lucide-react"
 import { ExePickerModal } from "@/components/ExePickerModal"
 import { EditGameMetadataModal } from "@/components/EditGameMetadataModal"
@@ -185,6 +186,10 @@ export function LibraryPage() {
   const [librarySearch, setLibrarySearch] = useState("")
   const [selectedCollection, setSelectedCollection] = useState(() => searchParams.get("collection") || "all")
 
+  // Cloud-aware user collections — also used to size chip counts and the
+  // "X of Y installed" filter status by the selected collection's full size.
+  const userCollections = useUserCollections()
+
   // Keep URL in sync so external links (e.g. sidebar Collections) and back/forward work.
   useEffect(() => {
     const urlCollection = searchParams.get("collection") || "all"
@@ -300,8 +305,14 @@ export function LibraryPage() {
   }, [installed, hiddenAppIds, libraryGameMeta])
 
   const availableCollections = useMemo(() => {
-    return dedupeCaseInsensitive(installedWithMeta.flatMap((game) => game.libraryMeta?.collections || []))
-  }, [installedWithMeta])
+    // Show every collection the user owns/contributes to even when none of its
+    // games are installed yet — otherwise an empty collection vanishes from
+    // the chip row until the first install. Merge with names derived from
+    // local meta so legacy local-only collections still appear.
+    const fromMeta = installedWithMeta.flatMap((game) => game.libraryMeta?.collections || [])
+    const fromCloud = userCollections.collections.map((c) => c.name)
+    return dedupeCaseInsensitive([...fromCloud, ...fromMeta])
+  }, [installedWithMeta, userCollections.collections])
 
   const filteredInstalled = useMemo(() => {
     const normalizedSearch = debouncedSearch.trim().toLowerCase()
@@ -788,10 +799,6 @@ export function LibraryPage() {
   const isAllPageSelected = pagedInstalled.length > 0 && pagedInstalled.every((game) => selectedAppIds.has(game.appid))
   const isAllVisibleSelected = filteredInstalled.length > 0 && filteredInstalled.every((game) => selectedAppIds.has(game.appid))
 
-  // Cloud-aware user collections — same hook the Collections page uses, so
-  // adding a game from the right-click menu writes through to the account
-  // database when signed in (and the local store either way).
-  const userCollections = useUserCollections()
   const { startGameDownload } = useDownloadsActions()
 
   // When a collection filter is active, find members that are NOT installed so
@@ -875,16 +882,21 @@ export function LibraryPage() {
   )
 
   // Counts so collection/tag chips show how many games are in each.
+  // Prefer the cloud collection's full size (matches the sidebar + the
+  // Collections manage page); fall back to the count of installed games
+  // tagged locally for collections that only exist in libraryGameMeta.
   const collectionCounts = useMemo(() => {
     const counts: Record<string, number> = {}
     for (const game of installedWithMeta) {
       for (const c of game.libraryMeta?.collections || []) {
-        const key = c
-        counts[key] = (counts[key] || 0) + 1
+        counts[c] = (counts[c] || 0) + 1
       }
     }
+    for (const c of userCollections.collections) {
+      counts[c.name] = c.appids.length
+    }
     return counts
-  }, [installedWithMeta])
+  }, [installedWithMeta, userCollections.collections])
 
   const renameCollection = async (oldName: string, nextName: string) => {
     const target = normalizeLibraryToken(nextName)
@@ -1023,34 +1035,26 @@ export function LibraryPage() {
               </Link>
             </div>
           </div>
-          <div className="flex flex-wrap items-center gap-1.5">
-            <CollectionPill
-              label="All games"
-              count={installedWithMeta.length}
-              active={selectedCollection === "all"}
-              onClick={() => setSelectedCollection("all")}
-            />
-            {availableCollections.map((collection) => (
-              <CollectionPill
-                key={collection}
-                label={collection}
-                count={collectionCounts[collection] || 0}
-                active={selectedCollection.toLowerCase() === collection.toLowerCase()}
-                onClick={() => setSelectedCollection(selectedCollection.toLowerCase() === collection.toLowerCase() ? "all" : collection)}
-                onRename={(next) => void renameCollection(collection, next)}
-                onDelete={() => void deleteCollection(collection)}
-                onRemoveFromSelected={selectionMode && selectedAppIds.size > 0 ? () => void handleBatchRemoveFromCollection(collection) : undefined}
-              />
-            ))}
-            {availableCollections.length === 0 && (
-              <Link
-                to="/collections"
-                className="text-xs text-zinc-400 hover:text-zinc-100 italic underline-offset-2 hover:underline"
-              >
-                No collections yet — create your first →
-              </Link>
-            )}
-          </div>
+          <CollectionFilterStrip
+            availableCollections={availableCollections}
+            collectionCounts={collectionCounts}
+            allGamesCount={installedWithMeta.length}
+            selectedCollection={selectedCollection}
+            setSelectedCollection={setSelectedCollection}
+            renameCollection={renameCollection}
+            deleteCollection={deleteCollection}
+            selectionMode={selectionMode}
+            selectedCount={selectedAppIds.size}
+            onRemoveFromSelected={handleBatchRemoveFromCollection}
+          />
+          {availableCollections.length === 0 && (
+            <Link
+              to="/collections"
+              className="text-xs text-zinc-400 hover:text-zinc-100 italic underline-offset-2 hover:underline"
+            >
+              No collections yet — create your first →
+            </Link>
+          )}
         </div>
       </div>
 
@@ -1102,9 +1106,26 @@ export function LibraryPage() {
       )}
 
       {/* Filter status + clear */}
-      {(selectedCollection !== "all" || debouncedSearch) && (
+      {(selectedCollection !== "all" || debouncedSearch) && (() => {
+        // Denominator depends on whether a collection is selected. With a
+        // collection selected, the meaningful total is "this collection's
+        // games", not the whole library. We prefer the cloud collection's
+        // size; otherwise fall back to installed-with-this-tag + uninstalled
+        // members so local-only collections still report a real number.
+        const activeCloud = selectedCollection !== "all"
+          ? userCollections.collections.find(
+              (c) => c.name.toLowerCase() === selectedCollection.toLowerCase()
+            )
+          : null
+        const denominator = selectedCollection === "all"
+          ? installedWithMeta.length
+          : activeCloud
+            ? activeCloud.appids.length
+            : filteredInstalled.length + uninstalledCollectionMembers.length
+        const label = selectedCollection === "all" ? "games installed" : "in this collection installed"
+        return (
         <div className="text-xs text-zinc-500">
-          {filteredInstalled.length} of {installedWithMeta.length} games installed
+          {filteredInstalled.length} of {denominator} {label}
           {uninstalledCollectionMembers.length > 0 && (
             <span className="ml-1">· {uninstalledCollectionMembers.length} not installed</span>
           )}
@@ -1116,7 +1137,8 @@ export function LibraryPage() {
             Clear filters
           </button>
         </div>
-      )}
+        )
+      })()}
 
       {/* Installed games grid */}
       <section className="space-y-4">
@@ -1163,16 +1185,18 @@ export function LibraryPage() {
                       if (!addedBy) return null
                       const nm = addedBy.displayName || addedBy.username || "Contributor"
                       return (
-                        <div
-                          className="pointer-events-none absolute bottom-2 left-2 z-10 inline-flex items-center gap-1.5 rounded-full border border-violet-500/30 bg-black/70 px-2 py-0.5 text-[10px] font-semibold text-violet-200 backdrop-blur-sm max-w-[80%]"
-                          title={`Added by ${nm}`}
-                        >
-                          <span className="h-3.5 w-3.5 shrink-0 overflow-hidden rounded-full bg-zinc-800">
-                            {addedBy.avatarUrl ? (
-                              <img src={addedBy.avatarUrl} alt="" className="h-full w-full object-cover" />
-                            ) : null}
-                          </span>
-                          <span className="truncate">{nm}</span>
+                        <div className="pointer-events-none absolute inset-x-0 top-0 aspect-[4/5] z-10">
+                          <div
+                            className="absolute bottom-2 left-2 inline-flex items-center gap-1.5 rounded-full border border-violet-500/30 bg-black/70 px-2 py-0.5 text-[10px] font-semibold text-violet-200 backdrop-blur-sm max-w-[calc(100%-1rem)]"
+                            title={`Added by ${nm}`}
+                          >
+                            <span className="h-3.5 w-3.5 shrink-0 overflow-hidden rounded-full bg-zinc-800">
+                              {addedBy.avatarUrl ? (
+                                <img src={addedBy.avatarUrl} alt="" className="h-full w-full object-cover" />
+                              ) : null}
+                            </span>
+                            <span className="truncate">{nm}</span>
+                          </div>
                         </div>
                       )
                     })()}
@@ -1546,6 +1570,231 @@ export function LibraryPage() {
           onClose={() => { setLinuxConfigOpen(false); setLinuxConfigGame(null) }}
         />
       )}
+    </div>
+  )
+}
+
+// ---- CollectionFilterStrip ---------------------------------------------------
+// Horizontally scrollable chip row (Steam-style) with arrow-button overflow nav
+// and a searchable popover that lists every collection. Keeps the strip tidy
+// when the user accumulates many collections without hiding any of them.
+
+type CollectionFilterStripProps = {
+  availableCollections: string[]
+  collectionCounts: Record<string, number>
+  allGamesCount: number
+  selectedCollection: string
+  setSelectedCollection: (value: string) => void
+  renameCollection: (oldName: string, nextName: string) => Promise<void> | void
+  deleteCollection: (name: string) => Promise<void> | void
+  selectionMode: boolean
+  selectedCount: number
+  onRemoveFromSelected: (collection: string) => Promise<void> | void
+}
+
+function CollectionFilterStrip({
+  availableCollections,
+  collectionCounts,
+  allGamesCount,
+  selectedCollection,
+  setSelectedCollection,
+  renameCollection,
+  deleteCollection,
+  selectionMode,
+  selectedCount,
+  onRemoveFromSelected,
+}: CollectionFilterStripProps) {
+  const scrollRef = useRef<HTMLDivElement | null>(null)
+  const [canScrollLeft, setCanScrollLeft] = useState(false)
+  const [canScrollRight, setCanScrollRight] = useState(false)
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const [pickerQuery, setPickerQuery] = useState("")
+
+  // Pin the selected chip and the top 6 most-populated collections in the
+  // visible strip; everything else lives in the "All" popover. This keeps
+  // the strip readable even with 30+ collections.
+  const PIN_COUNT = 6
+  const visibleCollections = useMemo(() => {
+    if (availableCollections.length <= PIN_COUNT + 1) return availableCollections
+    const sortedByCount = [...availableCollections].sort(
+      (a, b) => (collectionCounts[b] || 0) - (collectionCounts[a] || 0)
+    )
+    const top = sortedByCount.slice(0, PIN_COUNT)
+    if (
+      selectedCollection !== "all" &&
+      !top.some((c) => c.toLowerCase() === selectedCollection.toLowerCase())
+    ) {
+      const exact = availableCollections.find(
+        (c) => c.toLowerCase() === selectedCollection.toLowerCase()
+      )
+      if (exact) top.unshift(exact)
+    }
+    return Array.from(new Set(top))
+  }, [availableCollections, collectionCounts, selectedCollection])
+
+  const overflowCollections = useMemo(() => {
+    if (visibleCollections === availableCollections) return [] as string[]
+    const visibleSet = new Set(visibleCollections.map((c) => c.toLowerCase()))
+    return availableCollections.filter((c) => !visibleSet.has(c.toLowerCase()))
+  }, [availableCollections, visibleCollections])
+
+  const filteredPicker = useMemo(() => {
+    const q = pickerQuery.trim().toLowerCase()
+    if (!q) return availableCollections
+    return availableCollections.filter((c) => c.toLowerCase().includes(q))
+  }, [availableCollections, pickerQuery])
+
+  const updateArrowState = useCallback(() => {
+    const el = scrollRef.current
+    if (!el) return
+    setCanScrollLeft(el.scrollLeft > 4)
+    setCanScrollRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 4)
+  }, [])
+
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    updateArrowState()
+    const onScroll = () => updateArrowState()
+    el.addEventListener("scroll", onScroll, { passive: true })
+    const ro = new ResizeObserver(updateArrowState)
+    ro.observe(el)
+    return () => {
+      el.removeEventListener("scroll", onScroll)
+      ro.disconnect()
+    }
+  }, [updateArrowState, visibleCollections.length])
+
+  const nudge = (direction: 1 | -1) => {
+    const el = scrollRef.current
+    if (!el) return
+    el.scrollBy({ left: direction * Math.max(200, el.clientWidth * 0.6), behavior: "smooth" })
+  }
+
+  return (
+    <div className="relative">
+      <div className="flex items-center gap-1.5">
+        {canScrollLeft && (
+          <button
+            type="button"
+            onClick={() => nudge(-1)}
+            aria-label="Scroll collections left"
+            className="shrink-0 inline-flex h-7 w-7 items-center justify-center rounded-full border border-white/[.07] bg-zinc-950/80 text-zinc-300 hover:bg-white/[.07] hover:text-white transition-colors"
+          >
+            <ChevronLeft className="h-3.5 w-3.5" />
+          </button>
+        )}
+        <div
+          ref={scrollRef}
+          className="flex-1 min-w-0 overflow-x-auto uc-scrollbar-thin pb-1 -mb-1"
+          style={{ scrollbarWidth: "none" }}
+        >
+          <div className="flex items-center gap-1.5 w-max">
+            <CollectionPill
+              label="All games"
+              count={allGamesCount}
+              active={selectedCollection === "all"}
+              onClick={() => setSelectedCollection("all")}
+            />
+            {visibleCollections.map((collection) => (
+              <CollectionPill
+                key={collection}
+                label={collection}
+                count={collectionCounts[collection] || 0}
+                active={selectedCollection.toLowerCase() === collection.toLowerCase()}
+                onClick={() =>
+                  setSelectedCollection(
+                    selectedCollection.toLowerCase() === collection.toLowerCase()
+                      ? "all"
+                      : collection
+                  )
+                }
+                onRename={(next) => void renameCollection(collection, next)}
+                onDelete={() => void deleteCollection(collection)}
+                onRemoveFromSelected={
+                  selectionMode && selectedCount > 0
+                    ? () => void onRemoveFromSelected(collection)
+                    : undefined
+                }
+              />
+            ))}
+            {overflowCollections.length > 0 && (
+              <Popover open={pickerOpen} onOpenChange={(open) => { setPickerOpen(open); if (!open) setPickerQuery("") }}>
+                <PopoverTrigger asChild>
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1.5 rounded-full border border-white/[.07] bg-white/[.03] px-3 py-1 text-[12px] font-medium text-zinc-200 hover:bg-white/[.07] hover:text-white transition-colors whitespace-nowrap"
+                  >
+                    <Layers3 className="h-3 w-3" />
+                    +{overflowCollections.length} more
+                    <ChevronDown className="h-3 w-3" />
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent
+                  align="end"
+                  className="w-72 p-0 bg-zinc-950/95 border border-white/[.08] rounded-2xl shadow-[0_20px_60px_rgba(0,0,0,0.55)] backdrop-blur-xl"
+                >
+                  <div className="p-2 border-b border-white/[.06]">
+                    <div className="relative">
+                      <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-zinc-500 pointer-events-none" />
+                      <Input
+                        autoFocus
+                        value={pickerQuery}
+                        onChange={(e) => setPickerQuery(e.target.value)}
+                        placeholder={`Search ${availableCollections.length} collections…`}
+                        className="pl-8 h-8 rounded-lg bg-white/[.03] border-white/[.07] text-xs"
+                      />
+                    </div>
+                  </div>
+                  <div className="max-h-72 overflow-y-auto uc-scrollbar py-1">
+                    {filteredPicker.length === 0 ? (
+                      <div className="px-3 py-4 text-center text-xs text-zinc-500 italic">No match</div>
+                    ) : (
+                      filteredPicker.map((collection) => {
+                        const isActive =
+                          selectedCollection.toLowerCase() === collection.toLowerCase()
+                        return (
+                          <button
+                            key={collection}
+                            type="button"
+                            onClick={() => {
+                              setSelectedCollection(isActive ? "all" : collection)
+                              setPickerOpen(false)
+                              setPickerQuery("")
+                            }}
+                            className={cn(
+                              "w-full flex items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors",
+                              isActive
+                                ? "bg-white/[.07] text-white"
+                                : "text-zinc-300 hover:bg-white/[.05] hover:text-white"
+                            )}
+                          >
+                            <Layers3 className={cn("h-3.5 w-3.5 shrink-0", isActive ? "text-zinc-200" : "text-zinc-500")} />
+                            <span className="flex-1 truncate">{collection}</span>
+                            <span className="text-[10px] tabular-nums text-zinc-500">
+                              {collectionCounts[collection] || 0}
+                            </span>
+                          </button>
+                        )
+                      })
+                    )}
+                  </div>
+                </PopoverContent>
+              </Popover>
+            )}
+          </div>
+        </div>
+        {canScrollRight && (
+          <button
+            type="button"
+            onClick={() => nudge(1)}
+            aria-label="Scroll collections right"
+            className="shrink-0 inline-flex h-7 w-7 items-center justify-center rounded-full border border-white/[.07] bg-zinc-950/80 text-zinc-300 hover:bg-white/[.07] hover:text-white transition-colors"
+          >
+            <ChevronRight className="h-3.5 w-3.5" />
+          </button>
+        )}
+      </div>
     </div>
   )
 }

@@ -65,6 +65,7 @@ import { GameVersionStatus } from "@/components/GameVersionStatus"
 import { useAuth } from "@/hooks/useAuth"
 import { useMotionPreferences } from "@/hooks/use-motion-preferences"
 import { useImageColors } from "@/hooks/use-image-colors"
+import { AuraBackground } from "@/components/AuraBackground"
 
 const PROTON_RANK_COLORS: Record<string, string> = {
   platinum: "text-[#b3e5fc] border-[#b3e5fc]/30",
@@ -779,6 +780,31 @@ export function GameDetailPage() {
     },
   }), [userCollections, game])
 
+  // Auto-open the update flow when GameCard hands us off via `?update=1`.
+  // Must sit *before* the early returns below so the hook count stays
+  // consistent between the loading and loaded renders (Rules of Hooks).
+  useEffect(() => {
+    if (searchParams.get("update") !== "1") return
+    if (!game || loading) return
+    const isInstalled = installedVersions.length > 0 || Boolean(installedManifest)
+    // Wait until install state has resolved before deciding — otherwise we
+    // could miss the chance because hasUpdate is still false on first render.
+    if (installedVersionLabels.length === 0 && isInstalled) return
+    if (deepLinkUpdateHandledRef.current) return
+    const hasUpdate =
+      isInstalled &&
+      Boolean(game?.version) &&
+      installedVersionLabels.length > 0 &&
+      !installedVersionLabels.includes(game.version ?? "")
+    deepLinkUpdateHandledRef.current = true
+    const next = new URLSearchParams(searchParams)
+    next.delete("update")
+    setSearchParams(next, { replace: true })
+    if (hasUpdate) {
+      setUpdateWarningOpen(true)
+    }
+  }, [game, loading, installedVersions, installedManifest, installedVersionLabels, searchParams, setSearchParams])
+
   if (loading) {
     return (
       <div className="min-h-screen bg-[#09090b] pb-12">
@@ -870,27 +896,6 @@ export function GameDetailPage() {
   const isInstallReady = Boolean(installingManifest) && installingManifest?.installStatus === "downloaded" && !isInstalled
   const hasUpdate = isInstalled && Boolean(game?.version) && installedVersionLabels.length > 0 && !installedVersionLabels.includes(game.version ?? '')
   hasUpdateRef.current = hasUpdate
-
-  // Auto-open the update flow when GameCard hands us off via `?update=1`.
-  // Sits after hasUpdate is declared so it can read it directly. Gated on
-  // hasUpdate so a stale URL doesn't surprise the user with a modal for a
-  // game that's no longer outdated; we also strip the param so refreshing
-  // the page doesn't re-trigger it.
-  useEffect(() => {
-    if (searchParams.get("update") !== "1") return
-    if (!game || loading) return
-    // Wait until install state has resolved before deciding — otherwise we
-    // could miss the chance because hasUpdate is still false on first render.
-    if (installedVersionLabels.length === 0 && isInstalled) return
-    if (deepLinkUpdateHandledRef.current) return
-    deepLinkUpdateHandledRef.current = true
-    const next = new URLSearchParams(searchParams)
-    next.delete("update")
-    setSearchParams(next, { replace: true })
-    if (hasUpdate) {
-      setUpdateWarningOpen(true)
-    }
-  }, [game, loading, isInstalled, hasUpdate, installedVersionLabels, searchParams, setSearchParams])
   const showActionMenu = isInstalled
   // Only treat as "installing" from manifest if there are corresponding download items.
   // If the manifest exists but no download items remain (e.g. items were lost), it's a stale
