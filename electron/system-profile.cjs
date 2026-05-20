@@ -776,6 +776,48 @@ async function probeLinuxGpus() {
     if (m) glRenderer = m[1].trim()
   }
 
+  // 3a. vulkaninfo deviceName — Mesa/RADV/anvil resolve marketing names
+  // from the binary driver even when pci.ids is stale. Collect ALL discrete
+  // GPUs reported (so a system with multiple cards still gets per-card data).
+  const vkNamesByPci = new Map()
+  const vkNames = []
+  const vkInfo = await runCommand('vulkaninfo', ['--summary'], { timeoutMs: 4000 })
+  if (vkInfo.ok) {
+    // --summary blocks look like:
+    //   GPU0:
+    //     deviceName     = AMD Radeon RX 6700 XT (RADV NAVI22)
+    //     deviceID       = 0x73df
+    //     vendorID       = 0x1002
+    const blocks = vkInfo.stdout.split(/\bGPU\d+:/i)
+    for (const block of blocks) {
+      const nameMatch = block.match(/deviceName\s*=\s*([^\n]+)/i)
+      const vendMatch = block.match(/vendorID\s*=\s*0x([0-9a-f]+)/i)
+      const devMatch = block.match(/deviceID\s*=\s*0x([0-9a-f]+)/i)
+      if (!nameMatch) continue
+      const name = nameMatch[1].trim()
+      const vendorId = vendMatch ? vendMatch[1].toLowerCase().padStart(4, '0') : null
+      const deviceId = devMatch ? devMatch[1].toLowerCase().padStart(4, '0') : null
+      if (vendorId && deviceId) vkNamesByPci.set(`${vendorId}:${deviceId}`, name)
+      vkNames.push({ name, vendorId, deviceId })
+    }
+  }
+
+  // 3b. lshw -C display -short — needs root for full output but the short
+  // form often works without it and gives clean marketing names from kernel
+  // data (modalias-resolved, not from /usr/share/hwdata).
+  const lshw = await runCommand('lshw', ['-C', 'display', '-short'], { timeoutMs: 4000 })
+  const lshwNames = []
+  if (lshw.ok) {
+    for (const line of lshw.stdout.split('\n')) {
+      // Columns: H/W path  Device  Class  Description
+      const m = line.match(/\s+display\s+(.+)$/i)
+      if (!m) continue
+      const desc = m[1].trim()
+      if (!desc || /^display$/i.test(desc)) continue
+      lshwNames.push(desc)
+    }
+  }
+
   // 4. nvidia-smi for NVIDIA cards (gives proper marketing name + VRAM +
   // driver version even when pci.ids is stale).
   const nvsmi = await runCommand('nvidia-smi', ['--query-gpu=index,name,memory.total,driver_version,pci.bus_id', '--format=csv,noheader,nounits'], { timeoutMs: 3000 })
@@ -810,15 +852,41 @@ async function probeLinuxGpus() {
     }
   }
 
-  // Fall back to glxinfo renderer when we still have placeholder names.
+  // Fall back across all available enrichment sources so we never ship a
+  // raw "[8086:1111]" / placeholder string in the UI.
   for (const g of gpus) {
+    // (a) vulkaninfo matched by PCI id is the strongest signal.
+    if (!g.name && g.vendorId && g.deviceId) {
+      const vk = vkNamesByPci.get(`${g.vendorId}:${g.deviceId}`)
+      if (vk) g.name = vk
+    }
+    // (b) lshw -short marketing name for the matching vendor.
+    if (!g.name && lshwNames.length > 0) {
+      const matched = lshwNames.find((n) => detectGpuVendor(n) === g.vendor)
+      if (matched) g.name = matched
+    }
+    // (c) glxinfo renderer (only one entry, so first GPU of matching vendor).
     if (!g.name && glRenderer && (g.vendor === detectGpuVendor(glRenderer) || g.vendor === 'unknown')) {
       g.name = glRenderer.replace(/\s*\(.*?\)\s*$/, '').trim() || glRenderer
     }
-    // Last-resort label so the UI never has to print "Device 1111".
-    if (!g.name) {
-      if (g.vendorId && g.deviceId) g.name = `${g.vendorName || g.vendor || 'Unknown vendor'} [${g.vendorId}:${g.deviceId}]`
-      else if (g.vendorName) g.name = `${g.vendorName} GPU`
+    // (d) Any unmatched vulkaninfo entry of the right vendor.
+    if (!g.name && vkNames.length > 0) {
+      const matched = vkNames.find((v) => detectGpuVendor(v.name) === g.vendor)
+      if (matched) g.name = matched.name
+    }
+  }
+
+  // Last-resort: render a friendly fallback that doesn't look like a stale
+  // pci.ids placeholder. We prefer "Intel integrated GPU" over "[8086:1111]".
+  for (const g of gpus) {
+    if (g.name) continue
+    if (g.vendor && g.vendor !== 'unknown') {
+      const friendly = { nvidia: 'NVIDIA', amd: 'AMD', intel: 'Intel', apple: 'Apple' }[g.vendor] || g.vendor
+      g.name = `${friendly} GPU`
+    } else if (g.vendorName) {
+      g.name = `${g.vendorName} GPU`
+    } else if (g.vendorId) {
+      g.name = `GPU [vendor ${g.vendorId}]`
     }
   }
 
@@ -927,21 +995,175 @@ function probeLinuxVolumes() {
   return out
 }
 
-async function probeLinuxDisplays() {
-  const xrandr = await runCommand('xrandr', ['--current'], { timeoutMs: 2000 })
-  if (!xrandr.ok) return []
-  const displays = []
-  for (const line of xrandr.stdout.split('\n')) {
-    const m = line.match(/^\s*(\d+)x(\d+)\s+([\d.]+)\*/)
-    if (m) {
-      displays.push({
-        label: null,
-        width: Number(m[1]),
-        height: Number(m[2]),
-        refreshHz: Math.round(Number(m[3])),
-      })
+// PNP-ID → manufacturer name. We ship the most common subset so EDID strings
+// like "DEL" / "SAM" resolve to "Dell" / "Samsung" without a 5k-line table.
+const EDID_PNP_VENDORS = {
+  AAA: 'Avolites', ACI: 'Asus', ACR: 'Acer', AOC: 'AOC', APP: 'Apple', AUS: 'Asus',
+  BNQ: 'BenQ', CMN: 'Chimei Innolux', CMO: 'Chi Mei Optoelectronics',
+  DEL: 'Dell', GBT: 'Gigabyte', GSM: 'LG', HPN: 'HP', HSD: 'HannStar',
+  HWP: 'HP', IVM: 'Iiyama', LEN: 'Lenovo', LGD: 'LG Display', LGE: 'LG',
+  MEI: 'Panasonic', MSI: 'MSI', NEC: 'NEC', PHL: 'Philips', PNP: 'Plug & Play',
+  QDS: 'Quanta', SAM: 'Samsung', SDC: 'Samsung Display', SEC: 'Samsung',
+  SHP: 'Sharp', SNY: 'Sony', VIZ: 'Vizio', VSC: 'ViewSonic',
+}
+
+function decodeEdidPnpId(byte1, byte2) {
+  // EDID compresses 3 letters into 16 bits, with '@' (0x40) as the base.
+  const b1 = byte1 || 0
+  const b2 = byte2 || 0
+  const c1 = ((b1 >> 2) & 0x1f) + 64
+  const c2 = (((b1 & 0x3) << 3) | ((b2 >> 5) & 0x7)) + 64
+  const c3 = (b2 & 0x1f) + 64
+  if (c1 < 65 || c1 > 90 || c2 < 65 || c2 > 90 || c3 < 65 || c3 > 90) return null
+  return String.fromCharCode(c1) + String.fromCharCode(c2) + String.fromCharCode(c3)
+}
+
+function parseEdidBuffer(buf) {
+  if (!buf || buf.length < 128) return null
+  // EDID header: 00 FF FF FF FF FF FF 00
+  if (buf[0] !== 0x00 || buf[1] !== 0xff || buf[2] !== 0xff || buf[3] !== 0xff) return null
+  const pnpId = decodeEdidPnpId(buf[8], buf[9])
+  // Detailed descriptors (bytes 54..125, four 18-byte blocks). The first
+  // detailed timing block is conventionally the preferred (native) mode.
+  let modelName = null
+  let nativeWidth = null
+  let nativeHeight = null
+  for (let i = 54; i <= 108; i += 18) {
+    const block = buf.slice(i, i + 18)
+    if (block.length < 18) continue
+    if (block[0] === 0 && block[1] === 0) {
+      // Descriptor type byte at offset 3 within the block.
+      const type = block[3]
+      if (type === 0xfc) {
+        // Monitor name: ASCII, terminated by 0x0a or end-of-block.
+        const raw = block.slice(5, 18)
+        let text = ''
+        for (const b of raw) {
+          if (b === 0x0a) break
+          text += String.fromCharCode(b)
+        }
+        if (text.trim()) modelName = text.trim()
+      }
+    } else if (nativeWidth == null && nativeHeight == null) {
+      // First non-zero detailed timing descriptor → preferred timing.
+      const hAct = block[2] | ((block[4] & 0xf0) << 4)
+      const vAct = block[5] | ((block[7] & 0xf0) << 4)
+      if (hAct && vAct) {
+        nativeWidth = hAct
+        nativeHeight = vAct
+      }
     }
   }
+  return { pnpId, modelName, nativeWidth, nativeHeight }
+}
+
+async function probeLinuxDisplays() {
+  const displays = []
+  const seen = new Set()
+
+  // 1. Per-connector EDID under /sys/class/drm covers every connected
+  // monitor — not just the one xrandr happens to mark as the active mode.
+  try {
+    for (const entry of fs.readdirSync('/sys/class/drm')) {
+      // card0-HDMI-A-1, card0-DP-1, card0-eDP-1, …
+      if (!/^card\d+-/.test(entry)) continue
+      const connectorDir = `/sys/class/drm/${entry}`
+      const statusRaw = readFileSafe(`${connectorDir}/status`)
+      const status = (statusRaw || '').trim()
+      if (status !== 'connected') continue
+      const connectorName = entry.replace(/^card\d+-/, '')
+
+      // EDID is a binary file; readFileSafe returns latin-1 text which keeps
+      // bytes intact for indexing. Re-read it as a Buffer for accuracy.
+      let edid = null
+      try {
+        const buf = fs.readFileSync(`${connectorDir}/edid`)
+        if (buf && buf.length >= 128) edid = parseEdidBuffer(buf)
+      } catch { /* edid often empty for ghost connectors — skip */ }
+
+      const manufacturer = edid?.pnpId ? (EDID_PNP_VENDORS[edid.pnpId] || edid.pnpId) : null
+      const label = edid?.modelName || (manufacturer ? `${manufacturer} (${connectorName})` : connectorName)
+      const key = `${connectorName}|${edid?.modelName || ''}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      displays.push({
+        label,
+        connector: connectorName,
+        manufacturer,
+        model: edid?.modelName || null,
+        nativeWidth: edid?.nativeWidth || null,
+        nativeHeight: edid?.nativeHeight || null,
+        // Width / height / refresh below are the *current* mode; populated
+        // from xrandr in step 2.
+        width: edid?.nativeWidth || null,
+        height: edid?.nativeHeight || null,
+        refreshHz: null,
+      })
+    }
+  } catch { /* /sys/class/drm absent — fall through to xrandr-only path */ }
+
+  // 2. xrandr --current — gives the active mode + refresh for each connected
+  // output. Match by connector name when we already have the row from EDID,
+  // otherwise add a fresh entry (e.g. running under Wayland with no /sys
+  // access, or a connector we couldn't EDID-read).
+  const xrandr = await runCommand('xrandr', ['--current'], { timeoutMs: 2000 })
+  if (xrandr.ok) {
+    let currentConnector = null
+    for (const line of xrandr.stdout.split('\n')) {
+      const conMatch = line.match(/^(\S+)\s+connected\b/)
+      if (conMatch) {
+        currentConnector = conMatch[1]
+        if (!displays.some((d) => d.connector === currentConnector)) {
+          displays.push({
+            label: currentConnector,
+            connector: currentConnector,
+            manufacturer: null,
+            model: null,
+            nativeWidth: null,
+            nativeHeight: null,
+            width: null,
+            height: null,
+            refreshHz: null,
+          })
+        }
+        continue
+      }
+      const modeMatch = line.match(/^\s*(\d+)x(\d+)\s+([\d.]+)\*/)
+      if (modeMatch && currentConnector) {
+        const target = displays.find((d) => d.connector === currentConnector)
+        const width = Number(modeMatch[1])
+        const height = Number(modeMatch[2])
+        const refresh = Math.round(Number(modeMatch[3]))
+        if (target) {
+          target.width = width
+          target.height = height
+          target.refreshHz = refresh
+        }
+      }
+    }
+  }
+
+  // Fall back to a single legacy-shaped entry if both probes failed (very
+  // restricted sandboxes) so the panel doesn't render as "0 monitors".
+  if (displays.length === 0 && xrandr.ok) {
+    for (const line of xrandr.stdout.split('\n')) {
+      const m = line.match(/^\s*(\d+)x(\d+)\s+([\d.]+)\*/)
+      if (m) {
+        displays.push({
+          label: null,
+          connector: null,
+          manufacturer: null,
+          model: null,
+          nativeWidth: null,
+          nativeHeight: null,
+          width: Number(m[1]),
+          height: Number(m[2]),
+          refreshHz: Math.round(Number(m[3])),
+        })
+      }
+    }
+  }
+
   return displays
 }
 

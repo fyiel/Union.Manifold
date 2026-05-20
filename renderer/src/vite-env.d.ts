@@ -610,7 +610,12 @@ declare global {
       onSessionRecorded: (callback: (data: { session: { id: string; appid: string; gameName: string | null; durationSeconds: number; startedAt: string; endedAt: string }; totals?: { totalSeconds: number; sessionCount: number } | null }) => void) => () => void
     }
     ucPresence?: {
-      heartbeat: (baseUrl: string, appVersion?: string) => Promise<{ ok: boolean; status?: number; error?: string }>
+      heartbeat: (
+        baseUrl: string,
+        appVersion?: string,
+        opts?: { currentAppid?: string | null; currentGameName?: string | null }
+      ) => Promise<{ ok: boolean; status?: number; error?: string }>
+      onChanged?: (handler: (detail: { reason?: string; appid?: string | null; gameName?: string | null }) => void) => () => void
     }
     ucSystem?: {
       getVolume: () => Promise<{ ok: boolean; volume: number }>
