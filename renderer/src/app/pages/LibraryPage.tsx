@@ -810,6 +810,38 @@ export function LibraryPage() {
     return missingAppids.map((id) => catalogMap.get(id)).filter(Boolean) as CatalogGame[]
   }, [selectedCollection, userCollections.collections, installedWithMeta, games])
 
+  // When viewing a specific collection, map each appid -> contributor that
+  // added it. Owner-added games have no badge.
+  const collectionAttribution = useMemo(() => {
+    if (selectedCollection === "all") return null
+    const collection = userCollections.collections.find(
+      (c) => c.name.toLowerCase() === selectedCollection.toLowerCase()
+    )
+    if (!collection || !collection.cloud) return null
+    const contributorById = new Map(collection.contributors.map((c) => [c.discordId, c]))
+    const ownerId = collection.owner?.discordId
+    const map = new Map<string, { discordId: string; username: string | null; displayName: string | null; avatarUrl: string | null } | null>()
+    collection.appids.forEach((appid, idx) => {
+      const addedBy = collection.addedBy[idx]
+      if (!addedBy || addedBy === ownerId) {
+        map.set(appid, null)
+        return
+      }
+      const c = contributorById.get(addedBy)
+      if (!c) {
+        map.set(appid, { discordId: addedBy, username: null, displayName: null, avatarUrl: null })
+        return
+      }
+      map.set(appid, {
+        discordId: c.discordId,
+        username: c.username,
+        displayName: c.displayName,
+        avatarUrl: c.avatarUrl,
+      })
+    })
+    return map
+  }, [selectedCollection, userCollections.collections])
+
   const buildCollectionPicker = useCallback(
     (game: LibraryGame) => {
       const picker = {
@@ -1126,6 +1158,24 @@ export function LibraryPage() {
                         updateLabel={catalogVersionByAppid.get(game.appid) ? `Update available - ${catalogVersionByAppid.get(game.appid)}` : "Update available"}
                       />
                     </div>
+                    {(() => {
+                      const addedBy = collectionAttribution?.get(game.appid)
+                      if (!addedBy) return null
+                      const nm = addedBy.displayName || addedBy.username || "Contributor"
+                      return (
+                        <div
+                          className="pointer-events-none absolute bottom-2 left-2 z-10 inline-flex items-center gap-1.5 rounded-full border border-violet-500/30 bg-black/70 px-2 py-0.5 text-[10px] font-semibold text-violet-200 backdrop-blur-sm max-w-[80%]"
+                          title={`Added by ${nm}`}
+                        >
+                          <span className="h-3.5 w-3.5 shrink-0 overflow-hidden rounded-full bg-zinc-800">
+                            {addedBy.avatarUrl ? (
+                              <img src={addedBy.avatarUrl} alt="" className="h-full w-full object-cover" />
+                            ) : null}
+                          </span>
+                          <span className="truncate">{nm}</span>
+                        </div>
+                      )
+                    })()}
 
                     {selectionMode && (
                       <div className={cn(

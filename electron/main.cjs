@@ -7057,6 +7057,9 @@ function registerRunningGame(appid, exePath, proc, gameName, showGameName = true
   if (appid) writeLibraryGameMeta(appid, { lastPlayedAt: payload.startedAt })
   if (appid) runningGames.set(appid, payload)
   if (exePath) runningGames.set(exePath, payload)
+  // Notify renderers so they can fire an immediate presence heartbeat and the
+  // website's "now playing" counter updates without waiting for the 2.5-min tick.
+  broadcastPresenceChange({ reason: 'game-started', appid: appid || null, gameName: gameName || null })
   if (gameName || appid) {
     const buttons = appid
       ? [
@@ -7113,6 +7116,7 @@ function registerRunningGame(appid, exePath, proc, gameName, showGameName = true
     }
 
     clearTrackedPayload()
+    broadcastPresenceChange({ reason: 'game-exited', appid: payload.appid || null })
     if (runningGames.size === 0) clearGameRpcActivity()
     if (exitedPid) cleanupOverlayInjection(exitedPid)
     if (injectedRecently && payload.appid) {
@@ -12726,12 +12730,63 @@ ipcMain.handle('uc:playtime-server-totals', (event, { baseUrl } = {}) =>
 
 // ── Presence heartbeat ────────────────────────────────────────────────────────
 // Sends a lightweight ping to /api/playtime/heartbeat so the website can show
-// a real-time "Playing now" counter.  Called by the renderer every ~2.5 min.
-ipcMain.handle('uc:presence-heartbeat', async (event, { baseUrl, appVersion } = {}) => {
+// real-time "Now online" and "Now playing" counters.  Called by the renderer
+// every ~2.5 min, and also whenever a game starts / exits (push-driven so the
+// game state lands on the server immediately).
+function broadcastPresenceChange(detail) {
+  try {
+    for (const win of BrowserWindow.getAllWindows()) {
+      try {
+        if (!win.isDestroyed()) {
+          win.webContents.send('uc:presence-changed', detail || {})
+        }
+      } catch { /* swallow per-window send errors */ }
+    }
+  } catch { /* swallow */ }
+}
+
+function pickCurrentRunningGame() {
+  if (runningGames.size === 0) return { appid: null, name: null }
+  // runningGames is keyed by *both* appid and exePath, so iterating with a
+  // Set guarantees we count each payload once. Prefer entries that have an
+  // appid (real catalog games) over loose exe-only entries.
+  const seen = new Set()
+  let exeFallback = null
+  for (const payload of runningGames.values()) {
+    if (!payload || seen.has(payload)) continue
+    seen.add(payload)
+    if (payload.appid) {
+      return {
+        appid: String(payload.appid),
+        name: payload.name || payload.title || null,
+      }
+    }
+    if (!exeFallback) exeFallback = payload
+  }
+  if (exeFallback) {
+    return { appid: null, name: exeFallback.name || exeFallback.title || null }
+  }
+  return { appid: null, name: null }
+}
+
+ipcMain.handle('uc:presence-heartbeat', async (event, { baseUrl, appVersion, currentAppid, currentGameName } = {}) => {
   const win = BrowserWindow.fromWebContents(event.sender)
   if (!win || win.isDestroyed()) return { ok: false, error: 'no-window' }
   try {
-    const payload = { appVersion: appVersion || getAppVersion() }
+    // Renderer can override (e.g. when it knows the user just launched a
+    // specific game), otherwise we pick from main's runningGames Map.
+    let effectiveAppid = currentAppid && String(currentAppid).trim() ? String(currentAppid).trim() : null
+    let effectiveGameName = currentGameName && String(currentGameName).trim() ? String(currentGameName).trim() : null
+    if (!effectiveAppid) {
+      const current = pickCurrentRunningGame()
+      effectiveAppid = current.appid
+      if (!effectiveGameName) effectiveGameName = current.name
+    }
+    const payload = {
+      appVersion: appVersion || getAppVersion(),
+      currentAppid: effectiveAppid,
+      currentGameName: effectiveGameName,
+    }
     const response = await fetchWithSession(win.webContents.session, baseUrl, '/api/playtime/heartbeat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
