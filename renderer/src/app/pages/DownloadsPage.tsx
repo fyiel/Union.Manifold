@@ -7,7 +7,17 @@ import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { pickGameExecutable, proxyImageUrl } from "@/lib/utils"
-import { AlertTriangle, Download, HardDrive, PauseCircle, Play, XCircle, Square } from "lucide-react"
+import {
+  HardDrive,
+  PauseCircle,
+  XCircle,
+  Square,
+} from "lucide-react"
+import {
+  AlertTriangle,
+  Download,
+  Play,
+} from "@/components/icons"
 import { ExePickerModal } from "@/components/ExePickerModal"
 import { DesktopShortcutModal } from "@/components/DesktopShortcutModal"
 import { GameLaunchPreflightModal, type LaunchPreflightResult } from "@/components/GameLaunchPreflightModal"

@@ -1,6 +1,7 @@
 "use client"
 
-import { AlertTriangle, ExternalLink, RefreshCw } from "lucide-react"
+import { RefreshCw } from "lucide-react"
+import { AlertTriangle, ExternalLink } from "@/components/icons"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"

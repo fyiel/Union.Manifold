@@ -8,7 +8,12 @@ import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { Search, ChevronRight, ArrowRight, X, Trash2 } from "lucide-react"
+import { ArrowRight, X } from "lucide-react"
+import {
+  Search,
+  ChevronRight,
+  Trash2,
+} from "@/components/icons"
 import { useDebounce } from "@/hooks/use-debounce"
 import { addSearchToHistory, getRecentSearches, clearSearchHistory } from "@/lib/user-history"
 import { formatNumber, triggerHapticFeedback, proxyImageUrl } from "@/lib/utils"
@@ -229,6 +234,19 @@ export function SearchSuggestions({
     window.addEventListener("keydown", onKeyDown)
     return () => window.removeEventListener("keydown", onKeyDown)
   }, [enableShortcut])
+
+  useEffect(() => {
+    if (!showSuggestions) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault()
+        setShowSuggestions(false)
+        inputRef.current?.blur()
+      }
+    }
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [showSuggestions])
 
   useEffect(() => {
     if (!openEventName) return

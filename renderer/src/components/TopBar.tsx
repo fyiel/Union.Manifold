@@ -9,7 +9,17 @@ import { useDiscordAccount } from "@/hooks/use-discord-account"
 import { apiFetch, apiUrl, getApiBaseUrl } from "@/lib/api"
 import { getRouteChrome } from "@/lib/navigation"
 import { Button } from "@/components/ui/button"
-import { ChevronLeft, ChevronRight, LogIn, LogOut, Menu, Minus, RotateCw, Search, Settings, UserRound, X } from "lucide-react"
+import { RotateCw, UserRound, X } from "lucide-react"
+import {
+  ChevronLeft,
+  ChevronRight,
+  LogIn,
+  LogOut,
+  Menu,
+  Minus,
+  Search,
+  Settings,
+} from "@/components/icons"
 import { cn } from "@/lib/utils"
 
 const dragRegion = { WebkitAppRegion: "drag" } as CSSProperties

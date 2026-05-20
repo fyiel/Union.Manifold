@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { ArrowLeft, Loader2, LogIn, AlertCircle } from "lucide-react"
+import { ArrowLeft, AlertCircle } from "lucide-react"
+import { Loader2, LogIn } from "@/components/icons"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { useAuth } from "@/hooks/useAuth"

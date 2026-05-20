@@ -2,7 +2,12 @@ import { useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { X, Terminal, FolderOpen, FlaskConical, Cpu } from "lucide-react"
+import {
+  X,
+  FlaskConical,
+  Cpu,
+} from "lucide-react"
+import { Terminal, FolderOpen } from "@/components/icons"
 import { LINUX_PRESETS, applyGameLinuxPreset, type LinuxDetectionOption, type LinuxGameConfig, type LinuxPerGameLaunchMode } from "@/lib/linux-presets"
 
 type Props = {

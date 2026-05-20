@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react"
-import { Camera, ChevronLeft, ChevronRight, FolderOpen, Trash2, X } from "lucide-react"
+import { Camera, X } from "lucide-react"
+import {
+  ChevronLeft,
+  ChevronRight,
+  FolderOpen,
+  Trash2,
+} from "@/components/icons"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 

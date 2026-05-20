@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
-import { Download, RefreshCw } from "lucide-react"
+import { RefreshCw } from "lucide-react"
+import { Download } from "@/components/icons"
 
 type UpdateStatus = {
   enabled: boolean

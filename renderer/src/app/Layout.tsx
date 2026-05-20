@@ -1,6 +1,6 @@
 import { Outlet, useLocation, useNavigate } from "react-router-dom"
 import type { CSSProperties } from "react"
-import { useEffect, useRef, useState } from "react"
+import { Suspense, useEffect, useRef, useState } from "react"
 import { DownBar } from "@/components/DownBar"
 import { Sidebar } from "@/components/Sidebar"
 import { TopBar } from "@/components/TopBar"
@@ -303,7 +303,16 @@ export function AppLayout() {
                     collapse the layout to 0 between mounts, which kills
                     the blank-flash + scroll-jump combo. */}
                 <div key={location.pathname} className="uc-page-transition">
-                  <Outlet />
+                  {/* Inner Suspense boundary keeps the sidebar/topbar mounted
+                      while a lazy route chunk loads. Without this the root
+                      Suspense in App.tsx unmounts the entire layout (and
+                      sidebar), so the user can't navigate elsewhere until the
+                      current page finishes loading. The fallback intentionally
+                      reserves no specific layout — pages animate in via
+                      uc-page-transition once they're ready. */}
+                  <Suspense fallback={<div className="min-h-[60vh]" aria-hidden="true" />}>
+                    <Outlet />
+                  </Suspense>
                 </div>
               </main>
             </div>

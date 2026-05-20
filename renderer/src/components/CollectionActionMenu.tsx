@@ -1,26 +1,32 @@
 import { createPortal } from "react-dom"
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react"
+import type { ComponentType } from "react"
 import {
-  Bell,
   BellOff,
-  Download,
-  ExternalLink,
   GitFork,
-  Layers3,
   Pencil,
   RefreshCw,
   Share2,
+} from "lucide-react"
+import {
+  Bell,
+  Download,
+  ExternalLink,
+  Layers3,
   Trash2,
   Users,
-  type LucideIcon,
-} from "lucide-react"
+} from "@/components/icons"
 import { cn } from "@/lib/utils"
+
+/** Permissive icon component type — accepts both Lucide icons and our
+ *  animated wrappers from `@/components/icons`. */
+type CollectionMenuIcon = ComponentType<{ className?: string }>
 
 export type CollectionMenuPoint = { x: number; y: number }
 
 export type CollectionMenuAction = {
   id: string
-  icon: LucideIcon
+  icon: CollectionMenuIcon
   label: string
   destructive?: boolean
   disabled?: boolean
@@ -55,7 +61,7 @@ const ACTION_ICONS = {
   install: Download,
   update: RefreshCw,
   delete: Trash2,
-} as const satisfies Record<string, LucideIcon>
+} as const satisfies Record<string, CollectionMenuIcon>
 export const COLLECTION_MENU_ICONS = ACTION_ICONS
 
 export function CollectionActionMenuPanel({

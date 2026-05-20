@@ -1,7 +1,8 @@
 "use client"
 
 import React from "react"
-import { AlertTriangle, RefreshCw, Home } from "lucide-react"
+import { RefreshCw } from "lucide-react"
+import { AlertTriangle, Home } from "@/components/icons"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { APIFallback } from "@/components/api-fallback"

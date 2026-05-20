@@ -6,7 +6,18 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Badge } from "@/components/ui/badge"
-import { Home, RefreshCw, ChevronDown, Check, Copy, ExternalLink, HelpCircle, Clock } from "lucide-react"
+import {
+  RefreshCw,
+  HelpCircle,
+  Clock,
+} from "lucide-react"
+import {
+  Home,
+  ChevronDown,
+  Check,
+  Copy,
+  ExternalLink,
+} from "@/components/icons"
 
 interface RateLimitErrorProps {
   message?: string

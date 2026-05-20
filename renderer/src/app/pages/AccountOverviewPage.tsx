@@ -8,7 +8,24 @@ import { Textarea } from "@/components/ui/textarea"
 import { MyRequests } from "@/components/MyRequests"
 import { apiFetch, apiUrl } from "@/lib/api"
 import { useAuth } from "@/hooks/useAuth"
-import { LogIn, RefreshCw, Star, Heart, Clock, LogOut, Link2, Unlink, Loader2, Upload, ImageIcon, Pencil, X, Check } from "lucide-react"
+import {
+  RefreshCw,
+  Clock,
+  Link2,
+  ImageIcon,
+  Pencil,
+  X,
+} from "lucide-react"
+import {
+  LogIn,
+  Star,
+  Heart,
+  LogOut,
+  Unlink,
+  Loader2,
+  Upload,
+  Check,
+} from "@/components/icons"
 
 const MAX_BIO_LENGTH = 240
 

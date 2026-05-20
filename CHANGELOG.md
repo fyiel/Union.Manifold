@@ -1,5 +1,15 @@
 # Changelog
 
+## v2.3.0
+
+### Aura color effect
+
+- **Introduced aura color effect across the app.** Game cards now emit a per-card colored halo sourced from dominant colors extracted from the cover art. A matching full-page aura overlay fades in when hovering game cards, active on the home, search, library, wishlist, liked, view history, coming soon, collection, and game detail pages.
+
+### System Profile scanner
+
+- **Replaced custom scanner implementation with `systeminformation` v5.31.6.** The ~1380-line hand-rolled PowerShell/WMI + native CLI scanner has been rewritten to ~306 lines using the cross-platform `systeminformation` npm package. Exports, SPEC_VERSION (3), cache format, and spec shape are identical — `main.cjs` and the renderer require no changes. Vulkan version is still probed via `vulkaninfo --summary` since `systeminformation` does not expose graphics-API version strings.
+
 ## v2.2.0 — Crossroads · 2026-05-19
 
 Linux gets first-class treatment across the launcher, the system scanner gets sharper teeth, and the updater + installer stop tripping over themselves. Picks up the system-profile groundwork laid in v2.1.0 and makes that data actually matter cross-platform — sysreq panels auto-pick your OS, the runnable filter respects it, the scanner reports DDR/NVMe types correctly on both platforms, and the launcher no longer pretends a Linux user lives in a Windows world.

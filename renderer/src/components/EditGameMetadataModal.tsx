@@ -11,7 +11,16 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { ImageIcon, Link as LinkIcon, Loader2, Save, Upload, X } from "lucide-react"
+import {
+  ImageIcon,
+  Save,
+  X,
+} from "lucide-react"
+import {
+  Link as LinkIcon,
+  Loader2,
+  Upload,
+} from "@/components/icons"
 import { proxyImageUrl, cn } from "@/lib/utils"
 import type { Game } from "@/lib/types"
 

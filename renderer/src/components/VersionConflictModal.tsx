@@ -1,5 +1,10 @@
 import { Button } from "@/components/ui/button"
-import { AlertTriangle, ArrowRight, Calendar, Tag } from "lucide-react"
+import {
+  ArrowRight,
+  Calendar,
+  Tag,
+} from "lucide-react"
+import { AlertTriangle } from "@/components/icons"
 import { timeAgoLong } from "@/lib/utils"
 
 type Props = {

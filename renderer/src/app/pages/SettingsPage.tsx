@@ -1,5 +1,32 @@
 import { useEffect, useMemo, useRef, useState } from "react"
-import { ArrowDownToLine, ChevronDown, Check, ExternalLink, FolderOpen, Gamepad2, HardDrive, ImageIcon, Loader2, LogIn, LogOut, Pencil, Plus, RefreshCw, Settings2, Sparkles, Upload, UserRound, Terminal, Cpu, FlaskConical, X, Zap, Layers } from "lucide-react"
+import {
+  ArrowDownToLine,
+  HardDrive,
+  ImageIcon,
+  Pencil,
+  RefreshCw,
+  UserRound,
+  Cpu,
+  FlaskConical,
+  X,
+} from "lucide-react"
+import {
+  ChevronDown,
+  Check,
+  ExternalLink,
+  FolderOpen,
+  Gamepad2,
+  Loader2,
+  LogIn,
+  LogOut,
+  Plus,
+  Settings2,
+  Sparkles,
+  Upload,
+  Terminal,
+  Zap,
+  Layers,
+} from "@/components/icons"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -33,7 +60,7 @@ import { useToast } from "@/context/toast-context"
 import { useNavigate, useSearchParams } from "react-router-dom"
 import {
   useMotionPreferences,
-  setAnimatedBackgroundsEnabled as persistAnimatedBackgrounds,
+  setColorAuraEnabled as persistColorAura,
   setReducedMotionEnabled as persistReducedMotion,
 } from "@/hooks/use-motion-preferences"
 
@@ -238,7 +265,7 @@ export function SettingsPage() {
 
   // Motion preferences (animated backgrounds + reduced motion). Hook reads
   // from electron-store + localStorage; setters below persist + sync.
-  const { animatedBackgroundsEnabled, reducedMotionEnabled } = useMotionPreferences()
+  const { colorAuraEnabled, reducedMotionEnabled } = useMotionPreferences()
 
   // Overlay settings state
   const [overlayEnabled, setOverlayEnabled] = useState(true)
@@ -1214,12 +1241,14 @@ export function SettingsPage() {
     }).catch(() => { })
   }
 
-  // Animated backgrounds + reduced motion. Persisting via the helpers in
+  // Color aura + reduced motion. Persisting via the helpers in
   // use-motion-preferences updates electron-store + localStorage and fires
   // the cross-window event; useAppPreferencesSync picks that up and POSTs
   // to /api/account/app-preferences so the value syncs to the web app too.
-  const updateAnimatedBackgroundsEnabled = (checked: boolean) => {
-    void persistAnimatedBackgrounds(checked)
+  // The wire field stays `animatedBackgroundsEnabled` for compatibility
+  // with the web app — only the local naming changed.
+  const updateColorAuraEnabled = (checked: boolean) => {
+    void persistColorAura(checked)
     apiFetch("/api/account/app-preferences", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -2150,7 +2179,7 @@ export function SettingsPage() {
                         Appearance & motion
                       </div>
                       <div className="text-xs text-zinc-400 mt-0.5">
-                        Controls game-page background animation and motion intensity. Synced with your account.
+                        Controls the color aura effect and overall motion intensity. Synced with your account.
                       </div>
                     </div>
                     <Button
@@ -2169,14 +2198,14 @@ export function SettingsPage() {
                   <div className="rounded-xl border border-white/[.07] bg-zinc-900/50 p-4 divide-y divide-white/[.05]">
                     <div className="flex items-center justify-between gap-4 py-3">
                       <div className="min-w-0">
-                        <div className="text-sm font-medium leading-tight">Animated backgrounds</div>
+                        <div className="text-sm font-medium leading-tight">Color aura</div>
                         <div className="text-xs text-zinc-400 mt-0.5">
-                          Subtle ambient motion on game pages.
+                          Paints the page and game cards with each title's signature colors.
                         </div>
                       </div>
                       <Switch
-                        checked={animatedBackgroundsEnabled}
-                        onCheckedChange={updateAnimatedBackgroundsEnabled}
+                        checked={colorAuraEnabled}
+                        onCheckedChange={updateColorAuraEnabled}
                         className="shrink-0"
                       />
                     </div>
@@ -2184,7 +2213,7 @@ export function SettingsPage() {
                       <div className="min-w-0">
                         <div className="text-sm font-medium leading-tight">Reduced motion</div>
                         <div className="text-xs text-zinc-400 mt-0.5">
-                          Tones animations down site-wide. Overrides animated backgrounds.
+                          Damps animations everywhere — sidebar, transitions, color aura, hover effects.
                         </div>
                       </div>
                       <Switch

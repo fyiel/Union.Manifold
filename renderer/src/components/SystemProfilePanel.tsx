@@ -3,7 +3,28 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Cpu, Loader2, RefreshCw, Monitor, HardDrive, Zap, MemoryStick, Trash2, ShieldCheck, CloudUpload, CloudOff, CheckCircle2, Laptop, X, Check, Pencil, TrendingUp, Clock3 } from "lucide-react"
+import {
+  Cpu,
+  RefreshCw,
+  Monitor,
+  HardDrive,
+  MemoryStick,
+  CloudUpload,
+  CloudOff,
+  CheckCircle2,
+  Laptop,
+  X,
+  Pencil,
+  Clock3,
+} from "lucide-react"
+import {
+  Loader2,
+  Zap,
+  Trash2,
+  ShieldCheck,
+  Check,
+  TrendingUp,
+} from "@/components/icons"
 import { Switch } from "@/components/ui/switch"
 import { Input } from "@/components/ui/input"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"

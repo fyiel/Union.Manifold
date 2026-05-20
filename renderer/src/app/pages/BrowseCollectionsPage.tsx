@@ -3,16 +3,18 @@ import { useNavigate, useSearchParams } from "react-router-dom"
 import {
   ArrowLeft,
   ArrowRight,
-  Check,
   GitFork,
+  X,
+} from "lucide-react"
+import {
+  Check,
   Globe,
   Layers3,
   Loader2,
   MoreHorizontal,
   Search,
   Users,
-  X,
-} from "lucide-react"
+} from "@/components/icons"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"

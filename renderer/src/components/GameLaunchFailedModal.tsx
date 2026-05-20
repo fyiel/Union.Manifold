@@ -1,5 +1,5 @@
 import { Button } from "@/components/ui/button"
-import { AlertTriangle } from "lucide-react"
+import { AlertTriangle } from "@/components/icons"
 
 type GameLaunchFailedModalProps = {
   open: boolean

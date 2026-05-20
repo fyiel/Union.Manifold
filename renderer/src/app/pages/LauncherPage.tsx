@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom"
 import { GameCard } from "@/components/GameCard"
 import { GameCardCompact } from "@/components/GameCardCompact"
 import { GameCardSkeleton } from "@/components/GameCardSkeleton"
+import { PageAura } from "@/components/page-aura"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ErrorMessage } from "@/components/ErrorMessage"
@@ -15,7 +16,8 @@ import { PaginationBar } from "@/components/PaginationBar"
 import { formatNumber, generateErrorCode, ErrorTypes, getInstalledVersionLabel, hasInstalledVersionUpdate, proxyImageUrl } from "@/lib/utils"
 import { useConnectivityStatus } from "@/hooks/use-online-status"
 import { fetchCatalogGames, fetchCatalogStats, getCatalogCache, hydrateCatalogCache, isCatalogGamesStale, isCatalogStatsStale, mergeInstalledGames, persistCatalogCache, type CatalogGame } from "@/lib/catalog"
-import { ArrowRight, Cloud, Download, Layers3 } from "lucide-react"
+import { ArrowRight, Cloud } from "lucide-react"
+import { Download, Layers3 } from "@/components/icons"
 import { usePlayHistory } from "@/hooks/use-play-history"
 import { useUserCollections } from "@/hooks/use-user-collections"
 
@@ -400,7 +402,8 @@ export function LauncherPage() {
   const displayTotalSizeGB = (stats as any).totalSizeGB ?? Math.round(displayTotalSizeTB * 1024 * 10) / 10
 
   return (
-    <div className="space-y-12 pb-4">
+    <div className="relative space-y-12 pb-4">
+      <PageAura />
       <CriticalLoadModal
         open={Boolean(gamesError) && hasCriticalServiceInterruption && criticalLoadOpen}
         onOpenChange={setCriticalLoadOpen}
@@ -763,7 +766,7 @@ export function LauncherPage() {
                 <button
                   key={collection.id}
                   type="button"
-                  onClick={() => navigate(`/library?collection=${encodeURIComponent(collection.name)}`)}
+                  onClick={() => navigate(`/collections/view/${encodeURIComponent(collection.id)}`)}
                   className="group flex flex-col rounded-3xl border border-white/[.07] bg-zinc-900/40 backdrop-blur-md overflow-hidden transition-colors hover:border-white/[.14] text-left"
                 >
                   <div className="relative aspect-[16/10] w-full overflow-hidden bg-zinc-900">

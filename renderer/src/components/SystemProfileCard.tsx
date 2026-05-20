@@ -1,6 +1,12 @@
 import type { ReactNode } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Cpu, HardDrive, Monitor, MemoryStick, Zap } from "lucide-react"
+import {
+  Cpu,
+  HardDrive,
+  Monitor,
+  MemoryStick,
+} from "lucide-react"
+import { Zap } from "@/components/icons"
 
 /**
  * Renders another user's hardware spec — either a single-line summary

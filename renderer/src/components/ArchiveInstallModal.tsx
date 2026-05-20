@@ -3,16 +3,18 @@ import { Button } from "@/components/ui/button"
 import { useDownloadsActions } from "@/context/downloads-context"
 import type { Game } from "@/lib/types"
 import {
-  AlertTriangle,
   Archive,
   CheckCircle2,
   CircleX,
   FileArchive,
+} from "lucide-react"
+import {
+  AlertTriangle,
   FolderOpen,
   Layers,
   Loader2,
   Upload,
-} from "lucide-react"
+} from "@/components/icons"
 
 type Step = "method" | "pick" | "confirm" | "installing" | "done" | "error"
 type ArchiveMode = "single" | "multipart"

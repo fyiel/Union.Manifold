@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, useCallback } from "react"
 import { useSearchParams, Link } from "react-router-dom"
 import { GameActionContextMenu, GameActionMenuPanel } from "@/components/GameActionMenu"
 import { GameCard } from "@/components/GameCard"
+import { PageAura } from "@/components/page-aura"
 import { GameCardSkeleton } from "@/components/GameCardSkeleton"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -15,11 +16,28 @@ import { hasInstalledVersionUpdate, pickGameExecutable, cn } from "@/lib/utils"
 import { useDownloads, useDownloadsActions } from "@/context/downloads-context"
 import { getCatalogCache, type CatalogGame } from "@/lib/catalog"
 import {
-  Trash2, AlertTriangle, FolderOpen, ExternalLink, Unlink2,
-  Terminal, CheckSquare2, Layers3, Search, ArrowUpDown, Settings2,
-  X, Loader2, Check, MoreHorizontal, Download, ChevronLeft, ChevronRight,
-  ChevronDown,
+  CheckSquare2,
+  ArrowUpDown,
+  X,
 } from "lucide-react"
+import {
+  Trash2,
+  AlertTriangle,
+  FolderOpen,
+  ExternalLink,
+  Unlink2,
+  Terminal,
+  Layers3,
+  Search,
+  Settings2,
+  Loader2,
+  Check,
+  MoreHorizontal,
+  Download,
+  ChevronLeft,
+  ChevronRight,
+  ChevronDown,
+} from "@/components/icons"
 import { ExePickerModal } from "@/components/ExePickerModal"
 import { EditGameMetadataModal } from "@/components/EditGameMetadataModal"
 import { GameLinuxConfigModal } from "@/components/GameLinuxConfigModal"
@@ -942,7 +960,8 @@ export function LibraryPage() {
   }
 
   return (
-    <div className="space-y-5">
+    <div className="relative space-y-5">
+      <PageAura />
       {/* Header */}
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div>

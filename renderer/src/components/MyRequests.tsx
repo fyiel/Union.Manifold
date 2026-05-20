@@ -9,13 +9,12 @@ import { apiFetch, apiUrl } from "@/lib/api"
 import {
   CheckCircle,
   Clock,
-  Info,
-  Link as LinkIcon,
   MessageCircle,
   MessageSquare,
   RefreshCw,
   XCircle,
 } from "lucide-react"
+import { Info, Link as LinkIcon } from "@/components/icons"
 
 export type RequestRecord = {
   id: number

@@ -1,20 +1,25 @@
+import type { ComponentType } from "react"
+import { Library, Clock, Camera } from "lucide-react"
 import {
   Compass,
   Download,
   Gamepad2,
-  type LucideIcon,
-  Library,
   Settings,
   Star,
   Heart,
-  Clock,
-  Camera,
-} from "lucide-react"
+} from "@/components/icons"
+
+/**
+ * Nav icons accept just a `className` from their consumer. Using a permissive
+ * type here lets us mix Lucide icons (which haven't been animated yet) with
+ * the animated wrappers from `@/components/icons` without TS conflicts.
+ */
+export type NavIcon = ComponentType<{ className?: string }>
 
 export type PrimaryNavItem = {
   label: string
   to: string
-  icon: LucideIcon
+  icon: NavIcon
   description: string
 }
 

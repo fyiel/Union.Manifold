@@ -10,17 +10,19 @@ import {
 import type { Game } from "@/lib/types"
 import { apiFetch } from "@/lib/api"
 import {
-  AlertTriangle,
   CheckCircle2,
   CircleX,
-  ExternalLink,
   FileArchive,
-  Loader2,
   ShieldAlert,
   ArrowRightLeft,
   HardDrive,
   Cpu,
 } from "lucide-react"
+import {
+  AlertTriangle,
+  ExternalLink,
+  Loader2,
+} from "@/components/icons"
 import { ArchiveInstallModal } from "@/components/ArchiveInstallModal"
 import { compareToProfile, evaluateGpuDriver, type RequirementVerdict, type RequirementCheck, type DriverStatus } from "@/lib/system-requirements"
 

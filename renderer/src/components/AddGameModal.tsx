@@ -11,7 +11,17 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
-import { Archive, CheckCircle2, FolderOpen, ImageIcon, Loader2, Plus, Search } from "lucide-react"
+import {
+  Archive,
+  CheckCircle2,
+  ImageIcon,
+} from "lucide-react"
+import {
+  FolderOpen,
+  Loader2,
+  Plus,
+  Search,
+} from "@/components/icons"
 import { apiUrl } from "@/lib/api"
 import { proxyImageUrl } from "@/lib/utils"
 import { ArchiveInstallModal, type ArchiveInstallMetadata } from "@/components/ArchiveInstallModal"
