@@ -8,12 +8,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Union-Crax/UnionCrax.Direct.git"
+    "url": "https://github.com/UnionCrax-Team/UnionCrax.Direct.git"
   },
   "bugs": {
-    "url": "https://github.com/Union-Crax/UnionCrax.Direct/issues"
+    "url": "https://github.com/UnionCrax-Team/UnionCrax.Direct/issues"
   },
-  "homepage": "https://github.com/Union-Crax/UnionCrax.Direct#readme",
+  "homepage": "https://github.com/UnionCrax-Team/UnionCrax.Direct#readme",
   "scripts": {
     "setup": "node ./node_modules/electron/install.js",
     "dev": "concurrently -k \"pnpm:dev:renderer\" \"pnpm:dev:electron\"",
@@ -87,7 +87,7 @@
     "publish": [
       {
         "provider": "github",
-        "owner": "Union-Crax",
+        "owner": "UnionCrax-Team",
         "repo": "UnionCrax.Direct"
       }
     ],
