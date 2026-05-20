@@ -12,7 +12,7 @@ Thank you for your interest in contributing! This guide will help you set up the
 
 ### 1. Clone the repository
 ```bash
-git clone https://github.com/Union-Crax/UnionCrax.Direct.git
+git clone https://github.com/UnionCrax-Team/UnionCrax.Direct.git
 cd UnionCrax.Direct
 ```
 

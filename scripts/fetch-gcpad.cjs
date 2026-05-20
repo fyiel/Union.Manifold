@@ -2,7 +2,7 @@
  * fetch-gcpad.cjs
  *
  * Downloads the gcpad-unioncrax-direct.zip asset from the latest
- * veeeanti/GCPad_API GitHub release and extracts gcpad.dll and SDL2.dll
+ * UnionCrax-Team/GCPad_API GitHub release and extracts gcpad.dll and SDL2.dll
  * into gcpad-dll/.
  *
  * Usage:
@@ -20,7 +20,7 @@ const path   = require('node:path')
 const url    = require('node:url')
 const { execSync } = require('node:child_process')
 
-const REPO      = 'veeeanti/GCPad_API'
+const REPO      = 'UnionCrax-Team/GCPad_API'
 const ZIP_ASSET = 'gcpad-unioncrax-direct.zip'
 const OUT_DIR   = path.join(__dirname, '..', 'gcpad-dll')
 
@@ -106,7 +106,7 @@ async function main() {
 
   if (release.message === 'Not Found') {
     console.error(`[fetch-gcpad] No release found${tagArg ? ` for tag ${tagArg}` : ''}.`)
-    console.error(`  Push a version tag (e.g. v1.0.0) to veeeanti/GCPad_API to create one.`)
+    console.error(`  Push a version tag (e.g. v1.0.0) to UnionCrax-Team/GCPad_API to create one.`)
     process.exit(1)
   }
 

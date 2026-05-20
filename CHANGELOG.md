@@ -308,7 +308,7 @@ The launcher can now scan your PC's hardware and use it across the whole UC ecos
 
 ### Fixes & Improvements
 
-- **Fixed download payload type validation in Electron** - the `uc:download-start` and `uc:download-resume-with-fresh-url` IPC handlers now defensively coerce non-string `url` values (e.g., persisted `DownloadHostEntry` objects from old builds) to strings before calling `.includes()`, preventing "url.includes is not a function" errors ([#15](https://github.com/Union-Crax/UnionCrax.Direct/issues/15))
+- **Fixed download payload type validation in Electron** - the `uc:download-start` and `uc:download-resume-with-fresh-url` IPC handlers now defensively coerce non-string `url` values (e.g., persisted `DownloadHostEntry` objects from old builds) to strings before calling `.includes()`, preventing "url.includes is not a function" errors ([#15](https://github.com/UnionCrax-Team/UnionCrax.Direct/issues/15))
 - **Fixed stale download restoration from localStorage** - download items persisted by older builds that had `url` as an object (`{url: string, part: number|null}`) are now sanitized on app startup, extracting the string URL before resuming
 - **Added type coercion in resolveDownloadUrl** - the `resolveDownloadUrl` function now coerces non-string `url` inputs at entry point, ensuring old persisted state can never produce a falsely-resolved download URL object
 
@@ -343,7 +343,7 @@ The launcher can now scan your PC's hardware and use it across the whole UC ecos
   - Each sidebar item shows descriptive text for quick identification
   - Update check button moved to sidebar footer for easy access
   - Eliminates endless scrolling while preserving all existing functionality
-- **Linux gaming and VR support** - added comprehensive support for Windows games on Linux via Wine/Proton, and set up SteamVR/OpenXR for VR games ([#14](https://github.com/Union-Crax/UnionCrax.Direct/pull/14))
+- **Linux gaming and VR support** - added comprehensive support for Windows games on Linux via Wine/Proton, and set up SteamVR/OpenXR for VR games ([#14](https://github.com/UnionCrax-Team/UnionCrax.Direct/pull/14))
   - Added `ucLinux` and `ucVR` IPC APIs in the Electron preload script
   - Introduced `LINUX_SETTINGS_KEYS` and `VR_SETTINGS_KEYS` constants for persistent storage
   - Implemented comprehensive UI controls in SettingsPage for Wine/Proton and VR runtime configuration
