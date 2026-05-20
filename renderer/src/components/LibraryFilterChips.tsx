@@ -4,6 +4,12 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
+import {
+  CollectionActionContextMenu,
+  COLLECTION_MENU_ICONS,
+  type CollectionMenuPoint,
+  type CollectionMenuSection,
+} from "@/components/CollectionActionMenu"
 
 type PillProps = {
   label: string
@@ -28,6 +34,7 @@ function Pill({
   onRemoveFromSelected,
 }: PillProps) {
   const [menuOpen, setMenuOpen] = useState(false)
+  const [contextMenu, setContextMenu] = useState<CollectionMenuPoint | null>(null)
   const [renaming, setRenaming] = useState(false)
   const [renameDraft, setRenameDraft] = useState(rawLabel ?? label)
   const inputRef = useRef<HTMLInputElement | null>(null)
@@ -49,6 +56,43 @@ function Pill({
   }
 
   const hasManagement = Boolean(onRename || onDelete || onRemoveFromSelected)
+
+  const buildContextSections = (): CollectionMenuSection[] => {
+    const manage: CollectionMenuSection["items"] = []
+    if (onRename) {
+      manage.push({
+        id: "rename",
+        icon: COLLECTION_MENU_ICONS.rename,
+        label: "Rename",
+        onSelect: () => {
+          setRenameDraft(rawLabel ?? label)
+          setRenaming(true)
+        },
+      })
+    }
+    if (onRemoveFromSelected) {
+      manage.push({
+        id: "remove-from-selection",
+        icon: COLLECTION_MENU_ICONS.edit,
+        label: "Remove from selection",
+        onSelect: onRemoveFromSelected,
+      })
+    }
+    const danger: CollectionMenuSection["items"] = []
+    if (onDelete) {
+      danger.push({
+        id: "delete",
+        icon: COLLECTION_MENU_ICONS.delete,
+        label: "Delete collection",
+        destructive: true,
+        onSelect: onDelete,
+      })
+    }
+    const out: CollectionMenuSection[] = []
+    if (manage.length > 0) out.push({ id: "manage", items: manage })
+    if (danger.length > 0) out.push({ id: "danger", items: danger })
+    return out
+  }
 
   if (renaming) {
     return (
@@ -87,6 +131,12 @@ function Pill({
           ? "border-white bg-white text-black"
           : "border-white/[.07] bg-white/[.03] text-zinc-300 hover:bg-white/[.07] hover:text-white"
       )}
+      onContextMenu={(e) => {
+        if (!hasManagement) return
+        e.preventDefault()
+        e.stopPropagation()
+        setContextMenu({ x: e.clientX, y: e.clientY })
+      }}
     >
       <button
         type="button"
@@ -168,6 +218,13 @@ function Pill({
           </PopoverContent>
         </Popover>
       )}
+      <CollectionActionContextMenu
+        open={contextMenu != null}
+        position={contextMenu}
+        onClose={() => setContextMenu(null)}
+        title={rawLabel ?? label}
+        sections={buildContextSections()}
+      />
     </span>
   )
 }

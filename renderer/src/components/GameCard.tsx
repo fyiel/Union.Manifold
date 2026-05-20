@@ -520,10 +520,23 @@ export const GameCard = memo(function GameCard({
 
   const cardImageSrc = cardImageCandidates[imageCandidateIndex] || cardFallbackImage
 
+  // Reset only when the underlying source URLs change. Previously this
+  // depended on `cardImageCandidates` (a useMemo array). React is permitted
+  // to discard memo caches and recompute — that produces a new array
+  // reference even though every URL inside is identical, which re-fired this
+  // effect on unrelated re-renders (e.g. hover / sort) and flashed the
+  // skeleton back on.
   useEffect(() => {
     setImageCandidateIndex(0)
     setImageLoaded(false)
-  }, [cardImageCandidates])
+  }, [
+    cardFallbackImage,
+    game.background_image,
+    game.hero_image,
+    game.image,
+    game.localImage,
+    game.splash,
+  ])
 
   return (
     <div className="relative group/container h-full"

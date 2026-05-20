@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { useNavigate } from "react-router-dom"
+import { useNavigate, useSearchParams } from "react-router-dom"
 import {
   Layers3,
   Pencil,
@@ -53,6 +53,15 @@ import { useFollowedCollections, type FollowedCollection } from "@/hooks/use-fol
 import { useDownloadsActions } from "@/context/downloads-context"
 import { getCatalogCache, type CatalogGame } from "@/lib/catalog"
 import { apiFetch } from "@/lib/api"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import {
+  CollectionActionContextMenu,
+  CollectionActionMenuPanel,
+  COLLECTION_MENU_ICONS,
+  type CollectionMenuPoint,
+  type CollectionMenuSection,
+} from "@/components/CollectionActionMenu"
+import { MoreHorizontal } from "lucide-react"
 
 type InstalledGame = {
   appid: string
@@ -168,6 +177,25 @@ export function CollectionsPage() {
 
   const installedById = useMemo(() => new Map(installed.map((g) => [g.appid, g])), [installed])
 
+  // Scroll the matching followed card into view when arriving via
+  // `/collections#followed-<id>` (used by the sidebar's Following links).
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const hash = window.location.hash || ""
+    const m = hash.match(/followed-([^/?]+)$/)
+    if (!m) return
+    if (!followed.items || followed.items.length === 0) return
+    const id = m[1]
+    const tries = [80, 250, 600]
+    const timers = tries.map((delay) =>
+      window.setTimeout(() => {
+        const el = document.getElementById(`followed-${id}`)
+        if (el) el.scrollIntoView({ behavior: "smooth", block: "start" })
+      }, delay)
+    )
+    return () => timers.forEach((t) => window.clearTimeout(t))
+  }, [followed.items])
+
   // Batch-install every missing game in a collection. Resolves each appid from
   // the cached catalog (the one Browse already keeps warm) and feeds them to
   // `startGameDownload` one by one — the downloads queue handles concurrency
@@ -237,6 +265,39 @@ export function CollectionsPage() {
     }
   }, [renameTarget])
 
+  // ---- Deep-link from the detail page: ?edit=<id> / ?share=<id> / ?contributors=<id>
+  const [searchParams, setSearchParams] = useSearchParams()
+  useEffect(() => {
+    if (collections.length === 0) return
+    const editId = searchParams.get("edit")
+    const shareId = searchParams.get("share")
+    const contributorsId = searchParams.get("contributors")
+    let consumed = false
+    if (editId) {
+      const target = collections.find((c) => c.id === editId)
+      if (target) { setEditTarget(target); consumed = true }
+    }
+    if (shareId) {
+      const target = collections.find((c) => c.id === shareId)
+      if (target) { setShareTarget(target); consumed = true }
+    }
+    if (contributorsId) {
+      const target = collections.find((c) => c.id === contributorsId)
+      if (target) {
+        if (target.cloud) setContributorsTarget(target)
+        else setSyncPromptTarget(target)
+        consumed = true
+      }
+    }
+    if (consumed) {
+      const next = new URLSearchParams(searchParams)
+      next.delete("edit")
+      next.delete("share")
+      next.delete("contributors")
+      setSearchParams(next, { replace: true })
+    }
+  }, [searchParams, collections, setSearchParams])
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -249,6 +310,14 @@ export function CollectionsPage() {
         </div>
         <div className="flex items-center gap-2">
           <SyncStatus authed={authed} loading={loading} />
+          <Button
+            variant="outline"
+            className="rounded-2xl gap-2 h-10"
+            onClick={() => navigate("/collections/browse")}
+          >
+            <Globe className="h-4 w-4" />
+            Discover
+          </Button>
           <Button
             className="rounded-2xl gap-2 h-10"
             onClick={() => setCreateOpen(true)}
@@ -443,7 +512,7 @@ export function CollectionsPage() {
               renaming={renameTarget?.id === collection.id}
               renameDraft={renameDraft}
               renameInputRef={renameInputRef}
-              onOpen={() => navigate(`/library?collection=${encodeURIComponent(collection.name)}`)}
+              onOpen={() => navigate(`/collections/view/${encodeURIComponent(collection.id)}`)}
               onStartRename={() => {
                 setRenameDraft(collection.name)
                 setRenameTarget(collection)
@@ -637,6 +706,94 @@ function SyncStatus({ authed, loading }: { authed: boolean | null; loading: bool
   )
 }
 
+function buildCollectionMenuSections(args: {
+  collection: UserCollection
+  missingCount: number
+  updateCount: number
+  onEditMembers: () => void
+  onStartRename: () => void
+  onShare: () => void
+  onContributors: () => void
+  onInstallMissing: () => void
+  onUpdateOutdated: () => void
+  onDelete: () => void
+}): CollectionMenuSection[] {
+  const {
+    collection,
+    missingCount,
+    updateCount,
+    onEditMembers,
+    onStartRename,
+    onShare,
+    onContributors,
+    onInstallMissing,
+    onUpdateOutdated,
+    onDelete,
+  } = args
+  const isOwner = collection.role === "owner"
+  const canRename = isOwner || collection.permissions.canRename
+
+  const downloads: CollectionMenuSection["items"] = []
+  if (missingCount > 0) {
+    downloads.push({
+      id: "install-missing",
+      icon: COLLECTION_MENU_ICONS.install,
+      label: `Install ${missingCount} missing`,
+      onSelect: onInstallMissing,
+    })
+  }
+  if (updateCount > 0) {
+    downloads.push({
+      id: "update-outdated",
+      icon: COLLECTION_MENU_ICONS.update,
+      label: `Update ${updateCount} game${updateCount === 1 ? "" : "s"}`,
+      onSelect: onUpdateOutdated,
+    })
+  }
+
+  const manage: CollectionMenuSection["items"] = [
+    { id: "edit", icon: COLLECTION_MENU_ICONS.edit, label: "Edit games", onSelect: onEditMembers },
+  ]
+  if (canRename) {
+    manage.push({ id: "rename", icon: COLLECTION_MENU_ICONS.rename, label: "Rename", onSelect: onStartRename })
+  }
+
+  const sharing: CollectionMenuSection["items"] = []
+  if (isOwner) {
+    sharing.push({
+      id: "share",
+      icon: COLLECTION_MENU_ICONS.share,
+      label: collection.shareToken ? "Sharing settings" : "Share collection",
+      disabled: !collection.cloud,
+      onSelect: onShare,
+    })
+    sharing.push({
+      id: "contributors",
+      icon: COLLECTION_MENU_ICONS.contributors,
+      label: "Manage contributors",
+      onSelect: onContributors,
+    })
+  }
+
+  const danger: CollectionMenuSection["items"] = []
+  if (isOwner) {
+    danger.push({
+      id: "delete",
+      icon: COLLECTION_MENU_ICONS.delete,
+      label: "Delete collection",
+      destructive: true,
+      onSelect: onDelete,
+    })
+  }
+
+  return [
+    ...(downloads.length > 0 ? [{ id: "downloads", label: "Downloads", items: downloads }] : []),
+    { id: "manage", label: "Manage", items: manage },
+    ...(sharing.length > 0 ? [{ id: "sharing", label: "Sharing", items: sharing }] : []),
+    ...(danger.length > 0 ? [{ id: "danger", items: danger }] : []),
+  ]
+}
+
 function CollectionCard({
   collection,
   installedById,
@@ -696,9 +853,29 @@ function CollectionCard({
     if (catalogImg) coverCandidates.push(catalogImg)
   }
   const cover = coverCandidates
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [contextMenu, setContextMenu] = useState<CollectionMenuPoint | null>(null)
+  const menuSections = buildCollectionMenuSections({
+    collection,
+    missingCount,
+    updateCount,
+    onEditMembers,
+    onStartRename,
+    onShare,
+    onContributors,
+    onInstallMissing,
+    onUpdateOutdated,
+    onDelete,
+  })
 
   return (
-    <div className="group/card flex flex-col rounded-3xl border border-white/[.07] bg-zinc-900/40 backdrop-blur-md overflow-hidden transition-colors hover:border-white/[.14]">
+    <div
+      className="group/card flex flex-col rounded-3xl border border-white/[.07] bg-zinc-900/40 backdrop-blur-md overflow-hidden transition-colors hover:border-white/[.14]"
+      onContextMenu={(e) => {
+        e.preventDefault()
+        setContextMenu({ x: e.clientX, y: e.clientY })
+      }}
+    >
       <button
         type="button"
         onClick={onOpen}
@@ -781,29 +958,26 @@ function CollectionCard({
                 <RefreshCw className="h-3.5 w-3.5" />
               </IconButton>
             )}
-            <IconButton title="Edit games" onClick={onEditMembers}>
-              <Layers3 className="h-3.5 w-3.5" />
-            </IconButton>
-            {isOwner && (
-              <>
-                <IconButton title="Manage contributors" onClick={onContributors}>
-                  <Users className="h-3.5 w-3.5" />
-                </IconButton>
-                <IconButton title="Share" onClick={onShare} disabled={!collection.cloud}>
-                  <Share2 className="h-3.5 w-3.5" />
-                </IconButton>
-              </>
-            )}
-            {(isOwner || collection.permissions.canRename) && (
-              <IconButton title="Rename" onClick={onStartRename}>
-                <Pencil className="h-3.5 w-3.5" />
-              </IconButton>
-            )}
-            {isOwner && (
-              <IconButton title="Delete" onClick={onDelete} destructive>
-                <Trash2 className="h-3.5 w-3.5" />
-              </IconButton>
-            )}
+            <Popover open={menuOpen} onOpenChange={setMenuOpen}>
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  aria-label="More actions"
+                  title="More actions"
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-zinc-400 hover:bg-white/[.06] hover:text-zinc-100 transition-colors"
+                >
+                  <MoreHorizontal className="h-4 w-4" />
+                </button>
+              </PopoverTrigger>
+              <PopoverContent align="end" className="w-auto p-0 bg-transparent border-0 shadow-none">
+                <CollectionActionMenuPanel
+                  title={collection.name}
+                  subtitle={isOwner ? "Your collection" : `by ${ownerName}`}
+                  sections={menuSections}
+                  onAfterSelect={() => setMenuOpen(false)}
+                />
+              </PopoverContent>
+            </Popover>
           </div>
         </div>
         <div className="flex items-center gap-1.5 text-[11px] text-zinc-500">
@@ -818,6 +992,14 @@ function CollectionCard({
           )}
         </div>
       </div>
+      <CollectionActionContextMenu
+        open={contextMenu != null}
+        position={contextMenu}
+        onClose={() => setContextMenu(null)}
+        title={collection.name}
+        subtitle={isOwner ? "Your collection" : `by ${ownerName}`}
+        sections={menuSections}
+      />
     </div>
   )
 }
@@ -919,7 +1101,7 @@ function FollowedCard({
 }) {
   const ownerName = collection.owner.displayName || collection.owner.username || "Someone"
   return (
-    <div className="group/card flex flex-col rounded-3xl border border-white/[.07] bg-zinc-900/40 backdrop-blur-md overflow-hidden transition-colors hover:border-white/[.14] relative">
+    <div id={`followed-${collection.id}`} className="group/card flex flex-col rounded-3xl border border-white/[.07] bg-zinc-900/40 backdrop-blur-md overflow-hidden transition-colors hover:border-white/[.14] relative scroll-mt-24">
       {collection.hasUpdates && (
         <span className="absolute top-3 left-3 z-20 inline-flex items-center gap-1 rounded-full border border-amber-500/30 bg-amber-500/15 backdrop-blur-sm px-2 py-0.5 text-[10px] font-semibold text-amber-300">
           <Sparkles className="h-2.5 w-2.5" />

@@ -14,6 +14,8 @@ const SearchPage = lazy(() => import("@/app/pages/SearchPage").then((m) => ({ de
 const GameDetailPage = lazy(() => import("@/app/pages/GameDetailPage").then((m) => ({ default: m.GameDetailPage })))
 const LibraryPage = lazy(() => import("@/app/pages/LibraryPage").then((m) => ({ default: m.LibraryPage })))
 const CollectionsPage = lazy(() => import("@/app/pages/CollectionsPage").then((m) => ({ default: m.CollectionsPage })))
+const BrowseCollectionsPage = lazy(() => import("@/app/pages/BrowseCollectionsPage").then((m) => ({ default: m.BrowseCollectionsPage })))
+const CollectionDetailPage = lazy(() => import("@/app/pages/CollectionDetailPage").then((m) => ({ default: m.CollectionDetailPage })))
 const DownloadsPage = lazy(() => import("@/app/pages/DownloadsPage").then((m) => ({ default: m.DownloadsPage })))
 const SettingsPage = lazy(() => import("@/app/pages/SettingsPage").then((m) => ({ default: m.SettingsPage })))
 const WishlistPage = lazy(() => import("@/app/pages/WishlistPage").then((m) => ({ default: m.WishlistPage })))
@@ -127,6 +129,8 @@ export default function App() {
                 <Route path="/game/:id" element={<GameDetailPage />} />
                 <Route path="/library" element={<LibraryPage />} />
                 <Route path="/collections" element={<CollectionsPage />} />
+                <Route path="/collections/browse" element={<BrowseCollectionsPage />} />
+                <Route path="/collections/view/:id" element={<CollectionDetailPage />} />
                 <Route path="/downloads" element={<DownloadsPage />} />
                 <Route path="/settings" element={<SettingsPage />} />
                 <Route path="/wishlist" element={<WishlistPage />} />
