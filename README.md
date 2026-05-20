@@ -4,7 +4,7 @@
 
 A fast, standalone Electron desktop application for managing and launching games from the UnionCrax platform. Direct downloads with minimal overhead and full control over your gaming library.
 
-![Version](https://img.shields.io/github/v/release/Union-Crax/UnionCrax.Direct?include_prereleases&style=flat-square)
+![Version](https://img.shields.io/github/v/release/UnionCrax-Team/UnionCrax.Direct?include_prereleases&style=flat-square)
 ![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-0078d4?style=flat-square)
 
@@ -39,20 +39,20 @@ A fast, standalone Electron desktop application for managing and launching games
 ### Windows Installation Options
 
 #### Option 1: NSIS Installer (Recommended)
-1. Go to [Releases](https://github.com/Union-Crax/UnionCrax.Direct/releases)
+1. Go to [Releases](https://github.com/UnionCrax-Team/UnionCrax.Direct/releases)
 2. Download `UnionCrax.Direct.Setup.X.X.X.exe`
 3. Run the installer and choose installation directory
 4. Create desktop/Start Menu shortcuts
 5. Launch UnionCrax.Direct from Start Menu or desktop
 
 #### Option 2: Portable Executable
-1. Go to [Releases](https://github.com/Union-Crax/UnionCrax.Direct/releases)
+1. Go to [Releases](https://github.com/UnionCrax-Team/UnionCrax.Direct/releases)
 2. Download `UnionCrax.Direct.X.X.X.exe`
 3. Run directly - no installation needed
 4. Settings and data are stored alongside the executable
 
 #### Option 3: ZIP Archive
-1. Go to [Releases](https://github.com/Union-Crax/UnionCrax.Direct/releases)
+1. Go to [Releases](https://github.com/UnionCrax-Team/UnionCrax.Direct/releases)
 2. Download `UnionCrax.Direct-X.X.X-win.zip`
 3. Extract to your preferred location
 4. Run `UnionCrax.Direct.exe` from the extracted folder
@@ -71,7 +71,7 @@ This installs the AppImage to `~/.local/share/UnionCrax.Direct` and adds a launc
 - Check [UnionCrax Status](https://status.union-crax.xyz)
 
 ### Having issues?
-- [Report an Issue](https://github.com/Union-Crax/UnionCrax.Direct/issues)
+- [Report an Issue](https://github.com/UnionCrax-Team/UnionCrax.Direct/issues)
 - [Post on our socials](https://union-crax.xyz/discord)
 
 ## Development
@@ -82,7 +82,7 @@ Want to contribute? See [CONTRIBUTING.md](CONTRIBUTING.md) for setup instruction
 
 ```bash
 # Clone repository
-git clone https://github.com/Union-Crax/UnionCrax.Direct.git
+git clone https://github.com/UnionCrax-Team/UnionCrax.Direct.git
 cd UnionCrax.Direct
 
 # Install dependencies
