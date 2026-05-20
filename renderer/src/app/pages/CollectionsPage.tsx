@@ -1,34 +1,36 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
 import {
-  Layers3,
   Pencil,
-  Plus,
-  Search,
   GitFork,
-  Trash2,
   X,
-  Check,
-  AlertTriangle,
   ArrowDown,
   ArrowRight,
   ArrowUp,
   Share2,
+  Cloud,
+  CloudOff,
+  BellOff,
+  RefreshCw,
+  UserPlus,
+} from "lucide-react"
+import {
+  Layers3,
+  Plus,
+  Search,
+  Trash2,
+  Check,
+  AlertTriangle,
   Globe,
   Lock,
   Copy,
   ExternalLink,
-  Cloud,
-  CloudOff,
   Download,
   Bell,
-  BellOff,
   Sparkles,
   Loader2,
-  RefreshCw,
   Users,
-  UserPlus,
-} from "lucide-react"
+} from "@/components/icons"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -61,7 +63,7 @@ import {
   type CollectionMenuPoint,
   type CollectionMenuSection,
 } from "@/components/CollectionActionMenu"
-import { MoreHorizontal } from "lucide-react"
+import { MoreHorizontal } from "@/components/icons"
 
 type InstalledGame = {
   appid: string
@@ -412,7 +414,7 @@ export function CollectionsPage() {
                   try {
                     const forked = await forkCloudCollection(collection.shareToken)
                     await refresh()
-                    navigate(`/library?collection=${encodeURIComponent(forked.name)}`)
+                    navigate(`/collections/view/${encodeURIComponent(forked.id)}`)
                   } catch (err) {
                     console.error("fork followed collection failed", err)
                     setForkError(err instanceof Error ? err.message : "Could not fork collection")

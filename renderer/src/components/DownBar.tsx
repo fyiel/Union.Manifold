@@ -2,7 +2,8 @@ import { useState, type MouseEvent } from "react"
 import { useNavigate } from "react-router-dom"
 import { useDownloadsSelector, useDownloadsActions, type DownloadItem } from "@/context/downloads-context"
 import { Progress } from "@/components/ui/progress"
-import { PauseCircle, Play, Plus, Activity, Download, HardDrive } from "lucide-react"
+import { PauseCircle, HardDrive } from "lucide-react"
+import { Play, Plus, Activity, Download } from "@/components/icons"
 import { AddGameModal } from "@/components/AddGameModal"
 
 const ACTIVE_STATUSES = ["downloading", "paused", "extracting", "installing", "verifying", "retrying"]

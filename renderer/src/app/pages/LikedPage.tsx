@@ -3,10 +3,16 @@ import { useNavigate } from "react-router-dom"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { GameCard } from "@/components/GameCard"
+import { PageAura } from "@/components/page-aura"
 import { GameCardSkeleton } from "@/components/GameCardSkeleton"
 import { apiFetch, apiUrl, getApiBaseUrl } from "@/lib/api"
 import { useDiscordAccount } from "@/hooks/use-discord-account"
-import { Heart, LogIn, RefreshCw, Star } from "lucide-react"
+import { RefreshCw } from "lucide-react"
+import {
+  Heart,
+  LogIn,
+  Star,
+} from "@/components/icons"
 
 interface Game {
   appid: string
@@ -77,8 +83,9 @@ export function LikedPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#09090b]">
-      <div className="container mx-auto max-w-7xl px-3 sm:px-4 py-6 sm:py-8">
+    <div className="relative min-h-screen bg-[#09090b]">
+      <PageAura />
+      <div className="container mx-auto max-w-7xl px-3 sm:px-4 py-6 sm:py-8 relative z-10">
         <div className="mb-6 sm:mb-8 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
           <div>
             <h1 className="text-2xl sm:text-3xl font-bold text-zinc-100  mb-1 sm:mb-2">Liked</h1>

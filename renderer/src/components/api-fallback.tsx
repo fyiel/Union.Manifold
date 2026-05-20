@@ -1,7 +1,8 @@
 "use client"
 
 import { useState } from "react"
-import { AlertTriangle, RefreshCw, WifiOff } from "lucide-react"
+import { RefreshCw } from "lucide-react"
+import { AlertTriangle, WifiOff } from "@/components/icons"
 import { LoadingAnimated } from "@/components/brand/brand-assets"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"

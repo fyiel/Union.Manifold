@@ -2,7 +2,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
-import { ExternalLink } from "lucide-react"
+import { ExternalLink } from "@/components/icons"
 import { useEffect, useState } from "react"
 
 type DesktopShortcutModalProps = {

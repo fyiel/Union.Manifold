@@ -2,7 +2,17 @@ import { useCallback, useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { apiFetch } from "@/lib/api"
-import { Monitor, Smartphone, Globe, LogOut, Loader2, RefreshCw, ShieldAlert } from "lucide-react"
+import {
+  Monitor,
+  Smartphone,
+  RefreshCw,
+  ShieldAlert,
+} from "lucide-react"
+import {
+  Globe,
+  LogOut,
+  Loader2,
+} from "@/components/icons"
 
 type SessionInfo = {
   id: number | string

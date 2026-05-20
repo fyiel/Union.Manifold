@@ -2,25 +2,27 @@ import { useEffect, useMemo, useState } from "react"
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import {
   ArrowLeft,
-  Bell,
   BellOff,
   Cloud,
   CloudOff,
+  GitFork,
+  Pencil,
+  RefreshCw,
+  Share2,
+} from "lucide-react"
+import {
+  Bell,
   Copy,
   Download,
-  GitFork,
   Globe,
   Layers3,
   Loader2,
   Lock,
   MoreHorizontal,
-  Pencil,
-  RefreshCw,
-  Share2,
   Sparkles,
   Trash2,
   Users,
-} from "lucide-react"
+} from "@/components/icons"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -34,6 +36,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { GameCard } from "@/components/GameCard"
+import { PageAura } from "@/components/page-aura"
 import { GameCardSkeleton } from "@/components/GameCardSkeleton"
 import { cn, getCardImage, hasInstalledVersionUpdate, proxyImageUrl } from "@/lib/utils"
 import { getCatalogCache, type CatalogGame } from "@/lib/catalog"
@@ -486,7 +489,7 @@ export function CollectionDetailPage() {
 
   return (
     <div
-      className="space-y-6"
+      className="relative space-y-6"
       onContextMenu={(e) => {
         // Only intercept context on header chrome, not inside game cards
         const target = e.target as HTMLElement
@@ -495,6 +498,7 @@ export function CollectionDetailPage() {
         setContextMenu({ x: e.clientX, y: e.clientY })
       }}
     >
+      <PageAura />
       <Button
         variant="ghost"
         onClick={() => navigate("/collections")}

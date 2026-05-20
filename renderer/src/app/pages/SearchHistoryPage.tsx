@@ -4,7 +4,8 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { apiFetch, apiUrl, getApiBaseUrl } from "@/lib/api"
 import { useDiscordAccount } from "@/hooks/use-discord-account"
-import { Clock, LogIn, RefreshCw, Trash2 } from "lucide-react"
+import { Clock, RefreshCw } from "lucide-react"
+import { LogIn, Trash2 } from "@/components/icons"
 
 interface SearchHistoryItem {
   term: string

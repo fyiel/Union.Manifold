@@ -7,7 +7,7 @@ import { AuthProvider } from "@/context/auth-context"
 import { Toaster } from "@/components/Toaster"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { AlertTriangle } from "lucide-react"
+import { AlertTriangle } from "@/components/icons"
 
 const LauncherPage = lazy(() => import("@/app/pages/LauncherPage").then((m) => ({ default: m.LauncherPage })))
 const SearchPage = lazy(() => import("@/app/pages/SearchPage").then((m) => ({ default: m.SearchPage })))

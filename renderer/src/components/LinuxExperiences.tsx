@@ -8,7 +8,17 @@ import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import { useDiscordAccount } from "@/hooks/use-discord-account"
 import { apiFetch, apiUrl, getApiBaseUrl } from "@/lib/api"
-import { Loader2, Send, Terminal, CheckCircle2, AlertCircle, ChevronDown, Pin } from "lucide-react"
+import {
+  CheckCircle2,
+  AlertCircle,
+  Pin,
+} from "lucide-react"
+import {
+  Loader2,
+  Send,
+  Terminal,
+  ChevronDown,
+} from "@/components/icons"
 import { useNavigate } from "react-router-dom"
 
 const RATING_LABELS: Record<number, string> = {

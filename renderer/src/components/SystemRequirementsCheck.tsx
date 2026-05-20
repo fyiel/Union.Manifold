@@ -1,6 +1,12 @@
 import { useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { AlertTriangle, CheckCircle2, CircleX, Cpu, HelpCircle } from "lucide-react"
+import {
+  CheckCircle2,
+  CircleX,
+  Cpu,
+  HelpCircle,
+} from "lucide-react"
+import { AlertTriangle } from "@/components/icons"
 import { compareToProfile, type RequirementVerdict, type RequirementCheck } from "@/lib/system-requirements"
 import type { GameRequirements } from "@/lib/types"
 
@@ -20,6 +26,31 @@ type State =
   | { kind: "no-profile"; defaultPlatform: Platform }
   | { kind: "no-requirements" }
   | { kind: "ready"; spec: any; defaultPlatform: Platform }
+
+function hasMeaningfulText(value: unknown): boolean {
+  if (typeof value !== "string") return false
+  const text = value.replace(/<[^>]*>/g, " ").replace(/&nbsp;/gi, " ").trim()
+  return text.length > 0
+}
+
+function hasMeaningfulReq(req: GameRequirements | null | undefined): boolean {
+  if (!req) return false
+  if (hasMeaningfulText(req.raw)) return true
+  if (hasMeaningfulText(req.cpu)) return true
+  if (hasMeaningfulText(req.directx)) return true
+  if (hasMeaningfulText(req.vulkan)) return true
+  if (hasMeaningfulText(req.notes)) return true
+  if (typeof req.ramGb === "number" && Number.isFinite(req.ramGb) && req.ramGb > 0) return true
+  if (typeof req.storageGb === "number" && Number.isFinite(req.storageGb) && req.storageGb > 0) return true
+
+  const osList = Array.isArray(req.os) ? req.os : req.os ? [req.os] : []
+  if (osList.some(entry => hasMeaningfulText(entry))) return true
+
+  const gpuList = Array.isArray(req.gpu) ? req.gpu : req.gpu ? [req.gpu] : []
+  if (gpuList.some(entry => hasMeaningfulText(entry))) return true
+
+  return false
+}
 
 const COMPONENT_LABEL: Record<RequirementCheck["component"], string> = {
   cpu: "CPU",
@@ -64,8 +95,8 @@ export function SystemRequirementsCheck({
   /** User's manual override. Null = OS-detected default. */
   const [overridePlatform, setOverridePlatform] = useState<Platform | null>(null)
 
-  const hasWindows = Boolean(minRequirements || recommendedRequirements)
-  const hasLinux = Boolean(linuxMinRequirements || linuxRecommendedRequirements)
+  const hasWindows = hasMeaningfulReq(minRequirements) || hasMeaningfulReq(recommendedRequirements)
+  const hasLinux = hasMeaningfulReq(linuxMinRequirements) || hasMeaningfulReq(linuxRecommendedRequirements)
 
   useEffect(() => {
     let cancelled = false
@@ -104,12 +135,16 @@ export function SystemRequirementsCheck({
 
   const verdictData = useMemo<{ verdict: RequirementVerdict; tier: "minimum" | "recommended" } | null>(() => {
     if (state.kind !== "ready") return null
+    const windowsRecommended = hasMeaningfulReq(recommendedRequirements) ? recommendedRequirements : null
+    const windowsMinimum = hasMeaningfulReq(minRequirements) ? minRequirements : null
+    const linuxRecommended = hasMeaningfulReq(linuxRecommendedRequirements) ? linuxRecommendedRequirements : null
+    const linuxMinimum = hasMeaningfulReq(linuxMinRequirements) ? linuxMinRequirements : null
     const target = selectedPlatform === "linux"
-      ? (linuxRecommendedRequirements || linuxMinRequirements)
-      : (recommendedRequirements || minRequirements)
+      ? (linuxRecommended || linuxMinimum)
+      : (windowsRecommended || windowsMinimum)
     if (!target) return null
     const tier: "minimum" | "recommended" =
-      (selectedPlatform === "linux" ? linuxRecommendedRequirements : recommendedRequirements) ? "recommended" : "minimum"
+      (selectedPlatform === "linux" ? linuxRecommended : windowsRecommended) ? "recommended" : "minimum"
     return { verdict: compareToProfile(state.spec, target), tier }
   }, [state, selectedPlatform, minRequirements, recommendedRequirements, linuxMinRequirements, linuxRecommendedRequirements])
 

@@ -1,4 +1,5 @@
-import { WifiOff, RefreshCw } from "lucide-react"
+import { RefreshCw } from "lucide-react"
+import { WifiOff } from "@/components/icons"
 import { Button } from "@/components/ui/button"
 
 interface OfflineBannerProps {

@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from "react"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { Copy, Check } from "lucide-react"
+import { Copy, Check } from "@/components/icons"
 import { logger } from "@/lib/logger"
 
 function getLineClass(line: string): string {

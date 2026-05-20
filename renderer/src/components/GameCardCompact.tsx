@@ -6,6 +6,7 @@ import { getCardImage, proxyImageUrl } from "@/lib/utils"
 import { nsfwRevealedAppids } from "@/lib/nsfw-session"
 import { GameActionContextMenu, type CollectionPickerEntry } from "@/components/GameActionMenu"
 import { useUserCollections } from "@/hooks/use-user-collections"
+import { GameArtAura } from "@/components/game-art-aura"
 
 type CompactGame = {
   appid: string
@@ -93,8 +94,8 @@ export const GameCardCompact = memo(function GameCardCompact({ game }: { game: C
   }, [cardImageSrc])
 
   return (
+    <GameArtAura src={cardImageSrc} scopeKey={game.appid}>
     <div
-      className="relative"
       onContextMenu={(e) => {
         e.preventDefault()
         e.stopPropagation()
@@ -160,6 +161,7 @@ export const GameCardCompact = memo(function GameCardCompact({ game }: { game: C
         collectionPicker={collectionPicker}
       />
     </div>
+    </GameArtAura>
   )
 })
 
