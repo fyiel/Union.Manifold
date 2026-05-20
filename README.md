@@ -19,12 +19,21 @@ A fast, standalone Electron desktop application for managing and launching games
 - **Sync**: In sync with the UC Website, browse your liked/wishlisted games and recently viewed directly inside the launcher.
 
 ## System Requirements
-Windows:
-- **OS**: Windows 10 or later (64-bit)
-- **RAM**: 2GB minimum (4GB recommended)
-- **Storage**: 500MB for standalone app.
-Linux:
-yes 👍
+
+### Windows
+
+* **OS**: Windows 10 or later (64-bit)
+* **RAM**: 2GB minimum (4GB recommended)
+* **Storage**: 500MB for standalone app
+
+---
+
+### Linux
+
+* **Support**: Yes 👍
+
+---
+
 ## Installation
 
 ### Windows Installation Options
