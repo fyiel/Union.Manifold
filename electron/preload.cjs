@@ -357,9 +357,21 @@ contextBridge.exposeInMainWorld('ucPlaytime', {
   },
 })
 
-// Presence heartbeat — lets the website show a real-time "Playing now" counter
+// Presence heartbeat — lets the website show real-time "Now online" / "Now
+// playing" counters. The renderer fires this on the timer; main listens for
+// the broadcast below so it can push an extra heartbeat whenever a game
+// starts or exits (so the counter updates without waiting for the tick).
 contextBridge.exposeInMainWorld('ucPresence', {
-  heartbeat: (baseUrl, appVersion) => ipcRenderer.invoke('uc:presence-heartbeat', { baseUrl, appVersion }),
+  heartbeat: (baseUrl, appVersion, opts) => ipcRenderer.invoke(
+    'uc:presence-heartbeat',
+    { baseUrl, appVersion, currentAppid: opts?.currentAppid, currentGameName: opts?.currentGameName }
+  ),
+  onChanged: (handler) => {
+    if (typeof handler !== 'function') return () => {}
+    const listener = (_event, detail) => handler(detail || {})
+    ipcRenderer.on('uc:presence-changed', listener)
+    return () => ipcRenderer.removeListener('uc:presence-changed', listener)
+  },
 })
 
 // Storage reservation API (pre-download space checks)

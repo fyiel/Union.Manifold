@@ -10,7 +10,9 @@ import {
   X,
   Check,
   AlertTriangle,
+  ArrowDown,
   ArrowRight,
+  ArrowUp,
   Share2,
   Globe,
   Lock,
@@ -24,6 +26,8 @@ import {
   Sparkles,
   Loader2,
   RefreshCw,
+  Users,
+  UserPlus,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -34,7 +38,17 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { getInstalledVersionLabel, hasInstalledVersionUpdate, proxyImageUrl, getCardImage, cn } from "@/lib/utils"
 import { useUserCollections, type UserCollection } from "@/hooks/use-user-collections"
 import { useGamesData } from "@/hooks/use-games"
-import { forkCloudCollection, shareUrlFor } from "@/lib/cloud-collections"
+import {
+  forkCloudCollection,
+  shareUrlFor,
+  listCloudContributors,
+  inviteCloudContributor,
+  updateCloudContributorPermissions,
+  removeCloudContributor,
+  searchCloudUsers,
+  type CloudContributor,
+  type CloudUserSearchResult,
+} from "@/lib/cloud-collections"
 import { useFollowedCollections, type FollowedCollection } from "@/hooks/use-followed-collections"
 import { useDownloadsActions } from "@/context/downloads-context"
 import { getCatalogCache, type CatalogGame } from "@/lib/catalog"
@@ -72,6 +86,8 @@ export function CollectionsPage() {
   const [deleteTarget, setDeleteTarget] = useState<UserCollection | null>(null)
   const [editTarget, setEditTarget] = useState<UserCollection | null>(null)
   const [shareTarget, setShareTarget] = useState<UserCollection | null>(null)
+  const [contributorsTarget, setContributorsTarget] = useState<UserCollection | null>(null)
+  const [syncPromptTarget, setSyncPromptTarget] = useState<UserCollection | null>(null)
   const [batchInstallStatus, setBatchInstallStatus] = useState<{
     name: string
     queued: number
@@ -441,6 +457,13 @@ export function CollectionsPage() {
               onEditMembers={() => setEditTarget(collection)}
               onDelete={() => setDeleteTarget(collection)}
               onShare={() => setShareTarget(collection)}
+              onContributors={() => {
+                if (!collection.cloud) {
+                  setSyncPromptTarget(collection)
+                  return
+                }
+                setContributorsTarget(collection)
+              }}
               onInstallMissing={() => void handleInstallMissing(collection)}
               onUpdateOutdated={() => void handleUpdateAll(collection)}
             />
@@ -480,10 +503,11 @@ export function CollectionsPage() {
         description="Pick a name and the games that belong to it."
         games={allGamesForPicker}
         initialName=""
-        initialMembers={new Set()}
+        initialOrder={[]}
         confirmLabel="Create"
+        permissions={{ canAdd: true, canRemove: true, canRename: true }}
         onConfirm={async (name, ids) => {
-          const created = await create(name, Array.from(ids))
+          const created = await create(name, ids)
           setCreateOpen(false)
           return Boolean(created)
         }}
@@ -494,21 +518,51 @@ export function CollectionsPage() {
       <CollectionEditorDialog
         open={editTarget != null}
         title={editTarget ? `Edit "${editTarget.name}"` : ""}
-        description="Add or remove games. The change syncs to your other devices when signed in."
+        description="Add, remove, or reorder games. Changes sync to your other devices."
         games={allGamesForPicker}
         initialName={editTarget?.name || ""}
-        initialMembers={new Set(editTarget?.appids || [])}
+        initialOrder={editTarget?.appids || []}
         confirmLabel="Save"
         nameReadOnly
+        permissions={editTarget?.permissions ?? { canAdd: true, canRemove: true, canRename: true }}
         onConfirm={async (_name, ids) => {
           if (editTarget) {
-            await setMembership(editTarget, Array.from(ids))
+            await setMembership(editTarget, ids)
           }
           setEditTarget(null)
           return true
         }}
         onCancel={() => setEditTarget(null)}
       />
+
+      {/* Contributors dialog */}
+      <ContributorsDialog
+        target={contributorsTarget}
+        onClose={() => setContributorsTarget(null)}
+        onChanged={() => { void refresh() }}
+      />
+
+      {/* Sync prompt for local-only collections */}
+      <Dialog
+        open={syncPromptTarget != null}
+        onOpenChange={(open) => { if (!open) setSyncPromptTarget(null) }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Cloud className="h-5 w-5" />
+              Sync this collection first
+            </DialogTitle>
+            <DialogDescription>
+              Inviting contributors needs the collection to live on your account in the cloud, so the
+              changes can sync to them. Sign in (or wait for the migration) before sharing.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button onClick={() => setSyncPromptTarget(null)}>Got it</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Share dialog */}
       <ShareDialog
@@ -599,6 +653,7 @@ function CollectionCard({
   onEditMembers,
   onDelete,
   onShare,
+  onContributors,
   onInstallMissing,
   onUpdateOutdated,
 }: {
@@ -617,9 +672,13 @@ function CollectionCard({
   onEditMembers: () => void
   onDelete: () => void
   onShare: () => void
+  onContributors: () => void
   onInstallMissing: () => void
   onUpdateOutdated: () => void
 }) {
+  const isOwner = collection.role === "owner"
+  const ownerName =
+    collection.owner?.displayName || collection.owner?.username || "Someone"
   const installedAppids = collection.appids.filter((id) => installedById.has(id))
   const missingCount = collection.appids.length - installedAppids.length
   const updateCount = installedAppids.filter((appid) => {
@@ -683,59 +742,117 @@ function CollectionCard({
         </div>
       </button>
 
-      <div className="flex items-center gap-2 px-4 py-3 border-t border-white/[.05]">
-        {renaming ? (
-          <Input
-            ref={renameInputRef}
-            value={renameDraft}
-            onChange={(e) => onChangeRename(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault()
-                onCommitRename()
-              } else if (e.key === "Escape") {
-                e.preventDefault()
-                onCancelRename()
-              }
-            }}
-            onBlur={onCommitRename}
-            className="h-8 rounded-xl bg-white/[.03] border-white/[.10] text-sm font-semibold"
-          />
-        ) : (
-          <h3 className="flex-1 truncate font-semibold text-sm text-white">{collection.name}</h3>
-        )}
-        <div className="flex items-center gap-1 shrink-0">
-          {missingCount > 0 && (
-            <IconButton
-              title={`Install ${missingCount} missing game${missingCount === 1 ? "" : "s"}`}
-              onClick={onInstallMissing}
-            >
-              <Download className="h-3.5 w-3.5" />
-            </IconButton>
+      <div className="flex flex-col gap-2 px-4 py-3 border-t border-white/[.05]">
+        <div className="flex items-center gap-2">
+          {renaming ? (
+            <Input
+              ref={renameInputRef}
+              value={renameDraft}
+              onChange={(e) => onChangeRename(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault()
+                  onCommitRename()
+                } else if (e.key === "Escape") {
+                  e.preventDefault()
+                  onCancelRename()
+                }
+              }}
+              onBlur={onCommitRename}
+              className="h-8 rounded-xl bg-white/[.03] border-white/[.10] text-sm font-semibold"
+            />
+          ) : (
+            <h3 className="flex-1 truncate font-semibold text-sm text-white">{collection.name}</h3>
           )}
-          {updateCount > 0 && (
-            <IconButton
-              title={`Update ${updateCount} game${updateCount === 1 ? "" : "s"}`}
-              onClick={onUpdateOutdated}
-            >
-              <RefreshCw className="h-3.5 w-3.5" />
+          <div className="flex items-center gap-1 shrink-0">
+            {missingCount > 0 && (
+              <IconButton
+                title={`Install ${missingCount} missing game${missingCount === 1 ? "" : "s"}`}
+                onClick={onInstallMissing}
+              >
+                <Download className="h-3.5 w-3.5" />
+              </IconButton>
+            )}
+            {updateCount > 0 && (
+              <IconButton
+                title={`Update ${updateCount} game${updateCount === 1 ? "" : "s"}`}
+                onClick={onUpdateOutdated}
+              >
+                <RefreshCw className="h-3.5 w-3.5" />
+              </IconButton>
+            )}
+            <IconButton title="Edit games" onClick={onEditMembers}>
+              <Layers3 className="h-3.5 w-3.5" />
             </IconButton>
+            {isOwner && (
+              <>
+                <IconButton title="Manage contributors" onClick={onContributors}>
+                  <Users className="h-3.5 w-3.5" />
+                </IconButton>
+                <IconButton title="Share" onClick={onShare} disabled={!collection.cloud}>
+                  <Share2 className="h-3.5 w-3.5" />
+                </IconButton>
+              </>
+            )}
+            {(isOwner || collection.permissions.canRename) && (
+              <IconButton title="Rename" onClick={onStartRename}>
+                <Pencil className="h-3.5 w-3.5" />
+              </IconButton>
+            )}
+            {isOwner && (
+              <IconButton title="Delete" onClick={onDelete} destructive>
+                <Trash2 className="h-3.5 w-3.5" />
+              </IconButton>
+            )}
+          </div>
+        </div>
+        <div className="flex items-center gap-1.5 text-[11px] text-zinc-500">
+          {isOwner ? <span>by you</span> : <span>by {ownerName}</span>}
+          {!isOwner && (
+            <span className="rounded-full border border-violet-500/30 bg-violet-500/10 px-1.5 text-[10px] text-violet-200 inline-flex items-center gap-1">
+              <Users className="h-2.5 w-2.5" /> Contributor
+            </span>
           )}
-          <IconButton title="Edit games" onClick={onEditMembers}>
-            <Layers3 className="h-3.5 w-3.5" />
-          </IconButton>
-          <IconButton title="Share" onClick={onShare} disabled={!collection.cloud}>
-            <Share2 className="h-3.5 w-3.5" />
-          </IconButton>
-          <IconButton title="Rename" onClick={onStartRename}>
-            <Pencil className="h-3.5 w-3.5" />
-          </IconButton>
-          <IconButton title="Delete" onClick={onDelete} destructive>
-            <Trash2 className="h-3.5 w-3.5" />
-          </IconButton>
+          {collection.contributors && collection.contributors.length > 0 && (
+            <ContributorAvatarStack contributors={collection.contributors} />
+          )}
         </div>
       </div>
     </div>
+  )
+}
+
+function ContributorAvatarStack({
+  contributors,
+}: {
+  contributors: Array<{ discordId: string; username: string | null; displayName: string | null; avatarUrl: string | null }>
+}) {
+  const visible = contributors.slice(0, 3)
+  const extra = Math.max(0, contributors.length - visible.length)
+  return (
+    <span className="inline-flex items-center -space-x-1.5">
+      {visible.map((c) => {
+        const name = c.displayName || c.username || "User"
+        return (
+          <span
+            key={c.discordId}
+            title={name}
+            className="inline-flex h-4 w-4 overflow-hidden rounded-full ring-1 ring-zinc-950 bg-zinc-800"
+          >
+            {c.avatarUrl ? (
+              <img src={c.avatarUrl} alt={name} className="h-full w-full object-cover" />
+            ) : (
+              <span className="h-full w-full bg-violet-500/40" />
+            )}
+          </span>
+        )
+      })}
+      {extra > 0 && (
+        <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-zinc-800 px-1 ring-1 ring-zinc-950 text-[9px] font-semibold text-zinc-300">
+          +{extra}
+        </span>
+      )}
+    </span>
   )
 }
 
@@ -1290,9 +1407,10 @@ function CollectionEditorDialog({
   description,
   games,
   initialName,
-  initialMembers,
+  initialOrder,
   confirmLabel,
   nameReadOnly,
+  permissions,
   onConfirm,
   onCancel,
 }: {
@@ -1301,147 +1419,254 @@ function CollectionEditorDialog({
   description?: string
   games: Array<{ appid: string; name: string; image?: string; installed: boolean }>
   initialName: string
-  initialMembers: Set<string>
+  initialOrder: string[]
   confirmLabel: string
   nameReadOnly?: boolean
-  onConfirm: (name: string, ids: Set<string>) => Promise<boolean>
+  permissions: { canAdd: boolean; canRemove: boolean; canRename: boolean }
+  onConfirm: (name: string, ids: string[]) => Promise<boolean>
   onCancel: () => void
 }) {
   const [name, setName] = useState(initialName)
-  const [selected, setSelected] = useState<Set<string>>(new Set(initialMembers))
+  const [order, setOrder] = useState<string[]>(initialOrder)
+  const [initialAppids] = useState<Set<string>>(new Set(initialOrder))
   const [filter, setFilter] = useState("")
   const [submitting, setSubmitting] = useState(false)
 
   useEffect(() => {
     if (open) {
       setName(initialName)
-      setSelected(new Set(initialMembers))
+      setOrder(initialOrder)
       setFilter("")
       setSubmitting(false)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, initialName])
 
-  const toggle = (appid: string) => {
-    setSelected((prev) => {
-      const next = new Set(prev)
-      if (next.has(appid)) next.delete(appid)
-      else next.add(appid)
+  const selectedSet = useMemo(() => new Set(order), [order])
+  const gamesByAppid = useMemo(() => new Map(games.map((g) => [g.appid, g])), [games])
+
+  function toggle(appid: string) {
+    if (selectedSet.has(appid)) {
+      if (initialAppids.has(appid) && !permissions.canRemove) return
+      setOrder((prev) => prev.filter((id) => id !== appid))
+      return
+    }
+    if (!permissions.canAdd) return
+    setOrder((prev) => [...prev, appid])
+  }
+
+  function moveSelected(appid: string, direction: -1 | 1) {
+    setOrder((prev) => {
+      const idx = prev.indexOf(appid)
+      const nextIdx = idx + direction
+      if (idx < 0 || nextIdx < 0 || nextIdx >= prev.length) return prev
+      const next = [...prev]
+      const [moved] = next.splice(idx, 1)
+      next.splice(nextIdx, 0, moved)
       return next
     })
   }
 
-  // When no search: show installed games + already-selected uninstalled games.
-  // When searching: show all matching games (installed or not).
-  const filtered = useMemo(() => {
+  // Left panel: catalog/library filtered list, mirroring web's catalog search
+  // semantics. Always show installed; show uninstalled when filtering OR when
+  // they're already selected.
+  const leftPanelGames = useMemo(() => {
     const q = filter.trim().toLowerCase()
     return games.filter((g) => {
       const matches = !q || g.name.toLowerCase().includes(q) || g.appid.toLowerCase().includes(q)
       if (!matches) return false
       if (g.installed) return true
-      // Uninstalled: always show if already selected, otherwise only when searching
-      return selected.has(g.appid) || Boolean(q)
+      return selectedSet.has(g.appid) || Boolean(q)
     })
-  }, [filter, games, selected])
+  }, [filter, games, selectedSet])
 
-  const canConfirm = Boolean(name.trim()) && selected.size > 0 && !submitting
+  const canConfirm = Boolean(name.trim()) && order.length > 0 && !submitting
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onCancel() }}>
-      <DialogContent className="sm:max-w-2xl p-0 max-h-[85vh] flex flex-col">
-        <DialogHeader className="px-6 pt-6">
-          <DialogTitle>{title}</DialogTitle>
+      <DialogContent className="p-0 flex flex-col max-h-[90vh] w-[95vw] sm:max-w-3xl">
+        <DialogHeader className="px-6 pt-6 pb-2 shrink-0">
+          <DialogTitle className="truncate">{title}</DialogTitle>
           {description && <DialogDescription>{description}</DialogDescription>}
         </DialogHeader>
 
-        <div className="px-6 py-4 space-y-3">
-          <div className="space-y-1.5">
-            <label className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-400">Name</label>
-            <Input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Couch co-op night"
-              className="h-10"
-              readOnly={nameReadOnly}
-              disabled={nameReadOnly}
-              autoFocus={!nameReadOnly}
-            />
-          </div>
+        <div className="px-6 pt-2 pb-3 space-y-1.5 shrink-0">
+          <label className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-400">
+            Name
+          </label>
+          <Input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="e.g. Couch co-op night"
+            className="h-10"
+            readOnly={nameReadOnly || !permissions.canRename}
+            disabled={nameReadOnly || !permissions.canRename}
+            autoFocus={!nameReadOnly && permissions.canRename}
+            maxLength={80}
+          />
+        </div>
 
-          <div className="space-y-1.5">
-            <div className="flex items-center justify-between">
-              <label className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-400">Games</label>
-              <span className="text-[11px] text-zinc-500">{selected.size} selected</span>
-            </div>
-            <div className="relative">
+        <div className="flex flex-1 min-h-0 flex-col gap-4 px-6 pb-4 md:grid md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+          <div className="flex flex-col gap-2 min-h-0">
+            <label className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-400 shrink-0">
+              Library &amp; catalog
+            </label>
+            <div className="relative shrink-0">
               <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-zinc-400" />
               <Input
                 value={filter}
                 onChange={(e) => setFilter(e.target.value)}
-                placeholder="Search games… (type to find uninstalled)"
+                placeholder="Search by title or app id…"
                 className="h-9 rounded-xl bg-white/[.03] border-white/[.07] pl-8"
+                disabled={!permissions.canAdd}
               />
             </div>
+            <ScrollArea className="flex-1 min-h-[160px] md:min-h-0 rounded-xl border border-white/[.07] bg-black/20">
+              <div className="space-y-1 p-2">
+                {leftPanelGames.length === 0 ? (
+                  <p className="py-6 text-center text-sm text-zinc-500">
+                    {filter ? `No games match "${filter}".` : "No games available."}
+                  </p>
+                ) : (
+                  leftPanelGames.map((game) => {
+                    const active = selectedSet.has(game.appid)
+                    const disabledToggle = !active && !permissions.canAdd
+                    return (
+                      <button
+                        key={game.appid}
+                        type="button"
+                        onClick={() => toggle(game.appid)}
+                        disabled={disabledToggle}
+                        className={cn(
+                          "group/pick w-full flex items-center gap-2 rounded-xl border p-2 text-left transition-all active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed",
+                          active
+                            ? "border-white bg-white/[.08]"
+                            : "border-white/[.07] bg-white/[.02] hover:bg-white/[.04]"
+                        )}
+                      >
+                        <div className="h-10 w-10 shrink-0 overflow-hidden rounded-md bg-zinc-800">
+                          {game.image ? (
+                            <img
+                              src={proxyImageUrl(getCardImage(game.image))}
+                              alt=""
+                              className="h-full w-full object-cover"
+                              loading="lazy"
+                            />
+                          ) : null}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-xs font-semibold text-zinc-100">{game.name}</p>
+                          {!game.installed && (
+                            <p className="text-[10px] text-zinc-500">Not installed</p>
+                          )}
+                        </div>
+                        <div
+                          className={cn(
+                            "shrink-0 inline-flex h-5 w-5 items-center justify-center rounded-full border transition-colors",
+                            active
+                              ? "border-white bg-white text-black"
+                              : "border-zinc-600 bg-black/40 text-transparent group-hover/pick:text-zinc-500"
+                          )}
+                        >
+                          <Check className="h-3 w-3" />
+                        </div>
+                      </button>
+                    )
+                  })
+                )}
+              </div>
+            </ScrollArea>
+          </div>
+
+          <div className="flex flex-col gap-2 min-h-0">
+            <div className="flex items-center justify-between shrink-0">
+              <label className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-400">
+                In collection
+              </label>
+              <span className="text-[11px] text-zinc-500">
+                {order.length} {order.length === 1 ? "game" : "games"}
+              </span>
+            </div>
+            <ScrollArea className="flex-1 min-h-[160px] md:min-h-0 rounded-xl border border-white/[.07] bg-black/20">
+              <div className="space-y-1 p-2">
+                {order.length === 0 ? (
+                  <div className="rounded-xl border border-dashed border-white/[.07] p-6 text-center text-sm text-zinc-500">
+                    Pick games on the left to add them to the collection.
+                  </div>
+                ) : (
+                  order.map((appid, index) => {
+                    const game = gamesByAppid.get(appid)
+                    const wasInitial = initialAppids.has(appid)
+                    const removable = !wasInitial || permissions.canRemove
+                    return (
+                      <div
+                        key={appid}
+                        className="flex items-center gap-2 rounded-xl border border-white/[.07] bg-white/[.02] p-2"
+                      >
+                        <div className="h-10 w-10 shrink-0 overflow-hidden rounded-md bg-zinc-800">
+                          {game?.image ? (
+                            <img
+                              src={proxyImageUrl(getCardImage(game.image))}
+                              alt=""
+                              className="h-full w-full object-cover"
+                              loading="lazy"
+                            />
+                          ) : (
+                            <div className="flex h-full w-full items-center justify-center">
+                              <Layers3 className="h-4 w-4 text-zinc-600" />
+                            </div>
+                          )}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-xs font-semibold text-zinc-100">
+                            {game?.name || appid}
+                          </p>
+                          <p className="text-[10px] text-zinc-500">#{index + 1}</p>
+                        </div>
+                        <div className="flex items-center gap-0.5 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => moveSelected(appid, -1)}
+                            disabled={index === 0}
+                            className="inline-flex h-6 w-6 items-center justify-center rounded-full text-zinc-400 transition hover:text-white disabled:opacity-30"
+                            aria-label="Move up"
+                          >
+                            <ArrowUp className="h-3 w-3" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => moveSelected(appid, 1)}
+                            disabled={index === order.length - 1}
+                            className="inline-flex h-6 w-6 items-center justify-center rounded-full text-zinc-400 transition hover:text-white disabled:opacity-30"
+                            aria-label="Move down"
+                          >
+                            <ArrowDown className="h-3 w-3" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => toggle(appid)}
+                            disabled={!removable}
+                            className="inline-flex h-6 w-6 items-center justify-center rounded-full text-zinc-400 transition hover:text-red-400 disabled:opacity-30 disabled:cursor-not-allowed"
+                            aria-label="Remove"
+                            title={removable ? "Remove" : "You do not have permission to remove this game."}
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </div>
+                      </div>
+                    )
+                  })
+                )}
+              </div>
+            </ScrollArea>
           </div>
         </div>
 
-        <ScrollArea className="flex-1 px-6 min-h-[180px]">
-          {games.length === 0 ? (
-            <p className="text-sm text-zinc-500 text-center py-12">No games available.</p>
-          ) : filtered.length === 0 ? (
-            <p className="text-sm text-zinc-500 text-center py-12">No games match "{filter}".</p>
-          ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 pb-2">
-              {filtered.map((game) => {
-                const active = selected.has(game.appid)
-                return (
-                  <button
-                    key={game.appid}
-                    type="button"
-                    onClick={() => toggle(game.appid)}
-                    className={cn(
-                      "group/pick relative flex items-center gap-2 rounded-xl border p-2 text-left transition-all active:scale-[0.99]",
-                      active
-                        ? "border-white bg-white/[.08]"
-                        : "border-white/[.07] bg-white/[.02] hover:bg-white/[.04]"
-                    )}
-                  >
-                    <div className="h-10 w-10 shrink-0 overflow-hidden rounded-md bg-zinc-800">
-                      {game.image ? (
-                        <img
-                          src={proxyImageUrl(getCardImage(game.image))}
-                          alt=""
-                          className="h-full w-full object-cover"
-                          loading="lazy"
-                        />
-                      ) : null}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-xs font-semibold text-zinc-100">{game.name}</p>
-                      {!game.installed && (
-                        <p className="text-[10px] text-zinc-500">Not installed</p>
-                      )}
-                    </div>
-                    <div
-                      className={cn(
-                        "shrink-0 inline-flex h-5 w-5 items-center justify-center rounded-full border transition-colors",
-                        active
-                          ? "border-white bg-white text-black"
-                          : "border-zinc-600 bg-black/40 text-transparent group-hover/pick:text-zinc-500"
-                      )}
-                    >
-                      <Check className="h-3 w-3" />
-                    </div>
-                  </button>
-                )
-              })}
-            </div>
-          )}
-        </ScrollArea>
-
-        <DialogFooter className="px-6 py-4 border-t border-white/[.07] flex sm:justify-between">
+        <DialogFooter className="px-6 py-4 border-t border-white/[.07] shrink-0 sm:justify-between">
           <p className="text-xs text-zinc-500 hidden sm:block self-center">
-            {selected.size === 0 ? "Pick at least one game." : `${selected.size} game${selected.size === 1 ? "" : "s"} ready.`}
+            {order.length === 0
+              ? "Pick at least one game."
+              : `${order.length} game${order.length === 1 ? "" : "s"} ready.`}
           </p>
           <div className="flex gap-2 ml-auto">
             <Button variant="outline" onClick={onCancel} disabled={submitting}>Cancel</Button>
@@ -1450,7 +1675,7 @@ function CollectionEditorDialog({
                 if (!canConfirm) return
                 setSubmitting(true)
                 try {
-                  const ok = await onConfirm(name.trim(), selected)
+                  const ok = await onConfirm(name.trim(), order)
                   if (!ok) setSubmitting(false)
                 } catch {
                   setSubmitting(false)
@@ -1458,11 +1683,367 @@ function CollectionEditorDialog({
               }}
               disabled={!canConfirm}
             >
+              {submitting ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : null}
               {confirmLabel}
             </Button>
           </div>
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  )
+}
+
+// ---- Contributors dialog ----
+
+function ContributorsDialog({
+  target,
+  onClose,
+  onChanged,
+}: {
+  target: UserCollection | null
+  onClose: () => void
+  onChanged: (collectionId: string, contributors: CloudContributor[]) => void
+}) {
+  const [contributors, setContributors] = useState<CloudContributor[]>([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [search, setSearch] = useState("")
+  const [searchResults, setSearchResults] = useState<CloudUserSearchResult[]>([])
+  const [searching, setSearching] = useState(false)
+  const [inviting, setInviting] = useState<string | null>(null)
+  const [draftPerms, setDraftPerms] = useState<{ canAdd: boolean; canRemove: boolean; canRename: boolean }>({
+    canAdd: true,
+    canRemove: false,
+    canRename: false,
+  })
+
+  useEffect(() => {
+    if (!target) {
+      setContributors([])
+      setError(null)
+      setSearch("")
+      setSearchResults([])
+      setDraftPerms({ canAdd: true, canRemove: false, canRename: false })
+      return
+    }
+    let cancelled = false
+    setLoading(true)
+    setError(null)
+    void (async () => {
+      try {
+        const list = await listCloudContributors(target.id)
+        if (!cancelled) setContributors(list)
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : "Could not load contributors.")
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [target?.id])
+
+  useEffect(() => {
+    if (!target) return
+    const trimmed = search.trim()
+    if (trimmed.length < 2) {
+      setSearchResults([])
+      setSearching(false)
+      return
+    }
+    const controller = new AbortController()
+    const id = window.setTimeout(async () => {
+      try {
+        setSearching(true)
+        const users = await searchCloudUsers(trimmed)
+        if (!controller.signal.aborted) setSearchResults(users)
+      } catch {
+        if (!controller.signal.aborted) setSearchResults([])
+      } finally {
+        if (!controller.signal.aborted) setSearching(false)
+      }
+    }, 250)
+    return () => {
+      controller.abort()
+      window.clearTimeout(id)
+    }
+  }, [search, target?.id])
+
+  if (!target) return null
+
+  async function invite(username: string) {
+    setInviting(username)
+    setError(null)
+    try {
+      const next = await inviteCloudContributor(target!.id, { username, ...draftPerms })
+      setContributors(next)
+      onChanged(target!.id, next)
+      setSearch("")
+      setSearchResults([])
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not invite contributor.")
+    } finally {
+      setInviting(null)
+    }
+  }
+
+  async function updatePermission(discordId: string, perms: Partial<{ canAdd: boolean; canRemove: boolean; canRename: boolean }>) {
+    const prev = contributors
+    setError(null)
+    setContributors((curr) => curr.map((c) => (c.discordId === discordId ? { ...c, ...perms } : c)))
+    try {
+      const next = await updateCloudContributorPermissions(target!.id, discordId, perms)
+      setContributors(next)
+      onChanged(target!.id, next)
+    } catch (err) {
+      setContributors(prev)
+      setError(err instanceof Error ? err.message : "Could not update permission.")
+    }
+  }
+
+  async function remove(discordId: string) {
+    const prev = contributors
+    setError(null)
+    setContributors((curr) => curr.filter((c) => c.discordId !== discordId))
+    try {
+      await removeCloudContributor(target!.id, discordId)
+      onChanged(target!.id, contributors.filter((c) => c.discordId !== discordId))
+    } catch (err) {
+      setContributors(prev)
+      setError(err instanceof Error ? err.message : "Could not remove contributor.")
+    }
+  }
+
+  return (
+    <Dialog open={true} onOpenChange={(o) => { if (!o) onClose() }}>
+      <DialogContent className="p-0 flex flex-col max-h-[90vh] w-[95vw] sm:max-w-2xl">
+        <DialogHeader className="px-6 pt-6 pb-2 shrink-0">
+          <DialogTitle className="flex items-center gap-2">
+            <Users className="h-5 w-5" />
+            Contributors on "{target.name}"
+          </DialogTitle>
+          <DialogDescription>
+            Contributors can add games to this collection. Optionally let them remove games or rename it.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="flex flex-1 min-h-0 flex-col gap-4 px-6 pb-4">
+          <div className="space-y-2 shrink-0">
+            <label className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-400">
+              Invite a user
+            </label>
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-zinc-400" />
+              <Input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search by username…"
+                className="h-9 rounded-xl bg-white/[.03] border-white/[.07] pl-8"
+              />
+            </div>
+            <div className="rounded-2xl border border-white/[.07] bg-white/[.02] p-3 space-y-2">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-400">
+                Permissions for the invite
+              </p>
+              <PermissionRow
+                label="Add games"
+                description="Search the catalog and add games to this collection."
+                checked={draftPerms.canAdd}
+                onCheckedChange={(v) => setDraftPerms((p) => ({ ...p, canAdd: v }))}
+              />
+              <PermissionRow
+                label="Remove games"
+                description="Take any game out of the collection."
+                checked={draftPerms.canRemove}
+                onCheckedChange={(v) => setDraftPerms((p) => ({ ...p, canRemove: v }))}
+              />
+              <PermissionRow
+                label="Rename collection"
+                description="Change the collection name."
+                checked={draftPerms.canRename}
+                onCheckedChange={(v) => setDraftPerms((p) => ({ ...p, canRename: v }))}
+              />
+            </div>
+            {search.trim().length >= 2 && (
+              <div className="rounded-xl border border-white/[.07] bg-black/20 max-h-44 overflow-y-auto">
+                {searching ? (
+                  <div className="flex items-center justify-center gap-2 py-4 text-sm text-zinc-400">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Searching…
+                  </div>
+                ) : searchResults.length === 0 ? (
+                  <p className="py-4 text-center text-sm text-zinc-500">No matches.</p>
+                ) : (
+                  <div className="p-1.5 space-y-1">
+                    {searchResults.map((u) => {
+                      const already = contributors.some((c) => c.discordId === u.discordId)
+                      const isOwner = target!.owner?.discordId === u.discordId
+                      const disabled = already || isOwner || inviting === u.username
+                      return (
+                        <button
+                          key={u.discordId}
+                          type="button"
+                          onClick={() => u.username && invite(u.username)}
+                          disabled={disabled}
+                          className="w-full flex items-center gap-2 rounded-lg p-2 text-left transition hover:bg-white/[.04] disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          <span className="h-7 w-7 shrink-0 overflow-hidden rounded-full bg-zinc-800">
+                            {u.avatarUrl ? (
+                              <img src={u.avatarUrl} alt="" className="h-full w-full object-cover" />
+                            ) : null}
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-xs font-semibold text-zinc-100">
+                              {u.displayName || u.username || "Unknown"}
+                            </span>
+                            <span className="block truncate text-[10px] text-zinc-500">
+                              {u.username ? `@${u.username}` : ""}
+                              {isOwner ? " · owner" : already ? " · already invited" : ""}
+                            </span>
+                          </span>
+                          {inviting === u.username ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin text-zinc-400" />
+                          ) : (
+                            <UserPlus className="h-3.5 w-3.5 text-zinc-400" />
+                          )}
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="flex flex-1 min-h-0 flex-col gap-2">
+            <div className="flex items-center justify-between shrink-0">
+              <label className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-400">
+                Current contributors
+              </label>
+              <span className="text-[11px] text-zinc-500">{contributors.length}</span>
+            </div>
+            <ScrollArea className="flex-1 min-h-[120px] rounded-xl border border-white/[.07] bg-black/20">
+              <div className="p-2 space-y-1">
+                {loading ? (
+                  <div className="flex items-center justify-center gap-2 py-4 text-sm text-zinc-400">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Loading…
+                  </div>
+                ) : contributors.length === 0 ? (
+                  <p className="py-6 text-center text-sm text-zinc-500">
+                    No contributors yet. Search above to invite someone.
+                  </p>
+                ) : (
+                  contributors.map((c) => (
+                    <div
+                      key={c.discordId}
+                      className="rounded-xl border border-white/[.07] bg-white/[.02] p-3 space-y-2"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="h-8 w-8 shrink-0 overflow-hidden rounded-full bg-zinc-800">
+                          {c.avatarUrl ? (
+                            <img src={c.avatarUrl} alt="" className="h-full w-full object-cover" />
+                          ) : null}
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-xs font-semibold text-zinc-100">
+                            {c.displayName || c.username || "Unknown"}
+                          </p>
+                          <p className="truncate text-[10px] text-zinc-500">
+                            {c.username ? `@${c.username}` : ""}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => remove(c.discordId)}
+                          className="inline-flex h-7 w-7 items-center justify-center rounded-full text-zinc-400 hover:bg-red-500/10 hover:text-red-400 transition"
+                          title="Remove contributor"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-3 gap-1.5">
+                        <PermissionChip
+                          label="Add"
+                          checked={c.canAdd}
+                          onChange={(v) => updatePermission(c.discordId, { canAdd: v })}
+                        />
+                        <PermissionChip
+                          label="Remove"
+                          checked={c.canRemove}
+                          onChange={(v) => updatePermission(c.discordId, { canRemove: v })}
+                        />
+                        <PermissionChip
+                          label="Rename"
+                          checked={c.canRename}
+                          onChange={(v) => updatePermission(c.discordId, { canRename: v })}
+                        />
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </ScrollArea>
+          </div>
+
+          {error && (
+            <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200 shrink-0">
+              {error}
+            </div>
+          )}
+        </div>
+
+        <DialogFooter className="px-6 py-4 border-t border-white/[.07] shrink-0">
+          <Button onClick={onClose}>Done</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function PermissionRow({
+  label,
+  description,
+  checked,
+  onCheckedChange,
+}: {
+  label: string
+  description: string
+  checked: boolean
+  onCheckedChange: (v: boolean) => void
+}) {
+  return (
+    <div className="flex items-start gap-3">
+      <div className="min-w-0 flex-1">
+        <p className="text-xs font-semibold text-zinc-100">{label}</p>
+        <p className="text-[10px] text-zinc-500 leading-snug">{description}</p>
+      </div>
+      <Switch checked={checked} onCheckedChange={onCheckedChange} />
+    </div>
+  )
+}
+
+function PermissionChip({
+  label,
+  checked,
+  onChange,
+}: {
+  label: string
+  checked: boolean
+  onChange: (v: boolean) => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onChange(!checked)}
+      className={cn(
+        "rounded-full px-2 py-1 text-[10px] font-semibold transition",
+        checked
+          ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
+          : "bg-white/[.03] text-zinc-400 border border-white/[.07] hover:text-white"
+      )}
+    >
+      {checked ? "✓ " : "○ "}
+      {label}
+    </button>
   )
 }

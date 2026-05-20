@@ -1,13 +1,43 @@
 import { apiFetch, getApiBaseUrl } from "@/lib/api"
 
+export type CollectionPermissions = {
+  canAdd: boolean
+  canRemove: boolean
+  canRename: boolean
+}
+
+export type CloudCollectionOwner = {
+  discordId: string
+  username: string | null
+  displayName: string | null
+  avatarUrl: string | null
+}
+
+export type CloudContributor = {
+  discordId: string
+  username: string | null
+  displayName: string | null
+  avatarUrl: string | null
+  canAdd: boolean
+  canRemove: boolean
+  canRename: boolean
+  invitedAt: string
+}
+
 export type CloudCollection = {
   id: string
   name: string
   appids: string[]
+  /** Parallel to appids — addedBy[i] is the discord_id (or null) of the user who added that game. */
+  addedBy: Array<string | null>
   shareToken: string | null
   isPublic: boolean
   createdAt: string
   updatedAt: string
+  role: "owner" | "contributor"
+  permissions: CollectionPermissions
+  owner: CloudCollectionOwner | null
+  contributors: CloudContributor[]
 }
 
 type RawCollection = {
@@ -22,17 +52,60 @@ type RawCollection = {
   createdAt?: string
   updatedAt?: string
   appids?: string[]
+  added_by?: Array<string | null>
+  addedBy?: Array<string | null>
+  role?: "owner" | "contributor"
+  permissions?: CollectionPermissions
+  owner_discord_id?: string | null
+  owner_username?: string | null
+  owner_display_name?: string | null
+  owner_avatar_url?: string | null
+  contributorsPreview?: Array<{
+    discordId: string
+    username: string | null
+    displayName: string | null
+    avatarUrl: string | null
+  }>
 }
 
 function normalize(raw: RawCollection): CloudCollection {
+  const role: "owner" | "contributor" = raw.role === "contributor" ? "contributor" : "owner"
   return {
     id: String(raw.id),
     name: String(raw.name || ""),
     appids: Array.isArray(raw.appids) ? raw.appids.map(String) : [],
+    addedBy: Array.isArray(raw.added_by ?? raw.addedBy)
+      ? (raw.added_by ?? raw.addedBy ?? []).map((v) => (v == null ? null : String(v)))
+      : [],
     shareToken: (raw.share_token ?? raw.shareToken) || null,
     isPublic: Boolean(raw.is_public ?? raw.isPublic),
     createdAt: String(raw.created_at ?? raw.createdAt ?? ""),
     updatedAt: String(raw.updated_at ?? raw.updatedAt ?? ""),
+    role,
+    permissions:
+      raw.permissions ??
+      (role === "owner"
+        ? { canAdd: true, canRemove: true, canRename: true }
+        : { canAdd: false, canRemove: false, canRename: false }),
+    owner: raw.owner_discord_id
+      ? {
+          discordId: String(raw.owner_discord_id),
+          username: raw.owner_username ?? null,
+          displayName: raw.owner_display_name ?? null,
+          avatarUrl: raw.owner_avatar_url ?? null,
+        }
+      : null,
+    contributors: (raw.contributorsPreview || []).map((c) => ({
+      discordId: c.discordId,
+      username: c.username,
+      displayName: c.displayName,
+      avatarUrl: c.avatarUrl,
+      // Preview entries don't include perms; defaults are fine for display.
+      canAdd: true,
+      canRemove: false,
+      canRename: false,
+      invitedAt: "",
+    })),
   }
 }
 
@@ -125,6 +198,72 @@ export async function unshareCloudCollection(id: string): Promise<void> {
   if (!res.ok && res.status !== 404) {
     throw new Error(`unshareCloudCollection failed: ${res.status}`)
   }
+}
+
+// ---- Contributor management ----
+
+export async function listCloudContributors(id: string): Promise<CloudContributor[]> {
+  const res = await apiFetch(`/api/account/collections/${encodeURIComponent(id)}/contributors`)
+  const data = await res.json().catch(() => null)
+  if (!res.ok) throw new Error(data?.error || `listCloudContributors failed: ${res.status}`)
+  return Array.isArray(data?.contributors) ? data.contributors : []
+}
+
+export async function inviteCloudContributor(
+  id: string,
+  payload: { username: string; canAdd?: boolean; canRemove?: boolean; canRename?: boolean }
+): Promise<CloudContributor[]> {
+  const res = await apiFetch(`/api/account/collections/${encodeURIComponent(id)}/contributors`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  })
+  const data = await res.json().catch(() => null)
+  if (!res.ok) throw new Error(data?.error || `inviteCloudContributor failed: ${res.status}`)
+  return Array.isArray(data?.contributors) ? data.contributors : []
+}
+
+export async function updateCloudContributorPermissions(
+  id: string,
+  discordId: string,
+  perms: Partial<{ canAdd: boolean; canRemove: boolean; canRename: boolean }>
+): Promise<CloudContributor[]> {
+  const res = await apiFetch(
+    `/api/account/collections/${encodeURIComponent(id)}/contributors/${encodeURIComponent(discordId)}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(perms),
+    }
+  )
+  const data = await res.json().catch(() => null)
+  if (!res.ok) throw new Error(data?.error || `updateCloudContributorPermissions failed: ${res.status}`)
+  return Array.isArray(data?.contributors) ? data.contributors : []
+}
+
+export async function removeCloudContributor(id: string, discordId: string): Promise<void> {
+  const res = await apiFetch(
+    `/api/account/collections/${encodeURIComponent(id)}/contributors/${encodeURIComponent(discordId)}`,
+    { method: "DELETE" }
+  )
+  if (!res.ok && res.status !== 404) {
+    const data = await res.json().catch(() => null)
+    throw new Error(data?.error || `removeCloudContributor failed: ${res.status}`)
+  }
+}
+
+export type CloudUserSearchResult = {
+  discordId: string
+  username: string | null
+  displayName: string | null
+  avatarUrl: string | null
+}
+
+export async function searchCloudUsers(q: string): Promise<CloudUserSearchResult[]> {
+  const res = await apiFetch(`/api/account/users/search?q=${encodeURIComponent(q)}`)
+  if (!res.ok) return []
+  const data = await res.json().catch(() => null)
+  return Array.isArray(data?.users) ? data.users : []
 }
 
 /**
