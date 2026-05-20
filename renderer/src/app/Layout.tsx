@@ -17,7 +17,9 @@ import { logger } from "@/lib/logger"
 import { cn } from "@/lib/utils"
 import { LogSharingConsentModal } from "@/components/LogSharingConsentModal"
 import { WindowsDefenderPromptModal } from "@/components/WindowsDefenderPromptModal"
+import { LoginPromptModal } from "@/components/LoginPromptModal"
 import { getApiBaseUrl } from "@/lib/api"
+import { useAuth } from "@/hooks/useAuth"
 
 export function AppLayout() {
   useDiscordRpcPresence()
@@ -50,6 +52,9 @@ export function AppLayout() {
   const [logConsentOpen, setLogConsentOpen] = useState(false)
   const [defenderPromptOpen, setDefenderPromptOpen] = useState(false)
   const [defenderPromptPath, setDefenderPromptPath] = useState("")
+  const [loginPromptOpen, setLoginPromptOpen] = useState(false)
+  const [loginPromptSigningIn, setLoginPromptSigningIn] = useState(false)
+  const [{ isAuthenticated, isLoading: authLoading }, { signInWithWebsite }] = useAuth()
   const autoShareEnabledRef = useRef<boolean>(false)
   const lastLogShareRef = useRef<number>(0)
 
@@ -220,6 +225,44 @@ export function AppLayout() {
     try { await window.ucSettings?.set?.('windowsDefenderPromptSeen', true) } catch {}
   }
 
+  // First-launch sign-in prompt. Only fires once: gated by `loginPromptSeen`
+  // in settings, and skipped if the user is already signed in. The auth
+  // refresh on mount can take a moment, so we wait until isLoading is false
+  // before deciding whether to show it.
+  useEffect(() => {
+    if (authLoading) return
+    if (isAuthenticated) return
+    let mounted = true
+    void (async () => {
+      try {
+        const seen = await window.ucSettings?.get?.('loginPromptSeen')
+        if (!mounted || seen) return
+        setLoginPromptOpen(true)
+      } catch {
+        // ignore — best-effort
+      }
+    })()
+    return () => { mounted = false }
+  }, [authLoading, isAuthenticated])
+
+  const dismissLoginPrompt = async () => {
+    setLoginPromptOpen(false)
+    try { await window.ucSettings?.set?.('loginPromptSeen', true) } catch {}
+  }
+
+  const handleLoginPromptSignIn = async () => {
+    if (loginPromptSigningIn) return
+    setLoginPromptSigningIn(true)
+    try {
+      const result = await signInWithWebsite()
+      if (result.ok) {
+        await dismissLoginPrompt()
+      }
+    } finally {
+      setLoginPromptSigningIn(false)
+    }
+  }
+
   return (
     <div className="relative h-screen w-full overflow-hidden bg-zinc-950 text-zinc-100 flex flex-col">
       {/* Top-edge drag strip — gives the user a reliable place to grab and
@@ -304,6 +347,12 @@ export function AppLayout() {
             await dismissDefenderPrompt()
           })()
         }}
+      />
+      <LoginPromptModal
+        open={loginPromptOpen}
+        signingIn={loginPromptSigningIn}
+        onSignIn={() => { void handleLoginPromptSignIn() }}
+        onSkip={() => { void dismissLoginPrompt() }}
       />
       <CustomTooltipManager />
     </div>

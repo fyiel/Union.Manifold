@@ -6,6 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Cpu, Loader2, RefreshCw, Monitor, HardDrive, Zap, MemoryStick, Trash2, ShieldCheck, CloudUpload, CloudOff, CheckCircle2, Laptop, X, Check, Pencil, TrendingUp, Clock3 } from "lucide-react"
 import { Switch } from "@/components/ui/switch"
 import { Input } from "@/components/ui/input"
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { getApiBaseUrl } from "@/lib/api"
 
 const DEFAULT_VISIBILITY: SystemProfileVisibility = {
@@ -540,6 +541,7 @@ function DevicesSection({ baseUrl, currentFingerprint }: { baseUrl: string | und
   const [loading, setLoading] = useState(false)
   const [editingFp, setEditingFp] = useState<string | null>(null)
   const [editingName, setEditingName] = useState("")
+  const [confirmForgetFp, setConfirmForgetFp] = useState<string | null>(null)
 
   const reload = useCallback(async () => {
     if (!window.ucSystemProfile?.listDevices) return
@@ -609,17 +611,48 @@ function DevicesSection({ baseUrl, currentFingerprint }: { baseUrl: string | und
                   Make active
                 </Button>
               )}
-              <Button size="sm" variant="ghost" disabled={loading} onClick={async () => {
-                if (!confirm("Forget this PC's profile from UnionCrax? Old posts that snapshot this device keep their data.")) return
-                await window.ucSystemProfile?.deleteDevice?.(baseUrl, d.fingerprint)
-                void reload()
-              }} title="Forget this device">
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={loading}
+                onClick={() => setConfirmForgetFp(d.fingerprint)}
+                title="Forget this device"
+              >
                 <Trash2 className="h-3.5 w-3.5 text-red-400" />
               </Button>
             </div>
           ))}
         </div>
       </CardContent>
+      <Dialog open={confirmForgetFp != null} onOpenChange={(o) => { if (!o) setConfirmForgetFp(null) }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Trash2 className="h-5 w-5 text-red-400" />
+              Forget this PC's profile?
+            </DialogTitle>
+            <DialogDescription>
+              UnionCrax will stop using this device's hardware in profile filters. Old posts that
+              snapshot this device keep their data.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmForgetFp(null)}>Cancel</Button>
+            <Button
+              variant="destructive"
+              onClick={async () => {
+                const fp = confirmForgetFp
+                setConfirmForgetFp(null)
+                if (!fp) return
+                await window.ucSystemProfile?.deleteDevice?.(baseUrl, fp)
+                void reload()
+              }}
+            >
+              Forget device
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Card>
   )
 }
