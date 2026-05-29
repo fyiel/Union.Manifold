@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from "react"
-import { useSearchParams, Link } from "react-router-dom"
+import { useNavigate, useSearchParams, Link } from "react-router-dom"
 import { GameActionContextMenu, GameActionMenuPanel } from "@/components/GameActionMenu"
 import { GameCard } from "@/components/GameCard"
 import { PageAura } from "@/components/page-aura"
@@ -7,6 +7,7 @@ import { GameCardSkeleton } from "@/components/GameCardSkeleton"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { PaginationBar } from "@/components/PaginationBar"
@@ -18,6 +19,9 @@ import { getCatalogCache, type CatalogGame } from "@/lib/catalog"
 import {
   CheckSquare2,
   ArrowUpDown,
+  Clock,
+  RefreshCw,
+  StickyNote,
   X,
 } from "lucide-react"
 import {
@@ -37,19 +41,30 @@ import {
   ChevronLeft,
   ChevronRight,
   ChevronDown,
+  LayoutGrid,
+  LayoutList,
 } from "@/components/icons"
 import { ExePickerModal } from "@/components/ExePickerModal"
 import { EditGameMetadataModal } from "@/components/EditGameMetadataModal"
 import { GameLinuxConfigModal } from "@/components/GameLinuxConfigModal"
+import { LaunchOptionsModal } from "@/components/LaunchOptionsModal"
 import { CollectionPill, NewCollectionInline } from "@/components/LibraryFilterChips"
 import { useUserCollections } from "@/hooks/use-user-collections"
+import { useAccountLists } from "@/hooks/use-account-lists"
+import { EmptyState } from "@/components/EmptyState"
+import { DiskUsageBreakdown } from "@/components/DiskUsageBreakdown"
 import type { CollectionPickerEntry } from "@/components/GameActionMenu"
 import { gameLogger } from "@/lib/logger"
+import { useToast } from "@/context/toast-context"
 
 type LibraryGameMeta = {
   collections?: string[]
   tags?: string[]
   lastPlayedAt?: number
+  /** Per-game free-text notes — populated by GameNotesPanel on the detail
+   *  page. Surfaced as a tooltip on Library tiles so the user can recall
+   *  why-this-game without opening detail. */
+  notes?: string
 }
 
 type LibraryGame = Game & {
@@ -185,6 +200,26 @@ export function LibraryPage() {
   const [hiddenAppIds, setHiddenAppIds] = useState<Set<string>>(new Set())
   const [pendingDeleteGame, setPendingDeleteGame] = useState<Game | null>(null)
   const [pendingDeleteAction, setPendingDeleteAction] = useState<"installed" | "installing" | null>(null)
+  const { toast } = useToast()
+  // Deferred-delete bookkeeping for the undo toast. When the user deletes a
+  // library game we don't fire the IPC immediately — we hide the row, raise
+  // a toast with an "Undo" button, and only run the real delete after the
+  // toast expires. Map: appid → { commit, cancel }. `commit` is the actual
+  // disk-removing IPC; `cancel` clears the timer and restores the row.
+  const pendingUndoDeletesRef = useRef<Map<string, { timer: ReturnType<typeof setTimeout>; commit: () => Promise<void>; cancel: () => void }>>(new Map())
+  // Commit any pending soft-deletes when the page unmounts — otherwise
+  // navigating away mid-toast leaves the game hidden from the UI but still
+  // present on disk forever.
+  useEffect(() => {
+    const map = pendingUndoDeletesRef.current
+    return () => {
+      for (const [, entry] of map) {
+        clearTimeout(entry.timer)
+        void entry.commit()
+      }
+      map.clear()
+    }
+  }, [])
   const [exePickerOpen, setExePickerOpen] = useState(false)
   const [exePickerTitle, setExePickerTitle] = useState("")
   const [exePickerMessage, setExePickerMessage] = useState("")
@@ -198,15 +233,72 @@ export function LibraryPage() {
   const [cardContextMenu, setCardContextMenu] = useState<{ game: LibraryGame; position: { x: number; y: number } } | null>(null)
   const [editMetadataOpen, setEditMetadataOpen] = useState(false)
   const [linuxConfigOpen, setLinuxConfigOpen] = useState(false)
+  const [launchOptionsGame, setLaunchOptionsGame] = useState<LibraryGame | null>(null)
   const [linuxConfigGame, setLinuxConfigGame] = useState<LibraryGame | null>(null)
     const [batchDeleteConfirmOpen, setBatchDeleteConfirmOpen] = useState(false)
+  const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const [librarySearch, setLibrarySearch] = useState("")
+  // Focus target for the `/` keyboard shortcut. The shortcut handler in
+  // use-keyboard-shortcuts dispatches `uc_library_focus_search`; we listen
+  // for it below and pull focus to this Input. Scoped to /library so it
+  // doesn't fight with the global "?" help dialog.
+  const librarySearchInputRef = useRef<HTMLInputElement | null>(null)
+  useEffect(() => {
+    const onFocusSearch = () => {
+      try {
+        librarySearchInputRef.current?.focus()
+        librarySearchInputRef.current?.select()
+      } catch { /* ignore */ }
+    }
+    window.addEventListener('uc_library_focus_search', onFocusSearch)
+    return () => window.removeEventListener('uc_library_focus_search', onFocusSearch)
+  }, [])
   const [selectedCollection, setSelectedCollection] = useState(() => searchParams.get("collection") || "all")
 
   // Cloud-aware user collections — also used to size chip counts and the
   // "X of Y installed" filter status by the selected collection's full size.
   const userCollections = useUserCollections()
+  const accountLists = useAccountLists()
+
+  // Per-game Discord RPC mute. Loaded once at page level (and kept in sync
+  // via ucSettings.onChanged) so we can read it synchronously per-card
+  // without breaking the rules-of-hooks while mapping over the grid.
+  const [rpcMutedAppids, setRpcMutedAppids] = useState<Record<string, true>>({})
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const value = await window.ucSettings?.get?.("rpcMutedAppids")
+        if (cancelled) return
+        if (value && typeof value === "object" && !Array.isArray(value)) {
+          setRpcMutedAppids(value as Record<string, true>)
+        }
+      } catch { /* ignore */ }
+    })()
+    const off = window.ucSettings?.onChanged?.((data: any) => {
+      if (!data || cancelled) return
+      if (data.key === "__CLEAR_ALL__") { setRpcMutedAppids({}); return }
+      if (data.key !== "rpcMutedAppids") return
+      if (data.value && typeof data.value === "object" && !Array.isArray(data.value)) {
+        setRpcMutedAppids(data.value as Record<string, true>)
+      } else {
+        setRpcMutedAppids({})
+      }
+    })
+    return () => {
+      cancelled = true
+      if (typeof off === "function") off()
+    }
+  }, [])
+  const toggleRpcMute = useCallback(async (appid: string) => {
+    if (!appid) return
+    const next = { ...rpcMutedAppids }
+    if (next[appid]) delete next[appid]
+    else next[appid] = true
+    setRpcMutedAppids(next)
+    try { await window.ucSettings?.set?.("rpcMutedAppids", next) } catch { /* ignore */ }
+  }, [rpcMutedAppids])
 
   // Keep URL in sync so external links (e.g. sidebar Collections) and back/forward work.
   useEffect(() => {
@@ -228,6 +320,31 @@ export function LibraryPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedCollection])
   const [sortMode, setSortMode] = useState<'name' | 'recent-install' | 'recent-play'>('name')
+  // "Just played" quick-filter — narrows the grid to titles whose
+  // `libraryMeta.lastPlayedAt` falls within the last 7 days. Persists
+  // session-only because the user almost always wants to clear this when
+  // they're done looking at recent activity.
+  const [justPlayedOnly, setJustPlayedOnly] = useState(false)
+  const JUST_PLAYED_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
+  // View mode (grid vs list). Persisted under settings.libraryViewMode so
+  // the choice survives reloads. List view is denser — handy when the user
+  // has hundreds of installed games to scan.
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid')
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const value = await window.ucSettings?.get?.('libraryViewMode')
+        if (cancelled) return
+        if (value === 'list' || value === 'grid') setViewMode(value)
+      } catch { /* ignore */ }
+    })()
+    return () => { cancelled = true }
+  }, [])
+  const handleSetViewMode = (next: 'grid' | 'list') => {
+    setViewMode(next)
+    try { void window.ucSettings?.set?.('libraryViewMode', next) } catch { /* ignore */ }
+  }
   const [selectionMode, setSelectionMode] = useState(false)
   const [selectedAppIds, setSelectedAppIds] = useState<Set<string>>(new Set())
   const [collectionDraft, setCollectionDraft] = useState("")
@@ -265,23 +382,7 @@ export function LibraryPage() {
     return () => window.removeEventListener('uc_library_cycle_sort', onCycleSort)
   }, [])
 
-  useEffect(() => {
-    if (!batchDeleteConfirmOpen && !pendingDeleteGame) return
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return
-      event.preventDefault()
-      if (batchDeleteConfirmOpen) {
-        setBatchDeleteConfirmOpen(false)
-      }
-      if (pendingDeleteGame) {
-        setPendingDeleteGame(null)
-        setPendingDeleteAction(null)
-      }
-    }
-
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [batchDeleteConfirmOpen, pendingDeleteGame])
+  // ESC handling for these confirm dialogs now comes free from Radix Dialog.
 
   useEffect(() => {
     if (!selectionMode) return
@@ -334,9 +435,14 @@ export function LibraryPage() {
 
   const filteredInstalled = useMemo(() => {
     const normalizedSearch = debouncedSearch.trim().toLowerCase()
+    const recentCutoff = Date.now() - JUST_PLAYED_WINDOW_MS
     const next = installedWithMeta.filter((game) => {
       if (selectedCollection !== "all" && !(game.libraryMeta?.collections || []).some((value) => value.toLowerCase() === selectedCollection.toLowerCase())) {
         return false
+      }
+      if (justPlayedOnly) {
+        const last = Number(game.libraryMeta?.lastPlayedAt) || 0
+        if (last <= 0 || last < recentCutoff) return false
       }
       if (!normalizedSearch) return true
       const haystack = [
@@ -359,11 +465,37 @@ export function LibraryPage() {
       return left.name.localeCompare(right.name)
     })
     return next
-  }, [installedWithMeta, debouncedSearch, selectedCollection, sortMode])
+  }, [installedWithMeta, debouncedSearch, selectedCollection, sortMode, justPlayedOnly, JUST_PLAYED_WINDOW_MS])
+
+  // Pre-computed count of games played in the last 7 days. Used to show
+  // the user *how many* games the "Just played" toggle would surface
+  // before they click it, and to hide the toggle entirely when there's
+  // nothing to filter to — keeps the toolbar from feeling like dead UI
+  // for users who haven't played anything yet.
+  const justPlayedCount = useMemo(() => {
+    const recentCutoff = Date.now() - JUST_PLAYED_WINDOW_MS
+    return installedWithMeta.reduce((count, game) => {
+      const last = Number(game.libraryMeta?.lastPlayedAt) || 0
+      return count + (last > 0 && last >= recentCutoff ? 1 : 0)
+    }, 0)
+  }, [installedWithMeta, JUST_PLAYED_WINDOW_MS])
 
   const catalogVersionByAppid = useMemo(() => {
     return new Map(games.map((game) => [game.appid, game.version || ""]))
   }, [games])
+
+  // Installed games whose catalog version is newer than the local version.
+  // Surfaced as a pinned strip at the top of the library so users see updates
+  // before they have to scroll through the grid hunting for the orange dot.
+  const gamesWithUpdates = useMemo(() => {
+    return installedWithMeta.filter((game) => {
+      const catalogVersion = catalogVersionByAppid.get(game.appid)
+      if (!catalogVersion) return false
+      const versions = [game.version].filter(Boolean) as string[]
+      if (versions.length === 0) return false
+      return hasInstalledVersionUpdate(catalogVersion, versions)
+    })
+  }, [installedWithMeta, catalogVersionByAppid])
 
   const visibleInstalling = useMemo(() => {
     return installing.filter((game) => {
@@ -522,13 +654,9 @@ export function LibraryPage() {
     setTimeout(() => setBatchFeedback(null), 3000)
   }
 
-  const handleDeleteInstalled = async (game: Game) => {
-    setHiddenAppIds((prev) => {
-      const next = new Set(prev)
-      next.add(game.appid)
-      return next
-    })
-    setInstalled((prev) => prev.filter((item) => item.appid !== game.appid))
+  // Actually performs the destructive delete. Pulled out so both the
+  // immediate path (legacy) and the deferred / undo-toast path can reuse it.
+  const commitDeleteInstalled = async (game: Game) => {
     try {
       await window.ucDownloads?.deleteInstalled?.(game.appid)
       await window.ucDownloads?.deleteDesktopShortcut?.(game.name)
@@ -546,6 +674,65 @@ export function LibraryPage() {
         return next
       })
     }
+  }
+
+  // Soft-delete: hide the tile, raise an undo toast, run the real delete
+  // after the toast window expires. If the user hits Undo we cancel the
+  // timer and bring the tile back. This mirrors the trash-with-undo pattern
+  // users expect from email and modern OS file managers.
+  const handleDeleteInstalled = async (game: Game) => {
+    // If somehow there's already a pending undo for this appid, just commit
+    // it immediately — we shouldn't keep two timers fighting.
+    const existing = pendingUndoDeletesRef.current.get(game.appid)
+    if (existing) {
+      clearTimeout(existing.timer)
+      pendingUndoDeletesRef.current.delete(game.appid)
+      await existing.commit()
+    }
+
+    // Hide optimistically so the row disappears the instant the user clicks.
+    setHiddenAppIds((prev) => {
+      const next = new Set(prev)
+      next.add(game.appid)
+      return next
+    })
+    setInstalled((prev) => prev.filter((item) => item.appid !== game.appid))
+
+    const UNDO_WINDOW_MS = 5000
+    let committed = false
+
+    const commit = async () => {
+      if (committed) return
+      committed = true
+      pendingUndoDeletesRef.current.delete(game.appid)
+      await commitDeleteInstalled(game)
+    }
+
+    const cancel = () => {
+      if (committed) return
+      const entry = pendingUndoDeletesRef.current.get(game.appid)
+      if (entry) {
+        clearTimeout(entry.timer)
+        pendingUndoDeletesRef.current.delete(game.appid)
+      }
+      // Restore visibility — drop the appid from hiddenAppIds; the next
+      // refresh tick will repopulate `installed` from useGamesData.
+      setHiddenAppIds((prev) => {
+        const next = new Set(prev)
+        next.delete(game.appid)
+        return next
+      })
+      setRefreshTick((tick) => tick + 1)
+    }
+
+    const timer = setTimeout(() => { void commit() }, UNDO_WINDOW_MS)
+    pendingUndoDeletesRef.current.set(game.appid, { timer, commit, cancel })
+
+    const label = game.isExternal ? `Unlinked “${game.name}”` : `Removed “${game.name}”`
+    toast(label, "info", {
+      duration: UNDO_WINDOW_MS,
+      action: { label: "Undo", onClick: cancel },
+    })
   }
 
   const handleDeleteInstalling = async (game: Game) => {
@@ -966,12 +1153,12 @@ export function LibraryPage() {
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-white">Library</h1>
-          <p className="mt-1 text-sm text-zinc-400">
+          <p className="mt-1 text-sm text-muted-foreground">
             {loading ? "Loading…" : (
               <>
-                <span className="font-medium text-zinc-200">{installedWithMeta.length}</span> installed
+                <span className="font-medium text-foreground/90">{installedWithMeta.length}</span> installed
                 {visibleInstalling.length > 0 && (
-                  <> · <span className="font-medium text-zinc-200">{visibleInstalling.length}</span> downloading</>
+                  <> · <span className="font-medium text-foreground/90">{visibleInstalling.length}</span> downloading</>
                 )}
               </>
             )}
@@ -980,21 +1167,31 @@ export function LibraryPage() {
       </header>
 
       {/* Toolbar (replaces the left sidebar) */}
-      <div className="rounded-3xl border border-white/[.07] bg-zinc-900/40 backdrop-blur-md p-3 sm:p-4 space-y-3">
+      <div className="rounded-3xl border border-white/[.07] bg-card/40 backdrop-blur-md p-3 sm:p-4 space-y-3">
         <div className="flex flex-wrap items-center gap-2">
           <div className="relative flex-1 min-w-[220px]">
-            <Search className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-400" />
+            <Search className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
+              ref={librarySearchInputRef}
               value={librarySearch}
               onChange={(event) => handleSearchChange(event.target.value)}
-              placeholder="Search games or collections…"
+              onKeyDown={(event) => {
+                // Esc clears + blurs — matches the muscle memory users have
+                // from browser address bars and macOS finder search.
+                if (event.key === "Escape" && librarySearch) {
+                  event.preventDefault()
+                  setLibrarySearch("")
+                  setDebouncedSearch("")
+                }
+              }}
+              placeholder="Search games or collections…  ( / )"
               className="rounded-2xl bg-white/[.03] border-white/[.07] pl-10 h-11"
             />
             {librarySearch && (
               <button
                 type="button"
                 onClick={() => { setLibrarySearch(""); setDebouncedSearch("") }}
-                className="absolute right-3.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-100 transition-colors"
+                className="absolute right-3.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
                 aria-label="Clear search"
               >
                 <X className="h-3.5 w-3.5" />
@@ -1012,6 +1209,69 @@ export function LibraryPage() {
               <SelectItem value="recent-play">Recently played</SelectItem>
             </SelectContent>
           </Select>
+          {/* Grid / list toggle. Single segmented control so the active mode
+              is unambiguous and one tap switches. */}
+          <div className="inline-flex items-center rounded-2xl border border-white/[.07] bg-white/[.03] p-0.5 h-11">
+            <button
+              type="button"
+              onClick={() => handleSetViewMode('grid')}
+              className={cn(
+                "inline-flex items-center justify-center px-2.5 h-9 rounded-xl transition-colors",
+                viewMode === 'grid' ? "bg-white/[.08] text-white" : "text-muted-foreground hover:text-foreground/90"
+              )}
+              title="Grid view"
+              aria-pressed={viewMode === 'grid'}
+              aria-label="Grid view"
+            >
+              <LayoutGrid className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => handleSetViewMode('list')}
+              className={cn(
+                "inline-flex items-center justify-center px-2.5 h-9 rounded-xl transition-colors",
+                viewMode === 'list' ? "bg-white/[.08] text-white" : "text-muted-foreground hover:text-foreground/90"
+              )}
+              title="List view"
+              aria-pressed={viewMode === 'list'}
+              aria-label="List view"
+            >
+              <LayoutList className="h-4 w-4" />
+            </button>
+          </div>
+          {/* "Just played" quick-filter — narrows to titles played in the
+              last 7 days. Anchored next to the sort/view controls because
+              it's a temporary lens on the existing grid, not a permanent
+              filter like collections. Hidden entirely when nothing has
+              been played recently so the toolbar doesn't carry a button
+              that would always return zero results. */}
+          {(justPlayedCount > 0 || justPlayedOnly) && (
+            <button
+              type="button"
+              onClick={() => setJustPlayedOnly((value) => !value)}
+              aria-pressed={justPlayedOnly}
+              title={`Show only games you've played in the last 7 days (${justPlayedCount})`}
+              className={cn(
+                "rounded-2xl h-11 inline-flex items-center gap-1.5 border px-3 text-sm font-medium transition-colors active:scale-95",
+                justPlayedOnly
+                  ? "border-emerald-500/40 bg-emerald-500/[.08] text-emerald-200 hover:bg-emerald-500/[.12]"
+                  : "border-white/[.07] bg-white/[.03] text-foreground/80 hover:bg-white/[.07] hover:text-white"
+              )}
+            >
+              <Clock className="h-3.5 w-3.5" />
+              Just played
+              <span
+                className={cn(
+                  "ml-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-mono tabular-nums",
+                  justPlayedOnly
+                    ? "bg-emerald-500/20 text-emerald-200"
+                    : "bg-white/[.06] text-muted-foreground"
+                )}
+              >
+                {justPlayedCount}
+              </span>
+            </button>
+          )}
           <Button
             variant={selectionMode ? "default" : "outline"}
             className="rounded-2xl h-11 gap-2"
@@ -1029,7 +1289,7 @@ export function LibraryPage() {
         {/* Collections strip */}
         <div className="space-y-2">
           <div className="flex items-center justify-between gap-2">
-            <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-400">Collections</span>
+            <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Collections</span>
             <div className="flex items-center gap-2">
               {selectionMode && selectedAppIds.size > 0 && (
                 <NewCollectionInline
@@ -1047,7 +1307,7 @@ export function LibraryPage() {
               )}
               <Link
                 to="/collections"
-                className="inline-flex items-center gap-1 rounded-full border border-white/[.07] bg-white/[.03] px-2.5 py-1 text-[11px] font-medium text-zinc-300 hover:bg-white/[.07] hover:text-white transition-colors"
+                className="inline-flex items-center gap-1 rounded-full border border-white/[.07] bg-white/[.03] px-2.5 py-1 text-[11px] font-medium text-foreground/80 hover:bg-white/[.07] hover:text-white transition-colors"
               >
                 <Settings2 className="h-3 w-3" />
                 Manage
@@ -1069,7 +1329,7 @@ export function LibraryPage() {
           {availableCollections.length === 0 && (
             <Link
               to="/collections"
-              className="text-xs text-zinc-400 hover:text-zinc-100 italic underline-offset-2 hover:underline"
+              className="text-xs text-muted-foreground hover:text-foreground italic underline-offset-2 hover:underline"
             >
               No collections yet — create your first →
             </Link>
@@ -1079,7 +1339,7 @@ export function LibraryPage() {
 
       {/* Selection batch toolbar (sticky while active) */}
       {selectionMode && (
-        <div className="sticky top-2 z-30 rounded-2xl border border-white/[.07] bg-zinc-950/85 backdrop-blur-md p-3 space-y-2 shadow-[0_12px_40px_rgba(0,0,0,0.4)]">
+        <div className="sticky top-2 z-30 rounded-2xl border border-white/[.07] bg-background/85 backdrop-blur-md p-3 space-y-2 shadow-[0_12px_40px_rgba(0,0,0,0.4)]">
           <div className="flex flex-wrap items-center gap-2">
             <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={() => {
               if (isAllPageSelected) setSelectedAppIds((prev) => { const next = new Set(prev); pagedInstalled.forEach((g) => next.delete(g.appid)); return next })
@@ -1106,7 +1366,7 @@ export function LibraryPage() {
           </div>
           {batchProgress && (
             <div className="space-y-1">
-              <div className="flex items-center gap-2 text-xs text-zinc-400">
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
                 <span>Processing {batchProgress.done} / {batchProgress.total}…</span>
               </div>
@@ -1116,7 +1376,7 @@ export function LibraryPage() {
             </div>
           )}
           {batchFeedback && !batchProgress && (
-            <div className={cn("flex items-center gap-1.5 text-xs", batchFeedback.type === 'success' ? 'text-zinc-300' : 'text-destructive')}>
+            <div className={cn("flex items-center gap-1.5 text-xs", batchFeedback.type === 'success' ? 'text-foreground/80' : 'text-destructive')}>
               {batchFeedback.type === 'success' ? <Check className="h-3.5 w-3.5" /> : <AlertTriangle className="h-3.5 w-3.5" />}
               {batchFeedback.message}
             </div>
@@ -1125,7 +1385,7 @@ export function LibraryPage() {
       )}
 
       {/* Filter status + clear */}
-      {(selectedCollection !== "all" || debouncedSearch) && (() => {
+      {(selectedCollection !== "all" || debouncedSearch || justPlayedOnly) && (() => {
         // Denominator depends on whether a collection is selected. With a
         // collection selected, the meaningful total is "this collection's
         // games", not the whole library. We prefer the cloud collection's
@@ -1143,21 +1403,84 @@ export function LibraryPage() {
             : filteredInstalled.length + uninstalledCollectionMembers.length
         const label = selectedCollection === "all" ? "games installed" : "in this collection installed"
         return (
-        <div className="text-xs text-zinc-500">
+        <div className="text-xs text-muted-foreground/80">
           {filteredInstalled.length} of {denominator} {label}
           {uninstalledCollectionMembers.length > 0 && (
             <span className="ml-1">· {uninstalledCollectionMembers.length} not installed</span>
           )}
           <button
             type="button"
-            onClick={() => { setLibrarySearch(""); setDebouncedSearch(""); setSelectedCollection("all") }}
-            className="ml-2 text-zinc-400 hover:text-zinc-100 underline-offset-2 hover:underline"
+            onClick={() => { setLibrarySearch(""); setDebouncedSearch(""); setSelectedCollection("all"); setJustPlayedOnly(false) }}
+            className="ml-2 text-muted-foreground hover:text-foreground underline-offset-2 hover:underline"
           >
             Clear filters
           </button>
         </div>
         )
       })()}
+
+      {/* Updates available — pinned strip above the main grid. Each row
+          links to the game's detail page with ?update=1 so the existing
+          UpdateBackupWarningModal flow kicks in. Hidden when there are no
+          updates, when the catalog hasn't loaded yet, or while the page is
+          still loading the installed list. */}
+      {!loading && !statsLoading && gamesWithUpdates.length > 0 && (
+        <section className="space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="text-[11px] font-semibold uppercase tracking-[0.14em] text-amber-300 flex items-center gap-2">
+              <RefreshCw className="h-3 w-3" />
+              Updates available
+              <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-bold text-amber-200">
+                {gamesWithUpdates.length}
+              </span>
+            </h2>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {gamesWithUpdates.slice(0, 6).map((game) => {
+              const catalogVersion = catalogVersionByAppid.get(game.appid) || ""
+              return (
+                <Link
+                  key={game.appid}
+                  to={`/game/${encodeURIComponent(game.appid)}?update=1`}
+                  className="group flex items-center gap-3 rounded-2xl border border-amber-500/20 bg-amber-500/[.04] px-3 py-2.5 transition hover:border-amber-500/40 hover:bg-amber-500/[.07]"
+                >
+                  <div className="h-12 w-12 shrink-0 overflow-hidden rounded-lg border border-white/[.07] bg-card">
+                    {game.image && (
+                      <img
+                        src={(game as any).localImage || game.image}
+                        alt=""
+                        data-uc-handled="1"
+                        className="h-full w-full object-cover"
+                        onError={(event) => { (event.target as HTMLImageElement).style.opacity = "0" }}
+                      />
+                    )}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-semibold text-white truncate">{game.name}</div>
+                    <div className="text-[11px] text-muted-foreground truncate">
+                      <span className="font-mono text-muted-foreground/80">{game.version || "installed"}</span>
+                      <ArrowUpDown className="inline h-2.5 w-2.5 mx-1 rotate-90 text-muted-foreground/60" />
+                      <span className="font-mono text-amber-200">{catalogVersion}</span>
+                    </div>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 px-2.5 text-xs border-amber-500/30 bg-amber-500/10 text-amber-100 hover:bg-amber-500/20"
+                    onClick={(event) => { event.preventDefault(); event.stopPropagation(); /* navigation happens via the Link */ }}
+                    tabIndex={-1}
+                  >
+                    Update
+                  </Button>
+                </Link>
+              )
+            })}
+          </div>
+          {gamesWithUpdates.length > 6 && (
+            <p className="text-[11px] text-muted-foreground/80">+{gamesWithUpdates.length - 6} more — keep an eye on the orange dot in the grid below.</p>
+          )}
+        </section>
+      )}
 
       {/* Installed games grid */}
       <section className="space-y-4">
@@ -1167,11 +1490,133 @@ export function LibraryPage() {
           </div>
         ) : filteredInstalled.length ? (
           <div className="space-y-4">
-            <div className="grid gap-4 grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-              {pagedInstalled.map((game) => {
+            <div className={cn(
+              viewMode === 'list'
+                ? "flex flex-col gap-1.5"
+                : "grid gap-4 grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5"
+            )}>
+              {viewMode === 'list' ? pagedInstalled.map((game) => {
                 const collections = game.libraryMeta?.collections || []
                 const lastPlayed = formatRelativeTimestamp(game.libraryMeta?.lastPlayedAt)
                 const isSelected = selectedAppIds.has(game.appid)
+                const updateAvailable = hasInstalledVersionUpdate(catalogVersionByAppid.get(game.appid), [game.version])
+                const coverSrc = (game as any).localImage || game.image
+                const notesPreview = (() => {
+                  const raw = game.libraryMeta?.notes
+                  if (!raw) return null
+                  const firstLine = raw.split(/\r?\n/).map((line) => line.trim()).find((line) => line.length > 0)
+                  if (!firstLine) return null
+                  return firstLine.length > 160 ? `${firstLine.slice(0, 157)}…` : firstLine
+                })()
+                return (
+                  <div
+                    key={game.appid}
+                    title={notesPreview ?? undefined}
+                    onContextMenuCapture={!selectionMode ? (event) => {
+                      event.preventDefault()
+                      event.stopPropagation()
+                      openGameActionContextMenu(game, { x: event.clientX, y: event.clientY })
+                    } : undefined}
+                    onClick={selectionMode ? (e) => { e.preventDefault(); e.stopPropagation(); toggleSelected(game.appid) } : undefined}
+                    className={cn(
+                      "group flex items-center gap-3 rounded-2xl border border-white/[.07] bg-white/[.02] px-3 py-2 transition hover:border-white/15 hover:bg-white/[.04]",
+                      selectionMode ? "cursor-pointer" : "cursor-default",
+                      isSelected ? "ring-2 ring-white ring-offset-2 ring-offset-zinc-950" : ""
+                    )}
+                  >
+                    {selectionMode && (
+                      <div className={cn(
+                        "h-5 w-5 shrink-0 rounded-md border-2 flex items-center justify-center",
+                        isSelected ? "border-white bg-primary text-primary-foreground" : "border-zinc-500"
+                      )}>
+                        {isSelected && <Check className="h-3 w-3" />}
+                      </div>
+                    )}
+                    <Link
+                      to={`/game/${encodeURIComponent(game.appid)}`}
+                      className="flex flex-1 items-center gap-3 min-w-0"
+                      onClick={(e) => { if (selectionMode) { e.preventDefault(); e.stopPropagation() } }}
+                    >
+                      <div className="h-12 w-12 shrink-0 overflow-hidden rounded-lg border border-white/[.07] bg-card">
+                        {coverSrc && (
+                          <img
+                            src={coverSrc}
+                            alt=""
+                            data-uc-handled="1"
+                            className="h-full w-full object-cover"
+                            onError={(event) => { (event.target as HTMLImageElement).style.opacity = "0" }}
+                          />
+                        )}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <div className="text-sm font-semibold text-white truncate">{game.name}</div>
+                          {updateAvailable && (
+                            <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-bold text-amber-200">
+                              <RefreshCw className="h-2.5 w-2.5" />
+                              Update
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-[11px] text-muted-foreground/80 truncate">
+                          {[
+                            lastPlayed ? `Last played ${lastPlayed}` : null,
+                            game.size || null,
+                            game.version ? `v${game.version}` : null,
+                            collections.length > 0 ? `${collections.length} collection${collections.length === 1 ? "" : "s"}` : null,
+                          ].filter(Boolean).join(" · ")}
+                        </div>
+                      </div>
+                    </Link>
+                    {!selectionMode && (
+                      <div className="flex items-center gap-1 opacity-0 transition group-hover:opacity-100">
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          onClick={(event) => { event.stopPropagation(); event.preventDefault(); void handleOpenGameFiles(game) }}
+                          className="h-8 w-8 rounded-full text-muted-foreground hover:bg-white/[.06] hover:text-white"
+                          title="Open game files"
+                        >
+                          <FolderOpen className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          onClick={(event) => {
+                            // The Popover that openGameActionPopover anchors to
+                            // only renders in the grid layout. In list view we
+                            // route through the right-click context menu so
+                            // the click works in both modes — opens it at the
+                            // pointer position so it doesn't fly off-screen.
+                            event.stopPropagation()
+                            event.preventDefault()
+                            const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
+                            openGameActionContextMenu(game, { x: rect.right, y: rect.bottom + 4 })
+                          }}
+                          className="h-8 w-8 rounded-full text-muted-foreground hover:bg-white/[.06] hover:text-white"
+                          title="More actions"
+                        >
+                          <MoreHorizontal className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                )
+              }) : pagedInstalled.map((game) => {
+                const collections = game.libraryMeta?.collections || []
+                const lastPlayed = formatRelativeTimestamp(game.libraryMeta?.lastPlayedAt)
+                const isSelected = selectedAppIds.has(game.appid)
+                // Notes preview — first non-empty line, trimmed to a sane
+                // length so a long entry doesn't blow up the tooltip. Native
+                // browser tooltip is good enough here; a custom popover would
+                // fight the hover-only Aura on the card behind it.
+                const notesPreview = (() => {
+                  const raw = game.libraryMeta?.notes
+                  if (!raw) return null
+                  const firstLine = raw.split(/\r?\n/).map((line) => line.trim()).find((line) => line.length > 0)
+                  if (!firstLine) return null
+                  return firstLine.length > 160 ? `${firstLine.slice(0, 157)}…` : firstLine
+                })()
                 return (
                   <div
                     key={game.appid}
@@ -1180,6 +1625,7 @@ export function LibraryPage() {
                       selectionMode ? "cursor-pointer" : "",
                       isSelected ? "ring-2 ring-white ring-offset-2 ring-offset-zinc-950" : ""
                     )}
+                    title={notesPreview ?? undefined}
                     onContextMenuCapture={!selectionMode ? (event) => {
                       // Capture-phase: prevent the GameCard's built-in universal menu
                       // from firing — the Library has its own richer menu (with delete,
@@ -1209,7 +1655,7 @@ export function LibraryPage() {
                             className="absolute bottom-2 left-2 inline-flex items-center gap-1.5 rounded-full border border-violet-500/30 bg-black/70 px-2 py-0.5 text-[10px] font-semibold text-violet-200 backdrop-blur-sm max-w-[calc(100%-1rem)]"
                             title={`Added by ${nm}`}
                           >
-                            <span className="h-3.5 w-3.5 shrink-0 overflow-hidden rounded-full bg-zinc-800">
+                            <span className="h-3.5 w-3.5 shrink-0 overflow-hidden rounded-full bg-secondary">
                               {addedBy.avatarUrl ? (
                                 <img src={addedBy.avatarUrl} alt="" className="h-full w-full object-cover" />
                               ) : null}
@@ -1227,7 +1673,7 @@ export function LibraryPage() {
                       )}>
                         <div className={cn(
                           "absolute top-2.5 right-2.5 h-6 w-6 rounded-md border-2 flex items-center justify-center transition-all",
-                          isSelected ? "border-white bg-white text-black" : "border-zinc-500 bg-black/50"
+                          isSelected ? "border-white bg-primary text-primary-foreground" : "border-zinc-500 bg-black/50"
                         )}>
                           {isSelected && <Check className="h-4 w-4" />}
                         </div>
@@ -1281,6 +1727,11 @@ export function LibraryPage() {
                               onSetExecutable={() => { setSettingsPopupOpen(false); void openExecutablePicker(game) }}
                               onOpenFiles={() => { setSettingsPopupOpen(false); void handleOpenGameFiles(game) }}
                               onCreateShortcut={() => { void handleCreateShortcutForGame(game) }}
+                              onLaunchOptions={() => {
+                                setSettingsPopupOpen(false)
+                                setShortcutFeedback(null)
+                                setLaunchOptionsGame(game)
+                              }}
                               onEditDetails={game.isExternal ? () => {
                                 setSettingsPopupOpen(false)
                                 setShortcutFeedback(null)
@@ -1299,6 +1750,10 @@ export function LibraryPage() {
                                 setPendingDeleteGame(game)
                                 setPendingDeleteAction("installed")
                               }}
+                              rpcMute={{
+                                muted: rpcMutedAppids[game.appid] === true,
+                                toggle: () => { void toggleRpcMute(game.appid) },
+                              }}
                               collectionPicker={buildCollectionPicker(game)}
                             />
                           </PopoverContent>
@@ -1307,15 +1762,27 @@ export function LibraryPage() {
                     )}
 
                     {/* Card meta footer (compact) */}
-                    {(collections.length > 0 || lastPlayed) && (
+                    {(collections.length > 0 || lastPlayed || notesPreview) && (
                       <div className="mt-1 px-1 flex flex-wrap items-center gap-1">
                         {collections.slice(0, 2).map((c) => (
-                          <span key={c} className="inline-flex items-center gap-0.5 text-[10px] rounded-md bg-white/[.04] text-zinc-300 border border-white/[.07] px-1.5 py-0.5 truncate max-w-[80px]">
+                          <span key={c} className="inline-flex items-center gap-0.5 text-[10px] rounded-md bg-white/[.04] text-foreground/80 border border-white/[.07] px-1.5 py-0.5 truncate max-w-[80px]">
                             <Layers3 className="h-2.5 w-2.5" /> {c}
                           </span>
                         ))}
+                        {/* Small note pin — same hover surface as the tile
+                            itself (the title is already on the wrapper), but
+                            this gives a visible cue that there's a note
+                            without forcing the user to hover-and-wait. */}
+                        {notesPreview && (
+                          <span
+                            className="inline-flex items-center text-[10px] rounded-md bg-amber-500/[.08] text-amber-200 border border-amber-500/20 px-1 py-0.5"
+                            title={notesPreview}
+                          >
+                            <StickyNote className="h-2.5 w-2.5" />
+                          </span>
+                        )}
                         {lastPlayed && (
-                          <span className="ml-auto text-[10px] text-zinc-500">{lastPlayed}</span>
+                          <span className="ml-auto text-[10px] text-muted-foreground/80">{lastPlayed}</span>
                         )}
                       </div>
                     )}
@@ -1330,46 +1797,50 @@ export function LibraryPage() {
               wrapperClassName="mt-6"
             />
           </div>
-        ) : (
-          <div className="rounded-3xl border border-dashed border-white/[.07] bg-white/[.02] p-10 text-center space-y-3">
-            <div className="mx-auto h-12 w-12 rounded-full bg-white/[.04] border border-white/[.07] flex items-center justify-center">
-              <Search className="h-5 w-5 text-zinc-500" />
-            </div>
-            <p className="text-sm text-zinc-400">
-              {installedWithMeta.length === 0 ? "No games installed yet." : "No installed titles match these filters."}
-            </p>
-            {(debouncedSearch || selectedCollection !== "all") && (
-              <Button variant="ghost" size="sm" className="text-xs" onClick={() => { setLibrarySearch(""); setDebouncedSearch(""); setSelectedCollection("all") }}>
-                Clear all filters
+        ) : installedWithMeta.length === 0 ? (
+          <EmptyState
+            icon={Download}
+            title="No games installed yet"
+            description="Once you install a game it'll appear here, sorted by name, install date, or last played."
+            action={(
+              <Button onClick={() => navigate("/")}>
+                Browse games to install
               </Button>
             )}
-          </div>
+            hint={(
+              <>
+                Already have games on disk? <Link to="/library?collection=all" className="underline-offset-2 hover:underline">Add an external game</Link> via the toolbar.
+              </>
+            )}
+          />
+        ) : (
+          <EmptyState
+            icon={Search}
+            title="No installed titles match these filters"
+            description="Try a different collection or clear the search."
+            action={(debouncedSearch || selectedCollection !== "all") ? (
+              <Button variant="outline" size="sm" onClick={() => { setLibrarySearch(""); setDebouncedSearch(""); setSelectedCollection("all"); setJustPlayedOnly(false) }}>
+                Clear all filters
+              </Button>
+            ) : undefined}
+          />
         )}
       </section>
 
       {/* Uninstalled collection members — shown when filtering by a specific collection */}
       {uninstalledCollectionMembers.length > 0 && !loading && !statsLoading && (
         <section className="space-y-3">
-          <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500 flex items-center gap-1.5">
+          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground/80 flex items-center gap-1.5">
             <Download className="h-3 w-3" />
             Not installed ({uninstalledCollectionMembers.length})
           </p>
           <div className="grid gap-4 grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
             {uninstalledCollectionMembers.map((game) => (
-              <div key={game.appid} className="group/tile relative rounded-xl opacity-60 hover:opacity-100 transition-opacity duration-200">
+              <div key={game.appid} className="relative">
                 <GameCard game={game} stats={stats[game.appid]} size="compact" />
-                <div className="absolute inset-x-2 top-2 z-20 flex items-center justify-end opacity-0 transition-all duration-200 group-hover/tile:opacity-100">
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); void startGameDownload(game as any) }}
-                    className="h-8 w-8 rounded-full border border-white/[.08] bg-black/70 text-white hover:bg-white/20 backdrop-blur-md"
-                    title="Download game"
-                    aria-label="Download game"
-                  >
-                    <Download className="h-3.5 w-3.5" />
-                  </Button>
-                </div>
+                <NotInstalledOverlay
+                  onInstall={async () => { await startGameDownload(game as any) }}
+                />
               </div>
             ))}
           </div>
@@ -1419,16 +1890,35 @@ export function LibraryPage() {
           setPendingDeleteAction("installed")
           setCardContextMenu(null)
         }}
+        wishlist={accountLists.authed === false || !cardContextMenu ? undefined : {
+          inList: accountLists.wishlist.has(cardContextMenu.game.appid),
+          toggle: () => { void accountLists.toggleWishlist(cardContextMenu.game.appid, cardContextMenu.game.name) },
+        }}
+        favorites={accountLists.authed === false || !cardContextMenu ? undefined : {
+          inList: accountLists.favorites.has(cardContextMenu.game.appid),
+          toggle: () => { void accountLists.toggleFavorite(cardContextMenu.game.appid, cardContextMenu.game.name) },
+        }}
+        rpcMute={cardContextMenu ? {
+          muted: rpcMutedAppids[cardContextMenu.game.appid] === true,
+          toggle: () => { void toggleRpcMute(cardContextMenu.game.appid) },
+        } : undefined}
         collectionPicker={cardContextMenu ? buildCollectionPicker(cardContextMenu.game) : undefined}
       />
+
+      {/* Disk usage breakdown — quick "how much have I installed and where's
+          it going?" answer without leaving the library. Hidden when nothing
+          is installed (the component returns null in that case). */}
+      {!loading && !statsLoading && installedWithMeta.length > 0 && (
+        <DiskUsageBreakdown />
+      )}
 
       {/* Downloading section */}
       {(loading || statsLoading || visibleInstalling.length > 0) && (
         <section className="space-y-3">
           <div className="flex items-center gap-2">
-            <h2 className="text-sm font-semibold text-zinc-300">Downloading</h2>
+            <h2 className="text-sm font-semibold text-foreground/80">Downloading</h2>
             {!loading && !statsLoading && visibleInstalling.length > 0 && (
-              <span className="rounded-full border border-white/[.07] bg-white/[.04] px-2 py-0.5 text-[11px] text-zinc-400">
+              <span className="rounded-full border border-white/[.07] bg-white/[.04] px-2 py-0.5 text-[11px] text-muted-foreground">
                 {visibleInstalling.length}
               </span>
             )}
@@ -1466,7 +1956,7 @@ export function LibraryPage() {
                             "rounded-full border px-2 py-0.5 text-[11px] font-medium backdrop-blur-sm",
                             isFailed
                               ? "border-red-500/30 bg-black/70 text-red-400"
-                              : "border-white/[.07] bg-black/70 text-zinc-400"
+                              : "border-white/[.07] bg-black/70 text-muted-foreground"
                           )}>
                             {isFailed ? "Failed" : "Cancelled"}
                           </span>
@@ -1482,7 +1972,7 @@ export function LibraryPage() {
                             setPendingDeleteGame(game)
                             setPendingDeleteAction("installing")
                           }}
-                          className="h-7 w-7 rounded-full border border-white/[.08] bg-black/70 text-zinc-400 backdrop-blur-sm hover:bg-red-500/10 hover:text-red-400"
+                          className="h-7 w-7 rounded-full border border-white/[.08] bg-black/70 text-muted-foreground backdrop-blur-sm hover:bg-red-500/10 hover:text-red-400"
                           title="Remove"
                           aria-label="Remove download"
                         >
@@ -1506,59 +1996,70 @@ export function LibraryPage() {
         </section>
       )}
 
-      {/* ──── Modals ──── */}
-            {batchDeleteConfirmOpen && (
-              <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
-                <div className="absolute inset-0 bg-black/70" onClick={() => setBatchDeleteConfirmOpen(false)} />
-                <div className="relative w-full max-w-md rounded-2xl border border-white/[.07] bg-zinc-900 p-5 text-white shadow-2xl">
-                  <div className="flex items-center gap-2 text-base font-semibold">
-                    <AlertTriangle className="h-4 w-4 text-red-400" />
-                    Delete {selectedInstalledGames.length} game{selectedInstalledGames.length !== 1 ? "s" : ""}
-                  </div>
-                  <p className="mt-2 text-sm text-zinc-400">
-                    This will permanently remove the installed files from disk.
-                  </p>
-                  <div className="mt-4 flex justify-end gap-2">
-                    <Button variant="ghost" size="sm" onClick={() => setBatchDeleteConfirmOpen(false)}>Cancel</Button>
-                    <Button variant="destructive" size="sm" onClick={() => void executeBatchDelete()}>Delete</Button>
-                  </div>
-                </div>
-              </div>
-            )}
+      {/* ──── Modals ──── All use the shared Radix Dialog so overlay, surface,
+          blur and animations stay in lockstep with the rest of the app. */}
+      <Dialog open={batchDeleteConfirmOpen} onOpenChange={setBatchDeleteConfirmOpen}>
+        <DialogContent showCloseButton={false} className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <AlertTriangle className="h-4 w-4 text-red-400" />
+              Delete {selectedInstalledGames.length} game{selectedInstalledGames.length !== 1 ? "s" : ""}
+            </DialogTitle>
+            <DialogDescription>
+              This will permanently remove the installed files from disk.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="ghost" size="sm" onClick={() => setBatchDeleteConfirmOpen(false)}>Cancel</Button>
+            <Button variant="destructive" size="sm" onClick={() => void executeBatchDelete()}>Delete</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
-      {pendingDeleteGame && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
-          <div className="absolute inset-0 bg-black/70" onClick={() => { setPendingDeleteGame(null); setPendingDeleteAction(null) }} />
-          <div className="relative w-full max-w-md rounded-2xl border border-white/[.07] bg-zinc-900 p-5 text-white shadow-2xl">
-            <div className="text-base font-semibold">
-              {pendingDeleteAction === "installing" ? "Remove download" : pendingDeleteGame.isExternal ? "Unlink game" : "Delete game"}
-            </div>
-            <p className="mt-2 text-sm text-zinc-400">
-              {pendingDeleteAction === "installing"
-                ? `Remove “${pendingDeleteGame.name}”? Any downloaded data will be deleted.`
-                : pendingDeleteGame.isExternal
-                  ? `Unlink “${pendingDeleteGame.name}” from your library? Your files won’t be touched.`
-                  : `Delete “${pendingDeleteGame.name}”? This removes the installed files from disk.`}
-            </p>
-            <div className="mt-4 flex justify-end gap-2">
-              <Button variant="ghost" size="sm" onClick={() => { setPendingDeleteGame(null); setPendingDeleteAction(null) }}>Cancel</Button>
-              <Button variant="destructive" size="sm" onClick={() => {
-                const target = pendingDeleteGame
-                const action = pendingDeleteAction
-                setPendingDeleteGame(null)
-                setPendingDeleteAction(null)
-                if (!target) return
-                setTimeout(() => {
-                  if (action === "installing") void handleDeleteInstalling(target)
-                  else void handleDeleteInstalled(target)
-                }, 0)
-              }}>
-                {pendingDeleteAction === "installing" ? "Remove" : pendingDeleteGame?.isExternal ? "Unlink" : "Delete"}
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
+      <Dialog
+        open={Boolean(pendingDeleteGame)}
+        onOpenChange={(next) => {
+          if (!next) {
+            setPendingDeleteGame(null)
+            setPendingDeleteAction(null)
+          }
+        }}
+      >
+        <DialogContent showCloseButton={false} className="sm:max-w-md">
+          {pendingDeleteGame && (
+            <>
+              <DialogHeader>
+                <DialogTitle className="text-base">
+                  {pendingDeleteAction === "installing" ? "Remove download" : pendingDeleteGame.isExternal ? "Unlink game" : "Delete game"}
+                </DialogTitle>
+                <DialogDescription>
+                  {pendingDeleteAction === "installing"
+                    ? `Remove “${pendingDeleteGame.name}”? Any downloaded data will be deleted.`
+                    : pendingDeleteGame.isExternal
+                      ? `Unlink “${pendingDeleteGame.name}” from your library? Your files won’t be touched.`
+                      : `Delete “${pendingDeleteGame.name}”? This removes the installed files from disk.`}
+                </DialogDescription>
+              </DialogHeader>
+              <DialogFooter>
+                <Button variant="ghost" size="sm" onClick={() => { setPendingDeleteGame(null); setPendingDeleteAction(null) }}>Cancel</Button>
+                <Button variant="destructive" size="sm" onClick={() => {
+                  const target = pendingDeleteGame
+                  const action = pendingDeleteAction
+                  setPendingDeleteGame(null)
+                  setPendingDeleteAction(null)
+                  if (!target) return
+                  setTimeout(() => {
+                    if (action === "installing") void handleDeleteInstalling(target)
+                    else void handleDeleteInstalled(target)
+                  }, 0)
+                }}>
+                  {pendingDeleteAction === "installing" ? "Remove" : pendingDeleteGame.isExternal ? "Unlink" : "Delete"}
+                </Button>
+              </DialogFooter>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
       <ExePickerModal
         open={exePickerOpen}
         title={exePickerTitle}
@@ -1581,6 +2082,14 @@ export function LibraryPage() {
           }}
         />
       )}
+      {launchOptionsGame && (
+        <LaunchOptionsModal
+          open={Boolean(launchOptionsGame)}
+          appid={launchOptionsGame.appid}
+          gameName={launchOptionsGame.name}
+          onClose={() => setLaunchOptionsGame(null)}
+        />
+      )}
       {linuxConfigGame && (
         <GameLinuxConfigModal
           open={linuxConfigOpen}
@@ -1597,6 +2106,37 @@ export function LibraryPage() {
 // Horizontally scrollable chip row (Steam-style) with arrow-button overflow nav
 // and a searchable popover that lists every collection. Keeps the strip tidy
 // when the user accumulates many collections without hiding any of them.
+
+function NotInstalledOverlay({ onInstall }: { onInstall: () => void | Promise<void> }) {
+  const [busy, setBusy] = useState(false)
+  return (
+    <div className="pointer-events-none absolute inset-0 z-30 rounded-2xl overflow-hidden">
+      <div className="absolute inset-0 bg-black/55 backdrop-blur-[1px]" />
+      <div className="absolute top-2 left-2">
+        <span className="inline-flex items-center gap-1 rounded-full border border-white/[.12] bg-black/60 px-2 py-0.5 text-[10px] font-semibold text-foreground/90 backdrop-blur-sm">
+          Not installed
+        </span>
+      </div>
+      <div className="absolute inset-x-2 bottom-2 flex justify-center pointer-events-auto">
+        <Button
+          size="sm"
+          disabled={busy}
+          onClick={async (e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            if (busy) return
+            setBusy(true)
+            try { await onInstall() } finally { setBusy(false) }
+          }}
+          className="h-8 gap-1.5 rounded-full bg-primary text-primary-foreground hover:brightness-110 text-xs font-semibold shadow-lg"
+        >
+          {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+          Install
+        </Button>
+      </div>
+    </div>
+  )
+}
 
 type CollectionFilterStripProps = {
   availableCollections: string[]
@@ -1698,7 +2238,7 @@ function CollectionFilterStrip({
             type="button"
             onClick={() => nudge(-1)}
             aria-label="Scroll collections left"
-            className="shrink-0 inline-flex h-7 w-7 items-center justify-center rounded-full border border-white/[.07] bg-zinc-950/80 text-zinc-300 hover:bg-white/[.07] hover:text-white transition-colors"
+            className="shrink-0 inline-flex h-7 w-7 items-center justify-center rounded-full border border-white/[.07] bg-background/80 text-foreground/80 hover:bg-white/[.07] hover:text-white transition-colors"
           >
             <ChevronLeft className="h-3.5 w-3.5" />
           </button>
@@ -1742,7 +2282,7 @@ function CollectionFilterStrip({
                 <PopoverTrigger asChild>
                   <button
                     type="button"
-                    className="inline-flex items-center gap-1.5 rounded-full border border-white/[.07] bg-white/[.03] px-3 py-1 text-[12px] font-medium text-zinc-200 hover:bg-white/[.07] hover:text-white transition-colors whitespace-nowrap"
+                    className="inline-flex items-center gap-1.5 rounded-full border border-white/[.07] bg-white/[.03] px-3 py-1 text-[12px] font-medium text-foreground/90 hover:bg-white/[.07] hover:text-white transition-colors whitespace-nowrap"
                   >
                     <Layers3 className="h-3 w-3" />
                     +{overflowCollections.length} more
@@ -1751,11 +2291,11 @@ function CollectionFilterStrip({
                 </PopoverTrigger>
                 <PopoverContent
                   align="end"
-                  className="w-72 p-0 bg-zinc-950/95 border border-white/[.08] rounded-2xl shadow-[0_20px_60px_rgba(0,0,0,0.55)] backdrop-blur-xl"
+                  className="w-72 p-0 bg-background/95 border border-white/[.08] rounded-2xl shadow-[0_20px_60px_rgba(0,0,0,0.55)] backdrop-blur-xl"
                 >
                   <div className="p-2 border-b border-white/[.06]">
                     <div className="relative">
-                      <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-zinc-500 pointer-events-none" />
+                      <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground/80 pointer-events-none" />
                       <Input
                         autoFocus
                         value={pickerQuery}
@@ -1767,7 +2307,7 @@ function CollectionFilterStrip({
                   </div>
                   <div className="max-h-72 overflow-y-auto uc-scrollbar py-1">
                     {filteredPicker.length === 0 ? (
-                      <div className="px-3 py-4 text-center text-xs text-zinc-500 italic">No match</div>
+                      <div className="px-3 py-4 text-center text-xs text-muted-foreground/80 italic">No match</div>
                     ) : (
                       filteredPicker.map((collection) => {
                         const isActive =
@@ -1785,12 +2325,12 @@ function CollectionFilterStrip({
                               "w-full flex items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors",
                               isActive
                                 ? "bg-white/[.07] text-white"
-                                : "text-zinc-300 hover:bg-white/[.05] hover:text-white"
+                                : "text-foreground/80 hover:bg-white/[.05] hover:text-white"
                             )}
                           >
-                            <Layers3 className={cn("h-3.5 w-3.5 shrink-0", isActive ? "text-zinc-200" : "text-zinc-500")} />
+                            <Layers3 className={cn("h-3.5 w-3.5 shrink-0", isActive ? "text-foreground/90" : "text-muted-foreground/80")} />
                             <span className="flex-1 truncate">{collection}</span>
-                            <span className="text-[10px] tabular-nums text-zinc-500">
+                            <span className="text-[10px] tabular-nums text-muted-foreground/80">
                               {collectionCounts[collection] || 0}
                             </span>
                           </button>
@@ -1808,7 +2348,7 @@ function CollectionFilterStrip({
             type="button"
             onClick={() => nudge(1)}
             aria-label="Scroll collections right"
-            className="shrink-0 inline-flex h-7 w-7 items-center justify-center rounded-full border border-white/[.07] bg-zinc-950/80 text-zinc-300 hover:bg-white/[.07] hover:text-white transition-colors"
+            className="shrink-0 inline-flex h-7 w-7 items-center justify-center rounded-full border border-white/[.07] bg-background/80 text-foreground/80 hover:bg-white/[.07] hover:text-white transition-colors"
           >
             <ChevronRight className="h-3.5 w-3.5" />
           </button>

@@ -1,3 +1,10 @@
+/* Theme-customisable font choices. Loaded from Google Fonts CDN; if the
+   launcher is offline these silently fall back to Inter/Geist Mono via the
+   font-family stack in lib/themes/fonts.ts.
+   NOTE: PostCSS requires @import to precede every other statement in the
+   file (besides @charset and empty @layer) — keep this block at the top. */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600;700&family=Fira+Code:wght@400;500;600;700&display=swap');
+
 /* UC Universal Design Language - Geist typeface (bundled, works offline in Electron) */
 @font-face {
 	font-family: 'Geist';

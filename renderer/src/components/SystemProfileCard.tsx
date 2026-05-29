@@ -51,19 +51,19 @@ export function SystemProfileCard({ tier, summary, spec, fingerprint, capturedAt
   })()
 
   return (
-    <Card className="border-white/[.07] bg-zinc-900/40 backdrop-blur-sm">
+    <Card className="border-white/[.07] bg-card/40 backdrop-blur-sm">
       <CardHeader className="pb-2">
         <CardTitle className="text-sm font-medium flex items-center gap-2">
-          <Cpu className="h-4 w-4 text-zinc-400" />
+          <Cpu className="h-4 w-4 text-muted-foreground" />
           PC Specs
-          <span className="ml-auto text-[10px] font-mono text-zinc-500" title={`fingerprint ${fingerprint}`}>
+          <span className="ml-auto text-[10px] font-mono text-muted-foreground/80" title={`fingerprint ${fingerprint}`}>
             {capturedDate ? `scanned ${capturedDate}` : ""}
           </span>
         </CardTitle>
       </CardHeader>
       <CardContent className="pt-0">
         {tier === "summary" || !spec ? (
-          <p className="text-sm text-zinc-300 truncate" title={summary || undefined}>
+          <p className="text-sm text-foreground/80 truncate" title={summary || undefined}>
             {summary || "(no summary)"}
           </p>
         ) : (
@@ -128,13 +128,13 @@ export function SystemProfileCard({ tier, summary, spec, fingerprint, capturedAt
 
 function Tile({ icon, label, value, sub }: { icon: ReactNode; label: string; value: string; sub: string | null }) {
   return (
-    <div className="rounded-lg border border-white/[.07] bg-zinc-900/60 px-3 py-2">
-      <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-zinc-500">
+    <div className="rounded-lg border border-white/[.07] bg-card/60 px-3 py-2">
+      <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-muted-foreground/80">
         {icon}
         <span>{label}</span>
       </div>
-      <div className="text-xs font-medium text-zinc-100 mt-0.5 truncate" title={value}>{value}</div>
-      {sub && <div className="text-[10px] text-zinc-400 mt-0.5 truncate" title={sub}>{sub}</div>}
+      <div className="text-xs font-medium text-foreground mt-0.5 truncate" title={value}>{value}</div>
+      {sub && <div className="text-[10px] text-muted-foreground mt-0.5 truncate" title={sub}>{sub}</div>}
     </div>
   )
 }

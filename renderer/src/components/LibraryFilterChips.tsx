@@ -129,8 +129,8 @@ function Pill({
       className={cn(
         "group/pill inline-flex items-center gap-1 rounded-full border text-xs font-medium transition-all",
         active
-          ? "border-white bg-white text-black"
-          : "border-white/[.07] bg-white/[.03] text-zinc-300 hover:bg-white/[.07] hover:text-white"
+          ? "border-white bg-primary text-primary-foreground"
+          : "border-white/[.07] bg-white/[.03] text-foreground/80 hover:bg-white/[.07] hover:text-white"
       )}
       onContextMenu={(e) => {
         if (!hasManagement) return
@@ -149,7 +149,7 @@ function Pill({
           <span
             className={cn(
               "rounded-full px-1.5 py-0 text-[10px] font-semibold leading-4",
-              active ? "bg-black/15 text-black/70" : "bg-white/[.06] text-zinc-400"
+              active ? "bg-black/15 text-black/70" : "bg-white/[.06] text-muted-foreground"
             )}
           >
             {count}
@@ -166,7 +166,7 @@ function Pill({
               aria-label="Manage"
               className={cn(
                 "mr-0.5 inline-flex h-5 w-5 items-center justify-center rounded-full opacity-0 group-hover/pill:opacity-100 transition-opacity",
-                active ? "text-black/70 hover:bg-black/10" : "text-zinc-400 hover:bg-white/[.08]"
+                active ? "text-black/70 hover:bg-black/10" : "text-muted-foreground hover:bg-white/[.08]"
               )}
             >
               <MoreHorizontal className="h-3 w-3" />
@@ -181,7 +181,7 @@ function Pill({
                   setRenaming(true)
                   setMenuOpen(false)
                 }}
-                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-xs text-zinc-200 transition-colors hover:bg-white/[.08]"
+                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-xs text-foreground/90 transition-colors hover:bg-white/[.08]"
               >
                 <Pencil className="h-3.5 w-3.5" />
                 Rename
@@ -194,7 +194,7 @@ function Pill({
                   onRemoveFromSelected()
                   setMenuOpen(false)
                 }}
-                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-xs text-zinc-200 transition-colors hover:bg-white/[.08]"
+                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-xs text-foreground/90 transition-colors hover:bg-white/[.08]"
               >
                 <X className="h-3.5 w-3.5" />
                 Remove from selection
@@ -259,7 +259,7 @@ export function NewCollectionInline({
       </PopoverTrigger>
       <PopoverContent align="start" className="w-64 p-3">
         <div className="space-y-2">
-          <p className="text-xs text-zinc-400">{placeholder}</p>
+          <p className="text-xs text-muted-foreground">{placeholder}</p>
           <div className="flex gap-2">
             <Input
               autoFocus

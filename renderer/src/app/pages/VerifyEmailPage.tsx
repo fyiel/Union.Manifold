@@ -84,13 +84,13 @@ export function VerifyEmailPage() {
   if (verified) {
     return (
       <div className="min-h-screen bg-[#09090b] flex items-center justify-center p-4">
-        <Card className="w-full max-w-md border border-white/[.07] bg-zinc-900/40 backdrop-blur-xl">
+        <Card className="w-full max-w-md border border-white/[.07] bg-card/40 backdrop-blur-xl">
           <CardContent className="p-6 space-y-4 text-center">
             <div className="inline-flex items-center justify-center rounded-full bg-green-500/10 p-3">
               <CheckCircle className="h-8 w-8 text-green-400" />
             </div>
-            <h2 className="text-xl font-semibold text-zinc-100">Email Verified!</h2>
-            <p className="text-sm text-zinc-400">
+            <h2 className="text-xl font-semibold text-foreground">Email Verified!</h2>
+            <p className="text-sm text-muted-foreground">
               Your email has been verified. Redirecting to login...
             </p>
           </CardContent>
@@ -105,17 +105,17 @@ export function VerifyEmailPage() {
         <Button
           variant="ghost"
           onClick={() => navigate("/login")}
-          className="gap-2 text-zinc-400 hover:text-white hover:bg-white/[.05]"
+          className="gap-2 text-muted-foreground hover:text-white hover:bg-white/[.05]"
         >
           <ArrowLeft className="h-4 w-4" />
           Back to Login
         </Button>
 
-        <Card className="border border-white/[.07] bg-zinc-900/40 backdrop-blur-xl">
+        <Card className="border border-white/[.07] bg-card/40 backdrop-blur-xl">
           <CardContent className="p-6 space-y-6">
             <div className="text-center space-y-1">
-              <h1 className="text-xl font-semibold text-zinc-100">Verify Your Email</h1>
-              <p className="text-sm text-zinc-500">Enter the verification token from your email</p>
+              <h1 className="text-xl font-semibold text-foreground">Verify Your Email</h1>
+              <p className="text-sm text-muted-foreground/80">Enter the verification token from your email</p>
             </div>
 
             {error && (
@@ -125,25 +125,25 @@ export function VerifyEmailPage() {
               </div>
             )}
 
-            <div className="rounded-lg border border-white/[.07] bg-zinc-800/50 p-4">
+            <div className="rounded-lg border border-white/[.07] bg-secondary/50 p-4">
               <div className="flex gap-2 mb-2">
-                <Mail className="h-5 w-5 shrink-0 text-zinc-400" />
-                <p className="text-sm text-zinc-300">Check your email for a verification link or token.</p>
+                <Mail className="h-5 w-5 shrink-0 text-muted-foreground" />
+                <p className="text-sm text-foreground/80">Check your email for a verification link or token.</p>
               </div>
-              <p className="text-xs text-zinc-500 ml-7">
+              <p className="text-xs text-muted-foreground/80 ml-7">
                 You can click the link in the email or paste the token below.
               </p>
             </div>
 
             <form onSubmit={handleSubmitToken} className="space-y-4">
               <div className="space-y-1.5">
-                <label className="text-sm font-medium text-zinc-300">Verification Token</label>
+                <label className="text-sm font-medium text-foreground/80">Verification Token</label>
                 <Input
                   type="text"
                   value={token}
                   onChange={(e) => setToken(e.target.value)}
                   placeholder="Paste your token here"
-                  className="border-white/[.07] bg-zinc-800/50 text-white placeholder:text-zinc-600"
+                  className="border-white/[.07] bg-secondary/50 text-white placeholder:text-muted-foreground/60"
                   disabled={loading}
                 />
               </div>

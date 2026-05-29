@@ -136,10 +136,21 @@ export function SearchPage() {
   const initialFilters: Filters = useMemo(() => {
     const rawCanRun = searchParams.get("canRun")
     const canRun: Filters["canRun"] = rawCanRun === "playable" || rawCanRun === "smooth" ? rawCanRun : "off"
+    // When the URL doesn't carry a `sort` param (e.g. user clicked the
+    // sidebar "Search" link cold, or navigated back without history),
+    // fall back to the last choice persisted in localStorage so sort stops
+    // resetting to "Random" every visit.
+    let urlSort = searchParams.get("sort")
+    if (!urlSort && typeof window !== "undefined") {
+      try {
+        const stored = window.localStorage.getItem("uc_search_sort")
+        if (stored) urlSort = stored
+      } catch { /* ignore */ }
+    }
     return {
       ...DEFAULT_FILTERS,
       searchTerm: searchParams.get("q") || "",
-      sortBy: normalizeSort(searchParams.get("sort")),
+      sortBy: normalizeSort(urlSort),
       online: searchParams.get("online") === "1",
       nsfwOnly: searchParams.get("nsfw") === "1",
       canRun,
@@ -182,6 +193,18 @@ export function SearchPage() {
     if (f.nsfwOnly) params.set("nsfw", "1")
     if (f.canRun && f.canRun !== "off") params.set("canRun", f.canRun)
     setSearchParams(params, { replace: true })
+    // Persist the sort choice so a cold visit to /search restores it. We
+    // don't persist `searchTerm` (private), `online`, `nsfwOnly`, or `canRun`
+    // — only the broadly-applicable sort.
+    if (typeof window !== "undefined") {
+      try {
+        if (f.sortBy && f.sortBy !== "random") {
+          window.localStorage.setItem("uc_search_sort", f.sortBy)
+        } else {
+          window.localStorage.removeItem("uc_search_sort")
+        }
+      } catch { /* ignore quota / private mode */ }
+    }
   }, [setSearchParams])
 
   const updateFilter = useCallback(<K extends keyof Filters>(key: K, value: Filters[K]) => {
@@ -612,7 +635,7 @@ export function SearchPage() {
             <button
               type="button"
               onClick={() => updateFilter("genres", [])}
-              className="text-xs text-zinc-400 hover:text-zinc-100 transition-colors"
+              className="text-xs text-muted-foreground hover:text-foreground transition-colors"
             >
               Clear ({filters.genres.length})
             </button>
@@ -630,8 +653,8 @@ export function SearchPage() {
                 className={cn(
                   "rounded-full px-3 py-1.5 text-xs font-medium transition-all border active:scale-95",
                   active
-                    ? "bg-white text-black border-white"
-                    : "bg-white/[.03] text-zinc-300 border-white/[.07] hover:bg-white/[.07] hover:text-white"
+                    ? "bg-primary text-primary-foreground border-white"
+                    : "bg-white/[.03] text-foreground/80 border-white/[.07] hover:bg-white/[.07] hover:text-white"
                 )}
               >
                 {genre}
@@ -644,7 +667,7 @@ export function SearchPage() {
       {/* "Can my PC run" — gated on a scanned system profile. */}
       <FilterSection title="My PC">
         <div className="space-y-2">
-          <p className="text-[11px] text-zinc-400 leading-snug">
+          <p className="text-[11px] text-muted-foreground leading-snug">
             Filter to games your scanned PC can run. Scan once in Settings → System Profile to enable.
           </p>
           <div className="flex flex-wrap gap-1.5">
@@ -659,8 +682,8 @@ export function SearchPage() {
                   className={cn(
                     "rounded-full px-3 py-1.5 text-xs font-medium transition-all border active:scale-95",
                     active
-                      ? "bg-white text-black border-white"
-                      : "bg-white/[.03] text-zinc-300 border-white/[.07] hover:bg-white/[.07] hover:text-white"
+                      ? "bg-primary text-primary-foreground border-white"
+                      : "bg-white/[.03] text-foreground/80 border-white/[.07] hover:bg-white/[.07] hover:text-white"
                   )}
                 >
                   {label}
@@ -710,7 +733,7 @@ export function SearchPage() {
       <FilterSection title="Size Range (GB)">
         <div className="grid grid-cols-2 gap-2">
           <div className="space-y-1">
-            <label className="text-[10px] text-zinc-400 font-semibold uppercase tracking-wider">Min</label>
+            <label className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wider">Min</label>
             <Input
               type="number"
               min={0}
@@ -723,7 +746,7 @@ export function SearchPage() {
             />
           </div>
           <div className="space-y-1">
-            <label className="text-[10px] text-zinc-400 font-semibold uppercase tracking-wider">Max</label>
+            <label className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wider">Max</label>
             <Input
               type="number"
               min={0}
@@ -746,7 +769,7 @@ export function SearchPage() {
             <button
               type="button"
               onClick={() => updateFilter("developers", [])}
-              className="text-xs text-zinc-400 hover:text-zinc-100 transition-colors"
+              className="text-xs text-muted-foreground hover:text-foreground transition-colors"
             >
               Clear ({filters.developers.length})
             </button>
@@ -755,7 +778,7 @@ export function SearchPage() {
       >
         <div className="space-y-2">
           <div className="relative">
-            <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-zinc-400" />
+            <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
             <Input
               value={developerQuery}
               onChange={(e) => setDeveloperQuery(e.target.value)}
@@ -775,8 +798,8 @@ export function SearchPage() {
                     className={cn(
                       "text-left px-2.5 py-1.5 rounded-lg text-xs transition-colors",
                       active
-                        ? "bg-white text-black font-semibold"
-                        : "text-zinc-300 hover:bg-white/[.05]"
+                        ? "bg-primary text-primary-foreground font-semibold"
+                        : "text-foreground/80 hover:bg-white/[.05]"
                     )}
                   >
                     {developer}
@@ -784,7 +807,7 @@ export function SearchPage() {
                 )
               })}
               {filteredDevelopers.length > 200 && (
-                <p className="px-2.5 py-1.5 text-[11px] text-zinc-500 italic">
+                <p className="px-2.5 py-1.5 text-[11px] text-muted-foreground/80 italic">
                   Showing first 200. Refine your search.
                 </p>
               )}
@@ -801,8 +824,8 @@ export function SearchPage() {
       {/* Header */}
       <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
         <div className="min-w-0">
-          <h1 className="text-2xl sm:text-3xl font-bold text-zinc-100 mb-1">Search</h1>
-          <p className="text-sm text-zinc-400">Find your next adventure with detailed filters.</p>
+          <h1 className="text-2xl sm:text-3xl font-bold text-foreground mb-1">Search</h1>
+          <p className="text-sm text-muted-foreground">Find your next adventure with detailed filters.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Button variant="outline" size="sm" className="gap-1.5" onClick={() => navigate("/wishlist")}>
@@ -828,10 +851,10 @@ export function SearchPage() {
       <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-6">
         {/* Desktop sidebar */}
         <aside className="hidden lg:block">
-          <div className="sticky top-4 max-h-[calc(100vh-7rem)] overflow-hidden rounded-3xl border border-white/[.07] bg-zinc-950/60 backdrop-blur-md flex flex-col">
+          <div className="sticky top-4 max-h-[calc(100vh-7rem)] overflow-hidden rounded-3xl border border-white/[.07] bg-background/60 backdrop-blur-md flex flex-col">
             <div className="flex items-center justify-between px-5 py-4 border-b border-white/[.07]">
               <div className="flex items-center gap-2">
-                <SlidersHorizontal className="h-4 w-4 text-zinc-400" />
+                <SlidersHorizontal className="h-4 w-4 text-muted-foreground" />
                 <h2 className="text-sm font-semibold tracking-tight">Filters</h2>
                 {appliedFilterCount > 0 && (
                   <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">{appliedFilterCount}</Badge>
@@ -841,7 +864,7 @@ export function SearchPage() {
                 <button
                   type="button"
                   onClick={clearFilters}
-                  className="text-xs text-zinc-400 hover:text-zinc-100 transition-colors"
+                  className="text-xs text-muted-foreground hover:text-foreground transition-colors"
                 >
                   Reset all
                 </button>
@@ -856,10 +879,10 @@ export function SearchPage() {
         {/* Results column */}
         <div className="min-w-0 space-y-4">
           {/* Search + sort + mobile filter button */}
-          <div className="rounded-3xl border border-white/[.07] bg-zinc-950/60 backdrop-blur-md p-3 sm:p-4 space-y-3">
+          <div className="rounded-3xl border border-white/[.07] bg-background/60 backdrop-blur-md p-3 sm:p-4 space-y-3">
             <div className="flex flex-wrap items-center gap-2">
               <div className="relative flex-1 min-w-[240px]">
-                <Search className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-400" />
+                <Search className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
                   value={searchInput}
                   onChange={(e) => {
@@ -875,7 +898,7 @@ export function SearchPage() {
                   className="rounded-2xl bg-white/[.03] border-white/[.07] pl-10 h-11"
                 />
                 {isSearching && (
-                  <div className="pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2 text-zinc-400">
+                  <div className="pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2 text-muted-foreground">
                     <RefreshCw className="h-4 w-4 animate-spin" />
                   </div>
                 )}
@@ -1023,12 +1046,12 @@ export function SearchPage() {
               ) : (
                 <>
                   <div className="mb-4 flex items-baseline gap-3">
-                    <h2 className="text-lg sm:text-xl font-bold text-zinc-100">Results</h2>
-                    <span className="text-xs sm:text-sm font-medium text-zinc-400 bg-white/[.05] px-2.5 py-0.5 rounded-full border border-white/[.07]">
+                    <h2 className="text-lg sm:text-xl font-bold text-foreground">Results</h2>
+                    <span className="text-xs sm:text-sm font-medium text-muted-foreground bg-white/[.05] px-2.5 py-0.5 rounded-full border border-white/[.07]">
                       {totalGames.toLocaleString()} {totalGames === 1 ? "game" : "games"}
                     </span>
                     {totalGames > itemsPerPage && (
-                      <span className="text-xs text-zinc-400 italic hidden sm:inline">
+                      <span className="text-xs text-muted-foreground italic hidden sm:inline">
                         {startItem}–{endItem}
                       </span>
                     )}
@@ -1036,7 +1059,7 @@ export function SearchPage() {
 
                   <div className="relative">
                     {filtering && (
-                      <div className="absolute inset-0 bg-zinc-900/40 backdrop-blur-md z-40 flex items-center justify-center rounded-3xl transition-all duration-300">
+                      <div className="absolute inset-0 bg-card/40 backdrop-blur-md z-40 flex items-center justify-center rounded-3xl transition-all duration-300">
                         <div className="flex flex-col items-center gap-4 bg-black/60 p-8 rounded-3xl border border-white/[.07] shadow-2xl">
                           <LoadingAnimated className="h-12 w-12" />
                           <span className="text-sm font-semibold tracking-wider uppercase text-white">Filtering…</span>
@@ -1060,11 +1083,11 @@ export function SearchPage() {
                       <div className="text-center py-20 rounded-3xl bg-white/[.02] border border-dashed border-white/[.07]">
                         <div className="max-w-md mx-auto flex flex-col items-center gap-6">
                           <div className="h-20 w-20 rounded-full bg-white/[.04] flex items-center justify-center border border-white/[.07] shadow-inner">
-                            <Filter className="h-10 w-10 text-zinc-400" />
+                            <Filter className="h-10 w-10 text-muted-foreground" />
                           </div>
                           <div className="space-y-2">
                             <h3 className="text-2xl font-bold">No games found</h3>
-                            <p className="text-zinc-400">
+                            <p className="text-muted-foreground">
                               No games match your search criteria. Try adjusting your filters.
                             </p>
                           </div>
@@ -1073,7 +1096,7 @@ export function SearchPage() {
                             <div className="w-full space-y-4 pt-4">
                               <div className="flex items-center gap-2">
                                 <div className="h-px flex-1 bg-gradient-to-r from-transparent to-white/10" />
-                                <span className="text-xs font-bold uppercase tracking-widest text-zinc-400 px-2">Suggestions</span>
+                                <span className="text-xs font-bold uppercase tracking-widest text-muted-foreground px-2">Suggestions</span>
                                 <div className="h-px flex-1 bg-gradient-to-l from-transparent to-white/10" />
                               </div>
                               <div className="grid grid-cols-1 gap-2">
@@ -1092,16 +1115,16 @@ export function SearchPage() {
                                           className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-110"
                                         />
                                       ) : (
-                                        <div className="h-full w-full bg-zinc-800" />
+                                        <div className="h-full w-full bg-secondary" />
                                       )}
                                     </div>
                                     <div className="flex-1 min-w-0">
-                                      <h4 className="font-bold text-zinc-100 truncate group-hover:text-white transition-colors">{game.name}</h4>
+                                      <h4 className="font-bold text-foreground truncate group-hover:text-white transition-colors">{game.name}</h4>
                                       {game.developer && (
-                                        <p className="text-xs text-zinc-400 truncate">{game.developer}</p>
+                                        <p className="text-xs text-muted-foreground truncate">{game.developer}</p>
                                       )}
                                     </div>
-                                    <ChevronRight className="h-5 w-5 text-zinc-400 group-hover:text-white transition-all duration-300 group-hover:translate-x-1" />
+                                    <ChevronRight className="h-5 w-5 text-muted-foreground group-hover:text-white transition-all duration-300 group-hover:translate-x-1" />
                                   </button>
                                 ))}
                               </div>
@@ -1142,7 +1165,7 @@ function FilterSection({
   return (
     <div className="space-y-2.5">
       <div className="flex items-center justify-between">
-        <label className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-400">{title}</label>
+        <label className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">{title}</label>
         {action}
       </div>
       {children}
@@ -1164,8 +1187,8 @@ function ModeToggle({
   return (
     <div className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-xl border border-white/[.07] bg-white/[.02] hover:bg-white/[.04] transition-colors">
       <div className="min-w-0 space-y-0.5">
-        <p className="text-xs font-semibold text-zinc-100">{label}</p>
-        <p className="text-[10px] text-zinc-400 leading-snug">{description}</p>
+        <p className="text-xs font-semibold text-foreground">{label}</p>
+        <p className="text-[10px] text-muted-foreground leading-snug">{description}</p>
       </div>
       <Switch checked={checked} onCheckedChange={onCheckedChange} />
     </div>
@@ -1189,7 +1212,7 @@ function FilterChip({
         "inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium border backdrop-blur-md",
         tone === "emerald" && "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
         tone === "red" && "bg-red-500/10 text-red-400 border-red-500/20",
-        !tone && "bg-white/[.04] text-zinc-200 border-white/[.07]"
+        !tone && "bg-white/[.04] text-foreground/90 border-white/[.07]"
       )}
     >
       {icon}

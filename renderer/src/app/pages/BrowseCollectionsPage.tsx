@@ -163,17 +163,17 @@ export function BrowseCollectionsPage() {
             variant="ghost"
             size="sm"
             onClick={() => navigate("/collections")}
-            className="gap-1.5 -ml-2 h-8 text-xs text-zinc-400 hover:text-white hover:bg-white/[.05]"
+            className="gap-1.5 -ml-2 h-8 text-xs text-muted-foreground hover:text-white hover:bg-white/[.05]"
           >
             <ArrowLeft className="h-3.5 w-3.5" />
             Your collections
           </Button>
-          <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Community</p>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground/80">Community</p>
           <h1 className="text-2xl font-bold tracking-tight text-white flex items-center gap-2">
-            <Layers3 className="h-6 w-6 text-zinc-400" />
+            <Layers3 className="h-6 w-6 text-muted-foreground" />
             Public collections
           </h1>
-          <p className="text-sm text-zinc-400 max-w-xl">
+          <p className="text-sm text-muted-foreground max-w-xl">
             Collections owners have marked public. Search by name, owner, or games inside.
           </p>
         </div>
@@ -181,18 +181,18 @@ export function BrowseCollectionsPage() {
 
       <form onSubmit={handleSearch} className="flex gap-2 max-w-2xl">
         <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500 pointer-events-none" />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/80 pointer-events-none" />
           <Input
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
             placeholder="Search by collection name, owner, or game…"
-            className="pl-9 pr-9 rounded-2xl bg-white/[.03] border-white/[.07] h-11 text-white placeholder:text-zinc-500"
+            className="pl-9 pr-9 rounded-2xl bg-white/[.03] border-white/[.07] h-11 text-white placeholder:text-muted-foreground/80"
           />
           {inputValue && (
             <button
               type="button"
               onClick={handleClear}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300"
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground/80 hover:text-foreground/80"
               aria-label="Clear search"
             >
               <X className="h-4 w-4" />
@@ -205,7 +205,7 @@ export function BrowseCollectionsPage() {
       </form>
 
       {appliedQ && !loading && !error && (
-        <p className="text-xs text-zinc-500">
+        <p className="text-xs text-muted-foreground/80">
           {total} {total === 1 ? "result" : "results"} for &ldquo;{appliedQ}&rdquo;
         </p>
       )}
@@ -225,10 +225,10 @@ export function BrowseCollectionsPage() {
       )}
 
       {error ? (
-        <Card className="rounded-3xl border-white/[.07] bg-zinc-950/40">
-          <CardContent className="p-10 text-center text-sm text-zinc-400 space-y-2">
+        <Card className="rounded-3xl border-white/[.07] bg-background/40">
+          <CardContent className="p-10 text-center text-sm text-muted-foreground space-y-2">
             <p>Could not load public collections.</p>
-            <p className="text-xs text-zinc-500">{error}</p>
+            <p className="text-xs text-muted-foreground/80">{error}</p>
             <Button
               variant="outline"
               size="sm"
@@ -242,16 +242,16 @@ export function BrowseCollectionsPage() {
       ) : loading ? (
         <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {Array.from({ length: 8 }).map((_, i) => (
-            <div key={i} className="h-72 rounded-3xl bg-zinc-900/40 animate-pulse" />
+            <div key={i} className="h-72 rounded-3xl bg-card/40 animate-pulse" />
           ))}
         </div>
       ) : items.length === 0 ? (
-        <Card className="rounded-3xl border-white/[.07] bg-zinc-950/40">
-          <CardContent className="p-10 text-center text-sm text-zinc-400 space-y-2">
+        <Card className="rounded-3xl border-white/[.07] bg-background/40">
+          <CardContent className="p-10 text-center text-sm text-muted-foreground space-y-2">
             {appliedQ ? (
               <>
                 <p>No collections match &ldquo;{appliedQ}&rdquo;.</p>
-                <p className="text-xs text-zinc-500">Try a different search term.</p>
+                <p className="text-xs text-muted-foreground/80">Try a different search term.</p>
               </>
             ) : (
               <p>
@@ -353,7 +353,7 @@ function PublicCollectionCard({
 
   return (
     <div
-      className="group/card flex flex-col rounded-3xl border border-white/[.07] bg-zinc-900/40 backdrop-blur-md overflow-hidden transition-colors hover:border-white/[.14]"
+      className="group/card flex flex-col rounded-3xl border border-white/[.07] bg-card/40 backdrop-blur-md overflow-hidden transition-colors hover:border-white/[.14]"
       onContextMenu={(e) => {
         e.preventDefault()
         setContextMenu({ x: e.clientX, y: e.clientY })
@@ -362,15 +362,15 @@ function PublicCollectionCard({
       <button
         type="button"
         onClick={onOpen}
-        className="relative aspect-[16/10] w-full overflow-hidden bg-zinc-900 cursor-pointer text-left"
+        className="relative aspect-[16/10] w-full overflow-hidden bg-card cursor-pointer text-left"
         aria-label={`Open ${c.name}`}
       >
         {tiles.length === 0 ? (
-          <div className="absolute inset-0 flex items-center justify-center text-zinc-700">
+          <div className="absolute inset-0 flex items-center justify-center text-muted-foreground/40">
             <Layers3 className="h-12 w-12" />
           </div>
         ) : (
-          <div className="absolute inset-0 grid grid-cols-3 grid-rows-2 gap-px bg-zinc-950">
+          <div className="absolute inset-0 grid grid-cols-3 grid-rows-2 gap-px bg-background">
             {tiles.map((src, idx) => (
               <div key={`${c.id}-${idx}`} className="relative overflow-hidden">
                 {src ? (
@@ -382,18 +382,18 @@ function PublicCollectionCard({
                     onError={(e) => ((e.currentTarget as HTMLImageElement).style.opacity = "0")}
                   />
                 ) : (
-                  <div className="h-full w-full bg-zinc-900" />
+                  <div className="h-full w-full bg-card" />
                 )}
               </div>
             ))}
             {Array.from({ length: Math.max(0, 6 - tiles.length) }).map((_, idx) => (
-              <div key={`pad-${idx}`} className="bg-zinc-900" />
+              <div key={`pad-${idx}`} className="bg-card" />
             ))}
           </div>
         )}
         <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
         <div className="absolute top-3 left-3 right-3 flex items-start justify-between gap-2">
-          <span className="inline-flex items-center gap-1 rounded-full border border-white/[.10] bg-black/60 backdrop-blur-sm px-2 py-0.5 text-[10px] font-semibold text-zinc-100">
+          <span className="inline-flex items-center gap-1 rounded-full border border-white/[.10] bg-black/60 backdrop-blur-sm px-2 py-0.5 text-[10px] font-semibold text-foreground">
             <Globe className="h-2.5 w-2.5" /> Public
           </span>
           {isOwn && (
@@ -403,19 +403,19 @@ function PublicCollectionCard({
           )}
         </div>
         <div className="absolute bottom-3 left-3 right-3 flex items-end justify-between gap-2">
-          <span className="inline-flex items-center gap-1 rounded-full border border-white/[.10] bg-black/50 backdrop-blur-sm px-2.5 py-0.5 text-[11px] font-semibold text-zinc-200">
+          <span className="inline-flex items-center gap-1 rounded-full border border-white/[.10] bg-black/50 backdrop-blur-sm px-2.5 py-0.5 text-[11px] font-semibold text-foreground/90">
             <Layers3 className="h-3 w-3" />
             {c.gameCount} {c.gameCount === 1 ? "game" : "games"}
-            <span className="ml-1 inline-flex items-center gap-0.5 text-zinc-400">
+            <span className="ml-1 inline-flex items-center gap-0.5 text-muted-foreground">
               <Users className="h-2.5 w-2.5" />
               {c.followerCount}
             </span>
-            <span className="ml-0.5 inline-flex items-center gap-0.5 text-zinc-400">
+            <span className="ml-0.5 inline-flex items-center gap-0.5 text-muted-foreground">
               <GitFork className="h-2.5 w-2.5" />
               {c.forkCount}
             </span>
           </span>
-          <span className="inline-flex items-center gap-1 rounded-full border border-white/[.10] bg-black/50 backdrop-blur-sm px-2.5 py-0.5 text-[11px] font-semibold text-zinc-200 opacity-0 group-hover/card:opacity-100 transition-opacity">
+          <span className="inline-flex items-center gap-1 rounded-full border border-white/[.10] bg-black/50 backdrop-blur-sm px-2.5 py-0.5 text-[11px] font-semibold text-foreground/90 opacity-0 group-hover/card:opacity-100 transition-opacity">
             Open <ArrowRight className="h-3 w-3" />
           </span>
         </div>
@@ -430,7 +430,7 @@ function PublicCollectionCard({
                 type="button"
                 aria-label="More actions"
                 title="More actions"
-                className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-zinc-400 hover:bg-white/[.06] hover:text-zinc-100 transition-colors"
+                className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-white/[.06] hover:text-foreground transition-colors"
               >
                 <MoreHorizontal className="h-4 w-4" />
               </button>
@@ -445,8 +445,8 @@ function PublicCollectionCard({
             </PopoverContent>
           </Popover>
         </div>
-        <div className="flex items-center gap-2 text-[11px] text-zinc-500">
-          <div className="h-5 w-5 rounded-full overflow-hidden bg-zinc-800 shrink-0" title={`Owner: ${ownerName}`}>
+        <div className="flex items-center gap-2 text-[11px] text-muted-foreground/80">
+          <div className="h-5 w-5 rounded-full overflow-hidden bg-secondary shrink-0" title={`Owner: ${ownerName}`}>
             {c.owner.avatarUrl ? (
               <img src={c.owner.avatarUrl} alt="" className="h-full w-full object-cover" loading="lazy" />
             ) : null}
@@ -459,7 +459,7 @@ function PublicCollectionCard({
                 return (
                   <div
                     key={cc.discordId}
-                    className="h-4 w-4 rounded-full overflow-hidden bg-zinc-800 ring-1 ring-zinc-950"
+                    className="h-4 w-4 rounded-full overflow-hidden bg-secondary ring-1 ring-zinc-950"
                     title={`Contributor: ${label}`}
                   >
                     {cc.avatarUrl ? (
@@ -469,7 +469,7 @@ function PublicCollectionCard({
                 )
               })}
               {contributors.length > 3 && (
-                <div className="h-4 w-4 rounded-full bg-zinc-800 ring-1 ring-zinc-950 flex items-center justify-center text-[8px] font-semibold text-zinc-300">
+                <div className="h-4 w-4 rounded-full bg-secondary ring-1 ring-zinc-950 flex items-center justify-center text-[8px] font-semibold text-foreground/80">
                   +{contributors.length - 3}
                 </div>
               )}

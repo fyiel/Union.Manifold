@@ -1,5 +1,11 @@
 import { Button } from "@/components/ui/button"
 import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import {
   ArrowRight,
   Calendar,
   Tag,
@@ -42,58 +48,54 @@ export function UpdateBackupWarningModal({
   notes,
   gameName,
 }: Props) {
-  if (!open) return null
-
   const releaseLabel = releasedAt ? timeAgoLong(releasedAt) : null
   const showVersionRow = Boolean(currentVersion || newVersion)
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
-      <div
-        className="absolute inset-0 bg-black/70 backdrop-blur-sm"
-        onClick={onClose}
-      />
-      <div className="relative w-full max-w-md rounded-2xl border border-border/60 bg-card/95 p-6 text-foreground shadow-2xl">
-        <div className="flex items-center gap-2 text-lg font-semibold">
-          <AlertTriangle className="h-5 w-5 text-amber-400" />
-          Update {gameName ? `"${gameName}"` : "this game"}?
-        </div>
+    <Dialog open={open} onOpenChange={(next) => { if (!next) onClose() }}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-lg">
+            <AlertTriangle className="h-5 w-5 text-amber-400" />
+            Update {gameName ? `"${gameName}"` : "this game"}?
+          </DialogTitle>
+        </DialogHeader>
 
         {showVersionRow && (
-          <div className="mt-4 space-y-2 rounded-xl border border-white/[.07] bg-zinc-900/50 px-3 py-2.5 text-sm">
-            <div className="flex items-center gap-2 text-xs uppercase tracking-wider text-zinc-500">
+          <div className="space-y-2 rounded-xl border border-white/[.07] bg-card/50 px-3 py-2.5 text-sm">
+            <div className="flex items-center gap-2 text-xs uppercase tracking-wider text-muted-foreground/80">
               <Tag className="h-3 w-3" />
               <span>Version</span>
             </div>
             <div className="flex flex-wrap items-center gap-2 text-sm">
-              <span className="rounded-md bg-zinc-800/80 px-2 py-0.5 text-xs font-mono text-zinc-300">
+              <span className="rounded-md bg-secondary/80 px-2 py-0.5 text-xs font-mono text-foreground/80">
                 {currentVersion || "Installed"}
               </span>
-              <ArrowRight className="h-3.5 w-3.5 text-zinc-500" />
+              <ArrowRight className="h-3.5 w-3.5 text-muted-foreground/80" />
               <span className="rounded-md bg-emerald-500/15 px-2 py-0.5 text-xs font-mono text-emerald-200">
                 {newVersion || "Latest"}
               </span>
               {releaseLabel && (
-                <span className="ml-auto inline-flex items-center gap-1 text-[11px] text-zinc-500">
+                <span className="ml-auto inline-flex items-center gap-1 text-[11px] text-muted-foreground/80">
                   <Calendar className="h-3 w-3" />
                   Released {releaseLabel}
                 </span>
               )}
             </div>
             {notes && (
-              <p className="pt-1.5 text-xs text-zinc-400 leading-relaxed border-t border-white/[.06] mt-2">
+              <p className="pt-1.5 text-xs text-muted-foreground leading-relaxed border-t border-white/[.06] mt-2">
                 {notes}
               </p>
             )}
           </div>
         )}
 
-        <p className="mt-4 text-sm text-muted-foreground leading-relaxed">
+        <p className="text-sm text-muted-foreground leading-relaxed">
           Please backup your game data before updating &mdash; some games store saves
           inside the game folder. For help, join our Discord server.
         </p>
 
-        <div className="mt-5 flex flex-col gap-2">
+        <div className="flex flex-col gap-2">
           <Button
             className="w-full justify-center rounded-xl"
             onClick={onProceed}
@@ -109,7 +111,7 @@ export function UpdateBackupWarningModal({
             Cancel
           </Button>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   )
 }

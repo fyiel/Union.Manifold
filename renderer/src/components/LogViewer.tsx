@@ -9,8 +9,8 @@ function getLineClass(line: string): string {
   const upper = line.toUpperCase()
   if (upper.includes("[ERROR]")) return "text-red-400"
   if (upper.includes("[WARN ]") || upper.includes("[WARN]")) return "text-amber-400"
-  if (upper.includes("[DEBUG]")) return "text-zinc-500"
-  return "text-zinc-300"
+  if (upper.includes("[DEBUG]")) return "text-muted-foreground/80"
+  return "text-foreground/80"
 }
 
 export function LogViewer() {
@@ -49,12 +49,13 @@ export function LogViewer() {
   }
 
   const copyLogs = async () => {
-    try {
-      await navigator.clipboard.writeText(logs)
+    const { copyToClipboard } = await import("@/lib/clipboard")
+    const ok = await copyToClipboard(logs, { successMessage: "Logs copied" })
+    if (ok) {
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
-    } catch (error) {
-      logger.error("Failed to copy logs", { data: error })
+    } else {
+      logger.error("Failed to copy logs")
     }
   }
 
@@ -75,7 +76,7 @@ export function LogViewer() {
         <div className="flex flex-col h-full min-h-0 p-5 gap-0">
           <DialogHeader className="pb-3 shrink-0">
             <DialogTitle className="text-base font-semibold">Application Logs</DialogTitle>
-            <DialogDescription className="text-xs text-zinc-400">
+            <DialogDescription className="text-xs text-muted-foreground">
               View and manage UnionCrax.Direct application logs
             </DialogDescription>
           </DialogHeader>
@@ -94,7 +95,7 @@ export function LogViewer() {
             <ScrollArea className="h-full w-full min-h-0">
               <pre className="text-xs font-mono whitespace-pre px-4 py-3 leading-5">
                 {logLines.length === 0
-                  ? <span className="text-zinc-500">No logs available</span>
+                  ? <span className="text-muted-foreground/80">No logs available</span>
                   : logLines.map((line, i) => (
                       <span key={i} className={`block ${getLineClass(line)}`}>{line}</span>
                     ))

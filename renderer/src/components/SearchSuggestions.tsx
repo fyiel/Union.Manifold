@@ -18,6 +18,7 @@ import { useDebounce } from "@/hooks/use-debounce"
 import { addSearchToHistory, getRecentSearches, clearSearchHistory } from "@/lib/user-history"
 import { formatNumber, triggerHapticFeedback, proxyImageUrl } from "@/lib/utils"
 import { apiFetch } from "@/lib/api"
+import { useNsfwPreference } from "@/hooks/use-nsfw-reveal"
 
 interface SearchSuggestionsProps {
   value: string
@@ -61,7 +62,9 @@ export function SearchSuggestions({
   const [trendingGames, setTrendingGames] = useState<any[]>([])
   const [browseLoading, setBrowseLoading] = useState(false)
   const [recentSearches, setRecentSearches] = useState<string[]>([])
-  const [showNsfw, setShowNsfw] = useState(false)
+  // Global NSFW visibility preference. Centralised via useNsfwPreference so all
+  // card-rendering surfaces share one source of truth (localStorage + uc_nsfw_pref).
+  const showNsfw = useNsfwPreference()
   const [activeIndex, setActiveIndex] = useState(-1)
   const [searchScope, setSearchScope] = useState<"all" | "title" | "developer" | "genres">("title")
   const navigate = useNavigate()
@@ -134,31 +137,7 @@ export function SearchSuggestions({
     }
   }, [showSuggestions, value, showNsfw])
 
-  useEffect(() => {
-    const nsfwPreferenceKey = "uc_show_nsfw"
-    const syncPreference = () => {
-      try {
-        setShowNsfw(localStorage.getItem(nsfwPreferenceKey) === "1")
-      } catch {
-        setShowNsfw(false)
-      }
-    }
-
-    syncPreference()
-
-    const onStorage = (event: StorageEvent) => {
-      if (event.key === nsfwPreferenceKey) syncPreference()
-    }
-    const onPreferenceChange = () => syncPreference()
-
-    window.addEventListener("storage", onStorage)
-    window.addEventListener("uc_nsfw_pref", onPreferenceChange)
-
-    return () => {
-      window.removeEventListener("storage", onStorage)
-      window.removeEventListener("uc_nsfw_pref", onPreferenceChange)
-    }
-  }, [])
+  // NSFW preference subscription moved to useNsfwPreference (see top of file).
 
   useEffect(() => {
     const loadSearchHistory = async () => {
@@ -358,7 +337,7 @@ export function SearchSuggestions({
 
   const renderInput = () => (
     <div className="relative">
-      <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500" />
+      <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/80" />
       <Input
         id={inputId}
         ref={inputRef}
@@ -408,20 +387,20 @@ export function SearchSuggestions({
         aria-expanded={showPanel}
         aria-controls={hasResults || didYouMeanResults.length > 0 ? resultsListId : undefined}
         aria-activedescendant={activeIndex >= 0 ? activeItemId : undefined}
-        className={`h-11 pl-11 pr-16 text-left rounded-full border border-white/[.07] bg-zinc-900/70 text-zinc-200 placeholder:text-zinc-500 shadow-none focus-visible:ring-0 focus-visible:border-white focus-visible:bg-zinc-900/90 transition-all duration-200 ${
+        className={`h-11 pl-11 pr-16 text-left rounded-full border border-white/[.07] bg-card/70 text-foreground/90 placeholder:text-muted-foreground/80 shadow-none focus-visible:ring-0 focus-visible:border-white focus-visible:bg-card/90 transition-all duration-200 ${
           highlight ? "ring-2 ring-zinc-500 shadow-lg shadow-white/5" : ""
         } ${className}`}
       />
       <div className="absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-2">
         {showShortcutHint && !value.trim() && (
-          <span className="hidden rounded-md border border-white/[.07] bg-zinc-900 px-2 py-0.5 text-[10px] font-medium text-zinc-500 sm:inline">
+          <span className="hidden rounded-md border border-white/[.07] bg-card px-2 py-0.5 text-[10px] font-medium text-muted-foreground/80 sm:inline">
             {shortcutLabel}
           </span>
         )}
         {value.trim() && (
           <button
             type="button"
-            className="flex h-6 w-6 items-center justify-center rounded-full text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-200"
+            className="flex h-6 w-6 items-center justify-center rounded-full text-muted-foreground/80 transition-colors hover:bg-secondary hover:text-foreground/90"
             aria-label="Clear search"
             onClick={() => {
               onChange("")
@@ -438,12 +417,12 @@ export function SearchSuggestions({
 
   const renderResults = () => (
     <>
-      <div className="flex items-center justify-between px-5 py-4 border-b border-white/[.07] text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-500">
+      <div className="flex items-center justify-between px-5 py-4 border-b border-white/[.07] text-[10px] font-bold uppercase tracking-[0.2em] text-muted-foreground/80">
         <span>Results</span>
         <div className="flex items-center gap-3">
           {!isQueryTooShort && trimmedValue.length >= 2 && <span>{searchResults.total}</span>}
           {showShortcutHint && (
-            <span className="hidden rounded-md border border-white/[.07] bg-zinc-900 px-2 py-0.5 text-[10px] font-medium text-zinc-500 sm:inline">
+            <span className="hidden rounded-md border border-white/[.07] bg-card px-2 py-0.5 text-[10px] font-medium text-muted-foreground/80 sm:inline">
               {shortcutLabel}
             </span>
           )}
@@ -459,7 +438,7 @@ export function SearchSuggestions({
 
       {!isQueryTooShort && trimmedValue.length >= 2 && (
         <div className="px-4 pt-3 pb-2">
-          <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-500">Search in</div>
+          <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-muted-foreground/80">Search in</div>
           <div className="mt-2 flex flex-wrap gap-2">
             {[
               { value: "all", label: "All" },
@@ -472,8 +451,8 @@ export function SearchSuggestions({
                 type="button"
                 className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
                   searchScope === scope.value
-                    ? "border-white/[.07] bg-white text-black"
-                    : "border-white/[.07] bg-zinc-800/50 text-zinc-400 hover:text-zinc-200"
+                    ? "border-white/[.07] bg-primary text-primary-foreground"
+                    : "border-white/[.07] bg-secondary/50 text-muted-foreground hover:text-foreground/90"
                 }`}
                 onClick={() => setSearchScope(scope.value as typeof searchScope)}
               >
@@ -485,13 +464,13 @@ export function SearchSuggestions({
       )}
 
       {trimmedValue.length === 0 && (
-        <div className="px-4 py-5 text-sm text-zinc-500">
-          Start typing to search by title, dev, or IGDB ID.
+        <div className="px-4 py-5 text-sm text-muted-foreground/80">
+          Start typing to search by title, developer, genre, or IGDB ID.
         </div>
       )}
 
       {isQueryTooShort && (
-        <div className="px-4 py-5 text-sm text-zinc-500">Please enter at least 2 characters.</div>
+        <div className="px-4 py-5 text-sm text-muted-foreground/80">Please enter at least 2 characters.</div>
       )}
 
       {!isQueryTooShort && trimmedValue.length >= 2 && hasResults && (
@@ -500,8 +479,8 @@ export function SearchSuggestions({
             <button
               key={game.appid}
               type="button"
-              className={`group w-full flex items-center gap-4 rounded-2xl px-3 py-2.5 text-left transition-all duration-300 ease-out hover:bg-zinc-800/50 border border-transparent active:scale-[0.98] ${
-                activeItemKey === `result-${game.appid}` ? "bg-zinc-800/50 border-white/[.07]" : ""
+              className={`group w-full flex items-center gap-4 rounded-2xl px-3 py-2.5 text-left transition-all duration-300 ease-out hover:bg-secondary/50 border border-transparent active:scale-[0.98] ${
+                activeItemKey === `result-${game.appid}` ? "bg-secondary/50 border-white/[.07]" : ""
               }`}
               id={`search-suggestion-result-${game.appid}`}
               role="option"
@@ -515,7 +494,7 @@ export function SearchSuggestions({
                 setActiveIndex(activeItems.findIndex((item) => item.key === `result-${game.appid}`))
               }
             >
-              <div className="h-12 w-12 flex-shrink-0 overflow-hidden rounded-xl bg-zinc-800">
+              <div className="h-12 w-12 flex-shrink-0 overflow-hidden rounded-xl bg-secondary">
                 {game.image ? (
                   <img
                     src={proxyImageUrl(game.image)}
@@ -527,37 +506,37 @@ export function SearchSuggestions({
                     }`}
                   />
                 ) : (
-                  <div className="h-full w-full bg-zinc-800" />
+                  <div className="h-full w-full bg-secondary" />
                 )}
               </div>
               <div className="min-w-0 flex-1">
-                <div className="text-sm font-semibold text-zinc-200 line-clamp-1">{game.name}</div>
+                <div className="text-sm font-semibold text-foreground/90 line-clamp-1">{game.name}</div>
                 {game.description && (
-                  <div className="text-xs text-zinc-500 line-clamp-2">{game.description}</div>
+                  <div className="text-xs text-muted-foreground/80 line-clamp-2">{game.description}</div>
                 )}
                 {!game.description && game.developer && (
-                  <div className="text-xs text-zinc-500 line-clamp-1">by {game.developer}</div>
+                  <div className="text-xs text-muted-foreground/80 line-clamp-1">by {game.developer}</div>
                 )}
               </div>
-              <ChevronRight className="h-4 w-4 text-zinc-500 transition-transform duration-300 ease-out group-hover:translate-x-1.5" />
+              <ChevronRight className="h-4 w-4 text-muted-foreground/80 transition-transform duration-300 ease-out group-hover:translate-x-1.5" />
             </button>
           ))}
         </div>
       )}
 
       {!isQueryTooShort && trimmedValue.length >= 2 && !hasResults && didYouMeanResults.length === 0 && (
-        <div className="px-4 py-6 text-sm text-zinc-500">No results found.</div>
+        <div className="px-4 py-6 text-sm text-muted-foreground/80">No results found.</div>
       )}
 
       {!isQueryTooShort && trimmedValue.length >= 2 && !hasResults && didYouMeanResults.length > 0 && (
         <div className="p-2" role="listbox" id={resultsListId}>
-          <div className="px-2 pt-2 text-xs uppercase tracking-wide text-zinc-500">Did you mean</div>
+          <div className="px-2 pt-2 text-xs uppercase tracking-wide text-muted-foreground/80">Did you mean</div>
           {didYouMeanResults.map((game) => (
             <button
               key={`didyoumean-${game.appid}`}
               type="button"
-              className={`group w-full flex items-center gap-3 rounded-2xl px-2 py-2 text-left transition-all duration-300 ease-out hover:bg-zinc-800/50 active:scale-[0.98] ${
-                activeItemKey === `didyoumean-${game.appid}` ? "bg-zinc-800/50" : ""
+              className={`group w-full flex items-center gap-3 rounded-2xl px-2 py-2 text-left transition-all duration-300 ease-out hover:bg-secondary/50 active:scale-[0.98] ${
+                activeItemKey === `didyoumean-${game.appid}` ? "bg-secondary/50" : ""
               }`}
               id={`search-suggestion-didyoumean-${game.appid}`}
               role="option"
@@ -571,7 +550,7 @@ export function SearchSuggestions({
                 setActiveIndex(activeItems.findIndex((item) => item.key === `didyoumean-${game.appid}`))
               }
             >
-              <div className="h-12 w-12 flex-shrink-0 overflow-hidden rounded-xl bg-zinc-800">
+              <div className="h-12 w-12 flex-shrink-0 overflow-hidden rounded-xl bg-secondary">
                 {game.image ? (
                   <img
                     src={proxyImageUrl(game.image)}
@@ -583,16 +562,16 @@ export function SearchSuggestions({
                     }`}
                   />
                 ) : (
-                  <div className="h-full w-full bg-zinc-800" />
+                  <div className="h-full w-full bg-secondary" />
                 )}
               </div>
               <div className="min-w-0 flex-1">
-                <div className="text-sm font-semibold text-zinc-200 line-clamp-1">{game.name}</div>
+                <div className="text-sm font-semibold text-foreground/90 line-clamp-1">{game.name}</div>
                 {game.developer && (
-                  <div className="text-xs text-zinc-500 line-clamp-1">by {game.developer}</div>
+                  <div className="text-xs text-muted-foreground/80 line-clamp-1">by {game.developer}</div>
                 )}
               </div>
-              <ChevronRight className="h-4 w-4 text-zinc-500 transition-transform duration-300 ease-out group-hover:translate-x-1.5" />
+              <ChevronRight className="h-4 w-4 text-muted-foreground/80 transition-transform duration-300 ease-out group-hover:translate-x-1.5" />
             </button>
           ))}
         </div>
@@ -601,7 +580,7 @@ export function SearchSuggestions({
       {!isQueryTooShort && trimmedValue.length >= 2 && (
         <button
           type="button"
-          className="group w-full flex items-center justify-center gap-2 border-t border-white/[.07] px-4 py-3 text-sm font-medium text-zinc-200 hover:bg-white/[.03] transition-colors duration-300 ease-out active:scale-[0.98]"
+          className="group w-full flex items-center justify-center gap-2 border-t border-white/[.07] px-4 py-3 text-sm font-medium text-foreground/90 hover:bg-white/[.03] transition-colors duration-300 ease-out active:scale-[0.98]"
           onClick={() => {
             triggerHapticFeedback("light")
             handleSuggestionClick(trimmedValue)
@@ -615,7 +594,7 @@ export function SearchSuggestions({
       {trimmedValue.length === 0 && recentSearches.length > 0 && (
         <div className="border-t border-white/[.07] p-3">
           <div className="flex items-center justify-between mb-2">
-            <div className="text-xs uppercase tracking-wide text-zinc-500">Recent searches</div>
+            <div className="text-xs uppercase tracking-wide text-muted-foreground/80">Recent searches</div>
             <button
               type="button"
               onClick={async () => {
@@ -628,7 +607,7 @@ export function SearchSuggestions({
                   // ignore
                 }
               }}
-              className="text-xs text-zinc-500 hover:text-red-500 transition-colors flex items-center gap-1"
+              className="text-xs text-muted-foreground/80 hover:text-red-500 transition-colors flex items-center gap-1"
               title="Clear search history"
             >
               <Trash2 className="h-3 w-3" />
@@ -640,9 +619,9 @@ export function SearchSuggestions({
               <button
                 key={`recent-${term}`}
                 type="button"
-                className={`rounded-full border border-white/[.07] bg-zinc-800/50 px-3 py-1.5 text-xs font-medium text-zinc-400 transition-colors duration-200 ease-out hover:bg-zinc-700/50 hover:text-zinc-200 active:scale-95 ${
+                className={`rounded-full border border-white/[.07] bg-secondary/50 px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors duration-200 ease-out hover:bg-zinc-700/50 hover:text-foreground/90 active:scale-95 ${
                   activeItemKey === `recent-${term.toLowerCase().replace(/[^a-z0-9]+/gi, "-")}`
-                    ? "border-white/20 bg-zinc-700/50 text-zinc-200"
+                    ? "border-white/20 bg-zinc-700/50 text-foreground/90"
                     : ""
                 }`}
                 id={`search-suggestion-recent-${term.toLowerCase().replace(/[^a-z0-9]+/gi, "-")}`}
@@ -672,7 +651,7 @@ export function SearchSuggestions({
 
       {trimmedValue.length === 0 && (browseLoading || trendingGames.length > 0) && (
         <div className="border-t border-white/[.07] p-3">
-          <div className="text-xs uppercase tracking-wide text-zinc-500 mb-2">Trending (24h)</div>
+          <div className="text-xs uppercase tracking-wide text-muted-foreground/80 mb-2">Trending (24h)</div>
           {browseLoading ? (
             <div className="space-y-2">
               {Array.from({ length: 3 }).map((_, i) => (
@@ -691,8 +670,8 @@ export function SearchSuggestions({
                 <button
                   key={`trending-${game.appid}`}
                   type="button"
-                  className={`group w-full flex items-center gap-3 rounded-2xl px-2 py-2 text-left transition-all duration-300 ease-out hover:bg-zinc-800/50 active:scale-[0.98] ${
-                    activeItemKey === `trending-${game.appid}` ? "bg-zinc-800/50" : ""
+                  className={`group w-full flex items-center gap-3 rounded-2xl px-2 py-2 text-left transition-all duration-300 ease-out hover:bg-secondary/50 active:scale-[0.98] ${
+                    activeItemKey === `trending-${game.appid}` ? "bg-secondary/50" : ""
                   }`}
                   id={`search-suggestion-trending-${game.appid}`}
                   role="option"
@@ -706,7 +685,7 @@ export function SearchSuggestions({
                     setActiveIndex(activeItems.findIndex((item) => item.key === `trending-${game.appid}`))
                   }
                 >
-                  <div className="h-10 w-10 flex-shrink-0 overflow-hidden rounded-xl bg-zinc-800">
+                  <div className="h-10 w-10 flex-shrink-0 overflow-hidden rounded-xl bg-secondary">
                     {game.image ? (
                       <img
                         src={proxyImageUrl(game.image)}
@@ -718,14 +697,14 @@ export function SearchSuggestions({
                         }`}
                       />
                     ) : (
-                      <div className="h-full w-full bg-zinc-800" />
+                      <div className="h-full w-full bg-secondary" />
                     )}
                   </div>
                   <div className="min-w-0 flex-1">
-                    <div className="text-sm font-semibold text-zinc-200 line-clamp-1">{game.name}</div>
-                    <div className="text-xs text-zinc-500">{formatNumber(game.downloads)} downloads</div>
+                    <div className="text-sm font-semibold text-foreground/90 line-clamp-1">{game.name}</div>
+                    <div className="text-xs text-muted-foreground/80">{formatNumber(game.downloads)} downloads</div>
                   </div>
-                  <ChevronRight className="h-4 w-4 text-zinc-500 transition-transform duration-300 ease-out group-hover:translate-x-1.5" />
+                  <ChevronRight className="h-4 w-4 text-muted-foreground/80 transition-transform duration-300 ease-out group-hover:translate-x-1.5" />
                 </button>
               ))}
             </div>
@@ -735,7 +714,7 @@ export function SearchSuggestions({
 
       {trimmedValue.length === 0 && (browseLoading || popularGames.length > 0) && (
         <div className="border-t border-white/[.07] p-3">
-          <div className="text-xs uppercase tracking-wide text-zinc-500 mb-2">Popular games</div>
+          <div className="text-xs uppercase tracking-wide text-muted-foreground/80 mb-2">Popular games</div>
           {browseLoading ? (
             <div className="space-y-2">
               {Array.from({ length: 3 }).map((_, i) => (
@@ -754,8 +733,8 @@ export function SearchSuggestions({
                 <button
                   key={`popular-${game.appid}`}
                   type="button"
-                  className={`group w-full flex items-center gap-3 rounded-2xl px-2 py-2 text-left transition-all duration-300 ease-out hover:bg-zinc-800/50 active:scale-[0.98] ${
-                    activeItemKey === `popular-${game.appid}` ? "bg-zinc-800/50" : ""
+                  className={`group w-full flex items-center gap-3 rounded-2xl px-2 py-2 text-left transition-all duration-300 ease-out hover:bg-secondary/50 active:scale-[0.98] ${
+                    activeItemKey === `popular-${game.appid}` ? "bg-secondary/50" : ""
                   }`}
                   id={`search-suggestion-popular-${game.appid}`}
                   role="option"
@@ -769,7 +748,7 @@ export function SearchSuggestions({
                     setActiveIndex(activeItems.findIndex((item) => item.key === `popular-${game.appid}`))
                   }
                 >
-                  <div className="h-10 w-10 flex-shrink-0 overflow-hidden rounded-xl bg-zinc-800">
+                  <div className="h-10 w-10 flex-shrink-0 overflow-hidden rounded-xl bg-secondary">
                     {game.image ? (
                       <img
                         src={proxyImageUrl(game.image)}
@@ -781,14 +760,14 @@ export function SearchSuggestions({
                         }`}
                       />
                     ) : (
-                      <div className="h-full w-full bg-zinc-800" />
+                      <div className="h-full w-full bg-secondary" />
                     )}
                   </div>
                   <div className="min-w-0 flex-1">
-                    <div className="text-sm font-semibold text-zinc-200 line-clamp-1">{game.name}</div>
-                    <div className="text-xs text-zinc-500">{formatNumber(game.downloads)} downloads</div>
+                    <div className="text-sm font-semibold text-foreground/90 line-clamp-1">{game.name}</div>
+                    <div className="text-xs text-muted-foreground/80">{formatNumber(game.downloads)} downloads</div>
                   </div>
-                  <ChevronRight className="h-4 w-4 text-zinc-500 transition-transform duration-300 ease-out group-hover:translate-x-1.5" />
+                  <ChevronRight className="h-4 w-4 text-muted-foreground/80 transition-transform duration-300 ease-out group-hover:translate-x-1.5" />
                 </button>
               ))}
             </div>
@@ -798,7 +777,7 @@ export function SearchSuggestions({
 
       {trimmedValue.length === 0 && (browseLoading || recentlyAddedGames.length > 0) && (
         <div className="border-t border-white/[.07] p-3">
-          <div className="text-xs uppercase tracking-wide text-zinc-500 mb-2">Recently added</div>
+          <div className="text-xs uppercase tracking-wide text-muted-foreground/80 mb-2">Recently added</div>
           {browseLoading ? (
             <div className="space-y-2">
               {Array.from({ length: 3 }).map((_, i) => (
@@ -817,8 +796,8 @@ export function SearchSuggestions({
                 <button
                   key={`recently-added-${game.appid}`}
                   type="button"
-                  className={`group w-full flex items-center gap-3 rounded-2xl px-2 py-2 text-left transition-all duration-300 ease-out hover:bg-zinc-800/50 active:scale-[0.98] ${
-                    activeItemKey === `recently-added-${game.appid}` ? "bg-zinc-800/50" : ""
+                  className={`group w-full flex items-center gap-3 rounded-2xl px-2 py-2 text-left transition-all duration-300 ease-out hover:bg-secondary/50 active:scale-[0.98] ${
+                    activeItemKey === `recently-added-${game.appid}` ? "bg-secondary/50" : ""
                   }`}
                   id={`search-suggestion-recently-added-${game.appid}`}
                   role="option"
@@ -834,7 +813,7 @@ export function SearchSuggestions({
                     )
                   }
                 >
-                  <div className="h-10 w-10 flex-shrink-0 overflow-hidden rounded-xl bg-zinc-800">
+                  <div className="h-10 w-10 flex-shrink-0 overflow-hidden rounded-xl bg-secondary">
                     {game.image ? (
                       <img
                         src={proxyImageUrl(game.image)}
@@ -846,18 +825,18 @@ export function SearchSuggestions({
                         }`}
                       />
                     ) : (
-                      <div className="h-full w-full bg-zinc-800" />
+                      <div className="h-full w-full bg-secondary" />
                     )}
                   </div>
                   <div className="min-w-0 flex-1">
-                    <div className="text-sm font-semibold text-zinc-200 line-clamp-1">{game.name}</div>
+                    <div className="text-sm font-semibold text-foreground/90 line-clamp-1">{game.name}</div>
                     {game.update_time && (
-                      <div className="text-xs text-zinc-500">
+                      <div className="text-xs text-muted-foreground/80">
                         Updated {new Date(game.update_time).toLocaleDateString()}
                       </div>
                     )}
                   </div>
-                  <ChevronRight className="h-4 w-4 text-zinc-500 transition-transform duration-300 ease-out group-hover:translate-x-1.5" />
+                  <ChevronRight className="h-4 w-4 text-muted-foreground/80 transition-transform duration-300 ease-out group-hover:translate-x-1.5" />
                 </button>
               ))}
             </div>
@@ -874,11 +853,11 @@ export function SearchSuggestions({
       {popup && showPanel && (
         <div
           ref={overlayRef}
-          className="pointer-events-auto fixed inset-0 z-[90] bg-zinc-950/60 backdrop-blur-sm animate-in fade-in duration-300 ease-out"
+          className="pointer-events-auto fixed inset-0 z-[90] bg-background/60 backdrop-blur-sm animate-in fade-in duration-300 ease-out"
           onClick={() => setShowSuggestions(false)}
         >
           <div className="mx-auto w-full max-w-2xl px-4 pt-24" onClick={(e) => e.stopPropagation()}>
-            <div className="overflow-hidden rounded-[2.5rem] border border-white/[.07] bg-zinc-950/90 shadow-[0_32px_64px_-12px_rgba(0,0,0,0.5)] backdrop-blur-3xl animate-in fade-in slide-in-from-bottom-8 duration-500 ease-out">
+            <div className="overflow-hidden rounded-[2.5rem] border border-white/[.07] bg-background/90 shadow-[0_32px_64px_-12px_rgba(0,0,0,0.5)] backdrop-blur-3xl animate-in fade-in slide-in-from-bottom-8 duration-500 ease-out">
               <div className="flex items-center gap-3 px-6 py-5 border-b border-white/[.07]">
                 <div className="flex-1">{renderInput()}</div>
                 {showFiltersButton && (
@@ -906,7 +885,7 @@ export function SearchSuggestions({
       )}
 
       {!popup && showPanel && (
-        <div className="absolute left-0 right-0 top-[calc(100%+16px)] z-[60] max-h-[480px] overflow-y-auto rounded-[2rem] border border-white/[.07] bg-zinc-950/90 p-0 backdrop-blur-2xl shadow-2xl animate-in fade-in slide-in-from-top-4 duration-300 ease-out">
+        <div className="absolute left-0 right-0 top-[calc(100%+16px)] z-[60] max-h-[480px] overflow-y-auto rounded-[2rem] border border-white/[.07] bg-background/90 p-0 backdrop-blur-2xl shadow-2xl animate-in fade-in slide-in-from-top-4 duration-300 ease-out">
           {renderResults()}
         </div>
       )}

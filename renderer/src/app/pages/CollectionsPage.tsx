@@ -306,7 +306,7 @@ export function CollectionsPage() {
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div className="space-y-1">
           <h1 className="text-2xl font-bold tracking-tight text-white">Collections</h1>
-          <p className="text-sm text-zinc-400">
+          <p className="text-sm text-muted-foreground">
             Group your games into collections you can filter, share, and resync across devices.
           </p>
         </div>
@@ -352,7 +352,7 @@ export function CollectionsPage() {
       {/* Search */}
       {!loading && collections.length > 0 && (
         <div className="relative max-w-md">
-          <Search className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-400" />
+          <Search className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -363,7 +363,7 @@ export function CollectionsPage() {
             <button
               type="button"
               onClick={() => setSearch("")}
-              className="absolute right-3.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-100 transition-colors"
+              className="absolute right-3.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
               aria-label="Clear search"
             >
               <X className="h-3.5 w-3.5" />
@@ -387,14 +387,14 @@ export function CollectionsPage() {
                   </span>
                 )}
               </h2>
-              <p className="text-xs text-zinc-500">
+              <p className="text-xs text-muted-foreground/80">
                 Collections by other people. When the owner adds games, you'll see an Update badge.
               </p>
             </div>
             <button
               type="button"
               onClick={() => void followed.refresh()}
-              className="inline-flex items-center gap-1 rounded-full border border-white/[.07] bg-white/[.03] px-2.5 py-1 text-[11px] text-zinc-300 hover:bg-white/[.07] hover:text-white transition-colors"
+              className="inline-flex items-center gap-1 rounded-full border border-white/[.07] bg-white/[.03] px-2.5 py-1 text-[11px] text-foreground/80 hover:bg-white/[.07] hover:text-white transition-colors"
             >
               <RefreshCw className={cn("h-3 w-3", followed.loading && "animate-spin")} />
               Refresh
@@ -474,7 +474,7 @@ export function CollectionsPage() {
           <button
             type="button"
             onClick={() => void refresh()}
-            className="inline-flex items-center gap-1 rounded-full border border-white/[.07] bg-white/[.03] px-2.5 py-1 text-[11px] text-zinc-300 hover:bg-white/[.07] hover:text-white transition-colors"
+            className="inline-flex items-center gap-1 rounded-full border border-white/[.07] bg-white/[.03] px-2.5 py-1 text-[11px] text-foreground/80 hover:bg-white/[.07] hover:text-white transition-colors"
           >
             <RefreshCw className={cn("h-3 w-3", loading && "animate-spin")} />
             Refresh
@@ -492,12 +492,12 @@ export function CollectionsPage() {
           onCreate={() => setCreateOpen(true)}
         />
       ) : filtered.length === 0 ? (
-        <div className="rounded-3xl border border-dashed border-white/[.07] bg-white/[.02] p-10 text-center text-sm text-zinc-400">
+        <div className="rounded-3xl border border-dashed border-white/[.07] bg-white/[.02] p-10 text-center text-sm text-muted-foreground">
           No collections match "{search}".{" "}
           <button
             type="button"
             onClick={() => setSearch("")}
-            className="text-zinc-200 underline-offset-2 hover:underline"
+            className="text-foreground/90 underline-offset-2 hover:underline"
           >
             Clear search
           </button>
@@ -686,7 +686,7 @@ export function CollectionsPage() {
 function SyncStatus({ authed, loading }: { authed: boolean | null; loading: boolean }) {
   if (loading) {
     return (
-      <span className="hidden sm:inline-flex items-center gap-1.5 rounded-full border border-white/[.07] bg-white/[.02] px-3 py-1 text-[11px] text-zinc-500">
+      <span className="hidden sm:inline-flex items-center gap-1.5 rounded-full border border-white/[.07] bg-white/[.02] px-3 py-1 text-[11px] text-muted-foreground/80">
         <span className="h-1.5 w-1.5 rounded-full bg-zinc-500 animate-pulse" />
         Syncing…
       </span>
@@ -701,7 +701,7 @@ function SyncStatus({ authed, loading }: { authed: boolean | null; loading: bool
     )
   }
   return (
-    <span className="hidden sm:inline-flex items-center gap-1.5 rounded-full border border-white/[.07] bg-white/[.02] px-3 py-1 text-[11px] text-zinc-400">
+    <span className="hidden sm:inline-flex items-center gap-1.5 rounded-full border border-white/[.07] bg-white/[.02] px-3 py-1 text-[11px] text-muted-foreground">
       <CloudOff className="h-3 w-3" />
       Local only — sign in to sync
     </span>
@@ -872,7 +872,7 @@ function CollectionCard({
 
   return (
     <div
-      className="group/card flex flex-col rounded-3xl border border-white/[.07] bg-zinc-900/40 backdrop-blur-md overflow-hidden transition-colors hover:border-white/[.14]"
+      className="group/card flex flex-col rounded-3xl border border-white/[.07] bg-card/40 backdrop-blur-md overflow-hidden transition-colors hover:border-white/[.14]"
       onContextMenu={(e) => {
         e.preventDefault()
         setContextMenu({ x: e.clientX, y: e.clientY })
@@ -881,14 +881,14 @@ function CollectionCard({
       <button
         type="button"
         onClick={onOpen}
-        className="relative aspect-[16/10] w-full overflow-hidden bg-zinc-900 cursor-pointer text-left"
+        className="relative aspect-[16/10] w-full overflow-hidden bg-card cursor-pointer text-left"
         aria-label={`Open ${collection.name}`}
       >
         <CoverMosaic cover={cover} />
         <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
         <div className="absolute top-3 left-3 right-3 flex items-start justify-between gap-2">
           {collection.shareToken && (
-            <span className="inline-flex items-center gap-1 rounded-full border border-white/[.10] bg-black/60 backdrop-blur-sm px-2 py-0.5 text-[10px] font-semibold text-zinc-100">
+            <span className="inline-flex items-center gap-1 rounded-full border border-white/[.10] bg-black/60 backdrop-blur-sm px-2 py-0.5 text-[10px] font-semibold text-foreground">
               {collection.isPublic ? <Globe className="h-2.5 w-2.5" /> : <Share2 className="h-2.5 w-2.5" />}
               {collection.isPublic ? "Public" : "Shared"}
             </span>
@@ -901,7 +901,7 @@ function CollectionCard({
           )}
         </div>
         <div className="absolute bottom-3 left-3 right-3 flex items-end justify-between gap-2">
-          <span className="inline-flex items-center gap-1 rounded-full border border-white/[.10] bg-black/50 backdrop-blur-sm px-2.5 py-0.5 text-[11px] font-semibold text-zinc-200">
+          <span className="inline-flex items-center gap-1 rounded-full border border-white/[.10] bg-black/50 backdrop-blur-sm px-2.5 py-0.5 text-[11px] font-semibold text-foreground/90">
             <Layers3 className="h-3 w-3" />
             {collection.appids.length} {collection.appids.length === 1 ? "game" : "games"}
             {missingCount > 0 && (
@@ -915,7 +915,7 @@ function CollectionCard({
               </span>
             )}
           </span>
-          <span className="inline-flex items-center gap-1 rounded-full border border-white/[.10] bg-black/50 backdrop-blur-sm px-2.5 py-0.5 text-[11px] font-semibold text-zinc-200 opacity-0 group-hover/card:opacity-100 transition-opacity">
+          <span className="inline-flex items-center gap-1 rounded-full border border-white/[.10] bg-black/50 backdrop-blur-sm px-2.5 py-0.5 text-[11px] font-semibold text-foreground/90 opacity-0 group-hover/card:opacity-100 transition-opacity">
             Open <ArrowRight className="h-3 w-3" />
           </span>
         </div>
@@ -966,7 +966,7 @@ function CollectionCard({
                   type="button"
                   aria-label="More actions"
                   title="More actions"
-                  className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-zinc-400 hover:bg-white/[.06] hover:text-zinc-100 transition-colors"
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-white/[.06] hover:text-foreground transition-colors"
                 >
                   <MoreHorizontal className="h-4 w-4" />
                 </button>
@@ -982,7 +982,7 @@ function CollectionCard({
             </Popover>
           </div>
         </div>
-        <div className="flex items-center gap-1.5 text-[11px] text-zinc-500">
+        <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground/80">
           {isOwner ? <span>by you</span> : <span>by {ownerName}</span>}
           {!isOwner && (
             <span className="rounded-full border border-violet-500/30 bg-violet-500/10 px-1.5 text-[10px] text-violet-200 inline-flex items-center gap-1">
@@ -1021,7 +1021,7 @@ function ContributorAvatarStack({
           <span
             key={c.discordId}
             title={name}
-            className="inline-flex h-4 w-4 overflow-hidden rounded-full ring-1 ring-zinc-950 bg-zinc-800"
+            className="inline-flex h-4 w-4 overflow-hidden rounded-full ring-1 ring-zinc-950 bg-secondary"
           >
             {c.avatarUrl ? (
               <img src={c.avatarUrl} alt={name} className="h-full w-full object-cover" />
@@ -1032,7 +1032,7 @@ function ContributorAvatarStack({
         )
       })}
       {extra > 0 && (
-        <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-zinc-800 px-1 ring-1 ring-zinc-950 text-[9px] font-semibold text-zinc-300">
+        <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-secondary px-1 ring-1 ring-zinc-950 text-[9px] font-semibold text-foreground/80">
           +{extra}
         </span>
       )}
@@ -1043,7 +1043,7 @@ function ContributorAvatarStack({
 function CoverMosaic({ cover }: { cover: string[] }) {
   if (cover.length === 0) {
     return (
-      <div className="absolute inset-0 flex items-center justify-center text-zinc-700">
+      <div className="absolute inset-0 flex items-center justify-center text-muted-foreground/40">
         <Layers3 className="h-12 w-12" />
       </div>
     )
@@ -1051,7 +1051,7 @@ function CoverMosaic({ cover }: { cover: string[] }) {
 
   const tiles = cover.slice(0, 4)
   return (
-    <div className="absolute inset-0 grid grid-cols-2 grid-rows-2 gap-px bg-zinc-950">
+    <div className="absolute inset-0 grid grid-cols-2 grid-rows-2 gap-px bg-background">
       {tiles.map((src, idx) => (
         <div key={`${src}-${idx}`} className="relative overflow-hidden">
           <img
@@ -1064,7 +1064,7 @@ function CoverMosaic({ cover }: { cover: string[] }) {
         </div>
       ))}
       {Array.from({ length: 4 - tiles.length }).map((_, idx) => (
-        <div key={`empty-${idx}`} className="bg-zinc-900" />
+        <div key={`empty-${idx}`} className="bg-card" />
       ))}
     </div>
   )
@@ -1072,7 +1072,7 @@ function CoverMosaic({ cover }: { cover: string[] }) {
 
 function CollectionCardSkeleton() {
   return (
-    <div className="rounded-3xl border border-white/[.07] bg-zinc-900/40 overflow-hidden">
+    <div className="rounded-3xl border border-white/[.07] bg-card/40 overflow-hidden">
       <div className="aspect-[16/10] w-full">
         <Skeleton className="h-full w-full rounded-none" />
       </div>
@@ -1103,20 +1103,20 @@ function FollowedCard({
 }) {
   const ownerName = collection.owner.displayName || collection.owner.username || "Someone"
   return (
-    <div id={`followed-${collection.id}`} className="group/card flex flex-col rounded-3xl border border-white/[.07] bg-zinc-900/40 backdrop-blur-md overflow-hidden transition-colors hover:border-white/[.14] relative scroll-mt-24">
+    <div id={`followed-${collection.id}`} className="group/card flex flex-col rounded-3xl border border-white/[.07] bg-card/40 backdrop-blur-md overflow-hidden transition-colors hover:border-white/[.14] relative scroll-mt-24">
       {collection.hasUpdates && (
         <span className="absolute top-3 left-3 z-20 inline-flex items-center gap-1 rounded-full border border-amber-500/30 bg-amber-500/15 backdrop-blur-sm px-2 py-0.5 text-[10px] font-semibold text-amber-300">
           <Sparkles className="h-2.5 w-2.5" />
           Updated
         </span>
       )}
-      <div className="relative aspect-[16/10] w-full overflow-hidden bg-zinc-900">
+      <div className="relative aspect-[16/10] w-full overflow-hidden bg-card">
         {collection.previewCovers.length === 0 ? (
-          <div className="absolute inset-0 flex items-center justify-center text-zinc-700">
+          <div className="absolute inset-0 flex items-center justify-center text-muted-foreground/40">
             <Layers3 className="h-12 w-12" />
           </div>
         ) : (
-          <div className="absolute inset-0 grid grid-cols-3 grid-rows-2 gap-px bg-zinc-950">
+          <div className="absolute inset-0 grid grid-cols-3 grid-rows-2 gap-px bg-background">
             {collection.previewCovers.slice(0, 6).map((tile, idx) => (
               <div key={`${tile.appid}-${idx}`} className="relative overflow-hidden">
                 {tile.image ? (
@@ -1127,18 +1127,18 @@ function FollowedCard({
                     loading="lazy"
                   />
                 ) : (
-                  <div className="h-full w-full bg-zinc-900" />
+                  <div className="h-full w-full bg-card" />
                 )}
               </div>
             ))}
             {Array.from({ length: Math.max(0, 6 - collection.previewCovers.length) }).map((_, idx) => (
-              <div key={`empty-${idx}`} className="bg-zinc-900" />
+              <div key={`empty-${idx}`} className="bg-card" />
             ))}
           </div>
         )}
         <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/10 to-transparent" />
         <div className="absolute bottom-3 left-3 right-3 flex items-end justify-between gap-2">
-          <span className="inline-flex items-center gap-1 rounded-full border border-white/[.10] bg-black/50 backdrop-blur-sm px-2.5 py-0.5 text-[11px] font-semibold text-zinc-200">
+          <span className="inline-flex items-center gap-1 rounded-full border border-white/[.10] bg-black/50 backdrop-blur-sm px-2.5 py-0.5 text-[11px] font-semibold text-foreground/90">
             <Layers3 className="h-3 w-3" />
             {collection.gameCount} {collection.gameCount === 1 ? "game" : "games"}
           </span>
@@ -1148,13 +1148,13 @@ function FollowedCard({
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
             <p className="truncate font-semibold text-sm text-white">{collection.name}</p>
-            <p className="truncate text-[11px] text-zinc-500">by {ownerName}</p>
+            <p className="truncate text-[11px] text-muted-foreground/80">by {ownerName}</p>
           </div>
           <button
             type="button"
             onClick={onUnfollow}
             title="Stop following"
-            className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-white/[.07] bg-white/[.03] text-zinc-400 hover:bg-white/[.07] hover:text-white transition-colors shrink-0"
+            className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-white/[.07] bg-white/[.03] text-muted-foreground hover:bg-white/[.07] hover:text-white transition-colors shrink-0"
           >
             <BellOff className="h-3.5 w-3.5" />
           </button>
@@ -1289,7 +1289,7 @@ function SyncCollectionDialog({
           </DialogDescription>
         </DialogHeader>
         {loading ? (
-          <div className="flex items-center justify-center py-8 text-sm text-zinc-400 gap-2">
+          <div className="flex items-center justify-center py-8 text-sm text-muted-foreground gap-2">
             <Loader2 className="h-4 w-4 animate-spin" />
             Loading…
           </div>
@@ -1300,12 +1300,12 @@ function SyncCollectionDialog({
         ) : (
           <div className="rounded-2xl border border-white/[.07] bg-white/[.02] p-4 space-y-2">
             <div className="flex items-center justify-between text-sm">
-              <span className="text-zinc-400">Games to install</span>
-              <span className="font-mono text-zinc-100">{missing.length}</span>
+              <span className="text-muted-foreground">Games to install</span>
+              <span className="font-mono text-foreground">{missing.length}</span>
             </div>
             <div className="flex items-center justify-between text-sm">
-              <span className="text-zinc-400">Total size</span>
-              <span className="font-mono text-zinc-100">
+              <span className="text-muted-foreground">Total size</span>
+              <span className="font-mono text-foreground">
                 {totalGb > 0 ? `${totalGb.toLocaleString()} GB` : missing.length > 0 ? "Unknown" : "—"}
               </span>
             </div>
@@ -1368,8 +1368,8 @@ function IconButton({
       className={cn(
         "inline-flex h-7 w-7 items-center justify-center rounded-full border border-white/[.07] bg-white/[.03] transition-colors disabled:opacity-40 disabled:cursor-not-allowed",
         destructive
-          ? "text-zinc-400 hover:bg-red-500/10 hover:text-red-400 hover:border-red-500/30"
-          : "text-zinc-400 hover:bg-white/[.07] hover:text-white"
+          ? "text-muted-foreground hover:bg-red-500/10 hover:text-red-400 hover:border-red-500/30"
+          : "text-muted-foreground hover:bg-white/[.07] hover:text-white"
       )}
     >
       {children}
@@ -1385,11 +1385,11 @@ function EmptyState({
   return (
     <div className="rounded-3xl border border-dashed border-white/[.07] bg-white/[.02] p-10 sm:p-14 text-center space-y-4">
       <div className="mx-auto h-14 w-14 rounded-full bg-white/[.04] border border-white/[.07] flex items-center justify-center">
-        <Layers3 className="h-6 w-6 text-zinc-400" />
+        <Layers3 className="h-6 w-6 text-muted-foreground" />
       </div>
       <div className="space-y-1.5">
         <h2 className="text-xl font-bold text-white">No collections yet</h2>
-        <p className="text-sm text-zinc-400 max-w-md mx-auto">
+        <p className="text-sm text-muted-foreground max-w-md mx-auto">
           Bundle games — by genre, vibe, party night, anything — and reach them from the sidebar. Sign in and they'll sync to every device.
         </p>
       </div>
@@ -1472,7 +1472,7 @@ function ShareDialog({
         </DialogHeader>
 
         {!authed ? (
-          <div className="rounded-2xl border border-white/[.07] bg-white/[.02] p-5 space-y-2 text-sm text-zinc-400">
+          <div className="rounded-2xl border border-white/[.07] bg-white/[.02] p-5 space-y-2 text-sm text-muted-foreground">
             <p>Sharing requires a signed-in account so the link stays available across devices.</p>
           </div>
         ) : !token ? (
@@ -1494,20 +1494,21 @@ function ShareDialog({
               <input
                 readOnly
                 value={url || ""}
-                className="flex-1 min-w-0 bg-transparent text-xs text-zinc-200 outline-none truncate"
+                className="flex-1 min-w-0 bg-transparent text-xs text-foreground/90 outline-none truncate"
                 onClick={(e) => (e.target as HTMLInputElement).select()}
               />
               <Button
                 variant="outline"
                 size="sm"
                 className="rounded-full gap-1.5 shrink-0"
-                onClick={() => {
+                onClick={async () => {
                   if (!url) return
-                  try {
-                    navigator.clipboard.writeText(url)
+                  const { copyToClipboard } = await import("@/lib/clipboard")
+                  const ok = await copyToClipboard(url, { successMessage: "Share link copied" })
+                  if (ok) {
                     setCopied(true)
                     window.setTimeout(() => setCopied(false), 1500)
-                  } catch { /* swallow */ }
+                  }
                 }}
               >
                 {copied ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
@@ -1529,7 +1530,7 @@ function ShareDialog({
                 href={url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex items-center gap-2 text-xs text-zinc-400 hover:text-zinc-100 transition-colors"
+                className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors"
               >
                 <ExternalLink className="h-3 w-3" />
                 Open public page
@@ -1573,12 +1574,12 @@ function ToggleRow({
 }) {
   return (
     <div className="flex items-start gap-3 rounded-2xl border border-white/[.07] bg-white/[.02] p-4">
-      <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-white/[.04] text-zinc-300">
+      <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-white/[.04] text-foreground/80">
         {icon}
       </div>
       <div className="min-w-0 flex-1 space-y-0.5">
-        <p className="text-sm font-semibold text-zinc-100">{title}</p>
-        <p className="text-xs text-zinc-400 leading-snug">{description}</p>
+        <p className="text-sm font-semibold text-foreground">{title}</p>
+        <p className="text-xs text-muted-foreground leading-snug">{description}</p>
       </div>
       <Switch checked={checked} onCheckedChange={onCheckedChange} disabled={disabled} />
     </div>
@@ -1675,7 +1676,7 @@ function CollectionEditorDialog({
         </DialogHeader>
 
         <div className="px-6 pt-2 pb-3 space-y-1.5 shrink-0">
-          <label className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-400">
+          <label className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
             Name
           </label>
           <Input
@@ -1692,11 +1693,11 @@ function CollectionEditorDialog({
 
         <div className="flex flex-1 min-h-0 flex-col gap-4 px-6 pb-4 md:grid md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
           <div className="flex flex-col gap-2 min-h-0">
-            <label className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-400 shrink-0">
+            <label className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground shrink-0">
               Library &amp; catalog
             </label>
             <div className="relative shrink-0">
-              <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-zinc-400" />
+              <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
               <Input
                 value={filter}
                 onChange={(e) => setFilter(e.target.value)}
@@ -1708,7 +1709,7 @@ function CollectionEditorDialog({
             <ScrollArea className="flex-1 min-h-[160px] md:min-h-0 rounded-xl border border-white/[.07] bg-black/20">
               <div className="space-y-1 p-2">
                 {leftPanelGames.length === 0 ? (
-                  <p className="py-6 text-center text-sm text-zinc-500">
+                  <p className="py-6 text-center text-sm text-muted-foreground/80">
                     {filter ? `No games match "${filter}".` : "No games available."}
                   </p>
                 ) : (
@@ -1728,7 +1729,7 @@ function CollectionEditorDialog({
                             : "border-white/[.07] bg-white/[.02] hover:bg-white/[.04]"
                         )}
                       >
-                        <div className="h-10 w-10 shrink-0 overflow-hidden rounded-md bg-zinc-800">
+                        <div className="h-10 w-10 shrink-0 overflow-hidden rounded-md bg-secondary">
                           {game.image ? (
                             <img
                               src={proxyImageUrl(getCardImage(game.image))}
@@ -1739,17 +1740,17 @@ function CollectionEditorDialog({
                           ) : null}
                         </div>
                         <div className="min-w-0 flex-1">
-                          <p className="truncate text-xs font-semibold text-zinc-100">{game.name}</p>
+                          <p className="truncate text-xs font-semibold text-foreground">{game.name}</p>
                           {!game.installed && (
-                            <p className="text-[10px] text-zinc-500">Not installed</p>
+                            <p className="text-[10px] text-muted-foreground/80">Not installed</p>
                           )}
                         </div>
                         <div
                           className={cn(
                             "shrink-0 inline-flex h-5 w-5 items-center justify-center rounded-full border transition-colors",
                             active
-                              ? "border-white bg-white text-black"
-                              : "border-zinc-600 bg-black/40 text-transparent group-hover/pick:text-zinc-500"
+                              ? "border-white bg-primary text-primary-foreground"
+                              : "border-zinc-600 bg-black/40 text-transparent group-hover/pick:text-muted-foreground/80"
                           )}
                         >
                           <Check className="h-3 w-3" />
@@ -1764,17 +1765,17 @@ function CollectionEditorDialog({
 
           <div className="flex flex-col gap-2 min-h-0">
             <div className="flex items-center justify-between shrink-0">
-              <label className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-400">
+              <label className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                 In collection
               </label>
-              <span className="text-[11px] text-zinc-500">
+              <span className="text-[11px] text-muted-foreground/80">
                 {order.length} {order.length === 1 ? "game" : "games"}
               </span>
             </div>
             <ScrollArea className="flex-1 min-h-[160px] md:min-h-0 rounded-xl border border-white/[.07] bg-black/20">
               <div className="space-y-1 p-2">
                 {order.length === 0 ? (
-                  <div className="rounded-xl border border-dashed border-white/[.07] p-6 text-center text-sm text-zinc-500">
+                  <div className="rounded-xl border border-dashed border-white/[.07] p-6 text-center text-sm text-muted-foreground/80">
                     Pick games on the left to add them to the collection.
                   </div>
                 ) : (
@@ -1787,7 +1788,7 @@ function CollectionEditorDialog({
                         key={appid}
                         className="flex items-center gap-2 rounded-xl border border-white/[.07] bg-white/[.02] p-2"
                       >
-                        <div className="h-10 w-10 shrink-0 overflow-hidden rounded-md bg-zinc-800">
+                        <div className="h-10 w-10 shrink-0 overflow-hidden rounded-md bg-secondary">
                           {game?.image ? (
                             <img
                               src={proxyImageUrl(getCardImage(game.image))}
@@ -1797,22 +1798,22 @@ function CollectionEditorDialog({
                             />
                           ) : (
                             <div className="flex h-full w-full items-center justify-center">
-                              <Layers3 className="h-4 w-4 text-zinc-600" />
+                              <Layers3 className="h-4 w-4 text-muted-foreground/60" />
                             </div>
                           )}
                         </div>
                         <div className="min-w-0 flex-1">
-                          <p className="truncate text-xs font-semibold text-zinc-100">
+                          <p className="truncate text-xs font-semibold text-foreground">
                             {game?.name || appid}
                           </p>
-                          <p className="text-[10px] text-zinc-500">#{index + 1}</p>
+                          <p className="text-[10px] text-muted-foreground/80">#{index + 1}</p>
                         </div>
                         <div className="flex items-center gap-0.5 shrink-0">
                           <button
                             type="button"
                             onClick={() => moveSelected(appid, -1)}
                             disabled={index === 0}
-                            className="inline-flex h-6 w-6 items-center justify-center rounded-full text-zinc-400 transition hover:text-white disabled:opacity-30"
+                            className="inline-flex h-6 w-6 items-center justify-center rounded-full text-muted-foreground transition hover:text-white disabled:opacity-30"
                             aria-label="Move up"
                           >
                             <ArrowUp className="h-3 w-3" />
@@ -1821,7 +1822,7 @@ function CollectionEditorDialog({
                             type="button"
                             onClick={() => moveSelected(appid, 1)}
                             disabled={index === order.length - 1}
-                            className="inline-flex h-6 w-6 items-center justify-center rounded-full text-zinc-400 transition hover:text-white disabled:opacity-30"
+                            className="inline-flex h-6 w-6 items-center justify-center rounded-full text-muted-foreground transition hover:text-white disabled:opacity-30"
                             aria-label="Move down"
                           >
                             <ArrowDown className="h-3 w-3" />
@@ -1830,7 +1831,7 @@ function CollectionEditorDialog({
                             type="button"
                             onClick={() => toggle(appid)}
                             disabled={!removable}
-                            className="inline-flex h-6 w-6 items-center justify-center rounded-full text-zinc-400 transition hover:text-red-400 disabled:opacity-30 disabled:cursor-not-allowed"
+                            className="inline-flex h-6 w-6 items-center justify-center rounded-full text-muted-foreground transition hover:text-red-400 disabled:opacity-30 disabled:cursor-not-allowed"
                             aria-label="Remove"
                             title={removable ? "Remove" : "You do not have permission to remove this game."}
                           >
@@ -1847,7 +1848,7 @@ function CollectionEditorDialog({
         </div>
 
         <DialogFooter className="px-6 py-4 border-t border-white/[.07] shrink-0 sm:justify-between">
-          <p className="text-xs text-zinc-500 hidden sm:block self-center">
+          <p className="text-xs text-muted-foreground/80 hidden sm:block self-center">
             {order.length === 0
               ? "Pick at least one game."
               : `${order.length} game${order.length === 1 ? "" : "s"} ready.`}
@@ -2012,11 +2013,11 @@ function ContributorsDialog({
 
         <div className="flex flex-1 min-h-0 flex-col gap-4 px-6 pb-4">
           <div className="space-y-2 shrink-0">
-            <label className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-400">
+            <label className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
               Invite a user
             </label>
             <div className="relative">
-              <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-zinc-400" />
+              <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
               <Input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
@@ -2025,7 +2026,7 @@ function ContributorsDialog({
               />
             </div>
             <div className="rounded-2xl border border-white/[.07] bg-white/[.02] p-3 space-y-2">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-400">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                 Permissions for the invite
               </p>
               <PermissionRow
@@ -2050,12 +2051,12 @@ function ContributorsDialog({
             {search.trim().length >= 2 && (
               <div className="rounded-xl border border-white/[.07] bg-black/20 max-h-44 overflow-y-auto">
                 {searching ? (
-                  <div className="flex items-center justify-center gap-2 py-4 text-sm text-zinc-400">
+                  <div className="flex items-center justify-center gap-2 py-4 text-sm text-muted-foreground">
                     <Loader2 className="h-4 w-4 animate-spin" />
                     Searching…
                   </div>
                 ) : searchResults.length === 0 ? (
-                  <p className="py-4 text-center text-sm text-zinc-500">No matches.</p>
+                  <p className="py-4 text-center text-sm text-muted-foreground/80">No matches.</p>
                 ) : (
                   <div className="p-1.5 space-y-1">
                     {searchResults.map((u) => {
@@ -2070,24 +2071,24 @@ function ContributorsDialog({
                           disabled={disabled}
                           className="w-full flex items-center gap-2 rounded-lg p-2 text-left transition hover:bg-white/[.04] disabled:opacity-50 disabled:cursor-not-allowed"
                         >
-                          <span className="h-7 w-7 shrink-0 overflow-hidden rounded-full bg-zinc-800">
+                          <span className="h-7 w-7 shrink-0 overflow-hidden rounded-full bg-secondary">
                             {u.avatarUrl ? (
                               <img src={u.avatarUrl} alt="" className="h-full w-full object-cover" />
                             ) : null}
                           </span>
                           <span className="min-w-0 flex-1">
-                            <span className="block truncate text-xs font-semibold text-zinc-100">
+                            <span className="block truncate text-xs font-semibold text-foreground">
                               {u.displayName || u.username || "Unknown"}
                             </span>
-                            <span className="block truncate text-[10px] text-zinc-500">
+                            <span className="block truncate text-[10px] text-muted-foreground/80">
                               {u.username ? `@${u.username}` : ""}
                               {isOwner ? " · owner" : already ? " · already invited" : ""}
                             </span>
                           </span>
                           {inviting === u.username ? (
-                            <Loader2 className="h-3.5 w-3.5 animate-spin text-zinc-400" />
+                            <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
                           ) : (
-                            <UserPlus className="h-3.5 w-3.5 text-zinc-400" />
+                            <UserPlus className="h-3.5 w-3.5 text-muted-foreground" />
                           )}
                         </button>
                       )
@@ -2100,20 +2101,20 @@ function ContributorsDialog({
 
           <div className="flex flex-1 min-h-0 flex-col gap-2">
             <div className="flex items-center justify-between shrink-0">
-              <label className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-400">
+              <label className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                 Current contributors
               </label>
-              <span className="text-[11px] text-zinc-500">{contributors.length}</span>
+              <span className="text-[11px] text-muted-foreground/80">{contributors.length}</span>
             </div>
             <ScrollArea className="flex-1 min-h-[120px] rounded-xl border border-white/[.07] bg-black/20">
               <div className="p-2 space-y-1">
                 {loading ? (
-                  <div className="flex items-center justify-center gap-2 py-4 text-sm text-zinc-400">
+                  <div className="flex items-center justify-center gap-2 py-4 text-sm text-muted-foreground">
                     <Loader2 className="h-4 w-4 animate-spin" />
                     Loading…
                   </div>
                 ) : contributors.length === 0 ? (
-                  <p className="py-6 text-center text-sm text-zinc-500">
+                  <p className="py-6 text-center text-sm text-muted-foreground/80">
                     No contributors yet. Search above to invite someone.
                   </p>
                 ) : (
@@ -2123,23 +2124,23 @@ function ContributorsDialog({
                       className="rounded-xl border border-white/[.07] bg-white/[.02] p-3 space-y-2"
                     >
                       <div className="flex items-center gap-2">
-                        <span className="h-8 w-8 shrink-0 overflow-hidden rounded-full bg-zinc-800">
+                        <span className="h-8 w-8 shrink-0 overflow-hidden rounded-full bg-secondary">
                           {c.avatarUrl ? (
                             <img src={c.avatarUrl} alt="" className="h-full w-full object-cover" />
                           ) : null}
                         </span>
                         <div className="min-w-0 flex-1">
-                          <p className="truncate text-xs font-semibold text-zinc-100">
+                          <p className="truncate text-xs font-semibold text-foreground">
                             {c.displayName || c.username || "Unknown"}
                           </p>
-                          <p className="truncate text-[10px] text-zinc-500">
+                          <p className="truncate text-[10px] text-muted-foreground/80">
                             {c.username ? `@${c.username}` : ""}
                           </p>
                         </div>
                         <button
                           type="button"
                           onClick={() => remove(c.discordId)}
-                          className="inline-flex h-7 w-7 items-center justify-center rounded-full text-zinc-400 hover:bg-red-500/10 hover:text-red-400 transition"
+                          className="inline-flex h-7 w-7 items-center justify-center rounded-full text-muted-foreground hover:bg-red-500/10 hover:text-red-400 transition"
                           title="Remove contributor"
                         >
                           <X className="h-3.5 w-3.5" />
@@ -2198,8 +2199,8 @@ function PermissionRow({
   return (
     <div className="flex items-start gap-3">
       <div className="min-w-0 flex-1">
-        <p className="text-xs font-semibold text-zinc-100">{label}</p>
-        <p className="text-[10px] text-zinc-500 leading-snug">{description}</p>
+        <p className="text-xs font-semibold text-foreground">{label}</p>
+        <p className="text-[10px] text-muted-foreground/80 leading-snug">{description}</p>
       </div>
       <Switch checked={checked} onCheckedChange={onCheckedChange} />
     </div>
@@ -2223,7 +2224,7 @@ function PermissionChip({
         "rounded-full px-2 py-1 text-[10px] font-semibold transition",
         checked
           ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
-          : "bg-white/[.03] text-zinc-400 border border-white/[.07] hover:text-white"
+          : "bg-white/[.03] text-muted-foreground border border-white/[.07] hover:text-white"
       )}
     >
       {checked ? "✓ " : "○ "}

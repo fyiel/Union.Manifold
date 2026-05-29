@@ -79,7 +79,7 @@ function VisibilityRow({ label, description, value, onChange, allowFull = true }
     <div className="flex items-start justify-between gap-4 py-2">
       <div className="flex-1 min-w-0">
         <div className="text-sm font-medium">{label}</div>
-        <div className="text-xs text-zinc-400 mt-0.5">{description}</div>
+        <div className="text-xs text-muted-foreground mt-0.5">{description}</div>
       </div>
       <Select value={value} onValueChange={(v) => onChange(v as SystemProfileVisibilityTier)}>
         <SelectTrigger className="w-32 h-8 text-xs">
@@ -222,22 +222,25 @@ export function SystemProfilePanel({ autoScanOnMount = false, onAutoScanConsumed
     if (patch.sysreqCheck) setSysreqCheck(patch.sysreqCheck === "off" ? "off" : "on")
     try { await window.ucSettings?.set?.("systemProfileVisibility", next) } catch { }
 
-    // Mirror to server: if any online surface is on, push tiers + spec.
-    // If everything is now off, delete the server-side copy.
+    // Mirror visibility row to the server unconditionally — playtime sharing
+    // does not require a hardware scan, so the row must exist even when every
+    // hardware-surface tier is 'off'.
+    if (window.ucSystemProfile?.serverSetVisibility) {
+      try {
+        await window.ucSystemProfile.serverSetVisibility(baseUrlRef.current, {
+          comments: next.comments,
+          forums: next.forums,
+          profilePublic: next.profilePublic,
+          shareGamePlaytime: next.shareGamePlaytime,
+        })
+      } catch { /* swallow, will retry on next scan/visibility change */ }
+    }
+
+    // Spec upload still gated on a hardware surface being on.
     if (anyOnlineSurfaceOn(next)) {
-      if (window.ucSystemProfile?.serverSetVisibility) {
-        try {
-          await window.ucSystemProfile.serverSetVisibility(baseUrlRef.current, {
-            comments: next.comments,
-            forums: next.forums,
-            profilePublic: next.profilePublic,
-            shareGamePlaytime: next.shareGamePlaytime,
-          })
-        } catch { /* swallow, will retry on next scan/visibility change */ }
-      }
       if (profile) void uploadIfOptedIn(next)
-    } else if (!anyOnlineSurfaceOn(next) && anyOnlineSurfaceOn(visibility)) {
-      // All surfaces just flipped off — remove the server-side spec.
+    } else if (anyOnlineSurfaceOn(visibility)) {
+      // Hardware surfaces just flipped off — remove the server-side spec.
       if (window.ucSystemProfile?.serverDelete) {
         try { await window.ucSystemProfile.serverDelete(baseUrlRef.current) } catch { }
       }
@@ -272,14 +275,14 @@ export function SystemProfilePanel({ autoScanOnMount = false, onAutoScanConsumed
             <div>
               <div className="flex items-center gap-2 flex-wrap">
                 <h2 className="text-lg font-semibold">System Profile</h2>
-                {profile && <Badge className="bg-zinc-800 text-zinc-200 border-zinc-700 text-[10px]">fp:{profile.fingerprint.slice(0, 8)}</Badge>}
+                {profile && <Badge className="bg-secondary text-foreground/90 border-border text-[10px]">fp:{profile.fingerprint.slice(0, 8)}</Badge>}
                 <SyncStatusBadge state={syncState} error={syncError} />
               </div>
-              <p className="text-sm text-zinc-400 mt-1">
+              <p className="text-sm text-muted-foreground mt-1">
                 Scan your PC's hardware to power pre-download requirement checks, library filtering, and an opt-in spec badge on comments and your public profile. Nothing is uploaded unless you flip a sharing switch below.
               </p>
-              <p className="text-[11px] text-zinc-500 mt-2">
-                Last scan: <span className="text-zinc-300">{relativeTime(profile?.capturedAt)}</span>
+              <p className="text-[11px] text-muted-foreground/80 mt-2">
+                Last scan: <span className="text-foreground/80">{relativeTime(profile?.capturedAt)}</span>
                 {profile && <> · took {profile.scanDurationMs}ms</>}
               </p>
             </div>
@@ -329,14 +332,14 @@ export function SystemProfilePanel({ autoScanOnMount = false, onAutoScanConsumed
           )}
 
           {spec && spec.gpus.length > 1 && (
-            <div className="rounded-md border border-white/[.07] bg-zinc-900/40 px-3 py-2 text-xs text-zinc-400">
-              <span className="font-medium text-zinc-300">Additional GPUs:</span> {spec.gpus.slice(1).map((g) => g.name).filter(Boolean).join(", ")}
+            <div className="rounded-md border border-white/[.07] bg-card/40 px-3 py-2 text-xs text-muted-foreground">
+              <span className="font-medium text-foreground/80">Additional GPUs:</span> {spec.gpus.slice(1).map((g) => g.name).filter(Boolean).join(", ")}
             </div>
           )}
 
           {!profile && !scanning && (
-            <div className="rounded-md border border-dashed border-white/10 bg-zinc-900/30 px-4 py-6 text-sm text-zinc-400 text-center">
-              No scan yet. Click <span className="text-zinc-200 font-medium">Scan now</span> to detect your hardware.
+            <div className="rounded-md border border-dashed border-white/10 bg-card/30 px-4 py-6 text-sm text-muted-foreground text-center">
+              No scan yet. Click <span className="text-foreground/90 font-medium">Scan now</span> to detect your hardware.
             </div>
           )}
         </CardContent>
@@ -345,10 +348,10 @@ export function SystemProfilePanel({ autoScanOnMount = false, onAutoScanConsumed
       <Card className="border-white/[.07]">
         <CardContent className="p-6 space-y-4">
           <div className="flex items-start gap-2">
-            <ShieldCheck className="h-4 w-4 text-zinc-300 mt-1" />
+            <ShieldCheck className="h-4 w-4 text-foreground/80 mt-1" />
             <div>
               <h2 className="text-lg font-semibold">Sharing &amp; visibility</h2>
-              <p className="text-sm text-zinc-400 mt-1">
+              <p className="text-sm text-muted-foreground mt-1">
                 Choose where your specs are visible. <b>Summary</b> shows a short text line like &ldquo;RTX 4070 · 32GB · Win11&rdquo;. <b>Full spec</b> enables full detail support for that surface. Existing comments and forum posts keep the specs they had when posted.
               </p>
             </div>
@@ -376,10 +379,10 @@ export function SystemProfilePanel({ autoScanOnMount = false, onAutoScanConsumed
             <div className="flex items-start justify-between gap-4 py-2">
               <div className="flex-1 min-w-0">
                 <div className="text-sm font-medium flex items-center gap-1.5">
-                  <Clock3 className="h-3.5 w-3.5 text-zinc-400" />
+                  <Clock3 className="h-3.5 w-3.5 text-muted-foreground" />
                   Game playtime sharing
                 </div>
-                <div className="text-xs text-zinc-400 mt-0.5">
+                <div className="text-xs text-muted-foreground mt-0.5">
                   When on, your playtime appears on the public leaderboard and the playtime card on your profile (with which games you've played). <b>When off, you're removed from the playtime leaderboard and the card is hidden</b> — but your sessions are still tracked, so flipping this back on later restores everything without losing any playtime.
                 </div>
               </div>
@@ -392,7 +395,7 @@ export function SystemProfilePanel({ autoScanOnMount = false, onAutoScanConsumed
             <div className="flex items-start justify-between gap-4 py-2">
               <div className="flex-1 min-w-0">
                 <div className="text-sm font-medium">Pre-download requirement check</div>
-                <div className="text-xs text-zinc-400 mt-0.5">
+                <div className="text-xs text-muted-foreground mt-0.5">
                   Compare a game's minimum and recommended specs to your hardware before downloading. Also powers the &ldquo;Can my PC run&rdquo; check on union-crax.xyz when you&rsquo;re signed in.
                 </div>
               </div>
@@ -408,7 +411,7 @@ export function SystemProfilePanel({ autoScanOnMount = false, onAutoScanConsumed
             </div>
           </div>
 
-          <p className="text-[11px] text-zinc-500">
+          <p className="text-[11px] text-muted-foreground/80">
             Uploading specs to the UC server is opt-in and only happens when at least one online surface is set above &ldquo;Off&rdquo;.
           </p>
         </CardContent>
@@ -467,7 +470,7 @@ export function UpgradeSuggesterSection({ baseUrl }: { baseUrl: string | undefin
   if (loading) {
     return (
       <Card className="border-white/[.07]">
-        <CardContent className="p-6 flex items-center gap-2 text-sm text-zinc-400">
+        <CardContent className="p-6 flex items-center gap-2 text-sm text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" /> Analyzing your wishlist…
         </CardContent>
       </Card>
@@ -485,7 +488,7 @@ export function UpgradeSuggesterSection({ baseUrl }: { baseUrl: string | undefin
             <TrendingUp className="h-4 w-4 text-emerald-300" />
             <h2 className="text-lg font-semibold">Your PC clears every game in your wishlist</h2>
           </div>
-          <p className="text-sm text-zinc-400">
+          <p className="text-sm text-muted-foreground">
             {report.smoothCount} of {report.considered} game{report.considered === 1 ? "" : "s"} comfortable on your current rig.
             {report.unknownCount > 0 && ` ${report.unknownCount} game${report.unknownCount === 1 ? "" : "s"} we couldn't evaluate yet.`}
           </p>
@@ -498,12 +501,12 @@ export function UpgradeSuggesterSection({ baseUrl }: { baseUrl: string | undefin
     <Card className="border-white/[.07]">
       <CardContent className="p-6 space-y-4">
         <div className="flex items-start gap-2">
-          <TrendingUp className="h-4 w-4 text-zinc-300 mt-1" />
+          <TrendingUp className="h-4 w-4 text-foreground/80 mt-1" />
           <div>
             <h2 className="text-lg font-semibold">Upgrade suggestions</h2>
-            <p className="text-sm text-zinc-400 mt-1">
+            <p className="text-sm text-muted-foreground mt-1">
               {report
-                ? <>Based on your wishlist: {report.smoothCount} smooth · <span className="text-zinc-200">{report.bottleneckedCount} bottlenecked</span>{report.unknownCount > 0 && <> · {report.unknownCount} unknown</>}</>
+                ? <>Based on your wishlist: {report.smoothCount} smooth · <span className="text-foreground/90">{report.bottleneckedCount} bottlenecked</span>{report.unknownCount > 0 && <> · {report.unknownCount} unknown</>}</>
                 : (reason || "No data to evaluate yet.")}
             </p>
           </div>
@@ -515,22 +518,22 @@ export function UpgradeSuggesterSection({ baseUrl }: { baseUrl: string | undefin
               <div key={b.component} className={`rounded-lg border px-3 py-2 ${
                 i === 0
                   ? "border-amber-500/40 bg-amber-500/[.05]"
-                  : "border-white/[.07] bg-zinc-900/40"
+                  : "border-white/[.07] bg-card/40"
               }`}>
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2">
-                    <span className="text-[10px] uppercase tracking-wider text-zinc-500">{b.component}</span>
-                    <Badge className="bg-zinc-800 text-zinc-200 border-zinc-700 text-[10px]">
+                    <span className="text-[10px] uppercase tracking-wider text-muted-foreground/80">{b.component}</span>
+                    <Badge className="bg-secondary text-foreground/90 border-border text-[10px]">
                       {b.gamesAffected} game{b.gamesAffected === 1 ? "" : "s"}
                     </Badge>
                     {i === 0 && <Badge className="bg-amber-500/15 text-amber-200 border-amber-500/30 text-[10px]">biggest bottleneck</Badge>}
                   </div>
                 </div>
                 {b.suggestion && (
-                  <p className="text-sm text-zinc-200 mt-1">{b.suggestion}</p>
+                  <p className="text-sm text-foreground/90 mt-1">{b.suggestion}</p>
                 )}
                 {b.examples.length > 0 && (
-                  <p className="text-[11px] text-zinc-500 mt-1 truncate">
+                  <p className="text-[11px] text-muted-foreground/80 mt-1 truncate">
                     e.g. {b.examples.map((e) => e.name || e.appid).join(", ")}
                     {b.gamesAffected > b.examples.length && ` (+${b.gamesAffected - b.examples.length} more)`}
                   </p>
@@ -538,14 +541,14 @@ export function UpgradeSuggesterSection({ baseUrl }: { baseUrl: string | undefin
               </div>
             ))}
             {report.primaryUnlockCount != null && report.primaryUnlockCount > 0 && (
-              <p className="text-xs text-zinc-400">
+              <p className="text-xs text-muted-foreground">
                 Fixing the biggest bottleneck would unlock {report.primaryUnlockCount} wishlisted game{report.primaryUnlockCount === 1 ? "" : "s"} at smooth settings.
               </p>
             )}
           </div>
         )}
 
-        <p className="text-[11px] text-zinc-500">
+        <p className="text-[11px] text-muted-foreground/80">
           Suggestions are a rough heuristic, not an authoritative benchmark. Games with no published requirements aren't considered.
         </p>
       </CardContent>
@@ -584,10 +587,10 @@ function DevicesSection({ baseUrl, currentFingerprint }: { baseUrl: string | und
     <Card className="border-white/[.07]">
       <CardContent className="p-6 space-y-4">
         <div className="flex items-start gap-2">
-          <Laptop className="h-4 w-4 text-zinc-300 mt-1" />
+          <Laptop className="h-4 w-4 text-foreground/80 mt-1" />
           <div>
             <h2 className="text-lg font-semibold">My PCs</h2>
-            <p className="text-sm text-zinc-400 mt-1">
+            <p className="text-sm text-muted-foreground mt-1">
               You&apos;ve scanned more than one device. Pick which one UnionCrax should treat as your active rig — that&apos;s what appears on comments, forums, and the &quot;Can my PC run&quot; filter.
             </p>
           </div>
@@ -617,10 +620,10 @@ function DevicesSection({ baseUrl, currentFingerprint }: { baseUrl: string | und
                       <Pencil className="h-3 w-3" />
                     </button>
                     {d.isActive && <Badge className="bg-emerald-500/10 text-emerald-300 border-emerald-500/30 text-[10px]">active</Badge>}
-                    {d.fingerprint === currentFingerprint && !d.isActive && <Badge className="bg-zinc-800 text-zinc-300 border-zinc-700 text-[10px]">this PC</Badge>}
+                    {d.fingerprint === currentFingerprint && !d.isActive && <Badge className="bg-secondary text-foreground/80 border-border text-[10px]">this PC</Badge>}
                   </div>
                 )}
-                <div className="text-[11px] text-zinc-400 mt-0.5 truncate">
+                <div className="text-[11px] text-muted-foreground mt-0.5 truncate">
                   {d.summary || "(no summary)"} · scanned {new Date(d.capturedAt).toLocaleDateString()}
                 </div>
               </div>
@@ -681,14 +684,14 @@ function DevicesSection({ baseUrl, currentFingerprint }: { baseUrl: string | und
 function SyncStatusBadge({ state, error }: { state: SyncState; error: string | null }) {
   if (state === "idle") {
     return (
-      <Badge className="bg-zinc-900 text-zinc-400 border-zinc-800 text-[10px]" title="Profile is local only — flip a sharing switch below to publish.">
+      <Badge className="bg-card text-muted-foreground border-border text-[10px]" title="Profile is local only — flip a sharing switch below to publish.">
         <CloudOff className="h-2.5 w-2.5 mr-1" /> local only
       </Badge>
     )
   }
   if (state === "uploading") {
     return (
-      <Badge className="bg-zinc-800 text-zinc-300 border-zinc-700 text-[10px]">
+      <Badge className="bg-secondary text-foreground/80 border-border text-[10px]">
         <Loader2 className="h-2.5 w-2.5 mr-1 animate-spin" /> syncing
       </Badge>
     )
@@ -702,7 +705,7 @@ function SyncStatusBadge({ state, error }: { state: SyncState; error: string | n
   }
   if (state === "offline") {
     return (
-      <Badge className="bg-zinc-900 text-zinc-500 border-zinc-800 text-[10px]" title="Sync API not available.">
+      <Badge className="bg-card text-muted-foreground/80 border-border text-[10px]" title="Sync API not available.">
         <CloudOff className="h-2.5 w-2.5 mr-1" /> offline
       </Badge>
     )
@@ -716,13 +719,13 @@ function SyncStatusBadge({ state, error }: { state: SyncState; error: string | n
 
 function SpecTile({ icon, label, value, sub }: { icon: React.ReactNode; label: string; value: string; sub: string | null }) {
   return (
-    <div className="rounded-lg border border-white/[.07] bg-zinc-900/40 px-4 py-3">
-      <div className="flex items-center gap-2 text-[11px] uppercase tracking-wider text-zinc-500">
+    <div className="rounded-lg border border-white/[.07] bg-card/40 px-4 py-3">
+      <div className="flex items-center gap-2 text-[11px] uppercase tracking-wider text-muted-foreground/80">
         {icon}
         <span>{label}</span>
       </div>
-      <div className="text-sm font-medium text-zinc-100 mt-1 truncate" title={value}>{value}</div>
-      {sub && <div className="text-[11px] text-zinc-400 mt-1 truncate" title={sub}>{sub}</div>}
+      <div className="text-sm font-medium text-foreground mt-1 truncate" title={value}>{value}</div>
+      {sub && <div className="text-[11px] text-muted-foreground mt-1 truncate" title={sub}>{sub}</div>}
     </div>
   )
 }

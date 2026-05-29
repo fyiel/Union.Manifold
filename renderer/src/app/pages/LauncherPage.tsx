@@ -16,20 +16,25 @@ import { PaginationBar } from "@/components/PaginationBar"
 import { formatNumber, generateErrorCode, ErrorTypes, getInstalledVersionLabel, hasInstalledVersionUpdate, proxyImageUrl } from "@/lib/utils"
 import { useConnectivityStatus } from "@/hooks/use-online-status"
 import { fetchCatalogGames, fetchCatalogStats, getCatalogCache, hydrateCatalogCache, isCatalogGamesStale, isCatalogStatsStale, mergeInstalledGames, persistCatalogCache, type CatalogGame } from "@/lib/catalog"
-import { ArrowRight, Cloud } from "lucide-react"
+import { apiFetch } from "@/lib/api"
+import { ArrowRight, Cloud, X } from "lucide-react"
 import { Download, Layers3 } from "@/components/icons"
-import { usePlayHistory } from "@/hooks/use-play-history"
+import { usePlayHistory, type PlayHistoryGame } from "@/hooks/use-play-history"
 import { useUserCollections } from "@/hooks/use-user-collections"
+import { reportPlayEvent } from "@/lib/cloud-collections"
 
 type Game = CatalogGame
 
-const cardCarouselNavClass = "bg-zinc-800/80 hover:bg-white hover:text-black border-white/[.08] text-zinc-300 backdrop-blur-sm transition-all active:scale-95"
+const cardCarouselNavClass = "bg-secondary/80 hover:bg-primary hover:text-primary-foreground border-white/[.08] text-foreground/80 backdrop-blur-sm transition-all active:scale-95"
 
 export function LauncherPage() {
   const navigate = useNavigate()
   const { isOnline, browserOnline, serviceReachable } = useConnectivityStatus()
   const initialCatalog = getCatalogCache()
-  const playHistory = usePlayHistory(12)
+  // Request more than we plan to show so that locally-installed entries that
+  // are filtered out of the "From your cloud library" carousel don't drop the
+  // visible count below the basis-1/5 layout and leave the strip half-empty.
+  const playHistory = usePlayHistory(25)
   const userCollections = useUserCollections()
 
   class GamesFetchError extends Error {
@@ -62,13 +67,91 @@ export function LauncherPage() {
   const [emptyStateReady, setEmptyStateReady] = useState(false)
   const [currentPage, setCurrentPage] = useState(1)
   const [recentlyInstalledGames, setRecentlyInstalledGames] = useState<Game[]>([])
+  // Most-recently-played installed game — drives the "Continue where you
+  // left off" hero tile. Resolved by cross-referencing the installed list
+  // with the lastPlayedAt timestamps in libraryGameMeta (electron-store).
+  const [lastPlayedGame, setLastPlayedGame] = useState<{ game: Game; lastPlayedAt: number } | null>(null)
   // Full set of locally-installed appids so the cloud carousel can subtract
   // them — kept separate from `recentlyInstalledGames` (which is sliced to 10
   // for the carousel itself).
   const [installedAppidSet, setInstalledAppidSet] = useState<Set<string>>(() => new Set())
   const [installedVersionMap, setInstalledVersionMap] = useState<Record<string, string[]>>({})
   const itemsPerPage = 30
+  // Cloud-library removal undo state. When the user × an entry off the "Not
+  // on this PC" carousel we keep a copy of the row plus a timer; the undo
+  // toast restores it server-side (and visually) until the timer expires.
+  const [cloudRemovalUndo, setCloudRemovalUndo] = useState<PlayHistoryGame | null>(null)
+  const cloudRemovalUndoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [statsCacheTime, setStatsCacheTime] = useState<number>(initialCatalog.statsUpdatedAt || 0)
+  const [siteStats, setSiteStats] = useState<{
+    totalGames: number
+    totalSizeGB: number
+    totalDownloads: number
+    totalRequests: number
+    updatedGamesLast7Days: number
+    usersOnline: number
+    playersNow: number
+    totalPlaytimeSeconds: number
+  } | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    let interval: number | null = null
+    const fetchSiteStats = async () => {
+      try {
+        const [statsRes, requestsRes] = await Promise.all([
+          apiFetch("/api/site-stats").catch(() => null),
+          apiFetch("/api/requests/total").catch(() => null),
+        ])
+        if (cancelled) return
+        const stats = statsRes && statsRes.ok ? await statsRes.json() : null
+        const requests = requestsRes && requestsRes.ok ? await requestsRes.json() : null
+        if (cancelled || !stats) return
+        setSiteStats({
+          totalGames: stats.totalGames ?? 0,
+          totalSizeGB: stats.totalSizeGB ?? 0,
+          totalDownloads: stats.totalDownloads ?? 0,
+          totalRequests: typeof requests === "number" ? requests : (requests?.total ?? 0),
+          updatedGamesLast7Days: stats.updatedGamesLast7Days ?? 0,
+          usersOnline: stats.usersOnline ?? stats.activePlayers ?? 0,
+          playersNow: stats.playersNow ?? 0,
+          totalPlaytimeSeconds: stats.totalPlaytimeSeconds ?? 0,
+        })
+      } catch {
+        // ignore — fall back to derived stats
+      }
+    }
+
+    // Only run the 30s heartbeat while the window is actually visible. Without
+    // this gate the polling kept hitting the API every 30s for users who left
+    // the launcher minimised — pure waste on both client and server. When the
+    // window returns to the foreground we kick off an immediate fetch so the
+    // stats are fresh, then resume the interval.
+    const stop = () => {
+      if (interval !== null) {
+        window.clearInterval(interval)
+        interval = null
+      }
+    }
+    const start = () => {
+      if (interval !== null) return
+      void fetchSiteStats()
+      interval = window.setInterval(fetchSiteStats, 30_000)
+    }
+    const visible = typeof document === "undefined" || document.visibilityState === "visible"
+    if (visible) start()
+
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") start()
+      else stop()
+    }
+    document.addEventListener("visibilitychange", onVisibility)
+    return () => {
+      cancelled = true
+      stop()
+      document.removeEventListener("visibilitychange", onVisibility)
+    }
+  }, [])
 
   const activeLoadIdRef = useRef(0)
   const hasCriticalServiceInterruption = browserOnline && !serviceReachable
@@ -140,7 +223,13 @@ export function LauncherPage() {
               installedMap.set(meta.appid, {
                 ...meta,
                 name: meta.name || meta.appid,
-                image: meta.localImage || meta.image || "./fallbacks/game-card-3x4.svg",
+                // Don't pre-collapse to localImage — pass both so the card's
+                // candidate chain can fall through to the remote URL when the
+                // local file is gone (drive offline, partial install cleared,
+                // etc.). Previously this produced broken recently-installed
+                // tiles whenever a manifest pointed at a now-stale cache path.
+                image: meta.image || "./fallbacks/game-card-3x4.svg",
+                localImage: meta.localImage,
                 genres: Array.isArray(meta.genres) ? meta.genres : [],
               })
             }
@@ -151,8 +240,15 @@ export function LauncherPage() {
       }
 
       const installedGames = Array.from(installedMap.values())
-      // prefer most recently added if available
-      installedGames.sort((a: any, b: any) => (b.addedAt || 0) - (a.addedAt || 0))
+      // Sort by actual install timestamp. Manifests expose `installedAt` (set
+      // when the download finishes); fall back to `addedAt` for older records
+      // and finally to alphabetical name so the order is never random.
+      installedGames.sort((a: any, b: any) => {
+        const aTs = Number(a.installedAt) || Number(a.addedAt) || 0
+        const bTs = Number(b.installedAt) || Number(b.addedAt) || 0
+        if (bTs !== aTs) return bTs - aTs
+        return String(a.name || a.appid).localeCompare(String(b.name || b.appid))
+      })
       const resolved = installedGames.slice(0, 10)
 
       if (!ignore) {
@@ -160,6 +256,32 @@ export function LauncherPage() {
         setInstalledAppidSet(new Set(installedGames.map((g) => String(g.appid))))
         setInstalledVersionMap(nextInstalledVersions)
       }
+
+      // Resolve "last played" — read libraryGameMeta and find the installed
+      // game with the most recent lastPlayedAt. Best-effort; if the setting
+      // hasn't been written yet (user never launched anything) we just skip.
+      try {
+        const meta = await window.ucSettings?.get?.("libraryGameMeta")
+        if (ignore || !meta || typeof meta !== "object" || Array.isArray(meta)) {
+          if (!ignore) setLastPlayedGame(null)
+          return
+        }
+        const metaMap = meta as Record<string, { lastPlayedAt?: number }>
+        let bestAppid: string | null = null
+        let bestTs = 0
+        for (const [appid, entry] of Object.entries(metaMap)) {
+          const ts = Number(entry?.lastPlayedAt) || 0
+          if (ts > bestTs && installedMap.has(appid)) {
+            bestTs = ts
+            bestAppid = appid
+          }
+        }
+        if (bestAppid && installedMap.has(bestAppid)) {
+          if (!ignore) setLastPlayedGame({ game: installedMap.get(bestAppid)!, lastPlayedAt: bestTs })
+        } else {
+          if (!ignore) setLastPlayedGame(null)
+        }
+      } catch { /* ignore */ }
     }
 
     void loadInstalled()
@@ -184,7 +306,11 @@ export function LauncherPage() {
   const loadGames = async (forceRefresh = false) => {
     const loadId = ++activeLoadIdRef.current
     const isInitialLoad = !hasLoadedGames && games.length === 0
-    const maxAttempts = isInitialLoad ? 12 : 2
+    // Previously this was 12 attempts (~60s of skeleton on a cold backend).
+    // 4 attempts at 500/1000/2000/4000ms = ~7.5s worst case before we surface
+    // an error UI the user can act on. The 2-attempt budget for refreshes is
+    // unchanged since they already have content on screen.
+    const maxAttempts = isInitialLoad ? 4 : 2
 
     // While the DB/API is warming up, keep the skeleton visible rather than flashing empty/error states.
     let refreshStart: number | null = null
@@ -218,6 +344,16 @@ export function LauncherPage() {
     }
 
     for (let attempt = 0; attempt <= maxAttempts; attempt++) {
+      // Surface a transient "still loading…" banner once we've already retried
+      // a couple of times so users on a slow backend get visible feedback
+      // instead of a perpetually-static skeleton.
+      if (isInitialLoad && attempt === 2) {
+        setGamesError({
+          type: "games_warming_up",
+          message: "Server is taking longer than usual — still trying…",
+          code: "TRANSIENT",
+        })
+      }
       try {
         const gamesData = await mergeInstalledGames(
           shouldRefreshGames ? await fetchCatalogGames() : getCatalogCache().games
@@ -231,6 +367,8 @@ export function LauncherPage() {
           setHasLoadedGames(true)
           setStatsCacheTime(Date.now())
         })
+        // Clear the transient "warming up" banner if it was shown.
+        setGamesError(null)
 
         void persistCatalogCache({
           games: gamesData,
@@ -302,6 +440,35 @@ export function LauncherPage() {
   const newReleases = useMemo(() => {
     return games.slice(0, 8)
   }, [games])
+
+  // Clean up the undo timer on unmount so we don't leak it.
+  useEffect(() => {
+    return () => {
+      if (cloudRemovalUndoTimerRef.current) clearTimeout(cloudRemovalUndoTimerRef.current)
+    }
+  }, [])
+
+  const handleCloudRemoval = useCallback((entry: PlayHistoryGame) => {
+    if (cloudRemovalUndoTimerRef.current) clearTimeout(cloudRemovalUndoTimerRef.current)
+    setCloudRemovalUndo(entry)
+    cloudRemovalUndoTimerRef.current = setTimeout(() => setCloudRemovalUndo(null), 6000)
+    void playHistory.removeEntry(entry.appid)
+  }, [playHistory])
+
+  const handleCloudRemovalUndo = useCallback(async () => {
+    const entry = cloudRemovalUndo
+    if (!entry) return
+    setCloudRemovalUndo(null)
+    if (cloudRemovalUndoTimerRef.current) {
+      clearTimeout(cloudRemovalUndoTimerRef.current)
+      cloudRemovalUndoTimerRef.current = null
+    }
+    // Re-record an install event so the row reappears in play-history. The
+    // backend uses (discord_id, appid) as the conflict key so this restores
+    // the same row rather than creating a duplicate.
+    await reportPlayEvent(entry.appid, "install")
+    playHistory.refresh()
+  }, [cloudRemovalUndo, playHistory])
 
   // Games the user has installed or played on *another* device (from cloud
   // play history) that are NOT currently installed on this PC. Surface them
@@ -418,70 +585,77 @@ export function LauncherPage() {
         onContinue={() => setCriticalLoadOpen(false)}
       />
 
+      {/* Transient "still loading" banner — shows once the launcher has been
+          waiting on the catalog for several retries. Distinct from the
+          CriticalLoadModal which only fires when the service is unreachable. */}
+      {loading && gamesError?.type === "games_warming_up" && (
+        <div className="rounded-2xl border border-amber-500/20 bg-amber-500/[.06] px-4 py-2.5 text-xs text-amber-200 backdrop-blur-sm">
+          {gamesError.message}
+        </div>
+      )}
+
       {/* Full-width hero slider */}
       <HeroSlider games={games} gameStats={gameStats} loading={loading} />
 
-      {/* Stats row */}
-      <section className="grid grid-cols-2 gap-3 sm:grid-cols-4 anim anim-d1">
-        <div className="rounded-2xl border border-white/[.07] bg-zinc-900/60 p-4">
-          <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-500">Catalogue</div>
-          <div className="mt-2 text-2xl font-bold text-white">
-            {stats.totalGames === 0 ? (
-              <span className="text-zinc-600">—</span>
-            ) : (
-              <AnimatedCounter value={stats.totalGames} format={formatNumber} />
-            )}
-          </div>
-        </div>
-        <div className="rounded-2xl border border-white/[.07] bg-zinc-900/60 p-4">
-          <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-500">Downloads</div>
-          <div className="mt-2 text-2xl font-bold text-white">
-            {stats.totalDownloads === 0 ? (
-              <span className="text-zinc-600">—</span>
-            ) : (
-              <AnimatedCounter value={stats.totalDownloads} format={formatNumber} />
-            )}
-          </div>
-        </div>
-        <div className="rounded-2xl border border-white/[.07] bg-zinc-900/60 p-4">
-          <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-500">Storage</div>
-          <div className="mt-2 text-2xl font-bold text-white">
-            {displayTotalSizeGB >= 1024 ? (
-              <AnimatedCounter value={displayTotalSizeTB} suffix="TB" />
-            ) : displayTotalSizeGB > 0 ? (
-              <AnimatedCounter value={displayTotalSizeGB} suffix="GB" />
-            ) : (
-              <span className="text-zinc-600">—</span>
-            )}
-          </div>
-        </div>
-        <div className="rounded-2xl border border-white/[.07] bg-zinc-900/60 p-4 flex flex-col justify-between">
-          <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-500">Quick access</div>
-          <div className="mt-3 flex flex-col gap-1.5">
-            <Button
-              size="sm"
-              className="w-full rounded-full bg-white text-[12px] font-semibold text-black hover:bg-zinc-200 active:scale-95"
-              onClick={() => navigate("/library")}
-            >
-              My Library
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              className="w-full rounded-full text-[12px] text-zinc-400 hover:bg-white/[.04] hover:text-white active:scale-95"
-              onClick={() => navigate("/collections")}
-            >
-              <Layers3 className="h-3 w-3 mr-1" />
-              Collections
-              {userCollections.collections.length > 0 && (
-                <span className="ml-1 rounded-full bg-white/[.06] px-1.5 text-[10px] text-zinc-300">
-                  {userCollections.collections.length}
-                </span>
-              )}
-            </Button>
-          </div>
-        </div>
-      </section>
+      {/* Inline stats row — mirrors union-crax.xyz StatsSection */}
+      <StatsRow
+        totalGames={siteStats?.totalGames ?? stats.totalGames}
+        totalSizeGB={siteStats?.totalSizeGB ?? displayTotalSizeGB}
+        totalDownloads={siteStats?.totalDownloads ?? stats.totalDownloads}
+        totalRequests={siteStats?.totalRequests ?? 0}
+        updatedGamesLast7Days={siteStats?.updatedGamesLast7Days ?? 0}
+        usersOnline={siteStats?.usersOnline ?? 0}
+        playersNow={siteStats?.playersNow ?? 0}
+        totalPlaytimeSeconds={siteStats?.totalPlaytimeSeconds ?? 0}
+      />
+
+
+      {/* Continue where you left off — single big tile pointing at the most
+          recently played installed game. Click goes to the detail page so the
+          existing launch flow (with preflight, exe picker, etc.) takes over,
+          rather than half-implementing it inline here. */}
+      {lastPlayedGame && (
+        <section>
+          <SectionHeading eyebrow="Pick up where you left off" title={lastPlayedGame.game.name} />
+          <button
+            type="button"
+            onClick={() => navigate(`/game/${encodeURIComponent(lastPlayedGame.game.appid)}?launch=1`)}
+            className="group relative w-full overflow-hidden rounded-3xl border border-white/[.07] bg-background/60 text-left transition hover:border-white/15 active:scale-[0.998]"
+          >
+            <div className="relative aspect-[21/9] sm:aspect-[24/9]">
+              <img
+                src={proxyImageUrl(
+                  (lastPlayedGame.game as any).localHeroImage
+                    || (lastPlayedGame.game as any).hero_image
+                    || (lastPlayedGame.game as any).splash
+                    || lastPlayedGame.game.image
+                    || ""
+                )}
+                alt=""
+                data-uc-handled="1"
+                className="absolute inset-0 h-full w-full object-cover transition duration-500 group-hover:scale-[1.015]"
+                onError={(event) => { (event.target as HTMLImageElement).style.opacity = "0" }}
+              />
+              <div className="absolute inset-0 bg-gradient-to-r from-black via-black/55 to-transparent" />
+              <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
+              <div className="relative z-10 flex h-full flex-col justify-end p-6 sm:p-8">
+                <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-foreground/80/80 mb-2">
+                  Last played {formatLastPlayed(lastPlayedGame.lastPlayedAt)}
+                </div>
+                <h2 className="text-2xl sm:text-4xl font-black text-white tracking-tight mb-4 line-clamp-1">
+                  {lastPlayedGame.game.name}
+                </h2>
+                <div>
+                  <span className="inline-flex items-center gap-2 rounded-full bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground shadow-lg group-hover:brightness-110 transition">
+                    <ArrowRight className="h-4 w-4" />
+                    Continue playing
+                  </span>
+                </div>
+              </div>
+            </div>
+          </button>
+        </section>
+      )}
 
       {/* Recently installed — always rendered when we have any local installs,
           independent of the cloud carousel below. Previously this section was
@@ -529,9 +703,9 @@ export function LauncherPage() {
                     className="group block h-full w-full text-left"
                     aria-label="Open your installed library"
                   >
-                    <div className="h-full rounded-2xl border border-dashed border-zinc-700 bg-zinc-900/60 p-4 flex flex-col items-center justify-center text-center transition hover:border-zinc-500 active:scale-[.98]">
-                      <div className="text-sm font-semibold text-zinc-200">View all</div>
-                      <div className="mt-2 text-zinc-400 group-hover:text-white"><ArrowRight className="h-4 w-4" /></div>
+                    <div className="h-full rounded-2xl border border-dashed border-border bg-card/60 p-4 flex flex-col items-center justify-center text-center transition hover:border-zinc-500 active:scale-[.98]">
+                      <div className="text-sm font-semibold text-foreground/90">View all</div>
+                      <div className="mt-2 text-muted-foreground group-hover:text-white"><ArrowRight className="h-4 w-4" /></div>
                     </div>
                   </button>
                 </CarouselItem>
@@ -556,7 +730,7 @@ export function LauncherPage() {
             actionLabel="See all"
             onAction={() => navigate("/library")}
           />
-          <p className="-mt-1 mb-3 text-xs text-zinc-500">
+          <p className="-mt-1 mb-3 text-xs text-muted-foreground/80">
             On your account but not installed here. Click any game to install it on this device.
           </p>
           <Carousel
@@ -577,7 +751,7 @@ export function LauncherPage() {
                     key={entry.appid}
                     className="pl-2 md:pl-4 basis-1/2 sm:basis-1/3 md:basis-1/4 lg:basis-1/5"
                   >
-                    <div className="relative">
+                    <div className="group/cloud relative">
                       <GameCardCompact
                         game={{
                           appid: entry.appid,
@@ -586,16 +760,32 @@ export function LauncherPage() {
                           genres: Array.isArray(entry.game!.genres) ? entry.game!.genres : [],
                         }}
                       />
-                      {/* Inline overlay so the carousel item still looks like a
-                          regular catalog card but signals "available to pull
-                          down from cloud". */}
+                      {/* Inline overlay — uses the same chrome as the "Popular"
+                          badge (zinc/white) so it reads cleanly on every cover
+                          regardless of art tone. */}
                       <div
-                        className="pointer-events-none absolute top-2 left-2 z-10 inline-flex items-center gap-1 rounded-full border border-sky-500/40 bg-sky-500/15 px-2 py-0.5 text-[10px] font-semibold text-sky-200 backdrop-blur-sm"
+                        className="pointer-events-none absolute top-2 left-2 z-10 inline-flex items-center gap-1 rounded-full border border-white/10 bg-secondary/60 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white backdrop-blur-sm"
                         title={subtitle}
                       >
                         <Download className="h-2.5 w-2.5" />
                         <span>Not on this PC</span>
                       </div>
+                      {/* Remove from cloud library. Useful when the user no
+                          longer wants to see a game they removed from this PC
+                          (the cloud play-history record otherwise persists). */}
+                      <button
+                        type="button"
+                        title="Remove from cloud library"
+                        aria-label={`Remove ${entry.game!.name} from cloud library`}
+                        onClick={(event) => {
+                          event.preventDefault()
+                          event.stopPropagation()
+                          handleCloudRemoval(entry)
+                        }}
+                        className="absolute top-2 right-2 z-10 inline-flex h-7 w-7 items-center justify-center rounded-full border border-white/10 bg-black/70 text-foreground/90 opacity-0 transition-all hover:bg-red-500/20 hover:text-red-300 group-hover/cloud:opacity-100 focus-visible:opacity-100 active:scale-95"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
                     </div>
                   </CarouselItem>
                 )
@@ -767,15 +957,15 @@ export function LauncherPage() {
                   key={collection.id}
                   type="button"
                   onClick={() => navigate(`/collections/view/${encodeURIComponent(collection.id)}`)}
-                  className="group flex flex-col rounded-3xl border border-white/[.07] bg-zinc-900/40 backdrop-blur-md overflow-hidden transition-colors hover:border-white/[.14] text-left"
+                  className="group flex flex-col rounded-3xl border border-white/[.07] bg-card/40 backdrop-blur-md overflow-hidden transition-colors hover:border-white/[.14] text-left"
                 >
-                  <div className="relative aspect-[16/10] w-full overflow-hidden bg-zinc-900">
+                  <div className="relative aspect-[16/10] w-full overflow-hidden bg-card">
                     {previews.length === 0 ? (
-                      <div className="absolute inset-0 flex items-center justify-center text-zinc-700">
+                      <div className="absolute inset-0 flex items-center justify-center text-muted-foreground/40">
                         <Layers3 className="h-10 w-10" />
                       </div>
                     ) : (
-                      <div className="absolute inset-0 grid grid-cols-2 grid-rows-2 gap-px bg-zinc-950">
+                      <div className="absolute inset-0 grid grid-cols-2 grid-rows-2 gap-px bg-background">
                         {previews.map((g) => (
                           <div key={g.appid} className="relative overflow-hidden">
                             <img
@@ -787,16 +977,16 @@ export function LauncherPage() {
                           </div>
                         ))}
                         {Array.from({ length: Math.max(0, 4 - previews.length) }).map((_, idx) => (
-                          <div key={`empty-${idx}`} className="bg-zinc-900" />
+                          <div key={`empty-${idx}`} className="bg-card" />
                         ))}
                       </div>
                     )}
                     <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/10 to-transparent" />
                     <div className="absolute bottom-3 left-3 right-3 flex items-end justify-between gap-2">
-                      <span className="rounded-full border border-white/10 bg-black/60 backdrop-blur-sm px-2 py-0.5 text-[10px] font-semibold text-zinc-100">
+                      <span className="rounded-full border border-white/10 bg-black/60 backdrop-blur-sm px-2 py-0.5 text-[10px] font-semibold text-foreground">
                         {collection.appids.length} games
                       </span>
-                      <span className="rounded-full border border-white/10 bg-black/60 backdrop-blur-sm px-2 py-0.5 text-[10px] font-semibold text-zinc-100 opacity-0 group-hover:opacity-100 transition-opacity inline-flex items-center gap-1">
+                      <span className="rounded-full border border-white/10 bg-black/60 backdrop-blur-sm px-2 py-0.5 text-[10px] font-semibold text-foreground opacity-0 group-hover:opacity-100 transition-opacity inline-flex items-center gap-1">
                         Open <ArrowRight className="h-2.5 w-2.5" />
                       </span>
                     </div>
@@ -902,7 +1092,167 @@ export function LauncherPage() {
           )}
         </div>
       </section>
+
+      {/* Cloud library removal — undo toast. Fixed at bottom-center so it sits
+          above the rest of the page but doesn't shift layout. 6 second
+          self-dismiss timer matches the state in handleCloudRemoval. */}
+      {cloudRemovalUndo && (
+        <div
+          className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[9998] flex items-center gap-3 rounded-full border border-white/[.07] bg-background/92 px-4 py-2.5 text-sm text-foreground shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-2xl"
+          role="status"
+        >
+          <span className="text-foreground/80">
+            Removed <span className="font-medium text-white">{cloudRemovalUndo.game?.name || cloudRemovalUndo.appid}</span> from cloud library
+          </span>
+          <button
+            type="button"
+            onClick={() => void handleCloudRemovalUndo()}
+            className="rounded-full bg-primary px-3 py-1 text-xs font-semibold text-primary-foreground transition-colors hover:brightness-110 active:scale-95"
+          >
+            Undo
+          </button>
+          <button
+            type="button"
+            onClick={() => setCloudRemovalUndo(null)}
+            className="rounded-full p-0.5 text-muted-foreground/80 hover:text-foreground/90 transition-colors"
+            aria-label="Dismiss"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
     </div>
+  )
+}
+
+function formatLastPlayed(timestamp: number): string {
+  if (!timestamp) return ""
+  const delta = Date.now() - timestamp
+  if (delta < 60_000) return "just now"
+  const mins = Math.floor(delta / 60_000)
+  if (mins < 60) return `${mins} minute${mins === 1 ? "" : "s"} ago`
+  const hours = Math.floor(mins / 60)
+  if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"} ago`
+  const days = Math.floor(hours / 24)
+  if (days < 30) return `${days} day${days === 1 ? "" : "s"} ago`
+  const months = Math.floor(days / 30)
+  return `${months} month${months === 1 ? "" : "s"} ago`
+}
+
+function formatPlaytimeCompact(seconds: number): string {
+  const s = Math.max(0, Math.floor(seconds))
+  if (s < 60) return `${s}s`
+  const m = Math.floor(s / 60)
+  if (m < 60) return `${m}m`
+  const h = Math.floor(m / 60)
+  if (h < 1000) return `${h}h`
+  const k = Math.round(h / 100) / 10
+  return `${k}kh`
+}
+
+function StatsRow({
+  totalGames,
+  totalSizeGB,
+  totalDownloads,
+  totalRequests,
+  updatedGamesLast7Days,
+  usersOnline,
+  playersNow,
+  totalPlaytimeSeconds,
+}: {
+  totalGames: number
+  totalSizeGB: number
+  totalDownloads: number
+  totalRequests: number
+  updatedGamesLast7Days: number
+  usersOnline: number
+  playersNow: number
+  totalPlaytimeSeconds: number
+}) {
+  const showStorage = totalSizeGB > 0
+  const storageDisplay = totalSizeGB >= 1024
+    ? <AnimatedCounter value={Math.round((totalSizeGB / 1024) * 10) / 10} suffix="TB" />
+    : <AnimatedCounter value={totalSizeGB} suffix="GB" />
+
+  return (
+    <section className="anim anim-d1 rounded-2xl border border-white/[.07] bg-background/60 backdrop-blur-sm">
+      <div className="px-4 sm:px-6">
+        <div className="flex flex-col gap-1 py-3">
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+            <div className="flex shrink-0 items-center gap-2 whitespace-nowrap">
+              <span className="text-sm font-semibold text-white">
+                {showStorage ? storageDisplay : '?'}
+              </span>
+              <span className="whitespace-nowrap text-xs text-muted-foreground/80 font-medium">Storage</span>
+            </div>
+            <div className="w-px h-4 bg-white/[.07] hidden sm:block" />
+            <div className="flex shrink-0 items-center gap-2 whitespace-nowrap">
+              <span className="text-sm font-semibold text-white">
+                {totalGames === 0 ? '?' : <AnimatedCounter value={totalGames} format={formatNumber} />}
+              </span>
+              <span className="whitespace-nowrap text-xs text-muted-foreground/80 font-medium">Games</span>
+            </div>
+            <div className="w-px h-4 bg-white/[.07] hidden sm:block" />
+            <div className="flex shrink-0 items-center gap-2 whitespace-nowrap">
+              <span className="text-sm font-semibold text-white">
+                {totalDownloads === 0 ? '?' : <AnimatedCounter value={totalDownloads} format={formatNumber} />}
+              </span>
+              <span className="whitespace-nowrap text-xs text-muted-foreground/80 font-medium">Downloads</span>
+            </div>
+            <div className="w-px h-4 bg-white/[.07] hidden sm:block" />
+            <div className="flex shrink-0 items-center gap-2 whitespace-nowrap">
+              <span className="text-sm font-semibold text-white">
+                {totalRequests === 0 ? '?' : <AnimatedCounter value={totalRequests} format={formatNumber} />}
+              </span>
+              <span className="whitespace-nowrap text-xs text-muted-foreground/80 font-medium">Requests</span>
+            </div>
+            <div className="w-px h-4 bg-white/[.07] hidden sm:block" />
+            <div className="flex shrink-0 items-center gap-2 whitespace-nowrap">
+              <span className="text-sm font-semibold text-white">
+                <AnimatedCounter value={updatedGamesLast7Days} format={formatNumber} />
+              </span>
+              <span className="whitespace-nowrap text-xs text-muted-foreground/80 font-medium">Updated (7d)</span>
+            </div>
+            <div className="w-px h-4 bg-white/[.07] hidden sm:block" />
+            <div className="flex shrink-0 items-center gap-2 whitespace-nowrap" title="UC.Direct users online right now">
+              <span className="relative flex h-2 w-2 shrink-0">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-sky-400 opacity-75" />
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-sky-500" />
+              </span>
+              <span className="text-sm font-semibold text-sky-300 tabular-nums">
+                <AnimatedCounter value={usersOnline} format={formatNumber} />
+              </span>
+              <span className="text-xs text-muted-foreground/80 font-medium">Now online</span>
+            </div>
+            <div className="w-px h-4 bg-white/[.07] hidden sm:block" />
+            <div className="flex shrink-0 items-center gap-2 whitespace-nowrap" title="People in a running game right now">
+              <span className="relative flex h-2 w-2 shrink-0">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+              </span>
+              <span className="text-sm font-semibold text-emerald-400 tabular-nums">
+                <AnimatedCounter value={playersNow} format={formatNumber} />
+              </span>
+              <span className="text-xs text-muted-foreground/80 font-medium">Now playing</span>
+            </div>
+            <div className="w-px h-4 bg-white/[.07] hidden sm:block" />
+            <div className="flex shrink-0 items-center gap-2 whitespace-nowrap" title="All-time playtime tracked by UC.Direct">
+              <span className="text-sm font-semibold text-amber-400">
+                {formatPlaytimeCompact(totalPlaytimeSeconds)}
+              </span>
+              <span className="text-xs text-muted-foreground/80 font-medium">Total playtime</span>
+            </div>
+            <div className="flex shrink-0 items-center gap-1 whitespace-nowrap" title="These stats are tracked by UC.Direct">
+              <span className="text-xs text-muted-foreground/60 font-medium italic">Tracked by</span>
+              <span className="text-xs font-semibold text-violet-400">UC.Direct</span>
+            </div>
+          </div>
+          <p className="hidden shrink-0 whitespace-nowrap text-xs text-muted-foreground/60 italic md:block">
+            We prefer dangerous freedom over peaceful slavery
+          </p>
+        </div>
+      </div>
+    </section>
   )
 }
 
@@ -922,10 +1272,10 @@ function SectionHeading({
   className?: string
 }) {
   return (
-    <div className={`mb-5 flex flex-wrap items-end justify-between gap-3 ${className ?? ""}`}>
-      <div className="space-y-1">
-        {eyebrow && <p className="section-label">{eyebrow}</p>}
-        <h2 className="text-xl font-bold tracking-tight text-white flex items-center gap-2">
+    <div className={`mb-6 flex flex-col md:flex-row md:items-end justify-between gap-3 ${className ?? ""}`}>
+      <div>
+        {eyebrow && <p className="section-label mb-2">{eyebrow}</p>}
+        <h2 className="text-2xl font-light tracking-tight text-white flex items-center gap-2">
           {icon}
           {title}
         </h2>
@@ -934,10 +1284,9 @@ function SectionHeading({
         <button
           type="button"
           onClick={onAction}
-          className="inline-flex items-center gap-1.5 rounded-full border border-white/[.07] bg-white/[.03] px-3 py-1 text-xs font-medium text-zinc-300 hover:bg-white/[.07] hover:text-white transition-colors"
+          className="inline-flex items-center gap-2 rounded-full border border-border px-4 py-2 text-sm font-medium text-muted-foreground hover:text-white hover:border-zinc-500 transition-all"
         >
           {actionLabel}
-          <ArrowRight className="h-3 w-3" />
         </button>
       )}
     </div>

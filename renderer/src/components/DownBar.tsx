@@ -1,4 +1,4 @@
-import { useState, type MouseEvent } from "react"
+import { useEffect, useState, type MouseEvent } from "react"
 import { useNavigate } from "react-router-dom"
 import { useDownloadsSelector, useDownloadsActions, type DownloadItem } from "@/context/downloads-context"
 import { Progress } from "@/components/ui/progress"
@@ -212,6 +212,21 @@ export function DownBar() {
   const { pauseDownload, resumeGroup } = useDownloadsActions()
   const navigate = useNavigate()
   const [addGameOpen, setAddGameOpen] = useState(false)
+  const [addGameInitialSource, setAddGameInitialSource] = useState<"folder" | "archive" | null>(null)
+
+  // Listen for global "open Add Game modal" events — dispatched by the
+  // ArchiveDropZone when the user drags an archive file onto the window, and
+  // potentially by other surfaces in the future (e.g. a tray menu entry).
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const onOpen = (event: Event) => {
+      const detail = (event as CustomEvent<{ source?: "folder" | "archive" }>).detail
+      setAddGameInitialSource(detail?.source ?? null)
+      setAddGameOpen(true)
+    }
+    window.addEventListener("uc_open_add_game", onOpen)
+    return () => window.removeEventListener("uc_open_add_game", onOpen)
+  }, [])
 
   const handleClick = () => {
     if (addGameOpen) return
@@ -229,15 +244,15 @@ export function DownBar() {
             onKeyDown={(e) => {
               if (e.key === "Enter" || e.key === " ") handleClick()
             }}
-            className="glass pointer-events-auto flex w-full max-w-xl cursor-pointer items-center justify-between gap-3 rounded-full border border-white/[.12] bg-zinc-950/68 px-4 py-3 text-sm text-zinc-200 shadow-[0_8px_30px_rgba(0,0,0,0.28),inset_0_1px_0_rgba(255,255,255,0.04)] transition-all hover:border-white/[.16] hover:bg-zinc-950/75 backdrop-blur-2xl"
+            className="glass pointer-events-auto flex w-full max-w-xl cursor-pointer items-center justify-between gap-3 rounded-full px-4 py-3 text-sm text-foreground/90 shadow-[0_8px_30px_rgba(0,0,0,0.28),inset_0_1px_0_rgba(255,255,255,0.04)] transition-all hover:border-primary/30 hover:brightness-110 backdrop-blur-2xl"
           >
             <div className="flex items-center gap-3">
-               <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-zinc-800/80 ring-1 ring-white/[.07]">
-                <Activity className="h-4 w-4 text-zinc-500" />
+               <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-secondary/80 ring-1 ring-border/70">
+                <Activity className="h-4 w-4 text-muted-foreground/80" />
               </div>
               <div>
-                <span className="font-medium text-zinc-300">Activity</span>
-                <p className="text-[11px] text-zinc-400">No active downloads</p>
+                <span className="font-medium text-foreground/80">Activity</span>
+                <p className="text-[11px] text-muted-foreground">No active downloads</p>
               </div>
             </div>
             <button
@@ -248,14 +263,18 @@ export function DownBar() {
                 if (e.nativeEvent) e.nativeEvent.stopImmediatePropagation()
                 setAddGameOpen(true)
               }}
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-white/[.07] bg-zinc-800 text-zinc-400 transition-all hover:border-white/[.12] hover:bg-zinc-700 hover:text-white active:scale-95"
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-border/70 bg-secondary text-muted-foreground transition-all hover:border-border hover:brightness-125 hover:text-foreground active:scale-95"
               aria-label="Add external game"
             >
               <Plus className="h-4 w-4" />
             </button>
           </div>
         </div>
-        <AddGameModal open={addGameOpen} onOpenChange={setAddGameOpen} />
+        <AddGameModal
+          open={addGameOpen}
+          onOpenChange={(open) => { setAddGameOpen(open); if (!open) setAddGameInitialSource(null) }}
+          initialSource={addGameInitialSource ?? undefined}
+        />
       </>
     )
   }
@@ -293,17 +312,17 @@ export function DownBar() {
           onKeyDown={(e) => {
             if (e.key === "Enter" || e.key === " ") handleClick()
           }}
-          className="glass pointer-events-auto flex w-full max-w-xl cursor-pointer items-center gap-4 rounded-full border border-white/[.12] bg-zinc-950/68 px-4 py-3 text-sm text-zinc-200 shadow-[0_8px_30px_rgba(0,0,0,0.28),inset_0_1px_0_rgba(255,255,255,0.04)] transition-all hover:border-white/[.16] hover:bg-zinc-950/75 backdrop-blur-2xl"
+          className="glass pointer-events-auto flex w-full max-w-xl cursor-pointer items-center gap-4 rounded-full px-4 py-3 text-sm text-foreground/90 shadow-[0_8px_30px_rgba(0,0,0,0.28),inset_0_1px_0_rgba(255,255,255,0.04)] transition-all hover:border-primary/30 hover:brightness-110 backdrop-blur-2xl"
         >
           <div className="min-w-0 flex-1 space-y-2">
             <div className="flex items-center gap-4">
               <div className="min-w-0 flex flex-1 items-center gap-3">
-                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/10 ring-1 ring-white/[.07]">
-                  <Activity className="h-4 w-4 text-white" />
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/15 ring-1 ring-border/70">
+                  <Activity className="h-4 w-4 text-foreground" />
                 </div>
                 <div className="min-w-0">
-                  <span className="block max-w-[140px] truncate text-sm font-bold text-white">{displayName}</span>
-                  <span className="block text-[11px] text-zinc-500">
+                  <span className="block max-w-[140px] truncate text-sm font-bold text-foreground">{displayName}</span>
+                  <span className="block text-[11px] text-muted-foreground/80">
                     {isPaused
                       ? `Paused${queuedCount > 0 ? ` · ${queuedCount} queued` : ""}`
                       : isQueuedOnly
@@ -312,35 +331,35 @@ export function DownBar() {
                           ? `${phase} · ${partNum}/${partTotal}${secondaryActivityLabel ? ` · ${secondaryActivityLabel}` : ""}`
                           : `${phase}${secondaryActivityLabel ? ` · ${secondaryActivityLabel}` : ""}`}
                   </span>
-                  {etaLabel ? <span className="block text-[10px] text-zinc-600">ETA {etaLabel}</span> : null}
+                  {etaLabel ? <span className="block text-[10px] text-muted-foreground/60">ETA {etaLabel}</span> : null}
                 </div>
               </div>
 
               <div className="flex min-w-[100px] flex-1 items-center gap-3">
                 <div className="flex-1">
-                  <Progress value={progress} className="h-1.5 bg-zinc-800 [&_[data-slot=progress-indicator]]:bg-white" />
+                  <Progress value={progress} className="h-1.5 bg-secondary [&_[data-slot=progress-indicator]]:bg-primary" />
                 </div>
-                <span className="shrink-0 text-xs font-mono font-bold tabular-nums text-zinc-400">{formatPercent(progress)}</span>
+                <span className="shrink-0 text-xs font-mono font-bold tabular-nums text-muted-foreground">{formatPercent(progress)}</span>
               </div>
             </div>
 
             {secondaryActivityDetail && secondaryActivityName && secondaryActivityPhase ? (
-              <div className="flex items-center gap-3 rounded-xl border border-white/[.05] bg-white/[.03] px-3 py-2">
-                <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-zinc-800 ring-1 ring-white/[.06]">
+              <div className="flex items-center gap-3 rounded-xl border border-border/50 bg-secondary/40 px-3 py-2">
+                <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-secondary ring-1 ring-white/[.06]">
                   {secondaryActivityPhase === "Extracting" ? (
-                    <HardDrive className="h-3.5 w-3.5 text-zinc-300" />
+                    <HardDrive className="h-3.5 w-3.5 text-foreground/80" />
                   ) : (
-                    <Download className="h-3.5 w-3.5 text-zinc-300" />
+                    <Download className="h-3.5 w-3.5 text-foreground/80" />
                   )}
                 </div>
                 <div className="min-w-0 flex-1">
-                  <span className="block truncate text-[11px] font-medium text-zinc-200">{secondaryActivityName}</span>
-                  <span className="block truncate text-[10px] text-zinc-500">{secondaryActivityDetail}</span>
+                  <span className="block truncate text-[11px] font-medium text-foreground/90">{secondaryActivityName}</span>
+                  <span className="block truncate text-[10px] text-muted-foreground/80">{secondaryActivityDetail}</span>
                 </div>
-                <div className="flex shrink-0 items-center gap-1.5 text-[10px] text-zinc-500">
+                <div className="flex shrink-0 items-center gap-1.5 text-[10px] text-muted-foreground/80">
                   <span className="relative flex h-2.5 w-2.5">
-                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-white/35 opacity-75" />
-                    <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-white/70" />
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary/35 opacity-75" />
+                    <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-primary/70" />
                   </span>
                   <span>{secondaryActivityPhase}</span>
                 </div>
@@ -354,7 +373,7 @@ export function DownBar() {
               type="button"
               onClick={handleToggle}
               disabled={!canToggle}
-              className="flex h-8 w-8 items-center justify-center rounded-full border border-white/[.07] bg-zinc-800 text-zinc-400 transition-all hover:border-white/[.12] hover:bg-zinc-700 hover:text-white active:scale-95"
+              className="flex h-8 w-8 items-center justify-center rounded-full border border-border/70 bg-secondary text-muted-foreground transition-all hover:border-border hover:brightness-125 hover:text-foreground active:scale-95"
               aria-label={isPaused ? "Resume downloads" : "Pause downloads"}
             >
               {isPaused ? <Play className="h-4 w-4" /> : <PauseCircle className="h-4 w-4" />}
@@ -367,7 +386,7 @@ export function DownBar() {
                 if (e.nativeEvent) e.nativeEvent.stopImmediatePropagation()
                 setAddGameOpen(true)
               }}
-              className="flex h-8 w-8 items-center justify-center rounded-full border border-white/[.07] bg-zinc-800 text-zinc-400 transition-all hover:border-white/[.12] hover:bg-zinc-700 hover:text-white active:scale-95"
+              className="flex h-8 w-8 items-center justify-center rounded-full border border-border/70 bg-secondary text-muted-foreground transition-all hover:border-border hover:brightness-125 hover:text-foreground active:scale-95"
               aria-label="Add external game"
             >
               <Plus className="h-4 w-4" />

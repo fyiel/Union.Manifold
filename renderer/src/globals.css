@@ -32,12 +32,20 @@
   --sidebar-accent:    oklch(0.16 0.002 285);
   --sidebar-accent-foreground: oklch(0.968 0.001 286);
   --sidebar-border:    oklch(0.16 0.002 285 / 0.5);
+
+  /* Runtime-mutable font stacks, swapped by the theme engine. */
+  --font-sans-active: "Inter", "Geist", "Segoe UI", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono-active: "Geist Mono", ui-monospace, "SF Mono", "Cascadia Code", Consolas, monospace;
 }
 
 @theme inline {
-  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
-    --font-sans: "Geist", ui-sans-serif, system-ui, -apple-system, sans-serif;
-  --font-mono: "Geist Mono", ui-monospace, monospace;
+  /* `--font-sans` resolves to `var(--font-sans-active)` so the theme engine
+     can swap the active typeface at runtime (lib/themes/applyTheme.ts sets
+     `--font-sans-active` on <html>). Without this indirection, `@theme
+     inline` would bake the literal stack into every `.font-sans` utility at
+     build time and runtime updates would be a no-op. */
+  --font-sans: var(--font-sans-active);
+  --font-mono: var(--font-mono-active);
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -74,19 +82,27 @@
 
 .glass,
 .glass-card {
-  background: rgba(24, 24, 27, 0.70);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-  border: 1px solid rgba(255, 255, 255, 0.07);
+  /* `--background` follows the active theme so the TopBar pill and the
+     bottom Activity bar share the same theme-tinted glass surface. The
+     TopBar uses `bg-background/72 backdrop-blur-2xl` directly; this class
+     matches that visual language for any other pill (DownBar etc.). */
+  background: color-mix(in oklch, var(--background) 72%, transparent);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid var(--border);
 }
 
 /* In-game overlay panels — no backdrop-filter so the GPU isn't forced to
    composite the game framebuffer every frame (prevents lag / FPS drops).
-   Uses the UDL zinc-950 (#09090b) base with 96% opacity for a solid,
-   legible surface that still reads as a native dark panel over any game. */
+   Fully opaque so the overlay reads as a proper native panel over any game,
+   not a translucent ghost. Border + shadow give it the same lift the rest
+   of the app uses for cards. */
 .overlay-panel {
-  background: rgba(9, 9, 11, 0.96);
-  border: 1px solid rgba(63, 63, 70, 0.55);
+  background: #0a0a0c;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.04) inset,
+    0 24px 56px rgba(0, 0, 0, 0.6);
 }
 
 /* Section label - used for category headings */
@@ -96,6 +112,12 @@
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: #3f3f46;
+}
+
+/* Hero slider progress bar — ticks down the auto-advance timer. */
+@keyframes slider-progress {
+  from { transform: scaleX(0); }
+  to   { transform: scaleX(1); }
 }
 
 /* UDL skeleton shimmer — synced with union-crax.xyz. Never use animate-pulse.
@@ -364,12 +386,34 @@ html[data-reduced-motion="1"] .uc-sidebar-row::after {
 
   body {
     @apply bg-background text-foreground antialiased;
-    font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
+    font-family: var(--font-sans-active);
     overflow: hidden;
   }
 
   button {
     cursor: pointer;
+  }
+
+  /* ─── Global focus-visible ring ───
+     Every keyboard-tab landing should be obvious without each component
+     reinventing the ring. We target ALL focus-visible elements and remove
+     the browser default outline (which leans hard to bright blue on
+     dark backgrounds), then paint a soft white ring + offset. Components
+     that need a different colour still override via Tailwind utilities.
+
+     Note: we explicitly skip elements that opted out by setting
+     `outline-hidden` (Radix surfaces) — they paint their own ring inside. */
+  :where(a, button, [role="button"], [role="link"], [role="menuitem"],
+         input, textarea, select, summary, [tabindex]):not([tabindex="-1"]):focus-visible:not(.outline-hidden) {
+    outline: 2px solid rgba(255, 255, 255, 0.55);
+    outline-offset: 2px;
+    border-radius: inherit;
+  }
+
+  /* Don't render the ring on mouse interactions — focus-visible already
+     filters but some browsers still flash on click. */
+  :where(button, [role="button"]):focus:not(:focus-visible) {
+    outline: none;
   }
 
   /* Prevent cursor flicker on interactive elements with children */
@@ -434,64 +478,144 @@ html[data-reduced-motion="1"] .uc-sidebar-row::after {
   }
 }
 
-/* ── Scrollbars (outside @layer so cascade takes priority) ── */
-html,
-body,
-.uc-scrollbar,
-.uc-scrollbar *,
-[data-slot="scroll-area"],
-[data-slot="scroll-area"] * {
-  scrollbar-width: thin;
-  scrollbar-color: #27272a transparent;
+/* ── Scrollbars (outside @layer so cascade takes priority) ──
+   CRITICAL: `scrollbar-width: thin` (the Firefox property) silently disables
+   the WebKit `::-webkit-scrollbar-*` pseudo-element pipeline in Chromium, so
+   if both are set together the OS falls back to its native chrome thumb.
+   That's exactly why dialog scrollbars were rendering as Windows defaults
+   while the rest of the app was fine — Tailwind's preflight or some other
+   parent was setting `scrollbar-width: thin` on the modal root.
+
+   Fix: do NOT set `scrollbar-width` universally. Use `::-webkit-scrollbar`
+   alone on WebKit (Electron is Chromium), and only enable `scrollbar-width`
+   inside the explicit Firefox feature query so Chromium can never see it. */
+@supports (-moz-appearance: none) {
+  *,
+  html,
+  body,
+  .uc-scrollbar,
+  [data-slot="scroll-area"] {
+    scrollbar-width: thin;
+    scrollbar-color: #27272a transparent;
+  }
 }
 
+*::-webkit-scrollbar,
 html::-webkit-scrollbar,
 body::-webkit-scrollbar,
 .uc-scrollbar::-webkit-scrollbar,
-.uc-scrollbar *::-webkit-scrollbar,
-[data-slot="scroll-area"]::-webkit-scrollbar,
-[data-slot="scroll-area"] *::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+[data-slot="scroll-area"]::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
 }
 
+*::-webkit-scrollbar-track,
 html::-webkit-scrollbar-track,
 body::-webkit-scrollbar-track,
 .uc-scrollbar::-webkit-scrollbar-track,
-.uc-scrollbar *::-webkit-scrollbar-track,
-[data-slot="scroll-area"]::-webkit-scrollbar-track,
-[data-slot="scroll-area"] *::-webkit-scrollbar-track {
+[data-slot="scroll-area"]::-webkit-scrollbar-track {
   background: transparent;
 }
 
+*::-webkit-scrollbar-thumb,
 html::-webkit-scrollbar-thumb,
 body::-webkit-scrollbar-thumb,
 .uc-scrollbar::-webkit-scrollbar-thumb,
-.uc-scrollbar *::-webkit-scrollbar-thumb,
-[data-slot="scroll-area"]::-webkit-scrollbar-thumb,
-[data-slot="scroll-area"] *::-webkit-scrollbar-thumb {
+[data-slot="scroll-area"]::-webkit-scrollbar-thumb {
   -webkit-appearance: none;
   appearance: none;
-  border-radius: 10px;
-  background-color: #27272a;
+  border-radius: 999px;
+  background-color: #3f3f46;
+  border: 3px solid transparent;
+  background-clip: padding-box;
 }
 
+*::-webkit-scrollbar-thumb:hover,
 html::-webkit-scrollbar-thumb:hover,
 body::-webkit-scrollbar-thumb:hover,
 .uc-scrollbar::-webkit-scrollbar-thumb:hover,
-.uc-scrollbar *::-webkit-scrollbar-thumb:hover,
-[data-slot="scroll-area"]::-webkit-scrollbar-thumb:hover,
-[data-slot="scroll-area"] *::-webkit-scrollbar-thumb:hover {
-  background-color: #3f3f46;
+[data-slot="scroll-area"]::-webkit-scrollbar-thumb:hover {
+  background-color: #52525b;
 }
 
+*::-webkit-scrollbar-corner,
 html::-webkit-scrollbar-corner,
 body::-webkit-scrollbar-corner,
 .uc-scrollbar::-webkit-scrollbar-corner,
-.uc-scrollbar *::-webkit-scrollbar-corner,
-[data-slot="scroll-area"]::-webkit-scrollbar-corner,
-[data-slot="scroll-area"] *::-webkit-scrollbar-corner {
+[data-slot="scroll-area"]::-webkit-scrollbar-corner {
   background: transparent;
+}
+
+/* Modal/dialog scroll containers — Radix portal'd content. Note: NO
+   `scrollbar-width` here — see the @supports block above for why setting
+   that property kills the `::-webkit-scrollbar-*` pipeline in Chromium. */
+
+[data-slot="dialog-content"]::-webkit-scrollbar,
+[data-slot="dialog-content"] *::-webkit-scrollbar,
+[data-slot="popover-content"]::-webkit-scrollbar,
+[data-slot="popover-content"] *::-webkit-scrollbar,
+[data-slot="sheet-content"]::-webkit-scrollbar,
+[data-slot="sheet-content"] *::-webkit-scrollbar,
+[data-slot="select-content"]::-webkit-scrollbar,
+[data-slot="select-content"] *::-webkit-scrollbar,
+[data-slot="dropdown-menu-content"]::-webkit-scrollbar,
+[data-slot="dropdown-menu-content"] *::-webkit-scrollbar {
+  width: 12px !important;
+  height: 12px !important;
+}
+
+[data-slot="dialog-content"]::-webkit-scrollbar-track,
+[data-slot="dialog-content"] *::-webkit-scrollbar-track,
+[data-slot="popover-content"]::-webkit-scrollbar-track,
+[data-slot="popover-content"] *::-webkit-scrollbar-track {
+  background: transparent !important;
+}
+
+[data-slot="dialog-content"]::-webkit-scrollbar-thumb,
+[data-slot="dialog-content"] *::-webkit-scrollbar-thumb,
+[data-slot="popover-content"]::-webkit-scrollbar-thumb,
+[data-slot="popover-content"] *::-webkit-scrollbar-thumb,
+[data-slot="sheet-content"]::-webkit-scrollbar-thumb,
+[data-slot="sheet-content"] *::-webkit-scrollbar-thumb,
+[data-slot="select-content"]::-webkit-scrollbar-thumb,
+[data-slot="select-content"] *::-webkit-scrollbar-thumb,
+[data-slot="dropdown-menu-content"]::-webkit-scrollbar-thumb,
+[data-slot="dropdown-menu-content"] *::-webkit-scrollbar-thumb {
+  -webkit-appearance: none !important;
+  appearance: none !important;
+  border-radius: 999px !important;
+  background-color: #3f3f46 !important;
+  border: 3px solid transparent !important;
+  background-clip: padding-box !important;
+}
+
+[data-slot="dialog-content"]::-webkit-scrollbar-thumb:hover,
+[data-slot="dialog-content"] *::-webkit-scrollbar-thumb:hover,
+[data-slot="popover-content"]::-webkit-scrollbar-thumb:hover,
+[data-slot="popover-content"] *::-webkit-scrollbar-thumb:hover {
+  background-color: #3f3f46 !important;
+}
+
+/* Dedicated class for the theme editor's scroll columns. Same rules as the
+   universal scrollbar but slightly thicker for grab-ability. No
+   `scrollbar-width` — see @supports block above. */
+.uc-themed-scroll::-webkit-scrollbar {
+  width: 12px !important;
+  height: 12px !important;
+}
+.uc-themed-scroll::-webkit-scrollbar-track {
+  background: transparent !important;
+}
+.uc-themed-scroll::-webkit-scrollbar-thumb {
+  -webkit-appearance: none !important;
+  appearance: none !important;
+  border-radius: 999px !important;
+  background-color: #3f3f46 !important;
+  border: 3px solid transparent !important;
+  background-clip: padding-box !important;
+}
+.uc-themed-scroll::-webkit-scrollbar-thumb:hover {
+  background-color: #52525b !important;
 }
 
 /* Search suggestions still use native overflow; give them a dedicated rounded thumb path. */
@@ -651,6 +775,14 @@ body::-webkit-scrollbar-corner,
 @keyframes uc-accent-grow {
   from { transform: scaleY(0); opacity: 0; }
   to   { transform: scaleY(1); opacity: 1; }
+}
+
+/* Toast countdown — used on toasts that carry an Undo action so the
+   user has a visual cue for how long they have to click. The bar starts
+   at 100% width and animates down to 0 over the toast's duration. */
+@keyframes uc-toast-countdown {
+  from { width: 100%; }
+  to   { width: 0%; }
 }
 
 /* Nav row — owns the hover sheen and the active accent bar. */

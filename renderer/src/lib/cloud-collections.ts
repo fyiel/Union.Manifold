@@ -301,3 +301,21 @@ export async function reportPlayEvent(appid: string, type: "play" | "install"): 
     /* silent */
   }
 }
+
+/**
+ * Remove a single appid from the cloud play history (the "Not on this PC"
+ * carousel on the launcher). Used when the user no longer wants to see a
+ * previously-installed game in their cloud library.
+ */
+export async function removePlayHistoryEntry(appid: string): Promise<boolean> {
+  try {
+    const res = await apiFetch("/api/account/play-history", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ appid }),
+    })
+    return res.ok
+  } catch {
+    return false
+  }
+}

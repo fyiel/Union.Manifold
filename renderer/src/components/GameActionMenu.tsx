@@ -9,7 +9,9 @@ type MenuIconComponent = ComponentType<{ className?: string }>
 import {
   Check,
   ChevronRight,
+  Download,
   ExternalLink,
+  EyeOff,
   FolderOpen,
   Heart,
   Layers3,
@@ -64,12 +66,26 @@ type GameActionMenuPanelProps = {
   onCreateShortcut?: (() => void | Promise<void>) | null
   onEditDetails?: () => void | Promise<void>
   onLinuxConfig?: () => void | Promise<void>
+  /** Open the per-game "Launch options" dialog (custom CLI args). Available
+   *  whenever the game is installed. */
+  onLaunchOptions?: (() => void | Promise<void>) | null
   /** When provided shows the delete/unlink row. */
   onDelete?: (() => void | Promise<void>) | null
+  /** Universal "download / queue" action for not-installed games. The
+   *  `mode` lets us label the row correctly ("Add to download queue" when
+   *  there's already an active download, otherwise "Download"). */
+  download?: {
+    mode: "download" | "queue"
+    onClick: () => void | Promise<void>
+  }
   /** Wishlist toggle — when provided the menu shows an Add/Remove entry. */
   wishlist?: { inList: boolean; toggle: () => void | Promise<void> }
   /** Favorites/Liked toggle. */
   favorites?: { inList: boolean; toggle: () => void | Promise<void> }
+  /** Per-game Discord RPC mute. When `muted` is true the game is hidden
+   *  from the Playing-X presence card on Discord. Independent from the
+   *  global "Show in Discord" toggle. */
+  rpcMute?: { muted: boolean; toggle: () => void | Promise<void> }
   collectionPicker?: CollectionPickerProps
   className?: string
 }
@@ -102,10 +118,10 @@ function MenuItem({ icon: Icon, label, destructive = false, iconClassName, iconF
         "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-sm transition-colors active:scale-[0.98]",
         destructive
           ? "text-red-400 hover:bg-red-500/10 hover:text-red-300"
-          : "text-zinc-300 hover:bg-white/[.06] hover:text-white"
+          : "text-foreground/80 hover:bg-white/[.06] hover:text-white"
       )}
     >
-      <span className={cn("relative inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center transition-colors", iconClassName ?? "text-zinc-500")}>
+      <span className={cn("relative inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center transition-colors", iconClassName ?? "text-muted-foreground/80")}>
         <Icon className="h-3.5 w-3.5" />
         {iconFilled ? (
           <span className="pointer-events-none absolute inset-0 rounded-full bg-current opacity-15" aria-hidden="true" />
@@ -138,17 +154,17 @@ function CollectionPicker({ collections, onAddToCollection, onRemoveFromCollecti
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
           placeholder="Filter…"
-          className="w-full rounded-lg border border-white/[.07] bg-white/[.03] px-2 py-1 text-xs text-zinc-200 placeholder:text-zinc-500 outline-none focus-visible:border-white/20"
+          className="w-full rounded-lg border border-white/[.07] bg-white/[.03] px-2 py-1 text-xs text-foreground/90 placeholder:text-muted-foreground/80 outline-none focus-visible:border-white/20"
         />
       )}
 
       <div className="max-h-40 overflow-y-auto uc-scrollbar space-y-px pr-1">
         {collections.length === 0 ? (
-          <p className="px-2 py-1.5 text-[11px] text-zinc-500 italic">
+          <p className="px-2 py-1.5 text-[11px] text-muted-foreground/80 italic">
             No collections yet. Create one below.
           </p>
         ) : filtered.length === 0 ? (
-          <p className="px-2 py-1.5 text-[11px] text-zinc-500 italic">
+          <p className="px-2 py-1.5 text-[11px] text-muted-foreground/80 italic">
             No match.
           </p>
         ) : (
@@ -165,14 +181,14 @@ function CollectionPicker({ collections, onAddToCollection, onRemoveFromCollecti
                 "flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition-colors",
                 entry.included
                   ? "bg-white/[.06] text-white"
-                  : "text-zinc-300 hover:bg-white/[.05] hover:text-white"
+                  : "text-foreground/80 hover:bg-white/[.05] hover:text-white"
               )}
             >
               <div
                 className={cn(
                   "shrink-0 inline-flex h-4 w-4 items-center justify-center rounded border transition-colors",
                   entry.included
-                    ? "border-white bg-white text-black"
+                    ? "border-white bg-primary text-primary-foreground"
                     : "border-zinc-600 bg-black/30 text-transparent"
                 )}
               >
@@ -186,7 +202,7 @@ function CollectionPicker({ collections, onAddToCollection, onRemoveFromCollecti
 
       <div className="border-t border-white/[.06] pt-1.5">
         <div className="flex items-center gap-1.5">
-          <Plus className="h-3 w-3 text-zinc-500" />
+          <Plus className="h-3 w-3 text-muted-foreground/80" />
           <input
             value={newDraft}
             onChange={(e) => setNewDraft(e.target.value)}
@@ -200,7 +216,7 @@ function CollectionPicker({ collections, onAddToCollection, onRemoveFromCollecti
               }
             }}
             placeholder="New collection…"
-            className="flex-1 min-w-0 rounded-md border border-transparent bg-transparent px-1 py-1 text-xs text-zinc-200 placeholder:text-zinc-500 outline-none focus-visible:border-white/10"
+            className="flex-1 min-w-0 rounded-md border border-transparent bg-transparent px-1 py-1 text-xs text-foreground/90 placeholder:text-muted-foreground/80 outline-none focus-visible:border-white/10"
           />
           {newDraft.trim() && !draftCollides && (
             <button
@@ -211,7 +227,7 @@ function CollectionPicker({ collections, onAddToCollection, onRemoveFromCollecti
                 void onCreateCollection(name)
                 setNewDraft("")
               }}
-              className="rounded-md bg-white px-1.5 py-0.5 text-[10px] font-semibold text-black hover:bg-zinc-200"
+              className="rounded-md bg-primary px-1.5 py-0.5 text-[10px] font-semibold text-primary-foreground hover:brightness-110"
             >
               Add
             </button>
@@ -236,37 +252,55 @@ export function GameActionMenuPanel({
   onCreateShortcut,
   onEditDetails,
   onLinuxConfig,
+  onLaunchOptions,
   onDelete,
+  download,
   wishlist,
   favorites,
+  rpcMute,
   collectionPicker,
   className,
 }: GameActionMenuPanelProps) {
   const [pickerOpen, setPickerOpen] = useState(false)
 
-  const hasLibraryGroup = Boolean(onSetExecutable || onOpenFiles || onCreateShortcut || onEditDetails || (isLinux && onLinuxConfig))
-  const hasListGroup = Boolean(wishlist || favorites)
+  const hasInstallGroup = Boolean(download)
+  const hasLibraryGroup = Boolean(onSetExecutable || onOpenFiles || onCreateShortcut || onEditDetails || onLaunchOptions || (isLinux && onLinuxConfig))
+  const hasListGroup = Boolean(wishlist || favorites || rpcMute)
 
   return (
     <div
       className={cn(
-        "w-56 rounded-xl border border-white/[.07] bg-zinc-950/95 p-1 text-white shadow-xl backdrop-blur-xl",
+        "w-56 rounded-xl border border-white/[.07] bg-background/95 p-1 text-white shadow-xl backdrop-blur-xl",
         className
       )}
     >
-      {hasLibraryGroup && (
+      {hasInstallGroup && download && (
         <div className="space-y-px">
-          {onSetExecutable ? <MenuItem icon={Settings} label="Set Executable" onClick={onSetExecutable} /> : null}
-          {onOpenFiles ? <MenuItem icon={FolderOpen} label="Open Files" onClick={onOpenFiles} /> : null}
-          {onCreateShortcut ? <MenuItem icon={ExternalLink} label="Create Shortcut" onClick={onCreateShortcut} /> : null}
-          {onEditDetails ? <MenuItem icon={Pencil} label="Edit Details" onClick={onEditDetails} /> : null}
-          {isLinux && onLinuxConfig ? <MenuItem icon={Terminal} label="Linux / VR Config" onClick={onLinuxConfig} /> : null}
+          <MenuItem
+            icon={Download}
+            label={download.mode === "queue" ? "Add to download queue" : "Download"}
+            onClick={download.onClick}
+          />
         </div>
+      )}
+
+      {hasLibraryGroup && (
+        <>
+          {hasInstallGroup && <div className="my-1 h-px bg-white/[.06]" />}
+          <div className="space-y-px">
+            {onSetExecutable ? <MenuItem icon={Settings} label="Set Executable" onClick={onSetExecutable} /> : null}
+            {onOpenFiles ? <MenuItem icon={FolderOpen} label="Open Files" onClick={onOpenFiles} /> : null}
+            {onCreateShortcut ? <MenuItem icon={ExternalLink} label="Create Shortcut" onClick={onCreateShortcut} /> : null}
+            {onLaunchOptions ? <MenuItem icon={Terminal} label="Launch options" onClick={onLaunchOptions} /> : null}
+            {onEditDetails ? <MenuItem icon={Pencil} label="Edit Details" onClick={onEditDetails} /> : null}
+            {isLinux && onLinuxConfig ? <MenuItem icon={Terminal} label="Linux / VR Config" onClick={onLinuxConfig} /> : null}
+          </div>
+        </>
       )}
 
       {hasListGroup && (
         <>
-          {hasLibraryGroup && <div className="my-1 h-px bg-white/[.06]" />}
+          {(hasInstallGroup || hasLibraryGroup) && <div className="my-1 h-px bg-white/[.06]" />}
           <div className="space-y-px">
             {wishlist ? (
               <MenuItem
@@ -286,13 +320,22 @@ export function GameActionMenuPanel({
                 onClick={favorites.toggle}
               />
             ) : null}
+            {rpcMute ? (
+              <MenuItem
+                icon={EyeOff}
+                label={rpcMute.muted ? "Show on Discord" : "Hide from Discord"}
+                iconClassName={rpcMute.muted ? "text-fuchsia-400" : undefined}
+                iconFilled={rpcMute.muted}
+                onClick={rpcMute.toggle}
+              />
+            ) : null}
           </div>
         </>
       )}
 
       {collectionPicker ? (
         <>
-          {(hasLibraryGroup || hasListGroup) && <div className="my-1 h-px bg-white/[.06]" />}
+          {(hasInstallGroup || hasLibraryGroup || hasListGroup) && <div className="my-1 h-px bg-white/[.06]" />}
           {(() => {
             const includedCount = collectionPicker.collections.filter((c) => c.included).length
             return (
@@ -304,7 +347,7 @@ export function GameActionMenuPanel({
             trailing={
               <ChevronRight
                 className={cn(
-                  "h-3 w-3 text-zinc-500 transition-transform",
+                  "h-3 w-3 text-muted-foreground/80 transition-transform",
                   pickerOpen && "rotate-90"
                 )}
               />
@@ -342,7 +385,7 @@ export function GameActionMenuPanel({
           className={cn(
             "mt-1 rounded-lg border px-2.5 py-1.5 text-xs",
             shortcutFeedback.type === "success"
-              ? "border-white/[.07] bg-white/[.04] text-zinc-400"
+              ? "border-white/[.07] bg-white/[.04] text-muted-foreground"
               : "border-red-500/20 bg-red-500/10 text-red-300"
           )}
         >

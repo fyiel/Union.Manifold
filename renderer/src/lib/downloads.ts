@@ -9,7 +9,9 @@ export type DownloadLinksResult = {
   redirectUrl?: string
 }
 
-export type PreferredDownloadHost = "ucfiles" | "pixeldrain"
+// UC.Files is the only in-app download host. Vikingfile links exist in the
+// catalog but aren't downloadable from within the app (web-only fallback).
+export type PreferredDownloadHost = "ucfiles"
 
 export type ResolvedDownload = {
   url: string
@@ -53,9 +55,8 @@ export type DownloadConfig = {
 }
 
 const DOWNLOAD_HOST_STORAGE_KEY = "uc_direct_download_host"
-export const SUPPORTED_DOWNLOAD_HOSTS: PreferredDownloadHost[] = ["ucfiles", "pixeldrain"]
-const PREFERRED_HOSTS: PreferredDownloadHost[] = ["ucfiles", "pixeldrain"]
-const PIXELDRAIN_404_MESSAGE = "Pixeldrain returned 404. The link appears to be dead."
+export const SUPPORTED_DOWNLOAD_HOSTS: PreferredDownloadHost[] = ["ucfiles"]
+const PREFERRED_HOSTS: PreferredDownloadHost[] = ["ucfiles"]
 const UCFILES_404_MESSAGE = "UC.Files returned 404. The link appears to be dead."
 const UCFILES_IDENTIFIER_RE = /^[A-Za-z0-9_-]{1,64}$/
 
@@ -95,7 +96,7 @@ function sanitizeHosts(input: Record<string, any[]> | null | undefined): Downloa
   const cleaned: DownloadHosts = {}
   for (const [key, value] of Object.entries(hosts)) {
     if (!Array.isArray(value)) { cleaned[key] = []; continue }
-    cleaned[key] = value.map((entry, i) => {
+    cleaned[key] = value.map((entry) => {
       if (typeof entry === "string") return { url: entry, part: null }
       if (entry && typeof entry === "object" && typeof entry.url === "string")
         return { url: entry.url, part: typeof entry.part === "number" ? entry.part : null }
@@ -205,18 +206,12 @@ function pickHostLinks(available: DownloadHosts, host: PreferredDownloadHost) {
       .filter(([key]) => isUCFilesHostValue(key))
       .flatMap(([, entries]) => entries)
   }
-  if (host === "pixeldrain") {
-    return available.pixeldrain || available["pixeldrain.com"] || available["Pixeldrain"]  || []
-  }
-  if (host === "vikingfile") {
-    return available.vikingfile || available["vikingfile.com"] || available["VikingFile"] ||  []
-  }
   return []
 }
 
 export async function getPreferredDownloadHost(): Promise<PreferredDownloadHost> {
   if (typeof window === "undefined") return "ucfiles"
-  
+
   // Try to get from electron settings first (synchronized with Settings UI)
   if (window.ucSettings?.get) {
     try {
@@ -228,44 +223,34 @@ export async function getPreferredDownloadHost(): Promise<PreferredDownloadHost>
       downloadLogger.warn('Failed to get defaultMirrorHost from settings', { data: err })
     }
   }
-  
+
   // Fallback to localStorage for backwards compatibility
   const legacy = localStorage.getItem(DOWNLOAD_HOST_STORAGE_KEY)
   if (legacy && PREFERRED_HOSTS.includes(legacy as PreferredDownloadHost)) {
     return legacy as PreferredDownloadHost
   }
-  
+
   return "ucfiles"
 }
 
 export function setPreferredDownloadHost(host: PreferredDownloadHost) {
   if (typeof window === "undefined") return
   if (!PREFERRED_HOSTS.includes(host)) return
-  
+
   // Save to electron settings (synchronized with Settings UI)
   if (window.ucSettings?.set) {
     window.ucSettings.set('defaultMirrorHost', host).catch((err: any) => {
       downloadLogger.warn('Failed to set defaultMirrorHost', { data: err })
     })
   }
-  
+
   // Also keep localStorage for backwards compatibility
   localStorage.setItem(DOWNLOAD_HOST_STORAGE_KEY, host)
 }
 
-export function selectHost(available: DownloadHosts, preferredHost?: PreferredDownloadHost): { host: string; links: DownloadHostEntry[] } {
-  const preferred = preferredHost && PREFERRED_HOSTS.includes(preferredHost) ? preferredHost : "ucfiles"
-  if (SUPPORTED_DOWNLOAD_HOSTS.includes(preferred)) {
-    const preferredLinks = pickHostLinks(available, preferred)
-    if (preferredLinks.length) {
-      return { host: preferred, links: preferredLinks }
-    }
-  }
-  // Pixeldrain fallback: if pixeldrain has no links, try UC.Files
-  if (preferred === "pixeldrain") {
-    const ucLinks = pickHostLinks(available, "ucfiles")
-    if (ucLinks.length) return { host: "ucfiles", links: ucLinks }
-  }
+export function selectHost(available: DownloadHosts, _preferredHost?: PreferredDownloadHost): { host: string; links: DownloadHostEntry[] } {
+  const links = pickHostLinks(available, "ucfiles")
+  if (links.length) return { host: "ucfiles", links }
   return { host: "", links: [] }
 }
 
@@ -395,104 +380,7 @@ export async function resolveUCFilesDownload(url: string): Promise<ResolvedDownl
   }
 }
 
-// Pixeldrain URL detection and resolution
-
-/**
- * Checks if a URL is a Pixeldrain URL (user-facing format)
- */
-export function isPixeldrainUrl(url: string): boolean {
-  try {
-    const parsed = new URL(url)
-    return parsed.hostname.includes("pixeldrain.com") || parsed.hostname.includes("pixeldrain")
-  } catch {
-    return false
-  }
-}
-
-/**
- * Extracts the file ID from a Pixeldrain URL.
- * Supports formats:
- * - https://pixeldrain.com/u/{file_id}
- * - https://pixeldrain.com/file/{file_id}
- * - https://pixeldrain.com/api/file/{file_id}
- */
-function extractPixeldrainFileId(url: string): string | null {
-  try {
-    const parsed = new URL(url)
-    if (!parsed.hostname.includes("pixeldrain")) return null
-    
-    // Match /u/{file_id} or /file/{file_id} or /api/file/{file_id}
-    const pathMatch = parsed.pathname.match(/\/(?:u|file|api\/file)\/([a-zA-Z0-9_-]+)/)
-    if (pathMatch?.[1]) return pathMatch[1]
-    return null
-  } catch {
-    return null
-  }
-}
-
-/**
- * Resolves a Pixeldrain URL to the API download format.
- * User-facing URLs need to be converted to API format for actual file download.
- */
-async function resolvePixeldrainDownload(url: string): Promise<ResolvedDownload> {
-  if (!url) return { url, resolved: false }
-  
-  // If URL is already in API format with ?download, pass it through
-  try {
-    const parsed = new URL(url)
-    if (parsed.pathname.startsWith("/api/file/") && parsed.searchParams.has("download")) {
-      return {
-        url,
-        filename: inferFilenameFromUrl(url, ""),
-        resolved: true,
-      }
-    }
-  } catch {
-    // Invalid URL, will be handled below
-  }
-  
-  const fileId = extractPixeldrainFileId(url)
-  if (!fileId) {
-    // Not a recognizable pixeldrain URL format
-    return { url, resolved: false }
-  }
-  
-  // Convert to API download URL
-  const apiUrl = `https://pixeldrain.com/api/file/${fileId}?download`
-  
-  // Try to get file info to extract filename and size
-  try {
-    const infoResponse = await fetch(`https://pixeldrain.com/api/file/${fileId}/info`, {
-      headers: {
-        "X-UC-Client": "unioncrax-direct",
-      },
-    })
-    
-    if (infoResponse.ok) {
-      const info = await infoResponse.json()
-      if (info?.success && info?.name) {
-        return {
-          url: apiUrl,
-          filename: info.name,
-          size: info.size,
-          resolved: true,
-        }
-      }
-    }
-  } catch {
-    // Best effort - just return the converted URL
-  }
-  
-  return {
-    url: apiUrl,
-    filename: inferFilenameFromUrl(url, ""),
-    resolved: true,
-  }
-}
-
-// Aliases for backwards compatibility
-
-export async function resolveDownloadUrl(host: string, url: string): Promise<ResolvedDownload> {
+export async function resolveDownloadUrl(_host: string, url: string): Promise<ResolvedDownload> {
   // Defensive guard for legacy persisted state where "url" may be an object
   const normalizedUrl =
     typeof url === "string"
@@ -501,12 +389,8 @@ export async function resolveDownloadUrl(host: string, url: string): Promise<Res
         ? String((url as any).url)
         : String(url ?? "")
 
-  if (host === "ucfiles" || isUCFilesUrl(normalizedUrl) || Boolean(getUCFilesResolvePayload(normalizedUrl))) {
+  if (isUCFilesUrl(normalizedUrl) || Boolean(getUCFilesResolvePayload(normalizedUrl))) {
     return resolveUCFilesDownload(normalizedUrl)
-  }
-  if (host === "pixeldrain" || isPixeldrainUrl(normalizedUrl)) {
-    // Pixeldrain URLs need to be resolved from user-facing format to API download format
-    return resolvePixeldrainDownload(normalizedUrl)
   }
   return { url: normalizedUrl, resolved: false }
 }
@@ -519,4 +403,3 @@ export async function resolveDownloadSize(url: string): Promise<number | undefin
     return undefined
   }
 }
-

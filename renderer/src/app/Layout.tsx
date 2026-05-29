@@ -1,4 +1,4 @@
-import { Outlet, useLocation, useNavigate } from "react-router-dom"
+import { Outlet, useLocation, useNavigate, useNavigationType } from "react-router-dom"
 import type { CSSProperties } from "react"
 import { Suspense, useEffect, useRef, useState } from "react"
 import { DownBar } from "@/components/DownBar"
@@ -8,11 +8,17 @@ import { CustomTooltipManager } from "@/components/CustomTooltipManager"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import ScrollProgress from "@/components/ScrollProgress"
 import { UpdateNotification } from "@/components/UpdateNotification"
+import { KeyboardShortcutsDialog } from "@/components/KeyboardShortcutsDialog"
+import { ArchiveDropZone } from "@/components/ArchiveDropZone"
+import { WhatsNewModal } from "@/components/WhatsNewModal"
+import { OnboardingModal } from "@/components/OnboardingModal"
 import { useDiscordRpcPresence } from "@/hooks/use-discord-rpc"
 import { useAppPreferencesSync } from "@/hooks/use-app-preferences-sync"
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts"
+import { usePauseDownloadsWhilePlaying } from "@/hooks/use-pause-on-launch"
 import { usePlaytimeFlush } from "@/hooks/use-playtime-flush"
 import { usePresenceHeartbeat } from "@/hooks/use-presence-heartbeat"
+import { useInstalledGamesSync } from "@/hooks/use-installed-games-sync"
 import { logger } from "@/lib/logger"
 import { cn } from "@/lib/utils"
 import { LogSharingConsentModal } from "@/components/LogSharingConsentModal"
@@ -20,14 +26,18 @@ import { WindowsDefenderPromptModal } from "@/components/WindowsDefenderPromptMo
 import { LoginPromptModal } from "@/components/LoginPromptModal"
 import { getApiBaseUrl } from "@/lib/api"
 import { useAuth } from "@/hooks/useAuth"
+import { useHasRunningGames } from "@/hooks/use-running-games"
 
 export function AppLayout() {
   useDiscordRpcPresence()
   useAppPreferencesSync()
   useKeyboardShortcuts()
+  usePauseDownloadsWhilePlaying()
   usePlaytimeFlush()
   usePresenceHeartbeat()
+  useInstalledGamesSync()
   const location = useLocation()
+  const navigationType = useNavigationType()
   const navigate = useNavigate()
 
   // Listen for one-shot deep-link navigation actions delivered by the
@@ -36,11 +46,21 @@ export function AppLayout() {
   // which routes to /settings with the System Profile section preselected.
   useEffect(() => {
     const off = window.ucApp?.onNavigationAction?.((data) => {
-      if (!data || data.action !== "open-system-profile") return
-      const params = new URLSearchParams()
-      params.set("section", "system")
-      if (data.autoScan) params.set("autoScan", "1")
-      navigate(`/settings?${params.toString()}`)
+      if (!data) return
+      // Existing deep link from the website "Scan in UC.D" CTA.
+      if (data.action === "open-system-profile") {
+        const params = new URLSearchParams()
+        params.set("section", "system")
+        if (data.autoScan) params.set("autoScan", "1")
+        navigate(`/settings?${params.toString()}`)
+        return
+      }
+      // Generic path navigation — used by the tray menu's "Open downloads"
+      // / "Open game in launcher" actions so the renderer doesn't have to
+      // know which features the tray exposes.
+      if (typeof (data as any).path === "string" && (data as any).path.startsWith("/")) {
+        navigate((data as any).path)
+      }
     })
     return () => { off?.() }
   }, [navigate])
@@ -49,6 +69,10 @@ export function AppLayout() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     try { return localStorage.getItem("uc_sidebar_collapsed") === "true" } catch { return false }
   })
+  const hasRunningGames = useHasRunningGames()
+  // When a game is running, force the sidebar open so the Now Playing panel
+  // and quick-quit button are always accessible without extra clicks.
+  const effectiveSidebarCollapsed = sidebarCollapsed && !hasRunningGames
   const [logConsentOpen, setLogConsentOpen] = useState(false)
   const [defenderPromptOpen, setDefenderPromptOpen] = useState(false)
   const [defenderPromptPath, setDefenderPromptPath] = useState("")
@@ -130,10 +154,44 @@ export function AppLayout() {
     }
   }
 
+  // Scroll restoration:
+  //   - On forward / new navigation (PUSH / REPLACE) scroll to top.
+  //   - On back navigation (POP) restore the scroll position we saved when
+  //     the user last left this pathname. The cache lives in a ref keyed by
+  //     pathname — sessionStorage would persist across reloads but the user
+  //     expectation is "restore within this session" only.
+  //   - On every pathname change, remember the previous pathname's scroll
+  //     position before scrolling.
+  const scrollPositionsRef = useRef(new Map<string, number>())
+  const previousPathnameRef = useRef<string>(location.pathname)
   useEffect(() => {
+    const container = scrollContainerRef.current as unknown as { scrollTop: number; scrollTo: (opts: ScrollToOptions) => void } | null
+    if (!container) {
+      previousPathnameRef.current = location.pathname
+      return
+    }
+    const prevPath = previousPathnameRef.current
+    if (prevPath && prevPath !== location.pathname) {
+      // Save where we were before leaving — even a hash-only change can
+      // happen here; we only persist when the pathname actually changed.
+      try { scrollPositionsRef.current.set(prevPath, container.scrollTop) } catch { /* ignore */ }
+    }
+    previousPathnameRef.current = location.pathname
+
     if (location.hash) return
-    scrollContainerRef.current?.scrollTo({ top: 0, behavior: "auto" })
-  }, [location.pathname, location.hash])
+
+    if (navigationType === "POP") {
+      const saved = scrollPositionsRef.current.get(location.pathname)
+      if (typeof saved === "number") {
+        // Wait one frame so the new page has rendered enough to be
+        // tall enough to scroll into; otherwise we land at the top
+        // because the scroll target doesn't exist yet.
+        requestAnimationFrame(() => container.scrollTo({ top: saved, behavior: "auto" }))
+        return
+      }
+    }
+    container.scrollTo({ top: 0, behavior: "auto" })
+  }, [location.pathname, location.hash, navigationType])
 
   useEffect(() => {
     const handleWindowError = (event: ErrorEvent) => {
@@ -174,6 +232,20 @@ export function AppLayout() {
       const tagName = (target as Element).tagName?.toLowerCase?.() || "unknown"
       const src = (target as HTMLImageElement).currentSrc || (target as HTMLImageElement).src || ""
       if (!src) return
+
+      // Skip <img> errors that the rendering component already handles
+      // gracefully (MediaImage / GameCard's candidate chain mark themselves
+      // with data-uc-handled="1"). They retry, fall back to a placeholder,
+      // and cache the failure already — logging them globally produces noise
+      // proportional to the size of the user's grid and triggers
+      // auto-share-logs prompts for completely expected misses.
+      if (tagName === "img") {
+        try {
+          if ((target as HTMLElement).getAttribute("data-uc-handled") === "1") {
+            return
+          }
+        } catch { /* ignore — fall through to logging */ }
+      }
 
       logger.warn("Resource load failed", {
         context: "Window",
@@ -264,7 +336,7 @@ export function AppLayout() {
   }
 
   return (
-    <div className="relative h-screen w-full overflow-hidden bg-zinc-950 text-zinc-100 flex flex-col">
+    <div className="relative h-screen w-full overflow-hidden bg-background text-foreground flex flex-col">
       {/* Top-edge drag strip — gives the user a reliable place to grab and
           drag the window from above the sidebar (the integrated nav pill
           only covers part of the top row). Invisible, sits above the
@@ -278,22 +350,22 @@ export function AppLayout() {
         <Sidebar
           mobileOpen={mobileNavOpen}
           onClose={() => setMobileNavOpen(false)}
-          collapsed={sidebarCollapsed}
+          collapsed={effectiveSidebarCollapsed}
           onToggleCollapse={handleToggleCollapse}
         />
         <div className={cn(
           "relative flex min-h-0 flex-1 min-w-0 flex-col transition-[padding] duration-300 ease-in-out",
-          sidebarCollapsed ? "md:pl-[64px]" : "md:pl-[16rem]"
+          effectiveSidebarCollapsed ? "md:pl-[64px]" : "md:pl-[16rem]"
         )}>
           <div
             className={cn(
               "pointer-events-none absolute top-0 z-40 right-0",
-              sidebarCollapsed ? "left-[64px]" : "left-[16rem]"
+              effectiveSidebarCollapsed ? "left-[64px]" : "left-[16rem]"
             )}
           >
             <TopBar onOpenMenu={() => setMobileNavOpen(true)} />
           </div>
-          <ScrollArea ref={scrollContainerRef} className="flex-1 min-h-0 min-w-0 w-full bg-gradient-to-b from-zinc-950 to-zinc-950/95">
+          <ScrollArea ref={scrollContainerRef} className="flex-1 min-h-0 min-w-0 w-full bg-background">
             <div className="relative min-h-full w-full">
               <ScrollProgress />
               <main className="mx-auto w-full max-w-7xl px-4 pt-24 pb-28 md:px-8 xl:px-10">
@@ -321,6 +393,10 @@ export function AppLayout() {
           <UpdateNotification />
         </div>
       </div>
+      <KeyboardShortcutsDialog />
+      <ArchiveDropZone />
+      <WhatsNewModal />
+      <OnboardingModal />
       <LogSharingConsentModal
         open={logConsentOpen}
         onAccept={async () => {

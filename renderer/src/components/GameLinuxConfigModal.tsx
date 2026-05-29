@@ -125,16 +125,16 @@ export function GameLinuxConfigModal({ open, appid, gameName, onClose }: Props) 
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
-      <div className="absolute inset-0 bg-black/70" onClick={onClose} />
-      <div className="relative w-full max-w-lg rounded-2xl border border-border/60 bg-card/95 shadow-2xl overflow-hidden">
+      <div className="absolute inset-0 bg-black/72 backdrop-blur-md" onClick={onClose} />
+      <div className="relative w-full max-w-lg rounded-3xl border border-white/[.07] bg-background/88 backdrop-blur-2xl shadow-[0_24px_80px_rgba(0,0,0,0.55)] overflow-hidden">
         {/* Header */}
         <div className="flex items-center gap-3 px-5 py-4 border-b border-white/[.07] bg-white/5">
           <Terminal className="h-5 w-5 text-white shrink-0" />
           <div className="flex-1 min-w-0">
             <div className="text-sm font-semibold text-white truncate">Linux / VR Config</div>
-            {gameName && <div className="text-xs text-zinc-400 truncate">{gameName}</div>}
+            {gameName && <div className="text-xs text-muted-foreground truncate">{gameName}</div>}
           </div>
-          <button onClick={onClose} className="text-zinc-400 hover:text-white transition-colors">
+          <button onClick={onClose} className="text-muted-foreground hover:text-white transition-colors">
             <X className="h-4 w-4" />
           </button>
         </div>
@@ -142,14 +142,14 @@ export function GameLinuxConfigModal({ open, appid, gameName, onClose }: Props) 
         {/* Body */}
         <div className="p-5 space-y-4 max-h-[70vh] overflow-y-auto">
           {loading ? (
-            <div className="text-sm text-zinc-400 py-4 text-center">Loading…</div>
+            <div className="text-sm text-muted-foreground py-4 text-center">Loading…</div>
           ) : (
             <>
               {/* Launch Mode */}
-              <div className="space-y-2 rounded-lg border border-white/[.07] bg-zinc-900/40 p-3">
+              <div className="space-y-2 rounded-lg border border-white/[.07] bg-card/40 p-3">
                 <div>
-                  <label className="text-xs font-medium text-zinc-400 uppercase tracking-wide">Quick Presets</label>
-                  <p className="text-[11px] text-zinc-400 mt-1">Apply a launch setup, then fine-tune individual overrides below.</p>
+                  <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Quick Presets</label>
+                  <p className="text-[11px] text-muted-foreground mt-1">Apply a launch setup, then fine-tune individual overrides below.</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {LINUX_PRESETS.map((preset) => (
@@ -157,7 +157,7 @@ export function GameLinuxConfigModal({ open, appid, gameName, onClose }: Props) 
                       key={preset.id}
                       type="button"
                       onClick={() => { void applyPreset(preset.id) }}
-                      className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-zinc-200 transition-colors hover:bg-white/10"
+                      className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-foreground/90 transition-colors hover:bg-white/10"
                       title={preset.description}
                     >
                       {preset.label}
@@ -167,7 +167,7 @@ export function GameLinuxConfigModal({ open, appid, gameName, onClose }: Props) 
               </div>
 
               <div className="space-y-1.5">
-                <label className="text-xs font-medium text-zinc-400 uppercase tracking-wide">Launch Mode</label>
+                <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Launch Mode</label>
                 <Select
                   value={config.launchMode || 'inherit'}
                   onValueChange={(v) => update({ launchMode: v as LinuxPerGameLaunchMode })}
@@ -187,7 +187,7 @@ export function GameLinuxConfigModal({ open, appid, gameName, onClose }: Props) 
 
               {/* Wine Binary */}
               <div className="space-y-1.5">
-                <label className="text-xs font-medium text-zinc-400 uppercase tracking-wide">Wine Binary <span className="normal-case text-zinc-400/60">(overrides global)</span></label>
+                <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Wine Binary <span className="normal-case text-muted-foreground/60">(overrides global)</span></label>
                 <div className="flex gap-2">
                   <Input
                     value={config.winePath || ''}
@@ -204,7 +204,7 @@ export function GameLinuxConfigModal({ open, appid, gameName, onClose }: Props) 
 
               {/* Proton Script */}
               <div className="space-y-1.5">
-                <label className="text-xs font-medium text-zinc-400 uppercase tracking-wide">Proton Script <span className="normal-case text-zinc-400/60">(overrides global)</span></label>
+                <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Proton Script <span className="normal-case text-muted-foreground/60">(overrides global)</span></label>
                 <div className="flex gap-2">
                   <Input
                     value={config.protonPath || ''}
@@ -221,7 +221,7 @@ export function GameLinuxConfigModal({ open, appid, gameName, onClose }: Props) 
 
               {/* WINEPREFIX */}
               <div className="space-y-1.5">
-                <label className="text-xs font-medium text-zinc-400 uppercase tracking-wide">WINEPREFIX <span className="normal-case text-zinc-400/60">(overrides global)</span></label>
+                <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">WINEPREFIX <span className="normal-case text-muted-foreground/60">(overrides global)</span></label>
                 <div className="flex gap-2">
                   <Input
                     value={config.winePrefix || ''}
@@ -238,7 +238,7 @@ export function GameLinuxConfigModal({ open, appid, gameName, onClose }: Props) 
 
               {/* Proton Prefix */}
               <div className="space-y-1.5">
-                <label className="text-xs font-medium text-zinc-400 uppercase tracking-wide">Proton Prefix <span className="normal-case text-zinc-400/60">(STEAM_COMPAT_DATA_PATH)</span></label>
+                <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Proton Prefix <span className="normal-case text-muted-foreground/60">(STEAM_COMPAT_DATA_PATH)</span></label>
                 <div className="flex gap-2">
                   <Input
                     value={config.protonPrefix || ''}
@@ -251,14 +251,14 @@ export function GameLinuxConfigModal({ open, appid, gameName, onClose }: Props) 
                     <FolderOpen className="h-4 w-4" />
                   </Button>
                 </div>
-                <p className="text-[10px] text-zinc-400/60">
+                <p className="text-[10px] text-muted-foreground/60">
                   Leave empty to use automatic per-game prefix (~/.local/share/uc-proton/{appid})
                 </p>
               </div>
 
               {/* VR Override */}
               <div className="space-y-1.5">
-                <label className="text-xs font-medium text-zinc-400 uppercase tracking-wide">VR Support</label>
+                <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">VR Support</label>
                 <Select
                   value={config.vrEnabled === true ? 'on' : config.vrEnabled === false ? 'off' : 'inherit'}
                   onValueChange={(v) => update({ vrEnabled: v === 'on' ? true : v === 'off' ? false : undefined })}
@@ -277,7 +277,7 @@ export function GameLinuxConfigModal({ open, appid, gameName, onClose }: Props) 
               {/* XR Runtime JSON override */}
               {config.vrEnabled !== false && (
                 <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-zinc-400 uppercase tracking-wide">XR_RUNTIME_JSON <span className="normal-case text-zinc-400/60">(overrides global)</span></label>
+                  <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">XR_RUNTIME_JSON <span className="normal-case text-muted-foreground/60">(overrides global)</span></label>
                   <Input
                     value={config.vrXrRuntimeJson || ''}
                     onChange={(e) => setConfig({ ...config, vrXrRuntimeJson: e.target.value })}
@@ -291,8 +291,8 @@ export function GameLinuxConfigModal({ open, appid, gameName, onClose }: Props) 
               {/* Extra env vars */}
               <div className="space-y-1.5">
                 <div className="flex items-center gap-1.5">
-                  <Cpu className="h-3.5 w-3.5 text-zinc-400" />
-                  <label className="text-xs font-medium text-zinc-400 uppercase tracking-wide">Extra env vars <span className="normal-case text-zinc-400/60">(appended to global)</span></label>
+                  <Cpu className="h-3.5 w-3.5 text-muted-foreground" />
+                  <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Extra env vars <span className="normal-case text-muted-foreground/60">(appended to global)</span></label>
                 </div>
                 <textarea
                   value={config.extraEnv || ''}
@@ -300,17 +300,17 @@ export function GameLinuxConfigModal({ open, appid, gameName, onClose }: Props) 
                   onBlur={() => save(config)}
                   rows={3}
                   placeholder={"DXVK_HUD=fps\nWINEDEBUG=-all"}
-                  className="w-full rounded-md border border-input bg-[#09090b] px-3 py-2 text-xs font-mono text-zinc-100 placeholder:text-zinc-400 focus:outline-none focus:ring-1 focus:ring-ring resize-y"
+                  className="w-full rounded-md border border-input bg-[#09090b] px-3 py-2 text-xs font-mono text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring resize-y"
                 />
               </div>
 
               {/* SLSteam section */}
-              <div className="rounded-lg border border-white/[.07] bg-zinc-900/30 p-3 space-y-3">
+              <div className="rounded-lg border border-white/[.07] bg-card/30 p-3 space-y-3">
                 <div className="flex items-center gap-2 flex-wrap">
-                  <FlaskConical className="h-3.5 w-3.5 text-zinc-400" />
+                  <FlaskConical className="h-3.5 w-3.5 text-muted-foreground" />
                   <span className="text-xs font-medium">SLSteam</span>
                   {slsSteamGlobal !== null && (
-                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full border ${slsSteamGlobal.found ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' : 'bg-zinc-800/30 text-zinc-400 border-white/[.07]'}`}>
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full border ${slsSteamGlobal.found ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' : 'bg-secondary/30 text-muted-foreground border-white/[.07]'}`}>
                       {slsSteamGlobal.found ? 'installed' : 'not installed'}
                     </span>
                   )}
@@ -320,7 +320,7 @@ export function GameLinuxConfigModal({ open, appid, gameName, onClose }: Props) 
                     </span>
                   )}
                 </div>
-                <p className="text-xs text-zinc-400">
+                <p className="text-xs text-muted-foreground">
                   SLSteam enables Steam overlay and features for non-Steam games. Requires SLSteam to be installed and enabled in global settings.
                 </p>
                 <div className="flex items-center gap-2 flex-wrap">
@@ -357,11 +357,11 @@ export function GameLinuxConfigModal({ open, appid, gameName, onClose }: Props) 
 
         {/* Footer */}
         <div className="flex items-center justify-between gap-2 px-5 py-3 border-t border-white/[.07] bg-white/5">
-          <Button variant="ghost" size="sm" className="text-xs text-zinc-400" onClick={handleReset} disabled={saving}>
+          <Button variant="ghost" size="sm" className="text-xs text-muted-foreground" onClick={handleReset} disabled={saving}>
             Reset to global defaults
           </Button>
           <div className="flex gap-2">
-            {saving && <span className="text-xs text-zinc-400 self-center">Saving…</span>}
+            {saving && <span className="text-xs text-muted-foreground self-center">Saving…</span>}
             <Button size="sm" onClick={onClose}>Done</Button>
           </div>
         </div>

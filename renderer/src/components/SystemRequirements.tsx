@@ -94,10 +94,10 @@ export function SystemRequirements({ appid }: SystemRequirementsProps) {
 
   if (loading) {
     return (
-      <div className="p-8 rounded-3xl bg-zinc-900/60 border border-white/[.07] backdrop-blur-md shadow-xl space-y-4">
+      <div className="p-8 rounded-3xl bg-card/60 border border-white/[.07] backdrop-blur-md shadow-xl space-y-4">
         <div className="udl-skeleton h-3 w-36 rounded" />
         <div className="grid md:grid-cols-2 gap-4">
-          <div className="rounded-2xl bg-zinc-800/50 border border-white/[.07] p-5 space-y-2">
+          <div className="rounded-2xl bg-secondary/50 border border-white/[.07] p-5 space-y-2">
             <div className="udl-skeleton h-2.5 w-16 rounded mb-3" />
             <div className="udl-skeleton h-2.5 w-full rounded" />
             <div className="udl-skeleton h-2.5 w-5/6 rounded" />
@@ -105,7 +105,7 @@ export function SystemRequirements({ appid }: SystemRequirementsProps) {
             <div className="udl-skeleton h-2.5 w-full rounded" />
             <div className="udl-skeleton h-2.5 w-3/4 rounded" />
           </div>
-          <div className="rounded-2xl bg-zinc-800/50 border border-white/[.07] p-5 space-y-2">
+          <div className="rounded-2xl bg-secondary/50 border border-white/[.07] p-5 space-y-2">
             <div className="udl-skeleton h-2.5 w-20 rounded mb-3" />
             <div className="udl-skeleton h-2.5 w-full rounded" />
             <div className="udl-skeleton h-2.5 w-5/6 rounded" />
@@ -132,48 +132,48 @@ export function SystemRequirements({ appid }: SystemRequirementsProps) {
   }
 
   return (
-    <div className="p-8 rounded-3xl bg-zinc-900/60 border border-white/[.07] backdrop-blur-md shadow-xl space-y-4">
+    <div className="p-8 rounded-3xl bg-card/60 border border-white/[.07] backdrop-blur-md shadow-xl space-y-4">
       <div className="flex items-center justify-between gap-3">
         <h3 className="text-xs font-bold text-white uppercase tracking-widest">System Requirements</h3>
         {/* Pill only renders when both platforms are published. With a single
             platform we collapse to a static label so it's still clear which
             OS the visible numbers describe — Steam does the same thing. */}
         {hasWindows && hasLinux ? (
-          <div className="inline-flex items-center gap-0.5 rounded-full border border-white/[.07] bg-zinc-900/60 p-0.5 text-[10px]">
+          <div className="inline-flex items-center gap-0.5 rounded-full border border-white/[.07] bg-card/60 p-0.5 text-[10px]">
             <button
               type="button"
               onClick={() => setOverridePlatform("windows")}
-              className={`px-2.5 py-1 rounded-full transition ${selectedPlatform === "windows" ? "bg-zinc-700 text-white" : "text-zinc-400 hover:text-zinc-200"}`}
+              className={`px-2.5 py-1 rounded-full transition ${selectedPlatform === "windows" ? "bg-zinc-700 text-white" : "text-muted-foreground hover:text-foreground/90"}`}
               title="Show Windows requirements"
             >Windows</button>
             <button
               type="button"
               onClick={() => setOverridePlatform("linux")}
-              className={`px-2.5 py-1 rounded-full transition ${selectedPlatform === "linux" ? "bg-zinc-700 text-white" : "text-zinc-400 hover:text-zinc-200"}`}
+              className={`px-2.5 py-1 rounded-full transition ${selectedPlatform === "linux" ? "bg-zinc-700 text-white" : "text-muted-foreground hover:text-foreground/90"}`}
               title="Show Linux requirements"
             >Linux</button>
           </div>
         ) : (
-          <span className="rounded-full border border-white/10 bg-white/[.04] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
+          <span className="rounded-full border border-white/10 bg-white/[.04] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
             {selectedPlatform === "linux" ? "Linux" : "Windows"}
           </span>
         )}
       </div>
       <div className="grid md:grid-cols-2 gap-4">
         {hasMeaningfulHtml(active.minimum, "Minimum") && (
-          <div className="rounded-2xl bg-zinc-800/50 border border-white/[.07] p-5">
-            <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 mb-3">Minimum</p>
+          <div className="rounded-2xl bg-secondary/50 border border-white/[.07] p-5">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/80 mb-3">Minimum</p>
             <div
-              className="text-xs text-zinc-400 leading-relaxed [&_strong]:text-zinc-200 [&_strong]:font-semibold [&_ul]:list-disc [&_ul]:pl-4 [&_ul]:mt-1 [&_li]:mt-1"
+              className="text-xs text-muted-foreground leading-relaxed [&_strong]:text-foreground/90 [&_strong]:font-semibold [&_ul]:list-disc [&_ul]:pl-4 [&_ul]:mt-1 [&_li]:mt-1"
               dangerouslySetInnerHTML={{ __html: minHtml }}
             />
           </div>
         )}
         {hasMeaningfulHtml(active.recommended, "Recommended") && (
-          <div className="rounded-2xl bg-zinc-800/50 border border-white/[.07] p-5">
-            <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 mb-3">Recommended</p>
+          <div className="rounded-2xl bg-secondary/50 border border-white/[.07] p-5">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/80 mb-3">Recommended</p>
             <div
-              className="text-xs text-zinc-400 leading-relaxed [&_strong]:text-zinc-200 [&_strong]:font-semibold [&_ul]:list-disc [&_ul]:pl-4 [&_ul]:mt-1 [&_li]:mt-1"
+              className="text-xs text-muted-foreground leading-relaxed [&_strong]:text-foreground/90 [&_strong]:font-semibold [&_ul]:list-disc [&_ul]:pl-4 [&_ul]:mt-1 [&_li]:mt-1"
               dangerouslySetInnerHTML={{ __html: recHtml }}
             />
           </div>

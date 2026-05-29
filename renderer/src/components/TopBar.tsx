@@ -145,7 +145,7 @@ export function TopBar({ onOpenMenu }: TopBarProps) {
         style={hasWindowControls ? dragRegion : undefined}
       >
         <nav
-          className="mx-auto flex h-[60px] w-full max-w-6xl items-center gap-2 rounded-full border border-white/[.10] bg-zinc-950/72 px-2 py-2 shadow-[0_10px_32px_-12px_rgba(0,0,0,0.55),inset_0_1px_0_rgba(255,255,255,0.04)] backdrop-blur-2xl supports-[backdrop-filter]:bg-zinc-950/60"
+          className="mx-auto flex h-[60px] w-full max-w-6xl items-center gap-2 rounded-full border border-border bg-background/72 px-2 py-2 shadow-[0_10px_32px_-12px_rgba(0,0,0,0.55),inset_0_1px_0_rgba(255,255,255,0.04)] backdrop-blur-2xl supports-[backdrop-filter]:bg-background/60"
           style={hasWindowControls ? dragRegion : undefined}
         >
           {/* Mobile Menu Button */}
@@ -154,7 +154,7 @@ export function TopBar({ onOpenMenu }: TopBarProps) {
             aria-label="Open navigation"
             onClick={onOpenMenu}
             style={noDragRegion}
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/[.10] bg-white/[0.04] text-zinc-400 transition hover:bg-white/[0.08] hover:text-white active:scale-95 md:hidden"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border bg-secondary/40 text-muted-foreground transition hover:bg-secondary/80 hover:text-foreground active:scale-95 md:hidden"
           >
             <Menu className="h-4.5 w-4.5" />
           </button>
@@ -164,13 +164,13 @@ export function TopBar({ onOpenMenu }: TopBarProps) {
             onClick={handleLogoNav}
             aria-label="Go to home"
             style={noDragRegion}
-            className="hidden h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white text-black shadow-md transition-all hover:scale-[1.03] hover:bg-zinc-200 active:scale-95 md:flex"
+            className="hidden h-11 w-11 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-md transition-opacity hover:opacity-80 active:scale-95 md:flex"
           >
             <LogoStaticDark className="h-7 w-7" />
           </button>
 
           {/* Desktop Navigation Controls */}
-          <div className="hidden h-5 w-px bg-white/[.08] md:block" />
+          <div className="hidden h-5 w-px bg-secondary/80 md:block" />
 
           <div className="hidden items-center gap-1 md:flex" style={noDragRegion}>
             <button
@@ -180,8 +180,8 @@ export function TopBar({ onOpenMenu }: TopBarProps) {
               className={cn(
                 "flex h-9 w-9 items-center justify-center rounded-full transition-all active:scale-95",
                 canGoBack
-                  ? "text-zinc-400 hover:bg-white/[.08] hover:text-zinc-100"
-                  : "cursor-default text-zinc-700"
+                  ? "text-muted-foreground hover:bg-secondary/80 hover:text-foreground"
+                  : "cursor-default text-muted-foreground/40"
               )}
               aria-label="Go back"
             >
@@ -190,7 +190,7 @@ export function TopBar({ onOpenMenu }: TopBarProps) {
             <button
               type="button"
               onClick={handleForward}
-              className="flex h-9 w-9 items-center justify-center rounded-full text-zinc-700 transition-all hover:bg-white/[.08] hover:text-zinc-300 active:scale-95"
+              className="flex h-9 w-9 items-center justify-center rounded-full text-muted-foreground/40 transition-all hover:bg-secondary/80 hover:text-foreground/80 active:scale-95"
               aria-label="Go forward"
             >
               <ChevronRight className="h-4.5 w-4.5" strokeWidth={2.5} />
@@ -198,7 +198,7 @@ export function TopBar({ onOpenMenu }: TopBarProps) {
             <button
               type="button"
               onClick={handleRefresh}
-              className="flex h-9 w-9 items-center justify-center rounded-full text-zinc-600 transition-all hover:bg-white/[.08] hover:text-zinc-200 active:scale-95"
+              className="flex h-9 w-9 items-center justify-center rounded-full text-muted-foreground/60 transition-all hover:bg-secondary/80 hover:text-foreground/90 active:scale-95"
               aria-label="Refresh"
             >
               <RotateCw className={cn("h-3.5 w-3.5", isRefreshing && "animate-spin")} strokeWidth={2.5} />
@@ -208,17 +208,17 @@ export function TopBar({ onOpenMenu }: TopBarProps) {
           {/* Page Title Section */}
           <div className="min-w-0 flex-1 md:px-2">
             <div className="md:hidden">
-              <div className="truncate text-[10px] font-semibold uppercase tracking-[0.22em] text-zinc-500">{chrome.eyebrow}</div>
-              <div className="truncate text-sm font-semibold text-zinc-100">{chrome.title}</div>
+              <div className="truncate text-[10px] font-semibold uppercase tracking-[0.22em] text-muted-foreground/80">{chrome.eyebrow}</div>
+              <div className="truncate text-sm font-semibold text-foreground">{chrome.title}</div>
             </div>
             <div className="hidden md:flex md:justify-center">
               <div
-                className="flex min-w-0 max-w-full items-center gap-2.5 rounded-full border border-white/[.07] bg-gradient-to-b from-white/[.04] to-white/[.015] px-4 py-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04),0_1px_0_rgba(0,0,0,0.25)] transition-colors hover:border-white/[.10]"
+                className="flex min-w-0 max-w-full items-center gap-2.5 rounded-full border border-white/[.07] bg-gradient-to-b from-white/[.04] to-white/[.015] px-4 py-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04),0_1px_0_rgba(0,0,0,0.25)] transition-colors hover:border-border"
                 style={hasWindowControls ? dragRegion : undefined}
               >
-                <span className="shrink-0 text-[10px] font-semibold uppercase tracking-[0.22em] text-zinc-500">{chrome.eyebrow}</span>
-                <span className="h-3 w-px bg-white/[.08]" aria-hidden="true" />
-                <span className="truncate text-[13px] font-semibold text-zinc-100">{chrome.title}</span>
+                <span className="shrink-0 text-[10px] font-semibold uppercase tracking-[0.22em] text-muted-foreground/80">{chrome.eyebrow}</span>
+                <span className="h-3 w-px bg-secondary/80" aria-hidden="true" />
+                <span className="truncate text-[13px] font-semibold text-foreground">{chrome.title}</span>
               </div>
             </div>
           </div>
@@ -229,13 +229,13 @@ export function TopBar({ onOpenMenu }: TopBarProps) {
             variant="outline"
             onClick={handleSearchShortcut}
             style={noDragRegion}
-            className="hidden h-9 min-w-[220px] justify-between rounded-full border border-white/[.10] bg-black/20 px-4 text-zinc-400 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] backdrop-blur-xl hover:border-white/[.14] hover:bg-white/[.06] hover:text-zinc-100 active:scale-[0.98] md:flex"
+            className="hidden h-9 min-w-[220px] justify-between rounded-full border border-border bg-black/20 px-4 text-muted-foreground shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] backdrop-blur-xl hover:border-border hover:bg-secondary/60 hover:text-foreground active:scale-[0.98] md:flex"
           >
             <span className="flex items-center gap-2">
               <Search className="h-3.5 w-3.5" />
               <span className="text-[13px]">Search...</span>
             </span>
-            <kbd className="rounded-full border border-white/[.08] bg-white/[.03] px-2 py-0.5 text-[10px] font-medium text-zinc-500">
+            <kbd className="rounded-full border border-white/[.08] bg-white/[.03] px-2 py-0.5 text-[10px] font-medium text-muted-foreground/80">
               Ctrl+K
             </kbd>
           </Button>
@@ -246,21 +246,21 @@ export function TopBar({ onOpenMenu }: TopBarProps) {
             onClick={handleSearchShortcut}
             aria-label="Open search"
             style={noDragRegion}
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/[.10] bg-white/[0.04] text-zinc-400 transition hover:bg-white/[0.08] hover:text-white active:scale-95 md:hidden"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border bg-secondary/40 text-muted-foreground transition hover:bg-secondary/80 hover:text-foreground active:scale-95 md:hidden"
           >
             <Search className="h-4 w-4" />
           </button>
 
           {/* Account Menu */}
           {showAccountLoading ? (
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/[.10] bg-white/[0.04] text-zinc-600">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border bg-secondary/40 text-muted-foreground/60">
               <LoadingAnimated className="h-4 w-4 opacity-70" />
             </div>
           ) : (
             <Popover>
               <PopoverTrigger
                 style={noDragRegion}
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/[.10] bg-white/[0.04] p-0.5 outline-none transition hover:border-white/[.16] hover:bg-white/[0.08] focus-visible:ring-1 focus-visible:ring-white/20 active:scale-95"
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border bg-secondary/40 p-0.5 outline-none transition hover:border-border/80 hover:bg-secondary/80 focus-visible:ring-1 focus-visible:ring-white/20 active:scale-95"
                 aria-label={`${accountLabel} menu`}
               >
                 {avatarUrl ? (
@@ -270,7 +270,7 @@ export function TopBar({ onOpenMenu }: TopBarProps) {
                     className="h-8 w-8 rounded-full"
                   />
                 ) : (
-                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-zinc-800 text-zinc-500">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-secondary text-muted-foreground/80">
                     <UserRound className="h-4 w-4" />
                   </div>
                 )}
@@ -280,14 +280,14 @@ export function TopBar({ onOpenMenu }: TopBarProps) {
                 className="w-56 p-1.5"
               >
                 <div className="px-3 py-2">
-                  <div className="text-sm font-semibold text-zinc-100">{accountLabel}</div>
-                  <div className="text-[11px] text-zinc-500">{accountSubtitle}</div>
+                  <div className="text-sm font-semibold text-foreground">{accountLabel}</div>
+                  <div className="text-[11px] text-muted-foreground/80">{accountSubtitle}</div>
                 </div>
-                <div className="my-1 h-px bg-white/[.05]" />
+                <div className="my-1 h-px bg-secondary/50" />
                 <button
                   type="button"
                   onClick={() => navigate("/settings")}
-                  className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-[13px] text-zinc-400 transition hover:bg-white/[0.05] hover:text-white"
+                  className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-[13px] text-muted-foreground transition hover:bg-secondary hover:text-foreground"
                 >
                   <Settings className="h-4 w-4" />
                   Settings
@@ -298,8 +298,8 @@ export function TopBar({ onOpenMenu }: TopBarProps) {
                   disabled={accountUser ? loggingOut : loggingIn}
                   className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-[13px] transition disabled:opacity-40 ${
                     accountUser
-                      ? "text-zinc-500 hover:bg-red-500/10 hover:text-red-400"
-                      : "text-zinc-400 hover:bg-white/[0.05] hover:text-white"
+                      ? "text-muted-foreground/80 hover:bg-red-500/10 hover:text-red-400"
+                      : "text-muted-foreground hover:bg-secondary hover:text-foreground"
                   }`}
                 >
                   {accountUser ? <LogOut className="h-4 w-4" /> : <LogIn className="h-4 w-4" />}

@@ -224,12 +224,16 @@ export function CollectionDetailPage() {
 
   const handleCopyShare = async () => {
     if (!collection?.shareToken) return
-    try {
-      await navigator.clipboard.writeText(shareUrlFor(collection.shareToken))
+    // Routes through the shared toast bridge so the feedback matches every
+    // other "copied!" surface in the app. We still flip the local shareCopied
+    // flag so the button label can switch to "Copied" for ~1.6s.
+    const { copyToClipboard } = await import("@/lib/clipboard")
+    const ok = await copyToClipboard(shareUrlFor(collection.shareToken), {
+      successMessage: "Share link copied",
+    })
+    if (ok) {
       setShareCopied(true)
       window.setTimeout(() => setShareCopied(false), 1600)
-    } catch {
-      /* ignore */
     }
   }
 
@@ -405,10 +409,10 @@ export function CollectionDetailPage() {
   if (!collection && !followedCollection) {
     return (
       <div className="space-y-4">
-        <Button variant="ghost" onClick={() => navigate("/collections")} className="gap-2 text-zinc-400">
+        <Button variant="ghost" onClick={() => navigate("/collections")} className="gap-2 text-muted-foreground">
           <ArrowLeft className="h-4 w-4" /> Collections
         </Button>
-        <div className="rounded-3xl border border-white/[.07] bg-zinc-950/40 p-10 text-center text-sm text-zinc-400">
+        <div className="rounded-3xl border border-white/[.07] bg-background/40 p-10 text-center text-sm text-muted-foreground">
           Collection not found, or you don't have access.
         </div>
       </div>
@@ -419,7 +423,7 @@ export function CollectionDetailPage() {
   if (!collection && followedCollection) {
     return (
       <div className="space-y-6">
-        <Button variant="ghost" onClick={() => navigate("/collections")} className="gap-2 text-zinc-400 -ml-2">
+        <Button variant="ghost" onClick={() => navigate("/collections")} className="gap-2 text-muted-foreground -ml-2">
           <ArrowLeft className="h-4 w-4" /> Collections
         </Button>
         <CollectionBanner
@@ -433,14 +437,14 @@ export function CollectionDetailPage() {
         />
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2 min-w-0">
-            <div className="h-9 w-9 rounded-full overflow-hidden bg-zinc-800 shrink-0">
+            <div className="h-9 w-9 rounded-full overflow-hidden bg-secondary shrink-0">
               {followedCollection.owner.avatarUrl && (
                 <img src={followedCollection.owner.avatarUrl} alt="" className="h-full w-full object-cover" />
               )}
             </div>
             <div className="min-w-0">
               <div className="text-sm font-semibold text-white truncate">{ownerName}</div>
-              <div className="text-[11px] text-zinc-500">{followedCollection.gameCount} games · Following</div>
+              <div className="text-[11px] text-muted-foreground/80">{followedCollection.gameCount} games · Following</div>
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -448,7 +452,7 @@ export function CollectionDetailPage() {
               {forkBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <GitFork className="h-4 w-4" />}
               Fork
             </Button>
-            <Button variant="outline" className="rounded-full gap-2 h-9 text-zinc-300" onClick={() => setConfirmUnfollow(true)}>
+            <Button variant="outline" className="rounded-full gap-2 h-9 text-foreground/80" onClick={() => setConfirmUnfollow(true)}>
               <BellOff className="h-4 w-4" />
               Unfollow
             </Button>
@@ -461,7 +465,7 @@ export function CollectionDetailPage() {
           </div>
         )}
 
-        <div className="rounded-3xl border border-white/[.07] bg-white/[.02] p-6 text-sm text-zinc-400">
+        <div className="rounded-3xl border border-white/[.07] bg-white/[.02] p-6 text-sm text-muted-foreground">
           Followed collections show their full game list on the share page on the web. Fork to copy them
           into your own collections and view them here.
         </div>
@@ -502,7 +506,7 @@ export function CollectionDetailPage() {
       <Button
         variant="ghost"
         onClick={() => navigate("/collections")}
-        className="gap-2 text-zinc-400 -ml-2"
+        className="gap-2 text-muted-foreground -ml-2"
       >
         <ArrowLeft className="h-4 w-4" /> Collections
       </Button>
@@ -518,7 +522,7 @@ export function CollectionDetailPage() {
       {/* Owner / contributors / action row */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2 min-w-0">
-          <div className="h-9 w-9 rounded-full overflow-hidden bg-zinc-800 shrink-0">
+          <div className="h-9 w-9 rounded-full overflow-hidden bg-secondary shrink-0">
             {collection.owner?.avatarUrl ? (
               <img src={collection.owner.avatarUrl} alt="" className="h-full w-full object-cover" />
             ) : null}
@@ -527,7 +531,7 @@ export function CollectionDetailPage() {
             <div className="text-sm font-semibold text-white truncate">
               {isOwner ? "You" : ownerName}
             </div>
-            <div className="text-[11px] text-zinc-500">
+            <div className="text-[11px] text-muted-foreground/80">
               {collection.appids.length} game{collection.appids.length === 1 ? "" : "s"}
               {!collection.cloud && " · Local only"}
               {!isOwner && " · Contributor"}
@@ -540,7 +544,7 @@ export function CollectionDetailPage() {
                 return (
                   <div
                     key={c.discordId}
-                    className="h-6 w-6 rounded-full overflow-hidden bg-zinc-800 ring-2 ring-zinc-950"
+                    className="h-6 w-6 rounded-full overflow-hidden bg-secondary ring-2 ring-zinc-950"
                     title={name}
                   >
                     {c.avatarUrl ? (
@@ -550,7 +554,7 @@ export function CollectionDetailPage() {
                 )
               })}
               {contributors.length > 4 && (
-                <div className="h-6 w-6 rounded-full bg-zinc-800 ring-2 ring-zinc-950 flex items-center justify-center text-[10px] font-semibold text-zinc-300">
+                <div className="h-6 w-6 rounded-full bg-secondary ring-2 ring-zinc-950 flex items-center justify-center text-[10px] font-semibold text-foreground/80">
                   +{contributors.length - 4}
                 </div>
               )}
@@ -608,7 +612,7 @@ export function CollectionDetailPage() {
           ))}
         </div>
       ) : appids.length === 0 ? (
-        <div className="rounded-3xl border border-dashed border-white/[.07] bg-white/[.02] p-10 text-center text-sm text-zinc-400 space-y-3">
+        <div className="rounded-3xl border border-dashed border-white/[.07] bg-white/[.02] p-10 text-center text-sm text-muted-foreground space-y-3">
           <p>This collection is empty.</p>
           <Button
             variant="outline"
@@ -707,7 +711,7 @@ function NotInstalledOverlay({ onInstall }: { onInstall: () => void | Promise<vo
           layer sits above GameCard's own gradient. */}
       <div className="absolute inset-0 bg-black/55 backdrop-blur-[1px]" />
       <div className="absolute top-2 left-2">
-        <span className="inline-flex items-center gap-1 rounded-full border border-white/[.12] bg-black/60 px-2 py-0.5 text-[10px] font-semibold text-zinc-200 backdrop-blur-sm">
+        <span className="inline-flex items-center gap-1 rounded-full border border-white/[.12] bg-black/60 px-2 py-0.5 text-[10px] font-semibold text-foreground/90 backdrop-blur-sm">
           Not installed
         </span>
       </div>
@@ -725,7 +729,7 @@ function NotInstalledOverlay({ onInstall }: { onInstall: () => void | Promise<vo
             setBusy(true)
             try { await onInstall() } finally { setBusy(false) }
           }}
-          className="h-8 gap-1.5 rounded-full bg-white text-zinc-900 hover:bg-zinc-200 text-xs font-semibold shadow-lg"
+          className="h-8 gap-1.5 rounded-full bg-primary text-primary-foreground hover:brightness-110 text-xs font-semibold shadow-lg"
         >
           {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
           Install
@@ -750,13 +754,13 @@ function CollectionBanner({
 }) {
   const tiles = cover.slice(0, 6)
   return (
-    <div className="relative overflow-hidden rounded-3xl border border-white/[.07] bg-zinc-900 aspect-[5/1] sm:aspect-[6/1] min-h-[160px]">
+    <div className="relative overflow-hidden rounded-3xl border border-white/[.07] bg-card aspect-[5/1] sm:aspect-[6/1] min-h-[160px]">
       {tiles.length === 0 ? (
-        <div className="absolute inset-0 flex items-center justify-center text-zinc-700">
+        <div className="absolute inset-0 flex items-center justify-center text-muted-foreground/40">
           <Layers3 className="h-12 w-12" />
         </div>
       ) : (
-        <div className="absolute inset-0 grid grid-cols-3 sm:grid-cols-6 grid-rows-1 gap-px bg-zinc-950">
+        <div className="absolute inset-0 grid grid-cols-3 sm:grid-cols-6 grid-rows-1 gap-px bg-background">
           {tiles.map((src, idx) => (
             <div key={`${src}-${idx}`} className="relative overflow-hidden">
               <img
@@ -786,7 +790,7 @@ function CollectionBanner({
             </Badge>
           )}
           {!isLocal && !isShared && (
-            <Badge variant="outline" className="rounded-full text-[10px] text-zinc-400">
+            <Badge variant="outline" className="rounded-full text-[10px] text-muted-foreground">
               <Cloud className="h-3 w-3 mr-1" />
               Cloud
             </Badge>

@@ -1,5 +1,68 @@
 # Changelog
+## v2.5.0 — Themes, Tools & Infrastructure
 
+A major quality-of-life release centred on UI personalisation, per-game tooling, and a rewritten download backend. Every page now inherits a live token-based theme, the download engine is a proper standalone class, and a first-run onboarding flow makes sure new users land somewhere useful.
+
+### Custom Themes & Appearance
+
+- **Full theme engine** — a token-based CSS-variable system (`lib/themes/`) with preset themes, schema versioning, encode/decode for shareable theme codes, contrast validation, and per-token font selection from a curated font registry.
+- **Appearance settings tab** — new Settings → Appearance section (deep-linkable via `?section=appearance`) with theme cards showing colour swatches, active-state indicators, and a context-menu for Edit / Duplicate / Export / Publish / Delete per theme.
+- **Theme editor** — full per-token colour picker built with memoised `ColorRow` components and rAF-coalesced updates so dragging a picker doesn't stutter even across all 28 CSS tokens. Tokens are grouped into Surface / Accent / Neutral / Danger / Sidebar panels. Live preview is applied instantly via CSS variable injection.
+- **Theme import/export** — themes can be exported as a compact encoded string and re-imported on any device. Import validates schema and contrast before adding to the library.
+- **Community theme browser** — in-app gallery backed by `/api/themes` with sort-by-popular / sort-by-new, search, one-click install with install-count display, and persistence of installed community themes in `ucSettings` so they survive restarts.
+- **Theme publishing** — custom themes can be published to the community gallery from within the editor.
+- **`useActiveTheme` / `useCustomThemes` hooks** — reactive hooks keep theme selection and the custom-theme library in sync across tabs and restarts via `localStorage` events and `ucSettings.onChanged`.
+- **UC+ theme slots** — free accounts get 10 custom theme slots; UC+ members get 100.
+
+### Per-Game Tools (Game Detail Page)
+
+- **Game notes panel** (`GameNotesPanel`) — per-game scratchpad that persists locally to `libraryGameMeta[appid].notes` for offline access and syncs to `/api/account/game-notes` (debounced 600ms + on blur). Shows sync state (cloud / local-only / anonymous).
+- **Playtime sparkline** (`PlaytimeChart`) — 30-day daily bar chart fetched from `/api/playtime/chart`. Shows hover tooltip with session count. Hidden when no sessions are recorded for the game.
+- **Per-game launch options** (`LaunchOptionsModal`) — Steam-style custom launch arguments persisted under `settings.gameLaunchArgs[appid]` and appended to the process argv at spawn.
+
+### Keyboard Shortcuts
+
+- **Rebindable keyboard shortcuts** — `use-keyboard-shortcuts.ts` is rewritten with a `SHORTCUT_DEFINITIONS` registry shared across the handler, the rebind UI, and the cheat-sheet dialog. Every shortcut stores a user-chosen binding in `ucSettings` and the module-level cache is invalidated on change so bindings take effect immediately.
+- **Keyboard shortcuts dialog** (`KeyboardShortcutsDialog`) — press `?` anywhere outside a text field to open an overlay listing every action with its current binding (default or custom). Renderable binding strings show individual `<kbd>` caps.
+- **Keybindings panel** (`KeybindingsPanel`) — new Settings section for rebinding each shortcut; persists to `ucSettings`.
+
+### Onboarding & What's New
+
+- **First-run onboarding modal** (`OnboardingModal`) — four-step flow (Welcome → Discord sign-in → Install drive → First game). Fires once per device on first launch (keyed to `uc_onboarding_completed_v1`), skips if already completed, and can be re-opened via the `uc_open_onboarding` window event for a future "Walk me through the launcher again" settings entry.
+- **What's New modal** (`WhatsNewModal`) — auto-opens after an update when the current version is higher than `lastSeenWhatsNewVersion` in settings. Parses `CHANGELOG.md` at runtime as the single source of truth — no separate data file. Highlights are classified as `feature` / `fix` / `polish` with matching icons and accent colours. Re-openable via the `uc_open_whats_new` event.
+
+### Download Engine
+
+- **Standalone download engine** (`electron/download-engine.cjs`) — the ad-hoc download logic in `main.cjs` has been extracted into a proper `DownloadEngine` `EventEmitter` class. It owns the queue, the active slot, pause/resume/cancel, and the `.ucresume` partial-file hardlink strategy. Sidecar metadata files (cover art, screenshots, JSON manifests) are detected by stem and extension and never mistaken for resumable partials.
+
+### Running-Games Tracking
+
+- **Module-level running-games cache** (`use-running-games.ts`) — a singleton `Set` hydrated by one IPC round-trip on first subscription and kept live by `ucPresence.onChanged` push events. All `GameCard` components read the same Set so there's no per-card polling. Session start times are tracked for every appid so elapsed-session durations are available synchronously.
+
+### Library & Storage
+
+- **Disk usage breakdown** (`DiskUsageBreakdown`) — shows total bytes used by all installed games plus a sorted proportional-bar list of the biggest contributors. Reads from manifest `sizeBytes` (no filesystem walk). Updates on `uc_game_installed` events. Mountable in Library footer, Settings → Downloads, or a sidebar.
+- **Installed-games sync hook** (`use-installed-games-sync.ts`) — keeps the in-memory installed-games list in sync with `ucSettings` without a full context re-render on every mutation.
+
+### UC+ Integration
+
+- **UC+ panel in Settings** (`UcPlusPanel`) — native claim-code flow (Ko-fi webhook → server-side activation). Shows subscription status, expiry date, days-remaining countdown, copy-code button, and a refresh action. Previously required bouncing to the website.
+
+### Settings Restructuring
+
+- Settings now has a full sidebar navigation with nine sections: Account, Downloads, Game Launch, Overlay, Controller, System Profile, **Appearance** (new), Advanced, and **Membership / UC+** (new). Each section is deep-linkable via `?section=<id>`.
+
+### Misc Fixes & Improvements
+
+- **Image failure cache** (`lib/image-failure-cache.ts`) — failed CDN image URLs are cached in memory so the same broken URL doesn't trigger repeated network requests per render cycle.
+- **Game detail prefetch** (`lib/game-detail-prefetch.ts`) — preloads game-detail API responses on hover so the page transition feels instant.
+- **RPC game cache** (`lib/rpc-game-cache.ts`) — Discord Rich Presence game-art lookups are memoised to avoid redundant API calls per status change.
+- **NSFW reveal hook** (`use-nsfw-reveal.ts`) — per-session NSFW content reveal tracking, prevents the confirmation prompt re-appearing within the same app session.
+- **Pause-on-launch hook** (`use-pause-on-launch.ts`) — pauses active downloads when a game launches to free bandwidth, resumes when the game exits.
+- **RPC game mute hook** (`use-rpc-game-mute.ts`) — per-game opt-out of Discord Rich Presence presence, persisted in `ucSettings`.
+- **`ThemeBoundary` component** — error boundary wrapping theme application; falls back to the default preset if a custom theme fails to apply rather than crashing the renderer.
+- **`EmptyState` component** — shared empty-state illustration used consistently across Library, Wishlist, Collections, and Search pages.
+- **`media-image` UI primitive** — image component with built-in failure-cache integration, skeleton loading state, and crossfade transition.
 ## v2.3.0
 
 ### Aura color effect

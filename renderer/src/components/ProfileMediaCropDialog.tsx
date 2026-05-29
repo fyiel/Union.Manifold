@@ -197,10 +197,10 @@ export function ProfileMediaCropDialog({ open, kind, file, onOpenChange, onApply
         </DialogHeader>
 
         <div className="space-y-4">
-          <div className="rounded-xl border border-white/[.07] bg-zinc-900/50 p-4">
-            <p className="mb-2 text-xs text-zinc-400">Live preview</p>
+          <div className="rounded-xl border border-white/[.07] bg-card/50 p-4">
+            <p className="mb-2 text-xs text-muted-foreground">Live preview</p>
             <div
-              className={`relative mx-auto overflow-hidden border border-zinc-700/70 bg-zinc-950/70 ${kind === "avatar" ? "rounded-full" : "rounded-xl"}`}
+              className={`relative mx-auto overflow-hidden border border-border/70 bg-background/70 ${kind === "avatar" ? "rounded-full" : "rounded-xl"}`}
               style={{ width: PREVIEW_W, height: PREVIEW_H }}
             >
               {sourceUrl && (
@@ -221,21 +221,21 @@ export function ProfileMediaCropDialog({ open, kind, file, onOpenChange, onApply
 
           <div className="space-y-3">
             <div>
-              <div className="mb-1 flex items-center justify-between text-xs text-zinc-400">
+              <div className="mb-1 flex items-center justify-between text-xs text-muted-foreground">
                 <span>Zoom</span>
                 <span>{zoom.toFixed(2)}x</span>
               </div>
               <Slider value={[zoom]} min={minZoom} max={3} step={0.01} onValueChange={(v) => setZoom(v[0] ?? minZoom)} />
             </div>
             <div>
-              <div className="mb-1 flex items-center justify-between text-xs text-zinc-400">
+              <div className="mb-1 flex items-center justify-between text-xs text-muted-foreground">
                 <span>Horizontal</span>
                 <span>{panX}%</span>
               </div>
               <Slider value={[panX]} min={-100} max={100} step={1} onValueChange={(v) => setPanX(Math.round(v[0] ?? 0))} />
             </div>
             <div>
-              <div className="mb-1 flex items-center justify-between text-xs text-zinc-400">
+              <div className="mb-1 flex items-center justify-between text-xs text-muted-foreground">
                 <span>Vertical</span>
                 <span>{panY}%</span>
               </div>

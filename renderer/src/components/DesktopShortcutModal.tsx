@@ -38,16 +38,16 @@ export function DesktopShortcutModal({
             Create Desktop Shortcut?
           </DialogTitle>
           <DialogDescription className="text-left pt-2">
-            Would you like to create a desktop shortcut for <span className="font-semibold text-zinc-100">{gameName}</span>? This will allow you to launch the game directly from your desktop.
+            Would you like to create a desktop shortcut for <span className="font-semibold text-foreground">{gameName}</span>? This will allow you to launch the game directly from your desktop.
           </DialogDescription>
         </DialogHeader>
-        <div className="rounded-2xl border border-white/[.07] bg-zinc-800/50 px-4 py-3 flex items-center gap-3">
+        <div className="rounded-2xl border border-white/[.07] bg-secondary/50 px-4 py-3 flex items-center gap-3">
           <Checkbox
             id="always-create-shortcut"
             checked={alwaysCreate}
             onCheckedChange={(checked) => setAlwaysCreate(checked === true)}
           />
-          <Label htmlFor="always-create-shortcut" className="text-sm text-zinc-200 cursor-pointer leading-snug">
+          <Label htmlFor="always-create-shortcut" className="text-sm text-foreground/90 cursor-pointer leading-snug">
             Always create shortcuts on desktop
           </Label>
         </div>

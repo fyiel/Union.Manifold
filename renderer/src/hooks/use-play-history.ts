@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { apiFetch } from "@/lib/api"
+import { removePlayHistoryEntry } from "@/lib/cloud-collections"
 
 export type PlayHistoryGame = {
   appid: string
@@ -25,6 +26,9 @@ export function usePlayHistory(limit = 20) {
   const [items, setItems] = useState<PlayHistoryGame[] | null>(null)
   const [loading, setLoading] = useState(true)
   const [authed, setAuthed] = useState<boolean | null>(null)
+  const [tick, setTick] = useState(0)
+
+  const refresh = useCallback(() => setTick((value) => value + 1), [])
 
   useEffect(() => {
     let mounted = true
@@ -73,7 +77,15 @@ export function usePlayHistory(limit = 20) {
         window.removeEventListener("focus", onChange)
       }
     }
-  }, [limit])
+  }, [limit, tick])
 
-  return { items, loading, authed }
+  const removeEntry = useCallback(async (appid: string) => {
+    // Optimistic: drop the row locally so the carousel updates immediately.
+    setItems((current) => (current ? current.filter((entry) => entry.appid !== appid) : current))
+    const ok = await removePlayHistoryEntry(appid)
+    if (!ok) refresh()
+    return ok
+  }, [refresh])
+
+  return { items, loading, authed, refresh, removeEntry }
 }

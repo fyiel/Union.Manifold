@@ -23,16 +23,77 @@ function classifyApiPath(path: string): string {
   return "other"
 }
 
+// Endpoints that legitimately return 401 when the user isn't signed in.
+// Logging those as warnings spams the diagnostic feed without surfacing
+// anything actionable — the renderer already handles unauthed state via
+// useAuth/React Query.
+const EXPECTED_UNAUTHED_PREFIXES = [
+  "/api/auth/me",
+  "/api/account/",
+  "/api/search-history",
+  "/api/notifications",
+]
+
+function isExpectedUnauthed(status: number, path: string): boolean {
+  if (status !== 401) return false
+  return EXPECTED_UNAUTHED_PREFIXES.some((prefix) => path.startsWith(prefix))
+}
+
+// Endpoints where a 404 is a legitimate "this id isn't in the catalog"
+// answer and not an infrastructure failure. The renderer presents these as
+// friendly "not found" UIs already; logging them as warnings creates noise
+// every time someone follows a deleted/stale link.
+const EXPECTED_NOT_FOUND_PATTERNS: RegExp[] = [
+  /^\/api\/games\/[^/]+$/,
+  /^\/api\/account\/game-notes\?appid=/,
+]
+
+function isExpectedNotFound(status: number, path: string): boolean {
+  if (status !== 404) return false
+  return EXPECTED_NOT_FOUND_PATTERNS.some((pattern) => pattern.test(path))
+}
+
+// When the API is briefly down (Cloudflare 5xx, DNS hiccup) every page that
+// fans out fetches produces a fresh log line. This throttles to one log per
+// path per OUTAGE_LOG_WINDOW_MS so the diagnostic file stays readable.
+const OUTAGE_LOG_WINDOW_MS = 60_000
+const outageLogTimestamps = new Map<string, number>()
+
 function logApiFailure(event: {
-  stage: "auth-fetch" | "window-fetch"
+  stage: "auth-fetch" | "window-fetch" | "auth-upload"
   path: string
   method: string
   status: number
   statusText: string
   error?: string
 }) {
+  // Silently swallow expected 401s on auth-required endpoints. They fire on
+  // every page load for signed-out users and drown the log file.
+  if (isExpectedUnauthed(event.status, event.path)) return
+  // Same treatment for 404s on per-id catalog/game-notes lookups — the
+  // renderer already handles these gracefully with a not-found UI.
+  if (isExpectedNotFound(event.status, event.path)) return
   const baseUrl = getApiBaseUrl()
   const snapshot = getApiConnectivitySnapshot()
+
+  // During a known outage (serviceReachable=false from our heartbeat, or a
+  // network-level fetch failure with status=0), log the FIRST hit per path
+  // per minute and drop the rest. The full failure detail is still on the
+  // first line so debugging an outage doesn't lose anything.
+  const isOutageHit = snapshot.serviceReachable === false || event.status === 0 || event.status === 502 || event.status === 503 || event.status === 504
+  if (isOutageHit) {
+    const key = `${event.method}:${event.path}`
+    const now = Date.now()
+    const last = outageLogTimestamps.get(key) || 0
+    if (now - last < OUTAGE_LOG_WINDOW_MS) return
+    outageLogTimestamps.set(key, now)
+    // Bound the map so a long session can't grow it without limit.
+    if (outageLogTimestamps.size > 256) {
+      const oldestKey = outageLogTimestamps.keys().next().value
+      if (oldestKey) outageLogTimestamps.delete(oldestKey)
+    }
+  }
+
   apiLogger.warn("apiFetch request failed", {
     context: "API",
     data: {
@@ -299,4 +360,89 @@ export async function fetchJson<T>(path: string, init?: RequestInit): Promise<T>
     throw new Error(detail)
   }
   return response.json() as Promise<T>
+}
+
+/**
+ * Authenticated multipart upload that works in both the launcher and a
+ * browser context. In Electron we route the upload through the
+ * `uc:auth-upload` IPC so the BrowserWindow's session cookies are
+ * applied; otherwise we fall back to a plain `fetch` with
+ * `credentials: include`. Both paths end up POSTing the same multipart
+ * payload — only the cookie source differs.
+ *
+ * Use this whenever you need to send a file to an endpoint guarded by
+ * the user session (avatar, banner, screenshot uploads, etc.). A plain
+ * `fetch(apiUrl(...), {credentials:'include'})` will appear to work in a
+ * browser but returns 401 in the launcher because the cookies live in a
+ * different session.
+ */
+export async function apiUpload(
+  path: string,
+  options: {
+    file?: File | Blob | null
+    fileName?: string
+    fileField?: string
+    fields?: Record<string, string>
+    method?: string
+  }
+): Promise<Response> {
+  const fields = options.fields || {}
+  const method = options.method || "POST"
+  const file = options.file ?? null
+  const fileName = options.fileName || (file && 'name' in (file as any) ? (file as File).name : "upload.bin")
+  const fileField = options.fileField || "file"
+
+  const canUseAuthUpload = typeof window !== "undefined" && Boolean(window.ucAuth?.upload)
+  if (canUseAuthUpload) {
+    let filePayload: { field: string; name: string; type: string; base64: string } | undefined
+    if (file) {
+      const buffer = await file.arrayBuffer()
+      const bytes = new Uint8Array(buffer)
+      let binary = ""
+      for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i])
+      const base64 = typeof btoa === "function" ? btoa(binary) : ""
+      filePayload = {
+        field: fileField,
+        name: fileName,
+        type: (file as Blob).type || "application/octet-stream",
+        base64,
+      }
+    }
+    const result = await window.ucAuth!.upload(getApiBaseUrl(), path, {
+      method,
+      fields,
+      file: filePayload,
+    })
+    setServiceReachable(!(result.status === 0 || result.statusText === "upload_failed"))
+    const bytes = result.body ? base64ToUint8Array(result.body) : new Uint8Array()
+    const rawStatus = result.status || 0
+    const safeStatus = rawStatus >= 200 && rawStatus <= 599 ? rawStatus : 503
+    if (safeStatus >= 400) {
+      logApiFailure({
+        stage: "auth-upload",
+        path,
+        method,
+        status: safeStatus,
+        statusText: result.statusText || "",
+      })
+    }
+    return new Response(bytes as any, {
+      status: safeStatus,
+      statusText: result.statusText || (safeStatus !== rawStatus ? "Network Error" : ""),
+      headers: new Headers(result.headers || []),
+    })
+  }
+
+  // Browser / fallback path — relies on cross-site cookies being available.
+  const form = new FormData()
+  for (const [key, value] of Object.entries(fields)) {
+    if (value == null) continue
+    form.append(key, String(value))
+  }
+  if (file) form.append(fileField, file, fileName)
+  return await fetch(apiUrl(path), {
+    method,
+    body: form,
+    credentials: "include",
+  })
 }

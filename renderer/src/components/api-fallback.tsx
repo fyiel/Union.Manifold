@@ -37,7 +37,7 @@ export function APIFallback({
     <div className="flex items-center justify-center p-8">
       <Card className="w-full max-w-md rounded-2xl">
         <CardHeader className="text-center p-8">
-          <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/20 to-primary/5 border border-zinc-700">
+          <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/20 to-primary/5 border border-border">
             {showOfflineMessage && !isOnline && !browserOnline ? (
               <WifiOff className="h-7 w-7 text-orange-500" />
             ) : (
@@ -85,7 +85,7 @@ export function APIFallback({
 
           {showOfflineMessage && !isOnline && (
             <div className="text-center">
-              <p className="text-sm text-zinc-400 leading-relaxed">
+              <p className="text-sm text-muted-foreground leading-relaxed">
                 {browserOnline
                   ? "Your internet connection is up, but the website or mirrors did not respond. Try again when the service is reachable."
                   : "Check your internet connection and try again when you're back online."}
@@ -95,7 +95,7 @@ export function APIFallback({
 
           {isOnline && (
             <div className="text-center">
-              <p className="text-sm text-zinc-400 leading-relaxed">
+              <p className="text-sm text-muted-foreground leading-relaxed">
                 If this problem persists, the service might be temporarily unavailable.
               </p>
             </div>
@@ -110,7 +110,7 @@ export function GamesGridSkeleton({ count = 12 }: { count?: number }) {
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-6">
       {Array.from({ length: count }).map((_, index) => (
-        <Card key={index} className="overflow-hidden rounded-2xl border border-white/[.07] bg-zinc-900/60">
+        <Card key={index} className="overflow-hidden rounded-2xl border border-white/[.07] bg-card/60">
           <div className="udl-skeleton aspect-[3/4] rounded-none" />
           <CardContent className="p-5 space-y-3">
             <div className="udl-skeleton h-4 rounded-md" />
@@ -129,10 +129,10 @@ export function GamesGridSkeleton({ count = 12 }: { count?: number }) {
 export function LoadingState({ message = "Loading..." }: { message?: string }) {
   return (
     <div className="flex flex-col items-center justify-center p-12 space-y-4">
-      <div className="relative p-6 rounded-2xl bg-gradient-to-br from-primary/20 to-primary/5 border border-zinc-700">
+      <div className="relative p-6 rounded-2xl bg-gradient-to-br from-primary/20 to-primary/5 border border-border">
         <LoadingAnimated className="h-10 w-10" />
       </div>
-      <p className="text-zinc-400 text-base">{message}</p>
+      <p className="text-muted-foreground text-base">{message}</p>
     </div>
   )
 }

@@ -1,5 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import type { Game } from "@/lib/types"
 import {
   fetchDownloadLinks,
@@ -333,19 +334,41 @@ function createSyntheticDownloadFromInstallingManifest(
           : "failed"
   const metadata = manifest?.metadata || {}
 
+  // Pull resume metadata stored by the main process on shutdown. When this
+  // exists we can rebuild a DownloadItem the user can actually resume — url,
+  // savePath, and byte counters are all needed for resumeDownload's Level 3
+  // re-resolve + createInterruptedDownload path.
+  const snapshot = manifest?.downloadSnapshot && typeof manifest.downloadSnapshot === "object"
+    ? manifest.downloadSnapshot
+    : null
+
+  const safeUrl = typeof snapshot?.url === "string" ? snapshot.url : ""
+  const safeSavePath = typeof snapshot?.savePath === "string" ? snapshot.savePath : undefined
+  const safeFilename = typeof snapshot?.filename === "string" && snapshot.filename
+    ? snapshot.filename
+    : `${safeGameFilename(metadata.name || manifest?.name || appid)}.archive`
+  const safeDownloadId = typeof snapshot?.downloadId === "string" && snapshot.downloadId
+    ? snapshot.downloadId
+    : `installing:${appid}`
+  const safeTotalBytes = Number.isFinite(Number(snapshot?.totalBytes)) ? Number(snapshot.totalBytes) : 0
+  const safeReceivedBytes = Number.isFinite(Number(snapshot?.receivedBytes)) ? Number(snapshot.receivedBytes) : 0
+  const safeHost = typeof snapshot?.host === "string" && snapshot.host ? snapshot.host : "local"
+
   return {
-    id: `installing:${appid}`,
+    id: safeDownloadId,
     appid,
     gameName: metadata.name || manifest?.name || appid,
-    host: "local",
-    url: "",
-    filename: `${safeGameFilename(metadata.name || manifest?.name || appid)}.archive`,
+    host: safeHost,
+    url: safeUrl,
+    originalUrl: safeUrl || undefined,
+    filename: safeFilename,
     status,
-    receivedBytes: 0,
-    totalBytes: 0,
+    receivedBytes: safeReceivedBytes,
+    totalBytes: safeTotalBytes,
     speedBps: 0,
     etaSeconds: null,
     extractProgress: null,
+    savePath: safeSavePath,
     startedAt: manifest?.updatedAt || Date.now(),
     error: manifest?.installError || (status === "failed" ? "Installation was interrupted. Start it again." : null),
   }
@@ -389,9 +412,14 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
   const preparingRef = useRef(new Set<string>())
   const sequenceLocksRef = useRef(new Set<string>())
   const reconcileLocksRef = useRef(new Set<string>())
+  // Prevents concurrent resumeDownload calls for the same download item.
+  // Rapid pause/resume clicks can otherwise send two resume flows in parallel
+  // which leads to Level 3 (resumeWithFreshUrl) racing against startNextQueuedPart.
+  const resumeLocksRef = useRef(new Set<string>())
   const pendingProgressRef = useRef<Map<string, DownloadUpdate>>(new Map())
   const progressFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [archiveDeletionPrompts, setArchiveDeletionPrompts] = useState<ArchiveDeletionPrompt[]>([])
+  const [archiveDontAskAgain, setArchiveDontAskAgain] = useState(false)
   const [archiveDeletionBusy, setArchiveDeletionBusy] = useState(false)
   const [archiveDeletionError, setArchiveDeletionError] = useState<string | null>(null)
 
@@ -460,7 +488,16 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
     if (typeof window === "undefined" || !persistenceReady) return
     if (persistTimerRef.current) clearTimeout(persistTimerRef.current)
     persistTimerRef.current = setTimeout(() => {
-      const snapshot = downloadsRef.current
+      // Drop synthetic-from-manifest entries before persisting. They have
+      // `host: "local"` and either no url/savePath or a placeholder id, so
+      // round-tripping them through LevelDB just creates a stale shadow that
+      // outranks the real manifest snapshot on the next launch. The manifest
+      // reconcile pass rebuilds these on every start anyway.
+      const snapshot = downloadsRef.current.filter((item) => {
+        if (item.host !== "local") return true
+        if (item.url && item.savePath) return true
+        return false
+      })
       void (async () => {
         try {
           if (window.ucDownloads?.savePersistedState) {
@@ -661,6 +698,13 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
                     manifest = { ...manifest, installStatus: "paused", installError: manifest.installError || "App closed. Resume to continue downloading." }
                   } catch {}
                 } else if (["installing", "extracting"].includes(rawStatus)) {
+                  // Note: the download phase records 'installing' too (no
+                  // dedicated 'downloading' manifest status), so the main
+                  // process's listInstalling already rewrites that to 'paused'
+                  // when there is a partial archive on disk. Trust whatever
+                  // installStatus came back here — if it's still 'installing'
+                  // or 'extracting' after that pass, the install really did
+                  // fail and we surface it as such.
                   try {
                     await window.ucDownloads?.setInstallingStatus?.(appid, "failed", "Installation was interrupted when the app closed.")
                     manifest = { ...manifest, installStatus: "failed", installError: "Installation was interrupted when the app closed." }
@@ -675,12 +719,55 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         if (cancelled) return
 
         setDownloads((prev) => {
+          // Merge by appid: if a manifest item is fresher (has url/savePath
+          // that the existing item lacks, or supersedes a "local" placeholder),
+          // promote those fields onto the existing item. This is how a stale
+          // LevelDB row with host="local" and no url gets healed by the fresh
+          // downloadSnapshot the main process wrote on shutdown.
+          const byAppid = new Map<string, DownloadItem>()
+          for (const item of prev) {
+            if (item.appid) byAppid.set(item.appid, item)
+          }
           const next = [...prev]
-          const knownAppids = new Set(prev.map((item) => item.appid))
           for (const item of hydrated) {
-            if (!item || knownAppids.has(item.appid)) continue
-            next.unshift(item)
-            knownAppids.add(item.appid)
+            if (!item || !item.appid) continue
+            const existing = byAppid.get(item.appid)
+            if (!existing) {
+              next.unshift(item)
+              byAppid.set(item.appid, item)
+              continue
+            }
+            // Prefer the manifest's freshly-written url/savePath/host/byte
+            // counters over any stale placeholders on the existing row.
+            const shouldPromoteUrl = Boolean(item.url) && !existing.url
+            const shouldPromoteSavePath = Boolean(item.savePath) && !existing.savePath
+            const shouldPromoteHost = item.host && item.host !== "local" && existing.host === "local"
+            const shouldPromoteId = item.id && !item.id.startsWith("installing:") && existing.id.startsWith("installing:")
+            const shouldPromoteTotal = Number(item.totalBytes) > 0 && !(Number(existing.totalBytes) > 0)
+            const shouldPromoteReceived = Number(item.receivedBytes) > Number(existing.receivedBytes || 0)
+            if (
+              !shouldPromoteUrl &&
+              !shouldPromoteSavePath &&
+              !shouldPromoteHost &&
+              !shouldPromoteId &&
+              !shouldPromoteTotal &&
+              !shouldPromoteReceived
+            ) {
+              continue
+            }
+            const merged: DownloadItem = {
+              ...existing,
+              ...(shouldPromoteUrl ? { url: item.url, originalUrl: item.originalUrl || item.url } : {}),
+              ...(shouldPromoteSavePath ? { savePath: item.savePath } : {}),
+              ...(shouldPromoteHost ? { host: item.host } : {}),
+              ...(shouldPromoteId ? { id: item.id } : {}),
+              ...(shouldPromoteTotal ? { totalBytes: item.totalBytes } : {}),
+              ...(shouldPromoteReceived ? { receivedBytes: item.receivedBytes } : {}),
+              filename: existing.filename || item.filename,
+            }
+            const idx = next.findIndex((entry) => entry.appid === item.appid)
+            if (idx >= 0) next[idx] = merged
+            byAppid.set(item.appid, merged)
           }
           downloadsRef.current = next
           return next
@@ -713,7 +800,14 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
   const resolveFreshResumeSource = useCallback(
     async (target: DownloadItem) => {
       if (!target.appid) return null
-      if (!SUPPORTED_DOWNLOAD_HOSTS.includes(target.host as PreferredDownloadHost)) return null
+      // A "local" host means this item came from a manifest synthetic that
+      // had no downloadSnapshot recorded (older build, or LevelDB persist
+      // never flushed). We can still rehydrate it from /api/downloads/:appid
+      // since UC.Files is the only host the app actually downloads from.
+      const isSupported = SUPPORTED_DOWNLOAD_HOSTS.includes(target.host as PreferredDownloadHost)
+      const isPlaceholderHost = target.host === "local" || !target.host
+      if (!isSupported && !isPlaceholderHost) return null
+      const effectiveHost: PreferredDownloadHost = isSupported ? (target.host as PreferredDownloadHost) : "ucfiles"
 
       try {
         const token = await requestDownloadToken(target.appid)
@@ -723,8 +817,8 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         if (linksResult.redirectUrl) {
           links = [{ url: linksResult.redirectUrl, part: null }]
         } else {
-          const selected = selectHost(linksResult.hosts, target.host as PreferredDownloadHost)
-          if (selected.host !== target.host || !selected.links.length) {
+          const selected = selectHost(linksResult.hosts, effectiveHost)
+          if (!selected.links.length) {
             return null
           }
           links = selected.links
@@ -734,7 +828,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         if (!selectedLink?.url) return null
 
         return {
-          host: target.host,
+          host: effectiveHost,
           sourceUrl: selectedLink.url,
         }
       } catch (error) {
@@ -1038,9 +1132,26 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (!window.ucDownloads?.onArchiveDeletePrompt) return
-    return window.ucDownloads.onArchiveDeletePrompt((payload) => {
+    return window.ucDownloads.onArchiveDeletePrompt(async (payload) => {
       const normalized = normalizeArchivePromptPayload(payload)
       if (!normalized) return
+
+      // Respect "don't ask again" — if the user previously opted in to
+      // auto-delete, skip the prompt and delete in the background. Re-enable
+      // by flipping `autoDeleteArchives` back to false in Settings.
+      try {
+        const autoDelete = await window.ucSettings?.get?.('autoDeleteArchives')
+        if (autoDelete === true) {
+          const safe = normalizeArchivePathList(normalized.archivePaths)
+          if (safe.length && window.ucDownloads?.deleteArchiveFiles) {
+            await window.ucDownloads.deleteArchiveFiles({ archivePaths: safe })
+          }
+          return
+        }
+      } catch {
+        // Fall through to showing the prompt on any setting lookup failure.
+      }
+
       const signature = archivePromptIdentityKey(normalized)
       setArchiveDeletionPrompts((prev) => {
         if (prev.some((entry) => archivePromptIdentityKey(entry) === signature)) return prev
@@ -1352,6 +1463,13 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
 
   const resumeDownload = useCallback(
     async (downloadId: string) => {
+      // Block concurrent resume calls for the same item.
+      if (resumeLocksRef.current.has(downloadId)) {
+        downloadLogger.info("Resume skipped: already in progress", { data: { downloadId } })
+        return
+      }
+      resumeLocksRef.current.add(downloadId)
+      try {
       const target = downloadsRef.current.find((item) => item.id === downloadId)
       if (!target) return
 
@@ -1451,6 +1569,11 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
       // Instead of restarting from byte 0, we use createInterruptedDownload with the
       // fresh URL + actual file offset so the download continues where it left off.
       if (!ok && window.ucDownloads?.start) {
+        // Hold sequenceLocksRef so startNextQueuedPart doesn't pick up the
+        // transient "queued | 0/0" update the engine emits when resumeWithFreshUrl
+        // creates a new download item, which would trigger a conflicting start call
+        // that causes the engine to pause/cancel the download.
+        if (target.appid) sequenceLocksRef.current.add(target.appid)
         try {
           // Set to "downloading" so onUpdate callbacks from the main process are not blocked
           // by terminal state protection. Preserve receivedBytes to avoid clearing the UI progress.
@@ -1570,6 +1693,10 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
                   originalUrl: freshSource?.sourceUrl || item.originalUrl || resolveUrl,
                   url: freshUrl,
                   authHeader: freshAuth,
+                  // Promote the placeholder "local" host to the real host we
+                  // just re-resolved against; otherwise the next persist run
+                  // would still get filtered out as a synthetic.
+                  host: freshSource?.host || (item.host && item.host !== "local" ? item.host : "ucfiles"),
                   status: "downloading",
                   totalBytes: resolved?.size || item.totalBytes,
                 }
@@ -1579,6 +1706,8 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         } catch (err) {
           downloadLogger.warn("Resume Level 3 failed", { data: err })
           ok = false
+        } finally {
+          if (target.appid) sequenceLocksRef.current.delete(target.appid)
         }
       }
 
@@ -1591,6 +1720,9 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         if (target.appid) {
           await window.ucDownloads?.setInstallingStatus?.(target.appid, "failed", "Resume failed. Please try again.")
         }
+      }
+      } finally {
+        resumeLocksRef.current.delete(downloadId)
       }
     },
     [resolveFreshResumeSource]
@@ -1766,13 +1898,19 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
       if (!result?.ok) {
         throw new Error(result?.error || "Failed to delete archive files")
       }
+      // Persist "don't ask again" only after a successful delete so we never
+      // silently swallow archive cleanup that the user couldn't see.
+      if (archiveDontAskAgain) {
+        try { await window.ucSettings?.set?.('autoDeleteArchives', true) } catch {}
+        setArchiveDontAskAgain(false)
+      }
       setArchiveDeletionPrompts((prev) => prev.slice(1))
     } catch (error) {
       setArchiveDeletionError(error instanceof Error ? error.message : "Failed to delete archive files")
     } finally {
       setArchiveDeletionBusy(false)
     }
-  }, [archiveDeletionPrompts])
+  }, [archiveDeletionPrompts, archiveDontAskAgain])
 
   const store = useMemo<DownloadsStore>(
     () => ({
@@ -1817,22 +1955,22 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
           {children}
           {currentArchiveDeletionPrompt && (
             <div className="fixed inset-0 z-[80] flex items-center justify-center px-4">
-              <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={() => !archiveDeletionBusy && dismissArchiveDeletionPrompt()} />
-              <div className="relative w-full max-w-lg rounded-2xl border border-white/[.08] bg-zinc-950/95 p-5 shadow-2xl">
+              <div className="absolute inset-0 bg-black/72 backdrop-blur-md" onClick={() => !archiveDeletionBusy && dismissArchiveDeletionPrompt()} />
+              <div className="relative w-full max-w-lg rounded-3xl border border-white/[.07] bg-background/88 backdrop-blur-2xl p-5 shadow-[0_24px_80px_rgba(0,0,0,0.55)]">
                 <div className="space-y-1">
                   <h3 className="text-lg font-semibold text-white">Delete installer archive?</h3>
-                  <p className="text-sm text-zinc-400">
+                  <p className="text-sm text-muted-foreground">
                     {currentArchiveDeletionPrompt.gameName || "This game"} finished installing. You can keep the installer cache for reinstalling later, or delete it now to free up space.
                   </p>
                 </div>
 
-                <div className="mt-4 rounded-xl border border-white/[.08] bg-zinc-900/70 p-4 text-sm text-zinc-200">
+                <div className="mt-4 rounded-xl border border-white/[.08] bg-card/70 p-4 text-sm text-foreground/90">
                   <div className="flex items-center justify-between gap-3">
-                    <span className="text-zinc-400">Archive size</span>
+                    <span className="text-muted-foreground">Archive size</span>
                     <span className="font-mono">{formatArchiveBytes(currentArchiveDeletionPrompt.totalBytes)}</span>
                   </div>
                   <div className="mt-2 flex items-center justify-between gap-3">
-                    <span className="text-zinc-400">Archive files</span>
+                    <span className="text-muted-foreground">Archive files</span>
                     <span className="font-mono">{currentArchiveDeletionPrompt.archivePaths.length}</span>
                   </div>
                 </div>
@@ -1843,6 +1981,18 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
                   </div>
                 ) : null}
 
+                <label className="mt-4 flex items-center gap-2 text-sm text-foreground/80 cursor-pointer select-none">
+                  <Checkbox
+                    checked={archiveDontAskAgain}
+                    onCheckedChange={(checked) => setArchiveDontAskAgain(checked === true)}
+                    disabled={archiveDeletionBusy}
+                  />
+                  <span>Don't ask again — auto-delete future archives</span>
+                </label>
+                <p className="mt-1 ml-6 text-xs text-muted-foreground/80">
+                  You can turn the prompt back on in Settings → Downloads.
+                </p>
+
                 <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
                   <Button variant="ghost" onClick={dismissArchiveDeletionPrompt} disabled={archiveDeletionBusy}>
                     Keep archive
@@ -1851,11 +2001,11 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
                     variant="outline"
                     onClick={() => currentArchiveFolderPath ? void openPath(currentArchiveFolderPath) : undefined}
                     disabled={archiveDeletionBusy || !currentArchiveFolderPath}
-                    className="border-white/[.08] text-zinc-200"
+                    className="border-white/[.08] text-foreground/90"
                   >
                     Open archives folder
                   </Button>
-                  <Button onClick={() => void deletePromptArchives()} disabled={archiveDeletionBusy} className="bg-white text-black hover:bg-zinc-200">
+                  <Button onClick={() => void deletePromptArchives()} disabled={archiveDeletionBusy} className="bg-primary text-primary-foreground hover:brightness-110">
                     {archiveDeletionBusy ? "Deleting..." : "Delete archive"}
                   </Button>
                 </div>

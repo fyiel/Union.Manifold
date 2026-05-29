@@ -44,7 +44,7 @@ const markdownComponents = {
     </code>
   ),
   pre: ({ children }: { children?: ReactNode }) => (
-    <pre className="my-3 overflow-x-auto rounded-xl border border-white/10 bg-black/30 p-3 text-[0.85rem] text-zinc-100">
+    <pre className="my-3 overflow-x-auto rounded-xl border border-white/10 bg-black/30 p-3 text-[0.85rem] text-foreground">
       {children}
     </pre>
   ),

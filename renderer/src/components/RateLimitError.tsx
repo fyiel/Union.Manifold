@@ -33,11 +33,14 @@ export function RateLimitError({
   const [copied, setCopied] = useState(false)
   const [detailsOpen, setDetailsOpen] = useState(false)
 
-  const copyErrorCode = () => {
+  const copyErrorCode = async () => {
     if (!errorCode) return
-    navigator.clipboard.writeText(errorCode)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
+    const { copyToClipboard } = await import("@/lib/clipboard")
+    const ok = await copyToClipboard(errorCode, { successMessage: "Error code copied" })
+    if (ok) {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    }
   }
 
   return (

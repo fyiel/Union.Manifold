@@ -36,11 +36,14 @@ export function ErrorMessage({
   const [copied, setCopied] = useState(false)
   const [detailsOpen, setDetailsOpen] = useState(defaultDetailsOpen)
 
-  const copyErrorCode = () => {
+  const copyErrorCode = async () => {
     if (!errorCode) return
-    navigator.clipboard.writeText(errorCode)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
+    const { copyToClipboard } = await import("@/lib/clipboard")
+    const ok = await copyToClipboard(errorCode, { successMessage: "Error code copied" })
+    if (ok) {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    }
   }
 
   const detailsContent = (
@@ -104,7 +107,7 @@ export function ErrorMessage({
             </div>
             <div>
               <CardTitle className="text-lg sm:text-xl">{title}</CardTitle>
-              <p className="mt-2 text-sm sm:text-base text-zinc-300 leading-relaxed">{message}</p>
+              <p className="mt-2 text-sm sm:text-base text-foreground/80 leading-relaxed">{message}</p>
             </div>
           </div>
         </CardHeader>

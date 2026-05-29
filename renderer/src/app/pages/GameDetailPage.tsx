@@ -11,6 +11,10 @@ import { useDownloads } from "@/context/downloads-context"
 import { apiUrl, apiFetch } from "@/lib/api"
 import { getPreferredDownloadHost, setPreferredDownloadHost, requestDownloadToken, type PreferredDownloadHost, type DownloadConfig } from "@/lib/downloads"
 import { formatNumber, hasOnlineMode, pickGameExecutable, proxyImageUrl, cn, timeAgoLong } from "@/lib/utils"
+import { rememberGameName } from "@/lib/rpc-game-cache"
+import { getPrefetchedGameDetail } from "@/lib/game-detail-prefetch"
+import { useAccountLists } from "@/hooks/use-account-lists"
+import { useRpcGameMute } from "@/hooks/use-rpc-game-mute"
 import type { Game } from "@/lib/types"
 import { useGamesData } from "@/hooks/use-games"
 import { addViewedGameToHistory, hasCookieConsent } from "@/lib/user-history"
@@ -30,10 +34,13 @@ import {
   ChevronRight,
   Download,
   Eye,
+  EyeOff,
   ExternalLink,
   Flame,
+  Heart,
   ShieldCheck,
   Settings,
+  Star,
   Trash2,
   Unlink2,
   User,
@@ -58,12 +65,16 @@ import { GameActionContextMenu, GameActionMenuPanel, type CollectionPickerEntry 
 import { useUserCollections } from "@/hooks/use-user-collections"
 import { UpdateBackupWarningModal } from "@/components/VersionConflictModal"
 import { GameLinuxConfigModal } from "@/components/GameLinuxConfigModal"
+import { LaunchOptionsModal } from "@/components/LaunchOptionsModal"
 import { gameLogger } from "@/lib/logger"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { MediaImage } from "@/components/ui/media-image"
 import { GamePageSkeleton } from "@/components/GamePageSkeleton"
 import { SystemRequirements } from "@/components/SystemRequirements"
 import { SystemRequirementsCheck } from "@/components/SystemRequirementsCheck"
 import { GameVersionStatus } from "@/components/GameVersionStatus"
+import { GameNotesPanel } from "@/components/GameNotesPanel"
+import { PlaytimeChart } from "@/components/PlaytimeChart"
 import { useAuth } from "@/hooks/useAuth"
 import { useMotionPreferences } from "@/hooks/use-motion-preferences"
 import { useImageColors } from "@/hooks/use-image-colors"
@@ -100,6 +111,8 @@ export function GameDetailPage() {
   const [authState] = useAuth()
   const { startGameDownload, resumeGroup, downloads, clearByAppid } = useDownloads()
   const { games, stats } = useGamesData()
+  const accountLists = useAccountLists()
+  const rpcMute = useRpcGameMute(params.id || null)
   // Hooks must run before any early-return branch below, so hoist motion
   // prefs up here next to the other top-level hook calls. The result is
   // only consumed by the ambient-background JSX further down.
@@ -139,10 +152,14 @@ export function GameDetailPage() {
   const [launchPreflightOpen, setLaunchPreflightOpen] = useState(false)
   const [launchPreflightResult, setLaunchPreflightResult] = useState<LaunchPreflightResult | null>(null)
   const [hostSelectorOpen, setHostSelectorOpen] = useState(false)
-  const [selectedHost, setSelectedHost] = useState<PreferredDownloadHost>("pixeldrain")
-  const [defaultHost, setDefaultHost] = useState<PreferredDownloadHost>("pixeldrain")
+  const [selectedHost, setSelectedHost] = useState<PreferredDownloadHost>("ucfiles")
+  const [defaultHost, setDefaultHost] = useState<PreferredDownloadHost>("ucfiles")
   const [downloadToken, setDownloadToken] = useState<string | null>(null)
   const [isCheckingLinks, setIsCheckingLinks] = useState(false)
+  // Tracks whether the upcoming DownloadCheckModal session should auto-
+  // confirm if every check goes green. Set when openHostSelector runs in
+  // "auto" mode; consumed by the modal once it mounts.
+  const [downloadAutoConfirm, setDownloadAutoConfirm] = useState(false)
   const [exePickerTitle, setExePickerTitle] = useState("Select executable")
   const [exePickerMessage, setExePickerMessage] = useState("We couldn't confidently detect the correct exe. Please choose the one to launch.")
   const [exePickerCurrentPath, setExePickerCurrentPath] = useState<string | null>(null)
@@ -158,6 +175,7 @@ export function GameDetailPage() {
   const [pendingForceDownload, setPendingForceDownload] = useState(false)
   const [gameStartFailedOpen, setGameStartFailedOpen] = useState(false)
   const [linuxConfigOpen, setLinuxConfigOpen] = useState(false)
+  const [launchOptionsOpen, setLaunchOptionsOpen] = useState(false)
 
   // Ref to track whether a game was just launched (cleared on manual quit)
   // Stores the expiry timestamp of the quick-exit detection window (0 = not watching)
@@ -223,12 +241,10 @@ export function GameDetailPage() {
   }, [game?.appid])
 
   const persistGameName = (id: string, name?: string | null) => {
+    // LRU-capped cache (see lib/rpc-game-cache.ts). Previously this wrote a
+    // `uc_game_name:<id>` key per game that was never cleaned up.
     if (!id || !name) return
-    try {
-      localStorage.setItem(`uc_game_name:${id}`, name)
-    } catch {
-      // ignore
-    }
+    rememberGameName(id, name)
   }
 
   useEffect(() => {
@@ -241,7 +257,30 @@ export function GameDetailPage() {
         const isExternalId = appid.startsWith('external-')
 
         if (!isExternalId) {
+          // If the GameCard's hover-intent prefetch already landed a body
+          // for this appid we render from cache immediately (no skeleton),
+          // then drop the loading flag right away. The api fetch below is
+          // skipped on a fresh hit; a stale hit still goes through.
+          const prefetched = getPrefetchedGameDetail(appid)
+          if (prefetched) {
+            setGame(prefetched)
+            persistGameName(appid, prefetched?.name)
+            window.dispatchEvent(new CustomEvent("uc_game_name", { detail: { appid, name: prefetched?.name, genres: prefetched?.genres } }))
+            setSelectedImage(prefetched.hero_image || prefetched.splash || prefetched.image)
+            setLoading(false)
+            return
+          }
           const response = await apiFetch(`/api/games/${encodeURIComponent(appid)}`)
+          if (response.status === 404) {
+            // The game id genuinely doesn't exist on the API — usually
+            // because it was removed from the catalog or the user followed
+            // a stale link. Skip the network-error retry path and show a
+            // dedicated "not found" UI; the existing manifest fallback
+            // below still kicks in for locally-installed external entries.
+            setError("not-found")
+            setLoading(false)
+            return
+          }
           if (!response.ok) {
             throw new Error(`Unable to load game (${response.status})`)
           }
@@ -565,24 +604,38 @@ export function GameDetailPage() {
 
   const openHostSelector = async () => {
     if (!game) return
-    const skipLinkCheck = await window.ucSettings?.get?.('skipLinkCheck')
+    // Three modes:
+    //   "always" — current popup-every-time behaviour (default for users
+    //              upgrading from a build where skipLinkCheck was false).
+    //   "auto"   — open the modal but auto-confirm when everything's green.
+    //              Users still see the popup whenever something matters
+    //              (dead host, low disk, sysreq fail, HV title, etc.).
+    //   "skip"   — never run the availability check, just queue immediately.
+    //
+    // We also honour the legacy `skipLinkCheck` boolean so existing settings
+    // keep working until the next time the user touches the UI.
+    let mode = await window.ucSettings?.get?.('downloadCheckMode') as ('always' | 'auto' | 'skip' | undefined)
+    if (!mode) {
+      const legacy = await window.ucSettings?.get?.('skipLinkCheck')
+      mode = legacy === true ? 'skip' : 'auto'
+    }
 
-    // If user wants to skip just the link check, show a simpler flow
-    // Otherwise run the full availability check modal
     try {
       const preferred = await getPreferredDownloadHost()
       setSelectedHost(preferred)
       setDefaultHost(preferred)
 
-      if (skipLinkCheck) {
-        // Skip availability check but still show host selector
-        setDownloadToken(null)
+      if (mode === 'skip') {
+        // Skip the popup entirely — start the download with defaults.
         setIsCheckingLinks(false)
-        setHostSelectorOpen(true)
+        await startDownload(preferred)
         return
       }
 
-      // Acquire download token for availability check
+      // Both "always" and "auto" run the availability check; "auto" tells
+      // the modal to auto-confirm when every gate clears (see
+      // autoConfirmIfGreen below).
+      setDownloadAutoConfirm(mode === 'auto')
       setIsCheckingLinks(true)
       const token = await requestDownloadToken(game.appid)
       setDownloadToken(token)
@@ -823,8 +876,33 @@ export function GameDetailPage() {
       return (
         <div className="space-y-4">
           <OfflineBanner variant="compact" />
-          <div className="rounded-2xl border border-zinc-800 bg-zinc-900/50 px-4 py-3 text-sm text-zinc-400">
+          <div className="rounded-2xl border border-border bg-card/50 px-4 py-3 text-sm text-muted-foreground">
             This game isn't available offline. Check your Library for installed games.
+          </div>
+        </div>
+      )
+    }
+    // Dedicated "not found" path — the API returned 404, so retrying isn't
+    // going to help. Show a calm explanation instead of a critical error.
+    if (error === "not-found") {
+      return (
+        <div className="space-y-6 pt-12">
+          <div className="mx-auto max-w-md rounded-3xl border border-dashed border-white/[.07] bg-white/[.02] px-8 py-10 text-center space-y-3">
+            <div className="mx-auto h-12 w-12 rounded-full bg-white/[.04] border border-white/[.07] flex items-center justify-center">
+              <Info className="h-5 w-5 text-muted-foreground/80" />
+            </div>
+            <h3 className="text-base font-semibold text-white">This game isn't in the catalog</h3>
+            <p className="text-sm text-muted-foreground leading-relaxed">
+              We couldn't find <span className="font-mono text-foreground/80">{appid}</span> on union-crax.xyz. It may have been removed, renamed, or you might have followed an outdated link.
+            </p>
+            <div className="flex justify-center gap-2 pt-1">
+              <Button variant="outline" size="sm" onClick={() => navigate("/search")}>
+                Browse the catalog
+              </Button>
+              <Button size="sm" onClick={() => navigate("/")}>
+                Back to home
+              </Button>
+            </div>
           </div>
         </div>
       )
@@ -844,7 +922,7 @@ export function GameDetailPage() {
           onContinue={() => setCriticalLoadOpen(false)}
         />
 
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900/55 px-4 py-3 text-sm text-zinc-300">
+        <div className="rounded-2xl border border-border bg-card/55 px-4 py-3 text-sm text-foreground/80">
           We could not load this page right now. You can continue browsing or head back home.
         </div>
 
@@ -1286,9 +1364,11 @@ export function GameDetailPage() {
             <div className="relative rounded-3xl overflow-hidden border border-white/[.07] bg-[#1A1A1A]/80 backdrop-blur-md shadow-[0_8px_32px_0_rgba(0,0,0,0.5)]">
               <div className="relative aspect-video overflow-hidden">
                 {!heroImageLoaded && <div className="udl-skeleton absolute inset-0 z-0 rounded-none" />}
-                <img
+                <MediaImage
+                  unwrapped
                   src={proxyImageUrl(heroImage || "") || "./fallbacks/game-hero-16x9.svg"}
                   alt={game.name}
+                  fallbackSrc="./fallbacks/game-hero-16x9.svg"
                   className="h-full w-full object-cover"
                   onLoad={() => setHeroImageLoaded(true)}
                   onError={() => setHeroImageLoaded(true)}
@@ -1304,14 +1384,14 @@ export function GameDetailPage() {
                       variant={genre.toLowerCase() === "nsfw" ? "destructive" : "default"}
                       className={`px-3 py-1 rounded-full font-semibold backdrop-blur-md border shadow-lg ${genre.toLowerCase() === "nsfw"
                         ? "bg-red-500/20 border-red-500/30 text-red-400"
-                        : "bg-zinc-800/50 border-white/[.07] text-white hover:bg-zinc-700"
+                        : "bg-secondary/50 border-white/[.07] text-white hover:bg-zinc-700"
                         }`}
                     >
                       {genre}
                     </Badge>
                   ))}
                   {isPopular && (
-                    <Badge className="px-3 py-1 rounded-full bg-zinc-800/60 text-white backdrop-blur-sm border border-white/10 text-xs font-bold uppercase tracking-wider shadow-lg">
+                    <Badge className="px-3 py-1 rounded-full bg-secondary/60 text-white backdrop-blur-sm border border-white/10 text-xs font-bold uppercase tracking-wider shadow-lg">
                       <Flame className="w-3 h-3 mr-1 fill-current" /> Popular
                     </Badge>
                   )}
@@ -1330,7 +1410,7 @@ export function GameDetailPage() {
                     </Badge>
                   )}
                   {isExternalGame && (
-                    <Badge className="px-3 py-1 rounded-full bg-zinc-800/60 border-white/[.07] text-zinc-300 font-semibold flex items-center gap-1.5 backdrop-blur-md">
+                    <Badge className="px-3 py-1 rounded-full bg-secondary/60 border-white/[.07] text-foreground/80 font-semibold flex items-center gap-1.5 backdrop-blur-md">
                       <Info className="h-3 w-3" />
                       Externally Added
                     </Badge>
@@ -1373,9 +1453,11 @@ export function GameDetailPage() {
                   {game.hero_logo ? (
                     <div className="relative h-20 w-full max-w-[min(70vw,520px)] md:h-28">
                       {!logoLoaded && <div className="udl-skeleton absolute inset-0 rounded-lg" />}
-                      <img
+                      <MediaImage
+                        unwrapped
                         src={proxyImageUrl(game.hero_logo) || ""}
                         alt={`${game.name} logo`}
+                        showErrorState={false}
                         className="h-full w-full object-contain object-left drop-shadow-[0_8px_32px_rgba(0,0,0,0.45)]"
                         onLoad={() => setLogoLoaded(true)}
                         onError={() => setLogoLoaded(true)}
@@ -1388,10 +1470,10 @@ export function GameDetailPage() {
                   )}>
                     {game.name}
                   </h1>
-                  <p className="text-lg text-white/90 flex items-center gap-2 font-medium">
+                  <div className="text-lg text-white/90 flex items-center gap-2 font-medium">
                     <User className="h-4 w-4" />
                     {game.developer || "Unknown Developer"}
-                  </p>
+                  </div>
                 </div>
               </div>
             </div>
@@ -1406,9 +1488,9 @@ export function GameDetailPage() {
         <div className="max-w-6xl mx-auto">
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             <div className="lg:col-span-2 space-y-8">
-              <div className="p-8 rounded-3xl bg-zinc-900/60 border border-white/[.07] backdrop-blur-md shadow-xl">
+              <div className="p-8 rounded-3xl bg-card/60 border border-white/[.07] backdrop-blur-md shadow-xl">
                 <h2 className="text-2xl font-black text-white mb-4 tracking-tight">About This Game</h2>
-                <p className="text-base text-zinc-300 leading-relaxed whitespace-pre-wrap font-medium">
+                <p className="text-base text-foreground/80 leading-relaxed whitespace-pre-wrap font-medium">
                   {game.description}
                 </p>
               </div>
@@ -1423,35 +1505,35 @@ export function GameDetailPage() {
                       : ''
                   } ${game.hasHv
                     ? 'bg-red-950/30 border border-red-500/30'
-                    : 'bg-zinc-800/50 border border-white/[.07]'
+                    : 'bg-secondary/50 border border-white/[.07]'
                   }`}
                 >
                   <div className="flex items-start gap-4">
                     <div className={`p-2 rounded-full shrink-0 ${
-                      game.hasHv ? 'bg-red-900/50' : 'bg-zinc-800/50'
+                      game.hasHv ? 'bg-red-900/50' : 'bg-secondary/50'
                     }`}>
                       <AlertTriangle className={`h-5 w-5 ${game.hasHv ? 'text-red-400' : 'text-white'}`} />
                     </div>
                     <div>
                       <h3 className={`font-bold mb-1 ${game.hasHv ? 'text-red-300' : 'text-white'}`}>Important Note</h3>
-                      <CommentMarkdown text={game.comment} className={`text-sm font-medium ${game.hasHv ? 'text-red-200' : 'text-zinc-300'}`} />
+                      <CommentMarkdown text={game.comment} className={`text-sm font-medium ${game.hasHv ? 'text-red-200' : 'text-foreground/80'}`} />
                     </div>
                   </div>
                 </div>
               )}
 
               {/* Linux Experiences (community submissions) */}
-              <div className="rounded-3xl overflow-hidden backdrop-blur-md bg-zinc-900/60 border border-white/[.07] shadow-xl">
+              <div className="rounded-3xl overflow-hidden backdrop-blur-md bg-card/60 border border-white/[.07] shadow-xl">
                 <LinuxExperiences appid={game.appid} />
               </div>
 
               {resolvedScreenshots.length > 0 && (
-                <div className="p-8 rounded-3xl bg-zinc-900/60 border border-white/[.07] backdrop-blur-md shadow-xl">
+                <div className="p-8 rounded-3xl bg-card/60 border border-white/[.07] backdrop-blur-md shadow-xl">
                   <div className="flex items-center justify-between mb-6">
                     <h3 className="text-xl font-black text-white">Screenshots</h3>
                     <div className="flex items-center gap-3">
-                      <span className="text-sm font-medium text-zinc-400">{resolvedScreenshots.length} images</span>
-                      <Button variant="outline" size="sm" className="h-8 px-3 rounded-full border-white/[.07] bg-zinc-900/40 hover:bg-zinc-800 text-white shadow-sm active:scale-95" onClick={() => openLightbox(0)}>
+                      <span className="text-sm font-medium text-muted-foreground">{resolvedScreenshots.length} images</span>
+                      <Button variant="outline" size="sm" className="h-8 px-3 rounded-full border-white/[.07] bg-card/40 hover:bg-secondary text-white shadow-sm active:scale-95" onClick={() => openLightbox(0)}>
                         View All
                       </Button>
                     </div>
@@ -1465,22 +1547,13 @@ export function GameDetailPage() {
                         className="relative w-full aspect-video rounded-2xl overflow-hidden border border-white/[.07] hover:border-zinc-600 hover:scale-[1.02] transition-transform shadow-md active:scale-95"
                         aria-label={`Open screenshot ${index + 1}`}
                       >
-                        <img
+                        <MediaImage
+                          unwrapped
                           src={proxyImageUrl(screenshot) || "./fallbacks/game-shot-16x9.svg"}
                           alt={`Screenshot ${index + 1}`}
+                          fallbackSrc="./fallbacks/game-shot-16x9.svg"
                           className="h-full w-full object-cover"
                           loading="lazy"
-                          onError={(e) => {
-                            const el = e.currentTarget
-                            const r = parseInt(el.dataset.retries ?? "0")
-                            if (r < 2) {
-                              el.dataset.retries = String(r + 1)
-                              const base = proxyImageUrl(screenshot)
-                              setTimeout(() => { el.src = base + (base.includes("?") ? "&" : "?") + `_r=${r + 1}` }, 1500 * (r + 1))
-                            } else {
-                              el.src = "./fallbacks/game-shot-16x9.svg"
-                            }
-                          }}
                         />
                       </button>
                     ))}
@@ -1488,12 +1561,12 @@ export function GameDetailPage() {
                     {resolvedScreenshots.length > 6 && (
                       <button
                         onClick={() => openLightbox(6)}
-                        className="relative col-span-2 sm:col-auto w-full aspect-video rounded-2xl overflow-hidden border border-white/[.07] flex items-center justify-center bg-zinc-900/40 hover:bg-zinc-800 transition-colors backdrop-blur-sm active:scale-95"
+                        className="relative col-span-2 sm:col-auto w-full aspect-video rounded-2xl overflow-hidden border border-white/[.07] flex items-center justify-center bg-card/40 hover:bg-secondary transition-colors backdrop-blur-sm active:scale-95"
                         aria-label="View more screenshots"
                       >
                         <div className="text-center">
                           <div className="text-xl font-black text-white">+{resolvedScreenshots.length - 6}</div>
-                          <div className="text-sm font-medium text-zinc-400">more</div>
+                          <div className="text-sm font-medium text-muted-foreground">more</div>
                         </div>
                       </button>
                     )}
@@ -1502,14 +1575,14 @@ export function GameDetailPage() {
               )}
 
               {game?.dlc && game.dlc.length > 0 && (
-                <div className="p-8 rounded-3xl bg-zinc-900/60 border border-white/[.07] backdrop-blur-md shadow-xl">
+                <div className="p-8 rounded-3xl bg-card/60 border border-white/[.07] backdrop-blur-md shadow-xl">
                   <h2 className="text-2xl font-black text-white mb-4">
                     Included DLC ({game.dlc.length})
                   </h2>
                   <ul className="space-y-2 max-h-[400px] overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-foreground/20 hover:scrollbar-thumb-foreground/40">
                     {game.dlc.map((dlc, index) => (
-                      <li key={`${dlc}-${index}`} className="flex items-center gap-3 text-zinc-300 font-medium bg-zinc-900/40 p-3 rounded-2xl border border-white/[.07] shadow-sm">
-                        <span className="h-2 w-2 rounded-full bg-white flex-shrink-0" />
+                      <li key={`${dlc}-${index}`} className="flex items-center gap-3 text-foreground/80 font-medium bg-card/40 p-3 rounded-2xl border border-white/[.07] shadow-sm">
+                        <span className="h-2 w-2 rounded-full bg-primary flex-shrink-0" />
                         {dlc}
                       </li>
                     ))}
@@ -1531,25 +1604,149 @@ export function GameDetailPage() {
 
             </div>
             <div className="space-y-6">
+              {/*
+                Redesigned action card.
+                Goals:
+                  - Status pill at the top so users see "Installed v1.2.3" /
+                    "Running" / "Downloading 23 %" without parsing the button.
+                  - One hero CTA that does the right thing for the current
+                    state (Play / Update / Install / Resume / Quit / Download).
+                  - A horizontal row of quick-action chips (Open Files, Set
+                    Executable, Wishlist, Liked, Hide RPC) — replaces the
+                    old "Actions" outline button whose label and shape made
+                    the card feel half-finished.
+                  - Less-common actions (Linux config, Create Shortcut, Edit
+                    Details, Delete) tucked behind a small overflow button.
+              */}
               <div
-                className="p-8 rounded-3xl bg-zinc-950/60 border border-white/[.07] backdrop-blur-md shadow-xl cursor-context-menu"
+                className="rounded-3xl bg-background/60 border border-white/[.07] backdrop-blur-md shadow-xl cursor-context-menu overflow-hidden"
                 onContextMenu={handleActionCardContextMenu}
               >
-                <div className="flex items-center gap-3">
+                {/* Status header */}
+                {(() => {
+                  let dotClass = "bg-zinc-500"
+                  let label: string = "Not installed"
+                  let sub: string | null = null
+                  if (isGameRunning) {
+                    dotClass = "bg-emerald-400 animate-pulse"
+                    label = "Running"
+                  } else if (isInstalling) {
+                    dotClass = "bg-amber-400 animate-pulse"
+                    label = "Installing"
+                  } else if (isQueued) {
+                    dotClass = "bg-zinc-400 animate-pulse"
+                    label = "Queued for download"
+                  } else if (isPaused) {
+                    dotClass = "bg-zinc-400"
+                    label = "Download paused"
+                  } else if (isFailed) {
+                    dotClass = "bg-red-400"
+                    label = "Download failed"
+                  } else if (isInstallReady) {
+                    dotClass = "bg-sky-400"
+                    label = "Ready to install"
+                  } else if (isInstalled) {
+                    dotClass = hasUpdate ? "bg-amber-400" : "bg-emerald-400"
+                    label = hasUpdate ? "Update available" : "Installed"
+                    if (installedVersionLabels[0]) sub = `v${installedVersionLabels[0]}`
+                  }
+                  return (
+                    <div className="flex items-center justify-between gap-3 px-6 pt-5 pb-4 border-b border-white/[.05]">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <span className={cn("h-2 w-2 rounded-full shrink-0", dotClass)} aria-hidden />
+                        <span className="text-sm font-semibold text-white truncate">{label}</span>
+                        {sub && <span className="text-xs text-muted-foreground/80 truncate">· {sub}</span>}
+                      </div>
+                      {/* Overflow for less-common actions. Compact icon button
+                          instead of the outline "Actions" text button. */}
+                      {(showActionMenu || isExternalGame) && (
+                        <Popover open={actionMenuOpen} onOpenChange={setActionMenuOpen}>
+                          <PopoverTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => setActionMenuContextPosition(null)}
+                              className="h-8 w-8 rounded-full text-muted-foreground hover:bg-white/[.06] hover:text-white"
+                              aria-label="More game actions"
+                              title="More game actions"
+                            >
+                              <MoreHorizontal className="h-4 w-4" />
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent align="end" sideOffset={6} className="w-auto border-none bg-transparent p-0 shadow-none">
+                            <GameActionMenuPanel
+                              gameName={game?.name || "Game"}
+                              gameSource={game?.source}
+                              isExternal={Boolean(installedManifest?.isExternal)}
+                              isLinux={isLinux}
+                              shortcutFeedback={shortcutFeedback}
+                              // Show the FULL action set in the overflow
+                              // menu — the chip row below is a quick-access
+                              // subset, but users expect the 3-dot menu to be
+                              // exhaustive. Duplication between chips and
+                              // menu is intentional (Steam / Epic / GOG all
+                              // do this) so right-click and overflow line up.
+                              onSetExecutable={showActionMenu ? () => {
+                                setActionMenuOpen(false)
+                                void openExecutablePicker()
+                              } : null}
+                              onOpenFiles={showActionMenu ? () => {
+                                setActionMenuOpen(false)
+                                void openGameFiles()
+                              } : null}
+                              onCreateShortcut={showActionMenu ? () => {
+                                void handleCreateShortcut()
+                              } : null}
+                              onLaunchOptions={showActionMenu ? () => {
+                                setActionMenuOpen(false)
+                                setLaunchOptionsOpen(true)
+                              } : null}
+                              onEditDetails={isExternalGame ? () => {
+                                setActionMenuOpen(false)
+                                setEditMetadataOpen(true)
+                              } : undefined}
+                              onLinuxConfig={isLinux && showActionMenu ? () => {
+                                setActionMenuOpen(false)
+                                setLinuxConfigOpen(true)
+                              } : undefined}
+                              onDelete={showActionMenu ? () => {
+                                setActionMenuOpen(false)
+                                void handleDeleteGame()
+                              } : null}
+                              wishlist={accountLists.authed === false || !game?.appid ? undefined : {
+                                inList: accountLists.wishlist.has(game.appid),
+                                toggle: () => { void accountLists.toggleWishlist(game.appid, game.name) },
+                              }}
+                              favorites={accountLists.authed === false || !game?.appid ? undefined : {
+                                inList: accountLists.favorites.has(game.appid),
+                                toggle: () => { void accountLists.toggleFavorite(game.appid, game.name) },
+                              }}
+                              rpcMute={game?.appid ? {
+                                muted: rpcMute.muted,
+                                toggle: () => { void rpcMute.toggle() },
+                              } : undefined}
+                            />
+                          </PopoverContent>
+                        </Popover>
+                      )}
+                    </div>
+                  )
+                })()}
+
+                {/* Hero CTA */}
+                <div className="px-6 pt-5 pb-4">
                   <Button
                     size="lg"
-                    className={`flex-1 font-black text-lg py-7 rounded-full shadow-lg transition-all duration-300 active:scale-95 ${isGameRunning
+                    className={`w-full font-black text-lg py-7 rounded-2xl shadow-lg transition-all duration-300 active:scale-[0.98] ${isGameRunning
                         ? "bg-destructive hover:bg-destructive/90"
-                        : "bg-white text-black hover:bg-zinc-200"
+                        : "bg-primary text-primary-foreground hover:brightness-110"
                       }`}
                     onClick={() => {
                       if (isGameRunning) {
                         void stopRunningGame()
                       } else if (hasUpdate) {
-                        // White "Update" button now actually triggers the
-                        // update flow (via the backup warning modal) instead
-                        // of launching the installed game. The yellow
-                        // duplicate CTA below has been removed.
+                        // White "Update" button drives the update flow (via
+                        // the backup warning modal) instead of launching.
                         setUpdateWarningOpen(true)
                       } else if (isInstalled) {
                         void launchInstalledGame()
@@ -1579,82 +1776,104 @@ export function GameDetailPage() {
                     {actionLabel}
                   </Button>
 
-                  {showActionMenu ? (
-                    <Popover open={actionMenuOpen} onOpenChange={setActionMenuOpen}>
-                      <PopoverTrigger asChild>
-                        <Button
-                          variant="outline"
-                          size="lg"
-                          onClick={() => setActionMenuContextPosition(null)}
-                          className="h-[52px] rounded-full border-white/[.07] bg-zinc-900/60 px-4 text-zinc-300 hover:bg-zinc-800 hover:text-white backdrop-blur-md active:scale-95"
-                          aria-label="Game actions"
-                        >
-                          <MoreHorizontal className="h-4.5 w-4.5" />
-                          <span className="text-sm font-medium">Actions</span>
-                        </Button>
-                      </PopoverTrigger>
-                      <PopoverContent align="end" className="w-auto border-none bg-transparent p-0 shadow-none">
-                        <GameActionMenuPanel
-                          gameName={game?.name || "Game"}
-                          gameSource={game?.source}
-                          isExternal={Boolean(installedManifest?.isExternal)}
-                          isLinux={isLinux}
-                          shortcutFeedback={shortcutFeedback}
-                          onSetExecutable={() => {
-                            setActionMenuOpen(false)
-                            void openExecutablePicker()
-                          }}
-                          onOpenFiles={() => {
-                            setActionMenuOpen(false)
-                            void openGameFiles()
-                          }}
-                          onCreateShortcut={() => {
-                            void handleCreateShortcut()
-                          }}
-                          onEditDetails={isExternalGame ? () => {
-                            setActionMenuOpen(false)
-                            setEditMetadataOpen(true)
-                          } : undefined}
-                          onLinuxConfig={isLinux ? () => {
-                            setActionMenuOpen(false)
-                            setLinuxConfigOpen(true)
-                          } : undefined}
-                          onDelete={() => {
-                            setActionMenuOpen(false)
-                            void handleDeleteGame()
-                          }}
-                        />
-                      </PopoverContent>
-                    </Popover>
-                  ) : null}
+                  {isFailed && (
+                    <Button
+                      variant="secondary"
+                      className="mt-3 w-full rounded-xl"
+                      onClick={() => void openHostSelector()}
+                      disabled={downloading}
+                    >
+                      <RefreshCw className="mr-2 h-4 w-4" />
+                      Retry
+                    </Button>
+                  )}
+
+                  {shortcutFeedback && (
+                    <div className={`mt-2 text-xs ${shortcutFeedback.type === 'success' ? 'text-foreground/80' : 'text-destructive'}`}>
+                      {shortcutFeedback.message}
+                    </div>
+                  )}
+
+                  {(downloadError || failedDownload?.error) && (
+                    <div className="mt-3 text-xs text-destructive">{downloadError || failedDownload?.error}</div>
+                  )}
                 </div>
 
-                {isFailed && (
-                  <Button
-                    variant="secondary"
-                    className="mt-3 w-full"
-                    onClick={() => void openHostSelector()}
-                    disabled={downloading}
-                  >
-                    <RefreshCw className="mr-2 h-4 w-4" />
-                    Retry
-                  </Button>
-                )}
-
-                {/* The previous yellow "Update available - X.Y" CTA used to live here.
-                    It's been removed: the white main button now drives the update flow
-                    directly when hasUpdate is true, and the version diff has moved into
-                    the UpdateBackupWarningModal. */}
-
-                {shortcutFeedback && (
-                  <div className={`mt-2 text-xs ${shortcutFeedback.type === 'success' ? 'text-zinc-300' : 'text-destructive'}`}>
-                    {shortcutFeedback.message}
-                  </div>
-                )}
-
-                {(downloadError || failedDownload?.error) && (
-                  <div className="mt-3 text-xs text-destructive">{downloadError || failedDownload?.error}</div>
-                )}
+                {/* Quick action chips */}
+                {(() => {
+                  const chips: Array<{
+                    key: string
+                    icon: typeof Play
+                    label: string
+                    onClick: () => void
+                    active?: boolean
+                    activeIconClass?: string
+                  }> = []
+                  if (showActionMenu) {
+                    chips.push({
+                      key: "files",
+                      icon: FolderOpen,
+                      label: "Open files",
+                      onClick: () => { void openGameFiles() },
+                    })
+                    chips.push({
+                      key: "exe",
+                      icon: Settings,
+                      label: "Executable",
+                      onClick: () => { void openExecutablePicker() },
+                    })
+                  }
+                  if (accountLists.authed !== false && game?.appid) {
+                    chips.push({
+                      key: "wishlist",
+                      icon: Star,
+                      label: accountLists.wishlist.has(game.appid) ? "Wishlisted" : "Wishlist",
+                      onClick: () => { void accountLists.toggleWishlist(game.appid, game.name) },
+                      active: accountLists.wishlist.has(game.appid),
+                      activeIconClass: "text-amber-400",
+                    })
+                    chips.push({
+                      key: "liked",
+                      icon: Heart,
+                      label: accountLists.favorites.has(game.appid) ? "Liked" : "Like",
+                      onClick: () => { void accountLists.toggleFavorite(game.appid, game.name) },
+                      active: accountLists.favorites.has(game.appid),
+                      activeIconClass: "text-rose-400",
+                    })
+                  }
+                  if (game?.appid) {
+                    chips.push({
+                      key: "rpc",
+                      icon: rpcMute.muted ? EyeOff : Eye,
+                      label: rpcMute.muted ? "RPC hidden" : "On Discord",
+                      onClick: () => { void rpcMute.toggle() },
+                      active: rpcMute.muted,
+                      activeIconClass: "text-fuchsia-400",
+                    })
+                  }
+                  if (chips.length === 0) return null
+                  return (
+                    <div className="flex flex-wrap gap-1.5 border-t border-white/[.05] bg-white/[.015] px-3 py-3">
+                      {chips.map(({ key, icon: Icon, label, onClick, active, activeIconClass }) => (
+                        <button
+                          key={key}
+                          type="button"
+                          onClick={onClick}
+                          title={label}
+                          className={cn(
+                            "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1.5 text-[11px] font-semibold transition-colors active:scale-95",
+                            active
+                              ? "border-white/15 bg-white/[.07] text-white"
+                              : "border-white/[.07] bg-white/[.03] text-foreground/80 hover:bg-white/[.07] hover:text-white"
+                          )}
+                        >
+                          <Icon className={cn("h-3.5 w-3.5", active ? activeIconClass : "text-muted-foreground")} />
+                          <span className="truncate max-w-[7rem]">{label}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )
+                })()}
               </div>
 
               <GameActionContextMenu
@@ -1678,6 +1897,10 @@ export function GameDetailPage() {
                   setActionMenuContextPosition(null)
                   void handleCreateShortcut()
                 } : undefined}
+                onLaunchOptions={showActionMenu ? () => {
+                  setActionMenuContextPosition(null)
+                  setLaunchOptionsOpen(true)
+                } : undefined}
                 onEditDetails={isExternalGame ? () => {
                   setActionMenuContextPosition(null)
                   setEditMetadataOpen(true)
@@ -1690,35 +1913,60 @@ export function GameDetailPage() {
                   setActionMenuContextPosition(null)
                   void handleDeleteGame()
                 } : undefined}
+                wishlist={accountLists.authed === false || !game?.appid ? undefined : {
+                  inList: accountLists.wishlist.has(game.appid),
+                  toggle: () => { void accountLists.toggleWishlist(game.appid, game.name) },
+                }}
+                favorites={accountLists.authed === false || !game?.appid ? undefined : {
+                  inList: accountLists.favorites.has(game.appid),
+                  toggle: () => { void accountLists.toggleFavorite(game.appid, game.name) },
+                }}
+                rpcMute={game?.appid ? {
+                  muted: rpcMute.muted,
+                  toggle: () => { void rpcMute.toggle() },
+                } : undefined}
                 collectionPicker={collectionPicker}
               />
 
-              <div className={`grid grid-cols-2 gap-4${isUCMatched ? ' opacity-40 blur-[2px] pointer-events-none select-none' : ''}`}>
-                <div className="p-5 rounded-3xl bg-zinc-900/60 border border-white/[.07] backdrop-blur-md text-center shadow-xl">
-                  <Download className="h-6 w-6 text-white mx-auto mb-3 drop-shadow-md" />
-                  <div className="text-3xl font-black text-white tracking-tight">
-                    {formatNumber(effectiveDownloadCount)}
+              {/* Compact stats strip. Was two oversized cards with giant icons +
+                  shadows — now a single horizontal panel so the sidebar stays
+                  scannable instead of feeling like a stack of dashboards. */}
+              <div className={cn(
+                "flex items-stretch rounded-2xl bg-card/60 border border-white/[.07] backdrop-blur-md overflow-hidden shadow-md",
+                isUCMatched && "opacity-40 blur-[2px] pointer-events-none select-none"
+              )}>
+                <div className="flex-1 flex items-center gap-3 px-4 py-3">
+                  <Download className="h-4 w-4 text-muted-foreground shrink-0" />
+                  <div className="min-w-0">
+                    <div className="text-base font-bold text-white tabular-nums leading-tight truncate">
+                      {formatNumber(effectiveDownloadCount)}
+                    </div>
+                    <div className="text-[10px] font-semibold text-muted-foreground/80 uppercase tracking-wider">Downloads</div>
                   </div>
-                  <div className="text-xs font-bold text-zinc-500 uppercase tracking-wider mt-1">Downloads</div>
                 </div>
-
-                <div className="p-5 rounded-3xl bg-zinc-900/60 border border-white/[.07] backdrop-blur-md text-center shadow-xl">
-                  <Eye className="h-6 w-6 text-blue-500 mx-auto mb-3 drop-shadow-md" />
-                  <div className="text-3xl font-black text-white tracking-tight">
-                    {formatNumber(effectiveViewCount)}
+                <div className="w-px bg-white/[.05]" />
+                <div className="flex-1 flex items-center gap-3 px-4 py-3">
+                  <Eye className="h-4 w-4 text-muted-foreground shrink-0" />
+                  <div className="min-w-0">
+                    <div className="text-base font-bold text-white tabular-nums leading-tight truncate">
+                      {formatNumber(effectiveViewCount)}
+                    </div>
+                    <div className="text-[10px] font-semibold text-muted-foreground/80 uppercase tracking-wider">Views</div>
                   </div>
-                  <div className="text-xs font-bold text-zinc-500 uppercase tracking-wider mt-1">Views</div>
                 </div>
               </div>
 
-              <div className="p-8 rounded-3xl bg-zinc-900/60 border border-white/[.07] backdrop-blur-md space-y-5 shadow-xl">
+              {/* Lighter Details card — was p-8 rounded-3xl with shadow-xl,
+                  which made it dominate the sidebar. Toned down to match the
+                  rest of the redesigned column. */}
+              <div className="p-5 rounded-2xl bg-card/60 border border-white/[.07] backdrop-blur-md space-y-4 shadow-md">
                 <div className="flex items-center justify-between">
-                  <h3 className="font-black text-white tracking-tight">Details</h3>
+                  <h3 className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Details</h3>
                   {isExternalGame && (
                     <Button
                       variant="ghost"
                       size="sm"
-                      className="h-7 px-2.5 text-xs text-zinc-400 hover:text-white hover:bg-white/[.05]"
+                      className="h-7 px-2.5 text-xs text-muted-foreground hover:text-white hover:bg-white/[.05]"
                       onClick={() => setEditMetadataOpen(true)}
                     >
                       <Settings className="mr-1.5 h-3 w-3" />
@@ -1728,7 +1976,7 @@ export function GameDetailPage() {
                 </div>
 
                 {isUCMatched && (
-                  <div className="flex items-start gap-2 rounded-lg bg-zinc-800/50 border border-zinc-700/50 px-3 py-2 text-xs text-zinc-400">
+                  <div className="flex items-start gap-2 rounded-lg bg-secondary/50 border border-border/50 px-3 py-2 text-xs text-muted-foreground">
                     <Info className="h-3.5 w-3.5 flex-shrink-0 mt-0.5" />
                     <span>Matched from UC catalog - details may not reflect your installed version.</span>
                   </div>
@@ -1736,7 +1984,7 @@ export function GameDetailPage() {
 
                 <div className={`space-y-4 text-sm font-medium${isUCMatched ? ' opacity-50 blur-[1.5px] select-none' : ''}`}>
                   <div className="flex items-center justify-between py-1.5 border-b border-white/[.07] pb-3">
-                    <span className="text-zinc-400 flex items-center gap-2.5">
+                    <span className="text-muted-foreground flex items-center gap-2.5">
                       <Calendar className="h-4 w-4" />
                       Released
                     </span>
@@ -1749,7 +1997,7 @@ export function GameDetailPage() {
                   </div>
 
                   <div className="flex items-center justify-between py-1.5 border-b border-white/[.07] pb-3">
-                    <span className="text-zinc-400 flex items-center gap-2.5">
+                    <span className="text-muted-foreground flex items-center gap-2.5">
                       <Calendar className="h-4 w-4" />
                       Date Added
                     </span>
@@ -1760,7 +2008,7 @@ export function GameDetailPage() {
 
                   {game.update_time && (
                     <div className="flex items-center justify-between py-1.5 border-b border-white/[.07] pb-3">
-                      <span className="text-zinc-400 flex items-center gap-2.5">
+                      <span className="text-muted-foreground flex items-center gap-2.5">
                         <RefreshCw className="h-4 w-4" />
                         Edited
                       </span>
@@ -1772,7 +2020,7 @@ export function GameDetailPage() {
 
                   {(game.version || installedVersionLabels.length > 0) && (
                     <div className="flex items-center justify-between py-1.5 border-b border-white/[.07] pb-3">
-                      <span className="text-zinc-400">Version</span>
+                      <span className="text-muted-foreground">Version</span>
                       <span className="font-bold text-white">
                         {installedVersionLabels[0] || game.version}
                       </span>
@@ -1780,7 +2028,7 @@ export function GameDetailPage() {
                   )}
 
                   <div className="flex items-center justify-between py-1.5 border-b border-white/[.07] pb-3">
-                    <span className="text-zinc-400 flex items-center gap-2.5">
+                    <span className="text-muted-foreground flex items-center gap-2.5">
                       <HardDrive className="h-4 w-4" />
                       Size
                     </span>
@@ -1788,14 +2036,14 @@ export function GameDetailPage() {
                   </div>
 
                   <div className="flex items-center justify-between py-1.5">
-                    <span className="text-zinc-400 flex items-center gap-2.5">Source</span>
+                    <span className="text-muted-foreground flex items-center gap-2.5">Source</span>
                     <span className="font-bold text-white">
                       {game?.source ? (
                         <span className="relative group/source inline-flex">
-                          <Badge variant="outline" className="px-2.5 py-1 text-xs max-w-[200px] border-white/[.07] bg-zinc-900/40 shadow-sm">
+                          <Badge variant="outline" className="px-2.5 py-1 text-xs max-w-[200px] border-white/[.07] bg-card/40 shadow-sm">
                             <span className="truncate inline-block">{game.source}</span>
                           </Badge>
-                          <span className="pointer-events-none absolute left-1/2 top-full z-30 mt-2 w-64 -translate-x-1/2 rounded-2xl border border-white/[.07] bg-zinc-950/95 px-3 py-2 text-[11px] leading-relaxed text-zinc-400 shadow-xl opacity-0 transition-opacity duration-150 group-hover/source:opacity-100 group-focus-within/source:opacity-100">
+                          <span className="pointer-events-none absolute left-1/2 top-full z-30 mt-2 w-64 -translate-x-1/2 rounded-2xl border border-white/[.07] bg-background/95 px-3 py-2 text-[11px] leading-relaxed text-muted-foreground shadow-xl opacity-0 transition-opacity duration-150 group-hover/source:opacity-100 group-focus-within/source:opacity-100">
                             Source: {game.source}
                           </span>
                         </span>
@@ -1816,13 +2064,30 @@ export function GameDetailPage() {
                 />
               )}
 
+              {/* Playtime chart — hidden by the component itself when the
+                  user is anonymous or has no recorded sessions for this
+                  game. Renders for both installed and uninstalled because
+                  the user might be looking up a game they used to play. */}
+              {game?.appid && (
+                <PlaytimeChart appid={game.appid} />
+              )}
+
+              {/* Per-game notes — only shown for installed games. The notes
+                  are stored in libraryGameMeta which we only write for games
+                  the user actually owns / installed; rendering for catalog
+                  browsing would let users litter notes on games they don't
+                  even own. */}
+              {game?.appid && isInstalled && (
+                <GameNotesPanel appid={game.appid} />
+              )}
+
             </div>
           </div>
         </div>
       </section>
 
       <div className="container mx-auto px-4 relative z-10">
-        <div className="max-w-6xl mx-auto rounded-3xl overflow-hidden backdrop-blur-md bg-zinc-900/60 border border-white/[.07] shadow-xl">
+        <div className="max-w-6xl mx-auto rounded-3xl overflow-hidden backdrop-blur-md bg-card/60 border border-white/[.07] shadow-xl">
           <GameComments appid={game.appid} gameName={game.name} />
         </div>
       </div>
@@ -1836,7 +2101,7 @@ export function GameDetailPage() {
             <div className="mb-6 text-center">
               <Link
                 to="/search?sort=recommended"
-                className="text-sm font-semibold text-zinc-300 underline decoration-zinc-500/60 underline-offset-4 transition hover:text-white hover:decoration-white"
+                className="text-sm font-semibold text-foreground/80 underline decoration-zinc-500/60 underline-offset-4 transition hover:text-white hover:decoration-white"
               >
                 More Recommended
               </Link>
@@ -1860,7 +2125,7 @@ export function GameDetailPage() {
           <div className="absolute inset-0 bg-black/90 backdrop-blur-md z-[10000]" onClick={closeLightbox} aria-hidden="true" />
 
           <button
-            className="absolute top-6 right-6 z-[10010] bg-zinc-800/50 hover:bg-zinc-700 border border-white/[.07] rounded-full p-3 backdrop-blur-md transition-all active:scale-95"
+            className="absolute top-6 right-6 z-[10010] bg-secondary/50 hover:bg-zinc-700 border border-white/[.07] rounded-full p-3 backdrop-blur-md transition-all active:scale-95"
             onClick={closeLightbox}
             aria-label="Close"
           >
@@ -1869,7 +2134,7 @@ export function GameDetailPage() {
 
           <button
             onClick={prevLightbox}
-            className="absolute left-2 sm:left-6 top-1/2 -translate-y-1/2 z-[10010] p-2 sm:p-4 rounded-full bg-zinc-800/60 hover:bg-zinc-800 border border-white/[.07] backdrop-blur-md transition-all active:scale-95"
+            className="absolute left-2 sm:left-6 top-1/2 -translate-y-1/2 z-[10010] p-2 sm:p-4 rounded-full bg-secondary/60 hover:bg-secondary border border-white/[.07] backdrop-blur-md transition-all active:scale-95"
             aria-label="Previous"
           >
             <ChevronLeft className="h-6 w-6 sm:h-8 sm:w-8 text-white" />
@@ -1937,7 +2202,7 @@ export function GameDetailPage() {
 
           <button
             onClick={nextLightbox}
-            className="absolute right-2 sm:right-6 top-1/2 -translate-y-1/2 z-[10010] p-2 sm:p-4 rounded-full bg-zinc-800/60 hover:bg-zinc-800 border border-white/[.07] backdrop-blur-md transition-all active:scale-95"
+            className="absolute right-2 sm:right-6 top-1/2 -translate-y-1/2 z-[10010] p-2 sm:p-4 rounded-full bg-secondary/60 hover:bg-secondary border border-white/[.07] backdrop-blur-md transition-all active:scale-95"
             aria-label="Next"
           >
             <ChevronRight className="h-6 w-6 sm:h-8 sm:w-8 text-white" />
@@ -1946,28 +2211,28 @@ export function GameDetailPage() {
           <div className="absolute bottom-5 left-1/2 -translate-x-1/2 bg-black/55 backdrop-blur-md px-3 sm:px-4 py-2 rounded-full border border-white/[.07] text-xs sm:text-sm font-bold text-white z-[10010] tracking-widest shadow-lg flex items-center gap-2 sm:gap-3">
             <button
               onClick={prevLightbox}
-              className="md:hidden h-8 w-8 rounded-full border border-white/[.12] bg-zinc-900/70 hover:bg-zinc-800/80 flex items-center justify-center active:scale-95"
+              className="md:hidden h-8 w-8 rounded-full border border-white/[.12] bg-card/70 hover:bg-secondary/80 flex items-center justify-center active:scale-95"
               aria-label="Previous screenshot"
             >
               <ChevronLeft className="h-4 w-4 text-white" />
             </button>
             <button
               onClick={zoomOutLightbox}
-              className="h-8 w-8 rounded-full border border-white/[.12] bg-zinc-900/70 hover:bg-zinc-800/80 flex items-center justify-center active:scale-95"
+              className="h-8 w-8 rounded-full border border-white/[.12] bg-card/70 hover:bg-secondary/80 flex items-center justify-center active:scale-95"
               aria-label="Zoom out"
             >
               <Minus className="h-4 w-4 text-white" />
             </button>
             <button
               onClick={resetLightboxZoom}
-              className="px-3 h-8 rounded-full border border-white/[.12] bg-zinc-900/70 hover:bg-zinc-800/80 text-[11px] sm:text-xs font-black text-white active:scale-95"
+              className="px-3 h-8 rounded-full border border-white/[.12] bg-card/70 hover:bg-secondary/80 text-[11px] sm:text-xs font-black text-white active:scale-95"
               aria-label="Reset zoom"
             >
               {`${Math.round(lightboxZoom * 100)}%`}
             </button>
             <button
               onClick={zoomInLightbox}
-              className="h-8 w-8 rounded-full border border-white/[.12] bg-zinc-900/70 hover:bg-zinc-800/80 flex items-center justify-center active:scale-95"
+              className="h-8 w-8 rounded-full border border-white/[.12] bg-card/70 hover:bg-secondary/80 flex items-center justify-center active:scale-95"
               aria-label="Zoom in"
             >
               <Plus className="h-4 w-4 text-white" />
@@ -1975,7 +2240,7 @@ export function GameDetailPage() {
             <span>{`${lightboxIndex + 1} / ${lightboxScreenshots.length}`}</span>
             <button
               onClick={nextLightbox}
-              className="md:hidden h-8 w-8 rounded-full border border-white/[.12] bg-zinc-900/70 hover:bg-zinc-800/80 flex items-center justify-center active:scale-95"
+              className="md:hidden h-8 w-8 rounded-full border border-white/[.12] bg-card/70 hover:bg-secondary/80 flex items-center justify-center active:scale-95"
               aria-label="Next screenshot"
             >
               <ChevronRight className="h-4 w-4 text-white" />
@@ -2003,6 +2268,7 @@ export function GameDetailPage() {
         game={game}
         downloadToken={downloadToken}
         defaultHost={defaultHost}
+        autoConfirmIfGreen={downloadAutoConfirm}
         onCheckingChange={setIsCheckingLinks}
         onConfirm={async (config: DownloadConfig) => {
           setHostSelectorOpen(false)
@@ -2033,10 +2299,10 @@ export function GameDetailPage() {
       {pendingDeleteAction && game && (
         <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
           <div
-            className="absolute inset-0 bg-black/70"
+            className="absolute inset-0 bg-black/72 backdrop-blur-md"
             onClick={() => setPendingDeleteAction(null)}
           />
-          <div className="relative w-full max-w-md rounded-2xl border border-border/60 bg-card/95 p-5 text-foreground shadow-2xl">
+          <div className="relative w-full max-w-md rounded-3xl border border-white/[.07] bg-background/88 backdrop-blur-2xl p-5 text-foreground shadow-[0_24px_80px_rgba(0,0,0,0.55)]">
             <div className="flex items-center gap-2 text-lg font-semibold">
               <AlertTriangle className="h-5 w-5 text-destructive" />
               {pendingDeleteAction === "installing"
@@ -2158,6 +2424,13 @@ export function GameDetailPage() {
         open={gameStartFailedOpen}
         gameName={game.name}
         onClose={() => setGameStartFailedOpen(false)}
+        onPickExecutable={() => { void openExecutablePicker() }}
+      />
+      <LaunchOptionsModal
+        open={launchOptionsOpen}
+        appid={game.appid}
+        gameName={game.name}
+        onClose={() => setLaunchOptionsOpen(false)}
       />
       {isLinux && (
         <GameLinuxConfigModal

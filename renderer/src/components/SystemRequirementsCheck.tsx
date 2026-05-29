@@ -66,7 +66,7 @@ function statusIcon(status: RequirementCheck["status"]) {
   if (status === "pass") return <CheckCircle2 className="h-4 w-4 text-emerald-400" />
   if (status === "warn") return <AlertTriangle className="h-4 w-4 text-amber-400" />
   if (status === "fail") return <CircleX className="h-4 w-4 text-rose-400" />
-  return <HelpCircle className="h-4 w-4 text-zinc-500" />
+  return <HelpCircle className="h-4 w-4 text-muted-foreground/80" />
 }
 
 function detectPlatformFromSpec(spec: any): Platform {
@@ -157,22 +157,22 @@ export function SystemRequirementsCheck({
   const platformLabel = (
     <>
       {(hasWindows && hasLinux) ? (
-        <div className="inline-flex items-center gap-0.5 rounded-full border border-white/[.07] bg-zinc-900/60 p-0.5 text-[10px]">
+        <div className="inline-flex items-center gap-0.5 rounded-full border border-white/[.07] bg-card/60 p-0.5 text-[10px]">
           <button
             type="button"
             onClick={() => setOverridePlatform("windows")}
-            className={`px-2 py-0.5 rounded-full transition ${selectedPlatform === "windows" ? "bg-zinc-700 text-white" : "text-zinc-400 hover:text-zinc-200"}`}
+            className={`px-2 py-0.5 rounded-full transition ${selectedPlatform === "windows" ? "bg-zinc-700 text-white" : "text-muted-foreground hover:text-foreground/90"}`}
             title="Compare against Windows requirements"
           >Windows</button>
           <button
             type="button"
             onClick={() => setOverridePlatform("linux")}
-            className={`px-2 py-0.5 rounded-full transition ${selectedPlatform === "linux" ? "bg-zinc-700 text-white" : "text-zinc-400 hover:text-zinc-200"}`}
+            className={`px-2 py-0.5 rounded-full transition ${selectedPlatform === "linux" ? "bg-zinc-700 text-white" : "text-muted-foreground hover:text-foreground/90"}`}
             title="Compare against Linux requirements"
           >Linux</button>
         </div>
       ) : (
-        <span className="rounded-full border border-white/10 bg-white/[.04] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
+        <span className="rounded-full border border-white/10 bg-white/[.04] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
           {selectedPlatform === "linux" ? "Linux" : "Windows"}
         </span>
       )}
@@ -181,23 +181,23 @@ export function SystemRequirementsCheck({
 
   if (state.kind === "no-profile") {
     return (
-      <div className="p-6 rounded-3xl bg-zinc-900/60 border border-white/[.07] backdrop-blur-md shadow-xl">
+      <div className="p-6 rounded-3xl bg-card/60 border border-white/[.07] backdrop-blur-md shadow-xl">
         <div className="flex items-start gap-3">
           <div className="h-10 w-10 rounded-2xl bg-white/[.05] border border-white/[.07] flex items-center justify-center shrink-0">
-            <Cpu className="h-5 w-5 text-zinc-300" />
+            <Cpu className="h-5 w-5 text-foreground/80" />
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center justify-between gap-2">
               <h3 className="text-sm font-bold text-white">Can my PC run this?</h3>
               {platformLabel}
             </div>
-            <p className="mt-1 text-xs text-zinc-400 leading-relaxed">
+            <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
               Scan your hardware once and we'll compare your PC against every game's requirements automatically.
             </p>
             <button
               type="button"
               onClick={() => navigate("/settings?section=system&autoScan=1")}
-              className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-white text-black px-3 py-1.5 text-xs font-semibold hover:bg-zinc-200 transition-colors"
+              className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-primary text-primary-foreground px-3 py-1.5 text-xs font-semibold hover:brightness-110 transition-colors"
             >
               <Cpu className="h-3.5 w-3.5" /> Scan my PC
             </button>
@@ -220,7 +220,7 @@ export function SystemRequirementsCheck({
     "We couldn't fully compare your PC against the requirements"
 
   return (
-    <div className="p-6 rounded-3xl bg-zinc-900/60 border border-white/[.07] backdrop-blur-md shadow-xl space-y-4">
+    <div className="p-6 rounded-3xl bg-card/60 border border-white/[.07] backdrop-blur-md shadow-xl space-y-4">
       <div className="flex items-center justify-between gap-3">
         <h3 className="text-xs font-bold text-white uppercase tracking-widest">Will it run on my PC?</h3>
         <div className="flex items-center gap-2">
@@ -230,7 +230,7 @@ export function SystemRequirementsCheck({
             (verdictTone === "emerald" ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300" :
              verdictTone === "amber"   ? "border-amber-500/40 bg-amber-500/10 text-amber-300" :
              verdictTone === "rose"    ? "border-rose-500/40 bg-rose-500/10 text-rose-300" :
-                                         "border-white/10 bg-white/[.04] text-zinc-300")
+                                         "border-white/10 bg-white/[.04] text-foreground/80")
           }>
             {tier}
           </span>
@@ -241,7 +241,7 @@ export function SystemRequirementsCheck({
         (verdictTone === "emerald" ? "text-emerald-300" :
          verdictTone === "amber"   ? "text-amber-300" :
          verdictTone === "rose"    ? "text-rose-300" :
-                                     "text-zinc-300")
+                                     "text-foreground/80")
       }>
         {verdictLabel}
       </p>
@@ -250,18 +250,18 @@ export function SystemRequirementsCheck({
           {verdict.checks.map((check) => (
             <li
               key={check.component}
-              className="flex items-start gap-2.5 rounded-2xl bg-zinc-800/40 border border-white/[.06] px-3 py-2"
+              className="flex items-start gap-2.5 rounded-2xl bg-secondary/40 border border-white/[.06] px-3 py-2"
             >
               <span className="shrink-0 mt-0.5">{statusIcon(check.status)}</span>
               <div className="min-w-0 flex-1">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/80">
                   {COMPONENT_LABEL[check.component]}
                 </p>
-                <p className="text-xs text-zinc-300 truncate" title={check.have || ""}>
+                <p className="text-xs text-foreground/80 truncate" title={check.have || ""}>
                   {check.have || "—"}
                 </p>
                 {check.required && (
-                  <p className="text-[10px] text-zinc-500 truncate" title={check.required}>
+                  <p className="text-[10px] text-muted-foreground/80 truncate" title={check.required}>
                     needs {check.required}
                   </p>
                 )}

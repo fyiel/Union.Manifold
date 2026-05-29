@@ -22,6 +22,9 @@ contextBridge.exposeInMainWorld('ucDownloads', {
   resume: (downloadId) => ipcRenderer.invoke('uc:download-resume', downloadId),
   resumeInterrupted: (payload) => ipcRenderer.invoke('uc:download-resume-interrupted', payload),
   resumeWithFreshUrl: (payload) => ipcRenderer.invoke('uc:download-resume-with-fresh-url', payload),
+  // New simplified entry point — main process decides resume-vs-fresh based
+  // on what's actually on disk. Replaces the renderer-side 3-level resume cascade.
+  smartStart: (payload) => ipcRenderer.invoke('uc:dl:smart-start', payload),
   showInFolder: (targetPath) => ipcRenderer.invoke('uc:download-show', targetPath),
   openPath: (targetPath) => ipcRenderer.invoke('uc:download-open', targetPath),
   listDisks: () => ipcRenderer.invoke('uc:disk-list'),
@@ -51,6 +54,11 @@ contextBridge.exposeInMainWorld('ucDownloads', {
   preflightGameLaunch: (appid, exePath) => ipcRenderer.invoke('uc:game-exe-preflight', appid, exePath),
   launchGameExecutable: (appid, exePath, gameName, showGameName) => ipcRenderer.invoke('uc:game-exe-launch', appid, exePath, gameName, showGameName),
   getRunningGame: (appid) => ipcRenderer.invoke('uc:game-exe-running', appid),
+  // One-shot lookup of every currently-running appid. Used by grid views so
+  // we don't fire N IPC round-trips on mount (one per card) when listing
+  // installed games. Each card still subscribes to ucPresence.onChanged for
+  // instant per-game updates afterwards.
+  listRunningGameAppids: () => ipcRenderer.invoke('uc:game-exe-running-list'),
   isLauncherAvailable: () => ipcRenderer.invoke('uc:launcher-available'),
   quitGameExecutable: (appid) => ipcRenderer.invoke('uc:game-exe-quit', appid),
   deleteInstalled: (appid) => ipcRenderer.invoke('uc:installed-delete', appid),
@@ -104,7 +112,15 @@ contextBridge.exposeInMainWorld('ucApp', {
     const listener = (_event, data) => callback(data)
     ipcRenderer.on('uc:navigation-action', listener)
     return () => ipcRenderer.removeListener('uc:navigation-action', listener)
-  }
+  },
+  // Auth flows on a non-primary mirror need to nudge the user to the main
+  // website. Main process pushes the message here; the renderer shows it via
+  // the in-app toast (no native dialog).
+  onMirrorAuthBlocked: (callback) => {
+    const listener = (_event, data) => callback(data)
+    ipcRenderer.on('uc:mirror-auth-blocked', listener)
+    return () => ipcRenderer.removeListener('uc:mirror-auth-blocked', listener)
+  },
 })
 
 contextBridge.exposeInMainWorld('ucSettings', {
@@ -161,7 +177,14 @@ contextBridge.exposeInMainWorld('ucAuth', {
   updatePassword: (baseUrl, currentPassword, newPassword) => ipcRenderer.invoke('uc:auth-update-password', { baseUrl, currentPassword, newPassword }),
   
   // HTTP fetch with session
-  fetch: (baseUrl, path, init) => ipcRenderer.invoke('uc:auth-fetch', { baseUrl, path, init })
+  fetch: (baseUrl, path, init) => ipcRenderer.invoke('uc:auth-fetch', { baseUrl, path, init }),
+
+  // Multipart file upload that reuses the session cookies. We can't
+  // serialize FormData over IPC, so the renderer encodes the file as
+  // base64 + builds a fields map; main.cjs reconstructs a multipart body
+  // and POSTs via fetchWithSession (same path as cookied auth-fetch). Use
+  // this for avatar / banner / any other authenticated file upload.
+  upload: (baseUrl, path, payload) => ipcRenderer.invoke('uc:auth-upload', { baseUrl, path, payload }),
 })
 
 contextBridge.exposeInMainWorld('ucUpdater', {
@@ -170,6 +193,9 @@ contextBridge.exposeInMainWorld('ucUpdater', {
   getVersion: () => ipcRenderer.invoke('uc:get-version'),
   getUpdateStatus: () => ipcRenderer.invoke('uc:get-update-status'),
   retryUpdate: () => ipcRenderer.invoke('uc:update-retry'),
+  /** Reads the bundled CHANGELOG.md off disk so the "What's new" modal
+   *  doesn't need a hardcoded data file. Returns the raw markdown. */
+  getChangelog: () => ipcRenderer.invoke('uc:get-changelog'),
   onStatusChanged: (callback) => {
     const listener = (_event, data) => callback(data)
     ipcRenderer.on('uc:update-status-changed', listener)

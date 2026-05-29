@@ -27,12 +27,12 @@ type SessionInfo = {
 function DeviceIcon({ deviceName }: { deviceName: string | null }) {
   const name = (deviceName ?? "").toLowerCase()
   if (name.includes("mobile") || name.includes("android") || name.includes("iphone") || name.includes("ios")) {
-    return <Smartphone className="h-4 w-4 text-zinc-400" />
+    return <Smartphone className="h-4 w-4 text-muted-foreground" />
   }
   if (name.includes("unioncrax.direct") || name.includes("electron") || name.includes("windows") || name.includes("linux") || name.includes("mac")) {
-    return <Monitor className="h-4 w-4 text-zinc-400" />
+    return <Monitor className="h-4 w-4 text-muted-foreground" />
   }
-  return <Globe className="h-4 w-4 text-zinc-400" />
+  return <Globe className="h-4 w-4 text-muted-foreground" />
 }
 
 function formatRelative(dateStr: string | null): string {
@@ -124,17 +124,17 @@ export function SessionManager() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <p className="text-sm text-zinc-400">
+        <p className="text-sm text-muted-foreground">
           {loading ? "Loading sessions..." : `${sessions.length} active session${sessions.length !== 1 ? "s" : ""}`}
         </p>
-        <Button variant="ghost" size="sm" className="gap-2 text-zinc-400" onClick={loadSessions} disabled={loading}>
+        <Button variant="ghost" size="sm" className="gap-2 text-muted-foreground" onClick={loadSessions} disabled={loading}>
           <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
           Refresh
         </Button>
       </div>
 
       {feedback && (
-        <div className="rounded-lg border border-zinc-700 bg-zinc-800/40 px-4 py-2 text-sm text-zinc-200">
+        <div className="rounded-lg border border-border bg-secondary/40 px-4 py-2 text-sm text-foreground/90">
           {feedback}
         </div>
       )}
@@ -152,32 +152,32 @@ export function SessionManager() {
           ))}
         </div>
       ) : sessions.length === 0 ? (
-        <p className="text-sm text-zinc-500">No active sessions found.</p>
+        <p className="text-sm text-muted-foreground/80">No active sessions found.</p>
       ) : (
         <div className="space-y-2">
           {sessions.map((session) => (
             <div
               key={session.id}
-              className={`rounded-xl border ${session.isCurrent ? "border-zinc-600 bg-zinc-800/40" : "border-white/[.07] bg-zinc-800/20"} p-4 flex items-center justify-between gap-4`}
+              className={`rounded-xl border ${session.isCurrent ? "border-zinc-600 bg-secondary/40" : "border-white/[.07] bg-secondary/20"} p-4 flex items-center justify-between gap-4`}
             >
               <div className="flex items-center gap-3 min-w-0">
                 <DeviceIcon deviceName={session.deviceName} />
                 <div className="min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-sm font-medium text-zinc-100 truncate">
+                    <span className="text-sm font-medium text-foreground truncate">
                       {session.deviceName || "Unknown device"}
                     </span>
                     {session.isCurrent && (
-                      <span className="text-[10px] font-semibold bg-zinc-700 text-zinc-200 px-1.5 py-0.5 rounded-full">
+                      <span className="text-[10px] font-semibold bg-zinc-700 text-foreground/90 px-1.5 py-0.5 rounded-full">
                         This device
                       </span>
                     )}
                   </div>
                   <div className="flex items-center gap-3 mt-0.5 flex-wrap">
                     {session.lastIp && (
-                      <span className="text-xs text-zinc-500">{session.lastIp}</span>
+                      <span className="text-xs text-muted-foreground/80">{session.lastIp}</span>
                     )}
-                    <span className="text-xs text-zinc-500">
+                    <span className="text-xs text-muted-foreground/80">
                       Active {formatRelative(session.lastActiveAt)}
                     </span>
                   </div>

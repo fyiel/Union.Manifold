@@ -78,7 +78,7 @@ export function CollectionActionMenuPanel({
   return (
     <div
       className={cn(
-        "w-64 rounded-2xl border border-white/[.08] bg-zinc-950/95 backdrop-blur-xl p-1.5 shadow-[0_20px_60px_rgba(0,0,0,0.55)]",
+        "w-64 rounded-2xl border border-white/[.08] bg-background/95 backdrop-blur-xl p-1.5 shadow-[0_20px_60px_rgba(0,0,0,0.55)]",
         className
       )}
       role="menu"
@@ -86,13 +86,13 @@ export function CollectionActionMenuPanel({
       {(title || subtitle) && (
         <div className="px-2 pt-1 pb-2 border-b border-white/[.05] mb-1">
           {title && <div className="text-sm font-semibold text-white truncate">{title}</div>}
-          {subtitle && <div className="text-[11px] text-zinc-500 truncate">{subtitle}</div>}
+          {subtitle && <div className="text-[11px] text-muted-foreground/80 truncate">{subtitle}</div>}
         </div>
       )}
       {visibleSections.map((section, sIdx) => (
         <div key={section.id} className={cn(sIdx > 0 && "mt-1 pt-1 border-t border-white/[.05]")}>
           {section.label && (
-            <div className="px-2 pt-1 pb-0.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-zinc-600">
+            <div className="px-2 pt-1 pb-0.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-muted-foreground/60">
               {section.label}
             </div>
           )}
@@ -113,10 +113,10 @@ export function CollectionActionMenuPanel({
                     "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-sm text-left transition-colors active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed",
                     item.destructive
                       ? "text-red-400 hover:bg-red-500/10 hover:text-red-300"
-                      : "text-zinc-300 hover:bg-white/[.06] hover:text-white"
+                      : "text-foreground/80 hover:bg-white/[.06] hover:text-white"
                   )}
                 >
-                  <Icon className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
+                  <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground/80" />
                   <span className="flex-1 truncate">{item.label}</span>
                 </button>
               )

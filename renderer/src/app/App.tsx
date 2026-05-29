@@ -5,6 +5,7 @@ import { DownloadsProvider, useDownloads } from "@/context/downloads-context"
 import { ToastProvider } from "@/context/toast-context"
 import { AuthProvider } from "@/context/auth-context"
 import { Toaster } from "@/components/Toaster"
+import { ThemeBoundary } from "@/components/ThemeBoundary"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { AlertTriangle } from "@/components/icons"
@@ -72,14 +73,14 @@ function ExtractionCloseGuard() {
             <AlertTriangle className="h-5 w-5 text-amber-400" />
             {isExtractionRequest ? "Download or extraction still running" : "Download still running"}
           </DialogTitle>
-          <DialogDescription className="text-left pt-2 text-zinc-300">
+          <DialogDescription className="text-left pt-2 text-foreground/80">
             {isExtractionRequest
               ? "Closing now will stop the current work. Downloads will be resumable when you reopen the app, and finished archives can still be installed later."
               : "Closing now will pause the current download. You can resume it when you reopen the app."}
           </DialogDescription>
         </DialogHeader>
         {affectedNames.length > 0 ? (
-          <div className="rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-zinc-200">
+          <div className="rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-foreground/90">
             {affectedNames.join(", ")}
           </div>
         ) : null}
@@ -111,6 +112,7 @@ export default function App() {
       <ToastProvider>
         <AuthProvider>
         <DownloadsProvider>
+        <ThemeBoundary>
           <Suspense fallback={<RouteFallback />}>
             <Routes>
               <Route path="/overlay" element={<InGameOverlay />} />
@@ -145,6 +147,7 @@ export default function App() {
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </Suspense>
+        </ThemeBoundary>
         </DownloadsProvider>
         </AuthProvider>
         <Toaster />

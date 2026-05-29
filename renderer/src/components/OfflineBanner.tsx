@@ -14,8 +14,8 @@ export function OfflineBanner({ variant = "full", onRetry }: OfflineBannerProps)
       <div className="flex items-center gap-3 rounded-xl border border-orange-300/30 bg-gradient-to-r from-orange-400/10 via-orange-300/5 to-transparent px-4 py-3">
         <WifiOff className="h-4 w-4 shrink-0 text-orange-400" />
         <div className="min-w-0 flex-1">
-          <span className="text-sm font-medium text-zinc-100">Using offline mode</span>
-          <span className="ml-2 text-xs text-zinc-400">
+          <span className="text-sm font-medium text-foreground">Using offline mode</span>
+          <span className="ml-2 text-xs text-muted-foreground">
             Installed games still work. Retry when you're back online or Union Crax is reachable again.
           </span>
         </div>
@@ -37,13 +37,13 @@ export function OfflineBanner({ variant = "full", onRetry }: OfflineBannerProps)
             <WifiOff className="h-12 w-12 text-orange-400" />
           </div>
         </div>
-        <h2 className="text-3xl sm:text-4xl font-black text-zinc-100  mb-4">
+        <h2 className="text-3xl sm:text-4xl font-black text-foreground  mb-4">
           Using Offline Mode
         </h2>
-        <p className="text-base sm:text-lg text-zinc-400 mb-6 max-w-md mx-auto leading-relaxed">
+        <p className="text-base sm:text-lg text-muted-foreground mb-6 max-w-md mx-auto leading-relaxed">
           We couldn't reach Union Crax right now. Retry when you're back online or the service is reachable again to browse the full collection of games.
         </p>
-        <p className="text-sm text-zinc-400/70 mb-8">
+        <p className="text-sm text-muted-foreground/70 mb-8">
           Your installed games are still available in your Library.
         </p>
         {onRetry && (

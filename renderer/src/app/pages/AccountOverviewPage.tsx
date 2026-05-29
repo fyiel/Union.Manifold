@@ -6,7 +6,7 @@ import { CommentMarkdown } from "@/components/CommentMarkdown"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Textarea } from "@/components/ui/textarea"
 import { MyRequests } from "@/components/MyRequests"
-import { apiFetch, apiUrl } from "@/lib/api"
+import { apiFetch, apiUpload, apiUrl } from "@/lib/api"
 import { useAuth } from "@/hooks/useAuth"
 import {
   RefreshCw,
@@ -165,15 +165,12 @@ export function AccountOverviewPage() {
     setProfileUploadError(null)
     setAvatarUploading(true)
     try {
-      const form = new FormData()
-      form.append("file", file)
-      form.append("kind", "avatar")
-      const res = await fetch(apiUrl("/api/account/profile-images"), {
-        method: "POST",
-        body: form,
-        credentials: "include",
+      const res = await apiUpload("/api/account/profile-images", {
+        file,
+        fileName: file.name || "avatar.png",
+        fields: { kind: "avatar" },
       })
-      const data = await res.json()
+      const data = await res.json().catch(() => ({}))
       if (!res.ok) {
         setProfileUploadError(data?.error || "Failed to upload avatar.")
       } else {
@@ -193,15 +190,12 @@ export function AccountOverviewPage() {
     setProfileUploadError(null)
     setBannerUploading(true)
     try {
-      const form = new FormData()
-      form.append("file", file)
-      form.append("kind", "banner")
-      const res = await fetch(apiUrl("/api/account/profile-images"), {
-        method: "POST",
-        body: form,
-        credentials: "include",
+      const res = await apiUpload("/api/account/profile-images", {
+        file,
+        fileName: file.name || "banner.png",
+        fields: { kind: "banner" },
       })
-      const data = await res.json()
+      const data = await res.json().catch(() => ({}))
       if (!res.ok) {
         setProfileUploadError(data?.error || "Failed to upload banner.")
       } else {
@@ -307,8 +301,8 @@ export function AccountOverviewPage() {
       <div className="container mx-auto px-4 py-10 sm:py-12 md:py-14 max-w-6xl">
         <div className="mb-10 anim">
           <p className="section-label mb-2">Account</p>
-          <h1 className="text-4xl sm:text-5xl font-light tracking-tight text-zinc-100">My Profile</h1>
-          <p className="mt-3 text-base text-zinc-400">
+          <h1 className="text-4xl sm:text-5xl font-light tracking-tight text-foreground">My Profile</h1>
+          <p className="mt-3 text-base text-muted-foreground">
             Track your account activity and stay on top of what you care about.
           </p>
         </div>
@@ -316,8 +310,8 @@ export function AccountOverviewPage() {
         {!hasSession && !authState.isLoading && (
           <Card className="glass rounded-2xl">
             <CardContent className="py-12 text-center space-y-4">
-              <p className="text-lg font-semibold text-zinc-100">Login to continue.</p>
-              <p className="text-sm text-zinc-400">
+              <p className="text-lg font-semibold text-foreground">Login to continue.</p>
+              <p className="text-sm text-muted-foreground">
                 Sign in to see your saved lists and recent activity.
               </p>
               <Button className="w-full md:w-auto" onClick={handleLogin}>
@@ -365,28 +359,28 @@ export function AccountOverviewPage() {
                 {/* User Info */}
                 <div className="grid gap-4 md:grid-cols-2">
                   {authState.user?.email && (
-                    <div className="rounded-lg border border-white/[.07] bg-zinc-800/20 p-4">
-                      <p className="text-xs font-semibold text-zinc-400 mb-1">Email</p>
-                      <p className="text-sm text-zinc-100 break-all">{authState.user.email}</p>
+                    <div className="rounded-lg border border-white/[.07] bg-secondary/20 p-4">
+                      <p className="text-xs font-semibold text-muted-foreground mb-1">Email</p>
+                      <p className="text-sm text-foreground break-all">{authState.user.email}</p>
                     </div>
                   )}
                   {authState.user?.username && (
-                    <div className="rounded-lg border border-white/[.07] bg-zinc-800/20 p-4">
-                      <p className="text-xs font-semibold text-zinc-400 mb-1">Username</p>
-                      <p className="text-sm text-zinc-100">{authState.user.username}</p>
+                    <div className="rounded-lg border border-white/[.07] bg-secondary/20 p-4">
+                      <p className="text-xs font-semibold text-muted-foreground mb-1">Username</p>
+                      <p className="text-sm text-foreground">{authState.user.username}</p>
                     </div>
                   )}
                 </div>
 
                 {/* Linked Providers */}
                 <div className="space-y-3">
-                  <p className="text-sm font-semibold text-zinc-300">Linked Accounts</p>
+                  <p className="text-sm font-semibold text-foreground/80">Linked Accounts</p>
                   <div className="grid gap-2 md:grid-cols-2">
                     {/* Discord */}
-                    <div className="rounded-lg border border-white/[.07] bg-zinc-800/20 p-3 flex items-center justify-between">
+                    <div className="rounded-lg border border-white/[.07] bg-secondary/20 p-3 flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         <div className="w-2 h-2 rounded-full bg-indigo-500" />
-                        <span className="text-sm text-zinc-300">Discord</span>
+                        <span className="text-sm text-foreground/80">Discord</span>
                       </div>
                       {linkedProviders.some((p) => p.provider === "discord") ? (
                         <Button
@@ -418,10 +412,10 @@ export function AccountOverviewPage() {
                     </div>
 
                     {/* Google */}
-                    <div className="rounded-lg border border-white/[.07] bg-zinc-800/20 p-3 flex items-center justify-between">
+                    <div className="rounded-lg border border-white/[.07] bg-secondary/20 p-3 flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         <div className="w-2 h-2 rounded-full bg-red-500" />
-                        <span className="text-sm text-zinc-300">Google</span>
+                        <span className="text-sm text-foreground/80">Google</span>
                       </div>
                       {linkedProviders.some((p) => p.provider === "google") ? (
                         <Button
@@ -452,7 +446,7 @@ export function AccountOverviewPage() {
                       )}
                     </div>
                   </div>
-                  <p className="text-xs text-zinc-500 mt-2">
+                  <p className="text-xs text-muted-foreground/80 mt-2">
                     You need at least one account linked. Link multiple providers for easier access.
                   </p>
                 </div>
@@ -463,18 +457,20 @@ export function AccountOverviewPage() {
               <input ref={bannerInputRef} type="file" accept="image/*" className="hidden" onChange={handleBannerUpload} />
               <input ref={avatarInputRef} type="file" accept="image/*" className="hidden" onChange={handleAvatarUpload} />
 
-              {/* Banner + Avatar Hero */}
+              {/* Banner + Avatar Hero — banner uses the same 3:1 aspect
+                  ratio as the public profile and the settings page so
+                  uploaded artwork frames identically everywhere. */}
               <div className="relative">
-                <div className="w-full h-32 bg-zinc-800/40 overflow-hidden">
+                <div className="w-full aspect-[3/1] bg-secondary/40 overflow-hidden">
                   {profileImages?.bannerUrl ? (
                     <img src={profileImages.bannerUrl} alt="Profile banner" className="w-full h-full object-cover" />
                   ) : (
-                    <div className="w-full h-full bg-gradient-to-r from-zinc-800 to-zinc-700" />
+                    <div className="w-full h-full bg-gradient-to-r from-secondary to-zinc-700" />
                   )}
                 </div>
                 <div className="px-5 pb-4">
                   <div className="flex items-end justify-between -mt-8">
-                    <div className="h-16 w-16 rounded-full border-2 border-[#09090b] bg-zinc-800/80 overflow-hidden flex items-center justify-center shrink-0">
+                    <div className="h-16 w-16 rounded-full border-2 border-[#09090b] bg-secondary/80 overflow-hidden flex items-center justify-center shrink-0">
                       {profileImages?.customAvatarUrl || profileImages?.avatarUrl ? (
                         <img
                           src={profileImages.customAvatarUrl ?? profileImages.avatarUrl ?? ""}
@@ -482,7 +478,7 @@ export function AccountOverviewPage() {
                           className="w-full h-full object-cover"
                         />
                       ) : (
-                        <ImageIcon className="h-6 w-6 text-zinc-500" />
+                        <ImageIcon className="h-6 w-6 text-muted-foreground/80" />
                       )}
                     </div>
                     <Button
@@ -500,14 +496,14 @@ export function AccountOverviewPage() {
                     </Button>
                   </div>
                   <div className="mt-2">
-                    <p className="font-semibold text-zinc-100">
+                    <p className="font-semibold text-foreground">
                       {authState.user?.displayName || authState.user?.username || "Your Account"}
                     </p>
                     {authState.user?.username && authState.user?.displayName && (
-                      <p className="text-xs text-zinc-500">@{authState.user.username}</p>
+                      <p className="text-xs text-muted-foreground/80">@{authState.user.username}</p>
                     )}
                     {!editingProfile && summary?.user?.bio && (
-                      <p className="mt-1 text-sm text-zinc-400 line-clamp-2">{summary.user.bio}</p>
+                      <p className="mt-1 text-sm text-muted-foreground line-clamp-2">{summary.user.bio}</p>
                     )}
                   </div>
                 </div>
@@ -524,12 +520,12 @@ export function AccountOverviewPage() {
 
                   {/* Banner upload */}
                   <div className="space-y-2">
-                    <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Banner</p>
+                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Banner</p>
                     <button
                       type="button"
                       disabled={bannerUploading || Boolean(profileImages?.bannerCooldownActive)}
                       onClick={() => bannerInputRef.current?.click()}
-                      className="relative w-full h-24 rounded-xl overflow-hidden border border-white/[.07] bg-zinc-800/30 flex items-center justify-center group transition-opacity disabled:opacity-50"
+                      className="relative w-full aspect-[3/1] rounded-xl overflow-hidden border border-white/[.07] bg-secondary/30 flex items-center justify-center group transition-opacity disabled:opacity-50"
                     >
                       {profileImages?.bannerUrl ? (
                         <img src={profileImages.bannerUrl} alt="Banner" className="w-full h-full object-cover" />
@@ -542,14 +538,14 @@ export function AccountOverviewPage() {
                         )}
                       </div>
                       {!profileImages?.bannerUrl && !bannerUploading && (
-                        <div className="flex flex-col items-center gap-1 text-zinc-500">
+                        <div className="flex flex-col items-center gap-1 text-muted-foreground/80">
                           <Upload className="h-5 w-5" />
                           <span className="text-xs">Click to upload banner</span>
                         </div>
                       )}
                     </button>
                     {profileImages?.bannerCooldownActive && profileImages.bannerNextChangeAt && (
-                      <p className="text-xs text-zinc-500">
+                      <p className="text-xs text-muted-foreground/80">
                         Next change available after {new Date(profileImages.bannerNextChangeAt).toLocaleDateString()}
                       </p>
                     )}
@@ -557,13 +553,13 @@ export function AccountOverviewPage() {
 
                   {/* Avatar upload */}
                   <div className="space-y-2">
-                    <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Profile Picture</p>
+                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Profile Picture</p>
                     <div className="flex items-center gap-4">
                       <button
                         type="button"
                         disabled={avatarUploading || Boolean(profileImages?.avatarCooldownActive)}
                         onClick={() => avatarInputRef.current?.click()}
-                        className="relative h-16 w-16 rounded-full overflow-hidden border border-white/[.07] bg-zinc-800/30 flex items-center justify-center group shrink-0 transition-opacity disabled:opacity-50"
+                        className="relative h-16 w-16 rounded-full overflow-hidden border border-white/[.07] bg-secondary/30 flex items-center justify-center group shrink-0 transition-opacity disabled:opacity-50"
                       >
                         {profileImages?.customAvatarUrl || profileImages?.avatarUrl ? (
                           <img
@@ -580,10 +576,10 @@ export function AccountOverviewPage() {
                           )}
                         </div>
                         {!profileImages?.customAvatarUrl && !profileImages?.avatarUrl && !avatarUploading && (
-                          <ImageIcon className="h-6 w-6 text-zinc-500" />
+                          <ImageIcon className="h-6 w-6 text-muted-foreground/80" />
                         )}
                       </button>
-                      <div className="space-y-1 text-xs text-zinc-500">
+                      <div className="space-y-1 text-xs text-muted-foreground/80">
                         <p>Click the circle to upload a new profile picture.</p>
                         {profileImages?.avatarCooldownActive && profileImages.avatarNextChangeAt && (
                           <p>Next change available after {new Date(profileImages.avatarNextChangeAt).toLocaleDateString()}</p>
@@ -594,7 +590,7 @@ export function AccountOverviewPage() {
 
                   {/* Bio */}
                   <div className="space-y-2">
-                    <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Bio</p>
+                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Bio</p>
                     <Textarea
                       value={bioDraft}
                       onChange={(e) => setBioDraft(e.target.value.slice(0, MAX_BIO_LENGTH))}
@@ -602,7 +598,7 @@ export function AccountOverviewPage() {
                       rows={3}
                       maxLength={MAX_BIO_LENGTH}
                     />
-                    <p className="text-xs text-zinc-500 text-right">{bioDraft.length}/{MAX_BIO_LENGTH}</p>
+                    <p className="text-xs text-muted-foreground/80 text-right">{bioDraft.length}/{MAX_BIO_LENGTH}</p>
                   </div>
 
                   <div className="flex gap-2 pt-1">
@@ -657,14 +653,14 @@ export function AccountOverviewPage() {
                     ))}
                   </div>
                 ) : recentError ? (
-                  <p className="text-sm text-zinc-400">{recentError}</p>
+                  <p className="text-sm text-muted-foreground">{recentError}</p>
                 ) : recentComments.length === 0 ? (
-                  <p className="text-sm text-zinc-400">No recent comments yet.</p>
+                  <p className="text-sm text-muted-foreground">No recent comments yet.</p>
                 ) : (
                   <div className="space-y-3">
                     {recentComments.map((comment) => (
-                      <div key={comment.id} className="rounded-xl border border-white/[.07] bg-zinc-800/20 p-4">
-                        <p className="text-sm text-zinc-400">
+                      <div key={comment.id} className="rounded-xl border border-white/[.07] bg-secondary/20 p-4">
+                        <p className="text-sm text-muted-foreground">
                           {comment.gameName ? (
                             <Button
                               variant="link"
@@ -682,11 +678,11 @@ export function AccountOverviewPage() {
                               View game
                             </Button>
                           )}
-                          <span className="ml-2 text-xs text-zinc-400">
+                          <span className="ml-2 text-xs text-muted-foreground">
                             {new Date(comment.createdAt).toLocaleDateString()}
                           </span>
                         </p>
-                        <CommentMarkdown text={comment.body} className="mt-2 max-h-24 overflow-hidden text-zinc-100" />
+                        <CommentMarkdown text={comment.body} className="mt-2 max-h-24 overflow-hidden text-foreground" />
                       </div>
                     ))}
                   </div>
@@ -700,7 +696,7 @@ export function AccountOverviewPage() {
                 <CardTitle className="text-xl font-light tracking-tight">Your Lists</CardTitle>
               </CardHeader>
               <CardContent className="grid gap-4 md:grid-cols-2">
-                <div className="rounded-xl border border-white/[.07] bg-zinc-800/20 p-4 space-y-2">
+                <div className="rounded-xl border border-white/[.07] bg-secondary/20 p-4 space-y-2">
                   <div className="flex items-center gap-2">
                     <Star className="h-4 w-4 text-white" />
                     <p className="text-sm font-semibold">Wishlist</p>
@@ -708,7 +704,7 @@ export function AccountOverviewPage() {
                   <p className="text-2xl font-bold">{overviewStats.wishlist}</p>
                   <Button variant="outline" className="gap-2" onClick={() => navigate("/wishlist")}>View wishlist</Button>
                 </div>
-                <div className="rounded-xl border border-white/[.07] bg-zinc-800/20 p-4 space-y-2">
+                <div className="rounded-xl border border-white/[.07] bg-secondary/20 p-4 space-y-2">
                   <div className="flex items-center gap-2">
                     <Heart className="h-4 w-4 text-white" />
                     <p className="text-sm font-semibold">Liked</p>
@@ -716,7 +712,7 @@ export function AccountOverviewPage() {
                   <p className="text-2xl font-bold">{overviewStats.favorites}</p>
                   <Button variant="outline" className="gap-2" onClick={() => navigate("/liked")}>View liked</Button>
                 </div>
-                <div className="rounded-xl border border-white/[.07] bg-zinc-800/20 p-4 space-y-2">
+                <div className="rounded-xl border border-white/[.07] bg-secondary/20 p-4 space-y-2">
                   <div className="flex items-center gap-2">
                     <Clock className="h-4 w-4 text-white" />
                     <p className="text-sm font-semibold">View history</p>
@@ -724,7 +720,7 @@ export function AccountOverviewPage() {
                   <p className="text-2xl font-bold">{overviewStats.viewHistory}</p>
                   <Button variant="outline" className="gap-2" onClick={() => navigate("/view-history")}>View history</Button>
                 </div>
-                <div className="rounded-xl border border-white/[.07] bg-zinc-800/20 p-4 space-y-2">
+                <div className="rounded-xl border border-white/[.07] bg-secondary/20 p-4 space-y-2">
                   <div className="flex items-center gap-2">
                     <Clock className="h-4 w-4 text-white" />
                     <p className="text-sm font-semibold">Search history</p>

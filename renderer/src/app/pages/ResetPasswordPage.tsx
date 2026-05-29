@@ -115,10 +115,10 @@ export function ResetPasswordPage() {
   if (!token) {
     return (
       <div className="min-h-screen bg-[#09090b] flex items-center justify-center p-4">
-        <Card className="w-full max-w-md border border-white/[.07] bg-zinc-900/40 backdrop-blur-xl">
+        <Card className="w-full max-w-md border border-white/[.07] bg-card/40 backdrop-blur-xl">
           <CardContent className="p-6 space-y-4 text-center">
-            <h2 className="text-xl font-semibold text-zinc-100">Invalid Link</h2>
-            <p className="text-sm text-zinc-400">This password reset link is invalid or has expired.</p>
+            <h2 className="text-xl font-semibold text-foreground">Invalid Link</h2>
+            <p className="text-sm text-muted-foreground">This password reset link is invalid or has expired.</p>
             <Button onClick={() => navigate("/forgot-password", { replace: true })} className="w-full gap-2">
               Request New Link
             </Button>
@@ -131,13 +131,13 @@ export function ResetPasswordPage() {
   if (completed) {
     return (
       <div className="min-h-screen bg-[#09090b] flex items-center justify-center p-4">
-        <Card className="w-full max-w-md border border-white/[.07] bg-zinc-900/40 backdrop-blur-xl">
+        <Card className="w-full max-w-md border border-white/[.07] bg-card/40 backdrop-blur-xl">
           <CardContent className="p-6 space-y-4 text-center">
             <div className="inline-flex items-center justify-center rounded-full bg-green-500/10 p-3">
               <CheckCircle className="h-8 w-8 text-green-400" />
             </div>
-            <h2 className="text-xl font-semibold text-zinc-100">Password Reset</h2>
-            <p className="text-sm text-zinc-400">Your password has been reset. Redirecting to login...</p>
+            <h2 className="text-xl font-semibold text-foreground">Password Reset</h2>
+            <p className="text-sm text-muted-foreground">Your password has been reset. Redirecting to login...</p>
           </CardContent>
         </Card>
       </div>
@@ -154,17 +154,17 @@ export function ResetPasswordPage() {
         <Button
           variant="ghost"
           onClick={() => navigate("/login")}
-          className="gap-2 text-zinc-400 hover:text-white hover:bg-white/[.05]"
+          className="gap-2 text-muted-foreground hover:text-white hover:bg-white/[.05]"
         >
           <ArrowLeft className="h-4 w-4" />
           Back to Login
         </Button>
 
-        <Card className="border border-white/[.07] bg-zinc-900/40 backdrop-blur-xl">
+        <Card className="border border-white/[.07] bg-card/40 backdrop-blur-xl">
           <CardContent className="p-6 space-y-6">
             <div className="text-center space-y-1">
-              <h1 className="text-xl font-semibold text-zinc-100">Reset Your Password</h1>
-              <p className="text-sm text-zinc-500">Enter a new password for your account</p>
+              <h1 className="text-xl font-semibold text-foreground">Reset Your Password</h1>
+              <p className="text-sm text-muted-foreground/80">Enter a new password for your account</p>
             </div>
 
             {error && (
@@ -176,21 +176,21 @@ export function ResetPasswordPage() {
 
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="space-y-1.5">
-                <label className="text-sm font-medium text-zinc-300">New Password</label>
+                <label className="text-sm font-medium text-foreground/80">New Password</label>
                 <div className="relative">
-                  <Lock className="absolute left-3 top-3 h-4 w-4 text-zinc-500" />
+                  <Lock className="absolute left-3 top-3 h-4 w-4 text-muted-foreground/80" />
                   <Input
                     type={showPassword ? "text" : "password"}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="••••••••"
-                    className="pl-10 pr-10 border-white/[.07] bg-zinc-800/50 text-white placeholder:text-zinc-600"
+                    className="pl-10 pr-10 border-white/[.07] bg-secondary/50 text-white placeholder:text-muted-foreground/60"
                     disabled={loading}
                   />
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-3 text-zinc-500 hover:text-zinc-300"
+                    className="absolute right-3 top-3 text-muted-foreground/80 hover:text-foreground/80"
                   >
                     {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
@@ -209,7 +209,7 @@ export function ResetPasswordPage() {
                         />
                       ))}
                     </div>
-                    <p className="text-xs text-zinc-500">
+                    <p className="text-xs text-muted-foreground/80">
                       {passwordStrength === 0 && "Very weak"}
                       {passwordStrength === 1 && "Weak"}
                       {passwordStrength === 2 && "Fair"}
@@ -222,21 +222,21 @@ export function ResetPasswordPage() {
               </div>
 
               <div className="space-y-1.5">
-                <label className="text-sm font-medium text-zinc-300">Confirm Password</label>
+                <label className="text-sm font-medium text-foreground/80">Confirm Password</label>
                 <div className="relative">
-                  <Lock className="absolute left-3 top-3 h-4 w-4 text-zinc-500" />
+                  <Lock className="absolute left-3 top-3 h-4 w-4 text-muted-foreground/80" />
                   <Input
                     type={showConfirmPassword ? "text" : "password"}
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
                     placeholder="••••••••"
-                    className="pl-10 pr-10 border-white/[.07] bg-zinc-800/50 text-white placeholder:text-zinc-600"
+                    className="pl-10 pr-10 border-white/[.07] bg-secondary/50 text-white placeholder:text-muted-foreground/60"
                     disabled={loading}
                   />
                   <button
                     type="button"
                     onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                    className="absolute right-3 top-3 text-zinc-500 hover:text-zinc-300"
+                    className="absolute right-3 top-3 text-muted-foreground/80 hover:text-foreground/80"
                   >
                     {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
