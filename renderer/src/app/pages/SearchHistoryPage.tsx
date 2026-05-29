@@ -82,8 +82,8 @@ export function SearchHistoryPage() {
       <div className="container mx-auto max-w-6xl px-3 sm:px-4 py-6 sm:py-8">
         <div className="mb-6 sm:mb-8 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
           <div>
-            <h1 className="text-2xl sm:text-3xl font-bold text-zinc-100  mb-1 sm:mb-2">Search History</h1>
-            <p className="text-sm sm:text-base text-zinc-400">Recent searches synced with your account.</p>
+            <h1 className="text-2xl sm:text-3xl font-bold text-foreground  mb-1 sm:mb-2">Search History</h1>
+            <p className="text-sm sm:text-base text-muted-foreground">Recent searches synced with your account.</p>
           </div>
           <div className="flex gap-2">
             <Button variant="outline" onClick={() => navigate("/view-history")} className="gap-2">
@@ -102,13 +102,13 @@ export function SearchHistoryPage() {
         </div>
 
         {!accountUser && !accountLoading && (
-          <Card className="border border-white/[.07] bg-zinc-900/40">
+          <Card className="border border-white/[.07] bg-card/40">
             <CardContent className="p-6 text-center space-y-3">
               <div className="inline-flex items-center justify-center rounded-full bg-white/10 text-white p-3">
                 <Clock className="h-5 w-5" />
               </div>
               <div className="text-lg font-semibold">Login to see your search history</div>
-              <p className="text-sm text-zinc-400">Sign in to sync search history across devices.</p>
+              <p className="text-sm text-muted-foreground">Sign in to sync search history across devices.</p>
               <Button className="gap-2" onClick={handleLogin} disabled={loggingIn}>
                 <LogIn className="h-4 w-4" />
                 {loggingIn ? "Redirecting..." : "Sign In to see search history"}
@@ -126,7 +126,7 @@ export function SearchHistoryPage() {
         {!accountUser && !accountLoading ? null : loading || accountLoading ? (
           <div className="space-y-2.5">
             {Array.from({ length: 6 }).map((_, idx) => (
-              <div key={idx} className="rounded-xl border border-white/[.07] bg-zinc-900/40 p-4 flex items-center justify-between">
+              <div key={idx} className="rounded-xl border border-white/[.07] bg-card/40 p-4 flex items-center justify-between">
                 <div className="space-y-1.5 flex-1">
                   <div className="udl-skeleton h-3.5 w-1/3 rounded" />
                   <div className="udl-skeleton h-2.5 w-1/4 rounded" />
@@ -136,8 +136,8 @@ export function SearchHistoryPage() {
             ))}
           </div>
         ) : items.length === 0 ? (
-          <Card className="border border-white/[.07] bg-zinc-900/40">
-            <CardContent className="p-10 text-center text-zinc-400">
+          <Card className="border border-white/[.07] bg-card/40">
+            <CardContent className="p-10 text-center text-muted-foreground">
               No search history yet.
             </CardContent>
           </Card>
@@ -146,12 +146,12 @@ export function SearchHistoryPage() {
             {items.map((item, index) => {
               const timestamp = item.lastSearchedAt || item.last_searched_at
               return (
-                <Card key={`${item.term}-${index}`} className="border border-white/[.07] bg-zinc-900/40">
+                <Card key={`${item.term}-${index}`} className="border border-white/[.07] bg-card/40">
                   <CardContent className="flex items-center justify-between gap-4 p-4">
                     <div>
-                      <div className="text-sm font-semibold text-zinc-100">{item.term}</div>
+                      <div className="text-sm font-semibold text-foreground">{item.term}</div>
                       {timestamp ? (
-                        <div className="text-xs text-zinc-400">Searched {new Date(timestamp).toLocaleDateString()}</div>
+                        <div className="text-xs text-muted-foreground">Searched {new Date(timestamp).toLocaleDateString()}</div>
                       ) : null}
                     </div>
                     <Button variant="outline" onClick={() => navigate(`/search?q=${encodeURIComponent(item.term)}`)}>

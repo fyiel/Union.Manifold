@@ -86,8 +86,8 @@ export function ViewHistoryPage() {
       <div className="container mx-auto max-w-7xl px-3 sm:px-4 py-6 sm:py-8 relative z-10">
         <div className="mb-6 sm:mb-8 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
           <div>
-            <h1 className="text-2xl sm:text-3xl font-bold text-zinc-100  mb-1 sm:mb-2">View History</h1>
-            <p className="text-sm sm:text-base text-zinc-400">Quickly jump back to recently viewed games.</p>
+            <h1 className="text-2xl sm:text-3xl font-bold text-foreground  mb-1 sm:mb-2">View History</h1>
+            <p className="text-sm sm:text-base text-muted-foreground">Quickly jump back to recently viewed games.</p>
           </div>
           <div className="flex gap-2">
             <Button variant="outline" onClick={() => navigate("/search-history")} className="gap-2">
@@ -102,13 +102,13 @@ export function ViewHistoryPage() {
         </div>
 
         {!accountUser && !accountLoading && (
-          <Card className="border border-white/[.07] bg-zinc-900/40">
+          <Card className="border border-white/[.07] bg-card/40">
             <CardContent className="p-6 text-center space-y-3">
               <div className="inline-flex items-center justify-center rounded-full bg-white/10 text-white p-3">
                 <Clock className="h-5 w-5" />
               </div>
               <div className="text-lg font-semibold">Login to see your view history</div>
-              <p className="text-sm text-zinc-400">Sign in to sync view history across devices.</p>
+              <p className="text-sm text-muted-foreground">Sign in to sync view history across devices.</p>
               <Button className="gap-2" onClick={handleLogin} disabled={loggingIn}>
                 <LogIn className="h-4 w-4" />
                 {loggingIn ? "Connecting..." : "Sign In"}
@@ -130,8 +130,8 @@ export function ViewHistoryPage() {
             ))}
           </div>
         ) : items.length === 0 ? (
-          <Card className="border border-white/[.07] bg-zinc-900/40">
-            <CardContent className="p-10 text-center text-zinc-400">
+          <Card className="border border-white/[.07] bg-card/40">
+            <CardContent className="p-10 text-center text-muted-foreground">
               No view history yet.
             </CardContent>
           </Card>
@@ -140,7 +140,7 @@ export function ViewHistoryPage() {
             {items.map((game) => (
               <div key={game.appid} className="space-y-2">
                 <GameCard game={game} />
-                <div className="text-[11px] text-zinc-500 flex items-center gap-1.5 px-1">
+                <div className="text-[11px] text-muted-foreground/80 flex items-center gap-1.5 px-1">
                   <Clock className="h-3 w-3" />
                   {new Date(game.lastViewedAt).toLocaleDateString()}
                 </div>

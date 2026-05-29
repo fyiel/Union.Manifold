@@ -33,19 +33,19 @@ export function LoginPromptModal({ open, onSignIn, onSkip, signingIn }: LoginPro
       <DialogContent className="sm:max-w-lg" showCloseButton={false}>
         <DialogHeader>
           <DialogTitle className="text-xl">Sign in to UnionCrax</DialogTitle>
-          <DialogDescription className="text-left pt-1 text-zinc-400">
+          <DialogDescription className="text-left pt-1 text-muted-foreground">
             You can use UC.Direct without an account, but signing in unlocks a lot more.
           </DialogDescription>
         </DialogHeader>
         <ul className="grid gap-2 py-1">
           {benefits.map(({ icon: Icon, label, desc }) => (
             <li key={label} className="flex items-start gap-3 rounded-xl border border-white/[.06] bg-white/[.02] px-3 py-2.5">
-              <span className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-white/[.06] text-zinc-200">
+              <span className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-white/[.06] text-foreground/90">
                 <Icon className="h-3.5 w-3.5" />
               </span>
               <div className="min-w-0">
-                <div className="text-[13px] font-semibold text-zinc-100 leading-tight">{label}</div>
-                <div className="text-[12px] text-zinc-500 leading-snug">{desc}</div>
+                <div className="text-[13px] font-semibold text-foreground leading-tight">{label}</div>
+                <div className="text-[12px] text-muted-foreground/80 leading-snug">{desc}</div>
               </div>
             </li>
           ))}
@@ -62,7 +62,7 @@ export function LoginPromptModal({ open, onSignIn, onSkip, signingIn }: LoginPro
           <Button
             onClick={onSignIn}
             disabled={signingIn}
-            className="flex-1 sm:flex-none gap-2 bg-white text-black hover:bg-zinc-200"
+            className="flex-1 sm:flex-none gap-2 bg-primary text-primary-foreground hover:brightness-110"
           >
             <LogIn className="h-4 w-4" />
             {signingIn ? "Signing in…" : "Sign in"}

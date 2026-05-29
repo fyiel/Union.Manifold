@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { useDownloads, type DownloadItem } from "@/context/downloads-context"
 import { useNavigate } from "react-router-dom"
 import { useGamesData } from "@/hooks/use-games"
+import { useRunningGamesSessions } from "@/hooks/use-running-games"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
@@ -101,53 +102,86 @@ let _persistedDiskHistory: number[] = []
 let _persistedPeakSpeed = 0
 let _persistedForAppId: string | null = null
 
-function renderBars(points: number[], color: string) {
-  const width = 600
-  const height = 70
-  if (!points.length) {
-    return <line x1="0" y1={height} x2={width} y2={height} stroke={color} strokeWidth="1" opacity="0.35" />
-  }
-  const max = Math.max(...points, 1)
-  const barSlot = width / Math.max(points.length, 1)
-  const barWidth = Math.max(1, barSlot * 0.22)
-  const offset = (barSlot - barWidth) / 2
+// Steam-style throughput chart: filled vertical bars for the network history
+// (green), a smoothed line over them for disk I/O (amber). Renders against a
+// shared max so both series read on the same scale.
+const CHART_WIDTH = 600
+const CHART_HEIGHT = 90
+
+function renderBars(points: number[], _color: string, sharedMax?: number) {
+  const height = CHART_HEIGHT
+  const width = CHART_WIDTH
+  if (!points.length) return null
+  const max = sharedMax ?? Math.max(...points, 1)
+  // ~60 samples fill the width. Each bar is a thin column with a small gap.
+  const slot = width / Math.max(points.length, 1)
+  const barWidth = Math.max(2, slot * 0.7)
+  const offset = (slot - barWidth) / 2
 
   return (
-    <>
+    <g>
       {points.map((value, index) => {
-        const x = index * barSlot + offset
-        const barHeight = (value / max) * height
+        const x = index * slot + offset
+        // Floor height a little so we always see something while bytes are
+        // moving — Steam does the same so the chart never looks "empty".
+        const safeValue = value > 0 ? value : 0
+        const barHeight = max > 0 ? Math.max(safeValue > 0 ? 2 : 0, (safeValue / max) * height) : 0
         return (
           <rect
-            key={`${color}-${index}`}
+            key={`bar-${index}`}
             x={x}
             y={height - barHeight}
             width={barWidth}
             height={barHeight}
-            fill={color}
-            opacity="0.85"
+            fill="url(#netGradient)"
+            rx={1}
           />
         )
       })}
-    </>
+    </g>
   )
 }
 
-function renderLine(points: number[], color: string) {
-  const width = 600
-  const height = 70
-  if (!points.length) {
-    return <polyline points={`0,${height} ${width},${height}`} fill="none" stroke={color} strokeWidth="2" opacity="0.6" />
-  }
-  const max = Math.max(...points, 1)
+function renderLine(points: number[], color: string, sharedMax?: number) {
+  const height = CHART_HEIGHT
+  const width = CHART_WIDTH
+  if (!points.length) return null
+  const max = sharedMax ?? Math.max(...points, 1)
+  // Build a smoothed polyline by sampling each point at the centre of its slot.
+  const slot = width / Math.max(points.length, 1)
   const path = points
     .map((value, index) => {
-      const x = points.length === 1 ? 0 : (index / (points.length - 1)) * width
-      const y = height - (value / max) * height
-      return `${x},${y}`
+      const x = index * slot + slot / 2
+      const safeValue = value > 0 ? value : 0
+      const y = max > 0 ? height - (safeValue / max) * height : height
+      return `${x.toFixed(1)},${y.toFixed(1)}`
     })
     .join(" ")
-  return <polyline points={path} fill="none" stroke={color} strokeWidth="2" opacity="0.9" />
+  return (
+    <polyline
+      points={path}
+      fill="none"
+      stroke={color}
+      strokeWidth={2}
+      strokeLinejoin="round"
+      strokeLinecap="round"
+    />
+  )
+}
+
+function ChartGradients() {
+  return (
+    <defs>
+      <linearGradient id="netGradient" x1="0" x2="0" y1="0" y2="1">
+        <stop offset="0%" stopColor="#22c55e" stopOpacity="0.95" />
+        <stop offset="100%" stopColor="#16a34a" stopOpacity="0.55" />
+      </linearGradient>
+      <linearGradient id="netGlow" x1="0" x2="0" y1="0" y2="1">
+        <stop offset="0%" stopColor="#22c55e" stopOpacity="0.18" />
+        <stop offset="100%" stopColor="#22c55e" stopOpacity="0" />
+      </linearGradient>
+    </defs>
+  )
 }
 
 function computeGroupStats(
@@ -301,6 +335,24 @@ function groupIsPaused(items: DownloadItem[], phase?: string | null) {
   return !groupCanPause(items) && items.some((item) => item.status === "paused")
 }
 
+/** Live session timer — ticks every second, shows h/m/s. */
+function SessionTimer({ startedAt }: { startedAt: number }) {
+  const [elapsed, setElapsed] = useState(() => Math.max(0, Math.floor((Date.now() - startedAt) / 1000)))
+  useEffect(() => {
+    const id = setInterval(
+      () => setElapsed(Math.max(0, Math.floor((Date.now() - startedAt) / 1000))),
+      1000
+    )
+    return () => clearInterval(id)
+  }, [startedAt])
+  const h = Math.floor(elapsed / 3600)
+  const m = Math.floor((elapsed % 3600) / 60)
+  const s = elapsed % 60
+  if (h > 0) return <>{h}h {m}m</>
+  if (m > 0) return <>{m}m {s}s</>
+  return <>{s}s</>
+}
+
 export function DownloadsPage() {
   const isWindows = typeof navigator !== 'undefined' && /windows/i.test(navigator.userAgent)
   const {
@@ -311,6 +363,7 @@ export function DownloadsPage() {
     pauseAll,
     resumeAll,
     resumeGroup,
+    resumeDownload,
     openPath,
     clearCompleted,
     clearByAppid,
@@ -318,6 +371,34 @@ export function DownloadsPage() {
   } = useDownloads()
   const navigate = useNavigate()
   const { games } = useGamesData()
+  const runningSessions = useRunningGamesSessions()
+
+  // Watch the user's bandwidth cap so we can decorate active rows when the
+  // cap is biting (current speed is at/near the configured ceiling). Stored
+  // as KB/s; convert to bytes-per-second for comparison with `speedBps`.
+  const [bandwidthLimitKBps, setBandwidthLimitKBps] = useState(0)
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const value = await window.ucSettings?.get?.('downloadBandwidthLimitKBps')
+        if (!cancelled) setBandwidthLimitKBps(Number(value) > 0 ? Math.floor(Number(value)) : 0)
+      } catch { /* ignore */ }
+    })()
+    const off = window.ucSettings?.onChanged?.((data: any) => {
+      if (!data) return
+      if (data.key === 'downloadBandwidthLimitKBps') {
+        setBandwidthLimitKBps(Number(data.value) > 0 ? Math.floor(Number(data.value)) : 0)
+      } else if (data.key === '__CLEAR_ALL__') {
+        setBandwidthLimitKBps(0)
+      }
+    })
+    return () => {
+      cancelled = true
+      if (typeof off === 'function') off()
+    }
+  }, [])
+  const bandwidthLimitBps = bandwidthLimitKBps * 1024
 
   const grouped = useMemo(() => {
     return downloads.reduce<Record<string, typeof downloads>>((acc, item) => {
@@ -397,6 +478,7 @@ export function DownloadsPage() {
     progress: number
   } | null>(null)
   const lastSampleRef = useRef<{ time: number; received: number } | null>(null)
+  const isPausedRef = useRef(false)
 
   const primaryStats = useMemo(() => {
     if (!primaryGroup) return null
@@ -404,6 +486,7 @@ export function DownloadsPage() {
   }, [primaryGroup])
   const primaryPhase = primaryStats?.phase ?? null
   const primaryIsPaused = primaryGroup ? groupIsPaused(primaryGroup, primaryPhase) : false
+  isPausedRef.current = primaryIsPaused
   const primaryCanPause = primaryGroup ? groupCanPause(primaryGroup) : false
   const primaryTotalParts = useMemo(() => {
     if (!primaryGroup) return 1
@@ -455,15 +538,22 @@ export function DownloadsPage() {
       setNetworkHistory([])
       setDiskHistory([])
       setPeakSpeed(0)
-    _persistedNetworkHistory = []
-    _persistedDiskHistory = []
-    _persistedPeakSpeed = 0
-    _persistedForAppId = null
-    lastSampleRef.current = null
-    return
-  }
+      // Do NOT clear persisted data here — primaryGroup may be transiently null
+      // on mount while the downloads context is still populating. Clearing here
+      // would destroy the history before it can be restored when the group loads.
+      lastSampleRef.current = null
+      return
+    }
 
     const appId = primaryGroup?.[0]?.appid ?? null
+
+    // If a genuinely different download is now active, discard old chart data.
+    if (_persistedForAppId !== null && _persistedForAppId !== appId) {
+      _persistedNetworkHistory = []
+      _persistedDiskHistory = []
+      _persistedPeakSpeed = 0
+    }
+
     // Restore persisted chart data if same download is still active
     if (_persistedForAppId === appId && _persistedNetworkHistory.length > 0) {
       setNetworkHistory(_persistedNetworkHistory)
@@ -480,6 +570,16 @@ export function DownloadsPage() {
       if (!stats) return
       const now = Date.now()
       const networkSpeed = stats.speedBps || 0
+
+      // Don't accumulate zero samples while paused — preserve history so the
+      // chart still shows the pre-pause activity when the download resumes.
+      if (isPausedRef.current) {
+        // Reset the disk-speed baseline so the first tick after resume
+        // doesn't compute a huge delta from bytes that downloaded before the pause.
+        lastSampleRef.current = null
+        return
+      }
+
       const lastSample = lastSampleRef.current
       let diskSpeed = 0
       if (lastSample) {
@@ -673,6 +773,65 @@ export function DownloadsPage() {
     if (!game) return
     setRetryingAppId(appid)
     try {
+      // New simple path: ask the main process to either resume from any
+      // partial it finds on disk OR start fresh. It owns the filesystem
+      // truth — the renderer just provides a fresh URL.
+      if (window.ucDownloads?.smartStart) {
+        // First make sure we have a fresh download URL from the API.
+        const { requestDownloadToken, fetchDownloadLinks, selectHost, resolveDownloadUrl } = await import("@/lib/downloads")
+        try {
+          const token = await requestDownloadToken(appid)
+          const links = await fetchDownloadLinks(appid, token)
+          const sourceUrl = links.redirectUrl || selectHost(links.hosts, "ucfiles").links[0]?.url
+          if (!sourceUrl) throw new Error("No download link available")
+          const resolved = await resolveDownloadUrl("ucfiles", sourceUrl)
+          const finalUrl = resolved?.resolved ? resolved.url : sourceUrl
+
+          // Reuse the existing downloadId from state if there is one, else generate one.
+          const existing = downloads.find((item) => item.appid === appid && item.url)
+          const downloadId = existing?.id || `${appid}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}-0`
+
+          // Make sure the install metadata is on disk first so smartStart can
+          // write the manifest snapshot.
+          if (window.ucDownloads?.saveInstalledMetadata) {
+            try {
+              await window.ucDownloads.saveInstalledMetadata(appid, {
+                ...game,
+                downloadedVersion: game.version || undefined,
+              })
+            } catch { }
+          }
+
+          // Reset any "failed/cancelled" UI rows for this appid so progress
+          // shows up against the new (or existing) downloadId.
+          if (!existing) {
+            clearByAppid(appid)
+          }
+
+          const result = await window.ucDownloads.smartStart({
+            appid,
+            downloadId,
+            gameName: game.name,
+            url: finalUrl,
+            filename: resolved?.filename || existing?.filename,
+            totalBytes: resolved?.size || existing?.totalBytes,
+          })
+
+          if (result?.alreadyComplete) {
+            // File on disk is full size — kick off install directly.
+            if (window.ucDownloads?.installDownloadedArchive) {
+              await window.ucDownloads.installDownloadedArchive(appid)
+            }
+            return
+          }
+          if (result?.ok) return
+          // smartStart returned !ok — fall through to legacy path
+          console.warn("[UC] smartStart failed, falling back to fresh download", result?.error)
+        } catch (err) {
+          console.warn("[UC] smartStart pre-resolve failed, falling back", err)
+        }
+      }
+      // Legacy fallback path
       clearByAppid(appid)
       await startGameDownload(game)
     } catch (err) {
@@ -835,21 +994,29 @@ export function DownloadsPage() {
     }
   }
 
+  const isCompletelyIdle =
+    !primaryGroup &&
+    runningGames.length === 0 &&
+    queuedGroups.length === 0 &&
+    installReadyGroups.length === 0 &&
+    completedGroups.length === 0 &&
+    cancelledGroups.length === 0
+
   return (
     <div className="container mx-auto max-w-7xl space-y-8">
       {/* Header Section */}
       <div className="flex items-end justify-between anim">
         <div className="space-y-1">
-          <p className="section-label">Downloads</p>
-          <h1 className="text-3xl font-black tracking-tight text-white sm:text-4xl">Activity</h1>
-          <p className="text-sm text-zinc-500">Manage your downloads, installations and running games</p>
+          <p className="section-label">Library</p>
+          <h1 className="text-3xl font-light tracking-tight text-white sm:text-4xl">Activity</h1>
+          <p className="text-sm text-muted-foreground/80">Manage your downloads, installations and running games</p>
         </div>
         <div className="flex items-center gap-2">
           <Button
             variant="outline"
             onClick={() => void resumeAll()}
             disabled={!hasAnyPausedGroups}
-            className="gap-2 rounded-full border-white/[.07] px-4 text-sm font-medium text-zinc-300 hover:border-zinc-500 hover:text-white active:scale-95 disabled:pointer-events-none disabled:opacity-50"
+            className="gap-2 rounded-full border-white/[.07] px-4 text-sm font-medium text-foreground/80 hover:border-zinc-500 hover:text-white active:scale-95 disabled:pointer-events-none disabled:opacity-50"
           >
             <Play className="h-4 w-4" />
             Resume all
@@ -858,7 +1025,7 @@ export function DownloadsPage() {
             variant="outline"
             onClick={() => void pauseAll()}
             disabled={!hasAnyPausableGroups}
-            className="gap-2 rounded-full border-white/[.07] px-4 text-sm font-medium text-zinc-300 hover:border-zinc-500 hover:text-white active:scale-95 disabled:pointer-events-none disabled:opacity-50"
+            className="gap-2 rounded-full border-white/[.07] px-4 text-sm font-medium text-foreground/80 hover:border-zinc-500 hover:text-white active:scale-95 disabled:pointer-events-none disabled:opacity-50"
           >
             <PauseCircle className="h-4 w-4" />
             Pause all
@@ -866,54 +1033,119 @@ export function DownloadsPage() {
           <Button
             variant="outline"
             onClick={clearCompleted}
-            className="rounded-full border-white/[.07] px-5 text-sm font-medium text-zinc-300 hover:border-zinc-500 hover:text-white active:scale-95"
+            className="rounded-full border-white/[.07] px-5 text-sm font-medium text-foreground/80 hover:border-zinc-500 hover:text-white active:scale-95"
           >
             Clear history
           </Button>
         </div>
       </div>
 
-      {/* Now Playing Section */}
-      {runningGames.length > 0 && (
-        <section className="space-y-4 anim anim-d1">
-          <div className="flex items-center gap-3">
-            <div className="h-2 w-2 animate-pulse rounded-full bg-green-400" />
-            <p className="section-label text-zinc-400">Now Playing</p>
+      {/* Big empty state when nothing is downloading, installed-recently, queued,
+          or running. Better than five "no items" placeholders stacked. */}
+      {isCompletelyIdle && (
+        <div className="rounded-3xl border border-white/[.07] bg-card/40 px-6 py-16 text-center backdrop-blur-sm anim anim-d1">
+          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-white/[.05]">
+            <Download className="h-6 w-6 text-muted-foreground/80" />
           </div>
-          <div className="space-y-3">
-            {runningGames.map((game) => (
-              <div
-                key={game.appid}
-                className="group flex items-center justify-between rounded-2xl border border-white/[.07] bg-zinc-900/60 p-4 backdrop-blur-md transition-all hover:border-zinc-700 hover:bg-white/[.03]"
-              >
-                <div className="flex items-center gap-4">
-                  <div className="relative flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-green-500/20 to-green-600/10 ring-1 ring-green-500/30">
-                    <Play className="h-5 w-5 text-green-400" />
-                    <div className="absolute -right-1 -top-1 h-3 w-3 animate-pulse rounded-full bg-green-400 ring-2 ring-zinc-900" />
+          <h2 className="mt-4 text-lg font-light text-white">Nothing happening here</h2>
+          <p className="mx-auto mt-1.5 max-w-md text-sm text-muted-foreground/80">
+            Start a download from any game's page and you'll see live progress, throughput, and post-install controls here.
+          </p>
+          <Button
+            onClick={() => navigate("/")}
+            className="mt-6 rounded-full bg-primary px-6 text-sm font-semibold text-primary-foreground hover:brightness-110 active:scale-95"
+          >
+            Browse catalogue
+          </Button>
+        </div>
+      )}
+
+      {/* Now Playing — rich cards with game art, session timer, no PID */}
+      {runningGames.length > 0 && (
+        <section className="space-y-3 anim anim-d1">
+          <div className="flex items-center gap-3">
+            <div className="relative flex h-2 w-2">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-400 opacity-75" />
+              <span className="relative inline-flex h-2 w-2 rounded-full bg-green-500" />
+            </div>
+            <p className="section-label text-muted-foreground">Now Playing</p>
+            <Badge variant="secondary" className="rounded-full bg-green-500/10 px-2.5 py-0.5 text-[11px] font-medium text-green-300 ring-1 ring-green-500/20">
+              {runningGames.length}
+            </Badge>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {runningGames.map((rg) => {
+              const game = games.find((g) => g.appid === rg.appid)
+              const heroSrc = proxyImageUrl(
+                (game as any)?.hero_image ||
+                (game as any)?.localHeroImage ||
+                game?.splash ||
+                (game as any)?.localSplash ||
+                game?.image ||
+                (game as any)?.localImage ||
+                "./fallbacks/game-hero-16x9.svg"
+              )
+              const coverSrc = proxyImageUrl(
+                (game as any)?.image ||
+                (game as any)?.localImage ||
+                (game as any)?.splash ||
+                ""
+              ) || "./fallbacks/game-card-3x4.svg"
+              const session = runningSessions.find((s) => s.appid === rg.appid)
+              return (
+                <div
+                  key={rg.appid}
+                  className="group relative overflow-hidden rounded-2xl border border-green-500/20 bg-card shadow-lg shadow-green-500/5 transition-all hover:border-green-500/35 hover:shadow-green-500/10"
+                >
+                  {/* Full-bleed hero as ambient background */}
+                  <div className="absolute inset-0">
+                    <img src={heroSrc} alt={rg.gameName} className="h-full w-full object-cover opacity-45 transition-opacity group-hover:opacity-55" />
+                    <div className="absolute inset-0 bg-gradient-to-r from-background via-background/75 to-background/15" />
                   </div>
-                  <div>
-                    <div className="font-semibold text-white">{game.gameName}</div>
-                    <div className="flex items-center gap-2 text-xs text-zinc-500">
-                      <span className="inline-flex items-center gap-1">
-                        <span className="h-1.5 w-1.5 rounded-full bg-green-400" />
-                        Running
-                      </span>
-                      <span className="text-zinc-600">•</span>
-                      <span className="font-mono text-zinc-600">PID {game.pid}</span>
+                  <div className="relative flex items-center justify-between gap-3 p-4">
+                    <div className="flex min-w-0 items-center gap-3">
+                      {/* Portrait cover art thumbnail */}
+                      <div className="relative h-14 w-10 shrink-0 overflow-hidden rounded-lg ring-1 ring-white/[.08] shadow-md">
+                        <img src={coverSrc} alt="" className="h-full w-full object-cover" />
+                        {/* Pulsing live indicator overlay */}
+                        <div className="absolute inset-0 flex items-end justify-center pb-1">
+                          <span className="h-1.5 w-1.5 rounded-full bg-green-400 shadow-[0_0_6px_rgba(74,222,128,0.8)] animate-pulse" />
+                        </div>
+                      </div>
+                      <div className="min-w-0">
+                        <div className="truncate font-semibold text-white leading-snug">{rg.gameName}</div>
+                        <div className="mt-0.5 flex items-center gap-2 text-[11px]">
+                          <span className="inline-flex items-center gap-1 font-medium text-green-300">
+                            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-green-400" />
+                            Running
+                          </span>
+                          {session && (
+                            <>
+                              <span className="text-muted-foreground/60">·</span>
+                              <span className="font-mono text-muted-foreground">
+                                <SessionTimer startedAt={session.startedAt} />
+                              </span>
+                            </>
+                          )}
+                        </div>
+                        {game?.genres && game.genres.length > 0 && (
+                          <div className="mt-1 text-[10px] text-muted-foreground/60 truncate">{game.genres.slice(0, 2).join(" · ")}</div>
+                        )}
+                      </div>
                     </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleQuitGame(rg.appid)}
+                      className="shrink-0 gap-1.5 rounded-full border-white/10 bg-card/70 px-3 text-xs text-foreground/80 backdrop-blur-sm hover:border-red-500/40 hover:bg-red-500/10 hover:text-red-300 active:scale-95"
+                    >
+                      <Square className="h-3 w-3" />
+                      Stop
+                    </Button>
                   </div>
                 </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleQuitGame(game.appid)}
-                  className="gap-2 rounded-full border-zinc-700 text-zinc-400 hover:border-red-500/50 hover:bg-red-500/10 hover:text-red-400 active:scale-95"
-                >
-                  <Square className="h-3.5 w-3.5" />
-                  Stop
-                </Button>
-              </div>
-            ))}
+              )
+            })}
           </div>
         </section>
       )}
@@ -921,206 +1153,244 @@ export function DownloadsPage() {
       {/* Primary Active Download */}
       {primaryGroup && primaryStats && (
         <section className="anim anim-d1">
-          <div className="relative overflow-hidden rounded-3xl border border-white/[.07] bg-zinc-900/70 shadow-2xl shadow-black/40 backdrop-blur-xl">
-            {/* Background Image with Gradient Overlay */}
+          <div className="relative overflow-hidden rounded-3xl border border-white/[.07] bg-card/70 shadow-2xl shadow-black/40 backdrop-blur-xl">
+            {/* HERO BACKGROUND — prefer hero_image/splash for the big art so it's
+                actually cinematic rather than a blurred capsule */}
             <div className="absolute inset-0">
               <img
-                src={downloadItemImageSrc(primaryGame)}
-                alt={primaryGroup[0]?.gameName || "Download"}
-                className="h-full w-full scale-110 object-cover opacity-20 blur-3xl saturate-50"
+                src={proxyImageUrl((primaryGame as any)?.hero_image || (primaryGame as any)?.localHeroImage || primaryGame?.splash || (primaryGame as any)?.localSplash || primaryGame?.image || (primaryGame as any)?.localImage || "./fallbacks/game-hero-16x9.svg")}
+                alt=""
+                className="h-full w-full object-cover opacity-50"
               />
-              <div className="absolute inset-0 bg-gradient-to-br from-zinc-950/80 via-zinc-900/90 to-zinc-950/80" />
-              <div className="absolute inset-0 bg-gradient-to-t from-zinc-950/60 via-transparent to-transparent" />
+              <div className="absolute inset-0 bg-gradient-to-r from-background via-background/85 to-background/20" />
+              <div className="absolute inset-0 bg-gradient-to-t from-background via-background/40 to-background/10" />
             </div>
 
-            <div className="relative z-10 p-6 lg:p-8">
-              {/* Header Row */}
-              <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
-                <div className="flex items-start gap-4">
-                  {/* Game Thumbnail */}
-                  <div className="relative h-20 w-32 flex-shrink-0 overflow-hidden rounded-xl border border-white/[.07] bg-zinc-900/80 shadow-lg">
+            <div className="relative z-10 grid gap-6 p-6 lg:grid-cols-[1fr_280px] lg:p-8">
+              {/* LEFT: identity + actions + progress + perf */}
+              <div className="min-w-0 space-y-6">
+                {/* Identity row */}
+                <div className="flex flex-col gap-5 sm:flex-row sm:items-start">
+                  {/* Capsule cover */}
+                  <div className="relative h-32 w-24 flex-shrink-0 overflow-hidden rounded-xl border border-white/[.08] bg-card shadow-2xl shadow-black/50">
                     <img
-                      src={downloadItemImageSrc(primaryGame)}
+                      src={proxyImageUrl(primaryGame?.image || (primaryGame as any)?.localImage || "./fallbacks/game-card-3x4.svg")}
                       alt={primaryGroup[0]?.gameName || "Download"}
                       className="h-full w-full object-cover"
                     />
                   </div>
-                  
-                  {/* Game Info */}
-                  <div className="space-y-2">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <h2 className="text-xl font-black tracking-tight text-white sm:text-2xl">
+
+                  <div className="min-w-0 flex-1 space-y-3">
+                    {/* Logo if available, else fall back to the text title */}
+                    {(primaryGame as any)?.hero_logo ? (
+                      <div className="-mt-1">
+                        <img
+                          src={proxyImageUrl((primaryGame as any).hero_logo)}
+                          alt={primaryGroup[0]?.gameName || ""}
+                          className="h-16 max-w-[320px] object-contain object-left drop-shadow-[0_4px_18px_rgba(0,0,0,0.6)]"
+                        />
+                        <span className="sr-only">{primaryGroup[0]?.gameName}</span>
+                      </div>
+                    ) : (
+                      <h2 className="text-2xl font-light tracking-tight text-white sm:text-3xl">
                         {primaryGroup[0]?.gameName || "Unknown"}
                       </h2>
-                      {primaryGame?.version && (
-                        <span className="rounded-full border border-white/10 bg-zinc-800/60 px-2.5 py-0.5 text-[11px] font-medium text-zinc-400">
-                          v{primaryGame.version}
-                        </span>
-                      )}
-                    </div>
-                    
-                    {primaryTotalParts > 1 && (
-                      <div className="text-xs text-zinc-500">
-                        {(() => {
-                          const info = getPartIndex(
-                            primaryStats.primaryPartFilename || "",
-                            0,
-                            primaryTotalParts,
-                            primaryStats.primaryPartIndex
-                          )
-                          return `Part ${info.partNum} of ${info.total}`
-                        })()}
-                      </div>
                     )}
 
-                    {/* Quick Stats Row */}
-                    <div className="flex flex-wrap items-center gap-4 pt-1">
-                      <div className="flex items-center gap-2 text-sm">
-                        <span className="text-zinc-500">ETA</span>
-                        <span className="font-mono font-bold tabular-nums text-white">{formatEta(primaryStats.etaSeconds)}</span>
-                      </div>
-                      <div className="h-3 w-px bg-zinc-700" />
-                      <div className="flex items-center gap-2 text-sm">
-                        <span className="text-zinc-500">{primaryTotalParts > 1 ? "Parts" : "File"}</span>
-                        <span className="font-bold text-white">{primaryTotalParts}</span>
-                      </div>
-                      <div className="h-3 w-px bg-zinc-700" />
-                      <div className="flex items-center gap-2 text-sm">
-                        <span className="text-zinc-500">Avg</span>
-                        <span className="font-mono font-bold tabular-nums text-white">{formatSpeed(averageSpeed)}</span>
-                      </div>
+                    {/* Meta chips */}
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="rounded-full border border-white/10 bg-card/70 px-2.5 py-0.5 text-[11px] font-medium text-foreground/80 backdrop-blur-sm">
+                        {primaryStats?.phase === "queued" ? "Queued" :
+                         primaryStats?.phase === "paused" ? "Paused" :
+                         primaryStats?.phase === "verifying" ? "Verifying" :
+                         primaryStats?.phase === "retrying" ? "Retrying" :
+                         primaryStats?.phase === "installing" || primaryStats?.phase === "extracting" ? "Installing" :
+                         "Downloading"}
+                      </span>
+                      {primaryGame?.version && (
+                        <span className="rounded-full border border-white/10 bg-card/70 px-2.5 py-0.5 text-[11px] font-mono text-foreground/80 backdrop-blur-sm">
+                          {primaryGame.version}
+                        </span>
+                      )}
+                      {primaryGame?.size && (
+                        <span className="rounded-full border border-white/10 bg-card/70 px-2.5 py-0.5 text-[11px] font-medium text-foreground/80 backdrop-blur-sm">
+                          {primaryGame.size}
+                        </span>
+                      )}
+                      {Array.isArray(primaryGame?.genres) && primaryGame.genres.slice(0, 2).map((g) => (
+                        <span key={g} className="rounded-full border border-white/10 bg-card/70 px-2.5 py-0.5 text-[11px] font-medium text-muted-foreground backdrop-blur-sm">{g}</span>
+                      ))}
+                    </div>
+
+                    {/* Action buttons */}
+                    <div className="flex flex-wrap items-center gap-2 pt-1">
+                      {primaryIsPaused ? (
+                        <Button
+                          onClick={() => primaryGroup && resumeGroup(primaryGroup[0]?.appid)}
+                          className="gap-2 rounded-full bg-primary px-5 text-sm font-semibold text-primary-foreground hover:brightness-110 active:scale-95"
+                        >
+                          <Play className="h-4 w-4" />
+                          Resume
+                        </Button>
+                      ) : (
+                        <Button
+                          variant="outline"
+                          onClick={() => primaryGroup && void pauseGroup(primaryGroup[0]?.appid)}
+                          disabled={!primaryCanPause}
+                          className="gap-2 rounded-full border-white/10 bg-card/60 px-5 text-sm font-medium text-foreground/90 backdrop-blur-sm hover:border-white/20 hover:bg-secondary/80 active:scale-95 disabled:pointer-events-none disabled:opacity-50"
+                        >
+                          <PauseCircle className="h-4 w-4" />
+                          Pause
+                        </Button>
+                      )}
+                      <Button
+                        variant="outline"
+                        onClick={() => primaryGroup && cancelGroup(primaryGroup[0]?.appid)}
+                        className="gap-2 rounded-full border-white/10 bg-card/60 px-5 text-sm font-medium text-muted-foreground backdrop-blur-sm hover:border-red-500/40 hover:bg-red-500/10 hover:text-red-400 active:scale-95"
+                      >
+                        <XCircle className="h-4 w-4" />
+                        Cancel
+                      </Button>
                     </div>
                   </div>
                 </div>
 
-                {/* Action Buttons */}
-                <div className="flex items-center gap-2">
-                  {primaryIsPaused ? (
-                    <Button 
-                      onClick={() => primaryGroup && resumeGroup(primaryGroup[0]?.appid)} 
-                      className="gap-2 rounded-full bg-white px-5 text-sm font-bold text-black hover:bg-zinc-200 active:scale-95"
-                    >
-                      <Play className="h-4 w-4" />
-                      Resume
-                    </Button>
-                  ) : (
-                    <Button 
-                      variant="outline" 
-                      onClick={() => primaryGroup && void pauseGroup(primaryGroup[0]?.appid)} 
-                      disabled={!primaryCanPause}
-                      className="gap-2 rounded-full border-white/[.07] px-5 text-sm font-medium text-zinc-300 hover:border-zinc-500 hover:text-white active:scale-95 disabled:pointer-events-none disabled:opacity-50"
-                    >
-                      <PauseCircle className="h-4 w-4" />
-                      Pause
-                    </Button>
-                  )}
-                  <Button
-                    variant="outline"
-                    onClick={() => primaryGroup && cancelGroup(primaryGroup[0]?.appid)}
-                    className="gap-2 rounded-full border-white/[.07] px-5 text-sm font-medium text-zinc-400 hover:border-red-500/40 hover:bg-red-500/10 hover:text-red-400 active:scale-95"
-                  >
-                    <XCircle className="h-4 w-4" />
-                    Cancel
-                  </Button>
-                </div>
-              </div>
-
-              {/* Progress Section */}
-              <div className="mt-6 space-y-3">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="text-zinc-400">
-                    {(() => {
-                      const part = getPartIndex(
-                        primaryStats.primaryPartFilename || "",
-                        0,
-                        primaryTotalParts,
-                        primaryStats.primaryPartIndex
-                      ).partNum
-                      if (primaryStats?.phase === "queued") return "Waiting in queue..."
-                      if (primaryStats?.phase === "paused") return "Download paused"
-                      if (primaryStats?.phase === "verifying") return "Verifying archive integrity..."
-                      if (primaryStats?.phase === "retrying") return "Verification failed - re-downloading..."
-                      if (primaryStats?.phase === "installing" || primaryStats?.phase === "extracting") {
-                        return primaryStats.extractionProgress != null
-                          ? `Installing game data... ${Math.round(primaryStats.extractionProgress)}%`
-                          : primaryTotalParts > 1
-                            ? `Installing part ${part} of ${primaryTotalParts}...`
-                            : "Installing game data..."
-                      }
-                      return "Downloading game data..."
-                    })()}
-                  </span>
-                  <span className="font-mono text-sm font-bold tabular-nums text-white">
-                    {primaryStats.phase === "installing" || primaryStats.phase === "extracting"
-                      ? `${Math.round(primaryStats.progress)}%`
-                      : <>{formatBytes(primaryStats.receivedBytes)} <span className="text-zinc-500">/</span> {formatBytes(primaryStats.totalBytes)}</>}
-                  </span>
-                </div>
-                
-                {/* Enhanced Progress Bar */}
-                <div className="relative">
+                {/* Progress */}
+                <div className="space-y-2">
+                  <div className="flex items-end justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground/80">
+                        {primaryStats?.phase === "queued" ? "Waiting in queue" :
+                         primaryStats?.phase === "paused" ? "Paused — resume to continue" :
+                         primaryStats?.phase === "verifying" ? "Verifying archive integrity" :
+                         primaryStats?.phase === "retrying" ? "Repairing download" :
+                         primaryStats?.phase === "installing" || primaryStats?.phase === "extracting" ? "Installing game data" :
+                         "Downloading game data"}
+                      </div>
+                      <div className="mt-1 flex items-baseline gap-2">
+                        <span className="font-mono text-2xl font-light tabular-nums text-white">
+                          {Math.round(primaryStats.progress)}<span className="text-muted-foreground/80">%</span>
+                        </span>
+                        {primaryStats.phase !== "installing" && primaryStats.phase !== "extracting" && (
+                          <span className="font-mono text-sm tabular-nums text-muted-foreground/80">
+                            {formatBytes(primaryStats.receivedBytes)} / {formatBytes(primaryStats.totalBytes)}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="shrink-0 text-right">
+                      <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground/80">ETA</div>
+                      <div className="font-mono text-base tabular-nums text-white">{formatEta(primaryStats.etaSeconds)}</div>
+                    </div>
+                  </div>
                   <Progress
                     value={primaryStats.progress}
-                    className="h-3 bg-zinc-800/80 [&_[data-slot=progress-indicator]]:bg-gradient-to-r [&_[data-slot=progress-indicator]]:from-white [&_[data-slot=progress-indicator]]:to-zinc-300"
+                    className="h-2 overflow-hidden bg-secondary/70 [&_[data-slot=progress-indicator]]:bg-gradient-to-r [&_[data-slot=progress-indicator]]:from-zinc-200 [&_[data-slot=progress-indicator]]:to-white"
                   />
-                  <div className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] font-bold text-black/80">
-                    {Math.round(primaryStats.progress)}%
+                </div>
+
+                {/* Compact stats row */}
+                <div className="grid grid-cols-4 gap-2 rounded-2xl border border-white/[.07] bg-card/40 px-3 py-3 backdrop-blur-sm">
+                  <div>
+                    <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground/80">Speed</div>
+                    <div className="mt-0.5 font-mono text-sm tabular-nums text-white">{formatSpeed(currentNetwork)}</div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground/80">Avg</div>
+                    <div className="mt-0.5 font-mono text-sm tabular-nums text-foreground/80">{formatSpeed(averageSpeed)}</div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground/80">Peak</div>
+                    <div className="mt-0.5 font-mono text-sm tabular-nums text-foreground/80">{formatSpeed(peakNetworkSpeed)}</div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground/80">Disk</div>
+                    <div className="mt-0.5 font-mono text-sm tabular-nums text-foreground/80">{formatSpeed(currentDisk)}</div>
                   </div>
                 </div>
 
-              </div>
-
-              {/* Performance Chart */}
-              <div className="mt-6 rounded-2xl border border-white/[.07] bg-zinc-900/50 p-4">
-                <div className="mb-3 flex items-center justify-between">
-                  <span className="text-xs font-semibold uppercase tracking-wider text-zinc-400">Performance Monitor</span>
-                  <div className="flex items-center gap-4 text-xs text-zinc-500">
-                    <span className="inline-flex items-center gap-1.5">
-                      <span className="h-2 w-2 rounded-full bg-white" />
-                      Network
-                    </span>
-                    <span className="inline-flex items-center gap-1.5">
-                      <span className="h-2 w-2 rounded-full bg-zinc-500" />
-                      Disk I/O
-                    </span>
+                {/* Steam-style throughput chart — bars + line on a shared scale */}
+                <div className="rounded-2xl border border-white/[.07] bg-black/30 px-4 py-3 backdrop-blur-sm">
+                  <div className="mb-2 flex items-center justify-between">
+                    <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground/80">Throughput</span>
+                    <div className="flex items-center gap-4 text-[10px] text-muted-foreground">
+                      <span className="inline-flex items-center gap-1.5">
+                        <span className="h-2 w-2 rounded-sm bg-gradient-to-b from-green-500 to-green-700" />
+                        Network
+                      </span>
+                      <span className="inline-flex items-center gap-1.5">
+                        <span className="h-[2px] w-3 rounded-full bg-amber-400" />
+                        Disk I/O
+                      </span>
+                    </div>
+                  </div>
+                  <div className="relative">
+                    <svg viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`} preserveAspectRatio="none" className="h-20 w-full">
+                      <ChartGradients />
+                      {/* Soft glow behind the bars to lift them off the background */}
+                      {networkHistory.length > 0 && (() => {
+                        const sharedMax = Math.max(...networkHistory, ...diskHistory, 1)
+                        return (
+                          <>
+                            {renderBars(networkHistory, "url(#netGradient)", sharedMax)}
+                            {renderLine(diskHistory, "#fbbf24", sharedMax)}
+                          </>
+                        )
+                      })()}
+                      {networkHistory.length === 0 && (
+                        <line x1="0" y1={CHART_HEIGHT - 1} x2={CHART_WIDTH} y2={CHART_HEIGHT - 1} stroke="rgb(63 63 70)" strokeWidth="1" />
+                      )}
+                    </svg>
+                    {/* Bottom rule */}
+                    <div className="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-secondary/80" />
                   </div>
                 </div>
-                <svg viewBox="0 0 600 70" className="h-16 w-full">
-                  {renderBars(networkHistory, "rgb(255 255 255)")}
-                  {renderLine(diskHistory, "rgb(113 113 122)")}
-                </svg>
               </div>
 
-              {/* Stats Grid */}
-              <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                <div className="rounded-xl border border-white/[.07] bg-zinc-800/40 p-3">
-                  <div className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">Download</div>
-                  <div className="mt-1 font-mono text-lg font-bold tabular-nums text-white">{formatSpeed(currentNetwork)}</div>
+              {/* RIGHT: screenshots strip — the second-most "art-rich" piece of
+                  catalog data, finally surfaced. Stacks under the main column
+                  on smaller screens. */}
+              {Array.isArray((primaryGame as any)?.screenshots) && (primaryGame as any).screenshots.length > 0 && (
+                <div className="hidden lg:block">
+                  <div className="mb-2 flex items-center justify-between">
+                    <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground/80">Screenshots</span>
+                    <span className="font-mono text-[10px] text-muted-foreground/60">{Math.min((primaryGame as any).screenshots.length, 4)} of {(primaryGame as any).screenshots.length}</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {(primaryGame as any).screenshots.slice(0, 4).map((shot: string, i: number) => (
+                      <div key={i} className="relative aspect-video overflow-hidden rounded-lg border border-white/[.06] bg-card">
+                        <img
+                          src={proxyImageUrl(shot)}
+                          alt={`Screenshot ${i + 1}`}
+                          className="h-full w-full object-cover opacity-90 transition-opacity hover:opacity-100"
+                          loading="lazy"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                  {primaryGame?.developer && (
+                    <div className="mt-3 rounded-xl border border-white/[.06] bg-card/40 px-3 py-2 text-xs text-muted-foreground backdrop-blur-sm">
+                      <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground/80">Developer</div>
+                      <div className="mt-0.5 truncate text-foreground/90">{primaryGame.developer}</div>
+                    </div>
+                  )}
                 </div>
-                <div className="rounded-xl border border-white/[.07] bg-zinc-800/40 p-3">
-                  <div className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">Peak</div>
-                  <div className="mt-1 font-mono text-lg font-bold tabular-nums text-white">{formatSpeed(peakNetworkSpeed)}</div>
-                </div>
-                <div className="rounded-xl border border-white/[.07] bg-zinc-800/40 p-3">
-                  <div className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">Disk Write</div>
-                  <div className="mt-1 font-mono text-lg font-bold tabular-nums text-white">{formatSpeed(currentDisk)}</div>
-                </div>
-              </div>
+              )}
             </div>
           </div>
         </section>
       )}
 
       {secondaryActiveGroups.length > 0 && (
-        <section className="space-y-4 anim anim-d2">
+        <section className="space-y-3 anim anim-d2">
           <div className="flex items-center gap-3">
             <p className="section-label">Also Running</p>
-            <Badge variant="secondary" className="rounded-full bg-zinc-800 px-2.5 py-0.5 text-[11px] font-medium text-zinc-400">
+            <Badge variant="secondary" className="rounded-full bg-secondary/80 px-2.5 py-0.5 text-[11px] font-medium text-muted-foreground">
               {secondaryActiveGroups.length}
             </Badge>
           </div>
 
-          <div className="space-y-3">
+          <div className="space-y-2.5">
             {secondaryActiveGroups.map((items) => {
               const { totalBytes, receivedBytes, speedBps, etaSeconds, progress, phase, extractionProgress } = computeGroupStats(items)
               const totalParts = getTotalParts(items)
@@ -1140,15 +1410,28 @@ export function DownloadsPage() {
                       : phase === "retrying"
                         ? "Retrying"
                         : "Downloading"
+              const statusTone = phase === "paused" ? "text-amber-300 bg-amber-500/10 border-amber-500/20"
+                : phase === "installing" || phase === "extracting" ? "text-sky-300 bg-sky-500/10 border-sky-500/20"
+                : "text-foreground/80 bg-white/[.06] border-white/10"
 
               return (
                 <div
                   key={`active-${items[0].appid}-${gameName}`}
-                  className="group overflow-hidden rounded-2xl border border-white/[.07] bg-zinc-900/60 backdrop-blur-sm transition-all hover:border-zinc-700"
+                  className="group relative overflow-hidden rounded-2xl border border-white/[.07] bg-card/70 backdrop-blur-md transition-all hover:border-white/[.14]"
                 >
-                  <div className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center">
+                  {/* Subtle hero art in the background of each row */}
+                  <div className="absolute inset-0 opacity-25">
+                    <img
+                      src={proxyImageUrl((game as any)?.hero_image || (game as any)?.localHeroImage || game?.splash || (game as any)?.localSplash || game?.image || (game as any)?.localImage || "./fallbacks/game-hero-16x9.svg")}
+                      alt=""
+                      className="h-full w-full object-cover blur-[2px]"
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-r from-card via-card/85 to-card/40" />
+                  </div>
+
+                  <div className="relative flex flex-col gap-4 p-4 sm:flex-row sm:items-center">
                     <div className="flex items-center gap-4 sm:w-[280px]">
-                      <div className="relative h-14 w-24 flex-shrink-0 overflow-hidden rounded-lg border border-white/[.07] bg-zinc-800">
+                      <div className="relative h-14 w-24 flex-shrink-0 overflow-hidden rounded-lg border border-white/[.07] bg-secondary shadow-md shadow-black/40">
                         <img
                           src={downloadItemImageSrc(game)}
                           alt={gameName}
@@ -1158,18 +1441,18 @@ export function DownloadsPage() {
                       </div>
                       <div className="min-w-0">
                         <h3 className="truncate text-sm font-semibold text-white">{gameName}</h3>
-                        <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-zinc-500">
+                        <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px]">
+                          <span className={`rounded-full border px-2 py-0.5 font-medium ${statusTone}`}>{groupStatus}</span>
                           {game?.version && (
-                            <span className="rounded bg-zinc-800/80 px-1.5 py-0.5 font-mono">{game.version}</span>
+                            <span className="rounded bg-white/[.04] px-1.5 py-0.5 font-mono text-muted-foreground">{game.version}</span>
                           )}
-                          <span className="rounded bg-zinc-800/80 px-1.5 py-0.5 text-zinc-400">{groupStatus}</span>
                         </div>
                       </div>
                     </div>
 
                     <div className="flex-1 space-y-2">
                       <div className="flex items-center justify-between text-xs">
-                        <span className="text-zinc-500">
+                        <span className="text-muted-foreground/80">
                           {phase === "installing" || phase === "extracting"
                             ? extractionProgress != null
                               ? `Installing game data... ${Math.round(extractionProgress)}%`
@@ -1182,16 +1465,37 @@ export function DownloadsPage() {
                                   ? "Download paused"
                                   : "Downloading..."}
                         </span>
-                        <span className="font-mono text-zinc-400">
+                        <span className="font-mono text-muted-foreground">
                           {phase === "installing" || phase === "extracting"
                             ? `${Math.round(progress)}%`
                             : `${formatBytes(receivedBytes)} / ${formatBytes(totalBytes)}`}
                         </span>
                       </div>
-                      <Progress value={progress} className="h-1.5 bg-zinc-800" />
-                      <div className="flex items-center justify-between text-[11px] text-zinc-500">
+                      <Progress value={progress} className="h-1.5 bg-secondary" />
+                      <div className="flex items-center justify-between text-[11px] text-muted-foreground/80">
                         <span>ETA: {formatEta(etaSeconds)}</span>
-                        <span>{formatSpeed(speedBps)}</span>
+                        <span className="inline-flex items-center gap-1.5">
+                          {/* Show a "Capped" pill when the user has a
+                              bandwidth limit set AND the current row is
+                              within 15% of it — confirms the limit is
+                              actually biting rather than just configured.
+                              `phase === "downloading"` keeps us from
+                              advertising a cap on extracting / installing
+                              rows where speedBps is unrelated. */}
+                          {bandwidthLimitBps > 0
+                            && phase === "downloading"
+                            && speedBps > 0
+                            && speedBps >= bandwidthLimitBps * 0.85
+                            && (
+                              <span
+                                className="inline-flex items-center gap-1 rounded-full border border-amber-500/30 bg-amber-500/[.08] px-1.5 py-0.5 text-[9px] font-semibold text-amber-200"
+                                title={`Bandwidth cap: ${(bandwidthLimitKBps / 1024).toFixed(bandwidthLimitKBps >= 10240 ? 0 : 1)} MB/s. Change it in Settings → Downloads.`}
+                              >
+                                Capped
+                              </span>
+                            )}
+                          <span>{formatSpeed(speedBps)}</span>
+                        </span>
                       </div>
                     </div>
 
@@ -1200,7 +1504,7 @@ export function DownloadsPage() {
                         <Button
                           size="sm"
                           onClick={() => void resumeGroup(appid)}
-                          className="rounded-full bg-white px-3 text-xs font-medium text-black hover:bg-zinc-200 active:scale-95"
+                          className="rounded-full bg-primary px-3 text-xs font-medium text-primary-foreground hover:brightness-110 active:scale-95"
                         >
                           <Play className="mr-1.5 h-3.5 w-3.5" />
                           Resume
@@ -1211,7 +1515,7 @@ export function DownloadsPage() {
                           variant="ghost"
                           onClick={() => void pauseGroup(appid)}
                           disabled={!canPause}
-                          className="rounded-full px-3 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-white disabled:pointer-events-none disabled:opacity-50"
+                          className="rounded-full px-3 text-xs text-muted-foreground hover:bg-secondary hover:text-white disabled:pointer-events-none disabled:opacity-50"
                         >
                           <PauseCircle className="mr-1.5 h-3.5 w-3.5" />
                           Pause
@@ -1221,7 +1525,7 @@ export function DownloadsPage() {
                         size="sm"
                         variant="ghost"
                         onClick={() => cancelGroup(items[0]?.appid)}
-                        className="rounded-full px-3 text-xs text-zinc-500 hover:bg-red-500/10 hover:text-red-400"
+                        className="rounded-full px-3 text-xs text-muted-foreground/80 hover:bg-red-500/10 hover:text-red-400"
                       >
                         <XCircle className="mr-1.5 h-3.5 w-3.5" />
                         Cancel
@@ -1236,25 +1540,18 @@ export function DownloadsPage() {
       )}
 
       {/* Queue Section */}
-      <section className="space-y-4 anim anim-d2">
+      {queuedGroups.length > 0 && (
+      <section className="space-y-3 anim anim-d2">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <p className="section-label">Download Queue</p>
-            <Badge variant="secondary" className="rounded-full bg-zinc-800 px-2.5 py-0.5 text-[11px] font-medium text-zinc-400">
+            <p className="section-label">Up Next</p>
+            <Badge variant="secondary" className="rounded-full bg-secondary/80 px-2.5 py-0.5 text-[11px] font-medium text-muted-foreground">
               {queuedGroups.length}
             </Badge>
           </div>
         </div>
 
-        {queuedGroups.length === 0 && (
-          <div className="rounded-2xl border border-dashed border-zinc-800 bg-zinc-900/30 p-8 text-center">
-            <Download className="mx-auto mb-3 h-8 w-8 text-zinc-700" />
-            <p className="text-sm text-zinc-500">Queue is empty</p>
-            <p className="mt-1 text-xs text-zinc-600">Start a download from any game page to see it here</p>
-          </div>
-        )}
-
-        <div className="space-y-3">
+        <div className="space-y-2.5">
           {queuedGroups.map((items) => {
             const {
               totalBytes,
@@ -1285,12 +1582,12 @@ export function DownloadsPage() {
             return (
               <div
                 key={`${items[0].appid}-${gameName}`}
-                className="group overflow-hidden rounded-2xl border border-white/[.07] bg-zinc-900/60 backdrop-blur-sm transition-all hover:border-zinc-700"
+                className="group overflow-hidden rounded-2xl border border-white/[.07] bg-card/60 backdrop-blur-sm transition-all hover:border-border"
               >
                 <div className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center">
                   {/* Game Info */}
                   <div className="flex items-center gap-4 sm:w-[280px]">
-                    <div className="relative h-14 w-24 flex-shrink-0 overflow-hidden rounded-lg border border-white/[.07] bg-zinc-800">
+                    <div className="relative h-14 w-24 flex-shrink-0 overflow-hidden rounded-lg border border-white/[.07] bg-secondary">
                       <img
                         src={downloadItemImageSrc(game)}
                         alt={gameName}
@@ -1300,14 +1597,14 @@ export function DownloadsPage() {
                     </div>
                     <div className="min-w-0">
                       <h3 className="truncate text-sm font-semibold text-white">{gameName}</h3>
-                      <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-zinc-500">
+                      <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground/80">
                         {game?.version && (
-                          <span className="rounded bg-zinc-800/80 px-1.5 py-0.5 font-mono">{game.version}</span>
+                          <span className="rounded bg-secondary/80 px-1.5 py-0.5 font-mono">{game.version}</span>
                         )}
                         <span className={`rounded px-1.5 py-0.5 ${
                           groupStatus === "Paused" 
                             ? "bg-amber-500/10 text-amber-400" 
-                            : "bg-zinc-800/80 text-zinc-400"
+                            : "bg-secondary/80 text-muted-foreground"
                         }`}>
                           {groupStatus}
                         </span>
@@ -1318,7 +1615,7 @@ export function DownloadsPage() {
                   {/* Progress */}
                   <div className="flex-1 space-y-2">
                     <div className="flex items-center justify-between text-xs">
-                      <span className="text-zinc-500">
+                      <span className="text-muted-foreground/80">
                         {queuedOnly
                           ? "Waiting in queue..."
                           : phase === "installing"
@@ -1327,12 +1624,12 @@ export function DownloadsPage() {
                               ? "Extracting..."
                               : "Downloading..."}
                       </span>
-                      <span className="font-mono text-zinc-400">
+                      <span className="font-mono text-muted-foreground">
                         {formatBytes(receivedBytes)} / {formatBytes(totalBytes)}
                       </span>
                     </div>
-                    <Progress value={progress} className="h-1.5 bg-zinc-800" />
-                    <div className="flex items-center justify-between text-[11px] text-zinc-500">
+                    <Progress value={progress} className="h-1.5 bg-secondary" />
+                    <div className="flex items-center justify-between text-[11px] text-muted-foreground/80">
                       <span>ETA: {formatEta(etaSeconds)}</span>
                       <span>{formatSpeed(speedBps)}</span>
                     </div>
@@ -1344,7 +1641,7 @@ export function DownloadsPage() {
                       size="sm" 
                       variant="ghost" 
                       onClick={() => cancelGroup(items[0]?.appid)}
-                      className="rounded-full px-3 text-xs text-zinc-500 hover:bg-red-500/10 hover:text-red-400"
+                      className="rounded-full px-3 text-xs text-muted-foreground/80 hover:bg-red-500/10 hover:text-red-400"
                     >
                       <XCircle className="mr-1.5 h-3.5 w-3.5" />
                       Cancel
@@ -1353,8 +1650,8 @@ export function DownloadsPage() {
                 </div>
 
                 {/* Footer */}
-                <div className="border-t border-white/[.05] bg-zinc-900/40 px-4 py-2">
-                  <div className="flex items-center justify-between text-[11px] text-zinc-600">
+                <div className="border-t border-white/[.05] bg-card/40 px-4 py-2">
+                  <div className="flex items-center justify-between text-[11px] text-muted-foreground/60">
                     <span>{totalParts} {getPartsLabel(items)}</span>
                     <span>
                       {(() => {
@@ -1372,25 +1669,19 @@ export function DownloadsPage() {
           })}
         </div>
       </section>
+      )}
 
       {/* Install Ready Section */}
-      <section className="space-y-4 anim anim-d3">
+      {installReadyGroups.length > 0 && (
+      <section className="space-y-3 anim anim-d3">
         <div className="flex items-center gap-3">
           <p className="section-label">Ready to Install</p>
-          <Badge variant="secondary" className="rounded-full bg-blue-500/10 px-2.5 py-0.5 text-[11px] font-medium text-blue-400 ring-1 ring-blue-500/20">
+          <Badge variant="secondary" className="rounded-full bg-sky-500/10 px-2.5 py-0.5 text-[11px] font-medium text-sky-300 ring-1 ring-sky-500/20">
             {installReadyGroups.length}
           </Badge>
         </div>
 
-        {installReadyGroups.length === 0 && (
-          <div className="rounded-2xl border border-dashed border-zinc-800 bg-zinc-900/30 p-8 text-center">
-            <HardDrive className="mx-auto mb-3 h-8 w-8 text-zinc-700" />
-            <p className="text-sm text-zinc-500">No pending installations</p>
-            <p className="mt-1 text-xs text-zinc-600">Downloads ready for extraction will appear here</p>
-          </div>
-        )}
-
-        <div className="space-y-3">
+        <div className="space-y-2.5">
           {installReadyGroups.map((items) => {
             const gameName = items[0]?.gameName || "Unknown"
             const appid = items[0]?.appid
@@ -1408,7 +1699,7 @@ export function DownloadsPage() {
               >
                 <div className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between">
                   <div className="flex items-center gap-4">
-                    <div className="relative h-14 w-24 flex-shrink-0 overflow-hidden rounded-lg border border-white/[.07] bg-zinc-800">
+                    <div className="relative h-14 w-24 flex-shrink-0 overflow-hidden rounded-lg border border-white/[.07] bg-secondary">
                       <img
                         src={downloadItemImageSrc(game)}
                         alt={gameName}
@@ -1420,14 +1711,14 @@ export function DownloadsPage() {
                     </div>
                     <div className="min-w-0">
                       <h3 className="truncate text-sm font-semibold text-white">{gameName}</h3>
-                      <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-zinc-500">
+                      <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground/80">
                         {game?.version && (
-                          <span className="rounded bg-zinc-800/80 px-1.5 py-0.5 font-mono">{game.version}</span>
+                          <span className="rounded bg-secondary/80 px-1.5 py-0.5 font-mono">{game.version}</span>
                         )}
-                        <span className="text-zinc-600">•</span>
+                        <span className="text-muted-foreground/60">•</span>
                         <span>{readyAt ? new Date(readyAt).toLocaleDateString() : "Ready"}</span>
                       </div>
-                      <p className="mt-1.5 max-w-md text-[11px] text-zinc-500">{readyNote}</p>
+                      <p className="mt-1.5 max-w-md text-[11px] text-muted-foreground/80">{readyNote}</p>
                     </div>
                   </div>
 
@@ -1438,7 +1729,7 @@ export function DownloadsPage() {
                         void handleInstallReady(appid)
                       }}
                       disabled={!appid || installingAppId === appid}
-                      className="gap-2 rounded-full bg-white px-4 text-xs font-medium text-black hover:bg-zinc-200 active:scale-95 disabled:opacity-50"
+                      className="gap-2 rounded-full bg-primary px-4 text-xs font-medium text-primary-foreground hover:brightness-110 active:scale-95 disabled:opacity-50"
                     >
                       <HardDrive className="h-3.5 w-3.5" />
                       {installingAppId === appid ? "Starting..." : "Install Now"}
@@ -1449,7 +1740,7 @@ export function DownloadsPage() {
                       onClick={() => {
                         if (appid) navigate(`/game/${appid}`)
                       }}
-                      className="rounded-full border-zinc-700 px-4 text-xs text-zinc-400 hover:border-zinc-500 hover:text-white active:scale-95"
+                      className="rounded-full border-border px-4 text-xs text-muted-foreground hover:border-zinc-500 hover:text-white active:scale-95"
                     >
                       View
                     </Button>
@@ -1461,15 +1752,15 @@ export function DownloadsPage() {
                           void dismissByAppid(appid)
                         }
                       }}
-                      className="rounded-full px-3 text-xs text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
+                      className="rounded-full px-3 text-xs text-muted-foreground/80 hover:bg-secondary hover:text-foreground/80"
                     >
                       Remove
                     </Button>
                   </div>
                 </div>
 
-                <div className="border-t border-white/[.05] bg-zinc-900/40 px-4 py-2">
-                  <div className="flex items-center justify-between text-[11px] text-zinc-600">
+                <div className="border-t border-white/[.05] bg-card/40 px-4 py-2">
+                  <div className="flex items-center justify-between text-[11px] text-muted-foreground/60">
                     <span>{totalParts} {getPartsLabel(items)}</span>
                     <span className="flex items-center gap-1.5 text-blue-400">
                       <span className="h-1.5 w-1.5 rounded-full bg-blue-400" />
@@ -1482,25 +1773,19 @@ export function DownloadsPage() {
           })}
         </div>
       </section>
+      )}
 
       {/* Completed Section */}
-      <section className="space-y-4 anim anim-d4">
+      {completedGroups.length > 0 && (
+      <section className="space-y-3 anim anim-d4">
         <div className="flex items-center gap-3">
-          <p className="section-label">Completed</p>
+          <p className="section-label">Recently Installed</p>
           <Badge variant="secondary" className="rounded-full bg-green-500/10 px-2.5 py-0.5 text-[11px] font-medium text-green-400 ring-1 ring-green-500/20">
             {completedGroups.length}
           </Badge>
         </div>
 
-        {completedGroups.length === 0 && (
-          <div className="rounded-2xl border border-dashed border-zinc-800 bg-zinc-900/30 p-8 text-center">
-            <Play className="mx-auto mb-3 h-8 w-8 text-zinc-700" />
-            <p className="text-sm text-zinc-500">No completed downloads yet</p>
-            <p className="mt-1 text-xs text-zinc-600">Successfully installed games will appear here</p>
-          </div>
-        )}
-
-        <div className="space-y-3">
+        <div className="grid gap-4 sm:grid-cols-2">
           {completedGroups.map((items) => {
             const gameName = items[0]?.gameName || "Unknown"
             const appid = items[0]?.appid
@@ -1508,213 +1793,229 @@ export function DownloadsPage() {
             const finishedAt = items
               .map((item) => item.completedAt || 0)
               .sort((a, b) => b - a)[0]
-            const totalParts = getTotalParts(items)
+            // Hero art for the card background — falls back through every
+            // available asset before landing on the bundled placeholder.
+            const heroSrc = proxyImageUrl(
+              (game as any)?.hero_image ||
+              (game as any)?.localHeroImage ||
+              game?.splash ||
+              (game as any)?.localSplash ||
+              game?.image ||
+              (game as any)?.localImage ||
+              "./fallbacks/game-hero-16x9.svg"
+            )
+            const logoSrc = (game as any)?.hero_logo ? proxyImageUrl((game as any).hero_logo) : null
 
             return (
               <div
                 key={`completed-${items[0].appid}-${gameName}`}
-                className="group cursor-pointer overflow-hidden rounded-2xl border border-white/[.07] bg-zinc-900/60 backdrop-blur-sm transition-all hover:border-green-500/30 hover:bg-white/[.03]"
+                className="group relative cursor-pointer overflow-hidden rounded-2xl border border-white/[.07] bg-card shadow-xl shadow-black/40 transition-all hover:border-green-500/40 hover:shadow-green-500/10"
                 onClick={() => {
                   if (appid) navigate(`/game/${appid}`)
                 }}
               >
-                <div className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="flex items-center gap-4">
-                    <div className="relative h-14 w-24 flex-shrink-0 overflow-hidden rounded-lg border border-white/[.07] bg-zinc-800">
+                {/* Hero art background */}
+                <div className="relative aspect-[16/7] overflow-hidden">
+                  <img
+                    src={heroSrc}
+                    alt={gameName}
+                    className="absolute inset-0 h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+                  />
+                  {/* Dark gradient overlay so foreground UI stays legible */}
+                  <div className="absolute inset-0 bg-gradient-to-t from-background via-background/60 to-background/10" />
+                  <div className="absolute inset-0 bg-gradient-to-r from-background/70 via-transparent to-transparent" />
+
+                  {/* Installed badge top-right */}
+                  <div className="absolute right-3 top-3 inline-flex items-center gap-1.5 rounded-full border border-green-500/30 bg-green-500/15 px-2.5 py-1 text-[10px] font-semibold text-green-300 backdrop-blur-sm">
+                    <span className="h-1.5 w-1.5 rounded-full bg-green-400" />
+                    Installed
+                  </div>
+
+                  {/* Logo / title bottom-left */}
+                  <div className="absolute bottom-0 left-0 right-0 p-4">
+                    {logoSrc ? (
                       <img
-                        src={downloadItemImageSrc(game)}
+                        src={logoSrc}
                         alt={gameName}
-                        className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+                        className="h-12 max-w-[220px] object-contain object-left drop-shadow-[0_3px_10px_rgba(0,0,0,0.7)]"
                       />
-                      <div className="absolute bottom-1 right-1 flex h-5 w-5 items-center justify-center rounded-full bg-green-500 text-white">
-                        <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                        </svg>
-                      </div>
-                    </div>
-                    <div className="min-w-0">
-                      <h3 className="truncate text-sm font-semibold text-white group-hover:text-green-50">{gameName}</h3>
-                      <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-zinc-500">
-                        {game?.version && (
-                          <span className="rounded bg-zinc-800/80 px-1.5 py-0.5 font-mono">{game.version}</span>
-                        )}
-                        <span className="text-zinc-600">•</span>
-                        <span>{finishedAt ? new Date(finishedAt).toLocaleDateString() : "Completed"}</span>
-                      </div>
-                      {game?.comment && (
-                        <div className="mt-1.5 max-w-md text-[11px] text-amber-400/80">
-                          <strong className="text-amber-300">Note:</strong>
-                          <CommentMarkdown text={game.comment} className="mt-1 text-[11px] text-amber-400/80" />
-                        </div>
+                    ) : (
+                      <h3 className="truncate text-lg font-semibold text-white drop-shadow-[0_2px_6px_rgba(0,0,0,0.7)]">
+                        {gameName}
+                      </h3>
+                    )}
+                  </div>
+                </div>
+
+                {/* Footer with action */}
+                <div className="flex items-center justify-between gap-3 border-t border-white/[.05] bg-background/80 px-4 py-3 backdrop-blur-sm">
+                  <div className="min-w-0 space-y-0.5">
+                    {logoSrc && (
+                      // When the logo is shown above, repeat the name in the
+                      // footer as a small label so the card is still
+                      // identifiable by text.
+                      <p className="truncate text-xs font-medium text-foreground/80">{gameName}</p>
+                    )}
+                    <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground/80">
+                      {game?.version && (
+                        <span className="rounded bg-secondary/80 px-1.5 py-0.5 font-mono text-[10px]">{game.version}</span>
                       )}
+                      <span className="text-muted-foreground/40">•</span>
+                      <span>{finishedAt ? new Date(finishedAt).toLocaleDateString() : "Completed"}</span>
                     </div>
                   </div>
-
-                  <div className="flex items-center gap-2">
-                    <Button
-                      size="sm"
-                      onClick={(event) => {
-                        event.stopPropagation()
-                        if (appid) {
-                          void handleLaunch(appid, gameName, items[0]?.savePath)
-                        }
-                      }}
-                      className="gap-2 rounded-full bg-white px-4 text-xs font-medium text-black hover:bg-zinc-200 active:scale-95"
-                    >
-                      <Play className="h-3.5 w-3.5" />
-                      Launch
-                    </Button>
-                  </div>
+                  <Button
+                    size="sm"
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      if (appid) {
+                        void handleLaunch(appid, gameName, items[0]?.savePath)
+                      }
+                    }}
+                    className="gap-2 rounded-full bg-primary px-5 text-xs font-semibold text-primary-foreground hover:brightness-110 active:scale-95"
+                  >
+                    <Play className="h-3.5 w-3.5 fill-current" />
+                    Play
+                  </Button>
                 </div>
 
-                <div className="border-t border-white/[.05] bg-zinc-900/40 px-4 py-2">
-                  <div className="flex items-center justify-between text-[11px] text-zinc-600">
-                    <span>{totalParts} {getPartsLabel(items)}</span>
-                    <span className="flex items-center gap-1.5 text-green-400">
-                      <span className="h-1.5 w-1.5 rounded-full bg-green-400" />
-                      Installed
-                    </span>
+                {/* Comment ribbon if the catalog has a note */}
+                {game?.comment && (
+                  <div className="border-t border-amber-500/20 bg-amber-500/[0.06] px-4 py-2 text-[11px] text-amber-300/90">
+                    <strong className="text-amber-200">Note:</strong>
+                    <CommentMarkdown text={game.comment} className="ml-1 inline text-[11px] text-amber-200/90" />
                   </div>
-                </div>
+                )}
               </div>
-            )}
-          )}
+            )
+          })}
         </div>
       </section>
+      )}
 
       {/* Cancelled / Failed Section */}
-      <section className="space-y-4 anim anim-d5">
-        <div className="flex items-center gap-3">
-          <p className="section-label">Failed / Cancelled</p>
-          <Badge variant="secondary" className="rounded-full bg-red-500/10 px-2.5 py-0.5 text-[11px] font-medium text-red-400 ring-1 ring-red-500/20">
-            {cancelledGroups.length}
-          </Badge>
-        </div>
-
-        {cancelledGroups.length === 0 && (
-          <div className="rounded-2xl border border-dashed border-zinc-800 bg-zinc-900/30 p-8 text-center">
-            <XCircle className="mx-auto mb-3 h-8 w-8 text-zinc-700" />
-            <p className="text-sm text-zinc-500">No failed downloads</p>
-            <p className="mt-1 text-xs text-zinc-600">Cancelled or failed downloads will appear here</p>
+      {cancelledGroups.length > 0 && (
+        <section className="space-y-3 anim anim-d5">
+          <div className="flex items-center gap-3">
+            <p className="section-label">Failed / Cancelled</p>
+            <Badge variant="secondary" className="rounded-full bg-red-500/10 px-2.5 py-0.5 text-[11px] font-medium text-red-400 ring-1 ring-red-500/20">
+              {cancelledGroups.length}
+            </Badge>
           </div>
-        )}
 
-        <div className="space-y-3">
-          {cancelledGroups.map((items) => {
-            const gameName = items[0]?.gameName || "Unknown"
-            const appid = items[0]?.appid
-            const game = appid ? games.find((g) => g.appid === appid) : null
-            const status = items[0]?.status || "cancelled"
-            const statusLabel = status === "cancelled" ? "Cancelled" : status === "extract_failed" ? "Extract Failed" : "Failed"
-            const totalParts = getTotalParts(items)
+          <div className="space-y-2.5">
+            {cancelledGroups.map((items) => {
+              const gameName = items[0]?.gameName || "Unknown"
+              const appid = items[0]?.appid
+              const game = appid ? games.find((g) => g.appid === appid) : null
+              const status = items[0]?.status || "cancelled"
+              const statusLabel = status === "cancelled" ? "Cancelled" : status === "extract_failed" ? "Extract Failed" : "Failed"
+              const errorMsg = items[0]?.error || null
 
-            return (
-              <div
-                key={`cancelled-${items[0].appid}-${gameName}`}
-                className="group overflow-hidden rounded-2xl border border-red-500/10 bg-zinc-900/40 opacity-75 backdrop-blur-sm transition-all hover:opacity-100"
-              >
-                <div className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="flex items-center gap-4">
-                    <div className="relative h-14 w-24 flex-shrink-0 overflow-hidden rounded-lg border border-white/[.07] bg-zinc-800 grayscale">
-                      <img
-                        src={downloadItemImageSrc(game)}
-                        alt={gameName}
-                        className="h-full w-full object-cover opacity-50"
-                      />
-                      <div className="absolute inset-0 flex items-center justify-center bg-black/40">
-                        <XCircle className="h-6 w-6 text-red-400/80" />
+              return (
+                <div
+                  key={`cancelled-${items[0].appid}-${gameName}`}
+                  className="group relative overflow-hidden rounded-2xl border border-red-500/15 bg-card/60 backdrop-blur-sm transition-all hover:border-red-500/30 hover:bg-card/80"
+                >
+                  {/* Desaturated hero art */}
+                  <div className="absolute inset-0 opacity-20 grayscale">
+                    <img
+                      src={proxyImageUrl((game as any)?.hero_image || (game as any)?.localHeroImage || game?.splash || (game as any)?.localSplash || game?.image || (game as any)?.localImage || "./fallbacks/game-hero-16x9.svg")}
+                      alt=""
+                      className="h-full w-full object-cover blur-[2px]"
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-r from-card via-card/90 to-card/50" />
+                  </div>
+
+                  <div className="relative flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex items-center gap-4">
+                      <div className="relative h-14 w-24 flex-shrink-0 overflow-hidden rounded-lg border border-white/[.07] bg-secondary">
+                        <img
+                          src={downloadItemImageSrc(game)}
+                          alt={gameName}
+                          className="h-full w-full object-cover grayscale opacity-60"
+                        />
+                        <div className="absolute inset-0 flex items-center justify-center bg-black/40">
+                          <XCircle className="h-6 w-6 text-red-400" />
+                        </div>
                       </div>
-                    </div>
-                    <div className="min-w-0">
-                      <h3 className="truncate text-sm font-semibold text-zinc-400">{gameName}</h3>
-                      <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px]">
-                        <span className="rounded bg-red-500/10 px-1.5 py-0.5 text-red-400">{statusLabel}</span>
-                        {game?.version && (
-                          <>
-                            <span className="text-zinc-600">•</span>
-                            <span className="text-zinc-500 font-mono">{game.version}</span>
-                          </>
+                      <div className="min-w-0">
+                        <h3 className="truncate text-sm font-semibold text-foreground/90">{gameName}</h3>
+                        <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px]">
+                          <span className="rounded-full border border-red-500/30 bg-red-500/10 px-2 py-0.5 font-medium text-red-300">{statusLabel}</span>
+                          {game?.version && (
+                            <span className="rounded bg-white/[.04] px-1.5 py-0.5 font-mono text-muted-foreground/80">{game.version}</span>
+                          )}
+                        </div>
+                        {errorMsg && (
+                          <p className="mt-2 max-w-md truncate text-[11px] text-red-300/70" title={errorMsg}>
+                            {errorMsg}
+                          </p>
                         )}
                       </div>
                     </div>
-                  </div>
 
-                  <div className="flex items-center gap-2">
-                    <Button
-                      size="sm"
-                      onClick={() => {
-                        void handleRetry(appid)
-                      }}
-                      disabled={retryingAppId === appid}
-                      className="gap-2 rounded-full bg-white px-4 text-xs font-medium text-black hover:bg-zinc-200 active:scale-95 disabled:opacity-50"
-                    >
-                      {retryingAppId === appid ? "Retrying..." : "Retry"}
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => {
-                        if (appid) {
-                          void dismissByAppid(appid)
-                        }
-                      }}
-                      className="rounded-full px-3 text-xs text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
-                    >
-                      Remove
-                    </Button>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        size="sm"
+                        onClick={() => { void handleRetry(appid) }}
+                        disabled={retryingAppId === appid}
+                        className="gap-2 rounded-full bg-primary px-4 text-xs font-semibold text-primary-foreground hover:brightness-110 active:scale-95 disabled:opacity-50"
+                      >
+                        {retryingAppId === appid ? "Retrying..." : "Retry"}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => { if (appid) void dismissByAppid(appid) }}
+                        className="rounded-full px-3 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground"
+                      >
+                        Remove
+                      </Button>
+                    </div>
                   </div>
                 </div>
-
-                <div className="border-t border-white/[.05] bg-zinc-900/40 px-4 py-2">
-                  <div className="flex items-center justify-between text-[11px] text-zinc-600">
-                    <span>{totalParts} {getPartsLabel(items)}</span>
-                    <span className="flex items-center gap-1.5 text-red-400/70">
-                      <span className="h-1.5 w-1.5 rounded-full bg-red-400/70" />
-                      {statusLabel}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            )}
-          )}
-        </div>
-      </section>
+              )
+            })}
+          </div>
+        </section>
+      )}
 
       {spacePrompt && (
         <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
-          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => !switchingDrive && setSpacePrompt(null)} />
-          <div className="relative w-full max-w-lg rounded-2xl border border-white/[.08] bg-zinc-950/95 p-5 shadow-2xl">
+          <div className="absolute inset-0 bg-black/72 backdrop-blur-md" onClick={() => !switchingDrive && setSpacePrompt(null)} />
+          <div className="relative w-full max-w-lg rounded-3xl border border-white/[.07] bg-background/88 backdrop-blur-2xl p-5 shadow-[0_24px_80px_rgba(0,0,0,0.55)]">
             <div className="flex items-start gap-3">
               <div className="rounded-full bg-red-500/10 p-2 text-red-400">
                 <AlertTriangle className="h-5 w-5" />
               </div>
               <div className="space-y-1">
                 <h3 className="text-lg font-semibold text-white">Not enough free space</h3>
-                <p className="text-sm text-zinc-400">
+                <p className="text-sm text-muted-foreground">
                   {spacePrompt.gameName || "This game"} cannot be extracted on the current install drive yet.
                 </p>
               </div>
             </div>
 
-            <div className="mt-4 rounded-xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-zinc-200">
+            <div className="mt-4 rounded-xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-foreground/90">
               <div className="flex items-center justify-between">
-                <span className="text-zinc-400">Required free space</span>
+                <span className="text-muted-foreground">Required free space</span>
                 <span className="font-mono">{formatBytes(spacePrompt.spaceCheck.requiredBytes)}</span>
               </div>
               <div className="mt-2 flex items-center justify-between">
-                <span className="text-zinc-400">Available now</span>
+                <span className="text-muted-foreground">Available now</span>
                 <span className="font-mono">{formatBytes(spacePrompt.spaceCheck.freeBytes)}</span>
               </div>
               <div className="mt-2 flex items-center justify-between">
-                <span className="text-zinc-400">Shortfall</span>
+                <span className="text-muted-foreground">Shortfall</span>
                 <span className="font-mono text-red-300">{formatBytes(spacePrompt.spaceCheck.shortfallBytes)}</span>
               </div>
             </div>
 
             <div className="mt-4 space-y-2">
-              <label className="text-xs font-medium uppercase tracking-[0.18em] text-zinc-500">Install drive</label>
+              <label className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground/80">Install drive</label>
               <Select value={selectedSpaceDriveId} onValueChange={setSelectedSpaceDriveId}>
-                <SelectTrigger className="border-white/[.08] bg-zinc-900 text-zinc-100">
+                <SelectTrigger className="border-white/[.08] bg-card text-foreground">
                   <SelectValue placeholder="Choose a drive" />
                 </SelectTrigger>
                 <SelectContent>
@@ -1725,15 +2026,15 @@ export function DownloadsPage() {
                   ))}
                 </SelectContent>
               </Select>
-              <p className="text-xs text-zinc-500">Choose a drive with enough free space, or free space on the current one and retry.</p>
+              <p className="text-xs text-muted-foreground/80">Choose a drive with enough free space, or free space on the current one and retry.</p>
             </div>
 
             <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
               <Button variant="ghost" onClick={() => setSpacePrompt(null)} disabled={switchingDrive}>Close</Button>
-              <Button variant="outline" onClick={handlePickInstallFolder} disabled={switchingDrive} className="border-white/[.08] text-zinc-200">
+              <Button variant="outline" onClick={handlePickInstallFolder} disabled={switchingDrive} className="border-white/[.08] text-foreground/90">
                 Choose Folder
               </Button>
-              <Button onClick={handleSwitchInstallDrive} disabled={switchingDrive || !selectedSpaceDriveId} className="bg-white text-black hover:bg-zinc-200">
+              <Button onClick={handleSwitchInstallDrive} disabled={switchingDrive || !selectedSpaceDriveId} className="bg-primary text-primary-foreground hover:brightness-110">
                 {switchingDrive ? "Switching..." : "Switch Drive And Retry"}
               </Button>
             </div>

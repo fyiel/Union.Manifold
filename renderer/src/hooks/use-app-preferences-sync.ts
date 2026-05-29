@@ -12,6 +12,9 @@ type AppPreferences = {
   verboseDownloadLogging?: boolean
   animatedBackgroundsEnabled?: boolean
   reducedMotionEnabled?: boolean
+  activeThemeId?: string
+  customThemes?: unknown[]
+  installedCommunityThemeIds?: string[]
 }
 
 const ALLOWED_KEYS = new Set<keyof AppPreferences>([
@@ -23,6 +26,9 @@ const ALLOWED_KEYS = new Set<keyof AppPreferences>([
   "verboseDownloadLogging",
   "animatedBackgroundsEnabled",
   "reducedMotionEnabled",
+  "activeThemeId",
+  "customThemes",
+  "installedCommunityThemeIds",
 ])
 
 function normalizePreferences(input: unknown): AppPreferences {
@@ -31,10 +37,7 @@ function normalizePreferences(input: unknown): AppPreferences {
   const prefs: AppPreferences = {}
 
   const mirrorHost = record.defaultMirrorHost
-  if (
-    mirrorHost === "ucfiles" ||
-    mirrorHost === "pixeldrain"
-  ) {
+  if (mirrorHost === "ucfiles") {
     prefs.defaultMirrorHost = mirrorHost as PreferredDownloadHost
   }
 
@@ -56,6 +59,17 @@ function normalizePreferences(input: unknown): AppPreferences {
   }
   if (typeof record.reducedMotionEnabled === "boolean") {
     prefs.reducedMotionEnabled = record.reducedMotionEnabled
+  }
+  if (typeof record.activeThemeId === "string" && record.activeThemeId.length > 0) {
+    prefs.activeThemeId = record.activeThemeId
+  }
+  if (Array.isArray(record.customThemes)) {
+    prefs.customThemes = record.customThemes.slice(0, 25)
+  }
+  if (Array.isArray(record.installedCommunityThemeIds)) {
+    prefs.installedCommunityThemeIds = record.installedCommunityThemeIds.filter(
+      (v): v is string => typeof v === "string" && v.length > 0,
+    )
   }
 
   const linuxLaunchMode = record.linuxLaunchMode
@@ -113,6 +127,25 @@ async function readLocalPreferences(): Promise<AppPreferences> {
     if (typeof rm === "boolean") prefs.reducedMotionEnabled = rm
   } catch {}
 
+  try {
+    const themeId = await window.ucSettings.get("activeThemeId")
+    if (typeof themeId === "string" && themeId.length > 0) prefs.activeThemeId = themeId
+  } catch {}
+
+  try {
+    const customThemes = await window.ucSettings.get("customThemes")
+    if (Array.isArray(customThemes)) prefs.customThemes = customThemes.slice(0, 25)
+  } catch {}
+
+  try {
+    const installed = await window.ucSettings.get("installedCommunityThemeIds")
+    if (Array.isArray(installed)) {
+      prefs.installedCommunityThemeIds = installed.filter(
+        (v): v is string => typeof v === "string" && v.length > 0,
+      )
+    }
+  } catch {}
+
   return prefs
 }
 
@@ -131,6 +164,10 @@ async function applyPreferences(prefs: AppPreferences) {
     if (typeof prefs.reducedMotionEnabled === "boolean") {
       try { localStorage.setItem("uc_reduced_motion", prefs.reducedMotionEnabled ? "1" : "0") } catch {}
       try { window.dispatchEvent(new Event("uc_reduce_motion_pref")) } catch {}
+    }
+    if (typeof prefs.activeThemeId === "string" && prefs.activeThemeId.length > 0) {
+      try { localStorage.setItem("uc_active_theme", prefs.activeThemeId) } catch {}
+      try { window.dispatchEvent(new Event("uc_theme_pref")) } catch {}
     }
   }
 

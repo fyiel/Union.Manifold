@@ -6,6 +6,8 @@ import {
   HardDrive,
   Square,
   RefreshCw,
+  Loader2,
+  ImageOff,
 } from "lucide-react"
 import {
   Download,
@@ -16,12 +18,14 @@ import {
 } from "@/components/icons"
 import { formatNumber, getCardImage, hasOnlineMode, isGameVersionUpdate, pickGameExecutable, proxyImageUrl, timeAgo } from "@/lib/utils"
 import { reportPlayEvent } from "@/lib/cloud-collections"
-import { GameActionContextMenu, type CollectionPickerEntry } from "@/components/GameActionMenu"
-import { useAccountLists } from "@/hooks/use-account-lists"
-import { useUserCollections } from "@/hooks/use-user-collections"
+import { GameActionContextMenu } from "@/components/GameActionMenu"
 import { useDownloads, useDownloadsSelector } from "@/context/downloads-context"
 import { apiUrl } from "@/lib/api"
-import { nsfwRevealedAppids } from "@/lib/nsfw-session"
+import { useNsfwReveal } from "@/hooks/use-nsfw-reveal"
+import { useRunningGame } from "@/hooks/use-running-games"
+import { useUniversalGameMenuProps } from "@/hooks/use-universal-game-menu"
+import { schedulePrefetchGameDetail } from "@/lib/game-detail-prefetch"
+import { isImageKnownBad, markImageFailed, forgetImageFailure } from "@/lib/image-failure-cache"
 import { ExePickerModal } from "@/components/ExePickerModal"
 import { DesktopShortcutModal } from "@/components/DesktopShortcutModal"
 import { GameLaunchFailedModal } from "@/components/GameLaunchFailedModal"
@@ -84,8 +88,8 @@ export const GameCard = memo(function GameCard({
   const genres = Array.isArray(game.genres) ? game.genres : []
   const displayGenres = genres.filter((genre) => String(genre).toLowerCase() !== "nsfw")
   const isNSFW = genres.some((genre) => genre.toLowerCase() === "nsfw")
-  const [allowNsfwReveal, setAllowNsfwReveal] = useState(false)
-  const [sessionRevealed, setSessionRevealed] = useState(false)
+  const { revealed: nsfwRevealed, reveal: revealNsfw } = useNsfwReveal(game.appid)
+  const nsfwGateUp = isNSFW && !nsfwRevealed
   const displayStats = initialStats || hoveredStats || { downloads: 0, views: 0 }
 
   const navigate = useNavigate()
@@ -113,8 +117,17 @@ export const GameCard = memo(function GameCard({
   )
   const [installedPath, setInstalledPath] = useState<string | null>(null)
   const [isInstalled, setIsInstalled] = useState(false)
+  // Pulled from the shared module-level cache (one bulk IPC fetch on first
+  // subscription, then push-based updates via ucPresence.onChanged). Replaces
+  // the per-card 60s polling loop that used to fire ~N IPC calls/minute on a
+  // populated library grid.
+  const cachedRunning = useRunningGame(isInstalled ? game.appid : null)
   const [isRunning, setIsRunning] = useState(false)
+  // Keep the local isRunning in sync with the cache, but allow launchGame() to
+  // optimistically flip it true before the presence event lands.
+  useEffect(() => { setIsRunning(cachedRunning) }, [cachedRunning])
   const [imageLoaded, setImageLoaded] = useState(false)
+  const [imageFailed, setImageFailed] = useState(false)
   const [imageCandidateIndex, setImageCandidateIndex] = useState(0)
   const [exePickerOpen, setExePickerOpen] = useState(false)
   const [exePickerExes, setExePickerExes] = useState<Array<{ name: string; path: string; size?: number; depth?: number }>>([])
@@ -127,36 +140,7 @@ export const GameCard = memo(function GameCard({
   const [launchPreflightResult, setLaunchPreflightResult] = useState<LaunchPreflightResult | null>(null)
   const gameJustLaunchedRef = useRef<number>(0)
   const gameQuickExitUnsubRef = useRef<(() => void) | null>(null)
-
-  // Sync NSFW reveal preference from localStorage
-  useEffect(() => {
-    const syncPreference = () => {
-      try {
-        setAllowNsfwReveal(localStorage.getItem("uc_show_nsfw") === "1")
-      } catch {
-        setAllowNsfwReveal(false)
-      }
-    }
-    syncPreference()
-    const onStorage = (e: StorageEvent) => {
-      if (e.key === "uc_show_nsfw") syncPreference()
-    }
-    const onPreferenceChange = () => syncPreference()
-    window.addEventListener("storage", onStorage)
-    window.addEventListener("uc_nsfw_pref", onPreferenceChange)
-    return () => {
-      window.removeEventListener("storage", onStorage)
-      window.removeEventListener("uc_nsfw_pref", onPreferenceChange)
-    }
-  }, [])
-
-  // Session reveal: in-memory only - resets on page reload, never persisted to storage.
-  useEffect(() => {
-    const checkSession = () => setSessionRevealed(nsfwRevealedAppids.has(game.appid))
-    checkSession()
-    window.addEventListener("uc_nsfw_session_changed", checkSession)
-    return () => window.removeEventListener("uc_nsfw_session_changed", checkSession)
-  }, [game.appid])
+  const prefetchCancelRef = useRef<(() => void) | null>(null)
 
   useEffect(() => {
     let mounted = true
@@ -187,31 +171,10 @@ export const GameCard = memo(function GameCard({
     }
   }, [game.appid])
 
-  useEffect(() => {
-    if (!isInstalled) {
-      setIsRunning(false)
-      return
-    }
-
-    let mounted = true
-    const checkRunning = async () => {
-      if (!window.ucDownloads?.getRunningGame) return
-      try {
-        const result = await window.ucDownloads.getRunningGame(game.appid)
-        if (mounted && result?.ok) {
-          setIsRunning(result.running || false)
-        }
-      } catch {
-        if (mounted) setIsRunning(false)
-      }
-    }
-    void checkRunning()
-    const interval = setInterval(checkRunning, 5000)
-    return () => {
-      mounted = false
-      clearInterval(interval)
-    }
-  }, [game.appid, isInstalled])
+  // The dedicated per-card running poll has been replaced by the shared
+  // useRunningGame() hook above (single IPC for the whole grid + push-based
+  // updates). Leaving the effect here as a deliberate no-op so future edits
+  // know not to re-introduce polling.
 
   // If the running state flips to false within the quick-exit window, show the modal
   useEffect(() => {
@@ -474,41 +437,21 @@ export const GameCard = memo(function GameCard({
     }
   }
 
-  // Universal right-click menu. Works on every GameCard regardless of
-  // installed/uninstalled state — picks up the relevant action set:
-  //  - Wishlist + Liked toggles for any game
-  //  - Add to collection (cloud-synced when authed)
-  //  - Open Files when installed
-  const accountLists = useAccountLists()
-  const userCollections = useUserCollections()
+  // Universal right-click menu. All surfaces (GameCard, GameCardCompact,
+  // LibraryPage, GameDetailPage) feed their `game` through
+  // useUniversalGameMenuProps so every right-click shows the same actions in
+  // the same order — Download / Open Files / Wishlist / Liked / Hide from
+  // Discord / Collections — gated only on actual availability. Page-specific
+  // wrinkles (the Library's delete handler, the detail page's exe picker,
+  // etc.) come in via the second arg.
   const [contextMenuPos, setContextMenuPos] = useState<{ x: number; y: number } | null>(null)
   const closeContextMenu = useCallback(() => setContextMenuPos(null), [])
-
-  const collectionPicker = useMemo(() => ({
-    collections: userCollections.collections.map<CollectionPickerEntry>((c) => ({
-      id: c.id,
-      name: c.name,
-      included: c.appids.includes(game.appid),
-    })),
-    onAddToCollection: async (collectionId: string) => {
-      const target = userCollections.collections.find((c) => c.id === collectionId)
-      if (!target) return
-      if (!target.appids.includes(game.appid)) {
-        await userCollections.setMembership(target, [...target.appids, game.appid])
-      }
-    },
-    onRemoveFromCollection: async (collectionId: string) => {
-      const target = userCollections.collections.find((c) => c.id === collectionId)
-      if (!target) return
-      await userCollections.setMembership(
-        target,
-        target.appids.filter((id) => id !== game.appid)
-      )
-    },
-    onCreateCollection: async (name: string) => {
-      await userCollections.create(name, [game.appid])
-    },
-  }), [userCollections, game.appid])
+  const menuProps = useUniversalGameMenuProps(game, {
+    onOpenFiles: isInstalled && installedPath ? () => {
+      closeContextMenu()
+      openPath(installedPath)
+    } : null,
+  })
 
   const cardImageCandidates = useMemo(() => {
     const candidates = [
@@ -531,7 +474,24 @@ export const GameCard = memo(function GameCard({
     }, [])
   }, [cardFallbackImage, game.background_image, game.hero_image, game.image, game.localImage, game.splash])
 
-  const cardImageSrc = cardImageCandidates[imageCandidateIndex] || cardFallbackImage
+  // Skip past any candidate URLs we already know failed this session — no
+  // point hitting the spinner-then-fallback path again on every re-mount when
+  // we have the answer cached. Falls through to the SVG fallback if every
+  // candidate is poisoned, which matches the existing behaviour.
+  const resolvedCandidateIndex = useMemo(() => {
+    let idx = imageCandidateIndex
+    while (
+      idx < cardImageCandidates.length - 1
+      && cardImageCandidates[idx]
+      && cardImageCandidates[idx] !== cardFallbackImage
+      && isImageKnownBad(cardImageCandidates[idx])
+    ) {
+      idx += 1
+    }
+    return idx
+  }, [cardImageCandidates, imageCandidateIndex, cardFallbackImage])
+
+  const cardImageSrc = cardImageCandidates[resolvedCandidateIndex] || cardFallbackImage
 
   // Reset only when the underlying source URLs change. Previously this
   // depended on `cardImageCandidates` (a useMemo array). React is permitted
@@ -542,6 +502,7 @@ export const GameCard = memo(function GameCard({
   useEffect(() => {
     setImageCandidateIndex(0)
     setImageLoaded(false)
+    setImageFailed(false)
   }, [
     cardFallbackImage,
     game.background_image,
@@ -563,7 +524,18 @@ export const GameCard = memo(function GameCard({
       <Link to={`/game/${game.appid}`} className="block h-full">
         <div
           className="group relative h-full overflow-hidden rounded-2xl glass hover:bg-white/[.03] transition-all duration-300 flex flex-col"
-          onMouseEnter={fetchStatsOnHover}
+          onMouseEnter={() => {
+            // Stats hover (unchanged) + hover-intent prefetch of the game
+            // detail JSON so navigating into the page feels instant.
+            void fetchStatsOnHover()
+            prefetchCancelRef.current = schedulePrefetchGameDetail(game.appid)
+          }}
+          onMouseLeave={() => {
+            if (prefetchCancelRef.current) {
+              prefetchCancelRef.current()
+              prefetchCancelRef.current = null
+            }
+          }}
         >
           {/* Image Section */}
           <div className={`relative w-full overflow-hidden ${isCompact ? "aspect-[4/5]" : "aspect-[3/4]"}`}>
@@ -574,36 +546,78 @@ export const GameCard = memo(function GameCard({
             <img
               src={cardImageSrc}
               alt={game.name}
+              data-uc-handled="1"
               className={`h-full w-full object-cover transition-all duration-500 ease-in-out group-hover:scale-105 ${
-                isNSFW && !(sessionRevealed || allowNsfwReveal)
-                  ? "blur-xl brightness-50"
-                  : ""
-                }`}
+                nsfwGateUp ? "blur-xl brightness-50" : ""
+                } ${imageLoaded ? "opacity-100" : "opacity-0"}`}
               loading="lazy"
-              onLoad={() => setImageLoaded(true)}
+              ref={(node) => {
+                // Browser-cached images can finish loading BEFORE the React
+                // tree subscribes its onLoad — so we never get the event and
+                // the skeleton spins forever. When we mount over a complete
+                // image, mark it loaded synchronously. Common cause: changing
+                // a sort/filter that re-renders the same cards with the same
+                // src; the browser already has them, no network call happens.
+                if (node && node.complete && node.naturalWidth > 0) {
+                  setImageLoaded(true)
+                  setImageFailed(false)
+                  if (cardImageSrc) forgetImageFailure(cardImageSrc)
+                }
+              }}
+              onLoad={() => {
+                // The current candidate worked — pull it out of the failure
+                // cache in case it had been poisoned by an earlier transient.
+                if (cardImageSrc) forgetImageFailure(cardImageSrc)
+                setImageLoaded(true)
+                setImageFailed(false)
+              }}
               onError={() => {
-                if (imageCandidateIndex < cardImageCandidates.length - 1) {
-                  setImageCandidateIndex((current) => current + 1)
+                // Remember this URL is bad so other cards / re-mounts skip it.
+                if (cardImageSrc && cardImageSrc !== cardFallbackImage) {
+                  markImageFailed(cardImageSrc)
+                }
+                if (resolvedCandidateIndex < cardImageCandidates.length - 1) {
+                  setImageCandidateIndex(resolvedCandidateIndex + 1)
                   return
                 }
                 setImageLoaded(true)
+                setImageFailed(true)
               }}
             />
 
-            {/* NSFW overlay: show Reveal button when not revealed */}
-            {isNSFW && !(sessionRevealed || allowNsfwReveal) && (
-              <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/50 gap-2">
+            {!imageLoaded && !imageFailed && (
+              <div aria-hidden className="pointer-events-none absolute inset-0 z-[5] flex items-center justify-center">
+                <Loader2 className="h-6 w-6 animate-spin text-white/70 drop-shadow" />
+              </div>
+            )}
+
+            {imageFailed && (
+              <div
+                aria-hidden
+                role="img"
+                aria-label={`${game.name} cover failed to load`}
+                className="pointer-events-none absolute inset-0 z-[5] flex flex-col items-center justify-center gap-1 bg-card/70 text-muted-foreground"
+              >
+                <ImageOff className="h-6 w-6" />
+                <span className="text-[10px] uppercase tracking-wider">Image unavailable</span>
+              </div>
+            )}
+
+            {/* NSFW overlay: show Reveal button when not revealed. Renders
+                ABOVE the play button (z-40) so the reveal target is always
+                clickable — previously z-20 sat below the z-30 play overlay,
+                which swallowed every click on installed cards. */}
+            {nsfwGateUp && (
+              <div className="absolute inset-0 z-40 flex flex-col items-center justify-center bg-black/50 gap-2">
                 <div className="bg-red-600 text-white px-3 py-1 rounded-full text-xs font-bold">18+</div>
                 <button
                   type="button"
                   aria-label={`Reveal NSFW cover for ${game.name}`}
-                  className="mt-1 bg-zinc-800/80 hover:bg-white hover:text-black text-white text-xs font-semibold px-3 py-1.5 rounded-full border border-zinc-700 transition-all active:scale-95 focus-visible:outline-none"
+                  className="mt-1 bg-secondary/80 hover:bg-primary hover:text-primary-foreground text-white text-xs font-semibold px-3 py-1.5 rounded-full border border-border transition-all active:scale-95 focus-visible:outline-none"
                   onClick={(e) => {
                     e.preventDefault()
                     e.stopPropagation()
-                    nsfwRevealedAppids.add(game.appid)
-                    setSessionRevealed(true)
-                    window.dispatchEvent(new Event('uc_nsfw_session_changed'))
+                    revealNsfw()
                   }}
                 >
                   Reveal
@@ -612,8 +626,13 @@ export const GameCard = memo(function GameCard({
               </div>
             )}
 
-            {/* Play Button Overlay — running state always visible, otherwise hover-only */}
-            {isInstalled && (
+            {/* Play Button Overlay — running state always visible, otherwise
+                hover-only. Hidden entirely while the NSFW gate is up so the
+                reveal click target is never blocked. The wrapper is
+                pointer-events-none and the button itself re-enables them, so
+                the empty (transparent) area never swallows clicks meant for
+                layers below. */}
+            {isInstalled && !nsfwGateUp && (
               <>
                 <div
                   className={`pointer-events-none absolute inset-0 z-20 bg-black/40 transition-opacity duration-200 ${
@@ -621,7 +640,7 @@ export const GameCard = memo(function GameCard({
                   }`}
                 />
                 <div
-                  className={`absolute inset-0 z-30 flex items-center justify-center transition-all duration-200 ${
+                  className={`pointer-events-none absolute inset-0 z-30 flex items-center justify-center transition-all duration-200 ${
                     isRunning
                       ? "opacity-100"
                       : "opacity-0 scale-90 group-hover:opacity-100 group-hover:scale-100"
@@ -630,8 +649,8 @@ export const GameCard = memo(function GameCard({
                   <button
                     onClick={handlePlayClick}
                     aria-label={isRunning ? "Stop game" : updateAvailable ? "Update game" : "Launch game"}
-                    className={`group/play relative inline-flex h-12 w-12 items-center justify-center rounded-full border border-white/20 shadow-xl transition-transform duration-200 hover:scale-110 active:scale-95 ${
-                      isRunning ? "bg-red-600 text-white" : "bg-white text-black"
+                    className={`group/play pointer-events-auto relative inline-flex h-12 w-12 items-center justify-center rounded-full border border-white/20 shadow-xl transition-transform duration-200 hover:scale-110 active:scale-95 ${
+                      isRunning ? "bg-red-600 text-white" : "bg-primary text-primary-foreground"
                     }`}
                   >
                     {isRunning ? (
@@ -649,20 +668,20 @@ export const GameCard = memo(function GameCard({
             {/* Status Badges */}
             <div className="absolute top-3 left-3 z-30 flex flex-col gap-2">
               {(isQueued || isInstalling) && (
-                <Badge className="bg-white text-black border-none shadow-lg shadow-white/20 animate-pulse">
+                <Badge className="bg-primary text-primary-foreground border-none shadow-lg shadow-white/20 animate-pulse">
                   <Download className="w-3 h-3 mr-1" />
                   {isQueued ? "Queued" : "Installing"}
                 </Badge>
               )}
 
               {isPopular && (
-                <Badge className="bg-zinc-800/60 text-white backdrop-blur-sm border border-white/10 px-3 py-1 text-xs font-bold uppercase tracking-wider rounded-full">
+                <Badge className="bg-secondary/60 text-white backdrop-blur-sm border border-white/10 px-3 py-1 text-xs font-bold uppercase tracking-wider rounded-full">
                   <Flame className="w-3 h-3 mr-1 fill-current" /> Popular
                 </Badge>
               )}
 
               {hasOnlineMode(game.hasCoOp) && (
-                <Badge variant="online" className="bg-zinc-800/60 backdrop-blur-sm border border-white/10 px-3 py-1 text-xs font-semibold flex items-center gap-1 rounded-full">
+                <Badge variant="online" className="bg-secondary/60 backdrop-blur-sm border border-white/10 px-3 py-1 text-xs font-semibold flex items-center gap-1 rounded-full">
                   <Wifi className="w-3 h-3 mr-1 text-white" />
                   <span className="text-white">MP</span>
                 </Badge>
@@ -676,9 +695,9 @@ export const GameCard = memo(function GameCard({
               )}
 
               {isGameVersionUpdate(game) && (
-                <Badge className="bg-zinc-800/60 backdrop-blur-sm border border-white/10 px-3 py-1 text-xs font-semibold flex items-center gap-1 rounded-full">
-                  <RefreshCw className="w-3 h-3 mr-1 text-zinc-300" />
-                  <span className="text-zinc-300">Updated {timeAgo(game.update_time)}</span>
+                <Badge className="bg-secondary/60 backdrop-blur-sm border border-white/10 px-3 py-1 text-xs font-semibold flex items-center gap-1 rounded-full">
+                  <RefreshCw className="w-3 h-3 mr-1 text-foreground/80" />
+                  <span className="text-foreground/80">Updated {timeAgo(game.update_time)}</span>
                 </Badge>
               )}
             </div>
@@ -686,12 +705,12 @@ export const GameCard = memo(function GameCard({
             {/* Hover Stats Overlay */}
             <div className="absolute bottom-0 left-0 right-0 z-20 p-4 pt-10 translate-y-full bg-gradient-to-t from-black/90 via-black/60 to-transparent transition-transform duration-300 ease-out group-hover:translate-y-0">
               <div className="flex items-center justify-between text-xs font-medium text-white/90">
-                <div className="flex items-center gap-1.5 bg-black/50 rounded-full px-2 py-1 border border-zinc-800/50">
-                  <Download className="w-3.5 h-3.5 text-zinc-400" />
+                <div className="flex items-center gap-1.5 bg-black/50 rounded-full px-2 py-1 border border-border/50">
+                  <Download className="w-3.5 h-3.5 text-muted-foreground" />
                   <span>{formatNumber(displayStats.downloads)}</span>
                 </div>
-                <div className="flex items-center gap-1.5 bg-black/50 rounded-full px-2 py-1 border border-zinc-800/50">
-                  <Eye className="w-3.5 h-3.5 text-zinc-400" />
+                <div className="flex items-center gap-1.5 bg-black/50 rounded-full px-2 py-1 border border-border/50">
+                  <Eye className="w-3.5 h-3.5 text-muted-foreground" />
                   <span>{formatNumber(displayStats.views)}</span>
                 </div>
               </div>
@@ -708,7 +727,7 @@ export const GameCard = memo(function GameCard({
                 {displayGenres.slice(0, 3).map((genre) => (
                   <span
                     key={genre}
-                    className="text-[10px] uppercase font-medium tracking-wider text-zinc-400 bg-white/5 border border-white/[.08] px-2 py-0.5 rounded-full whitespace-nowrap"
+                    className="text-[10px] uppercase font-medium tracking-wider text-muted-foreground bg-white/5 border border-white/[.08] px-2 py-0.5 rounded-full whitespace-nowrap"
                   >
                     {genre}
                   </span>
@@ -716,7 +735,7 @@ export const GameCard = memo(function GameCard({
               </div>
             </div>
 
-            <div className="flex items-center justify-between text-xs text-zinc-500 pt-2 border-t border-white/[.07] mt-auto">
+            <div className="flex items-center justify-between text-xs text-muted-foreground/80 pt-2 border-t border-white/[.07] mt-auto">
               <div className="flex items-center gap-1.5">
                 <Calendar className="w-3.5 h-3.5" />
                 <span>{game.release_date?.split("-")[0] || "N/A"}</span>
@@ -795,6 +814,19 @@ export const GameCard = memo(function GameCard({
         open={gameStartFailedOpen}
         gameName={game.name}
         onClose={() => setGameStartFailedOpen(false)}
+        onPickExecutable={async () => {
+          // Open the exe picker pre-loaded with the game's executables so the
+          // user can immediately pick a different one instead of re-traversing
+          // the gear menu after a failed launch.
+          try {
+            const result = await listGameExecutables()
+            const exes = result?.exes || []
+            const folder = result?.folder || null
+            openExePicker(exes, folder)
+          } catch {
+            openExePicker([], null)
+          }
+        }}
       />
 
       {/* Universal right-click menu — appears on every card site-wide. */}
@@ -802,25 +834,7 @@ export const GameCard = memo(function GameCard({
         open={contextMenuPos != null}
         position={contextMenuPos}
         onClose={closeContextMenu}
-        gameName={game.name}
-        gameSource={game.source}
-        isExternal={false}
-        // Library-only actions are not wired here — the LibraryPage's own
-        // context menu (with delete, executable picker, etc.) takes over
-        // when right-clicking inside the library grid.
-        onSetExecutable={null}
-        onOpenFiles={isInstalled && installedPath ? () => { closeContextMenu(); openPath(installedPath) } : null}
-        onCreateShortcut={null}
-        onDelete={null}
-        wishlist={accountLists.authed === false ? undefined : {
-          inList: accountLists.wishlist.has(game.appid),
-          toggle: () => { void accountLists.toggleWishlist(game.appid, game.name) },
-        }}
-        favorites={accountLists.authed === false ? undefined : {
-          inList: accountLists.favorites.has(game.appid),
-          toggle: () => { void accountLists.toggleFavorite(game.appid, game.name) },
-        }}
-        collectionPicker={collectionPicker}
+        {...menuProps}
       />
     </div>
     </GameArtAura>

@@ -35,7 +35,6 @@ type HostOption = {
 
 const HOST_OPTIONS: HostOption[] = [
   { key: "ucfiles", label: "UC.Files", supportsResume: true },
-  { key: "pixeldrain", label: "Pixeldrain", supportsResume: true },
 ]
 
 function hostLabel(key: string): string {
@@ -54,6 +53,12 @@ type Props = {
   game: Game | null
   downloadToken: string | null
   defaultHost: PreferredDownloadHost
+  /** When true and every check completes green (preferred host has all parts
+   *  alive, no dead-parts overrides needed, storage precheck OK, no sysreq
+   *  fail, no HV warning) we automatically fire onConfirm after a short
+   *  grace. Used for the "Auto-confirm downloads when everything's fine"
+   *  mode so happy-path downloads don't require an extra click. */
+  autoConfirmIfGreen?: boolean
   onCheckingChange?: (checking: boolean) => void
   onConfirm: (config: DownloadConfig) => void
   onClose: () => void
@@ -71,7 +76,7 @@ function parseSizeStringToBytes(value: string | null | undefined): number {
   return Math.round(n * (mult[unit] || 1))
 }
 
-export function DownloadCheckModal({ open, game, downloadToken, defaultHost, onCheckingChange, onConfirm, onClose }: Props) {
+export function DownloadCheckModal({ open, game, downloadToken, defaultHost, autoConfirmIfGreen, onCheckingChange, onConfirm, onClose }: Props) {
   const [phase, setPhase] = useState<Phase>("loading")
   const [selectedHost, setSelectedHost] = useState<PreferredDownloadHost>(defaultHost)
   const [errorMsg, setErrorMsg] = useState("")
@@ -333,17 +338,46 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, onC
       )
     : false
 
+  // Auto-confirm path. When the consumer opted in (smart download mode) AND
+  // every gate is fully green, we fire onConfirm a short moment after the
+  // checks settle so the user sees a brief loading flash and then their
+  // download just starts — no extra click for the happy path. The grace
+  // matters because storage/sysreq run asynchronously after `phase=ready`;
+  // checking them on the same tick would mis-fire.
+  const autoConfirmEligible =
+    autoConfirmIfGreen
+    && phase === "ready"
+    && Boolean(currentHostAvail?.allAlive)
+    && Object.keys(partOverrides).length === 0
+    && (storageCheck === null || storageCheck.ok)
+    && (sysreqVerdict === null || sysreqVerdict.status !== "fail")
+    && !game?.hasHv
+    && selectedHost === defaultHost
+  const autoConfirmFiredRef = useRef(false)
+  useEffect(() => {
+    if (!open) {
+      autoConfirmFiredRef.current = false
+      return
+    }
+    if (!autoConfirmEligible || autoConfirmFiredRef.current) return
+    autoConfirmFiredRef.current = true
+    const timer = setTimeout(() => {
+      onConfirm({ host: selectedHost, partOverrides: {} })
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [autoConfirmEligible, open, onConfirm, selectedHost])
+
   if (!open) return null
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
-      <div className="absolute inset-0 bg-[#09090b]/40 backdrop-blur-sm animate-in fade-in duration-300 ease-out" onClick={onClose} />
-      <div className="relative w-full max-w-lg overflow-hidden rounded-2xl border border-white/[.07] bg-zinc-900/95 p-5 text-zinc-100 shadow-2xl animate-in slide-in-from-top-4 duration-300 ease-out">
+      <div className="absolute inset-0 bg-black/72 backdrop-blur-md animate-in fade-in duration-300 ease-out" onClick={onClose} />
+      <div className="relative w-full max-w-lg overflow-hidden rounded-3xl border border-white/[.07] bg-background/88 backdrop-blur-2xl p-5 text-foreground shadow-[0_24px_80px_rgba(0,0,0,0.55)] animate-in slide-in-from-top-4 duration-300 ease-out">
         {/* ── Loading Phase ── */}
         {phase === "loading" && (
           <div className="flex flex-col items-center gap-3 py-8">
             <Loader2 className="h-8 w-8 animate-spin text-white" />
-            <p className="text-sm text-zinc-400">Checking link availability…</p>
+            <p className="text-sm text-muted-foreground">Checking link availability…</p>
           </div>
         )}
 
@@ -354,7 +388,7 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, onC
               <ShieldAlert className="h-5 w-5 text-destructive" />
               Availability check failed
             </div>
-            <p className="text-sm text-zinc-400">
+            <p className="text-sm text-muted-foreground">
               {errorMsg || "Could not verify link availability. You can still try downloading."}
             </p>
             <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
@@ -391,14 +425,14 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, onC
               <CircleX className="h-5 w-5 text-destructive" />
               {hasWebOnly ? "Not available in-app" : "Game not available"}
             </div>
-            <p className="text-sm text-zinc-400">
+            <p className="text-sm text-muted-foreground">
               {hasWebOnly
                 ? <>
-                    <span className="font-medium text-zinc-100">{game?.name}</span> isn&apos;t
+                    <span className="font-medium text-foreground">{game?.name}</span> isn&apos;t
                     hosted on any in-app download host, but it&apos;s available on the web.
                   </>
                 : <>
-                    All download links for <span className="font-medium text-zinc-100">{game?.name}</span> are
+                    All download links for <span className="font-medium text-foreground">{game?.name}</span> are
                     currently dead on every host. The game cannot be downloaded right now.
                   </>
               }
@@ -414,20 +448,20 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, onC
                 ? Object.keys(availability.webOnlyHosts)
                 : []
               if (webOnlyHosts.length === 0) return (
-                <div className="rounded-lg border border-white/[.07] bg-zinc-800/30 px-3 py-2 text-xs text-zinc-400">
+                <div className="rounded-lg border border-white/[.07] bg-secondary/30 px-3 py-2 text-xs text-muted-foreground">
                   Please try <strong>downloading from the website</strong> where more hosts may be available.
                 </div>
               )
               return (
-                <div className="rounded-lg border border-zinc-700 bg-white/5 px-3 py-3 space-y-2">
-                  <div className="flex items-center gap-1.5 text-sm font-medium text-zinc-100">
+                <div className="rounded-lg border border-border bg-white/5 px-3 py-3 space-y-2">
+                  <div className="flex items-center gap-1.5 text-sm font-medium text-foreground">
                     <ExternalLink className="h-3.5 w-3.5 text-white" />
                     Available on the web
                   </div>
-                  <p className="text-xs text-zinc-400">
+                  <p className="text-xs text-muted-foreground">
                     This game has links alive on {webOnlyHosts.join(", ")} - these hosts don&apos;t work in the app, but you can download from the website and install here.
                   </p>
-                  <ol className="text-xs text-zinc-400 space-y-1 pl-4 list-decimal">
+                  <ol className="text-xs text-muted-foreground space-y-1 pl-4 list-decimal">
                     <li>
                       <a
                         href={`https://union-crax.xyz/game/${game?.appid}`}
@@ -445,7 +479,7 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, onC
               )
             })()}
             {deadLinksReported && (
-              <p className="text-[11px] text-zinc-400/60 text-center">
+              <p className="text-[11px] text-muted-foreground/60 text-center">
                 We detected dead links and have reported it for you.
               </p>
             )}
@@ -466,13 +500,13 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, onC
         {phase === "ready" && (
           <div className="space-y-4">
             <div className="text-lg font-semibold">Download options</div>
-            <p className="text-sm text-zinc-400">
+            <p className="text-sm text-muted-foreground">
               Choose a host for this download.
             </p>
 
             {/* Host selector + health */}
             <div className="space-y-1.5">
-              <label className="text-sm font-medium text-zinc-100">Host</label>
+              <label className="text-sm font-medium text-foreground">Host</label>
               <Select value={selectedHost} onValueChange={(v) => {
                 setSelectedHost(v as PreferredDownloadHost)
                 setPartOverrides({}) // reset overrides when host changes
@@ -519,13 +553,13 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, onC
                               ) : (
                                 <AlertTriangle className="h-3.5 w-3.5 text-amber-400" />
                               )}
-                              <span className="text-zinc-400">
+                              <span className="text-muted-foreground">
                                 {alive}/{total}
                               </span>
                             </span>
                           )}
                           {hasAvailData && noParts && (
-                            <span className="ml-auto text-xs text-zinc-400">
+                            <span className="ml-auto text-xs text-muted-foreground">
                               unavailable
                             </span>
                           )}
@@ -583,7 +617,7 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, onC
                           {!isOverridden && filteredAliveOn.length > 0 && (
                             <button
                               onClick={() => applyAlternative(p.part, selectedHost)}
-                              className="flex items-center gap-1 rounded-full border border-white/[.07] bg-[#09090b]/70 px-2 py-0.5 text-[10px] font-medium text-zinc-100 transition-colors hover:bg-foreground/5"
+                              className="flex items-center gap-1 rounded-full border border-white/[.07] bg-[#09090b]/70 px-2 py-0.5 text-[10px] font-medium text-foreground transition-colors hover:bg-foreground/5"
                             >
                               <ArrowRightLeft className="h-2.5 w-2.5" />
                               Use {hostLabel(filteredAliveOn[0])}
@@ -669,12 +703,12 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, onC
 
             {/* System requirement comparison */}
             {sysreqProfileMissing && (game?.minRequirements || game?.recommendedRequirements || game?.linuxMinRequirements || game?.linuxRecommendedRequirements) && (
-              <div className="rounded-lg border border-white/[.07] bg-zinc-800/30 px-3 py-2 text-xs text-zinc-300">
+              <div className="rounded-lg border border-white/[.07] bg-secondary/30 px-3 py-2 text-xs text-foreground/80">
                 <div className="flex items-center gap-1.5 font-medium">
                   <Cpu className="h-3.5 w-3.5" />
                   Scan your PC to see if it meets the requirements
                 </div>
-                <div className="text-[11px] text-zinc-400 mt-1">
+                <div className="text-[11px] text-muted-foreground mt-1">
                   Settings → System Profile → Scan now.
                 </div>
               </div>
@@ -712,7 +746,7 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, onC
 
             {/* Dead links reported notice */}
             {deadLinksReported && (
-              <p className="text-[11px] text-zinc-400/60 text-center">
+              <p className="text-[11px] text-muted-foreground/60 text-center">
                 We detected dead links and have reported it for you.
               </p>
             )}
@@ -807,7 +841,7 @@ function SysreqPanel({ verdict }: { verdict: RequirementVerdict }) {
     verdict.status === "pass" ? "border-emerald-500/20 bg-emerald-500/5 text-emerald-200" :
     verdict.status === "warn" ? "border-amber-500/30 bg-amber-500/10 text-amber-200" :
     verdict.status === "fail" ? "border-red-500/30 bg-red-500/10 text-red-200" :
-    "border-white/[.07] bg-zinc-800/30 text-zinc-300"
+    "border-white/[.07] bg-secondary/30 text-foreground/80"
 
   const summary =
     verdict.status === "pass" ? "Your PC meets all checked requirements." :

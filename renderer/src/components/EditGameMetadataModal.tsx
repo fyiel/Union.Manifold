@@ -171,12 +171,12 @@ export function EditGameMetadataModal({ open, onOpenChange, game, onSaved }: Edi
         <div className="px-6 pt-6 pb-2">
           <DialogHeader className="space-y-1.5">
             <div className="flex items-center gap-2">
-              <span className="inline-flex items-center rounded-full border border-white/[.07] bg-white/[.04] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-400">
+              <span className="inline-flex items-center rounded-full border border-white/[.07] bg-white/[.04] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
                 External
               </span>
               <DialogTitle className="text-lg">Edit game details</DialogTitle>
             </div>
-            <DialogDescription className="text-zinc-400">
+            <DialogDescription className="text-muted-foreground">
               Customize how this game appears in your library. Changes only affect your local copy.
             </DialogDescription>
           </DialogHeader>
@@ -186,7 +186,7 @@ export function EditGameMetadataModal({ open, onOpenChange, game, onSaved }: Edi
           {/* Banner — full-width hero, what users see at the top of the game page */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <Label className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-400">
+              <Label className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                 Hero banner
               </Label>
               <ImageSourceTabs mode={bannerMode} onChange={setBannerMode} />
@@ -207,7 +207,7 @@ export function EditGameMetadataModal({ open, onOpenChange, game, onSaved }: Edi
           <div className="grid gap-4 sm:grid-cols-[148px_1fr]">
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <Label className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-400">
+                <Label className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                   Cover
                 </Label>
               </div>
@@ -299,7 +299,7 @@ export function EditGameMetadataModal({ open, onOpenChange, game, onSaved }: Edi
                         "inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium",
                         isNsfw
                           ? "border-red-500/30 bg-red-500/10 text-red-300"
-                          : "border-white/[.07] bg-white/[.04] text-zinc-200"
+                          : "border-white/[.07] bg-white/[.04] text-foreground/90"
                       )}
                     >
                       {g}
@@ -332,11 +332,11 @@ export function EditGameMetadataModal({ open, onOpenChange, game, onSaved }: Edi
                   }}
                   onBlur={() => addGenre(genreDraft)}
                   placeholder={genres.length === 0 ? "Type a genre and press Enter…" : "Add another…"}
-                  className="flex-1 min-w-[120px] bg-transparent border-0 outline-none text-sm text-zinc-100 placeholder:text-zinc-500 px-2 py-1"
+                  className="flex-1 min-w-[120px] bg-transparent border-0 outline-none text-sm text-foreground placeholder:text-muted-foreground/80 px-2 py-1"
                 />
               </div>
             </div>
-            <p className="text-[11px] text-zinc-500">
+            <p className="text-[11px] text-muted-foreground/80">
               Press <kbd className="rounded bg-white/[.06] px-1 font-mono text-[10px]">Enter</kbd> or
               <kbd className="rounded bg-white/[.06] px-1 font-mono text-[10px] ml-1">,</kbd> to add.
             </p>
@@ -351,7 +351,7 @@ export function EditGameMetadataModal({ open, onOpenChange, game, onSaved }: Edi
         </div>
 
         <DialogFooter className="px-6 pb-6 pt-2 flex items-center sm:justify-between gap-3">
-          <p className="text-xs text-zinc-500 hidden sm:block">
+          <p className="text-xs text-muted-foreground/80 hidden sm:block">
             {dirty ? "Unsaved changes" : "No changes"}
           </p>
           <div className="flex justify-end gap-2 ml-auto">
@@ -399,7 +399,7 @@ function ImageSourceTabs({
           onClick={() => onChange(m)}
           className={cn(
             "inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 font-semibold tracking-wide transition-colors",
-            mode === m ? "bg-white text-black" : "text-zinc-400 hover:text-zinc-100"
+            mode === m ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
           )}
         >
           {m === "file" ? <Upload className="h-3 w-3" /> : <LinkIcon className="h-3 w-3" />}
@@ -464,19 +464,19 @@ function ImageDrop({
             <button
               type="button"
               onClick={(e) => { e.stopPropagation(); onClear() }}
-              className="absolute top-2 right-2 inline-flex h-6 w-6 items-center justify-center rounded-full border border-white/[.10] bg-black/70 text-zinc-300 backdrop-blur-sm hover:bg-red-500/20 hover:text-red-300 hover:border-red-500/30 transition-colors opacity-0 group-hover:opacity-100"
+              className="absolute top-2 right-2 inline-flex h-6 w-6 items-center justify-center rounded-full border border-white/[.10] bg-black/70 text-foreground/80 backdrop-blur-sm hover:bg-red-500/20 hover:text-red-300 hover:border-red-500/30 transition-colors opacity-0 group-hover:opacity-100"
               aria-label="Clear image"
             >
               <X className="h-3 w-3" />
             </button>
           </>
         ) : (
-          <div className="absolute inset-0 flex flex-col items-center justify-center text-zinc-500 gap-1.5 px-3 text-center">
+          <div className="absolute inset-0 flex flex-col items-center justify-center text-muted-foreground/80 gap-1.5 px-3 text-center">
             <ImageIcon className={compact ? "h-5 w-5" : "h-6 w-6"} />
             <span className={cn("font-medium", compact ? "text-[10px]" : "text-xs")}>
               {imgError ? "Couldn't load image" : mode === "file" ? "Click to choose a file" : "Paste a URL below"}
             </span>
-            {!compact && <span className="text-[10px] text-zinc-600">{hint}</span>}
+            {!compact && <span className="text-[10px] text-muted-foreground/60">{hint}</span>}
           </div>
         )}
       </div>

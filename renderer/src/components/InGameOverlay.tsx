@@ -5,6 +5,7 @@ import {
 } from 'lucide-react'
 import { ControllerOverlayFlyout } from './ControllerOverlayFlyout'
 import { LogoStaticDark } from './brand/brand-assets'
+import { CustomTooltipManager } from './CustomTooltipManager'
 import { proxyImageUrl } from '@/lib/utils'
 
 type OverlayApi = NonNullable<Window['ucOverlay']> & {
@@ -60,8 +61,8 @@ function dlStatusColor(s: string) {
   if (s === 'extracting' || s === 'installing') return 'text-amber-300'
   if (s === 'verifying')  return 'text-cyan-300'
   if (s === 'retrying')   return 'text-red-400'
-  if (s === 'paused')     return 'text-zinc-400'
-  if (s === 'queued')     return 'text-zinc-500'
+  if (s === 'paused')     return 'text-muted-foreground'
+  if (s === 'queued')     return 'text-muted-foreground/80'
   return 'text-white'
 }
 
@@ -107,6 +108,7 @@ export function InGameOverlay() {
   const [toastVertical,     setToastVertical]     = useState<OverlayVert>('bottom')
 
   const currentAppidRef   = useRef<string | null>(null)
+  const gameInfoRef       = useRef<GameInfo | null>(null)
   const modeRef           = useRef<OverlayMode>(mode)
   const toastTimerRef     = useRef<ReturnType<typeof setTimeout> | null>(null)
   const toastProgressRef  = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -115,6 +117,7 @@ export function InGameOverlay() {
   const clockRef          = useRef<ReturnType<typeof setInterval> | null>(null)
 
   useEffect(() => { currentAppidRef.current = currentAppid }, [currentAppid])
+  useEffect(() => { gameInfoRef.current = gameInfo }, [gameInfo])
   useEffect(() => { modeRef.current = mode }, [mode])
 
   // Transparent root
@@ -333,6 +336,35 @@ export function InGameOverlay() {
         if (data.toastVertical === 'top' || data.toastVertical === 'bottom')
           setToastVertical(data.toastVertical)
       }),
+      // Listen for game-exited so the overlay clears its session state
+      // immediately. Without this, a closed game still showed its name +
+      // running timer the next time the panel was opened, even though the
+      // launcher's library card had correctly reverted to "not running" and
+      // no playtime was recorded — the overlay just held the stale gameInfo.
+      window.ucPresence?.onChanged?.((detail) => {
+        if (!detail) return
+        if (detail.reason === 'game-exited') {
+          // Only clear if it matches the session this overlay is tracking;
+          // otherwise leave it alone (another game might still be running).
+          const matches = !detail.appid
+            || gameInfoRef.current?.appid === detail.appid
+            || currentAppidRef.current === detail.appid
+          if (matches) {
+            setGameInfo(null)
+            setCurrentAppid(null)
+            // Belt-and-suspenders: if we're still showing the panel/toast
+            // for the now-dead session, dismiss it.
+            if (modeRef.current !== 'hidden') enterMode('hidden')
+          }
+        } else if (detail.reason === 'game-started') {
+          // A fresh launch — bring the gameInfo up to date so the overlay
+          // (if shown) reflects the new session rather than a stale one.
+          if (detail.appid) {
+            setCurrentAppid(detail.appid)
+            refreshGameInfo(detail.appid)
+          }
+        }
+      }),
     ].filter(Boolean) as Array<() => void>
 
     api.getSettings().then(s => {
@@ -422,13 +454,13 @@ export function InGameOverlay() {
       <div className={`pointer-events-none fixed ${toastVClass} z-[9999] w-72`} style={toastStyle}>
         <div className={`overlay-panel rounded-2xl p-3 shadow-[0_16px_48px_rgba(0,0,0,0.7)] transition-all duration-200 ${animated ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'}`}>
           <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-white">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-primary">
               {gameInfo?.image
                 ? <img src={proxyImageUrl(gameInfo.image)} alt="" className="h-full w-full object-cover" />
-                : <LogoStaticDark className="h-[15px] w-[15px]" />}
+                : <LogoStaticDark className="h-6 w-6" />}
             </div>
             <div className="min-w-0 flex-1">
-              <div className="section-label !text-zinc-400">Now Playing</div>
+              <div className="section-label !text-muted-foreground">Now Playing</div>
               <div className="truncate text-sm font-semibold text-white leading-tight">
                 {gameInfo?.gameName || currentAppid || 'Game session'}
               </div>
@@ -439,7 +471,7 @@ export function InGameOverlay() {
             <div className="h-full rounded-full bg-white/80" style={{ width: `${toastProgress}%`, transition: 'width 50ms linear' }} />
           </div>
           <div className="mt-2 flex items-center justify-between">
-            <span className="text-[9px] text-zinc-600">Press to open overlay</span>
+            <span className="text-[9px] text-muted-foreground/60">Press to open overlay</span>
             <span className="token-chip text-[9px]">{hotkey}</span>
           </div>
         </div>
@@ -456,6 +488,10 @@ export function InGameOverlay() {
       className={`fixed inset-0 z-[9998] transition-colors duration-300 ${mode === 'panel' ? 'bg-black/40' : ''}`}
       onClick={closePanelAndHide}
     >
+      {/* The overlay renders in its own window, outside AppLayout, so the
+          tooltip manager has to be mounted locally here. Without it the
+          data-tooltip attributes fall back to the native browser title. */}
+      <CustomTooltipManager />
       {/* ── Floating quick actions (opposite side of panel) ─────── */}
       <div
         className={`pointer-events-auto absolute top-4 ${actionsPos} flex items-center gap-2 transition-all duration-200 ${animated ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'}`}
@@ -464,8 +500,9 @@ export function InGameOverlay() {
         {/* Screenshot */}
         <button
           onClick={handleScreenshot}
-          className={`overlay-panel flex h-9 w-9 items-center justify-center rounded-xl shadow-[0_8px_24px_rgba(0,0,0,0.6)] transition hover:bg-zinc-700/80 hover:text-white active:scale-95 ${screenshotFlash ? 'text-emerald-300' : 'text-zinc-400'}`}
-          title="Screenshot"
+          className={`overlay-panel flex h-9 w-9 items-center justify-center rounded-xl shadow-[0_8px_24px_rgba(0,0,0,0.6)] transition hover:bg-zinc-700/80 hover:text-white active:scale-95 ${screenshotFlash ? 'text-emerald-300' : 'text-muted-foreground'}`}
+          data-tooltip="Screenshot"
+          data-tooltip-position={dock === 'right' ? 'left' : 'bottom'}
         >
           <Camera size={14} />
         </button>
@@ -473,12 +510,13 @@ export function InGameOverlay() {
         {/* Notifications */}
         <button
           onClick={() => setShowNotifications(v => !v)}
-          className={`overlay-panel relative flex h-9 w-9 items-center justify-center rounded-xl shadow-[0_8px_24px_rgba(0,0,0,0.6)] transition hover:bg-zinc-700/80 hover:text-white active:scale-95 ${showNotifications ? 'text-sky-300' : 'text-zinc-400'}`}
-          title="Notifications"
+          className={`overlay-panel relative flex h-9 w-9 items-center justify-center rounded-xl shadow-[0_8px_24px_rgba(0,0,0,0.6)] transition hover:bg-zinc-700/80 hover:text-white active:scale-95 ${showNotifications ? 'text-sky-300' : 'text-muted-foreground'}`}
+          data-tooltip="Notifications"
+          data-tooltip-position={dock === 'right' ? 'left' : 'bottom'}
         >
           <Bell size={14} />
           {unreadNotifs.length > 0 && (
-            <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-white px-1 text-[9px] font-bold text-black">
+            <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[9px] font-bold text-primary-foreground">
               {unreadNotifs.length > 9 ? '9+' : unreadNotifs.length}
             </span>
           )}
@@ -487,8 +525,9 @@ export function InGameOverlay() {
         {/* Controller */}
         <button
           onClick={() => setShowController(v => !v)}
-          className={`overlay-panel flex h-9 w-9 items-center justify-center rounded-xl shadow-[0_8px_24px_rgba(0,0,0,0.6)] transition hover:bg-zinc-700/80 hover:text-white active:scale-95 ${showController ? 'text-violet-300' : 'text-zinc-400'}`}
-          title="Controller"
+          className={`overlay-panel flex h-9 w-9 items-center justify-center rounded-xl shadow-[0_8px_24px_rgba(0,0,0,0.6)] transition hover:bg-zinc-700/80 hover:text-white active:scale-95 ${showController ? 'text-violet-300' : 'text-muted-foreground'}`}
+          data-tooltip="Controller"
+          data-tooltip-position={dock === 'right' ? 'left' : 'bottom'}
         >
           <Gamepad2 size={14} />
         </button>
@@ -502,14 +541,14 @@ export function InGameOverlay() {
         >
           <div className="flex items-center justify-between border-b border-white/[.06] px-3 py-2.5">
             <span className="text-xs font-semibold text-white">Notifications</span>
-            <span className="text-[10px] text-zinc-600">{notifications.length}</span>
+            <span className="text-[10px] text-muted-foreground/60">{notifications.length}</span>
           </div>
           <div className="max-h-56 overflow-y-auto">
             {notifications.length === 0
               ? (
                 <div className="flex flex-col items-center gap-2 py-6 text-center">
-                  <Bell size={18} className="text-zinc-700" />
-                  <span className="text-xs text-zinc-600">No notifications</span>
+                  <Bell size={18} className="text-muted-foreground/40" />
+                  <span className="text-xs text-muted-foreground/60">No notifications</span>
                 </div>
               )
               : (
@@ -520,9 +559,9 @@ export function InGameOverlay() {
                         {!n.read && <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-sky-400" />}
                         <div className="min-w-0 flex-1">
                           <div className="truncate text-xs font-medium text-white">{n.title}</div>
-                          <div className="mt-0.5 truncate text-[11px] text-zinc-500">{n.body}</div>
+                          <div className="mt-0.5 truncate text-[11px] text-muted-foreground/80">{n.body}</div>
                         </div>
-                        <span className="shrink-0 text-[10px] text-zinc-600">{formatNotifTime(n.timestamp)}</span>
+                        <span className="shrink-0 text-[10px] text-muted-foreground/60">{formatNotifTime(n.timestamp)}</span>
                       </div>
                     </div>
                   ))}
@@ -542,22 +581,25 @@ export function InGameOverlay() {
           {/* Header */}
           <div className="flex items-center gap-2.5 px-4 py-3 border-b border-white/[.06]">
             {/* Time pill */}
-            <div className="flex items-center gap-1.5 rounded-lg bg-zinc-800 px-2 py-1">
-              <Clock size={11} className="text-zinc-500" />
-              <span className="font-mono text-xs text-zinc-300">{formatTime(currentTime)}</span>
+            <div className="flex items-center gap-1.5 rounded-lg bg-secondary px-2 py-1">
+              <Clock size={11} className="text-muted-foreground/80" />
+              <span className="font-mono text-xs text-foreground/80">{formatTime(currentTime)}</span>
             </div>
             <div className="flex-1" />
-            {/* Logo + wordmark */}
+            {/* Logo + wordmark — proportional to the overlay's compact
+                header. Previous size (13px glyph in 28px tile) read as a
+                dot; this fills the tile properly without dwarfing the
+                wordmark next to it. */}
             <div className="flex items-center gap-2">
-              <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-white">
-                <LogoStaticDark className="h-[13px] w-[13px]" />
+              <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary">
+                <LogoStaticDark className="h-[18px] w-[18px]" />
               </div>
-              <span className="text-sm font-brand text-white">UnionCrax</span>
+              <span className="text-sm font-brand text-white tracking-tight">UnionCrax</span>
             </div>
             <div className="flex-1" />
             <button
               onClick={closePanelAndHide}
-              className="flex h-7 w-7 items-center justify-center rounded-full border border-white/[.08] bg-zinc-900 text-zinc-500 transition hover:bg-white/[.08] hover:text-white active:scale-90"
+              className="flex h-7 w-7 items-center justify-center rounded-full border border-white/[.08] bg-card text-muted-foreground/80 transition hover:bg-white/[.08] hover:text-white active:scale-90"
             >
               <X size={13} />
             </button>
@@ -573,7 +615,7 @@ export function InGameOverlay() {
                 {gameInfo?.image && (
                   <div className="relative mb-3 h-20 overflow-hidden rounded-xl">
                     <img src={proxyImageUrl(gameInfo.image)} alt="" className="h-full w-full object-cover" />
-                    <div className="absolute inset-0 bg-gradient-to-t from-zinc-950/80 to-transparent" />
+                    <div className="absolute inset-0 bg-gradient-to-t from-background/80 to-transparent" />
                     <div className="absolute bottom-2 left-3 flex items-center gap-1.5">
                       <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
                       <span className="section-label !text-emerald-300">Live</span>
@@ -592,9 +634,9 @@ export function InGameOverlay() {
                       {gameInfo?.gameName || 'Session active'}
                     </div>
                     {gameInfo?.startedAt && (
-                      <div className="mt-0.5 flex items-center gap-1 text-[11px] text-zinc-500">
+                      <div className="mt-0.5 flex items-center gap-1 text-[11px] text-muted-foreground/80">
                         <Clock size={10} />
-                        <span className="font-mono text-zinc-300">{playtime}</span>
+                        <span className="font-mono text-foreground/80">{playtime}</span>
                         <span>session</span>
                       </div>
                     )}
@@ -610,7 +652,7 @@ export function InGameOverlay() {
                 <div className="mb-2.5 flex items-center gap-1.5">
                   <Download size={11} className="text-sky-400" />
                   <span className="section-label !text-sky-400">Downloads</span>
-                  <span className="ml-auto text-[10px] text-zinc-600">{activeDl.length}</span>
+                  <span className="ml-auto text-[10px] text-muted-foreground/60">{activeDl.length}</span>
                 </div>
                 <div className="space-y-2">
                   {activeDl.slice(0, 4).map(dl => {
@@ -623,7 +665,7 @@ export function InGameOverlay() {
                       : dl.status === 'paused' ? 'Paused'
                       : `${formatSpeed(dl.speedBps)} · ${formatBytes(dl.receivedBytes)} / ${formatBytes(dl.totalBytes)}`
                     return (
-                        <div key={dl.id} className="rounded-xl border border-zinc-800 bg-zinc-900 p-2.5">
+                        <div key={dl.id} className="rounded-xl border border-border bg-card p-2.5">
                         <div className="flex items-center gap-2">
                           <div className="min-w-0 flex-1">
                             <div className="truncate text-xs font-medium text-white">{dl.gameName || dl.appid}</div>
@@ -631,7 +673,7 @@ export function InGameOverlay() {
                               <span className={`text-[9px] font-semibold uppercase tracking-[0.12em] ${dlStatusColor(dl.status)}`}>
                                 {dlLabel(dl.status)}
                               </span>
-                              <span className="text-[9px] text-zinc-600">{pct}%</span>
+                              <span className="text-[9px] text-muted-foreground/60">{pct}%</span>
                             </div>
                           </div>
                           {(dl.status === 'downloading' || dl.status === 'paused') && (
@@ -639,7 +681,7 @@ export function InGameOverlay() {
                               onClick={() => dl.status === 'downloading'
                                 ? window.ucOverlay?.pauseDownload(dl.id)
                                 : window.ucOverlay?.resumeDownload(dl.id)}
-                              className="flex h-6 w-6 items-center justify-center rounded-lg border border-white/[.08] bg-zinc-900 text-zinc-400 transition hover:text-white active:scale-90"
+                              className="flex h-6 w-6 items-center justify-center rounded-lg border border-white/[.08] bg-card text-muted-foreground transition hover:text-white active:scale-90"
                             >
                               {dl.status === 'downloading' ? <Pause size={10} /> : <Play size={10} />}
                             </button>
@@ -648,7 +690,7 @@ export function InGameOverlay() {
                         <div className="mt-2 h-1 overflow-hidden rounded-full bg-white/[.07]">
                           <div className="h-full rounded-full" style={{ width: `${pct}%`, background: dlBarGradient(dl.status), transition: 'width 300ms ease' }} />
                         </div>
-                        <div className="mt-1.5 text-[10px] text-zinc-600">{statusLine}</div>
+                        <div className="mt-1.5 text-[10px] text-muted-foreground/60">{statusLine}</div>
                       </div>
                     )
                   })}
@@ -661,7 +703,7 @@ export function InGameOverlay() {
               <div className="flex items-center gap-2.5">
                 <button
                   onClick={handleMuteToggle}
-                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-white/[.08] bg-zinc-900 text-zinc-400 transition hover:text-white active:scale-90"
+                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-white/[.08] bg-card text-muted-foreground transition hover:text-white active:scale-90"
                 >
                   {isMuted ? <VolumeX size={13} /> : <Volume2 size={13} />}
                 </button>
@@ -674,7 +716,7 @@ export function InGameOverlay() {
                     background: `linear-gradient(to right,rgba(255,255,255,0.9) 0%,rgba(255,255,255,0.9) ${isMuted ? 0 : volume}%,rgba(255,255,255,0.1) ${isMuted ? 0 : volume}%,rgba(255,255,255,0.1) 100%)`
                   }}
                 />
-                <span className="w-8 text-right font-mono text-[10px] text-zinc-500">
+                <span className="w-8 text-right font-mono text-[10px] text-muted-foreground/80">
                   {isMuted ? '0' : volume}%
                 </span>
               </div>
@@ -686,12 +728,12 @@ export function InGameOverlay() {
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     onClick={closePanelAndHide}
-                    className="flex items-center gap-2 rounded-xl border border-zinc-700/60 bg-zinc-800 px-3 py-2 text-left text-white transition hover:bg-zinc-700 active:scale-95"
+                    className="flex items-center gap-2 rounded-xl border border-border/60 bg-secondary px-3 py-2 text-left text-white transition hover:bg-zinc-700 active:scale-95"
                   >
                     <Play size={13} />
                     <div>
                       <div className="text-xs font-semibold">Resume</div>
-                      <div className="text-[10px] text-zinc-500">Back to game</div>
+                      <div className="text-[10px] text-muted-foreground/80">Back to game</div>
                     </div>
                   </button>
                   <button
@@ -725,12 +767,12 @@ export function InGameOverlay() {
                       <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-white/[.06]">
                         {game.metadata?.image
                           ? <img src={proxyImageUrl(game.metadata.image)} alt="" className="h-full w-full object-cover" />
-                          : <Gamepad2 size={13} className="text-zinc-500" />}
+                          : <Gamepad2 size={13} className="text-muted-foreground/80" />}
                       </div>
-                      <span className="min-w-0 flex-1 truncate text-xs font-medium text-zinc-200">
+                      <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground/90">
                         {game.metadata?.name || game.name || game.appid}
                       </span>
-                      <Play size={11} className="shrink-0 text-zinc-600" />
+                      <Play size={11} className="shrink-0 text-muted-foreground/60" />
                     </button>
                   ))}
                 </div>
@@ -740,11 +782,11 @@ export function InGameOverlay() {
 
           {/* Footer */}
           <div className="flex items-center justify-center gap-2 border-t border-white/[.05] px-4 py-2.5">
-            <span className="text-[10px] text-zinc-700">Close</span>
+            <span className="text-[10px] text-muted-foreground/40">Close</span>
             <span className="token-chip text-[9px]">Esc</span>
             <span className="text-zinc-800">·</span>
             <span className="token-chip text-[9px]">{hotkey}</span>
-            <span className="text-[10px] text-zinc-700">Toggle</span>
+            <span className="text-[10px] text-muted-foreground/40">Toggle</span>
           </div>
         </div>
       </div>

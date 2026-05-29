@@ -20,8 +20,8 @@ export const APP_INFO = {
   DOWNLOAD_DIR_NAME: 'UnionCrax.Direct',
 } as const
 
-// Mirror host configuration
-export type MirrorHost = 'ucfiles' | 'pixeldrain'
+// Mirror host configuration. UC.Files is the only in-app downloadable host.
+export type MirrorHost = 'ucfiles'
 export type MirrorHostTag = 'beta' | 'soon' | 'retiring'
 
 export interface MirrorHostInfo {
@@ -33,5 +33,4 @@ export interface MirrorHostInfo {
 
 export const MIRROR_HOSTS: MirrorHostInfo[] = [
   { key: 'ucfiles', label: 'UC.Files', supportsResume: true },
-  { key: 'pixeldrain', label: 'Pixeldrain', supportsResume: true },
 ]

@@ -4,24 +4,46 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  Gamepad2,
   Layers3,
   Plus,
   Settings2,
   Sparkles,
 } from "@/components/icons"
+import { Square } from "lucide-react"
 import { LogoStaticDark } from "@/components/brand/brand-assets"
 import { primaryNavItems, secondaryNavItems, bottomNavItems } from "@/lib/navigation"
-import { cn } from "@/lib/utils"
-import { useState } from "react"
+import { cn, proxyImageUrl } from "@/lib/utils"
+import { useEffect, useState } from "react"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { useUserCollections, type UserCollection } from "@/hooks/use-user-collections"
 import { useFollowedCollections, type FollowedCollection } from "@/hooks/use-followed-collections"
+import { useRunningGamesSessions, type RunningSession } from "@/hooks/use-running-games"
+import { useGamesData } from "@/hooks/use-games"
 import {
   CollectionActionContextMenu,
   COLLECTION_MENU_ICONS,
   type CollectionMenuPoint,
   type CollectionMenuSection,
 } from "@/components/CollectionActionMenu"
+
+/** Live session timer — ticks every second while the game is running. */
+function SessionTimer({ startedAt }: { startedAt: number }) {
+  const [elapsed, setElapsed] = useState(() => Math.max(0, Math.floor((Date.now() - startedAt) / 1000)))
+  useEffect(() => {
+    const id = setInterval(
+      () => setElapsed(Math.max(0, Math.floor((Date.now() - startedAt) / 1000))),
+      1000
+    )
+    return () => clearInterval(id)
+  }, [startedAt])
+  const h = Math.floor(elapsed / 3600)
+  const m = Math.floor((elapsed % 3600) / 60)
+  const s = elapsed % 60
+  if (h > 0) return <>{h}h {m}m</>
+  if (m > 0) return <>{m}m {s}s</>
+  return <>{s}s</>
+}
 
 interface SidebarProps {
   mobileOpen: boolean
@@ -40,12 +62,23 @@ export function Sidebar({ mobileOpen, onClose, collapsed, onToggleCollapse }: Si
   const followed = useFollowedCollections()
   const followedItems = followed.items || []
   const followedUpdateCount = followedItems.filter((c) => c.hasUpdates).length
+  const runningSessions = useRunningGamesSessions()
+  const { games } = useGamesData()
   const [ownedContextMenu, setOwnedContextMenu] = useState<
     { collection: UserCollection; point: CollectionMenuPoint } | null
   >(null)
   const [followedContextMenu, setFollowedContextMenu] = useState<
     { collection: FollowedCollection; point: CollectionMenuPoint } | null
   >(null)
+
+  const handleQuitSession = async (appid: string) => {
+    if (!window.ucDownloads?.quitGameExecutable) return
+    try {
+      await window.ucDownloads.quitGameExecutable(appid)
+    } catch {
+      // ignore — presence events will update the running state automatically
+    }
+  }
 
   const buildOwnedContextSections = (collection: UserCollection): CollectionMenuSection[] => {
     const isOwner = collection.role === "owner"
@@ -181,21 +214,24 @@ export function Sidebar({ mobileOpen, onClose, collapsed, onToggleCollapse }: Si
       >
         <span
           className={cn(
-            "flex shrink-0 items-center justify-center rounded-full bg-white text-black shadow-md transition-transform",
+            // Container stays at its original 44px — that read fine. Bump
+            // only the glyph inside so the logo fills more of the puck and
+            // matches the web's lockup ratio without ballooning the chrome.
+            "flex shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-md transition-transform",
             isCollapsed ? "h-9 w-9" : "h-11 w-11"
           )}
         >
-          <LogoStaticDark className={cn(isCollapsed ? "h-5 w-5" : "h-7 w-7")} />
+          <LogoStaticDark className={cn(isCollapsed ? "h-[22px] w-[22px]" : "h-[30px] w-[30px]")} />
         </span>
         {!isCollapsed && (
           <div className="min-w-0 leading-none">
-            <span className="block text-[15px] font-bold tracking-tight text-white">UnionCrax</span>
-            <span className="block text-[10px] font-semibold uppercase tracking-[0.22em] text-zinc-500 mt-1">.Direct</span>
+            <span className="block text-[15px] font-bold tracking-tight text-sidebar-foreground">UnionCrax</span>
+            <span className="block text-[10px] font-semibold uppercase tracking-[0.22em] text-sidebar-foreground/55 mt-1">.Direct</span>
           </div>
         )}
       </button>
 
-      <div className="h-px bg-white/[.06] mx-3" />
+      <div className="h-px bg-sidebar-foreground/[.06] mx-3" />
 
       {/* Nav */}
       <ScrollArea className="flex-1 min-h-0">
@@ -214,8 +250,8 @@ export function Sidebar({ mobileOpen, onClose, collapsed, onToggleCollapse }: Si
                     "uc-sidebar-row group flex items-center rounded-lg text-[13px] font-medium transition-colors duration-150",
                     isCollapsed ? "justify-center p-2.5" : "gap-2.5 px-2.5 py-2",
                     isActive
-                      ? "is-active is-active-inverse bg-white text-zinc-900"
-                      : "text-zinc-400 hover:bg-white/[.05] hover:text-zinc-100"
+                      ? "is-active is-active-inverse bg-sidebar-primary text-sidebar-primary-foreground"
+                      : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground"
                   )
                 }
               >
@@ -223,10 +259,10 @@ export function Sidebar({ mobileOpen, onClose, collapsed, onToggleCollapse }: Si
                   <>
                     <item.icon className={cn(
                       "uc-sidebar-icon h-4 w-4 shrink-0",
-                      isActive ? "text-zinc-900" : "text-zinc-500 group-hover:text-zinc-300"
+                      isActive ? "text-sidebar-primary-foreground" : "text-sidebar-foreground/60 group-hover:text-sidebar-foreground/90"
                     )} />
                     {!isCollapsed && (
-                      <span className={cn("uc-sidebar-label font-semibold", isActive ? "text-zinc-900" : "")}>{item.label}</span>
+                      <span className={cn("uc-sidebar-label font-semibold", isActive ? "text-sidebar-primary-foreground" : "")}>{item.label}</span>
                     )}
                   </>
                 )}
@@ -248,12 +284,12 @@ export function Sidebar({ mobileOpen, onClose, collapsed, onToggleCollapse }: Si
                       cn(
                         "flex justify-center items-center rounded-lg p-2.5 transition-colors duration-150",
                         isActive
-                          ? "bg-white/[.08] text-white"
-                          : "text-zinc-600 hover:bg-white/[.05] hover:text-zinc-300"
+                          ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                          : "text-sidebar-foreground/45 hover:bg-sidebar-foreground/[.05] hover:text-sidebar-foreground/80"
                       )
                     }
                   >
-                    {({ isActive }) => <item.icon className={cn("h-4 w-4 shrink-0", isActive && "text-white")} />}
+                    {({ isActive }) => <item.icon className={cn("h-4 w-4 shrink-0", isActive && "text-sidebar-foreground")} />}
                   </NavLink>
                 ))}
               </div>
@@ -265,9 +301,9 @@ export function Sidebar({ mobileOpen, onClose, collapsed, onToggleCollapse }: Si
                   aria-label={libraryOpen ? "Collapse my library" : "Expand my library"}
                   className="mb-1 flex w-full items-center justify-between px-2.5 py-1 group"
                 >
-                  <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-600 group-hover:text-zinc-400 transition-colors duration-150">My Library</span>
+                  <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-sidebar-foreground/45 group-hover:text-sidebar-foreground/65 transition-colors duration-150">My Library</span>
                   <ChevronDown className={cn(
-                    "h-3 w-3 text-zinc-700 group-hover:text-zinc-500 transition-[transform,color] duration-150",
+                    "h-3 w-3 text-sidebar-foreground/30 group-hover:text-sidebar-foreground/55 transition-[transform,color] duration-150",
                     libraryOpen ? "rotate-0" : "-rotate-90"
                   )} />
                 </button>
@@ -287,8 +323,8 @@ export function Sidebar({ mobileOpen, onClose, collapsed, onToggleCollapse }: Si
                             cn(
                               "uc-sidebar-row group flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[13px] font-medium transition-colors duration-150",
                               isActive
-                                ? "is-active bg-white/[.07] text-white"
-                                : "text-zinc-500 hover:bg-white/[.04] hover:text-zinc-200"
+                                ? "is-active bg-sidebar-accent text-sidebar-accent-foreground"
+                                : "text-sidebar-foreground/55 hover:bg-sidebar-foreground/[.04] hover:text-sidebar-foreground/90"
                             )
                           }
                         >
@@ -296,7 +332,7 @@ export function Sidebar({ mobileOpen, onClose, collapsed, onToggleCollapse }: Si
                             <>
                               <item.icon className={cn(
                                 "uc-sidebar-icon h-3.5 w-3.5 shrink-0",
-                                isActive ? "text-zinc-200" : "text-zinc-600 group-hover:text-zinc-400"
+                                isActive ? "text-sidebar-foreground/90" : "text-sidebar-foreground/45 group-hover:text-sidebar-foreground/65"
                               )} />
                               <span className="uc-sidebar-label">{item.label}</span>
                             </>
@@ -321,8 +357,8 @@ export function Sidebar({ mobileOpen, onClose, collapsed, onToggleCollapse }: Si
                   cn(
                     "flex justify-center items-center rounded-lg p-2.5 transition-colors duration-150",
                     isActive
-                      ? "bg-white/[.08] text-white"
-                      : "text-zinc-600 hover:bg-white/[.05] hover:text-zinc-300"
+                      ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                      : "text-sidebar-foreground/45 hover:bg-sidebar-foreground/[.05] hover:text-sidebar-foreground/80"
                   )
                 }
               >
@@ -345,8 +381,8 @@ export function Sidebar({ mobileOpen, onClose, collapsed, onToggleCollapse }: Si
                     className={cn(
                       "flex justify-center items-center rounded-lg p-2.5 transition-colors duration-150",
                       isActive
-                        ? "bg-white/[.08] text-white"
-                        : "text-zinc-600 hover:bg-white/[.05] hover:text-zinc-300"
+                        ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                        : "text-sidebar-foreground/45 hover:bg-sidebar-foreground/[.05] hover:text-sidebar-foreground/80"
                     )}
                   >
                     <span className="text-[10px] font-bold uppercase tracking-wider leading-none">
@@ -365,7 +401,7 @@ export function Sidebar({ mobileOpen, onClose, collapsed, onToggleCollapse }: Si
                     setFollowedContextMenu({ collection, point: { x: e.clientX, y: e.clientY } })
                   }}
                   title={`${collection.name} (following${collection.hasUpdates ? " — updated" : ""})`}
-                  className="relative flex justify-center items-center rounded-lg p-2.5 transition-colors duration-150 text-zinc-600 hover:bg-white/[.05] hover:text-zinc-300"
+                  className="relative flex justify-center items-center rounded-lg p-2.5 transition-colors duration-150 text-sidebar-foreground/45 hover:bg-sidebar-foreground/[.05] hover:text-sidebar-foreground/80"
                 >
                   <Bell className="h-3.5 w-3.5" />
                   {collection.hasUpdates && (
@@ -383,16 +419,16 @@ export function Sidebar({ mobileOpen, onClose, collapsed, onToggleCollapse }: Si
                   aria-label={collectionsOpen ? "Collapse collections" : "Expand collections"}
                   className="flex items-center gap-1.5 group"
                 >
-                  <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-600 group-hover:text-zinc-400 transition-colors duration-150">
+                  <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-sidebar-foreground/45 group-hover:text-sidebar-foreground/65 transition-colors duration-150">
                     Collections
                   </span>
                   {collections.length > 0 && (
-                    <span className="rounded-full bg-white/[.06] px-1 text-[9px] font-bold text-zinc-500 leading-4 tabular-nums">
+                    <span className="rounded-full bg-sidebar-foreground/[.06] px-1 text-[9px] font-bold text-sidebar-foreground/55 leading-4 tabular-nums">
                       {collections.length}
                     </span>
                   )}
                   <ChevronDown className={cn(
-                    "h-3 w-3 text-zinc-700 group-hover:text-zinc-500 transition-[transform,color] duration-150",
+                    "h-3 w-3 text-sidebar-foreground/30 group-hover:text-sidebar-foreground/55 transition-[transform,color] duration-150",
                     collectionsOpen ? "rotate-0" : "-rotate-90"
                   )} />
                 </button>
@@ -400,7 +436,7 @@ export function Sidebar({ mobileOpen, onClose, collapsed, onToggleCollapse }: Si
                   to="/collections"
                   onClick={onClose}
                   title={followedUpdateCount > 0 ? `${followedUpdateCount} followed collection${followedUpdateCount === 1 ? "" : "s"} updated` : "Manage collections"}
-                  className="inline-flex items-center gap-1 rounded-md text-zinc-600 hover:text-zinc-300 transition-colors duration-150 p-1 relative"
+                  className="inline-flex items-center gap-1 rounded-md text-sidebar-foreground/45 hover:text-sidebar-foreground/80 transition-colors duration-150 p-1 relative"
                 >
                   <Settings2 className="h-3 w-3" />
                   {followedUpdateCount > 0 && (
@@ -421,9 +457,9 @@ export function Sidebar({ mobileOpen, onClose, collapsed, onToggleCollapse }: Si
                       <NavLink
                         to="/collections"
                         onClick={onClose}
-                        className="group flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[12px] text-zinc-600 hover:bg-white/[.04] hover:text-zinc-300 transition-colors duration-150"
+                        className="group flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[12px] text-sidebar-foreground/45 hover:bg-sidebar-foreground/[.04] hover:text-sidebar-foreground/80 transition-colors duration-150"
                       >
-                        <Plus className="h-3.5 w-3.5 shrink-0 text-zinc-700 group-hover:text-zinc-500" />
+                        <Plus className="h-3.5 w-3.5 shrink-0 text-sidebar-foreground/30 group-hover:text-sidebar-foreground/55" />
                         <span>Create your first</span>
                       </NavLink>
                     ) : (
@@ -444,18 +480,18 @@ export function Sidebar({ mobileOpen, onClose, collapsed, onToggleCollapse }: Si
                               className={cn(
                                 "uc-sidebar-row group flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[13px] font-medium transition-colors duration-150",
                                 isActive
-                                  ? "is-active bg-white/[.07] text-white"
-                                  : "text-zinc-500 hover:bg-white/[.04] hover:text-zinc-200"
+                                  ? "is-active bg-sidebar-accent text-sidebar-accent-foreground"
+                                  : "text-sidebar-foreground/55 hover:bg-sidebar-foreground/[.04] hover:text-sidebar-foreground/90"
                               )}
                             >
                               <Layers3 className={cn(
                                 "uc-sidebar-icon h-3.5 w-3.5 shrink-0",
-                                isActive ? "text-zinc-300" : "text-zinc-700 group-hover:text-zinc-500"
+                                isActive ? "text-sidebar-foreground/80" : "text-sidebar-foreground/30 group-hover:text-sidebar-foreground/55"
                               )} />
                               <span className="uc-sidebar-label truncate flex-1">{collection.name}</span>
                               <span className={cn(
                                 "text-[10px] font-medium tabular-nums",
-                                isActive ? "text-zinc-400" : "text-zinc-700 group-hover:text-zinc-500"
+                                isActive ? "text-sidebar-foreground/65" : "text-sidebar-foreground/30 group-hover:text-sidebar-foreground/55"
                               )}>
                                 {collection.appids.length}
                               </span>
@@ -465,9 +501,9 @@ export function Sidebar({ mobileOpen, onClose, collapsed, onToggleCollapse }: Si
                         <NavLink
                           to="/collections"
                           onClick={onClose}
-                          className="group flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[12px] text-zinc-600 hover:bg-white/[.04] hover:text-zinc-300 transition-colors duration-150"
+                          className="group flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[12px] text-sidebar-foreground/45 hover:bg-sidebar-foreground/[.04] hover:text-sidebar-foreground/80 transition-colors duration-150"
                         >
-                          <Plus className="h-3.5 w-3.5 shrink-0 text-zinc-700 group-hover:text-zinc-500" />
+                          <Plus className="h-3.5 w-3.5 shrink-0 text-sidebar-foreground/30 group-hover:text-sidebar-foreground/55" />
                           <span>New collection</span>
                         </NavLink>
                       </>
@@ -486,10 +522,10 @@ export function Sidebar({ mobileOpen, onClose, collapsed, onToggleCollapse }: Si
                       aria-label={followingOpen ? "Collapse following" : "Expand following"}
                       className="flex items-center gap-1.5 group"
                     >
-                      <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-600 group-hover:text-zinc-400 transition-colors duration-150">
+                      <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-sidebar-foreground/45 group-hover:text-sidebar-foreground/65 transition-colors duration-150">
                         Following
                       </span>
-                      <span className="rounded-full bg-white/[.06] px-1 text-[9px] font-bold text-zinc-500 leading-4 tabular-nums">
+                      <span className="rounded-full bg-sidebar-foreground/[.06] px-1 text-[9px] font-bold text-sidebar-foreground/55 leading-4 tabular-nums">
                         {followedItems.length}
                       </span>
                       {followedUpdateCount > 0 && (
@@ -499,7 +535,7 @@ export function Sidebar({ mobileOpen, onClose, collapsed, onToggleCollapse }: Si
                         </span>
                       )}
                       <ChevronDown className={cn(
-                        "h-3 w-3 text-zinc-700 group-hover:text-zinc-500 transition-[transform,color] duration-150",
+                        "h-3 w-3 text-sidebar-foreground/30 group-hover:text-sidebar-foreground/55 transition-[transform,color] duration-150",
                         followingOpen ? "rotate-0" : "-rotate-90"
                       )} />
                     </button>
@@ -522,16 +558,16 @@ export function Sidebar({ mobileOpen, onClose, collapsed, onToggleCollapse }: Si
                                 setFollowedContextMenu({ collection, point: { x: e.clientX, y: e.clientY } })
                               }}
                               title={`${collection.name} — by ${ownerLabel}`}
-                              className="uc-sidebar-row group flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[13px] font-medium transition-colors duration-150 text-zinc-500 hover:bg-white/[.04] hover:text-zinc-200"
+                              className="uc-sidebar-row group flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[13px] font-medium transition-colors duration-150 text-sidebar-foreground/55 hover:bg-sidebar-foreground/[.04] hover:text-sidebar-foreground/90"
                             >
                               <Bell className={cn(
                                 "uc-sidebar-icon h-3.5 w-3.5 shrink-0",
                                 collection.hasUpdates
                                   ? "uc-anim-wiggle text-amber-400 animate-[uc-bell-wiggle_1.6s_ease-in-out_infinite] origin-top"
-                                  : "text-zinc-700 group-hover:text-zinc-500"
+                                  : "text-sidebar-foreground/30 group-hover:text-sidebar-foreground/55"
                               )} />
                               <span className="uc-sidebar-label truncate flex-1">{collection.name}</span>
-                              <span className="text-[10px] font-medium tabular-nums text-zinc-700 group-hover:text-zinc-500">
+                              <span className="text-[10px] font-medium tabular-nums text-sidebar-foreground/30 group-hover:text-sidebar-foreground/55">
                                 {collection.gameCount}
                               </span>
                             </NavLink>
@@ -547,6 +583,89 @@ export function Sidebar({ mobileOpen, onClose, collapsed, onToggleCollapse }: Si
         </nav>
       </ScrollArea>
 
+      {/* Now Playing — shown when one or more games are running */}
+      {runningSessions.length > 0 && (
+        <div className={cn("border-t border-green-500/[.12] bg-green-950/[.08]", isCollapsed ? "px-1.5 py-2" : "px-2 py-2")}>
+          {isCollapsed ? (
+            /* Collapsed: pulsing game icon as a visual cue; clicking navigates to Activity */
+            <button
+              type="button"
+              onClick={() => { onClose(); navigate("/downloads") }}
+              title={`Playing: ${runningSessions.map(s => games.find(g => g.appid === s.appid)?.name || s.appid).join(", ")}`}
+              className="relative flex w-full justify-center rounded-lg p-2 text-green-400 hover:bg-green-500/10 transition-colors active:scale-95"
+            >
+              <span className="relative flex h-5 w-5 items-center justify-center">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-400/25" />
+                <Gamepad2 className="relative h-4 w-4" />
+              </span>
+            </button>
+          ) : (
+            <>
+              <div className="mb-1.5 flex items-center gap-2 px-2.5">
+                <span className="relative flex h-1.5 w-1.5">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-400 opacity-75" />
+                  <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-green-500" />
+                </span>
+                <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-green-600">Now Playing</span>
+              </div>
+              <div className="space-y-1">
+                {runningSessions.map((session: RunningSession) => {
+                  const game = games.find((g) => g.appid === session.appid)
+                  const artSrc =
+                    proxyImageUrl(
+                      (game as any)?.image ||
+                      (game as any)?.localImage ||
+                      (game as any)?.splash ||
+                      (game as any)?.localSplash ||
+                      ""
+                    ) || "./fallbacks/game-card-3x4.svg"
+                  return (
+                    <div
+                      key={session.appid}
+                      className="group relative overflow-hidden rounded-xl ring-1 ring-green-500/20 bg-card/60"
+                    >
+                      {/* Ambient game art */}
+                      <div className="absolute inset-0">
+                        <img src={artSrc} alt="" className="h-full w-full object-cover opacity-25" />
+                        <div className="absolute inset-0 bg-gradient-to-r from-background/90 to-background/50" />
+                      </div>
+                      <div className="relative flex items-center gap-2 px-2.5 py-2">
+                        <button
+                          type="button"
+                          onClick={() => { onClose(); navigate(`/game/${encodeURIComponent(session.appid)}`) }}
+                          aria-label={`Open ${game?.name || session.appid}`}
+                          title="Open game page"
+                          className="min-w-0 flex-1 text-left rounded-md hover:bg-sidebar-foreground/[.04] focus-visible:bg-sidebar-foreground/[.04] transition-colors -mx-1 px-1 py-0.5"
+                        >
+                          <div className="truncate text-[12px] font-semibold text-sidebar-foreground leading-snug">
+                            {game?.name || session.appid}
+                          </div>
+                          <div className="flex items-center gap-1 mt-0.5">
+                            <span className="h-1 w-1 shrink-0 rounded-full bg-green-400 animate-pulse" />
+                            <span className="text-[10px] font-mono text-green-400">
+                              <SessionTimer startedAt={session.startedAt} />
+                            </span>
+                          </div>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(event) => { event.stopPropagation(); void handleQuitSession(session.appid) }}
+                          aria-label="Stop game"
+                          title="Stop game"
+                          className="shrink-0 flex h-6 w-6 items-center justify-center rounded-full bg-secondary text-sidebar-foreground/55 ring-1 ring-sidebar-foreground/[.06] transition-colors hover:bg-red-500/15 hover:text-red-400 active:scale-95"
+                        >
+                          <Square className="h-3 w-3" />
+                        </button>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
       {/* Bottom */}
       <div className={cn("mt-auto border-t border-white/[.05] py-2 space-y-px", isCollapsed ? "px-2" : "px-2")}>
         {bottomNavItems.map((item) => (
@@ -560,8 +679,8 @@ export function Sidebar({ mobileOpen, onClose, collapsed, onToggleCollapse }: Si
                 "uc-sidebar-row group flex items-center rounded-lg text-[13px] font-medium transition-colors duration-150",
                 isCollapsed ? "justify-center p-2.5" : "gap-2.5 px-2.5 py-2",
                 isActive
-                  ? "is-active bg-white/[.07] text-white"
-                  : "text-zinc-500 hover:bg-white/[.05] hover:text-zinc-200"
+                  ? "is-active bg-sidebar-accent text-sidebar-accent-foreground"
+                  : "text-sidebar-foreground/55 hover:bg-sidebar-foreground/[.05] hover:text-sidebar-foreground/90"
               )
             }
           >
@@ -569,7 +688,7 @@ export function Sidebar({ mobileOpen, onClose, collapsed, onToggleCollapse }: Si
               <>
                 <item.icon className={cn(
                   "uc-sidebar-icon h-4 w-4 shrink-0",
-                  isActive ? "text-white" : "text-zinc-600 group-hover:text-zinc-400"
+                  isActive ? "text-sidebar-foreground" : "text-sidebar-foreground/45 group-hover:text-sidebar-foreground/65"
                 )} />
                 {!isCollapsed && <span className="uc-sidebar-label">{item.label}</span>}
               </>
@@ -584,7 +703,7 @@ export function Sidebar({ mobileOpen, onClose, collapsed, onToggleCollapse }: Si
           aria-label={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
           title={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
           className={cn(
-            "group flex w-full items-center rounded-lg text-[13px] font-medium transition-colors duration-150 text-zinc-600 hover:bg-white/[.04] hover:text-zinc-400",
+            "group flex w-full items-center rounded-lg text-[13px] font-medium transition-colors duration-150 text-sidebar-foreground/45 hover:bg-sidebar-foreground/[.04] hover:text-sidebar-foreground/65",
             isCollapsed ? "justify-center p-2.5" : "gap-2.5 px-2.5 py-2"
           )}
         >
@@ -592,7 +711,7 @@ export function Sidebar({ mobileOpen, onClose, collapsed, onToggleCollapse }: Si
             ? <ChevronRight className="h-4 w-4 shrink-0" />
             : (
               <>
-                <ChevronLeft className="h-4 w-4 shrink-0 text-zinc-700 group-hover:text-zinc-400 transition-colors duration-150" />
+                <ChevronLeft className="h-4 w-4 shrink-0 text-sidebar-foreground/30 group-hover:text-sidebar-foreground/65 transition-colors duration-150" />
                 <span>Collapse</span>
               </>
             )
@@ -604,12 +723,11 @@ export function Sidebar({ mobileOpen, onClose, collapsed, onToggleCollapse }: Si
 
   return (
     <>
-      {/* Uses the UDL `.glass` token (rgba(24,24,27,0.70) + 14px backdrop-blur)
-          so the GameDetailPage ambient background drifts through the sidebar
-          on game routes. On other routes the underlying body is bg-zinc-950,
-          which sits ~indistinguishably behind the glass — no visual regression. */}
+      {/* Match the same visual DNA as the TopBar nav pill:
+          bg-zinc-950/72 + backdrop-blur-2xl + border-sidebar-border
+          so sidebar and navbar read as the same material. */}
       <aside className={cn(
-        "hidden md:fixed md:bottom-0 md:left-0 md:top-0 md:z-30 md:flex md:flex-col glass border-r border-white/[.05] transition-[width] duration-200 ease-in-out overflow-hidden",
+        "hidden md:fixed md:bottom-0 md:left-0 md:top-0 md:z-30 md:flex md:flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground shadow-[inset_-1px_0_0_rgba(255,255,255,0.03)] transition-[width] duration-200 ease-in-out overflow-hidden",
         collapsed ? "md:w-[56px]" : "md:w-[15rem]"
       )}>
         {content(collapsed)}
@@ -618,7 +736,7 @@ export function Sidebar({ mobileOpen, onClose, collapsed, onToggleCollapse }: Si
       {mobileOpen && (
         <div className="fixed inset-0 z-50 md:hidden">
           <div className="absolute inset-0 bg-black/80 backdrop-blur-sm" onClick={onClose} />
-          <div className="absolute left-0 top-0 bottom-0 flex w-64 flex-col border-r border-white/[.07] glass shadow-2xl">
+          <div className="absolute left-0 top-0 bottom-0 flex w-64 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground shadow-2xl">
             {content(false)}
           </div>
         </div>

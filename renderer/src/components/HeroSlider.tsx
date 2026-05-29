@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom'
 import { ChevronLeft, ChevronRight, Download, Info } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { apiUrl } from '@/lib/api'
-import { formatNumber, cn, proxyImageUrl } from '@/lib/utils'
+import { cn, proxyImageUrl } from '@/lib/utils'
+import { useMotionPreferences } from '@/hooks/use-motion-preferences'
 
 type SliderHeroAsset = {
   heroUrl: string | null
@@ -39,15 +40,28 @@ interface HeroSliderProps {
 
 export function HeroSlider({ games, gameStats = {}, loading = false }: HeroSliderProps) {
   const navigate = useNavigate()
+  const { reducedMotionEffective } = useMotionPreferences()
   const [currentIndex, setCurrentIndex] = useState(0)
   const [isTransitioning, setIsTransitioning] = useState(false)
   const [isPaused, setIsPaused] = useState(false)
+  // Pause auto-rotate while the window is in the background. Otherwise the
+  // 5-second timer keeps ticking and the user comes back to a slide they
+  // never saw, plus we waste CPU running transitions no one is watching.
+  const [pageHidden, setPageHidden] = useState<boolean>(() =>
+    typeof document !== "undefined" && document.visibilityState === "hidden"
+  )
+  const [failedLogoByAppid, setFailedLogoByAppid] = useState<Record<string, true>>({})
   const [sgdbHeroesByAppid, setSgdbHeroesByAppid] = useState<Record<string, SliderHeroAsset>>({})
   const autoPlayRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const touchStartXRef = useRef<number | null>(null)
 
-  // Mirrors union-crax.xyz HeroGameSlider: IGDB splash → cover fallback with
-  // legacy size-token rewrites; SGDB hero/logo lookup layered on top.
+  useEffect(() => {
+    if (typeof document === "undefined") return
+    const onVisibility = () => setPageHidden(document.visibilityState === "hidden")
+    document.addEventListener("visibilitychange", onVisibility)
+    return () => document.removeEventListener("visibilitychange", onVisibility)
+  }, [])
+
   const getHeroImage = useCallback((featuredGame: Game) => {
     const imageUrl = featuredGame.splash?.trim() || featuredGame.image
     return imageUrl
@@ -86,7 +100,6 @@ export function HeroSlider({ games, gameStats = {}, loading = false }: HeroSlide
   const total = sliderGames.length
   const game = sliderGames[currentIndex]
 
-  // SGDB lookup — same endpoint + shape as union-crax.xyz.
   useEffect(() => {
     let cancelled = false
     const load = async () => {
@@ -109,15 +122,13 @@ export function HeroSlider({ games, gameStats = {}, loading = false }: HeroSlide
         }
         if (!cancelled) setSgdbHeroesByAppid((prev) => ({ ...prev, ...updates }))
       } catch {
-        // Ignore lookup failures; getSliderImageSrc handles null gracefully.
+        // ignore
       }
     }
     load()
     return () => { cancelled = true }
   }, [sliderGames, sgdbHeroesByAppid])
 
-  // Return null until SGDB lookup resolves so we render a skeleton instead of
-  // flashing the IGDB cover first. After resolve, prefer SGDB hero then IGDB.
   const getSliderImageSrc = useCallback(
     (featuredGame: Game) => {
       const resolved = sgdbHeroesByAppid[featuredGame.appid]
@@ -133,7 +144,7 @@ export function HeroSlider({ games, gameStats = {}, loading = false }: HeroSlide
   )
 
   const currentHeroSrc = game ? getSliderImageSrc(game) : null
-  const currentLogoSrc = game ? getSliderLogoSrc(game) : null
+  const currentLogoSrc = game && !failedLogoByAppid[game.appid] ? getSliderLogoSrc(game) : null
 
   const goTo = useCallback(
     (index: number) => {
@@ -153,9 +164,7 @@ export function HeroSlider({ games, gameStats = {}, loading = false }: HeroSlide
       setCurrentIndex(0)
       return
     }
-    if (currentIndex >= total) {
-      setCurrentIndex(0)
-    }
+    if (currentIndex >= total) setCurrentIndex(0)
   }, [currentIndex, total])
 
   useEffect(() => {
@@ -165,7 +174,6 @@ export function HeroSlider({ games, gameStats = {}, loading = false }: HeroSlide
       (currentIndex + 1) % total,
       (currentIndex - 1 + total) % total,
     ]
-
     preloadIndexes.forEach((index) => {
       const slide = sliderGames[index]
       if (!slide) return
@@ -177,24 +185,17 @@ export function HeroSlider({ games, gameStats = {}, loading = false }: HeroSlide
     })
   }, [currentIndex, total, sliderGames, getSliderImageSrc])
 
-  // Autoplay
   useEffect(() => {
-    if (total === 0 || isPaused) return
+    // Auto-advance only when the slider is actually visible AND the user
+    // hasn't asked for reduced motion. Manual prev/next still works either
+    // way, but we stop hijacking attention on background tabs / motion-
+    // sensitive users.
+    if (total === 0 || isPaused || pageHidden || reducedMotionEffective) return
     autoPlayRef.current = setTimeout(() => goTo(currentIndex + 1), 5000)
     return () => {
       if (autoPlayRef.current) clearTimeout(autoPlayRef.current)
     }
-  }, [currentIndex, total, isPaused, goTo])
-
-  // Keyboard navigation
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'ArrowLeft') prev()
-      if (e.key === 'ArrowRight') next()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [prev, next])
+  }, [currentIndex, total, isPaused, pageHidden, reducedMotionEffective, goTo])
 
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
     touchStartXRef.current = e.touches[0].clientX
@@ -210,158 +211,211 @@ export function HeroSlider({ games, gameStats = {}, loading = false }: HeroSlide
     }
   }, [prev, next])
 
-  const currentStats = game ? gameStats[game.appid] : undefined
-  const downloadCount = currentStats?.downloads ?? 0
-
-  if (loading) {
+  if (loading || total === 0 || (game && currentHeroSrc === null)) {
     return (
-      <div
-        className="relative overflow-hidden rounded-3xl bg-zinc-900 udl-skeleton w-full"
-        style={{ height: 480 }}
-      />
+      <section className="relative w-full overflow-hidden rounded-3xl h-[368px] sm:h-[428px] md:h-[488px] bg-[#1A1A1A]/80">
+        <div className="absolute inset-0 bg-gradient-to-r from-black/80 via-black/40 to-transparent" />
+        <div className="absolute inset-y-0 left-0 flex items-end px-6 sm:px-12 pb-10 sm:pb-12">
+          <div className="space-y-3">
+            <div className="h-6 w-40 udl-skeleton rounded-full" />
+            <div className="h-10 w-64 udl-skeleton rounded-xl" />
+            <div className="h-4 w-80 udl-skeleton rounded-full" />
+            <div className="flex gap-3 pt-1">
+              <div className="h-10 w-32 udl-skeleton rounded-full" />
+              <div className="h-10 w-24 udl-skeleton rounded-full" />
+            </div>
+          </div>
+        </div>
+      </section>
     )
   }
 
-  if (total === 0) return null
-
   return (
     <section
-      className="relative overflow-hidden rounded-3xl w-full select-none"
-      style={{ height: 480 }}
+      id="hero"
+      className="relative w-full overflow-hidden rounded-3xl h-[368px] sm:h-[428px] md:h-[488px] select-none"
       onMouseEnter={() => setIsPaused(true)}
       onMouseLeave={() => setIsPaused(false)}
       onTouchStart={handleTouchStart}
       onTouchEnd={handleTouchEnd}
       onKeyDown={(event) => {
-        if (event.key === 'ArrowRight') {
-          event.preventDefault()
-          next()
-        }
-        if (event.key === 'ArrowLeft') {
-          event.preventDefault()
-          prev()
-        }
+        if (event.key === 'ArrowRight') { event.preventDefault(); next() }
+        if (event.key === 'ArrowLeft')  { event.preventDefault(); prev() }
       }}
       tabIndex={0}
       role="region"
       aria-roledescription="carousel"
       aria-label="Featured Games Slider"
     >
-      {/* Background hero image. Skeleton stays visible until SGDB lookup
-          resolves so the IGDB cover never flashes first. */}
-      {!currentHeroSrc && (
-        <div className="udl-skeleton absolute inset-0 bg-zinc-900" />
-      )}
-      {currentHeroSrc && (
-        <img
-          key={`hero-${game.appid}-${currentHeroSrc}`}
-          src={proxyImageUrl(currentHeroSrc)}
-          alt={game.name}
-          className={cn(
-            'absolute inset-0 h-full w-full object-cover transition-opacity duration-500',
-            isTransitioning ? 'opacity-0' : 'opacity-100',
-          )}
-          draggable={false}
-        />
-      )}
-
-      {/* Gradient overlays */}
-      <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent" />
-      <div className="absolute inset-0 bg-gradient-to-r from-black/60 via-transparent to-transparent" />
-
-      {/* Content */}
-      <div className="absolute inset-0 flex flex-col justify-end p-6 sm:p-8 xl:p-10">
-        <div
-          className={cn(
-            'max-w-xl space-y-4 transition-all duration-500',
-            isTransitioning ? 'opacity-0 translate-y-2' : 'opacity-100 translate-y-0',
-          )}
-        >
-          {/* Game logo or title */}
-          {currentLogoSrc ? (
+      {/* Background slides */}
+      {sliderGames.map((g, i) => {
+        if (Math.abs(i - currentIndex) > 1 && Math.abs(i - currentIndex) !== total - 1) {
+          return null
+        }
+        const src = getSliderImageSrc(g)
+        if (!src) return null
+        const proxied = proxyImageUrl(src)
+        return (
+          <div
+            key={g.appid}
+            className={cn(
+              'absolute inset-0 transition-opacity duration-700 ease-in-out',
+              i === currentIndex ? 'opacity-100' : 'opacity-0 pointer-events-none',
+            )}
+          >
             <img
-              src={proxyImageUrl(currentLogoSrc)}
-              alt={`${game.name} logo`}
-              className="max-h-[72px] w-auto max-w-[260px] object-contain drop-shadow-2xl"
+              src={proxied}
+              alt={g.name}
+              className={cn(
+                'absolute inset-0 h-full w-full object-cover object-center transition-transform duration-[6000ms] ease-out',
+                i === currentIndex ? 'scale-110' : 'scale-100',
+              )}
               draggable={false}
             />
-          ) : (
-            <h2 className="text-3xl font-bold tracking-tight text-white drop-shadow-lg sm:text-4xl">
-              {game.name}
-            </h2>
-          )}
+          </div>
+        )
+      })}
 
-          {/* Genres + download count */}
-          <div className="flex flex-wrap items-center gap-2">
-            {(game.genres || [])
-              .filter((g) => g?.toLowerCase() !== 'nsfw')
-              .slice(0, 3)
-              .map((genre) => (
-                <span
-                  key={genre}
-                  className="rounded-full border border-white/20 bg-white/10 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wider text-white backdrop-blur-sm"
-                >
-                  {genre}
-                </span>
-              ))}
-            {downloadCount > 0 && (
-              <span className="flex items-center gap-1 rounded-full border border-white/10 bg-black/40 px-2.5 py-1 text-[11px] font-medium text-zinc-300 backdrop-blur-sm">
-                <Download className="h-3 w-3 opacity-60" />
-                {formatNumber(downloadCount)}
+      {/* Gradient overlays */}
+      <div className="absolute inset-0 bg-gradient-to-r from-black/85 via-black/50 to-transparent pointer-events-none z-[1]" />
+      <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-black/20 pointer-events-none z-[1]" />
+
+      {/* Content */}
+      <div
+        className={cn(
+          'absolute inset-0 flex items-end pl-16 sm:pl-20 pr-8 sm:pr-12 pb-10 sm:pb-12 transition-all duration-500 ease-out z-[2]',
+          isTransitioning ? 'opacity-0 translate-y-4 scale-[0.98]' : 'opacity-100 translate-y-0 scale-100',
+        )}
+      >
+        <div className="w-full max-w-[1800px] mx-auto">
+          {/* Badges */}
+          <div className={cn(
+            'flex flex-wrap items-center gap-2 mb-2 transition-all duration-500 delay-100',
+            isTransitioning ? 'opacity-0 translate-x-[-8px]' : 'opacity-100 translate-x-0',
+          )}>
+            {game.version && (
+              <span className="bg-primary text-primary-foreground text-xs font-bold px-3 py-1 rounded-full">
+                {game.version}
+              </span>
+            )}
+            <span className="bg-white/10 text-white text-xs font-bold px-3 py-1 rounded-full backdrop-blur-sm border border-white/[.08]">
+              PC
+            </span>
+            {game.source && (
+              <span className="bg-white/10 text-white text-xs font-bold px-3 py-1 rounded-full backdrop-blur-sm border border-white/[.08] uppercase">
+                {game.source}
+              </span>
+            )}
+            {game.release_date && (
+              <span className="bg-white/10 text-white text-xs font-bold px-3 py-1 rounded-full backdrop-blur-sm border border-white/[.08]">
+                {new Date(game.release_date).getFullYear()}
               </span>
             )}
           </div>
 
+          {/* Logo (if available) */}
+          {currentLogoSrc ? (
+            <div className={cn(
+              'relative mb-3 h-16 max-w-[min(68vw,420px)] transition-all duration-500 delay-150 sm:h-20',
+              isTransitioning ? 'opacity-0 translate-y-3' : 'opacity-100 translate-y-0',
+            )}>
+              <img
+                src={proxyImageUrl(currentLogoSrc)}
+                alt={`${game.name} logo`}
+                className="absolute inset-0 h-full w-full object-contain object-left drop-shadow-[0_8px_24px_rgba(0,0,0,0.45)]"
+                onError={() => {
+                  setFailedLogoByAppid((prev) => ({ ...prev, [game.appid]: true }))
+                }}
+                draggable={false}
+              />
+            </div>
+          ) : null}
+
+          <h1 className={cn(
+            'text-2xl sm:text-3xl md:text-4xl font-light text-white mb-2 leading-tight max-w-xl line-clamp-2 transition-all duration-500 delay-150',
+            currentLogoSrc ? 'text-sm sm:text-lg md:text-xl text-white/85 font-medium' : '',
+            isTransitioning ? 'opacity-0 translate-y-3' : 'opacity-100 translate-y-0',
+          )}>
+            {game.name}
+          </h1>
+
+          {/* Description */}
+          <p className={cn(
+            'text-sm text-white/75 max-w-lg mb-4 line-clamp-2 leading-relaxed transition-all duration-500 delay-200 hidden sm:block',
+            isTransitioning ? 'opacity-0 translate-y-3' : 'opacity-100 translate-y-0',
+          )}>
+            {game.description?.replace(/<[^>]+>/g, '').slice(0, 150)}
+            {(game.description?.length ?? 0) > 150 ? '...' : ''}
+          </p>
+
           {/* Actions */}
-          <div className="flex items-center gap-2">
+          <div className={cn(
+            'flex flex-wrap items-center gap-3 transition-all duration-500 delay-[250ms]',
+            isTransitioning ? 'opacity-0 translate-y-3' : 'opacity-100 translate-y-0',
+          )}>
             <Button
-              size="lg"
-              className="h-10 rounded-full bg-white px-5 text-sm font-semibold text-black hover:-translate-y-0.5 hover:bg-zinc-200 active:scale-95"
+              size="default"
+              className="rounded-full px-6 font-medium"
               onClick={() => navigate(`/game/${game.appid}`)}
             >
-              <Info className="mr-1.5 h-4 w-4" />
-              View Game
+              <Download className="mr-2 h-4 w-4" />
+              Download Now
+            </Button>
+            <Button
+              size="default"
+              variant="outline"
+              className="rounded-full px-6 font-medium border-border bg-secondary/50 backdrop-blur-md text-white hover:bg-zinc-700 hover:border-zinc-500"
+              onClick={() => navigate(`/game/${game.appid}`)}
+            >
+              <Info className="mr-2 h-4 w-4" />
+              Details
             </Button>
           </div>
         </div>
+      </div>
 
-        {/* Navigation bar: prev + dots + next */}
-        <div className="mt-5 flex items-center gap-3">
+      {/* Prev / Next */}
+      <button
+        onClick={prev}
+        className="absolute left-3 sm:left-5 top-1/2 -translate-y-1/2 h-10 w-10 sm:h-12 sm:w-12 flex items-center justify-center rounded-full bg-secondary/80 hover:bg-primary hover:text-primary-foreground text-foreground/80 border border-white/[.08] backdrop-blur-sm transition-all active:scale-95 z-[3]"
+        aria-label="Previous slide"
+      >
+        <ChevronLeft className="h-5 w-5" />
+      </button>
+      <button
+        onClick={next}
+        className="absolute right-3 sm:right-5 top-1/2 -translate-y-1/2 h-10 w-10 sm:h-12 sm:w-12 flex items-center justify-center rounded-full bg-secondary/80 hover:bg-primary hover:text-primary-foreground text-foreground/80 border border-white/[.08] backdrop-blur-sm transition-all active:scale-95 z-[3]"
+        aria-label="Next slide"
+      >
+        <ChevronRight className="h-5 w-5" />
+      </button>
+
+      {/* Progress bar */}
+      <div className="absolute bottom-0 left-0 right-0 z-[4] h-1.5 bg-transparent">
+        {!isPaused && (
+          <div
+            key={currentIndex}
+            className="h-full rounded-r-full origin-left"
+            style={{ animation: 'slider-progress 5s linear forwards', backgroundColor: 'var(--primary)' }}
+          />
+        )}
+      </div>
+
+      {/* Dot navigation */}
+      <div className="absolute bottom-3 right-6 sm:right-12 flex items-center gap-1.5 z-[3]">
+        {sliderGames.map((_, i) => (
           <button
-            type="button"
-            onClick={prev}
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-white/20 bg-black/40 text-white backdrop-blur-sm transition hover:bg-black/70 active:scale-95"
-            aria-label="Previous game"
-          >
-            <ChevronLeft className="h-4 w-4" />
-          </button>
-
-          <div className="flex flex-1 items-center gap-1.5">
-            {sliderGames.map((_, i) => (
-              <button
-                key={i}
-                type="button"
-                onClick={() => goTo(i)}
-                aria-label={`Slide ${i + 1}`}
-                className={cn(
-                  'h-1 rounded-full transition-all duration-300',
-                  i === currentIndex
-                    ? 'w-8 bg-white'
-                    : 'w-1.5 bg-white/30 hover:bg-white/50',
-                )}
-              />
-            ))}
-          </div>
-
-          <button
-            type="button"
-            onClick={next}
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-white/20 bg-black/40 text-white backdrop-blur-sm transition hover:bg-black/70 active:scale-95"
-            aria-label="Next game"
-          >
-            <ChevronRight className="h-4 w-4" />
-          </button>
-        </div>
+            key={i}
+            onClick={() => goTo(i)}
+            className={cn(
+              'rounded-full transition-all duration-300',
+              i === currentIndex
+                ? 'w-6 h-2 bg-white'
+                : 'w-2 h-2 bg-white/30 hover:bg-white/60',
+            )}
+            aria-label={`Go to slide ${i + 1}`}
+          />
+        ))}
       </div>
     </section>
   )

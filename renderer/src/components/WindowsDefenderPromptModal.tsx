@@ -25,7 +25,7 @@ export function WindowsDefenderPromptModal({
             <span className="block">
               UnionCrax.Direct stores downloads, installs, and extracted game files in this folder. Windows Defender can sometimes quarantine cracked or patched files before the install finishes.
             </span>
-            <span className="block rounded-lg border border-white/[.07] bg-white/[.03] px-3 py-2 font-mono text-xs text-zinc-200">
+            <span className="block rounded-lg border border-white/[.07] bg-white/[.03] px-3 py-2 font-mono text-xs text-foreground/90">
               {downloadPath || "Download path not set yet"}
             </span>
             <span className="block">
