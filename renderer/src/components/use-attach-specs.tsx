@@ -68,7 +68,7 @@ export function AttachSpecsToggle({ value, onChange, className = "" }: {
         "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] transition-colors " +
         (value
           ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-200"
-          : "border-white/10 bg-zinc-900/40 text-zinc-400 hover:text-zinc-200") +
+          : "border-white/10 bg-card/40 text-muted-foreground hover:text-foreground/90") +
         " " + className
       }
       title={value ? "Your PC specs will be shown on this post" : "Your PC specs will be hidden on this post"}

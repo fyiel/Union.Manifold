@@ -16,6 +16,7 @@ const DiscordRPC = require('discord-rpc')
 const { autoUpdater } = require('electron-updater')
 const systemProfileScanner = require('./system-profile.cjs')
 const storageReservation = require('./storage-reservation.cjs')
+const { DownloadEngine } = require('./download-engine.cjs')
 
 const packageJson = require('../package.json')
 const isDev = !app.isPackaged
@@ -36,6 +37,32 @@ if (!isDev) {
         secure: true,
         supportFetchAPI: true,
         corsEnabled: true,
+      },
+    },
+    {
+      scheme: 'uc-local',
+      privileges: {
+        standard: true,
+        secure: true,
+        supportFetchAPI: true,
+        corsEnabled: true,
+        bypassCSP: true,
+      },
+    },
+  ])
+} else {
+  // Dev mode: still need to register uc-local as privileged so the renderer
+  // (which is loaded from localhost:5173) can read installing/installed images.
+  // `ucd` isn't registered in dev because the renderer is the Vite server.
+  protocol.registerSchemesAsPrivileged([
+    {
+      scheme: 'uc-local',
+      privileges: {
+        standard: true,
+        secure: true,
+        supportFetchAPI: true,
+        corsEnabled: true,
+        bypassCSP: true,
       },
     },
   ])
@@ -847,7 +874,15 @@ function createOverlayWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       preload: path.join(__dirname, 'preload.cjs'),
-      webSecurity: true
+      webSecurity: true,
+      // When the overlay is hidden (95% of the time — only shown during games
+      // via the hotkey or toast), aggressively throttle its renderer so it
+      // doesn't keep clocks/intervals/animations burning CPU in the
+      // background. Browser tabs default to ~1Hz timers when hidden; we want
+      // the same for our offscreen overlay.
+      backgroundThrottling: true,
+      // No need for Chromium's compositor to render frames when hidden.
+      offscreen: false,
     }
   })
 
@@ -1551,15 +1586,19 @@ function injectOverlayIntoGame(pid, appid) {
     })
 
     // When the offscreen window paints, write pixels to shared memory.
-    // Rate-limited to 30 fps to keep event-loop overhead low (~250 MB/s vs 500).
-    // image.toBitmap() already returns a Buffer – no extra Buffer.from() copy needed.
+    // While the overlay is hidden (the common case during gameplay), skip
+    // the bitmap upload entirely — we don't need to ship frames the game
+    // isn't compositing. When visible, throttle to ~30fps. Hidden state ran
+    // at 60fps capture before, which was burning ~250MB/s of memcpy traffic
+    // and tanking framerate on weaker machines.
     let lastPaintMs = 0
     offscreenWin.webContents.on('paint', (_event, _dirty, image) => {
+      const injection = overlayInjections.get(pid)
+      if (!injection) return
+      if (!injection.visible) return // skip capture entirely while hidden
       const now = Date.now()
       if (now - lastPaintMs < 33) return
       lastPaintMs = now
-      const injection = overlayInjections.get(pid)
-      if (!injection) return
       const bitmap = image.toBitmap()
       if (bitmap.length !== OVERLAY_FRAME_WIDTH * OVERLAY_FRAME_HEIGHT * 4) return
       try {
@@ -1567,7 +1606,9 @@ function injectOverlayIntoGame(pid, appid) {
       } catch {}
     })
 
-    offscreenWin.webContents.setFrameRate(60)
+    // Start at 1 fps — just enough to keep the renderer alive. Ramp to 30 fps
+    // when the overlay is shown via toggleInjectedOverlay.
+    offscreenWin.webContents.setFrameRate(1)
 
     // Load overlay page
     if (isDev) {
@@ -1685,6 +1726,9 @@ function toggleInjectedOverlay(pid) {
   injection.visible = !injection.visible
   const wc = injection.offscreenWindow?.webContents
   if (wc && !injection.offscreenWindow.isDestroyed()) {
+    // Match the offscreen capture rate to the overlay's visibility so the
+    // GPU/CPU don't churn 30fps frames into a buffer the game isn't reading.
+    try { wc.setFrameRate(injection.visible ? 30 : 1) } catch { }
     if (injection.visible) {
       wc.send('uc:overlay-show', { appid: injection.appid })
     } else {
@@ -1954,6 +1998,126 @@ function registerRendererAssetProtocol() {
   })
 }
 
+// uc-local:// — bridges the renderer (which runs on ucd:// in prod and
+// localhost:5173 in dev, neither of which can load file://) to image assets
+// inside the installing/installed folders.
+//
+// URL shape: `uc-local://app/?p=<urlencoded-absolute-path>`.
+// The fixed `app` host + `?p=` query sidesteps Chromium's URL parser quirks
+// around drive letters, triple-slashes, and pathname normalization that
+// were swallowing previous URL formats.
+//
+// We read the file directly with fs.readFileSync rather than going through
+// net.fetch(file://) — the latter has been flaky for our use case (silent
+// 404s from Chromium's net stack on certain Windows paths).
+//
+// Restricted to the download root so a malicious page can't read arbitrary
+// filesystem paths.
+
+// Best-effort MIME guess for the file extensions UC.D actually serves. The
+// browser sniffs anyway for images, but a correct Content-Type avoids the
+// "treated as text/html" race that some loaders trip on.
+const UC_LOCAL_MIME_MAP = {
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.png': 'image/png',
+  '.webp': 'image/webp',
+  '.avif': 'image/avif',
+  '.gif': 'image/gif',
+  '.svg': 'image/svg+xml',
+  '.ico': 'image/x-icon',
+  '.bmp': 'image/bmp',
+  '.mp4': 'video/mp4',
+  '.webm': 'video/webm',
+  '.mov': 'video/quicktime',
+  '.json': 'application/json',
+  '.txt': 'text/plain; charset=utf-8',
+}
+function uc_localMimeFor(filePath) {
+  const ext = path.extname(filePath).toLowerCase()
+  return UC_LOCAL_MIME_MAP[ext] || 'application/octet-stream'
+}
+
+// Log uc-local misses at most once per unique path per session — these are
+// expected when a game is uninstalled / partial-cache cleared, and the
+// renderer's candidate chain already falls through to the remote URL. The
+// previous warn-per-request flooded the log with predictable noise.
+const ucLocalLoggedMisses = new Set()
+
+function registerLocalMediaProtocol() {
+  protocol.handle('uc-local', async (request) => {
+    try {
+      const url = new URL(request.url)
+      const encodedPath = url.searchParams.get('p') || ''
+      if (!encodedPath) {
+        ucLog(`uc-local: missing ?p= for ${request.url}`, 'warn')
+        return new Response('Bad request', { status: 400 })
+      }
+      const root = path.resolve(ensureDownloadDir())
+      // Try the path we were given, then fall back to the installing↔installed
+      // mirror. The metadata cacher writes localImage paths into
+      // installing/<game>/, and the install pipeline later moves the folder to
+      // installed/<game>/ without always rewriting the cached paths — so an
+      // image reference for an installed game can still point at
+      // installing/<game>/image.jpg. Rather than rewrite every manifest at
+      // install time, we treat the two folders as interchangeable on read.
+      const installingDir = path.join(root, installingDirName) + path.sep
+      const installedDir  = path.join(root, installedDirName)  + path.sep
+      const tryPaths = []
+      const primary = path.resolve(encodedPath)
+      tryPaths.push(primary)
+      if (primary.startsWith(installingDir)) {
+        tryPaths.push(installedDir + primary.slice(installingDir.length))
+      } else if (primary.startsWith(installedDir)) {
+        tryPaths.push(installingDir + primary.slice(installedDir.length))
+      }
+      let resolved = null
+      for (const candidate of tryPaths) {
+        if (candidate !== root && !candidate.startsWith(root + path.sep)) continue
+        try {
+          if (fs.existsSync(candidate)) { resolved = candidate; break }
+        } catch { /* ignore */ }
+      }
+      // Final containment check on the resolved path (covers both branches).
+      if (!resolved) {
+        // Cap the noise. The renderer's failure-cache means we won't keep
+        // asking for the same dead path; logging every transient request
+        // would blow up dev logs for users mid-uninstall.
+        if (!ucLocalLoggedMisses.has(primary)) {
+          ucLocalLoggedMisses.add(primary)
+          if (ucLocalLoggedMisses.size > 256) {
+            // Bound the set so a long session doesn't grow it forever.
+            const first = ucLocalLoggedMisses.values().next().value
+            if (first) ucLocalLoggedMisses.delete(first)
+          }
+          ucLog(`uc-local: not found (tried ${tryPaths.length}) ${primary}`, 'warn')
+        }
+        return new Response('Not found', { status: 404 })
+      }
+      if (resolved !== root && !resolved.startsWith(root + path.sep)) {
+        ucLog(`uc-local: forbidden ${resolved} (root=${root})`, 'warn')
+        return new Response('Forbidden', { status: 403 })
+      }
+      const data = fs.readFileSync(resolved)
+      // Convert Node Buffer → Uint8Array (Response only accepts BodyInit).
+      const body = new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
+      return new Response(body, {
+        status: 200,
+        headers: {
+          'Content-Type': uc_localMimeFor(resolved),
+          'Content-Length': String(data.byteLength),
+          // Local files don't change once written by the metadata cacher,
+          // so cache them forever in the renderer.
+          'Cache-Control': 'public, max-age=31536000, immutable',
+        },
+      })
+    } catch (err) {
+      ucLog(`uc-local protocol failed: ${err?.message || err}`, 'warn')
+      return new Response('Internal error', { status: 500 })
+    }
+  })
+}
+
 function registerProcessLogging() {
   process.on('uncaughtException', (err) => ucLog('Uncaught exception', 'error', err))
   process.on('unhandledRejection', (reason) => ucLog('Unhandled rejection', 'error', reason))
@@ -2050,12 +2214,25 @@ function restoreRpcActivity() {
 }
 function shutdownRpcClient() {
   if (!rpcClient) return
-  try { rpcClient.clearActivity() } catch { }
-  try { rpcClient.destroy() } catch { }
+  // discord-rpc's clearActivity()/destroy() both end up writing to the
+  // underlying IPC transport. If the transport was already torn down (Discord
+  // quit, user disabled the integration, OS killed the pipe, etc.), the
+  // socket is null and the write throws — synchronously for clearActivity,
+  // and as an unhandled Promise rejection for destroy. Both must be swallowed
+  // so toggling the setting doesn't crash the renderer log.
+  const client = rpcClient
   rpcClient = null
   rpcReady = false
   rpcCurrentActivity = null
   rpcActiveClientId = null
+  try {
+    const p = client.clearActivity()
+    if (p && typeof p.catch === 'function') p.catch(() => { })
+  } catch { /* ignore */ }
+  try {
+    const p = client.destroy()
+    if (p && typeof p.catch === 'function') p.catch(() => { })
+  } catch { /* ignore */ }
 }
 
 async function ensureRpcClient() {
@@ -2169,46 +2346,142 @@ function resolveTrayIcon() {
   return resolveWindowIcon()
 }
 
+// Statuses we consider "actively running" for the tray downloads section.
+// Excludes 'completed' / 'cancelled' / 'failed' since those are no longer
+// taking up bandwidth.
+const ACTIVE_TRAY_STATUSES = new Set(['downloading', 'queued', 'extracting', 'installing', 'verifying', 'retrying'])
+
+// Set by createTray() so other parts of the process (presence broadcasts,
+// download lifecycle hooks) can ask the tray to refresh its menu state.
+let trayMenuRebuild = null
+
+function refreshTrayMenu() {
+  try {
+    if (typeof trayMenuRebuild === 'function') trayMenuRebuild()
+  } catch (err) {
+    ucLog(`refreshTrayMenu failed: ${err?.message || err}`, 'warn')
+  }
+}
+
 function createTray() {
   if (tray) return
   const iconImage = resolveTrayIcon()
   tray = new Tray(iconImage)
   tray.setToolTip(WINDOW_DISPLAY_NAME)
   tray.setTitle(WINDOW_DISPLAY_NAME)
-  const contextMenu = Menu.buildFromTemplate([
-    {
-      label: `Show ${WINDOW_DISPLAY_NAME}`,
-      click: () => {
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.show()
-          mainWindow.focus()
-        }
-      }
-    },
-    {
-      label: 'Quit',
-      click: () => {
-        app.quit()
-      }
-    }
-  ])
-  tray.setContextMenu(contextMenu)
-  tray.on('click', () => {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      if (mainWindow.isVisible()) {
-        mainWindow.hide()
-      } else {
-        mainWindow.show()
-        mainWindow.focus()
-      }
-    }
-  })
-  tray.on('double-click', () => {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.show()
+  // Helper: bring the main window back from any state (minimized, hidden,
+  // or unfocused). A minimized window still reports isVisible()===true, so
+  // we have to check isMinimized() first before considering hide.
+  const showAndFocus = () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return
+    try {
+      if (mainWindow.isMinimized()) mainWindow.restore()
+      if (!mainWindow.isVisible()) mainWindow.show()
       mainWindow.focus()
+      // Tap into the OS focus stealing protection on Windows.
+      if (process.platform === 'win32') {
+        try { mainWindow.moveTop?.() } catch { }
+      }
+    } catch (err) {
+      ucLog(`tray showAndFocus failed: ${err?.message || err}`, 'warn')
+    }
+  }
+  // Rebuild the tray menu dynamically so the running-game entry / downloads
+  // section reflect current state every time the user right-clicks. Static
+  // menus would freeze whatever was true the moment the tray was created.
+  const rebuildContextMenu = () => {
+    if (!tray) return
+    const items = [
+      { label: `Show ${WINDOW_DISPLAY_NAME}`, click: () => showAndFocus() },
+    ]
+
+    // Currently running game — surface the most recent payload so the user
+    // can quit it without unfolding the launcher window.
+    try {
+      const running = pickCurrentRunningGame()
+      if (running.appid) {
+        const displayName = running.name || running.appid
+        items.push({ type: 'separator' })
+        items.push({ label: `▶ Playing: ${displayName}`, enabled: false })
+        items.push({
+          label: 'Quit game',
+          click: async () => {
+            try {
+              const payload = runningGames.get(running.appid)
+              if (payload?.userQuitRequested === false || payload?.userQuitRequested === undefined) {
+                if (payload) payload.userQuitRequested = true
+              }
+              if (typeof killProcessTree === 'function' && payload?.pid) {
+                await killProcessTree(payload.pid)
+              }
+            } catch (err) {
+              ucLog(`tray quit-game failed: ${err?.message || err}`, 'warn')
+            }
+          },
+        })
+        items.push({
+          label: 'Open game in launcher',
+          click: () => {
+            showAndFocus()
+            try {
+              if (mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.webContents.send('uc:navigation-action', { path: `/game/${encodeURIComponent(running.appid)}` })
+              }
+            } catch { /* ignore */ }
+          },
+        })
+      }
+    } catch (err) {
+      ucLog(`tray running-game lookup failed: ${err?.message || err}`, 'warn')
+    }
+
+    // Active downloads — quick pause / resume + jump to Downloads page.
+    try {
+      const activeCount = globalDownloadQueue.filter((job) => ACTIVE_TRAY_STATUSES.has(job.status)).length
+      if (activeCount > 0) {
+        items.push({ type: 'separator' })
+        items.push({ label: `↓ ${activeCount} download${activeCount === 1 ? '' : 's'} active`, enabled: false })
+        items.push({
+          label: 'Open downloads',
+          click: () => {
+            showAndFocus()
+            try {
+              if (mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.webContents.send('uc:navigation-action', { path: '/downloads' })
+              }
+            } catch { /* ignore */ }
+          },
+        })
+      }
+    } catch { /* ignore */ }
+
+    items.push({ type: 'separator' })
+    items.push({ label: 'Quit', click: () => { app.isQuitting = true; app.quit() } })
+
+    try {
+      tray.setContextMenu(Menu.buildFromTemplate(items))
+    } catch (err) {
+      ucLog(`tray menu rebuild failed: ${err?.message || err}`, 'warn')
+    }
+  }
+  // Build initial menu and refresh whenever game / download state changes
+  // (presence events are the natural cue here).
+  rebuildContextMenu()
+  trayMenuRebuild = rebuildContextMenu
+  tray.on('click', () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return
+    // Toggle: if the window is genuinely visible & focused, hide it.
+    // Otherwise restore/show/focus.
+    const isMinimized = mainWindow.isMinimized()
+    const isVisible = mainWindow.isVisible()
+    const isFocused = mainWindow.isFocused()
+    if (isVisible && !isMinimized && isFocused) {
+      mainWindow.hide()
+    } else {
+      showAndFocus()
     }
   })
+  tray.on('double-click', () => showAndFocus())
 }
 
 const DEFAULT_BASE_URL = 'https://union-crax.xyz'
@@ -2326,6 +2599,82 @@ async function detectBestBaseUrl(onStatus) {
 
 let tray = null
 let mainWindow = null
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Download engine — the simple, single-source-of-truth replacement for the
+// older download/resume IPC handlers. Lazily initialised so it can pick up
+// the real mainWindow session after createWindow runs.
+// ─────────────────────────────────────────────────────────────────────────────
+let _downloadEngine = null
+function getDownloadEngine() {
+  if (_downloadEngine) {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      try { _downloadEngine.attachSession(mainWindow.webContents.session) } catch { }
+    }
+    return _downloadEngine
+  }
+  const downloadRoot = ensureDownloadDir()
+  const installingRootDir = path.join(downloadRoot, installingDirName)
+  try { fs.mkdirSync(installingRootDir, { recursive: true }) } catch { }
+  _downloadEngine = new DownloadEngine({
+    installingRoot: installingRootDir,
+    manifestName: INSTALLED_MANIFEST,
+    safeFolderName,
+    log: (level, message) => ucLog(message, level === 'warn' || level === 'error' ? level : 'info'),
+  })
+  // Apply persisted bandwidth limit on engine creation. The setting is
+  // stored as KB/s for human-friendliness; the engine wants raw bytes/s.
+  try {
+    const settings = readSettings() || {}
+    const cap = Number(settings.downloadBandwidthLimitKBps) || 0
+    if (cap > 0) _downloadEngine.setBandwidthLimit(cap * 1024)
+  } catch { /* ignore */ }
+  // Push every engine update through the existing renderer-update plumbing so
+  // the activity page, overlay, and stats continue to work unchanged.
+  _downloadEngine.on('update', (dl) => {
+    sendDownloadUpdate(mainWindow, {
+      downloadId: dl.id,
+      status: dl.status,
+      receivedBytes: dl.receivedBytes || 0,
+      totalBytes: dl.totalBytes || 0,
+      speedBps: dl.speedBps || 0,
+      etaSeconds: dl.etaSeconds ?? null,
+      filename: dl.filename || '',
+      savePath: dl.savePath || '',
+      appid: dl.appid || null,
+      gameName: dl.gameName || null,
+      url: dl.url || '',
+      error: dl.error || null,
+      partIndex: undefined,
+      partTotal: undefined,
+    })
+  })
+  _downloadEngine.on('complete', (dl) => {
+    // Hand off to the existing extraction pipeline by faking a 'completed'
+    // done-event on a synthetic activeDownloads entry. The extraction code in
+    // the legacy 'done' handler already does everything we need (manifest
+    // updates, install_ready space-check, 7z extraction, etc.).
+    handleEngineDownloadComplete(dl).catch((err) => {
+      ucLog(`[engine] post-complete handoff failed: ${err?.message || err}`, 'error')
+    })
+  })
+  // Attach session now if window is ready.
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    try { _downloadEngine.attachSession(mainWindow.webContents.session) } catch { }
+  }
+  return _downloadEngine
+}
+
+// Stub forward-declaration — implementation lives further down where the
+// extraction helpers (registerExtractionJob, run7zExtract, etc.) are defined.
+async function handleEngineDownloadComplete(dl) {
+  if (typeof _handleEngineDownloadCompleteImpl === 'function') {
+    return _handleEngineDownloadCompleteImpl(dl)
+  }
+  ucLog(`[engine] complete fired for ${dl.id} before extraction handler was wired`, 'warn')
+}
+let _handleEngineDownloadCompleteImpl = null
+
 const UC_DEEP_LINK_SCHEME = 'unioncrax'
 let pendingAppLaunchRequests = []
 let processingLaunchQueue = false
@@ -2822,15 +3171,15 @@ function isMainWebsiteBaseUrl(baseUrl) {
 async function maybeBlockMirrorAuth(win, baseUrl, options = {}) {
   if (isMainWebsiteBaseUrl(baseUrl)) return null
 
+  // Surface the block to the renderer via a window event so it can show the
+  // app's own custom toast / dialog. Previously we raised a native Electron
+  // dialog.showMessageBox here, but the launcher should never use OS-native
+  // popups — they look out of place vs. the in-app modal style.
   if (options.showDialog && win && !win.isDestroyed()) {
     try {
-      await dialog.showMessageBox(win, {
-        type: 'info',
-        buttons: ['OK'],
-        defaultId: 0,
-        noLink: true,
-        title: 'Login unavailable on mirror',
+      win.webContents.send('uc:mirror-auth-blocked', {
         message: MIRROR_AUTH_BLOCK_MESSAGE,
+        baseUrl: baseUrl ?? null,
       })
     } catch { }
   }
@@ -2983,29 +3332,80 @@ async function getDownloadsStateStore() {
   }
   if (!downloadsStateStorePromise) {
     downloadsStateStorePromise = (async () => {
+      // Classify the open error so we only wipe the DB for genuine corruption.
+      // Lock contention (another electron instance / hot-reload race) and
+      // transient IO errors must NOT trigger a wipe — that's what was causing
+      // download state to vanish across restarts in dev.
+      const isLockError = (err) => {
+        const code = err?.code || ''
+        const msg = String(err?.message || err || '')
+        return code === 'LEVEL_LOCKED' || /lock|resource temporarily unavailable|already held/i.test(msg)
+      }
+      const isCorruptionError = (err) => {
+        const code = err?.code || ''
+        const msg = String(err?.message || err || '')
+        return code === 'LEVEL_CORRUPTION' || /corrupt|manifest|checksum mismatch|bad block|truncated/i.test(msg)
+      }
+
+      async function tryOpen() {
+        const db = new ClassicLevel(downloadsStateDbPath, { valueEncoding: 'json' })
+        await db.open()
+        return db
+      }
+
       async function openDbWithRecovery() {
-        let db = new ClassicLevel(downloadsStateDbPath, { valueEncoding: 'json' })
+        // Step 1: plain open
         try {
-          await db.open()
-          return db
-        } catch {
-          // Step 1: stale LOCK file from a previous crash — delete and retry
+          return await tryOpen()
+        } catch (firstError) {
+          // Step 2: lock contention — wait + retry a few times. This handles
+          // the dev hot-reload race where the prior electron process hasn't
+          // released the lock yet.
+          if (isLockError(firstError)) {
+            for (let attempt = 0; attempt < 8; attempt++) {
+              await new Promise((resolve) => setTimeout(resolve, 250 * (attempt + 1)))
+              try {
+                const db = await tryOpen()
+                ucLog(`[State] LevelDB opened after ${attempt + 1} lock retries`, 'info')
+                return db
+              } catch (retryError) {
+                if (!isLockError(retryError)) {
+                  // Different failure mode — fall through to the LOCK file step
+                  // with this as the latest error.
+                  // eslint-disable-next-line no-param-reassign
+                  firstError = retryError
+                  break
+                }
+              }
+            }
+          }
+
+          // Step 3: stale LOCK file from a previous crash — remove + retry
           const lockPath = path.join(downloadsStateDbPath, 'LOCK')
           if (fs.existsSync(lockPath)) {
             try { fs.unlinkSync(lockPath) } catch { }
             try {
-              await db.open()
+              const db = await tryOpen()
               ucLog('[State] Recovered LevelDB after stale LOCK removal', 'warn')
               return db
-            } catch { }
+            } catch (lockClearError) {
+              if (isLockError(lockClearError)) {
+                // Another process is genuinely holding it — bail without
+                // wiping. Persistence will be a no-op this run; data survives.
+                throw new Error('leveldb_locked_by_other_process')
+              }
+              // eslint-disable-next-line no-param-reassign
+              firstError = lockClearError
+            }
           }
-          // Step 2: DB is corrupted / unrecoverable — wipe directory and start fresh
-          ucLog('[State] LevelDB unrecoverable, wiping state-db and starting fresh', 'warn')
-          try { await db.close() } catch { }
+
+          // Step 4: only wipe on genuine corruption. Anything else, re-throw.
+          if (!isCorruptionError(firstError)) {
+            throw firstError
+          }
+          ucLog(`[State] LevelDB corrupted (${firstError?.message || firstError}), wiping state-db and starting fresh`, 'warn')
           try { fs.rmSync(downloadsStateDbPath, { recursive: true, force: true }) } catch { }
-          db = new ClassicLevel(downloadsStateDbPath, { valueEncoding: 'json' })
-          await db.open()
-          return db
+          return await tryOpen()
         }
       }
       const db = await openDbWithRecovery()
@@ -3425,6 +3825,16 @@ ipcMain.handle('uc:setting-set', (_event, key, value) => {
     }
     if (key === 'preventSleepDuringOperations') {
       refreshOperationPowerSaveBlocker()
+    }
+    // Live-apply bandwidth limit changes so the user doesn't have to
+    // pause/resume the active download to pick up a new cap.
+    if (key === 'downloadBandwidthLimitKBps') {
+      try {
+        const cap = Number(value) || 0
+        if (_downloadEngine) _downloadEngine.setBandwidthLimit(cap > 0 ? cap * 1024 : 0)
+      } catch (err) {
+        ucLog(`Bandwidth limit apply failed: ${err?.message || err}`, 'warn')
+      }
     }
     broadcastSettingsChanges(s, prev)
     ucLog(`Setting set: ${key}`)
@@ -3983,6 +4393,56 @@ ipcMain.handle('uc:auth-fetch', async (event, payload) => {
   }
 })
 
+// Multipart upload that reuses the session cookies. The renderer ships
+// the file as { name, type, base64 } plus a fields map; we reconstruct a
+// `FormData` here (Node 18+ has it globally) and POST through
+// fetchWithSession so the auth cookies stored in the BrowserWindow
+// session are applied. This is the only way avatar/banner/etc. uploads
+// can authenticate in the launcher — a renderer-side `fetch` with
+// `credentials: include` won't pick up those cookies.
+ipcMain.handle('uc:auth-upload', async (event, payload) => {
+  const win = BrowserWindow.fromWebContents(event.sender)
+  if (!win || win.isDestroyed()) {
+    return { ok: false, status: 0, statusText: 'no_window', headers: [], body: '' }
+  }
+
+  const baseUrl = payload?.baseUrl || DEFAULT_BASE_URL
+  const path = payload?.path || '/'
+  const data = payload?.payload || {}
+  const method = String(data?.method || 'POST').toUpperCase()
+  const fields = data?.fields && typeof data.fields === 'object' ? data.fields : {}
+  const file = data?.file || null
+
+  try {
+    const form = new FormData()
+    for (const [key, value] of Object.entries(fields)) {
+      if (value == null) continue
+      form.append(String(key), String(value))
+    }
+    if (file && typeof file.base64 === 'string') {
+      const bytes = Buffer.from(file.base64, 'base64')
+      const blob = new Blob([bytes], { type: file.type || 'application/octet-stream' })
+      const filename = file.name || 'upload.bin'
+      form.append(file.field || 'file', blob, filename)
+    }
+    const response = await fetchWithSession(win.webContents.session, baseUrl, path, {
+      method,
+      body: form,
+    })
+    const arrayBuffer = await response.arrayBuffer()
+    const body = Buffer.from(arrayBuffer).toString('base64')
+    return {
+      ok: response.ok,
+      status: response.status,
+      statusText: response.statusText,
+      headers: Array.from(response.headers.entries()),
+      body,
+    }
+  } catch (error) {
+    return { ok: false, status: 0, statusText: 'upload_failed', headers: [], body: '' }
+  }
+})
+
 function getDefaultDownloadRoot() {
   if (process.platform === 'win32') {
     const systemDrive = process.env.SystemDrive || 'C:'
@@ -4314,11 +4774,111 @@ function needsMediaCache(metadata) {
   if (!metadata || typeof metadata !== 'object') return false
   const missingFieldCache = MEDIA_CACHE_FIELDS.some((field) => {
     const remote = normalizeRemoteMediaUrl(metadata[field.source])
-    return Boolean(remote) && !metadata[field.local]
+    if (!remote) return false
+    const localPath = metadata[field.local]
+    if (!localPath) return true
+    // Local path is set but the file vanished — happens when the metadata
+    // cacher wrote into installing/<appid>/ before the install completed
+    // and the partial cache got cleaned up after the folder was moved to
+    // installed/. Treat that as "cache needed" so we re-download into the
+    // current installed folder on next read.
+    try { return !fs.existsSync(localPath) } catch { return true }
   })
   const hasRemoteScreens = Array.isArray(metadata.screenshots) && metadata.screenshots.some((s) => Boolean(normalizeRemoteMediaUrl(s)))
-  const hasLocalScreens = Array.isArray(metadata.localScreenshots) && metadata.localScreenshots.some(Boolean)
+  const hasLocalScreens = Array.isArray(metadata.localScreenshots)
+    && metadata.localScreenshots.some((p) => {
+      if (!p) return false
+      try { return fs.existsSync(p) } catch { return false }
+    })
   return missingFieldCache || (hasRemoteScreens && !hasLocalScreens)
+}
+
+/**
+ * Drops `local*` paths from a metadata blob whose underlying file no
+ * longer exists on disk. The metadata cacher writes paths like
+ * installing/<appid>/hero-image.jpg before the install completes; after
+ * the folder is moved to installed/ those paths can become stale. We
+ * also try the installing↔installed mirror as a last resort — if the
+ * mirrored file exists we rewrite the path in-place so the renderer
+ * loads the local copy without a round trip.
+ *
+ * Returns true if anything was changed (caller decides whether to
+ * persist the cleanup back to disk).
+ */
+function healStaleLocalMediaPaths(metadata, downloadRoot) {
+  if (!metadata || typeof metadata !== 'object') return false
+  const root = downloadRoot || (() => { try { return ensureDownloadDir() } catch { return null } })()
+  const installingDir = root ? path.join(root, installingDirName) + path.sep : null
+  const installedDir  = root ? path.join(root, installedDirName)  + path.sep : null
+  let changed = false
+
+  const resolve = (candidate) => {
+    if (!candidate) return null
+    try {
+      if (fs.existsSync(candidate)) return candidate
+    } catch { return null }
+    // Try the installing ↔ installed mirror.
+    if (installingDir && installedDir) {
+      let mirrored = null
+      if (candidate.startsWith(installingDir)) mirrored = installedDir + candidate.slice(installingDir.length)
+      else if (candidate.startsWith(installedDir)) mirrored = installingDir + candidate.slice(installedDir.length)
+      if (mirrored) {
+        try { if (fs.existsSync(mirrored)) return mirrored } catch { /* ignore */ }
+      }
+    }
+    return null
+  }
+
+  for (const field of MEDIA_CACHE_FIELDS) {
+    const value = metadata[field.local]
+    if (!value || typeof value !== 'string') continue
+    const resolved = resolve(value)
+    if (!resolved) {
+      delete metadata[field.local]
+      changed = true
+    } else if (resolved !== value) {
+      metadata[field.local] = resolved
+      changed = true
+    }
+  }
+  // Legacy aliases — localImage / localSplash can be populated from
+  // background_image / hero_image (see cacheMetadataAssets). Same pruning.
+  for (const alias of ['localImage', 'localSplash']) {
+    const value = metadata[alias]
+    if (!value || typeof value !== 'string') continue
+    const resolved = resolve(value)
+    if (!resolved) {
+      delete metadata[alias]
+      changed = true
+    } else if (resolved !== value) {
+      metadata[alias] = resolved
+      changed = true
+    }
+  }
+  if (Array.isArray(metadata.localScreenshots)) {
+    const next = metadata.localScreenshots.map((p) => (p ? resolve(p) : null))
+    if (next.some((p, i) => p !== metadata.localScreenshots[i])) {
+      metadata.localScreenshots = next
+      changed = true
+    }
+  }
+  return changed
+}
+
+/**
+ * Reads an installed.json from disk and prunes stale local media paths
+ * so the renderer never gets handed dead `localImage`/`localHeroImage`
+ * etc. that would just produce a uc-local 404. Returns the manifest
+ * (which may have been mutated) or null on read failure.
+ */
+function readInstalledManifestForRenderer(manifestPath, downloadRoot) {
+  const manifest = readJsonFile(manifestPath)
+  if (!manifest) return null
+  try {
+    const meta = manifest.metadata && typeof manifest.metadata === 'object' ? manifest.metadata : manifest
+    healStaleLocalMediaPaths(meta, downloadRoot)
+  } catch { /* never fail the read because of healing */ }
+  return manifest
 }
 
 async function fetchPixeldrainInfo(fileId) {
@@ -4501,6 +5061,21 @@ function restorePreservedFile(savePath) {
       ucLog(`Failed to restore preserved partial download: ${e.message}`, 'warn')
     }
   }
+  // Chromium downloads write to <savePath>.crdownload until completion. If the
+  // app was hard-killed (terminal Ctrl+C, taskkill, OS crash), the graceful
+  // hardlink path doesn't fire, but the .crdownload partial is usually still
+  // on disk and is the actual file with the downloaded bytes. Promote it to
+  // the final savePath so the resume layer above can use it.
+  const crdownloadPath = savePath + '.crdownload'
+  if (fs.existsSync(crdownloadPath)) {
+    try {
+      fs.renameSync(crdownloadPath, savePath)
+      ucLog(`Restored partial download from .crdownload: ${savePath}`, 'info')
+      return true
+    } catch (e) {
+      ucLog(`Failed to restore .crdownload partial: ${e.message}`, 'warn')
+    }
+  }
   return false
 }
 
@@ -4582,14 +5157,63 @@ function manifestRichness(m) {
   return s
 }
 
+// Heuristics for the manifest-less fallback in listManifestsFromRoot. Without
+// these, a folder containing nothing but an uninstall log or a leftover stub
+// would be reported as an "installed game", which is the root cause of users
+// seeing games in the library that they had already deleted from their PC.
+function folderLooksLikeInstalledGame(folder) {
+  let hasLaunchable = false
+  let fileCount = 0
+  const walk = (dir, depth) => {
+    if (depth > 3 || hasLaunchable) return
+    let entries
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }) } catch { return }
+    for (const entry of entries) {
+      if (hasLaunchable) return
+      if (entry.name === INSTALLED_MANIFEST) continue
+      const full = path.join(dir, entry.name)
+      if (entry.isDirectory()) {
+        walk(full, depth + 1)
+        continue
+      }
+      fileCount += 1
+      const lower = entry.name.toLowerCase()
+      // Windows: an .exe (excluding obvious uninstallers/setup helpers) is the
+      // strongest signal that a real game lives here. Linux: ELF binaries
+      // typically lack an extension, so accept .sh/.AppImage/.x86_64 too.
+      const isWindowsExe = lower.endsWith('.exe')
+        && !/^uninstall|^unins|^setup|^vc_?redist|^dxsetup|^directx/i.test(entry.name)
+      const isLinuxLaunchable = lower.endsWith('.sh') || lower.endsWith('.appimage') || lower.endsWith('.x86_64') || lower.endsWith('.x86')
+      if (isWindowsExe || isLinuxLaunchable) {
+        hasLaunchable = true
+        return
+      }
+    }
+  }
+  try {
+    walk(folder, 0)
+  } catch { /* ignore */ }
+  return hasLaunchable && fileCount > 1
+}
+
 function listManifestsFromRoot(root, allowFallback) {
   try {
     if (!fs.existsSync(root)) return []
     const manifests = []
     const seenAppids = new Map() // appid -> index in manifests
+    // Heal stale local-media paths against the same root the manifest
+    // came from so the renderer never receives `localImage` etc. that
+    // point at files which no longer exist (typical after a game folder
+    // was moved from installing/ → installed/).
+    const healingRoot = (() => {
+      try {
+        const parent = path.dirname(root)
+        return parent || null
+      } catch { return null }
+    })()
     for (const { folder, name } of iterateGameFolders(root)) {
       const manifestPath = path.join(folder, INSTALLED_MANIFEST)
-      const manifest = readJsonFile(manifestPath)
+      const manifest = readInstalledManifestForRenderer(manifestPath, healingRoot)
       if (manifest && manifest.appid) {
         if (!seenAppids.has(manifest.appid)) {
           seenAppids.set(manifest.appid, manifests.length)
@@ -4604,11 +5228,18 @@ function listManifestsFromRoot(root, allowFallback) {
         continue
       }
       if (allowFallback) {
-        const files = fs.readdirSync(folder).filter((f) => f !== INSTALLED_MANIFEST)
-        if (files.length && !seenAppids.has(name)) {
-          seenAppids.set(name, manifests.length)
-          manifests.push({ appid: name, name: name, files: files.map((f) => ({ name: f })) })
-        }
+        // Only resurrect a manifest-less folder if it actually contains a
+        // launchable executable AND more than a single stray file. This
+        // prevents leftover uninstall logs / empty folders from being
+        // reported as ghost installs in the library.
+        if (seenAppids.has(name)) continue
+        if (!folderLooksLikeInstalledGame(folder)) continue
+        let files = []
+        try {
+          files = fs.readdirSync(folder).filter((f) => f !== INSTALLED_MANIFEST)
+        } catch { files = [] }
+        seenAppids.set(name, manifests.length)
+        manifests.push({ appid: name, name: name, files: files.map((f) => ({ name: f })) })
       }
     }
     return manifests
@@ -4755,7 +5386,7 @@ function findInstallingFolderByAppid(appid) {
   return null
 }
 
-function updateInstallingManifestStatus(appid, status, error) {
+function updateInstallingManifestStatus(appid, status, error, extra) {
   try {
     if (!appid) return false
     const folder = findInstallingFolderByAppid(appid)
@@ -4768,6 +5399,23 @@ function updateInstallingManifestStatus(appid, status, error) {
     if (error) manifest.installError = String(error)
     else delete manifest.installError
     manifest.updatedAt = Date.now()
+    // Optional resume metadata. We stash the last known download payload
+    // (url, savePath, byte counters, downloadId) into the manifest so the
+    // renderer can rebuild a resumable DownloadItem from listInstalling
+    // even when the renderer's debounced LevelDB persist hasn't flushed
+    // before the app dies.
+    if (extra && typeof extra === 'object') {
+      const snapshot = manifest.downloadSnapshot || {}
+      if (typeof extra.url === 'string' && extra.url) snapshot.url = extra.url
+      if (typeof extra.savePath === 'string' && extra.savePath) snapshot.savePath = extra.savePath
+      if (typeof extra.filename === 'string' && extra.filename) snapshot.filename = extra.filename
+      if (typeof extra.downloadId === 'string' && extra.downloadId) snapshot.downloadId = extra.downloadId
+      if (Number.isFinite(Number(extra.totalBytes))) snapshot.totalBytes = Number(extra.totalBytes)
+      if (Number.isFinite(Number(extra.receivedBytes))) snapshot.receivedBytes = Number(extra.receivedBytes)
+      if (typeof extra.host === 'string' && extra.host) snapshot.host = extra.host
+      snapshot.updatedAt = Date.now()
+      manifest.downloadSnapshot = snapshot
+    }
     const ok = uc_writeJsonSync(manifestPath, manifest)
     if (ok) {
       if (shouldRetainInstallingStatus(status)) {
@@ -4812,6 +5460,61 @@ function writeInstallingManifest(appid, metadata, status = 'installing', error =
   }
 }
 
+// Looks for a download archive (or .ucresume hardlink) inside the installing
+// folder for the given manifest. If anything is present it means the download
+// phase had progress on disk and the work is resumable, not a failed install.
+function hasInstallingArchiveOnDisk(manifest) {
+  return Boolean(findInstallingArchiveOnDisk(manifest))
+}
+
+// Locate the most likely partial download in the installing folder. Returns
+// `{ path, size }` for the largest non-manifest file (preferring the live file
+// over the .ucresume hardlink). Used both as a resumability check and as a
+// fallback when the manifest's downloadSnapshot is missing (older builds, or
+// when the renderer's debounced LevelDB persist never flushed).
+function findInstallingArchiveOnDisk(manifest) {
+  try {
+    const folderName = safeFolderName((manifest?.metadata?.name || manifest?.name || manifest?.appid || ''))
+    if (!folderName) return null
+    const downloadRoot = ensureDownloadDir()
+    const installingRoot = path.join(downloadRoot, installingDirName, folderName)
+    if (!fs.existsSync(installingRoot)) return null
+    const entries = fs.readdirSync(installingRoot)
+    let best = null
+    // Ignore the image/metadata sidecar files that always live in the
+    // installing folder — they aren't download archives and would otherwise
+    // pollute the "is there a partial?" heuristic.
+    const isSidecar = (name) => {
+      const lower = name.toLowerCase()
+      if (lower === INSTALLED_MANIFEST.toLowerCase()) return true
+      if (['image.jpg', 'splash.jpg', 'hero-image.jpg', 'background-image.jpg', 'hero-logo.jpg'].includes(lower)) return true
+      if (lower === 'screenshots') return true
+      return false
+    }
+    for (const entry of entries) {
+      if (isSidecar(entry)) continue
+      const full = path.join(installingRoot, entry)
+      try {
+        const st = fs.statSync(full)
+        if (!st.isFile() || st.size <= 0) continue
+        const isBackup = entry.endsWith(RESUME_BACKUP_EXT)
+        const isCrdownload = entry.endsWith('.crdownload')
+        const candidate = { path: full, size: st.size, isBackup, isCrdownload }
+        if (!best) { best = candidate; continue }
+        // Prefer the live file over a .ucresume/.crdownload partial;
+        // otherwise pick the larger of the same kind.
+        const candidateIsPartial = candidate.isBackup || candidate.isCrdownload
+        const bestIsPartial = best.isBackup || best.isCrdownload
+        if (!candidateIsPartial && bestIsPartial) best = candidate
+        else if (candidateIsPartial === bestIsPartial && candidate.size > best.size) best = candidate
+      } catch { }
+    }
+    return best
+  } catch {
+    return null
+  }
+}
+
 function normalizeInstallingManifestForQuery(manifest) {
   try {
     if (!manifest || !manifest.appid) return manifest
@@ -4820,12 +5523,51 @@ function normalizeInstallingManifestForQuery(manifest) {
     if (!status) return manifest
     if (!['installing', 'extracting', 'downloading', 'verifying', 'retrying', 'paused'].includes(status)) return manifest
     if (hasActiveDownloadsForApp(manifest.appid) || hasActiveExtractionForApp(manifest.appid)) return manifest
-    if (['downloading', 'verifying', 'retrying', 'paused'].includes(status)) {
+    // The download phase is recorded as 'installing' (never transitions to a
+    // dedicated 'downloading' status), so we can't tell from the status alone
+    // whether the interruption happened mid-download or mid-extraction. If a
+    // download archive exists in the installing folder (whole or partial,
+    // including the .ucresume hardlink we created on quit) the work was in
+    // the download phase — surface it as 'paused' so the user can resume.
+    // Only when there's no archive at all do we treat it as a failed install.
+    const archiveOnDisk = findInstallingArchiveOnDisk(manifest)
+    const downloadablePhase = ['downloading', 'verifying', 'retrying', 'paused'].includes(status)
+      || (status === 'installing' && archiveOnDisk)
+    if (downloadablePhase) {
+      // Backfill the downloadSnapshot from disk when the manifest doesn't have
+      // one yet. This rescues paused items written by older builds (or builds
+      // where the renderer's LevelDB persist never flushed) — the renderer's
+      // synthetic-from-manifest needs at least a savePath to call
+      // resumeWithFreshUrl. The url itself can't be reconstructed here, but
+      // having appid + savePath is enough for resolveFreshResumeSource to
+      // re-fetch a fresh ucfiles link via /api/downloads/:appid.
+      const existingSnapshot = manifest.downloadSnapshot && typeof manifest.downloadSnapshot === 'object'
+        ? manifest.downloadSnapshot
+        : null
+      let snapshot = existingSnapshot
+      if (archiveOnDisk) {
+        let livePath = archiveOnDisk.path
+        if (archiveOnDisk.isBackup) {
+          livePath = archiveOnDisk.path.replace(new RegExp(RESUME_BACKUP_EXT + '$'), '')
+        } else if (archiveOnDisk.isCrdownload) {
+          livePath = archiveOnDisk.path.replace(/\.crdownload$/, '')
+        }
+        const next = { ...(existingSnapshot || {}) }
+        if (!next.savePath) next.savePath = livePath
+        if (!next.filename) next.filename = path.basename(livePath)
+        if (!Number.isFinite(Number(next.receivedBytes)) || Number(next.receivedBytes) <= 0) {
+          next.receivedBytes = archiveOnDisk.size
+        }
+        if (!next.host) next.host = 'ucfiles'
+        next.updatedAt = next.updatedAt || Date.now()
+        snapshot = next
+      }
       return {
         ...manifest,
         installStatus: 'paused',
         installError: manifest.installError || 'App closed. Resume to continue downloading.',
         updatedAt: Date.now(),
+        ...(snapshot ? { downloadSnapshot: snapshot } : {}),
       }
     }
     return {
@@ -6770,14 +7512,30 @@ function run7zExtract(archivePath, destDir, onProgress, options = {}) {
       }
 
       const before = snapshotFiles(destDir)
+      // Cap 7z to roughly half the CPU cores so the rest of the system stays
+      // responsive during extraction. On a 16-thread machine that's 8 threads,
+      // on a 4-thread one it's 2 — never less than 1.
+      const os = require('os')
+      const cpuCount = Math.max(1, (os.cpus?.() || []).length || 4)
+      const threadCap = Math.max(1, Math.floor(cpuCount / 2))
       // -bsp1 forces 7z to emit progress (NN%) on stdout — without it 7z is
       // silent and the regex below never matches, so the UI stays at 0%.
       // -bso1 keeps normal output on stdout; -bse1 keeps errors on stderr;
       // -bb1 includes the filename for each extracted entry so we can report it.
-      const args = ['x', archivePath, `-o${destDir}`, '-y', '-bsp1', '-bso1', '-bse1', '-bb1']
-      uc_log(`spawning 7zip with command: ${cmd} ${args.join(' ')}`)
+      // -mmt limits the worker thread count.
+      const args = ['x', archivePath, `-o${destDir}`, '-y', `-mmt=${threadCap}`, '-bsp1', '-bso1', '-bse1', '-bb1']
+      uc_log(`spawning 7zip (${threadCap}/${cpuCount} threads): ${cmd} ${args.join(' ')}`)
 
       const proc = child_process.spawn(cmd, args, { windowsHide: true })
+      // Lower the process priority so a multi-GB extraction doesn't starve
+      // the rest of the system. PRIORITY_BELOW_NORMAL maps to BELOW_NORMAL on
+      // Windows and nice=10 on Linux/macOS. Best-effort — some platforms
+      // require elevated permissions to change priority for arbitrary PIDs.
+      try {
+        if (proc.pid) os.setPriority(proc.pid, os.constants.priority.PRIORITY_BELOW_NORMAL)
+      } catch (err) {
+        uc_log(`could not lower 7z priority: ${err?.message || err}`)
+      }
       let settled = false
       let aborted = false
       let stdout = ''
@@ -6966,6 +7724,56 @@ function run7zTest(archivePath) {
 // for an accurate initial panel load regardless of which downloader is active.
 const latestDownloadState = new Map()
 
+// Throttle map (appid -> last write timestamp) for the on-disk manifest
+// downloadSnapshot. The renderer's LevelDB persist is debounced at 1.5s and
+// won't flush at all if the process is hard-killed (taskkill, terminal Ctrl+C
+// hitting Windows' "Terminate batch job"). Writing the snapshot directly to
+// the installing manifest on the main side guarantees a resume target exists
+// on disk regardless of how the app exits.
+const installingSnapshotWriteAt = new Map()
+const INSTALLING_SNAPSHOT_WRITE_MIN_INTERVAL_MS = 1500
+
+function maybeWriteInstallingDownloadSnapshot(payload) {
+  if (!payload || !payload.appid || !payload.downloadId) return
+  const status = payload.status
+  // Only persist while the download is actually progressing or resumable.
+  if (!['downloading', 'paused', 'verifying', 'retrying'].includes(status)) return
+  const now = Date.now()
+  const last = installingSnapshotWriteAt.get(payload.appid) || 0
+  if (now - last < INSTALLING_SNAPSHOT_WRITE_MIN_INTERVAL_MS && status === 'downloading') {
+    return
+  }
+  installingSnapshotWriteAt.set(payload.appid, now)
+  try {
+    const folder = findInstallingFolderByAppid(payload.appid)
+    if (!folder) return
+    const manifestPath = path.join(folder, INSTALLED_MANIFEST)
+    const manifest = readJsonFile(manifestPath)
+    if (!manifest) return
+    const snapshot = manifest.downloadSnapshot && typeof manifest.downloadSnapshot === 'object'
+      ? { ...manifest.downloadSnapshot }
+      : {}
+    if (payload.url) snapshot.url = payload.url
+    if (payload.savePath) snapshot.savePath = payload.savePath
+    if (payload.filename) snapshot.filename = payload.filename
+    if (payload.downloadId) snapshot.downloadId = payload.downloadId
+    if (Number.isFinite(Number(payload.totalBytes)) && Number(payload.totalBytes) > 0) {
+      snapshot.totalBytes = Number(payload.totalBytes)
+    }
+    if (Number.isFinite(Number(payload.receivedBytes))) {
+      snapshot.receivedBytes = Number(payload.receivedBytes)
+    }
+    if (payload.url && isUCFilesUrl(payload.url)) snapshot.host = 'ucfiles'
+    else if (!snapshot.host) snapshot.host = 'ucfiles'
+    snapshot.updatedAt = now
+    manifest.downloadSnapshot = snapshot
+    manifest.updatedAt = now
+    uc_writeJsonSync(manifestPath, manifest)
+  } catch (err) {
+    // best-effort — never block the renderer update on this
+  }
+}
+
 function sendDownloadUpdate(win, payload) {
   try {
     const settings = readSettings() || {}
@@ -6979,10 +7787,15 @@ function sendDownloadUpdate(win, payload) {
     if (payload.downloadId) {
       if (['completed', 'failed', 'cancelled'].includes(payload.status)) {
         latestDownloadState.delete(payload.downloadId)
+        installingSnapshotWriteAt.delete(payload.appid || '')
       } else {
         latestDownloadState.set(payload.downloadId, payload)
       }
     }
+    // Persist resume metadata to the installing manifest (throttled) so a
+    // hard kill — terminal Ctrl+C, taskkill, OS crash — still leaves
+    // enough on disk for the next launch to resume.
+    maybeWriteInstallingDownloadSnapshot(payload)
     // Send to main window (always)
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('uc:download-update', payload)
@@ -7060,7 +7873,19 @@ function registerRunningGame(appid, exePath, proc, gameName, showGameName = true
   // Notify renderers so they can fire an immediate presence heartbeat and the
   // website's "now playing" counter updates without waiting for the 2.5-min tick.
   broadcastPresenceChange({ reason: 'game-started', appid: appid || null, gameName: gameName || null })
-  if (gameName || appid) {
+  // Per-game RPC mute: when the user has flipped "Hide from Discord RPC" for
+  // this specific appid, suppress the Playing-X presence card entirely. The
+  // global discordRpcEnabled toggle and the NSFW-mask toggle still take
+  // precedence over this; per-game is the *last* opt-out.
+  let rpcMutedForThisGame = false
+  try {
+    const settings = readSettings() || {}
+    const muted = settings.rpcMutedAppids
+    if (muted && typeof muted === 'object' && appid && muted[appid] === true) {
+      rpcMutedForThisGame = true
+    }
+  } catch { /* ignore — fail open, show the presence */ }
+  if (!rpcMutedForThisGame && (gameName || appid)) {
     const buttons = appid
       ? [
         { label: 'Open on web', url: `https://union-crax.xyz/game/${appid}` },
@@ -7071,10 +7896,33 @@ function registerRunningGame(appid, exePath, proc, gameName, showGameName = true
         { label: 'Download UC.D', url: 'https://union-crax.xyz/direct' }
       ]
     const displayName = showGameName ? (gameName || appid) : 'A game'
+    // Discord already prepends "Playing UC.D" as the activity header, so
+    // duplicating it in `state` produced "Playing X" / "Playing" stacked on
+    // top of each other. Drop the state field — the running timer
+    // (startTimestamp) is the secondary signal users actually want.
+    //
+    // Large image: try the game's cover art from its installed manifest.
+    // Discord accepts arbitrary HTTPS URLs for largeImageKey on most clients;
+    // if it doesn't render the cover the presence falls back to the app icon
+    // (no broken-image state), so this is a low-risk enhancement.
+    let largeImageKey
+    let largeImageText
+    if (appid && showGameName) {
+      try {
+        const manifest = readInstalledManifestByAppidSync(appid)
+        const meta = manifest?.metadata || manifest
+        const candidate = meta?.hero_image || meta?.image || meta?.splash || null
+        if (candidate && typeof candidate === 'string' && /^https?:\/\//i.test(candidate)) {
+          largeImageKey = candidate
+          largeImageText = gameName || appid
+        }
+      } catch { /* ignore — fall back to default app icon */ }
+    }
+
     setGameRpcActivity({
       details: `Playing ${displayName}`,
-      state: 'Playing',
       startTimestamp: Math.floor(payload.startedAt / 1000),
+      ...(largeImageKey ? { largeImageKey, largeImageText } : {}),
       buttons
     }).catch(() => { })
   }
@@ -7211,6 +8059,18 @@ $candidates | Sort-Object CreationDate | ForEach-Object { $_.ProcessId }`
   }
 
   function handleTrackedExit(exitedPid) {
+    // User-initiated quit must skip the launcher → main-game adoption path.
+    // Otherwise quitting a game like KSP1 kills the launcher, the successor
+    // scan picks up the still-running main game, re-populates runningGames,
+    // and the card flips back to "Playing" with a now-stale PID that the next
+    // Quit click can't kill. quitGameExecutable() also pre-kills all
+    // related PIDs (siblings/game-folder processes) before this fires, so a
+    // launcher with detached/sibling game processes still gets fully closed.
+    if (payload.userQuitRequested) {
+      finalizeTrackedExit(exitedPid)
+      return
+    }
+
     if (process.platform !== 'win32' || !payload.exePath) {
       finalizeTrackedExit(exitedPid)
       return
@@ -7222,10 +8082,19 @@ $candidates | Sort-Object CreationDate | ForEach-Object { $_.ProcessId }`
     const tryAdoptSuccessor = async () => {
       if (!isTrackedPayloadCurrent()) return
       if (payload.pid !== exitedPid) return
+      // If quit landed mid-poll, bail.
+      if (payload.userQuitRequested) {
+        finalizeTrackedExit(exitedPid)
+        return
+      }
 
       const successorPids = await findWindowsSuccessorPids(exitedPid)
       if (!isTrackedPayloadCurrent()) return
       if (payload.pid !== exitedPid) return
+      if (payload.userQuitRequested) {
+        finalizeTrackedExit(exitedPid)
+        return
+      }
 
       if (successorPids.length > 0) {
         const adoptedPid = successorPids[successorPids.length - 1]
@@ -7251,6 +8120,16 @@ $candidates | Sort-Object CreationDate | ForEach-Object { $_.ProcessId }`
     }
 
     setTimeout(tryAdoptSuccessor, 500)
+  }
+
+  // Exposed on the payload so the quit IPC can enumerate everything related
+  // to this game session (launcher PID, all descendants, plus anything
+  // currently executing out of the game's install folder) and kill it as one.
+  payload.findRelatedPids = async () => {
+    if (!payload.pid) return []
+    if (process.platform !== 'win32') return [payload.pid]
+    const successors = await findWindowsSuccessorPids(payload.pid)
+    return Array.from(new Set([payload.pid, ...successors]))
   }
 
   // Auto-show overlay when game launches
@@ -7528,7 +8407,12 @@ function createWindow(existingSplash) {
       // This app needs to talk to a remote Next.js server; easiest path is to disable CORS in the desktop shell.
       webSecurity: false,
       contextIsolation: true,
-      preload: path.join(__dirname, 'preload.cjs')
+      preload: path.join(__dirname, 'preload.cjs'),
+      // Throttle timers/animations when the window is minimized/hidden so we
+      // don't drag the system down while sitting in the tray. This is the
+      // Chromium default for invisible tabs anyway, but Electron sometimes
+      // disables it; setting it explicitly keeps the minimized state cheap.
+      backgroundThrottling: true,
     },
     icon: iconPath
   })
@@ -7644,7 +8528,29 @@ function createWindow(existingSplash) {
     }
   )
 
+  // Make sure the engine claims its downloads first.
+  try { getDownloadEngine().attachSession(mainWindow.webContents.session) } catch (err) {
+    ucLog(`Failed to attach engine session listener: ${err?.message || err}`, 'warn')
+  }
+
   mainWindow.webContents.session.on('will-download', (_event, item) => {
+    // If the download engine owns this URL, bail out — the engine's own
+    // will-download listener has already (or will shortly) handle it.
+    // Match against the full URL chain so post-redirect events still get
+    // recognised (UC.Files share links → backblaze CDN).
+    try {
+      const engine = _downloadEngine
+      if (engine) {
+        let chain = [item.getURL()]
+        try {
+          if (typeof item.getURLChain === 'function') chain = item.getURLChain() || chain
+        } catch { /* ignore */ }
+        const pendingHit = chain.some((u) => engine._pendingByUrl?.has?.(u))
+        const itemHit = Array.from(engine._itemById?.values?.() || []).includes(item)
+        if (pendingHit || itemHit) return
+      }
+    } catch { /* ignore */ }
+
     const downloadRoot = ensureDownloadDir()
     const url = item.getURL()
     const normalizedUrl = normalizeDownloadUrl(url)
@@ -7780,12 +8686,66 @@ function createWindow(existingSplash) {
     item.once('done', async (_event, state) => {
       uc_log(`download done handler start - downloadId=${downloadId} state=${state} url=${url}`)
 
-      // When the app is quitting, Electron cancels all active/paused DownloadItems and fires
-      // done with state='cancelled' (or sometimes 'interrupted'). Don't propagate this to the
-      // renderer - the download was not cancelled by the user. On next startup the renderer will
-      // restore it as 'paused'.
-      if (app.isQuitting && (state === 'cancelled' || state === 'interrupted')) {
-        uc_log(`download done during quit - suppressing ${state} status for ${downloadId}`)
+      // When the app is quitting, Electron cancels all active/paused DownloadItems and
+      // fires 'done' with state='cancelled'/'interrupted'. We want to: (a) keep the
+      // partial file alive, (b) leave the manifest as 'paused' so it shows up as
+      // resumable on next start, and (c) skip propagating the cancel to the renderer.
+      //
+      // We can't rely on `app.isQuitting` here — it's only set inside before-quit,
+      // and Electron fires 'done' for cancellations BEFORE before-quit runs (Ctrl+C,
+      // OS shutdown, taskkill etc. all hit this race). Instead we treat any
+      // 'cancelled'/'interrupted' state that didn't come from `uc:download-cancel`
+      // (i.e. not in `cancelledDownloadIds`) as a shutdown-induced cancel.
+      const isQuitCancel =
+        (state === 'cancelled' || state === 'interrupted') &&
+        !cancelledDownloadIds.has(downloadId)
+
+      if (isQuitCancel) {
+        uc_log(`download done during shutdown - suppressing ${state} status for ${downloadId}`)
+        const entryAtQuit = activeDownloads.get(downloadId)
+        if (entryAtQuit?.savePath) {
+          // Hardlink the partial file before Chromium's cancel callback deletes
+          // the original. Hardlinks are instant on any local filesystem and
+          // survive the original's deletion because both point to the same
+          // inode. before-quit also tries to do this, but the 'done' handler
+          // runs first when SIGTERM/taskkill hit us, so it has to happen here.
+          try {
+            const backupPath = entryAtQuit.savePath + RESUME_BACKUP_EXT
+            if (fs.existsSync(entryAtQuit.savePath)) {
+              if (fs.existsSync(backupPath)) {
+                try { fs.unlinkSync(backupPath) } catch { }
+              }
+              fs.linkSync(entryAtQuit.savePath, backupPath)
+              uc_log(`Preserved partial download via hardlink: ${backupPath} (downloadId=${downloadId})`)
+            }
+          } catch (err) {
+            uc_log(`Failed to preserve partial download ${entryAtQuit.savePath}: ${err?.message || err}`)
+          }
+          // Mark the manifest paused so listInstalling resurrects it as
+          // resumable on next launch. Also stash url/savePath/byte counters
+          // so the renderer can reconstruct a resumable DownloadItem even
+          // when its own LevelDB snapshot is stale.
+          if (entryAtQuit.appid) {
+            try {
+              const lastReceived = item.getReceivedBytes()
+              const lastTotal = item.getTotalBytes()
+              updateInstallingManifestStatus(
+                entryAtQuit.appid,
+                'paused',
+                'App closed. Resume to continue downloading.',
+                {
+                  url: entryAtQuit.url,
+                  savePath: entryAtQuit.savePath,
+                  filename: filename,
+                  downloadId,
+                  totalBytes: lastTotal,
+                  receivedBytes: lastReceived,
+                  host: entryAtQuit.url && isUCFilesUrl(entryAtQuit.url) ? 'ucfiles' : undefined,
+                },
+              )
+            } catch { }
+          }
+        }
         activeDownloads.delete(downloadId)
         refreshOperationPowerSaveBlocker()
         return
@@ -8277,6 +9237,7 @@ function createWindow(existingSplash) {
 app.whenReady().then(async () => {
   ensureDownloadDir()
   registerRendererAssetProtocol()
+  registerLocalMediaProtocol()
   await hydratePersistedLauncherState()
 
   // Show splash immediately, then detect the best reachable domain before
@@ -8467,7 +9428,19 @@ ipcMain.handle('uc:logs-share', async (event, payload) => {
       const responseText = await response.text().catch(() => '')
       if (!response.ok) {
         lastError = responseText || `${response.status} ${response.statusText}`
-        ucLog('Log share failed', 'warn', { endpoint, status: response.status, body: responseText })
+        // Strip Cloudflare / nginx HTML error pages from the log payload —
+        // they account for 5+ kB of useless markup and trigger the
+        // auto-share spiral when the upstream is briefly down. Keep a one-
+        // line summary so a real failure is still debuggable.
+        const isHtmlPage = typeof responseText === 'string' && /^\s*</.test(responseText)
+        const logBody = isHtmlPage
+          ? `<${response.status} HTML error page from gateway, suppressed>`
+          : (responseText || '').slice(0, 512)
+        // Cloudflare 502/503/504 means UC.D's API server is briefly down;
+        // logging at info level avoids the auto-share loop firing for a
+        // recoverable outage. We still log so devs can spot a long outage.
+        const level = response.status >= 500 && response.status < 600 ? 'info' : 'warn'
+        ucLog('Log share failed', level, { endpoint, status: response.status, body: logBody })
         return { ok: false, error: lastError, status: response.status }
       }
 
@@ -8488,6 +9461,27 @@ ipcMain.handle('uc:get-update-status', () => {
 
 ipcMain.handle('uc:get-version', () => {
   return packageJson.version
+})
+
+// Read CHANGELOG.md off disk so the "What's new" modal can parse it client-
+// side. Tries a few resolved locations because dev (project root), packaged
+// resources (app.asar.unpacked / resources/app), and unpacked builds differ.
+ipcMain.handle('uc:get-changelog', async () => {
+  const candidates = []
+  try { candidates.push(path.join(app.getAppPath(), 'CHANGELOG.md')) } catch { /* ignore */ }
+  try { candidates.push(path.join(__dirname, '..', 'CHANGELOG.md')) } catch { /* ignore */ }
+  try { candidates.push(path.join(process.resourcesPath || __dirname, 'CHANGELOG.md')) } catch { /* ignore */ }
+  for (const file of candidates) {
+    try {
+      if (fs.existsSync(file)) {
+        const markdown = await fs.promises.readFile(file, 'utf8')
+        return { ok: true, markdown }
+      }
+    } catch (err) {
+      ucLog(`Failed reading CHANGELOG at ${file}: ${err?.message || err}`, 'warn')
+    }
+  }
+  return { ok: false, error: 'changelog-not-found' }
 })
 
 ipcMain.handle('uc:window-minimize', () => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.minimize() })
@@ -8599,6 +9593,42 @@ ipcMain.handle('uc:download-start', (event, payload) => {
     ucLog('Download start failed: invalid payload', 'warn')
     return { ok: false }
   }
+
+  // New engine path — UC.Files only. The engine handles the queue, disk-based
+  // resume, and persistence on its own. Use it whenever the URL is a
+  // UC.Files-hosted CDN/share link (which is everything we ship now).
+  try {
+    if (isUCFilesUrl(payload.url) || payload.url.includes('cdn.union-crax.xyz')) {
+      const engine = getDownloadEngine()
+      if (engine.byId.has(payload.downloadId)) {
+        const dl = engine.byId.get(payload.downloadId)
+        // A terminal state (failed/cancelled) shouldn't permanently block a
+        // retry with the same id. Drop the stale entry and let the new
+        // enqueue create a fresh one — engine._kickOff still inspects disk
+        // first, so any preserved partial gets reused.
+        if (['failed', 'cancelled'].includes(dl.status)) {
+          engine.byId.delete(payload.downloadId)
+        } else {
+          ucLog(`[engine] download-start: ${payload.downloadId} already known (status=${dl.status})`, 'warn')
+          return { ok: true, already: true, state: dl.status }
+        }
+      }
+      const id = engine.enqueue({
+        webContents: win.webContents,
+        id: payload.downloadId,
+        appid: payload.appid,
+        gameName: payload.gameName,
+        url: payload.url,
+        filename: payload.filename,
+        totalBytes: payload.totalBytes,
+      })
+      ucLog(`[engine] download-start: enqueued ${id} appid=${payload.appid}`)
+      return { ok: true, queued: true, engine: true }
+    }
+  } catch (err) {
+    ucLog(`[engine] download-start routing failed, falling back to legacy: ${err?.message || err}`, 'warn')
+  }
+
   const knownState = getKnownDownloadState(payload.downloadId)
   if (knownState) {
     ucLog(`Download already exists: ${payload.downloadId} (state=${knownState})`, 'warn')
@@ -8666,6 +9696,17 @@ ipcMain.handle('uc:download-start', (event, payload) => {
 
 ipcMain.handle('uc:download-cancel', (_event, downloadId) => {
   if (!downloadId) return { ok: false }
+  // Route to the new engine first if it owns this download.
+  try {
+    const engine = _downloadEngine
+    if (engine && engine.byId.has(downloadId)) {
+      engine.cancel(downloadId)
+      try { storageReservation.release(downloadId) } catch { }
+      return { ok: true, engine: true }
+    }
+  } catch (err) {
+    ucLog(`[engine] cancel route failed: ${err?.message || err}`, 'warn')
+  }
   // Track this ID as cancelled so delayed/pending downloads can't resurrect
   cancelledDownloadIds.add(downloadId)
   // Auto-clean after 5 minutes to avoid memory leak
@@ -8748,6 +9789,17 @@ ipcMain.handle('uc:download-cancel', (_event, downloadId) => {
 ipcMain.handle('uc:download-pause', (event, downloadId) => {
   const win = BrowserWindow.fromWebContents(event.sender)
 
+  // Route to engine first if it owns this download.
+  try {
+    const engine = _downloadEngine
+    if (engine && engine.byId.has(downloadId)) {
+      engine.pause(downloadId)
+      return { ok: true, engine: true }
+    }
+  } catch (err) {
+    ucLog(`[engine] pause route failed: ${err?.message || err}`, 'warn')
+  }
+
   const extractionResult = interruptExtractionJob(downloadId, 'pause', 'Extraction paused. Install again to continue.')
   if (extractionResult.ok) return { ok: true }
 
@@ -8812,6 +9864,17 @@ ipcMain.handle('uc:download-pause', (event, downloadId) => {
 
 ipcMain.handle('uc:download-resume', (event, downloadId) => {
   const win = BrowserWindow.fromWebContents(event.sender)
+
+  // Route to engine first if it owns this download.
+  try {
+    const engine = _downloadEngine
+    if (engine && engine.byId.has(downloadId)) {
+      const ok = engine.resume(downloadId)
+      return { ok, engine: true }
+    }
+  } catch (err) {
+    ucLog(`[engine] resume route failed: ${err?.message || err}`, 'warn')
+  }
 
   // UC.Files parallel download resume
   const ucEntry = ucfilesActiveDownloads.get(downloadId)
@@ -8967,6 +10030,45 @@ ipcMain.handle('uc:download-resume-with-fresh-url', (event, payload) => {
   }
   if (!payload || !payload.url || typeof payload.url !== 'string') return { ok: false, error: 'missing-url' }
 
+  // New engine path: adopt this resume into the engine. The engine's _kickOff
+  // handles "is there a partial on disk? if yes resume from offset; if no
+  // start fresh" in a single, debuggable code path — and once it owns the
+  // download all future progress flows through the engine's events. This
+  // replaces the legacy createInterruptedDownload-from-the-IPC approach that
+  // was racing with the legacy will-download listener.
+  try {
+    if (isUCFilesUrl(payload.url) || payload.url.includes('cdn.union-crax.xyz')) {
+      const engine = getDownloadEngine()
+      // Drop any prior engine record for this id so enqueue creates a fresh one
+      // pointed at the current savePath. The engine's enqueue will look on disk
+      // for partials before starting.
+      if (payload.downloadId && engine.byId.has(payload.downloadId)) {
+        engine.byId.delete(payload.downloadId)
+      }
+      const id = engine.enqueue({
+        webContents: win.webContents,
+        id: payload.downloadId,
+        appid: payload.appid,
+        gameName: payload.gameName,
+        url: payload.url,
+        filename: payload.filename,
+        totalBytes: payload.totalBytes,
+      })
+      ucLog(`[engine] resume-with-fresh-url adopted as engine download: ${id}`)
+      let actualOffset = 0
+      try {
+        const dl = engine.byId.get(id)
+        if (dl?.savePath) {
+          const st = fs.statSync(dl.savePath)
+          if (st && st.isFile()) actualOffset = st.size
+        }
+      } catch { }
+      return { ok: true, actualOffset, engine: true }
+    }
+  } catch (err) {
+    ucLog(`[engine] resume-with-fresh-url adoption failed, falling back to legacy: ${err?.message || err}`, 'warn')
+  }
+
   const savePath = payload.savePath
   // Attempt to restore the partial file if Chromium deleted it during a previous quit
   if (!savePath || !restorePreservedFile(savePath)) {
@@ -8984,33 +10086,15 @@ ipcMain.handle('uc:download-resume-with-fresh-url', (event, payload) => {
     return { ok: false, error: 'empty-file' }
   }
 
-  // UC.Files preallocates the destination file to its final size before the chunks are
-  // fully written, so file-size equality is not proof of completion. Hand those resumes
-  // back to the UC.Files engine, which can use its chunk checkpoint sidecar.
+  // UC.Files now uses Electron's downloader (no chunk preallocation), so a
+  // file at >= totalBytes really is complete. The legacy parallel-engine
+  // handoff was removed when UC.Files switched to Backblaze-backed links.
   if (payload.totalBytes && actualOffset >= payload.totalBytes) {
-    if (isUCFilesUrl(payload.url)) {
-      const resumeState = readUCFilesResumeState(savePath)
-      const completedCount = Array.isArray(resumeState?.completedChunks) ? resumeState.completedChunks.length : 0
-      const expectedChunks = payload.totalBytes > 0 ? Math.ceil(payload.totalBytes / UCFILES_CHUNK_SIZE) : 0
-      if (expectedChunks > 0 && completedCount >= expectedChunks) {
-        ucLog(`resume-with-fresh-url: UC.Files checkpoint shows all ${completedCount} chunks complete, handing off to install`, 'info')
-        return { ok: false, error: 'file-already-complete' }
-      }
-      ucLog(`resume-with-fresh-url: UC.Files file is preallocated (${actualOffset}/${payload.totalBytes}) with ${completedCount}/${expectedChunks || '?'} chunks done, delegating to UC.Files resume`, 'info')
-      return { ok: false, error: 'use-ucfiles-engine-resume' }
-    }
-
     ucLog(`resume-with-fresh-url: file already complete (offset=${actualOffset}, totalBytes=${payload.totalBytes}), skipping re-download`, 'info')
     return { ok: false, error: 'file-already-complete' }
   }
 
   ucLog(`resume-with-fresh-url: downloadId=${payload.downloadId} url=${payload.url} offset=${actualOffset} savePath=${savePath}`, 'info')
-
-  // Register auth header for pixeldrain authenticated downloads
-  if (payload.authHeader && payload.url.includes('pixeldrain.com')) {
-    const fileId = extractPixeldrainFileIdFromUrl(payload.url)
-    if (fileId) pixeldrainAuthHeaders.set(fileId, payload.authHeader)
-  }
 
   pendingDownloads.push({
     url: payload.url,
@@ -9043,6 +10127,194 @@ ipcMain.handle('uc:download-resume-with-fresh-url', (event, payload) => {
     return { ok: true, actualOffset }
   } catch (e) {
     return { ok: false, error: String(e) }
+  }
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// New simplified smart-start: a single IPC the renderer calls with a fresh url
+// to either resume from disk or start from scratch. Replaces the renderer-side
+// 3-level resume cascade. The main process is the single source of truth for
+// what's on disk and whether resume is possible.
+//
+// Payload: { appid, downloadId, gameName, url, filename, totalBytes? }
+// Returns: { ok, resumed: boolean, actualOffset?: number, savePath?: string, error?: string }
+//
+// Behaviour:
+//  1. Resolve the target savePath (installing/<folder>/<filename>).
+//  2. Scan the installing folder for any partial: live file, .crdownload, or
+//     the .ucresume hardlink we preserve on graceful quit.
+//  3. If a partial exists → rename to canonical savePath and createInterruptedDownload
+//     from its size. If complete → return file-already-complete.
+//  4. If no partial → regular downloadURL fresh start.
+// ─────────────────────────────────────────────────────────────────────────────
+ipcMain.handle('uc:dl:smart-start', async (event, payload) => {
+  const win = BrowserWindow.fromWebContents(event.sender)
+  if (!win || win.isDestroyed()) return { ok: false, error: 'no-window' }
+
+  if (!payload || !payload.appid || !payload.downloadId || typeof payload.url !== 'string' || !payload.url) {
+    return { ok: false, error: 'invalid-payload' }
+  }
+
+  const { appid, downloadId, gameName, url, filename, totalBytes } = payload
+
+  // Bail if already running so duplicate clicks don't spawn a second download.
+  if (activeDownloads.has(downloadId) || ucfilesActiveDownloads.has(downloadId)) {
+    return { ok: true, resumed: true, alreadyActive: true }
+  }
+  if (cancelledDownloadIds.has(downloadId)) {
+    cancelledDownloadIds.delete(downloadId)
+  }
+
+  try {
+    const downloadRoot = ensureDownloadDir()
+    const folderName = safeFolderName(gameName || appid || 'unknown')
+    const installingRoot = ensureSubdir(path.join(downloadRoot, installingDirName), folderName)
+    // Settle on a deterministic savePath. If the caller passed a filename, use
+    // it; otherwise fall back to what the manifest snapshot remembers, then to
+    // a derived name from the URL path.
+    let resolvedFilename = (typeof filename === 'string' && filename.trim()) ? filename.trim() : ''
+    if (!resolvedFilename) {
+      try {
+        const manifest = readJsonFile(path.join(installingRoot, INSTALLED_MANIFEST))
+        const snap = manifest && manifest.downloadSnapshot
+        if (snap && typeof snap.filename === 'string' && snap.filename) {
+          resolvedFilename = snap.filename
+        }
+      } catch { }
+    }
+    if (!resolvedFilename) {
+      try {
+        const parsed = new URL(url)
+        const last = decodeURIComponent(parsed.pathname.split('/').pop() || '')
+        if (last) resolvedFilename = last
+      } catch { }
+    }
+    if (!resolvedFilename) resolvedFilename = `${safeFolderName(gameName || appid || 'download')}.archive`
+    const savePath = path.join(installingRoot, resolvedFilename)
+
+    // Look for any partial on disk and promote it to the canonical savePath.
+    // Order of preference: the live file → .crdownload (Chromium temp) → .ucresume (hardlink backup).
+    const tryPromote = (candidatePath) => {
+      try {
+        if (!fs.existsSync(candidatePath)) return false
+        const st = fs.statSync(candidatePath)
+        if (!st.isFile() || st.size <= 0) return false
+        if (path.resolve(candidatePath) === path.resolve(savePath)) return true
+        try { fs.renameSync(candidatePath, savePath) } catch { return false }
+        ucLog(`[dl:smart-start] Promoted partial: ${candidatePath} → ${savePath}`, 'info')
+        return true
+      } catch { return false }
+    }
+
+    let hasPartial = tryPromote(savePath)
+      || tryPromote(savePath + '.crdownload')
+      || tryPromote(savePath + RESUME_BACKUP_EXT)
+
+    if (!hasPartial) {
+      // The exact filename may differ from what the caller knows about (the
+      // CDN's content-disposition vs. the URL path vs. an older filename in
+      // the manifest). As a last-ditch effort, pick the biggest non-sidecar
+      // file in the installing folder and use that as the partial.
+      try {
+        const entries = fs.readdirSync(installingRoot)
+        const sidecars = new Set([INSTALLED_MANIFEST.toLowerCase(), 'image.jpg', 'splash.jpg', 'hero-image.jpg', 'hero-animated.webp', 'hero-image.webp', 'background-image.jpg', 'hero-logo.jpg', 'screenshots'])
+        let best = null
+        for (const entry of entries) {
+          if (sidecars.has(entry.toLowerCase())) continue
+          const full = path.join(installingRoot, entry)
+          try {
+            const st = fs.statSync(full)
+            if (!st.isFile() || st.size <= 0) continue
+            if (!best || st.size > best.size) best = { name: entry, path: full, size: st.size }
+          } catch { }
+        }
+        if (best) {
+          // Strip known partial suffixes when computing the canonical name.
+          const canonicalName = best.name
+            .replace(/\.crdownload$/, '')
+            .replace(new RegExp(RESUME_BACKUP_EXT + '$'), '')
+          const canonicalPath = path.join(installingRoot, canonicalName)
+          if (best.path !== canonicalPath) {
+            try { fs.renameSync(best.path, canonicalPath) } catch { }
+          }
+          resolvedFilename = canonicalName
+          // Use canonicalPath as savePath since that's where the bytes are
+          if (canonicalPath !== savePath && fs.existsSync(canonicalPath)) {
+            // Rewrite the variable for the rest of this handler
+            // (savePath was const, so we read fs.statSync on canonicalPath instead)
+            try {
+              const st = fs.statSync(canonicalPath)
+              if (st.isFile() && st.size > 0) {
+                hasPartial = true
+                ucLog(`[dl:smart-start] Adopted partial under different name: ${canonicalPath} (${st.size} bytes)`, 'info')
+                // For the rest of the handler we'll use canonicalPath; reassign-by-shadowing.
+                payload.__resolvedSavePath = canonicalPath
+              }
+            } catch { }
+          } else if (canonicalPath === savePath) {
+            hasPartial = true
+          }
+        }
+      } catch { }
+    }
+
+    const effectiveSavePath = payload.__resolvedSavePath || savePath
+
+    // Register the pending entry so will-download / done handlers wire up
+    // properly. Both code paths below rely on this.
+    pendingDownloads.push({
+      url,
+      normalizedUrl: normalizeDownloadUrl(url),
+      downloadId,
+      filename: path.basename(effectiveSavePath),
+      appid,
+      gameName: gameName || null,
+      savePath: effectiveSavePath,
+      _addedAt: Date.now(),
+    })
+
+    // Make sure the manifest exists so the rest of the install pipeline can
+    // attach to it. We don't overwrite metadata — just ensure status is set.
+    try { updateInstallingManifestStatus(appid, 'installing', null) } catch { }
+
+    if (hasPartial) {
+      let actualOffset = 0
+      try { actualOffset = fs.statSync(effectiveSavePath).size } catch { }
+
+      if (totalBytes && actualOffset >= totalBytes) {
+        // File looks complete on disk — let the renderer trigger the install
+        // step rather than re-downloading.
+        const idx = pendingDownloads.findIndex((p) => p.downloadId === downloadId)
+        if (idx >= 0) pendingDownloads.splice(idx, 1)
+        return { ok: true, resumed: true, actualOffset, savePath: effectiveSavePath, alreadyComplete: true }
+      }
+
+      try {
+        win.webContents.session.createInterruptedDownload({
+          path: effectiveSavePath,
+          urlChain: [url],
+          mimeType: '',
+          offset: actualOffset,
+          length: totalBytes || 0,
+          lastModified: '',
+          eTag: '',
+          startTime: Date.now(),
+        })
+        ucLog(`[dl:smart-start] Resumed from disk: appid=${appid} offset=${actualOffset} savePath=${effectiveSavePath}`, 'info')
+        return { ok: true, resumed: true, actualOffset, savePath: effectiveSavePath }
+      } catch (err) {
+        ucLog(`[dl:smart-start] createInterruptedDownload failed: ${err?.message || err} — falling back to fresh start`, 'warn')
+        // Fall through to fresh start below.
+      }
+    }
+
+    // Fresh start.
+    ucLog(`[dl:smart-start] Fresh download: appid=${appid} url=${url}`, 'info')
+    win.webContents.downloadURL(url)
+    return { ok: true, resumed: false, savePath: effectiveSavePath }
+  } catch (err) {
+    ucLog(`[dl:smart-start] failed: ${err?.message || err}`, 'error')
+    return { ok: false, error: String(err?.message || err) }
   }
 })
 
@@ -9341,6 +10613,36 @@ ipcMain.handle('uc:pick-archive-files', async () => {
     return { ok: false, error: String(err) }
   }
 })
+
+// Wire the engine's 'complete' event into the existing archive install pipeline.
+// We do this after runArchiveInstallJob is declared so the function reference
+// is available — main.cjs is otherwise hoisting-friendly but this gets used
+// from getDownloadEngine() which may be called before this point in dev.
+_handleEngineDownloadCompleteImpl = async function _engineCompleteImpl(dl) {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  if (!dl?.savePath || !fs.existsSync(dl.savePath)) {
+    ucLog(`[engine] complete but file missing: ${dl?.savePath}`, 'warn')
+    return
+  }
+  try {
+    const installingDir = path.dirname(dl.savePath)
+    const manifestPath = path.join(installingDir, INSTALLED_MANIFEST)
+    const manifest = readJsonFile(manifestPath) || {}
+    const metadata = manifest.metadata || { appid: dl.appid, name: dl.gameName || dl.appid }
+    await runArchiveInstallJob(mainWindow, {
+      appid: dl.appid,
+      gameName: dl.gameName || metadata.name || dl.appid,
+      archivePaths: [dl.savePath],
+      metadata,
+      downloadId: dl.id,
+    }, {
+      preserveSourceFiles: false,
+      cleanupInstallingRoot: installingDir,
+    })
+  } catch (err) {
+    ucLog(`[engine] runArchiveInstallJob failed for ${dl.id}: ${err?.message || err}`, 'error')
+  }
+}
 
 async function runArchiveInstallJob(win, payload, options = {}) {
   if (!win || win.isDestroyed()) return { ok: false, error: 'no_window' }
@@ -9746,7 +11048,7 @@ ipcMain.handle('uc:installed-get', (_event, appid) => {
     const root = path.join(downloadRoot, installedDirName)
     for (const { folder } of iterateGameFolders(root)) {
       const manifestPath = path.join(folder, INSTALLED_MANIFEST)
-      const manifest = readJsonFile(manifestPath)
+      const manifest = readInstalledManifestForRenderer(manifestPath, downloadRoot)
       if (manifest && manifest.appid === appid) {
         if (needsMediaCache(manifest.metadata || manifest)) {
           ;(async () => {
@@ -9775,7 +11077,7 @@ ipcMain.handle('uc:installed-list-by-appid', (_event, appid) => {
       const installedRoot = path.join(root, installedDirName)
       for (const { folder } of iterateGameFolders(installedRoot)) {
         const manifestPath = path.join(folder, INSTALLED_MANIFEST)
-        const manifest = readJsonFile(manifestPath)
+        const manifest = readInstalledManifestForRenderer(manifestPath, root)
         if (!manifest || manifest.appid !== appid) continue
         if (seen.has(manifestPath)) continue
         seen.add(manifestPath)
@@ -9820,7 +11122,7 @@ ipcMain.handle('uc:installed-get-global', (_event, appid) => {
       const installedRoot = path.join(root, installedDirName)
       for (const { folder } of iterateGameFolders(installedRoot)) {
         const manifestPath = path.join(folder, INSTALLED_MANIFEST)
-        const manifest = readJsonFile(manifestPath)
+        const manifest = readInstalledManifestForRenderer(manifestPath, root)
         if (manifest && manifest.appid === appid) {
           if (needsMediaCache(manifest.metadata || manifest)) {
             ;(async () => {
@@ -11056,11 +12358,36 @@ async function launchGameExecutableFromMain(appid, exePath, gameName, showGameNa
     ucLog(`Launching game: ${appid} at ${exePath}`)
 
     try {
-      const { command, args, cwd } = appid
+      const launchSpec = appid
         ? resolveLaunchCommandWithGameConfig(exePath, appid)
         : resolveLaunchCommand(exePath)
+      const { command, cwd } = launchSpec
+      let { args } = launchSpec
+      args = Array.isArray(args) ? args.slice() : []
 
       const settings = readSettings() || {}
+
+      // Per-game custom launch arguments — power-user feature ("Launch
+      // options" in the gear menu). Stored as a string; we split it on
+      // whitespace while honouring shell-style "double-quoted" or
+      // 'single-quoted' tokens so users can pass paths with spaces.
+      if (appid && settings.gameLaunchArgs && typeof settings.gameLaunchArgs === 'object') {
+        const raw = settings.gameLaunchArgs[appid]
+        if (typeof raw === 'string' && raw.trim()) {
+          try {
+            const extraArgs = []
+            const re = /"([^"]*)"|'([^']*)'|(\S+)/g
+            let m
+            while ((m = re.exec(raw)) !== null) {
+              extraArgs.push(m[1] ?? m[2] ?? m[3] ?? '')
+            }
+            if (extraArgs.length > 0) args.push(...extraArgs)
+          } catch (e) {
+            ucLog(`Failed to parse gameLaunchArgs for ${appid}: ${e?.message || e}`, 'warn')
+          }
+        }
+      }
+
       if (settings.verboseDownloadLogging) {
         ucLog(`  Working directory: ${cwd}`, 'info')
         ucLog(`  Command: ${command}`, 'info')
@@ -11140,15 +12467,74 @@ ipcMain.handle('uc:game-exe-running', async (_event, appid) => {
   }
 })
 
+// Bulk lookup so the library / launcher grid can mount with one IPC call
+// instead of N (one per visible installed card). We do NOT poll the OS here
+// — the source-of-truth is the runningGames map maintained by
+// registerRunningGame + the exit monitor. Stale entries are pruned by the
+// existing pruneRunningGames sweep, so this read is cheap and sync-fast.
+ipcMain.handle('uc:game-exe-running-list', () => {
+  try {
+    const appids = []
+    const seen = new Set()
+    for (const payload of runningGames.values()) {
+      if (!payload || !payload.appid) continue
+      if (seen.has(payload.appid)) continue
+      seen.add(payload.appid)
+      appids.push(payload.appid)
+    }
+    return { ok: true, appids }
+  } catch (err) {
+    ucLog(`Running games list failed: ${err?.message || err}`, 'error')
+    return { ok: false, appids: [] }
+  }
+})
+
 ipcMain.handle('uc:game-exe-quit', async (_event, appid) => {
   try {
     const running = getRunningGame(appid)
     if (!running) return { ok: true, stopped: false }
-    let stopped = await killProcessTree(running.pid)
-    if (!stopped) {
-      const alive = await isProcessRunning(running.pid)
-      if (!alive) stopped = true
+
+    // Flag this as a user-requested quit *before* killing anything so the
+    // exit listener / monitor poll can't sneak in a successor adoption
+    // between killProcessTree returning and handleDead running.
+    running.userQuitRequested = true
+
+    // Enumerate every PID associated with this session — the original launcher
+    // PID, every descendant we can walk via WMI, and (fallback) any process
+    // currently executing out of the game's install folder. Games like KSP1
+    // ship a launcher that spawns the actual game as a sibling (sometimes
+    // re-parented away from the launcher), so a single taskkill /T against
+    // the launcher leaves the main game alive.
+    let relatedPids = [running.pid]
+    if (typeof running.findRelatedPids === 'function') {
+      try {
+        const found = await running.findRelatedPids()
+        if (Array.isArray(found) && found.length > 0) relatedPids = found
+      } catch (err) {
+        ucLog(`[Game] findRelatedPids failed for ${running.appid || running.pid}: ${err?.message || err}`, 'warn')
+      }
     }
+
+    let killedAny = false
+    for (const pid of relatedPids) {
+      if (!pid) continue
+      const ok = await killProcessTree(pid)
+      if (ok) killedAny = true
+    }
+
+    // Verify everything actually died. If even one PID is still alive after
+    // the kill pass, report stopped=false so the UI can offer a retry.
+    let stillAlive = false
+    for (const pid of relatedPids) {
+      if (!pid) continue
+      const alive = await isProcessRunning(pid)
+      if (alive) {
+        stillAlive = true
+        break
+      }
+    }
+    const stopped = killedAny && !stillAlive
+
     if (stopped) {
       // Let the normal exit finalizer record the completed playtime session.
       // Direct deletion here drops the only in-memory start time.
@@ -11161,6 +12547,10 @@ ipcMain.handle('uc:game-exe-quit', async (_event, appid) => {
         if (running.exePath) runningGames.delete(running.exePath)
         if (runningGames.size === 0) clearGameRpcActivity()
       }
+    } else {
+      // Quit didn't fully succeed — clear the flag so a legitimate auto-exit
+      // later doesn't end up routed through the userQuit short-circuit.
+      running.userQuitRequested = false
     }
     return { ok: true, stopped }
   } catch (err) {
@@ -12743,6 +14133,9 @@ function broadcastPresenceChange(detail) {
       } catch { /* swallow per-window send errors */ }
     }
   } catch { /* swallow */ }
+  // Tray menu reflects "Playing X" / "Quit game" — refresh whenever a game
+  // starts or exits so right-clicking the tray icon is always accurate.
+  refreshTrayMenu()
 }
 
 function pickCurrentRunningGame() {

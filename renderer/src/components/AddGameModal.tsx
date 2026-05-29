@@ -40,12 +40,25 @@ interface MatchedGame {
 interface AddGameModalProps {
   open: boolean
   onOpenChange: (open: boolean) => void
+  /** Pre-select the install source. Useful when a drag-and-drop opens this
+   *  modal — the user already implied "archive" by dropping a .zip, so we
+   *  skip the folder-vs-archive picker. */
+  initialSource?: InstallSource
 }
 
-export function AddGameModal({ open, onOpenChange }: AddGameModalProps) {
+export function AddGameModal({ open, onOpenChange, initialSource }: AddGameModalProps) {
   const [gameName, setGameName] = useState("")
   const [gamePath, setGamePath] = useState("")
-  const [installSource, setInstallSource] = useState<InstallSource>("folder")
+  const [installSource, setInstallSource] = useState<InstallSource>(initialSource ?? "folder")
+
+  // When the modal opens with a fresh initialSource (e.g. drag-and-drop fires
+  // again after the modal was closed), sync state. We intentionally don't
+  // overwrite during an existing edit — only on the open transition.
+  useEffect(() => {
+    if (open && initialSource) {
+      setInstallSource(initialSource)
+    }
+  }, [open, initialSource])
   const [searching, setSearching] = useState(false)
   const [matchedGame, setMatchedGame] = useState<MatchedGame | null>(null)
   const [matchResults, setMatchResults] = useState<MatchedGame[]>([])
@@ -262,8 +275,8 @@ export function AddGameModal({ open, onOpenChange }: AddGameModalProps) {
         {success ? (
           <div className="flex flex-col items-center gap-3 py-8">
             <CheckCircle2 className="h-12 w-12 text-green-500" />
-            <p className="text-lg font-semibold text-zinc-100">Game Added!</p>
-            <p className="text-sm text-zinc-400">
+            <p className="text-lg font-semibold text-foreground">Game Added!</p>
+            <p className="text-sm text-muted-foreground">
               You can find it in your Library.
             </p>
           </div>
@@ -281,7 +294,7 @@ export function AddGameModal({ open, onOpenChange }: AddGameModalProps) {
                   className={`rounded-xl border px-4 py-3 text-left transition-colors ${
                     installSource === "folder"
                       ? "border-white/40 bg-white/10 text-white"
-                      : "border-white/[.07] bg-[#09090b]/40 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200"
+                      : "border-white/[.07] bg-[#09090b]/40 text-muted-foreground hover:border-border hover:text-foreground/90"
                   }`}
                 >
                   <div className="flex items-center gap-2 text-sm font-medium">
@@ -301,7 +314,7 @@ export function AddGameModal({ open, onOpenChange }: AddGameModalProps) {
                   className={`rounded-xl border px-4 py-3 text-left transition-colors ${
                     installSource === "archive"
                       ? "border-white/40 bg-white/10 text-white"
-                      : "border-white/[.07] bg-[#09090b]/40 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200"
+                      : "border-white/[.07] bg-[#09090b]/40 text-muted-foreground hover:border-border hover:text-foreground/90"
                   }`}
                 >
                   <div className="flex items-center gap-2 text-sm font-medium">
@@ -337,17 +350,17 @@ export function AddGameModal({ open, onOpenChange }: AddGameModalProps) {
                 />
                 <div className="absolute right-3 top-1/2 -translate-y-1/2">
                   {searching ? (
-                    <Loader2 className="h-4 w-4 animate-spin text-zinc-400" />
+                    <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
                   ) : (
-                    <Search className="h-4 w-4 text-zinc-400" />
+                    <Search className="h-4 w-4 text-muted-foreground" />
                   )}
                 </div>
               </div>
 
               {/* Search Results Dropdown */}
               {showResults && matchResults.length > 0 && (
-                <div className="overflow-hidden rounded-2xl border border-white/[.07] bg-zinc-900/95 shadow-2xl">
-                  <div className="px-3 py-2 text-xs text-zinc-400 border-b border-white/[.07]">
+                <div className="overflow-hidden rounded-2xl border border-white/[.07] bg-card/95 shadow-2xl">
+                  <div className="px-3 py-2 text-xs text-muted-foreground border-b border-white/[.07]">
                     Matches from UC catalog
                   </div>
                   {matchResults.map((game) => (
@@ -361,24 +374,24 @@ export function AddGameModal({ open, onOpenChange }: AddGameModalProps) {
                         <img
                           src={proxyImageUrl(game.image)}
                           alt={game.name}
-                          className="h-10 w-16 rounded object-cover bg-zinc-800"
+                          className="h-10 w-16 rounded object-cover bg-secondary"
                           onError={(e) => {
                             ;(e.target as HTMLImageElement).style.display = "none"
                           }}
                         />
                       ) : (
-                        <div className="flex h-10 w-16 items-center justify-center rounded bg-zinc-800">
-                          <ImageIcon className="h-4 w-4 text-zinc-400" />
+                        <div className="flex h-10 w-16 items-center justify-center rounded bg-secondary">
+                          <ImageIcon className="h-4 w-4 text-muted-foreground" />
                         </div>
                       )}
                       <div className="min-w-0 flex-1">
-                        <div className="truncate text-sm font-medium text-zinc-100">{game.name}</div>
+                        <div className="truncate text-sm font-medium text-foreground">{game.name}</div>
                         <div className="flex items-center gap-2 mt-0.5">
                           {game.size && (
-                            <span className="text-xs text-zinc-400">{game.size}</span>
+                            <span className="text-xs text-muted-foreground">{game.size}</span>
                           )}
                           {game.developer && (
-                            <span className="text-xs text-zinc-400">• {game.developer}</span>
+                            <span className="text-xs text-muted-foreground">• {game.developer}</span>
                           )}
                         </div>
                       </div>
@@ -389,23 +402,23 @@ export function AddGameModal({ open, onOpenChange }: AddGameModalProps) {
 
               {/* Matched Game Preview */}
               {matchedGame && (
-                <div className="flex items-center gap-3 rounded-lg border border-zinc-700 bg-white/5 p-3">
+                <div className="flex items-center gap-3 rounded-lg border border-border bg-white/5 p-3">
                   {imagePreview ? (
                     <img
                       src={imagePreview}
                       alt={matchedGame.name}
-                      className="h-14 w-24 rounded-md object-cover bg-zinc-800"
+                      className="h-14 w-24 rounded-md object-cover bg-secondary"
                       onError={() => setImagePreview(null)}
                     />
                   ) : (
-                    <div className="flex h-14 w-24 items-center justify-center rounded-md bg-zinc-800">
-                      <ImageIcon className="h-5 w-5 text-zinc-400" />
+                    <div className="flex h-14 w-24 items-center justify-center rounded-md bg-secondary">
+                      <ImageIcon className="h-5 w-5 text-muted-foreground" />
                     </div>
                   )}
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
-                      <span className="truncate text-sm font-semibold text-zinc-100">{matchedGame.name}</span>
-                      <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-zinc-700 text-white">
+                      <span className="truncate text-sm font-semibold text-foreground">{matchedGame.name}</span>
+                      <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-border text-white">
                         UC Match
                       </Badge>
                     </div>
@@ -443,12 +456,12 @@ export function AddGameModal({ open, onOpenChange }: AddGameModalProps) {
                     <FolderOpen className="h-4 w-4" />
                   </Button>
                 </div>
-                <p className="text-xs text-zinc-400">
+                <p className="text-xs text-muted-foreground">
                   Select the root folder containing the game&apos;s executable files.
                 </p>
               </div>
             ) : (
-              <div className="rounded-xl border border-white/[.07] bg-[#09090b]/30 px-4 py-3 text-sm text-zinc-400">
+              <div className="rounded-xl border border-white/[.07] bg-[#09090b]/30 px-4 py-3 text-sm text-muted-foreground">
                 After you continue, you&apos;ll choose the archive files to extract into your game library.
               </div>
             )}

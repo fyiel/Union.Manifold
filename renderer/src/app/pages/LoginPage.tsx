@@ -45,19 +45,19 @@ export function LoginPage() {
         <Button
           variant="ghost"
           onClick={() => navigate(-1)}
-          className="gap-2 text-zinc-400 hover:text-white hover:bg-white/[.05]"
+          className="gap-2 text-muted-foreground hover:text-white hover:bg-white/[.05]"
         >
           <ArrowLeft className="h-4 w-4" />
           Back
         </Button>
 
-        <Card className="border border-white/[.07] bg-zinc-900/40 backdrop-blur-xl">
+        <Card className="border border-white/[.07] bg-card/40 backdrop-blur-xl">
           <CardContent className="p-6 space-y-6">
             <div className="text-center space-y-2">
-              <h1 className="text-2xl font-semibold text-zinc-100">
+              <h1 className="text-2xl font-semibold text-foreground">
                 Sign in to UnionCrax.Direct
               </h1>
-              <p className="text-sm text-zinc-500">
+              <p className="text-sm text-muted-foreground/80">
                 Sign in with your UnionCrax account. A secure window will open
                 so you can complete the login.
               </p>
@@ -77,7 +77,7 @@ export function LoginPage() {
               type="button"
               onClick={handleSignIn}
               disabled={signingIn || isLoading}
-              className="w-full gap-2 bg-white text-black hover:bg-zinc-200"
+              className="w-full gap-2 bg-primary text-primary-foreground hover:brightness-110"
             >
               {signingIn ? (
                 <>
@@ -92,7 +92,7 @@ export function LoginPage() {
               )}
             </Button>
 
-            <p className="text-xs text-zinc-500 text-center">
+            <p className="text-xs text-muted-foreground/80 text-center">
               Your session stays on this device. Closing the sign-in window cancels the flow.
             </p>
           </CardContent>

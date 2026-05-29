@@ -88,12 +88,12 @@ export function GameVersionStatus({ appid, gameName, localVersionString, isAuthe
   const hasChecked = hadExplicitCheck || steamData?.buildId != null
 
   let statusText = ""
-  let statusColorClass = "text-zinc-500"
+  let statusColorClass = "text-muted-foreground/80"
 
   if (hasChecked) {
     if (!resolvedSteamAppId && !latestBuild) {
       statusText = "Could not find game on Steam"
-      statusColorClass = "text-zinc-600"
+      statusColorClass = "text-muted-foreground/60"
     } else if (localBuild && latestBuild) {
       const upToDate = localBuild === latestBuild
       statusText = upToDate ? "Game version is up to date" : "A newer build is available on Steam"
@@ -103,14 +103,14 @@ export function GameVersionStatus({ appid, gameName, localVersionString, isAuthe
       statusColorClass = "text-sky-400"
     } else {
       statusText = "Steam build ID not available"
-      statusColorClass = "text-zinc-500"
+      statusColorClass = "text-muted-foreground/80"
     }
   }
 
   const requestUpdateHref = `/request?${new URLSearchParams({ type: "update", game: gameName }).toString()}`
 
   return (
-    <div className="rounded-2xl bg-zinc-900/60 border border-white/[.07] backdrop-blur-md shadow-xl overflow-hidden">
+    <div className="rounded-2xl bg-card/60 border border-white/[.07] backdrop-blur-md shadow-xl overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between px-5 py-4 border-b border-white/[.07]">
         <h3 className="text-xs font-bold text-white uppercase tracking-widest">Version Status</h3>
@@ -118,7 +118,7 @@ export function GameVersionStatus({ appid, gameName, localVersionString, isAuthe
           onClick={() => void handleCheck()}
           disabled={initialLoading || checking}
           title={isAuthed ? (hasChecked ? "Refresh Steam data" : "Check Steam data") : "Log in to check"}
-          className="w-8 h-8 rounded-full flex items-center justify-center bg-zinc-800/50 border border-white/[.07] text-zinc-400 hover:text-white hover:bg-zinc-700 transition-all active:scale-95 disabled:opacity-30 disabled:cursor-not-allowed"
+          className="w-8 h-8 rounded-full flex items-center justify-center bg-secondary/50 border border-white/[.07] text-muted-foreground hover:text-white hover:bg-zinc-700 transition-all active:scale-95 disabled:opacity-30 disabled:cursor-not-allowed"
         >
           {checking
             ? <RefreshCw className="w-3.5 h-3.5 animate-spin" />
@@ -135,17 +135,17 @@ export function GameVersionStatus({ appid, gameName, localVersionString, isAuthe
         {/* Data rows — blurred when unchecked */}
         <div className={`space-y-3 text-sm transition-all duration-300 ${!hasChecked && !initialLoading ? "blur-sm select-none pointer-events-none opacity-50" : ""}`}>
           <div className="flex items-center justify-between">
-            <span className="text-zinc-500">Current Version</span>
-            <span className="font-semibold text-zinc-200">{localVersion ?? "—"}</span>
+            <span className="text-muted-foreground/80">Current Version</span>
+            <span className="font-semibold text-foreground/90">{localVersion ?? "—"}</span>
           </div>
           <div className="flex items-center justify-between">
-            <span className="text-zinc-500">Current Build</span>
-            <span className="font-semibold text-zinc-400">
-              {localBuild ?? <span className="text-zinc-600 italic text-xs">Not stored</span>}
+            <span className="text-muted-foreground/80">Current Build</span>
+            <span className="font-semibold text-muted-foreground">
+              {localBuild ?? <span className="text-muted-foreground/60 italic text-xs">Not stored</span>}
             </span>
           </div>
           <div className="flex items-center justify-between">
-            <span className="text-zinc-500">Latest Build</span>
+            <span className="text-muted-foreground/80">Latest Build</span>
             <span className="font-semibold text-emerald-400">
               {initialLoading
                 ? <span className="udl-skeleton inline-block h-3.5 w-16 rounded align-middle" />
@@ -153,8 +153,8 @@ export function GameVersionStatus({ appid, gameName, localVersionString, isAuthe
             </span>
           </div>
           <div className="flex items-center justify-between">
-            <span className="text-zinc-500">Last Steam Update</span>
-            <span className="text-zinc-400">
+            <span className="text-muted-foreground/80">Last Steam Update</span>
+            <span className="text-muted-foreground">
               {initialLoading
                 ? <span className="udl-skeleton inline-block h-3.5 w-24 rounded align-middle" />
                 : (hasChecked ? (updateDate ?? "—") : "—")}
@@ -167,7 +167,7 @@ export function GameVersionStatus({ appid, gameName, localVersionString, isAuthe
           <button
             onClick={() => void handleCheck()}
             disabled={checking}
-            className="w-full py-2 rounded-xl bg-zinc-800/60 border border-white/[.07] text-zinc-300 text-xs font-medium hover:bg-zinc-700 hover:text-white transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2"
+            className="w-full py-2 rounded-xl bg-secondary/60 border border-white/[.07] text-foreground/80 text-xs font-medium hover:bg-zinc-700 hover:text-white transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2"
           >
             {isAuthed
               ? <><RefreshCw className={`w-3.5 h-3.5 ${checking ? "animate-spin" : ""}`} /> {checking ? "Checking..." : "Check version status"}</>
@@ -181,7 +181,7 @@ export function GameVersionStatus({ appid, gameName, localVersionString, isAuthe
           <div className="pt-3 border-t border-white/[.07] space-y-1">
             <p className={`text-sm font-medium ${statusColorClass}`}>{statusText}</p>
             {lastChecked && (
-              <p className="text-xs text-zinc-600">
+              <p className="text-xs text-muted-foreground/60">
                 Last checked: {lastChecked.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}
               </p>
             )}
@@ -192,7 +192,7 @@ export function GameVersionStatus({ appid, gameName, localVersionString, isAuthe
         <div className="flex flex-col gap-2">
           <a
             href={requestUpdateHref}
-            className="flex items-center justify-center gap-2 w-full py-2.5 rounded-full border border-white/[.07] bg-zinc-800/50 text-zinc-200 text-sm font-semibold hover:bg-zinc-700 hover:border-zinc-600 transition-all active:scale-95"
+            className="flex items-center justify-center gap-2 w-full py-2.5 rounded-full border border-white/[.07] bg-secondary/50 text-foreground/90 text-sm font-semibold hover:bg-zinc-700 hover:border-zinc-600 transition-all active:scale-95"
           >
             Request Update
           </a>
@@ -201,7 +201,7 @@ export function GameVersionStatus({ appid, gameName, localVersionString, isAuthe
               href={`https://steamdb.info/app/${resolvedSteamAppId}/patchnotes/`}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex items-center justify-center gap-2 w-full py-2.5 rounded-full border border-white/[.07] text-zinc-400 text-sm font-medium hover:text-white hover:border-zinc-600 transition-all active:scale-95"
+              className="flex items-center justify-center gap-2 w-full py-2.5 rounded-full border border-white/[.07] text-muted-foreground text-sm font-medium hover:text-white hover:border-zinc-600 transition-all active:scale-95"
             >
               <ExternalLink className="w-3.5 h-3.5" />
               View on SteamDB

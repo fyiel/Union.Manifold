@@ -75,16 +75,16 @@ export function ForgotPasswordPage() {
   if (submitted) {
     return (
       <div className="min-h-screen bg-[#09090b] flex items-center justify-center p-4">
-        <Card className="w-full max-w-md border border-white/[.07] bg-zinc-900/40 backdrop-blur-xl">
+        <Card className="w-full max-w-md border border-white/[.07] bg-card/40 backdrop-blur-xl">
           <CardContent className="p-6 space-y-4 text-center">
             <div className="inline-flex items-center justify-center rounded-full bg-green-500/10 p-3">
               <CheckCircle className="h-8 w-8 text-green-400" />
             </div>
-            <h2 className="text-xl font-semibold text-zinc-100">Check Your Email</h2>
-            <p className="text-sm text-zinc-300">
+            <h2 className="text-xl font-semibold text-foreground">Check Your Email</h2>
+            <p className="text-sm text-foreground/80">
               We've sent password reset instructions to <strong>{email}</strong>
             </p>
-            <p className="text-xs text-zinc-500">
+            <p className="text-xs text-muted-foreground/80">
               Check your email (including spam folder) for a link to reset your password.
             </p>
             <Button onClick={() => navigate("/login", { replace: true })} className="w-full gap-2">
@@ -102,17 +102,17 @@ export function ForgotPasswordPage() {
         <Button
           variant="ghost"
           onClick={() => navigate("/login")}
-          className="gap-2 text-zinc-400 hover:text-white hover:bg-white/[.05]"
+          className="gap-2 text-muted-foreground hover:text-white hover:bg-white/[.05]"
         >
           <ArrowLeft className="h-4 w-4" />
           Back to Login
         </Button>
 
-        <Card className="border border-white/[.07] bg-zinc-900/40 backdrop-blur-xl">
+        <Card className="border border-white/[.07] bg-card/40 backdrop-blur-xl">
           <CardContent className="p-6 space-y-6">
             <div className="text-center space-y-1">
-              <h1 className="text-xl font-semibold text-zinc-100">Reset Password</h1>
-              <p className="text-sm text-zinc-500">
+              <h1 className="text-xl font-semibold text-foreground">Reset Password</h1>
+              <p className="text-sm text-muted-foreground/80">
                 Enter your email to receive password reset instructions
               </p>
             </div>
@@ -126,19 +126,19 @@ export function ForgotPasswordPage() {
 
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="space-y-1.5">
-                <label className="text-sm font-medium text-zinc-300">Email Address</label>
+                <label className="text-sm font-medium text-foreground/80">Email Address</label>
                 <div className="relative">
-                  <Mail className="absolute left-3 top-3 h-4 w-4 text-zinc-500" />
+                  <Mail className="absolute left-3 top-3 h-4 w-4 text-muted-foreground/80" />
                   <Input
                     type="email"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     placeholder="you@example.com"
-                    className="pl-10 border-white/[.07] bg-zinc-800/50 text-white placeholder:text-zinc-600"
+                    className="pl-10 border-white/[.07] bg-secondary/50 text-white placeholder:text-muted-foreground/60"
                     disabled={loading}
                   />
                 </div>
-                <p className="text-xs text-zinc-500">
+                <p className="text-xs text-muted-foreground/80">
                   Enter the email address associated with your account
                 </p>
               </div>

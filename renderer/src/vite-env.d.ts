@@ -209,6 +209,15 @@ declare global {
         totalBytes?: number
         authHeader?: string
       }) => Promise<{ ok: boolean; actualOffset?: number; error?: string }>
+      // New simplified entry point — main process decides resume vs fresh.
+      smartStart: (payload: {
+        appid: string
+        downloadId: string
+        gameName?: string
+        url: string
+        filename?: string
+        totalBytes?: number
+      }) => Promise<{ ok: boolean; resumed?: boolean; actualOffset?: number; savePath?: string; alreadyComplete?: boolean; alreadyActive?: boolean; error?: string }>
       showInFolder: (path: string) => Promise<{ ok: boolean }>
       openPath: (path: string) => Promise<{ ok: boolean }>
       listDisks: () => Promise<
@@ -243,6 +252,7 @@ declare global {
       }>
       launchGameExecutable: (appid: string, exePath: string, gameName?: string, showGameName?: boolean) => Promise<{ ok: boolean; error?: string; pid?: number }>
       getRunningGame: (appid: string) => Promise<{ ok: boolean; running: boolean; pid?: number; exePath?: string }>
+      listRunningGameAppids: () => Promise<{ ok: boolean; appids: string[] }>
       quitGameExecutable: (appid: string) => Promise<{ ok: boolean; stopped?: boolean }>
       deleteInstalled: (appid: string) => Promise<{ ok: boolean }>
       deleteInstalling: (appid: string) => Promise<{ ok: boolean }>
@@ -275,7 +285,11 @@ declare global {
     ucApp?: {
       respondToCloseRequest: (shouldProceed: boolean) => Promise<{ ok: boolean; proceeded: boolean }>
       onCloseRequest: (callback: (data: { mode: "quit" | "hide"; extractionCount?: number; appids?: string[] }) => void) => () => void
-      onNavigationAction?: (callback: (data: { action: 'open-system-profile'; autoScan?: boolean }) => void) => () => void
+      onNavigationAction?: (callback: (data:
+        | { action: 'open-system-profile'; autoScan?: boolean }
+        | { action?: never; path: string }
+      ) => void) => () => void
+      onMirrorAuthBlocked?: (callback: (data: { message: string; baseUrl: string | null }) => void) => () => void
     }
     ucSettings?: {
       get: (key: string) => Promise<any>
@@ -312,6 +326,21 @@ declare global {
         headers: [string, string][]
         body?: string
       }>
+      upload: (
+        baseUrl: string,
+        path: string,
+        payload: {
+          method?: string
+          fields?: Record<string, string>
+          file?: { field?: string; name: string; type: string; base64: string }
+        }
+      ) => Promise<{
+        ok: boolean
+        status: number
+        statusText: string
+        headers: [string, string][]
+        body?: string
+      }>
     }
     ucUpdater?: {
       checkForUpdates: () => Promise<{
@@ -327,6 +356,7 @@ declare global {
       }>
       installUpdate: () => Promise<{ ok: boolean; error?: string }>
       getVersion: () => Promise<string>
+      getChangelog: () => Promise<{ ok: boolean; markdown?: string; error?: string }>
       getUpdateStatus: () => Promise<{
         enabled: boolean
         state: 'disabled' | 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'installing' | 'not-available' | 'error'
@@ -559,7 +589,7 @@ declare global {
       clearCache: () => Promise<{ ok: boolean; error?: string }>
       upload: (baseUrl?: string) => Promise<{ ok: boolean; status?: number; fingerprint?: string; summary?: string; error?: string }>
       serverGetVisibility: (baseUrl?: string) => Promise<{ ok: boolean; status?: number; visibility?: { comments: 'off' | 'summary' | 'full'; forums: 'off' | 'summary' | 'full'; profilePublic: 'off' | 'summary' | 'full' } | null; error?: string }>
-      serverSetVisibility: (baseUrl: string | undefined, patch: Partial<{ comments: 'off' | 'summary' | 'full'; forums: 'off' | 'summary' | 'full'; profilePublic: 'off' | 'summary' | 'full' }>) => Promise<{ ok: boolean; status?: number; visibility?: { comments: 'off' | 'summary' | 'full'; forums: 'off' | 'summary' | 'full'; profilePublic: 'off' | 'summary' | 'full' } | null; error?: string }>
+      serverSetVisibility: (baseUrl: string | undefined, patch: Partial<{ comments: 'off' | 'summary' | 'full'; forums: 'off' | 'summary' | 'full'; profilePublic: 'off' | 'summary' | 'full'; shareGamePlaytime: boolean }>) => Promise<{ ok: boolean; status?: number; visibility?: { comments: 'off' | 'summary' | 'full'; forums: 'off' | 'summary' | 'full'; profilePublic: 'off' | 'summary' | 'full'; shareGamePlaytime?: boolean } | null; error?: string }>
       serverDelete: (baseUrl?: string) => Promise<{ ok: boolean; status?: number; error?: string }>
       // Multi-rig
       listDevices: (baseUrl?: string) => Promise<{ ok: boolean; devices?: Array<{ fingerprint: string; deviceName: string | null; summary: string | null; sourceAppVersion: string | null; capturedAt: string; isActive: boolean }>; error?: string }>

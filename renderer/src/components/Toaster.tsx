@@ -10,11 +10,27 @@ import { type ToastItem, type ToastType, useToast } from "@/context/toast-contex
 function ToastItemView({ item }: { item: ToastItem }) {
   const { dismiss } = useToast()
   const [exiting, setExiting] = useState(false)
+  // Tick a 1-second clock for the action countdown. Only ticks while the
+  // toast has an action and a duration > 1s, so it costs nothing for
+  // ordinary fire-and-forget toasts.
+  const [secondsLeft, setSecondsLeft] = useState<number>(() => Math.ceil(item.duration / 1000))
 
   useEffect(() => {
     const exitTimer = setTimeout(() => setExiting(true), item.duration)
     return () => clearTimeout(exitTimer)
   }, [item.duration])
+
+  useEffect(() => {
+    if (!item.action || item.duration < 1500) return
+    const start = Date.now()
+    const interval = setInterval(() => {
+      const elapsed = Date.now() - start
+      const remaining = Math.max(0, Math.ceil((item.duration - elapsed) / 1000))
+      setSecondsLeft(remaining)
+      if (remaining <= 0) clearInterval(interval)
+    }, 250)
+    return () => clearInterval(interval)
+  }, [item.action, item.duration])
 
   const isError = item.type === "error"
   const isSuccess = item.type === "success"
@@ -24,24 +40,49 @@ function ToastItemView({ item }: { item: ToastItem }) {
   return (
     <div
       className={`
-        flex items-center gap-3 px-5 py-3 rounded-full shadow-2xl border
+        relative overflow-hidden flex items-center gap-3 px-5 py-3 rounded-full shadow-2xl border
         text-sm font-medium transition-all duration-500
         ${exiting ? "opacity-0 translate-y-2" : "opacity-100 translate-y-0 anim"}
         ${isError
-          ? "bg-zinc-900 border-red-500/30 text-red-400"
-          : "bg-zinc-900 border-zinc-700 text-zinc-200"
+          ? "bg-card border-red-500/30 text-red-400"
+          : "bg-card border-border text-foreground/90"
         }
       `}
     >
-      <Icon className={`h-4 w-4 shrink-0 ${isError ? "text-red-400" : isSuccess ? "text-zinc-300" : "text-zinc-400"}`} />
+      <Icon className={`h-4 w-4 shrink-0 ${isError ? "text-red-400" : isSuccess ? "text-foreground/80" : "text-muted-foreground"}`} />
       <span>{item.message}</span>
+      {item.action && (
+        <button
+          onClick={() => {
+            try { item.action?.onClick() } catch { /* ignore */ }
+            dismiss(item.id)
+          }}
+          className="ml-1 rounded-full bg-white/[.05] hover:bg-white/[.12] px-2.5 py-0.5 text-xs font-semibold text-emerald-300 transition-colors active:scale-95 inline-flex items-center gap-1"
+        >
+          <span>{item.action.label}</span>
+          {item.duration >= 1500 && secondsLeft > 0 && (
+            <span className="text-emerald-400/70 font-mono tabular-nums">{secondsLeft}s</span>
+          )}
+        </button>
+      )}
       <button
         onClick={() => dismiss(item.id)}
-        className="ml-1 rounded-full p-0.5 text-zinc-500 hover:text-zinc-200 transition-colors active:scale-95"
+        className="ml-1 rounded-full p-0.5 text-muted-foreground/80 hover:text-foreground/90 transition-colors active:scale-95"
         aria-label="Dismiss notification"
       >
         <X className="h-3.5 w-3.5" />
       </button>
+      {/* Progress bar for action-bearing toasts — gives the user a visual
+          cue of how long the undo window is. Animates from 100% → 0% over
+          the toast's duration. */}
+      {item.action && item.duration >= 1500 && !exiting && (
+        <span
+          className="absolute left-0 bottom-0 h-[2px] bg-emerald-400/40"
+          style={{
+            animation: `uc-toast-countdown ${item.duration}ms linear forwards`,
+          }}
+        />
+      )}
     </div>
   )
 }

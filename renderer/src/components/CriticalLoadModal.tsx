@@ -43,20 +43,20 @@ export function CriticalLoadModal({
             <AlertTriangle className="h-5 w-5 text-red-400" />
           </div>
           <DialogTitle className="text-xl tracking-tight text-white">{title}</DialogTitle>
-          <DialogDescription className="text-sm leading-relaxed text-zinc-300">
+          <DialogDescription className="text-sm leading-relaxed text-foreground/80">
             {message}
           </DialogDescription>
         </DialogHeader>
 
-        <div className="grid gap-3 rounded-2xl border border-white/[.07] bg-zinc-900/60 p-4 sm:grid-cols-[1fr_auto] sm:items-center">
+        <div className="grid gap-3 rounded-2xl border border-white/[.07] bg-card/60 p-4 sm:grid-cols-[1fr_auto] sm:items-center">
           <div className="space-y-1.5">
-            <p className="text-sm font-medium text-zinc-100">Service interruption detected.</p>
-            <p className="text-xs text-zinc-400">
+            <p className="text-sm font-medium text-foreground">Service interruption detected.</p>
+            <p className="text-xs text-muted-foreground">
               Check live incident updates on our status page, or socials for broader announcements.
             </p>
           </div>
           {errorCode && (
-            <Badge variant="outline" className="w-fit font-mono text-[11px] border-white/20 text-zinc-300">
+            <Badge variant="outline" className="w-fit font-mono text-[11px] border-white/20 text-foreground/80">
               Error: {errorCode}
             </Badge>
           )}
@@ -64,13 +64,13 @@ export function CriticalLoadModal({
 
         <DialogFooter className="gap-3 border-t border-white/[.07] pt-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex flex-col gap-2 sm:flex-row">
-            <Button asChild variant="ghost" className="justify-start px-0 text-zinc-300 hover:text-white hover:bg-transparent">
+            <Button asChild variant="ghost" className="justify-start px-0 text-foreground/80 hover:text-white hover:bg-transparent">
               <a href="https://status.union-crax.xyz/" target="_blank" rel="noreferrer">
                 <ExternalLink className="mr-2 h-4 w-4" />
                 Status page
               </a>
             </Button>
-            <Button asChild variant="ghost" className="justify-start px-0 text-zinc-300 hover:text-white hover:bg-transparent">
+            <Button asChild variant="ghost" className="justify-start px-0 text-foreground/80 hover:text-white hover:bg-transparent">
               <a href="https://union-crax.xyz/discord" target="_blank" rel="noreferrer">
                 <ExternalLink className="mr-2 h-4 w-4" />
                 Check socials
@@ -79,11 +79,11 @@ export function CriticalLoadModal({
           </div>
 
           <div className="flex w-full flex-col-reverse gap-2 sm:w-auto sm:flex-row sm:items-center">
-            <Button variant="outline" onClick={handleContinue} className="border-white/20 bg-transparent text-zinc-100 hover:bg-white/10">
+            <Button variant="outline" onClick={handleContinue} className="border-white/20 bg-transparent text-foreground hover:bg-white/10">
               {continueLabel}
             </Button>
             {onRetry && (
-              <Button onClick={onRetry} className="bg-white text-black hover:bg-zinc-200">
+              <Button onClick={onRetry} className="bg-primary text-primary-foreground hover:brightness-110">
                 <RefreshCw className="mr-2 h-4 w-4" />
                 Try again
               </Button>

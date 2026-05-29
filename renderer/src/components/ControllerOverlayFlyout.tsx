@@ -132,19 +132,19 @@ export function ControllerOverlayFlyout({ visible, onClose, position = 'right' }
       }`}
       onClick={(event) => event.stopPropagation()}
     >
-      <div className="glass overflow-hidden rounded-[28px] border border-white/[.07] !bg-zinc-950/92 shadow-[0_28px_80px_rgba(0,0,0,0.6)]">
+      <div className="glass overflow-hidden rounded-[28px] border border-white/[.07] !bg-background/92 shadow-[0_28px_80px_rgba(0,0,0,0.6)]">
         <div
           className={`flex items-center gap-3 px-4 py-3 ${expanded ? 'border-b border-white/[.07]' : ''} cursor-pointer`}
           onClick={() => setExpanded(!expanded)}
         >
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-white text-black">
+          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary text-primary-foreground">
             <Gamepad2 size={15} />
           </div>
           <div className="min-w-0 flex-1">
-            <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-zinc-500">Controller</div>
+            <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground/80">Controller</div>
             <div className="text-base font-black tracking-tight text-white">Input Console</div>
             <div className="flex items-center gap-2">
-              <span className={`text-[10px] ${connected ? 'text-emerald-300' : 'text-zinc-500'}`}>{statusLabel}</span>
+              <span className={`text-[10px] ${connected ? 'text-emerald-300' : 'text-muted-foreground/80'}`}>{statusLabel}</span>
               {connected && batteryLevel != null && batteryLevel > 0 && (
                 <span className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[9px] font-bold ${
                   isCharging ? 'bg-emerald-500/20 text-emerald-300' :
@@ -166,7 +166,7 @@ export function ControllerOverlayFlyout({ visible, onClose, position = 'right' }
               event.stopPropagation()
               onClose()
             }}
-            className="flex h-8 w-8 items-center justify-center rounded-full border border-white/[.08] bg-zinc-900/85 text-zinc-400 transition hover:bg-white/[.06] hover:text-white active:scale-95"
+            className="flex h-8 w-8 items-center justify-center rounded-full border border-white/[.08] bg-card/85 text-muted-foreground transition hover:bg-white/[.06] hover:text-white active:scale-95"
             aria-label="Close controller overlay"
           >
             <X size={14} />
@@ -180,8 +180,8 @@ export function ControllerOverlayFlyout({ visible, onClose, position = 'right' }
                 onClick={() => setActiveTab('quick')}
                 className={`flex-1 rounded-full border px-3 py-2 text-[11px] font-semibold transition active:scale-95 ${
                   activeTab === 'quick'
-                    ? 'border-white/60 bg-white text-black'
-                    : 'border-white/[.07] bg-zinc-900/85 text-zinc-400 hover:bg-white/[.06] hover:text-white'
+                    ? 'border-white/60 bg-primary text-black'
+                    : 'border-white/[.07] bg-card/85 text-muted-foreground hover:bg-white/[.06] hover:text-white'
                 }`}
               >
                 <span className="inline-flex items-center justify-center gap-2">
@@ -193,8 +193,8 @@ export function ControllerOverlayFlyout({ visible, onClose, position = 'right' }
                 onClick={() => setActiveTab('mouse')}
                 className={`flex-1 rounded-full border px-3 py-2 text-[11px] font-semibold transition active:scale-95 ${
                   activeTab === 'mouse'
-                    ? 'border-white/60 bg-white text-black'
-                    : 'border-white/[.07] bg-zinc-900/85 text-zinc-400 hover:bg-white/[.06] hover:text-white'
+                    ? 'border-white/60 bg-primary text-black'
+                    : 'border-white/[.07] bg-card/85 text-muted-foreground hover:bg-white/[.06] hover:text-white'
                 }`}
               >
                 <span className="inline-flex items-center justify-center gap-2">
@@ -206,8 +206,8 @@ export function ControllerOverlayFlyout({ visible, onClose, position = 'right' }
                 onClick={() => setActiveTab('mapping')}
                 className={`flex-1 rounded-full border px-3 py-2 text-[11px] font-semibold transition active:scale-95 ${
                   activeTab === 'mapping'
-                    ? 'border-white/60 bg-white text-black'
-                    : 'border-white/[.07] bg-zinc-900/85 text-zinc-400 hover:bg-white/[.06] hover:text-white'
+                    ? 'border-white/60 bg-primary text-black'
+                    : 'border-white/[.07] bg-card/85 text-muted-foreground hover:bg-white/[.06] hover:text-white'
                 }`}
               >
                 <span className="inline-flex items-center justify-center gap-2">
@@ -220,7 +220,7 @@ export function ControllerOverlayFlyout({ visible, onClose, position = 'right' }
             {activeTab === 'quick' && (
               <div className="mt-4 space-y-4">
                 <div>
-                  <div className="mb-2 flex items-center justify-between text-[11px] text-zinc-400">
+                  <div className="mb-2 flex items-center justify-between text-[11px] text-muted-foreground">
                     <span>Deadzone</span>
                     <span>{Math.round(localDeadzone * 100)}%</span>
                   </div>
@@ -241,8 +241,8 @@ export function ControllerOverlayFlyout({ visible, onClose, position = 'right' }
                 </div>
 
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2 text-[11px] text-zinc-400">
-                    <Volume2 size={14} className="text-zinc-500" />
+                  <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                    <Volume2 size={14} className="text-muted-foreground/80" />
                     <span>Vibration</span>
                   </div>
                   <Switch checked={localVibration} onCheckedChange={handleVibrationToggle} />
@@ -250,7 +250,7 @@ export function ControllerOverlayFlyout({ visible, onClose, position = 'right' }
 
                 <button
                   onClick={checkControllers}
-                  className="flex w-full items-center justify-center gap-2 rounded-full border border-white/[.07] bg-zinc-900/85 px-3 py-2 text-[11px] text-zinc-300 transition hover:bg-white/[.06] hover:text-white active:scale-95"
+                  className="flex w-full items-center justify-center gap-2 rounded-full border border-white/[.07] bg-card/85 px-3 py-2 text-[11px] text-foreground/80 transition hover:bg-white/[.06] hover:text-white active:scale-95"
                 >
                   <RefreshCw size={12} />
                   Refresh Controller
@@ -261,8 +261,8 @@ export function ControllerOverlayFlyout({ visible, onClose, position = 'right' }
             {activeTab === 'mouse' && activeProfile && (
               <div className="mt-4 space-y-4">
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2 text-[11px] text-zinc-400">
-                    <Mouse size={14} className="text-zinc-500" />
+                  <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                    <Mouse size={14} className="text-muted-foreground/80" />
                     <span>Left Stick to Mouse</span>
                   </div>
                   <Switch
@@ -272,8 +272,8 @@ export function ControllerOverlayFlyout({ visible, onClose, position = 'right' }
                 </div>
 
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2 text-[11px] text-zinc-400">
-                    <Mouse size={14} className="text-zinc-500" />
+                  <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                    <Mouse size={14} className="text-muted-foreground/80" />
                     <span>Right Stick to Mouse</span>
                   </div>
                   <Switch
@@ -283,7 +283,7 @@ export function ControllerOverlayFlyout({ visible, onClose, position = 'right' }
                 </div>
 
                 <div>
-                  <div className="mb-2 flex items-center justify-between text-[11px] text-zinc-400">
+                  <div className="mb-2 flex items-center justify-between text-[11px] text-muted-foreground">
                     <span>Mouse Speed</span>
                     <span>{(activeProfile.keyBinding?.stickToMouse?.mouseSpeed ?? 1.0).toFixed(1)}x</span>
                   </div>
@@ -306,11 +306,11 @@ export function ControllerOverlayFlyout({ visible, onClose, position = 'right' }
             {activeTab === 'mapping' && (
               <div className="mt-4 space-y-4">
                 <div>
-                  <div className="mb-2 text-[11px] text-zinc-400">Active Profile</div>
+                  <div className="mb-2 text-[11px] text-muted-foreground">Active Profile</div>
                   <select
                     value={activeProfile?.id || ''}
                     onChange={(e) => setActiveProfile(e.target.value)}
-                  className="w-full rounded-2xl border border-white/[.07] bg-zinc-900/85 px-3 py-2 text-sm text-white"
+                  className="w-full rounded-2xl border border-white/[.07] bg-card/85 px-3 py-2 text-sm text-white"
                 >
                     {profiles.map((profile) => (
                       <option key={profile.id} value={profile.id}>
@@ -320,19 +320,19 @@ export function ControllerOverlayFlyout({ visible, onClose, position = 'right' }
                   </select>
                 </div>
 
-                <div className="rounded-2xl border border-white/[.07] bg-zinc-950/85 px-3 py-3">
-                  <div className="text-[10px] text-zinc-500">Input Translation</div>
+                <div className="rounded-2xl border border-white/[.07] bg-background/85 px-3 py-3">
+                  <div className="text-[10px] text-muted-foreground/80">Input Translation</div>
                   <div className="mt-1 text-sm font-semibold text-white">
                     {settings?.inputTranslation?.enabled ? 'Enabled' : 'Disabled'}
                   </div>
-                  <div className="mt-1 text-[10px] text-zinc-500">
+                  <div className="mt-1 text-[10px] text-muted-foreground/80">
                     Preset: {settings?.inputTranslation?.mappingPreset || 'Auto'}
                   </div>
                 </div>
 
                 <button
                   onClick={onClose}
-                  className="flex w-full items-center justify-center gap-2 rounded-full border border-white/60 bg-white px-3 py-2 text-[12px] font-semibold text-black transition hover:bg-zinc-200 active:scale-95"
+                  className="flex w-full items-center justify-center gap-2 rounded-full border border-white/60 bg-primary px-3 py-2 text-[12px] font-semibold text-primary-foreground transition hover:brightness-110 active:scale-95"
                 >
                   <Settings size={14} />
                   Close flyout
@@ -341,10 +341,10 @@ export function ControllerOverlayFlyout({ visible, onClose, position = 'right' }
             )}
 
             <div className="mt-4 border-t border-white/[.06] pt-3">
-              <div className="flex items-center justify-center gap-2 text-[10px] text-zinc-500">
+              <div className="flex items-center justify-center gap-2 text-[10px] text-muted-foreground/80">
                 <span>Press</span>
                 <span className="token-chip text-[9px]">Esc</span>
-                <span className="text-zinc-700">|</span>
+                <span className="text-muted-foreground/40">|</span>
                 <span>Close</span>
               </div>
             </div>

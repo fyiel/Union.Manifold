@@ -58,7 +58,7 @@ export function GamePageSkeleton() {
               <Skeleton className="h-5 w-48 rounded udl-skeleton-d1" />
               <div className="grid md:grid-cols-2 gap-4">
                 {[1, 2].map((col) => (
-                  <div key={col} className="rounded-2xl bg-zinc-800/30 border border-white/[.04] p-5 space-y-2.5">
+                  <div key={col} className="rounded-2xl bg-secondary/30 border border-white/[.04] p-5 space-y-2.5">
                     <Skeleton className={`h-3 w-20 rounded mb-3 udl-skeleton-d${col}`} />
                     <Skeleton className="h-2.5 w-full rounded" />
                     <Skeleton className="h-2.5 w-5/6 rounded" />

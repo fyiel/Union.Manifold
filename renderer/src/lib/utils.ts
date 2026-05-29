@@ -172,19 +172,76 @@ function isPublicImageHost(host: string): boolean {
   )
 }
 
+// Renderer-served prefixes inside the packaged Vite dist. Anything starting
+// with `/` and matching one of these is a relative URL handled by the
+// `ucd://renderer/...` protocol, not a filesystem path.
+const RENDERER_DIST_PREFIXES = ["/assets/", "/fallbacks/", "/icons/", "/images/", "/fonts/", "/static/"]
+
+// Build a `uc-local://` URL from an absolute filesystem path. The renderer
+// can't load `file://` directly (cross-origin from ucd://renderer and from
+// localhost in dev), so the main process exposes the installing/installed
+// folders through this scheme.
+//
+// We pack the whole filesystem path into the `?p=` query parameter rather
+// than the URL path. This sidesteps two Chromium pitfalls:
+//   1. With a triple-slash like `uc-local:///C:/foo`, the URL parser hoists
+//      `C:` into the host, lowercases it, and strips the colon.
+//   2. Even with `uc-local:///C%3A/foo` (per-segment encoded), some net
+//      stacks normalize the pathname before the protocol handler sees it.
+// A fixed hostname (`app`) plus a query string is exactly the structure
+// Electron's docs use in their examples, and `URLSearchParams` decodes it
+// reliably across all platforms.
+function toUcLocalUrl(absolutePath: string): string {
+  const normalized = absolutePath.replace(/\\/g, "/")
+  return `uc-local://app/?p=${encodeURIComponent(normalized)}`
+}
+
 export function proxyMediaUrl(mediaUrl: string): string {
   if (!mediaUrl) return mediaUrl
-  // already a relative path or data/blob URL served by the app
-  if (mediaUrl.startsWith("/") || mediaUrl.startsWith("data:") || mediaUrl.startsWith("blob:") || mediaUrl.startsWith("file://")) {
+
+  // data/blob URLs and already-built uc-local:// URLs pass through.
+  if (
+    mediaUrl.startsWith("data:") ||
+    mediaUrl.startsWith("blob:") ||
+    mediaUrl.startsWith("uc-local://")
+  ) {
     return mediaUrl
   }
+  // Existing file:// URLs get rewritten to uc-local:// (the renderer can't
+  // load file:// across origins; uc-local proxies through the main process).
+  if (mediaUrl.startsWith("file://")) {
+    try {
+      const u = new URL(mediaUrl)
+      let p = decodeURIComponent(u.pathname || "")
+      // Drop the leading slash before a Windows drive letter so toUcLocalUrl
+      // produces `uc-local:///C:/...` (single leading slash, drive-letter path).
+      if (/^\/[A-Za-z]:/.test(p)) p = p.slice(1)
+      return toUcLocalUrl(p)
+    } catch {
+      return mediaUrl
+    }
+  }
 
-  // detect absolute Windows paths like C:\ or UNC paths starting with \\ and convert to file:// URL
+  // Absolute paths starting with `/` are ambiguous between Linux/macOS file
+  // paths (e.g. /home/user/.../image.jpg) and renderer-served assets
+  // (/fallbacks/...). Renderer paths use a small set of known prefixes;
+  // everything else is treated as a filesystem path and proxied via
+  // uc-local:// so it doesn't get resolved against the `ucd://renderer/` base.
+  if (mediaUrl.startsWith("/")) {
+    if (mediaUrl.startsWith("//")) {
+      // Protocol-relative URL — leave for the loader to resolve.
+      return mediaUrl
+    }
+    const isRendererAsset = RENDERER_DIST_PREFIXES.some((prefix) => mediaUrl.startsWith(prefix))
+    if (isRendererAsset) return mediaUrl
+    // Linux/macOS absolute filesystem path.
+    return toUcLocalUrl(mediaUrl)
+  }
+
+  // Windows absolute paths (C:\ or UNC \\server\share) — proxy via uc-local://.
   try {
     if (/^[A-Za-z]:\\/.test(mediaUrl) || mediaUrl.startsWith('\\')) {
-      // normalize backslashes to forward slashes and ensure proper file:// prefix
-      const normalized = mediaUrl.replace(/\\/g, '/')
-      return `file:///${encodeURI(normalized)}`
+      return toUcLocalUrl(mediaUrl)
     }
   } catch {}
 

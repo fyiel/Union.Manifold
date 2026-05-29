@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react"
+import { cn } from "@/lib/utils"
 import {
   ArrowDownToLine,
   HardDrive,
@@ -8,8 +9,12 @@ import {
   UserRound,
   Cpu,
   FlaskConical,
+  Palette,
   X,
+  Crown,
 } from "lucide-react"
+import { UcPlusPanel } from "@/components/UcPlusPanel"
+import { AppearanceTab } from "@/app/pages/settings/AppearanceTab"
 import {
   ChevronDown,
   Check,
@@ -36,12 +41,13 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Switch } from "@/components/ui/switch"
 import { DiscordAvatar } from "@/components/DiscordAvatar"
-import { apiFetch, apiUrl, getApiBaseUrl, normalizeApiBaseUrl, setApiBaseUrl } from "@/lib/api"
+import { apiFetch, apiUpload, apiUrl, getApiBaseUrl, normalizeApiBaseUrl, setApiBaseUrl } from "@/lib/api"
 import {
   getPreferredDownloadHost,
   setPreferredDownloadHost,
 } from "@/lib/downloads"
 import { LogViewer } from "@/components/LogViewer"
+import { KeybindingsPanel } from "@/components/KeybindingsPanel"
 import { SessionManager } from "@/components/SessionManager"
 import { ProfileMediaCropDialog } from "@/components/ProfileMediaCropDialog"
 import { useDiscordAccount } from "@/hooks/use-discord-account"
@@ -171,6 +177,10 @@ export function SettingsPage() {
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus>(INITIAL_UPDATE_STATUS)
   const [alwaysCreateDesktopShortcut, setAlwaysCreateDesktopShortcut] = useState(false)
   const [preventSleepDuringOperations, setPreventSleepDuringOperations] = useState(true)
+  const [pauseDownloadsWhilePlaying, setPauseDownloadsWhilePlaying] = useState(false)
+  const [catalogRefreshing, setCatalogRefreshing] = useState(false)
+  const [catalogRefreshFeedback, setCatalogRefreshFeedback] = useState<{ type: "success" | "error"; message: string } | null>(null)
+  const [bandwidthLimitKBps, setBandwidthLimitKBps] = useState(0)
   const [linuxLaunchMode, setLinuxLaunchMode] = useState<'auto' | 'native' | 'wine' | 'proton'>('auto')
   const [linuxWinePath, setLinuxWinePath] = useState('')
   const [linuxProtonPath, setLinuxProtonPath] = useState('')
@@ -215,6 +225,7 @@ export function SettingsPage() {
   const [developerMode, setDeveloperMode] = useState(false)
   const [copyingDiagnostics, setCopyingDiagnostics] = useState(false)
   const [autoShareErrorLogs, setAutoShareErrorLogs] = useState(false)
+  const [autoDeleteArchives, setAutoDeleteArchives] = useState(false)
   const [verboseDownloadLogging, setVerboseDownloadLogging] = useState(false)
   const [customApiBaseUrl, setCustomApiBaseUrl] = useState("")
   const [networkTesting, setNetworkTesting] = useState(false)
@@ -231,6 +242,8 @@ export function SettingsPage() {
   const [bioDraft, setBioDraft] = useState("")
   const [bioSaving, setBioSaving] = useState(false)
   const [skipLinkCheck, setSkipLinkCheck] = useState(false)
+  type DownloadCheckMode = 'always' | 'auto' | 'skip'
+  const [downloadCheckMode, setDownloadCheckMode] = useState<DownloadCheckMode>('auto')
   const [profileImages, setProfileImages] = useState<{
     avatarUrl: string | null
     customAvatarUrl: string | null
@@ -255,12 +268,13 @@ export function SettingsPage() {
   const initialSection = (() => {
     const raw = searchParams.get('section')
     if (raw === 'account' || raw === 'downloads' || raw === 'game-launch' || raw === 'overlay' ||
-        raw === 'controller' || raw === 'system' || raw === 'advanced') {
+        raw === 'controller' || raw === 'system' || raw === 'appearance' || raw === 'advanced' || raw === 'membership') {
       return raw
     }
+    if (raw === 'uc-plus' || raw === 'uc_plus') return 'membership' as const
     return 'account' as const
   })()
-  const [activeSection, setActiveSection] = useState<'account' | 'downloads' | 'game-launch' | 'overlay' | 'controller' | 'system' | 'advanced'>(initialSection)
+  const [activeSection, setActiveSection] = useState<'account' | 'downloads' | 'game-launch' | 'overlay' | 'controller' | 'system' | 'appearance' | 'advanced' | 'membership'>(initialSection)
   const autoScanRequested = searchParams.get('autoScan') === '1'
 
   // Motion preferences (animated backgrounds + reduced motion). Hook reads
@@ -607,15 +621,21 @@ export function SettingsPage() {
     let mounted = true
     const loadShortcutSetting = async () => {
       try {
-        const [shortcutValue, sleepValue, autoShareValue] = await Promise.all([
+        const [shortcutValue, sleepValue, autoShareValue, autoDeleteValue, pauseValue, bwValue] = await Promise.all([
           window.ucSettings?.get?.('alwaysCreateDesktopShortcut'),
           window.ucSettings?.get?.('preventSleepDuringOperations'),
           window.ucSettings?.get?.('autoShareErrorLogs'),
+          window.ucSettings?.get?.('autoDeleteArchives'),
+          window.ucSettings?.get?.('pauseDownloadsWhilePlaying'),
+          window.ucSettings?.get?.('downloadBandwidthLimitKBps'),
         ])
         if (mounted) {
           setAlwaysCreateDesktopShortcut(shortcutValue || false)
           setPreventSleepDuringOperations(sleepValue !== false)
           setAutoShareErrorLogs(autoShareValue === true)
+          setAutoDeleteArchives(autoDeleteValue === true)
+          setPauseDownloadsWhilePlaying(pauseValue === true)
+          setBandwidthLimitKBps(Number(bwValue) > 0 ? Math.floor(Number(bwValue)) : 0)
         }
       } catch {
         // ignore
@@ -637,6 +657,15 @@ export function SettingsPage() {
       }
       if (data.key === 'autoShareErrorLogs') {
         setAutoShareErrorLogs(data.value === true)
+      }
+      if (data.key === 'autoDeleteArchives') {
+        setAutoDeleteArchives(data.value === true)
+      }
+      if (data.key === 'pauseDownloadsWhilePlaying') {
+        setPauseDownloadsWhilePlaying(data.value === true)
+      }
+      if (data.key === 'downloadBandwidthLimitKBps') {
+        setBandwidthLimitKBps(Number(data.value) > 0 ? Math.floor(Number(data.value)) : 0)
       }
     })
     return () => {
@@ -746,17 +775,34 @@ export function SettingsPage() {
 
   useEffect(() => {
     let mounted = true
-    const loadSkipLinkCheck = async () => {
+    const loadDownloadCheckSettings = async () => {
       try {
-        const value = await window.ucSettings?.get?.('skipLinkCheck')
-        if (mounted) setSkipLinkCheck(Boolean(value))
+        const newMode = await window.ucSettings?.get?.('downloadCheckMode') as DownloadCheckMode | undefined
+        const legacy = await window.ucSettings?.get?.('skipLinkCheck')
+        if (!mounted) return
+        setSkipLinkCheck(Boolean(legacy))
+        if (newMode === 'always' || newMode === 'auto' || newMode === 'skip') {
+          setDownloadCheckMode(newMode)
+        } else {
+          // Migrate from the legacy boolean — `true` meant "skip the popup".
+          setDownloadCheckMode(legacy ? 'skip' : 'auto')
+        }
       } catch { }
     }
-    loadSkipLinkCheck()
+    loadDownloadCheckSettings()
     const off = window.ucSettings?.onChanged?.((data: any) => {
       if (!data || !data.key) return
       if (data.key === 'skipLinkCheck') setSkipLinkCheck(Boolean(data.value))
-      if (data.key === '__CLEAR_ALL__') setSkipLinkCheck(false)
+      if (data.key === 'downloadCheckMode') {
+        const value = data.value
+        if (value === 'always' || value === 'auto' || value === 'skip') {
+          setDownloadCheckMode(value)
+        }
+      }
+      if (data.key === '__CLEAR_ALL__') {
+        setSkipLinkCheck(false)
+        setDownloadCheckMode('auto')
+      }
     })
     return () => {
       mounted = false
@@ -1378,19 +1424,20 @@ export function SettingsPage() {
     if (bannerInputRef.current) bannerInputRef.current.value = ""
   }
 
+  // Routes uploads through apiUpload so the launcher uses the IPC bridge
+  // (cookies live in the BrowserWindow's session); the previous raw
+  // fetch with credentials:'include' returned 401 in Electron because
+  // the renderer can't see those cookies on its own.
   const doAvatarUpload = async (file: File) => {
     setProfileUploadError(null)
     setAvatarUploading(true)
     try {
-      const form = new FormData()
-      form.append("file", file)
-      form.append("kind", "avatar")
-      const res = await fetch(apiUrl("/api/account/profile-images"), {
-        method: "POST",
-        body: form,
-        credentials: "include",
+      const res = await apiUpload("/api/account/profile-images", {
+        file,
+        fileName: file.name || "avatar.png",
+        fields: { kind: "avatar" },
       })
-      const data = await res.json()
+      const data = await res.json().catch(() => ({}))
       if (!res.ok) {
         setProfileUploadError(data?.error || "Failed to upload avatar.")
       } else {
@@ -1407,15 +1454,12 @@ export function SettingsPage() {
     setProfileUploadError(null)
     setBannerUploading(true)
     try {
-      const form = new FormData()
-      form.append("file", file)
-      form.append("kind", "banner")
-      const res = await fetch(apiUrl("/api/account/profile-images"), {
-        method: "POST",
-        body: form,
-        credentials: "include",
+      const res = await apiUpload("/api/account/profile-images", {
+        file,
+        fileName: file.name || "banner.png",
+        fields: { kind: "banner" },
       })
-      const data = await res.json()
+      const data = await res.json().catch(() => ({}))
       if (!res.ok) {
         setProfileUploadError(data?.error || "Failed to upload banner.")
       } else {
@@ -1642,6 +1686,8 @@ export function SettingsPage() {
 
   const NAV_ITEMS = [
     { id: 'account' as const, label: 'Account', icon: UserRound, description: 'Profile & preferences' },
+    { id: 'membership' as const, label: 'UC+', icon: Crown, description: 'Membership & Ko-fi' },
+    { id: 'appearance' as const, label: 'Appearance', icon: Palette, description: 'Themes & customization' },
     { id: 'downloads' as const, label: 'Downloads', icon: ArrowDownToLine, description: 'Storage & mirrors' },
     { id: 'game-launch' as const, label: 'Game Launch', icon: Gamepad2, description: 'Launch & compatibility' },
     { id: 'controller' as const, label: 'Controller', icon: Gamepad2, description: 'Controller support' },
@@ -1656,8 +1702,8 @@ export function SettingsPage() {
         <p className="section-label mb-2">Configuration</p>
         <div className="flex items-center gap-3">
           <h1 className="text-2xl sm:text-3xl font-light tracking-tight">Settings</h1>
-          <Badge className="rounded-full bg-zinc-800 text-zinc-200 border-zinc-700">UnionCrax.Direct</Badge>
-          {appVersion && <span className="text-xs text-zinc-400 font-mono ml-auto">v{appVersion}</span>}
+          <Badge className="rounded-full bg-secondary text-foreground/90 border-border">UnionCrax.Direct</Badge>
+          {appVersion && <span className="text-xs text-muted-foreground font-mono ml-auto">v{appVersion}</span>}
         </div>
       </div>
 
@@ -1671,11 +1717,11 @@ export function SettingsPage() {
                 key={item.id}
                 onClick={() => setActiveSection(item.id)}
                 className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all text-left ${activeSection === item.id
-                    ? 'bg-zinc-800 text-white'
-                    : 'text-zinc-400 hover:text-white hover:bg-zinc-800/50'
+                    ? 'bg-secondary text-secondary-foreground'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-secondary/50'
                   }`}
               >
-                <item.icon className={`h-4 w-4 shrink-0 ${activeSection === item.id ? 'text-white' : ''}`} />
+                <item.icon className={`h-4 w-4 shrink-0 ${activeSection === item.id ? 'text-primary' : ''}`} />
                 <div>
                   <div className="leading-tight">{item.label}</div>
                   <div className="text-[11px] font-normal opacity-70 leading-tight mt-0.5">{item.description}</div>
@@ -1688,14 +1734,23 @@ export function SettingsPage() {
             <button
               onClick={handleCheckForUpdates}
               disabled={checkingUpdate}
-              className="w-full flex items-center gap-2 text-xs text-zinc-500 hover:text-zinc-200 transition-colors py-1 disabled:opacity-60"
+              className="w-full flex items-center gap-2 text-xs text-muted-foreground/80 hover:text-foreground/90 transition-colors py-1 disabled:opacity-60"
             >
               <RefreshCw className={`h-3.5 w-3.5 ${checkingUpdate ? 'animate-spin' : ''}`} />
               {checkingUpdate ? 'Checking...' : updateStatus.state === 'downloaded' ? 'Update ready' : 'Check for updates'}
             </button>
             {updateStatus.state !== 'idle' && updateStatus.state !== 'not-available' && (
-              <div className="mt-2 text-[11px] text-zinc-300">{getUpdateStatusMessage(updateStatus)}</div>
+              <div className="mt-2 text-[11px] text-foreground/80">{getUpdateStatusMessage(updateStatus)}</div>
             )}
+            <button
+              onClick={() => {
+                try { window.dispatchEvent(new Event('uc_open_whats_new')) } catch { /* ignore */ }
+              }}
+              className="mt-2 w-full flex items-center gap-2 text-xs text-muted-foreground/80 hover:text-foreground/90 transition-colors py-1"
+            >
+              <Sparkles className="h-3.5 w-3.5" />
+              What's new
+            </button>
           </div>
         </aside>
 
@@ -1711,7 +1766,7 @@ export function SettingsPage() {
                 <input ref={avatarInputRef} type="file" accept="image/*" className="hidden" onChange={handleAvatarFileChange} />
 
                 {/* Banner */}
-                <div className="relative w-full aspect-[3/1] bg-zinc-900">
+                <div className="relative w-full aspect-[3/1] bg-card">
                   {profileImages?.bannerUrl ? (
                     <img
                       src={profileImages.bannerUrl}
@@ -1719,9 +1774,9 @@ export function SettingsPage() {
                       className="w-full h-full object-cover"
                     />
                   ) : showAccountControls ? (
-                    <div className="w-full h-full bg-gradient-to-br from-zinc-800 via-zinc-800 to-zinc-700" />
+                    <div className="w-full h-full bg-gradient-to-br from-secondary via-secondary to-zinc-700" />
                   ) : (
-                    <div className="w-full h-full bg-zinc-900" />
+                    <div className="w-full h-full bg-card" />
                   )}
                   <div className="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-black/60 to-transparent pointer-events-none" />
                 </div>
@@ -1729,7 +1784,7 @@ export function SettingsPage() {
                 {/* Avatar + action row */}
                 <div className="px-5 pt-0 pb-0">
                   <div className="flex items-end justify-between -mt-7">
-                    <div className="h-14 w-14 rounded-full border-2 border-card bg-zinc-800 overflow-hidden flex items-center justify-center shrink-0 shadow-lg">
+                    <div className="h-14 w-14 rounded-full border-2 border-card bg-secondary overflow-hidden flex items-center justify-center shrink-0 shadow-lg">
                       {profileImages?.customAvatarUrl || profileImages?.avatarUrl ? (
                         <img
                           src={profileImages.customAvatarUrl ?? profileImages.avatarUrl ?? ""}
@@ -1792,9 +1847,9 @@ export function SettingsPage() {
                 {/* Name + bio preview */}
                 <div className="px-5 pt-3 pb-5 space-y-4">
                   <div>
-                    <p className="font-semibold text-zinc-100 leading-tight">{accountLabel}</p>
+                    <p className="font-semibold text-foreground leading-tight">{accountLabel}</p>
                     {accountUser?.bio && (
-                      <p className="mt-1 text-sm text-zinc-400 line-clamp-2">{accountUser.bio}</p>
+                      <p className="mt-1 text-sm text-muted-foreground line-clamp-2">{accountUser.bio}</p>
                     )}
                   </div>
 
@@ -1806,8 +1861,8 @@ export function SettingsPage() {
 
                   {/* Preferences */}
                   {showAccountControls && (
-                    <div className="rounded-xl border border-white/[.07] bg-zinc-900/50 p-4 space-y-1">
-                      <div className="flex items-center gap-2 text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-3">
+                    <div className="rounded-xl border border-white/[.07] bg-card/50 p-4 space-y-1">
+                      <div className="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">
                         <UserRound className="h-3.5 w-3.5" />
                         Preferences
                       </div>
@@ -1815,21 +1870,21 @@ export function SettingsPage() {
                         <div className="flex items-center justify-between gap-4 py-3">
                           <div className="min-w-0">
                             <div className="text-sm font-medium leading-tight">Show NSFW covers</div>
-                            <div className="text-xs text-zinc-400 mt-0.5">Unblur NSFW game cover images.</div>
+                            <div className="text-xs text-muted-foreground mt-0.5">Unblur NSFW game cover images.</div>
                           </div>
                           <Switch checked={showNsfw} onCheckedChange={updateNsfwVisibility} className="shrink-0" />
                         </div>
                         <div className="flex items-center justify-between gap-4 py-3">
                           <div className="min-w-0">
                             <div className="text-sm font-medium leading-tight">Show Mika art</div>
-                            <div className="text-xs text-zinc-400 mt-0.5">Hide the Mika mascot artwork.</div>
+                            <div className="text-xs text-muted-foreground mt-0.5">Hide the Mika mascot artwork.</div>
                           </div>
                           <Switch checked={showMika} onCheckedChange={updateMikaVisibility} className="shrink-0" />
                         </div>
                         <div className="flex items-center justify-between gap-4 py-3">
                           <div className="min-w-0">
                             <div className="text-sm font-medium leading-tight">Public profile</div>
-                            <div className="text-xs text-zinc-400 mt-0.5">Let others view your profile page.</div>
+                            <div className="text-xs text-muted-foreground mt-0.5">Let others view your profile page.</div>
                           </div>
                           <Switch checked={showPublicProfile} onCheckedChange={updatePublicProfileVisibility} className="shrink-0" />
                         </div>
@@ -1864,12 +1919,12 @@ export function SettingsPage() {
 
                     {/* Banner */}
                     <div className="space-y-2">
-                      <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Banner</p>
+                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Banner</p>
                       <button
                         type="button"
                         disabled={bannerUploading || Boolean(profileImages?.bannerCooldownActive)}
                         onClick={() => bannerInputRef.current?.click()}
-                        className="relative w-full aspect-[3/1] rounded-xl overflow-hidden border border-white/[.07] bg-zinc-900 flex items-center justify-center group transition-opacity disabled:opacity-50"
+                        className="relative w-full aspect-[3/1] rounded-xl overflow-hidden border border-white/[.07] bg-card flex items-center justify-center group transition-opacity disabled:opacity-50"
                       >
                         {profileImages?.bannerUrl ? (
                           <img src={profileImages.bannerUrl} alt="Banner" className="w-full h-full object-cover" />
@@ -1885,14 +1940,14 @@ export function SettingsPage() {
                           )}
                         </div>
                         {!profileImages?.bannerUrl && !bannerUploading && (
-                          <div className="flex flex-col items-center gap-1 text-zinc-500">
+                          <div className="flex flex-col items-center gap-1 text-muted-foreground/80">
                             <Upload className="h-5 w-5" />
                             <span className="text-xs">Click to upload banner</span>
                           </div>
                         )}
                       </button>
                       {profileImages?.bannerCooldownActive && profileImages.bannerNextChangeAt && (
-                        <p className="text-xs text-zinc-500">
+                        <p className="text-xs text-muted-foreground/80">
                           Next change after {new Date(profileImages.bannerNextChangeAt).toLocaleDateString()}
                         </p>
                       )}
@@ -1900,13 +1955,13 @@ export function SettingsPage() {
 
                     {/* Avatar */}
                     <div className="space-y-2">
-                      <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Profile Picture</p>
+                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Profile Picture</p>
                       <div className="flex items-center gap-4">
                         <button
                           type="button"
                           disabled={avatarUploading || Boolean(profileImages?.avatarCooldownActive)}
                           onClick={() => avatarInputRef.current?.click()}
-                          className="relative h-16 w-16 rounded-full overflow-hidden border border-white/[.07] bg-zinc-800/30 flex items-center justify-center group shrink-0 transition-opacity disabled:opacity-50"
+                          className="relative h-16 w-16 rounded-full overflow-hidden border border-white/[.07] bg-secondary/30 flex items-center justify-center group shrink-0 transition-opacity disabled:opacity-50"
                         >
                           {profileImages?.customAvatarUrl || profileImages?.avatarUrl ? (
                             <img
@@ -1923,10 +1978,10 @@ export function SettingsPage() {
                             )}
                           </div>
                           {!profileImages?.customAvatarUrl && !profileImages?.avatarUrl && !avatarUploading && (
-                            <ImageIcon className="h-6 w-6 text-zinc-500" />
+                            <ImageIcon className="h-6 w-6 text-muted-foreground/80" />
                           )}
                         </button>
-                        <div className="text-xs text-zinc-500 space-y-0.5">
+                        <div className="text-xs text-muted-foreground/80 space-y-0.5">
                           <p>Click to upload a new profile picture.</p>
                           {profileImages?.avatarCooldownActive && profileImages.avatarNextChangeAt && (
                             <p>Next change after {new Date(profileImages.avatarNextChangeAt).toLocaleDateString()}</p>
@@ -1937,7 +1992,7 @@ export function SettingsPage() {
 
                     {/* Bio */}
                     <div className="space-y-2">
-                      <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Bio</p>
+                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Bio</p>
                       <Textarea
                         value={bioDraft}
                         onChange={(e) => setBioDraft(e.target.value.slice(0, TEXT_CONSTRAINTS.MAX_BIO_LENGTH))}
@@ -1946,7 +2001,7 @@ export function SettingsPage() {
                         maxLength={TEXT_CONSTRAINTS.MAX_BIO_LENGTH}
                         disabled={bioSaving || accountBusy}
                       />
-                      <p className="text-xs text-zinc-500 text-right">{bioDraft.length}/{TEXT_CONSTRAINTS.MAX_BIO_LENGTH}</p>
+                      <p className="text-xs text-muted-foreground/80 text-right">{bioDraft.length}/{TEXT_CONSTRAINTS.MAX_BIO_LENGTH}</p>
                     </div>
 
                     <div className="flex gap-2">
@@ -1998,7 +2053,7 @@ export function SettingsPage() {
                   <CardContent className="p-6 space-y-4">
                     <div>
                       <h2 className="text-lg font-semibold">Sessions &amp; Devices</h2>
-                      <p className="text-sm text-zinc-400">
+                      <p className="text-sm text-muted-foreground">
                         Manage active sign-in sessions across all your devices.
                       </p>
                     </div>
@@ -2011,7 +2066,7 @@ export function SettingsPage() {
                 <CardContent className="p-6 space-y-6">
                   <div>
                     <h2 className="text-lg font-semibold">Discord Rich Presence</h2>
-                    <p className="text-sm text-zinc-400">
+                    <p className="text-sm text-muted-foreground">
                       Show your UnionCrax.Direct activity on Discord.
                     </p>
                   </div>
@@ -2020,7 +2075,7 @@ export function SettingsPage() {
                     <div className="flex items-center justify-between">
                       <div>
                         <label className="text-sm font-medium cursor-pointer">Enable Discord RPC</label>
-                        <p className="text-xs text-zinc-400 mt-1">
+                        <p className="text-xs text-muted-foreground mt-1">
                           Requires the Discord desktop app running in the background.
                         </p>
                       </div>
@@ -2037,7 +2092,7 @@ export function SettingsPage() {
                         title="Toggle Discord Rich Presence"
                       >
                         <span
-                          className={`inline-block h-4 w-4 transform rounded-full transition-transform ${discordRpcEnabled ? 'bg-black translate-x-6' : 'bg-white translate-x-1'
+                          className={`inline-block h-4 w-4 transform rounded-full transition-transform ${discordRpcEnabled ? 'bg-black translate-x-6' : 'bg-primary translate-x-1'
                             }`}
                         />
                       </button>
@@ -2045,7 +2100,7 @@ export function SettingsPage() {
 
                     <button
                       onClick={() => setShowRpcAdvanced(!showRpcAdvanced)}
-                      className="flex items-center gap-2 text-sm text-zinc-400 hover:text-zinc-100 transition-colors mt-4"
+                      className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors mt-4"
                     >
                       <ChevronDown className={`h-4 w-4 transition-transform ${showRpcAdvanced ? 'rotate-180' : ''
                         }`} />
@@ -2053,11 +2108,11 @@ export function SettingsPage() {
                     </button>
 
                     {showRpcAdvanced && discordRpcEnabled && (
-                      <div className="mt-4 space-y-3 rounded-lg border border-white/[.07] bg-zinc-900/50 p-4">
+                      <div className="mt-4 space-y-3 rounded-lg border border-white/[.07] bg-card/50 p-4">
                         <div className="flex items-center justify-between">
                           <div>
                             <div className="text-sm font-medium">Hide NSFW content</div>
-                            <div className="text-xs text-zinc-400">Don't show RPC when viewing or downloading NSFW games</div>
+                            <div className="text-xs text-muted-foreground">Don't show RPC when viewing or downloading NSFW games</div>
                           </div>
                           <button
                             onClick={() => {
@@ -2069,7 +2124,7 @@ export function SettingsPage() {
                           }`}
                           >
                             <span
-                              className={`inline-block h-4 w-4 transform rounded-full transition-transform ${rpcHideNsfw ? 'bg-black translate-x-6' : 'bg-white translate-x-1'
+                              className={`inline-block h-4 w-4 transform rounded-full transition-transform ${rpcHideNsfw ? 'bg-black translate-x-6' : 'bg-primary translate-x-1'
                                 }`}
                             />
                           </button>
@@ -2078,7 +2133,7 @@ export function SettingsPage() {
                         <div className="flex items-center justify-between">
                           <div>
                             <div className="text-sm font-medium">Show game name</div>
-                            <div className="text-xs text-zinc-400">Display the game title in your status</div>
+                            <div className="text-xs text-muted-foreground">Display the game title in your status</div>
                           </div>
                           <button
                             onClick={() => {
@@ -2090,7 +2145,7 @@ export function SettingsPage() {
                           }`}
                           >
                             <span
-                              className={`inline-block h-4 w-4 transform rounded-full transition-transform ${rpcShowGameName ? 'bg-black translate-x-6' : 'bg-white translate-x-1'
+                              className={`inline-block h-4 w-4 transform rounded-full transition-transform ${rpcShowGameName ? 'bg-black translate-x-6' : 'bg-primary translate-x-1'
                                 }`}
                             />
                           </button>
@@ -2099,7 +2154,7 @@ export function SettingsPage() {
                         <div className="flex items-center justify-between">
                           <div>
                             <div className="text-sm font-medium">Show download status</div>
-                            <div className="text-xs text-zinc-400">Display download/extraction progress and queue in your status</div>
+                            <div className="text-xs text-muted-foreground">Display download/extraction progress and queue in your status</div>
                           </div>
                           <button
                             onClick={() => {
@@ -2111,7 +2166,7 @@ export function SettingsPage() {
                           }`}
                           >
                             <span
-                              className={`inline-block h-4 w-4 transform rounded-full transition-transform ${rpcShowDownloadStatus ? 'bg-black translate-x-6' : 'bg-white translate-x-1'
+                              className={`inline-block h-4 w-4 transform rounded-full transition-transform ${rpcShowDownloadStatus ? 'bg-black translate-x-6' : 'bg-primary translate-x-1'
                                 }`}
                             />
                           </button>
@@ -2120,7 +2175,7 @@ export function SettingsPage() {
                         <div className="flex items-center justify-between">
                           <div>
                             <div className="text-sm font-medium">Show browsing status</div>
-                            <div className="text-xs text-zinc-400">Display what you're viewing or playing (browsing, game details, library)</div>
+                            <div className="text-xs text-muted-foreground">Display what you're viewing or playing (browsing, game details, library)</div>
                           </div>
                           <button
                             onClick={() => {
@@ -2132,7 +2187,7 @@ export function SettingsPage() {
                           }`}
                           >
                             <span
-                              className={`inline-block h-4 w-4 transform rounded-full transition-transform ${rpcShowBrowseStatus ? 'bg-black translate-x-6' : 'bg-white translate-x-1'
+                              className={`inline-block h-4 w-4 transform rounded-full transition-transform ${rpcShowBrowseStatus ? 'bg-black translate-x-6' : 'bg-primary translate-x-1'
                                 }`}
                             />
                           </button>
@@ -2141,7 +2196,7 @@ export function SettingsPage() {
                         <div className="flex items-center justify-between">
                           <div>
                             <div className="text-sm font-medium">Show buttons</div>
-                            <div className="text-xs text-zinc-400">Display "Open on web" and "Download UC.D" buttons</div>
+                            <div className="text-xs text-muted-foreground">Display "Open on web" and "Download UC.D" buttons</div>
                           </div>
                           <button
                             onClick={() => {
@@ -2153,7 +2208,7 @@ export function SettingsPage() {
                           }`}
                           >
                             <span
-                              className={`inline-block h-4 w-4 transform rounded-full transition-transform ${rpcShowButtons ? 'bg-black translate-x-6' : 'bg-white translate-x-1'
+                              className={`inline-block h-4 w-4 transform rounded-full transition-transform ${rpcShowButtons ? 'bg-black translate-x-6' : 'bg-primary translate-x-1'
                                 }`}
                             />
                           </button>
@@ -2174,11 +2229,11 @@ export function SettingsPage() {
                 <CardContent className="p-6 space-y-5">
                   <div className="flex items-center justify-between gap-3">
                     <div>
-                      <div className="text-sm font-semibold text-zinc-100 flex items-center gap-2">
-                        <Sparkles className="h-4 w-4 text-zinc-400" />
+                      <div className="text-sm font-semibold text-foreground flex items-center gap-2">
+                        <Sparkles className="h-4 w-4 text-muted-foreground" />
                         Appearance & motion
                       </div>
-                      <div className="text-xs text-zinc-400 mt-0.5">
+                      <div className="text-xs text-muted-foreground mt-0.5">
                         Controls the color aura effect and overall motion intensity. Synced with your account.
                       </div>
                     </div>
@@ -2195,11 +2250,11 @@ export function SettingsPage() {
                     </Button>
                   </div>
 
-                  <div className="rounded-xl border border-white/[.07] bg-zinc-900/50 p-4 divide-y divide-white/[.05]">
+                  <div className="rounded-xl border border-white/[.07] bg-card/50 p-4 divide-y divide-white/[.05]">
                     <div className="flex items-center justify-between gap-4 py-3">
                       <div className="min-w-0">
                         <div className="text-sm font-medium leading-tight">Color aura</div>
-                        <div className="text-xs text-zinc-400 mt-0.5">
+                        <div className="text-xs text-muted-foreground mt-0.5">
                           Paints the page and game cards with each title's signature colors.
                         </div>
                       </div>
@@ -2212,7 +2267,7 @@ export function SettingsPage() {
                     <div className="flex items-center justify-between gap-4 py-3">
                       <div className="min-w-0">
                         <div className="text-sm font-medium leading-tight">Reduced motion</div>
-                        <div className="text-xs text-zinc-400 mt-0.5">
+                        <div className="text-xs text-muted-foreground mt-0.5">
                           Damps animations everywhere — sidebar, transitions, color aura, hover effects.
                         </div>
                       </div>
@@ -2229,6 +2284,29 @@ export function SettingsPage() {
             </>
           )}
 
+          {/* ====== UC+ MEMBERSHIP ====== */}
+          {activeSection === 'membership' && (
+            <Card className="border-white/[.07]">
+              <CardContent className="p-6 space-y-4">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <Crown className="h-5 w-5 text-primary" />
+                    <h2 className="text-lg font-semibold">UC+ Membership</h2>
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    Your supporter status, Ko-fi claim code, and renewal date.
+                  </p>
+                </div>
+                <UcPlusPanel />
+              </CardContent>
+            </Card>
+          )}
+
+          {/* ====== APPEARANCE ====== */}
+          {activeSection === 'appearance' && (
+            <AppearanceTab />
+          )}
+
           {/* ====== DOWNLOADS ====== */}
           {activeSection === 'downloads' && (
             <>
@@ -2237,7 +2315,7 @@ export function SettingsPage() {
                 <CardContent className="p-6 space-y-6">
                   <div>
                     <h2 className="text-lg font-semibold">Manage disk</h2>
-                    <p className="text-sm text-zinc-400">
+                    <p className="text-sm text-muted-foreground">
                       Choose where UnionCrax.Direct stores downloaded games.
                     </p>
                   </div>
@@ -2265,33 +2343,33 @@ export function SettingsPage() {
                         )}
                       </SelectContent>
                     </Select>
-                    <div className="flex items-center justify-between text-xs text-zinc-400">
+                    <div className="flex items-center justify-between text-xs text-muted-foreground">
                       <span>Current path</span>
                       <span className="truncate max-w-[280px] text-right">{downloadPath || "Not set"}</span>
                     </div>
                   </div>
 
                   {selectedDisk && (
-                    <div className="rounded-xl border border-white/[.07] bg-zinc-900/50 p-4 space-y-3">
+                    <div className="rounded-xl border border-white/[.07] bg-card/50 p-4 space-y-3">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
-                          <HardDrive className="h-4 w-4 text-zinc-300" />
+                          <HardDrive className="h-4 w-4 text-foreground/80" />
                           <span className="text-sm font-semibold">{selectedDisk.name}</span>
                         </div>
-                        <span className="text-xs text-zinc-400">
+                        <span className="text-xs text-muted-foreground">
                           {formatBytes(selectedDisk.freeBytes)} free of {formatBytes(selectedDisk.totalBytes)}
                         </span>
                       </div>
                       {usageBreakdown ? (
                         <div className="space-y-3">
-                          <div className="flex h-2 w-full overflow-hidden rounded-full bg-zinc-800">
-                            <div className="h-full bg-white" style={{ width: `${usageBreakdown.ucPercent}%` }} />
+                          <div className="flex h-2 w-full overflow-hidden rounded-full bg-secondary">
+                            <div className="h-full bg-primary" style={{ width: `${usageBreakdown.ucPercent}%` }} />
                             <div className="h-full bg-amber-400/80" style={{ width: `${usageBreakdown.otherPercent}%` }} />
                             <div className="h-full bg-emerald-400/60" style={{ width: `${usageBreakdown.freePercent}%` }} />
                           </div>
-                          <div className="grid gap-2 text-xs text-zinc-400 sm:grid-cols-3">
+                          <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-3">
                             <div className="flex items-center gap-2">
-                              <span className="h-2 w-2 rounded-full bg-white" />
+                              <span className="h-2 w-2 rounded-full bg-primary" />
                               <span>UC games {usageLoading && ucSizeBytes === null ? "..." : formatBytes(usageBreakdown.ucBytes)}</span>
                             </div>
                             <div className="flex items-center gap-2">
@@ -2306,10 +2384,10 @@ export function SettingsPage() {
                         </div>
                       ) : (
                         <div className="space-y-2">
-                          <div className="flex h-2 w-full overflow-hidden rounded-full bg-zinc-800">
+                          <div className="flex h-2 w-full overflow-hidden rounded-full bg-secondary">
                             <div className="h-full bg-zinc-400" style={{ width: `${usagePercent}%` }} />
                           </div>
-                          <div className="text-xs text-zinc-400">Usage breakdown unavailable.</div>
+                          <div className="text-xs text-muted-foreground">Usage breakdown unavailable.</div>
                         </div>
                       )}
                     </div>
@@ -2337,25 +2415,25 @@ export function SettingsPage() {
                 <CardContent className="p-6 space-y-4">
                   <div>
                     <h2 className="text-lg font-semibold">Updates</h2>
-                    <p className="text-sm text-zinc-400">
+                    <p className="text-sm text-muted-foreground">
                       Download and install new versions of UnionCrax.Direct inside the app.
                     </p>
                   </div>
                   <div className="flex items-center justify-between text-sm">
-                    <span className="text-zinc-400">Current version</span>
+                    <span className="text-muted-foreground">Current version</span>
                     <span className="font-mono font-medium">{appVersion ? `v${appVersion}` : 'Loading...'}</span>
                   </div>
                   <div className="flex items-center justify-between text-sm">
-                    <span className="text-zinc-400">Updater state</span>
+                    <span className="text-muted-foreground">Updater state</span>
                     <span className="font-medium capitalize">{updateStatus.state.replace(/-/g, ' ')}</span>
                   </div>
                   {updateStatus.state !== 'idle' && (
-                    <div className="rounded-lg border border-zinc-700 bg-zinc-800/50 px-3 py-2 text-sm text-zinc-300">
+                    <div className="rounded-lg border border-border bg-secondary/50 px-3 py-2 text-sm text-foreground/80">
                       {getUpdateStatusMessage(updateStatus)}
                     </div>
                   )}
                   {updateStatus.state === 'downloading' && (
-                    <div className="rounded-lg border border-white/[.07] bg-zinc-900/60 px-3 py-2 text-xs text-zinc-300">
+                    <div className="rounded-lg border border-white/[.07] bg-card/60 px-3 py-2 text-xs text-foreground/80">
                       Download progress: {Math.round(updateStatus.progress)}%
                     </div>
                   )}
@@ -2394,7 +2472,7 @@ export function SettingsPage() {
                 <CardContent className="p-6 space-y-6">
                   <div>
                     <h2 className="text-lg font-semibold">Mirror host</h2>
-                    <p className="text-sm text-zinc-400">Choose the default mirror host for downloads.</p>
+                    <p className="text-sm text-muted-foreground">Choose the default mirror host for downloads.</p>
                   </div>
 
                   <div className="space-y-3">
@@ -2440,42 +2518,264 @@ export function SettingsPage() {
               </Card>
 
               <Card className="border-white/[.07]">
-                <CardContent className="p-6 space-y-6">
+                <CardContent className="p-6 space-y-4">
                   <div>
-                    <h2 className="text-lg font-semibold">Download checks</h2>
-                    <p className="text-sm text-zinc-400">Configure pre-download link verification.</p>
+                    <h2 className="text-lg font-semibold">Archive cleanup</h2>
+                    <p className="text-sm text-muted-foreground">
+                      Choose what happens to the installer archive after a game finishes installing.
+                    </p>
                   </div>
-
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <label className="text-sm font-medium cursor-pointer">Skip link availability check</label>
-                        <p className="text-xs text-zinc-400 mt-1">
-                          Download immediately without checking if links are alive first
-                        </p>
-                      </div>
-                      <button
-                        onClick={async () => {
-                          const current = await window.ucSettings?.get?.('skipLinkCheck')
-                          const newValue = !current
-                          setSkipLinkCheck(newValue)
-                          try {
-                            await window.ucSettings?.set?.('skipLinkCheck', newValue)
-                          } catch { }
-                        }}
-                        className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${skipLinkCheck ? 'bg-white' : 'bg-zinc-700'
-                          }`}
-                        title="Toggle skip link check"
-                      >
-                        <span
-                          className={`inline-block h-4 w-4 transform rounded-full transition-transform ${skipLinkCheck ? 'bg-black translate-x-6' : 'bg-white translate-x-1'
-                            }`}
-                        />
-                      </button>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <label className="text-sm font-medium cursor-pointer">Auto-delete installer archives</label>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Skip the "Delete archive?" prompt and remove the installer archive automatically once the install succeeds. Turn this off to bring the prompt back.
+                      </p>
                     </div>
+                    <button
+                      onClick={async () => {
+                        const newValue = !autoDeleteArchives
+                        setAutoDeleteArchives(newValue)
+                        try { await window.ucSettings?.set?.('autoDeleteArchives', newValue) } catch {}
+                      }}
+                      className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${autoDeleteArchives ? 'bg-white' : 'bg-zinc-700'}`}
+                      title="Toggle auto-delete archives"
+                    >
+                      <span className={`inline-block h-4 w-4 transform rounded-full transition-transform ${autoDeleteArchives ? 'bg-black translate-x-6' : 'bg-primary translate-x-1'}`} />
+                    </button>
                   </div>
                 </CardContent>
               </Card>
+
+              <Card className="border-white/[.07]">
+                <CardContent className="p-6 space-y-6">
+                  <div>
+                    <h2 className="text-lg font-semibold">Download confirmation</h2>
+                    <p className="text-sm text-muted-foreground">
+                      Decide when the pre-download popup (link availability, storage check, system requirements) should appear.
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    {([
+                      {
+                        value: 'always' as DownloadCheckMode,
+                        label: 'Always confirm',
+                        desc: 'Show the popup for every download so you can review hosts, space, and warnings before queueing.',
+                      },
+                      {
+                        value: 'auto' as DownloadCheckMode,
+                        label: 'Smart — only when needed',
+                        desc: 'Run the checks in the background. The popup only appears if something needs attention (dead host, low disk, sysreq mismatch, HV title).',
+                      },
+                      {
+                        value: 'skip' as DownloadCheckMode,
+                        label: 'Skip checks entirely',
+                        desc: "Queue downloads immediately with no checks. Fastest, but you won't be warned about dead links or full drives.",
+                      },
+                    ]).map((option) => {
+                      const active = downloadCheckMode === option.value
+                      return (
+                        <button
+                          key={option.value}
+                          type="button"
+                          onClick={async () => {
+                            setDownloadCheckMode(option.value)
+                            try {
+                              await window.ucSettings?.set?.('downloadCheckMode', option.value)
+                              // Keep the legacy flag in sync so other code paths
+                              // that still read it (and older builds) behave.
+                              await window.ucSettings?.set?.('skipLinkCheck', option.value === 'skip')
+                            } catch { }
+                          }}
+                          className={`w-full text-left rounded-2xl border px-4 py-3 transition-colors ${
+                            active
+                              ? 'border-white/20 bg-white/[.07]'
+                              : 'border-white/[.07] bg-white/[.02] hover:bg-white/[.04]'
+                          }`}
+                        >
+                          <div className="flex items-start gap-3">
+                            <span
+                              className={`mt-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${
+                                active ? 'border-white bg-white' : 'border-zinc-500 bg-transparent'
+                              }`}
+                              aria-hidden
+                            >
+                              {active && <span className="h-1.5 w-1.5 rounded-full bg-black" />}
+                            </span>
+                            <div className="min-w-0">
+                              <div className="text-sm font-medium text-white">{option.label}</div>
+                              <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">{option.desc}</p>
+                            </div>
+                          </div>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Force refresh — useful when the launcher believes the catalog
+                  is fresh but the user has reason to think otherwise (new
+                  release pushed, mod added, etc.). Single-click bust + refetch. */}
+              <Card className="border-white/[.07]">
+                <CardContent className="p-6 space-y-4">
+                  <div>
+                    <h2 className="text-lg font-semibold">Catalog data</h2>
+                    <p className="text-sm text-muted-foreground">
+                      The catalog refreshes on its own; this button bypasses the staleness window if you want the latest now.
+                    </p>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={async () => {
+                      setCatalogRefreshing(true)
+                      setCatalogRefreshFeedback(null)
+                      try {
+                        const { fetchCatalogGames, fetchCatalogStats, persistCatalogCache, mergeInstalledGames } = await import("@/lib/catalog")
+                        const [games, stats] = await Promise.all([
+                          fetchCatalogGames(),
+                          fetchCatalogStats(),
+                        ])
+                        const merged = await mergeInstalledGames(games)
+                        await persistCatalogCache({
+                          games: merged,
+                          stats,
+                          gamesUpdatedAt: Date.now(),
+                          statsUpdatedAt: Date.now(),
+                        })
+                        setCatalogRefreshFeedback({ type: "success", message: `Refreshed ${merged.length} games + stats.` })
+                      } catch (err) {
+                        setCatalogRefreshFeedback({ type: "error", message: err instanceof Error ? err.message : "Refresh failed." })
+                      } finally {
+                        setCatalogRefreshing(false)
+                      }
+                    }}
+                    disabled={catalogRefreshing}
+                  >
+                    {catalogRefreshing ? "Refreshing…" : "Force refresh catalog now"}
+                  </Button>
+                  {catalogRefreshFeedback && (
+                    <p className={`text-xs ${catalogRefreshFeedback.type === "success" ? "text-emerald-300" : "text-destructive"}`}>
+                      {catalogRefreshFeedback.message}
+                    </p>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* Bandwidth throttle — useful on metered connections or while
+                  you want to keep latency-sensitive things responsive during
+                  a big install. Presets cover the common cases (slow DSL →
+                  gigabit) so most users never have to touch the custom field.
+                  The setting is stored in KB/s (engine wants bytes) but the
+                  UI talks MB/s because nobody thinks in KB/s. */}
+              {(() => {
+                // Presets keyed by KB/s so the comparison is exact-integer.
+                // 0 = Unlimited / no cap.
+                const BANDWIDTH_PRESETS: Array<{ label: string; mbps: number; kBps: number }> = [
+                  { label: "Unlimited", mbps: 0, kBps: 0 },
+                  { label: "1 MB/s",    mbps: 1,    kBps: 1024 },
+                  { label: "5 MB/s",    mbps: 5,    kBps: 5 * 1024 },
+                  { label: "10 MB/s",   mbps: 10,   kBps: 10 * 1024 },
+                  { label: "25 MB/s",   mbps: 25,   kBps: 25 * 1024 },
+                  { label: "50 MB/s",   mbps: 50,   kBps: 50 * 1024 },
+                  { label: "100 MB/s",  mbps: 100,  kBps: 100 * 1024 },
+                ]
+                const activePreset = BANDWIDTH_PRESETS.find((p) => p.kBps === bandwidthLimitKBps)
+                const usingCustom = !activePreset
+                // Friendly readout in MB/s (single decimal under 10, integer above)
+                const currentMbps = bandwidthLimitKBps / 1024
+                const customDraft = currentMbps > 0
+                  ? (currentMbps < 10 ? currentMbps.toFixed(1) : Math.round(currentMbps).toString())
+                  : ""
+                return (
+                  <Card className="border-white/[.07]">
+                    <CardContent className="p-6 space-y-4">
+                      <div>
+                        <h2 className="text-lg font-semibold">Download speed limit</h2>
+                        <p className="text-sm text-muted-foreground">
+                          Cap how much bandwidth UC.D uses for downloads. Useful on metered Wi-Fi or to keep games / calls smooth during a big install.
+                        </p>
+                      </div>
+
+                      {/* Preset chips. Single source of truth = the value
+                          stored in ucSettings; we just compare. */}
+                      <div className="flex flex-wrap gap-1.5">
+                        {BANDWIDTH_PRESETS.map((preset) => {
+                          const isActive = activePreset?.kBps === preset.kBps
+                          return (
+                            <button
+                              key={preset.label}
+                              type="button"
+                              onClick={async () => {
+                                setBandwidthLimitKBps(preset.kBps)
+                                try { await window.ucSettings?.set?.('downloadBandwidthLimitKBps', preset.kBps) } catch { /* ignore */ }
+                              }}
+                              className={cn(
+                                "inline-flex items-center rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors active:scale-95",
+                                isActive
+                                  ? "border-white/20 bg-primary text-primary-foreground"
+                                  : "border-white/[.07] bg-white/[.03] text-foreground/80 hover:bg-white/[.07] hover:text-white"
+                              )}
+                            >
+                              {preset.label}
+                            </button>
+                          )
+                        })}
+                      </div>
+
+                      {/* Custom value — collapses unless the user has one set
+                          or explicitly opens it via the "Custom…" affordance. */}
+                      <details className="group" open={usingCustom && bandwidthLimitKBps > 0}>
+                        <summary className="cursor-pointer text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/80 hover:text-foreground/80 transition-colors list-none inline-flex items-center gap-1.5">
+                          <span className="transition-transform group-open:rotate-90">▸</span>
+                          Custom speed
+                          {usingCustom && bandwidthLimitKBps > 0 && (
+                            <span className="ml-1 rounded-full bg-white/[.06] px-1.5 py-0.5 text-[9px] font-mono text-foreground/80">
+                              ~{currentMbps < 10 ? currentMbps.toFixed(1) : Math.round(currentMbps)} MB/s
+                            </span>
+                          )}
+                        </summary>
+                        <div className="mt-2 flex items-end gap-2 flex-wrap">
+                          <div className="flex-1 min-w-[140px]">
+                            <label className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/80" htmlFor="bw-limit-custom">
+                              Max speed
+                            </label>
+                            <div className="mt-1 flex items-center rounded-xl border border-white/[.07] bg-white/[.03] overflow-hidden focus-within:border-white/20">
+                              <input
+                                id="bw-limit-custom"
+                                type="number"
+                                min={0}
+                                step={0.5}
+                                defaultValue={customDraft}
+                                key={`bw-${bandwidthLimitKBps}`}
+                                onBlur={async (event) => {
+                                  const value = Number(event.target.value) || 0
+                                  const kBps = value > 0 ? Math.max(1, Math.round(value * 1024)) : 0
+                                  setBandwidthLimitKBps(kBps)
+                                  try { await window.ucSettings?.set?.('downloadBandwidthLimitKBps', kBps) } catch { /* ignore */ }
+                                }}
+                                className="flex-1 bg-transparent px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/80 outline-none font-mono tabular-nums"
+                                placeholder="0 (unlimited)"
+                              />
+                              <span className="px-3 py-2 text-xs font-semibold text-muted-foreground/80 border-l border-white/[.07]">
+                                MB/s
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      </details>
+
+                      <p className="text-[11px] text-muted-foreground/80 leading-relaxed">
+                        {bandwidthLimitKBps > 0
+                          ? `Downloads capped at ~${currentMbps < 10 ? currentMbps.toFixed(1) : Math.round(currentMbps)} MB/s.`
+                          : "No cap applied — downloads will use whatever bandwidth your network offers."}
+                      </p>
+                    </CardContent>
+                  </Card>
+                )
+              })()}
 
             </>
           )}
@@ -2488,7 +2788,7 @@ export function SettingsPage() {
                 <CardContent className="p-6 space-y-6">
                   <div>
                     <h2 className="text-lg font-semibold">Game Launch</h2>
-                    <p className="text-sm text-zinc-400">
+                    <p className="text-sm text-muted-foreground">
                       Configure how games are launched on your system.
                     </p>
                   </div>
@@ -2497,7 +2797,7 @@ export function SettingsPage() {
                     <div className="flex items-center justify-between">
                       <div>
                         <label className="text-sm font-medium cursor-pointer">Always create desktop shortcuts</label>
-                        <p className="text-xs text-zinc-400 mt-1">
+                        <p className="text-xs text-muted-foreground mt-1">
                           Automatically create desktop shortcuts when launching games for the first time
                         </p>
                       </div>
@@ -2514,7 +2814,33 @@ export function SettingsPage() {
                         title="Toggle always create desktop shortcuts"
                       >
                         <span
-                          className={`inline-block h-4 w-4 transform rounded-full transition-transform ${alwaysCreateDesktopShortcut ? 'bg-black translate-x-6' : 'bg-white translate-x-1'
+                          className={`inline-block h-4 w-4 transform rounded-full transition-transform ${alwaysCreateDesktopShortcut ? 'bg-black translate-x-6' : 'bg-primary translate-x-1'
+                            }`}
+                        />
+                      </button>
+                    </div>
+
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <label className="text-sm font-medium cursor-pointer">Pause downloads while playing</label>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Pause every active download when you launch a game, then resume them when the game exits. Helps with limited bandwidth and unstable Wi-Fi.
+                        </p>
+                      </div>
+                      <button
+                        onClick={async () => {
+                          const newValue = !pauseDownloadsWhilePlaying
+                          setPauseDownloadsWhilePlaying(newValue)
+                          try {
+                            await window.ucSettings?.set?.('pauseDownloadsWhilePlaying', newValue)
+                          } catch { }
+                        }}
+                        className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${pauseDownloadsWhilePlaying ? 'bg-white' : 'bg-zinc-700'
+                          }`}
+                        title="Toggle pause downloads while playing"
+                      >
+                        <span
+                          className={`inline-block h-4 w-4 transform rounded-full transition-transform ${pauseDownloadsWhilePlaying ? 'bg-black translate-x-6' : 'bg-primary translate-x-1'
                             }`}
                         />
                       </button>
@@ -2523,7 +2849,7 @@ export function SettingsPage() {
                     <div className="flex items-center justify-between">
                       <div>
                         <label className="text-sm font-medium cursor-pointer">Prevent system sleep during installs and launch handoff</label>
-                        <p className="text-xs text-zinc-400 mt-1">
+                        <p className="text-xs text-muted-foreground mt-1">
                           Keep the app awake while downloads, extraction, or the first seconds of game launch are in progress.
                         </p>
                       </div>
@@ -2540,7 +2866,7 @@ export function SettingsPage() {
                         title="Toggle sleep prevention during active operations"
                       >
                         <span
-                          className={`inline-block h-4 w-4 transform rounded-full transition-transform ${preventSleepDuringOperations ? 'bg-black translate-x-6' : 'bg-white translate-x-1'
+                          className={`inline-block h-4 w-4 transform rounded-full transition-transform ${preventSleepDuringOperations ? 'bg-black translate-x-6' : 'bg-primary translate-x-1'
                             }`}
                         />
                       </button>
@@ -2556,17 +2882,17 @@ export function SettingsPage() {
                       <div className="rounded-xl border border-white/[.07] bg-muted/30 p-4 space-y-4">
                         {/* Header */}
                         <div className="flex items-center gap-2">
-                          <Terminal className="h-4 w-4 text-zinc-300" />
+                          <Terminal className="h-4 w-4 text-foreground/80" />
                           <div>
                             <div className="text-sm font-semibold">Linux Gaming</div>
-                            <div className="text-xs text-zinc-400">Configure Wine, Proton, and compatibility tools for running Windows games on Linux.</div>
+                            <div className="text-xs text-muted-foreground">Configure Wine, Proton, and compatibility tools for running Windows games on Linux.</div>
                           </div>
                         </div>
 
-                        <div className="space-y-2 rounded-lg border border-white/[.07] bg-zinc-900/40 p-3">
+                        <div className="space-y-2 rounded-lg border border-white/[.07] bg-card/40 p-3">
                           <div>
-                            <label className="text-xs font-medium text-zinc-400 uppercase tracking-wide">Quick Presets</label>
-                            <p className="text-[11px] text-zinc-400 mt-1">Apply a base runner setup, then adjust paths and prefixes if a game needs something special.</p>
+                            <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Quick Presets</label>
+                            <p className="text-[11px] text-muted-foreground mt-1">Apply a base runner setup, then adjust paths and prefixes if a game needs something special.</p>
                           </div>
                           <div className="flex flex-wrap gap-2">
                             {LINUX_PRESETS.map((preset) => (
@@ -2574,7 +2900,7 @@ export function SettingsPage() {
                                 key={preset.id}
                                 type="button"
                                 onClick={() => { void handleApplyLinuxPreset(preset.id) }}
-                                className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-zinc-200 transition-colors hover:bg-white/10"
+                                className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-foreground/90 transition-colors hover:bg-white/10"
                                 title={preset.description}
                               >
                                 {preset.label}
@@ -2585,7 +2911,7 @@ export function SettingsPage() {
 
                         {/* Launch Mode */}
                         <div className="space-y-2">
-                          <label className="text-xs font-medium text-zinc-400 uppercase tracking-wide">Launch Mode</label>
+                          <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Launch Mode</label>
                           <Select
                             value={linuxLaunchMode}
                             onValueChange={async (value) => {
@@ -2610,7 +2936,7 @@ export function SettingsPage() {
 
                         {/* Wine Binary */}
                         <div className="space-y-2">
-                          <label className="text-xs font-medium text-zinc-400 uppercase tracking-wide">Wine Binary</label>
+                          <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Wine Binary</label>
                           <div className="flex gap-2">
                             <Input
                               value={linuxWinePath}
@@ -2635,7 +2961,7 @@ export function SettingsPage() {
                                     setLinuxWinePath(v.path)
                                     await window.ucSettings?.set?.('linuxWinePath', v.path).catch(() => { })
                                   }}
-                                  className="text-[10px] px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-300 border border-zinc-700 hover:bg-zinc-700 transition-colors"
+                                  className="text-[10px] px-2 py-0.5 rounded-full bg-secondary text-foreground/80 border border-border hover:bg-zinc-700 transition-colors"
                                 >
                                   {v.label}
                                 </button>
@@ -2646,7 +2972,7 @@ export function SettingsPage() {
 
                         {/* Proton Binary */}
                         <div className="space-y-2">
-                          <label className="text-xs font-medium text-zinc-400 uppercase tracking-wide">Proton Script</label>
+                          <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Proton Script</label>
                           <div className="flex gap-2">
                             <Input
                               value={linuxProtonPath}
@@ -2671,7 +2997,7 @@ export function SettingsPage() {
                                     setLinuxProtonPath(v.path)
                                     await window.ucSettings?.set?.('linuxProtonPath', v.path).catch(() => { })
                                   }}
-                                  className="text-[10px] px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-300 border border-zinc-700 hover:bg-zinc-700 transition-colors"
+                                  className="text-[10px] px-2 py-0.5 rounded-full bg-secondary text-foreground/80 border border-border hover:bg-zinc-700 transition-colors"
                                 >
                                   {v.label}
                                 </button>
@@ -2682,7 +3008,7 @@ export function SettingsPage() {
 
                         {/* WINEPREFIX */}
                         <div className="space-y-2">
-                          <label className="text-xs font-medium text-zinc-400 uppercase tracking-wide">WINEPREFIX</label>
+                          <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">WINEPREFIX</label>
                           <div className="flex gap-2">
                             <Input
                               value={linuxWinePrefix}
@@ -2733,7 +3059,7 @@ export function SettingsPage() {
 
                         {/* Proton Prefix (STEAM_COMPAT_DATA_PATH) */}
                         <div className="space-y-2">
-                          <label className="text-xs font-medium text-zinc-400 uppercase tracking-wide">Proton Prefix <span className="normal-case">(STEAM_COMPAT_DATA_PATH)</span></label>
+                          <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Proton Prefix <span className="normal-case">(STEAM_COMPAT_DATA_PATH)</span></label>
                           <div className="flex gap-2">
                             <Input
                               value={linuxProtonPrefix}
@@ -2752,7 +3078,7 @@ export function SettingsPage() {
 
                         {/* Steam Path */}
                         <div className="space-y-2">
-                          <label className="text-xs font-medium text-zinc-400 uppercase tracking-wide">Steam Install Path <span className="normal-case">(STEAM_COMPAT_CLIENT_INSTALL_PATH)</span></label>
+                          <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Steam Install Path <span className="normal-case">(STEAM_COMPAT_CLIENT_INSTALL_PATH)</span></label>
                           <Input
                             value={linuxSteamPath}
                             onChange={(e) => setLinuxSteamPath(e.target.value)}
@@ -2766,22 +3092,22 @@ export function SettingsPage() {
                         {/* Advanced toggle */}
                         <button
                           onClick={() => setShowLinuxAdvanced(!showLinuxAdvanced)}
-                          className="flex items-center gap-2 text-sm text-zinc-400 hover:text-zinc-100 transition-colors"
+                          className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
                         >
                           <ChevronDown className={`h-4 w-4 transition-transform ${showLinuxAdvanced ? 'rotate-180' : ''}`} />
                           Advanced tools & environment
                         </button>
 
                         {showLinuxAdvanced && (
-                          <div className="space-y-4 rounded-lg border border-white/[.07] bg-zinc-900/50 p-4">
+                          <div className="space-y-4 rounded-lg border border-white/[.07] bg-card/50 p-4">
 
                             {/* Extra environment variables */}
                             <div className="space-y-2">
                               <div className="flex items-center gap-2">
-                                <Cpu className="h-3.5 w-3.5 text-zinc-400" />
+                                <Cpu className="h-3.5 w-3.5 text-muted-foreground" />
                                 <label className="text-xs font-medium">Extra environment variables</label>
                               </div>
-                              <p className="text-xs text-zinc-400">One per line, format: <code className="font-mono bg-muted/50 px-1 rounded">KEY=VALUE</code>. Applied to every game launch.</p>
+                              <p className="text-xs text-muted-foreground">One per line, format: <code className="font-mono bg-muted/50 px-1 rounded">KEY=VALUE</code>. Applied to every game launch.</p>
                               <textarea
                                 value={linuxExtraEnv}
                                 onChange={(e) => setLinuxExtraEnv(e.target.value)}
@@ -2790,14 +3116,14 @@ export function SettingsPage() {
                                 }}
                                 rows={4}
                                 placeholder={"DXVK_HUD=fps\nMESA_GL_VERSION_OVERRIDE=4.5\n# WINEDEBUG=-all"}
-                                className="w-full rounded-md border border-input bg-background px-3 py-2 text-xs font-mono text-zinc-100 placeholder:text-zinc-400 focus:outline-none focus:ring-1 focus:ring-ring resize-y"
+                                className="w-full rounded-md border border-input bg-background px-3 py-2 text-xs font-mono text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring resize-y"
                               />
                             </div>
 
                             {/* Winetricks */}
                             <div className="space-y-2 border-t border-border/40 pt-4">
                               <div className="flex items-center gap-2">
-                                <FlaskConical className="h-3.5 w-3.5 text-zinc-400" />
+                                <FlaskConical className="h-3.5 w-3.5 text-muted-foreground" />
                                 <label className="text-xs font-medium">winetricks</label>
                                 {linuxToolAvailability.winetricks === false && (
                                   <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-destructive/20 text-destructive border border-destructive/30">not found</span>
@@ -2806,7 +3132,7 @@ export function SettingsPage() {
                                   <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">available</span>
                                 )}
                               </div>
-                              <p className="text-xs text-zinc-400">Install Windows components into your WINEPREFIX (e.g. <code className="font-mono bg-muted/50 px-1 rounded">vcrun2019 d3dx9</code>).</p>
+                              <p className="text-xs text-muted-foreground">Install Windows components into your WINEPREFIX (e.g. <code className="font-mono bg-muted/50 px-1 rounded">vcrun2019 d3dx9</code>).</p>
                               <div className="flex gap-2">
                                 <Input
                                   value={linuxWinetricksInput}
@@ -2847,7 +3173,7 @@ export function SettingsPage() {
                             {/* Protontricks */}
                             <div className="space-y-2 border-t border-border/40 pt-4">
                               <div className="flex items-center gap-2">
-                                <FlaskConical className="h-3.5 w-3.5 text-zinc-400" />
+                                <FlaskConical className="h-3.5 w-3.5 text-muted-foreground" />
                                 <label className="text-xs font-medium">protontricks</label>
                                 {linuxToolAvailability.protontricks === false && (
                                   <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-destructive/20 text-destructive border border-destructive/30">not found</span>
@@ -2856,7 +3182,7 @@ export function SettingsPage() {
                                   <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">available</span>
                                 )}
                               </div>
-                              <p className="text-xs text-zinc-400">Install components into a Proton prefix by Steam App ID (e.g. <code className="font-mono bg-muted/50 px-1 rounded">12345 vcrun2019</code>).</p>
+                              <p className="text-xs text-muted-foreground">Install components into a Proton prefix by Steam App ID (e.g. <code className="font-mono bg-muted/50 px-1 rounded">12345 vcrun2019</code>).</p>
                               <div className="flex gap-2">
                                 <Input
                                   value={linuxProtontricksAppId}
@@ -2900,10 +3226,10 @@ export function SettingsPage() {
                   <div className="flex items-start justify-between gap-4">
                     <div>
                       <div className="flex items-center gap-2">
-                        <Zap className="h-4 w-4 text-zinc-300" />
+                        <Zap className="h-4 w-4 text-foreground/80" />
                         <h2 className="text-lg font-semibold">SLSsteam Integration</h2>
                       </div>
-                      <p className="text-sm text-zinc-400 mt-1">
+                      <p className="text-sm text-muted-foreground mt-1">
                         Inject SLSsteam into game launches via <code className="font-mono bg-muted/50 px-1 rounded text-xs">LD_AUDIT</code> to enable Steam client modifications (DRM bypass, family sharing, etc.) for games launched through UnionCrax.Direct.
                       </p>
                     </div>
@@ -2917,23 +3243,23 @@ export function SettingsPage() {
                           }`}
                       title="Toggle SLSsteam integration"
                     >
-                      <span className={`inline-block h-4 w-4 transform rounded-full transition-transform ${slsSteamEnabled ? 'bg-black translate-x-6' : 'bg-white translate-x-1'}`} />
+                      <span className={`inline-block h-4 w-4 transform rounded-full transition-transform ${slsSteamEnabled ? 'bg-black translate-x-6' : 'bg-primary translate-x-1'}`} />
                     </button>
                   </div>
 
                   {/* Detection status */}
                   <div className="flex flex-wrap gap-2">
                     {slsSteamDetected !== null && (
-                      <span className={`text-[11px] px-2 py-1 rounded-full border ${slsSteamDetected.found ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' : 'bg-muted/30 text-zinc-400 border-border/40'}`}>
+                      <span className={`text-[11px] px-2 py-1 rounded-full border ${slsSteamDetected.found ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' : 'bg-muted/30 text-muted-foreground border-border/40'}`}>
                         SLSsteam: {slsSteamDetected.found ? `found${slsSteamDetected.dir ? ` (${slsSteamDetected.dir})` : ''}` : 'not found at default path'}
                       </span>
                     )}
                   </div>
 
                   {/* Path configuration */}
-                  <div className="space-y-4 rounded-lg border border-white/[.07] bg-zinc-900/50 p-4">
+                  <div className="space-y-4 rounded-lg border border-white/[.07] bg-card/50 p-4">
                     <div className="space-y-2">
-                      <label className="text-xs font-medium text-zinc-400 uppercase tracking-wide">SLSsteam.so path</label>
+                      <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">SLSsteam.so path</label>
                       <div className="flex gap-2">
                         <Input
                           value={slsSteamPath}
@@ -2962,7 +3288,7 @@ export function SettingsPage() {
                     </div>
 
                     <div className="space-y-2">
-                      <label className="text-xs font-medium text-zinc-400 uppercase tracking-wide">library-inject.so path</label>
+                      <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">library-inject.so path</label>
                       <div className="flex gap-2">
                         <Input
                           value={slsInjectPath}
@@ -3004,7 +3330,7 @@ export function SettingsPage() {
                               await window.ucSettings?.set?.('slsInjectPath', ip).catch(() => { })
                             }
                           }}
-                          className="text-[10px] px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-300 border border-zinc-700 hover:bg-zinc-700 transition-colors"
+                          className="text-[10px] px-2 py-0.5 rounded-full bg-secondary text-foreground/80 border border-border hover:bg-zinc-700 transition-colors"
                         >
                           Use detected paths
                         </button>
@@ -3038,7 +3364,7 @@ export function SettingsPage() {
                 <CardContent className="p-6 space-y-6">
                   <div>
                     <h2 className="text-lg font-semibold">VR / SteamVR</h2>
-                    <p className="text-sm text-zinc-400">
+                    <p className="text-sm text-muted-foreground">
                       Configure SteamVR and OpenXR settings for VR game launches.
                     </p>
                   </div>
@@ -3047,7 +3373,7 @@ export function SettingsPage() {
                   <div className="flex items-center justify-between">
                     <div>
                       <label className="text-sm font-medium cursor-pointer">Enable VR support</label>
-                      <p className="text-xs text-zinc-400 mt-1">
+                      <p className="text-xs text-muted-foreground mt-1">
                         Apply VR environment variables (XR_RUNTIME_JSON, STEAM_VR_RUNTIME) when launching games.
                       </p>
                     </div>
@@ -3061,19 +3387,19 @@ export function SettingsPage() {
                           }`}
                       title="Toggle VR support"
                     >
-                      <span className={`inline-block h-4 w-4 transform rounded-full transition-transform ${vrEnabled ? 'bg-black translate-x-6' : 'bg-white translate-x-1'}`} />
+                      <span className={`inline-block h-4 w-4 transform rounded-full transition-transform ${vrEnabled ? 'bg-black translate-x-6' : 'bg-primary translate-x-1'}`} />
                     </button>
                   </div>
 
                   {/* Detection status */}
                   <div className="flex flex-wrap gap-2">
                     {vrDetected !== null && (
-                      <span className={`text-[11px] px-2 py-1 rounded-full border ${vrDetected.found ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' : 'bg-muted/30 text-zinc-400 border-border/40'}`}>
+                      <span className={`text-[11px] px-2 py-1 rounded-full border ${vrDetected.found ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' : 'bg-muted/30 text-muted-foreground border-border/40'}`}>
                         SteamVR: {vrDetected.found ? `found${vrDetected.dir ? ` (${vrDetected.dir.split('/').pop()})` : ''}` : 'not found'}
                       </span>
                     )}
                     {vrOpenXrDetected !== null && (
-                      <span className={`text-[11px] px-2 py-1 rounded-full border ${vrOpenXrDetected.found ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' : 'bg-muted/30 text-zinc-400 border-border/40'}`}>
+                      <span className={`text-[11px] px-2 py-1 rounded-full border ${vrOpenXrDetected.found ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' : 'bg-muted/30 text-muted-foreground border-border/40'}`}>
                         OpenXR: {vrOpenXrDetected.found ? 'runtime found' : 'not found'}
                       </span>
                     )}
@@ -3096,7 +3422,7 @@ export function SettingsPage() {
                   <div className="flex items-center justify-between">
                     <div>
                       <label className="text-sm font-medium cursor-pointer">Auto-launch SteamVR with VR games</label>
-                      <p className="text-xs text-zinc-400 mt-1">
+                      <p className="text-xs text-muted-foreground mt-1">
                         Automatically start SteamVR before launching a VR game.
                       </p>
                     </div>
@@ -3110,25 +3436,25 @@ export function SettingsPage() {
                           }`}
                       title="Toggle auto-launch SteamVR"
                     >
-                      <span className={`inline-block h-4 w-4 transform rounded-full transition-transform ${vrAutoLaunchSteamVr ? 'bg-black translate-x-6' : 'bg-white translate-x-1'}`} />
+                      <span className={`inline-block h-4 w-4 transform rounded-full transition-transform ${vrAutoLaunchSteamVr ? 'bg-black translate-x-6' : 'bg-primary translate-x-1'}`} />
                     </button>
                   </div>
 
                   {/* Advanced toggle */}
                   <button
                     onClick={() => setShowVrAdvanced(!showVrAdvanced)}
-                    className="flex items-center gap-2 text-sm text-zinc-400 hover:text-zinc-100 transition-colors"
+                    className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
                   >
                     <ChevronDown className={`h-4 w-4 transition-transform ${showVrAdvanced ? 'rotate-180' : ''}`} />
                     Advanced VR settings
                   </button>
 
                   {showVrAdvanced && (
-                    <div className="space-y-4 rounded-lg border border-white/[.07] bg-zinc-900/50 p-4">
+                    <div className="space-y-4 rounded-lg border border-white/[.07] bg-card/50 p-4">
 
                       {/* SteamVR directory */}
                       <div className="space-y-2">
-                        <label className="text-xs font-medium text-zinc-400 uppercase tracking-wide">SteamVR Directory</label>
+                        <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">SteamVR Directory</label>
                         <div className="flex gap-2">
                           <Input
                             value={vrSteamVrPath}
@@ -3150,7 +3476,7 @@ export function SettingsPage() {
                               setVrSteamVrPath(vrDetected.dir!)
                               await window.ucSettings?.set?.('vrSteamVrPath', vrDetected.dir).catch(() => { })
                             }}
-                            className="text-[10px] px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-300 border border-zinc-700 hover:bg-zinc-700 transition-colors"
+                            className="text-[10px] px-2 py-0.5 rounded-full bg-secondary text-foreground/80 border border-border hover:bg-zinc-700 transition-colors"
                           >
                             Use detected: {vrDetected.dir}
                           </button>
@@ -3159,7 +3485,7 @@ export function SettingsPage() {
 
                       {/* XR_RUNTIME_JSON */}
                       <div className="space-y-2">
-                        <label className="text-xs font-medium text-zinc-400 uppercase tracking-wide">
+                        <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
                           XR_RUNTIME_JSON <span className="normal-case">(OpenXR runtime)</span>
                         </label>
                         <div className="flex gap-2">
@@ -3183,7 +3509,7 @@ export function SettingsPage() {
                               setVrXrRuntimeJson(vrOpenXrDetected.path || "")
                               await window.ucSettings?.set?.('vrXrRuntimeJson', vrOpenXrDetected.path || "").catch(() => { })
                             }}
-                            className="text-[10px] px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-300 border border-zinc-700 hover:bg-zinc-700 transition-colors"
+                            className="text-[10px] px-2 py-0.5 rounded-full bg-secondary text-foreground/80 border border-border hover:bg-zinc-700 transition-colors"
                           >
                             Use detected: {vrOpenXrDetected.path}
                           </button>
@@ -3192,7 +3518,7 @@ export function SettingsPage() {
 
                       {/* STEAM_VR_RUNTIME */}
                       <div className="space-y-2">
-                        <label className="text-xs font-medium text-zinc-400 uppercase tracking-wide">
+                        <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
                           STEAM_VR_RUNTIME
                         </label>
                         <Input
@@ -3207,8 +3533,8 @@ export function SettingsPage() {
 
                       {/* VR extra env vars */}
                       <div className="space-y-2">
-                        <label className="text-xs font-medium text-zinc-400 uppercase tracking-wide">VR extra environment variables</label>
-                        <p className="text-xs text-zinc-400">One per line, format: <code className="font-mono bg-muted/50 px-1 rounded">KEY=VALUE</code>. Applied in addition to the Linux gaming env vars.</p>
+                        <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">VR extra environment variables</label>
+                        <p className="text-xs text-muted-foreground">One per line, format: <code className="font-mono bg-muted/50 px-1 rounded">KEY=VALUE</code>. Applied in addition to the Linux gaming env vars.</p>
                         <textarea
                           value={vrExtraEnv}
                           onChange={(e) => setVrExtraEnv(e.target.value)}
@@ -3217,7 +3543,7 @@ export function SettingsPage() {
                           }}
                           rows={3}
                           placeholder={"ENABLE_VK_LAYER_VALVE_steam_overlay_1=1\n# VR_OVERRIDE=1"}
-                          className="w-full rounded-md border border-input bg-background px-3 py-2 text-xs font-mono text-zinc-100 placeholder:text-zinc-400 focus:outline-none focus:ring-1 focus:ring-ring resize-y"
+                          className="w-full rounded-md border border-input bg-background px-3 py-2 text-xs font-mono text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring resize-y"
                         />
                       </div>
 
@@ -3250,7 +3576,7 @@ export function SettingsPage() {
                 <CardContent className="p-6 space-y-6">
                   <div>
                     <h2 className="text-lg font-semibold">In-Game Overlay</h2>
-                    <p className="text-sm text-zinc-400">
+                    <p className="text-sm text-muted-foreground">
                       A Discord-style overlay that appears over your games. Toggle it with a hotkey.
                     </p>
                   </div>
@@ -3260,7 +3586,7 @@ export function SettingsPage() {
                     <div className="flex items-center justify-between">
                       <div>
                         <label className="text-sm font-medium">Enable in-game overlay</label>
-                        <p className="text-xs text-zinc-400 mt-1">
+                        <p className="text-xs text-muted-foreground mt-1">
                           Show the UC.Direct overlay panel while games are running
                         </p>
                       </div>
@@ -3273,7 +3599,7 @@ export function SettingsPage() {
                         className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${overlayEnabled ? 'bg-white' : 'bg-zinc-700'
                           }`}
                       >
-                        <span className={`inline-block h-4 w-4 transform rounded-full transition-transform ${overlayEnabled ? 'bg-black translate-x-6' : 'bg-white translate-x-1'}`} />
+                        <span className={`inline-block h-4 w-4 transform rounded-full transition-transform ${overlayEnabled ? 'bg-black translate-x-6' : 'bg-primary translate-x-1'}`} />
                       </button>
                     </div>
 
@@ -3281,7 +3607,7 @@ export function SettingsPage() {
                     <div className="flex items-center justify-between">
                       <div>
                         <label className="text-sm font-medium">Show overlay when game launches</label>
-                        <p className="text-xs text-zinc-400 mt-1">
+                        <p className="text-xs text-muted-foreground mt-1">
                           Automatically show the overlay when you start a game
                         </p>
                       </div>
@@ -3295,7 +3621,7 @@ export function SettingsPage() {
                           }`}
                         disabled={!overlayEnabled}
                       >
-                        <span className={`inline-block h-4 w-4 transform rounded-full transition-transform ${overlayAutoShow ? 'bg-black translate-x-6' : 'bg-white translate-x-1'}`} />
+                        <span className={`inline-block h-4 w-4 transform rounded-full transition-transform ${overlayAutoShow ? 'bg-black translate-x-6' : 'bg-primary translate-x-1'}`} />
                       </button>
                     </div>
 
@@ -3303,7 +3629,7 @@ export function SettingsPage() {
                     <div className="flex items-center justify-between">
                       <div>
                         <label className="text-sm font-medium">Toggle hotkey</label>
-                        <p className="text-xs text-zinc-400 mt-1">
+                        <p className="text-xs text-muted-foreground mt-1">
                           Press this key combination to show/hide the overlay in-game
                         </p>
                       </div>
@@ -3358,7 +3684,7 @@ export function SettingsPage() {
                     <div className="flex items-center justify-between">
                       <div>
                         <label className="text-sm font-medium">Panel position</label>
-                        <p className="text-xs text-zinc-400 mt-1">
+                        <p className="text-xs text-muted-foreground mt-1">
                           Which side of the screen the overlay slides in from
                         </p>
                       </div>
@@ -3370,8 +3696,8 @@ export function SettingsPage() {
                           }}
                           className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
                             overlayPosition === 'left'
-                              ? 'bg-background text-zinc-100 shadow-sm'
-                              : 'text-zinc-400 hover:text-zinc-100'
+                              ? 'bg-background text-foreground shadow-sm'
+                              : 'text-muted-foreground hover:text-foreground'
                           }`}
                           disabled={!overlayEnabled}
                         >
@@ -3384,8 +3710,8 @@ export function SettingsPage() {
                           }}
                           className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
                             overlayPosition === 'right'
-                              ? 'bg-background text-zinc-100 shadow-sm'
-                              : 'text-zinc-400 hover:text-zinc-100'
+                              ? 'bg-background text-foreground shadow-sm'
+                              : 'text-muted-foreground hover:text-foreground'
                           }`}
                           disabled={!overlayEnabled}
                         >
@@ -3398,7 +3724,7 @@ export function SettingsPage() {
                     <div className="flex items-center justify-between">
                       <div>
                         <label className="text-sm font-medium">Toast duration</label>
-                        <p className="text-xs text-zinc-400 mt-1">
+                        <p className="text-xs text-muted-foreground mt-1">
                           How long launch toasts stay visible before fading out
                         </p>
                       </div>
@@ -3412,8 +3738,8 @@ export function SettingsPage() {
                             }}
                             className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
                               overlayToastDurationMs === duration
-                                ? 'bg-background text-zinc-100 shadow-sm'
-                                : 'text-zinc-400 hover:text-zinc-100'
+                                ? 'bg-background text-foreground shadow-sm'
+                                : 'text-muted-foreground hover:text-foreground'
                             }`}
                             disabled={!overlayEnabled}
                           >
@@ -3427,7 +3753,7 @@ export function SettingsPage() {
                     <div className="flex items-center justify-between">
                       <div>
                         <label className="text-sm font-medium">Toast anchor</label>
-                        <p className="text-xs text-zinc-400 mt-1">
+                        <p className="text-xs text-muted-foreground mt-1">
                           Choose whether launch toasts appear at the top or bottom edge
                         </p>
                       </div>
@@ -3439,8 +3765,8 @@ export function SettingsPage() {
                           }}
                           className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
                             overlayToastVertical === 'top'
-                              ? 'bg-background text-zinc-100 shadow-sm'
-                              : 'text-zinc-400 hover:text-zinc-100'
+                              ? 'bg-background text-foreground shadow-sm'
+                              : 'text-muted-foreground hover:text-foreground'
                           }`}
                           disabled={!overlayEnabled}
                         >
@@ -3453,8 +3779,8 @@ export function SettingsPage() {
                           }}
                           className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
                             overlayToastVertical === 'bottom'
-                              ? 'bg-background text-zinc-100 shadow-sm'
-                              : 'text-zinc-400 hover:text-zinc-100'
+                              ? 'bg-background text-foreground shadow-sm'
+                              : 'text-muted-foreground hover:text-foreground'
                           }`}
                           disabled={!overlayEnabled}
                         >
@@ -3464,11 +3790,11 @@ export function SettingsPage() {
                     </div>
                   </div>
 
-                  <div className="rounded-2xl border border-white/[.07] bg-zinc-900/40 p-4 space-y-4">
+                  <div className="rounded-2xl border border-white/[.07] bg-card/40 p-4 space-y-4">
                     <div className="flex items-center justify-between gap-3">
                       <div>
                         <h3 className="text-sm font-semibold">Overlay diagnostics</h3>
-                        <p className="text-xs text-zinc-400 mt-1">
+                        <p className="text-xs text-muted-foreground mt-1">
                           Live health data for overlay loading, hotkey registration, and native injection.
                         </p>
                       </div>
@@ -3481,8 +3807,8 @@ export function SettingsPage() {
                     {overlayDiagnostics && (
                       <div className="grid gap-3 md:grid-cols-2">
                         <div className="rounded-xl border border-white/[.07] bg-black/20 px-3 py-3 text-sm">
-                          <div className="text-xs uppercase tracking-[0.14em] text-zinc-500">Window state</div>
-                          <div className="mt-2 space-y-1 text-zinc-200">
+                          <div className="text-xs uppercase tracking-[0.14em] text-muted-foreground/80">Window state</div>
+                          <div className="mt-2 space-y-1 text-foreground/90">
                             <div>Created: {overlayDiagnostics.overlayWindowCreated ? 'Yes' : 'No'}</div>
                             <div>Renderer ready: {overlayDiagnostics.overlayWindowReady ? 'Yes' : 'No'}</div>
                             <div>Visible: {overlayDiagnostics.overlayWindowVisible ? 'Yes' : 'No'}</div>
@@ -3490,8 +3816,8 @@ export function SettingsPage() {
                           </div>
                         </div>
                         <div className="rounded-xl border border-white/[.07] bg-black/20 px-3 py-3 text-sm">
-                          <div className="text-xs uppercase tracking-[0.14em] text-zinc-500">Hook state</div>
-                          <div className="mt-2 space-y-1 text-zinc-200">
+                          <div className="text-xs uppercase tracking-[0.14em] text-muted-foreground/80">Hook state</div>
+                          <div className="mt-2 space-y-1 text-foreground/90">
                             <div>Native addon: {overlayDiagnostics.nativeAddonAvailable ? 'Available' : 'Missing'}</div>
                             <div>DLL present: {overlayDiagnostics.dllExists ? 'Yes' : 'No'}</div>
                             <div>Hotkey registered: {overlayDiagnostics.hotkeyRegistered ? 'Yes' : 'No'}</div>
@@ -3502,13 +3828,13 @@ export function SettingsPage() {
                     )}
 
                     {overlayDiagnostics && (
-                      <div className="space-y-2 rounded-xl border border-white/[.07] bg-black/20 px-3 py-3 text-xs text-zinc-300">
-                        <div><span className="text-zinc-500">DLL path:</span> {overlayDiagnostics.dllPath}</div>
-                        <div><span className="text-zinc-500">Last event:</span> {overlayDiagnostics.lastEvent}</div>
-                        <div><span className="text-zinc-500">Last error:</span> {overlayDiagnostics.lastError || 'None'}</div>
+                      <div className="space-y-2 rounded-xl border border-white/[.07] bg-black/20 px-3 py-3 text-xs text-foreground/80">
+                        <div><span className="text-muted-foreground/80">DLL path:</span> {overlayDiagnostics.dllPath}</div>
+                        <div><span className="text-muted-foreground/80">Last event:</span> {overlayDiagnostics.lastEvent}</div>
+                        <div><span className="text-muted-foreground/80">Last error:</span> {overlayDiagnostics.lastError || 'None'}</div>
                         {overlayDiagnostics.injections.length > 0 && (
                           <div>
-                            <span className="text-zinc-500">Injected PIDs:</span> {overlayDiagnostics.injections.map((entry) => `${entry.pid}${entry.gameName ? ` (${entry.gameName})` : ''}`).join(', ')}
+                            <span className="text-muted-foreground/80">Injected PIDs:</span> {overlayDiagnostics.injections.map((entry) => `${entry.pid}${entry.gameName ? ` (${entry.gameName})` : ''}`).join(', ')}
                           </div>
                         )}
                       </div>
@@ -3538,19 +3864,31 @@ export function SettingsPage() {
           {activeSection === 'advanced' && (
             <>
 
+              <Card className="border-white/[.07]">
+                <CardContent className="p-6 space-y-4">
+                  <div>
+                    <h2 className="text-lg font-semibold">Keyboard shortcuts</h2>
+                    <p className="text-sm text-muted-foreground">
+                      Rebind any shortcut to suit your workflow. Press <kbd className="inline-flex h-5 min-w-[1.25rem] items-center justify-center rounded-md border border-white/[.08] bg-white/[.05] px-1 font-mono text-[10px] text-foreground/90">?</kbd> anywhere to bring up the cheat sheet.
+                    </p>
+                  </div>
+                  <KeybindingsPanel />
+                </CardContent>
+              </Card>
+
               <Card className="border-destructive/40">
                 <CardContent className="p-6 space-y-4">
                   <div>
                     <h2 className="text-lg font-semibold text-destructive">Danger Zone</h2>
-                    <p className="text-sm text-zinc-400">
+                    <p className="text-sm text-muted-foreground">
                       Irreversible actions that will reset your application data.
                     </p>
                   </div>
 
                   <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-4 space-y-4">
                     <div>
-                      <h3 className="text-sm font-semibold text-zinc-100 mb-1">Clear All User Data</h3>
-                      <p className="text-xs text-zinc-400">
+                      <h3 className="text-sm font-semibold text-foreground mb-1">Clear All User Data</h3>
+                      <p className="text-xs text-muted-foreground">
                         This will reset all settings to defaults, including download preferences, game launch settings,
                         saved game executables, and desktop shortcut preferences. Your downloaded games and files will not be affected.
                       </p>
@@ -3634,14 +3972,14 @@ export function SettingsPage() {
                 <CardContent className="p-6 space-y-4">
                   <div>
                     <h2 className="text-lg font-semibold">Privacy</h2>
-                    <p className="text-sm text-zinc-400">
+                    <p className="text-sm text-muted-foreground">
                       Control what data is shared with UC Development.
                     </p>
                   </div>
                   <div className="flex items-center justify-between">
                     <div>
                       <label className="text-sm font-medium cursor-pointer">Send error reports automatically</label>
-                      <p className="text-xs text-zinc-400 mt-1">
+                      <p className="text-xs text-muted-foreground mt-1">
                         When an error occurs, a redacted log snapshot is sent to the UC Development team to help fix bugs. No personal data or file paths are included.
                       </p>
                     </div>
@@ -3654,7 +3992,7 @@ export function SettingsPage() {
                       className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${autoShareErrorLogs ? 'bg-white' : 'bg-zinc-700'}`}
                       title="Toggle automatic error report sharing"
                     >
-                      <span className={`inline-block h-4 w-4 transform rounded-full transition-transform ${autoShareErrorLogs ? 'bg-black translate-x-6' : 'bg-white translate-x-1'}`} />
+                      <span className={`inline-block h-4 w-4 transform rounded-full transition-transform ${autoShareErrorLogs ? 'bg-black translate-x-6' : 'bg-primary translate-x-1'}`} />
                     </button>
                   </div>
                   <AttachSystemProfileToLogsToggle />
@@ -3665,7 +4003,7 @@ export function SettingsPage() {
                 <CardContent className="p-6 space-y-4">
                   <div>
                     <h2 className="text-lg font-semibold text-amber-400">Developer Mode</h2>
-                    <p className="text-sm text-zinc-400">
+                    <p className="text-sm text-muted-foreground">
                       Advanced settings for developers and power users.
                     </p>
                   </div>
@@ -3677,7 +4015,7 @@ export function SettingsPage() {
                           Enable Developer Mode
                         </label>
                       </div>
-                      <p className="text-xs text-zinc-400 mt-1">
+                      <p className="text-xs text-muted-foreground mt-1">
                         Unlock advanced settings and customization options.
                       </p>
                     </div>
@@ -3690,7 +4028,7 @@ export function SettingsPage() {
                       className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${developerMode ? 'bg-white' : 'bg-zinc-700'}`}
                       title="Toggle Developer Mode"
                     >
-                      <span className={`inline-block h-4 w-4 transform rounded-full transition-transform ${developerMode ? 'bg-black translate-x-6' : 'bg-white translate-x-1'}`} />
+                      <span className={`inline-block h-4 w-4 transform rounded-full transition-transform ${developerMode ? 'bg-black translate-x-6' : 'bg-primary translate-x-1'}`} />
                     </button>
                   </div>
 
@@ -3698,13 +4036,13 @@ export function SettingsPage() {
                     <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-4 space-y-6">
                       <div className="space-y-3">
                         <div>
-                          <h3 className="text-sm font-semibold text-zinc-100">Verbose download logging</h3>
-                          <p className="text-xs text-zinc-400">
+                          <h3 className="text-sm font-semibold text-foreground">Verbose download logging</h3>
+                          <p className="text-xs text-muted-foreground">
                             Enable extra download logs for troubleshooting.
                           </p>
                         </div>
                         <div className="flex items-center justify-between">
-                          <span className="text-xs text-zinc-400">Debug-level download logs</span>
+                          <span className="text-xs text-muted-foreground">Debug-level download logs</span>
                           <button
                             onClick={async () => {
                               const next = !verboseDownloadLogging
@@ -3718,7 +4056,7 @@ export function SettingsPage() {
                             title="Toggle verbose download logging"
                           >
                             <span
-                              className={`inline-block h-4 w-4 transform rounded-full transition-transform ${verboseDownloadLogging ? 'bg-black translate-x-6' : 'bg-white translate-x-1'
+                              className={`inline-block h-4 w-4 transform rounded-full transition-transform ${verboseDownloadLogging ? 'bg-black translate-x-6' : 'bg-primary translate-x-1'
                                 }`}
                             />
                           </button>
@@ -3727,8 +4065,8 @@ export function SettingsPage() {
 
                       <div className="border-t border-amber-500/20 pt-4 space-y-3">
                         <div>
-                          <h3 className="text-sm font-semibold text-zinc-100">Custom API endpoint</h3>
-                          <p className="text-xs text-zinc-400">
+                          <h3 className="text-sm font-semibold text-foreground">Custom API endpoint</h3>
+                          <p className="text-xs text-muted-foreground">
                             Override the default API host for local testing. Example: http://localhost:3000
                           </p>
                         </div>
@@ -3741,7 +4079,7 @@ export function SettingsPage() {
                             autoCapitalize="off"
                             autoCorrect="off"
                           />
-                          <div className="text-xs text-zinc-400">
+                          <div className="text-xs text-muted-foreground">
                             Effective base: {getApiBaseUrl()}
                           </div>
                           <div className="flex flex-wrap gap-2">
@@ -3757,8 +4095,8 @@ export function SettingsPage() {
 
                       <div className="border-t border-amber-500/20 pt-4 space-y-3">
                         <div>
-                          <h3 className="text-sm font-semibold text-zinc-100">Network test</h3>
-                          <p className="text-xs text-zinc-400">
+                          <h3 className="text-sm font-semibold text-foreground">Network test</h3>
+                          <p className="text-xs text-muted-foreground">
                             Check connectivity to the API and download mirrors.
                           </p>
                         </div>
@@ -3771,11 +4109,11 @@ export function SettingsPage() {
                           <div className="space-y-2 text-xs">
                             {networkResults.map((result) => (
                               <div key={result.url} className="flex flex-col gap-1 rounded-md border border-white/[.07] px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
-                                <div className="font-medium text-zinc-100">{result.label}</div>
+                                <div className="font-medium text-foreground">{result.label}</div>
                                 <div className={result.ok ? 'text-emerald-400' : 'text-destructive'}>
                                   {result.ok ? `OK (${result.status})` : `Failed (${result.error || result.status})`}
                                 </div>
-                                <div className="text-zinc-400">{result.elapsedMs} ms</div>
+                                <div className="text-muted-foreground">{result.elapsedMs} ms</div>
                               </div>
                             ))}
                           </div>
@@ -3784,8 +4122,8 @@ export function SettingsPage() {
 
                       <div className="border-t border-amber-500/20 pt-4 space-y-3">
                         <div>
-                          <h3 className="text-sm font-semibold text-zinc-100">Download cache</h3>
-                          <p className="text-xs text-zinc-400">
+                          <h3 className="text-sm font-semibold text-foreground">Download cache</h3>
+                          <p className="text-xs text-muted-foreground">
                             Clear temporary installing files and cached download parts.
                           </p>
                         </div>
@@ -3798,8 +4136,8 @@ export function SettingsPage() {
 
                       <div className="border-t border-amber-500/20 pt-4 space-y-3">
                         <div>
-                          <h3 className="text-sm font-semibold text-zinc-100">Settings JSON</h3>
-                          <p className="text-xs text-zinc-400">
+                          <h3 className="text-sm font-semibold text-foreground">Settings JSON</h3>
+                          <p className="text-xs text-muted-foreground">
                             Export or import your app settings.
                           </p>
                         </div>
@@ -3815,8 +4153,8 @@ export function SettingsPage() {
 
                       <div className="border-t border-amber-500/20 pt-4 space-y-3">
                         <div>
-                          <h3 className="text-sm font-semibold text-zinc-100">Diagnostics</h3>
-                          <p className="text-xs text-zinc-400">
+                          <h3 className="text-sm font-semibold text-foreground">Diagnostics</h3>
+                          <p className="text-xs text-muted-foreground">
                             Copy system and app details for debugging reports.
                           </p>
                         </div>
@@ -3830,8 +4168,8 @@ export function SettingsPage() {
 
                       <div className="border-t border-amber-500/20 pt-4 space-y-3">
                         <div>
-                          <h3 className="text-sm font-semibold text-zinc-100">Application Logs</h3>
-                          <p className="text-xs text-zinc-400">
+                          <h3 className="text-sm font-semibold text-foreground">Application Logs</h3>
+                          <p className="text-xs text-muted-foreground">
                             View and manage application logs for debugging and troubleshooting.
                           </p>
                         </div>
@@ -3878,7 +4216,7 @@ function AttachSystemProfileToLogsToggle() {
     <div className="flex items-center justify-between pt-2 mt-2 border-t border-white/[.05]">
       <div>
         <label className="text-sm font-medium cursor-pointer">Include hardware summary in error reports</label>
-        <p className="text-xs text-zinc-400 mt-1">
+        <p className="text-xs text-muted-foreground mt-1">
           Adds a one-line spec ("RTX 4070 · 32GB · Win11") to shared logs. Helps the team reproduce platform-specific bugs. No personal info — see Settings → System Profile.
         </p>
       </div>
@@ -3891,7 +4229,7 @@ function AttachSystemProfileToLogsToggle() {
         className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${attach ? 'bg-white' : 'bg-zinc-700'}`}
         title="Toggle hardware summary in logs"
       >
-        <span className={`inline-block h-4 w-4 transform rounded-full transition-transform ${attach ? 'bg-black translate-x-6' : 'bg-white translate-x-1'}`} />
+        <span className={`inline-block h-4 w-4 transform rounded-full transition-transform ${attach ? 'bg-black translate-x-6' : 'bg-primary translate-x-1'}`} />
       </button>
     </div>
   )

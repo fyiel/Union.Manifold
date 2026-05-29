@@ -16,12 +16,12 @@ export function SystemSpecChip({ summary, fingerprint, className }: Props) {
   return (
     <span
       className={
-        "inline-flex items-center gap-1 rounded-full border border-white/10 bg-zinc-900/60 px-1.5 py-px text-[10px] font-medium text-zinc-300 " +
+        "inline-flex items-center gap-1 rounded-full border border-white/10 bg-card/60 px-1.5 py-px text-[10px] font-medium text-foreground/80 " +
         (className || "")
       }
       title={fingerprint ? `Author's PC (fingerprint ${fingerprint.slice(0, 8)})` : "Author's PC"}
     >
-      <Cpu className="h-2.5 w-2.5 text-zinc-400" />
+      <Cpu className="h-2.5 w-2.5 text-muted-foreground" />
       <span className="truncate max-w-[260px]">{summary}</span>
     </span>
   )
