@@ -1,11 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
-import {
-  ArrowLeft,
-  ArrowRight,
-  GitFork,
-  X,
-} from "lucide-react"
+import { GitFork, X } from "@/components/icons"
+import { ArrowLeft, ArrowRight } from "lucide-react"
 import {
   Check,
   Globe,

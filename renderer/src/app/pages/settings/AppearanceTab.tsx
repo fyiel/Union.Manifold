@@ -1,13 +1,7 @@
 import { useMemo, useRef, useState } from "react"
 import { Check, Globe, Plus } from "@/components/icons"
-import {
-  Copy,
-  MoreVertical,
-  Pencil,
-  Share2,
-  Trash2,
-  Upload,
-} from "lucide-react"
+import { Copy, MoreVertical, Share2, Trash2, Upload } from "@/components/icons"
+import { Pencil } from "lucide-react"
 import { apiFetch } from "@/lib/api"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -183,15 +177,22 @@ export function AppearanceTab() {
   const [importValue, setImportValue] = useState("")
   const [publishingId, setPublishingId] = useState<string | null>(null)
 
-  const openNew = () => {
-    setEditingTheme({
-      ...makeDuplicate(PRESET_THEMES[0], "My"),
-      name: "My Theme",
-    })
+  // Open the editor in its own window so the main window previews the draft
+  // theme live while you edit. Falls back to the in-place dialog if the
+  // Electron bridge isn't available (e.g. running the renderer in a browser).
+  const openInWindow = (theme: ThemeDef, mode: "new" | "edit" | "duplicate") => {
+    const editor = window.ucThemeEditor
+    if (editor?.open) {
+      void editor.open({ theme, mode })
+      return
+    }
+    setEditingTheme(theme)
     setEditorOpen(true)
   }
-  const openEdit = (theme: ThemeDef) => { setEditingTheme(theme); setEditorOpen(true) }
-  const openDuplicate = (theme: ThemeDef) => { setEditingTheme(makeDuplicate(theme)); setEditorOpen(true) }
+
+  const openNew = () => openInWindow({ ...makeDuplicate(PRESET_THEMES[0], "My"), name: "My Theme" }, "new")
+  const openEdit = (theme: ThemeDef) => openInWindow(theme, "edit")
+  const openDuplicate = (theme: ThemeDef) => openInWindow(makeDuplicate(theme), "duplicate")
 
   const handleSave = (theme: ThemeDef) => {
     const existing = customThemes.some((t) => t.id === theme.id)

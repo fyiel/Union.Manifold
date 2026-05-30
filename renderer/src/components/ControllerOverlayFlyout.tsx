@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useController, ControllerProfile } from '../hooks/use-controller'
 import { Switch } from './ui/switch'
-import { Gamepad2, X, RefreshCw, Mouse, Settings, Volume2, BatteryFull, BatteryLow, BatteryMedium, BatteryCharging, Zap } from 'lucide-react'
+import { Gamepad2, X, Settings, BatteryFull, Zap } from "@/components/icons"
+import { RefreshCw, Mouse, Volume2, BatteryLow, BatteryMedium, BatteryCharging } from "lucide-react"
 
 interface ControllerOverlayFlyoutProps {
   visible: boolean

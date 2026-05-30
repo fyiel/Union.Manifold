@@ -6,10 +6,8 @@ import { Slider } from './ui/slider'
 import { Button } from './ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs'
 import { useEffect, useState, useCallback } from 'react'
-import {
-  Gamepad2, Plus, Trash2, Copy, Settings, Keyboard, Mouse,
-  RefreshCw, ChevronRight, X, Pencil, GripHorizontal,
-} from 'lucide-react'
+import { Gamepad2, Plus, Trash2, Copy, Settings, ChevronRight, X } from "@/components/icons"
+import { Keyboard, Mouse, RefreshCw, Pencil, GripHorizontal } from "lucide-react"
 import {
   createDefaultProfile,
   Xbox360ButtonLabels,
@@ -63,10 +61,10 @@ function formatActionSimple(action: InputAction | undefined): string {
 }
 
 function actionBadgeClass(action: InputAction | undefined) {
-  if (!action || action.type === 'none') return 'bg-gray-700 text-gray-500'
+  if (!action || action.type === 'none') return 'bg-secondary text-muted-foreground'
   if (action.type === 'keyboard') return 'bg-blue-600/70 text-blue-200'
   if (action.type === 'mouse') return 'bg-cyan-600/70 text-cyan-200'
-  return 'bg-gray-700 text-gray-500'
+  return 'bg-secondary text-muted-foreground'
 }
 
 interface CompactRemapSectionProps {
@@ -154,7 +152,7 @@ export function CompactRemapSection({ activeProfile, onUpdateProfile }: CompactR
         
         {/* Button mapping list */}
         <div className="flex-1 space-y-2 max-h-[200px] overflow-y-auto">
-          <div className="text-xs font-medium text-gray-500 uppercase mb-2">Buttons</div>
+          <div className="text-xs font-medium text-muted-foreground uppercase mb-2">Buttons</div>
           {BUTTON_MAP.map(({ key, label }) => {
             const binding = activeProfile?.keyBinding?.buttonMappings
               ? (activeProfile.keyBinding.buttonMappings as Record<string, InputAction>)[key]
@@ -168,10 +166,10 @@ export function CompactRemapSection({ activeProfile, onUpdateProfile }: CompactR
                 className={`w-full flex items-center justify-between px-2 py-1.5 rounded text-sm transition-colors text-left ${
                   isSelected 
                     ? 'bg-blue-600/30 border border-blue-500' 
-                    : 'bg-gray-800/40 hover:bg-gray-800/80'
+                    : 'bg-secondary/40 hover:bg-secondary/80'
                 }`}
               >
-                <span className="text-gray-300">{label}</span>
+                <span className="text-foreground">{label}</span>
                 <span className={`text-xs px-1.5 py-0.5 rounded ${actionBadgeClass(binding)}`}>
                   {formatActionSimple(binding) || '—'}
                 </span>
@@ -183,17 +181,17 @@ export function CompactRemapSection({ activeProfile, onUpdateProfile }: CompactR
       
       {/* Selected button binding UI */}
       {selectedButton && (
-        <div className="rounded-lg bg-gray-800/60 p-4 border border-gray-700">
+        <div className="rounded-lg bg-secondary/60 p-4 border border-border">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
-              <GripHorizontal size={16} className="text-gray-400" />
-              <span className="font-medium text-white">
+              <GripHorizontal size={16} className="text-muted-foreground" />
+              <span className="font-medium text-foreground">
                 Mapping: {BUTTON_MAP.find(b => b.key === selectedButton)?.label}
               </span>
             </div>
             <button
               onClick={() => { setSelectedButton(null); setTempBinding(null) }}
-              className="text-gray-400 hover:text-white"
+              className="text-muted-foreground hover:text-foreground"
             >
               <X size={16} />
             </button>
@@ -201,7 +199,7 @@ export function CompactRemapSection({ activeProfile, onUpdateProfile }: CompactR
           
           {/* Current binding display */}
           <div className="flex items-center gap-3 mb-3">
-            <span className="text-sm text-gray-400">Current:</span>
+            <span className="text-sm text-muted-foreground">Current:</span>
             <span className={`text-sm px-2 py-1 rounded ${actionBadgeClass(tempBinding || currentBinding)}`}>
               {formatActionSimple(tempBinding || currentBinding) || 'None'}
             </span>
@@ -245,7 +243,7 @@ export function CompactRemapSection({ activeProfile, onUpdateProfile }: CompactR
           </div>
           
           {/* Save/Clear buttons */}
-          <div className="flex gap-2 mt-3 pt-3 border-t border-gray-700">
+          <div className="flex gap-2 mt-3 pt-3 border-t border-border">
             {tempBinding && (
               <Button size="sm" onClick={() => saveBinding(selectedButton, tempBinding)}>
                 Save Binding
@@ -266,14 +264,14 @@ export function CompactRemapSection({ activeProfile, onUpdateProfile }: CompactR
       {/* Mouse/Stick settings */}
       <div className="grid grid-cols-2 gap-4">
         {/* Stick to Mouse */}
-        <div className="rounded-lg bg-gray-800/50 p-4 space-y-3">
+        <div className="rounded-lg bg-secondary/50 p-4 space-y-3">
           <div className="flex items-center gap-2">
-            <Mouse size={16} className="text-gray-400" />
+            <Mouse size={16} className="text-muted-foreground" />
             <Label className="text-sm font-medium">Stick to Mouse</Label>
           </div>
           
           <div className="flex items-center justify-between">
-            <span className="text-sm text-gray-300">Left Stick</span>
+            <span className="text-sm text-foreground">Left Stick</span>
             <Switch
               checked={activeProfile?.keyBinding?.stickToMouse?.leftStick ?? false}
               onCheckedChange={(checked) => {
@@ -296,7 +294,7 @@ export function CompactRemapSection({ activeProfile, onUpdateProfile }: CompactR
           </div>
           
           <div className="flex items-center justify-between">
-            <span className="text-sm text-gray-300">Right Stick</span>
+            <span className="text-sm text-foreground">Right Stick</span>
             <Switch
               checked={activeProfile?.keyBinding?.stickToMouse?.rightStick ?? false}
               onCheckedChange={(checked) => {
@@ -322,7 +320,7 @@ export function CompactRemapSection({ activeProfile, onUpdateProfile }: CompactR
             <>
               <div className="flex items-center justify-between pt-2">
                 <Label className="text-xs">Sensitivity</Label>
-                <span className="text-xs text-gray-400">
+                <span className="text-xs text-muted-foreground">
                   {((activeProfile?.keyBinding?.stickToMouse?.mouseSpeed ?? 1.0) * 100).toFixed(0)}%
                 </span>
               </div>
@@ -351,16 +349,16 @@ export function CompactRemapSection({ activeProfile, onUpdateProfile }: CompactR
         </div>
         
         {/* Deadzone */}
-        <div className="rounded-lg bg-gray-800/50 p-4 space-y-3">
+        <div className="rounded-lg bg-secondary/50 p-4 space-y-3">
           <div className="flex items-center gap-2">
-            <Settings size={16} className="text-gray-400" />
+            <Settings size={16} className="text-muted-foreground" />
             <Label className="text-sm font-medium">Deadzone</Label>
           </div>
           
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <span className="text-sm text-gray-300">Stick</span>
-              <span className="text-xs text-gray-400">{((activeProfile?.deadzone ?? 0.15) * 100).toFixed(0)}%</span>
+              <span className="text-sm text-foreground">Stick</span>
+              <span className="text-xs text-muted-foreground">{((activeProfile?.deadzone ?? 0.15) * 100).toFixed(0)}%</span>
             </div>
             <Slider
               value={[activeProfile?.deadzone ?? 0.15]}
@@ -374,8 +372,8 @@ export function CompactRemapSection({ activeProfile, onUpdateProfile }: CompactR
           
           <div className="space-y-2 pt-2">
             <div className="flex items-center justify-between">
-              <span className="text-sm text-gray-300">Trigger</span>
-              <span className="text-xs text-gray-400">{((activeProfile?.triggerDeadzone ?? 0.1) * 100).toFixed(0)}%</span>
+              <span className="text-sm text-foreground">Trigger</span>
+              <span className="text-xs text-muted-foreground">{((activeProfile?.triggerDeadzone ?? 0.1) * 100).toFixed(0)}%</span>
             </div>
             <Slider
               value={[activeProfile?.triggerDeadzone ?? 0.1]}

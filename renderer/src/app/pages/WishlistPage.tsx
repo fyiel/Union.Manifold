@@ -87,7 +87,7 @@ export function WishlistPage() {
   }
 
   return (
-    <div className="relative min-h-screen bg-[#09090b]">
+    <div className="relative min-h-screen bg-background">
       <PageAura />
       <div className="container mx-auto max-w-7xl px-3 sm:px-4 py-6 sm:py-8 relative z-10">
         <div className="mb-6 sm:mb-8 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">

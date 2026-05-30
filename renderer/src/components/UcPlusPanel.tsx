@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { Crown, Copy, RefreshCw } from "lucide-react"
+import { Copy } from "@/components/icons"
+import { Crown, RefreshCw } from "lucide-react"
 import { Check, ExternalLink, Loader2 } from "@/components/icons"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ChevronLeft, ChevronRight, Download, Info } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Download, Info } from "@/components/icons"
 import { Button } from '@/components/ui/button'
 import { apiUrl } from '@/lib/api'
 import { cn, proxyImageUrl } from '@/lib/utils'

@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -106,28 +106,48 @@ const ColorRow = memo(function ColorRow({
   )
 })
 
-export function ThemeEditor({
-  open,
+/**
+ * The editor's inner form + mockup preview. Manages its own draft state and
+ * fires `onChange` on every mutation so the standalone editor window can stream
+ * the live draft to the main window. Reused by both the {@link ThemeEditor}
+ * Dialog (fallback) and the standalone `ThemeEditorWindow` page.
+ */
+export function ThemeEditorBody({
   initial,
-  onClose,
+  onChange,
   onSave,
+  onCancel,
+  saveLabel = "Save theme",
 }: {
-  open: boolean
   initial: ThemeDef
-  onClose: () => void
+  onChange?: (draft: ThemeDef) => void
   onSave: (theme: ThemeDef) => void
+  onCancel: () => void
+  saveLabel?: string
 }) {
-  const [draft, setDraft] = useState<ThemeDef>(initial)
+  const [draft, setDraftState] = useState<ThemeDef>(initial)
   const { toast } = useToast()
 
   useEffect(() => {
-    setDraft(initial)
-  }, [initial, open])
+    setDraftState(initial)
+  }, [initial])
+
+  const onChangeRef = useRef(onChange)
+  useEffect(() => { onChangeRef.current = onChange }, [onChange])
+
+  // Wrap setDraft so every mutation also notifies the live-preview listener.
+  const setDraft = useCallback((next: ThemeDef | ((prev: ThemeDef) => ThemeDef)) => {
+    setDraftState((prev) => {
+      const resolved = typeof next === "function" ? (next as (p: ThemeDef) => ThemeDef)(prev) : next
+      onChangeRef.current?.(resolved)
+      return resolved
+    })
+  }, [])
 
   // Stable callback so memoised ColorRows don't see a new ref each draft tick.
   const setColor = useCallback((token: ColorToken, hex: string) => {
     setDraft((prev) => ({ ...prev, colors: { ...prev.colors, [token]: hex } }))
-  }, [])
+  }, [setDraft])
 
   const sansStack = useMemo(() => resolveFontStack(draft.fontSans, "sans"), [draft.fontSans])
   const monoStack = useMemo(() => resolveFontStack(draft.fontMono, "mono"), [draft.fontMono])
@@ -157,13 +177,8 @@ export function ThemeEditor({
   }
 
   return (
-    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-[min(1180px,96vw)] sm:max-w-[min(1180px,96vw)] p-0 gap-0 overflow-hidden">
-        <DialogHeader className="px-6 pt-6 pb-4 border-b border-white/[.07]">
-          <DialogTitle>Theme editor</DialogTitle>
-        </DialogHeader>
-
-        <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_400px] max-h-[74vh] overflow-hidden">
+    <div className="flex flex-col min-h-0 flex-1">
+        <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_400px] flex-1 min-h-0 overflow-hidden">
           {/* Left: form */}
           <div className="uc-themed-scroll overflow-y-auto overflow-x-hidden px-6 py-5 space-y-6 min-w-0 border-r border-white/[.05]">
             <div className="grid grid-cols-1 sm:grid-cols-[2fr_1fr_1fr] gap-4 items-end">
@@ -377,10 +392,39 @@ export function ThemeEditor({
           </div>
         </div>
 
-        <DialogFooter className="px-6 py-4 border-t border-white/[.07]">
-          <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button onClick={handleSave}>Save theme</Button>
-        </DialogFooter>
+        <div className="flex justify-end gap-2 px-6 py-4 border-t border-white/[.07]">
+          <Button variant="outline" onClick={onCancel}>Cancel</Button>
+          <Button onClick={handleSave}>{saveLabel}</Button>
+        </div>
+      </div>
+  )
+}
+
+/**
+ * Dialog wrapper around {@link ThemeEditorBody}. Used as the fallback when the
+ * standalone editor window isn't available (e.g. `window.ucThemeEditor` is
+ * undefined outside Electron).
+ */
+export function ThemeEditor({
+  open,
+  initial,
+  onClose,
+  onSave,
+}: {
+  open: boolean
+  initial: ThemeDef
+  onClose: () => void
+  onSave: (theme: ThemeDef) => void
+}) {
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-[min(1180px,96vw)] sm:max-w-[min(1180px,96vw)] p-0 gap-0 overflow-hidden">
+        <DialogHeader className="px-6 pt-6 pb-4 border-b border-white/[.07]">
+          <DialogTitle>Theme editor</DialogTitle>
+        </DialogHeader>
+        <div className="max-h-[74vh] flex flex-col overflow-hidden">
+          <ThemeEditorBody initial={initial} onSave={onSave} onCancel={onClose} />
+        </div>
       </DialogContent>
     </Dialog>
   )

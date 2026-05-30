@@ -10,7 +10,8 @@ import {
   type ShortcutDefinition,
 } from "@/hooks/use-keyboard-shortcuts"
 import { emitToast } from "@/lib/clipboard"
-import { RotateCcw, X } from "lucide-react"
+import { X } from "@/components/icons"
+import { RotateCcw } from "lucide-react"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 
 function KeyCap({ children }: { children: string }) {
