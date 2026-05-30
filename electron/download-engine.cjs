@@ -216,6 +216,19 @@ class DownloadEngine extends EventEmitter {
   resume(downloadId) {
     const dl = this.byId.get(downloadId)
     if (!dl) return false
+
+    // Already live in the engine — re-emit current state and report success
+    // instead of re-kicking. This guards the Ctrl+R case: the renderer reloads
+    // and restores the download as "paused" even though the main-process stream
+    // never stopped, then walks its resume cascade. Without this, resume()
+    // returns false for a still-"downloading" item, the renderer escalates to
+    // the re-resolve / fresh-start path, that races the live stream, and a
+    // follow-up cancel wipes the partial — forcing a restart from byte 0.
+    if (dl.status === 'downloading' || dl.status === 'queued') {
+      this.emit('update', this._publicView(dl))
+      return true
+    }
+
     if (dl.status !== 'paused' && dl.status !== 'failed' && dl.status !== 'cancelled') return false
 
     const item = this._itemById.get(downloadId)

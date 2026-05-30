@@ -7965,6 +7965,10 @@ function interruptExtractionJob(downloadId, mode = 'cancel', reason) {
 
 function registerRunningGame(appid, exePath, proc, gameName, showGameName = true) {
   if (!proc || !proc.pid) return
+  // Normalize to a strict boolean: only an explicit `false` (the privacy
+  // opt-out) hides the name. A `null`/`undefined` from a caller must not slip
+  // through the ternary below as falsy and render "Playing A game".
+  showGameName = showGameName !== false
   const payload = {
     appid: appid || null,
     exePath: exePath || null,
@@ -10148,7 +10152,29 @@ ipcMain.handle('uc:download-resume-with-fresh-url', (event, payload) => {
       // Drop any prior engine record for this id so enqueue creates a fresh one
       // pointed at the current savePath. The engine's enqueue will look on disk
       // for partials before starting.
+      //
+      // BUT never tear down a download the engine is still actively running.
+      // This fires on a renderer reload (Ctrl+R) mid-download: the renderer
+      // restores its state as "paused" and walks the resume cascade down to
+      // here, yet the main-process range-resume stream never stopped. Deleting
+      // + re-enqueueing races the live stream, and a follow-up cancel from the
+      // duplicate-start race wipes the partial — forcing a restart from byte 0.
+      // Instead, adopt the live download: re-emit its state and report success.
       if (payload.downloadId && engine.byId.has(payload.downloadId)) {
+        const existing = engine.byId.get(payload.downloadId)
+        if (existing.status === 'downloading' || existing.status === 'queued') {
+          let actualOffset = 0
+          try {
+            if (existing.savePath) {
+              const st = fs.statSync(existing.savePath)
+              if (st && st.isFile()) actualOffset = st.size
+            }
+          } catch { }
+          engine.resume(payload.downloadId) // no-op re-emit of live state for the renderer
+          ucLog(`[engine] resume-with-fresh-url: ${payload.downloadId} already active (status=${existing.status}); adopting live download instead of restarting`, 'warn')
+          return { ok: true, actualOffset, engine: true, already: true }
+        }
+        // Paused / failed / cancelled — safe to drop and re-enqueue fresh.
         engine.byId.delete(payload.downloadId)
       }
       const id = engine.enqueue({
