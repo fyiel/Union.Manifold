@@ -37,6 +37,16 @@ const RATING_COLORS: Record<number, string> = {
   5: "text-sky-500",
 }
 
+// Coloured pill background per rating — matches the website's redesign so the
+// "how well it runs" verdict reads at a glance instead of counting stars.
+const RATING_PILLS: Record<number, string> = {
+  1: "bg-red-500/10 text-red-300 border-red-500/25",
+  2: "bg-orange-500/10 text-orange-300 border-orange-500/25",
+  3: "bg-yellow-500/10 text-yellow-300 border-yellow-500/25",
+  4: "bg-emerald-500/10 text-emerald-300 border-emerald-500/25",
+  5: "bg-sky-500/10 text-sky-300 border-sky-500/25",
+}
+
 function StarRating({ value, onChange }: { value: number | null; onChange: (v: number) => void }) {
   const [hovered, setHovered] = useState<number | null>(null)
   const display = hovered ?? value ?? 0
@@ -67,39 +77,45 @@ function StarRating({ value, onChange }: { value: number | null; onChange: (v: n
 function ExperienceCard({ exp }: { exp: any }) {
   const rating = exp.rating as number
   const isPinned = exp.pinned === true
+  const proton = exp.proton_version || exp.protonVersion
+  const date = exp.created_at
+    ? new Date(exp.created_at).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })
+    : ""
   return (
-    <div className={`p-4 rounded-xl border transition-colors space-y-2 ${
+    <div className={`group relative rounded-2xl border px-4 py-3.5 transition-colors ${
       isPinned
-        ? "bg-sky-500/5 border-sky-500/30 shadow-[0_2px_12px_rgba(56,189,248,0.08)]"
-        : "bg-white/5 border-white/10 hover:bg-white/10"
+        ? "bg-sky-500/[.06] border-sky-500/25"
+        : "bg-white/[.02] border-white/[.07] hover:bg-white/[.04]"
     }`}>
-      {isPinned && (
-        <div className="flex items-center gap-1 text-[10px] font-semibold text-sky-500 mb-1">
-          <Pin className="h-3 w-3" />
-          Pinned
+      <div className="flex items-start gap-3">
+        <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-sky-500/10 border border-sky-500/20 text-sky-300">
+          <Terminal className="h-4 w-4" />
         </div>
-      )}
-      <div className="flex items-start justify-between gap-2 flex-wrap">
-        <div className="flex items-center gap-2">
-          <Terminal className="h-4 w-4 text-sky-500 shrink-0" />
-          <span className="text-sm font-semibold text-white">{exp.distro}</span>
-          <span className="text-gray-500 text-xs">·</span>
-          <span className="text-xs text-gray-400">{exp.proton_version || exp.protonVersion}</span>
+        <div className="min-w-0 flex-1 space-y-2">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="truncate text-sm font-semibold text-foreground">{exp.distro}</span>
+              {proton && (
+                <span className="shrink-0 rounded-md bg-white/[.05] border border-white/[.07] px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                  {proton}
+                </span>
+              )}
+              {isPinned && (
+                <span className="shrink-0 inline-flex items-center gap-1 rounded-md bg-sky-500/15 border border-sky-500/30 px-1.5 py-0.5 text-[10px] font-semibold text-sky-300">
+                  <Pin className="h-2.5 w-2.5" /> Pinned
+                </span>
+              )}
+            </div>
+            <span className={`shrink-0 inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-semibold ${RATING_PILLS[rating] || "bg-white/5 border-white/10 text-muted-foreground"}`}>
+              <span className="text-[10px]">★</span>
+              {RATING_LABELS[rating] || `${rating}/5`}
+            </span>
+          </div>
+          {exp.notes && (
+            <p className="text-sm text-muted-foreground leading-relaxed">{exp.notes}</p>
+          )}
+          {date && <div className="text-[11px] text-muted-foreground/50">{date}</div>}
         </div>
-        <div className="flex items-center gap-1">
-          {[1, 2, 3, 4, 5].map((n) => (
-            <span key={n} className={`text-sm ${n <= rating ? "text-yellow-500" : "text-gray-600"}`}>★</span>
-          ))}
-          <span className={`ml-1 text-xs font-medium ${RATING_COLORS[rating] || "text-gray-400"}`}>
-            {RATING_LABELS[rating] || `${rating}/5`}
-          </span>
-        </div>
-      </div>
-      {exp.notes && (
-        <p className="text-sm text-gray-400 leading-relaxed">{exp.notes}</p>
-      )}
-      <div className="text-xs text-gray-600">
-        {exp.created_at ? new Date(exp.created_at).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }) : ""}
       </div>
     </div>
   )
@@ -176,12 +192,12 @@ export function LinuxExperiences({ appid }: { appid: string }) {
         className="w-full flex items-center gap-3 px-6 py-4 border-b border-white/10 bg-white/5 hover:bg-white/10 transition-colors cursor-pointer text-left"
       >
         <Terminal className="h-5 w-5 text-sky-500 shrink-0" />
-        <h3 className="text-base font-bold text-white">Linux Experiences</h3>
-        <span className="text-xs text-gray-400">community reports</span>
+        <h3 className="text-base font-bold text-foreground">Linux Experiences</h3>
+        <span className="text-xs text-muted-foreground">community reports</span>
         <Badge className="ml-auto text-xs bg-sky-500/20 border-sky-500/30 text-sky-500 border font-medium">
           {experiences.length} {experiences.length === 1 ? "report" : "reports"}
         </Badge>
-        <ChevronDown className={`h-4 w-4 text-gray-400 transition-transform ${expanded ? "rotate-180" : ""}`} />
+        <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform ${expanded ? "rotate-180" : ""}`} />
       </button>
 
       {/* Collapsible content */}
@@ -189,12 +205,12 @@ export function LinuxExperiences({ appid }: { appid: string }) {
         <div className="p-6 space-y-5">
           {/* Auth gate / submit form */}
           {authLoading ? (
-            <div className="flex items-center gap-2 text-gray-400 text-sm">
+            <div className="flex items-center gap-2 text-muted-foreground text-sm">
               <Loader2 className="h-4 w-4 animate-spin" /> Loading…
             </div>
           ) : !user ? (
             <div className="flex flex-col sm:flex-row sm:items-center gap-3 p-4 rounded-xl bg-sky-500/10 border border-sky-500/20">
-              <div className="flex-1 text-sm text-gray-400">
+              <div className="flex-1 text-sm text-muted-foreground">
                 Sign in to share how this game runs on your Linux setup.
               </div>
               <Button size="sm" className="bg-[#5865F2] hover:bg-[#4752c4] text-white border-0 gap-2 shrink-0" onClick={connectDiscord}>
@@ -209,16 +225,16 @@ export function LinuxExperiences({ appid }: { appid: string }) {
               <CheckCircle2 className="h-5 w-5 text-emerald-500 mt-0.5 shrink-0" />
               <div>
                 <div className="text-sm font-semibold text-emerald-500">Experience posted!</div>
-                <div className="text-xs text-gray-400 mt-1">Your report is now visible below. It may be reviewed by the community later.</div>
-                <button onClick={() => setSubmitted(false)} className="text-xs text-gray-500 underline mt-2 hover:text-gray-300">Submit another</button>
+                <div className="text-xs text-muted-foreground mt-1">Your report is now visible below. It may be reviewed by the community later.</div>
+                <button onClick={() => setSubmitted(false)} className="text-xs text-muted-foreground underline mt-2 hover:text-foreground">Submit another</button>
               </div>
             </div>
           ) : (
             <div className="space-y-4">
-              <div className="text-sm font-semibold text-gray-300">Share your experience</div>
+              <div className="text-sm font-semibold text-foreground">Share your experience</div>
               <div className="grid sm:grid-cols-2 gap-3">
                 <div className="space-y-1.5">
-                  <Label className="text-xs text-gray-400 font-medium">Distribution</Label>
+                  <Label className="text-xs text-muted-foreground font-medium">Distribution</Label>
                   <Input
                     value={distro}
                     onChange={(e) => setDistro(e.target.value)}
@@ -227,7 +243,7 @@ export function LinuxExperiences({ appid }: { appid: string }) {
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <Label className="text-xs text-gray-400 font-medium">Proton Version</Label>
+                  <Label className="text-xs text-muted-foreground font-medium">Proton Version</Label>
                   <Input
                     value={protonVersion}
                     onChange={(e) => setProtonVersion(e.target.value)}
@@ -237,11 +253,11 @@ export function LinuxExperiences({ appid }: { appid: string }) {
                 </div>
               </div>
               <div className="space-y-1.5">
-                <Label className="text-xs text-gray-400 font-medium">How well does it run?</Label>
+                <Label className="text-xs text-muted-foreground font-medium">How well does it run?</Label>
                 <StarRating value={rating} onChange={setRating} />
               </div>
               <div className="space-y-1.5">
-                <Label className="text-xs text-gray-400 font-medium">Notes <span className="text-gray-600">(optional)</span></Label>
+                <Label className="text-xs text-muted-foreground font-medium">Notes <span className="text-muted-foreground">(optional)</span></Label>
                 <Textarea
                   value={notes}
                   onChange={(e) => setNotes(e.target.value)}
@@ -270,14 +286,14 @@ export function LinuxExperiences({ appid }: { appid: string }) {
           {/* Experiences list */}
           <div className="space-y-3">
             {loadingExp ? (
-              <div className="flex items-center gap-2 text-gray-500 text-sm py-2">
+              <div className="flex items-center gap-2 text-muted-foreground text-sm py-2">
                 <Loader2 className="h-4 w-4 animate-spin" /> Loading experiences…
               </div>
             ) : experiences.length === 0 ? (
               <div className="py-6 text-center">
-                <Terminal className="h-8 w-8 text-gray-700 mx-auto mb-2" />
-                <div className="text-sm text-gray-400">No experiences yet.</div>
-                <div className="text-xs text-gray-600 mt-1">Be the first to share how this game runs on Linux!</div>
+                <Terminal className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
+                <div className="text-sm text-muted-foreground">No experiences yet.</div>
+                <div className="text-xs text-muted-foreground mt-1">Be the first to share how this game runs on Linux!</div>
               </div>
             ) : (
               experiences.map((exp, i) => <ExperienceCard key={exp.id ?? i} exp={exp} />)

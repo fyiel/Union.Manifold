@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react"
-import { FileArchive, Upload } from "lucide-react"
+import { Upload } from "@/components/icons"
+import { FileArchive } from "lucide-react"
 
 /**
  * Global drag-and-drop target. When the user drags archive files (.zip /

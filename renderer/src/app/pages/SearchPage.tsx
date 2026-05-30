@@ -11,12 +11,8 @@ import { Switch } from "@/components/ui/switch"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
 import { PaginationBar } from "@/components/PaginationBar"
-import {
-  Filter,
-  X,
-  RefreshCw,
-  Cpu,
-} from "lucide-react"
+import { X } from "@/components/icons"
+import { Filter, RefreshCw, Cpu } from "lucide-react"
 import {
   Wifi,
   SlidersHorizontal,

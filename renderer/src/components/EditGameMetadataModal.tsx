@@ -11,11 +11,8 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import {
-  ImageIcon,
-  Save,
-  X,
-} from "lucide-react"
+import { X } from "@/components/icons"
+import { ImageIcon, Save } from "lucide-react"
 import {
   Link as LinkIcon,
   Loader2,

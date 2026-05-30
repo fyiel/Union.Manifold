@@ -1,9 +1,6 @@
 import { useEffect, useState } from "react"
-import {
-  CheckCircle2,
-  X,
-  XCircle,
-} from "lucide-react"
+import { X } from "@/components/icons"
+import { CheckCircle2, XCircle } from "lucide-react"
 import { Info } from "@/components/icons"
 import { type ToastItem, type ToastType, useToast } from "@/context/toast-context"
 

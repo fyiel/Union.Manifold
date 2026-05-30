@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
-import { HardDrive, ChevronDown, ChevronRight } from "lucide-react"
+import { ChevronDown, ChevronRight } from "@/components/icons"
+import { HardDrive } from "lucide-react"
 
 type InstalledEntry = {
   appid: string

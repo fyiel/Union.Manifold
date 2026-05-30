@@ -1,18 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { cn } from "@/lib/utils"
-import {
-  ArrowDownToLine,
-  HardDrive,
-  ImageIcon,
-  Pencil,
-  RefreshCw,
-  UserRound,
-  Cpu,
-  FlaskConical,
-  Palette,
-  X,
-  Crown,
-} from "lucide-react"
+import { UserRound, X } from "@/components/icons"
+import { ArrowDownToLine, HardDrive, ImageIcon, Pencil, RefreshCw, Cpu, FlaskConical, Palette, Crown } from "lucide-react"
 import { UcPlusPanel } from "@/components/UcPlusPanel"
 import { AppearanceTab } from "@/app/pages/settings/AppearanceTab"
 import {

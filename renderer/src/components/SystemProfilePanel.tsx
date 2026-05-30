@@ -3,20 +3,8 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import {
-  Cpu,
-  RefreshCw,
-  Monitor,
-  HardDrive,
-  MemoryStick,
-  CloudUpload,
-  CloudOff,
-  CheckCircle2,
-  Laptop,
-  X,
-  Pencil,
-  Clock3,
-} from "lucide-react"
+import { CloudUpload, X } from "@/components/icons"
+import { Cpu, RefreshCw, Monitor, HardDrive, MemoryStick, CloudOff, CheckCircle2, Laptop, Pencil, Clock3 } from "lucide-react"
 import {
   Loader2,
   Zap,

@@ -300,6 +300,15 @@ declare global {
       runNetworkTest: (baseUrl?: string) => Promise<{ ok: boolean; results?: Array<{ label: string; url: string; ok: boolean; status: number; elapsedMs: number; error?: string }>; error?: string }>
       onChanged: (callback: (data: { key: string; value: any }) => void) => () => void
     }
+    ucThemeEditor?: {
+      open: (seed: { theme: import("./lib/themes/types").ThemeDef; mode: "new" | "edit" | "duplicate" }) => Promise<boolean>
+      close: () => Promise<void>
+      sendPreview: (theme: import("./lib/themes/types").ThemeDef) => void
+      endPreview: () => void
+      onSeed: (callback: (seed: { theme: import("./lib/themes/types").ThemeDef; mode: "new" | "edit" | "duplicate" }) => void) => () => void
+      onPreview: (callback: (theme: import("./lib/themes/types").ThemeDef) => void) => () => void
+      onPreviewEnd: (callback: () => void) => () => void
+    }
     ucAuth?: {
       login: (baseUrl?: string, provider?: string) => Promise<{ ok: boolean; error?: string }>
       logout: (baseUrl?: string) => Promise<{ ok: boolean; error?: string }>
