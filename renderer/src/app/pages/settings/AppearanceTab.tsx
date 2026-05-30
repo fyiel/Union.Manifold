@@ -7,7 +7,8 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { useActiveTheme } from "@/hooks/use-active-theme"
-import { useCustomThemes, MAX_CUSTOM_THEMES } from "@/hooks/use-custom-themes"
+import { useCustomThemes } from "@/hooks/use-custom-themes"
+import { useUcPlus } from "@/hooks/use-uc-plus"
 import { PRESET_THEMES } from "@/lib/themes/presets"
 import type { ThemeDef } from "@/lib/themes/types"
 import { decodeTheme, encodeTheme } from "@/lib/themes/encode"
@@ -168,7 +169,8 @@ function makeDuplicate(base: ThemeDef, namePrefix = "Copy of"): ThemeDef {
 
 export function AppearanceTab() {
   const { activeThemeId, setActiveThemeId } = useActiveTheme()
-  const { customThemes, addCustomTheme, updateCustomTheme, deleteCustomTheme } = useCustomThemes()
+  const { active: isUcPlus } = useUcPlus()
+  const { customThemes, maxCustomThemes, addCustomTheme, updateCustomTheme, deleteCustomTheme } = useCustomThemes({ isUcPlus })
   const { toast } = useToast()
 
   const [editorOpen, setEditorOpen] = useState(false)
@@ -206,7 +208,10 @@ export function AppearanceTab() {
     } else {
       const ok = addCustomTheme(theme)
       if (!ok) {
-        toast(`Limit reached (${MAX_CUSTOM_THEMES} custom themes).`, "error")
+        toast(
+          `Limit reached (${maxCustomThemes} custom themes).${isUcPlus ? "" : " UC+ supporters get 100 slots."}`,
+          "error"
+        )
         return
       }
       toast(`Created "${theme.name}".`, "success")
@@ -269,7 +274,10 @@ export function AppearanceTab() {
     const imported: ThemeDef = { ...res.theme, id: generateThemeId(), source: "custom" }
     const ok = addCustomTheme(imported)
     if (!ok) {
-      toast(`Limit reached (${MAX_CUSTOM_THEMES} custom themes).`, "error")
+      toast(
+        `Limit reached (${maxCustomThemes} custom themes).${isUcPlus ? "" : " UC+ supporters get 100 slots."}`,
+        "error"
+      )
       return
     }
     setImportValue("")
@@ -356,7 +364,7 @@ export function AppearanceTab() {
             <div className="section-label mb-2 flex items-center justify-between">
               <span>Your themes</span>
               <span className="text-muted-foreground text-[10px] normal-case tracking-normal font-normal">
-                {customThemes.length} / {MAX_CUSTOM_THEMES}
+                {customThemes.length} / {maxCustomThemes}
               </span>
             </div>
             {customThemes.length === 0 ? (

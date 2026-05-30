@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { GitFork, Share2 } from "@/components/icons"
 import { ArrowLeft, BellOff, Cloud, CloudOff, Pencil, RefreshCw } from "lucide-react"
@@ -35,7 +35,7 @@ import { getCatalogCache, type CatalogGame } from "@/lib/catalog"
 import { useUserCollections, type UserCollection } from "@/hooks/use-user-collections"
 import { useFollowedCollections } from "@/hooks/use-followed-collections"
 import { useGamesData } from "@/hooks/use-games"
-import { useDownloadsActions } from "@/context/downloads-context"
+import { useDownloadsActions, useDownloadsSelector } from "@/context/downloads-context"
 import { useAuth } from "@/hooks/useAuth"
 import {
   forkCloudCollection,
@@ -52,6 +52,21 @@ import {
 } from "@/components/CollectionActionMenu"
 
 type InstalledLite = { appid: string; name: string; image?: string; version?: string }
+
+// Non-terminal download states: a game in any of these is actively being
+// fetched/installed, so the collection view should not offer "Install" again.
+const IN_PROGRESS_DL_STATUSES = new Set([
+  "queued",
+  "downloading",
+  "paused",
+  "verifying",
+  "retrying",
+  "extracting",
+  "installing",
+  "install_ready",
+])
+// States that mean the archive finished and the game is (about to be) installed.
+const COMPLETED_DL_STATUSES = new Set(["completed", "extracted"])
 
 export function CollectionDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -109,33 +124,64 @@ export function CollectionDetailPage() {
   }, [searchParams, collection, setSearchParams])
 
   // ---- Load installed snapshot for "missing/update" badges ----
-  useEffect(() => {
-    let mounted = true
-    void (async () => {
-      try {
-        const list =
-          (await window.ucDownloads?.listInstalledGlobal?.()) ||
-          (await window.ucDownloads?.listInstalled?.()) ||
-          []
-        if (!mounted) return
-        const games: InstalledLite[] = []
-        for (const entry of list as any[]) {
-          const item = entry?.metadata || entry
-          if (!item?.appid) continue
-          games.push({
-            appid: item.appid,
-            name: item.name || item.appid,
-            image: item.image || item.localImage || "",
-            version: item.version || "",
-          })
-        }
-        setInstalled(games)
-      } finally {
-        if (mounted) setInstalledLoading(false)
+  const refreshInstalled = useCallback(async () => {
+    try {
+      const list =
+        (await window.ucDownloads?.listInstalledGlobal?.()) ||
+        (await window.ucDownloads?.listInstalled?.()) ||
+        []
+      const games: InstalledLite[] = []
+      for (const entry of list as any[]) {
+        const item = entry?.metadata || entry
+        if (!item?.appid) continue
+        games.push({
+          appid: item.appid,
+          name: item.name || item.appid,
+          image: item.image || item.localImage || "",
+          version: item.version || "",
+        })
       }
-    })()
-    return () => { mounted = false }
+      setInstalled(games)
+    } finally {
+      setInstalledLoading(false)
+    }
   }, [])
+
+  useEffect(() => {
+    void refreshInstalled()
+  }, [refreshInstalled])
+
+  // Appids with a live download/install in flight, and ones that have just
+  // finished. The first set hides the "Install" prompt overlay while a game is
+  // installing (otherwise it sits on top of GameCard's installing badge and
+  // keeps re-prompting); the second refreshes the installed list — which only
+  // loads on mount — so the overlay disappears for good once install completes.
+  const inProgressKey = useDownloadsSelector(
+    useCallback((items) => {
+      const ids: string[] = []
+      for (const it of items) {
+        if (it.appid && IN_PROGRESS_DL_STATUSES.has(it.status)) ids.push(it.appid)
+      }
+      return Array.from(new Set(ids)).sort().join(",")
+    }, [])
+  )
+  const completedKey = useDownloadsSelector(
+    useCallback((items) => {
+      const ids: string[] = []
+      for (const it of items) {
+        if (it.appid && COMPLETED_DL_STATUSES.has(it.status)) ids.push(it.appid)
+      }
+      return Array.from(new Set(ids)).sort().join(",")
+    }, [])
+  )
+  const inProgressAppids = useMemo(
+    () => new Set(inProgressKey ? inProgressKey.split(",") : []),
+    [inProgressKey]
+  )
+
+  useEffect(() => {
+    if (completedKey) void refreshInstalled()
+  }, [completedKey, refreshInstalled])
 
   const installedById = useMemo(() => new Map(installed.map((g) => [g.appid, g])), [installed])
   const catalogById = useMemo(() => {
@@ -619,7 +665,7 @@ export function CollectionDetailPage() {
           {orderedGames.map((entry) => (
             <div key={entry.appid} data-uc-game-card className="relative">
               <GameCard game={entry.data as any} />
-              {!entry.installed && (
+              {!entry.installed && !inProgressAppids.has(entry.appid) && (
                 <NotInstalledOverlay
                   onInstall={async () => {
                     const catalog = getCatalogCache().games as CatalogGame[]

@@ -1,10 +1,24 @@
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import type { ThemeDef } from "@/lib/themes/types"
 import { validateTheme } from "@/lib/themes/validate"
 
 const LS_KEY = "uc_custom_themes"
 const EVENT_NAME = "uc_custom_themes_pref"
-export const MAX_CUSTOM_THEMES = 10
+
+/** Slot caps. UC+ supporters get a much larger personal theme collection. */
+export const MAX_CUSTOM_THEMES_FREE = 10
+export const MAX_CUSTOM_THEMES_UC_PLUS = 100
+
+/**
+ * @deprecated Use {@link getMaxCustomThemes} or the `maxCustomThemes` value
+ * returned from {@link useCustomThemes}. Kept as the UC+ cap (not the free cap)
+ * so any UI still importing this constant doesn't under-cap UC+ members.
+ */
+export const MAX_CUSTOM_THEMES = MAX_CUSTOM_THEMES_UC_PLUS
+
+export function getMaxCustomThemes(isUcPlus: boolean): number {
+  return isUcPlus ? MAX_CUSTOM_THEMES_UC_PLUS : MAX_CUSTOM_THEMES_FREE
+}
 
 function readInitial(): ThemeDef[] {
   if (typeof window === "undefined") return []
@@ -32,14 +46,17 @@ function persist(themes: ThemeDef[]): void {
   void window.ucSettings?.set?.("customThemes", themes)
 }
 
-export function useCustomThemes(): {
+export function useCustomThemes(options?: { isUcPlus?: boolean }): {
   customThemes: ThemeDef[]
+  maxCustomThemes: number
   addCustomTheme: (theme: ThemeDef) => boolean
   updateCustomTheme: (id: string, patch: Partial<ThemeDef>) => boolean
   deleteCustomTheme: (id: string) => void
   replaceAll: (themes: ThemeDef[]) => void
 } {
   const [customThemes, setCustomThemes] = useState<ThemeDef[]>(() => readInitial())
+  const isUcPlus = Boolean(options?.isUcPlus)
+  const maxCustomThemes = useMemo(() => getMaxCustomThemes(isUcPlus), [isUcPlus])
 
   useEffect(() => {
     const onPref = () => setCustomThemes(readInitial())
@@ -74,13 +91,13 @@ export function useCustomThemes(): {
   }, [])
 
   const addCustomTheme = useCallback((theme: ThemeDef): boolean => {
-    if (customThemes.length >= MAX_CUSTOM_THEMES) return false
+    if (customThemes.length >= maxCustomThemes) return false
     if (customThemes.some((t) => t.id === theme.id)) return false
     const next = [...customThemes, theme]
     setCustomThemes(next)
     persist(next)
     return true
-  }, [customThemes])
+  }, [customThemes, maxCustomThemes])
 
   const updateCustomTheme = useCallback((id: string, patch: Partial<ThemeDef>): boolean => {
     const idx = customThemes.findIndex((t) => t.id === id)
@@ -104,5 +121,5 @@ export function useCustomThemes(): {
     persist(sliced)
   }, [])
 
-  return { customThemes, addCustomTheme, updateCustomTheme, deleteCustomTheme, replaceAll }
+  return { customThemes, maxCustomThemes, addCustomTheme, updateCustomTheme, deleteCustomTheme, replaceAll }
 }

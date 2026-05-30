@@ -416,17 +416,22 @@ export function InGameOverlay() {
     const api = uc.ucDownloads
     if (!api?.launchGameExecutable || !api?.listGameExecutables) return
     const name = game.metadata?.name || game.name || game.appid
+    // Honour the user's "Show game name in Discord" preference instead of
+    // hardcoding false — passing false here forced the RPC card to read
+    // "Playing A game" for every overlay-launched title. Defaults to true
+    // (matches GameCard/GameDetailPage/DownloadsPage launch callers).
+    const showGameName = (await uc.ucSettings?.get?.('rpcShowGameName')) ?? true
     enterMode('hidden')
     try {
       const saved = await uc.ucSettings?.get?.(`gameExe:${game.appid}`)
       if (saved) {
-        const r = await api.launchGameExecutable(game.appid, saved, name, false)
+        const r = await api.launchGameExecutable(game.appid, saved, name, showGameName)
         if (r?.ok) { setGameInfo({ appid: game.appid, gameName: name, startedAt: Date.now(), image: game.metadata?.image || null }); enterMode('toast', game.appid) }
         return
       }
       const r = await api.listGameExecutables(game.appid)
       if (r?.ok && r.exes?.[0]?.path) {
-        const l = await api.launchGameExecutable(game.appid, r.exes[0].path, name, false)
+        const l = await api.launchGameExecutable(game.appid, r.exes[0].path, name, showGameName)
         if (l?.ok) { setGameInfo({ appid: game.appid, gameName: name, startedAt: Date.now(), image: game.metadata?.image || null }); enterMode('toast', game.appid) }
       }
     } catch {}
