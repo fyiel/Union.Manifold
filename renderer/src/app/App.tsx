@@ -5,6 +5,7 @@ import { DownloadsProvider, useDownloads } from "@/context/downloads-context"
 import { ToastProvider } from "@/context/toast-context"
 import { AuthProvider } from "@/context/auth-context"
 import { Toaster } from "@/components/Toaster"
+import { WebDownloadQueueConsumer } from "@/components/WebDownloadQueueConsumer"
 import { ThemeBoundary } from "@/components/ThemeBoundary"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -102,6 +103,7 @@ function AppWithDownloads() {
   return (
     <>
       <ExtractionCloseGuard />
+      <WebDownloadQueueConsumer />
       <AppLayout />
     </>
   )
