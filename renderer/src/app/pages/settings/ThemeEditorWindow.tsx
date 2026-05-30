@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { Palette } from "lucide-react"
 import { ThemeEditorBody } from "./ThemeEditor"
 import { useActiveTheme } from "@/hooks/use-active-theme"
-import { useCustomThemes, MAX_CUSTOM_THEMES } from "@/hooks/use-custom-themes"
+import { useCustomThemes } from "@/hooks/use-custom-themes"
+import { useUcPlus } from "@/hooks/use-uc-plus"
 import { PRESET_THEMES } from "@/lib/themes/presets"
 import type { ThemeDef } from "@/lib/themes/types"
 import { validateTheme } from "@/lib/themes/validate"
@@ -20,7 +21,8 @@ type Seed = { theme: ThemeDef; mode: "new" | "edit" | "duplicate" }
  */
 export default function ThemeEditorWindow() {
   const { setActiveThemeId } = useActiveTheme()
-  const { customThemes, addCustomTheme, updateCustomTheme } = useCustomThemes()
+  const { active: isUcPlus } = useUcPlus()
+  const { customThemes, maxCustomThemes, addCustomTheme, updateCustomTheme } = useCustomThemes({ isUcPlus })
   const { toast } = useToast()
 
   const [seed, setSeed] = useState<Seed | null>(null)
@@ -73,7 +75,10 @@ export default function ThemeEditorWindow() {
         return
       }
     } else if (!addCustomTheme(theme)) {
-      toast(`Limit reached (${MAX_CUSTOM_THEMES} custom themes).`, "error")
+      toast(
+        `Limit reached (${maxCustomThemes} custom themes).${isUcPlus ? "" : " UC+ supporters get 100 slots."}`,
+        "error"
+      )
       return
     }
     setActiveThemeId(theme.id)
@@ -82,7 +87,7 @@ export default function ThemeEditorWindow() {
     try { window.ucThemeEditor?.endPreview?.() } catch {}
     // Let the settings write + broadcast flush before the window closes.
     setTimeout(closeWindow, 120)
-  }, [customThemes, updateCustomTheme, addCustomTheme, setActiveThemeId, toast, closeWindow])
+  }, [customThemes, updateCustomTheme, addCustomTheme, maxCustomThemes, isUcPlus, setActiveThemeId, toast, closeWindow])
 
   const handleCancel = useCallback(() => {
     try { window.ucThemeEditor?.endPreview?.() } catch {}
