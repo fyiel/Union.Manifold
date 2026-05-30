@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react"
-import { Pencil, X } from "lucide-react"
+import { X } from "@/components/icons"
+import { Pencil } from "lucide-react"
 import { MoreHorizontal, Trash2 } from "@/components/icons"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Input } from "@/components/ui/input"

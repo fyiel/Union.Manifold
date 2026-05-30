@@ -9,7 +9,8 @@ import {
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Check, ChevronRight, FolderOpen, Search } from "@/components/icons"
-import { HardDrive, LogIn } from "lucide-react"
+import { LogIn } from "@/components/icons"
+import { HardDrive } from "lucide-react"
 import { useDiscordAccount } from "@/hooks/use-discord-account"
 
 const SEEN_KEY = "uc_onboarding_completed_v1"

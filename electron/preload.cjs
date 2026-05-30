@@ -147,6 +147,37 @@ contextBridge.exposeInMainWorld('ucSettings', {
   }
 })
 
+// Theme editor: opens the editor in its own window and streams the unsaved
+// draft back to the main window for live preview. Persisted saves ride the
+// normal ucSettings path, so there's no save channel here.
+contextBridge.exposeInMainWorld('ucThemeEditor', {
+  // Called from the appearance settings tab to spawn/focus the editor window.
+  open: (seed) => ipcRenderer.invoke('uc:theme-editor-open', seed),
+  // Called from the editor window to close itself after save/cancel.
+  close: () => ipcRenderer.invoke('uc:theme-editor-close'),
+  // Editor window → main window: push the live draft / end the preview.
+  sendPreview: (theme) => ipcRenderer.send('uc:theme-preview', theme),
+  endPreview: () => ipcRenderer.send('uc:theme-preview-end'),
+  // Editor window: receive the theme to edit once the window has loaded.
+  onSeed: (callback) => {
+    const listener = (_event, seed) => callback(seed)
+    ipcRenderer.on('uc:theme-editor-seed', listener)
+    return () => ipcRenderer.removeListener('uc:theme-editor-seed', listener)
+  },
+  // Main window: receive live draft updates from the editor window.
+  onPreview: (callback) => {
+    const listener = (_event, theme) => callback(theme)
+    ipcRenderer.on('uc:theme-preview', listener)
+    return () => ipcRenderer.removeListener('uc:theme-preview', listener)
+  },
+  // Main window: the editor ended the preview (cancel/close/save).
+  onPreviewEnd: (callback) => {
+    const listener = () => callback()
+    ipcRenderer.on('uc:theme-preview-end', listener)
+    return () => ipcRenderer.removeListener('uc:theme-preview-end', listener)
+  },
+})
+
 contextBridge.exposeInMainWorld('ucAuth', {
   // OAuth login (Discord/Google)
   login: (baseUrl, provider) => ipcRenderer.invoke('uc:auth-login', baseUrl, provider),

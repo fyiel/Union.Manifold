@@ -6,10 +6,8 @@ import { Slider } from './ui/slider'
 import { Button } from './ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs'
 import { useEffect, useState, useCallback } from 'react'
-import {
-  Gamepad2, Plus, Trash2, Copy, Settings, Keyboard, Mouse,
-  RefreshCw, ChevronRight, X, Pencil,
-} from 'lucide-react'
+import { Gamepad2, Plus, Trash2, Copy, Settings, ChevronRight, X } from "@/components/icons"
+import { Keyboard, Mouse, RefreshCw, Pencil } from "lucide-react"
 import {
   createDefaultProfile,
   Xbox360ButtonLabels,
@@ -148,10 +146,10 @@ function BindingCapture({ buttonLabel, currentAction, onSave, onCancel }: Bindin
   return (
     <div className="rounded-lg border border-blue-500/40 bg-blue-950/30 p-4 space-y-3">
       <div className="flex items-center justify-between">
-        <span className="text-sm font-medium text-white">
+        <span className="text-sm font-medium text-foreground">
           Binding: <span className="text-blue-300">{buttonLabel}</span>
         </span>
-        <button onClick={onCancel} className="text-gray-400 hover:text-white p-0.5">
+        <button onClick={onCancel} className="text-muted-foreground hover:text-foreground p-0.5">
           <X size={15} />
         </button>
       </div>
@@ -159,57 +157,57 @@ function BindingCapture({ buttonLabel, currentAction, onSave, onCancel }: Bindin
       {waitingKey ? (
         <div className="flex flex-col items-center gap-2 py-4">
           <Keyboard size={28} className="text-blue-400 animate-pulse" />
-          <p className="text-sm font-medium text-white">Press any key...</p>
-          <p className="text-xs text-gray-400">Ctrl / Alt / Shift combos are supported</p>
+          <p className="text-sm font-medium text-foreground">Press any key...</p>
+          <p className="text-xs text-muted-foreground">Ctrl / Alt / Shift combos are supported</p>
           <button
             onClick={() => setWaitingKey(false)}
-            className="mt-1 text-xs text-gray-400 hover:text-white underline"
+            className="mt-1 text-xs text-muted-foreground hover:text-foreground underline"
           >
             Back
           </button>
         </div>
       ) : (
         <div className="space-y-3">
-          <p className="text-xs text-gray-400">Choose what this button does:</p>
+          <p className="text-xs text-muted-foreground">Choose what this button does:</p>
           <div className="grid grid-cols-2 gap-2">
             <button
               onClick={() => setWaitingKey(true)}
-              className="flex items-center gap-2 px-3 py-2.5 rounded-lg bg-gray-700 hover:bg-gray-600 text-sm text-white transition-colors"
+              className="flex items-center gap-2 px-3 py-2.5 rounded-lg bg-secondary hover:bg-muted text-sm text-foreground transition-colors"
             >
               <Keyboard size={15} className="text-blue-400" />
               Keyboard Key
             </button>
             <button
               onClick={() => onSave({ type: 'mouse', input: { type: 'click', button: 'left' } })}
-              className="flex items-center gap-2 px-3 py-2.5 rounded-lg bg-gray-700 hover:bg-gray-600 text-sm text-white transition-colors"
+              className="flex items-center gap-2 px-3 py-2.5 rounded-lg bg-secondary hover:bg-muted text-sm text-foreground transition-colors"
             >
               <Mouse size={15} className="text-green-400" />
               Left Click
             </button>
             <button
               onClick={() => onSave({ type: 'mouse', input: { type: 'right_click', button: 'right' } })}
-              className="flex items-center gap-2 px-3 py-2.5 rounded-lg bg-gray-700 hover:bg-gray-600 text-sm text-white transition-colors"
+              className="flex items-center gap-2 px-3 py-2.5 rounded-lg bg-secondary hover:bg-muted text-sm text-foreground transition-colors"
             >
               <Mouse size={15} className="text-yellow-400" />
               Right Click
             </button>
             <button
               onClick={() => onSave({ type: 'mouse', input: { type: 'middle_click', button: 'middle' } })}
-              className="flex items-center gap-2 px-3 py-2.5 rounded-lg bg-gray-700 hover:bg-gray-600 text-sm text-white transition-colors"
+              className="flex items-center gap-2 px-3 py-2.5 rounded-lg bg-secondary hover:bg-muted text-sm text-foreground transition-colors"
             >
               <Mouse size={15} className="text-purple-400" />
               Middle Click
             </button>
             <button
               onClick={() => onSave({ type: 'mouse', input: { type: 'scroll', direction: 'up' } })}
-              className="flex items-center gap-2 px-3 py-2.5 rounded-lg bg-gray-700 hover:bg-gray-600 text-sm text-white transition-colors"
+              className="flex items-center gap-2 px-3 py-2.5 rounded-lg bg-secondary hover:bg-muted text-sm text-foreground transition-colors"
             >
               <Mouse size={15} className="text-cyan-400" />
               Scroll Up
             </button>
             <button
               onClick={() => onSave({ type: 'mouse', input: { type: 'scroll', direction: 'down' } })}
-              className="flex items-center gap-2 px-3 py-2.5 rounded-lg bg-gray-700 hover:bg-gray-600 text-sm text-white transition-colors"
+              className="flex items-center gap-2 px-3 py-2.5 rounded-lg bg-secondary hover:bg-muted text-sm text-foreground transition-colors"
             >
               <Mouse size={15} className="text-cyan-400" />
               Scroll Down
@@ -476,7 +474,7 @@ export function ControllerSettingsPanel() {
   if (loading) {
     return (
       <div className="flex items-center justify-center p-8">
-        <div className="text-gray-400">Loading controller settings...</div>
+        <div className="text-muted-foreground">Loading controller settings...</div>
       </div>
     )
   }
@@ -498,7 +496,7 @@ export function ControllerSettingsPanel() {
           <div className="flex items-center justify-between">
             <div className="space-y-1">
               <Label className="text-base">Controller Support</Label>
-              <p className="text-sm text-gray-400">Enable controller navigation and gamepad input</p>
+              <p className="text-sm text-muted-foreground">Enable controller navigation and gamepad input</p>
             </div>
             <Switch checked={localSettings.enabled} onCheckedChange={handleEnabledChange} />
           </div>
@@ -506,13 +504,13 @@ export function ControllerSettingsPanel() {
           {localSettings.enabled && (
             <>
               {/* Connection status */}
-              <div className="rounded-lg bg-gray-800/50 p-4">
+              <div className="rounded-lg bg-secondary/50 p-4">
                 <div className="flex items-center justify-between">
                   <div className="space-y-1">
                     <Label className="text-sm font-medium">Connection Status</Label>
                     <div className="flex items-center gap-2">
-                      <div className={`h-2 w-2 rounded-full ${connected ? 'bg-green-500' : 'bg-gray-500'}`} />
-                      <span className="text-sm text-gray-300">
+                      <div className={`h-2 w-2 rounded-full ${connected ? 'bg-green-500' : 'bg-muted-foreground'}`} />
+                      <span className="text-sm text-foreground">
                         {connected ? (controllerInfo.name || 'Controller connected') : 'No controller detected'}
                       </span>
                     </div>
@@ -548,7 +546,7 @@ export function ControllerSettingsPanel() {
                     ))}
                   </SelectContent>
                 </Select>
-                <p className="text-xs text-gray-400">Select a specific controller or auto-detect</p>
+                <p className="text-xs text-muted-foreground">Select a specific controller or auto-detect</p>
                 <button 
                   onClick={loadAvailableControllers} 
                   className="text-xs text-blue-400 hover:text-blue-300"
@@ -573,14 +571,14 @@ export function ControllerSettingsPanel() {
                     <SelectItem value="xboxseries">Xbox Series X</SelectItem>
                   </SelectContent>
                 </Select>
-                <p className="text-xs text-gray-400">Affects button prompts and layout</p>
+                <p className="text-xs text-muted-foreground">Affects button prompts and layout</p>
               </div>
 
               {/* Vibration */}
               <div className="flex items-center justify-between">
                 <div className="space-y-1">
                   <Label className="text-base">Vibration</Label>
-                  <p className="text-sm text-gray-400">Enable controller rumble feedback</p>
+                  <p className="text-sm text-muted-foreground">Enable controller rumble feedback</p>
                 </div>
                 <Switch checked={localSettings.vibrationEnabled} onCheckedChange={handleVibrationChange} />
               </div>
@@ -589,20 +587,20 @@ export function ControllerSettingsPanel() {
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <Label>Stick Deadzone</Label>
-                  <span className="text-sm text-gray-400">{Math.round(localSettings.deadzone * 100)}%</span>
+                  <span className="text-sm text-muted-foreground">{Math.round(localSettings.deadzone * 100)}%</span>
                 </div>
                 <Slider value={[localSettings.deadzone]} min={0} max={0.5} step={0.01} onValueChange={handleDeadzoneChange} />
-                <p className="text-xs text-gray-400">Minimum stick movement required for input</p>
+                <p className="text-xs text-muted-foreground">Minimum stick movement required for input</p>
               </div>
 
               {/* Trigger deadzone */}
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <Label>Trigger Deadzone</Label>
-                  <span className="text-sm text-gray-400">{Math.round(localSettings.triggerDeadzone * 100)}%</span>
+                  <span className="text-sm text-muted-foreground">{Math.round(localSettings.triggerDeadzone * 100)}%</span>
                 </div>
                 <Slider value={[localSettings.triggerDeadzone]} min={0} max={0.5} step={0.01} onValueChange={handleTriggerDeadzoneChange} />
-                <p className="text-xs text-gray-400">Minimum trigger pressure required for input</p>
+                <p className="text-xs text-muted-foreground">Minimum trigger pressure required for input</p>
               </div>
 
               {/* Button layout */}
@@ -627,7 +625,7 @@ export function ControllerSettingsPanel() {
               <Gamepad2 className="text-purple-400" size={20} />
               <Label className="text-base font-medium">Xbox 360 Input Translation (GCPad_Remap)</Label>
             </div>
-            <p className="text-sm text-gray-400">
+            <p className="text-sm text-muted-foreground">
               Translate unsupported controller inputs to Xbox 360 format for better game compatibility
             </p>
           </div>
@@ -635,7 +633,7 @@ export function ControllerSettingsPanel() {
           <div className="flex items-center justify-between">
             <div className="space-y-1">
               <Label className="text-base">Enable Input Translation</Label>
-              <p className="text-sm text-gray-400">Automatically translate controller inputs</p>
+              <p className="text-sm text-muted-foreground">Automatically translate controller inputs</p>
             </div>
             <Switch
               checked={localSettings.inputTranslation?.enabled ?? true}
@@ -648,7 +646,7 @@ export function ControllerSettingsPanel() {
               <div className="flex items-center justify-between">
                 <div className="space-y-1">
                   <Label className="text-base">Auto-Detect Controller</Label>
-                  <p className="text-sm text-gray-400">Automatically detect and apply best mapping</p>
+                  <p className="text-sm text-muted-foreground">Automatically detect and apply best mapping</p>
                 </div>
                 <Switch
                   checked={localSettings.inputTranslation?.autoDetect ?? true}
@@ -675,23 +673,23 @@ export function ControllerSettingsPanel() {
                     <SelectItem value="xboxseries">Xbox Series X</SelectItem>
                   </SelectContent>
                 </Select>
-                <p className="text-xs text-gray-400">Select your controller type for proper button mapping</p>
+                <p className="text-xs text-muted-foreground">Select your controller type for proper button mapping</p>
               </div>
 
-              <div className="rounded-lg bg-gray-800/50 p-4">
+              <div className="rounded-lg bg-secondary/50 p-4">
                 <Label className="text-sm font-medium mb-3 block">Button Mapping Preview</Label>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <div className="text-xs text-gray-500 uppercase">Native Button</div>
+                    <div className="text-xs text-muted-foreground uppercase">Native Button</div>
                     {Object.entries(NativeButtonLabels).slice(0, 8).map(([key, label]) => (
                       <div key={key} className="flex items-center justify-between text-sm">
-                        <span className="text-gray-300">{label}</span>
-                        <ChevronRight size={14} className="text-gray-600" />
+                        <span className="text-foreground">{label}</span>
+                        <ChevronRight size={14} className="text-muted-foreground" />
                       </div>
                     ))}
                   </div>
                   <div className="space-y-2">
-                    <div className="text-xs text-gray-500 uppercase">Xbox 360 Output</div>
+                    <div className="text-xs text-muted-foreground uppercase">Xbox 360 Output</div>
                     {Object.entries(Xbox360ButtonLabels).slice(0, 8).map(([key, label]) => (
                       <div key={key} className="text-sm">
                         <span className="text-purple-400 font-medium">{label}</span>
@@ -711,7 +709,7 @@ export function ControllerSettingsPanel() {
               <Keyboard className="text-blue-400" size={20} />
               <Label className="text-base font-medium">Controller Remapping</Label>
             </div>
-            <p className="text-sm text-gray-400">
+            <p className="text-sm text-muted-foreground">
               Map any button, trigger, or stick to keyboard keys or mouse inputs.
               Click a button row and press a key — or choose a mouse action.
             </p>
@@ -721,7 +719,7 @@ export function ControllerSettingsPanel() {
           <div className="flex items-center justify-between">
             <div className="space-y-1">
               <Label className="text-base">Enable Key Binding</Label>
-              <p className="text-sm text-gray-400">Map controller inputs to keyboard / mouse</p>
+              <p className="text-sm text-muted-foreground">Map controller inputs to keyboard / mouse</p>
             </div>
             <Switch
               checked={localSettings.keyBinding?.enabled ?? false}
@@ -770,7 +768,7 @@ export function ControllerSettingsPanel() {
                     placeholder="New profile name"
                     value={profileName}
                     onChange={e => setProfileName(e.target.value)}
-                    className="flex-1 px-3 py-2 bg-gray-800 border border-gray-700 rounded-md text-white text-sm"
+                    className="flex-1 px-3 py-2 bg-secondary border border-border rounded-md text-foreground text-sm"
                   />
                   <Button onClick={handleCreateProfile}>
                     <Plus size={16} className="mr-2" />
@@ -799,7 +797,7 @@ export function ControllerSettingsPanel() {
               <Settings className="text-green-400" size={20} />
               <Label className="text-base font-medium">In-Game Overlay</Label>
             </div>
-            <p className="text-sm text-gray-400">
+            <p className="text-sm text-muted-foreground">
               Configure the flyout overlay for quick controller remapping while in-game
             </p>
           </div>
@@ -807,7 +805,7 @@ export function ControllerSettingsPanel() {
           <div className="flex items-center justify-between">
             <div className="space-y-1">
               <Label className="text-base">Enable Overlay</Label>
-              <p className="text-sm text-gray-400">Show controller remapping flyout in games</p>
+              <p className="text-sm text-muted-foreground">Show controller remapping flyout in games</p>
             </div>
             <Switch checked={localSettings.overlayEnabled ?? true} onCheckedChange={handleOverlayToggle} />
           </div>
@@ -820,10 +818,10 @@ export function ControllerSettingsPanel() {
                   type="text"
                   value={localSettings.overlayHotkey || 'Guide Button'}
                   onChange={e => handleOverlayHotkeyChange(e.target.value)}
-                  className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-md text-white text-sm"
+                  className="w-full px-3 py-2 bg-secondary border border-border rounded-md text-foreground text-sm"
                   placeholder="Guide Button"
                 />
-                <p className="text-xs text-gray-400">Press the guide button on your controller to open the overlay</p>
+                <p className="text-xs text-muted-foreground">Press the guide button on your controller to open the overlay</p>
               </div>
 
               <div className="space-y-2">
@@ -840,12 +838,12 @@ export function ControllerSettingsPanel() {
                 </Select>
               </div>
 
-              <div className="rounded-lg bg-gray-800/50 p-4">
-                <div className="flex items-center gap-2 text-sm text-gray-300">
-                  <Gamepad2 size={16} className="text-gray-400" />
+              <div className="rounded-lg bg-secondary/50 p-4">
+                <div className="flex items-center gap-2 text-sm text-foreground">
+                  <Gamepad2 size={16} className="text-muted-foreground" />
                   <span>
                     Press{' '}
-                    <kbd className="px-1.5 py-0.5 bg-gray-700 rounded text-xs">
+                    <kbd className="px-1.5 py-0.5 bg-secondary rounded text-xs">
                       {localSettings.overlayHotkey || 'Ctrl+Shift+Gamepad'}
                     </kbd>{' '}
                     while in-game to open quick controller settings

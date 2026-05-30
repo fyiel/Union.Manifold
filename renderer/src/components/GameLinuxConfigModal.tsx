@@ -2,11 +2,8 @@ import { useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import {
-  X,
-  FlaskConical,
-  Cpu,
-} from "lucide-react"
+import { X } from "@/components/icons"
+import { FlaskConical, Cpu } from "lucide-react"
 import { Terminal, FolderOpen } from "@/components/icons"
 import { LINUX_PRESETS, applyGameLinuxPreset, type LinuxDetectionOption, type LinuxGameConfig, type LinuxPerGameLaunchMode } from "@/lib/linux-presets"
 
@@ -300,7 +297,7 @@ export function GameLinuxConfigModal({ open, appid, gameName, onClose }: Props) 
                   onBlur={() => save(config)}
                   rows={3}
                   placeholder={"DXVK_HUD=fps\nWINEDEBUG=-all"}
-                  className="w-full rounded-md border border-input bg-[#09090b] px-3 py-2 text-xs font-mono text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring resize-y"
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-xs font-mono text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring resize-y"
                 />
               </div>
 

@@ -8,14 +8,8 @@ import { Textarea } from "@/components/ui/textarea"
 import { MyRequests } from "@/components/MyRequests"
 import { apiFetch, apiUpload, apiUrl } from "@/lib/api"
 import { useAuth } from "@/hooks/useAuth"
-import {
-  RefreshCw,
-  Clock,
-  Link2,
-  ImageIcon,
-  Pencil,
-  X,
-} from "lucide-react"
+import { X } from "@/components/icons"
+import { RefreshCw, Clock, Link2, ImageIcon, Pencil } from "lucide-react"
 import {
   LogIn,
   Star,
@@ -297,7 +291,7 @@ export function AccountOverviewPage() {
   }, [summary])
 
   return (
-    <div className="min-h-screen bg-[#09090b]">
+    <div className="min-h-screen bg-background">
       <div className="container mx-auto px-4 py-10 sm:py-12 md:py-14 max-w-6xl">
         <div className="mb-10 anim">
           <p className="section-label mb-2">Account</p>

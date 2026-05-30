@@ -109,7 +109,7 @@ export function ControllerDiagram({ onButtonClick, compact = false }: Controller
       
       {!connected && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-lg">
-          <span className="text-gray-400 text-sm">No controller connected</span>
+          <span className="text-muted-foreground text-sm">No controller connected</span>
         </div>
       )}
     </div>
@@ -126,7 +126,7 @@ export function ControllerButtonLabel({ button, label }: { button: string; label
   }
   
   return (
-    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white ${colors[button] || 'bg-gray-500'}`}>
+    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white ${colors[button] || 'bg-muted-foreground'}`}>
       {button}
     </div>
   )

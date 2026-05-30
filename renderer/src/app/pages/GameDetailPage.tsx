@@ -21,13 +21,8 @@ import { addViewedGameToHistory, hasCookieConsent } from "@/lib/user-history"
 import { useConnectivityStatus } from "@/hooks/use-online-status"
 import { OfflineBanner } from "@/components/OfflineBanner"
 import { CriticalLoadModal } from "@/components/CriticalLoadModal"
-import {
-  Calendar,
-  HardDrive,
-  RefreshCw,
-  Square,
-  X,
-} from "lucide-react"
+import { X } from "@/components/icons"
+import { Calendar, HardDrive, RefreshCw, Square } from "lucide-react"
 import {
   AlertTriangle,
   ChevronLeft,
@@ -75,6 +70,7 @@ import { SystemRequirementsCheck } from "@/components/SystemRequirementsCheck"
 import { GameVersionStatus } from "@/components/GameVersionStatus"
 import { GameNotesPanel } from "@/components/GameNotesPanel"
 import { PlaytimeChart } from "@/components/PlaytimeChart"
+import { GameTopPlayers, GameCommunityActivity } from "@/components/GameCommunityActivity"
 import { useAuth } from "@/hooks/useAuth"
 import { useMotionPreferences } from "@/hooks/use-motion-preferences"
 import { useImageColors } from "@/hooks/use-image-colors"
@@ -131,6 +127,9 @@ export function GameDetailPage() {
   const [viewCount, setViewCount] = useState(0)
   const [downloading, setDownloading] = useState(false)
   const [downloadError, setDownloadError] = useState<string | null>(null)
+  // Tabbed content area — matches the website's game page so the launcher
+  // stays to roughly one screen instead of a long card stack.
+  const [activeTab, setActiveTab] = useState<'overview' | 'screenshots' | 'community' | 'you'>('overview')
   const [selectedImage, setSelectedImage] = useState<string>("")
   const [heroImageLoaded, setHeroImageLoaded] = useState(false)
   const [logoLoaded, setLogoLoaded] = useState(false)
@@ -471,11 +470,16 @@ export function GameDetailPage() {
   }, [isGameRunning])
 
   const handleHVTagClick = () => {
-    if (importantNoteRef.current) {
-      importantNoteRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' })
-      setHighlightImportantNote(true)
-      setTimeout(() => setHighlightImportantNote(false), 3000)
-    }
+    // The Important Note lives in the Overview tab — switch to it first so the
+    // scroll target is mounted before we scroll/highlight it.
+    setActiveTab('overview')
+    setTimeout(() => {
+      if (importantNoteRef.current) {
+        importantNoteRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        setHighlightImportantNote(true)
+        setTimeout(() => setHighlightImportantNote(false), 3000)
+      }
+    }, 50)
   }
 
   const clampLightboxPan = (nextX: number, nextY: number, zoomValue = lightboxZoom) => {
@@ -865,7 +869,7 @@ export function GameDetailPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#09090b] pb-12">
+      <div className="min-h-screen bg-background pb-12">
         <GamePageSkeleton />
       </div>
     )
@@ -1487,8 +1491,40 @@ export function GameDetailPage() {
       <section className="container mx-auto px-4 py-12">
         <div className="max-w-6xl mx-auto">
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            <div className="lg:col-span-2 space-y-8">
-              <div className="p-8 rounded-3xl bg-card/60 border border-white/[.07] backdrop-blur-md shadow-xl">
+            <div className="lg:col-span-2 space-y-6 min-w-0">
+              {/* Tab bar — keeps the page to roughly one screen. Mirrors the
+                  website's game page tabs. */}
+              {(() => {
+                const tabs: { id: typeof activeTab; label: string; show: boolean }[] = [
+                  { id: "overview", label: "Overview", show: true },
+                  { id: "screenshots", label: "Screenshots", show: true },
+                  { id: "community", label: "Community", show: true },
+                  { id: "you", label: "You", show: authState.isAuthenticated },
+                ]
+                return (
+                  <div className="flex flex-wrap items-center gap-1.5 border-b border-white/[.07] pb-3">
+                    {tabs.filter((t) => t.show).map((t) => (
+                      <button
+                        key={t.id}
+                        type="button"
+                        onClick={() => setActiveTab(t.id)}
+                        aria-pressed={activeTab === t.id}
+                        className={`rounded-full border px-4 py-2 text-sm font-semibold transition-colors active:scale-95 ${
+                          activeTab === t.id
+                            ? "border-white/15 bg-white/[.08] text-white"
+                            : "border-white/[.07] bg-white/[.03] text-foreground/70 hover:bg-white/[.06] hover:text-white"
+                        }`}
+                      >
+                        {t.label}
+                      </button>
+                    ))}
+                  </div>
+                )
+              })()}
+
+              {/* ── Overview tab ─────────────────────────────────────── */}
+              <div className={activeTab === "overview" ? "space-y-6" : "hidden"}>
+              <div className="p-6 rounded-2xl bg-card/40 border border-white/[.07]">
                 <h2 className="text-2xl font-black text-white mb-4 tracking-tight">About This Game</h2>
                 <p className="text-base text-foreground/80 leading-relaxed whitespace-pre-wrap font-medium">
                   {game.description}
@@ -1522,63 +1558,13 @@ export function GameDetailPage() {
                 </div>
               )}
 
-              {/* Linux Experiences (community submissions) */}
-              <div className="rounded-3xl overflow-hidden backdrop-blur-md bg-card/60 border border-white/[.07] shadow-xl">
-                <LinuxExperiences appid={game.appid} />
-              </div>
-
-              {resolvedScreenshots.length > 0 && (
-                <div className="p-8 rounded-3xl bg-card/60 border border-white/[.07] backdrop-blur-md shadow-xl">
-                  <div className="flex items-center justify-between mb-6">
-                    <h3 className="text-xl font-black text-white">Screenshots</h3>
-                    <div className="flex items-center gap-3">
-                      <span className="text-sm font-medium text-muted-foreground">{resolvedScreenshots.length} images</span>
-                      <Button variant="outline" size="sm" className="h-8 px-3 rounded-full border-white/[.07] bg-card/40 hover:bg-secondary text-white shadow-sm active:scale-95" onClick={() => openLightbox(0)}>
-                        View All
-                      </Button>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                    {resolvedScreenshots.slice(0, 6).map((screenshot, index) => (
-                      <button
-                        key={`${screenshot}-${index}`}
-                        onClick={() => openLightbox(index)}
-                        className="relative w-full aspect-video rounded-2xl overflow-hidden border border-white/[.07] hover:border-zinc-600 hover:scale-[1.02] transition-transform shadow-md active:scale-95"
-                        aria-label={`Open screenshot ${index + 1}`}
-                      >
-                        <MediaImage
-                          unwrapped
-                          src={proxyImageUrl(screenshot) || "./fallbacks/game-shot-16x9.svg"}
-                          alt={`Screenshot ${index + 1}`}
-                          fallbackSrc="./fallbacks/game-shot-16x9.svg"
-                          className="h-full w-full object-cover"
-                          loading="lazy"
-                        />
-                      </button>
-                    ))}
-
-                    {resolvedScreenshots.length > 6 && (
-                      <button
-                        onClick={() => openLightbox(6)}
-                        className="relative col-span-2 sm:col-auto w-full aspect-video rounded-2xl overflow-hidden border border-white/[.07] flex items-center justify-center bg-card/40 hover:bg-secondary transition-colors backdrop-blur-sm active:scale-95"
-                        aria-label="View more screenshots"
-                      >
-                        <div className="text-center">
-                          <div className="text-xl font-black text-white">+{resolvedScreenshots.length - 6}</div>
-                          <div className="text-sm font-medium text-muted-foreground">more</div>
-                        </div>
-                      </button>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {game?.dlc && game.dlc.length > 0 && (
-                <div className="p-8 rounded-3xl bg-card/60 border border-white/[.07] backdrop-blur-md shadow-xl">
-                  <h2 className="text-2xl font-black text-white mb-4">
-                    Included DLC ({game.dlc.length})
-                  </h2>
+              {/* DLC — always rendered, with an empty state instead of
+                  vanishing when none are listed. */}
+              <div className="p-6 rounded-2xl bg-card/40 border border-white/[.07]">
+                <h2 className="text-2xl font-black text-white mb-4">
+                  {game?.dlc && game.dlc.length > 0 ? `Included DLC (${game.dlc.length})` : "DLC"}
+                </h2>
+                {game?.dlc && game.dlc.length > 0 ? (
                   <ul className="space-y-2 max-h-[400px] overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-foreground/20 hover:scrollbar-thumb-foreground/40">
                     {game.dlc.map((dlc, index) => (
                       <li key={`${dlc}-${index}`} className="flex items-center gap-3 text-foreground/80 font-medium bg-card/40 p-3 rounded-2xl border border-white/[.07] shadow-sm">
@@ -1587,8 +1573,12 @@ export function GameDetailPage() {
                       </li>
                     ))}
                   </ul>
-                </div>
-              )}
+                ) : (
+                  <div className="text-center font-medium text-muted-foreground/80 py-6 bg-card/30 rounded-2xl border border-white/[.07]">
+                    No DLC is listed for this game yet.
+                  </div>
+                )}
+              </div>
 
               {game?.appid && (
                 <>
@@ -1601,9 +1591,70 @@ export function GameDetailPage() {
                   <SystemRequirements appid={game.appid} />
                 </>
               )}
+              </div>
+              {/* end Overview tab */}
+
+              {/* ── Screenshots tab (always present; shows an empty state
+                  rather than vanishing when there are none) ──────────── */}
+              <div className={activeTab === "screenshots" ? "" : "hidden"}>
+                {resolvedScreenshots.length > 0 ? (
+                  <>
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-xl font-black text-white">Screenshots</h3>
+                      <span className="text-sm font-medium text-muted-foreground">{resolvedScreenshots.length} images</span>
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                      {resolvedScreenshots.map((screenshot, index) => (
+                        <button
+                          key={`${screenshot}-${index}`}
+                          onClick={() => openLightbox(index)}
+                          className="relative w-full aspect-video rounded-2xl overflow-hidden border border-white/[.07] hover:border-zinc-600 hover:scale-[1.02] transition-transform shadow-md active:scale-95"
+                          aria-label={`Open screenshot ${index + 1}`}
+                        >
+                          <MediaImage
+                            unwrapped
+                            src={proxyImageUrl(screenshot) || "./fallbacks/game-shot-16x9.svg"}
+                            alt={`Screenshot ${index + 1}`}
+                            fallbackSrc="./fallbacks/game-shot-16x9.svg"
+                            className="h-full w-full object-cover"
+                            loading="lazy"
+                          />
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                ) : (
+                  <div className="rounded-2xl border border-white/[.07] bg-card/40 py-16 text-center">
+                    <div className="text-sm font-semibold text-foreground/80">No screenshots available</div>
+                    <div className="text-xs text-muted-foreground/70 mt-1">This game doesn&apos;t have any screenshots yet.</div>
+                  </div>
+                )}
+              </div>
+
+              {/* ── Community tab ────────────────────────────────────── */}
+              <div className={activeTab === "community" ? "space-y-6" : "hidden"}>
+                {game?.appid && <GameTopPlayers appid={game.appid} />}
+                {game?.appid && <GameCommunityActivity appid={game.appid} />}
+                <div className="rounded-2xl overflow-hidden bg-card/40 border border-white/[.07]">
+                  <LinuxExperiences appid={game.appid} />
+                </div>
+                {game?.appid && (
+                  <div className="rounded-2xl overflow-hidden bg-card/40 border border-white/[.07]">
+                    <GameComments appid={game.appid} gameName={game.name} />
+                  </div>
+                )}
+              </div>
+
+              {/* ── You tab (signed-in only) ─────────────────────────── */}
+              {authState.isAuthenticated && (
+                <div className={activeTab === "you" ? "space-y-6" : "hidden"}>
+                  {game?.appid && <PlaytimeChart appid={game.appid} />}
+                  {game?.appid && isInstalled && <GameNotesPanel appid={game.appid} />}
+                </div>
+              )}
 
             </div>
-            <div className="space-y-6">
+            <div className="space-y-6 lg:sticky lg:top-24 lg:self-start">
               {/*
                 Redesigned action card.
                 Goals:
@@ -2064,33 +2115,14 @@ export function GameDetailPage() {
                 />
               )}
 
-              {/* Playtime chart — hidden by the component itself when the
-                  user is anonymous or has no recorded sessions for this
-                  game. Renders for both installed and uninstalled because
-                  the user might be looking up a game they used to play. */}
-              {game?.appid && (
-                <PlaytimeChart appid={game.appid} />
-              )}
-
-              {/* Per-game notes — only shown for installed games. The notes
-                  are stored in libraryGameMeta which we only write for games
-                  the user actually owns / installed; rendering for catalog
-                  browsing would let users litter notes on games they don't
-                  even own. */}
-              {game?.appid && isInstalled && (
-                <GameNotesPanel appid={game.appid} />
-              )}
+              {/* Playtime chart, notes and community feeds now live in the
+                  You / Community content tabs to keep this sidebar focused on
+                  the install/play actions and key details. */}
 
             </div>
           </div>
         </div>
       </section>
-
-      <div className="container mx-auto px-4 relative z-10">
-        <div className="max-w-6xl mx-auto rounded-3xl overflow-hidden backdrop-blur-md bg-card/60 border border-white/[.07] shadow-xl">
-          <GameComments appid={game.appid} gameName={game.name} />
-        </div>
-      </div>
 
       {relatedGames.length > 0 && (
         <section className="py-20 px-4 relative z-10">

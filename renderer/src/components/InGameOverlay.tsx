@@ -1,8 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import {
-  Bell, Camera, Clock, Download, Gamepad2,
-  Pause, Play, Square, Volume2, VolumeX, X, Zap,
-} from 'lucide-react'
+import { Bell, Download, Gamepad2, Pause, Play, X, Zap } from "@/components/icons"
+import { Camera, Clock, Square, Volume2, VolumeX } from "lucide-react"
 import { ControllerOverlayFlyout } from './ControllerOverlayFlyout'
 import { LogoStaticDark } from './brand/brand-assets'
 import { CustomTooltipManager } from './CustomTooltipManager'
@@ -784,7 +782,7 @@ export function InGameOverlay() {
           <div className="flex items-center justify-center gap-2 border-t border-white/[.05] px-4 py-2.5">
             <span className="text-[10px] text-muted-foreground/40">Close</span>
             <span className="token-chip text-[9px]">Esc</span>
-            <span className="text-zinc-800">·</span>
+            <span className="text-muted-foreground/40">·</span>
             <span className="token-chip text-[9px]">{hotkey}</span>
             <span className="text-[10px] text-muted-foreground/40">Toggle</span>
           </div>

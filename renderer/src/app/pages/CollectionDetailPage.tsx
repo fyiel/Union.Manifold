@@ -1,15 +1,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
-import {
-  ArrowLeft,
-  BellOff,
-  Cloud,
-  CloudOff,
-  GitFork,
-  Pencil,
-  RefreshCw,
-  Share2,
-} from "lucide-react"
+import { GitFork, Share2 } from "@/components/icons"
+import { ArrowLeft, BellOff, Cloud, CloudOff, Pencil, RefreshCw } from "lucide-react"
 import {
   Bell,
   Copy,

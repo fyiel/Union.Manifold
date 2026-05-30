@@ -30,9 +30,10 @@ const VerifyEmailPage = lazy(() => import("@/app/pages/VerifyEmailPage").then((m
 const ForgotPasswordPage = lazy(() => import("@/app/pages/ForgotPasswordPage").then((m) => ({ default: m.ForgotPasswordPage })))
 const ResetPasswordPage = lazy(() => import("@/app/pages/ResetPasswordPage").then((m) => ({ default: m.ResetPasswordPage })))
 const InGameOverlay = lazy(() => import("@/components/InGameOverlay").then((m) => ({ default: m.InGameOverlay })))
+const ThemeEditorWindow = lazy(() => import("@/app/pages/settings/ThemeEditorWindow"))
 
 function RouteFallback() {
-  return <div className="min-h-screen bg-[#09090b]" />
+  return <div className="min-h-screen bg-background" />
 }
 
 function ExtractionCloseGuard() {
@@ -116,6 +117,7 @@ export default function App() {
           <Suspense fallback={<RouteFallback />}>
             <Routes>
               <Route path="/overlay" element={<InGameOverlay />} />
+              <Route path="/theme-editor" element={<ThemeEditorWindow />} />
 
               {/* Auth pages (inside app layout) */}
               <Route path="/login" element={<LoginPage />} />

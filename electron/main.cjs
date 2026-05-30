@@ -3803,6 +3803,112 @@ async function getDiscordSession(session, baseUrl) {
   }
 }
 
+// IPC: theme editor window. Opens the theme editor in its own window so the
+// MAIN window can preview the draft theme live while the user edits. Persisted
+// saves propagate via the normal ucSettings path (which already broadcasts
+// uc:setting-changed to every window), so only the *unsaved* live draft needs
+// the relay below. The editor window is closed/reverted automatically on close.
+let themeEditorWindow = null
+
+function openThemeEditorWindow(seed) {
+  // Focus + re-seed an already-open editor instead of spawning a second one.
+  if (themeEditorWindow && !themeEditorWindow.isDestroyed()) {
+    try {
+      themeEditorWindow.themeEditorSeed = seed
+      themeEditorWindow.webContents.send('uc:theme-editor-seed', seed)
+      themeEditorWindow.focus()
+    } catch { }
+    return
+  }
+
+  const parent = (mainWindow && !mainWindow.isDestroyed()) ? mainWindow : undefined
+  themeEditorWindow = new BrowserWindow({
+    width: 1200,
+    height: 860,
+    minWidth: 880,
+    minHeight: 600,
+    parent,
+    modal: false,
+    show: false,
+    frame: true,
+    autoHideMenuBar: true,
+    backgroundColor: '#09090b',
+    title: 'Theme editor',
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      preload: path.join(__dirname, 'preload.cjs'),
+      webSecurity: true,
+    }
+  })
+
+  // Stash the seed; handed to the renderer once it finishes loading.
+  themeEditorWindow.themeEditorSeed = seed
+
+  if (isDev) {
+    themeEditorWindow.loadURL('http://localhost:5173/#/theme-editor')
+  } else {
+    themeEditorWindow.loadURL('ucd://renderer/index.html#/theme-editor')
+  }
+
+  themeEditorWindow.webContents.on('did-finish-load', () => {
+    try {
+      themeEditorWindow.webContents.send('uc:theme-editor-seed', themeEditorWindow.themeEditorSeed)
+    } catch { }
+  })
+
+  themeEditorWindow.once('ready-to-show', () => {
+    try { themeEditorWindow.show(); themeEditorWindow.focus() } catch { }
+  })
+
+  themeEditorWindow.on('closed', () => {
+    // If the editor closed without saving, make sure the main window drops any
+    // live preview and reverts to the persisted active theme.
+    try {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('uc:theme-preview-end')
+      }
+    } catch { }
+    themeEditorWindow = null
+  })
+
+  return themeEditorWindow
+}
+
+ipcMain.handle('uc:theme-editor-open', (_event, seed) => {
+  try {
+    openThemeEditorWindow(seed)
+    return true
+  } catch (err) {
+    ucLog(`Theme editor open failed: ${err.message}`, 'error')
+    return false
+  }
+})
+
+ipcMain.handle('uc:theme-editor-close', (event) => {
+  try {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (win && !win.isDestroyed()) win.close()
+  } catch { }
+})
+
+// Relay the live (unsaved) draft from the editor window to the main window.
+ipcMain.on('uc:theme-preview', (_event, theme) => {
+  try {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('uc:theme-preview', theme)
+    }
+  } catch { }
+})
+
+ipcMain.on('uc:theme-preview-end', () => {
+  try {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('uc:theme-preview-end')
+    }
+  } catch { }
+})
+
 // IPC: simple settings get/set with broadcast when changed
 ipcMain.handle('uc:setting-get', (_event, key) => {
   try {

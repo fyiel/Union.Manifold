@@ -1,14 +1,8 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react"
 import { Link, useNavigate } from "react-router-dom"
 import { Badge } from "@/components/ui/badge"
-import {
-  Calendar,
-  HardDrive,
-  Square,
-  RefreshCw,
-  Loader2,
-  ImageOff,
-} from "lucide-react"
+import { Loader2 } from "@/components/icons"
+import { Calendar, HardDrive, Square, RefreshCw, ImageOff } from "lucide-react"
 import {
   Download,
   Eye,

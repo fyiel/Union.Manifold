@@ -1,4 +1,31 @@
 # Changelog
+## v2.5.1 — Polish & Parity · 2026-05-30
+
+A follow-up to v2.5.0 that pops the theme editor out into its own window, brings the website's community/social context onto the desktop game page, refreshes the Linux experiences cards, and finishes migrating the UI onto the animated icon set.
+
+### What's New modal
+
+- **Fixed: the "What's new" modal showed "No changelog available right now" in installed builds.** `CHANGELOG.md` was never bundled into the packaged app (it wasn't in electron-builder's `files` list), so the `uc:get-changelog` handler couldn't find it anywhere on disk and the modal fell back to its empty state. The changelog is now packaged with the app, so release notes render in production the same way they do in dev.
+
+### Theme editor
+
+- **Pop-out theme editor window** — editing a theme now opens a dedicated, full-size Electron window (`ThemeEditorWindow`) instead of an in-page panel, so the main window stays visible and previews your draft live as you drag colour pickers. Unsaved drafts are streamed to the main window over a `uc:theme-preview` relay and automatically reverted when the editor closes; saves ride the normal `ucSettings` broadcast so every window updates together.
+- **Live preview in `useActiveTheme`** — the active-theme hook now accepts a transient `previewTheme` that takes priority over the persisted theme while the editor window is open, then clears itself on preview-end.
+- `ThemeEditor` was split into a reusable `ThemeEditorBody` so both the settings tab and the standalone window share one implementation.
+
+### Game community section
+
+- **Top players & community activity on the game page** — the desktop game detail page gains new **Community** and **You** tabs backed by `GameTopPlayers` and `GameCommunityActivity`, which hit the same `/api/games/:appid/top-players` and `/community-activity` endpoints the website uses. Both panels self-hide when there's nothing to show, so the launcher's game page now mirrors the social context you see on union-crax.xyz.
+
+### Linux experiences
+
+- **Redesigned experience cards** — the per-game Linux experiences list now uses coloured rating pills (red → sky by score) and a tightened card layout that surfaces the Proton version and report date at a glance, matching the website's experiences redesign.
+
+### Icons & polish
+
+- **Animated icon migration** — components and pages across the launcher (game detail, settings, search, library, collections, overlay, and more) now import from the shared animated `@/components/icons` set instead of raw `lucide-react`, for consistent hover/active motion.
+- Added animated wrappers for `X`, `BatteryFull`, `CloudUpload`, `GitFork`, `MessageCircle`, `Reply`, `UserPlus`, `UserRound`, and `Share2`.
+
 ## v2.5.0 — Themes, Tools & Infrastructure
 
 A major quality-of-life release centred on UI personalisation, per-game tooling, and a rewritten download backend. Every page now inherits a live token-based theme, the download engine is a proper standalone class, and a first-run onboarding flow makes sure new users land somewhere useful.

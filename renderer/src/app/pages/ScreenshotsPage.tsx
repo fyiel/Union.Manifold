@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react"
-import { Camera, X } from "lucide-react"
+import { X } from "@/components/icons"
+import { Camera } from "lucide-react"
 import {
   ChevronLeft,
   ChevronRight,

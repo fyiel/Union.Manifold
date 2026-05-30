@@ -26,15 +26,8 @@ import { AttachSpecsToggle, useAttachSpecsToggle } from "@/components/use-attach
 import { PaginationBar } from "@/components/PaginationBar"
 import { apiFetch, apiUrl, getApiBaseUrl } from "@/lib/api"
 import { CommentSkeleton } from "@/components/CommentSkeleton"
-import {
-  Flag,
-  MessageCircle,
-  MessageSquare,
-  Pin,
-  RefreshCw,
-  Reply,
-  Share2,
-} from "lucide-react"
+import { MessageCircle, Reply, Share2 } from "@/components/icons"
+import { Flag, MessageSquare, Pin, RefreshCw } from "lucide-react"
 import {
   AlertTriangle,
   Check,

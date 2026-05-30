@@ -1,7 +1,8 @@
 import type { ComponentType } from "react"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
-import { Cloud, Share2 } from "lucide-react"
+import { Share2 } from "@/components/icons"
+import { Cloud } from "lucide-react"
 import {
   Layers3,
   Bell,

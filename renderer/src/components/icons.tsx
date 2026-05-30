@@ -109,6 +109,14 @@ import {
   LayoutGridIcon,
   LayoutListIcon,
   SlidersHorizontalIcon,
+  XIcon,
+  BatteryFullIcon,
+  CloudUploadIcon,
+  GitForkIcon,
+  MessageCircleIcon,
+  ReplyIcon,
+  UserPlusIcon,
+  UserRoundIcon,
 } from "@animateicons/react/lucide"
 
 /** Imperative handle exposed by every animated icon. */
@@ -379,3 +387,14 @@ export const LayoutList = makeWrapper(LayoutListIcon, "LayoutList")
 export const SlidersHorizontal = makeWrapper(SlidersHorizontalIcon, "SlidersHorizontal")
 /** Settings2 is lucide's vertical-sliders icon; closest animated match is SlidersHorizontal. */
 export const Settings2 = makeWrapper(SlidersHorizontalIcon, "Settings2")
+export const X = makeWrapper(XIcon, "X")
+export const BatteryFull = makeWrapper(BatteryFullIcon, "BatteryFull")
+export const CloudUpload = makeWrapper(CloudUploadIcon, "CloudUpload")
+export const GitFork = makeWrapper(GitForkIcon, "GitFork")
+export const MessageCircle = makeWrapper(MessageCircleIcon, "MessageCircle")
+export const Reply = makeWrapper(ReplyIcon, "Reply")
+export const UserPlus = makeWrapper(UserPlusIcon, "UserPlus")
+export const UserRound = makeWrapper(UserRoundIcon, "UserRound")
+/** Lucide's `Share2` is the share-nodes glyph; the animated set ships a single
+ *  `Share` — same idea, close enough at our sizes. */
+export const Share2 = makeWrapper(ShareIcon, "Share2")

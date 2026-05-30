@@ -6,14 +6,8 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
 import { apiFetch, apiUrl } from "@/lib/api"
-import {
-  CheckCircle,
-  Clock,
-  MessageCircle,
-  MessageSquare,
-  RefreshCw,
-  XCircle,
-} from "lucide-react"
+import { MessageCircle } from "@/components/icons"
+import { CheckCircle, Clock, MessageSquare, RefreshCw, XCircle } from "lucide-react"
 import { Info, Link as LinkIcon } from "@/components/icons"
 
 export type RequestRecord = {

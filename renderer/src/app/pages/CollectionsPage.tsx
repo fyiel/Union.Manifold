@@ -1,19 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
-import {
-  Pencil,
-  GitFork,
-  X,
-  ArrowDown,
-  ArrowRight,
-  ArrowUp,
-  Share2,
-  Cloud,
-  CloudOff,
-  BellOff,
-  RefreshCw,
-  UserPlus,
-} from "lucide-react"
+import { GitFork, X, Share2, UserPlus } from "@/components/icons"
+import { Pencil, ArrowDown, ArrowRight, ArrowUp, Cloud, CloudOff, BellOff, RefreshCw } from "lucide-react"
 import {
   Layers3,
   Plus,

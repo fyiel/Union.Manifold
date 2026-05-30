@@ -16,14 +16,8 @@ import type { Game } from "@/lib/types"
 import { hasInstalledVersionUpdate, pickGameExecutable, cn } from "@/lib/utils"
 import { useDownloads, useDownloadsActions } from "@/context/downloads-context"
 import { getCatalogCache, type CatalogGame } from "@/lib/catalog"
-import {
-  CheckSquare2,
-  ArrowUpDown,
-  Clock,
-  RefreshCw,
-  StickyNote,
-  X,
-} from "lucide-react"
+import { X } from "@/components/icons"
+import { CheckSquare2, ArrowUpDown, Clock, RefreshCw, StickyNote } from "lucide-react"
 import {
   Trash2,
   AlertTriangle,

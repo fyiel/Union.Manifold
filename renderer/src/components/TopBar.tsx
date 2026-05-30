@@ -9,7 +9,8 @@ import { useDiscordAccount } from "@/hooks/use-discord-account"
 import { apiFetch, apiUrl, getApiBaseUrl } from "@/lib/api"
 import { getRouteChrome } from "@/lib/navigation"
 import { Button } from "@/components/ui/button"
-import { RotateCw, UserRound, X } from "lucide-react"
+import { UserRound, X } from "@/components/icons"
+import { RotateCw } from "lucide-react"
 import {
   ChevronLeft,
   ChevronRight,

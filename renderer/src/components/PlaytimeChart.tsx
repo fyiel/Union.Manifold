@@ -103,9 +103,9 @@ export function PlaytimeChart({ appid, className, days = DEFAULT_DAYS }: Props) 
   if (!auth.isAuthenticated) return null
   if (buckets === null) {
     return (
-      <div className={`p-5 rounded-2xl bg-card/60 border border-white/[.07] backdrop-blur-md space-y-3 shadow-md ${className ?? ""}`}>
+      <div className={`px-3.5 py-2.5 rounded-2xl bg-card/60 border border-white/[.07] backdrop-blur-md space-y-2 shadow-md ${className ?? ""}`}>
         <div className="udl-skeleton h-3 w-24 rounded" />
-        <div className="udl-skeleton h-16 w-full rounded" />
+        <div className="udl-skeleton h-12 w-full rounded" />
       </div>
     )
   }
@@ -114,11 +114,11 @@ export function PlaytimeChart({ appid, className, days = DEFAULT_DAYS }: Props) 
   const labelInterval = Math.max(1, Math.ceil(buckets.length / 6))
 
   return (
-    <div className={`p-5 rounded-2xl bg-card/60 border border-white/[.07] backdrop-blur-md space-y-3 shadow-md ${className ?? ""}`}>
+    <div className={`px-3.5 py-2.5 rounded-2xl bg-card/60 border border-white/[.07] backdrop-blur-md space-y-2 shadow-md ${className ?? ""}`}>
       <div className="flex items-center justify-between gap-2">
-        <h3 className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground inline-flex items-center gap-1.5">
+        <h3 className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground inline-flex items-center gap-1.5">
           <Clock className="h-3 w-3" />
-          Playtime · last {days} days
+          Playtime · {days}d
         </h3>
         <span className="text-[10px] text-muted-foreground/80 tabular-nums">
           {formatHumanRange(buckets)}
@@ -126,7 +126,7 @@ export function PlaytimeChart({ appid, className, days = DEFAULT_DAYS }: Props) 
       </div>
 
       <div
-        className="relative flex items-end gap-[2px] h-20"
+        className="relative flex items-end gap-[2px] h-12"
         onMouseLeave={() => setHovered(null)}
       >
         {buckets.map((bucket) => {

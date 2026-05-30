@@ -8,7 +8,8 @@ import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { ArrowRight, X } from "lucide-react"
+import { X } from "@/components/icons"
+import { ArrowRight } from "lucide-react"
 import {
   Search,
   ChevronRight,

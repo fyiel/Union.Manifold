@@ -7,7 +7,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
-import { Sparkles, Wrench, Brush, ChevronDown } from "lucide-react"
+import { Sparkles, ChevronDown } from "@/components/icons"
+import { Wrench, Brush } from "lucide-react"
 import { loadReleaseNotes, type ReleaseHighlight, type ReleaseNotes } from "@/lib/whats-new"
 
 const LAST_SEEN_KEY = "lastSeenWhatsNewVersion"

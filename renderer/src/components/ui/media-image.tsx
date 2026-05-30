@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ImgHTMLAttributes } from "react"
-import { Loader2, ImageOff } from "lucide-react"
+import { Loader2 } from "@/components/icons"
+import { ImageOff } from "lucide-react"
 import { forgetImageFailure, isImageKnownBad, markImageFailed } from "@/lib/image-failure-cache"
 
 type MediaImageProps = ImgHTMLAttributes<HTMLImageElement> & {

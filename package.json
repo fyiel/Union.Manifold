@@ -1,6 +1,6 @@
 {
   "name": "unioncrax-direct",
-  "version": "2.5.0",
+  "version": "2.5.1",
   "description": "UC.D",
   "type": "module",
   "main": "electron/main.cjs",
@@ -100,7 +100,8 @@
       "electron/**/*",
       "node_modules/**/*",
       "renderer/dist/**/*",
-      "package.json"
+      "package.json",
+      "CHANGELOG.md"
     ],
     "asarUnpack": [
       "node_modules/7zip-bin",
