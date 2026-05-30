@@ -14,12 +14,16 @@ import { RotateCw } from "lucide-react"
 import {
   ChevronLeft,
   ChevronRight,
+  Eye,
+  Heart,
+  Layers3,
   LogIn,
   LogOut,
   Menu,
   Minus,
   Search,
   Settings,
+  Star,
 } from "@/components/icons"
 import { cn } from "@/lib/utils"
 
@@ -284,6 +288,51 @@ export function TopBar({ onOpenMenu }: TopBarProps) {
                   <div className="text-sm font-semibold text-foreground">{accountLabel}</div>
                   <div className="text-[11px] text-muted-foreground/80">{accountSubtitle}</div>
                 </div>
+                {accountUser ? (
+                  <>
+                    <div className="my-1 h-px bg-secondary/50" />
+                    <button
+                      type="button"
+                      onClick={() => navigate("/account")}
+                      className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-[13px] text-muted-foreground transition hover:bg-secondary hover:text-foreground"
+                    >
+                      <UserRound className="h-4 w-4" />
+                      My profile
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => navigate("/view-history")}
+                      className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-[13px] text-muted-foreground transition hover:bg-secondary hover:text-foreground"
+                    >
+                      <Eye className="h-4 w-4" />
+                      View history
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => navigate("/liked")}
+                      className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-[13px] text-muted-foreground transition hover:bg-secondary hover:text-foreground"
+                    >
+                      <Heart className="h-4 w-4" />
+                      Liked
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => navigate("/wishlist")}
+                      className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-[13px] text-muted-foreground transition hover:bg-secondary hover:text-foreground"
+                    >
+                      <Star className="h-4 w-4" />
+                      Wishlist
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => navigate("/collections")}
+                      className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-[13px] text-muted-foreground transition hover:bg-secondary hover:text-foreground"
+                    >
+                      <Layers3 className="h-4 w-4" />
+                      Collections
+                    </button>
+                  </>
+                ) : null}
                 <div className="my-1 h-px bg-secondary/50" />
                 <button
                   type="button"
