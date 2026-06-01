@@ -939,6 +939,11 @@ function showOverlay(appid = null) {
     overlayMode = 'panel'
     currentOverlayAppid = appid
     overlayWindow.setIgnoreMouseEvents(false)
+    // Re-assert the top-most level before showing, exactly like the toast
+    // path does. Without this the panel sometimes failed to appear above
+    // exclusive-fullscreen games even though the launch toast (which always
+    // re-asserts) showed fine in the same game.
+    overlayWindow.setAlwaysOnTop(true, 'screen-saver')
     overlayWindow.show()
     overlayWindow.focus()
     setOverlayEvent(`overlay panel shown for ${appid || 'unknown'}`)
@@ -2180,7 +2185,7 @@ function normalizeRpcActivity(payload) {
 }
 
 async function applyRpcActivity(activity) {
-  if (!rpcClient || !rpcReady || !activity || rpcWindowHidden) return
+  if (!rpcClient || !rpcReady || !activity) return
   try {
     rpcCurrentActivity = activity
     await rpcClient.setActivity(activity)
@@ -2199,18 +2204,38 @@ function clearRpcActivity() {
   }
 }
 
+// Single source of truth for which presence should currently be shown.
+//   • A running game ALWAYS wins and is shown even when the launcher window is
+//     minimised/hidden to the tray — putting UC.D in the tray while playing a
+//     game must not stop Discord from showing that game.
+//   • Otherwise the launcher ("browsing UC.D") presence is shown, but only
+//     while the window is visible; minimising to tray suppresses it.
+function resolveRpcActivity() {
+  if (rpcGameActivity) return rpcGameActivity
+  if (rpcWindowHidden) return null
+  return rpcLastRendererActivity || null
+}
+
+function syncRpcActivity() {
+  const activity = resolveRpcActivity()
+  if (activity) {
+    applyRpcActivity(activity)
+  } else {
+    clearRpcActivity()
+  }
+}
+
 function hideRpcActivity() {
   rpcWindowHidden = true
-  clearRpcActivity()
+  // Re-sync rather than clearing outright: a game in progress keeps its
+  // presence; only the launcher presence is suppressed.
+  syncRpcActivity()
 }
 
 function restoreRpcActivity() {
   if (!rpcWindowHidden) return
   rpcWindowHidden = false
-  const activity = rpcGameActivity || rpcLastRendererActivity || rpcCurrentActivity
-  if (activity) {
-    applyRpcActivity(activity)
-  }
+  syncRpcActivity()
 }
 function shutdownRpcClient() {
   if (!rpcClient) return
@@ -2245,8 +2270,7 @@ async function ensureRpcClient() {
     rpcClient.on('ready', () => {
       rpcReady = true
       ucLog('Discord RPC connected')
-      const activity = rpcGameActivity || rpcLastRendererActivity || rpcCurrentActivity
-      if (activity) applyRpcActivity(activity)
+      syncRpcActivity()
     })
     rpcClient.on('disconnected', () => {
       rpcReady = false
@@ -2275,28 +2299,20 @@ async function updateRpcSettings(nextSettings) {
 }
 
 async function setRendererRpcActivity(payload) {
-  const activity = normalizeRpcActivity(payload)
-  rpcLastRendererActivity = activity
-  if (!rpcGameActivity && activity) {
-    await applyRpcActivity(activity)
-  }
+  rpcLastRendererActivity = normalizeRpcActivity(payload)
+  // syncRpcActivity keeps a running game's presence in front of the launcher
+  // presence, and respects the window-hidden suppression.
+  syncRpcActivity()
 }
 
 async function setGameRpcActivity(payload) {
-  const activity = normalizeRpcActivity(payload)
-  rpcGameActivity = activity
-  if (activity) {
-    await applyRpcActivity(activity)
-  }
+  rpcGameActivity = normalizeRpcActivity(payload)
+  syncRpcActivity()
 }
 
 function clearGameRpcActivity() {
   rpcGameActivity = null
-  if (rpcLastRendererActivity) {
-    applyRpcActivity(rpcLastRendererActivity)
-  } else {
-    clearRpcActivity()
-  }
+  syncRpcActivity()
 }
 
 // Initialize logging
@@ -8021,7 +8037,23 @@ function registerRunningGame(appid, exePath, proc, gameName, showGameName = true
       try {
         const manifest = readInstalledManifestByAppidSync(appid)
         const meta = manifest?.metadata || manifest
-        const candidate = meta?.hero_image || meta?.image || meta?.splash || null
+        // Prefer the game's logo art when UC has one — it reads far better as a
+        // square-ish presence thumbnail than a cropped wide hero. Fall back
+        // through the wider art and finally to the default app icon (Discord
+        // renders that when largeImageKey is omitted).
+        // `hero_logo` is the resolved logo the detail API (/api/games/:appid)
+        // serves — admin override first, else the SteamGridDB static logo.
+        // It's saved into the installed manifest metadata at download time.
+        // `hero_logo_override` covers manifests built from the list endpoint,
+        // which only ships the raw override.
+        const candidate =
+          meta?.hero_logo
+          || meta?.hero_logo_override
+          || meta?.logo
+          || meta?.hero_image
+          || meta?.image
+          || meta?.splash
+          || null
         if (candidate && typeof candidate === 'string' && /^https?:\/\//i.test(candidate)) {
           largeImageKey = candidate
           largeImageText = gameName || appid
@@ -8076,6 +8108,13 @@ function registerRunningGame(appid, exePath, proc, gameName, showGameName = true
     clearTrackedPayload()
     broadcastPresenceChange({ reason: 'game-exited', appid: payload.appid || null })
     if (runningGames.size === 0) clearGameRpcActivity()
+    // Release the overlay if it was bound to the game that just exited, even
+    // when another game is still running — otherwise the panel's dim and
+    // mouse capture linger over the remaining/next game until the user
+    // presses Escape. (The size===0 case is also handled below.)
+    if (currentOverlayAppid && currentOverlayAppid === payload.appid && overlayMode !== 'hidden') {
+      hideOverlay()
+    }
     if (exitedPid) cleanupOverlayInjection(exitedPid)
     if (injectedRecently && payload.appid) {
       overlayInjectionDenylistAppids.add(payload.appid)

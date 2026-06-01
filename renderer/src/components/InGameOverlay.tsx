@@ -256,14 +256,18 @@ export function InGameOverlay() {
       hideTimeoutRef.current = setTimeout(() => setMode('hidden'), 200)
       return
     }
-    if (modeRef.current === next) setMode('hidden')
     modeRef.current = next
+    if (appid !== undefined) setCurrentAppid(appid)
+    // Render the target mode immediately in its pre-animation state, then flip
+    // `animated` on the next frame so the enter transition plays. The previous
+    // approach set `mode` inside requestAnimationFrame, which left one painted
+    // frame still showing the *previous* mode. When a launch toast arrived
+    // right after the panel had been (invisibly, while the window was hidden
+    // and its timers throttled) left mounted, that stale frame flashed the
+    // full dimmed panel for a moment before the toast rendered.
     setAnimated(false)
-    requestAnimationFrame(() => {
-      setMode(next)
-      if (appid !== undefined) setCurrentAppid(appid)
-      requestAnimationFrame(() => setAnimated(true))
-    })
+    setMode(next)
+    requestAnimationFrame(() => setAnimated(true))
     if (next === 'toast') {
       setToastProgress(100)
       const start = Date.now()
@@ -351,8 +355,16 @@ export function InGameOverlay() {
             setGameInfo(null)
             setCurrentAppid(null)
             // Belt-and-suspenders: if we're still showing the panel/toast
-            // for the now-dead session, dismiss it.
-            if (modeRef.current !== 'hidden') enterMode('hidden')
+            // for the now-dead session, dismiss it — and tell the main
+            // process to hide the native overlay window too. Clearing only
+            // the React mode left the transparent window mounted with
+            // ignoreMouseEvents=false (from panel mode), so it kept eating
+            // clicks over the *next* game and the user had to press Escape
+            // to interact with it.
+            if (modeRef.current !== 'hidden') {
+              enterMode('hidden')
+              window.ucOverlay?.hide?.()
+            }
           }
         } else if (detail.reason === 'game-started') {
           // A fresh launch — bring the gameInfo up to date so the overlay
