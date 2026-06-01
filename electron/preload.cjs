@@ -349,6 +349,11 @@ contextBridge.exposeInMainWorld('ucController', {
   getSettings: () => ipcRenderer.invoke('uc:controller-get-settings'),
   setSettings: (settings) => ipcRenderer.invoke('uc:controller-set-settings', settings),
   getConnected: () => ipcRenderer.invoke('uc:controller-get-connected'),
+  // Controller selection
+  getAvailableControllers: () => ipcRenderer.invoke('uc:controller-get-available'),
+  setControllerSlot: (slot) => ipcRenderer.invoke('uc:controller-set-slot', slot),
+  // Rumble / haptics — left & right motor intensities in 0..255
+  rumble: (slot, left, right) => ipcRenderer.invoke('uc:controller-rumble', { slot, left, right }),
   // Input translation
   getMappingPresets: () => ipcRenderer.invoke('uc:controller-get-mapping-presets'),
   getActiveMapping: () => ipcRenderer.invoke('uc:controller-get-active-mapping'),

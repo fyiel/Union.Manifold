@@ -13515,6 +13515,62 @@ ipcMain.handle('uc:controller-get-connected', () => {
   }
 })
 
+// IPC: List available controllers (slots reported by GCPad). Lets the
+// settings UI offer "Controller 1 / 2 / …" instead of only auto-detect.
+ipcMain.handle('uc:controller-get-available', () => {
+  try {
+    if (!nativeOverlay || typeof nativeOverlay.gcpadGetStates !== 'function') {
+      return { ok: true, controllers: [] }
+    }
+    const states = nativeOverlay.gcpadGetStates() || []
+    const controllers = states
+      .filter(s => s && s.connected)
+      .map(s => ({
+        index: Number(s.slot),
+        id: `gcpad-slot-${s.slot}`,
+        name: s.name || `Controller ${Number(s.slot) + 1}`,
+      }))
+    return { ok: true, controllers }
+  } catch (err) {
+    ucLog(`Controller get available failed: ${err.message}`, 'error')
+    return { ok: false, controllers: [], error: err.message }
+  }
+})
+
+// IPC: Select which controller slot drives input translation / rumble.
+ipcMain.handle('uc:controller-set-slot', (_event, slot) => {
+  try {
+    const normalized = (slot === null || slot === undefined) ? null : Number(slot)
+    controllerSettings = { ...controllerSettings, controllerSlot: normalized }
+    const currentSettings = readSettings()
+    currentSettings.controllerSettings = controllerSettings
+    writeSettings(currentSettings)
+    return { ok: true }
+  } catch (err) {
+    ucLog(`Controller set slot failed: ${err.message}`, 'error')
+    return { ok: false, error: err.message }
+  }
+})
+
+// IPC: Rumble a controller. Powers the UI haptic feedback ("button reactions")
+// for pads that expose motors through GCPad but not the Gamepad API. Gated by
+// the user's Vibration preference so a disabled toggle is always honoured.
+ipcMain.handle('uc:controller-rumble', (_event, payload) => {
+  try {
+    if (!controllerSettings.vibrationEnabled) return { ok: false, error: 'vibration-disabled' }
+    if (!nativeOverlay || typeof nativeOverlay.gcpadSetRumble !== 'function') {
+      return { ok: false, error: 'native-unavailable' }
+    }
+    const slot = Number(payload?.slot ?? controllerSettings.controllerSlot ?? 0) || 0
+    const left = Math.max(0, Math.min(255, Math.round(Number(payload?.left ?? 0))))
+    const right = Math.max(0, Math.min(255, Math.round(Number(payload?.right ?? 0))))
+    const ok = nativeOverlay.gcpadSetRumble(slot, left, right)
+    return { ok: !!ok }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
 // IPC: Get mapping presets
 ipcMain.handle('uc:controller-get-mapping-presets', () => {
   try {
