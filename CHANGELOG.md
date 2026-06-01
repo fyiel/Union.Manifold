@@ -1,4 +1,23 @@
 # Changelog
+## v2.5.2 — Overlay, Presence & Download Fixes · 2026-06-01
+
+A bug-fix release squashing four issues around Discord Rich Presence, the in-game overlay, and the smart pre-download check.
+
+### Discord Rich Presence
+
+- **Fixed: minimising UC.D to the tray while playing a game stopped the Discord presence.** The window `hide`/`minimize` handlers cleared *all* presence — including the active game. Presence is now resolved from a single source of truth (`resolveRpcActivity`): a running game always wins and stays visible regardless of window state, while the launcher ("browsing UC.D") presence is the only thing suppressed when the window is hidden. So putting the launcher in the tray mid-game keeps Discord showing the game.
+- **Fixed: the presence thumbnail used the wrong art.** The `largeImageKey` now prefers the game's logo when UC has one — the `hero_logo` the detail API resolves (admin `hero_logo_override`, else the SteamGridDB static logo) and which is saved into the installed manifest at download time — since it reads far better as a presence thumbnail than a cropped wide hero. It then falls back through `hero_logo_override` → `hero_image` → `image` → `splash`, and finally to the default app icon.
+
+### In-game overlay
+
+- **Fixed: the overlay dim + mouse capture lingered after closing a game and opening another, forcing an Escape press to interact.** Two changes: the renderer's `game-exited` handler now also tells the main process to hide the native overlay window (releasing its `ignoreMouseEvents=false` panel capture instead of only clearing the React state), and the main process now hides the overlay when the game it was bound to exits — even if another game is still running.
+- **Fixed: launching a game flashed the full overlay panel for a moment before the toast.** `enterMode` set the React `mode` inside `requestAnimationFrame`, leaving one painted frame on the *previous* mode; with the overlay window's timers throttled while hidden, that stale frame showed the dimmed panel. The target mode is now committed synchronously and only the enter animation is deferred to the next frame.
+- **Fixed: the full overlay panel sometimes failed to appear over exclusive-fullscreen games even though the launch toast did.** `showOverlay` now re-asserts the top-most (`screen-saver`) level before showing, matching what the toast path already did.
+
+### Smart pre-download
+
+- **Fixed: the pre-download check popup still appeared on the all-green happy path instead of auto-confirming.** The auto-confirm effect depended on the inline `onConfirm` callback (recreated every render), so the storage / sysreq / driver state updates that land during the 300ms grace re-ran the effect, whose cleanup cancelled the pending timer — and the fired-guard then blocked a reschedule. The effect now depends only on eligibility + open state (callback/host read from refs) and re-checks eligibility at fire time, so a clean check (enough storage, sysreq pass, no HV) starts the download without an extra click.
+
 ## v2.5.1 — Polish & Parity · 2026-05-30
 
 A follow-up to v2.5.0 that pops the theme editor out into its own window, brings the website's community/social context onto the desktop game page, refreshes the Linux experiences cards, and finishes migrating the UI onto the animated icon set.

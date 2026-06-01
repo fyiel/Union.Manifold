@@ -354,6 +354,20 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, aut
     && !game?.hasHv
     && selectedHost === defaultHost
   const autoConfirmFiredRef = useRef(false)
+  // Keep the latest callback / host / eligibility in refs so the auto-confirm
+  // effect can depend ONLY on `[autoConfirmEligible, open]`. Previously the
+  // effect also listed `onConfirm` and `selectedHost`; `onConfirm` is an inline
+  // arrow recreated on every render, so each of the storage / sysreq / driver
+  // state updates that land within the 300ms grace re-ran the effect, whose
+  // cleanup cleared the pending timer — and the `firedRef` guard then blocked
+  // it from being rescheduled. Net result: on the all-green happy path the
+  // timer was almost always cancelled and the popup never auto-confirmed.
+  const onConfirmRef = useRef(onConfirm)
+  const selectedHostRef = useRef(selectedHost)
+  const autoConfirmEligibleRef = useRef(autoConfirmEligible)
+  onConfirmRef.current = onConfirm
+  selectedHostRef.current = selectedHost
+  autoConfirmEligibleRef.current = autoConfirmEligible
   useEffect(() => {
     if (!open) {
       autoConfirmFiredRef.current = false
@@ -362,10 +376,17 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, aut
     if (!autoConfirmEligible || autoConfirmFiredRef.current) return
     autoConfirmFiredRef.current = true
     const timer = setTimeout(() => {
-      onConfirm({ host: selectedHost, partOverrides: {} })
+      // Re-check eligibility at fire time: if an async check (e.g. storage
+      // precheck) came back unfavourable during the grace window, fall back to
+      // the manual popup instead of auto-firing.
+      if (!autoConfirmEligibleRef.current) {
+        autoConfirmFiredRef.current = false
+        return
+      }
+      onConfirmRef.current({ host: selectedHostRef.current, partOverrides: {} })
     }, 300)
     return () => clearTimeout(timer)
-  }, [autoConfirmEligible, open, onConfirm, selectedHost])
+  }, [autoConfirmEligible, open])
 
   if (!open) return null
 
