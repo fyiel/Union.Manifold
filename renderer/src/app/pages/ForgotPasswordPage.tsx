@@ -118,7 +118,7 @@ export function ForgotPasswordPage() {
             </div>
 
             {error && (
-              <div className="flex gap-2 rounded-lg border border-red-500/20 bg-red-500/10 p-3">
+              <div role="alert" className="flex gap-2 rounded-lg border border-red-500/20 bg-red-500/10 p-3">
                 <AlertCircle className="h-4 w-4 shrink-0 text-red-400 mt-0.5" />
                 <p className="text-sm text-red-300">{error}</p>
               </div>
@@ -126,11 +126,13 @@ export function ForgotPasswordPage() {
 
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="space-y-1.5">
-                <label className="text-sm font-medium text-foreground/80">Email Address</label>
+                <label htmlFor="forgot-email" className="text-sm font-medium text-foreground/80">Email Address</label>
                 <div className="relative">
                   <Mail className="absolute left-3 top-3 h-4 w-4 text-muted-foreground/80" />
                   <Input
+                    id="forgot-email"
                     type="email"
+                    autoComplete="email"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     placeholder="you@example.com"

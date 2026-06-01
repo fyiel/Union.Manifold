@@ -7,13 +7,12 @@ export function BackButton() {
   const navigate = useNavigate()
   const location = useLocation()
   const [canGoBack, setCanGoBack] = useState(false)
-  const [canGoForward, setCanGoForward] = useState(false)
 
   useEffect(() => {
     // Check if we can go back (not on the initial page)
     setCanGoBack(window.history.length > 1)
-    // Note: There's no reliable way to check forward navigation in react-router
-    // but we can track it manually if needed
+    // Note: There's no reliable way to check forward navigation in react-router,
+    // so the forward button stays enabled and is a no-op at the end of the stack.
   }, [location])
 
   const handleBack = () => {
@@ -35,6 +34,7 @@ export function BackButton() {
         disabled={!canGoBack}
         className="h-8 w-8 rounded-md disabled:opacity-40"
         title="Go back"
+        aria-label="Go back"
       >
         <ArrowLeft className="h-4 w-4" />
       </Button>
@@ -44,6 +44,7 @@ export function BackButton() {
         onClick={handleForward}
         className="h-8 w-8 rounded-md disabled:opacity-40"
         title="Go forward"
+        aria-label="Go forward"
       >
         <ArrowRight className="h-4 w-4" />
       </Button>
