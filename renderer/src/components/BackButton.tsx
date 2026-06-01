@@ -32,6 +32,9 @@ export function BackButton() {
         size="icon"
         onClick={handleBack}
         disabled={!canGoBack}
+        // Tagged so the controller's B button routes "back" here instead of
+        // only emitting Escape (see use-controller-navigation.ts).
+        data-uc-back
         className="h-8 w-8 rounded-md disabled:opacity-40"
         title="Go back"
         aria-label="Go back"

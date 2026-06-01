@@ -52,6 +52,9 @@ export interface ControllerAPI {
   // Controller selection
   getAvailableControllers: () => Promise<{ ok: boolean; controllers?: Array<{ index: number; id: string; name: string }>; error?: string }>
   setControllerSlot: (slot: number | null) => Promise<{ ok: boolean; error?: string }>
+
+  // Rumble / haptics — left & right motor intensities in 0..255
+  rumble: (slot: number, left: number, right: number) => Promise<{ ok: boolean; error?: string }>
   
   // Input translation
   getMappingPresets: () => Promise<{ ok: boolean; presets?: ControllerMapping[]; error?: string }>

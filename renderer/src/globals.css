@@ -852,3 +852,53 @@ body::-webkit-scrollbar-corner,
 .uc-sidebar-row:hover .uc-sidebar-label {
   transform: translateX(2px);
 }
+/* ── Controller / gamepad navigation ───────────────────────────
+   When a gamepad is steering the UI we set `data-uc-gamepad` on <html>
+   (see use-controller-navigation.ts). Only then do we paint a bold focus
+   ring on the focused element, so mouse/keyboard users never see it. The
+   ring is drawn with box-shadow so it never affects layout, and it rides
+   the theme's primary colour. */
+html[data-uc-gamepad] :focus {
+  outline: none;
+}
+html[data-uc-gamepad] *:focus-visible,
+html[data-uc-gamepad] a:focus,
+html[data-uc-gamepad] button:focus,
+html[data-uc-gamepad] [role="button"]:focus,
+html[data-uc-gamepad] [data-uc-focusable]:focus,
+html[data-uc-gamepad] input:focus,
+html[data-uc-gamepad] select:focus,
+html[data-uc-gamepad] textarea:focus {
+  outline: none;
+  box-shadow:
+    0 0 0 2px var(--background),
+    0 0 0 4px color-mix(in oklch, var(--primary) 85%, transparent),
+    0 0 22px 2px color-mix(in oklch, var(--primary) 35%, transparent);
+  border-radius: 12px;
+  scroll-margin: 96px;
+  transition: box-shadow 140ms ease;
+  position: relative;
+  z-index: 1;
+}
+
+/* Subtle scale pop when the controller lands focus on something clickable. */
+@keyframes uc-gamepad-focus-pop {
+  0%   { transform: scale(0.97); }
+  60%  { transform: scale(1.02); }
+  100% { transform: scale(1); }
+}
+html[data-uc-gamepad] button:focus,
+html[data-uc-gamepad] a:focus,
+html[data-uc-gamepad] [role="button"]:focus,
+html[data-uc-gamepad] [data-uc-focusable]:focus {
+  animation: uc-gamepad-focus-pop 180ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-uc-gamepad] button:focus,
+  html[data-uc-gamepad] a:focus,
+  html[data-uc-gamepad] [role="button"]:focus,
+  html[data-uc-gamepad] [data-uc-focusable]:focus {
+    animation: none;
+  }
+}
