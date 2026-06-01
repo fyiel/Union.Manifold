@@ -168,7 +168,7 @@ export function ResetPasswordPage() {
             </div>
 
             {error && (
-              <div className="flex gap-2 rounded-lg border border-red-500/20 bg-red-500/10 p-3">
+              <div role="alert" className="flex gap-2 rounded-lg border border-red-500/20 bg-red-500/10 p-3">
                 <AlertCircle className="h-4 w-4 shrink-0 text-red-400 mt-0.5" />
                 <p className="text-sm text-red-300">{error}</p>
               </div>
@@ -176,11 +176,13 @@ export function ResetPasswordPage() {
 
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="space-y-1.5">
-                <label className="text-sm font-medium text-foreground/80">New Password</label>
+                <label htmlFor="reset-password" className="text-sm font-medium text-foreground/80">New Password</label>
                 <div className="relative">
                   <Lock className="absolute left-3 top-3 h-4 w-4 text-muted-foreground/80" />
                   <Input
+                    id="reset-password"
                     type={showPassword ? "text" : "password"}
+                    autoComplete="new-password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="••••••••"
@@ -190,6 +192,7 @@ export function ResetPasswordPage() {
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
+                    aria-label={showPassword ? "Hide password" : "Show password"}
                     className="absolute right-3 top-3 text-muted-foreground/80 hover:text-foreground/80"
                   >
                     {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
@@ -222,11 +225,13 @@ export function ResetPasswordPage() {
               </div>
 
               <div className="space-y-1.5">
-                <label className="text-sm font-medium text-foreground/80">Confirm Password</label>
+                <label htmlFor="reset-confirm-password" className="text-sm font-medium text-foreground/80">Confirm Password</label>
                 <div className="relative">
                   <Lock className="absolute left-3 top-3 h-4 w-4 text-muted-foreground/80" />
                   <Input
+                    id="reset-confirm-password"
                     type={showConfirmPassword ? "text" : "password"}
+                    autoComplete="new-password"
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
                     placeholder="••••••••"
@@ -236,6 +241,7 @@ export function ResetPasswordPage() {
                   <button
                     type="button"
                     onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                    aria-label={showConfirmPassword ? "Hide password" : "Show password"}
                     className="absolute right-3 top-3 text-muted-foreground/80 hover:text-foreground/80"
                   >
                     {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}

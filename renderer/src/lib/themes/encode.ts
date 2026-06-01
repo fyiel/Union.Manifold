@@ -7,14 +7,16 @@ function b64encode(s: string): string {
   if (typeof btoa === "function") {
     return btoa(unescape(encodeURIComponent(s)))
   }
-  return Buffer.from(s, "utf8").toString("base64")
+  // Node fallback (never hit in the Electron renderer, which always has btoa).
+  return (globalThis as any).Buffer.from(s, "utf8").toString("base64")
 }
 
 function b64decode(s: string): string {
   if (typeof atob === "function") {
     return decodeURIComponent(escape(atob(s)))
   }
-  return Buffer.from(s, "base64").toString("utf8")
+  // Node fallback (never hit in the Electron renderer, which always has atob).
+  return (globalThis as any).Buffer.from(s, "base64").toString("utf8")
 }
 
 /** Serialize a theme to a portable copy/paste string. */
