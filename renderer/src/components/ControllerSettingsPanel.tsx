@@ -16,6 +16,7 @@ import {
   InputAction,
 } from '../lib/controller-mappings'
 import { CompactRemapSection } from './CompactRemapSection'
+import { playHaptic } from '../lib/haptics'
 
 // ─── Button list ─────────────────────────────────────────────────────────────
 
@@ -144,10 +145,10 @@ function BindingCapture({ buttonLabel, currentAction, onSave, onCancel }: Bindin
   }, [waitingKey, onSave])
 
   return (
-    <div className="rounded-lg border border-blue-500/40 bg-blue-950/30 p-4 space-y-3">
+    <div className="rounded-2xl border border-primary/40 bg-card/70 p-4 space-y-3">
       <div className="flex items-center justify-between">
         <span className="text-sm font-medium text-foreground">
-          Binding: <span className="text-blue-300">{buttonLabel}</span>
+          Binding: <span className="text-primary">{buttonLabel}</span>
         </span>
         <button onClick={onCancel} className="text-muted-foreground hover:text-foreground p-0.5">
           <X size={15} />
@@ -156,7 +157,7 @@ function BindingCapture({ buttonLabel, currentAction, onSave, onCancel }: Bindin
 
       {waitingKey ? (
         <div className="flex flex-col items-center gap-2 py-4">
-          <Keyboard size={28} className="text-blue-400 animate-pulse" />
+          <Keyboard size={28} className="text-primary animate-pulse" />
           <p className="text-sm font-medium text-foreground">Press any key...</p>
           <p className="text-xs text-muted-foreground">Ctrl / Alt / Shift combos are supported</p>
           <button
@@ -578,9 +579,22 @@ export function ControllerSettingsPanel() {
               <div className="flex items-center justify-between">
                 <div className="space-y-1">
                   <Label className="text-base">Vibration</Label>
-                  <p className="text-sm text-muted-foreground">Enable controller rumble feedback</p>
+                  <p className="text-sm text-muted-foreground">Rumble feedback for navigation and button presses</p>
                 </div>
-                <Switch checked={localSettings.vibrationEnabled} onCheckedChange={handleVibrationChange} />
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => { playHaptic('select'); setTimeout(() => playHaptic('select'), 130) }}
+                    disabled={!localSettings.vibrationEnabled}
+                    className="rounded-full border border-white/[.1] bg-secondary px-3 py-1.5 text-xs font-medium text-foreground/90 transition hover:bg-muted active:scale-95 disabled:opacity-40"
+                  >
+                    Test
+                  </button>
+                  <Switch
+                    checked={localSettings.vibrationEnabled}
+                    onCheckedChange={(v) => { handleVibrationChange(v); if (v) playHaptic('toggle') }}
+                  />
+                </div>
               </div>
 
               {/* Stick deadzone */}
@@ -620,14 +634,16 @@ export function ControllerSettingsPanel() {
 
         {/* ── Input Translation Tab ───────────────────────────────────────── */}
         <TabsContent value="input-translation" className="space-y-6 mt-4">
-          <div className="rounded-lg bg-purple-900/20 border border-purple-500/30 p-4">
-            <div className="flex items-center gap-3 mb-2">
-              <Gamepad2 className="text-purple-400" size={20} />
-              <Label className="text-base font-medium">Xbox 360 Input Translation (GCPad_Remap)</Label>
+          <div className="flex items-start gap-3 rounded-2xl border border-white/[.07] bg-card/60 p-4">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground">
+              <Gamepad2 size={18} />
             </div>
-            <p className="text-sm text-muted-foreground">
-              Translate unsupported controller inputs to Xbox 360 format for better game compatibility
-            </p>
+            <div className="space-y-1">
+              <Label className="text-base font-semibold">Xbox 360 Input Translation</Label>
+              <p className="text-sm text-muted-foreground">
+                Translate unsupported controller inputs to Xbox 360 format for better game compatibility.
+              </p>
+            </div>
           </div>
 
           <div className="flex items-center justify-between">
@@ -676,26 +692,19 @@ export function ControllerSettingsPanel() {
                 <p className="text-xs text-muted-foreground">Select your controller type for proper button mapping</p>
               </div>
 
-              <div className="rounded-lg bg-secondary/50 p-4">
-                <Label className="text-sm font-medium mb-3 block">Button Mapping Preview</Label>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <div className="text-xs text-muted-foreground uppercase">Native Button</div>
-                    {Object.entries(NativeButtonLabels).slice(0, 8).map(([key, label]) => (
-                      <div key={key} className="flex items-center justify-between text-sm">
-                        <span className="text-foreground">{label}</span>
-                        <ChevronRight size={14} className="text-muted-foreground" />
+              <div className="rounded-2xl border border-white/[.07] bg-card/60 p-4">
+                <Label className="mb-3 block text-sm font-semibold">Button Mapping Preview</Label>
+                <div className="space-y-1.5">
+                  {Object.entries(NativeButtonLabels).slice(0, 8).map(([key, label], i) => {
+                    const out = Object.entries(Xbox360ButtonLabels)[i]?.[1]
+                    return (
+                      <div key={key} className="flex items-center gap-3 rounded-lg bg-white/[.02] px-3 py-1.5 text-sm">
+                        <span className="flex-1 text-foreground/90">{label}</span>
+                        <ChevronRight size={14} className="text-muted-foreground/60" />
+                        <span className="flex-1 text-right font-medium text-white">{out}</span>
                       </div>
-                    ))}
-                  </div>
-                  <div className="space-y-2">
-                    <div className="text-xs text-muted-foreground uppercase">Xbox 360 Output</div>
-                    {Object.entries(Xbox360ButtonLabels).slice(0, 8).map(([key, label]) => (
-                      <div key={key} className="text-sm">
-                        <span className="text-purple-400 font-medium">{label}</span>
-                      </div>
-                    ))}
-                  </div>
+                    )
+                  })}
                 </div>
               </div>
             </>
@@ -704,15 +713,17 @@ export function ControllerSettingsPanel() {
 
         {/* ── Key Binding Tab ─────────────────────────────────────────────── */}
         <TabsContent value="key-binding" className="space-y-6 mt-4">
-          <div className="rounded-lg bg-blue-900/20 border border-blue-500/30 p-4">
-            <div className="flex items-center gap-3 mb-2">
-              <Keyboard className="text-blue-400" size={20} />
-              <Label className="text-base font-medium">Controller Remapping</Label>
+          <div className="flex items-start gap-3 rounded-2xl border border-white/[.07] bg-card/60 p-4">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground">
+              <Keyboard size={18} />
             </div>
-            <p className="text-sm text-muted-foreground">
-              Map any button, trigger, or stick to keyboard keys or mouse inputs.
-              Click a button row and press a key — or choose a mouse action.
-            </p>
+            <div className="space-y-1">
+              <Label className="text-base font-semibold">Controller Remapping</Label>
+              <p className="text-sm text-muted-foreground">
+                Map any button, trigger, or stick to keyboard keys or mouse inputs.
+                Click a button row and press a key — or choose a mouse action.
+              </p>
+            </div>
           </div>
 
           {/* Enable toggle */}
@@ -792,14 +803,16 @@ export function ControllerSettingsPanel() {
 
         {/* ── Overlay Tab ─────────────────────────────────────────────────── */}
         <TabsContent value="overlay" className="space-y-6 mt-4">
-          <div className="rounded-lg bg-green-900/20 border border-green-500/30 p-4">
-            <div className="flex items-center gap-3 mb-2">
-              <Settings className="text-green-400" size={20} />
-              <Label className="text-base font-medium">In-Game Overlay</Label>
+          <div className="flex items-start gap-3 rounded-2xl border border-white/[.07] bg-card/60 p-4">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground">
+              <Settings size={18} />
             </div>
-            <p className="text-sm text-muted-foreground">
-              Configure the flyout overlay for quick controller remapping while in-game
-            </p>
+            <div className="space-y-1">
+              <Label className="text-base font-semibold">In-Game Overlay</Label>
+              <p className="text-sm text-muted-foreground">
+                Configure the flyout overlay for quick controller remapping while in-game.
+              </p>
+            </div>
           </div>
 
           <div className="flex items-center justify-between">
