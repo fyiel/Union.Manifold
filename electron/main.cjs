@@ -10226,10 +10226,16 @@ ipcMain.handle('uc:download-resume-with-fresh-url', (event, payload) => {
         totalBytes: payload.totalBytes,
       })
       ucLog(`[engine] resume-with-fresh-url adopted as engine download: ${id}`)
+      // enqueue() now adopts the on-disk partial up front, so the engine
+      // record's receivedBytes is the source of truth for the resume offset —
+      // even when the download is still queued behind another active one. Fall
+      // back to stat-ing savePath only if that's somehow unset.
       let actualOffset = 0
       try {
         const dl = engine.byId.get(id)
-        if (dl?.savePath) {
+        if (dl && dl.receivedBytes > 0) {
+          actualOffset = dl.receivedBytes
+        } else if (dl?.savePath) {
           const st = fs.statSync(dl.savePath)
           if (st && st.isFile()) actualOffset = st.size
         }
