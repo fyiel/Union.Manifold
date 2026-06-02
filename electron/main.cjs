@@ -7855,6 +7855,48 @@ function run7zExtract(archivePath, destDir, onProgress, options = {}) {
           // includes the phrase "virus or potentially unwanted software".
           // Detect this and surface an actionable message instead of raw 7zip output.
           const isAvBlock = /virus|potentially unwanted software|malicious/i.test(details)
+
+          // 7-Zip exit codes: 1 = warning (non-fatal), 2 = fatal error. Code 1
+          // always means the archive came out usable. Code 2 is normally fatal,
+          // BUT some game archives carry a few entries compressed with a codec
+          // this bundled 7-Zip build can't decode — most commonly the ARM64
+          // plugin DLLs in Unity games (e.g. Rewired_*.dll), which are useless
+          // on an x86_64 Windows machine anyway. 7-Zip skips those individual
+          // entries with "ERROR: Unsupported Method : <file>" / "Sub items
+          // Errors" yet still writes every other file. When the ONLY per-item
+          // errors are "Unsupported Method" (not an AV block, corrupt headers,
+          // CRC/data error, or truncated archive) and we actually extracted
+          // files, accept it as a partial success instead of failing the install.
+          const after = snapshotFiles(destDir)
+          const extracted = []
+          for (const f of after) if (!before.has(f)) extracted.push(f)
+
+          const itemErrorLines = details
+            .split(/\r?\n/)
+            .map((l) => l.trim())
+            .filter((l) => /^ERROR:/i.test(l))
+          const allUnsupportedMethod =
+            itemErrorLines.length > 0 &&
+            itemErrorLines.every((l) => /Unsupported Method/i.test(l))
+          const usableDespiteCode =
+            !isAvBlock &&
+            extracted.length > 0 &&
+            (code === 1 || (code === 2 && allUnsupportedMethod))
+
+          if (usableDespiteCode) {
+            const skipped = []
+            for (const m of details.matchAll(/Unsupported Method\s*:\s*(.+?)\s*$/gim)) {
+              skipped.push(m[1].trim())
+            }
+            uc_log(
+              `7zip exited with code ${code} but extraction is usable: ` +
+              `${extracted.length} files written` +
+              (skipped.length ? `, ${skipped.length} entry(s) skipped (unsupported codec): ${skipped.join(', ')}` : '')
+            )
+            finish({ ok: true, files: extracted, warnings: details, skipped })
+            return
+          }
+
           const errorMsg = isAvBlock
             ? 'Windows Defender blocked the archive. Open Windows Security → Virus & threat protection → Manage settings → Add or remove exclusions, add your UnionCrax install folder, then retry the download.'
             : details
@@ -9269,7 +9311,10 @@ function createWindow(existingSplash) {
                   gameName: entry?.gameName || null,
                   url: entry?.url || null,
                   partIndex: entry?.partIndex,
-                  partTotal: entry?.partTotal
+                  partTotal: entry?.partTotal,
+                  // Non-blocking note: entries 7-Zip couldn't decode (usually
+                  // ARM64 plugin DLLs irrelevant on x86_64). Game still works.
+                  ...(Array.isArray(res.skipped) && res.skipped.length ? { skippedFiles: res.skipped } : {}),
                 })
                 uc_log(`emitted final completed status for ${entry?.appid}`)
               } catch (e) {
@@ -11108,7 +11153,9 @@ async function runArchiveInstallJob(win, payload, options = {}) {
     return { ok: false, downloadId, error: rawError }
   }
 
-  ucLog(`[Archive Install] Extraction succeeded: ${(res.files || []).length} files`)
+  const skippedFiles = Array.isArray(res.skipped) ? res.skipped : []
+  ucLog(`[Archive Install] Extraction succeeded: ${(res.files || []).length} files` +
+    (skippedFiles.length ? ` (${skippedFiles.length} incompatible entry(s) skipped)` : ''))
   const extractedFiles = res.files || []
   const fileEntries = []
   for (const ef of extractedFiles) {
@@ -11137,7 +11184,11 @@ async function runArchiveInstallJob(win, payload, options = {}) {
   sendDownloadUpdate(win, {
     downloadId, status: 'completed',
     receivedBytes: totalBytes, totalBytes, speedBps: 0, etaSeconds: 0,
-    filename: path.basename(archiveToExtract), savePath: null, appid, gameName
+    filename: path.basename(archiveToExtract), savePath: null, appid, gameName,
+    // A handful of archives carry entries this 7-Zip build can't decode
+    // (e.g. ARM64 plugin DLLs in Unity games). The game is fully playable
+    // without them; surface a non-blocking note so the user knows.
+    ...(skippedFiles.length ? { skippedFiles } : {}),
   })
 
   const sourceArchivePaths = partFiles && partFiles.length ? partFiles : [archiveToExtract]
