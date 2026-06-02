@@ -1814,10 +1814,6 @@ function applySettingsDefaults(settings) {
   const next = settings && typeof settings === 'object' ? { ...settings } : {}
   if (typeof next.discordRpcEnabled !== 'boolean') next.discordRpcEnabled = true
   if (typeof next.verboseDownloadLogging !== 'boolean') next.verboseDownloadLogging = false
-  // Opt-in: route downloads through the bundled aria2c background daemon
-  // (Hydra-style) instead of the in-process downloader. Default off until the
-  // binary is bundled (scripts/fetch-aria2.cjs) and the user has tested it.
-  if (typeof next.useAria2Downloader !== 'boolean') next.useAria2Downloader = false
   if (typeof next.preventSleepDuringOperations !== 'boolean') next.preventSleepDuringOperations = true
   if (!next.libraryGameMeta || typeof next.libraryGameMeta !== 'object' || Array.isArray(next.libraryGameMeta)) {
     next.libraryGameMeta = {}
@@ -2669,12 +2665,10 @@ let mainWindow = null
 // the real mainWindow session after createWindow runs.
 // ─────────────────────────────────────────────────────────────────────────────
 let _aria2Manager = null
-/** Lazily create + start the aria2 daemon when the user opted in and a binary
- *  is available. Returns the manager (already kicking off start) or null. */
+/** Create + start the aria2 daemon (the only download backend) and return it.
+ *  Idempotent. Start is async/best-effort; the engine awaits readiness before
+ *  the first download, so calling this early just warms it up. */
 function getAria2Manager() {
-  let enabled = false
-  try { enabled = (readSettings() || {}).useAria2Downloader === true } catch { /* default off */ }
-  if (!enabled) return _aria2Manager // null unless previously created
   if (_aria2Manager) {
     _aria2Manager.ensureStarted().catch(() => {})
     return _aria2Manager
@@ -2685,9 +2679,8 @@ function getAria2Manager() {
       resourcesPath: process.resourcesPath,
       log: (level, message) => ucLog(message, level === 'warn' || level === 'error' ? level : 'info'),
     })
-    // Fire-and-forget; isReady() gates actual use.
     _aria2Manager.ensureStarted().then((ok) => {
-      ucLog(`[aria2] downloader ${ok ? 'enabled' : 'unavailable — using in-process downloader'}`)
+      ucLog(`[aria2] daemon ${ok ? 'ready' : 'UNAVAILABLE — aria2c binary not found; downloads will fail until it is bundled (run `pnpm fetch-aria2`)'}`, ok ? 'info' : 'warn')
     }).catch(() => {})
   } catch (err) {
     ucLog(`[aria2] init failed: ${err?.message || err}`, 'warn')
@@ -4038,21 +4031,6 @@ ipcMain.handle('uc:setting-set', (_event, key, value) => {
         if (_downloadEngine) _downloadEngine.setBandwidthLimit(cap > 0 ? cap * 1024 : 0)
       } catch (err) {
         ucLog(`Bandwidth limit apply failed: ${err?.message || err}`, 'warn')
-      }
-    }
-    // Attach/detach the aria2 backend live so the toggle takes effect on the
-    // next download without an app restart. In-flight downloads keep using
-    // whatever path they started on; only newly-kicked ones switch.
-    if (key === 'useAria2Downloader') {
-      try {
-        if (value === true) {
-          const mgr = getAria2Manager()
-          if (_downloadEngine && mgr) _downloadEngine.aria2 = mgr
-        } else if (_downloadEngine) {
-          _downloadEngine.aria2 = null
-        }
-      } catch (err) {
-        ucLog(`aria2 toggle apply failed: ${err?.message || err}`, 'warn')
       }
     }
     broadcastSettingsChanges(s, prev)
@@ -9857,11 +9835,11 @@ ipcMain.handle('uc:download-start', (event, payload) => {
     return { ok: false }
   }
 
-  // New engine path — UC.Files only. The engine handles the queue, disk-based
-  // resume, and persistence on its own. Use it whenever the URL is a
-  // UC.Files-hosted CDN/share link (which is everything we ship now).
+  // The engine (aria2 backend) handles every download — queue, disk-based
+  // resume, and persistence. aria2 downloads any http(s) URL, so all downloads
+  // route here; the legacy in-process path below is unreachable.
   try {
-    if (isUCFilesUrl(payload.url) || payload.url.includes('cdn.union-crax.xyz')) {
+    {
       const engine = getDownloadEngine()
       if (engine.byId.has(payload.downloadId)) {
         const dl = engine.byId.get(payload.downloadId)
@@ -10293,14 +10271,10 @@ ipcMain.handle('uc:download-resume-with-fresh-url', (event, payload) => {
   }
   if (!payload || !payload.url || typeof payload.url !== 'string') return { ok: false, error: 'missing-url' }
 
-  // New engine path: adopt this resume into the engine. The engine's _kickOff
-  // handles "is there a partial on disk? if yes resume from offset; if no
-  // start fresh" in a single, debuggable code path — and once it owns the
-  // download all future progress flows through the engine's events. This
-  // replaces the legacy createInterruptedDownload-from-the-IPC approach that
-  // was racing with the legacy will-download listener.
+  // Adopt this resume into the engine. enqueue() promotes the on-disk partial
+  // and aria2 continues from it (--continue), so resume is just a re-enqueue.
   try {
-    if (isUCFilesUrl(payload.url) || payload.url.includes('cdn.union-crax.xyz')) {
+    {
       const engine = getDownloadEngine()
       // Drop any prior engine record for this id so enqueue creates a fresh one
       // pointed at the current savePath. The engine's enqueue will look on disk
