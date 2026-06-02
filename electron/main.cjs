@@ -17,6 +17,7 @@ const { autoUpdater } = require('electron-updater')
 const systemProfileScanner = require('./system-profile.cjs')
 const storageReservation = require('./storage-reservation.cjs')
 const { DownloadEngine } = require('./download-engine.cjs')
+const { Aria2Manager } = require('./aria2-manager.cjs')
 
 const packageJson = require('../package.json')
 const isDev = !app.isPackaged
@@ -1813,6 +1814,10 @@ function applySettingsDefaults(settings) {
   const next = settings && typeof settings === 'object' ? { ...settings } : {}
   if (typeof next.discordRpcEnabled !== 'boolean') next.discordRpcEnabled = true
   if (typeof next.verboseDownloadLogging !== 'boolean') next.verboseDownloadLogging = false
+  // Opt-in: route downloads through the bundled aria2c background daemon
+  // (Hydra-style) instead of the in-process downloader. Default off until the
+  // binary is bundled (scripts/fetch-aria2.cjs) and the user has tested it.
+  if (typeof next.useAria2Downloader !== 'boolean') next.useAria2Downloader = false
   if (typeof next.preventSleepDuringOperations !== 'boolean') next.preventSleepDuringOperations = true
   if (!next.libraryGameMeta || typeof next.libraryGameMeta !== 'object' || Array.isArray(next.libraryGameMeta)) {
     next.libraryGameMeta = {}
@@ -2181,7 +2186,11 @@ function registerProcessLogging() {
   app.on('before-quit', () => {
     ucLog('App before-quit')
   })
-  app.on('will-quit', () => { ucLog('App will-quit'); flushLogsSync() })
+  app.on('will-quit', () => {
+    ucLog('App will-quit')
+    try { if (_aria2Manager) _aria2Manager.stop() } catch { /* ignore */ }
+    flushLogsSync()
+  })
   app.on('quit', (_event, exitCode) => { ucLog('App quit', 'info', { exitCode }); flushLogsSync() })
   app.on('window-all-closed', () => ucLog('All windows closed'))
   app.on('activate', () => ucLog('App activate'))
@@ -2659,6 +2668,34 @@ let mainWindow = null
 // older download/resume IPC handlers. Lazily initialised so it can pick up
 // the real mainWindow session after createWindow runs.
 // ─────────────────────────────────────────────────────────────────────────────
+let _aria2Manager = null
+/** Lazily create + start the aria2 daemon when the user opted in and a binary
+ *  is available. Returns the manager (already kicking off start) or null. */
+function getAria2Manager() {
+  let enabled = false
+  try { enabled = (readSettings() || {}).useAria2Downloader === true } catch { /* default off */ }
+  if (!enabled) return _aria2Manager // null unless previously created
+  if (_aria2Manager) {
+    _aria2Manager.ensureStarted().catch(() => {})
+    return _aria2Manager
+  }
+  try {
+    _aria2Manager = new Aria2Manager({
+      appRoot: app.getAppPath(),
+      resourcesPath: process.resourcesPath,
+      log: (level, message) => ucLog(message, level === 'warn' || level === 'error' ? level : 'info'),
+    })
+    // Fire-and-forget; isReady() gates actual use.
+    _aria2Manager.ensureStarted().then((ok) => {
+      ucLog(`[aria2] downloader ${ok ? 'enabled' : 'unavailable — using in-process downloader'}`)
+    }).catch(() => {})
+  } catch (err) {
+    ucLog(`[aria2] init failed: ${err?.message || err}`, 'warn')
+    _aria2Manager = null
+  }
+  return _aria2Manager
+}
+
 let _downloadEngine = null
 function getDownloadEngine() {
   if (_downloadEngine) {
@@ -2670,10 +2707,17 @@ function getDownloadEngine() {
   const downloadRoot = ensureDownloadDir()
   const installingRootDir = path.join(downloadRoot, installingDirName)
   try { fs.mkdirSync(installingRootDir, { recursive: true }) } catch { }
+  // Optional Hydra-style aria2 background daemon. Opt-in (useAria2Downloader)
+  // and only when the binary is actually present; otherwise the engine uses
+  // its in-process downloader. Starting is async + best-effort — if it isn't
+  // ready by the time a download begins, that download just uses the in-process
+  // path, and later ones pick up aria2 once it's up.
+  const aria2 = getAria2Manager()
   _downloadEngine = new DownloadEngine({
     installingRoot: installingRootDir,
     manifestName: INSTALLED_MANIFEST,
     safeFolderName,
+    aria2,
     log: (level, message) => ucLog(message, level === 'warn' || level === 'error' ? level : 'info'),
   })
   // Apply persisted bandwidth limit on engine creation. The setting is
@@ -3994,6 +4038,21 @@ ipcMain.handle('uc:setting-set', (_event, key, value) => {
         if (_downloadEngine) _downloadEngine.setBandwidthLimit(cap > 0 ? cap * 1024 : 0)
       } catch (err) {
         ucLog(`Bandwidth limit apply failed: ${err?.message || err}`, 'warn')
+      }
+    }
+    // Attach/detach the aria2 backend live so the toggle takes effect on the
+    // next download without an app restart. In-flight downloads keep using
+    // whatever path they started on; only newly-kicked ones switch.
+    if (key === 'useAria2Downloader') {
+      try {
+        if (value === true) {
+          const mgr = getAria2Manager()
+          if (_downloadEngine && mgr) _downloadEngine.aria2 = mgr
+        } else if (_downloadEngine) {
+          _downloadEngine.aria2 = null
+        }
+      } catch (err) {
+        ucLog(`aria2 toggle apply failed: ${err?.message || err}`, 'warn')
       }
     }
     broadcastSettingsChanges(s, prev)
