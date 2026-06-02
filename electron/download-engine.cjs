@@ -88,7 +88,7 @@ class DownloadEngine extends EventEmitter {
    * @param {function} [opts.log]          - logger (level: 'info'|'warn'|'error', message)
    * @param {boolean} [opts.singleActive]  - serialise downloads (default: true)
    */
-  constructor({ installingRoot, manifestName, safeFolderName, log, singleActive = true }) {
+  constructor({ installingRoot, manifestName, safeFolderName, log, singleActive = true, aria2 = null }) {
     super()
     if (!installingRoot) throw new Error('installingRoot required')
     if (!manifestName) throw new Error('manifestName required')
@@ -99,6 +99,22 @@ class DownloadEngine extends EventEmitter {
     this.safeFolderName = safeFolderName
     this.log = typeof log === 'function' ? log : () => {}
     this.singleActive = singleActive
+
+    /**
+     * Optional aria2 backend (Hydra-style). When present AND ready, downloads
+     * are handed to a background aria2c daemon over RPC instead of being pumped
+     * through this (main-process) Node code — keeping the UI responsive while a
+     * game runs. aria2 writes to the very same installing/<game>/<file> path, so
+     * partial adoption, extraction handoff, queue, and events are all unchanged.
+     * If it's null or not ready we transparently fall back to the in-process
+     * downloader, so nothing regresses when the binary isn't bundled.
+     * @type {import('./aria2-manager.cjs').Aria2Manager | null}
+     */
+    this.aria2 = aria2
+    /** aria2 gid -> downloadId, for routing poll results back to a Download. */
+    this._gidToId = new Map()
+    /** Handle for the shared aria2 status poller (one timer for all downloads). */
+    this._aria2PollTimer = null
 
     /**
      * Bandwidth cap in bytes per second (0 / null = unlimited). Settable at
@@ -211,6 +227,17 @@ class DownloadEngine extends EventEmitter {
       return true
     }
     if (dl.status !== 'downloading') return false
+    // aria2-owned download: pause via RPC. The poller will reflect the paused
+    // status; set it optimistically so the UI flips immediately.
+    if (dl._gid && this.aria2) {
+      try { this.aria2.pause(dl._gid).catch(() => {}) } catch { /* ignore */ }
+      dl.status = 'paused'
+      dl.speedBps = 0
+      dl.etaSeconds = null
+      this.emit('update', this._publicView(dl))
+      this._writeManifestSnapshot(dl)
+      return true
+    }
     const item = this._itemById.get(downloadId)
     if (item && typeof item.pause === 'function') {
       try { item.pause() } catch { /* ignore */ }
@@ -249,6 +276,16 @@ class DownloadEngine extends EventEmitter {
 
     if (dl.status !== 'paused' && dl.status !== 'failed' && dl.status !== 'cancelled') return false
 
+    // aria2-owned download with a live gid (same session): just unpause.
+    if (dl._gid && this.aria2 && this.aria2.isReady()) {
+      try { this.aria2.unpause(dl._gid).catch(() => {}) } catch { /* ignore */ }
+      dl.status = 'downloading'
+      dl.startedAt = Date.now()
+      this.emit('update', this._publicView(dl))
+      this._ensureAria2Poller()
+      return true
+    }
+
     const item = this._itemById.get(downloadId)
     if (item && typeof item.resume === 'function' && typeof item.isPaused === 'function' && item.isPaused()) {
       // In-memory resume — the Chromium DownloadItem is still alive.
@@ -283,6 +320,14 @@ class DownloadEngine extends EventEmitter {
     // Abort the manual Range stream too, if this is a resume-in-progress.
     if (typeof dl._rangeAbort === 'function') {
       try { dl._rangeAbort('cancel') } catch { /* ignore */ }
+    }
+    // aria2-owned download: remove it from the daemon so it stops writing.
+    if (dl._gid && this.aria2) {
+      const gid = dl._gid
+      dl._gid = null
+      this._gidToId.delete(gid)
+      try { this.aria2.forceRemove(gid).catch(() => {}) } catch { /* ignore */ }
+      try { this.aria2.removeDownloadResult(gid).catch(() => {}) } catch { /* ignore */ }
     }
 
     if (!keepFile && dl.savePath) {
@@ -415,15 +460,10 @@ class DownloadEngine extends EventEmitter {
   }
 
   _kickOff(dl) {
-    if (!dl.webContents || dl.webContents.isDestroyed()) {
-      this._fail(dl, 'webContents destroyed')
-      return
-    }
-
     const partial = this._findPartial(dl)
     if (partial && partial.path !== dl.savePath) {
-      // Rename whatever we found to the canonical savePath so Chromium picks
-      // it up via createInterruptedDownload.
+      // Rename whatever we found to the canonical savePath so Chromium / aria2
+      // pick it up as the resume target.
       if (!safeRename(partial.path, dl.savePath)) {
         this.log('warn', `[engine] failed to rename partial ${partial.path} → ${dl.savePath}`)
         // Fall through to fresh start.
@@ -448,6 +488,41 @@ class DownloadEngine extends EventEmitter {
       return
     }
 
+    // Hydra-style background path: hand the byte-pumping to the aria2 daemon
+    // when it's ready. aria2 continues from the on-disk partial (--continue),
+    // so the actualOffset promotion above is all the prep it needs. No
+    // webContents required — downloads keep running even if the window is gone.
+    if (this.aria2 && this.aria2.isReady()) {
+      dl.status = 'downloading'
+      dl.startedAt = Date.now()
+      dl.error = null
+      if (actualOffset > 0) dl.receivedBytes = actualOffset
+      this.emit('update', this._publicView(dl))
+      this._startAria2(dl, actualOffset).catch((err) => {
+        this.log('warn', `[engine] aria2 start failed for ${dl.id}, falling back to in-process: ${err?.message || err}`)
+        // Fall back to the in-process downloader for this item.
+        if (dl.webContents && !dl.webContents.isDestroyed()) {
+          this._kickOffInProcess(dl, actualOffset)
+        } else {
+          this._fail(dl, String(err?.message || err))
+        }
+      })
+      return
+    }
+
+    if (!dl.webContents || dl.webContents.isDestroyed()) {
+      this._fail(dl, 'webContents destroyed')
+      return
+    }
+    this._kickOffInProcess(dl, actualOffset)
+  }
+
+  /** In-process (Electron DownloadManager / manual Range) download path. */
+  _kickOffInProcess(dl, actualOffset) {
+    if (!dl.webContents || dl.webContents.isDestroyed()) {
+      this._fail(dl, 'webContents destroyed')
+      return
+    }
     dl.status = 'downloading'
     dl.startedAt = Date.now()
     dl.error = null
@@ -484,6 +559,123 @@ class DownloadEngine extends EventEmitter {
       this._pendingByUrl.delete(dl.url)
       this._fail(dl, String(err?.message || err))
     }
+  }
+
+  // ── aria2 backend ─────────────────────────────────────────────────────────
+
+  /** Hand a download to the aria2 daemon and begin polling its status. */
+  async _startAria2(dl, actualOffset) {
+    const options = {
+      dir: dl.installingDir,
+      out: dl.filename,
+      continue: 'true',
+      'auto-file-renaming': 'false',
+      'allow-overwrite': 'true',
+    }
+    if (dl.authHeader) options.header = [`Authorization: ${dl.authHeader}`]
+    const gid = await this.aria2.addUri([dl.url], options)
+    dl._gid = gid
+    this._gidToId.set(gid, dl.id)
+    this.log('info', `[engine] aria2 download: id=${dl.id} gid=${gid} offset=${actualOffset} out=${dl.filename}`)
+    this._ensureAria2Poller()
+  }
+
+  _ensureAria2Poller() {
+    if (this._aria2PollTimer) return
+    this._aria2PollTimer = setInterval(() => { this._pollAria2() }, 700)
+    if (typeof this._aria2PollTimer.unref === 'function') this._aria2PollTimer.unref()
+  }
+
+  _stopAria2PollerIfIdle() {
+    // Stop the timer once no download is owned by aria2 anymore.
+    let anyActive = false
+    for (const dl of this.byId.values()) {
+      if (dl._gid && (dl.status === 'downloading' || dl.status === 'queued' || dl.status === 'paused')) {
+        anyActive = true
+        break
+      }
+    }
+    if (!anyActive && this._aria2PollTimer) {
+      clearInterval(this._aria2PollTimer)
+      this._aria2PollTimer = null
+    }
+  }
+
+  async _pollAria2() {
+    if (!this.aria2 || !this.aria2.isReady()) return
+    // Snapshot the gids we currently track so concurrent mutation is safe.
+    const entries = []
+    for (const dl of this.byId.values()) {
+      if (dl._gid && dl.status !== 'completed' && dl.status !== 'failed' && dl.status !== 'cancelled') {
+        entries.push(dl)
+      }
+    }
+    if (entries.length === 0) { this._stopAria2PollerIfIdle(); return }
+    for (const dl of entries) {
+      let status
+      try {
+        status = await this.aria2.tellStatus(dl._gid)
+      } catch (err) {
+        // Transient RPC hiccup — leave state as-is and try again next tick.
+        continue
+      }
+      const completed = Number(status.completedLength) || 0
+      const total = Number(status.totalLength) || 0
+      const speed = Number(status.downloadSpeed) || 0
+      if (total > 0) dl.totalBytes = total
+      if (completed > 0) dl.receivedBytes = completed
+
+      if (status.status === 'complete') {
+        this._finishAria2(dl, 'complete')
+      } else if (status.status === 'error') {
+        const msg = status.errorMessage || `aria2 error ${status.errorCode || ''}`.trim()
+        this._finishAria2(dl, 'error', msg)
+      } else if (status.status === 'removed') {
+        // We initiated this via cancel(); cleanup already handled there.
+        this._gidToId.delete(dl._gid)
+        dl._gid = null
+      } else {
+        // active / waiting / paused
+        dl.status = status.status === 'paused' ? 'paused' : 'downloading'
+        dl.speedBps = dl.status === 'paused' ? 0 : speed
+        const remaining = total > 0 ? Math.max(0, total - completed) : 0
+        dl.etaSeconds = speed > 0 && remaining > 0 ? Math.round(remaining / speed) : null
+        this.emit('update', this._publicView(dl))
+        this._writeManifestSnapshotThrottled(dl)
+      }
+    }
+  }
+
+  _finishAria2(dl, kind, errorMsg) {
+    const gid = dl._gid
+    dl._gid = null
+    if (gid) {
+      this._gidToId.delete(gid)
+      // Let aria2 forget the finished download so its memory + .aria2 file are
+      // cleaned up. Best-effort.
+      try { this.aria2.removeDownloadResult(gid).catch(() => {}) } catch { /* ignore */ }
+    }
+    if (kind === 'complete') {
+      // Trust the on-disk size as the source of truth.
+      try {
+        const st = statOrNull(dl.savePath)
+        if (st && st.isFile()) dl.receivedBytes = st.size
+      } catch { /* ignore */ }
+      dl.status = 'completed'
+      dl.speedBps = 0
+      dl.etaSeconds = null
+      try { safeUnlink(dl.savePath + RESUME_BACKUP_EXT) } catch { /* ignore */ }
+      this._writeManifestSnapshot(dl)
+      this.emit('update', this._publicView(dl))
+      this.emit('complete', this._publicView(dl))
+      this.activeId = null
+      this._stopAria2PollerIfIdle()
+      this._maybeStartNext()
+      return
+    }
+    // error
+    this._stopAria2PollerIfIdle()
+    this._fail(dl, errorMsg || 'aria2 download failed')
   }
 
   // Manual Range-based resume. Bypasses Electron's DownloadManager entirely
