@@ -79,6 +79,12 @@ export type DownloadItem = {
   completedAt?: number
   error?: string | null
   spaceCheck?: DownloadSpaceCheck | null
+  /** Explicit position in the download queue. Set by the user when they
+   *  reorder the "Up Next" list (drag-and-drop). Items that share an appid
+   *  carry the same value so a whole game moves as one unit; ties break on
+   *  partIndex. Items without it fall back to startedAt ordering (e.g. a
+   *  newly-queued game appends to the end). */
+  queueOrder?: number
 }
 
 type DownloadUpdate = {
@@ -162,6 +168,7 @@ type DownloadsActionsValue = {
   resumeDownload: (downloadId: string) => Promise<void>
   resumeGroup: (appid: string) => Promise<void>
   resumeAll: () => Promise<void>
+  reorderQueuedGroups: (orderedAppids: string[]) => void
   upsertDownload: (download: DownloadItem) => void
   showInFolder: (path: string) => Promise<void>
   openPath: (path: string) => Promise<void>
@@ -181,6 +188,29 @@ type DownloadsStore = {
 const DownloadsStoreContext = createContext<DownloadsStore | null>(null)
 const LEGACY_STORAGE_KEY = "uc_direct_downloads"
 const PAUSABLE_STATUSES: DownloadStatus[] = ["downloading", "retrying", "extracting", "installing", "verifying"]
+
+/** Ordering for queued items. Honours the user's explicit `queueOrder` first
+ *  (set via drag-and-drop reordering), falling back to enqueue time so a fresh
+ *  download lands at the end. Items sharing a queueOrder (same game, multiple
+ *  parts) keep their natural part order. Exported shape kept simple so both the
+ *  auto-start sequencer and the renderer's "Up Next" list sort identically. */
+function compareQueuePosition(
+  a: { queueOrder?: number; startedAt: number; partIndex?: number },
+  b: { queueOrder?: number; startedAt: number; partIndex?: number }
+): number {
+  const ao = a.queueOrder
+  const bo = b.queueOrder
+  if (ao != null && bo != null) {
+    if (ao !== bo) return ao - bo
+  } else if (ao != null) {
+    return -1
+  } else if (bo != null) {
+    return 1
+  } else if (a.startedAt !== b.startedAt) {
+    return a.startedAt - b.startedAt
+  }
+  return (a.partIndex ?? 0) - (b.partIndex ?? 0)
+}
 
 function coercePersistedDownloadUrl(url: unknown): string {
   if (typeof url === "string") return url
@@ -894,12 +924,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
 
       const queued = downloadsRef.current
         .filter((item) => item.status === "queued")
-        .sort((a, b) => {
-          if (a.startedAt !== b.startedAt) return a.startedAt - b.startedAt
-          const aKey = a.partIndex ?? 0
-          const bKey = b.partIndex ?? 0
-          return aKey - bKey
-        })
+        .sort(compareQueuePosition)
       if (!queued.length) return
       const next = queued[0]
       // Don't start a queued item if a different appid has paused downloads.
@@ -1780,9 +1805,14 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
   )
 
   const pauseAll = useCallback(async () => {
+    // Only pause groups that are actually downloading/active. Groups that are
+    // purely queued (a different game waiting its turn) are left as "queued" —
+    // they must never flip to "paused", and the auto-start guard already holds
+    // them back while any game is paused. Flipping them here was what made a
+    // queued game show "Paused" and let Resume reactivate the wrong download.
     const appids = [...new Set(
       downloadsRef.current
-        .filter((item) => item.status === "queued" || PAUSABLE_STATUSES.includes(item.status))
+        .filter((item) => PAUSABLE_STATUSES.includes(item.status))
         .map((item) => item.appid)
         .filter(Boolean)
     )]
@@ -1802,6 +1832,26 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
       await resumeGroup(appid)
     }
   }, [resumeGroup])
+
+  // Apply a user-chosen order to the queued games. `orderedAppids` is the full
+  // list of currently-queued appids in their new top-to-bottom order. Every
+  // queued item for a given appid gets the same queueOrder so the whole game
+  // moves as one block; the auto-start sequencer and the "Up Next" list both
+  // read this via compareQueuePosition. Non-queued items are untouched.
+  const reorderQueuedGroups = useCallback((orderedAppids: string[]) => {
+    const orderMap = new Map<string, number>()
+    orderedAppids.forEach((appid, index) => orderMap.set(appid, index))
+    setDownloads((prev) => {
+      const next = prev.map((item) => {
+        if (item.status !== "queued") return item
+        const order = orderMap.get(item.appid)
+        if (order == null) return item
+        return { ...item, queueOrder: order }
+      })
+      downloadsRef.current = next
+      return next
+    })
+  }, [])
 
   const showInFolder = useCallback(async (path: string) => {
     if (window.ucDownloads?.showInFolder) {
@@ -1934,6 +1984,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
       resumeDownload,
       resumeGroup,
       resumeAll,
+      reorderQueuedGroups,
       upsertDownload,
       showInFolder,
       openPath,
@@ -1943,7 +1994,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
       dismissByAppid,
       clearCompleted,
     }),
-    [startGameDownload, cancelDownload, cancelGroup, pauseDownload, pauseGroup, pauseAll, resumeDownload, resumeGroup, resumeAll, upsertDownload, showInFolder, openPath, clearByAppid, dismissByAppid, clearCompleted]
+    [startGameDownload, cancelDownload, cancelGroup, pauseDownload, pauseGroup, pauseAll, resumeDownload, resumeGroup, resumeAll, reorderQueuedGroups, upsertDownload, showInFolder, openPath, clearByAppid, dismissByAppid, clearCompleted]
   )
 
   const dataValue = useMemo(() => ({ downloads }), [downloads])
