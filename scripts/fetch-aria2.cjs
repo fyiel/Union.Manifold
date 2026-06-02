@@ -1,23 +1,24 @@
 /**
  * fetch-aria2.cjs
  *
- * Downloads an `aria2c` binary for the HOST platform into
+ * Downloads `aria2c` binaries into
  *   assets/bin/aria2/<platform>-<arch>/aria2c[.exe]
- * so electron-builder can bundle it (see asarUnpack in package.json) and the
- * Hydra-style background downloader can use it at runtime.
+ * so electron-builder can bundle them (see asarUnpack in package.json) and the
+ * aria2 background downloader can use it at runtime.
  *
- * This is build tooling — run it on the machine/CI that packages each OS:
- *   node ./scripts/fetch-aria2.cjs
+ * Usage:
+ *   node ./scripts/fetch-aria2.cjs            # fetch for THIS host's platform
+ *   node ./scripts/fetch-aria2.cjs --all      # fetch win + linux (for CI / one-host builds)
+ *   node ./scripts/fetch-aria2.cjs win32-x64 linux-x64   # explicit targets
  *
- * It is intentionally best-effort and non-fatal: if a download fails or no
- * source is known for the platform, it prints guidance and exits 0 so it never
- * breaks `pnpm install`. The app falls back to its in-process downloader when
- * the binary is absent.
+ * The project ships Windows + Linux. Each target's binary name differs
+ * (aria2c.exe vs aria2c), and extraction happens on the host doing the build —
+ * the zips are cross-extractable (Expand-Archive / unzip), so a single Linux or
+ * Windows CI host can produce binaries for both with `--all`.
  *
- * Sources (override with env vars if these ever drift):
- *   ARIA2_WIN_URL    — zip containing aria2c.exe (default: official aria2 release)
- *   ARIA2_LINUX_URL  — tar.* containing aria2c   (default: q3aql static build)
- *   ARIA2_MAC_URL    — archive containing aria2c (no stable default; see notes)
+ * Best-effort and non-fatal: a failed/missing source prints guidance and exits
+ * 0 so it never breaks `pnpm install`. Sources are overridable via env:
+ *   ARIA2_WIN_URL, ARIA2_LINUX_URL, ARIA2_VERSION, ARIA2_LINUX_TAG
  */
 
 'use strict'
@@ -28,22 +29,39 @@ const os = require('node:os')
 const path = require('node:path')
 const { execSync } = require('node:child_process')
 
-const VERSION = process.env.ARIA2_VERSION || '1.37.0'
-const DEFAULTS = {
-  win32: process.env.ARIA2_WIN_URL ||
-    `https://github.com/aria2/aria2/releases/download/release-${VERSION}/aria2-${VERSION}-win-64bit-build1.zip`,
-  linux: process.env.ARIA2_LINUX_URL ||
-    `https://github.com/q3aql/aria2-static-builds/releases/download/v${VERSION}/aria2-${VERSION}-linux-gnu-64bit-build1.tar.bz2`,
-  darwin: process.env.ARIA2_MAC_URL || '',
+const VERSION = process.env.ARIA2_VERSION || '1.37.0'        // official aria2 (Windows)
+const ABCFY2_TAG = process.env.ARIA2_LINUX_TAG || '1.37.0'   // abcfy2 static musl builds (Linux)
+
+// Each target maps to a release zip + the binary name inside it.
+const TARGETS = {
+  'win32-x64': {
+    url: process.env.ARIA2_WIN_URL ||
+      `https://github.com/aria2/aria2/releases/download/release-${VERSION}/aria2-${VERSION}-win-64bit-build1.zip`,
+    bin: 'aria2c.exe',
+  },
+  'linux-x64': {
+    url: process.env.ARIA2_LINUX_URL ||
+      `https://github.com/abcfy2/aria2-static-build/releases/download/${ABCFY2_TAG}/aria2-x86_64-linux-musl_static.zip`,
+    bin: 'aria2c',
+  },
+  'linux-arm64': {
+    url: `https://github.com/abcfy2/aria2-static-build/releases/download/${ABCFY2_TAG}/aria2-aarch64-linux-musl_static.zip`,
+    bin: 'aria2c',
+  },
 }
 
-const platform = process.platform
-const arch = process.arch
-const exe = platform === 'win32' ? 'aria2c.exe' : 'aria2c'
-const outDir = path.join(__dirname, '..', 'assets', 'bin', 'aria2', `${platform}-${arch}`)
-const outBin = path.join(outDir, exe)
+const HOST_PLATFORM = process.platform
+const HOST_KEY = `${HOST_PLATFORM}-${process.arch}`
 
 function log(msg) { console.log(`[fetch-aria2] ${msg}`) }
+
+function selectedTargets() {
+  const args = process.argv.slice(2)
+  if (args.includes('--all')) return ['win32-x64', 'linux-x64']
+  const explicit = args.filter((a) => TARGETS[a])
+  if (explicit.length) return explicit
+  return [HOST_KEY]
+}
 
 function download(url, dest, redirects = 0) {
   return new Promise((resolve, reject) => {
@@ -51,17 +69,13 @@ function download(url, dest, redirects = 0) {
     const req = https.get(url, { headers: { 'User-Agent': 'UnionCrax.Direct-build' } }, (res) => {
       const status = res.statusCode || 0
       // Follow redirects WITHOUT touching `dest` — GitHub release URLs always
-      // redirect to objects.githubusercontent.com. (The previous version
-      // unlinked dest here, which raced the recursive download writing to the
-      // same path and left an empty/missing file.)
+      // redirect to objects.githubusercontent.com.
       if (status >= 300 && status < 400 && res.headers.location) {
-        res.resume() // drain so the socket frees up
-        const next = new URL(res.headers.location, url).toString()
-        resolve(download(next, dest, redirects + 1))
+        res.resume()
+        resolve(download(new URL(res.headers.location, url).toString(), dest, redirects + 1))
         return
       }
       if (status !== 200) { res.resume(); reject(new Error(`HTTP ${status} for ${url}`)); return }
-      // Only now (final 200) do we open the file and stream the body in.
       const file = fs.createWriteStream(dest)
       res.pipe(file)
       file.on('finish', () => file.close((err) => (err ? reject(err) : resolve())))
@@ -72,10 +86,9 @@ function download(url, dest, redirects = 0) {
 }
 
 function extractTo(archivePath, destDir) {
-  // Use system tools so we don't add an unzip dependency. Runs on the OS doing
-  // the packaging, which has the right tools available.
+  // Extraction runs on the build host. zips are cross-extractable on both OSes.
   if (archivePath.endsWith('.zip')) {
-    if (platform === 'win32') {
+    if (HOST_PLATFORM === 'win32') {
       execSync(`powershell -NoProfile -Command "Expand-Archive -LiteralPath '${archivePath}' -DestinationPath '${destDir}' -Force"`, { stdio: 'inherit' })
     } else {
       execSync(`unzip -o "${archivePath}" -d "${destDir}"`, { stdio: 'inherit' })
@@ -87,49 +100,63 @@ function extractTo(archivePath, destDir) {
   }
 }
 
-/** Recursively find the aria2c binary under dir. */
-function findBinary(dir) {
+/** Recursively find a file named `binName` under dir. */
+function findBinary(dir, binName) {
   let found = null
   const walk = (d) => {
     if (found) return
     for (const entry of fs.readdirSync(d, { withFileTypes: true })) {
       const full = path.join(d, entry.name)
       if (entry.isDirectory()) walk(full)
-      else if (entry.name === exe) { found = full; return }
+      else if (entry.name === binName) { found = full; return }
     }
   }
   try { walk(dir) } catch { /* ignore */ }
   return found
 }
 
-async function main() {
-  if (fs.existsSync(outBin)) { log(`already present: ${outBin}`); return }
-  const url = DEFAULTS[platform]
-  if (!url) {
-    log(`no default aria2 source for ${platform}. Set ARIA2_${platform === 'darwin' ? 'MAC' : platform.toUpperCase()}_URL, or install aria2c on PATH (e.g. \`brew install aria2\`). Skipping — app will use the in-process downloader.`)
+async function fetchTarget(key) {
+  const target = TARGETS[key]
+  if (!target || !target.url) {
+    log(`no source configured for ${key} — skipping (the app will fall back / require a system aria2c).`)
     return
   }
+  const outDir = path.join(__dirname, '..', 'assets', 'bin', 'aria2', key)
+  const outBin = path.join(outDir, target.bin)
+  if (fs.existsSync(outBin)) { log(`already present: ${outBin}`); return }
   fs.mkdirSync(outDir, { recursive: true })
-  const tmp = path.join(os.tmpdir(), `aria2-dl-${Date.now()}${path.extname(url) || '.bin'}`)
-  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'aria2-x-'))
+  const tmp = path.join(os.tmpdir(), `aria2-${key}-${Date.now()}.zip`)
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), `aria2-x-${key}-`))
   try {
-    log(`downloading ${url}`)
-    await download(url, tmp)
-    log(`extracting`)
+    log(`[${key}] downloading ${target.url}`)
+    await download(target.url, tmp)
+    log(`[${key}] extracting`)
     extractTo(tmp, work)
-    const bin = findBinary(work)
-    if (!bin) throw new Error('aria2c not found in archive')
+    const bin = findBinary(work, target.bin)
+    if (!bin) throw new Error(`${target.bin} not found in archive`)
     fs.copyFileSync(bin, outBin)
-    if (platform !== 'win32') fs.chmodSync(outBin, 0o755)
-    log(`installed → ${outBin}`)
+    if (!target.bin.endsWith('.exe')) fs.chmodSync(outBin, 0o755)
+    log(`[${key}] installed → ${outBin}`)
   } finally {
     try { fs.unlinkSync(tmp) } catch { /* ignore */ }
     try { fs.rmSync(work, { recursive: true, force: true }) } catch { /* ignore */ }
   }
 }
 
+async function main() {
+  const targets = selectedTargets()
+  if (!targets.length || (targets.length === 1 && !TARGETS[targets[0]])) {
+    log(`no aria2 source for ${HOST_KEY}. Pass explicit targets (win32-x64, linux-x64) or install aria2c on PATH.`)
+    return
+  }
+  for (const key of targets) {
+    // One target's failure shouldn't abort the others.
+    try { await fetchTarget(key) } catch (err) { log(`[${key}] skipped (${err?.message || err})`) }
+  }
+}
+
 main().catch((err) => {
-  // Non-fatal: never break install/packaging over this.
-  log(`skipped (${err?.message || err}). The app will use its in-process downloader.`)
+  // Never break install/packaging over this.
+  log(`skipped (${err?.message || err}).`)
   process.exit(0)
 })
