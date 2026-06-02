@@ -1888,22 +1888,56 @@ function redactLogText(input) {
     .replace(/((?:\/home\/|\/users\/))[^\/\n\r]+/gi, '$1[REDACTED_USER]')
 }
 
+// Log writes used to be `fs.appendFileSync` on every call. On the hot path —
+// download progress (4/s per download) and especially extraction (7z emits
+// progress every few ms) — that synchronous disk I/O blocks the main process
+// event loop and contends with the disk a running game is using, which is the
+// "super laggy while downloading + playing" symptom. We now buffer lines and
+// flush them with async `fs.appendFile` on a short timer, with a synchronous
+// drain for the paths that must see everything on disk immediately (reading
+// logs, clearing logs, quitting).
+const _logBuffer = []
+let _logFlushTimer = null
+
+function _flushLogsAsync() {
+  _logFlushTimer = null
+  if (_logBuffer.length === 0) return
+  const chunk = _logBuffer.join('')
+  _logBuffer.length = 0
+  fs.appendFile(appLogsPath, chunk, (err) => {
+    if (err) console.error('[UC] Failed to write log:', err)
+  })
+}
+
+function flushLogsSync() {
+  if (_logFlushTimer) { clearTimeout(_logFlushTimer); _logFlushTimer = null }
+  if (_logBuffer.length === 0) return
+  const chunk = _logBuffer.join('')
+  _logBuffer.length = 0
+  try { fs.appendFileSync(appLogsPath, chunk) } catch (err) { console.error('[UC] Failed to write log:', err) }
+}
+
 function ucLog(message, level = 'info', data = null) {
   const timestamp = new Date().toISOString()
   const levelTag = level.toUpperCase().padEnd(5)
   const normalized = normalizeLogData(data)
   const dataStr = normalized ? ` | Data: ${safeStringify(normalized)}` : ''
   const logLine = `[${timestamp}] [${levelTag}] ${message}${dataStr}\n`
-  try {
-    fs.appendFileSync(appLogsPath, logLine)
-  } catch (err) {
-    console.error('[UC] Failed to write log:', err)
+  _logBuffer.push(logLine)
+  // Cap the buffer so a stalled flush can't grow it without bound; drain
+  // synchronously if it ever gets large (e.g. a burst before the timer fires).
+  if (_logBuffer.length >= 256) {
+    flushLogsSync()
+  } else if (!_logFlushTimer) {
+    _logFlushTimer = setTimeout(_flushLogsAsync, 200)
   }
   const consoleMethod = level === 'error' ? console.error : level === 'warn' ? console.warn : console.log
   consoleMethod(`[UC] [${level.toUpperCase()}]`, message, data || '')
 }
 
 function getLogs() {
+  // Drain buffered lines first so a reader sees everything logged so far.
+  flushLogsSync()
   try {
     return fs.readFileSync(appLogsPath, 'utf8')
   } catch (err) {
@@ -1913,6 +1947,10 @@ function getLogs() {
 }
 
 function clearLogs() {
+  // Drop any buffered lines from the prior session — they belong to the file
+  // we're about to truncate, not the new one.
+  if (_logFlushTimer) { clearTimeout(_logFlushTimer); _logFlushTimer = null }
+  _logBuffer.length = 0
   try {
     fs.writeFileSync(appLogsPath, `[${new Date().toISOString()}] [INFO ] === App Log Started (session ${LOG_SESSION_ID}, pid ${process.pid}) ===\n`)
     ucLog('Logs cleared')
@@ -2143,8 +2181,8 @@ function registerProcessLogging() {
   app.on('before-quit', () => {
     ucLog('App before-quit')
   })
-  app.on('will-quit', () => ucLog('App will-quit'))
-  app.on('quit', (_event, exitCode) => ucLog('App quit', 'info', { exitCode }))
+  app.on('will-quit', () => { ucLog('App will-quit'); flushLogsSync() })
+  app.on('quit', (_event, exitCode) => { ucLog('App quit', 'info', { exitCode }); flushLogsSync() })
   app.on('window-all-closed', () => ucLog('All windows closed'))
   app.on('activate', () => ucLog('App activate'))
   app.on('render-process-gone', (_event, _webContents, details) => ucLog('Render process gone (app)', 'error', details))
@@ -6780,7 +6818,7 @@ async function handleUCFilesDownloadComplete(win, info) {
 
       writeInstallingManifest(appid || 'manual-install', { ...metadataForInstall, appid, name: gameName }, 'extracting', null)
 
-      const progressState = { lastPercent: 0, lastAt: Date.now(), speedBps: 0 }
+      const progressState = { lastPercent: 0, lastAt: Date.now(), speedBps: 0, lastEmitAt: 0, lastEmitPercent: -1 }
       const st = fs.existsSync(savePath) ? fs.statSync(savePath) : null
       const totalBytes = st ? st.size : 0
 
@@ -6795,6 +6833,14 @@ async function handleUCFilesDownloadComplete(win, info) {
         progressState.speedBps = progressState.speedBps > 0 ? progressState.speedBps * 0.7 + instantSpeed * 0.3 : instantSpeed
         progressState.lastPercent = safePercent
         progressState.lastAt = now
+        // 7z (with -bsp1) emits progress every few milliseconds. Coalesce to at
+        // most ~5 updates/sec, plus whole-percent steps and the final 100%, so
+        // the IPC + renderer re-render isn't hammered during extraction.
+        const enoughTimePassed = now - progressState.lastEmitAt >= 200
+        const enoughProgress = Math.floor(safePercent) > progressState.lastEmitPercent
+        if (!enoughTimePassed && !enoughProgress && safePercent < 100) return
+        progressState.lastEmitAt = now
+        progressState.lastEmitPercent = Math.floor(safePercent)
         const etaSeconds = progressState.speedBps > 0 ? Math.max(0, Math.round((totalBytes - received) / progressState.speedBps)) : null
         sendDownloadUpdate(win, makeUpdate({
           status: 'extracting', extractProgress: safePercent,
@@ -7853,6 +7899,11 @@ const latestDownloadState = new Map()
 // the installing manifest on the main side guarantees a resume target exists
 // on disk regardless of how the app exits.
 const installingSnapshotWriteAt = new Map()
+// downloadId -> last status we wrote a log line for. Lets the default
+// (non-verbose) log record status *transitions* only, instead of one line per
+// progress tick — which during extraction was hundreds of synchronous log
+// writes per second.
+const lastLoggedDownloadStatus = new Map()
 const INSTALLING_SNAPSHOT_WRITE_MIN_INTERVAL_MS = 1500
 
 function maybeWriteInstallingDownloadSnapshot(payload) {
@@ -7899,10 +7950,13 @@ function maybeWriteInstallingDownloadSnapshot(payload) {
 function sendDownloadUpdate(win, payload) {
   try {
     const settings = readSettings() || {}
-    const isProgressUpdate = payload.status === 'downloading' || payload.status === 'paused'
     if (settings.verboseDownloadLogging) {
+      // Opt-in firehose: one line per tick, for debugging download issues.
       ucLog(`[Download] ${payload.downloadId} | ${payload.status} | ${payload.receivedBytes || 0}/${payload.totalBytes || 0} | ${Math.round(payload.speedBps || 0)} B/s | ${payload.filename || ''}`)
-    } else if (!isProgressUpdate) {
+    } else if (payload.downloadId && lastLoggedDownloadStatus.get(payload.downloadId) !== payload.status) {
+      // Default: log only when the status actually changes. Progress ticks
+      // (downloading / extracting / verifying / …) no longer each hit the log.
+      lastLoggedDownloadStatus.set(payload.downloadId, payload.status)
       ucLog(`[Download] ${payload.downloadId} → ${payload.status}${payload.error ? ' (' + payload.error + ')' : ''} | ${payload.filename || ''} | appid=${payload.appid || 'unknown'}`)
     }
     // Keep a live snapshot for the overlay's initial panel load
@@ -7910,6 +7964,7 @@ function sendDownloadUpdate(win, payload) {
       if (['completed', 'failed', 'cancelled'].includes(payload.status)) {
         latestDownloadState.delete(payload.downloadId)
         installingSnapshotWriteAt.delete(payload.appid || '')
+        lastLoggedDownloadStatus.delete(payload.downloadId)
       } else {
         latestDownloadState.set(payload.downloadId, payload)
       }
