@@ -23,7 +23,8 @@
     "build:renderer": "vite build --config renderer/vite.config.ts",
     "build:electron": "node ./scripts/build-electron.cjs",
     "fetch-gcpad": "node ./scripts/fetch-gcpad.cjs",
-    "pack": "pnpm -s fetch-gcpad && pnpm -s build && electron-builder",
+    "fetch-aria2": "node ./scripts/fetch-aria2.cjs",
+    "pack": "pnpm -s fetch-gcpad && pnpm -s fetch-aria2 && pnpm -s build && electron-builder",
     "release:version": "node ./scripts/release-version.cjs",
     "rebuild-native": "node scripts/rebuild-native.cjs",
     "postinstall": "pnpm rebuild-native || echo 'Native overlay addon build skipped (install C++ build tools to enable)'"
@@ -105,7 +106,8 @@
     ],
     "asarUnpack": [
       "node_modules/7zip-bin",
-      "electron/native/build/**/*"
+      "electron/native/build/**/*",
+      "assets/bin/aria2/**"
     ],
     "protocols": [
       {
