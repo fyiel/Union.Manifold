@@ -231,6 +231,12 @@ class Aria2Manager {
     return gid
   }
 
+  /** Set the global download speed cap in bytes/sec (0 = unlimited). */
+  setMaxOverallDownloadLimit(bytesPerSec) {
+    const v = Number(bytesPerSec) > 0 ? String(Math.floor(bytesPerSec)) : '0'
+    return this._rpc('aria2.changeGlobalOption', [{ 'max-overall-download-limit': v }]).catch(() => {})
+  }
+
   pause(gid) { return this._rpc('aria2.pause', [gid]) }
   forcePause(gid) { return this._rpc('aria2.forcePause', [gid]) }
   unpause(gid) { return this._rpc('aria2.unpause', [gid]) }

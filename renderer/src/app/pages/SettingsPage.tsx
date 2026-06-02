@@ -216,7 +216,6 @@ export function SettingsPage() {
   const [autoShareErrorLogs, setAutoShareErrorLogs] = useState(false)
   const [autoDeleteArchives, setAutoDeleteArchives] = useState(false)
   const [verboseDownloadLogging, setVerboseDownloadLogging] = useState(false)
-  const [useAria2Downloader, setUseAria2Downloader] = useState(false)
   const [customApiBaseUrl, setCustomApiBaseUrl] = useState("")
   const [networkTesting, setNetworkTesting] = useState(false)
   const [networkResults, setNetworkResults] = useState<Array<{ label: string; url: string; ok: boolean; status: number; elapsedMs: number; error?: string }> | null>(null)
@@ -723,12 +722,10 @@ export function SettingsPage() {
       try {
         const devMode = await window.ucSettings?.get?.('developerMode')
         const verbose = await window.ucSettings?.get?.('verboseDownloadLogging')
-        const aria2 = await window.ucSettings?.get?.('useAria2Downloader')
         const customBase = await window.ucSettings?.get?.('customApiBaseUrl')
         if (!mounted) return
         setDeveloperMode(devMode || false)
         setVerboseDownloadLogging(Boolean(verbose))
-        setUseAria2Downloader(Boolean(aria2))
         if (typeof customBase === 'string') {
           setCustomApiBaseUrl(customBase)
           setApiBaseUrl(customBase)
@@ -4049,38 +4046,6 @@ export function SettingsPage() {
                           >
                             <span
                               className={`inline-block h-4 w-4 transform rounded-full transition-transform ${verboseDownloadLogging ? 'bg-black translate-x-6' : 'bg-primary translate-x-1'
-                                }`}
-                            />
-                          </button>
-                        </div>
-                      </div>
-
-                      <div className="border-t border-amber-500/20 pt-4 space-y-3">
-                        <div>
-                          <h3 className="text-sm font-semibold text-foreground">Background downloader (aria2)</h3>
-                          <p className="text-xs text-muted-foreground">
-                            Experimental. Runs downloads in a background aria2 process (like Hydra) instead of the app
-                            itself, for less lag while downloading and playing, plus faster multi-connection downloads
-                            and more reliable resume. Requires the bundled aria2 binary; falls back automatically if
-                            it's missing. Restart a download after toggling.
-                          </p>
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs text-muted-foreground">Use aria2 background downloader</span>
-                          <button
-                            onClick={async () => {
-                              const next = !useAria2Downloader
-                              setUseAria2Downloader(next)
-                              try {
-                                await window.ucSettings?.set?.('useAria2Downloader', next)
-                              } catch { }
-                            }}
-                            className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${useAria2Downloader ? 'bg-white' : 'bg-zinc-700'
-                          }`}
-                            title="Toggle aria2 background downloader"
-                          >
-                            <span
-                              className={`inline-block h-4 w-4 transform rounded-full transition-transform ${useAria2Downloader ? 'bg-black translate-x-6' : 'bg-primary translate-x-1'
                                 }`}
                             />
                           </button>

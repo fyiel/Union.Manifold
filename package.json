@@ -27,7 +27,7 @@
     "pack": "pnpm -s fetch-gcpad && pnpm -s fetch-aria2 && pnpm -s build && electron-builder",
     "release:version": "node ./scripts/release-version.cjs",
     "rebuild-native": "node scripts/rebuild-native.cjs",
-    "postinstall": "pnpm rebuild-native || echo 'Native overlay addon build skipped (install C++ build tools to enable)'"
+    "postinstall": "pnpm rebuild-native || echo 'Native overlay addon build skipped (install C++ build tools to enable)' && node ./scripts/fetch-aria2.cjs"
   },
   "dependencies": {
     "7zip-bin": "^5.0.0",
