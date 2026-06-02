@@ -1136,6 +1136,22 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         // Dispatch event so launcher page knows to refresh installed list
         if (typeof window !== "undefined") {
           window.dispatchEvent(new CustomEvent("uc_game_installed", { detail: { appid: update.appid } }))
+
+          // A few archives carry entries this 7-Zip build can't decode (most
+          // commonly ARM64 plugin DLLs in Unity games, useless on x86_64). The
+          // game still installs and runs fine — surface a non-blocking note so
+          // the skip isn't silent, via the toast-context window bridge.
+          const skipped = (update as { skippedFiles?: unknown }).skippedFiles
+          if (Array.isArray(skipped) && skipped.length > 0) {
+            const count = skipped.length
+            window.dispatchEvent(new CustomEvent("uc_toast", {
+              detail: {
+                message: `Installed. ${count} incompatible ${count === 1 ? "file" : "files"} skipped (not needed on this platform).`,
+                type: "info",
+                duration: 7000,
+              },
+            }))
+          }
         }
         // Record an install event in the account's cloud history (no-op when
         // unauthenticated — failures are swallowed by the helper).

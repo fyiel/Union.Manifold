@@ -1945,18 +1945,22 @@ export function LibraryPage() {
                         updateLabel={catalogVersionByAppid.get(game.appid) ? `Update available - ${catalogVersionByAppid.get(game.appid)}` : "Update available"}
                       />
                       {(isCancelled || isFailed) && (
-                        <div className="pointer-events-none absolute left-2 top-2 z-20">
+                        // Centred at the top so it never collides with the
+                        // corner badges GameCard paints (MP / Popular sit
+                        // top-left, the Remove button sits top-right). z-30 to
+                        // sit above GameCard's z-30 badge layer.
+                        <div className="pointer-events-none absolute left-1/2 top-2 z-30 -translate-x-1/2">
                           <span className={cn(
-                            "rounded-full border px-2 py-0.5 text-[11px] font-medium backdrop-blur-sm",
+                            "rounded-full border px-2.5 py-0.5 text-[11px] font-medium backdrop-blur-sm whitespace-nowrap",
                             isFailed
-                              ? "border-red-500/30 bg-black/70 text-red-400"
-                              : "border-white/[.07] bg-black/70 text-muted-foreground"
+                              ? "border-red-500/40 bg-black/80 text-red-400"
+                              : "border-white/[.07] bg-black/80 text-muted-foreground"
                           )}>
                             {isFailed ? "Failed" : "Cancelled"}
                           </span>
                         </div>
                       )}
-                      <div className="absolute right-2 top-2 z-20 opacity-0 transition-opacity group-hover/tile:opacity-100">
+                      <div className="absolute right-2 top-2 z-30 opacity-0 transition-opacity group-hover/tile:opacity-100">
                         <Button
                           size="icon"
                           variant="ghost"
@@ -1966,7 +1970,12 @@ export function LibraryPage() {
                             setPendingDeleteGame(game)
                             setPendingDeleteAction("installing")
                           }}
-                          className="h-7 w-7 rounded-full border border-white/[.08] bg-black/70 text-muted-foreground backdrop-blur-sm hover:bg-red-500/10 hover:text-red-400"
+                          // [&_svg…]:size-3 overrides the Button's base
+                          // `[&_svg:not([class*='size-'])]:size-4` rule (same
+                          // variant prefix → tailwind-merge keeps this one) so
+                          // the inner <svg> matches the 12px wrapper instead of
+                          // overflowing it and rendering off-centre.
+                          className="h-7 w-7 rounded-full border border-white/[.08] bg-black/70 text-muted-foreground backdrop-blur-sm hover:bg-red-500/10 hover:text-red-400 [&_svg:not([class*='size-'])]:size-3"
                           title="Remove"
                           aria-label="Remove download"
                         >
