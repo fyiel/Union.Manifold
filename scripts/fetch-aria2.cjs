@@ -48,18 +48,26 @@ function log(msg) { console.log(`[fetch-aria2] ${msg}`) }
 function download(url, dest, redirects = 0) {
   return new Promise((resolve, reject) => {
     if (redirects > 6) { reject(new Error('too many redirects')); return }
-    const file = fs.createWriteStream(dest)
-    https.get(url, { headers: { 'User-Agent': 'UnionCrax.Direct-build' } }, (res) => {
-      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-        file.close(() => fs.unlink(dest, () => {}))
+    const req = https.get(url, { headers: { 'User-Agent': 'UnionCrax.Direct-build' } }, (res) => {
+      const status = res.statusCode || 0
+      // Follow redirects WITHOUT touching `dest` — GitHub release URLs always
+      // redirect to objects.githubusercontent.com. (The previous version
+      // unlinked dest here, which raced the recursive download writing to the
+      // same path and left an empty/missing file.)
+      if (status >= 300 && status < 400 && res.headers.location) {
+        res.resume() // drain so the socket frees up
         const next = new URL(res.headers.location, url).toString()
         resolve(download(next, dest, redirects + 1))
         return
       }
-      if (res.statusCode !== 200) { reject(new Error(`HTTP ${res.statusCode} for ${url}`)); return }
+      if (status !== 200) { res.resume(); reject(new Error(`HTTP ${status} for ${url}`)); return }
+      // Only now (final 200) do we open the file and stream the body in.
+      const file = fs.createWriteStream(dest)
       res.pipe(file)
-      file.on('finish', () => file.close(() => resolve()))
-    }).on('error', (err) => { file.close(() => fs.unlink(dest, () => {})); reject(err) })
+      file.on('finish', () => file.close((err) => (err ? reject(err) : resolve())))
+      file.on('error', (err) => { try { fs.unlinkSync(dest) } catch { /* ignore */ } reject(err) })
+    })
+    req.on('error', reject)
   })
 }
 
