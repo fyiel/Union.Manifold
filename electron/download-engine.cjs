@@ -175,6 +175,24 @@ class DownloadEngine extends EventEmitter {
     }
 
     this.byId.set(downloadId, dl)
+
+    // Adopt any partial already on disk *now*, before the download is queued or
+    // _kickOff runs. _kickOff also locates the partial, but only once it
+    // actually starts — and a resume that lands behind another active download
+    // stays queued, so its offset would be reported as 0. The renderer's resume
+    // cascade then mistakes that for a fresh start and the ~GB partial is thrown
+    // away, restarting from byte 0 (and often racing into a fail→cancel). By
+    // promoting the partial here, receivedBytes is correct the instant we
+    // enqueue, regardless of when _kickOff fires.
+    try {
+      const partial = this._findPartial(dl)
+      if (partial) {
+        if (partial.path !== dl.savePath) safeRename(partial.path, dl.savePath)
+        const st = statOrNull(dl.savePath)
+        if (st && st.isFile()) dl.receivedBytes = st.size
+      }
+    } catch { /* ignore — _kickOff will retry the same discovery */ }
+
     this.queue.push(downloadId)
     this.emit('update', this._publicView(dl))
     this._writeManifestSnapshot(dl)
