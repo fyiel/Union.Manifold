@@ -1,5 +1,9 @@
 #include <napi.h>
 
+#ifndef NAPI_HAS_THREADS
+#define NAPI_HAS_THREADS 1
+#endif
+
 namespace {
 Napi::Value Unsupported(const Napi::Env& env, const char* feature) {
     Napi::Error::New(env, std::string(feature) + " is only supported on Windows").ThrowAsJavaScriptException();

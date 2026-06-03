@@ -1189,10 +1189,19 @@ function getControllerTypeFromName(rawName) {
 
 function getGCPadDllPath() {
   if (isDev) {
-    // Check gcpad-dll/ first (vendored DLLs), then legacy build/gcpad/ path
-    const vendored = path.join(__dirname, '..', 'gcpad-dll', 'gcpad.dll')
-    if (fs.existsSync(vendored)) return vendored
+    const gcpadDll = path.join(__dirname, '..', 'gcpad-dll', 'gcpad.dll')
+    if (fs.existsSync(gcpadDll)) return gcpadDll
+
+    const libgcpad = path.join(__dirname, '..', 'gcpad-dll', 'libgcpad.so')
+    if (fs.existsSync(libgcpad)) return libgcpad
+
     return path.join(__dirname, '..', 'build', 'gcpad', 'gcpad.dll')
+  }
+  if (process.platform === 'win32') {
+    return path.join(process.resourcesPath, 'gcpad.dll')
+  }
+  if (process.platform === 'linux') {
+    return path.join(process.resourcesPath, 'libgcpad.so')
   }
   return path.join(process.resourcesPath, 'gcpad.dll')
 }

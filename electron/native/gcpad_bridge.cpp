@@ -24,6 +24,10 @@
  *     touchpad: [{ active, x, y }, { active, x, y }] }
  */
 
+#ifndef NAPI_HAS_THREADS
+#define NAPI_HAS_THREADS 1
+#endif
+
 #include <napi.h>
 #include <windows.h>
 #include <cstdint>
