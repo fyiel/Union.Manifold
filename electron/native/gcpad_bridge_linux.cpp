@@ -99,7 +99,6 @@ static void gcpad_on_disconnected(int slot, void*) {
     do {                                                                  \
         var = reinterpret_cast<T>(dlsym(g_dll, name));                    \
         if (!(var)) {                                                     \
-            char err_buf[256];                                            \
             dlclose(g_dll); g_dll = nullptr;                              \
             Napi::Error::New(env, std::string("gcpadLoad: missing export: ") + name) \
                 .ThrowAsJavaScriptException();                              \
