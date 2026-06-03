@@ -89,9 +89,12 @@ export function Toaster() {
 
   if (toasts.length === 0) return null
 
+  // Sits at bottom-24 (not bottom-8) so toasts clear the always-present
+  // DownBar "Activity" pill (fixed at bottom-4). At bottom-8 the two
+  // overlapped and toasts read as tucked behind the activity bar.
   return (
     <div
-      className="fixed bottom-8 left-1/2 -translate-x-1/2 z-[9999] flex flex-col-reverse items-center gap-2 pointer-events-none"
+      className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[9999] flex flex-col-reverse items-center gap-2 pointer-events-none"
       aria-live="polite"
       aria-atomic="false"
     >
