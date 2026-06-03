@@ -16,6 +16,8 @@
       "conditions": [
         ["OS=='win'", {
           "sources": [
+            "addon.cpp",
+            "volume_control.cpp",
             "injector.cpp",
             "shared_memory.cpp",
             "pipe_server.cpp",
@@ -33,7 +35,8 @@
         }],
         ["OS=='linux'", {
           "sources": [
-            "stubs_nonwin.cpp",
+            "addon.cpp",
+            "volume_control.cpp",
             "gcpad_bridge_linux.cpp"
           ],
           "libraries": [
