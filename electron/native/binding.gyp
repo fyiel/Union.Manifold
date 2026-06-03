@@ -26,9 +26,24 @@
             "-lkernel32.lib",
             "-ladvapi32.lib",
             "-lole32.lib"
+          ],
+          "cflags": [
+            "-DNAPI_HAS_THREADS=1"
           ]
         }],
-        ["OS!='win'", {
+        ["OS=='linux'", {
+          "sources": [
+            "stubs_nonwin.cpp",
+            "gcpad_bridge_linux.cpp"
+          ],
+          "libraries": [
+            "-ldl"
+          ],
+          "cflags": [
+            "-DNAPI_HAS_THREADS=1"
+          ]
+        }],
+        ["OS!='win' and OS!='linux'", {
           "sources": [
             "stubs_nonwin.cpp"
           ]
