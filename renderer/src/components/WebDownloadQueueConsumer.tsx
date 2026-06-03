@@ -10,6 +10,10 @@ type QueueEntry = {
   appid: string
   name?: string
   queueSource?: string
+  /** When set, the website pinned this download to a specific PC's system-
+   *  profile fingerprint. Only that device should start it; other devices
+   *  leave it in the queue. Null/absent means "any device" (legacy behaviour). */
+  deviceFingerprint?: string | null
 } & Partial<Game>
 
 /**
@@ -27,6 +31,22 @@ type QueueEntry = {
  * drains.
  */
 const POLL_INTERVAL_MS = 25_000
+
+async function getLocalFingerprint(): Promise<string | null> {
+  try {
+    const res = await window.ucSystemProfile?.getCached?.()
+    if (res?.ok && res.profile?.fingerprint) return res.profile.fingerprint
+  } catch {
+    // fall through to summary
+  }
+  try {
+    const s = await window.ucSystemProfile?.summary?.()
+    if (s?.ok && s.fingerprint) return s.fingerprint
+  } catch {
+    // best-effort
+  }
+  return null
+}
 
 async function removeFromServerQueue(appid: string) {
   try {
@@ -46,6 +66,9 @@ export function WebDownloadQueueConsumer() {
   const { startGameDownload } = useDownloadsActions()
   const { toast } = useToast()
   const runningRef = useRef(false)
+  // This device's own system-profile fingerprint, resolved lazily and cached.
+  // Used to decide whether a device-targeted queue entry belongs to us.
+  const fingerprintRef = useRef<string | null>(null)
   // Keep the latest startGameDownload in a ref so the polling effect doesn't
   // tear down / restart its interval whenever the actions object identity
   // changes.
@@ -69,11 +92,23 @@ export function WebDownloadQueueConsumer() {
         if (!Array.isArray(items) || items.length === 0) return
         if (cancelled) return
 
+        // Resolve our own fingerprint once we need it, so we can tell which
+        // device-targeted entries belong to this PC. Retried on later drains
+        // if it isn't available yet (e.g. the system profile hasn't scanned).
+        if (fingerprintRef.current == null) {
+          fingerprintRef.current = await getLocalFingerprint()
+        }
+        const myFingerprint = fingerprintRef.current
+
         const startedNames: string[] = []
         for (const item of items) {
           if (cancelled) break
           const appid = String(item?.appid || "")
           if (!appid) continue
+          // Device-targeted entry for a different PC — leave it in the queue
+          // (don't start it, don't delete it) so the intended device drains it.
+          const target = item?.deviceFingerprint ? String(item.deviceFingerprint) : null
+          if (target && target !== myFingerprint) continue
           try {
             const game = { source: "web", ...item, appid } as unknown as Game
             await startRef.current(game)
