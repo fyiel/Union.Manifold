@@ -112,10 +112,11 @@ Built with:
 - [Lucide Icons](https://lucide.dev/)
 
 ---
-<img width="1916" height="1079" alt="image" src="https://github.com/user-attachments/assets/d9ce9369-6971-4225-b194-3018f901c1c1" />
-<img width="1916" height="1079" alt="image" src="https://github.com/user-attachments/assets/3d64ae31-4193-4326-ab06-e1dd1ec6f4c7" />
-<img width="1060" height="722" alt="image" src="https://github.com/user-attachments/assets/88ecbce7-1a03-453f-a81b-9c13c67eed6b" />
-<img width="1054" height="613" alt="image" src="https://github.com/user-attachments/assets/6611ca14-2b0f-4429-8a35-e8cfd4f518be" />
-
+<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/6899606d-8632-404e-bfac-106c3a67b947" />
+<img width="1920" height="1080" alt="Screenshot (77)" src="https://github.com/user-attachments/assets/0d01a1cf-012f-4cf3-b25b-7a136678df0f" />
+<img width="1920" height="1080" alt="Screenshot (78)" src="https://github.com/user-attachments/assets/ec9f0a64-7add-43d9-b74c-aeb560500a95" />
+<img width="1920" height="1080" alt="Screenshot (84)" src="https://github.com/user-attachments/assets/a268bbb5-42d9-4f1a-98c9-8d089c1cbdd7" />
+<img width="1920" height="1080" alt="Screenshot (85)" src="https://github.com/user-attachments/assets/fee9d423-5c32-4552-93b2-3a0364a4bf77" />
+<img width="1920" height="1080" alt="Screenshot (80)" src="https://github.com/user-attachments/assets/e839ad2e-de57-43a7-893c-6f8769f11b03" />
 
 **Made with ❤️ by the [UnionCrax](https://union-crax.xyz) Team**
