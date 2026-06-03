@@ -475,12 +475,12 @@ export function InGameOverlay() {
                 : <LogoStaticDark className="h-6 w-6" />}
             </div>
             <div className="min-w-0 flex-1">
-              <div className="section-label !text-muted-foreground">Now Playing</div>
-              <div className="truncate text-sm font-semibold text-white leading-tight">
-                {gameInfo?.gameName || currentAppid || 'Game session'}
+              <div className="section-label !text-muted-foreground">{hasSession ? 'Now Playing' : 'UnionCrax'}</div>
+              <div className={`truncate text-sm font-semibold leading-tight ${hasSession ? 'text-white' : 'text-muted-foreground'}`}>
+                {hasSession ? (gameInfo?.gameName || currentAppid) : 'No games running'}
               </div>
             </div>
-            <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-400" />
+            <span className={`h-2 w-2 shrink-0 rounded-full ${hasSession ? 'bg-emerald-400' : 'bg-muted-foreground/40'}`} />
           </div>
           <div className="mt-3 h-1 overflow-hidden rounded-full bg-white/[.08]">
             <div className="h-full rounded-full bg-white/80" style={{ width: `${toastProgress}%`, transition: 'width 50ms linear' }} />
@@ -622,6 +622,21 @@ export function InGameOverlay() {
 
           {/* Scrollable body */}
           <div className="flex-1 overflow-y-auto">
+
+            {/* Stale state — the overlay is open but no game session is being
+                tracked (e.g. the game exited while the panel was up). Make it
+                explicit rather than implying an active session. */}
+            {!hasSession && (
+              <section className="px-4 py-3 border-b border-white/[.05]">
+                <div className="flex items-center gap-2">
+                  <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-muted-foreground/40" />
+                  <span className="text-sm font-medium text-muted-foreground">No games running</span>
+                </div>
+                <p className="mt-0.5 text-[11px] text-muted-foreground/60">
+                  Stale overlay state — launch a game to start a session.
+                </p>
+              </section>
+            )}
 
             {/* Now Playing */}
             {hasSession && (
