@@ -132,7 +132,7 @@ importers:
         specifier: ^25.1.8
         version: 25.1.8(electron-builder-squirrel-windows@25.1.8)
       node-addon-api:
-        specifier: ^7.1.0
+        specifier: ^7.1.1
         version: 7.1.1
       node-gyp:
         specifier: ^10.2.0
