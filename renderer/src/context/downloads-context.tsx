@@ -78,6 +78,8 @@ export type DownloadItem = {
   startedAt: number
   completedAt?: number
   error?: string | null
+  warning?: string | null
+  skippedFiles?: string[]
   spaceCheck?: DownloadSpaceCheck | null
 }
 
@@ -95,6 +97,8 @@ type DownloadUpdate = {
   gameName?: string | null
   url?: string
   error?: string | null
+  warning?: string | null
+  skippedFiles?: string[]
   partIndex?: number
   partTotal?: number
   resumeData?: DownloadItem["resumeData"]
@@ -304,6 +308,8 @@ function createSyntheticDownloadFromUpdate(update: DownloadUpdate): DownloadItem
     savePath: update.savePath,
     startedAt: Date.now(),
     error: update.error ?? null,
+    warning: update.warning ?? null,
+    skippedFiles: Array.isArray(update.skippedFiles) ? update.skippedFiles : undefined,
     partIndex: update.partIndex,
     partTotal: update.partTotal,
     resumeData: update.resumeData,
@@ -1080,6 +1086,8 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
           savePath: update.savePath ?? existing.savePath,
           url: update.url ?? existing.url,
           error: update.error !== undefined ? update.error : (finalStatus === "downloading" ? null : existing.error),
+          warning: update.warning !== undefined ? update.warning : (finalStatus === "downloading" ? null : existing.warning ?? null),
+          skippedFiles: update.skippedFiles !== undefined ? update.skippedFiles : existing.skippedFiles,
           partIndex: update.partIndex ?? existing.partIndex,
           partTotal: update.partTotal ?? existing.partTotal,
           resumeData: update.resumeData ?? existing.resumeData,
@@ -1361,21 +1369,50 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
 
   const cancelDownload = useCallback(async (downloadId: string) => {
     const download = downloadsRef.current.find((d) => d.id === downloadId)
+    const appid = download?.appid
     let cancelResult: Awaited<ReturnType<NonNullable<typeof window.ucDownloads>['cancel']>> | null = null
     if (window.ucDownloads?.cancel) {
       cancelResult = await window.ucDownloads.cancel(downloadId)
     }
+    const becameInstallReady = cancelResult?.status === "install_ready"
+
+    // When the user cancels the last live part of a game (and we aren't keeping
+    // a finished archive via install_ready), don't leave a "Cancelled" ghost
+    // behind — purge the on-disk installing folder (partial files, cached
+    // screenshots and the manifest) and drop the rows. Otherwise the game keeps
+    // showing under the Library's "Downloading" shelf and its files stay on
+    // disk forever, which is exactly the lingering-cancelled-download bug.
+    if (appid && !becameInstallReady) {
+      const KEEPABLE_STATUSES = [
+        "downloading", "queued", "paused", "extracting", "installing",
+        "verifying", "retrying", "completed", "extracted", "install_ready",
+      ]
+      const otherLivePart = downloadsRef.current.some(
+        (d) => d.appid === appid && d.id !== downloadId && KEEPABLE_STATUSES.includes(String(d.status))
+      )
+      if (!otherLivePart) {
+        // Drop the rows first so the UI updates instantly, then clean the disk.
+        setDownloads((prev) => {
+          const next = prev.filter((item) => item.appid !== appid)
+          downloadsRef.current = next
+          return next
+        })
+        try { await window.ucDownloads?.deleteInstalling?.(appid) } catch { }
+        return
+      }
+    }
+
     setDownloads((prev) =>
       prev.map((item) =>
         item.id === downloadId
           ? {
             ...item,
-            status: cancelResult?.status === "install_ready" ? "install_ready" : "cancelled",
-            error: cancelResult?.error || (cancelResult?.status === "install_ready"
+            status: becameInstallReady ? "install_ready" : "cancelled",
+            error: cancelResult?.error || (becameInstallReady
               ? "Installation stopped. Archive kept. Click Install to continue."
               : "Cancelled"),
-            savePath: cancelResult?.status === "install_ready" ? (item.savePath || download?.savePath) : item.savePath,
-            completedAt: cancelResult?.status === "install_ready" ? Date.now() : item.completedAt,
+            savePath: becameInstallReady ? (item.savePath || download?.savePath) : item.savePath,
+            completedAt: becameInstallReady ? Date.now() : item.completedAt,
           }
           : item
       )
@@ -1395,6 +1432,29 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         }
       } catch (e) { }
     }
+
+    // If any part produced a keepable archive (install_ready) the user can
+    // still finish installing, so preserve the group. Otherwise the download
+    // was discarded outright — delete the on-disk installing folder (partials,
+    // cached screenshots, manifest) and drop the rows so the game stops
+    // lingering in the Library "Downloading" shelf and its files don't pile up
+    // on disk.
+    const keepArchive =
+      Array.from(cancelResults.values()).some((r) => r?.status === "install_ready") ||
+      // Don't nuke a download that already finished into an installable archive
+      // (completed/extracted) — only discard work that was still in flight.
+      downloadsRef.current.some((d) => d.appid === appid && ["completed", "extracted", "install_ready"].includes(String(d.status)))
+    if (!keepArchive) {
+      // Drop the rows first so the UI updates instantly, then clean the disk.
+      setDownloads((prev) => {
+        const next = prev.filter((item) => item.appid !== appid)
+        downloadsRef.current = next
+        return next
+      })
+      try { await window.ucDownloads?.deleteInstalling?.(appid) } catch { }
+      return
+    }
+
     setDownloads((prev) =>
       prev.map((item) =>
         item.appid === appid

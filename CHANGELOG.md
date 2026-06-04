@@ -1,4 +1,10 @@
 # Changelog
+## v2.5.3 — Tray Menu Fix · 2026-06-04
+
+### Tray
+
+- **Fixed: tray right-click menu showed the raw app ID instead of the game name while a game was running.** `pickCurrentRunningGame()` looked for `payload.name` and `payload.title`, but `registerRunningGame()` stores the name under `payload.gameName`. The lookup now checks `gameName` first.
+
 ## v2.5.2 — Overlay, Presence & Download Fixes · 2026-06-01
 
 A bug-fix release squashing four issues around Discord Rich Presence, the in-game overlay, and the smart pre-download check.
@@ -17,6 +23,11 @@ A bug-fix release squashing four issues around Discord Rich Presence, the in-gam
 ### Smart pre-download
 
 - **Fixed: the pre-download check popup still appeared on the all-green happy path instead of auto-confirming.** The auto-confirm effect depended on the inline `onConfirm` callback (recreated every render), so the storage / sysreq / driver state updates that land during the 300ms grace re-ran the effect, whose cleanup cancelled the pending timer — and the fired-guard then blocked a reschedule. The effect now depends only on eligibility + open state (callback/host read from refs) and re-checks eligibility at fire time, so a clean check (enough storage, sysreq pass, no HV) starts the download without an extra click.
+
+### Archive install
+
+- **Fixed: some valid archives failed install with `7zip exited with code 2` even though most files extracted correctly.** Extraction now treats warning code `1` as non-fatal, and treats code `2` as usable when every `ERROR:` line is `Unsupported Method` and files were actually extracted (for example ARM64-only plugin DLLs inside otherwise-working x64 game archives).
+- **Added install warning surfacing for skipped incompatible files.** When extraction succeeds with non-fatal skipped entries, the download/install UI now shows a compact note like `2 files skipped (incompatible archive method)` instead of failing the whole install.
 
 ## v2.5.1 — Polish & Parity · 2026-05-30
 

@@ -89,12 +89,16 @@ export function Toaster() {
 
   if (toasts.length === 0) return null
 
-  // Sits at bottom-24 (not bottom-8) so toasts clear the always-present
-  // DownBar "Activity" pill (fixed at bottom-4). At bottom-8 the two
-  // overlapped and toasts read as tucked behind the activity bar.
+  // Anchored above the always-present DownBar "Activity" pill (fixed at
+  // bottom-4). The bar's live height is published as `--uc-downbar-height` by
+  // DownBar, so toasts clear it even when it grows for a second concurrent
+  // download — a fixed offset left them overlapping / tucked behind it. The
+  // fallback (3.5rem ≈ a single-row pill) covers routes where the bar isn't
+  // mounted. `1rem` is the bar's own bottom offset, plus a `1rem` gap.
   return (
     <div
-      className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[9999] flex flex-col-reverse items-center gap-2 pointer-events-none"
+      style={{ bottom: "calc(var(--uc-downbar-height, 3.5rem) + 2rem)" }}
+      className="fixed left-1/2 -translate-x-1/2 z-[9999] flex flex-col-reverse items-center gap-2 pointer-events-none"
       aria-live="polite"
       aria-atomic="false"
     >

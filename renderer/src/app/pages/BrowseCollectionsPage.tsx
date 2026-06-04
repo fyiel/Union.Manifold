@@ -444,7 +444,7 @@ function PublicCollectionCard({
         <div className="flex items-center gap-2 text-[11px] text-muted-foreground/80">
           <div className="h-5 w-5 rounded-full overflow-hidden bg-secondary shrink-0" title={`Owner: ${ownerName}`}>
             {c.owner.avatarUrl ? (
-              <img src={c.owner.avatarUrl} alt="" className="h-full w-full object-cover" loading="lazy" />
+              <img src={proxyImageUrl(c.owner.avatarUrl)} alt="" className="h-full w-full object-cover" loading="lazy" />
             ) : null}
           </div>
           <span className="truncate">by {ownerName}</span>
@@ -459,7 +459,7 @@ function PublicCollectionCard({
                     title={`Contributor: ${label}`}
                   >
                     {cc.avatarUrl ? (
-                      <img src={cc.avatarUrl} alt="" className="h-full w-full object-cover" loading="lazy" />
+                      <img src={proxyImageUrl(cc.avatarUrl)} alt="" className="h-full w-full object-cover" loading="lazy" />
                     ) : null}
                   </div>
                 )

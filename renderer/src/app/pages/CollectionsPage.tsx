@@ -80,8 +80,6 @@ export function CollectionsPage() {
   const [installedLoading, setInstalledLoading] = useState(true)
   const [search, setSearch] = useState("")
   const [createOpen, setCreateOpen] = useState(false)
-  const [renameTarget, setRenameTarget] = useState<UserCollection | null>(null)
-  const [renameDraft, setRenameDraft] = useState("")
   const [deleteTarget, setDeleteTarget] = useState<UserCollection | null>(null)
   const [editTarget, setEditTarget] = useState<UserCollection | null>(null)
   const [shareTarget, setShareTarget] = useState<UserCollection | null>(null)
@@ -95,7 +93,6 @@ export function CollectionsPage() {
   const [syncTarget, setSyncTarget] = useState<FollowedCollection | null>(null)
   const [forkingId, setForkingId] = useState<string | null>(null)
   const [forkError, setForkError] = useState<string | null>(null)
-  const renameInputRef = useRef<HTMLInputElement | null>(null)
   const { startGameDownload } = useDownloadsActions()
   const { games: catalogGames } = useGamesData()
   const followed = useFollowedCollections()
@@ -246,14 +243,6 @@ export function CollectionsPage() {
     if (!q) return collections
     return collections.filter((c) => c.name.toLowerCase().includes(q))
   }, [collections, search])
-
-  // ---- Rename inline focus management ----
-  useEffect(() => {
-    if (renameTarget) {
-      const id = window.setTimeout(() => renameInputRef.current?.select(), 30)
-      return () => window.clearTimeout(id)
-    }
-  }, [renameTarget])
 
   // ---- Deep-link from the detail page: ?edit=<id> / ?share=<id> / ?contributors=<id>
   const [searchParams, setSearchParams] = useSearchParams()
@@ -499,20 +488,7 @@ export function CollectionsPage() {
               installedById={installedById}
               catalogById={catalogById}
               catalogVersionByAppid={catalogVersionByAppid}
-              renaming={renameTarget?.id === collection.id}
-              renameDraft={renameDraft}
-              renameInputRef={renameInputRef}
               onOpen={() => navigate(`/collections/view/${encodeURIComponent(collection.id)}`)}
-              onStartRename={() => {
-                setRenameDraft(collection.name)
-                setRenameTarget(collection)
-              }}
-              onChangeRename={setRenameDraft}
-              onCommitRename={async () => {
-                await rename(collection, renameDraft.trim())
-                setRenameTarget(null)
-              }}
-              onCancelRename={() => setRenameTarget(null)}
               onEditMembers={() => setEditTarget(collection)}
               onDelete={() => setDeleteTarget(collection)}
               onShare={() => setShareTarget(collection)}
@@ -577,15 +553,17 @@ export function CollectionsPage() {
       <CollectionEditorDialog
         open={editTarget != null}
         title={editTarget ? `Edit "${editTarget.name}"` : ""}
-        description="Add, remove, or reorder games. Changes sync to your other devices."
+        description="Add, remove, or reorder games. You can also rename the collection here."
         games={allGamesForPicker}
         initialName={editTarget?.name || ""}
         initialOrder={editTarget?.appids || []}
         confirmLabel="Save"
-        nameReadOnly
         permissions={editTarget?.permissions ?? { canAdd: true, canRemove: true, canRename: true }}
-        onConfirm={async (_name, ids) => {
+        onConfirm={async (name, ids) => {
           if (editTarget) {
+            if (name.trim() && name.trim() !== editTarget.name) {
+              await rename(editTarget, name.trim())
+            }
             await setMembership(editTarget, ids)
           }
           setEditTarget(null)
@@ -701,7 +679,6 @@ function buildCollectionMenuSections(args: {
   missingCount: number
   updateCount: number
   onEditMembers: () => void
-  onStartRename: () => void
   onShare: () => void
   onContributors: () => void
   onInstallMissing: () => void
@@ -713,7 +690,6 @@ function buildCollectionMenuSections(args: {
     missingCount,
     updateCount,
     onEditMembers,
-    onStartRename,
     onShare,
     onContributors,
     onInstallMissing,
@@ -721,7 +697,6 @@ function buildCollectionMenuSections(args: {
     onDelete,
   } = args
   const isOwner = collection.role === "owner"
-  const canRename = isOwner || collection.permissions.canRename
 
   const downloads: CollectionMenuSection["items"] = []
   if (missingCount > 0) {
@@ -744,9 +719,6 @@ function buildCollectionMenuSections(args: {
   const manage: CollectionMenuSection["items"] = [
     { id: "edit", icon: COLLECTION_MENU_ICONS.edit, label: "Edit games", onSelect: onEditMembers },
   ]
-  if (canRename) {
-    manage.push({ id: "rename", icon: COLLECTION_MENU_ICONS.rename, label: "Rename", onSelect: onStartRename })
-  }
 
   const sharing: CollectionMenuSection["items"] = []
   if (isOwner) {
@@ -789,14 +761,7 @@ function CollectionCard({
   installedById,
   catalogById,
   catalogVersionByAppid,
-  renaming,
-  renameDraft,
-  renameInputRef,
   onOpen,
-  onStartRename,
-  onChangeRename,
-  onCommitRename,
-  onCancelRename,
   onEditMembers,
   onDelete,
   onShare,
@@ -808,14 +773,7 @@ function CollectionCard({
   installedById: Map<string, InstalledGame>
   catalogById: Map<string, CatalogGame>
   catalogVersionByAppid: Map<string, string>
-  renaming: boolean
-  renameDraft: string
-  renameInputRef: React.MutableRefObject<HTMLInputElement | null>
   onOpen: () => void
-  onStartRename: () => void
-  onChangeRename: (value: string) => void
-  onCommitRename: () => void
-  onCancelRename: () => void
   onEditMembers: () => void
   onDelete: () => void
   onShare: () => void
@@ -850,7 +808,6 @@ function CollectionCard({
     missingCount,
     updateCount,
     onEditMembers,
-    onStartRename,
     onShare,
     onContributors,
     onInstallMissing,
@@ -911,26 +868,7 @@ function CollectionCard({
 
       <div className="flex flex-col gap-2 px-4 py-3 border-t border-white/[.05]">
         <div className="flex items-center gap-2">
-          {renaming ? (
-            <Input
-              ref={renameInputRef}
-              value={renameDraft}
-              onChange={(e) => onChangeRename(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault()
-                  onCommitRename()
-                } else if (e.key === "Escape") {
-                  e.preventDefault()
-                  onCancelRename()
-                }
-              }}
-              onBlur={onCommitRename}
-              className="h-8 rounded-xl bg-white/[.03] border-white/[.10] text-sm font-semibold"
-            />
-          ) : (
-            <h3 className="flex-1 truncate font-semibold text-sm text-white">{collection.name}</h3>
-          )}
+          <h3 className="flex-1 truncate font-semibold text-sm text-white">{collection.name}</h3>
           <div className="flex items-center gap-1 shrink-0">
             {missingCount > 0 && (
               <IconButton
@@ -1012,7 +950,7 @@ function ContributorAvatarStack({
             className="inline-flex h-4 w-4 overflow-hidden rounded-full ring-1 ring-zinc-950 bg-secondary"
           >
             {c.avatarUrl ? (
-              <img src={c.avatarUrl} alt={name} className="h-full w-full object-cover" />
+              <img src={proxyImageUrl(c.avatarUrl)} alt={name} className="h-full w-full object-cover" />
             ) : (
               <span className="h-full w-full bg-violet-500/40" />
             )}
@@ -1432,15 +1370,25 @@ function ShareDialog({
       const result = await onShare(target, next)
       if (result) setToken(result.shareToken)
       setWorking(false)
+    } else if (next) {
+      // Auto-enable sharing when enabling public profile without a share link
+      setWorking(true)
+      const result = await onShare(target, true)
+      if (result) setToken(result.shareToken)
+      setWorking(false)
     }
   }
 
-  const handleStopSharing = async () => {
+  const handleDisableShare = async () => {
     setWorking(true)
     await onUnshare(target)
     setToken(null)
     setMakePublic(false)
     setWorking(false)
+  }
+
+  const handleStopSharing = async () => {
+    await handleDisableShare()
     onClose()
   }
 
@@ -1463,67 +1411,69 @@ function ShareDialog({
           <div className="rounded-2xl border border-white/[.07] bg-white/[.02] p-5 space-y-2 text-sm text-muted-foreground">
             <p>Sharing requires a signed-in account so the link stays available across devices.</p>
           </div>
-        ) : !token ? (
-          <div className="space-y-3">
-            <ToggleRow
-              icon={<Globe className="h-4 w-4" />}
-              title="Show on my public profile"
-              description="Anyone visiting your union-crax.xyz profile sees this collection."
-              checked={makePublic}
-              onCheckedChange={setMakePublic}
-            />
-            <Button onClick={handleEnableShare} disabled={working} className="w-full rounded-2xl h-10">
-              {working ? "Generating link…" : "Generate share link"}
-            </Button>
-          </div>
         ) : (
           <div className="space-y-4">
-            <div className="rounded-2xl border border-white/[.07] bg-white/[.03] p-3 flex items-center gap-2">
-              <input
-                readOnly
-                value={url || ""}
-                className="flex-1 min-w-0 bg-transparent text-xs text-foreground/90 outline-none truncate"
-                onClick={(e) => (e.target as HTMLInputElement).select()}
-              />
-              <Button
-                variant="outline"
-                size="sm"
-                className="rounded-full gap-1.5 shrink-0"
-                onClick={async () => {
-                  if (!url) return
-                  const { copyToClipboard } = await import("@/lib/clipboard")
-                  const ok = await copyToClipboard(url, { successMessage: "Share link copied" })
-                  if (ok) {
-                    setCopied(true)
-                    window.setTimeout(() => setCopied(false), 1500)
-                  }
-                }}
-              >
-                {copied ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
-                {copied ? "Copied" : "Copy"}
-              </Button>
-            </div>
+            {/* Enable sharing row */}
+            <ToggleRow
+              icon={<Share2 className="h-4 w-4" />}
+              title="Enable sharing"
+              description="Generate a shareable link so anyone with the link can view this collection."
+              checked={Boolean(token)}
+              onCheckedChange={(checked) => {
+                if (checked) void handleEnableShare()
+                else void handleDisableShare()
+              }}
+              disabled={working}
+            />
 
+            {/* Share URL */}
+            {token && url && (
+              <div className="space-y-2">
+                <div className="rounded-2xl border border-white/[.07] bg-white/[.03] p-3 flex items-center gap-2">
+                  <input
+                    readOnly
+                    value={url}
+                    className="flex-1 min-w-0 bg-transparent text-xs text-foreground/90 outline-none truncate"
+                    onClick={(e) => (e.target as HTMLInputElement).select()}
+                  />
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="rounded-full gap-1.5 shrink-0"
+                    onClick={async () => {
+                      const { copyToClipboard } = await import("@/lib/clipboard")
+                      const ok = await copyToClipboard(url, { successMessage: "Share link copied" })
+                      if (ok) {
+                        setCopied(true)
+                        window.setTimeout(() => setCopied(false), 1500)
+                      }
+                    }}
+                  >
+                    {copied ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
+                    {copied ? "Copied" : "Copy"}
+                  </Button>
+                </div>
+                <a
+                  href={url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  <ExternalLink className="h-3 w-3" />
+                  Open public page
+                </a>
+              </div>
+            )}
+
+            {/* Show on public profile — independent of sharing */}
             <ToggleRow
               icon={<Globe className="h-4 w-4" />}
               title="Show on my public profile"
-              description="Anyone visiting your union-crax.xyz profile sees this collection."
+              description="Shows this collection on your union-crax.xyz profile page. Enables sharing automatically if not already on."
               checked={makePublic}
               onCheckedChange={handleTogglePublic}
               disabled={working}
             />
-
-            {url && (
-              <a
-                href={url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors"
-              >
-                <ExternalLink className="h-3 w-3" />
-                Open public page
-              </a>
-            )}
           </div>
         )}
 
@@ -2061,7 +2011,7 @@ function ContributorsDialog({
                         >
                           <span className="h-7 w-7 shrink-0 overflow-hidden rounded-full bg-secondary">
                             {u.avatarUrl ? (
-                              <img src={u.avatarUrl} alt="" className="h-full w-full object-cover" />
+                              <img src={proxyImageUrl(u.avatarUrl)} alt="" className="h-full w-full object-cover" />
                             ) : null}
                           </span>
                           <span className="min-w-0 flex-1">
@@ -2114,7 +2064,7 @@ function ContributorsDialog({
                       <div className="flex items-center gap-2">
                         <span className="h-8 w-8 shrink-0 overflow-hidden rounded-full bg-secondary">
                           {c.avatarUrl ? (
-                            <img src={c.avatarUrl} alt="" className="h-full w-full object-cover" />
+                            <img src={proxyImageUrl(c.avatarUrl)} alt="" className="h-full w-full object-cover" />
                           ) : null}
                         </span>
                         <div className="min-w-0 flex-1">

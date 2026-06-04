@@ -27,6 +27,8 @@ type DownloadUpdatePayload = {
   gameName?: string | null
   url?: string
   error?: string | null
+  warning?: string | null
+  skippedFiles?: string[]
   partIndex?: number
   partTotal?: number
   spaceCheck?: {
