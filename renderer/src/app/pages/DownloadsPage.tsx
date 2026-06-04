@@ -13,6 +13,7 @@ import {
   PauseCircle,
   XCircle,
   Square,
+  GripVertical,
 } from "lucide-react"
 import {
   AlertTriangle,
@@ -336,6 +337,27 @@ function getGroupPriority(items: DownloadItem[]) {
 }
 const INSTALL_READY_STATUS = "install_ready"
 
+/** Order two queued groups for the "Up Next" list. Mirrors the sequencer's
+ *  compareQueuePosition: an explicit user-set queueOrder wins, otherwise we
+ *  fall back to enqueue time so untouched queues keep their natural order. */
+function compareQueuedGroups(left: DownloadItem[], right: DownloadItem[]) {
+  const orderOf = (items: DownloadItem[]) => {
+    const orders = items.map((i) => i.queueOrder).filter((n): n is number => n != null)
+    return orders.length ? Math.min(...orders) : null
+  }
+  const startOf = (items: DownloadItem[]) => Math.min(...items.map((i) => i.startedAt || 0))
+  const lo = orderOf(left)
+  const ro = orderOf(right)
+  if (lo != null && ro != null) {
+    if (lo !== ro) return lo - ro
+  } else if (lo != null) {
+    return -1
+  } else if (ro != null) {
+    return 1
+  }
+  return startOf(left) - startOf(right)
+}
+
 function groupCanPause(items: DownloadItem[]) {
   return items.some((item) => ["downloading", "retrying", "extracting", "installing", "verifying"].includes(item.status))
 }
@@ -374,6 +396,7 @@ export function DownloadsPage() {
     resumeAll,
     resumeGroup,
     resumeDownload,
+    reorderQueuedGroups,
     openPath,
     clearCompleted,
     clearByAppid,
@@ -427,7 +450,7 @@ export function DownloadsPage() {
     .sort((left, right) => getGroupPriority(left) - getGroupPriority(right))
   const queuedGroups = Object.values(grouped)
     .filter((items) => items.every((item) => item.status === "queued"))
-    .sort((left, right) => getGroupPriority(left) - getGroupPriority(right))
+    .sort((left, right) => compareQueuedGroups(left, right))
   const installReadyGroups = Object.values(grouped).filter((items) =>
     items.some((item) => item.status === INSTALL_READY_STATUS)
   )
@@ -437,6 +460,21 @@ export function DownloadsPage() {
   const cancelledGroups = Object.values(grouped).filter((items) =>
     items.every((item) => ["cancelled", "failed", "extract_failed"].includes(item.status))
   )
+
+  // Move the dragged queued game so it lands in `toAppid`'s slot, then persist
+  // the new order. Built from the currently-displayed queue order so it stays
+  // correct regardless of prior reorders.
+  const reorderQueue = (fromAppid: string, toAppid: string) => {
+    if (!fromAppid || !toAppid || fromAppid === toAppid) return
+    const appids = queuedGroups.map((items) => items[0]?.appid).filter(Boolean) as string[]
+    const fromIdx = appids.indexOf(fromAppid)
+    const toIdx = appids.indexOf(toAppid)
+    if (fromIdx === -1 || toIdx === -1) return
+    const next = [...appids]
+    next.splice(fromIdx, 1)
+    next.splice(toIdx, 0, fromAppid)
+    reorderQueuedGroups(next)
+  }
 
   const primaryGroup = activeGroups[0] || queuedGroups[0]
   const secondaryActiveGroups = primaryGroup ? activeGroups.slice(1) : activeGroups
@@ -478,6 +516,12 @@ export function DownloadsPage() {
   const [launchPreflightOpen, setLaunchPreflightOpen] = useState(false)
   const [launchPreflightResult, setLaunchPreflightResult] = useState<LaunchPreflightResult | null>(null)
   const [installingAppId, setInstallingAppId] = useState<string | null>(null)
+  // Drag-and-drop reordering of the "Up Next" queue. `draggingAppid` is the
+  // game currently being dragged; `dragOverAppid` is the card it's hovering so
+  // we can show a drop indicator. On drop we splice the dragged appid into its
+  // new slot and persist the order via reorderQueuedGroups.
+  const [draggingAppid, setDraggingAppid] = useState<string | null>(null)
+  const [dragOverAppid, setDragOverAppid] = useState<string | null>(null)
   const [spacePrompt, setSpacePrompt] = useState<SpacePromptState | null>(null)
   const [selectedSpaceDriveId, setSelectedSpaceDriveId] = useState("")
   const [switchingDrive, setSwitchingDrive] = useState(false)
@@ -1596,14 +1640,56 @@ export function DownloadsPage() {
                   ? "Extracting"
                   : "Queued"
 
+            const canReorder = queuedGroups.length > 1
+            const isDragging = draggingAppid === appid
+            const isDragOver = dragOverAppid === appid && draggingAppid !== appid
+
             return (
               <div
                 key={`${items[0].appid}-${gameName}`}
-                className="group overflow-hidden rounded-2xl border border-white/[.07] bg-card/60 backdrop-blur-sm transition-all hover:border-border"
+                draggable={canReorder}
+                onDragStart={(e) => {
+                  if (!canReorder || !appid) return
+                  setDraggingAppid(appid)
+                  e.dataTransfer.effectAllowed = "move"
+                }}
+                onDragOver={(e) => {
+                  if (!canReorder || !draggingAppid) return
+                  e.preventDefault()
+                  e.dataTransfer.dropEffect = "move"
+                  if (appid && appid !== dragOverAppid) setDragOverAppid(appid)
+                }}
+                onDrop={(e) => {
+                  if (!canReorder || !draggingAppid || !appid) return
+                  e.preventDefault()
+                  reorderQueue(draggingAppid, appid)
+                  setDraggingAppid(null)
+                  setDragOverAppid(null)
+                }}
+                onDragEnd={() => {
+                  setDraggingAppid(null)
+                  setDragOverAppid(null)
+                }}
+                className={`group overflow-hidden rounded-2xl border bg-card/60 backdrop-blur-sm transition-all hover:border-border ${
+                  isDragging
+                    ? "border-primary/60 opacity-50"
+                    : isDragOver
+                      ? "border-primary/60 ring-1 ring-primary/40"
+                      : "border-white/[.07]"
+                }`}
               >
                 <div className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center">
                   {/* Game Info */}
                   <div className="flex items-center gap-4 sm:w-[280px]">
+                    {canReorder && (
+                      <span
+                        className="flex-shrink-0 cursor-grab text-muted-foreground/40 transition-colors hover:text-muted-foreground active:cursor-grabbing"
+                        title="Drag to reorder the queue"
+                        aria-label="Drag to reorder"
+                      >
+                        <GripVertical className="h-4 w-4" />
+                      </span>
+                    )}
                     <div className="relative h-14 w-24 flex-shrink-0 overflow-hidden rounded-lg border border-white/[.07] bg-secondary">
                       <img
                         src={downloadItemImageSrc(game)}

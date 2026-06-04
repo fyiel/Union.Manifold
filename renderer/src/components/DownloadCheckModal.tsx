@@ -388,7 +388,22 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, aut
     return () => clearTimeout(timer)
   }, [autoConfirmEligible, open])
 
-  if (!open) return null
+  // Smart/auto mode visibility gate. When `autoConfirmIfGreen` is on we keep
+  // the modal mounted so every check (availability, storage, sysreq, driver)
+  // still runs — but we don't *paint* the popup unless a conflict actually
+  // surfaces. The happy path auto-confirms silently after the grace window, so
+  // the user only ever sees this modal when something needs their attention
+  // (dead/partial host, host auto-switched away from preferred, low disk,
+  // sysreq fail, HV title, or the check itself failing). Feedback during the
+  // silent check is provided by the parent's "Checking…" button state via
+  // onCheckingChange.
+  const hasConflict =
+    phase === "unavailable" ||
+    phase === "error" ||
+    (phase === "ready" && !autoConfirmEligible)
+  const visible = open && (!autoConfirmIfGreen || hasConflict)
+
+  if (!visible) return null
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
