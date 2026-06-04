@@ -477,7 +477,7 @@ export function CollectionDetailPage() {
           <div className="flex items-center gap-2 min-w-0">
             <div className="h-9 w-9 rounded-full overflow-hidden bg-secondary shrink-0">
               {followedCollection.owner.avatarUrl && (
-                <img src={followedCollection.owner.avatarUrl} alt="" className="h-full w-full object-cover" />
+                <img src={proxyImageUrl(followedCollection.owner.avatarUrl)} alt="" className="h-full w-full object-cover" />
               )}
             </div>
             <div className="min-w-0">
@@ -562,7 +562,7 @@ export function CollectionDetailPage() {
         <div className="flex items-center gap-2 min-w-0">
           <div className="h-9 w-9 rounded-full overflow-hidden bg-secondary shrink-0">
             {collection.owner?.avatarUrl ? (
-              <img src={collection.owner.avatarUrl} alt="" className="h-full w-full object-cover" />
+              <img src={proxyImageUrl(collection.owner.avatarUrl)} alt="" className="h-full w-full object-cover" />
             ) : null}
           </div>
           <div className="min-w-0">
@@ -586,7 +586,7 @@ export function CollectionDetailPage() {
                     title={name}
                   >
                     {c.avatarUrl ? (
-                      <img src={c.avatarUrl} alt="" className="h-full w-full object-cover" />
+                      <img src={proxyImageUrl(c.avatarUrl)} alt="" className="h-full w-full object-cover" />
                     ) : null}
                   </div>
                 )

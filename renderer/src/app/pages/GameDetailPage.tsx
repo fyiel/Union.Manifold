@@ -265,7 +265,7 @@ export function GameDetailPage() {
             setGame(prefetched)
             persistGameName(appid, prefetched?.name)
             window.dispatchEvent(new CustomEvent("uc_game_name", { detail: { appid, name: prefetched?.name, genres: prefetched?.genres } }))
-            setSelectedImage(prefetched.hero_image || prefetched.splash || prefetched.image)
+            setSelectedImage(prefetched.hero_image || prefetched.splash || "")
             setLoading(false)
             return
           }
@@ -287,7 +287,7 @@ export function GameDetailPage() {
           setGame(data)
           persistGameName(appid, data?.name)
           window.dispatchEvent(new CustomEvent("uc_game_name", { detail: { appid, name: data?.name, genres: data?.genres } }))
-          setSelectedImage(data.hero_image || data.splash || data.image)
+          setSelectedImage(data.hero_image || data.splash || "")
           return
         }
 
@@ -311,7 +311,7 @@ export function GameDetailPage() {
               setGame(meta)
               persistGameName(appid, meta?.name)
               window.dispatchEvent(new CustomEvent("uc_game_name", { detail: { appid, name: meta?.name, genres: meta?.genres } }))
-              setSelectedImage(meta.hero_image || meta.splash || meta.image || "")
+              setSelectedImage(meta.hero_image || meta.splash || "")
               setError(null)
               gameLogger.info("Game detail fallback loaded from local manifest", {
                 context: "Game",
@@ -957,12 +957,18 @@ export function GameDetailPage() {
   const dateAddedLabel = dateAdded && !isNaN(dateAdded.getTime())
     ? dateAdded.toLocaleDateString()
     : "Unknown"
+  // The big banner/splash must be a WIDE image. Prefer the real hero/splash
+  // (remote, then the locally-cached copies) and only fall back to the
+  // portrait cover (`image` / `localImage`) as a last resort — otherwise an
+  // installed game with a perfectly good hero-image.jpg shows its box-art
+  // stretched across the banner.
   const heroImage =
     selectedImage ||
     game.hero_image ||
     game.splash ||
-    game.image ||
+    installedMeta?.localHeroImage ||
     installedMeta?.localSplash ||
+    game.image ||
     installedMeta?.localImage ||
     ""
   const appDownloads = downloads.filter((item) => item.appid === game.appid)
@@ -1340,7 +1346,14 @@ export function GameDetailPage() {
   // Background source. Two mutually exclusive modes:
   //   • Animated backgrounds ON  → colour glow blobs only (no image)
   //   • Animated backgrounds OFF → static blurred cover image only
-  const backgroundImage = game.hero_image || game.splash || game.image
+  const backgroundImage =
+    game.hero_image ||
+    game.splash ||
+    installedMeta?.localHeroImage ||
+    installedMeta?.localSplash ||
+    game.image ||
+    installedMeta?.localImage ||
+    ""
 
   return (
     <div className="relative">
@@ -1639,9 +1652,7 @@ export function GameDetailPage() {
                   <LinuxExperiences appid={game.appid} />
                 </div>
                 {game?.appid && (
-                  <div className="rounded-2xl overflow-hidden bg-card/40 border border-white/[.07]">
-                    <GameComments appid={game.appid} gameName={game.name} />
-                  </div>
+                  <GameComments appid={game.appid} gameName={game.name} />
                 )}
               </div>
 

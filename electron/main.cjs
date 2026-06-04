@@ -1,4 +1,4 @@
-const { app, BrowserWindow, shell, ipcMain, dialog, Tray, Menu, nativeImage, globalShortcut, powerSaveBlocker, protocol, net } = require('electron')
+const { app, BrowserWindow, shell, ipcMain, dialog, Tray, Menu, nativeImage, globalShortcut, powerSaveBlocker, protocol, net, screen } = require('electron')
 const path = require('node:path')
 const fs = require('node:fs')
 const crypto = require('node:crypto')
@@ -2067,7 +2067,31 @@ function registerLocalMediaProtocol() {
         ucLog(`uc-local: missing ?p= for ${request.url}`, 'warn')
         return new Response('Bad request', { status: 400 })
       }
-      const root = path.resolve(ensureDownloadDir())
+      // Games can live under any of the roots the app knows about — the
+      // configured download path, the default root, AND any drive that has a
+      // UnionCrax.Direct folder (see listDownloadRoots). A user who has moved
+      // their download location, or who has leftover installs on a second
+      // drive, ends up with manifest image paths that point outside the
+      // *current* primary root. Validating against only ensureDownloadDir()
+      // 404s every one of those images even though the file is right there on
+      // disk — which is exactly why an installed game's hero-image.jpg fails to
+      // load while the renderer silently falls back to the remote cover. So we
+      // accept any path contained by ANY known root.
+      const roots = []
+      try { for (const r of listDownloadRoots()) if (r) roots.push(path.resolve(r)) } catch { /* ignore */ }
+      try { const r = ensureDownloadDir(); if (r) roots.push(path.resolve(r)) } catch { /* ignore */ }
+      // Windows paths are case-insensitive and drive letters can arrive in
+      // either case (D:\ vs d:\). String startsWith is case-sensitive, so
+      // normalize before every containment / prefix comparison.
+      const caseFold = process.platform === 'win32'
+      const norm = (s) => (caseFold ? path.resolve(s).toLowerCase() : path.resolve(s))
+      const isWithin = (candidate) => {
+        const nc = norm(candidate)
+        return roots.some((root) => {
+          const nr = norm(root)
+          return nc === nr || nc.startsWith(nr.endsWith(path.sep) ? nr : nr + path.sep)
+        })
+      }
       // Try the path we were given, then fall back to the installing↔installed
       // mirror. The metadata cacher writes localImage paths into
       // installing/<game>/, and the install pipeline later moves the folder to
@@ -2075,19 +2099,21 @@ function registerLocalMediaProtocol() {
       // image reference for an installed game can still point at
       // installing/<game>/image.jpg. Rather than rewrite every manifest at
       // install time, we treat the two folders as interchangeable on read.
-      const installingDir = path.join(root, installingDirName) + path.sep
-      const installedDir  = path.join(root, installedDirName)  + path.sep
-      const tryPaths = []
       const primary = path.resolve(encodedPath)
-      tryPaths.push(primary)
-      if (primary.startsWith(installingDir)) {
-        tryPaths.push(installedDir + primary.slice(installingDir.length))
-      } else if (primary.startsWith(installedDir)) {
-        tryPaths.push(installingDir + primary.slice(installedDir.length))
+      const tryPaths = [primary]
+      for (const root of roots) {
+        const installingDir = path.join(root, installingDirName) + path.sep
+        const installedDir  = path.join(root, installedDirName)  + path.sep
+        const np = norm(primary)
+        if (np.startsWith(norm(installingDir))) {
+          tryPaths.push(installedDir + primary.slice(installingDir.length))
+        } else if (np.startsWith(norm(installedDir))) {
+          tryPaths.push(installingDir + primary.slice(installedDir.length))
+        }
       }
       let resolved = null
       for (const candidate of tryPaths) {
-        if (candidate !== root && !candidate.startsWith(root + path.sep)) continue
+        if (!isWithin(candidate)) continue
         try {
           if (fs.existsSync(candidate)) { resolved = candidate; break }
         } catch { /* ignore */ }
@@ -2108,8 +2134,8 @@ function registerLocalMediaProtocol() {
         }
         return new Response('Not found', { status: 404 })
       }
-      if (resolved !== root && !resolved.startsWith(root + path.sep)) {
-        ucLog(`uc-local: forbidden ${resolved} (root=${root})`, 'warn')
+      if (!isWithin(resolved)) {
+        ucLog(`uc-local: forbidden ${resolved} (roots=${roots.join(', ')})`, 'warn')
         return new Response('Forbidden', { status: 403 })
       }
       const data = fs.readFileSync(resolved)
@@ -2378,14 +2404,227 @@ const ACTIVE_TRAY_STATUSES = new Set(['downloading', 'queued', 'extracting', 'in
 
 // Set by createTray() so other parts of the process (presence broadcasts,
 // download lifecycle hooks) can ask the tray to refresh its menu state.
-let trayMenuRebuild = null
+
+// Bring the main window to the front from any state (minimized / hidden / unfocused).
+function showMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  try {
+    if (mainWindow.isMinimized()) mainWindow.restore()
+    if (!mainWindow.isVisible()) mainWindow.show()
+    mainWindow.focus()
+    if (process.platform === 'win32') {
+      try { mainWindow.moveTop?.() } catch { }
+    }
+  } catch (err) {
+    ucLog(`showMainWindow failed: ${err?.message || err}`, 'warn')
+  }
+}
 
 function refreshTrayMenu() {
+  void (async () => {
+    try {
+      if (trayPopupWindow && !trayPopupWindow.isDestroyed() && trayPopupWindow.isVisible()) {
+        trayPopupWindow.webContents.send('tray-popup:data', await buildTrayPopupData())
+      }
+    } catch (err) {
+      ucLog(`refreshTrayMenu failed: ${err?.message || err}`, 'warn')
+    }
+  })()
+}
+
+function trayLocalMediaUrl(filePath) {
+  const value = typeof filePath === 'string' ? filePath.trim() : ''
+  if (!value) return null
+  if (!path.isAbsolute(value) || !fs.existsSync(value)) return null
+  return `uc-local://app/?p=${encodeURIComponent(value)}`
+}
+
+function resolveTrayGameImage(appid) {
+  const gameAppid = typeof appid === 'string' ? appid.trim() : ''
+  if (!gameAppid) return null
   try {
-    if (typeof trayMenuRebuild === 'function') trayMenuRebuild()
-  } catch (err) {
-    ucLog(`refreshTrayMenu failed: ${err?.message || err}`, 'warn')
+    const folder = findInstalledFolderByAppid(gameAppid)
+    if (!folder) return null
+    const manifest = readJsonFile(path.join(folder, INSTALLED_MANIFEST)) || {}
+    const metadata = manifest?.metadata && typeof manifest.metadata === 'object' ? manifest.metadata : {}
+    for (const key of ['localHeroImage', 'localImage', 'localBackgroundImage', 'localSplash', 'localHeroLogo']) {
+      const localUrl = trayLocalMediaUrl(metadata[key])
+      if (localUrl) return localUrl
+    }
+    for (const key of ['hero_image', 'image', 'background_image', 'splash', 'hero_logo']) {
+      const remoteUrl = normalizeRemoteMediaUrl(metadata[key])
+      if (remoteUrl) return remoteUrl
+    }
+  } catch { /* ignore */ }
+  return null
+}
+
+async function resolveTrayTheme() {
+  const fallback = {
+    background: 'oklch(0.035 0.002 285)',
+    foreground: 'oklch(0.968 0.001 286)',
+    card: 'oklch(0.12 0.002 285)',
+    secondary: 'oklch(0.16 0.002 285)',
+    muted: 'oklch(0.55 0.003 286)',
+    border: 'oklch(0.16 0.002 285 / 0.5)',
+    destructive: 'oklch(0.577 0.245 27.325)',
+    primary: 'oklch(1 0 0)',
+    radius: '0.625rem',
+    fontSans: '"Inter", "Geist", "Segoe UI", ui-sans-serif, system-ui, -apple-system, sans-serif',
   }
+  try {
+    if (!mainWindow || mainWindow.isDestroyed()) return fallback
+    return await mainWindow.webContents.executeJavaScript(`(() => {
+      const root = document.documentElement
+      const body = document.body || root
+      const styles = getComputedStyle(root)
+      const read = (name, fallback = '') => styles.getPropertyValue(name).trim() || fallback
+      return {
+        background: read('--background', '${fallback.background}'),
+        foreground: read('--foreground', '${fallback.foreground}'),
+        card: read('--card', '${fallback.card}'),
+        secondary: read('--secondary', '${fallback.secondary}'),
+        muted: read('--muted-foreground', '${fallback.muted}'),
+        border: read('--border', '${fallback.border}'),
+        destructive: read('--destructive', '${fallback.destructive}'),
+        primary: read('--primary', '${fallback.primary}'),
+        radius: read('--radius', '${fallback.radius}'),
+        fontSans: read('--font-sans-active', getComputedStyle(body).fontFamily || '${fallback.fontSans}'),
+      }
+    })()`, true)
+  } catch {
+    return fallback
+  }
+}
+
+// ── Build the data payload sent to the custom tray popup ──────────────────────
+async function buildTrayPopupData() {
+  const rawRunning = pickCurrentRunningGame()
+  const running = rawRunning?.appid
+    ? { ...rawRunning, image: resolveTrayGameImage(rawRunning.appid) }
+    : rawRunning
+
+  let recentGames = []
+  try {
+    const settings = readSettings() || {}
+    const meta = settings.libraryGameMeta && typeof settings.libraryGameMeta === 'object'
+      ? settings.libraryGameMeta : {}
+    recentGames = Object.entries(meta)
+      .filter(([, entry]) => entry && entry.lastPlayedAt)
+      .sort(([, a], [, b]) => (b.lastPlayedAt || 0) - (a.lastPlayedAt || 0))
+      .slice(0, 6)
+      .map(([appid, entry]) => ({
+        appid,
+        name: entry.name || entry.gameName || resolveGameNameForAppid(appid),
+        image: resolveTrayGameImage(appid),
+      }))
+  } catch { /* ignore */ }
+
+  const activeDownloads = globalDownloadQueue.filter(job => ACTIVE_TRAY_STATUSES.has(job.status)).length
+
+  return {
+    running,
+    recentGames,
+    activeDownloads,
+    appVersion: getAppVersion(),
+    theme: await resolveTrayTheme(),
+  }
+}
+
+function estimateTrayPopupHeight(data) {
+  const hasRunningGame = Boolean(data?.running?.appid)
+  const recentCount = Array.isArray(data?.recentGames) ? Math.min(data.recentGames.length, 5) : 0
+  let height = 74
+  if (hasRunningGame) height += 126
+  if (recentCount > 0) height += 30 + (recentCount * 44)
+  height += 188
+  return Math.max(320, Math.min(height, 760))
+}
+
+function destroyTrayPopupWindow() {
+  try {
+    if (trayPopupWindow && !trayPopupWindow.isDestroyed()) trayPopupWindow.close()
+  } catch (err) {
+    ucLog(`destroyTrayPopupWindow failed: ${err?.message || err}`, 'warn')
+  } finally {
+    trayPopupWindow = null
+  }
+}
+
+// ── Create/show the custom tray popup BrowserWindow ───────────────────────────
+function createTrayPopupWindow(data) {
+  destroyTrayPopupWindow()
+
+  const win = new BrowserWindow({
+    width: 288,
+    height: estimateTrayPopupHeight(data),
+    frame: false,
+    transparent: true,
+    backgroundColor: '#00000000',
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    resizable: false,
+    movable: false,
+    focusable: true,
+    fullscreenable: false,
+    show: false,
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      preload: path.join(__dirname, 'tray-popup-preload.cjs'),
+      webSecurity: true,
+    },
+  })
+
+  trayPopupWindow = win
+  win.on('blur', () => {
+    if (trayPopupWindow === win) destroyTrayPopupWindow()
+  })
+  win.on('closed', () => {
+    if (trayPopupWindow === win) trayPopupWindow = null
+  })
+  win.webContents.once('did-finish-load', () => {
+    try {
+      if (win.isDestroyed()) return
+      win.webContents.send('tray-popup:data', data)
+    } catch (err) {
+      ucLog(`createTrayPopupWindow did-finish-load failed: ${err?.message || err}`, 'warn')
+      if (trayPopupWindow === win) destroyTrayPopupWindow()
+    }
+  })
+  win.loadFile(path.join(__dirname, 'tray-popup.html'))
+  return win
+}
+
+function positionTrayPopup(win) {
+  try {
+    const tb = tray.getBounds()
+    const [w, h] = win.getSize()
+    const display = screen.getDisplayNearestPoint({ x: tb.x, y: tb.y })
+    const wa = display.workArea
+    let x = Math.round(tb.x + tb.width / 2 - w / 2)
+    let y = Math.round(tb.y - h - 4)
+    // If the taskbar is at the top, place the popup below the tray icon instead.
+    if (y < wa.y) y = Math.round(tb.y + tb.height + 4)
+    x = Math.max(wa.x, Math.min(x, wa.x + wa.width - w))
+    y = Math.max(wa.y, Math.min(y, wa.y + wa.height - h))
+    win.setPosition(x, y, false)
+  } catch (err) {
+    ucLog(`positionTrayPopup failed: ${err?.message || err}`, 'warn')
+  }
+}
+
+function showTrayPopup() {
+  void (async () => {
+    try {
+      const wasVisible = Boolean(trayPopupWindow && !trayPopupWindow.isDestroyed() && trayPopupWindow.isVisible())
+      destroyTrayPopupWindow()
+      if (wasVisible) return
+      createTrayPopupWindow(await buildTrayPopupData())
+    } catch (err) {
+      ucLog(`showTrayPopup failed: ${err?.message || err}`, 'warn')
+    }
+  })()
 }
 
 function createTray() {
@@ -2394,106 +2633,11 @@ function createTray() {
   tray = new Tray(iconImage)
   tray.setToolTip(WINDOW_DISPLAY_NAME)
   tray.setTitle(WINDOW_DISPLAY_NAME)
-  // Helper: bring the main window back from any state (minimized, hidden,
-  // or unfocused). A minimized window still reports isVisible()===true, so
-  // we have to check isMinimized() first before considering hide.
-  const showAndFocus = () => {
-    if (!mainWindow || mainWindow.isDestroyed()) return
-    try {
-      if (mainWindow.isMinimized()) mainWindow.restore()
-      if (!mainWindow.isVisible()) mainWindow.show()
-      mainWindow.focus()
-      // Tap into the OS focus stealing protection on Windows.
-      if (process.platform === 'win32') {
-        try { mainWindow.moveTop?.() } catch { }
-      }
-    } catch (err) {
-      ucLog(`tray showAndFocus failed: ${err?.message || err}`, 'warn')
-    }
-  }
-  // Rebuild the tray menu dynamically so the running-game entry / downloads
-  // section reflect current state every time the user right-clicks. Static
-  // menus would freeze whatever was true the moment the tray was created.
-  const rebuildContextMenu = () => {
-    if (!tray) return
-    const items = [
-      { label: `Show ${WINDOW_DISPLAY_NAME}`, click: () => showAndFocus() },
-    ]
+  // Right-click opens the custom styled popup instead of the native OS menu.
+  tray.on('right-click', () => showTrayPopup())
 
-    // Currently running game — surface the most recent payload so the user
-    // can quit it without unfolding the launcher window.
-    try {
-      const running = pickCurrentRunningGame()
-      if (running.appid) {
-        const displayName = running.name || running.appid
-        items.push({ type: 'separator' })
-        items.push({ label: `▶ Playing: ${displayName}`, enabled: false })
-        items.push({
-          label: 'Quit game',
-          click: async () => {
-            try {
-              const payload = runningGames.get(running.appid)
-              if (payload?.userQuitRequested === false || payload?.userQuitRequested === undefined) {
-                if (payload) payload.userQuitRequested = true
-              }
-              if (typeof killProcessTree === 'function' && payload?.pid) {
-                await killProcessTree(payload.pid)
-              }
-            } catch (err) {
-              ucLog(`tray quit-game failed: ${err?.message || err}`, 'warn')
-            }
-          },
-        })
-        items.push({
-          label: 'Open game in launcher',
-          click: () => {
-            showAndFocus()
-            try {
-              if (mainWindow && !mainWindow.isDestroyed()) {
-                mainWindow.webContents.send('uc:navigation-action', { path: `/game/${encodeURIComponent(running.appid)}` })
-              }
-            } catch { /* ignore */ }
-          },
-        })
-      }
-    } catch (err) {
-      ucLog(`tray running-game lookup failed: ${err?.message || err}`, 'warn')
-    }
-
-    // Active downloads — quick pause / resume + jump to Downloads page.
-    try {
-      const activeCount = globalDownloadQueue.filter((job) => ACTIVE_TRAY_STATUSES.has(job.status)).length
-      if (activeCount > 0) {
-        items.push({ type: 'separator' })
-        items.push({ label: `↓ ${activeCount} download${activeCount === 1 ? '' : 's'} active`, enabled: false })
-        items.push({
-          label: 'Open downloads',
-          click: () => {
-            showAndFocus()
-            try {
-              if (mainWindow && !mainWindow.isDestroyed()) {
-                mainWindow.webContents.send('uc:navigation-action', { path: '/downloads' })
-              }
-            } catch { /* ignore */ }
-          },
-        })
-      }
-    } catch { /* ignore */ }
-
-    items.push({ type: 'separator' })
-    items.push({ label: 'Quit', click: () => { app.isQuitting = true; app.quit() } })
-
-    try {
-      tray.setContextMenu(Menu.buildFromTemplate(items))
-    } catch (err) {
-      ucLog(`tray menu rebuild failed: ${err?.message || err}`, 'warn')
-    }
-  }
-  // Build initial menu and refresh whenever game / download state changes
-  // (presence events are the natural cue here).
-  rebuildContextMenu()
-  trayMenuRebuild = rebuildContextMenu
   tray.on('click', () => {
+    destroyTrayPopupWindow()
     if (!mainWindow || mainWindow.isDestroyed()) return
     // Toggle: if the window is genuinely visible & focused, hide it.
     // Otherwise restore/show/focus.
@@ -2503,11 +2647,77 @@ function createTray() {
     if (isVisible && !isMinimized && isFocused) {
       mainWindow.hide()
     } else {
-      showAndFocus()
+      showMainWindow()
     }
   })
-  tray.on('double-click', () => showAndFocus())
+  tray.on('double-click', () => {
+    destroyTrayPopupWindow()
+    showMainWindow()
+  })
 }
+
+ipcMain.on('tray-popup:ready', (event, { height }) => {
+  const win = BrowserWindow.fromWebContents(event.sender)
+  if (!win || win.isDestroyed() || win !== trayPopupWindow) return
+  try {
+    const nextHeight = Math.max(320, Math.min(760, Math.ceil(Number(height) || 0)))
+    const [width] = win.getSize()
+    win.setSize(width, nextHeight, false)
+    positionTrayPopup(win)
+    win.show()
+    win.focus()
+  } catch (err) {
+    ucLog(`tray-popup:ready failed: ${err?.message || err}`, 'warn')
+  }
+})
+
+ipcMain.on('tray-popup:action', async (event, { type, payload }) => {
+  const win = BrowserWindow.fromWebContents(event.sender)
+  if (win && !win.isDestroyed()) win.close()
+  try {
+    switch (type) {
+      case 'show':
+        showMainWindow()
+        break
+      case 'navigate':
+        showMainWindow()
+        if (mainWindow && !mainWindow.isDestroyed() && payload) {
+          mainWindow.webContents.send('uc:navigation-action', { path: payload })
+        }
+        break
+      case 'quit-game': {
+        const gp = payload ? runningGames.get(payload) : null
+        if (gp) {
+          gp.userQuitRequested = true
+          if (typeof killProcessTree === 'function' && gp.pid) {
+            await killProcessTree(gp.pid)
+          }
+        }
+        break
+      }
+      case 'open-game':
+        showMainWindow()
+        if (mainWindow && !mainWindow.isDestroyed() && payload) {
+          mainWindow.webContents.send('uc:navigation-action', { path: `/game/${encodeURIComponent(payload)}` })
+        }
+        break
+      case 'launch-game':
+        showMainWindow()
+        if (mainWindow && !mainWindow.isDestroyed() && payload) {
+          mainWindow.webContents.send('uc:navigation-action', { path: `/game/${encodeURIComponent(payload)}?launch=1` })
+        }
+        break
+      case 'quit':
+        app.isQuitting = true
+        app.quit()
+        break
+      default:
+        ucLog(`tray-popup:action — unknown type: ${type}`, 'warn')
+    }
+  } catch (err) {
+    ucLog(`tray-popup:action handler failed: ${err?.message || err}`, 'warn')
+  }
+})
 
 const DEFAULT_BASE_URL = 'https://union-crax.xyz'
 
@@ -2623,6 +2833,7 @@ async function detectBestBaseUrl(onStatus) {
 }
 
 let tray = null
+let trayPopupWindow = null
 let mainWindow = null
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -4943,6 +5154,13 @@ function healStaleLocalMediaPaths(metadata, downloadRoot) {
   const installedDir  = root ? path.join(root, installedDirName)  + path.sep : null
   let changed = false
 
+  // Drive letters and folder casing can differ between what was baked into a
+  // manifest and the live root (D:\ vs d:\), so prefix-match case-insensitively
+  // on Windows — otherwise the installing↔installed mirror silently misses.
+  const caseFold = process.platform === 'win32'
+  const startsWithDir = (value, dir) => (caseFold
+    ? value.toLowerCase().startsWith(dir.toLowerCase())
+    : value.startsWith(dir))
   const resolve = (candidate) => {
     if (!candidate) return null
     try {
@@ -4951,8 +5169,8 @@ function healStaleLocalMediaPaths(metadata, downloadRoot) {
     // Try the installing ↔ installed mirror.
     if (installingDir && installedDir) {
       let mirrored = null
-      if (candidate.startsWith(installingDir)) mirrored = installedDir + candidate.slice(installingDir.length)
-      else if (candidate.startsWith(installedDir)) mirrored = installingDir + candidate.slice(installedDir.length)
+      if (startsWithDir(candidate, installingDir)) mirrored = installedDir + candidate.slice(installingDir.length)
+      else if (startsWithDir(candidate, installedDir)) mirrored = installingDir + candidate.slice(installedDir.length)
       if (mirrored) {
         try { if (fs.existsSync(mirrored)) return mirrored } catch { /* ignore */ }
       }
@@ -6813,6 +7031,10 @@ async function handleUCFilesDownloadComplete(win, info) {
       })
       if (!result.ok) throw new Error(result.error || 'Extraction failed')
 
+      const extractionWarnings = Array.isArray(result.warnings) ? result.warnings.filter(Boolean) : []
+      const extractionSkipped = Array.isArray(result.skipped) ? result.skipped.filter(Boolean) : []
+      const extractionWarningText = extractionWarnings.length > 0 ? extractionWarnings.join(' ') : null
+
       // Build file entries for manifest
       const extractedFiles = result.files || []
       const fileEntries = []
@@ -6842,6 +7064,8 @@ async function handleUCFilesDownloadComplete(win, info) {
       sendDownloadUpdate(win, makeUpdate({
         status: 'completed', savePath: null,
         receivedBytes: totalBytes, totalBytes, speedBps: 0, etaSeconds: 0,
+        warning: extractionWarningText,
+        skippedFiles: extractionSkipped,
       }))
     } catch (err) {
       ucLog(`[UC.Files] Extraction failed: ${err.message}`, 'error')
@@ -7773,27 +7997,69 @@ function run7zExtract(archivePath, destDir, onProgress, options = {}) {
           finish({ ok: false, aborted: true, error: String(abortSignal?.reason || 'Extraction interrupted') })
           return
         }
-        if (code !== 0) {
-          const details = [stderr.trim(), stdout.trim()].filter(Boolean).join('\n')
+        const after = snapshotFiles(destDir)
+        const extracted = []
+        for (const f of after) if (!before.has(f)) extracted.push(f)
 
+        const details = [stderr.trim(), stdout.trim()].filter(Boolean).join('\n')
+        if (code !== 0) {
           // Windows Defender (or other AV) quarantines game archives because they
           // contain cracked executables. 7-Zip exits with code 2 and its output
           // includes the phrase "virus or potentially unwanted software".
           // Detect this and surface an actionable message instead of raw 7zip output.
           const isAvBlock = /virus|potentially unwanted software|malicious/i.test(details)
-          const errorMsg = isAvBlock
-            ? 'Windows Defender blocked the archive. Open Windows Security → Virus & threat protection → Manage settings → Add or remove exclusions, add your UnionCrax install folder, then retry the download.'
-            : details
-              ? `7zip exited with code ${code}: ${details}`
-              : `7zip exited with code ${code}`
+          if (isAvBlock) {
+            const errorMsg = 'Windows Defender blocked the archive. Open Windows Security → Virus & threat protection → Manage settings → Add or remove exclusions, add your UnionCrax install folder, then retry the download.'
+            uc_log(errorMsg)
+            finish({ ok: false, error: errorMsg })
+            return
+          }
 
+          const errorLines = details
+            .split(/[\r\n]+/)
+            .map((line) => String(line || '').trim())
+            .filter((line) => /^ERROR:/i.test(line))
+          const unsupportedLines = errorLines.filter((line) => /Unsupported Method/i.test(line))
+          const allErrorsUnsupported = errorLines.length > 0 && unsupportedLines.length === errorLines.length
+          const skipped = unsupportedLines
+            .map((line) => {
+              const match = line.match(/Unsupported Method\s*:\s*(.+)$/i)
+              return match?.[1] ? match[1].trim() : null
+            })
+            .filter(Boolean)
+
+          // 7-Zip code 1 is warning-only. Code 2 can still be usable when the
+          // only per-item failures are Unsupported Method (common with ARM64-
+          // only plugin DLLs inside otherwise-working x64 game archives).
+          //
+          // Do NOT require `extracted.length > 0` here: retries often re-extract
+          // into an existing folder where every file already exists, so the
+          // before/after snapshot delta is 0 even though extraction completed.
+          const fatalSignature = /Headers Error|Data Error|CRC Failed|Unexpected end of data|Can(?:not|'t) open (?:as )?archive|Is not archive|Cannot open the file as/i.test(details)
+          const usableWarningCode = code === 1
+          const usableUnsupportedMethod = code === 2 && allErrorsUnsupported && !fatalSignature
+          if (usableWarningCode || usableUnsupportedMethod) {
+            const warnings = []
+            if (usableWarningCode) warnings.push('7-Zip reported non-fatal warnings while extracting this archive.')
+            if (usableUnsupportedMethod) {
+              const skippedCount = skipped.length || unsupportedLines.length
+              warnings.push(`${skippedCount} file${skippedCount === 1 ? '' : 's'} skipped (incompatible archive method).`)
+            }
+            if (warnings.length > 0) {
+              uc_log(`[Archive Install] Extraction completed with warnings: ${warnings.join(' ')}`)
+            }
+            finish({ ok: true, files: extracted, warnings, skipped })
+            return
+          }
+
+          const errorMsg = details
+            ? `7zip exited with code ${code}: ${details}`
+            : `7zip exited with code ${code}`
           uc_log(errorMsg)
           finish({ ok: false, error: errorMsg })
           return
         }
-        const after = snapshotFiles(destDir)
-        const extracted = []
-        for (const f of after) if (!before.has(f)) extracted.push(f)
+
         finish({ ok: true, files: extracted })
       })
       proc.on('error', (err) => {
@@ -9099,6 +9365,9 @@ function createWindow(existingSplash) {
               return
             }
             if (res && res.ok) {
+              const extractionWarnings = Array.isArray(res.warnings) ? res.warnings.filter(Boolean) : []
+              const extractionSkipped = Array.isArray(res.skipped) ? res.skipped.filter(Boolean) : []
+              const extractionWarningText = extractionWarnings.length > 0 ? extractionWarnings.join(' ') : null
               const extractedFiles = res.files || []
               const fileEntries = []
               for (const ef of extractedFiles) {
@@ -9169,7 +9438,15 @@ function createWindow(existingSplash) {
               // Clear update backup on successful extraction
               clearUpdateBackup(installedRoot)
 
-              sendDownloadUpdate(mainWindow, { downloadId, status: 'extracted', extracted: extractedFiles, savePath: null, appid: entry?.appid || null })
+              sendDownloadUpdate(mainWindow, {
+                downloadId,
+                status: 'extracted',
+                extracted: extractedFiles,
+                savePath: null,
+                appid: entry?.appid || null,
+                warning: extractionWarningText,
+                skippedFiles: extractionSkipped,
+              })
               try {
                 const stDone = archiveToExtract && fs.existsSync(archiveToExtract) ? fs.statSync(archiveToExtract) : null
                 const totalBytesDone = totalBytesOverride != null ? totalBytesOverride : stDone ? stDone.size : 0
@@ -9186,7 +9463,9 @@ function createWindow(existingSplash) {
                   gameName: entry?.gameName || null,
                   url: entry?.url || null,
                   partIndex: entry?.partIndex,
-                  partTotal: entry?.partTotal
+                  partTotal: entry?.partTotal,
+                  warning: extractionWarningText,
+                  skippedFiles: extractionSkipped,
                 })
                 uc_log(`emitted final completed status for ${entry?.appid}`)
               } catch (e) {
@@ -11023,7 +11302,11 @@ async function runArchiveInstallJob(win, payload, options = {}) {
     return { ok: false, downloadId, error: rawError }
   }
 
-  ucLog(`[Archive Install] Extraction succeeded: ${(res.files || []).length} files`)
+  const extractionWarnings = Array.isArray(res.warnings) ? res.warnings.filter(Boolean) : []
+  const extractionSkipped = Array.isArray(res.skipped) ? res.skipped.filter(Boolean) : []
+  const extractionWarningText = extractionWarnings.length > 0 ? extractionWarnings.join(' ') : null
+
+  ucLog(`[Archive Install] Extraction succeeded: ${(res.files || []).length} files${extractionWarningText ? ` (${extractionWarningText})` : ''}`)
   const extractedFiles = res.files || []
   const fileEntries = []
   for (const ef of extractedFiles) {
@@ -11047,12 +11330,16 @@ async function runArchiveInstallJob(win, payload, options = {}) {
 
   sendDownloadUpdate(win, {
     downloadId, status: 'extracted', extracted: extractedFiles,
-    savePath: null, appid, gameName
+    savePath: null, appid, gameName,
+    warning: extractionWarningText,
+    skippedFiles: extractionSkipped,
   })
   sendDownloadUpdate(win, {
     downloadId, status: 'completed',
     receivedBytes: totalBytes, totalBytes, speedBps: 0, etaSeconds: 0,
-    filename: path.basename(archiveToExtract), savePath: null, appid, gameName
+    filename: path.basename(archiveToExtract), savePath: null, appid, gameName,
+    warning: extractionWarningText,
+    skippedFiles: extractionSkipped,
   })
 
   const sourceArchivePaths = partFiles && partFiles.length ? partFiles : [archiveToExtract]
@@ -14387,13 +14674,13 @@ function pickCurrentRunningGame() {
     if (payload.appid) {
       return {
         appid: String(payload.appid),
-        name: payload.name || payload.title || null,
+        name: payload.gameName || payload.name || payload.title || null,
       }
     }
     if (!exeFallback) exeFallback = payload
   }
   if (exeFallback) {
-    return { appid: null, name: exeFallback.name || exeFallback.title || null }
+    return { appid: null, name: exeFallback.gameName || exeFallback.name || exeFallback.title || null }
   }
   return { appid: null, name: null }
 }

@@ -70,6 +70,16 @@ function formatEta(seconds: number | null) {
   return `${secs}s`
 }
 
+function resolveInstallWarning(items: Array<Pick<DownloadItem, "warning" | "skippedFiles">>) {
+  const warningText = items.find((item) => typeof item.warning === "string" && item.warning.trim().length > 0)?.warning?.trim()
+  if (warningText) return warningText
+  const skippedCount = items.reduce((sum, item) => sum + (Array.isArray(item.skippedFiles) ? item.skippedFiles.length : 0), 0)
+  if (skippedCount > 0) {
+    return `${skippedCount} file${skippedCount === 1 ? "" : "s"} skipped (incompatible archive method).`
+  }
+  return null
+}
+
 type DiskInfo = {
   id: string
   name: string
@@ -440,6 +450,7 @@ export function DownloadsPage() {
   )
   const primaryGame = primaryGroup ? games.find((game) => game.appid === primaryGroup[0]?.appid) : null
   const primaryIsInstalling = primaryGroup ? primaryGroup.some((it) => it.status === 'installing' || it.status === 'extracting') : false
+  const primaryInstallWarning = useMemo(() => (primaryGroup ? resolveInstallWarning(primaryGroup) : null), [primaryGroup])
 
   const currentAppId = primaryGroup?.[0]?.appid ?? null
   const [networkHistory, setNetworkHistory] = useState<number[]>(
@@ -1277,6 +1288,12 @@ export function DownloadsPage() {
                           </span>
                         )}
                       </div>
+                      {primaryInstallWarning ? (
+                        <div className="mt-2 inline-flex max-w-full items-start gap-1.5 rounded-md border border-amber-500/25 bg-amber-500/10 px-2 py-1 text-[11px] text-amber-200">
+                          <AlertTriangle className="mt-[1px] h-3.5 w-3.5 shrink-0" />
+                          <span className="truncate">{primaryInstallWarning}</span>
+                        </div>
+                      ) : null}
                     </div>
                     <div className="shrink-0 text-right">
                       <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground/80">ETA</div>
@@ -1790,6 +1807,7 @@ export function DownloadsPage() {
             const gameName = items[0]?.gameName || "Unknown"
             const appid = items[0]?.appid
             const game = appid ? games.find((g) => g.appid === appid) : null
+            const installWarning = resolveInstallWarning(items)
             const finishedAt = items
               .map((item) => item.completedAt || 0)
               .sort((a, b) => b - a)[0]
@@ -1863,6 +1881,12 @@ export function DownloadsPage() {
                       <span className="text-muted-foreground/40">•</span>
                       <span>{finishedAt ? new Date(finishedAt).toLocaleDateString() : "Completed"}</span>
                     </div>
+                    {installWarning ? (
+                      <div className="mt-1.5 flex max-w-md items-start gap-1.5 text-[11px] text-amber-300">
+                        <AlertTriangle className="mt-[1px] h-3.5 w-3.5 shrink-0" />
+                        <span className="line-clamp-2">{installWarning}</span>
+                      </div>
+                    ) : null}
                   </div>
                   <Button
                     size="sm"

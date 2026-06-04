@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import {
   Dialog,
   DialogContent,
@@ -9,6 +9,7 @@ import {
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Slider } from "@/components/ui/slider"
+import { ZoomIn, RotateCcw } from "lucide-react"
 
 type CropKind = "avatar" | "banner"
 
@@ -31,8 +32,13 @@ const TARGET_SIZE: Record<CropKind, { width: number; height: number }> = {
   banner: { width: 1500, height: 500 },
 }
 
-// Fixed preview height (px); width is derived from aspect ratio
-const PREVIEW_H = 176
+const MAX_ZOOM = 4
+
+// Stage (the interactive crop viewport) is fit inside these bounds keeping the
+// output aspect ratio, so the avatar is a big rounded square and the banner is a
+// wide strip — both shown at the same shape they appear on the profile.
+const STAGE_MAX_W = 520
+const STAGE_MAX_H = 340
 
 function computeDrawBox(
   imageWidth: number,
@@ -52,7 +58,7 @@ function computeDrawBox(
   const offsetX = (targetWidth - drawWidth) / 2 + (values.panX / 100) * maxPanX
   const offsetY = (targetHeight - drawHeight) / 2 + (values.panY / 100) * maxPanY
 
-  return { offsetX, offsetY, drawWidth, drawHeight }
+  return { offsetX, offsetY, drawWidth, drawHeight, maxPanX, maxPanY }
 }
 
 async function renderCroppedFile(file: File, kind: CropKind, values: CropValues): Promise<File> {
@@ -100,6 +106,8 @@ async function renderCroppedFile(file: File, kind: CropKind, values: CropValues)
   }
 }
 
+const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
+
 export function ProfileMediaCropDialog({ open, kind, file, onOpenChange, onApply }: Props) {
   const [zoom, setZoom] = useState(1)
   const [panX, setPanX] = useState(0)
@@ -107,9 +115,26 @@ export function ProfileMediaCropDialog({ open, kind, file, onOpenChange, onApply
   const [submitting, setSubmitting] = useState(false)
   const [sourceUrl, setSourceUrl] = useState<string | null>(null)
   const [imageSize, setImageSize] = useState<{ w: number; h: number } | null>(null)
+  const [dragging, setDragging] = useState(false)
+
+  // Live pan/zoom are mutated rapidly during a drag; refs avoid stale closures
+  // inside the pointer handlers without forcing the values through state on
+  // every pointermove.
+  const dragState = useRef<{ pointerId: number; lastX: number; lastY: number } | null>(null)
+  const panRef = useRef({ x: 0, y: 0 })
+  const zoomRef = useRef(1)
+  useEffect(() => { panRef.current = { x: panX, y: panY } }, [panX, panY])
+  useEffect(() => { zoomRef.current = zoom }, [zoom])
 
   const { width: tw, height: th } = TARGET_SIZE[kind]
-  const PREVIEW_W = Math.round(PREVIEW_H * (tw / th))
+  const aspect = tw / th
+  // Fit the stage inside the bounds keeping aspect.
+  let STAGE_W = STAGE_MAX_W
+  let STAGE_H = Math.round(STAGE_MAX_W / aspect)
+  if (STAGE_H > STAGE_MAX_H) {
+    STAGE_H = STAGE_MAX_H
+    STAGE_W = Math.round(STAGE_MAX_H * aspect)
+  }
 
   // Minimum zoom: scale that makes the image fit entirely (contain), as a fraction of cover-scale
   const minZoom = imageSize
@@ -120,20 +145,18 @@ export function ProfileMediaCropDialog({ open, kind, file, onOpenChange, onApply
       })()
     : 0.1
 
-  // Pixel-accurate preview: mirrors computeDrawBox scaled to PREVIEW_H
-  const previewStyle = imageSize && sourceUrl
-    ? (() => {
-        const k = PREVIEW_H / th
-        const { offsetX, offsetY, drawWidth, drawHeight } = computeDrawBox(
-          imageSize.w, imageSize.h, tw, th, { zoom, panX, panY }
-        )
-        return {
-          left: Math.round(offsetX * k),
-          top: Math.round(offsetY * k),
-          width: Math.round(drawWidth * k),
-          height: Math.round(drawHeight * k),
-        }
-      })()
+  // Pixel-accurate preview: mirrors computeDrawBox scaled to the stage size.
+  const box = imageSize
+    ? computeDrawBox(imageSize.w, imageSize.h, tw, th, { zoom, panX, panY })
+    : null
+  const k = STAGE_H / th
+  const previewStyle = box && sourceUrl
+    ? {
+        left: Math.round(box.offsetX * k),
+        top: Math.round(box.offsetY * k),
+        width: Math.round(box.drawWidth * k),
+        height: Math.round(box.drawHeight * k),
+      }
     : null
 
   useEffect(() => {
@@ -157,7 +180,11 @@ export function ProfileMediaCropDialog({ open, kind, file, onOpenChange, onApply
     setImageSize({ w: iw, h: ih })
     const base = Math.max(tw / iw, th / ih)
     const contain = Math.min(tw / iw, th / ih)
-    setZoom(Math.max(0.05, Math.round((contain / base) * 1000) / 1000))
+    // Start at cover (zoom 1) so the frame is filled, matching how avatars are
+    // displayed everywhere else.
+    setZoom(Math.max(Math.max(0.05, Math.round((contain / base) * 1000) / 1000), 1))
+    setPanX(0)
+    setPanY(0)
   }
 
   const resetValues = () => {
@@ -165,6 +192,55 @@ export function ProfileMediaCropDialog({ open, kind, file, onOpenChange, onApply
     setPanX(0)
     setPanY(0)
     setImageSize(null)
+    setDragging(false)
+    dragState.current = null
+  }
+
+  // ── Direct manipulation: drag to pan, wheel to zoom ──────────────────────
+  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!imageSize) return
+    e.currentTarget.setPointerCapture(e.pointerId)
+    dragState.current = { pointerId: e.pointerId, lastX: e.clientX, lastY: e.clientY }
+    setDragging(true)
+  }
+
+  const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const drag = dragState.current
+    if (!drag || drag.pointerId !== e.pointerId || !imageSize) return
+    const dxPx = e.clientX - drag.lastX
+    const dyPx = e.clientY - drag.lastY
+    drag.lastX = e.clientX
+    drag.lastY = e.clientY
+
+    const current = computeDrawBox(imageSize.w, imageSize.h, tw, th, {
+      zoom: zoomRef.current,
+      panX: panRef.current.x,
+      panY: panRef.current.y,
+    })
+    // Convert the on-screen drag (stage px) to target px (÷k), then to a % of
+    // the available pan range. Dragging the image follows the cursor.
+    if (current.maxPanX > 0) {
+      const dPanX = ((dxPx / k) / current.maxPanX) * 100
+      setPanX((prev) => clamp(prev + dPanX, -100, 100))
+    }
+    if (current.maxPanY > 0) {
+      const dPanY = ((dyPx / k) / current.maxPanY) * 100
+      setPanY((prev) => clamp(prev + dPanY, -100, 100))
+    }
+  }
+
+  const endDrag = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (dragState.current?.pointerId === e.pointerId) {
+      try { e.currentTarget.releasePointerCapture(e.pointerId) } catch { /* ignore */ }
+      dragState.current = null
+      setDragging(false)
+    }
+  }
+
+  const onWheel = (e: React.WheelEvent<HTMLDivElement>) => {
+    if (!imageSize) return
+    const factor = Math.exp(-e.deltaY * 0.0015)
+    setZoom((prev) => clamp(Math.round(prev * factor * 1000) / 1000, minZoom, MAX_ZOOM))
   }
 
   const applyCrop = async () => {
@@ -180,6 +256,8 @@ export function ProfileMediaCropDialog({ open, kind, file, onOpenChange, onApply
     }
   }
 
+  const isAvatar = kind === "avatar"
+
   return (
     <Dialog
       open={open}
@@ -190,57 +268,71 @@ export function ProfileMediaCropDialog({ open, kind, file, onOpenChange, onApply
     >
       <DialogContent className="max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Adjust {kind === "avatar" ? "avatar" : "banner"}</DialogTitle>
+          <DialogTitle>Edit {isAvatar ? "avatar" : "banner"}</DialogTitle>
           <DialogDescription>
-            Position and scale your image before uploading.
+            Drag to reposition · scroll or use the slider to zoom.
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4">
-          <div className="rounded-xl border border-white/[.07] bg-card/50 p-4">
-            <p className="mb-2 text-xs text-muted-foreground">Live preview</p>
+        <div className="flex flex-col items-center gap-5 py-2">
+          {/* Interactive stage. The image is positioned pixel-accurately to
+              match exactly what will be exported by the canvas pipeline. */}
+          <div
+            className="relative overflow-hidden rounded-2xl bg-black/60 ring-1 ring-white/10 select-none touch-none"
+            style={{ width: STAGE_W, height: STAGE_H, cursor: dragging ? "grabbing" : "grab" }}
+            onPointerDown={onPointerDown}
+            onPointerMove={onPointerMove}
+            onPointerUp={endDrag}
+            onPointerCancel={endDrag}
+            onWheel={onWheel}
+          >
+            {sourceUrl && (
+              <img
+                src={sourceUrl}
+                alt="Crop preview"
+                draggable={false}
+                className="absolute max-w-none pointer-events-none"
+                style={
+                  previewStyle
+                    ? { left: previewStyle.left, top: previewStyle.top, width: previewStyle.width, height: previewStyle.height }
+                    : { opacity: 0 }
+                }
+                onLoad={handleImageLoad}
+              />
+            )}
+
+            {/* Crop mask: dim everything outside the avatar circle / banner frame
+                so the user sees exactly what's kept. */}
             <div
-              className={`relative mx-auto overflow-hidden border border-border/70 bg-background/70 ${kind === "avatar" ? "rounded-full" : "rounded-xl"}`}
-              style={{ width: PREVIEW_W, height: PREVIEW_H }}
-            >
-              {sourceUrl && (
-                <img
-                  src={sourceUrl}
-                  alt="Crop preview"
-                  className="absolute max-w-none"
-                  style={
-                    previewStyle
-                      ? { left: previewStyle.left, top: previewStyle.top, width: previewStyle.width, height: previewStyle.height }
-                      : { opacity: 0 }
-                  }
-                  onLoad={handleImageLoad}
-                />
-              )}
-            </div>
+              aria-hidden
+              className={`pointer-events-none absolute inset-0 rounded-2xl`}
+              style={{ boxShadow: "0 0 0 9999px rgba(0,0,0,0.55)" }}
+            />
+            <div
+              aria-hidden
+              className={`pointer-events-none absolute inset-0 ring-1 ring-white/40 rounded-2xl`}
+            />
           </div>
 
-          <div className="space-y-3">
-            <div>
-              <div className="mb-1 flex items-center justify-between text-xs text-muted-foreground">
-                <span>Zoom</span>
-                <span>{zoom.toFixed(2)}x</span>
-              </div>
-              <Slider value={[zoom]} min={minZoom} max={3} step={0.01} onValueChange={(v) => setZoom(v[0] ?? minZoom)} />
-            </div>
-            <div>
-              <div className="mb-1 flex items-center justify-between text-xs text-muted-foreground">
-                <span>Horizontal</span>
-                <span>{panX}%</span>
-              </div>
-              <Slider value={[panX]} min={-100} max={100} step={1} onValueChange={(v) => setPanX(Math.round(v[0] ?? 0))} />
-            </div>
-            <div>
-              <div className="mb-1 flex items-center justify-between text-xs text-muted-foreground">
-                <span>Vertical</span>
-                <span>{panY}%</span>
-              </div>
-              <Slider value={[panY]} min={-100} max={100} step={1} onValueChange={(v) => setPanY(Math.round(v[0] ?? 0))} />
-            </div>
+          {/* Zoom control */}
+          <div className="flex w-full max-w-sm items-center gap-3">
+            <ZoomIn className="h-4 w-4 shrink-0 text-muted-foreground" />
+            <Slider
+              value={[zoom]}
+              min={minZoom}
+              max={MAX_ZOOM}
+              step={0.01}
+              onValueChange={(v) => setZoom(clamp(v[0] ?? minZoom, minZoom, MAX_ZOOM))}
+              className="flex-1"
+            />
+            <button
+              type="button"
+              onClick={() => { setZoom(1); setPanX(0); setPanY(0) }}
+              className="shrink-0 inline-flex items-center gap-1 rounded-full border border-white/10 bg-white/[.04] px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:text-foreground hover:bg-white/[.08]"
+              title="Reset"
+            >
+              <RotateCcw className="h-3.5 w-3.5" /> Reset
+            </button>
           </div>
         </div>
 
@@ -249,7 +341,7 @@ export function ProfileMediaCropDialog({ open, kind, file, onOpenChange, onApply
             Cancel
           </Button>
           <Button type="button" onClick={applyCrop} disabled={!file || submitting}>
-            {submitting ? "Applying..." : "Apply crop"}
+            {submitting ? "Applying..." : "Apply"}
           </Button>
         </DialogFooter>
       </DialogContent>

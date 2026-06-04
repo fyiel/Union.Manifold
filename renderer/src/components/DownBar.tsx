@@ -1,4 +1,4 @@
-import { useEffect, useState, type MouseEvent } from "react"
+import { useEffect, useRef, useState, type MouseEvent } from "react"
 import { useNavigate } from "react-router-dom"
 import { useDownloadsSelector, useDownloadsActions, type DownloadItem } from "@/context/downloads-context"
 import { Progress } from "@/components/ui/progress"
@@ -213,6 +213,31 @@ export function DownBar() {
   const navigate = useNavigate()
   const [addGameOpen, setAddGameOpen] = useState(false)
   const [addGameInitialSource, setAddGameInitialSource] = useState<"folder" | "archive" | null>(null)
+  const barRef = useRef<HTMLDivElement | null>(null)
+
+  // Publish the bar's live height to a CSS variable so the Toaster can sit
+  // exactly above it. The bar grows taller when a second download is running
+  // (the secondary-activity panel), and at a fixed offset toasts ended up
+  // overlapping / reading as tucked behind it. A ResizeObserver keeps the
+  // variable in lockstep with whatever the bar's current height is.
+  useEffect(() => {
+    const node = barRef.current
+    const setVar = () => {
+      const h = node?.offsetHeight || 0
+      document.documentElement.style.setProperty("--uc-downbar-height", `${h}px`)
+    }
+    setVar()
+    if (!node || typeof ResizeObserver === "undefined") return
+    const ro = new ResizeObserver(setVar)
+    ro.observe(node)
+    return () => ro.disconnect()
+  }, [downBarData.hasDisplay, downBarData.secondaryActivityDetail])
+
+  // Clear the variable when the bar unmounts (e.g. on auth routes that don't
+  // render it) so toasts fall back to their default offset.
+  useEffect(() => () => {
+    document.documentElement.style.removeProperty("--uc-downbar-height")
+  }, [])
 
   // Listen for global "open Add Game modal" events — dispatched by the
   // ArchiveDropZone when the user drags an archive file onto the window, and
@@ -236,7 +261,7 @@ export function DownBar() {
   if (!downBarData.hasDisplay) {
     return (
       <>
-        <div className="pointer-events-none fixed bottom-4 left-0 right-0 z-30 flex justify-center px-4 md:left-[17rem]">
+        <div ref={barRef} className="pointer-events-none fixed bottom-4 left-0 right-0 z-30 flex justify-center px-4 md:left-[17rem]">
           <div
             role="button"
             tabIndex={0}

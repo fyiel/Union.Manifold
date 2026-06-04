@@ -13,7 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { PaginationBar } from "@/components/PaginationBar"
 import { useGamesData } from "@/hooks/use-games"
 import type { Game } from "@/lib/types"
-import { hasInstalledVersionUpdate, pickGameExecutable, cn } from "@/lib/utils"
+import { hasInstalledVersionUpdate, pickGameExecutable, cn, proxyImageUrl } from "@/lib/utils"
 import { useDownloads, useDownloadsActions } from "@/context/downloads-context"
 import { getCatalogCache, type CatalogGame } from "@/lib/catalog"
 import { X } from "@/components/icons"
@@ -548,6 +548,17 @@ export function LibraryPage() {
     return Array.from(failedAppIds).sort().join("|")
   }, [failedAppIds])
 
+  // Membership-only signature of the live downloads list (appids, not byte
+  // progress). When a download is discarded — e.g. cancelled from the activity
+  // page, which deletes its installing/ folder — its appid drops out of this
+  // key, re-reading the disk so the "Downloading" shelf doesn't keep showing a
+  // ghost tile for a game whose files are already gone.
+  const downloadAppIdsKey = useMemo(() => {
+    const ids = new Set<string>()
+    for (const item of downloads) if (item.appid) ids.add(item.appid)
+    return Array.from(ids).sort().join("|")
+  }, [downloads])
+
   useEffect(() => {
     let mounted = true
     const loadLibrary = async () => {
@@ -587,7 +598,7 @@ export function LibraryPage() {
     return () => {
       mounted = false
     }
-  }, [refreshTick, cancelledKey, failedKey])
+  }, [refreshTick, cancelledKey, failedKey, downloadAppIdsKey])
 
   useEffect(() => {
     let mounted = true
@@ -1651,7 +1662,7 @@ export function LibraryPage() {
                           >
                             <span className="h-3.5 w-3.5 shrink-0 overflow-hidden rounded-full bg-secondary">
                               {addedBy.avatarUrl ? (
-                                <img src={addedBy.avatarUrl} alt="" className="h-full w-full object-cover" />
+                                <img src={proxyImageUrl(addedBy.avatarUrl)} alt="" className="h-full w-full object-cover" />
                               ) : null}
                             </span>
                             <span className="truncate">{nm}</span>
@@ -1956,13 +1967,27 @@ export function LibraryPage() {
                           </span>
                         </div>
                       )}
-                      <div className="absolute right-2 top-2 z-20 opacity-0 transition-opacity group-hover/tile:opacity-100">
+                      <div className={cn(
+                        "absolute right-2 top-2 z-20 transition-opacity",
+                        // Dead entries (cancelled/failed) are meant to be
+                        // cleared, so keep their X always visible; live
+                        // downloads only reveal it on hover.
+                        (isCancelled || isFailed) ? "opacity-100" : "opacity-0 group-hover/tile:opacity-100"
+                      )}>
                         <Button
                           size="icon"
                           variant="ghost"
                           onClick={(e) => {
                             e.preventDefault()
                             e.stopPropagation()
+                            // A cancelled/failed download has nothing in flight
+                            // to lose — remove it immediately instead of routing
+                            // through the confirm dialog, which felt laggy when
+                            // clearing a pile of dead entries.
+                            if (isCancelled || isFailed) {
+                              void handleDeleteInstalling(game)
+                              return
+                            }
                             setPendingDeleteGame(game)
                             setPendingDeleteAction("installing")
                           }}
