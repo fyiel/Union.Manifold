@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react"
 import { Clock, HardDrive, Heart, Bookmark, Activity } from "lucide-react"
 import { apiFetch } from "@/lib/api"
+import { proxyImageUrl } from "@/lib/utils"
 
 /**
  * Desktop counterparts of the web's GameTopPlayers / GameCommunityActivity
@@ -48,7 +49,7 @@ function Avatar({ url, size = "h-8 w-8" }: { url: string | null; size?: string }
   if (url) {
     return (
       <img
-        src={url}
+        src={proxyImageUrl(url)}
         alt=""
         className={`${size} rounded-full object-cover border border-white/[.07] shrink-0`}
         loading="lazy"

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react"
-import { cn } from "@/lib/utils"
+import { cn, proxyImageUrl } from "@/lib/utils"
 import { UserRound, X } from "@/components/icons"
 import { ArrowDownToLine, HardDrive, ImageIcon, Pencil, RefreshCw, Cpu, FlaskConical, Palette, Crown } from "lucide-react"
 import { UcPlusPanel } from "@/components/UcPlusPanel"
@@ -38,7 +38,8 @@ import {
 import { LogViewer } from "@/components/LogViewer"
 import { KeybindingsPanel } from "@/components/KeybindingsPanel"
 import { SessionManager } from "@/components/SessionManager"
-import { ProfileMediaCropDialog } from "@/components/ProfileMediaCropDialog"
+import { AvatarPickerDialog } from "@/components/AvatarPickerDialog"
+import { resolveCurrentAvatarUrl, EMPTY_PROFILE_IMAGES, type ProfileImages } from "@/hooks/use-profile-images"
 import { useDiscordAccount } from "@/hooks/use-discord-account"
 import { ControllerSettingsPanel } from "@/components/ControllerSettingsPanel"
 import { SystemProfilePanel } from "@/components/SystemProfilePanel"
@@ -233,24 +234,15 @@ export function SettingsPage() {
   const [skipLinkCheck, setSkipLinkCheck] = useState(false)
   type DownloadCheckMode = 'always' | 'auto' | 'skip'
   const [downloadCheckMode, setDownloadCheckMode] = useState<DownloadCheckMode>('auto')
-  const [profileImages, setProfileImages] = useState<{
-    avatarUrl: string | null
-    customAvatarUrl: string | null
-    bannerUrl: string | null
-    avatarCooldownActive: boolean
-    bannerCooldownActive: boolean
-    avatarNextChangeAt: string | null
-    bannerNextChangeAt: string | null
-  } | null>(null)
+  const [profileImages, setProfileImages] = useState<ProfileImages | null>(null)
   const [avatarUploading, setAvatarUploading] = useState(false)
   const [bannerUploading, setBannerUploading] = useState(false)
   const [profileUploadError, setProfileUploadError] = useState<string | null>(null)
   const [editingProfile, setEditingProfile] = useState(false)
   const avatarInputRef = useRef<HTMLInputElement>(null)
   const bannerInputRef = useRef<HTMLInputElement>(null)
-  const [cropOpen, setCropOpen] = useState(false)
-  const [cropKind, setCropKind] = useState<"avatar" | "banner">("avatar")
-  const [cropSourceFile, setCropSourceFile] = useState<File | null>(null)
+  const [avatarPickerOpen, setAvatarPickerOpen] = useState(false)
+  const [bannerPickerOpen, setBannerPickerOpen] = useState(false)
   const [searchParams, setSearchParams] = useSearchParams()
   // Allow deep links / route navigations to preselect a section via `?section=…`
   // (used by the `unioncrax://scan` flow from the website).
@@ -1387,6 +1379,10 @@ export function SettingsPage() {
         avatarUrl: data.avatarUrl ?? null,
         customAvatarUrl: data.customAvatarUrl ?? null,
         bannerUrl: data.bannerUrl ?? null,
+        avatarSource: data.avatarSource ?? null,
+        recentAvatars: Array.isArray(data.recentAvatars) ? data.recentAvatars : [],
+        recentBanners: Array.isArray(data.recentBanners) ? data.recentBanners : [],
+        oauthAvatars: Array.isArray(data.oauthAvatars) ? data.oauthAvatars : [],
         avatarCooldownActive: Boolean(data.avatarCooldownActive),
         bannerCooldownActive: Boolean(data.bannerCooldownActive),
         avatarNextChangeAt: data.avatarNextChangeAt ?? null,
@@ -1395,22 +1391,24 @@ export function SettingsPage() {
     } catch { }
   }
 
-  const handleAvatarFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    setCropKind("avatar")
-    setCropSourceFile(file)
-    setCropOpen(true)
-    if (avatarInputRef.current) avatarInputRef.current.value = ""
-  }
-
-  const handleBannerFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    setCropKind("banner")
-    setCropSourceFile(file)
-    setCropOpen(true)
-    if (bannerInputRef.current) bannerInputRef.current.value = ""
+  // Switch to a previously uploaded image or revert to an OAuth provider avatar
+  // (free — no cooldown). `fileId` picks a specific entry from history.
+  const selectProfileMedia = async (args: { source: "custom" | "discord" | "google"; kind?: "avatar" | "banner"; fileId?: number }) => {
+    setProfileUploadError(null)
+    try {
+      const res = await apiFetch("/api/account/profile-images", {
+        method: "PATCH",
+        body: JSON.stringify({ source: args.source, kind: args.kind ?? "avatar", fileId: args.fileId }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setProfileUploadError(data?.error || "Failed to update avatar.")
+        return
+      }
+      await loadProfileImages()
+    } catch {
+      setProfileUploadError("Failed to update avatar.")
+    }
   }
 
   // Routes uploads through apiUpload so the launcher uses the IPC bridge
@@ -1751,14 +1749,12 @@ export function SettingsPage() {
             <>
 
               <Card className="border-white/[.07] overflow-hidden">
-                <input ref={bannerInputRef} type="file" accept="image/*" className="hidden" onChange={handleBannerFileChange} />
-                <input ref={avatarInputRef} type="file" accept="image/*" className="hidden" onChange={handleAvatarFileChange} />
 
                 {/* Banner */}
                 <div className="relative w-full aspect-[3/1] bg-card">
                   {profileImages?.bannerUrl ? (
                     <img
-                      src={profileImages.bannerUrl}
+                      src={proxyImageUrl(profileImages.bannerUrl)}
                       alt="Profile banner"
                       className="w-full h-full object-cover"
                     />
@@ -1772,11 +1768,11 @@ export function SettingsPage() {
 
                 {/* Avatar + action row */}
                 <div className="px-5 pt-0 pb-0">
-                  <div className="flex items-end justify-between -mt-7">
-                    <div className="h-14 w-14 rounded-full border-2 border-card bg-secondary overflow-hidden flex items-center justify-center shrink-0 shadow-lg">
+                  <div className="flex items-end justify-between -mt-10 sm:-mt-14">
+                    <div className="h-20 w-20 sm:h-28 sm:w-28 rounded-2xl border-4 border-[#09090b] ring-1 ring-white/10 bg-secondary overflow-hidden flex items-center justify-center shrink-0 shadow-[0_10px_30px_rgba(0,0,0,0.5)]">
                       {profileImages?.customAvatarUrl || profileImages?.avatarUrl ? (
                         <img
-                          src={profileImages.customAvatarUrl ?? profileImages.avatarUrl ?? ""}
+                          src={proxyImageUrl(resolveCurrentAvatarUrl(profileImages) ?? "")}
                           alt="Avatar"
                           className="w-full h-full object-cover"
                         />
@@ -1911,12 +1907,11 @@ export function SettingsPage() {
                       <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Banner</p>
                       <button
                         type="button"
-                        disabled={bannerUploading || Boolean(profileImages?.bannerCooldownActive)}
-                        onClick={() => bannerInputRef.current?.click()}
+                        onClick={() => setBannerPickerOpen(true)}
                         className="relative w-full aspect-[3/1] rounded-xl overflow-hidden border border-white/[.07] bg-card flex items-center justify-center group transition-opacity disabled:opacity-50"
                       >
                         {profileImages?.bannerUrl ? (
-                          <img src={profileImages.bannerUrl} alt="Banner" className="w-full h-full object-cover" />
+                          <img src={proxyImageUrl(profileImages.bannerUrl)} alt="Banner" className="w-full h-full object-cover" />
                         ) : null}
                         <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity rounded-xl">
                           {bannerUploading ? (
@@ -1948,13 +1943,12 @@ export function SettingsPage() {
                       <div className="flex items-center gap-4">
                         <button
                           type="button"
-                          disabled={avatarUploading || Boolean(profileImages?.avatarCooldownActive)}
-                          onClick={() => avatarInputRef.current?.click()}
+                          onClick={() => setAvatarPickerOpen(true)}
                           className="relative h-16 w-16 rounded-full overflow-hidden border border-white/[.07] bg-secondary/30 flex items-center justify-center group shrink-0 transition-opacity disabled:opacity-50"
                         >
                           {profileImages?.customAvatarUrl || profileImages?.avatarUrl ? (
                             <img
-                              src={profileImages.customAvatarUrl ?? profileImages.avatarUrl ?? ""}
+                              src={proxyImageUrl(resolveCurrentAvatarUrl(profileImages) ?? "")}
                               alt="Avatar"
                               className="w-full h-full object-cover"
                             />
@@ -2022,19 +2016,31 @@ export function SettingsPage() {
                 </DialogContent>
               </Dialog>
 
-              {/* Crop dialog */}
-              <ProfileMediaCropDialog
-                open={cropOpen}
-                kind={cropKind}
-                file={cropSourceFile}
-                onOpenChange={(open) => {
-                  setCropOpen(open)
-                  if (!open) setCropSourceFile(null)
-                }}
-                onApply={(file) => {
-                  if (cropKind === "avatar") void doAvatarUpload(file)
-                  else void doBannerUpload(file)
-                }}
+              {/* Avatar / banner pickers (upload + crop + recent + revert) */}
+              <AvatarPickerDialog
+                open={avatarPickerOpen}
+                onOpenChange={setAvatarPickerOpen}
+                kind="avatar"
+                images={profileImages ?? EMPTY_PROFILE_IMAGES}
+                currentUrl={resolveCurrentAvatarUrl(profileImages)}
+                busy={avatarUploading}
+                cooldownActive={Boolean(profileImages?.avatarCooldownActive)}
+                nextChangeAt={profileImages?.avatarNextChangeAt ?? null}
+                onUpload={(file) => doAvatarUpload(file)}
+                onSelectRecent={(fileId) => selectProfileMedia({ source: "custom", kind: "avatar", fileId })}
+                onSelectOAuth={(source) => selectProfileMedia({ source: source as "discord" | "google", kind: "avatar" })}
+              />
+              <AvatarPickerDialog
+                open={bannerPickerOpen}
+                onOpenChange={setBannerPickerOpen}
+                kind="banner"
+                images={profileImages ?? EMPTY_PROFILE_IMAGES}
+                currentUrl={profileImages?.bannerUrl ?? null}
+                busy={bannerUploading}
+                cooldownActive={Boolean(profileImages?.bannerCooldownActive)}
+                nextChangeAt={profileImages?.bannerNextChangeAt ?? null}
+                onUpload={(file) => doBannerUpload(file)}
+                onSelectRecent={(fileId) => selectProfileMedia({ source: "custom", kind: "banner", fileId })}
               />
 
               {showAccountControls && (

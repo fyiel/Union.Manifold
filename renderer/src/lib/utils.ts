@@ -161,6 +161,11 @@ const PUBLIC_IMAGE_HOST_SUFFIXES = [
   "discordapp.com",
   "discordapp.net",
   "discord.com",
+  // Google account avatars (OAuth sign-in). Without this, googleusercontent
+  // URLs were returned raw and hot-linked from the renderer, which fails where
+  // direct third-party fetches are blocked — routing them through the mirror's
+  // /api/image-proxy (which already allowlists googleusercontent) fixes it.
+  "googleusercontent.com",
   "githubusercontent.com",
   "scdn.co",
 ]
