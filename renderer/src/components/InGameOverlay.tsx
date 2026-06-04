@@ -633,7 +633,7 @@ export function InGameOverlay() {
                   <span className="text-sm font-medium text-muted-foreground">No games running</span>
                 </div>
                 <p className="mt-0.5 text-[11px] text-muted-foreground/60">
-                  Launch a game to start a session.
+                  Stale overlay state — launch a game to start a session.
                 </p>
               </section>
             )}
