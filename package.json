@@ -23,10 +23,12 @@
     "build:renderer": "vite build --config renderer/vite.config.ts",
     "build:electron": "node ./scripts/build-electron.cjs",
     "fetch-gcpad": "node ./scripts/fetch-gcpad.cjs",
-    "pack": "pnpm -s fetch-gcpad && pnpm -s build && electron-builder",
+    "fetch-aria2": "node ./scripts/fetch-aria2.cjs",
+    "fetch-aria2:all": "node ./scripts/fetch-aria2.cjs --all",
+    "pack": "pnpm -s fetch-gcpad && pnpm -s fetch-aria2:all && pnpm -s build && electron-builder",
     "release:version": "node ./scripts/release-version.cjs",
     "rebuild-native": "node scripts/rebuild-native.cjs",
-    "postinstall": "pnpm rebuild-native"
+    "postinstall": "pnpm rebuild-native || echo 'Native overlay addon build skipped (install C++ build tools to enable)' && node ./scripts/fetch-aria2.cjs"
   },
   "dependencies": {
     "7zip-bin": "^5.0.0",
@@ -105,7 +107,8 @@
     ],
     "asarUnpack": [
       "node_modules/7zip-bin",
-      "electron/native/build/**/*"
+      "electron/native/build/**/*",
+      "assets/bin/aria2/**"
     ],
     "protocols": [
       {
@@ -117,6 +120,9 @@
     ],
     "win": {
       "icon": "assets/icon.ico",
+      "files": [
+        "!assets/bin/aria2/linux-*/**"
+      ],
       "target": [
         "nsis",
         "portable",
@@ -147,6 +153,9 @@
       "uninstallerIcon": "assets/icon.ico"
     },
     "linux": {
+      "files": [
+        "!assets/bin/aria2/win32-*/**"
+      ],
       "target": [
         "AppImage",
         "tar.gz"
