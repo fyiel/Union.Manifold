@@ -1,17 +1,12 @@
 import { Outlet, useLocation, useNavigate, useNavigationType } from "react-router-dom"
 import type { CSSProperties } from "react"
-import { Suspense, useEffect, useRef, useState } from "react"
+import { lazy, Suspense, useEffect, useRef, useState } from "react"
 import { DownBar } from "@/components/DownBar"
 import { Sidebar } from "@/components/Sidebar"
 import { TopBar } from "@/components/TopBar"
 import { CustomTooltipManager } from "@/components/CustomTooltipManager"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import ScrollProgress from "@/components/ScrollProgress"
-import { UpdateNotification } from "@/components/UpdateNotification"
-import { KeyboardShortcutsDialog } from "@/components/KeyboardShortcutsDialog"
-import { ArchiveDropZone } from "@/components/ArchiveDropZone"
-import { WhatsNewModal } from "@/components/WhatsNewModal"
-import { OnboardingModal } from "@/components/OnboardingModal"
 import { useDiscordRpcPresence } from "@/hooks/use-discord-rpc"
 import { useAppPreferencesSync } from "@/hooks/use-app-preferences-sync"
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts"
@@ -21,12 +16,18 @@ import { usePresenceHeartbeat } from "@/hooks/use-presence-heartbeat"
 import { useInstalledGamesSync } from "@/hooks/use-installed-games-sync"
 import { logger } from "@/lib/logger"
 import { cn } from "@/lib/utils"
-import { LogSharingConsentModal } from "@/components/LogSharingConsentModal"
-import { WindowsDefenderPromptModal } from "@/components/WindowsDefenderPromptModal"
-import { LoginPromptModal } from "@/components/LoginPromptModal"
 import { getApiBaseUrl } from "@/lib/api"
 import { useAuth } from "@/hooks/useAuth"
 import { useHasRunningGames } from "@/hooks/use-running-games"
+
+const UpdateNotification = lazy(() => import("@/components/UpdateNotification").then((m) => ({ default: m.UpdateNotification })))
+const KeyboardShortcutsDialog = lazy(() => import("@/components/KeyboardShortcutsDialog").then((m) => ({ default: m.KeyboardShortcutsDialog })))
+const ArchiveDropZone = lazy(() => import("@/components/ArchiveDropZone").then((m) => ({ default: m.ArchiveDropZone })))
+const WhatsNewModal = lazy(() => import("@/components/WhatsNewModal").then((m) => ({ default: m.WhatsNewModal })))
+const OnboardingModal = lazy(() => import("@/components/OnboardingModal").then((m) => ({ default: m.OnboardingModal })))
+const LogSharingConsentModal = lazy(() => import("@/components/LogSharingConsentModal").then((m) => ({ default: m.LogSharingConsentModal })))
+const WindowsDefenderPromptModal = lazy(() => import("@/components/WindowsDefenderPromptModal").then((m) => ({ default: m.WindowsDefenderPromptModal })))
+const LoginPromptModal = lazy(() => import("@/components/LoginPromptModal").then((m) => ({ default: m.LoginPromptModal })))
 
 export function AppLayout() {
   useDiscordRpcPresence()
@@ -390,55 +391,59 @@ export function AppLayout() {
             </div>
           </ScrollArea>
           <DownBar />
-          <UpdateNotification />
+          <Suspense fallback={null}>
+            <UpdateNotification />
+          </Suspense>
         </div>
       </div>
-      <KeyboardShortcutsDialog />
-      <ArchiveDropZone />
-      <WhatsNewModal />
-      <OnboardingModal />
-      <LogSharingConsentModal
-        open={logConsentOpen}
-        onAccept={async () => {
-          setLogConsentOpen(false)
-          autoShareEnabledRef.current = true
-          try { await window.ucSettings?.set?.('autoShareErrorLogs', true) } catch {}
-        }}
-        onDecline={async () => {
-          setLogConsentOpen(false)
-          autoShareEnabledRef.current = false
-          try { await window.ucSettings?.set?.('autoShareErrorLogs', false) } catch {}
-        }}
-      />
-      <WindowsDefenderPromptModal
-        open={defenderPromptOpen}
-        downloadPath={defenderPromptPath}
-        onOpenSecurity={() => {
-          void (async () => {
-            const primary = await window.ucSystem?.openExternal?.('windowsdefender://threatsettings/')
-            if (!primary?.ok) {
-              await window.ucSystem?.openExternal?.('ms-settings:windowsdefender')
-            }
-          })()
-        }}
-        onDismiss={() => {
-          void dismissDefenderPrompt()
-        }}
-        onOpenFolder={() => {
-          void (async () => {
-            if (defenderPromptPath) {
-              try { await window.ucDownloads?.openPath?.(defenderPromptPath) } catch {}
-            }
-            await dismissDefenderPrompt()
-          })()
-        }}
-      />
-      <LoginPromptModal
-        open={loginPromptOpen}
-        signingIn={loginPromptSigningIn}
-        onSignIn={() => { void handleLoginPromptSignIn() }}
-        onSkip={() => { void dismissLoginPrompt() }}
-      />
+      <Suspense fallback={null}>
+        <KeyboardShortcutsDialog />
+        <ArchiveDropZone />
+        <WhatsNewModal />
+        <OnboardingModal />
+        <LogSharingConsentModal
+          open={logConsentOpen}
+          onAccept={async () => {
+            setLogConsentOpen(false)
+            autoShareEnabledRef.current = true
+            try { await window.ucSettings?.set?.('autoShareErrorLogs', true) } catch {}
+          }}
+          onDecline={async () => {
+            setLogConsentOpen(false)
+            autoShareEnabledRef.current = false
+            try { await window.ucSettings?.set?.('autoShareErrorLogs', false) } catch {}
+          }}
+        />
+        <WindowsDefenderPromptModal
+          open={defenderPromptOpen}
+          downloadPath={defenderPromptPath}
+          onOpenSecurity={() => {
+            void (async () => {
+              const primary = await window.ucSystem?.openExternal?.('windowsdefender://threatsettings/')
+              if (!primary?.ok) {
+                await window.ucSystem?.openExternal?.('ms-settings:windowsdefender')
+              }
+            })()
+          }}
+          onDismiss={() => {
+            void dismissDefenderPrompt()
+          }}
+          onOpenFolder={() => {
+            void (async () => {
+              if (defenderPromptPath) {
+                try { await window.ucDownloads?.openPath?.(defenderPromptPath) } catch {}
+              }
+              await dismissDefenderPrompt()
+            })()
+          }}
+        />
+        <LoginPromptModal
+          open={loginPromptOpen}
+          signingIn={loginPromptSigningIn}
+          onSignIn={() => { void handleLoginPromptSignIn() }}
+          onSkip={() => { void dismissLoginPrompt() }}
+        />
+      </Suspense>
       <CustomTooltipManager />
     </div>
   )

@@ -280,6 +280,10 @@ class DownloadEngine extends EventEmitter {
       safeUnlink(dl.savePath)
       safeUnlink(dl.savePath + '.crdownload')
       safeUnlink(dl.savePath + RESUME_BACKUP_EXT)
+      // Also remove aria2's segment control file. Without this, a future
+      // download of the same file would resume against stale .aria2 control
+      // data describing a file we just deleted, producing a corrupt result.
+      safeUnlink(dl.savePath + '.aria2')
     }
 
     dl.status = 'cancelled'
@@ -498,46 +502,57 @@ class DownloadEngine extends EventEmitter {
 
   async _pollAria2() {
     if (!this.aria2 || !this.aria2.isReady()) return
-    // Snapshot the gids we currently track so concurrent mutation is safe.
-    const entries = []
-    for (const dl of this.byId.values()) {
-      if (dl._gid && dl.status !== 'completed' && dl.status !== 'failed' && dl.status !== 'cancelled') {
-        entries.push(dl)
+    // Re-entrancy guard: the driving setInterval fires every 700ms regardless of
+    // whether the previous (async) poll finished. Under RPC latency or many
+    // concurrent gids a tick can exceed 700ms; overlapping ticks would issue
+    // concurrent tellStatus calls and race manifest writes / double-fire
+    // completion (_finishAria2) for the same gid. Skip if a poll is in flight.
+    if (this._polling) return
+    this._polling = true
+    try {
+      // Snapshot the gids we currently track so concurrent mutation is safe.
+      const entries = []
+      for (const dl of this.byId.values()) {
+        if (dl._gid && dl.status !== 'completed' && dl.status !== 'failed' && dl.status !== 'cancelled') {
+          entries.push(dl)
+        }
       }
-    }
-    if (entries.length === 0) { this._stopAria2PollerIfIdle(); return }
-    for (const dl of entries) {
-      let status
-      try {
-        status = await this.aria2.tellStatus(dl._gid)
-      } catch (err) {
-        // Transient RPC hiccup — leave state as-is and try again next tick.
-        continue
-      }
-      const completed = Number(status.completedLength) || 0
-      const total = Number(status.totalLength) || 0
-      const speed = Number(status.downloadSpeed) || 0
-      if (total > 0) dl.totalBytes = total
-      if (completed > 0) dl.receivedBytes = completed
+      if (entries.length === 0) { this._stopAria2PollerIfIdle(); return }
+      for (const dl of entries) {
+        let status
+        try {
+          status = await this.aria2.tellStatus(dl._gid)
+        } catch (err) {
+          // Transient RPC hiccup — leave state as-is and try again next tick.
+          continue
+        }
+        const completed = Number(status.completedLength) || 0
+        const total = Number(status.totalLength) || 0
+        const speed = Number(status.downloadSpeed) || 0
+        if (total > 0) dl.totalBytes = total
+        if (completed > 0) dl.receivedBytes = completed
 
-      if (status.status === 'complete') {
-        this._finishAria2(dl, 'complete')
-      } else if (status.status === 'error') {
-        const msg = status.errorMessage || `aria2 error ${status.errorCode || ''}`.trim()
-        this._finishAria2(dl, 'error', msg)
-      } else if (status.status === 'removed') {
-        // We initiated this via cancel(); cleanup already handled there.
-        this._gidToId.delete(dl._gid)
-        dl._gid = null
-      } else {
-        // active / waiting / paused
-        dl.status = status.status === 'paused' ? 'paused' : 'downloading'
-        dl.speedBps = dl.status === 'paused' ? 0 : speed
-        const remaining = total > 0 ? Math.max(0, total - completed) : 0
-        dl.etaSeconds = speed > 0 && remaining > 0 ? Math.round(remaining / speed) : null
-        this.emit('update', this._publicView(dl))
-        this._writeManifestSnapshotThrottled(dl)
+        if (status.status === 'complete') {
+          this._finishAria2(dl, 'complete')
+        } else if (status.status === 'error') {
+          const msg = status.errorMessage || `aria2 error ${status.errorCode || ''}`.trim()
+          this._finishAria2(dl, 'error', msg)
+        } else if (status.status === 'removed') {
+          // We initiated this via cancel(); cleanup already handled there.
+          this._gidToId.delete(dl._gid)
+          dl._gid = null
+        } else {
+          // active / waiting / paused
+          dl.status = status.status === 'paused' ? 'paused' : 'downloading'
+          dl.speedBps = dl.status === 'paused' ? 0 : speed
+          const remaining = total > 0 ? Math.max(0, total - completed) : 0
+          dl.etaSeconds = speed > 0 && remaining > 0 ? Math.round(remaining / speed) : null
+          this.emit('update', this._publicView(dl))
+          this._writeManifestSnapshotThrottled(dl)
+        }
       }
+    } finally {
+      this._polling = false
     }
   }
 
@@ -641,11 +656,18 @@ class DownloadEngine extends EventEmitter {
         host: 'ucfiles',
         updatedAt: Date.now(),
       }
-      // Atomic-ish write.
+      // Atomic write: temp file + rename. The previous direct-overwrite fallback
+      // on rename failure reintroduced exactly the torn-write corruption the
+      // temp+rename was meant to prevent. If the rename fails, leave the
+      // existing manifest intact (a stale-but-valid manifest is recoverable; a
+      // half-written one is not) and clean up the temp file.
       const tmp = manifestPath + '.tmp'
       fs.writeFileSync(tmp, JSON.stringify(manifest, null, 2))
-      try { fs.renameSync(tmp, manifestPath) } catch {
-        try { fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2)) } catch { /* ignore */ }
+      try {
+        fs.renameSync(tmp, manifestPath)
+      } catch (renameErr) {
+        try { fs.unlinkSync(tmp) } catch { /* ignore */ }
+        this.log('warn', `[engine] manifest rename failed for ${dl.id}: ${renameErr?.message || renameErr}`)
       }
     } catch (err) {
       this.log('warn', `[engine] manifest write failed for ${dl.id}: ${err?.message || err}`)

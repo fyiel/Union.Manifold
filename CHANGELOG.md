@@ -1,4 +1,52 @@
 # Changelog
+
+## v2.6.1 — Performance & Manifest Stability
+
+A comprehensive sweep addressing performance regressions, manifest corruption risk, and child-process lifecycle issues.
+
+### Catalog & Game Data
+
+- **Fixed: full catalog was re-downloaded and re-normalized on every online/offline flip.** The 6-hour TTL on `/api/games` was imported but never checked; `shouldRefreshGames` was hardwired to `connectivity.isOnline`. The entire catalog and all game entries were re-normalized (regex extraction, NFD, searchText) on every online transition and page mount. Now correctly gates on `isCatalogGamesStale()`, matching the stats TTL already in place. This alone cuts catalog churn by ~99% on the home screen.
+- **Fixed: catalog games were normalized twice on every persist.** `persistCatalogCache` pre-normalized games, then `setCatalogCache` normalized the same array again — expensive regex work (developer extraction, NFD searchText, spreads) running 2× per game per save. Now normalizes once. Combined with the TTL fix, main-thread catalog work drops ~95%.
+
+### Manifests & Storage
+
+- **Fixed: installed.json could be corrupted on crash mid-write.** `uc_writeJsonSync` overwrote the live file directly; a crash/power-loss/full-disk mid-write left a truncated manifest → game vanishes from library or loses saved executable path. All manifest writes now use atomic temp-file + rename. Same fix applied to the download engine's manifest snapshots. Plus: removed the torn-write fallback (direct overwrite on rename failure) that re-introduced corruption.
+- **Fixed: storage reservation over-counted during extraction.** `markExtracting()` was exported but never called, so every reservation held `downloadBytes + extractBytes` for its entire lifetime and falsely rejected concurrent downloads as out-of-space. Now wired at extraction start (both pipeline paths). Reservation space is correctly freed once the archive is on disk.
+
+### Download Engine & Child Processes
+
+- **Fixed: the aria2 daemon could be orphaned on app quit.** `stop()` relied on a post-quit `setTimeout(1500)` kill that Electron's `will-quit` never keeps alive. The daemon kept writing to disk and holding the RPC port. Now kills deterministically via `taskkill /T /F` on Windows (`spawnSync`, not async) and `SIGTERM` on Unix.
+- **Fixed: overlapping poll ticks could race manifest writes and double-fire completion.** The 700ms `_pollAria2` interval fired regardless of whether the previous async poll finished. Under RPC latency, ticks overlapped, issuing concurrent `tellStatus` calls and corrupting the manifest via simultaneous writes. Added re-entrancy guard: the poller skips if a tick is in-flight.
+- **Fixed: cancelled downloads left stale aria2 control files.** `cancel()` deleted the partial + `.crdownload` + resume backup but not the `.aria2 control file`, so a re-download resumed against stale segmented-download metadata and produced a corrupt file. Now also deletes the control file.
+- **Fixed: an unhandled error could crash the main process.** `terminateChildProcess` spawned `taskkill` with no `error` listener. If the binary wasn't launchable (e.g. not on PATH in a stripped environment), an unhandled `error` event hard-crashed the main process. Added the listener + fallback kill.
+
+### Image & Resource Loading
+
+- **Fixed: the image-failure cache used O(n log n) eviction on a hot path.** Every `<img>` onError during a CDN outage called `Array.from(cache.entries()).sort()` to drop the oldest entries. Now uses the Map's insertion-order iterator — O(n) and negligible on a 1024-entry cache.
+- **Fixed: uc-local:// image serving blocked the main thread.** The (already-async) protocol handler used `fs.existsSync` + `fs.readFileSync`, blocking the event loop on every local game image request. Now uses `fs.promises.access` + `readFile`. This unblocks the launcher UI while waiting for disk I/O during local asset loads.
+
+### React Performance & Re-renders
+
+- **Fixed: LibraryPage re-rendered ~5×/sec during any download.** The 2400-line page subscribed to the raw `downloads` array via `useDownloads()`, so every batched progress tick (200ms cadence) re-rendered the entire page and its 24-card grid. The library's download-derived logic (membership scan, failed-appids, status signatures) only needs `{appid, status}`, not byte counters. Now uses a narrow `useDownloadsSelector` with content-equality, keeping the page un-rendered except on real membership/status changes. `GameCard`'s memo is now effective.
+- **Fixed: GameDetailPage re-issued disk IPC on every download progress byte.** Two effects keyed on the raw `downloads` array re-ran `getInstalled`/`listInstalledByAppid` many times per second during active downloads. Now keys on a narrow per-appid status signature (`id:status`) string, so meaningful transitions re-trigger the effects but byte-progress ticks don't.
+- **Fixed: SearchPage filter sidebar remounted on every keystroke.** `FilterPanel` was a React component *defined inside the render body*, so its identity changed on every keystroke and the entire filter sidebar (genres + ~200 developer buttons) unmounted and remounted. Now invoked inline as `{FilterPanel()}` so it reconciles in place.
+- **Fixed: DownloadsPage running-games check issued N sequential IPC calls every 3 seconds.** With N installed games this stalled the whole polling thread. Now parallelizes with `Promise.all` + a Map lookup.
+- **Fixed: CollectionsPage re-ran expensive per-card loops on every parent render.** Membership scan, update-version check per installed appid, and cover-mosaic build recomputed for every collection card (search typing, menu toggles) even though they only depend on that collection + the stable lookup maps. Now memoized.
+
+### Search & Sorting
+
+- **Fixed: SearchPage sorted React state in place.** When no size/online filter narrowed the games array, `filtered` was the raw `games` state and `filtered.sort()` mutated React state directly. This can desync derived arrays and causes inconsistent renders. Now clones before sorting.
+- **Fixed: SearchPage random sort re-shuffled the grid when stats arrived.** The shuffle seed was `Date.now()` — so when `gameStats` landed (a separate fetch after games), the entire grid reshuffled and every card remounted. Now uses a deterministic content-derived seed, keeping the order stable across re-renders.
+
+### Download UI & Progress
+
+- **Fixed: progress flush timer could leak, allowing stale updates to fire post-unmount.** The batched-progress `setTimeout` was never cleared when the provider unmounted or the onUpdate effect re-subscribed, so a pending flush could call `setDownloads` after component unmount (silent error in dev, potential state corruption in prod). Now clears on cleanup. Also: drops stale pending progress entries when a status-changing update arrives, so a queued byte-update can't clobber newer state on the next flush.
+
+### Type Safety
+
+- **Fixed: 3 pre-existing TypeScript errors in DownloadsPage.** The `primaryStatsRef` type was missing the `phase` field (it was hand-written and had drifted from `computeGroupStats`'s return shape), producing `TS2339` errors on every `stats.phase` read. Now derives the ref type from `computeGroupStats` so it stays in sync.
+
 ## v2.6.0 - Launch Reliability
 
 ### Game launching

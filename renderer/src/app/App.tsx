@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from "react"
 import { HashRouter, Route, Routes, Navigate } from "react-router-dom"
 import { AppLayout } from "@/app/Layout"
-import { DownloadsProvider, useDownloads } from "@/context/downloads-context"
+import { DownloadsProvider, useDownloadsSelector } from "@/context/downloads-context"
 import { ToastProvider } from "@/context/toast-context"
 import { AuthProvider } from "@/context/auth-context"
 import { Toaster } from "@/components/Toaster"
@@ -38,8 +38,29 @@ function RouteFallback() {
   return <div className="min-h-screen bg-background" />
 }
 
+const EXTRACTION_GUARD_EXTRACTING = ["extracting", "installing"]
+const EXTRACTION_GUARD_DOWNLOADING = ["downloading", "verifying", "retrying"]
+
 function ExtractionCloseGuard() {
-  const { downloads } = useDownloads()
+  // This guard is mounted at the app root for the whole session. Subscribing to
+  // the raw `downloads` array (useDownloads) re-rendered it ~5×/sec for every
+  // active download — pure waste, since the dialog only cares about which items
+  // are active and their status/name, never their byte counters. Use a narrow
+  // selector with content equality so a progress tick that doesn't change the
+  // active set produces no re-render.
+  const activeItems = useDownloadsSelector(
+    (downloads) =>
+      downloads
+        .filter(
+          (item) =>
+            EXTRACTION_GUARD_EXTRACTING.includes(item.status) ||
+            EXTRACTION_GUARD_DOWNLOADING.includes(item.status),
+        )
+        .map((item) => ({ id: item.id, status: item.status, gameName: item.gameName ?? null })),
+    (a, b) =>
+      a.length === b.length &&
+      a.every((x, i) => x.id === b[i].id && x.status === b[i].status && x.gameName === b[i].gameName),
+  )
   const [request, setRequest] = useState<{ mode: "quit" | "hide"; extractionCount?: number; downloadCount?: number; appids?: string[] } | null>(null)
 
   useEffect(() => {
@@ -50,12 +71,12 @@ function ExtractionCloseGuard() {
   }, [])
 
   const activeExtractions = useMemo(() => {
-    return downloads.filter((item) => ["extracting", "installing"].includes(item.status))
-  }, [downloads])
+    return activeItems.filter((item) => EXTRACTION_GUARD_EXTRACTING.includes(item.status))
+  }, [activeItems])
 
   const activeDownloads = useMemo(() => {
-    return downloads.filter((item) => ["downloading", "verifying", "retrying"].includes(item.status))
-  }, [downloads])
+    return activeItems.filter((item) => EXTRACTION_GUARD_DOWNLOADING.includes(item.status))
+  }, [activeItems])
 
   const affectedNames = useMemo(() => {
     return [...new Set([...activeDownloads, ...activeExtractions].map((item) => item.gameName).filter(Boolean))].slice(0, 3)

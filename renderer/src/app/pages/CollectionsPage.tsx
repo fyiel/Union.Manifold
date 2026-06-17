@@ -784,23 +784,30 @@ function CollectionCard({
   const isOwner = collection.role === "owner"
   const ownerName =
     collection.owner?.displayName || collection.owner?.username || "Someone"
-  const installedAppids = collection.appids.filter((id) => installedById.has(id))
-  const missingCount = collection.appids.length - installedAppids.length
-  const updateCount = installedAppids.filter((appid) => {
-    const installed = installedById.get(appid)
-    return hasInstalledVersionUpdate(catalogVersionByAppid.get(appid), [installed?.version])
-  }).length
-  // Cover mosaic: prefer installed images, fall back to catalog images for uninstalled members
-  const coverCandidates: string[] = []
-  for (const id of collection.appids) {
-    if (coverCandidates.length >= 4) break
-    const installedImg = installedById.get(id)?.image
-    if (installedImg) { coverCandidates.push(installedImg); continue }
-    const catalogGame = catalogById.get(id)
-    const catalogImg = catalogGame?.image || catalogGame?.hero_image || catalogGame?.splash
-    if (catalogImg) coverCandidates.push(catalogImg)
-  }
-  const cover = coverCandidates
+  // Memoize the per-card derived values so their loops (membership scan, the
+  // hasInstalledVersionUpdate check per installed appid, and the cover-mosaic
+  // build) don't re-run every time the parent re-renders — e.g. on every
+  // keystroke in the collections search box or whenever a menu opens. They only
+  // depend on this collection and the shared (already-memoized) lookup maps.
+  const { installedAppids, missingCount, updateCount, cover } = useMemo(() => {
+    const installedAppids = collection.appids.filter((id) => installedById.has(id))
+    const missingCount = collection.appids.length - installedAppids.length
+    const updateCount = installedAppids.filter((appid) => {
+      const installed = installedById.get(appid)
+      return hasInstalledVersionUpdate(catalogVersionByAppid.get(appid), [installed?.version])
+    }).length
+    // Cover mosaic: prefer installed images, fall back to catalog images for uninstalled members
+    const coverCandidates: string[] = []
+    for (const id of collection.appids) {
+      if (coverCandidates.length >= 4) break
+      const installedImg = installedById.get(id)?.image
+      if (installedImg) { coverCandidates.push(installedImg); continue }
+      const catalogGame = catalogById.get(id)
+      const catalogImg = catalogGame?.image || catalogGame?.hero_image || catalogGame?.splash
+      if (catalogImg) coverCandidates.push(catalogImg)
+    }
+    return { installedAppids, missingCount, updateCount, cover: coverCandidates }
+  }, [collection, installedById, catalogById, catalogVersionByAppid])
   const [menuOpen, setMenuOpen] = useState(false)
   const [contextMenu, setContextMenu] = useState<CollectionMenuPoint | null>(null)
   const menuSections = buildCollectionMenuSections({
