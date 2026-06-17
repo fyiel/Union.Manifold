@@ -69,11 +69,14 @@ export function GameVersionStatus({ appid, gameName, localVersionString, isAuthe
     }
   }
 
-  // Parse local version/build
+  // Parse local version/build — detect BETA suffix first
   let localVersion: string | null = null
   let localBuild: string | null = null
+  let isBetaVersion = false
   if (localVersionString) {
-    const v = localVersionString.trim()
+    const raw = localVersionString.trim()
+    isBetaVersion = /\s*[-–]\s*BETA\s*$/i.test(raw)
+    const v = isBetaVersion ? raw.replace(/\s*[-–]\s*BETA\s*$/i, "").trim() : raw
     const buildMatch = v.match(/^[bB](\d+)/)
     if (buildMatch) localBuild = buildMatch[1]
     else if (/^\d+/.test(v)) localBuild = v.match(/^\d+/)![0]
@@ -89,15 +92,27 @@ export function GameVersionStatus({ appid, gameName, localVersionString, isAuthe
 
   let statusText = ""
   let statusColorClass = "text-muted-foreground/80"
+  let isBetaRelease = isBetaVersion
 
   if (hasChecked) {
     if (!resolvedSteamAppId && !latestBuild) {
       statusText = "Could not find game on Steam"
       statusColorClass = "text-muted-foreground/60"
     } else if (localBuild && latestBuild) {
-      const upToDate = localBuild === latestBuild
-      statusText = upToDate ? "Game version is up to date" : "A newer build is available on Steam"
-      statusColorClass = upToDate ? "text-emerald-400" : "text-amber-400"
+      const localN = parseInt(localBuild, 10)
+      const latestN = parseInt(latestBuild, 10)
+      if (localBuild === latestBuild) {
+        statusText = "Game version is up to date"
+        statusColorClass = isBetaVersion ? "text-red-400" : "text-emerald-400"
+      } else if (!isNaN(localN) && !isNaN(latestN) && localN > latestN) {
+        // Local build is ahead of Steam — non-public beta
+        isBetaRelease = true
+        statusText = "Game version is up to date"
+        statusColorClass = "text-red-400"
+      } else {
+        statusText = "A newer build is available on Steam"
+        statusColorClass = "text-amber-400"
+      }
     } else if (localVersion && latestBuild) {
       statusText = "No BuildID stored. Version comparing disabled."
       statusColorClass = "text-sky-400"
@@ -140,8 +155,11 @@ export function GameVersionStatus({ appid, gameName, localVersionString, isAuthe
           </div>
           <div className="flex items-center justify-between">
             <span className="text-muted-foreground/80">Current Build</span>
-            <span className="font-semibold text-muted-foreground">
-              {localBuild ?? <span className="text-muted-foreground/60 italic text-xs">Not stored</span>}
+            <span className={`font-semibold ${isBetaRelease ? "text-red-400" : "text-muted-foreground"}`}>
+              {localBuild
+                ? <>{localBuild}{isBetaRelease && <span className="ml-1.5 text-[10px] font-bold uppercase tracking-wider bg-red-500/20 text-red-400 border border-red-500/30 rounded px-1 py-0.5">BETA</span>}</>
+                : <span className="text-muted-foreground/60 italic text-xs">Not stored</span>
+              }
             </span>
           </div>
           <div className="flex items-center justify-between">
@@ -180,6 +198,9 @@ export function GameVersionStatus({ appid, gameName, localVersionString, isAuthe
         {hasChecked && (
           <div className="pt-3 border-t border-white/[.07] space-y-1">
             <p className={`text-sm font-medium ${statusColorClass}`}>{statusText}</p>
+            {isBetaRelease && (
+              <p className="text-xs font-medium text-red-400">This is a non-public beta release.</p>
+            )}
             {lastChecked && (
               <p className="text-xs text-muted-foreground/60">
                 Last checked: {lastChecked.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}

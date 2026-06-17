@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react"
+import { useCallback, useEffect, useState, type ReactNode } from "react"
 import { Clock, HardDrive, Heart, Bookmark, Activity } from "lucide-react"
 import { apiFetch } from "@/lib/api"
 import { proxyImageUrl } from "@/lib/utils"
@@ -45,7 +45,7 @@ const TONE_CLASSES = {
 } as const
 type Tone = keyof typeof TONE_CLASSES
 
-function Avatar({ url, size = "h-8 w-8" }: { url: string | null; size?: string }) {
+function Avatar({ url, name, size = "h-8 w-8" }: { url: string | null; name?: string | null; size?: string }) {
   if (url) {
     return (
       <img
@@ -56,7 +56,17 @@ function Avatar({ url, size = "h-8 w-8" }: { url: string | null; size?: string }
       />
     )
   }
-  return <div className={`${size} rounded-full bg-secondary/60 border border-white/[.07] shrink-0`} />
+  const initial = (name || "?").trim().charAt(0).toUpperCase() || "?"
+  return (
+    <div
+      className={`${size} rounded-full bg-secondary/60 border border-white/[.07] shrink-0 flex items-center justify-center`}
+      style={{ containerType: "inline-size" }}
+    >
+      <span aria-hidden className="font-semibold uppercase leading-none text-muted-foreground/80" style={{ fontSize: "45cqw" }}>
+        {initial}
+      </span>
+    </div>
+  )
 }
 
 function UcPlus() {
@@ -106,7 +116,7 @@ export function GameTopPlayers({ appid, limit = 5 }: { appid: string; limit?: nu
         {players.map((player) => (
           <li key={player.userId} className="flex items-center gap-3">
             <span className="w-5 text-center text-[11px] font-bold text-muted-foreground tabular-nums">{player.rank}</span>
-            <Avatar url={player.avatarUrl} />
+            <Avatar url={player.avatarUrl} name={player.displayName || player.username} />
             <div className="min-w-0 flex-1 flex items-center gap-1.5">
               <span className="truncate text-sm font-semibold text-white">{player.displayName || player.username}</span>
               {player.ucPlus && <UcPlus />}
@@ -144,25 +154,52 @@ const ACTIVITY_META: Record<ActivityType, { label: (e: ActivityEvent) => string;
   },
 }
 
-export function GameCommunityActivity({ appid, limit = 10 }: { appid: string; limit?: number }) {
+export function GameCommunityActivity({ appid, pageSize = 10 }: { appid: string; pageSize?: number }) {
   const [events, setEvents] = useState<ActivityEvent[] | null>(null)
+  const [hasMore, setHasMore] = useState(false)
+  const [loadingMore, setLoadingMore] = useState(false)
 
+  // Reset + load the first page whenever the game changes.
   useEffect(() => {
     if (!appid) return
     let cancelled = false
+    setEvents(null)
+    setHasMore(false)
     void (async () => {
       try {
-        const res = await apiFetch(`/api/games/${encodeURIComponent(appid)}/community-activity?limit=${limit}`)
+        const res = await apiFetch(`/api/games/${encodeURIComponent(appid)}/community-activity?limit=${pageSize}&offset=0`)
         if (cancelled) return
         if (!res.ok) { setEvents([]); return }
         const data = await res.json().catch(() => null)
-        if (!cancelled) setEvents(Array.isArray(data?.events) ? data.events : [])
+        const list = Array.isArray(data?.events) ? (data.events as ActivityEvent[]) : []
+        if (!cancelled) {
+          setEvents(list)
+          setHasMore(list.length === pageSize)
+        }
       } catch {
         if (!cancelled) setEvents([])
       }
     })()
     return () => { cancelled = true }
-  }, [appid, limit])
+  }, [appid, pageSize])
+
+  // Append the next page (offset = however many we already hold).
+  const loadMore = useCallback(async () => {
+    if (loadingMore || !events) return
+    setLoadingMore(true)
+    try {
+      const res = await apiFetch(`/api/games/${encodeURIComponent(appid)}/community-activity?limit=${pageSize}&offset=${events.length}`)
+      if (!res.ok) { setHasMore(false); return }
+      const data = await res.json().catch(() => null)
+      const list = Array.isArray(data?.events) ? (data.events as ActivityEvent[]) : []
+      setEvents((prev) => [...(prev ?? []), ...list])
+      setHasMore(list.length === pageSize)
+    } catch {
+      setHasMore(false)
+    } finally {
+      setLoadingMore(false)
+    }
+  }, [appid, events, pageSize, loadingMore])
 
   if (!events || events.length === 0) return null
 
@@ -172,13 +209,13 @@ export function GameCommunityActivity({ appid, limit = 10 }: { appid: string; li
         <Activity className="h-4 w-4 text-muted-foreground/70 shrink-0" />
         <h3 className="font-black text-white tracking-tight">Community Activity</h3>
       </div>
-      <ul className="space-y-3">
+      <ul className="space-y-3 max-h-[420px] overflow-y-auto pr-1 -mr-1">
         {events.map((event, i) => {
           const meta = ACTIVITY_META[event.type]
           if (!meta) return null
           return (
             <li key={`${event.userId}-${event.type}-${i}`} className="flex items-center gap-3 min-w-0">
-              <Avatar url={event.avatarUrl} size="h-7 w-7" />
+              <Avatar url={event.avatarUrl} name={event.displayName || event.username} size="h-7 w-7" />
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
                   <span className="truncate text-sm font-semibold text-white">{event.displayName || event.username}</span>
@@ -198,6 +235,18 @@ export function GameCommunityActivity({ appid, limit = 10 }: { appid: string; li
           )
         })}
       </ul>
+      {hasMore && (
+        <div className="mt-4 flex justify-center">
+          <button
+            type="button"
+            onClick={loadMore}
+            disabled={loadingMore}
+            className="rounded-full border border-white/[.1] bg-white/[.03] px-4 py-1.5 text-[12px] font-semibold text-foreground/80 hover:bg-white/[.07] hover:text-white transition-colors disabled:opacity-60"
+          >
+            {loadingMore ? "Loading…" : "Load more"}
+          </button>
+        </div>
+      )}
     </div>
   )
 }

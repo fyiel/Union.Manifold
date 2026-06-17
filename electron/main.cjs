@@ -1844,6 +1844,10 @@ function applySettingsDefaults(settings) {
   // When sharing error logs / diagnostics, optionally include a one-line hardware
   // summary so the dev team can see what platform the issue happened on.
   if (typeof next.attachSystemProfileToLogs !== 'boolean') next.attachSystemProfileToLogs = true
+  // null = not yet asked (first failure will trigger the consent modal in renderer)
+  // true  = user opted in to automatic error log sharing
+  // false = user declined
+  if (!Object.prototype.hasOwnProperty.call(next, 'autoShareErrorLogs')) next.autoShareErrorLogs = null
   return next
 }
 
@@ -2969,6 +2973,9 @@ function getDownloadEngine() {
       ucLog(`[engine] post-complete handoff failed: ${err?.message || err}`, 'error')
     })
   })
+  _downloadEngine.on('fail', (dl) => {
+    ucLog(`Download failed: ${dl.gameName || dl.appid || dl.id} — ${dl.error || 'unknown error'} (url: ${dl.url || 'unknown'})`, 'error')
+  })
   // Attach session now if window is ready.
   if (mainWindow && !mainWindow.isDestroyed()) {
     try { _downloadEngine.attachSession(mainWindow.webContents.session) } catch { }
@@ -3554,6 +3561,25 @@ function buildAuthUrl(baseUrl, nextPath, action) {
     return null
   }
 
+// Google's OAuth consent screen refuses to render inside "embedded user-agents"
+// (it returns disallowed_useragent / "this browser or app may not be secure").
+// Electron's default UA carries `Electron/<ver>` and the app name token, which
+// trip that heuristic — so Google sign-in fails in the auth window while Discord
+// works. Stripping those tokens leaves a plain Chrome UA the provider accepts.
+function applyBrowserLikeUserAgent(win) {
+  try {
+    const baseUa = win.webContents.getUserAgent()
+    const cleanUa = baseUa
+      .replace(/\s*UnionCrax\.Direct\/\S+/gi, '')
+      .replace(/\s*Electron\/\S+/gi, '')
+      .replace(/\s{2,}/g, ' ')
+      .trim()
+    if (cleanUa && cleanUa !== baseUa) {
+      win.webContents.setUserAgent(cleanUa)
+    }
+  } catch { }
+}
+
 function openAuthWindow(parent, url) {
   return new Promise((resolve) => {
     let settled = false
@@ -3602,11 +3628,13 @@ function openAuthWindow(parent, url) {
 
     authWin.webContents.on('did-navigate', (_event, nextUrl) => handleUrl(nextUrl))
     authWin.webContents.on('did-redirect-navigation', (_event, nextUrl) => handleUrl(nextUrl))
+    authWin.webContents.on('did-navigate-in-page', (_event, nextUrl) => handleUrl(nextUrl))
     authWin.webContents.on('did-fail-load', () => finish({ ok: false, error: 'load_failed' }))
     authWin.webContents.on('render-process-gone', () => finish({ ok: false, error: 'render_gone' }))
     authWin.once('ready-to-show', () => authWin.show())
     authWin.on('closed', () => finish({ ok: false, error: 'closed' }))
 
+    applyBrowserLikeUserAgent(authWin)
     authWin.loadURL(url)
   })
 }
@@ -4273,6 +4301,12 @@ ipcMain.handle('uc:setting-clear-all', () => {
     refreshOperationPowerSaveBlocker()
     // Clear the log file so the share-logs popup starts fresh
     clearLogs()
+    // Remove the desktop shortcuts this app generated. Saved exe paths and all
+    // other per-game keys (gameExe:*, shortcutAsked:*, gameLaunchArgs, library
+    // meta) live in settings.json and were already wiped by writeSettings(defaults)
+    // above — but the .lnk/.desktop files on the desktop are separate artifacts
+    // and would otherwise survive a "reset", so clear them here too.
+    const shortcutsRemoved = clearAllDesktopShortcuts()
     // broadcast to all renderer windows that settings were cleared
     for (const w of BrowserWindow.getAllWindows()) {
       if (w && !w.isDestroyed()) {
@@ -4280,7 +4314,7 @@ ipcMain.handle('uc:setting-clear-all', () => {
       }
     }
     ucLog('User data cleared successfully')
-    return { ok: true }
+    return { ok: true, shortcutsRemoved }
   } catch (err) {
     console.error('[UC] Failed to clear settings', err)
     ucLog(`Failed to clear user data: ${err.message}`, 'error')
@@ -4687,9 +4721,14 @@ function openWebsiteLoginWindow(parent, baseUrl) {
   return new Promise((resolve) => {
     let settled = false
     let win = null
+    let pollTimer = null
     const finish = (payload) => {
       if (settled) return
       settled = true
+      if (pollTimer) {
+        try { clearInterval(pollTimer) } catch { }
+        pollTimer = null
+      }
       try {
         if (win && !win.isDestroyed()) {
           setTimeout(() => {
@@ -4752,6 +4791,13 @@ function openWebsiteLoginWindow(parent, baseUrl) {
 
     win.webContents.on('did-navigate', (_event, nextUrl) => handleUrl(nextUrl))
     win.webContents.on('did-redirect-navigation', (_event, nextUrl) => handleUrl(nextUrl))
+    // Email/password login finishes with a client-side `router.push('/direct/continue')`,
+    // which Electron reports as an in-page (same-document) navigation rather than
+    // `did-navigate`. Without this listener the desktop never noticed email logins.
+    win.webContents.on('did-navigate-in-page', (_event, nextUrl, isMainFrame) => {
+      if (isMainFrame === false) return
+      handleUrl(nextUrl)
+    })
     win.webContents.on('did-fail-load', (_event, errorCode, _errorDesc, validatedUrl, isMainFrame) => {
       if (!isMainFrame) return
       // -3 = ABORTED (common during redirects); ignore.
@@ -4762,9 +4808,20 @@ function openWebsiteLoginWindow(parent, baseUrl) {
     win.webContents.on('render-process-gone', () => finish({ ok: false, error: 'render_gone' }))
     win.once('ready-to-show', () => {
       try { win.show() } catch { }
+      // Catch-all: poll the session while the window is open so any sign-in path
+      // (email, Discord, Google) is detected even if its final navigation event
+      // doesn't fire the way we expect. Cleared by finish().
+      if (!pollTimer) {
+        pollTimer = setInterval(async () => {
+          if (settled) return
+          const user = await verifySession()
+          if (user) finish({ ok: true, user })
+        }, 1500)
+      }
     })
     win.on('closed', () => finish({ ok: false, error: 'cancelled' }))
 
+    applyBrowserLikeUserAgent(win)
     win.loadURL(loginUrl)
   })
 }
@@ -4988,6 +5045,11 @@ function* iterateGameFolders(root) {
   try { entries = fs.readdirSync(root, { withFileTypes: true }) } catch { return }
   for (const dirent of entries) {
     if (!dirent.isDirectory()) continue
+    // Skip pre-update backup folders. These are renamed copies of the previous
+    // install kept only so an update can be rolled back on failure — they still
+    // contain a manifest with this appid, so counting them as a real game folder
+    // makes the installed list report a stale "second" version of the game.
+    if (dirent.name.endsWith(UC_UPDATE_BACKUP_SUFFIX)) continue
     const folder = path.join(root, dirent.name)
     yield { folder, name: dirent.name }
   }
@@ -8264,7 +8326,8 @@ function sendDownloadUpdate(win, payload) {
     const settings = readSettings() || {}
     if (settings.verboseDownloadLogging) {
       // Opt-in firehose: one line per tick, for debugging download issues.
-      ucLog(`[Download] ${payload.downloadId} | ${payload.status} | ${payload.receivedBytes || 0}/${payload.totalBytes || 0} | ${Math.round(payload.speedBps || 0)} B/s | ${payload.filename || ''}`)
+      const _vLevel = payload.status === 'failed' ? 'error' : 'info'
+      ucLog(`[Download] ${payload.downloadId} | ${payload.status}${payload.error ? ' (' + payload.error + ')' : ''} | ${payload.receivedBytes || 0}/${payload.totalBytes || 0} | ${Math.round(payload.speedBps || 0)} B/s | ${payload.filename || ''}`, _vLevel)
     } else if (payload.downloadId && lastLoggedDownloadStatus.get(payload.downloadId) !== payload.status) {
       // Default: log only when the status actually changes. Progress ticks
       // (downloading / extracting / verifying / …) no longer each hit the log.
@@ -10231,6 +10294,17 @@ ipcMain.handle('uc:download-cancel', (_event, downloadId) => {
     if (engine && engine.byId.has(downloadId)) {
       engine.cancel(downloadId)
       try { storageReservation.release(downloadId) } catch { }
+      // Also stop any Chromium legacy download using the same id. This happens
+      // when aria2 failed and the retry went through the legacy (smart-start)
+      // path — the engine still owns the id but the actual bytes are being pumped
+      // by a Chromium DownloadItem. Without this, cancel() only updates the
+      // engine's internal state but the Chromium download keeps running,
+      // causing repeated "downloading" updates that re-create the item in the UI.
+      const legacyEntry = activeDownloads.get(downloadId)
+      if (legacyEntry) {
+        try { legacyEntry.item.cancel() } catch { /* ignore */ }
+        activeDownloads.delete(downloadId)
+      }
       return { ok: true, engine: true }
     }
   } catch (err) {
@@ -10480,68 +10554,32 @@ ipcMain.handle('uc:download-resume', (event, downloadId) => {
   return { ok: true }
 })
 
-ipcMain.handle('uc:download-resume-interrupted', (event, payload) => {
-  const win = BrowserWindow.fromWebContents(event.sender)
-  if (!win || win.isDestroyed()) return { ok: false }
-  if (!payload || !payload.resumeData) return { ok: false, error: 'missing-resume-data' }
-  const resume = payload.resumeData || {}
-  const savePath = resume.savePath || payload.savePath
-  // Attempt to restore the partial file if Chromium deleted it during a previous quit
-  if (!savePath || !restorePreservedFile(savePath)) return { ok: false, error: 'missing-file' }
-  const urlChain = Array.isArray(resume.urlChain) && resume.urlChain.length
-    ? resume.urlChain
-    : payload.url
-      ? [payload.url]
-      : []
-  if (!urlChain.length) return { ok: false, error: 'missing-url' }
-
-  // Register auth header for pixeldrain authenticated downloads
-  if (payload.authHeader && urlChain[0] && urlChain[0].includes('pixeldrain.com')) {
-    const fileId = extractPixeldrainFileIdFromUrl(urlChain[0])
-    if (fileId) pixeldrainAuthHeaders.set(fileId, payload.authHeader)
-  }
-
-  pendingDownloads.push({
-    url: urlChain[0],
-    downloadId: payload.downloadId,
-    filename: payload.filename || path.basename(savePath),
-    appid: payload.appid,
-    gameName: payload.gameName,
-    partIndex: payload.partIndex,
-    partTotal: payload.partTotal,
-    urlChain,
-    authHeader: payload.authHeader,
-    savePath
-  })
-
-  // Use the actual file size on disk as the offset - the stored resumeData.offset
-  // can be stale if the app was closed before localStorage caught up to the actual
-  // bytes written to disk (updates arrive ~1/sec, disk writes are continuous).
-  let actualOffset = resume.offset || 0
+ipcMain.handle('uc:download-resume-interrupted', (_event, payload) => {
+  // The Chromium createInterruptedDownload path has been removed — all downloads go
+  // through the aria2 engine which resumes natively from disk via --continue.
+  if (!payload || !payload.downloadId) return { ok: false, error: 'invalid-payload' }
   try {
-    const stat = fs.statSync(savePath)
-    if (stat.size > 0) {
-      if (stat.size !== actualOffset) {
-        ucLog(`resume-interrupted: correcting offset ${actualOffset} → ${stat.size} (actual file size)`, 'info')
-      }
-      actualOffset = stat.size
+    const engine = getDownloadEngine()
+    if (engine.byId.has(payload.downloadId)) {
+      const ok = engine.resume(payload.downloadId)
+      return { ok, engine: true }
     }
-  } catch { }
-
-  try {
-    win.webContents.session.createInterruptedDownload({
-      path: savePath,
-      urlChain,
-      mimeType: resume.mimeType || '',
-      offset: actualOffset,
-      length: resume.totalBytes || 0,
-      lastModified: resume.lastModified || '',
-      eTag: resume.etag || '',
-      startTime: resume.startTime || 0
+    // Not in the engine yet — enqueue it; engine picks up the on-disk partial automatically.
+    const url = (Array.isArray(payload.resumeData?.urlChain) && payload.resumeData.urlChain[0])
+      ? payload.resumeData.urlChain[0]
+      : (typeof payload.url === 'string' ? payload.url : null)
+    if (!url) return { ok: false, error: 'missing-url' }
+    engine.enqueue({
+      id: payload.downloadId,
+      appid: payload.appid,
+      gameName: payload.gameName,
+      url,
+      filename: payload.filename,
+      totalBytes: payload.resumeData?.totalBytes || payload.totalBytes,
     })
-    return { ok: true, actualOffset }
-  } catch (e) {
-    return { ok: false, error: String(e) }
+    return { ok: true, engine: true }
+  } catch (err) {
+    return { ok: false, error: String(err?.message || err) }
   }
 })
 
@@ -10619,252 +10657,35 @@ ipcMain.handle('uc:download-resume-with-fresh-url', (event, payload) => {
       return { ok: true, actualOffset, engine: true }
     }
   } catch (err) {
-    ucLog(`[engine] resume-with-fresh-url adoption failed, falling back to legacy: ${err?.message || err}`, 'warn')
-  }
-
-  const savePath = payload.savePath
-  // Attempt to restore the partial file if Chromium deleted it during a previous quit
-  if (!savePath || !restorePreservedFile(savePath)) {
-    // No partial file on disk - caller should fall back to a from-scratch download
-    return { ok: false, error: 'missing-file' }
-  }
-
-  let actualOffset = 0
-  try {
-    const stat = fs.statSync(savePath)
-    actualOffset = stat.size
-  } catch { }
-
-  if (actualOffset <= 0) {
-    return { ok: false, error: 'empty-file' }
-  }
-
-  // UC.Files now uses Electron's downloader (no chunk preallocation), so a
-  // file at >= totalBytes really is complete. The legacy parallel-engine
-  // handoff was removed when UC.Files switched to Backblaze-backed links.
-  if (payload.totalBytes && actualOffset >= payload.totalBytes) {
-    ucLog(`resume-with-fresh-url: file already complete (offset=${actualOffset}, totalBytes=${payload.totalBytes}), skipping re-download`, 'info')
-    return { ok: false, error: 'file-already-complete' }
-  }
-
-  ucLog(`resume-with-fresh-url: downloadId=${payload.downloadId} url=${payload.url} offset=${actualOffset} savePath=${savePath}`, 'info')
-
-  pendingDownloads.push({
-    url: payload.url,
-    normalizedUrl: normalizeDownloadUrl(payload.url),
-    downloadId: payload.downloadId,
-    filename: payload.filename || path.basename(savePath),
-    appid: payload.appid,
-    gameName: payload.gameName,
-    partIndex: payload.partIndex,
-    partTotal: payload.partTotal,
-    authHeader: payload.authHeader,
-    savePath,
-    urlChain: [payload.url]
-  })
-
-  try {
-    // Use createInterruptedDownload with the fresh URL. We intentionally pass empty
-    // eTag/lastModified because this is a brand-new URL - stale metadata from the
-    // original session would cause the server to reject the Range request.
-    win.webContents.session.createInterruptedDownload({
-      path: savePath,
-      urlChain: [payload.url],
-      mimeType: '',
-      offset: actualOffset,
-      length: payload.totalBytes || 0,
-      lastModified: '',
-      eTag: '',
-      startTime: Date.now()
-    })
-    return { ok: true, actualOffset }
-  } catch (e) {
-    return { ok: false, error: String(e) }
+    ucLog(`[engine] resume-with-fresh-url adoption failed: ${err?.message || err}`, 'error')
+    return { ok: false, error: String(err?.message || err) }
   }
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
-// New simplified smart-start: a single IPC the renderer calls with a fresh url
-// to either resume from disk or start from scratch. Replaces the renderer-side
-// 3-level resume cascade. The main process is the single source of truth for
-// what's on disk and whether resume is possible.
+// smart-start: all downloads go through the aria2 engine — enqueue handles
+// on-disk partial detection and resume automatically via --continue.
 //
 // Payload: { appid, downloadId, gameName, url, filename, totalBytes? }
-// Returns: { ok, resumed: boolean, actualOffset?: number, savePath?: string, error?: string }
-//
-// Behaviour:
-//  1. Resolve the target savePath (installing/<folder>/<filename>).
-//  2. Scan the installing folder for any partial: live file, .crdownload, or
-//     the .ucresume hardlink we preserve on graceful quit.
-//  3. If a partial exists → rename to canonical savePath and createInterruptedDownload
-//     from its size. If complete → return file-already-complete.
-//  4. If no partial → regular downloadURL fresh start.
-// ─────────────────────────────────────────────────────────────────────────────
-ipcMain.handle('uc:dl:smart-start', async (event, payload) => {
-  const win = BrowserWindow.fromWebContents(event.sender)
-  if (!win || win.isDestroyed()) return { ok: false, error: 'no-window' }
-
+// Returns: { ok, alreadyActive?: boolean, error?: string }
+ipcMain.handle('uc:dl:smart-start', (_event, payload) => {
   if (!payload || !payload.appid || !payload.downloadId || typeof payload.url !== 'string' || !payload.url) {
     return { ok: false, error: 'invalid-payload' }
   }
-
   const { appid, downloadId, gameName, url, filename, totalBytes } = payload
-
-  // Bail if already running so duplicate clicks don't spawn a second download.
-  if (activeDownloads.has(downloadId) || ucfilesActiveDownloads.has(downloadId)) {
-    return { ok: true, resumed: true, alreadyActive: true }
-  }
-  if (cancelledDownloadIds.has(downloadId)) {
-    cancelledDownloadIds.delete(downloadId)
-  }
-
   try {
-    const downloadRoot = ensureDownloadDir()
-    const folderName = safeFolderName(gameName || appid || 'unknown')
-    const installingRoot = ensureSubdir(path.join(downloadRoot, installingDirName), folderName)
-    // Settle on a deterministic savePath. If the caller passed a filename, use
-    // it; otherwise fall back to what the manifest snapshot remembers, then to
-    // a derived name from the URL path.
-    let resolvedFilename = (typeof filename === 'string' && filename.trim()) ? filename.trim() : ''
-    if (!resolvedFilename) {
-      try {
-        const manifest = readJsonFile(path.join(installingRoot, INSTALLED_MANIFEST))
-        const snap = manifest && manifest.downloadSnapshot
-        if (snap && typeof snap.filename === 'string' && snap.filename) {
-          resolvedFilename = snap.filename
-        }
-      } catch { }
-    }
-    if (!resolvedFilename) {
-      try {
-        const parsed = new URL(url)
-        const last = decodeURIComponent(parsed.pathname.split('/').pop() || '')
-        if (last) resolvedFilename = last
-      } catch { }
-    }
-    if (!resolvedFilename) resolvedFilename = `${safeFolderName(gameName || appid || 'download')}.archive`
-    const savePath = path.join(installingRoot, resolvedFilename)
-
-    // Look for any partial on disk and promote it to the canonical savePath.
-    // Order of preference: the live file → .crdownload (Chromium temp) → .ucresume (hardlink backup).
-    const tryPromote = (candidatePath) => {
-      try {
-        if (!fs.existsSync(candidatePath)) return false
-        const st = fs.statSync(candidatePath)
-        if (!st.isFile() || st.size <= 0) return false
-        if (path.resolve(candidatePath) === path.resolve(savePath)) return true
-        try { fs.renameSync(candidatePath, savePath) } catch { return false }
-        ucLog(`[dl:smart-start] Promoted partial: ${candidatePath} → ${savePath}`, 'info')
-        return true
-      } catch { return false }
-    }
-
-    let hasPartial = tryPromote(savePath)
-      || tryPromote(savePath + '.crdownload')
-      || tryPromote(savePath + RESUME_BACKUP_EXT)
-
-    if (!hasPartial) {
-      // The exact filename may differ from what the caller knows about (the
-      // CDN's content-disposition vs. the URL path vs. an older filename in
-      // the manifest). As a last-ditch effort, pick the biggest non-sidecar
-      // file in the installing folder and use that as the partial.
-      try {
-        const entries = fs.readdirSync(installingRoot)
-        const sidecars = new Set([INSTALLED_MANIFEST.toLowerCase(), 'image.jpg', 'splash.jpg', 'hero-image.jpg', 'hero-animated.webp', 'hero-image.webp', 'background-image.jpg', 'hero-logo.jpg', 'screenshots'])
-        let best = null
-        for (const entry of entries) {
-          if (sidecars.has(entry.toLowerCase())) continue
-          const full = path.join(installingRoot, entry)
-          try {
-            const st = fs.statSync(full)
-            if (!st.isFile() || st.size <= 0) continue
-            if (!best || st.size > best.size) best = { name: entry, path: full, size: st.size }
-          } catch { }
-        }
-        if (best) {
-          // Strip known partial suffixes when computing the canonical name.
-          const canonicalName = best.name
-            .replace(/\.crdownload$/, '')
-            .replace(new RegExp(RESUME_BACKUP_EXT + '$'), '')
-          const canonicalPath = path.join(installingRoot, canonicalName)
-          if (best.path !== canonicalPath) {
-            try { fs.renameSync(best.path, canonicalPath) } catch { }
-          }
-          resolvedFilename = canonicalName
-          // Use canonicalPath as savePath since that's where the bytes are
-          if (canonicalPath !== savePath && fs.existsSync(canonicalPath)) {
-            // Rewrite the variable for the rest of this handler
-            // (savePath was const, so we read fs.statSync on canonicalPath instead)
-            try {
-              const st = fs.statSync(canonicalPath)
-              if (st.isFile() && st.size > 0) {
-                hasPartial = true
-                ucLog(`[dl:smart-start] Adopted partial under different name: ${canonicalPath} (${st.size} bytes)`, 'info')
-                // For the rest of the handler we'll use canonicalPath; reassign-by-shadowing.
-                payload.__resolvedSavePath = canonicalPath
-              }
-            } catch { }
-          } else if (canonicalPath === savePath) {
-            hasPartial = true
-          }
-        }
-      } catch { }
-    }
-
-    const effectiveSavePath = payload.__resolvedSavePath || savePath
-
-    // Register the pending entry so will-download / done handlers wire up
-    // properly. Both code paths below rely on this.
-    pendingDownloads.push({
-      url,
-      normalizedUrl: normalizeDownloadUrl(url),
-      downloadId,
-      filename: path.basename(effectiveSavePath),
-      appid,
-      gameName: gameName || null,
-      savePath: effectiveSavePath,
-      _addedAt: Date.now(),
-    })
-
-    // Make sure the manifest exists so the rest of the install pipeline can
-    // attach to it. We don't overwrite metadata — just ensure status is set.
-    try { updateInstallingManifestStatus(appid, 'installing', null) } catch { }
-
-    if (hasPartial) {
-      let actualOffset = 0
-      try { actualOffset = fs.statSync(effectiveSavePath).size } catch { }
-
-      if (totalBytes && actualOffset >= totalBytes) {
-        // File looks complete on disk — let the renderer trigger the install
-        // step rather than re-downloading.
-        const idx = pendingDownloads.findIndex((p) => p.downloadId === downloadId)
-        if (idx >= 0) pendingDownloads.splice(idx, 1)
-        return { ok: true, resumed: true, actualOffset, savePath: effectiveSavePath, alreadyComplete: true }
+    const engine = getDownloadEngine()
+    if (engine.byId.has(downloadId)) {
+      const dl = engine.byId.get(downloadId)
+      if (dl.status === 'downloading' || dl.status === 'queued') {
+        return { ok: true, alreadyActive: true }
       }
-
-      try {
-        win.webContents.session.createInterruptedDownload({
-          path: effectiveSavePath,
-          urlChain: [url],
-          mimeType: '',
-          offset: actualOffset,
-          length: totalBytes || 0,
-          lastModified: '',
-          eTag: '',
-          startTime: Date.now(),
-        })
-        ucLog(`[dl:smart-start] Resumed from disk: appid=${appid} offset=${actualOffset} savePath=${effectiveSavePath}`, 'info')
-        return { ok: true, resumed: true, actualOffset, savePath: effectiveSavePath }
-      } catch (err) {
-        ucLog(`[dl:smart-start] createInterruptedDownload failed: ${err?.message || err} — falling back to fresh start`, 'warn')
-        // Fall through to fresh start below.
-      }
+      // Stale failed/cancelled/paused entry — drop and re-enqueue with fresh URL.
+      engine.byId.delete(downloadId)
     }
-
-    // Fresh start.
-    ucLog(`[dl:smart-start] Fresh download: appid=${appid} url=${url}`, 'info')
-    win.webContents.downloadURL(url)
-    return { ok: true, resumed: false, savePath: effectiveSavePath }
+    const id = engine.enqueue({ id: downloadId, appid, gameName, url, filename, totalBytes })
+    ucLog(`[dl:smart-start] engine enqueued: ${id} appid=${appid}`)
+    return { ok: true }
   } catch (err) {
     ucLog(`[dl:smart-start] failed: ${err?.message || err}`, 'error')
     return { ok: false, error: String(err?.message || err) }
@@ -10895,6 +10716,46 @@ ipcMain.handle('uc:system-open-external', async (_event, target) => {
   } catch (error) {
     return { ok: false, error: error?.message || String(error) }
   }
+})
+
+// Launch the Steam client (and bring it to the foreground). Some games that
+// ship online/multiplayer modes won't start unless Steam is already running in
+// the background, so the "couldn't start" modal offers this when the game has
+// online support. `steam://open/main` is the canonical way to start-or-focus
+// Steam and works on every platform once the client is installed and its URL
+// protocol is registered. On Windows we fall back to the registered SteamExe
+// path if the protocol handler isn't wired up for some reason.
+ipcMain.handle('uc:system-launch-steam', async () => {
+  try {
+    await shell.openExternal('steam://open/main')
+    ucLog('Steam launched via steam:// protocol')
+    return { ok: true, method: 'steam-url' }
+  } catch (error) {
+    ucLog(`Steam protocol launch failed: ${error?.message || error}`, 'warn')
+  }
+
+  if (process.platform === 'win32') {
+    try {
+      // HKCU\Software\Valve\Steam\SteamExe holds the absolute path to steam.exe.
+      const result = child_process.spawnSync('reg.exe', [
+        'query', 'HKCU\\Software\\Valve\\Steam', '/v', 'SteamExe'
+      ], { windowsHide: true, encoding: 'utf8' })
+      const match = typeof result.stdout === 'string'
+        ? result.stdout.match(/SteamExe\s+REG_SZ\s+(.+)/i)
+        : null
+      const steamExe = match ? match[1].trim() : ''
+      if (steamExe && fs.existsSync(steamExe)) {
+        const proc = child_process.spawn(steamExe, [], { detached: true, stdio: 'ignore', windowsHide: false })
+        proc.unref()
+        ucLog(`Steam launched via SteamExe: ${steamExe}`)
+        return { ok: true, method: 'steam-exe' }
+      }
+    } catch (err) {
+      ucLog(`Steam exe fallback launch failed: ${err?.message || err}`, 'warn')
+    }
+  }
+
+  return { ok: false, error: 'steam-not-found' }
 })
 
 ipcMain.handle('uc:disk-list', () => {
@@ -11389,6 +11250,11 @@ async function runArchiveInstallJob(win, payload, options = {}) {
     }
 
     updateInstallingManifestStatus(appid, 'failed', rawError)
+    // If this was an update, the old install was renamed to a .uc-update-backup
+    // folder before extraction. Extraction hard-failed, so restore it — otherwise
+    // the user is left with no playable install and a stale backup folder that
+    // still answers to this appid (breaking the saved exe path and version state).
+    restoreUpdateBackup(installedRoot)
     sendDownloadUpdate(win, {
       downloadId, status: 'extract_failed', error: rawError,
       savePath: archiveToExtract, appid, gameName
@@ -11419,6 +11285,12 @@ async function runArchiveInstallJob(win, payload, options = {}) {
   } else {
     updateInstalledManifest(installedRoot, metaForManifest, null)
   }
+
+  // Extraction succeeded. If this was an update, drop the pre-update backup of the
+  // old install. Leaving it behind makes listInstalledByAppid / installed-list-global
+  // report two installed versions for this appid (the new one *and* the stale backup),
+  // which surfaces as "another version installed" and an outdated version status.
+  clearUpdateBackup(installedRoot)
 
   updateInstallingManifestStatus(appid, 'completed', null)
 
@@ -13007,6 +12879,21 @@ ipcMain.handle('uc:game-exe-running', async (_event, appid) => {
   try {
     const running = getRunningGame(appid)
     if (!running) return { ok: true, running: false }
+    // Launcher → main-game handoff in progress. The original launcher PID has
+    // already exited but the successor-adoption path (registerRunningGame →
+    // handleTrackedExit) hasn't bound the real game's PID yet. The launcher
+    // PID is dead right now, so the isProcessRunning() check below would say
+    // "not running" and we'd (a) pop a false "couldn't start" modal in the
+    // renderer for a game that is actually launching, and (b) fire handleDead()
+    // — a SECOND finalize/adoption loop that races the real one and can clear
+    // the payload out from under it, dropping the still-running session and its
+    // playtime (never recorded → never synced to the leaderboard). Treat the
+    // game as running until the handoff window closes, mirroring the same guard
+    // in pruneRunningGames(). Games behind a launcher (DELTARUNE, KSP, etc.)
+    // depend on this to get tracked at all.
+    if (running.handoffPendingUntil && running.handoffPendingUntil > Date.now()) {
+      return { ok: true, running: true, pid: running.pid, exePath: running.exePath }
+    }
     const alive = await isProcessRunning(running.pid)
     if (!alive) {
       // Route dead processes through the tracked-exit finalizer so playtime is
@@ -13223,6 +13110,30 @@ function buildDesktopShortcutName(gameName) {
   return process.platform === 'win32'
     ? `${safeName} - UC.lnk`
     : `${safeName} - UC.desktop`
+}
+
+// Remove every desktop shortcut this app generated. UC shortcuts always end in
+// " - UC.lnk" (Windows) / " - UC.desktop" (Linux), so we can match by suffix and
+// avoid touching the user's own shortcuts. Used by the "Clear User Data" reset.
+function clearAllDesktopShortcuts() {
+  try {
+    const desktopPath = app.getPath('desktop')
+    if (!desktopPath || !fs.existsSync(desktopPath)) return 0
+    const suffix = process.platform === 'win32' ? ' - UC.lnk' : ' - UC.desktop'
+    let removed = 0
+    for (const entry of fs.readdirSync(desktopPath)) {
+      if (!entry.endsWith(suffix)) continue
+      try {
+        fs.unlinkSync(path.join(desktopPath, entry))
+        removed += 1
+      } catch { /* ignore individual failures */ }
+    }
+    if (removed) ucLog(`Cleared ${removed} UC desktop shortcut(s) during reset`)
+    return removed
+  } catch (err) {
+    ucLog(`Failed to clear desktop shortcuts: ${err?.message || err}`, 'warn')
+    return 0
+  }
 }
 
 ipcMain.handle('uc:delete-desktop-shortcut', async (_event, gameName) => {

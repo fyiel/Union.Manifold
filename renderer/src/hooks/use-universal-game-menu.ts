@@ -1,8 +1,9 @@
 import { useCallback, useMemo } from "react"
+import { useNavigate } from "react-router-dom"
 import type { Game } from "@/lib/types"
 import { useAccountLists } from "@/hooks/use-account-lists"
 import { useRpcGameMute } from "@/hooks/use-rpc-game-mute"
-import { useDownloads, useDownloadsActions } from "@/context/downloads-context"
+import { useDownloads } from "@/context/downloads-context"
 import { useUserCollections } from "@/hooks/use-user-collections"
 import type { CollectionPickerEntry } from "@/components/GameActionMenu"
 
@@ -54,8 +55,8 @@ export function useUniversalGameMenuProps(
   const accountLists = useAccountLists()
   const rpcMute = useRpcGameMute(appid || null)
   const userCollections = useUserCollections()
-  const { startGameDownload } = useDownloadsActions()
   const { downloads } = useDownloads()
+  const navigate = useNavigate()
 
   // Treat any in-flight, paused, or queued download for this appid as
   // "already downloading" — the menu offers "Add to queue" in that case
@@ -63,8 +64,12 @@ export function useUniversalGameMenuProps(
   // job. Failed / completed states aren't here; the action card / detail
   // page handles retry separately.
   const activeAppidDownloads = useMemo(() => {
+    // Every non-terminal state — anything that means "a download/install for
+    // this game is already in flight". Keep this list in sync with the
+    // DownloadStatus union; missing one here caused the menu to show
+    // "Download" (or the old "Add to queue") mid-download.
     return downloads.filter((item) => item.appid === appid && [
-      "queued", "downloading", "paused", "extracting", "installing", "verifying", "retrying"
+      "queued", "downloading", "paused", "extracting", "installing", "verifying", "retrying", "install_ready"
     ].includes(item.status))
   }, [downloads, appid])
 
@@ -76,10 +81,18 @@ export function useUniversalGameMenuProps(
     // / locally-added games can't be re-downloaded from the catalog.
     if (game?.isExternal) return undefined
     return {
-      mode: hasActiveDownload ? "queue" as const : "download" as const,
-      onClick: () => { void startGameDownload(game as Game) },
+      // While a download is in flight the row is disabled ("Downloading…")
+      // rather than offering a no-op "Add to queue" / "Download".
+      mode: hasActiveDownload ? "active" as const : "download" as const,
+      onClick: () => {
+        if (hasActiveDownload) return
+        // Fresh download: route to the game page so the pre-download check
+        // modal + host selector run (they only live there) instead of
+        // silently queueing with defaults from a card/menu.
+        navigate(`/game/${encodeURIComponent(appid)}?download=1`)
+      },
     }
-  }, [appid, game, hasActiveDownload, overrides.downloadable, startGameDownload])
+  }, [appid, game, hasActiveDownload, overrides.downloadable, navigate])
 
   const wishlist = useMemo(() => {
     if (accountLists.authed === false || !appid) return undefined

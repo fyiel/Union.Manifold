@@ -87,13 +87,27 @@ function openWebsite(path: string) {
  * Profile" page it carries the owner controls (Edit Profile / Logout).
  */
 export function ProfileView({ data, heroActions }: { data: ProfilePayload; heroActions?: ReactNode }) {
-  const { user, stats, recentComments, topGames, recentRequests, wishlist, collections, forumTopics, forumPosts, systemProfile, playtime } = data
+  // Defensive defaults: the deployed website API may be an older revision that
+  // omits some of these fields (forum lists, playtime, system profile, etc.)
+  // until the matching backend ships, so never assume an array/object exists.
+  const user = data.user
+  const stats = data.stats ?? { commentCount: 0, likeCount: 0, forumTopicCount: 0, forumPostCount: 0, wishlistCount: 0, lastActiveAt: null }
+  const recentComments = data.recentComments ?? []
+  const topGames = data.topGames ?? []
+  const recentRequests = data.recentRequests ?? []
+  const wishlist = data.wishlist ?? []
+  const collections = data.collections ?? []
+  const forumTopics = data.forumTopics ?? []
+  const forumPosts = data.forumPosts ?? []
+  const systemProfile = data.systemProfile ?? null
+  const playtime = data.playtime ?? null
+  const supporterDonations = data.supporterDonations ?? []
   const displayName = user.displayName || user.username
   const joinedAt = user.createdAt ? new Date(user.createdAt).toLocaleDateString() : "Unknown"
   const lastActiveDate = stats.lastActiveAt ? new Date(stats.lastActiveAt) : null
   const lastActiveAbsolute = lastActiveDate ? lastActiveDate.toLocaleDateString() : "Unknown"
   const lastActiveRelative = stats.lastActiveAt ? (timeAgo(stats.lastActiveAt) || lastActiveAbsolute) : "Never"
-  const hasMonthlySupport = (data.supporterDonations || []).some((d) => d.isSubscriptionPayment)
+  const hasMonthlySupport = (supporterDonations || []).some((d) => d.isSubscriptionPayment)
   const bannerUrl = user.bannerUrl ?? null
   const requestQuota = data.requestQuota
 
@@ -132,7 +146,7 @@ export function ProfileView({ data, heroActions }: { data: ProfilePayload; heroA
               <DiscordAvatar
                 avatarUrl={user.avatarUrl}
                 alt={`${displayName} avatar`}
-                className="h-20 w-20 rounded-2xl border-4 border-zinc-950 ring-1 ring-white/10 shadow-[0_10px_30px_rgba(0,0,0,0.5)] sm:h-28 sm:w-28"
+                className="h-20 w-20 rounded-full border-4 border-zinc-950 ring-1 ring-white/10 shadow-[0_10px_30px_rgba(0,0,0,0.5)] sm:h-28 sm:w-28"
               />
               <div className="min-w-0 pb-1">
                 <div className="flex flex-wrap items-center gap-2">
@@ -193,7 +207,7 @@ export function ProfileView({ data, heroActions }: { data: ProfilePayload; heroA
       </section>
 
       {/* Public support (Ko-fi) */}
-      {data.supporterDonations && data.supporterDonations.length > 0 ? (
+      {supporterDonations && supporterDonations.length > 0 ? (
         <div className="mt-4">
           <Card className={CARD}>
             <CardHeader className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
@@ -203,7 +217,7 @@ export function ProfileView({ data, heroActions }: { data: ProfilePayload; heroA
                   Public support
                 </CardTitle>
                 <p className="text-sm text-muted-foreground">
-                  {data.supporterDonations.length} public Ko-fi donation{data.supporterDonations.length === 1 ? "" : "s"}
+                  {supporterDonations.length} public Ko-fi donation{supporterDonations.length === 1 ? "" : "s"}
                 </p>
               </div>
               {hasMonthlySupport ? (
@@ -214,7 +228,7 @@ export function ProfileView({ data, heroActions }: { data: ProfilePayload; heroA
               ) : null}
             </CardHeader>
             <CardContent className="space-y-3">
-              {data.supporterDonations.slice(0, 3).map((donation, index) => (
+              {supporterDonations.slice(0, 3).map((donation, index) => (
                 <div key={`${donation.name}-${donation.createdAt || donation.donatedAt || index}`} className="rounded-2xl border border-border/50 bg-secondary/50 px-4 py-3 backdrop-blur-md">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>

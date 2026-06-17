@@ -1,4 +1,27 @@
 # Changelog
+## v2.6 - Launch Reliability
+
+### Game launching
+
+- **Admin-selected executable is now used automatically.** When staff pick the launch executable for a release in the website admin panel, UC.D resolves that file inside the install folder and launches it directly — instead of guessing with the heuristic exe detector. This matters because our releases' real binary often differs from Steam's (emulator/repack), so the staff choice is authoritative. Resolution is case-insensitive and slash-agnostic: exact relative path first, then a unique basename match, then a path-suffix match (`matchAdminExecutable`). The choice is persisted into the installed manifest at download time, so it's honoured everywhere — game page, every card/activity surface, the downloads list, and deep-link/shortcut launches — even offline.
+- **No executable set? You're asked when it's ambiguous.** When our team hasn't configured the launch file for a release (and you haven't picked one before): if the folder has exactly one real executable, UC.D just launches it; if there are several candidates, it opens the executable picker — best guess highlighted — instead of silently auto-launching a heuristic match that might be the wrong .exe. Your pick is saved, so the prompt only appears on the first launch.
+- **Fixed: a failed launch did nothing.** Clicking Play on a broken or missing executable previously hit a silent `if (res.ok)` with no else, so nothing happened — most visible on cards/activity feeds and the downloads list. Launch failures now surface: the game page and cards show the "Game couldn't start" modal, and the downloads page shows an error toast with a *Pick executable* action.
+- **Updated the "Game couldn't start" copy.** The modal previously said UC.D "has no system to determine if the right executable was chosen." It now explains that UC.D launches the staff-configured executable when one is set, and asks the user to pick manually when it isn't set for this release.
+- **Fixed: launcher-based games (DELTARUNE, KSP) lost playtime and showed a false "couldn't start" popup.** Games behind a launcher stub spawn the launcher, which exits and hands off to the real game process. The main process marked a 12-second handoff grace window (`handoffPendingUntil`), but the `uc:game-exe-running` IPC handler (polled every 3s by the renderer) didn't respect it. During the gap the launcher PID was dead, so the handler incorrectly reported the game as not running and fired a second finalize loop that raced the real one — clearing the session before adoption bound the real game PID, so the session was never recorded and playtime never synced to the leaderboard. The handler now respects the handoff window, returning `running: true` until the grace period closes, so the adoption completes cleanly and playtime records on real exit.
+- **Added "Launch Steam" action to the "Game couldn't start" modal for online games.** Games with multiplayer/online support often fail to launch when Steam isn't already running in the background (they can't reach the Steam client to bootstrap online services). When a game with online modes fails to launch, the modal now shows a blue notice: *"We detected that this game might have online support. For the game to launch, you may need to run Steam in the background."* with a one-click **Launch Steam** button that starts (or focuses) the Steam client via the `steam://open/main` protocol, then tells the user to retry Play.
+
+### Right-click / action menu
+
+- **Fixed: the Download row showed the wrong state mid-download.** Depending on timing it would say "Add to download queue" (a no-op for a game already downloading) or even "Download". The row is now a single source of truth: while a download/install for that game is in flight — any non-terminal state, including the previously-missed `install_ready` — it's shown **disabled** as "Downloading…"; otherwise it's an enabled "Download". The confusing "Add to download queue" wording is gone.
+
+### Downloads
+
+- **Fixed: downloading from outside the game page skipped the pre-download check.** The availability/host-selector modal only existed on the game detail page, so right-click → **Download** (and other card/list download entries) queued silently with defaults — no storage/sysreq/host check. A fresh download started from the universal menu now routes to the game page with `?download=1`, which runs the same pre-download check modal everywhere (respecting the user's `auto`/`always`/`skip` setting). "Add to queue" for an already-downloading game stays a direct in-place action.
+
+### Version status
+
+- **Non-public beta builds are now flagged instead of nagged.** When the installed build number is higher than Steam's public build (a non-public beta), the Version Status card no longer says "A newer build is available" — it reads up-to-date and marks the build red with a **BETA** badge plus a "This is a non-public beta release." line. A `- BETA` suffix entered by staff is preserved (it was previously stripped) and surfaces the same red treatment in both the Version Status card and the game's Details section.
+
 ## v2.5.3 — Tray Menu Fix · 2026-06-04
 
 ### Tray

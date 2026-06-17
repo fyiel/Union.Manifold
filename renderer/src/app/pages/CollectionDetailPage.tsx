@@ -560,10 +560,14 @@ export function CollectionDetailPage() {
       {/* Owner / contributors / action row */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2 min-w-0">
-          <div className="h-9 w-9 rounded-full overflow-hidden bg-secondary shrink-0">
+          <div className="h-9 w-9 rounded-full overflow-hidden bg-secondary shrink-0" style={{ containerType: "inline-size" }}>
             {collection.owner?.avatarUrl ? (
               <img src={proxyImageUrl(collection.owner.avatarUrl)} alt="" className="h-full w-full object-cover" />
-            ) : null}
+            ) : (
+              <span aria-hidden className="flex h-full w-full items-center justify-center font-semibold uppercase leading-none text-muted-foreground/80" style={{ fontSize: "45cqw" }}>
+                {(ownerName || "?").charAt(0).toUpperCase()}
+              </span>
+            )}
           </div>
           <div className="min-w-0">
             <div className="text-sm font-semibold text-white truncate">
@@ -583,11 +587,16 @@ export function CollectionDetailPage() {
                   <div
                     key={c.discordId}
                     className="h-6 w-6 rounded-full overflow-hidden bg-secondary ring-2 ring-zinc-950"
+                    style={{ containerType: "inline-size" }}
                     title={name}
                   >
                     {c.avatarUrl ? (
                       <img src={proxyImageUrl(c.avatarUrl)} alt="" className="h-full w-full object-cover" />
-                    ) : null}
+                    ) : (
+                      <span aria-hidden className="flex h-full w-full items-center justify-center font-semibold uppercase leading-none text-muted-foreground/80" style={{ fontSize: "45cqw" }}>
+                        {name.charAt(0).toUpperCase()}
+                      </span>
+                    )}
                   </div>
                 )
               })}
@@ -667,19 +676,11 @@ export function CollectionDetailPage() {
               <GameCard game={entry.data as any} />
               {!entry.installed && !inProgressAppids.has(entry.appid) && (
                 <NotInstalledOverlay
-                  onInstall={async () => {
-                    const catalog = getCatalogCache().games as CatalogGame[]
-                    const byId = new Map(catalog.map((g) => [g.appid, g]))
-                    const game = byId.get(entry.appid)
-                    if (!game) {
-                      setError("This game isn't in the catalogue right now — try again after Browse refreshes.")
-                      return
-                    }
-                    try {
-                      await startGameDownload(game as any)
-                    } catch (err) {
-                      setError(err instanceof Error ? err.message : "Could not start download.")
-                    }
+                  onInstall={() => {
+                    // Route to the game page so the pre-download check modal +
+                    // host selector run, matching every other download entry
+                    // point (was a silent direct queue before).
+                    navigate(`/game/${encodeURIComponent(entry.appid)}?download=1`)
                   }}
                 />
               )}

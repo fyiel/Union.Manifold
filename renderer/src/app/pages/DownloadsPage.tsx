@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useDownloads, type DownloadItem } from "@/context/downloads-context"
 import { useNavigate } from "react-router-dom"
+import { useToast } from "@/context/toast-context"
 import { useGamesData } from "@/hooks/use-games"
 import { useRunningGamesSessions } from "@/hooks/use-running-games"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { pickGameExecutable, proxyImageUrl } from "@/lib/utils"
+import { getUnambiguousExecutable, matchAdminExecutable, proxyImageUrl } from "@/lib/utils"
 import {
   HardDrive,
   PauseCircle,
@@ -387,6 +388,7 @@ function SessionTimer({ startedAt }: { startedAt: number }) {
 
 export function DownloadsPage() {
   const isWindows = typeof navigator !== 'undefined' && /windows/i.test(navigator.userAgent)
+  const { toast } = useToast()
   const {
     downloads,
     startGameDownload,
@@ -828,67 +830,29 @@ export function DownloadsPage() {
     if (!game) return
     setRetryingAppId(appid)
     try {
-      // New simple path: ask the main process to either resume from any
-      // partial it finds on disk OR start fresh. It owns the filesystem
-      // truth — the renderer just provides a fresh URL.
-      if (window.ucDownloads?.smartStart) {
-        // First make sure we have a fresh download URL from the API.
-        const { requestDownloadToken, fetchDownloadLinks, selectHost, resolveDownloadUrl } = await import("@/lib/downloads")
-        try {
-          const token = await requestDownloadToken(appid)
-          const links = await fetchDownloadLinks(appid, token)
-          const sourceUrl = links.redirectUrl || selectHost(links.hosts, "ucfiles").links[0]?.url
-          if (!sourceUrl) throw new Error("No download link available")
-          const resolved = await resolveDownloadUrl("ucfiles", sourceUrl)
-          const finalUrl = resolved?.resolved ? resolved.url : sourceUrl
+      // Re-resolve a fresh URL and enqueue through the aria2 engine.
+      const { requestDownloadToken, fetchDownloadLinks, selectHost, resolveDownloadUrl } = await import("@/lib/downloads")
+      const token = await requestDownloadToken(appid)
+      const links = await fetchDownloadLinks(appid, token)
+      const sourceUrl = links.redirectUrl || selectHost(links.hosts, "ucfiles").links[0]?.url
+      if (!sourceUrl) throw new Error("No download link available")
+      const resolved = await resolveDownloadUrl("ucfiles", sourceUrl)
+      const finalUrl = resolved?.resolved ? resolved.url : sourceUrl
 
-          // Reuse the existing downloadId from state if there is one, else generate one.
-          const existing = downloads.find((item) => item.appid === appid && item.url)
-          const downloadId = existing?.id || `${appid}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}-0`
+      // Reuse the existing downloadId so the UI row updates in-place.
+      const existing = downloads.find((item) => item.appid === appid && item.url)
+      const downloadId = existing?.id || `${appid}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}-0`
 
-          // Make sure the install metadata is on disk first so smartStart can
-          // write the manifest snapshot.
-          if (window.ucDownloads?.saveInstalledMetadata) {
-            try {
-              await window.ucDownloads.saveInstalledMetadata(appid, {
-                ...game,
-                downloadedVersion: game.version || undefined,
-              })
-            } catch { }
-          }
+      if (!existing) clearByAppid(appid)
 
-          // Reset any "failed/cancelled" UI rows for this appid so progress
-          // shows up against the new (or existing) downloadId.
-          if (!existing) {
-            clearByAppid(appid)
-          }
-
-          const result = await window.ucDownloads.smartStart({
-            appid,
-            downloadId,
-            gameName: game.name,
-            url: finalUrl,
-            filename: resolved?.filename || existing?.filename,
-            totalBytes: resolved?.size || existing?.totalBytes,
-          })
-
-          if (result?.alreadyComplete) {
-            // File on disk is full size — kick off install directly.
-            if (window.ucDownloads?.installDownloadedArchive) {
-              await window.ucDownloads.installDownloadedArchive(appid)
-            }
-            return
-          }
-          if (result?.ok) return
-          // smartStart returned !ok — fall through to legacy path
-          console.warn("[UC] smartStart failed, falling back to fresh download", result?.error)
-        } catch (err) {
-          console.warn("[UC] smartStart pre-resolve failed, falling back", err)
-        }
-      }
-      // Legacy fallback path
-      clearByAppid(appid)
-      await startGameDownload(game)
+      await window.ucDownloads?.start({
+        downloadId,
+        appid,
+        gameName: game.name,
+        url: finalUrl,
+        filename: resolved?.filename || existing?.filename,
+        totalBytes: resolved?.size || existing?.totalBytes,
+      } as Parameters<typeof window.ucDownloads.start>[0])
     } catch (err) {
       console.error("[UC] Failed to retry download", err)
     } finally {
@@ -971,6 +935,14 @@ export function DownloadsPage() {
       setShortcutModalOpen(false)
       setPendingExePath(null)
       setPendingAppId(null)
+    } else {
+      // Previously silent — clicking Play on a broken exe did nothing. Surface
+      // the failure with an action to re-pick the executable.
+      toast(
+        res?.error ? `Couldn't launch ${gameName}: ${res.error}` : `Couldn't launch ${gameName}.`,
+        "error",
+        { action: { label: "Pick executable", onClick: () => { void handleLaunch(appid, gameName) } } },
+      )
     }
   }
 
@@ -1026,12 +998,33 @@ export function DownloadsPage() {
       const result = await window.ucDownloads.listGameExecutables(appid)
       const exes = result?.exes || []
       const folder = result?.folder || null
-      const { pick, confident } = pickGameExecutable(exes, gameName, undefined, folder)
-      if (pick && confident) {
-        await handleLaunchWithShortcutCheck(appid, pick.path)
+
+      // Prefer the executable staff set in the admin panel (persisted into the
+      // installed manifest at download time), then the picker — never a silent
+      // heuristic guess.
+      const game = games.find((g) => g.appid === appid)
+      const adminExe = matchAdminExecutable(exes, (game as { game_executable_path?: string | null } | undefined)?.game_executable_path, folder)
+      if (adminExe) {
+        await handleLaunchWithShortcutCheck(appid, adminExe.path)
         return
       }
-      openExePicker(appid, gameName, exes, folder)
+
+      // Single unambiguous exe → launch directly; ambiguous → picker.
+      const single = getUnambiguousExecutable(exes)
+      if (single) {
+        await handleLaunchWithShortcutCheck(appid, single.path)
+        return
+      }
+
+      openExePicker(
+        appid,
+        gameName,
+        exes,
+        folder,
+        exes.length
+          ? `Our team hasn't set the launch file for "${gameName}" yet. Pick the executable to run — usually the largest, named after the game.`
+          : undefined,
+      )
     } catch {
       openExePicker(appid, gameName, [], null, `Unable to list executables for "${gameName}".`)
     }
@@ -1058,7 +1051,7 @@ export function DownloadsPage() {
     cancelledGroups.length === 0
 
   return (
-    <div className="container mx-auto max-w-7xl space-y-8">
+    <div className="space-y-8">
       {/* Header Section */}
       <div className="flex items-end justify-between anim">
         <div className="space-y-1">
