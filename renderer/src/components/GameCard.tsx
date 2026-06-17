@@ -10,7 +10,7 @@ import {
   Flame,
   Play,
 } from "@/components/icons"
-import { formatNumber, getCardImage, hasOnlineMode, isGameVersionUpdate, pickGameExecutable, proxyImageUrl, timeAgo } from "@/lib/utils"
+import { formatNumber, getCardImage, getUnambiguousExecutable, hasOnlineMode, isGameVersionUpdate, matchAdminExecutable, proxyImageUrl, timeAgo } from "@/lib/utils"
 import { reportPlayEvent } from "@/lib/cloud-collections"
 import { GameActionContextMenu } from "@/components/GameActionMenu"
 import { useDownloads, useDownloadsSelector } from "@/context/downloads-context"
@@ -54,6 +54,9 @@ interface GameCardProps {
     hasCoOp?: boolean
     update_time?: string
     release_time?: string
+    /** Admin-selected launcher exe (relative to install folder). Preferred
+     *  over heuristic detection when present. */
+    game_executable_path?: string | null
   }
   stats?: {
     downloads: number
@@ -335,6 +338,11 @@ export const GameCard = memo(function GameCard({
         gameQuickExitUnsubRef.current = null
         void showStartFailedModal()
       }) ?? null
+    } else {
+      // Launch failed outright — surface it instead of silently doing nothing
+      // (this was the "click Play on the activity/card and nothing happens" bug).
+      setIsRunning(false)
+      setGameStartFailedOpen(true)
     }
   }
 
@@ -408,8 +416,17 @@ export const GameCard = memo(function GameCard({
       const savedExe = await getSavedExe()
 
       if (savedExe) {
-        await handleLaunchWithShortcutCheck(savedExe)
-        return
+        // Saved exe paths go stale after an update re-extracts the game. If the
+        // path no longer resolves, clear it and re-detect rather than dead-ending
+        // on the "executable no longer exists" modal.
+        const pre = await window.ucDownloads?.preflightGameLaunch?.(game.appid, savedExe)
+        const exeMissing = pre?.ok && pre.checks?.some((c) => c.code === "exe-not-found")
+        if (exeMissing) {
+          await setSavedExe(null)
+        } else {
+          await handleLaunchWithShortcutCheck(savedExe)
+          return
+        }
       }
 
       const result = await listGameExecutables()
@@ -420,9 +437,20 @@ export const GameCard = memo(function GameCard({
       const exes = result?.exes || []
       const folder = result?.folder || null
       const browseFolder = folder
-      const { pick, confident } = pickGameExecutable(exes, game.name, game.source, folder)
-      if (pick && confident) {
-        await handleLaunchWithShortcutCheck(pick.path)
+
+      // Prefer the admin-selected executable for our release over the heuristic.
+      const adminExe = matchAdminExecutable(exes, game.game_executable_path, folder)
+      if (adminExe) {
+        await handleLaunchWithShortcutCheck(adminExe.path)
+        return
+      }
+
+      // No admin exe set. A single unambiguous executable launches directly;
+      // anything ambiguous (2+ candidates) opens the picker rather than
+      // guessing the wrong file.
+      const single = getUnambiguousExecutable(exes)
+      if (single) {
+        await handleLaunchWithShortcutCheck(single.path)
         return
       }
       openExePicker(exes, browseFolder)
@@ -745,7 +773,7 @@ export const GameCard = memo(function GameCard({
       <ExePickerModal
         open={exePickerOpen}
         title="Select executable"
-        message={`We couldn't confidently detect the correct exe for "${game.name}". Please choose the one to launch.`}
+        message={`Pick the executable to launch for "${game.name}" — usually the largest one named after the game. Your choice is saved for next time.`}
         exes={exePickerExes}
         gameName={game.name}
         baseFolder={exePickerFolder}
@@ -807,6 +835,7 @@ export const GameCard = memo(function GameCard({
       <GameLaunchFailedModal
         open={gameStartFailedOpen}
         gameName={game.name}
+        hasOnlineSupport={hasOnlineMode(game.hasCoOp)}
         onClose={() => setGameStartFailedOpen(false)}
         onPickExecutable={async () => {
           // Open the exe picker pre-loaded with the game's executables so the

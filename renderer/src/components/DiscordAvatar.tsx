@@ -1,16 +1,22 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { proxyImageUrl } from "@/lib/utils"
+import { cn, proxyImageUrl } from "@/lib/utils"
 
 interface DiscordAvatarProps {
   avatarUrl?: string | null
   fallback?: string | null
   alt: string
   className?: string
+  /**
+   * Render without the decorative border / hover-zoom chrome. Use when the
+   * parent already supplies the frame (e.g. the settings profile box), so the
+   * avatar is just the image — or a full-bleed fallback initial — filling it.
+   */
+  bare?: boolean
 }
 
-export function DiscordAvatar({ avatarUrl, fallback, alt, className }: DiscordAvatarProps) {
+export function DiscordAvatar({ avatarUrl, fallback, alt, className, bare = false }: DiscordAvatarProps) {
   const [failedSource, setFailedSource] = useState<string | null>(null)
   const [loaded, setLoaded] = useState(false)
 
@@ -29,11 +35,31 @@ export function DiscordAvatar({ avatarUrl, fallback, alt, className }: DiscordAv
     setLoaded(false)
   }, [rawSrc])
 
+  // The fallback initial is sized in `cqw` units so it scales with the avatar
+  // box (small nav chip → large profile hero) instead of staying a fixed tiny
+  // glyph. `containerType: inline-size` (on the wrapper) makes that query unit
+  // resolve against this element's size.
+  const initialStyle = { fontSize: "45cqw" } as const
+
   return (
     <div
-      className={`relative group rounded-full overflow-hidden transition-all duration-300 hover:scale-[1.05] ${className || "h-10 w-10"}`}
+      className={cn(
+        "relative overflow-hidden h-10 w-10",
+        !bare && "group transition-all duration-300 hover:scale-[1.05]",
+        className,
+        // Profile avatars are ALWAYS circles. Passed LAST so it wins over any
+        // `rounded-*` a caller put in `className` — there is no "box" mode.
+        "rounded-full"
+      )}
+      style={{ containerType: "inline-size" }}
     >
-      <div className="h-full w-full border border-white/20 hover:border-primary/50 rounded-full bg-card/95 backdrop-blur-sm transition-all duration-300 overflow-hidden">
+      <div
+        className={cn(
+          "h-full w-full rounded-[inherit] overflow-hidden",
+          !bare &&
+            "border border-white/20 group-hover:border-primary/50 bg-card/95 backdrop-blur-sm transition-all duration-300"
+        )}
+      >
         {showImage ? (
           <>
             <img
@@ -49,7 +75,8 @@ export function DiscordAvatar({ avatarUrl, fallback, alt, className }: DiscordAv
             {!loaded && (
               <div
                 aria-hidden
-                className="absolute inset-0 flex items-center justify-center bg-card/95 text-muted-foreground/80 font-bold text-sm select-none animate-pulse"
+                style={initialStyle}
+                className="absolute inset-0 flex items-center justify-center bg-card/95 text-muted-foreground/80 font-bold leading-none select-none animate-pulse"
               >
                 {initial}
               </div>
@@ -58,7 +85,8 @@ export function DiscordAvatar({ avatarUrl, fallback, alt, className }: DiscordAv
         ) : (
           <div
             aria-hidden
-            className="h-full w-full bg-gradient-to-br from-primary/10 to-primary/5 flex items-center justify-center font-bold text-sm text-foreground/80 select-none"
+            style={initialStyle}
+            className="h-full w-full bg-gradient-to-br from-primary/10 to-primary/5 flex items-center justify-center font-bold leading-none text-foreground/80 select-none"
           >
             {initial}
           </div>

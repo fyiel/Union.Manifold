@@ -442,10 +442,14 @@ function PublicCollectionCard({
           </Popover>
         </div>
         <div className="flex items-center gap-2 text-[11px] text-muted-foreground/80">
-          <div className="h-5 w-5 rounded-full overflow-hidden bg-secondary shrink-0" title={`Owner: ${ownerName}`}>
+          <div className="h-5 w-5 rounded-full overflow-hidden bg-secondary shrink-0 flex items-center justify-center" style={{ containerType: "inline-size" }} title={`Owner: ${ownerName}`}>
             {c.owner.avatarUrl ? (
               <img src={proxyImageUrl(c.owner.avatarUrl)} alt="" className="h-full w-full object-cover" loading="lazy" />
-            ) : null}
+            ) : (
+              <span aria-hidden className="font-semibold uppercase leading-none text-muted-foreground/80" style={{ fontSize: "50cqw" }}>
+                {(ownerName || "?").charAt(0).toUpperCase()}
+              </span>
+            )}
           </div>
           <span className="truncate">by {ownerName}</span>
           {contributors.length > 0 && (
@@ -455,12 +459,17 @@ function PublicCollectionCard({
                 return (
                   <div
                     key={cc.discordId}
-                    className="h-4 w-4 rounded-full overflow-hidden bg-secondary ring-1 ring-zinc-950"
+                    className="h-4 w-4 rounded-full overflow-hidden bg-secondary ring-1 ring-zinc-950 flex items-center justify-center"
+                    style={{ containerType: "inline-size" }}
                     title={`Contributor: ${label}`}
                   >
                     {cc.avatarUrl ? (
                       <img src={proxyImageUrl(cc.avatarUrl)} alt="" className="h-full w-full object-cover" loading="lazy" />
-                    ) : null}
+                    ) : (
+                      <span aria-hidden className="font-semibold uppercase leading-none text-muted-foreground/80" style={{ fontSize: "55cqw" }}>
+                        {(label || "?").charAt(0).toUpperCase()}
+                      </span>
+                    )}
                   </div>
                 )
               })}

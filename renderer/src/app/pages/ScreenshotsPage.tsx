@@ -9,6 +9,7 @@ import {
 } from "@/components/icons"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { MediaLightbox } from "@/components/MediaLightbox"
 
 interface Screenshot {
   filename: string
@@ -59,17 +60,7 @@ export function ScreenshotsPage() {
     loadScreenshots()
   }, [loadScreenshots])
 
-  // Keyboard navigation in lightbox
-  useEffect(() => {
-    if (lightboxIndex === null) return
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "ArrowRight") setLightboxIndex(i => (i !== null ? Math.min(i + 1, screenshots.length - 1) : null))
-      else if (e.key === "ArrowLeft") setLightboxIndex(i => (i !== null ? Math.max(i - 1, 0) : null))
-      else if (e.key === "Escape") setLightboxIndex(null)
-    }
-    window.addEventListener("keydown", onKey)
-    return () => window.removeEventListener("keydown", onKey)
-  }, [lightboxIndex, screenshots.length])
+  // Keyboard / zoom / pan handled inside <MediaLightbox/>.
 
   const openFolder = useCallback(async () => {
     if (!window.ucSystem?.getScreenshotPath) return
@@ -217,66 +208,19 @@ export function ScreenshotsPage() {
       </Dialog>
 
       {/* Lightbox */}
-      {lightboxScreenshot && lightboxIndex !== null && (
-        <div
-          ref={lightboxRef}
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm"
-          onClick={() => setLightboxIndex(null)}
-        >
-          {/* Main image */}
-          <img
-            src={toFileUrl(lightboxScreenshot.path)}
-            alt={lightboxScreenshot.filename}
-            className="max-w-[90vw] max-h-[85vh] object-contain rounded-lg shadow-2xl"
-            onClick={e => e.stopPropagation()}
-          />
-
-          {/* Close button */}
-          <button
-            className="absolute top-4 right-4 w-9 h-9 rounded-full bg-black/60 flex items-center justify-center text-white/70 hover:text-white hover:bg-black/80 transition-colors"
-            onClick={() => setLightboxIndex(null)}
-          >
-            <X size={18} />
-          </button>
-
-          {/* Info bar */}
-          <div
-            className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-4 bg-black/60 backdrop-blur-md rounded-full px-5 py-2.5 text-sm"
-            onClick={e => e.stopPropagation()}
-          >
-            <span className="text-white/50 text-xs">{lightboxIndex + 1} / {screenshots.length}</span>
-            <span className="text-white/80 truncate max-w-xs">{formatDate(lightboxScreenshot.takenAt)}</span>
-            <span className="text-white/40 text-xs">{formatFileSize(lightboxScreenshot.size)}</span>
-            <button
-              className="text-white/50 hover:text-red-400 transition-colors ml-1"
-              title="Delete screenshot"
-              onClick={() => {
-                setDeleteConfirm(lightboxScreenshot.path)
-              }}
-            >
-              <Trash2 size={14} />
-            </button>
-          </div>
-
-          {/* Prev/Next arrows */}
-          {lightboxIndex > 0 && (
-            <button
-              className="absolute left-4 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-black/60 flex items-center justify-center text-white/70 hover:text-white hover:bg-black/80 transition-colors"
-              onClick={e => { e.stopPropagation(); setLightboxIndex(lightboxIndex - 1) }}
-            >
-              <ChevronLeft size={22} />
-            </button>
-          )}
-          {lightboxIndex < screenshots.length - 1 && (
-            <button
-              className="absolute right-4 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-black/60 flex items-center justify-center text-white/70 hover:text-white hover:bg-black/80 transition-colors"
-              onClick={e => { e.stopPropagation(); setLightboxIndex(lightboxIndex + 1) }}
-            >
-              <ChevronRight size={22} />
-            </button>
-          )}
-        </div>
-      )}
+      <MediaLightbox
+        open={lightboxIndex !== null}
+        index={lightboxIndex ?? 0}
+        onIndexChange={setLightboxIndex}
+        onClose={() => setLightboxIndex(null)}
+        onDelete={() => {
+          if (!lightboxScreenshot) return
+          const path = lightboxScreenshot.path
+          setLightboxIndex(null)
+          setDeleteConfirm(path)
+        }}
+        images={screenshots.map((s) => ({ src: toFileUrl(s.path), alt: s.filename, downloadUrl: toFileUrl(s.path) }))}
+      />
     </div>
   )
 }

@@ -71,11 +71,13 @@ type GameActionMenuPanelProps = {
   onLaunchOptions?: (() => void | Promise<void>) | null
   /** When provided shows the delete/unlink row. */
   onDelete?: (() => void | Promise<void>) | null
-  /** Universal "download / queue" action for not-installed games. The
-   *  `mode` lets us label the row correctly ("Add to download queue" when
-   *  there's already an active download, otherwise "Download"). */
+  /** Universal "download" action for not-installed games. `mode` drives the
+   *  row state: "download" is the normal clickable action; "active" means a
+   *  download/install for this game is already in progress, so the row is
+   *  shown disabled ("Downloading…") rather than offering a confusing
+   *  "Download" / "Add to queue" that would no-op. */
   download?: {
-    mode: "download" | "queue"
+    mode: "download" | "active"
     onClick: () => void | Promise<void>
   }
   /** Wishlist toggle — when provided the menu shows an Add/Remove entry. */
@@ -106,19 +108,26 @@ type MenuItemProps = {
    *  dot under the icon since the animated SVGs don't accept `fill`. */
   iconFilled?: boolean
   trailing?: React.ReactNode
+  /** When true the row is shown greyed-out and is not clickable — used e.g.
+   *  for the Download action while a download for that game is already in
+   *  progress. */
+  disabled?: boolean
   onClick: () => void | Promise<void>
 }
 
-function MenuItem({ icon: Icon, label, destructive = false, iconClassName, iconFilled = false, trailing, onClick }: MenuItemProps) {
+function MenuItem({ icon: Icon, label, destructive = false, iconClassName, iconFilled = false, trailing, disabled = false, onClick }: MenuItemProps) {
   return (
     <button
       type="button"
-      onClick={() => void onClick()}
+      disabled={disabled}
+      onClick={() => { if (!disabled) void onClick() }}
       className={cn(
         "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-sm transition-colors active:scale-[0.98]",
-        destructive
-          ? "text-red-400 hover:bg-red-500/10 hover:text-red-300"
-          : "text-foreground/80 hover:bg-white/[.06] hover:text-white"
+        disabled
+          ? "cursor-not-allowed text-muted-foreground/50"
+          : destructive
+            ? "text-red-400 hover:bg-red-500/10 hover:text-red-300"
+            : "text-foreground/80 hover:bg-white/[.06] hover:text-white"
       )}
     >
       <span className={cn("relative inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center transition-colors", iconClassName ?? "text-muted-foreground/80")}>
@@ -278,7 +287,8 @@ export function GameActionMenuPanel({
         <div className="space-y-px">
           <MenuItem
             icon={Download}
-            label={download.mode === "queue" ? "Add to download queue" : "Download"}
+            label={download.mode === "active" ? "Downloading…" : "Download"}
+            disabled={download.mode === "active"}
             onClick={download.onClick}
           />
         </div>

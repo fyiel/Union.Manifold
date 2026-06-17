@@ -1,6 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
+import { LogSharingConsentModal } from "@/components/LogSharingConsentModal"
 import type { Game } from "@/lib/types"
 import {
   fetchDownloadLinks,
@@ -454,6 +455,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
   const resumeLocksRef = useRef(new Set<string>())
   const pendingProgressRef = useRef<Map<string, DownloadUpdate>>(new Map())
   const progressFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [showLogShareConsent, setShowLogShareConsent] = useState(false)
   const [archiveDeletionPrompts, setArchiveDeletionPrompts] = useState<ArchiveDeletionPrompt[]>([])
   const [archiveDontAskAgain, setArchiveDontAskAgain] = useState(false)
   const [archiveDeletionBusy, setArchiveDeletionBusy] = useState(false)
@@ -1137,6 +1139,19 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         downloadsRef.current = clone
         return clone
       })
+      if (update.status === "failed") {
+        // Auto-share logs silently if the user opted in. The consent modal is
+        // shown on first launch (via a separate onboarding flow), not here.
+        void (async () => {
+          try {
+            const consent = await window.ucSettings?.get?.("autoShareErrorLogs")
+            if (consent === true) {
+              await window.ucLogs?.shareLogs?.({ baseUrl: (window as any).ucApp?.getBaseUrl?.() ?? undefined })
+            }
+          } catch { /* ignore */ }
+        })()
+      }
+
       if (update.status === "completed" || update.status === "extracted") {
         queueMicrotask(() => {
           void startNextQueuedPart()
@@ -1622,58 +1637,9 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         }
       }
 
-      // Level 2: Try resuming from interrupted state (createInterruptedDownload)
-      if (!ok && window.ucDownloads?.resumeInterrupted && target.resumeData?.offset) {
-        try {
-          downloadLogger.info("Resume Level 2 (interrupted)", { data: { offset: target.resumeData.offset, savePath: target.savePath } })
-          const res = await window.ucDownloads.resumeInterrupted({
-            downloadId,
-            url: target.url,
-            filename: target.filename,
-            appid: target.appid,
-            gameName: target.gameName,
-            partIndex: target.partIndex,
-            partTotal: target.partTotal,
-            savePath: target.savePath,
-            resumeData: target.resumeData,
-            authHeader: target.authHeader,
-          })
-          ok = Boolean(res && typeof res === "object" && "ok" in res ? (res as { ok?: boolean }).ok : res)
-          // The main process returns the actual file-size-based offset which may differ
-          // from the stale stored resumeData.offset (localStorage updates lag behind disk writes).
-          const actualOffset = (res as { actualOffset?: number })?.actualOffset
-          downloadLogger.info("Resume Level 2 result", { data: { ok, actualOffset, storedOffset: target.resumeData.offset } })
-        } catch {
-          ok = false
-        }
-        if (ok) {
-          // createInterruptedDownload triggers will-download which sends status updates.
-          // Set to "downloading" (not "queued") to prevent auto-start from re-processing this item.
-          setDownloads((prev) =>
-            prev.map((item) =>
-              item.id === downloadId
-                ? {
-                  ...item,
-                  status: "downloading" as DownloadStatus,
-                  speedBps: 0,
-                  etaSeconds: null,
-                  error: null,
-                  startedAt: Date.now(),
-                }
-                : item
-            )
-          )
-        }
-      }
-
-      // Level 3: Re-resolve the URL and resume from the partial file on disk.
-      // Instead of restarting from byte 0, we use createInterruptedDownload with the
-      // fresh URL + actual file offset so the download continues where it left off.
+      // Level 2: Re-resolve URL and re-enqueue through the aria2 engine.
+      // The engine handles on-disk partial detection and resume via --continue.
       if (!ok && window.ucDownloads?.start) {
-        // Hold sequenceLocksRef so startNextQueuedPart doesn't pick up the
-        // transient "queued | 0/0" update the engine emits when resumeWithFreshUrl
-        // creates a new download item, which would trigger a conflicting start call
-        // that causes the engine to pause/cancel the download.
         if (target.appid) sequenceLocksRef.current.add(target.appid)
         try {
           // Set to "downloading" so onUpdate callbacks from the main process are not blocked
@@ -1697,11 +1663,11 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
           // CDN URLs (e.g. FileQ signed links) expire, so we need a fresh one.
           const freshSource = await resolveFreshResumeSource(target)
           const resolveUrl = freshSource?.sourceUrl || target.originalUrl || target.url
-          downloadLogger.info("Resume Level 3 (re-resolve)", {
+          downloadLogger.info("Resume Level 2 (re-resolve)", {
             data: { host: freshSource?.host || target.host, resolveUrl, usedFreshSource: Boolean(freshSource?.sourceUrl) },
           })
           const resolved = await resolveDownloadUrl(freshSource?.host || target.host, resolveUrl)
-          downloadLogger.info("Resume Level 3 resolved", { data: { resolvedUrl: resolved?.url, resolvedOk: resolved?.resolved, hasAuth: Boolean(resolved?.authHeader) } })
+          downloadLogger.info("Resume Level 2 resolved", { data: { resolvedUrl: resolved?.url, resolvedOk: resolved?.resolved, hasAuth: Boolean(resolved?.authHeader) } })
           const freshUrl = resolved?.resolved ? resolved.url : target.url
           const freshAuth = resolved?.authHeader || target.authHeader
 
@@ -1722,7 +1688,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
                 totalBytes: resolved?.size || target.totalBytes,
                 authHeader: freshAuth,
               })
-              downloadLogger.info("Resume Level 3 resumeWithFreshUrl result", { data: resumeRes })
+              downloadLogger.info("Resume Level 2 resumeWithFreshUrl result", { data: resumeRes })
               if (resumeRes && typeof resumeRes === "object" && resumeRes.ok) {
                 resumedFromDisk = true
                 ok = true
@@ -1730,7 +1696,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
                 // File on disk is already fully downloaded. Continue with extraction instead of
                 // pretending the whole install completed, otherwise the user gets stuck in a fake
                 // completed state until they cancel and redownload.
-                downloadLogger.info("Resume Level 3: file already complete, starting install from downloaded archive")
+                downloadLogger.info("Resume Level 2: file already complete, starting install from downloaded archive")
                 resumedFromDisk = true
                 if (target.appid && window.ucDownloads?.installDownloadedArchive) {
                   const installRes = await window.ucDownloads.installDownloadedArchive(target.appid)
@@ -1765,7 +1731,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
                 }
               }
             } catch (e) {
-              downloadLogger.warn("Resume Level 3 resumeWithFreshUrl failed, falling back to fresh start", { data: e })
+              downloadLogger.warn("Resume Level 2 resumeWithFreshUrl failed, falling back to fresh start", { data: e })
             }
           }
 
@@ -1782,7 +1748,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
               authHeader: freshAuth,
               savePath: target.savePath,
             } as Parameters<typeof window.ucDownloads.start>[0])
-            downloadLogger.info("Resume Level 3 start result", { data: res })
+            downloadLogger.info("Resume Level 2 start result", { data: res })
             ok = true
           }
 
@@ -1805,7 +1771,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
             )
           )
         } catch (err) {
-          downloadLogger.warn("Resume Level 3 failed", { data: err })
+          downloadLogger.warn("Resume Level 2 failed", { data: err })
           ok = false
         } finally {
           if (target.appid) sequenceLocksRef.current.delete(target.appid)
@@ -2141,6 +2107,18 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
           )}
         </DownloadsContext.Provider>
       </DownloadsActionsContext.Provider>
+      <LogSharingConsentModal
+        open={showLogShareConsent}
+        onAccept={() => {
+          setShowLogShareConsent(false)
+          void window.ucSettings?.set?.("autoShareErrorLogs", true)
+          void window.ucLogs?.shareLogs?.({ baseUrl: (window as any).ucApp?.getBaseUrl?.() ?? undefined })
+        }}
+        onDecline={() => {
+          setShowLogShareConsent(false)
+          void window.ucSettings?.set?.("autoShareErrorLogs", false)
+        }}
+      />
     </DownloadsStoreContext.Provider>
   )
 }

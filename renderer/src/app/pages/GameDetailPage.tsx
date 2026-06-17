@@ -10,7 +10,7 @@ import { CommentMarkdown } from "@/components/CommentMarkdown"
 import { useDownloads } from "@/context/downloads-context"
 import { apiUrl, apiFetch } from "@/lib/api"
 import { getPreferredDownloadHost, setPreferredDownloadHost, requestDownloadToken, type PreferredDownloadHost, type DownloadConfig } from "@/lib/downloads"
-import { formatNumber, hasOnlineMode, pickGameExecutable, proxyImageUrl, cn, timeAgoLong } from "@/lib/utils"
+import { formatNumber, getUnambiguousExecutable, hasOnlineMode, matchAdminExecutable, proxyImageUrl, cn, timeAgoLong } from "@/lib/utils"
 import { rememberGameName } from "@/lib/rpc-game-cache"
 import { getPrefetchedGameDetail } from "@/lib/game-detail-prefetch"
 import { useAccountLists } from "@/hooks/use-account-lists"
@@ -52,7 +52,9 @@ import {
 import { ExePickerModal } from "@/components/ExePickerModal"
 import { GameLaunchFailedModal } from "@/components/GameLaunchFailedModal"
 import { GameLaunchPreflightModal, type LaunchPreflightResult } from "@/components/GameLaunchPreflightModal"
-import { LinuxExperiences } from "@/components/LinuxExperiences"
+import { GameExperience } from "@/components/GameExperience"
+import { GameExperiencePrompt } from "@/components/GameExperiencePrompt"
+import { GameRatingSummary } from "@/components/GameRatingSummary"
 import { DownloadCheckModal } from "@/components/DownloadCheckModal"
 import { DesktopShortcutModal } from "@/components/DesktopShortcutModal"
 import { EditGameMetadataModal } from "@/components/EditGameMetadataModal"
@@ -64,12 +66,14 @@ import { LaunchOptionsModal } from "@/components/LaunchOptionsModal"
 import { gameLogger } from "@/lib/logger"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { MediaImage } from "@/components/ui/media-image"
+import { MediaLightbox } from "@/components/MediaLightbox"
 import { GamePageSkeleton } from "@/components/GamePageSkeleton"
 import { SystemRequirements } from "@/components/SystemRequirements"
 import { SystemRequirementsCheck } from "@/components/SystemRequirementsCheck"
 import { GameVersionStatus } from "@/components/GameVersionStatus"
 import { GameNotesPanel } from "@/components/GameNotesPanel"
 import { PlaytimeChart } from "@/components/PlaytimeChart"
+import { CommunityPlaytimeChart } from "@/components/CommunityPlaytimeChart"
 import { GameTopPlayers, GameCommunityActivity } from "@/components/GameCommunityActivity"
 import { useAuth } from "@/hooks/useAuth"
 import { useMotionPreferences } from "@/hooks/use-motion-preferences"
@@ -482,6 +486,22 @@ export function GameDetailPage() {
     }, 50)
   }
 
+  // Switch to the Community tab and scroll to an element inside it. Tab panels
+  // render with `hidden` while inactive, so we flip the tab first and scroll on
+  // the next frame. Used by the playtime nudge and the rating panel's CTA.
+  const goToCommunity = (elementId: "comments" | "game-experience") => {
+    setActiveTab("community")
+    setTimeout(() => {
+      if (elementId === "comments") {
+        // GameComments owns its own scroll + highlight flash (it listens for
+        // this event) so the landing spot is unmistakable.
+        window.dispatchEvent(new CustomEvent("uc:focus-comments"))
+      } else {
+        document.getElementById(elementId)?.scrollIntoView({ behavior: "smooth", block: "start" })
+      }
+    }, 80)
+  }
+
   const clampLightboxPan = (nextX: number, nextY: number, zoomValue = lightboxZoom) => {
     const viewport = lightboxViewportRef.current
     if (!viewport || zoomValue <= 1) {
@@ -592,19 +612,7 @@ export function GameDetailPage() {
     }
   }
 
-  useEffect(() => {
-    if (!lightboxOpen) return
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") closeLightbox()
-      if (e.key === "ArrowRight") nextLightbox()
-      if (e.key === "ArrowLeft") prevLightbox()
-      if (e.key === "+" || e.key === "=") zoomInLightbox()
-      if (e.key === "-" || e.key === "_") zoomOutLightbox()
-      if (e.key === "0") resetLightboxZoom()
-    }
-    window.addEventListener("keydown", onKey)
-    return () => window.removeEventListener("keydown", onKey)
-  }, [lightboxOpen, nextLightbox, prevLightbox, closeLightbox, zoomInLightbox, zoomOutLightbox, resetLightboxZoom])
+  // Keyboard + zoom/pan are handled inside <MediaLightbox/>.
 
   const openHostSelector = async () => {
     if (!game) return
@@ -718,20 +726,54 @@ export function GameDetailPage() {
       const savedExe = await getSavedExe()
 
       if (savedExe) {
-        await handleLaunchWithShortcutCheck(savedExe)
-        return
+        // The saved path is absolute and can go stale after an update re-extracts
+        // the game (different top-level folder, renamed exe, etc.). If it no longer
+        // resolves, drop it and fall through to re-detection instead of dead-ending
+        // on the "executable no longer exists" modal and forcing a manual reselect.
+        const pre = await window.ucDownloads?.preflightGameLaunch?.(game.appid, savedExe)
+        const exeMissing = pre?.ok && pre.checks?.some((c) => c.code === "exe-not-found")
+        if (exeMissing) {
+          await setSavedExe(null)
+        } else {
+          await handleLaunchWithShortcutCheck(savedExe)
+          return
+        }
       }
 
       const result = await window.ucDownloads.listGameExecutables(game.appid)
       const exes = result?.exes || []
       const folder = result?.folder || null
       const browseFolder = folder
-      const { pick, confident } = pickGameExecutable(exes, game.name, game.source, folder)
-      if (pick && confident) {
-        await handleLaunchWithShortcutCheck(pick.path)
+
+      // Prefer the executable staff selected in the admin panel — it's the
+      // authoritative choice for our release and avoids the wrong-exe guess.
+      const adminExe = matchAdminExecutable(exes, game.game_executable_path, folder)
+      if (adminExe) {
+        await handleLaunchWithShortcutCheck(adminExe.path)
         return
       }
-      await openExePicker(exes, { mode: "launch", actionLabel: "Launch", folder: browseFolder })
+
+      // No admin exe set. If the folder has exactly one real executable there's
+      // nothing to choose between — launch it directly. Only when it's
+      // ambiguous (2+ candidates) do we surface the picker, so we never
+      // silently guess the wrong .exe.
+      const single = getUnambiguousExecutable(exes)
+      if (single) {
+        await handleLaunchWithShortcutCheck(single.path)
+        return
+      }
+
+      // Ambiguous (or nothing found) — show the picker with the heuristic
+      // best-guess highlighted so the launch target is an explicit choice.
+      // Once picked it's saved, so this popup only appears on the first launch.
+      await openExePicker(exes, {
+        mode: "launch",
+        actionLabel: "Launch",
+        folder: browseFolder,
+        message: exes.length
+          ? `Our team hasn't set the launch file for "${game.name}" yet, so UC.D can't be sure which executable is the game. Pick the one to run — usually the largest, named after the game.`
+          : `No executables were found for "${game.name}" yet. It may still be extracting, or you can browse to the correct file.`,
+      })
     } catch { }
   }
 
@@ -745,6 +787,22 @@ export function GameDetailPage() {
     deepLinkLaunchHandledRef.current = true
     setSearchParams({}, { replace: true })
     void launchInstalledGameRef.current()
+  }, [game, loading, searchParams, setSearchParams])
+
+  // Deep-link download intent. Other surfaces (right-click "Download", the
+  // collection/library download buttons) route here with ?download=1 instead
+  // of queueing silently, so the pre-download check modal + host selector —
+  // which only live on this page — run consistently everywhere.
+  const openHostSelectorRef = useRef<() => void | Promise<void>>(() => {})
+  openHostSelectorRef.current = openHostSelector
+  const deepLinkDownloadHandledRef = useRef(false)
+  useEffect(() => {
+    if (searchParams.get("download") !== "1") return
+    if (!game || loading) return
+    if (deepLinkDownloadHandledRef.current) return
+    deepLinkDownloadHandledRef.current = true
+    setSearchParams({}, { replace: true })
+    void openHostSelectorRef.current()
   }, [game, loading, searchParams, setSearchParams])
 
   // Forward-declared so the auto-open effect below can reference it; the
@@ -869,7 +927,7 @@ export function GameDetailPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-background pb-12">
+      <div className="space-y-6">
         <GamePageSkeleton />
       </div>
     )
@@ -1288,6 +1346,12 @@ export function GameDetailPage() {
         void showStartFailedModal()
       }) ?? null
       // Fallback: the isGameRunning useEffect below detects exits within the 12 s window
+    } else {
+      // Launch failed outright (exe missing, spawn error, etc.). Previously this
+      // path did nothing, so clicking Play on a broken exe looked like a no-op.
+      // Surface the failure modal so the user can pick a different executable.
+      setIsGameRunning(false)
+      setGameStartFailedOpen(true)
     }
   }
 
@@ -1376,9 +1440,8 @@ export function GameDetailPage() {
 
       <div className="relative z-10 space-y-12">
       <section className="relative pt-6">
-        <div className="container mx-auto px-4">
-          <div className="max-w-6xl mx-auto">
-            <div className="relative rounded-3xl overflow-hidden border border-white/[.07] bg-[#1A1A1A]/80 backdrop-blur-md shadow-[0_8px_32px_0_rgba(0,0,0,0.5)]">
+        <div className="max-w-6xl mx-auto">
+          <div className="relative rounded-3xl overflow-hidden border border-white/[.07] bg-[#1A1A1A]/80 backdrop-blur-md shadow-[0_8px_32px_0_rgba(0,0,0,0.5)]">
               <div className="relative aspect-video overflow-hidden">
                 {!heroImageLoaded && <div className="udl-skeleton absolute inset-0 z-0 rounded-none" />}
                 <MediaImage
@@ -1496,13 +1559,24 @@ export function GameDetailPage() {
             </div>
 
           </div>
-        </div>
       </section>
 
       {/* Version Switcher Tab Bar removed - single-version system */}
 
-      <section className="container mx-auto px-4 py-12">
-        <div className="max-w-6xl mx-auto">
+      <section className="max-w-6xl mx-auto py-12">
+          {/* "You've played X for Y — leave a review" nudge. Self-hides unless
+              the signed-in viewer has playtime on this game. */}
+          {game?.appid && (
+            <div className="mb-6">
+              <GameExperiencePrompt
+                key={game.appid}
+                appid={game.appid}
+                gameName={game.name}
+                onLeaveComment={() => goToCommunity("comments")}
+                onRate={() => goToCommunity("game-experience")}
+              />
+            </div>
+          )}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             <div className="lg:col-span-2 space-y-6 min-w-0">
               {/* Tab bar — keeps the page to roughly one screen. Mirrors the
@@ -1646,11 +1720,14 @@ export function GameDetailPage() {
 
               {/* ── Community tab ────────────────────────────────────── */}
               <div className={activeTab === "community" ? "space-y-6" : "hidden"}>
+                {game?.appid && <CommunityPlaytimeChart appid={game.appid} gameName={game.name} gameImage={game.image} />}
                 {game?.appid && <GameTopPlayers appid={game.appid} />}
                 {game?.appid && <GameCommunityActivity appid={game.appid} />}
-                <div className="rounded-2xl overflow-hidden bg-card/40 border border-white/[.07]">
-                  <LinuxExperiences appid={game.appid} />
-                </div>
+                <GameExperience
+                  appid={game.appid}
+                  gameName={game.name}
+                  onLeaveComment={() => goToCommunity("comments")}
+                />
                 {game?.appid && (
                   <GameComments appid={game.appid} gameName={game.name} />
                 )}
@@ -1659,7 +1736,7 @@ export function GameDetailPage() {
               {/* ── You tab (signed-in only) ─────────────────────────── */}
               {authState.isAuthenticated && (
                 <div className={activeTab === "you" ? "space-y-6" : "hidden"}>
-                  {game?.appid && <PlaytimeChart appid={game.appid} />}
+                  {game?.appid && <PlaytimeChart appid={game.appid} gameName={game.name} gameImage={game.image} />}
                   {game?.appid && isInstalled && <GameNotesPanel appid={game.appid} />}
                 </div>
               )}
@@ -2018,6 +2095,15 @@ export function GameDetailPage() {
                 </div>
               </div>
 
+              {/* Rating quick-view — average stars, count and Windows/Linux
+                  split at a glance; opens the full rating panel. */}
+              {game?.appid && (
+                <GameRatingSummary
+                  appid={game.appid}
+                  onOpen={() => goToCommunity("game-experience")}
+                />
+              )}
+
               {/* Lighter Details card — was p-8 rounded-3xl with shadow-xl,
                   which made it dominate the sidebar. Toned down to match the
                   rest of the redesigned column. */}
@@ -2080,14 +2166,20 @@ export function GameDetailPage() {
                     </div>
                   )}
 
-                  {(game.version || installedVersionLabels.length > 0) && (
-                    <div className="flex items-center justify-between py-1.5 border-b border-white/[.07] pb-3">
-                      <span className="text-muted-foreground">Version</span>
-                      <span className="font-bold text-white">
-                        {installedVersionLabels[0] || game.version}
-                      </span>
-                    </div>
-                  )}
+                  {(game.version || installedVersionLabels.length > 0) && (() => {
+                    const displayVersion = installedVersionLabels[0] || game.version || ""
+                    const isBeta = /\s*[-–]\s*BETA\s*$/i.test(displayVersion)
+                    const baseVersion = isBeta ? displayVersion.replace(/\s*[-–]\s*BETA\s*$/i, "").trim() : displayVersion
+                    return (
+                      <div className="flex items-center justify-between py-1.5 border-b border-white/[.07] pb-3">
+                        <span className="text-muted-foreground">Version</span>
+                        <span className={`font-bold ${isBeta ? "text-red-400" : "text-white"}`}>
+                          {baseVersion}
+                          {isBeta && <span className="ml-1.5 text-[10px] font-bold uppercase tracking-wider bg-red-500/20 text-red-400 border border-red-500/30 rounded px-1 py-0.5">BETA</span>}
+                        </span>
+                      </div>
+                    )
+                  })()}
 
                   <div className="flex items-center justify-between py-1.5 border-b border-white/[.07] pb-3">
                     <span className="text-muted-foreground flex items-center gap-2.5">
@@ -2132,12 +2224,11 @@ export function GameDetailPage() {
 
             </div>
           </div>
-        </div>
       </section>
 
       {relatedGames.length > 0 && (
-        <section className="py-20 px-4 relative z-10">
-          <div className="container mx-auto max-w-7xl">
+        <section className="py-20 relative z-10">
+          <div className="max-w-7xl mx-auto">
             <h2 className="text-3xl md:text-4xl font-black text-white mb-10 text-center">
               You May Also Like
             </h2>
@@ -2163,135 +2254,17 @@ export function GameDetailPage() {
         </section>
       )}
 
-      {lightboxScreenshots.length > 0 && lightboxOpen && typeof document !== "undefined" && createPortal(
-        <div className="fixed inset-0 z-[10000] flex items-center justify-center">
-          <div className="absolute inset-0 bg-black/90 backdrop-blur-md z-[10000]" onClick={closeLightbox} aria-hidden="true" />
-
-          <button
-            className="absolute top-6 right-6 z-[10010] bg-secondary/50 hover:bg-zinc-700 border border-white/[.07] rounded-full p-3 backdrop-blur-md transition-all active:scale-95"
-            onClick={closeLightbox}
-            aria-label="Close"
-          >
-            <X className="h-6 w-6 text-white" />
-          </button>
-
-          <button
-            onClick={prevLightbox}
-            className="absolute left-2 sm:left-6 top-1/2 -translate-y-1/2 z-[10010] p-2 sm:p-4 rounded-full bg-secondary/60 hover:bg-secondary border border-white/[.07] backdrop-blur-md transition-all active:scale-95"
-            aria-label="Previous"
-          >
-            <ChevronLeft className="h-6 w-6 sm:h-8 sm:w-8 text-white" />
-          </button>
-
-          <div
-            className="relative z-[10010] max-w-[98vw] max-h-[92vh] flex items-center justify-center px-2 sm:px-4 pointer-events-auto"
-            onWheel={(event) => {
-              event.preventDefault()
-              if (event.deltaY < 0) {
-                zoomInLightbox()
-              } else {
-                zoomOutLightbox()
-              }
-            }}
-          >
-            <div className="w-full h-full flex items-center justify-center">
-              <div
-                ref={lightboxViewportRef}
-                className="w-full max-w-[1600px] max-h-[88vh] flex items-center justify-center rounded-2xl overflow-hidden shadow-[0_0_50px_rgba(0,0,0,0.8)] border border-white/[.07]"
-                style={{ touchAction: lightboxZoom > 1 ? "none" : "auto" }}
-                onPointerDown={handleLightboxPointerDown}
-                onPointerMove={handleLightboxPointerMove}
-                onPointerUp={handleLightboxPointerUp}
-                onPointerCancel={handleLightboxPointerUp}
-              >
-                <img
-                  src={proxyImageUrl(getHighQualityScreenshotUrl(lightboxScreenshots[lightboxIndex])) || "./fallbacks/game-shot-16x9.svg"}
-                  alt={`Screenshot ${lightboxIndex + 1}`}
-                  className={cn(
-                    "max-w-full max-h-full object-contain mx-auto transition-transform duration-200 select-none",
-                    lightboxZoom > 1 ? (lightboxDragging ? "cursor-grabbing" : "cursor-grab") : "cursor-zoom-in",
-                  )}
-                  draggable={false}
-                  onDragStart={(event) => event.preventDefault()}
-                  onError={(e) => {
-                    const el = e.currentTarget
-                    const r = parseInt(el.dataset.retries ?? "0")
-                    if (r < 2) {
-                      el.dataset.retries = String(r + 1)
-                      const base = proxyImageUrl(getHighQualityScreenshotUrl(lightboxScreenshots[lightboxIndex]))
-                      setTimeout(() => { el.src = base + (base.includes("?") ? "&" : "?") + `_r=${r + 1}` }, 1500 * (r + 1))
-                    } else {
-                      el.src = "./fallbacks/game-shot-16x9.svg"
-                    }
-                  }}
-                  style={{ transform: `translate(${lightboxPan.x}px, ${lightboxPan.y}px) scale(${lightboxZoom})` }}
-                  onClick={() => {
-                    if (suppressLightboxImageClickRef.current) {
-                      suppressLightboxImageClickRef.current = false
-                      return
-                    }
-
-                    if (lightboxZoom > 1) {
-                      resetLightboxZoom()
-                    } else {
-                      setLightboxZoom(2)
-                      setLightboxPan({ x: 0, y: 0 })
-                    }
-                  }}
-                />
-              </div>
-            </div>
-          </div>
-
-          <button
-            onClick={nextLightbox}
-            className="absolute right-2 sm:right-6 top-1/2 -translate-y-1/2 z-[10010] p-2 sm:p-4 rounded-full bg-secondary/60 hover:bg-secondary border border-white/[.07] backdrop-blur-md transition-all active:scale-95"
-            aria-label="Next"
-          >
-            <ChevronRight className="h-6 w-6 sm:h-8 sm:w-8 text-white" />
-          </button>
-
-          <div className="absolute bottom-5 left-1/2 -translate-x-1/2 bg-black/55 backdrop-blur-md px-3 sm:px-4 py-2 rounded-full border border-white/[.07] text-xs sm:text-sm font-bold text-white z-[10010] tracking-widest shadow-lg flex items-center gap-2 sm:gap-3">
-            <button
-              onClick={prevLightbox}
-              className="md:hidden h-8 w-8 rounded-full border border-white/[.12] bg-card/70 hover:bg-secondary/80 flex items-center justify-center active:scale-95"
-              aria-label="Previous screenshot"
-            >
-              <ChevronLeft className="h-4 w-4 text-white" />
-            </button>
-            <button
-              onClick={zoomOutLightbox}
-              className="h-8 w-8 rounded-full border border-white/[.12] bg-card/70 hover:bg-secondary/80 flex items-center justify-center active:scale-95"
-              aria-label="Zoom out"
-            >
-              <Minus className="h-4 w-4 text-white" />
-            </button>
-            <button
-              onClick={resetLightboxZoom}
-              className="px-3 h-8 rounded-full border border-white/[.12] bg-card/70 hover:bg-secondary/80 text-[11px] sm:text-xs font-black text-white active:scale-95"
-              aria-label="Reset zoom"
-            >
-              {`${Math.round(lightboxZoom * 100)}%`}
-            </button>
-            <button
-              onClick={zoomInLightbox}
-              className="h-8 w-8 rounded-full border border-white/[.12] bg-card/70 hover:bg-secondary/80 flex items-center justify-center active:scale-95"
-              aria-label="Zoom in"
-            >
-              <Plus className="h-4 w-4 text-white" />
-            </button>
-            <span>{`${lightboxIndex + 1} / ${lightboxScreenshots.length}`}</span>
-            <button
-              onClick={nextLightbox}
-              className="md:hidden h-8 w-8 rounded-full border border-white/[.12] bg-card/70 hover:bg-secondary/80 flex items-center justify-center active:scale-95"
-              aria-label="Next screenshot"
-            >
-              <ChevronRight className="h-4 w-4 text-white" />
-            </button>
-          </div>
-        </div>,
-        document.body,
-      )}
+      <MediaLightbox
+        open={lightboxOpen}
+        index={lightboxIndex}
+        onIndexChange={setLightboxIndex}
+        onClose={() => setLightboxOpen(false)}
+        images={lightboxScreenshots.map((shot, i) => ({
+          src: proxyImageUrl(getHighQualityScreenshotUrl(shot)) || "./fallbacks/game-shot-16x9.svg",
+          alt: `Screenshot ${i + 1}`,
+          fallbackSrc: "./fallbacks/game-shot-16x9.svg",
+        }))}
+      />
       </div>{/* close relative z-10 */}
       <UpdateBackupWarningModal
         open={updateWarningOpen}
@@ -2468,6 +2441,7 @@ export function GameDetailPage() {
         gameName={game.name}
         onClose={() => setGameStartFailedOpen(false)}
         onPickExecutable={() => { void openExecutablePicker() }}
+        hasOnlineSupport={hasOnlineMode(game?.hasCoOp)}
       />
       <LaunchOptionsModal
         open={launchOptionsOpen}

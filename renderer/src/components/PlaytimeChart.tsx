@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react"
-import { Clock } from "lucide-react"
+import { Clock, Maximize2 } from "lucide-react"
 import { apiFetch } from "@/lib/api"
 import { useAuth } from "@/hooks/useAuth"
+import { PlaytimeDetailModal } from "@/components/PlaytimeDetailModal"
 
 type Bucket = { day: string; seconds: number; sessions: number }
 
@@ -37,6 +38,8 @@ type Props = {
   appid: string
   className?: string
   days?: number
+  gameName?: string | null
+  gameImage?: string | null
 }
 
 /**
@@ -45,11 +48,12 @@ type Props = {
  * compact summary line ("4h 12m across 7 sessions"). Hidden entirely when
  * the user has no recorded sessions for this game.
  */
-export function PlaytimeChart({ appid, className, days = DEFAULT_DAYS }: Props) {
+export function PlaytimeChart({ appid, className, days = DEFAULT_DAYS, gameName, gameImage }: Props) {
   const [auth] = useAuth()
   const [buckets, setBuckets] = useState<Bucket[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [hovered, setHovered] = useState<Bucket | null>(null)
+  const [detailOpen, setDetailOpen] = useState(false)
 
   useEffect(() => {
     if (!appid || !auth.isAuthenticated) {
@@ -114,11 +118,20 @@ export function PlaytimeChart({ appid, className, days = DEFAULT_DAYS }: Props) 
   const labelInterval = Math.max(1, Math.ceil(buckets.length / 6))
 
   return (
-    <div className={`px-3.5 py-2.5 rounded-2xl bg-card/60 border border-white/[.07] backdrop-blur-md space-y-2 shadow-md ${className ?? ""}`}>
+    <>
+    <div
+      className={`group relative cursor-pointer px-3.5 py-2.5 rounded-2xl bg-card/60 border border-white/[.07] backdrop-blur-md space-y-2 shadow-md transition-colors hover:border-white/[.14] ${className ?? ""}`}
+      role="button"
+      tabIndex={0}
+      onClick={() => setDetailOpen(true)}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setDetailOpen(true) } }}
+      aria-label="Open playtime details"
+    >
       <div className="flex items-center justify-between gap-2">
         <h3 className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground inline-flex items-center gap-1.5">
           <Clock className="h-3 w-3" />
           Playtime · {days}d
+          <Maximize2 className="h-3 w-3 text-muted-foreground/50 opacity-0 transition-opacity group-hover:opacity-100" />
         </h3>
         <span className="text-[10px] text-muted-foreground/80 tabular-nums">
           {formatHumanRange(buckets)}
@@ -167,13 +180,28 @@ export function PlaytimeChart({ appid, className, days = DEFAULT_DAYS }: Props) 
         </div>
       </div>
 
-      {hovered && hovered.seconds > 0 && (
-        <div className="text-[11px] text-foreground/80 tabular-nums">
-          <span className="text-white font-medium">{formatDayLabel(hovered.day)}</span>
-          <span className="text-muted-foreground/80"> · {formatHoursShort(hovered.seconds)}</span>
-          <span className="text-muted-foreground/80"> · {hovered.sessions} session{hovered.sessions === 1 ? "" : "s"}</span>
-        </div>
-      )}
+      {/* Fixed-height hovered-day readout. Always rendered (only its content
+          toggles) so hovering a bar fills it in place instead of inserting a
+          row that shifts every card below it in and out. */}
+      <div className="flex items-center h-4 text-[11px] tabular-nums whitespace-nowrap overflow-hidden">
+        {hovered && hovered.seconds > 0 && (
+          <span>
+            <span className="text-white font-medium">{formatDayLabel(hovered.day)}</span>
+            <span className="text-muted-foreground/80"> · {formatHoursShort(hovered.seconds)}</span>
+            <span className="text-muted-foreground/80"> · {hovered.sessions} session{hovered.sessions === 1 ? "" : "s"}</span>
+          </span>
+        )}
+      </div>
     </div>
+    <PlaytimeDetailModal
+      open={detailOpen}
+      onClose={() => setDetailOpen(false)}
+      mode="you"
+      days={days}
+      gameName={gameName}
+      gameImage={gameImage}
+      buckets={buckets}
+    />
+    </>
   )
 }

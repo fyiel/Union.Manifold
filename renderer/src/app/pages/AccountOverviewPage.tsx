@@ -187,16 +187,14 @@ export function AccountOverviewPage() {
   // ── Not signed in ──
   if (!hasSession && !authState.isLoading) {
     return (
-      <div className="min-h-screen bg-background">
-        <div className="container mx-auto px-4 py-14 max-w-6xl">
-          <Card className="glass rounded-3xl">
-            <CardContent className="py-12 text-center space-y-4">
-              <p className="text-lg font-semibold text-foreground">Login to continue.</p>
-              <p className="text-sm text-muted-foreground">Sign in to see your profile and activity.</p>
-              <Button onClick={handleLogin}><LogIn className="h-4 w-4 mr-2" />Sign In</Button>
-            </CardContent>
-          </Card>
-        </div>
+      <div className="max-w-6xl mx-auto space-y-6">
+        <Card className="glass rounded-3xl">
+          <CardContent className="py-12 text-center space-y-4">
+            <p className="text-lg font-semibold text-foreground">Login to continue.</p>
+            <p className="text-sm text-muted-foreground">Sign in to see your profile and activity.</p>
+            <Button onClick={handleLogin}><LogIn className="h-4 w-4 mr-2" />Sign In</Button>
+          </CardContent>
+        </Card>
       </div>
     )
   }
@@ -213,72 +211,68 @@ export function AccountOverviewPage() {
   )
 
   return (
-    <div className="min-h-screen bg-background">
-      <div className="container mx-auto px-4 py-10 sm:py-12 md:py-14 max-w-6xl">
-        {profileLoading || !profile ? (
-          <div className="space-y-6 anim">
-            <Skeleton className="h-56 w-full rounded-3xl" />
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
-              {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-16 rounded-2xl" />)}
-            </div>
-            <Skeleton className="h-40 w-full rounded-3xl" />
+    <div className="max-w-6xl mx-auto space-y-6 sm:space-y-8">
+      {profileLoading || !profile ? (
+        <div className="space-y-6 anim">
+          <Skeleton className="h-56 w-full rounded-3xl" />
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+            {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-16 rounded-2xl" />)}
           </div>
-        ) : (
-          <div className="anim">
-            <ProfileView data={profile} heroActions={heroActions} />
+          <Skeleton className="h-40 w-full rounded-3xl" />
+        </div>
+      ) : (
+        <div className="anim space-y-6 sm:space-y-8">
+          <ProfileView data={profile} heroActions={heroActions} />
 
-            {/* Account management (desktop-only — not part of the public profile) */}
-            <div className="mt-8">
-              <Card className="rounded-3xl bg-card/80 border border-border/50 backdrop-blur-md shadow-[0_8px_30px_rgb(0,0,0,0.12)]">
-                <CardHeader className="flex flex-row items-center gap-2">
-                  <CardTitle className="text-base font-semibold">Account</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="grid gap-3 md:grid-cols-2">
-                    {authState.user?.email && (
-                      <div className="rounded-2xl border border-border/50 bg-secondary/40 p-4">
-                        <p className="text-xs font-semibold text-muted-foreground mb-1">Email</p>
-                        <p className="text-sm text-foreground break-all">{authState.user.email}</p>
-                      </div>
-                    )}
-                    {authState.user?.username && (
-                      <div className="rounded-2xl border border-border/50 bg-secondary/40 p-4">
-                        <p className="text-xs font-semibold text-muted-foreground mb-1">Username</p>
-                        <p className="text-sm text-foreground">{authState.user.username}</p>
-                      </div>
-                    )}
+          {/* Account management (desktop-only — not part of the public profile) */}
+          <Card className="rounded-3xl bg-card/80 border border-border/50 backdrop-blur-md shadow-[0_8px_30px_rgb(0,0,0,0.12)]">
+            <CardHeader className="flex flex-row items-center gap-2">
+              <CardTitle className="text-base font-semibold">Account</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid gap-3 md:grid-cols-2">
+                {authState.user?.email && (
+                  <div className="rounded-2xl border border-border/50 bg-secondary/40 p-4">
+                    <p className="text-xs font-semibold text-muted-foreground mb-1">Email</p>
+                    <p className="text-sm text-foreground break-all">{authState.user.email}</p>
                   </div>
-                  <div className="space-y-2">
-                    <p className="text-sm font-semibold text-foreground/80">Linked accounts</p>
-                    <div className="grid gap-2 md:grid-cols-2">
-                      {(["discord", "google"] as const).map((provider) => {
-                        const linked = linkedProviders.some((p) => p.provider === provider)
-                        const busy = linkingProvider === provider || unlinkingProvider === provider
-                        return (
-                          <div key={provider} className="rounded-2xl border border-border/50 bg-secondary/40 p-3 flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                              <span className={`w-2 h-2 rounded-full ${provider === "discord" ? "bg-indigo-500" : "bg-red-500"}`} />
-                              <span className="text-sm text-foreground/80 capitalize">{provider}</span>
-                            </div>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => (linked ? handleUnlinkProvider(provider) : handleLinkProvider(provider))}
-                              disabled={busy || (linked && linkedProviders.length === 1)}
-                            >
-                              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : linked ? <Unlink className="h-4 w-4" /> : <Link2 className="h-4 w-4" />}
-                            </Button>
-                          </div>
-                        )
-                      })}
-                    </div>
+                )}
+                {authState.user?.username && (
+                  <div className="rounded-2xl border border-border/50 bg-secondary/40 p-4">
+                    <p className="text-xs font-semibold text-muted-foreground mb-1">Username</p>
+                    <p className="text-sm text-foreground">{authState.user.username}</p>
                   </div>
-                </CardContent>
-              </Card>
-            </div>
-          </div>
-        )}
-      </div>
+                )}
+              </div>
+              <div className="space-y-2">
+                <p className="text-sm font-semibold text-foreground/80">Linked accounts</p>
+                <div className="grid gap-2 md:grid-cols-2">
+                  {(["discord", "google"] as const).map((provider) => {
+                    const linked = linkedProviders.some((p) => p.provider === provider)
+                    const busy = linkingProvider === provider || unlinkingProvider === provider
+                    return (
+                      <div key={provider} className="rounded-2xl border border-border/50 bg-secondary/40 p-3 flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className={`w-2 h-2 rounded-full ${provider === "discord" ? "bg-indigo-500" : "bg-red-500"}`} />
+                          <span className="text-sm text-foreground/80 capitalize">{provider}</span>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => (linked ? handleUnlinkProvider(provider) : handleLinkProvider(provider))}
+                          disabled={busy || (linked && linkedProviders.length === 1)}
+                        >
+                          {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : linked ? <Unlink className="h-4 w-4" /> : <Link2 className="h-4 w-4" />}
+                        </Button>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       {/* Edit profile dialog */}
       <Dialog open={editOpen} onOpenChange={setEditOpen}>
@@ -291,10 +285,14 @@ export function AccountOverviewPage() {
               <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">{profileUploadError}</div>
             )}
             <div className="flex items-center gap-3">
-              <div className="h-16 w-16 shrink-0 overflow-hidden rounded-2xl border border-white/10 bg-secondary/60">
+              <div className="h-16 w-16 shrink-0 overflow-hidden rounded-full border border-white/10 bg-secondary/60 flex items-center justify-center" style={{ containerType: "inline-size" }}>
                 {resolveCurrentAvatarUrl(profileImages) ? (
                   <img src={proxyImageUrl(resolveCurrentAvatarUrl(profileImages) ?? "")} alt="" className="h-full w-full object-cover" />
-                ) : null}
+                ) : (
+                  <span aria-hidden className="font-bold uppercase leading-none text-muted-foreground/80" style={{ fontSize: "45cqw" }}>
+                    {(profile?.user.displayName || authState.user?.username || "?").charAt(0).toUpperCase()}
+                  </span>
+                )}
               </div>
               <div className="flex flex-wrap gap-2">
                 <Button variant="outline" size="sm" className="gap-2" onClick={() => setAvatarPickerOpen(true)}>

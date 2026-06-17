@@ -296,7 +296,7 @@ declare global {
     ucSettings?: {
       get: (key: string) => Promise<any>
       set: (key: string, value: any) => Promise<{ ok: boolean }>
-      clearAll: () => Promise<{ ok: boolean }>
+      clearAll: () => Promise<{ ok: boolean; shortcutsRemoved?: number }>
       exportSettings: () => Promise<{ ok: boolean; data?: string; error?: string }>
       importSettings: () => Promise<{ ok: boolean; error?: string }>
       runNetworkTest: (baseUrl?: string) => Promise<{ ok: boolean; results?: Array<{ label: string; url: string; ok: boolean; status: number; elapsedMs: number; error?: string }>; error?: string }>
@@ -661,6 +661,7 @@ declare global {
     ucSystem?: {
       getVolume: () => Promise<{ ok: boolean; volume: number }>
       openExternal?: (target: string) => Promise<{ ok: boolean; error?: string }>
+      launchSteam?: () => Promise<{ ok: boolean; method?: string; error?: string }>
       setVolume: (level: number) => Promise<{ ok: boolean }>
       getMuted: () => Promise<{ ok: boolean; muted: boolean }>
       setMuted: (muted: boolean) => Promise<{ ok: boolean }>

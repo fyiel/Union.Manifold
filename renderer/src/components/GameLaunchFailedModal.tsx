@@ -7,7 +7,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { AlertTriangle, Info, Settings2 } from "@/components/icons"
+import { AlertTriangle, Info, Settings2, Wifi } from "@/components/icons"
+import { useState } from "react"
 
 type GameLaunchFailedModalProps = {
   open: boolean
@@ -17,6 +18,11 @@ type GameLaunchFailedModalProps = {
    *  provided, the modal shows a primary "Pick executable" action so users
    *  don't have to dig through the gear menu to fix a wrong-exe launch. */
   onPickExecutable?: () => void
+  /** When the game advertises online/multiplayer support, a launch failure is
+   *  often because Steam isn't running in the background (the game can't reach
+   *  the Steam client to bootstrap its online services). Surface a hint + a
+   *  one-click "Launch Steam" action in that case. */
+  hasOnlineSupport?: boolean
 }
 
 export function GameLaunchFailedModal({
@@ -24,7 +30,24 @@ export function GameLaunchFailedModal({
   gameName,
   onClose,
   onPickExecutable,
+  hasOnlineSupport = false,
 }: GameLaunchFailedModalProps) {
+  const [steamLaunching, setSteamLaunching] = useState(false)
+  const [steamLaunched, setSteamLaunched] = useState(false)
+
+  const launchSteam = async () => {
+    if (steamLaunching) return
+    setSteamLaunching(true)
+    try {
+      const res = await window.ucSystem?.launchSteam?.()
+      setSteamLaunched(Boolean(res?.ok))
+    } catch {
+      setSteamLaunched(false)
+    } finally {
+      setSteamLaunching(false)
+    }
+  }
+
   return (
     <Dialog open={open} onOpenChange={(next) => { if (!next) onClose() }}>
       <DialogContent className="sm:max-w-md">
@@ -41,14 +64,41 @@ export function GameLaunchFailedModal({
           </DialogDescription>
         </DialogHeader>
 
-        {/* Beta notice — UC.D does not yet have automatic exe-correctness
-            detection, so the user is the one who decides which exe is right. */}
+        {/* Online/multiplayer games frequently fail to launch when Steam isn't
+            already running — the game's online layer expects to talk to a live
+            Steam client. Offer to start Steam right here so the user can retry. */}
+        {hasOnlineSupport && (
+          <div className="flex items-start gap-2 rounded-xl border border-sky-500/25 bg-sky-500/[.06] px-3 py-2.5 text-xs text-sky-100">
+            <Wifi className="mt-0.5 h-3.5 w-3.5 shrink-0 text-sky-300" />
+            <div className="space-y-2">
+              <p className="leading-relaxed">
+                We detected that this game might have online support. For the game
+                to launch, you may need to run <span className="font-medium">Steam</span> in
+                the background. Start Steam, then press Play again.
+              </p>
+              <Button
+                size="sm"
+                onClick={launchSteam}
+                disabled={steamLaunching}
+                className="bg-sky-500 text-white hover:bg-sky-400"
+              >
+                <Wifi className="h-3.5 w-3.5 mr-1.5" />
+                {steamLaunching ? "Launching Steam…" : steamLaunched ? "Steam launched — retry Play" : "Launch Steam"}
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* When staff have set the executable for a release in the admin panel,
+            UC.D launches that automatically. This notice covers the cases where
+            no exe was set, or this particular release uses a different file. */}
         <div className="flex items-start gap-2 rounded-xl border border-amber-500/25 bg-amber-500/[.06] px-3 py-2.5 text-xs text-amber-100">
           <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-300" />
           <p className="leading-relaxed">
-            UC.D currently has no system to determine if the right executable
-            was chosen for launch — we're working on it. For now, please pick
-            the executable manually before relaunching.
+            UC.D launches the executable our team set for this game when one is
+            configured. It looks like that isn't set for this release yet (or
+            this version uses a different file) — please pick the executable
+            manually before relaunching.
           </p>
         </div>
 

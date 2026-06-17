@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, startTransition } from "react"
-import { useNavigate } from "react-router-dom"
+import { useNavigate, Link } from "react-router-dom"
 import { GameCard } from "@/components/GameCard"
+import { TopPlayerOfTheWeekSection } from "@/components/home/TopPlayerOfTheWeekSection"
+import { ComingSoonSection } from "@/components/home/ComingSoonSection"
+import { PopularCollectionsSection } from "@/components/home/PopularCollectionsSection"
 import { GameCardCompact } from "@/components/GameCardCompact"
 import { GameCardSkeleton } from "@/components/GameCardSkeleton"
 import { PageAura } from "@/components/page-aura"
@@ -94,6 +97,30 @@ export function LauncherPage() {
     playersNow: number
     totalPlaytimeSeconds: number
   } | null>(null)
+
+  const [pendingGames, setPendingGames] = useState<any[]>([])
+
+  useEffect(() => {
+    if (!isOnline) return
+    let cancelled = false
+    const fetchPending = async () => {
+      try {
+        const res = await apiFetch("/api/games/pending?limit=20")
+        if (res.ok) {
+          const data = await res.json()
+          if (!cancelled) {
+            setPendingGames(data.games || [])
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
+    void fetchPending()
+    return () => {
+      cancelled = true
+    }
+  }, [isOnline, refreshKey])
 
   useEffect(() => {
     let cancelled = false
@@ -610,6 +637,8 @@ export function LauncherPage() {
         totalPlaytimeSeconds={siteStats?.totalPlaytimeSeconds ?? 0}
       />
 
+      <TopPlayerOfTheWeekSection />
+
 
       {/* Continue where you left off — single big tile pointing at the most
           recently played installed game. Click goes to the detail page so the
@@ -809,18 +838,16 @@ export function LauncherPage() {
       )}
 
       {!isOnline && games.length > 0 && (
-        <section className="py-4 px-4">
-          <div className="container mx-auto max-w-4xl">
-            <OfflineBanner
-              variant="compact"
-              onRetry={() => {
-                setGamesError(null)
-                setLoading(true)
-                loadGames(true)
-              }}
-            />
-          </div>
-        </section>
+        <div className="py-4 max-w-4xl mx-auto">
+          <OfflineBanner
+            variant="compact"
+            onRetry={() => {
+              setGamesError(null)
+              setLoading(true)
+              loadGames(true)
+            }}
+          />
+        </div>
       )}
 
       {(loading || newReleases.length > 0) && (
@@ -841,8 +868,8 @@ export function LauncherPage() {
             ) : (
               <>
                 <SectionHeading
-                  eyebrow="New"
-                  title="Latest games"
+                  eyebrow="New Releases"
+                  title="Latest Games/Updates"
                   actionLabel="Browse all"
                   onAction={() => navigate("/search?sort=added")}
                 />
@@ -890,7 +917,7 @@ export function LauncherPage() {
             ) : (
               <SectionHeading
                 eyebrow="Trending"
-                title="Most popular"
+                title="Most Popular"
                 actionLabel="Browse all"
                 onAction={() => navigate("/search?sort=downloads-desc")}
               />
@@ -936,6 +963,8 @@ export function LauncherPage() {
           </div>
         </section>
       )}
+
+      <ComingSoonSection games={pendingGames} />
 
       {/* From your collections — surface the user's curated bundles inline. */}
       {userCollections.collections.length > 0 && (
@@ -1021,7 +1050,8 @@ export function LauncherPage() {
               <div className="mb-5 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                 <SectionHeading
                   eyebrow="Library"
-                  title="All games"
+                  title="Featured from the catalog"
+                  description="Browse our complete library catalog. Open advanced search for filters, sorting, and full pagination."
                   className="mb-0"
                 />
                 <Button
@@ -1093,6 +1123,8 @@ export function LauncherPage() {
           )}
         </div>
       </section>
+
+      <PopularCollectionsSection />
 
       {/* Cloud library removal — undo toast. Fixed at bottom-center so it sits
           above the rest of the page but doesn't shift layout. 6 second
@@ -1215,34 +1247,46 @@ function StatsRow({
               <span className="whitespace-nowrap text-xs text-muted-foreground/80 font-medium">Updated (7d)</span>
             </div>
             <div className="w-px h-4 bg-white/[.07] hidden sm:block" />
-            <div className="flex shrink-0 items-center gap-2 whitespace-nowrap" title="UC.Direct users online right now">
+            <Link
+              to="/settings?section=leaderboard"
+              className="group flex shrink-0 items-center gap-2 whitespace-nowrap"
+              title="UC.Direct users online right now — open the leaderboard"
+            >
               <span className="relative flex h-2 w-2 shrink-0">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-sky-400 opacity-75" />
                 <span className="relative inline-flex rounded-full h-2 w-2 bg-sky-500" />
               </span>
-              <span className="text-sm font-semibold text-sky-300 tabular-nums">
+              <span className="text-sm font-semibold text-sky-300 group-hover:text-sky-200 transition-colors tabular-nums">
                 <AnimatedCounter value={usersOnline} format={formatNumber} />
               </span>
-              <span className="text-xs text-muted-foreground/80 font-medium">Now online</span>
-            </div>
+              <span className="text-xs text-muted-foreground/80 group-hover:text-muted-foreground transition-colors font-medium">Now online</span>
+            </Link>
             <div className="w-px h-4 bg-white/[.07] hidden sm:block" />
-            <div className="flex shrink-0 items-center gap-2 whitespace-nowrap" title="People in a running game right now">
+            <Link
+              to="/settings?section=leaderboard"
+              className="group flex shrink-0 items-center gap-2 whitespace-nowrap"
+              title="People in a running game right now — open the leaderboard"
+            >
               <span className="relative flex h-2 w-2 shrink-0">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
                 <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
               </span>
-              <span className="text-sm font-semibold text-emerald-400 tabular-nums">
+              <span className="text-sm font-semibold text-emerald-400 group-hover:text-emerald-300 transition-colors tabular-nums">
                 <AnimatedCounter value={playersNow} format={formatNumber} />
               </span>
-              <span className="text-xs text-muted-foreground/80 font-medium">Now playing</span>
-            </div>
+              <span className="text-xs text-muted-foreground/80 group-hover:text-muted-foreground transition-colors font-medium">Now playing</span>
+            </Link>
             <div className="w-px h-4 bg-white/[.07] hidden sm:block" />
-            <div className="flex shrink-0 items-center gap-2 whitespace-nowrap" title="All-time playtime tracked by UC.Direct">
-              <span className="text-sm font-semibold text-amber-400">
+            <Link
+              to="/settings?section=leaderboard"
+              className="group flex shrink-0 items-center gap-2 whitespace-nowrap"
+              title="All-time playtime tracked by UC.Direct — open the leaderboard"
+            >
+              <span className="text-sm font-semibold text-amber-400 group-hover:text-amber-300 transition-colors">
                 {formatPlaytimeCompact(totalPlaytimeSeconds)}
               </span>
-              <span className="text-xs text-muted-foreground/80 font-medium">Total playtime</span>
-            </div>
+              <span className="text-xs text-muted-foreground/80 group-hover:text-muted-foreground transition-colors font-medium">Total playtime</span>
+            </Link>
             <div className="flex shrink-0 items-center gap-1 whitespace-nowrap" title="These stats are tracked by UC.Direct">
               <span className="text-xs text-muted-foreground/60 font-medium italic">Tracked by</span>
               <span className="text-xs font-semibold text-violet-400">UC.Direct</span>
@@ -1260,6 +1304,7 @@ function StatsRow({
 function SectionHeading({
   eyebrow,
   title,
+  description,
   icon,
   actionLabel,
   onAction,
@@ -1267,6 +1312,7 @@ function SectionHeading({
 }: {
   eyebrow?: string
   title: string
+  description?: string
   icon?: React.ReactNode
   actionLabel?: string
   onAction?: () => void
@@ -1280,6 +1326,7 @@ function SectionHeading({
           {icon}
           {title}
         </h2>
+        {description && <p className="text-sm text-muted-foreground/80 mt-1 max-w-xl font-normal leading-snug">{description}</p>}
       </div>
       {actionLabel && onAction && (
         <button

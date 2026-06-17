@@ -161,7 +161,7 @@
     height: 5px;
     border-radius: 999px;
     background: var(--green);
-    animation: pulse 1.8s ease-in-out infinite;
+    animation: uc-playing-pulse 1.8s ease-in-out infinite;
   }
 
   .playing-label {
@@ -224,8 +224,29 @@
     margin: 0 3px;
     border-radius: 8px;
     cursor: pointer;
+    position: relative;
+    overflow: hidden;
     transition: background 90ms ease;
   }
+
+  /* Hover sheen — same uc-sheen-sweep the sidebar uses */
+  .row::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      100deg,
+      transparent 0%,
+      rgba(255,255,255,0.06) 45%,
+      rgba(255,255,255,0.12) 50%,
+      rgba(255,255,255,0.06) 55%,
+      transparent 100%
+    );
+    transform: translateX(-120%) skewX(-15deg);
+    opacity: 0;
+    pointer-events: none;
+  }
+  .row:hover::after { animation: uc-sheen-sweep 700ms ease-out; }
 
   .row:hover { background: var(--hover); }
   .row:active { background: var(--active); }
@@ -243,24 +264,20 @@
   .row-icon svg {
     width: 14px;
     height: 14px;
-    transition: transform 150ms ease, opacity 150ms ease;
+    transition: transform 200ms cubic-bezier(0.2, 0.9, 0.3, 1.2), color 200ms ease;
   }
 
-  .row:hover .row-icon svg,
-  .mini-row:hover svg {
-    transform: translateY(-1px) scale(1.06);
-  }
-
-  .row[data-icon="downloads"].active .row-icon svg {
-    animation: bob 1.15s ease-in-out infinite;
+  /* On hover, icons get the app's pop-scale micro-interaction */
+  .row:hover .row-icon svg {
+    animation: pop-scale 420ms ease-out both;
   }
 
   .row[data-icon="settings"]:hover .row-icon svg {
-    animation: spin 0.9s linear;
+    animation: pop-spin 520ms ease-out both;
   }
 
-  .row[data-icon="browse"]:hover .row-icon svg {
-    transform: scale(1.08) rotate(-6deg);
+  .mini-row:hover svg {
+    animation: pop-scale 420ms ease-out both;
   }
 
   .row-copy {
@@ -304,19 +321,44 @@
   .row.dest:hover { background: var(--red-bg); }
   .row.dest:active { background: color-mix(in oklab, var(--destructive) 18%, transparent); }
 
-  @keyframes pulse {
+  /* ── Animations — exact copies from globals.css ── */
+
+  /* Entry: uc-slide-up (same as .anim in the app) */
+  @keyframes uc-slide-up {
+    from { opacity: 0; transform: translateY(12px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  #popup { animation: uc-slide-up 0.35s ease-out both; }
+  .app-header         { animation: uc-slide-up 0.38s ease-out 0.04s both; }
+  .running-card       { animation: uc-slide-up 0.4s  ease-out 0.07s both; }
+  .section:nth-child(n+2) { animation: uc-slide-up 0.4s ease-out 0.11s both; }
+
+  /* Hover sheen: uc-sheen-sweep (same keyframe the sidebar nav uses) */
+  @keyframes uc-sheen-sweep {
+    0%   { transform: translateX(-120%) skewX(-15deg); opacity: 0; }
+    20%  { opacity: 1; }
+    100% { transform: translateX(220%)  skewX(-15deg); opacity: 0; }
+  }
+
+  /* Icon pop: pop-scale / pop-spin (same as globals.css micro-interactions) */
+  @keyframes pop-scale {
+    0%   { transform: scale(1); }
+    40%  { transform: scale(1.12); }
+    70%  { transform: scale(0.98); }
+    100% { transform: scale(1); }
+  }
+
+  @keyframes pop-spin {
+    0%   { transform: scale(1) rotate(0deg); }
+    45%  { transform: scale(1.15) rotate(8deg); }
+    100% { transform: scale(1) rotate(0deg); }
+  }
+
+  /* Playing-dot pulse */
+  @keyframes uc-playing-pulse {
     0%, 100% { opacity: 1; box-shadow: 0 0 4px var(--green); }
-    50% { opacity: 0.42; box-shadow: none; }
-  }
-
-  @keyframes spin {
-    from { transform: rotate(0deg); }
-    to { transform: rotate(360deg); }
-  }
-
-  @keyframes bob {
-    0%, 100% { transform: translateY(0); }
-    50% { transform: translateY(1px); }
+    50%      { opacity: 0.42; box-shadow: none; }
   }
 </style>
 </head>

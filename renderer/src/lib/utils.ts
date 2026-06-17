@@ -254,6 +254,10 @@ export function proxyMediaUrl(mediaUrl: string): string {
   if (normalizedRemoteUrl.startsWith("http://") || normalizedRemoteUrl.startsWith("https://")) {
     try {
       const parsed = new URL(normalizedRemoteUrl)
+      // Guard against stale DB URLs with invalid placeholder hostnames.
+      if (!parsed.hostname || parsed.hostname === "undefined" || parsed.hostname === "null") {
+        return ""
+      }
       // Private UC.Files app URLs use the authenticated bridge proxy.
       if (isUcFilesAppUrl(parsed.hostname) && shouldProxyUcFilesMedia()) {
         return apiUrl(`/api/ucfiles/media?url=${encodeURIComponent(normalizedRemoteUrl)}`)
@@ -333,6 +337,24 @@ export function filterGameExecutables(exes: GameExecutable[]) {
   })
 }
 
+/** Returns the sole real game executable when the folder is unambiguous —
+ *  exactly one candidate after de-duping by path + junk filtering. Returns
+ *  null when there are zero or 2+ candidates. Used to auto-launch without a
+ *  prompt only when there's genuinely nothing to choose between; anything
+ *  ambiguous falls through to the executable picker. */
+export function getUnambiguousExecutable(exes: GameExecutable[]): GameExecutable | null {
+  const seen = new Set<string>()
+  const unique: GameExecutable[] = []
+  for (const exe of exes) {
+    const key = (exe.path || "").toLowerCase().replace(/\//g, "\\")
+    if (seen.has(key)) continue
+    seen.add(key)
+    unique.push(exe)
+  }
+  const candidates = filterGameExecutables(unique)
+  return candidates.length === 1 ? candidates[0] : null
+}
+
 const normalizeToken = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, "")
 
 export function getExecutableRelativePath(fullPath: string, baseFolder?: string | null) {
@@ -346,6 +368,38 @@ export function getExecutableRelativePath(fullPath: string, baseFolder?: string 
     return trimmed || fullPath
   }
   return fullPath
+}
+
+/** Resolve the executable staff selected in the website admin panel against
+ *  the files actually present on disk. `adminRelPath` is relative to the
+ *  install folder (e.g. "bin/Game.exe"). Returns the matching discovered exe,
+ *  or null when there's no admin choice or it isn't present (caller then falls
+ *  back to heuristic detection). Matching is case-insensitive and slash-agnostic:
+ *  first an exact relative-path match, then a unique basename match, then a
+ *  suffix match. */
+export function matchAdminExecutable(
+  exes: GameExecutable[],
+  adminRelPath: string | null | undefined,
+  baseFolder?: string | null,
+): GameExecutable | null {
+  if (!adminRelPath || typeof adminRelPath !== "string") return null
+  const wanted = adminRelPath.trim().toLowerCase().replace(/^[\\/]+/, "").replace(/\//g, "\\")
+  if (!wanted) return null
+  const wantedBase = wanted.split("\\").pop() || wanted
+
+  const relOf = (exe: GameExecutable) =>
+    getExecutableRelativePath(exe.path, baseFolder).toLowerCase().replace(/\//g, "\\")
+
+  // 1) exact relative-path match
+  const exact = exes.find((exe) => relOf(exe) === wanted)
+  if (exact) return exact
+
+  // 2) basename match — admin path may omit the release's top-level subfolder
+  const byName = exes.filter((exe) => exe.name.toLowerCase() === wantedBase)
+  if (byName.length === 1) return byName[0]
+  const suffix = byName.find((exe) => relOf(exe).endsWith(wanted))
+  if (suffix) return suffix
+  return byName[0] ?? null
 }
 
 export function scoreGameExecutable(exe: GameExecutable, gameName: string, baseFolder?: string | null) {

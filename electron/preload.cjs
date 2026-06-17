@@ -446,6 +446,9 @@ contextBridge.exposeInMainWorld('ucStorage', {
 // System API (volume, screenshot, notifications, openExternal)
 contextBridge.exposeInMainWorld('ucSystem', {
   openExternal: (target) => ipcRenderer.invoke('uc:system-open-external', target),
+  // Start (or focus) the Steam client — used by the launch-failed modal when a
+  // game with online/multiplayer support needs Steam running in the background.
+  launchSteam: () => ipcRenderer.invoke('uc:system-launch-steam'),
   // Volume control
   getVolume: () => ipcRenderer.invoke('uc:system-get-volume'),
   setVolume: (level) => ipcRenderer.invoke('uc:system-set-volume', level),

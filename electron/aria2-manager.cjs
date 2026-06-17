@@ -137,6 +137,17 @@ class Aria2Manager {
       '--summary-interval=0',
       '--console-log-level=warn',
       '--quiet=true',
+      // Retry on transient network errors (WSAENETUNREACH, connection reset, etc.)
+      '--max-tries=10',
+      '--retry-wait=5',
+      '--connect-timeout=30',
+      '--timeout=60',
+      // aria2 does not implement Happy Eyeballs (RFC 6555). On Windows machines
+      // that have an IPv6 interface but no routable IPv6 path, connecting to a
+      // dual-stack host returns WSAENETUNREACH immediately on the IPv6 socket
+      // instead of falling back to IPv4 — Chromium handles this transparently
+      // but aria2 does not. Force IPv4 to avoid spurious failures.
+      '--disable-ipv6=true',
     ]
     this.log('info', `[aria2] spawning ${this.binaryPath} on rpc port ${this.port}`)
     this.proc = spawn(this.binaryPath, args, { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true })
