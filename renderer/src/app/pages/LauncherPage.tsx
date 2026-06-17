@@ -352,10 +352,13 @@ export function LauncherPage() {
     const hydrated = await hydrateCatalogCache()
     if (loadId !== activeLoadIdRef.current) return
 
-    if (hydrated.games.length > 0 || Object.keys(hydrated.stats).length > 0) {
+    const needsGamesSet = games.length === 0 && hydrated.games.length > 0
+    const needsStatsSet = Object.keys(gameStats).length === 0 && Object.keys(hydrated.stats).length > 0
+
+    if (needsGamesSet || needsStatsSet) {
       startTransition(() => {
-        if (hydrated.games.length > 0) setGames(hydrated.games)
-        setGameStats(hydrated.stats)
+        if (needsGamesSet) setGames(hydrated.games)
+        if (needsStatsSet) setGameStats(hydrated.stats)
         setHasLoadedGames(hydrated.games.length > 0)
         setStatsCacheTime(hydrated.statsUpdatedAt || 0)
       })
@@ -512,40 +515,41 @@ export function LauncherPage() {
   const popularReleases = useMemo(() => {
     if (Object.keys(gameStats).length === 0) return []
 
-    const getDaysDiff = (dateStr?: string) => {
-      if (!dateStr) return 999
-      const date = new Date(dateStr)
-      if (isNaN(date.getTime())) return 999
-      const now = new Date()
-      const diffTime = Math.abs(now.getTime() - date.getTime())
-      return Math.ceil(diffTime / (1000 * 60 * 60 * 24))
-    }
-
-    const isRecent = (dateStr?: string, days = 30) => getDaysDiff(dateStr) <= days
-
-    const calculateScore = (game: Game) => {
-      const stats = gameStats[game.appid] || { downloads: 0, views: 0 }
-      let score = (stats.downloads * 2) + (stats.views * 0.5)
-
-      if (isRecent(game.release_date, 30)) {
-        score += 500
-      }
-
-      if (isRecent(game.update_time, 14)) {
-        score += 300
-      }
-
-      return score
-    }
-
     const candidates = games.filter((game) => {
       const isNSFW = Array.isArray(game.genres) && game.genres.some((genre) => genre?.toLowerCase() === "nsfw")
       return !isNSFW
     })
 
-    const sorted = [...candidates].sort((a, b) => calculateScore(b) - calculateScore(a))
+    const nowMs = Date.now()
+    const oneDayMs = 1000 * 60 * 60 * 24
 
-    return sorted.slice(0, 8)
+    // Pre-calculate scores in a single linear pass so we parse dates at most twice per game
+    // instead of repeatedly parsing dates during every comparison in the sort callback.
+    const scored = candidates.map((game) => {
+      const stats = gameStats[game.appid] || { downloads: 0, views: 0 }
+      let score = (stats.downloads * 2) + (stats.views * 0.5)
+
+      if (game.release_date) {
+        const date = new Date(game.release_date)
+        if (!isNaN(date.getTime())) {
+          const diffDays = Math.ceil(Math.abs(nowMs - date.getTime()) / oneDayMs)
+          if (diffDays <= 30) score += 500
+        }
+      }
+
+      if (game.update_time) {
+        const date = new Date(game.update_time)
+        if (!isNaN(date.getTime())) {
+          const diffDays = Math.ceil(Math.abs(nowMs - date.getTime()) / oneDayMs)
+          if (diffDays <= 14) score += 300
+        }
+      }
+
+      return { game, score }
+    })
+
+    scored.sort((a, b) => b.score - a.score)
+    return scored.slice(0, 8).map((item) => item.game)
   }, [games, gameStats])
 
   const popularAppIds = useMemo(() => new Set(popularReleases.map((game) => game.appid)), [popularReleases])

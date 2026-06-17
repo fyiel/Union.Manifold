@@ -1,7 +1,8 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
-import { LogSharingConsentModal } from "@/components/LogSharingConsentModal"
+
+const LogSharingConsentModal = React.lazy(() => import("@/components/LogSharingConsentModal").then((m) => ({ default: m.LogSharingConsentModal })))
 import type { Game } from "@/lib/types"
 import {
   fetchDownloadLinks,
@@ -1033,7 +1034,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (!window.ucDownloads?.onUpdate) return
-    return window.ucDownloads.onUpdate((update: DownloadUpdate) => {
+    const unsubscribe = window.ucDownloads.onUpdate((update: DownloadUpdate) => {
       if (update.spaceCheck && typeof window !== "undefined") {
         window.dispatchEvent(new CustomEvent("uc_insufficient_space", { detail: update }))
       }
@@ -1068,6 +1069,11 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         }
         return
       }
+      // This update is NOT a pure downloading→downloading progress tick (it's a
+      // status change / first byte / terminal). Any byte-update still queued in
+      // the batch for this id is now stale — drop it so the next 200ms flush
+      // can't clobber the newer state we're about to apply.
+      pendingProgressRef.current.delete(update.downloadId)
       let nextDownloads: DownloadItem[] | null = null
       setDownloads((prev) => {
         const idx = prev.findIndex((item) => item.id === update.downloadId)
@@ -1192,6 +1198,18 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         })
       }
     })
+    return () => {
+      if (typeof unsubscribe === "function") unsubscribe()
+      // The batched-progress flush timer is module-lifetime on the provider; if
+      // it's pending when this effect tears down (or the provider unmounts), it
+      // would fire setDownloads after teardown. Clear it and drop any queued
+      // progress so nothing flushes post-unmount.
+      if (progressFlushTimerRef.current) {
+        clearTimeout(progressFlushTimerRef.current)
+        progressFlushTimerRef.current = null
+      }
+      pendingProgressRef.current.clear()
+    }
   }, [startNextQueuedPart])
 
   useEffect(() => {
@@ -2107,18 +2125,20 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
           )}
         </DownloadsContext.Provider>
       </DownloadsActionsContext.Provider>
-      <LogSharingConsentModal
-        open={showLogShareConsent}
-        onAccept={() => {
-          setShowLogShareConsent(false)
-          void window.ucSettings?.set?.("autoShareErrorLogs", true)
-          void window.ucLogs?.shareLogs?.({ baseUrl: (window as any).ucApp?.getBaseUrl?.() ?? undefined })
-        }}
-        onDecline={() => {
-          setShowLogShareConsent(false)
-          void window.ucSettings?.set?.("autoShareErrorLogs", false)
-        }}
-      />
+      <React.Suspense fallback={null}>
+        <LogSharingConsentModal
+          open={showLogShareConsent}
+          onAccept={() => {
+            setShowLogShareConsent(false)
+            void window.ucSettings?.set?.("autoShareErrorLogs", true)
+            void window.ucLogs?.shareLogs?.({ baseUrl: (window as any).ucApp?.getBaseUrl?.() ?? undefined })
+          }}
+          onDecline={() => {
+            setShowLogShareConsent(false)
+            void window.ucSettings?.set?.("autoShareErrorLogs", false)
+          }}
+        />
+      </React.Suspense>
     </DownloadsStoreContext.Provider>
   )
 }

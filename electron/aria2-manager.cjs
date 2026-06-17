@@ -25,7 +25,7 @@ const net = require('node:net')
 const crypto = require('node:crypto')
 const fs = require('node:fs')
 const path = require('node:path')
-const { spawn } = require('node:child_process')
+const { spawn, spawnSync } = require('node:child_process')
 
 /** Resolve the aria2c binary path for this platform, or null if not found.
  *  Looks first in the bundled assets dir (packaged + dev), then falls back to
@@ -186,15 +186,29 @@ class Aria2Manager {
 
   stop() {
     this._ready = false
-    if (this.proc) {
-      try {
-        // Ask aria2 to shut down cleanly so it flushes .aria2 control files
-        // (needed for exact resume next launch); fall back to kill.
-        this._rpc('aria2.forceShutdown', []).catch(() => {})
-      } catch { /* ignore */ }
-      const proc = this.proc
-      this.proc = null
-      setTimeout(() => { try { if (!proc.killed) proc.kill() } catch { /* ignore */ } }, 1500)
+    this._startPromise = null
+    const proc = this.proc
+    this.proc = null
+    if (!proc) return
+    try {
+      // Best-effort clean shutdown so aria2 flushes its .aria2 control files
+      // (helps exact segmented resume next launch).
+      this._rpc('aria2.forceShutdown', []).catch(() => {})
+    } catch { /* ignore */ }
+    // Then kill DETERMINISTICALLY. stop() runs inside Electron's 'will-quit',
+    // which does not keep the event loop alive for a deferred timer — the old
+    // setTimeout(..., 1500) kill never fired, orphaning aria2c (it kept holding
+    // the RPC port and writing partial files to disk). On Windows kill the whole
+    // process tree synchronously via taskkill; elsewhere SIGTERM. spawnSync
+    // blocks will-quit only for the few ms taskkill needs.
+    try {
+      if (process.platform === 'win32' && proc.pid) {
+        spawnSync('taskkill', ['/PID', String(proc.pid), '/T', '/F'], { windowsHide: true, timeout: 4000 })
+      } else {
+        proc.kill('SIGTERM')
+      }
+    } catch {
+      try { proc.kill() } catch { /* ignore */ }
     }
   }
 

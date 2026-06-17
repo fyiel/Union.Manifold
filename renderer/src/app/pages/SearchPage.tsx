@@ -503,6 +503,11 @@ export function SearchPage() {
     }
 
     if (filters.sortBy !== "random") {
+      // Clone before sorting — `filtered` may still be the `games` array held in
+      // React state (when no size/online filter narrowed it), and Array.sort
+      // mutates in place. Sorting state directly desyncs addedOrder and can cause
+      // inconsistent renders.
+      filtered = [...filtered]
       filtered.sort((a, b) => {
         switch (filters.sortBy) {
           case "added":
@@ -547,8 +552,17 @@ export function SearchPage() {
 
     if (filters.sortBy === "random") {
       const shuffled = [...filtered]
-      const seed = Date.now()
-      let random = seed
+      // Deterministic seed derived from the result set itself, NOT Date.now().
+      // A wall-clock seed re-randomized the order on every memo recompute — so
+      // when gameStats arrived (a separate fetch) the whole grid visibly
+      // reshuffled and every card remounted. A content-derived seed keeps the
+      // shuffle stable across re-renders while still varying per result set.
+      let seed = shuffled.length
+      for (const g of shuffled) {
+        const id = g.appid || ""
+        for (let k = 0; k < id.length; k++) seed = (seed * 31 + id.charCodeAt(k)) >>> 0
+      }
+      let random = seed % 233280
       for (let i = shuffled.length - 1; i > 0; i--) {
         random = (random * 9301 + 49297) % 233280
         const j = Math.floor((random / 233280) * (i + 1))
@@ -621,6 +635,12 @@ export function SearchPage() {
     return filterOptions.allDevelopers.filter((developer) => developer.toLowerCase().includes(q))
   }, [developerQuery, filterOptions.allDevelopers])
 
+  // Render helper, invoked inline as {FilterPanel()} — NOT mounted as
+  // <FilterPanel/>. As a nested component its identity changed every SearchPage
+  // render (e.g. every keystroke), forcing React to unmount/remount the entire
+  // filter sidebar (genres + up to ~200 developer buttons + scroll areas) each
+  // time. Calling it inline keeps the JSX part of SearchPage's own tree so it
+  // reconciles in place instead.
   const FilterPanel = () => (
     <div className="space-y-6">
       {/* Genres */}
@@ -867,7 +887,7 @@ export function SearchPage() {
               )}
             </div>
             <div className="flex-1 overflow-y-auto px-5 py-4 uc-scrollbar">
-              <FilterPanel />
+              {FilterPanel()}
             </div>
           </div>
         </aside>
@@ -934,7 +954,7 @@ export function SearchPage() {
                     <SheetDescription>Changes apply instantly.</SheetDescription>
                   </SheetHeader>
                   <div className="flex-1 overflow-y-auto px-5 py-4 uc-scrollbar">
-                    <FilterPanel />
+                    {FilterPanel()}
                   </div>
                   <div className="px-5 py-3 border-t border-white/[.07] flex gap-2">
                     <Button variant="outline" onClick={clearFilters} className="flex-1 rounded-2xl h-11">

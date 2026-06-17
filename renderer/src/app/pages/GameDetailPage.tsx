@@ -341,6 +341,17 @@ export function GameDetailPage() {
     }
   }, [appid, reloadNonce])
 
+  // A narrow signature of THIS game's download/install items (id + status only).
+  // The status effects below must re-run on meaningful transitions (download
+  // completes, install finishes) but NOT on every byte-progress tick — keying
+  // them on the raw `downloads` array re-issued getInstalled/getInstalling/
+  // listInstalledByAppid IPC to disk many times per second during any active
+  // download anywhere in the app.
+  const thisGameDownloadKey = useMemo(
+    () => downloads.filter((d) => d.appid === appid).map((d) => `${d.id}:${d.status}`).join("|"),
+    [downloads, appid],
+  )
+
   useEffect(() => {
     if (!appid) return
     let mounted = true
@@ -363,7 +374,7 @@ export function GameDetailPage() {
     return () => {
       mounted = false
     }
-  }, [appid, downloads])
+  }, [appid, thisGameDownloadKey])
 
   useEffect(() => {
     if (!appid) return
@@ -384,7 +395,7 @@ export function GameDetailPage() {
     return () => {
       mounted = false
     }
-  }, [appid, downloads, installedManifest])
+  }, [appid, thisGameDownloadKey, installedManifest])
 
   useEffect(() => {
     if (!appid) return

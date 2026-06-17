@@ -48,7 +48,13 @@ export function useGamesData() {
         })
       }
 
+      // Gate the full-catalog refetch on staleness, not just connectivity.
+      // Without the TTL check the entire /api/games list was re-downloaded and
+      // re-normalized on every mount and every offline→online flip, ignoring
+      // CATALOG_TTL_MS entirely. Mirrors LauncherPage's staleness gate.
       const shouldRefreshGames = connectivity.isOnline
+        ? (!hydrated.games.length || isCatalogGamesStale())
+        : false
       const shouldRefreshStats = connectivity.isOnline
         ? isCatalogStatsStale()
         : false

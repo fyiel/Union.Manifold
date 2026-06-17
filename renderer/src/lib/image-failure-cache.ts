@@ -15,12 +15,22 @@ const cache = new Map<string, number>()
 
 export function markImageFailed(url: string): void {
   if (!url) return
+  // Re-insert at the end so that, under the LRU-ish insertion order Map keeps,
+  // a freshly-failed URL isn't the first to be evicted.
+  cache.delete(url)
   cache.set(url, Date.now())
   if (cache.size > MAX_ENTRIES) {
-    // Drop the oldest quarter in one pass when we exceed the cap.
-    const entries = Array.from(cache.entries()).sort((a, b) => a[1] - b[1])
+    // Drop the oldest quarter. Map preserves insertion order, so the first keys
+    // are the oldest — delete them via the iterator instead of materializing and
+    // sorting the whole map (the previous Array.from().sort() was O(n log n) on a
+    // hot path hit from every <img> onError during a CDN outage).
     const dropCount = Math.floor(MAX_ENTRIES / 4)
-    for (let i = 0; i < dropCount; i++) cache.delete(entries[i][0])
+    let dropped = 0
+    for (const key of cache.keys()) {
+      if (dropped >= dropCount) break
+      cache.delete(key)
+      dropped++
+    }
   }
 }
 

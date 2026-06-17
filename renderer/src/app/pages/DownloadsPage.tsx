@@ -527,13 +527,11 @@ export function DownloadsPage() {
   const [spacePrompt, setSpacePrompt] = useState<SpacePromptState | null>(null)
   const [selectedSpaceDriveId, setSelectedSpaceDriveId] = useState("")
   const [switchingDrive, setSwitchingDrive] = useState(false)
-  const primaryStatsRef = useRef<{
-    totalBytes: number
-    receivedBytes: number
-    speedBps: number
-    etaSeconds: number | null
-    progress: number
-  } | null>(null)
+  // Mirror the exact shape of primaryStats (computeGroupStats' return) so reads
+  // like primaryStatsRef.current.phase typecheck. The hand-written type here was
+  // missing `phase` (and drifted from computeGroupStats), producing pre-existing
+  // TS2339 errors even though the field exists at runtime.
+  const primaryStatsRef = useRef<ReturnType<typeof computeGroupStats> | null>(null)
   const lastSampleRef = useRef<{ time: number; received: number } | null>(null)
   const isPausedRef = useRef(false)
 
@@ -626,7 +624,10 @@ export function DownloadsPage() {
       const stats = primaryStatsRef.current
       if (!stats) return
       const now = Date.now()
-      const networkSpeed = stats.speedBps || 0
+      const isExtractingOrInstalling = stats.phase === "extracting" || stats.phase === "installing"
+      const networkSpeed = isExtractingOrInstalling || stats.phase === "verifying"
+        ? 0
+        : (stats.speedBps || 0)
 
       // Don't accumulate zero samples while paused — preserve history so the
       // chart still shows the pre-pause activity when the download resumes.
@@ -639,7 +640,9 @@ export function DownloadsPage() {
 
       const lastSample = lastSampleRef.current
       let diskSpeed = 0
-      if (lastSample) {
+      if (isExtractingOrInstalling) {
+        diskSpeed = stats.speedBps || 0
+      } else if (lastSample) {
         const deltaBytes = stats.receivedBytes - lastSample.received
         const deltaTime = Math.max(0.001, (now - lastSample.time) / 1000)
         diskSpeed = Math.max(0, deltaBytes / deltaTime)
@@ -675,25 +678,38 @@ export function DownloadsPage() {
     let mounted = true
     const checkRunningGames = async () => {
       if (!window.ucDownloads?.listInstalledGlobal || !window.ucDownloads?.getRunningGame) return
+      const listInstalledGlobal = window.ucDownloads.listInstalledGlobal
+      const getRunningGame = window.ucDownloads.getRunningGame
       try {
-        const installed = await window.ucDownloads.listInstalledGlobal()
-        const running: Array<{ appid: string; gameName: string; pid: number }> = []
-        
-        for (const entry of installed) {
-          if (!entry?.appid) continue
-          const result = await window.ucDownloads.getRunningGame(entry.appid)
-          if (result?.ok && result.running && result.pid) {
-            const game = games.find((g) => g.appid === entry.appid)
-            running.push({
-              appid: entry.appid,
-              gameName: game?.name || entry.name || entry.appid,
-              pid: result.pid
-            })
-          }
-        }
-        
+        const installed = await listInstalledGlobal()
+        const candidates = (Array.isArray(installed) ? installed : []).filter((entry) => entry?.appid)
+        const gamesByAppid = new Map(games.map((g) => [g.appid, g]))
+
+        // Query every installed game concurrently. The previous sequential
+        // await-in-for loop fired one IPC round-trip per installed game every
+        // 3s — O(library size) latency that stalled the whole poll on the
+        // slowest call.
+        const results = await Promise.all(
+          candidates.map(async (entry) => {
+            try {
+              const result = await getRunningGame(entry.appid)
+              if (result?.ok && result.running && result.pid) {
+                const game = gamesByAppid.get(entry.appid)
+                return {
+                  appid: entry.appid as string,
+                  gameName: game?.name || entry.name || entry.appid,
+                  pid: result.pid as number,
+                }
+              }
+            } catch {
+              /* ignore individual failures — one dead query shouldn't drop the rest */
+            }
+            return null
+          })
+        )
+
         if (mounted) {
-          setRunningGames(running)
+          setRunningGames(results.filter(Boolean) as Array<{ appid: string; gameName: string; pid: number }>)
         }
       } catch (err) {
         gameLogger.error('Failed to check running games', { data: err })

@@ -2158,8 +2158,12 @@ function registerLocalMediaProtocol() {
       for (const candidate of tryPaths) {
         if (!isWithin(candidate)) continue
         try {
-          if (fs.existsSync(candidate)) { resolved = candidate; break }
-        } catch { /* ignore */ }
+          // Async existence probe — keep the protocol handler off the
+          // synchronous main-thread path so image serving doesn't block the UI.
+          await fs.promises.access(candidate)
+          resolved = candidate
+          break
+        } catch { /* not present — try the next candidate */ }
       }
       // Final containment check on the resolved path (covers both branches).
       if (!resolved) {
@@ -2181,7 +2185,7 @@ function registerLocalMediaProtocol() {
         ucLog(`uc-local: forbidden ${resolved} (roots=${roots.join(', ')})`, 'warn')
         return new Response('Forbidden', { status: 403 })
       }
-      const data = fs.readFileSync(resolved)
+      const data = await fs.promises.readFile(resolved)
       // Convert Node Buffer → Uint8Array (Response only accepts BodyInit).
       const body = new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
       return new Response(body, {
@@ -3912,6 +3916,7 @@ function setPersistedInstallingRecord(record) {
 }
 
 function deletePersistedInstallingRecord(appid) {
+  invalidateInstalledCache()
   if (!appid) return false
   const existed = persistedInstallingState.delete(String(appid))
   if (existed) persistInstallingStateSoon()
@@ -5408,6 +5413,7 @@ async function fetchPixeldrainInfo(fileId) {
 }
 
 function updateInstalledIndex(installedRoot) {
+  invalidateInstalledCache()
   try {
     if (!fs.existsSync(installedRoot)) return
     const index = []
@@ -5427,11 +5433,20 @@ function updateInstalledIndex(installedRoot) {
 }
 
 function uc_writeJsonSync(filePath, data) {
+  // Atomic write: serialize to a sibling temp file, then rename over the target.
+  // rename() is atomic on the same volume, so a crash / power-loss / full-disk
+  // mid-write can never leave a truncated installed.json (which readJsonFile
+  // would then return null for — making the game vanish from the library or
+  // lose its saved exe path). A direct writeFileSync over the live file does
+  // not have this guarantee.
+  const tmpPath = `${filePath}.tmp`
   try {
-    fs.writeFileSync(filePath, JSON.stringify(data, null, 2))
+    fs.writeFileSync(tmpPath, JSON.stringify(data, null, 2))
+    fs.renameSync(tmpPath, filePath)
     return true
   } catch (err) {
     ucLog(`Failed to write json ${filePath}: ${err.message}`, 'error')
+    try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath) } catch { /* ignore */ }
     return false
   }
 }
@@ -5873,6 +5888,7 @@ function findInstallingFolderByAppid(appid) {
 }
 
 function updateInstallingManifestStatus(appid, status, error, extra) {
+  invalidateInstalledCache()
   try {
     if (!appid) return false
     const folder = findInstallingFolderByAppid(appid)
@@ -5918,6 +5934,7 @@ function updateInstallingManifestStatus(appid, status, error, extra) {
 }
 
 function writeInstallingManifest(appid, metadata, status = 'installing', error = null) {
+  invalidateInstalledCache()
   try {
     const downloadRoot = ensureDownloadDir()
     const folderName = safeFolderName((metadata && (metadata.name || metadata.gameName)) || appid || 'unknown')
@@ -7591,6 +7608,87 @@ function flushQueuedGlobalDownloads(appid, status, error) {
   persistQueueStateSoon()
 }
 
+let cachedDisks = []
+let diskScanPromise = null
+let cachedInstalledList = null
+let cachedInstalledGlobalList = null
+
+function invalidateInstalledCache() {
+  cachedInstalledList = null
+  cachedInstalledGlobalList = null
+}
+
+async function updateDisksCache() {
+  if (diskScanPromise) return diskScanPromise
+  diskScanPromise = (async () => {
+    const disks = []
+    if (process.platform === 'win32') {
+      const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+      const probes = Array.from(letters).map(async (letter) => {
+        const root = `${letter}:\\`
+        try {
+          const stats = await fs.promises.statfs(root)
+          const totalBytes = stats.blocks * stats.bsize
+          const freeBytes = stats.bavail * stats.bsize
+          return {
+            id: letter,
+            name: `${letter}:`,
+            path: root,
+            totalBytes,
+            freeBytes
+          }
+        } catch {
+          return null
+        }
+      })
+      const results = await Promise.all(probes)
+      for (const r of results) {
+        if (r) disks.push(r)
+      }
+    } else {
+      const home = app.getPath('home')
+      const candidates = [home, '/home', '/mnt', '/media']
+      const probes = candidates.map(async (root) => {
+        try {
+          const stats = await fs.promises.statfs(root)
+          const id = root === home ? 'home' : root.replace(/\//g, '_')
+          const name = root === home ? 'Home' : root
+          return {
+            id,
+            name,
+            path: root,
+            totalBytes: stats.blocks * stats.bsize,
+            freeBytes: stats.bavail * stats.bsize
+          }
+        } catch {
+          return null
+        }
+      })
+      const results = await Promise.all(probes)
+      for (const r of results) {
+        if (r) disks.push(r)
+      }
+    }
+    cachedDisks = disks
+    return disks
+  })().finally(() => {
+    diskScanPromise = null
+  })
+  return diskScanPromise
+}
+
+function listDisks() {
+  if (cachedDisks.length === 0) {
+    if (process.platform === 'win32') {
+      return [{ id: 'C', name: 'C:', path: 'C:\\', totalBytes: 0, freeBytes: 0 }]
+    } else {
+      const home = app.getPath('home')
+      return [{ id: home, name: path.basename(home) || home, path: home, totalBytes: 0, freeBytes: 0 }]
+    }
+  }
+  return cachedDisks
+}
+
 function setDownloadRoot(targetPath) {
   const settings = readSettings()
   settings.downloadPath = normalizeDownloadRoot(targetPath)
@@ -7598,52 +7696,6 @@ function setDownloadRoot(targetPath) {
   return ensureDownloadDir()
 }
 
-function listDisks() {
-  const disks = []
-  if (process.platform === 'win32') {
-    const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
-    for (const letter of letters) {
-      const root = `${letter}:\\`
-      if (!fs.existsSync(root)) continue
-      try {
-        const stats = fs.statfsSync(root)
-        const totalBytes = stats.blocks * stats.bsize
-        const freeBytes = stats.bavail * stats.bsize
-        disks.push({
-          id: letter,
-          name: `${letter}:`,
-          path: root,
-          totalBytes,
-          freeBytes
-        })
-      } catch {
-        // ignore inaccessible drives
-      }
-    }
-  } else {
-    // Linux/macOS: list home directory and common mount points
-    const home = app.getPath('home')
-    const candidates = [home, '/home', '/mnt', '/media']
-    for (const root of candidates) {
-      try {
-        if (!fs.existsSync(root)) continue
-        const stats = fs.statfsSync(root)
-        const id = root === home ? 'home' : root.replace(/\//g, '_')
-        const name = root === home ? 'Home' : root
-        disks.push({
-          id,
-          name,
-          path: root,
-          totalBytes: stats.blocks * stats.bsize,
-          freeBytes: stats.bavail * stats.bsize
-        })
-      } catch {
-        // ignore inaccessible paths
-      }
-    }
-  }
-  return disks
-}
 
 async function getDirectorySize(targetPath) {
   if (!targetPath || typeof targetPath !== 'string') return 0
@@ -7949,7 +8001,11 @@ function terminateChildProcess(proc) {
   if (!proc || proc.killed) return
   try {
     if (process.platform === 'win32' && proc.pid) {
-      child_process.spawn('taskkill', ['/PID', String(proc.pid), '/T', '/F'], { windowsHide: true })
+      const killer = child_process.spawn('taskkill', ['/PID', String(proc.pid), '/T', '/F'], { windowsHide: true })
+      // spawn emits 'error' asynchronously if taskkill can't be launched (e.g.
+      // not on PATH in a stripped environment). With no listener that becomes
+      // an unhandled 'error' event and crashes the entire main process.
+      killer.on('error', () => { try { proc.kill() } catch { /* ignore */ } })
       return
     }
     proc.kill('SIGTERM')
@@ -8069,15 +8125,15 @@ function run7zExtract(archivePath, destDir, onProgress, options = {}) {
           if (typeof onProgress !== 'function') return
           const now = Date.now()
           const p = typeof patch.percent === 'number' ? patch.percent : lastPercent
-          const filenameChanged = patch.filename && patch.filename !== lastFilename
-          // Throttle to ~5/sec, but always emit when percent rises or filename changes.
+          
+          // STRICT THROTTLE: only emit if 150ms has elapsed since the last emit,
+          // OR if we reached 100% (to ensure completion is shown immediately).
           if (
-            (typeof patch.percent === 'number' && p !== lastPercent) ||
-            filenameChanged ||
-            now - lastEmit > 200
+            now - lastEmit > 150 ||
+            p === 100
           ) {
             if (typeof patch.percent === 'number') lastPercent = p
-            if (filenameChanged) lastFilename = patch.filename
+            if (patch.filename) lastFilename = patch.filename
             lastEmit = now
             try {
               onProgress({
@@ -8085,6 +8141,10 @@ function run7zExtract(archivePath, destDir, onProgress, options = {}) {
                 ...(lastFilename ? { filename: lastFilename } : {}),
               })
             } catch (e) { }
+          } else {
+            // Keep track of the latest values in between throttled ticks
+            if (typeof patch.percent === 'number') lastPercent = p
+            if (patch.filename) lastFilename = patch.filename
           }
         } catch (e) { }
       }
@@ -9476,6 +9536,13 @@ function createWindow(existingSplash) {
               partTotal: entry?.partTotal,
             })
             uc_log(`starting extraction of ${archiveToExtract} to ${installedFolder}`)
+            // Download is complete and the archive is on disk — transition the
+            // storage reservation to 'extracting' so its archive (download)
+            // bytes stop counting against concurrent downloads on the same
+            // drive. Without this the reservation held downloadBytes+extractBytes
+            // for its whole lifetime, over-reserving and falsely rejecting a
+            // second download as out-of-space. No-op if no reservation exists.
+            try { storageReservation.markExtracting(downloadId) } catch { }
 
             const res = await run7zExtract(archiveToExtract, installedFolder, ({ percent }) => {
               try {
@@ -9827,15 +9894,31 @@ function createWindow(existingSplash) {
 }
 
 app.whenReady().then(async () => {
+  // Show splash immediately so the user gets visual feedback right away
+  const splashWin = createSplashWindow()
+  setSplashStatus(splashWin, 'Starting up...')
+
   ensureDownloadDir()
   registerRendererAssetProtocol()
   registerLocalMediaProtocol()
+
+  setSplashStatus(splashWin, 'Scanning drives...')
+  try {
+    await updateDisksCache()
+  } catch (err) {
+    ucLog(`Failed to scan disks on startup: ${err?.message || err}`, 'warn')
+  }
+
+  // Refresh disk cache every 30 seconds
+  setInterval(() => {
+    updateDisksCache().catch(() => {})
+  }, 30000)
+
+  setSplashStatus(splashWin, 'Loading configuration...')
   await hydratePersistedLauncherState()
 
-  // Show splash immediately, then detect the best reachable domain before
-  // the main window loads so the renderer starts with the right API base URL.
-  const splashWin = createSplashWindow()
-
+  // Show status for domain/server checks
+  setSplashStatus(splashWin, 'Connecting to servers...')
   resolvedBaseUrl = await detectBestBaseUrl((status) => {
     setSplashStatus(splashWin, status)
   })
@@ -10758,7 +10841,10 @@ ipcMain.handle('uc:system-launch-steam', async () => {
   return { ok: false, error: 'steam-not-found' }
 })
 
-ipcMain.handle('uc:disk-list', () => {
+ipcMain.handle('uc:disk-list', async () => {
+  try {
+    await updateDisksCache()
+  } catch (e) {}
   return listDisks()
 })
 
@@ -11190,6 +11276,11 @@ async function runArchiveInstallJob(win, payload, options = {}) {
     gameName
   })
 
+  // Archive already on disk; free the reservation's download bytes for the
+  // extraction window so a concurrent download isn't falsely blocked. No-op if
+  // this install has no active reservation.
+  try { storageReservation.markExtracting(downloadId) } catch { }
+
   let res
   try {
     res = await run7zExtract(archiveToExtract, installedRoot, ({ percent }) => {
@@ -11466,9 +11557,11 @@ ipcMain.handle('uc:download-active-status', (_event, appid) => {
 // List installed manifests from installed folder
 ipcMain.handle('uc:installed-list', (_event) => {
   try {
+    if (cachedInstalledList) return cachedInstalledList
     const downloadRoot = ensureDownloadDir()
     const root = path.join(downloadRoot, installedDirName)
-    return listManifestsFromRoot(root, true)
+    cachedInstalledList = listManifestsFromRoot(root, true)
+    return cachedInstalledList
   } catch (err) {
     console.error('[UC] installed-list failed', err)
     return []
@@ -11526,6 +11619,7 @@ ipcMain.handle('uc:installed-list-by-appid', (_event, appid) => {
 
 ipcMain.handle('uc:installed-list-global', (_event) => {
   try {
+    if (cachedInstalledGlobalList) return cachedInstalledGlobalList
     const roots = listDownloadRoots()
     const bestByAppid = new Map() // appid -> manifest (keep richest)
     for (const root of roots) {
@@ -11540,7 +11634,8 @@ ipcMain.handle('uc:installed-list-global', (_event) => {
         }
       }
     }
-    return Array.from(bestByAppid.values())
+    cachedInstalledGlobalList = Array.from(bestByAppid.values())
+    return cachedInstalledGlobalList
   } catch (err) {
     console.error('[UC] installed-list-global failed', err)
     return []
