@@ -171,6 +171,7 @@ export function GameExperience({
   const [notes, setNotes] = useState("")
   const [submitting, setSubmitting] = useState(false)
   const [submitted, setSubmitted] = useState(false)
+  const [hasRated, setHasRated] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
   const { user, loading: authLoading } = useDiscordAccount()
 
@@ -183,6 +184,20 @@ export function GameExperience({
         if (j?.success) {
           setExperiences(j.experiences || [])
           if (j.stats) setStats(j.stats as Stats)
+          if (j.myRating) {
+            setHasRated(true)
+            setRating(j.myRating.rating)
+            const d = (j.myRating.distro || "").toLowerCase()
+            if (d === "windows") {
+              setPlatform("windows")
+              setDistro("")
+            } else {
+              setPlatform("linux")
+              setDistro(j.myRating.distro || "")
+            }
+            setProtonVersion(j.myRating.proton_version || "")
+            setNotes(j.myRating.notes || "")
+          }
         }
       })
       .catch(() => { })
@@ -233,11 +248,14 @@ export function GameExperience({
       if (!res.ok || !json.success) {
         setSubmitError(json.error || "Failed to submit. Please try again.")
       } else {
+        if (json.updated) setHasRated(true)
         setSubmitted(true)
-        setDistro("")
-        setProtonVersion("")
-        setRating(null)
-        setNotes("")
+        if (!json.updated && !hasRated) {
+          setDistro("")
+          setProtonVersion("")
+          setRating(null)
+          setNotes("")
+        }
         fetchExperiences()
       }
     } catch {
@@ -318,7 +336,7 @@ export function GameExperience({
           <div className="flex items-start gap-3 p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
             <CheckCircle2 className="h-5 w-5 text-emerald-500 mt-0.5 shrink-0" />
             <div className="flex-1">
-              <div className="text-sm font-semibold text-emerald-500">Thanks for the rating!</div>
+              <div className="text-sm font-semibold text-emerald-500">{hasRated ? "Thanks for updating your rating!" : "Thanks for the rating!"}</div>
               <div className="text-xs text-muted-foreground mt-1">Your report is now part of the average above.</div>
               <div className="flex flex-wrap items-center gap-3 mt-3">
                 {onLeaveComment && (
@@ -327,13 +345,15 @@ export function GameExperience({
                     Leave a detailed comment
                   </Button>
                 )}
-                <button onClick={() => setSubmitted(false)} className="text-xs text-muted-foreground underline hover:text-foreground">Rate again</button>
+                <button onClick={() => setSubmitted(false)} className="text-xs text-muted-foreground underline hover:text-foreground">
+                  {hasRated ? "Edit rating" : "Rate again"}
+                </button>
               </div>
             </div>
           </div>
         ) : (
           <div className="space-y-4">
-            <div className="text-sm font-semibold text-foreground">How is it running for you?</div>
+            <div className="text-sm font-semibold text-foreground">{hasRated ? "Update your rating" : "How is it running for you?"}</div>
 
             <div className="space-y-1.5">
               <StarRating value={rating} onChange={setRating} />
@@ -436,7 +456,7 @@ export function GameExperience({
               className="gap-2"
             >
               {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-              {submitting ? "Submitting…" : "Submit rating"}
+              {submitting ? "Submitting…" : hasRated ? "Update rating" : "Submit rating"}
             </Button>
           </div>
         )}
