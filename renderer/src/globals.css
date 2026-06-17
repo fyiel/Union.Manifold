@@ -24,6 +24,11 @@
   --border:            oklch(0.16 0.002 285 / 0.5); /* zinc-800/50 */
   --input:             oklch(0.16 0.002 285);
   --ring:              oklch(1 0 0);
+  --chart-1:           oklch(0.968 0.001 286);
+  --chart-2:           oklch(0.696 0.17 162.48);
+  --chart-3:           oklch(0.769 0.188 70.08);
+  --chart-4:           oklch(0.55 0.003 286);
+  --chart-5:           oklch(0.40 0.003 286);
   --radius:            0.625rem;
   --sidebar:           oklch(0.035 0.002 285);
   --sidebar-foreground:oklch(0.968 0.001 286);
@@ -32,6 +37,7 @@
   --sidebar-accent:    oklch(0.16 0.002 285);
   --sidebar-accent-foreground: oklch(0.968 0.001 286);
   --sidebar-border:    oklch(0.16 0.002 285 / 0.5);
+  --sidebar-ring:      oklch(1 0 0);
 
   /* Runtime-mutable font stacks, swapped by the theme engine. */
   --font-sans-active: "Inter", "Geist", "Segoe UI", ui-sans-serif, system-ui, -apple-system, sans-serif;
@@ -46,6 +52,7 @@
      build time and runtime updates would be a no-op. */
   --font-sans: var(--font-sans-active);
   --font-mono: var(--font-mono-active);
+  --font-montserrat: var(--font-sans-active);
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -65,6 +72,11 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -76,6 +88,7 @@
   --color-sidebar-accent: var(--sidebar-accent);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
 }
 
 /* ── UDL Utility Classes ─────────────────────────────────── */

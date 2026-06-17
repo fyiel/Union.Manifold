@@ -1,5 +1,5 @@
 # Changelog
-## v2.6 - Launch Reliability
+## v2.6.0 - Launch Reliability
 
 ### Game launching
 

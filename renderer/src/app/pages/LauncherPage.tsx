@@ -1247,8 +1247,12 @@ function StatsRow({
               <span className="whitespace-nowrap text-xs text-muted-foreground/80 font-medium">Updated (7d)</span>
             </div>
             <div className="w-px h-4 bg-white/[.07] hidden sm:block" />
-            <Link
-              to="/settings?section=leaderboard"
+            <a
+              href="https://union-crax.xyz/leaderboard"
+              onClick={(e) => {
+                e.preventDefault();
+                (window as any).ucSystem?.openExternal?.("https://union-crax.xyz/leaderboard");
+              }}
               className="group flex shrink-0 items-center gap-2 whitespace-nowrap"
               title="UC.Direct users online right now — open the leaderboard"
             >
@@ -1260,10 +1264,14 @@ function StatsRow({
                 <AnimatedCounter value={usersOnline} format={formatNumber} />
               </span>
               <span className="text-xs text-muted-foreground/80 group-hover:text-muted-foreground transition-colors font-medium">Now online</span>
-            </Link>
+            </a>
             <div className="w-px h-4 bg-white/[.07] hidden sm:block" />
-            <Link
-              to="/settings?section=leaderboard"
+            <a
+              href="https://union-crax.xyz/leaderboard"
+              onClick={(e) => {
+                e.preventDefault();
+                (window as any).ucSystem?.openExternal?.("https://union-crax.xyz/leaderboard");
+              }}
               className="group flex shrink-0 items-center gap-2 whitespace-nowrap"
               title="People in a running game right now — open the leaderboard"
             >
@@ -1275,10 +1283,14 @@ function StatsRow({
                 <AnimatedCounter value={playersNow} format={formatNumber} />
               </span>
               <span className="text-xs text-muted-foreground/80 group-hover:text-muted-foreground transition-colors font-medium">Now playing</span>
-            </Link>
+            </a>
             <div className="w-px h-4 bg-white/[.07] hidden sm:block" />
-            <Link
-              to="/settings?section=leaderboard"
+            <a
+              href="https://union-crax.xyz/leaderboard"
+              onClick={(e) => {
+                e.preventDefault();
+                (window as any).ucSystem?.openExternal?.("https://union-crax.xyz/leaderboard");
+              }}
               className="group flex shrink-0 items-center gap-2 whitespace-nowrap"
               title="All-time playtime tracked by UC.Direct — open the leaderboard"
             >
@@ -1286,7 +1298,7 @@ function StatsRow({
                 {formatPlaytimeCompact(totalPlaytimeSeconds)}
               </span>
               <span className="text-xs text-muted-foreground/80 group-hover:text-muted-foreground transition-colors font-medium">Total playtime</span>
-            </Link>
+            </a>
             <div className="flex shrink-0 items-center gap-1 whitespace-nowrap" title="These stats are tracked by UC.Direct">
               <span className="text-xs text-muted-foreground/60 font-medium italic">Tracked by</span>
               <span className="text-xs font-semibold text-violet-400">UC.Direct</span>

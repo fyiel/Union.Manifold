@@ -84,18 +84,28 @@ export function TopPlayerOfTheWeekSection() {
           </span>
         </div>
         <Button asChild variant="ghost" size="sm" className="rounded-full text-xs">
-          <Link to="/settings?section=leaderboard">
+          <a
+            href="https://union-crax.xyz/leaderboard"
+            onClick={(e) => {
+              e.preventDefault();
+              (window as any).ucSystem?.openExternal?.("https://union-crax.xyz/leaderboard");
+            }}
+          >
             View full leaderboard
             <ArrowUpRight className="ml-1 h-3.5 w-3.5" />
-          </Link>
+          </a>
         </Button>
       </div>
 
       <Card className="rounded-3xl border border-amber-400/15 bg-gradient-to-br from-amber-500/5 via-card/60 to-card/40 backdrop-blur-md">
         <CardContent className="p-6 sm:p-8">
           <div className="flex flex-col gap-6 sm:flex-row sm:items-center sm:justify-between">
-            <Link
-              to={`/settings?section=profile&user=${entry.username}`}
+            <a
+              href={`https://union-crax.xyz/user/${entry.username}`}
+              onClick={(e) => {
+                e.preventDefault();
+                (window as any).ucSystem?.openExternal?.(`https://union-crax.xyz/user/${entry.username}`);
+              }}
               className="group flex items-center gap-4"
             >
               <div className="relative">
@@ -135,16 +145,20 @@ export function TopPlayerOfTheWeekSection() {
                   </div>
                 ) : null}
               </div>
-            </Link>
+            </a>
 
             {runnersUp.length > 0 ? (
               <div className="flex flex-wrap items-center gap-2 sm:flex-nowrap sm:justify-end">
                 {runnersUp.map((runner) => {
                   const runnerName = runner.displayName || runner.username
                   return (
-                    <Link
+                    <a
                       key={runner.userId}
-                      to={`/settings?section=profile&user=${runner.username}`}
+                      href={`https://union-crax.xyz/user/${runner.username}`}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        (window as any).ucSystem?.openExternal?.(`https://union-crax.xyz/user/${runner.username}`);
+                      }}
                       className="flex items-center gap-2 rounded-full border border-white/[.07] bg-card/60 px-3 py-1.5 text-xs transition-colors hover:bg-secondary/70"
                       title={`${runnerName} · ${formatPlaytime(runner.weekSeconds)}`}
                     >
@@ -163,7 +177,7 @@ export function TopPlayerOfTheWeekSection() {
                       <span className="hidden sm:inline text-foreground/80">{runnerName}</span>
                       {runner.ucPlus ? <UcPlusBadge compact /> : null}
                       <span className="text-muted-foreground/80">{formatPlaytime(runner.weekSeconds)}</span>
-                    </Link>
+                    </a>
                   )
                 })}
               </div>
