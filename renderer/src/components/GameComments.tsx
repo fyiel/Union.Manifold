@@ -2,7 +2,7 @@
 
 import { useDeferredValue, useEffect, useMemo, useState } from "react"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent } from "@/components/ui/card"
+import { Badge } from "@/components/ui/badge"
 import { Textarea } from "@/components/ui/textarea"
 import {
   Dialog,
@@ -24,7 +24,10 @@ import { CommentMarkdown } from "@/components/CommentMarkdown"
 import { AttachSpecsToggle, useAttachSpecsToggle } from "@/components/use-attach-specs"
 
 import { PaginationBar } from "@/components/PaginationBar"
-import { apiFetch, apiUrl, getApiBaseUrl } from "@/lib/api"
+import { apiFetch, apiUpload, apiUrl, getApiBaseUrl } from "@/lib/api"
+import { proxyImageUrl } from "@/lib/utils"
+import { CommentMentionTextarea } from "@/components/CommentMentionTextarea"
+import { MediaLightbox, type LightboxImage } from "@/components/MediaLightbox"
 import { CommentSkeleton } from "@/components/CommentSkeleton"
 import { MessageCircle, Reply, Share2 } from "@/components/icons"
 import { Flag, MessageSquare, Pin, RefreshCw } from "lucide-react"
@@ -32,9 +35,13 @@ import {
   AlertTriangle,
   Check,
   ChevronDown,
+  Download,
   ExternalLink,
   Heart,
+  Loader2,
+  Paperclip,
   Trash2,
+  X,
 } from "@/components/icons"
 import { useNavigate } from "react-router-dom"
 
@@ -53,6 +60,15 @@ type CommentSystemSpec = {
   fingerprint: string
 }
 
+type CommentAttachment = {
+  id: string
+  fileId?: number
+  fileName: string
+  mimeType?: string | null
+  sizeBytes?: number
+  url: string
+}
+
 type ThreadCommentPayload = {
   id: string
   body: string
@@ -65,6 +81,7 @@ type ThreadCommentPayload = {
   author: CommentUser | null
   replies?: ThreadCommentPayload[]
   systemSpec?: CommentSystemSpec | null
+  attachments?: CommentAttachment[]
 }
 
 type GameComment = {
@@ -79,6 +96,7 @@ type GameComment = {
   author: CommentUser | null
   replies: GameComment[]
   systemSpec: CommentSystemSpec | null
+  attachments: CommentAttachment[]
 }
 
 const normalizeComment = (comment: ThreadCommentPayload): GameComment => ({
@@ -92,6 +110,7 @@ const normalizeComment = (comment: ThreadCommentPayload): GameComment => ({
   systemSpec: comment.systemSpec && comment.systemSpec.summary
     ? { summary: comment.systemSpec.summary, fingerprint: comment.systemSpec.fingerprint || "" }
     : null,
+  attachments: Array.isArray(comment.attachments) ? comment.attachments : [],
 })
 
 const addCommentToTree = (tree: GameComment[], parentId: string | null, newComment: GameComment): GameComment[] => {
@@ -243,6 +262,12 @@ export function GameComments({
   const [reportReason, setReportReason] = useState("")
   const [reportSubmitting, setReportSubmitting] = useState(false)
   const [reportedId, setReportedId] = useState<string | null>(null)
+  // Briefly ring-highlights the section when the user is sent here via a
+  // "leave a comment" CTA. Comments are always rendered now (no collapse).
+  const [highlighted, setHighlighted] = useState(false)
+  const [attachLightbox, setAttachLightbox] = useState<{ images: LightboxImage[]; index: number } | null>(null)
+  const [attachments, setAttachments] = useState<CommentAttachment[]>([])
+  const [uploadingNames, setUploadingNames] = useState<string[]>([])
   const [expandedReplies, setExpandedReplies] = useState<Set<string>>(new Set())
   const [expandedContinuations, setExpandedContinuations] = useState<Set<string>>(new Set())
   const [visibleReplyCounts, setVisibleReplyCounts] = useState<Record<string, number>>({})
@@ -350,6 +375,20 @@ export function GameComments({
     return () => clearTimeout(timeout)
   }, [highlightedCommentId])
 
+  // Listen for "jump to comments" requests fired by the rating panel / playtime
+  // nudge. Scroll the section into view and flash a highlight (the URL-hash
+  // deep-link path doesn't apply inside the launcher's HashRouter).
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const onFocus = () => {
+      document.getElementById("comments")?.scrollIntoView({ behavior: "smooth", block: "start" })
+      setHighlighted(true)
+      window.setTimeout(() => setHighlighted(false), 2200)
+    }
+    window.addEventListener("uc:focus-comments", onFocus)
+    return () => window.removeEventListener("uc:focus-comments", onFocus)
+  }, [])
+
   useEffect(() => {
     if (typeof window === "undefined") return
     if (window.location.hash?.startsWith("#comment-")) return
@@ -373,9 +412,39 @@ export function GameComments({
     await load()
   }
 
+  // Uploads files to the comment attachment endpoint (through the auth bridge,
+  // so it works in Electron where the renderer has no session cookie). No %
+  // progress over IPC, so we show an indeterminate "uploading" row.
+  const uploadForComment = async (files: File[]) => {
+    setError(null)
+    for (const file of files) {
+      const name = file.name || "attachment"
+      setUploadingNames((prev) => [...prev, name])
+      try {
+        const res = await apiUpload(`/api/comments/${appid}/attachments/upload`, { file, fileName: name })
+        const data = await res.json().catch(() => ({}))
+        if (!res.ok || !data?.attachment) {
+          setError(data?.error || `Failed to upload ${name}`)
+        } else {
+          setAttachments((prev) => [...prev, data.attachment as CommentAttachment])
+        }
+      } catch {
+        setError(`Failed to upload ${name}`)
+      } finally {
+        setUploadingNames((prev) => {
+          const idx = prev.indexOf(name)
+          if (idx < 0) return prev
+          const next = [...prev]
+          next.splice(idx, 1)
+          return next
+        })
+      }
+    }
+  }
+
   const submit = async () => {
     const trimmedBody = body.trim()
-    if (!trimmedBody) return
+    if (!trimmedBody && attachments.length === 0) return
 
     setPosting(true)
     setError(null)
@@ -385,6 +454,7 @@ export function GameComments({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           body: trimmedBody,
+          attachments,
           ...(specsToggle.payloadValue !== undefined ? { attachSpecs: specsToggle.payloadValue } : {}),
         }),
       })
@@ -397,6 +467,7 @@ export function GameComments({
       const newComment = normalizeComment(data.comment)
       setComments((prev) => addCommentToTree(prev, null, newComment))
       setBody("")
+      setAttachments([])
     } catch (e: any) {
       setError(e?.message || "Failed to post comment")
     } finally {
@@ -678,7 +749,7 @@ export function GameComments({
         <div
           key={comment.id}
           id={`comment-${comment.id}`}
-          className={`w-full max-w-full overflow-x-hidden rounded-2xl border border-white/[.07] md:bg-card/20 p-4 sm:p-5 transition-shadow ${isHighlighted ? "shadow-lg shadow-primary/30" : ""}`}
+          className={`w-full max-w-full overflow-x-hidden transition-colors ${depth === 0 ? "px-6 py-4" : "py-3"} ${isHighlighted ? "rounded-xl ring-1 ring-primary/40" : ""}`}
         >
           <div className="flex items-start gap-3">
             <div className="h-10 w-10 rounded-full bg-secondary/30 flex items-center justify-center shrink-0">
@@ -726,7 +797,7 @@ export function GameComments({
       <div
         key={comment.id}
         id={`comment-${comment.id}`}
-        className={`w-full max-w-full overflow-x-hidden rounded-2xl border border-white/[.07] md:bg-card/40 p-4 sm:p-5 transition-shadow ${isPinned ? "ring-1 ring-primary/40" : ""} ${isHighlighted ? "shadow-lg shadow-primary/30" : ""}`}
+        className={`w-full max-w-full overflow-x-hidden transition-colors ${depth === 0 ? "px-6 py-4" : "py-3"} ${isPinned ? "bg-primary/[0.04]" : ""} ${isHighlighted ? "rounded-xl ring-1 ring-primary/40" : ""}`}
       >
         <div className="flex items-start gap-3">
           <DiscordAvatar
@@ -772,6 +843,39 @@ export function GameComments({
               </div>
             </div>
             <CommentMarkdown text={comment.body} className="mt-2 text-muted-foreground" />
+            {comment.attachments.length > 0 && (() => {
+              const imageAttachments = comment.attachments.filter((a) => (a.mimeType || "").startsWith("image/"))
+              const fileAttachments = comment.attachments.filter((a) => !(a.mimeType || "").startsWith("image/"))
+              const lightboxImages: LightboxImage[] = imageAttachments.map((a) => ({ src: proxyImageUrl(a.url), alt: a.fileName, downloadUrl: a.url }))
+              return (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {imageAttachments.map((attachment, i) => (
+                    <button
+                      key={attachment.id}
+                      type="button"
+                      onClick={() => setAttachLightbox({ images: lightboxImages, index: i })}
+                      className="group relative h-28 w-28 overflow-hidden rounded-xl border border-white/[.07] bg-card/40"
+                      title={attachment.fileName}
+                    >
+                      <img src={proxyImageUrl(attachment.url)} alt={attachment.fileName} className="h-full w-full object-cover transition-transform group-hover:scale-105" loading="lazy" />
+                    </button>
+                  ))}
+                  {fileAttachments.map((attachment) => (
+                    <button
+                      key={attachment.id}
+                      type="button"
+                      onClick={() => { try { window.ucSystem?.openExternal?.(attachment.url) } catch { /* ignore */ } }}
+                      className="inline-flex items-center gap-1.5 rounded-full border border-border/60 bg-card/40 px-3 py-1.5 text-xs text-foreground/80 hover:bg-secondary/60 transition-colors"
+                      title={attachment.fileName}
+                    >
+                      <Paperclip className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                      <span className="max-w-[220px] truncate">{attachment.fileName}</span>
+                      <Download className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                    </button>
+                  ))}
+                </div>
+              )
+            })()}
             <div className="mt-3 flex flex-wrap items-center gap-2">
               <Button
                 variant="ghost"
@@ -899,124 +1003,159 @@ export function GameComments({
   )
 
   return (
-    <section className="container mx-auto px-4 py-16" id="comments">
-      <div className="max-w-6xl mx-auto space-y-6">
-        <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
-          <div>
-            <h2 className="text-2xl md:text-3xl font-black text-foreground  flex items-center gap-2">
-              <MessageSquare className="h-6 w-6 text-white" />
-              Comments
-            </h2>
-            <p className="text-sm text-muted-foreground">
+    <section className="pt-4 scroll-mt-24" id="comments">
+      <div className={`rounded-3xl bg-card/80 border border-border/50 backdrop-blur-md shadow-[0_8px_30px_rgb(0,0,0,0.12)] overflow-hidden transition-all duration-500 ${highlighted ? "ring-2 ring-primary/60 ring-offset-2 ring-offset-background" : ""}`}>
+
+        {/* Heading — always open (no collapse toggle). Card chrome is kept so
+            the section reads clearly over the game page's ambient background. */}
+        <div className="flex items-center gap-3 px-6 py-4">
+          <MessageSquare className="h-5 w-5 text-primary shrink-0" />
+          <div className="flex-1 min-w-0">
+            <h2 className="text-lg font-bold text-foreground">Comments</h2>
+            <p className="text-xs text-muted-foreground">
               Share feedback about <span className="font-semibold">{gameName}</span>
             </p>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <Select value={sortMode} onValueChange={(value) => setSortMode(value as SortMode)}>
-              <SelectTrigger className="h-9 w-[140px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="pinned">Pinned</SelectItem>
-                <SelectItem value="newest">Newest</SelectItem>
-                <SelectItem value="oldest">Oldest</SelectItem>
-                <SelectItem value="liked">Most liked</SelectItem>
-              </SelectContent>
-            </Select>
-            <Select value={filterMode} onValueChange={(value) => setFilterMode(value as FilterMode)}>
-              <SelectTrigger className="h-9 w-[120px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Show All</SelectItem>
-                <SelectItem value="pinned">Pinned Only</SelectItem>
-                <SelectItem value="deleted">Deleted Only</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+          <Badge className="ml-auto text-xs bg-secondary/30 border-border/50 text-primary border font-medium">
+            {comments.length} {comments.length === 1 ? "comment" : "comments"}
+          </Badge>
         </div>
+              {/* Filter + sort row */}
+              <div className="flex flex-wrap gap-2 px-6 py-3 border-t border-border/30 bg-white/[0.015]">
+                <Select value={sortMode} onValueChange={(value) => setSortMode(value as SortMode)}>
+                  <SelectTrigger className="h-8 w-[130px] text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="pinned">Pinned first</SelectItem>
+                    <SelectItem value="newest">Newest</SelectItem>
+                    <SelectItem value="oldest">Oldest</SelectItem>
+                    <SelectItem value="liked">Most liked</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={filterMode} onValueChange={(value) => setFilterMode(value as FilterMode)}>
+                  <SelectTrigger className="h-8 w-[115px] text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All</SelectItem>
+                    <SelectItem value="pinned">Pinned only</SelectItem>
+                    <SelectItem value="deleted">Deleted only</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
 
-        <Card className="border-white/[.07]">
-          <CardContent className="p-5 space-y-4">
-            {user ? (
-              <div className="flex items-center gap-3">
-                <DiscordAvatar
-                  avatarUrl={user.avatarUrl || undefined}
-                  alt={user.displayName || user.username}
-                  className="h-10 w-10 rounded-full"
-                />
-                <div>
-                  <div className="text-sm font-semibold text-foreground">
-                    {user.displayName || user.username}
+              {/* Compose area */}
+              <div className="px-6 py-4 border-t border-border/30 space-y-3">
+                {user ? (
+                  <div className="flex items-center gap-3">
+                    <DiscordAvatar
+                      avatarUrl={user.avatarUrl || undefined}
+                      alt={user.displayName || user.username}
+                      className="h-8 w-8 rounded-full shrink-0"
+                    />
+                    <span className="text-sm font-semibold text-foreground flex-1">
+                      {user.displayName || user.username}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={logout}
+                      className="text-xs text-muted-foreground/60 hover:text-muted-foreground transition-colors"
+                    >
+                      Logout
+                    </button>
                   </div>
-                  <button
-                    type="button"
-                    onClick={logout}
-                    className="text-xs text-muted-foreground hover:text-foreground"
-                  >
-                    Logout
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <MessageCircle className="h-4 w-4" />
-                  Sign in to post and like comments.
-                </div>
-                <Button size="sm" onClick={() => connectDiscord()}>Sign In</Button>
-              </div>
-            )}
-
-            <Textarea
-              value={body}
-              onChange={(e) => setBody(e.target.value)}
-              placeholder={user ? "Share your thoughts..." : "Login to comment"}
-              disabled={!user}
-              className="min-h-[120px]"
-              maxLength={1000}
-            />
-            <div className="flex items-center justify-between gap-2 flex-wrap text-xs text-muted-foreground">
-              <span>{remaining} characters remaining</span>
-              <div className="flex items-center gap-2">
-                {user && specsToggle.available && (
-                  <AttachSpecsToggle value={specsToggle.displayedValue} onChange={specsToggle.onChange} />
+                ) : (
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                      Sign in to post and like comments.
+                    </div>
+                    <Button size="sm" onClick={() => connectDiscord()}>Sign in</Button>
+                  </div>
                 )}
-                <Button size="sm" onClick={submit} disabled={!user || posting}>
-                  {posting ? "Posting..." : "Post comment"}
-                </Button>
+                <CommentMentionTextarea
+                  value={body}
+                  onChange={setBody}
+                  placeholder={user ? "Share your thoughts..." : "Login to comment"}
+                  disabled={!user}
+                  className="min-h-[100px]"
+                  maxLength={1000}
+                  onFilesSelected={user ? uploadForComment : undefined}
+                />
+                {(uploadingNames.length > 0 || attachments.length > 0) && (
+                  <div className="space-y-1">
+                    {uploadingNames.map((name, i) => (
+                      <div key={`up-${i}`} className="flex items-center gap-2 rounded-md border border-border/60 bg-card/40 px-2 py-1.5 text-xs text-muted-foreground/70">
+                        <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" />
+                        <span className="truncate">Uploading {name}…</span>
+                      </div>
+                    ))}
+                    {attachments.length > 0 && (
+                      <div className="flex flex-wrap gap-2">
+                        {attachments.map((attachment) => (
+                          <div key={attachment.id} className="inline-flex items-center gap-1.5 rounded-full border border-border/60 bg-card/40 px-2 py-1 text-xs text-foreground/80">
+                            <Paperclip className="h-3 w-3 shrink-0 text-muted-foreground" />
+                            <span className="max-w-[220px] truncate">{attachment.fileName}</span>
+                            <button
+                              type="button"
+                              onClick={() => setAttachments((prev) => prev.filter((item) => item.id !== attachment.id))}
+                              className="rounded-full p-0.5 text-muted-foreground hover:bg-secondary/70 hover:text-foreground/90"
+                              aria-label="Remove attachment"
+                            >
+                              <X className="h-3 w-3" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+                <div className="flex items-center justify-between text-xs text-muted-foreground/60 gap-2 flex-wrap">
+                  <span>{remaining} characters remaining</span>
+                  <div className="flex items-center gap-2">
+                    {user && specsToggle.available && (
+                      <AttachSpecsToggle value={specsToggle.displayedValue} onChange={specsToggle.onChange} />
+                    )}
+                    <Button size="sm" onClick={submit} disabled={!user || posting || uploadingNames.length > 0}>
+                      {posting ? "Posting..." : "Post comment"}
+                    </Button>
+                  </div>
+                </div>
+                {error && (
+                  <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                    {error}
+                  </div>
+                )}
               </div>
-            </div>
 
-            {error && (
-              <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                {error}
-              </div>
-            )}
-          </CardContent>
-        </Card>
+              {/* Comment list — flush rows separated by dividers (1:1 with web) */}
+              {loading ? (
+                <div className="border-t border-border/30 divide-y divide-white/5">
+                  {Array.from({ length: 4 }).map((_, i) => (
+                    <div key={i} className="px-6 py-4">
+                      <CommentSkeleton />
+                    </div>
+                  ))}
+                </div>
+              ) : comments.length === 0 ? (
+                <div className="border-t border-border/30 px-6 py-8 text-sm text-muted-foreground/60 text-center">
+                  No comments yet. Be the first to share your thoughts.
+                </div>
+              ) : (
+                <div className="border-t border-border/30 divide-y divide-white/5">
+                  {renderedComments}
+                </div>
+              )}
 
-        {loading ? (
-          <div className="space-y-4">
-            {Array.from({ length: 5 }).map((_, i) => (
-              <CommentSkeleton key={i} />
-            ))}
-          </div>
-        ) : comments.length === 0 ? (
-          <div className="rounded-2xl border border-white/[.07] bg-card/40 p-6 text-sm text-muted-foreground">
-            No comments yet. Be the first to share your thoughts.
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {renderedComments}
-            <PaginationBar
-              currentPage={currentPage}
-              totalPages={totalPages}
-              onPageChange={setCurrentPage}
-              wrapperClassName="mt-4"
-            />
-          </div>
-        )}
+              {totalPages > 1 && (
+                <div className="px-6 py-4 border-t border-border/30">
+                  <PaginationBar
+                    currentPage={currentPage}
+                    totalPages={totalPages}
+                    onPageChange={setCurrentPage}
+                  />
+                </div>
+              )}
       </div>
 
       <Dialog open={Boolean(reportingId)} onOpenChange={(open) => {
@@ -1060,6 +1199,14 @@ export function GameComments({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <MediaLightbox
+        open={Boolean(attachLightbox)}
+        images={attachLightbox?.images ?? []}
+        index={attachLightbox?.index ?? 0}
+        onIndexChange={(i) => setAttachLightbox((prev) => (prev ? { ...prev, index: i } : prev))}
+        onClose={() => setAttachLightbox(null)}
+      />
     </section>
   )
 }

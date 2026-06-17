@@ -14,7 +14,7 @@ import { PaginationBar } from "@/components/PaginationBar"
 import { useGamesData } from "@/hooks/use-games"
 import type { Game } from "@/lib/types"
 import { hasInstalledVersionUpdate, pickGameExecutable, cn, proxyImageUrl } from "@/lib/utils"
-import { useDownloads, useDownloadsActions } from "@/context/downloads-context"
+import { useDownloads } from "@/context/downloads-context"
 import { getCatalogCache, type CatalogGame } from "@/lib/catalog"
 import { X } from "@/components/icons"
 import { CheckSquare2, ArrowUpDown, Clock, RefreshCw, StickyNote } from "lucide-react"
@@ -1009,8 +1009,6 @@ export function LibraryPage() {
   const isAllPageSelected = pagedInstalled.length > 0 && pagedInstalled.every((game) => selectedAppIds.has(game.appid))
   const isAllVisibleSelected = filteredInstalled.length > 0 && filteredInstalled.every((game) => selectedAppIds.has(game.appid))
 
-  const { startGameDownload } = useDownloadsActions()
-
   // When a collection filter is active, find members that are NOT installed so
   // we can show them below the installed grid with a download button.
   const uninstalledCollectionMembers = useMemo(() => {
@@ -1557,10 +1555,22 @@ export function LibraryPage() {
                         <div className="flex items-center gap-2 min-w-0">
                           <div className="text-sm font-semibold text-white truncate">{game.name}</div>
                           {updateAvailable && (
-                            <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-bold text-amber-200">
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                // The badge sits inside the row's <Link>. Without
+                                // stopping propagation we'd navigate to the plain
+                                // game page and the update flow would never open.
+                                event.preventDefault()
+                                event.stopPropagation()
+                                navigate(`/game/${encodeURIComponent(game.appid)}?update=1`)
+                              }}
+                              className="inline-flex items-center gap-1 rounded-full border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-bold text-amber-200 transition hover:bg-amber-500/20"
+                              title="Update this game"
+                            >
                               <RefreshCw className="h-2.5 w-2.5" />
                               Update
-                            </span>
+                            </button>
                           )}
                         </div>
                         <div className="text-[11px] text-muted-foreground/80 truncate">
@@ -1660,10 +1670,14 @@ export function LibraryPage() {
                             className="absolute bottom-2 left-2 inline-flex items-center gap-1.5 rounded-full border border-violet-500/30 bg-black/70 px-2 py-0.5 text-[10px] font-semibold text-violet-200 backdrop-blur-sm max-w-[calc(100%-1rem)]"
                             title={`Added by ${nm}`}
                           >
-                            <span className="h-3.5 w-3.5 shrink-0 overflow-hidden rounded-full bg-secondary">
+                            <span className="h-3.5 w-3.5 shrink-0 overflow-hidden rounded-full bg-secondary flex items-center justify-center" style={{ containerType: "inline-size" }}>
                               {addedBy.avatarUrl ? (
                                 <img src={proxyImageUrl(addedBy.avatarUrl)} alt="" className="h-full w-full object-cover" />
-                              ) : null}
+                              ) : (
+                                <span aria-hidden className="font-bold uppercase leading-none text-violet-200" style={{ fontSize: "60cqw" }}>
+                                  {nm.charAt(0).toUpperCase()}
+                                </span>
+                              )}
                             </span>
                             <span className="truncate">{nm}</span>
                           </div>
@@ -1844,7 +1858,7 @@ export function LibraryPage() {
               <div key={game.appid} className="relative">
                 <GameCard game={game} stats={stats[game.appid]} size="compact" />
                 <NotInstalledOverlay
-                  onInstall={async () => { await startGameDownload(game as any) }}
+                  onInstall={() => { navigate(`/game/${encodeURIComponent(game.appid)}?download=1`) }}
                 />
               </div>
             ))}

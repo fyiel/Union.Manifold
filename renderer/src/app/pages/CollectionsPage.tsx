@@ -2009,10 +2009,14 @@ function ContributorsDialog({
                           disabled={disabled}
                           className="w-full flex items-center gap-2 rounded-lg p-2 text-left transition hover:bg-white/[.04] disabled:opacity-50 disabled:cursor-not-allowed"
                         >
-                          <span className="h-7 w-7 shrink-0 overflow-hidden rounded-full bg-secondary">
+                          <span className="h-7 w-7 shrink-0 overflow-hidden rounded-full bg-secondary flex items-center justify-center" style={{ containerType: "inline-size" }}>
                             {u.avatarUrl ? (
                               <img src={proxyImageUrl(u.avatarUrl)} alt="" className="h-full w-full object-cover" />
-                            ) : null}
+                            ) : (
+                              <span aria-hidden className="font-semibold uppercase leading-none text-muted-foreground/80" style={{ fontSize: "45cqw" }}>
+                                {(u.displayName || u.username || "?").charAt(0).toUpperCase()}
+                              </span>
+                            )}
                           </span>
                           <span className="min-w-0 flex-1">
                             <span className="block truncate text-xs font-semibold text-foreground">
@@ -2062,10 +2066,14 @@ function ContributorsDialog({
                       className="rounded-xl border border-white/[.07] bg-white/[.02] p-3 space-y-2"
                     >
                       <div className="flex items-center gap-2">
-                        <span className="h-8 w-8 shrink-0 overflow-hidden rounded-full bg-secondary">
+                        <span className="h-8 w-8 shrink-0 overflow-hidden rounded-full bg-secondary flex items-center justify-center" style={{ containerType: "inline-size" }}>
                           {c.avatarUrl ? (
                             <img src={proxyImageUrl(c.avatarUrl)} alt="" className="h-full w-full object-cover" />
-                          ) : null}
+                          ) : (
+                            <span aria-hidden className="font-semibold uppercase leading-none text-muted-foreground/80" style={{ fontSize: "45cqw" }}>
+                              {(c.displayName || c.username || "?").charAt(0).toUpperCase()}
+                            </span>
+                          )}
                         </span>
                         <div className="min-w-0 flex-1">
                           <p className="truncate text-xs font-semibold text-foreground">

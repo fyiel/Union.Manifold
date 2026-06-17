@@ -1684,7 +1684,7 @@ export function SettingsPage() {
   ]
 
   return (
-    <div className="container mx-auto max-w-4xl">
+    <div className="mx-auto max-w-4xl space-y-6">
       <div className="mb-8">
         <p className="section-label mb-2">Configuration</p>
         <div className="flex items-center gap-3">
@@ -1769,16 +1769,13 @@ export function SettingsPage() {
                 {/* Avatar + action row */}
                 <div className="px-5 pt-0 pb-0">
                   <div className="flex items-end justify-between -mt-10 sm:-mt-14">
-                    <div className="h-20 w-20 sm:h-28 sm:w-28 rounded-2xl border-4 border-[#09090b] ring-1 ring-white/10 bg-secondary overflow-hidden flex items-center justify-center shrink-0 shadow-[0_10px_30px_rgba(0,0,0,0.5)]">
-                      {profileImages?.customAvatarUrl || profileImages?.avatarUrl ? (
-                        <img
-                          src={proxyImageUrl(resolveCurrentAvatarUrl(profileImages) ?? "")}
-                          alt="Avatar"
-                          className="w-full h-full object-cover"
-                        />
-                      ) : (
-                        <DiscordAvatar avatarUrl={accountAvatarUrl} alt="Avatar" className="h-full w-full rounded-full" />
-                      )}
+                    <div className="h-20 w-20 sm:h-28 sm:w-28 rounded-full border-4 border-[#09090b] ring-1 ring-white/10 bg-secondary overflow-hidden flex items-center justify-center shrink-0 shadow-[0_10px_30px_rgba(0,0,0,0.5)]">
+                      <DiscordAvatar
+                        bare
+                        avatarUrl={resolveCurrentAvatarUrl(profileImages) ?? accountAvatarUrl}
+                        alt={accountLabel}
+                        className="h-full w-full"
+                      />
                     </div>
                     <div className="flex flex-wrap gap-2 mb-1">
                       {showAccountControls ? (
@@ -3919,17 +3916,26 @@ export function SettingsPage() {
                                   setShowMika(true)
                                   setShowNsfw(false)
                                   setShowPublicProfile(true)
-                                  // Wipe localStorage settings so views like the log popup start fresh
+                                  // Wipe every UC-owned localStorage key so views
+                                  // start fresh — not just the handful below. All of
+                                  // the app's client-side prefs are "uc_"-prefixed
+                                  // (theme, sidebar, search sort, custom API URL, …);
+                                  // auth is not stored here, so this won't log the
+                                  // user out.
                                   try {
-                                    localStorage.removeItem(SETTINGS_KEYS.MIKA)
-                                    localStorage.removeItem(SETTINGS_KEYS.NSFW)
-                                    localStorage.removeItem(SETTINGS_KEYS.PUBLIC_PROFILE)
-                                    localStorage.removeItem('uc_custom_api_base_url')
-                                    localStorage.removeItem('uc_sidebar_collapsed')
+                                    const ucKeys: string[] = []
+                                    for (let i = 0; i < localStorage.length; i++) {
+                                      const key = localStorage.key(i)
+                                      if (key && key.startsWith('uc_')) ucKeys.push(key)
+                                    }
+                                    for (const key of ucKeys) localStorage.removeItem(key)
                                     window.dispatchEvent(new Event('uc_mika_pref'))
                                     window.dispatchEvent(new Event('uc_nsfw_pref'))
                                   } catch { }
-                                  toast('User data cleared successfully.')
+                                  const removed = result.shortcutsRemoved ?? 0
+                                  toast(removed > 0
+                                    ? `User data cleared. Removed ${removed} desktop shortcut${removed === 1 ? '' : 's'}.`
+                                    : 'User data cleared successfully.')
                                   setTimeout(() => {
                                     setShowClearConfirm(false)
                                   }, 1500)

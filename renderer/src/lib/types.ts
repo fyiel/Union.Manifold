@@ -54,6 +54,14 @@ export interface Game {
    *  that case (the user might run via Proton). */
   linuxMinRequirements?: GameRequirements | null
   linuxRecommendedRequirements?: GameRequirements | null
+  /** Launcher metadata chosen by staff in the website admin panel. The
+   *  executable path is relative to the install folder (e.g. "bin/Game.exe").
+   *  When present, UC.D prefers this over its heuristic exe detection so our
+   *  release's correct binary (which can differ from Steam's by emulator/
+   *  repack) is launched without prompting. Empty when not configured. */
+  game_executable_path?: string | null
+  game_executable_cwd?: string | null
+  game_executable_args?: string | null
 }
 
 export type GameStats = Record<string, { downloads: number; views: number }>
