@@ -252,16 +252,19 @@ export async function persistCatalogCache(snapshot: Partial<CatalogSnapshot>): P
   // them when valid). The persisted-to-disk form strips them so a future
   // session can't inherit a localImage path whose folder has since been
   // deleted / moved.
-  const nextGames = Array.isArray(snapshot.games)
-    ? snapshot.games.map((game) => normalizeCatalogGame(game))
-    : memoryCache.games
   const nextStats = snapshot.stats && typeof snapshot.stats === "object" ? snapshot.stats : memoryCache.stats
   const nextGamesUpdatedAt = Number(snapshot.gamesUpdatedAt ?? memoryCache.gamesUpdatedAt ?? Date.now())
   const nextStatsUpdatedAt = Number(snapshot.statsUpdatedAt ?? memoryCache.statsUpdatedAt ?? Date.now())
   const updatedAt = Math.max(nextGamesUpdatedAt, nextStatsUpdatedAt, Number(snapshot.updatedAt || 0))
 
+  // setCatalogCache normalizes the games array exactly once. Previously this
+  // function pre-normalized the array and then setCatalogCache normalized the
+  // SAME array a second time — a full redundant pass (regex developer
+  // extraction + NFD searchText build + object spread) over the entire catalog
+  // on every persist. Hand the raw array straight to setCatalogCache and read
+  // the normalized result back from memoryCache.
   setCatalogCache({
-    games: nextGames,
+    games: snapshot.games,
     stats: nextStats,
     updatedAt,
     gamesUpdatedAt: nextGamesUpdatedAt,
@@ -270,7 +273,7 @@ export async function persistCatalogCache(snapshot: Partial<CatalogSnapshot>): P
 
   try {
     const result = await window.ucDownloads?.saveCatalogState?.({
-      games: nextGames.map((game) => stripLocalMediaForPersistence(game)),
+      games: memoryCache.games.map((game) => stripLocalMediaForPersistence(game)),
       stats: nextStats,
       gamesUpdatedAt: nextGamesUpdatedAt,
       statsUpdatedAt: nextStatsUpdatedAt,

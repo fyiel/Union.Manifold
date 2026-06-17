@@ -14,7 +14,7 @@ import { PaginationBar } from "@/components/PaginationBar"
 import { useGamesData } from "@/hooks/use-games"
 import type { Game } from "@/lib/types"
 import { hasInstalledVersionUpdate, pickGameExecutable, cn, proxyImageUrl } from "@/lib/utils"
-import { useDownloads } from "@/context/downloads-context"
+import { useDownloadsActions, useDownloadsSelector } from "@/context/downloads-context"
 import { getCatalogCache, type CatalogGame } from "@/lib/catalog"
 import { X } from "@/components/icons"
 import { CheckSquare2, ArrowUpDown, Clock, RefreshCw, StickyNote } from "lucide-react"
@@ -184,7 +184,18 @@ function formatRelativeTimestamp(timestamp?: number) {
 
 export function LibraryPage() {
   const { games, stats, loading: statsLoading } = useGamesData()
-  const { downloads, clearByAppid } = useDownloads()
+  const { clearByAppid } = useDownloadsActions()
+  // Narrow projection of the download list (appid + status only). The library's
+  // download-derived memos below (cancelled / failed / membership signature)
+  // never need byte progress, so subscribing to the raw `downloads` array
+  // re-rendered this 2400-line page ~5×/sec during any active download. The
+  // content-equality function keeps `downloadStates` referentially stable across
+  // byte-progress ticks, so those memos (and the page) only recompute when an
+  // appid or status actually changes.
+  const downloadStates = useDownloadsSelector(
+    (downloads) => downloads.map((item) => ({ appid: item.appid, status: item.status })),
+    (a, b) => a.length === b.length && a.every((x, i) => x.appid === b[i].appid && x.status === b[i].status),
+  )
   const [loading, setLoading] = useState(true)
   const [installed, setInstalled] = useState<LibraryGame[]>([])
   const [installing, setInstalling] = useState<LibraryGame[]>([])
@@ -402,11 +413,11 @@ export function LibraryPage() {
 
   const cancelledAppIds = useMemo(() => {
     const ids = new Set<string>()
-    for (const item of downloads) {
+    for (const item of downloadStates) {
       if (item.status === "cancelled" && item.appid) ids.add(item.appid)
     }
     return ids
-  }, [downloads])
+  }, [downloadStates])
 
   const installedWithMeta = useMemo(() => {
     return installed
@@ -525,14 +536,14 @@ export function LibraryPage() {
     const ids = new Set<string>()
     const activeOrQueuedAppIds = new Set<string>()
 
-    for (const item of downloads) {
+    for (const item of downloadStates) {
       if (!item.appid) continue
       if (["queued", "downloading", "paused", "extracting", "installing", "verifying", "retrying"].includes(item.status)) {
         activeOrQueuedAppIds.add(item.appid)
       }
     }
 
-    for (const item of downloads) {
+    for (const item of downloadStates) {
       if ((item.status === "failed" || item.status === "extract_failed") && item.appid && !activeOrQueuedAppIds.has(item.appid)) {
         ids.add(item.appid)
       }
@@ -541,7 +552,7 @@ export function LibraryPage() {
       if (meta?.status === "failed" && !activeOrQueuedAppIds.has(appid)) ids.add(appid)
     }
     return ids
-  }, [downloads, installingMeta])
+  }, [downloadStates, installingMeta])
 
   const failedKey = useMemo(() => {
     if (!failedAppIds.size) return ""
@@ -555,9 +566,9 @@ export function LibraryPage() {
   // ghost tile for a game whose files are already gone.
   const downloadAppIdsKey = useMemo(() => {
     const ids = new Set<string>()
-    for (const item of downloads) if (item.appid) ids.add(item.appid)
+    for (const item of downloadStates) if (item.appid) ids.add(item.appid)
     return Array.from(ids).sort().join("|")
-  }, [downloads])
+  }, [downloadStates])
 
   useEffect(() => {
     let mounted = true
