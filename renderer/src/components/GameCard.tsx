@@ -182,6 +182,17 @@ export const GameCard = memo(function GameCard({
     setGameStartFailedOpen(true)
   }, [isRunning])
 
+  // Drop the quick-exit subscription if the card unmounts (grid re-renders,
+  // navigation) before the event arrives — we now accept it past the 12 s
+  // window, so an orphaned listener could setState on an unmounted card.
+  useEffect(() => {
+    return () => {
+      try { gameQuickExitUnsubRef.current?.() } catch { }
+      gameQuickExitUnsubRef.current = null
+      gameJustLaunchedRef.current = 0
+    }
+  }, [])
+
   const fetchStatsOnHover = useCallback(async () => {
     if (initialStats && (initialStats.downloads > 0 || initialStats.views > 0)) {
       return
@@ -329,10 +340,16 @@ export const GameCard = memo(function GameCard({
         setGameStartFailedOpen(true)
       }
 
+      // The main process is authoritative for quick-exit detection — it only
+      // emits this for a genuine quick exit (game died <5 s after launch, no
+      // launcher handoff). Because of the Windows handoff grace the event can
+      // land AFTER our 12 s wall-clock window, so trust it while still armed
+      // (ref !== 0) instead of re-checking the deadline (which used to swallow
+      // it, so the "couldn't start" modal stopped appearing).
       try { gameQuickExitUnsubRef.current?.() } catch { }
       gameQuickExitUnsubRef.current = window.ucDownloads?.onGameQuickExit?.((data) => {
         if (data?.appid !== game.appid) return
-        if (!(gameJustLaunchedRef.current > Date.now())) return
+        if (gameJustLaunchedRef.current === 0) return
         gameJustLaunchedRef.current = 0
         try { gameQuickExitUnsubRef.current?.() } catch { }
         gameQuickExitUnsubRef.current = null
@@ -704,7 +721,7 @@ export const GameCard = memo(function GameCard({
 
               {hasOnlineMode(game.hasCoOp) && (
                 <Badge variant="online" className="bg-secondary/60 backdrop-blur-sm border border-white/10 px-3 py-1 text-xs font-semibold flex items-center gap-1 rounded-full">
-                  <Wifi className="w-3 h-3 mr-1 text-white" />
+                  <Wifi className="w-3 h-3 mr-1 text-green-400" />
                   <span className="text-white">MP</span>
                 </Badge>
               )}

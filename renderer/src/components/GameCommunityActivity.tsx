@@ -77,6 +77,83 @@ function UcPlus() {
   )
 }
 
+type NowPlayingPlayer = {
+  userId: string
+  username: string
+  displayName: string | null
+  avatarUrl: string | null
+  sessionStartedAt: string | null
+}
+
+/**
+ * Live "N playing now" indicator — desktop counterpart of the web's
+ * GameNowPlaying (components/game-viewer-state.tsx). Hits the shared
+ * `/api/games/:appid/now-playing` endpoint and shows an anonymous in-game count
+ * plus an avatar stack of players who share their activity. Self-hides when
+ * nobody is currently in the game. Meant to sit inline near the game title.
+ */
+export function GameNowPlaying({ appid, className = "" }: { appid: string; className?: string }) {
+  const [count, setCount] = useState(0)
+  const [players, setPlayers] = useState<NowPlayingPlayer[]>([])
+
+  useEffect(() => {
+    if (!appid) return
+    let cancelled = false
+    const load = async () => {
+      try {
+        const res = await apiFetch(`/api/games/${encodeURIComponent(appid)}/now-playing?limit=8`)
+        if (cancelled || !res.ok) return
+        const data = await res.json().catch(() => null)
+        if (cancelled || !data) return
+        setCount(Number(data.count || 0))
+        setPlayers(Array.isArray(data.players) ? data.players : [])
+      } catch {
+        /* keep last good value */
+      }
+    }
+    void load()
+    // Presence TTL is 3 min — a slow poll keeps the count fresh without churn.
+    const interval = window.setInterval(load, 45_000)
+    const onFocus = () => void load()
+    window.addEventListener("focus", onFocus)
+    return () => {
+      cancelled = true
+      window.clearInterval(interval)
+      window.removeEventListener("focus", onFocus)
+    }
+  }, [appid])
+
+  if (count <= 0) return null
+
+  const shown = players.slice(0, 5)
+  const extra = count - shown.length
+
+  return (
+    <div
+      className={`inline-flex items-center gap-2.5 rounded-full border border-emerald-400/25 bg-emerald-500/10 px-3 py-1.5 ${className}`}
+      title={`${count} ${count === 1 ? "person is" : "people are"} playing right now`}
+    >
+      <span className="relative flex h-2 w-2 shrink-0">
+        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+        <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-400" />
+      </span>
+      {shown.length > 0 && (
+        <div className="flex -space-x-2">
+          {shown.map((p) => (
+            <div key={p.userId} className="ring-1 ring-emerald-400/20 rounded-full">
+              <Avatar url={p.avatarUrl} name={p.displayName || p.username} size="h-6 w-6" />
+            </div>
+          ))}
+        </div>
+      )}
+      <span className="text-[11px] font-bold uppercase tracking-[0.14em] text-emerald-200">
+        {count} in game now
+        {extra > 0 && shown.length > 0 ? <span className="text-emerald-200/70"> +{extra}</span> : null}
+      </span>
+    </div>
+  )
+}
+
 type TopPlayer = {
   rank: number
   userId: string

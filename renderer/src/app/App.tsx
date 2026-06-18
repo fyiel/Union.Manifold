@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useMemo, useState } from "react"
 import { HashRouter, Route, Routes, Navigate } from "react-router-dom"
 import { AppLayout } from "@/app/Layout"
 import { DownloadsProvider, useDownloadsSelector } from "@/context/downloads-context"
+import { DownloadFlowProvider } from "@/context/download-flow-context"
 import { ToastProvider } from "@/context/toast-context"
 import { AuthProvider } from "@/context/auth-context"
 import { Toaster } from "@/components/Toaster"
@@ -138,6 +139,7 @@ export default function App() {
       <ToastProvider>
         <AuthProvider>
         <DownloadsProvider>
+        <DownloadFlowProvider>
         <ThemeBoundary>
           <Suspense fallback={<RouteFallback />}>
             <Routes>
@@ -175,6 +177,7 @@ export default function App() {
             </Routes>
           </Suspense>
         </ThemeBoundary>
+        </DownloadFlowProvider>
         </DownloadsProvider>
         </AuthProvider>
         <Toaster />
