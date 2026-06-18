@@ -36,6 +36,7 @@ import { useUserCollections, type UserCollection } from "@/hooks/use-user-collec
 import { useFollowedCollections } from "@/hooks/use-followed-collections"
 import { useGamesData } from "@/hooks/use-games"
 import { useDownloadsActions, useDownloadsSelector } from "@/context/downloads-context"
+import { useDownloadFlow } from "@/context/download-flow-context"
 import { useAuth } from "@/hooks/useAuth"
 import {
   forkCloudCollection,
@@ -76,6 +77,7 @@ export function CollectionDetailPage() {
   const followed = useFollowedCollections()
   const { games: catalogGames } = useGamesData()
   const { startGameDownload } = useDownloadsActions()
+  const { requestDownload } = useDownloadFlow()
   const [{ user, isAuthenticated }] = useAuth()
   const viewerDiscordId = user?.discordId ?? null
 
@@ -677,10 +679,10 @@ export function CollectionDetailPage() {
               {!entry.installed && !inProgressAppids.has(entry.appid) && (
                 <NotInstalledOverlay
                   onInstall={() => {
-                    // Route to the game page so the pre-download check modal +
-                    // host selector run, matching every other download entry
-                    // point (was a silent direct queue before).
-                    navigate(`/game/${encodeURIComponent(entry.appid)}?download=1`)
+                    // Start in place via the app-wide flow (quick-queue or the
+                    // check modal as an overlay, per the user's setting) instead
+                    // of navigating to the game page.
+                    void requestDownload(entry.data as any)
                   }}
                 />
               )}

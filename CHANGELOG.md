@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v2.7.0 — Launch Options & Linux
 
 ### Updates
 
@@ -17,6 +17,22 @@
 
 - **Added: per-game launch options in the launcher, sourced from Steam.** The admin "Fetch exes from Steam" picker already lists every launch config Steam exposes; UC.D now saves **all** of them to the game record (not just the one the admin picks), flagging the selected one as recommended. The launcher's **Launch options** dialog now shows these official options, pre-fills the recommended arguments, and lets you apply any of them with one click.
 - **Added: optional, opt-in community launch options.** Players can explicitly **Publish to community** their executable + arguments (basename only — no absolute paths leave the machine) so others can see what worked; nothing is shared automatically on launch. Community options appear in a separate, clearly-labelled section with a `?` hover note that they're unverified and quality may vary — the official options stay recommended.
+
+### Game pages
+
+- **Added: "N in game now" live indicator on game detail pages.** A green pulsing dot, avatar stack, and player count appear under the hero title when any UC.D users are actively playing that game. Count is an anonymous aggregate (all online launchers); the avatar stack is visibility-gated to users who have opted into playtime sharing. Self-hides when the count is zero. Polls every 45 seconds and refreshes on window focus. Mirrored on the website under the same hero title. Backed by a new `/api/games/:appid/now-playing` endpoint reading the `user_direct_presence` heartbeat table (3-minute TTL).
+
+### Downloads
+
+- **Fixed: right-click "Add to queue" / "Download" no longer navigates to the game detail page.** A new app-wide `DownloadFlowProvider` (mounted once in `App.tsx`) exposes a `requestDownload(game)` action used by the right-click menu, the Library install overlay, and the Collections install overlay. With `downloadCheckMode: "skip"` (or the legacy `skipLinkCheck: true`) the action queues immediately and shows a toast — true one-click add-to-queue. With `"auto"` or `"always"` it opens the pre-download check modal as an overlay in place, without navigating. The `GameDetailPage` keeps its own richer download flow for the Play/Download button.
+
+### Community & Ratings
+
+- **Fixed: "You've played X — rate it" prompt kept reappearing after dismissal or rating.** The prompt now checks a server-confirmed `reviewed` flag from the viewer-state API (backed by the `linux_experiences` table) and suppresses itself when you've already rated. Clicking either the "Rate it" or "Leave a comment" CTA also immediately dismisses the prompt for the current session, so it can't reappear while you're still on the page. Mirrored fix on the website.
+
+### Fixes
+
+- **Fixed: "Game couldn't start" popup no longer fires when a game exits almost instantly.** On Windows, the launcher-to-game handoff grace period (`WINDOWS_GAME_HANDOFF_GRACE_MS`, 12 s) was inflating the `elapsed` time used to detect quick exits — genuine instant crashes measured at ~12 s+ instead of ~0 ms, so the 5-second quick-exit gate was never crossed and the popup never fired. The death timestamp is now stamped at first detection in `handleTrackedExit` (and reset to zero on successful successor adoption), so `elapsed` correctly reflects the game's actual lifetime. The popup is also suppressed when the user explicitly quit the game (`userQuitRequested`). Renderer-side, the IPC handler now fires whenever the game-just-launched watch is still armed rather than re-checking an already-expired wall-clock deadline.
 
 ## v2.6.1 — Performance & Manifest Stability
 

@@ -45,13 +45,7 @@ A fast, standalone Electron desktop application for managing and launching games
 4. Create desktop/Start Menu shortcuts
 5. Launch UnionCrax.Direct from Start Menu or desktop
 
-#### Option 2: Portable Executable
-1. Go to [Releases](https://github.com/UnionCrax-Team/UnionCrax.Direct/releases)
-2. Download `UnionCrax.Direct.X.X.X.exe`
-3. Run directly - no installation needed
-4. Settings and data are stored alongside the executable
-
-#### Option 3: ZIP Archive
+#### Option 2: ZIP Archive
 1. Go to [Releases](https://github.com/UnionCrax-Team/UnionCrax.Direct/releases)
 2. Download `UnionCrax.Direct-X.X.X-win.zip`
 3. Extract to your preferred location
