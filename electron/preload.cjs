@@ -267,6 +267,7 @@ contextBridge.exposeInMainWorld('electron', {
 contextBridge.exposeInMainWorld('ucLinux', {
   detectProton: () => ipcRenderer.invoke('uc:linux-detect-proton'),
   detectWine: () => ipcRenderer.invoke('uc:linux-detect-wine'),
+  detectUmu: () => ipcRenderer.invoke('uc:linux-detect-umu'),
   runWinecfg: () => ipcRenderer.invoke('uc:linux-winecfg'),
   runWinetricks: (packages) => ipcRenderer.invoke('uc:linux-winetricks', packages),
   runProtontricks: (appId, packages) => ipcRenderer.invoke('uc:linux-protontricks', appId, packages),

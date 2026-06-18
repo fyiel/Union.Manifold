@@ -171,7 +171,9 @@ export function SettingsPage() {
   const [catalogRefreshing, setCatalogRefreshing] = useState(false)
   const [catalogRefreshFeedback, setCatalogRefreshFeedback] = useState<{ type: "success" | "error"; message: string } | null>(null)
   const [bandwidthLimitKBps, setBandwidthLimitKBps] = useState(0)
-  const [linuxLaunchMode, setLinuxLaunchMode] = useState<'auto' | 'native' | 'wine' | 'proton'>('auto')
+  const [linuxLaunchMode, setLinuxLaunchMode] = useState<'auto' | 'native' | 'wine' | 'proton' | 'umu'>('auto')
+  const [umuAvailable, setUmuAvailable] = useState<boolean | null>(null)
+  const [umuPath, setUmuPath] = useState('')
   const [linuxWinePath, setLinuxWinePath] = useState('')
   const [linuxProtonPath, setLinuxProtonPath] = useState('')
   const [linuxWinePrefix, setLinuxWinePrefix] = useState('')
@@ -561,14 +563,21 @@ export function SettingsPage() {
     let mounted = true
     const detect = async () => {
       try {
-        const [protonResult, wineResult, winetricksResult, protontricksResult, steamResult] = await Promise.allSettled([
+        const [protonResult, wineResult, winetricksResult, protontricksResult, steamResult, umuResult] = await Promise.allSettled([
           window.ucLinux?.detectProton?.(),
           window.ucLinux?.detectWine?.(),
           window.ucLinux?.checkTool?.('winetricks'),
           window.ucLinux?.checkTool?.('protontricks'),
           window.ucLinux?.getSteamPath?.(),
+          window.ucLinux?.detectUmu?.(),
         ])
         if (!mounted) return
+        if (umuResult.status === 'fulfilled' && umuResult.value) {
+          setUmuAvailable(Boolean(umuResult.value.found))
+          setUmuPath(typeof umuResult.value.path === 'string' ? umuResult.value.path : '')
+        } else {
+          setUmuAvailable(false)
+        }
         if (protonResult.status === 'fulfilled' && protonResult.value?.ok) {
           setDetectedProtonVersions(protonResult.value.versions || [])
           // Show notification if proton was auto-detected and applied
@@ -2907,7 +2916,7 @@ export function SettingsPage() {
                           <Select
                             value={linuxLaunchMode}
                             onValueChange={async (value) => {
-                              const next = value as 'auto' | 'native' | 'wine' | 'proton'
+                              const next = value as 'auto' | 'native' | 'wine' | 'proton' | 'umu'
                               setLinuxLaunchMode(next)
                               try {
                                 await window.ucSettings?.set?.('linuxLaunchMode', next)
@@ -2918,12 +2927,37 @@ export function SettingsPage() {
                               <SelectValue placeholder="Select a launch mode" />
                             </SelectTrigger>
                             <SelectContent>
-                              <SelectItem value="auto">Auto (native or Wine)</SelectItem>
-                              <SelectItem value="native">Native only</SelectItem>
-                              <SelectItem value="wine">Wine</SelectItem>
+                              <SelectItem value="auto">Auto (recommended)</SelectItem>
+                              <SelectItem value="umu">umu-launcher (Proton, no Steam)</SelectItem>
                               <SelectItem value="proton">Proton (Steam)</SelectItem>
+                              <SelectItem value="wine">Wine</SelectItem>
+                              <SelectItem value="native">Native only</SelectItem>
                             </SelectContent>
                           </Select>
+                          <p className="text-[11px] text-muted-foreground/80 leading-relaxed">
+                            {linuxLaunchMode === 'auto'
+                              ? 'Auto uses umu-launcher when available (the same Proton + Steam Runtime path as adding a non-Steam game), then Proton, then Wine.'
+                              : linuxLaunchMode === 'umu'
+                                ? 'Runs Windows games through Proton via umu-launcher — the most reliable option. If a game won’t launch any other way, use this.'
+                                : 'Choose how Windows executables are run on Linux.'}
+                          </p>
+                          {umuAvailable === false && (linuxLaunchMode === 'umu' || linuxLaunchMode === 'auto') && (
+                            <p className="text-[11px] text-amber-300/90 leading-relaxed">
+                              umu-launcher (<code>umu-run</code>) was not found. Install it for the most reliable launches — see{' '}
+                              <button
+                                type="button"
+                                className="underline hover:text-amber-200"
+                                onClick={() => { try { window.open('https://github.com/Open-Wine-Components/umu-launcher#installing', '_blank', 'noopener,noreferrer') } catch { /* ignore */ } }}
+                              >
+                                umu-launcher install guide
+                              </button>. The launcher falls back to Proton/Wine until then.
+                            </p>
+                          )}
+                          {umuAvailable === true && (
+                            <p className="text-[11px] text-emerald-300/90 leading-relaxed">
+                              umu-launcher detected{umuPath ? ` (${umuPath})` : ''}.
+                            </p>
+                          )}
                         </div>
 
                         {/* Wine Binary */}

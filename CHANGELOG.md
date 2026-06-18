@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+### Updates
+
+- **Improved: app updates now finish installing on the splash, even large ones.** The startup update check used a fixed 20-second timer, so any update that took longer than that to download was abandoned mid-way — the splash closed, the main window opened, and the download restarted behind the in-app "Restart to update" pill. The check is now two-phase: a short timeout while contacting GitHub, then a progress-resetting stall watchdog once a download actually starts, so the update downloads and installs on the splash (Discord-style) regardless of size. It only gives up if the download genuinely stalls.
+- **Added: a real progress bar to the in-app update notification.** While an update downloads in the background of the running app, the notification now shows a live progress bar instead of just a percentage in text. (Background re-checks already run hourly while the app is open.)
+
+### Linux
+
+- **Fixed: downloads failed on Linux with `aria2c … EACCES`.** The bundled `aria2c` is built on a Windows host (which has no Unix exec bit) and ships inside the AppImage's read-only squashfs mount, so it couldn't be made executable in place — every download errored with "aria2 downloader unavailable (aria2c binary not found)". The manager now guarantees an executable binary before spawning: use it as-is if already executable, else `chmod +x` in place, else stage an executable copy under `userData` and run that (the static-musl aria2c needs no sibling libraries). Robust regardless of build host or read-only mount.
+- **Added: umu-launcher support for Windows games, and "Auto" now prefers Proton.** Games that launched fine once added to Steam as a non-Steam game but failed from UC.D were being run through bare Wine, which lacks the Proton runtime (DXVK/VKD3D, dependencies, protonfixes). UC.D now detects and uses **umu-launcher** (`umu-run`) — the same Proton + Steam Linux Runtime path Steam uses outside of Steam — when it's installed. The **Auto** launch mode now prefers umu → Proton → Wine (previously Wine only), with a new explicit **umu-launcher** mode and a per-game equivalent. Linux settings show whether umu is detected, with a link to the install guide when it isn't.
+- **Fixed: misleading "not executable" warning for Wine/Proton launches.** The launch preflight no longer warns that a `.exe` isn't marked executable when it's being run through Wine/Proton/umu (where the exec bit is irrelevant) — only for native launches.
+
+### Launch options
+
+- **Added: per-game launch options in the launcher, sourced from Steam.** The admin "Fetch exes from Steam" picker already lists every launch config Steam exposes; UC.D now saves **all** of them to the game record (not just the one the admin picks), flagging the selected one as recommended. The launcher's **Launch options** dialog now shows these official options, pre-fills the recommended arguments, and lets you apply any of them with one click.
+- **Added: optional, opt-in community launch options.** Players can explicitly **Publish to community** their executable + arguments (basename only — no absolute paths leave the machine) so others can see what worked; nothing is shared automatically on launch. Community options appear in a separate, clearly-labelled section with a `?` hover note that they're unverified and quality may vary — the official options stay recommended.
+
 ## v2.6.1 — Performance & Manifest Stability
 
 A comprehensive sweep addressing performance regressions, manifest corruption risk, and child-process lifecycle issues.

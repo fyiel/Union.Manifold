@@ -1,4 +1,4 @@
-export type LinuxLaunchMode = 'auto' | 'native' | 'wine' | 'proton'
+export type LinuxLaunchMode = 'auto' | 'native' | 'wine' | 'proton' | 'umu'
 export type LinuxPerGameLaunchMode = LinuxLaunchMode | 'inherit'
 
 export type LinuxDetectionOption = {
@@ -18,6 +18,7 @@ export type LinuxGlobalSettings = {
 
 export type LinuxGameConfig = {
   launchMode?: LinuxPerGameLaunchMode
+  umuGameId?: string
   winePath?: string
   protonPath?: string
   winePrefix?: string
@@ -32,7 +33,7 @@ export type LinuxGameConfig = {
 export type LinuxPresetId = 'auto' | 'native' | 'wine-recommended' | 'proton-recommended'
 
 export const LINUX_PRESETS: Array<{ id: LinuxPresetId; label: string; description: string }> = [
-  { id: 'auto', label: 'Auto Detect', description: 'Prefer native launches, then fall back to Wine when needed.' },
+  { id: 'auto', label: 'Auto Detect', description: 'Use umu-launcher (Proton) when available, then Proton, then Wine — like adding a non-Steam game.' },
   { id: 'native', label: 'Native Only', description: 'Never route launches through Wine or Proton.' },
   { id: 'wine-recommended', label: 'Wine Setup', description: 'Use Wine with your current or detected binary.' },
   { id: 'proton-recommended', label: 'Proton Setup', description: 'Use Proton with your current or detected Steam script.' },
