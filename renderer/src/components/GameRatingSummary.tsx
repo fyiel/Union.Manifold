@@ -55,8 +55,8 @@ export function GameRatingSummary({ appid, onOpen }: { appid: string; onOpen?: (
   if (!loaded) {
     return (
       <div className="rounded-3xl bg-background/60 border border-white/[.07] backdrop-blur-md shadow-xl p-5">
-        <div className="h-3 w-20 rounded bg-white/5 animate-pulse mb-3" />
-        <div className="h-8 w-32 rounded bg-white/5 animate-pulse" />
+        <div className="udl-skeleton h-3 w-20 rounded mb-3" />
+        <div className="udl-skeleton udl-skeleton-d1 h-8 w-32 rounded" />
       </div>
     )
   }

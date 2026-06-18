@@ -1,9 +1,9 @@
 import { useCallback, useMemo } from "react"
-import { useNavigate } from "react-router-dom"
 import type { Game } from "@/lib/types"
 import { useAccountLists } from "@/hooks/use-account-lists"
 import { useRpcGameMute } from "@/hooks/use-rpc-game-mute"
 import { useDownloads } from "@/context/downloads-context"
+import { useDownloadFlow } from "@/context/download-flow-context"
 import { useUserCollections } from "@/hooks/use-user-collections"
 import type { CollectionPickerEntry } from "@/components/GameActionMenu"
 
@@ -56,7 +56,7 @@ export function useUniversalGameMenuProps(
   const rpcMute = useRpcGameMute(appid || null)
   const userCollections = useUserCollections()
   const { downloads } = useDownloads()
-  const navigate = useNavigate()
+  const { requestDownload } = useDownloadFlow()
 
   // Treat any in-flight, paused, or queued download for this appid as
   // "already downloading" — the menu offers "Add to queue" in that case
@@ -86,13 +86,15 @@ export function useUniversalGameMenuProps(
       mode: hasActiveDownload ? "active" as const : "download" as const,
       onClick: () => {
         if (hasActiveDownload) return
-        // Fresh download: route to the game page so the pre-download check
-        // modal + host selector run (they only live there) instead of
-        // silently queueing with defaults from a card/menu.
-        navigate(`/game/${encodeURIComponent(appid)}?download=1`)
+        // Start the download in place via the app-wide flow: it queues
+        // immediately when the user's downloadCheckMode is "skip" (true
+        // one-click add-to-queue) or pops the check modal as an overlay for
+        // "auto" / "always". No navigation — right-clicking a card and hitting
+        // Download no longer yanks the user onto the game page.
+        void requestDownload(game as Game)
       },
     }
-  }, [appid, game, hasActiveDownload, overrides.downloadable, navigate])
+  }, [appid, game, hasActiveDownload, overrides.downloadable, requestDownload])
 
   const wishlist = useMemo(() => {
     if (accountLists.authed === false || !appid) return undefined

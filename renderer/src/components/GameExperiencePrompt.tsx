@@ -10,6 +10,9 @@ type ViewerState = {
   authenticated: boolean
   playtimeSeconds: number
   installed: boolean
+  /** Server-confirmed "this viewer already rated". When true the nudge stops
+   *  showing for good (across devices), not just until the local dismissal. */
+  reviewed?: boolean
 }
 
 // Local copy of the shared playtime formatter (kept inline to match the other
@@ -81,8 +84,20 @@ export function GameExperiencePrompt({
     } catch { /* storage may be unavailable; the in-memory flag still hides it */ }
   }
 
+  // Clicking either CTA counts as responding to the nudge — hide it so it
+  // doesn't keep reappearing after the user has gone to rate / comment.
+  const handleRate = () => {
+    dismiss()
+    onRate?.()
+  }
+  const handleLeaveComment = () => {
+    dismiss()
+    onLeaveComment()
+  }
+
   if (dismissed) return null
-  if (!state || !state.authenticated || state.playtimeSeconds <= 0) return null
+  // Already rated (server-confirmed) → nothing to nudge for.
+  if (!state || !state.authenticated || state.playtimeSeconds <= 0 || state.reviewed) return null
 
   return (
     <div className="relative overflow-hidden rounded-3xl border border-cyan-400/20 bg-gradient-to-r from-cyan-500/[.08] via-card/60 to-card/60 backdrop-blur-md px-5 py-4 shadow-xl">
@@ -111,12 +126,12 @@ export function GameExperiencePrompt({
         </div>
         <div className="flex flex-wrap items-center gap-2 shrink-0">
           {onRate && (
-            <Button size="sm" variant="outline" className="gap-1.5 h-8" onClick={onRate}>
+            <Button size="sm" variant="outline" className="gap-1.5 h-8" onClick={handleRate}>
               <Star className="h-3.5 w-3.5" />
               Rate it
             </Button>
           )}
-          <Button size="sm" className="gap-1.5 h-8" onClick={onLeaveComment}>
+          <Button size="sm" className="gap-1.5 h-8" onClick={handleLeaveComment}>
             <MessageSquare className="h-3.5 w-3.5" />
             Leave a comment
           </Button>

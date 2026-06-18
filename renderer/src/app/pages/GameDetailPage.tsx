@@ -74,7 +74,7 @@ import { GameVersionStatus } from "@/components/GameVersionStatus"
 import { GameNotesPanel } from "@/components/GameNotesPanel"
 import { PlaytimeChart } from "@/components/PlaytimeChart"
 import { CommunityPlaytimeChart } from "@/components/CommunityPlaytimeChart"
-import { GameTopPlayers, GameCommunityActivity } from "@/components/GameCommunityActivity"
+import { GameTopPlayers, GameCommunityActivity, GameNowPlaying } from "@/components/GameCommunityActivity"
 import { useAuth } from "@/hooks/useAuth"
 import { useMotionPreferences } from "@/hooks/use-motion-preferences"
 import { useImageColors } from "@/hooks/use-image-colors"
@@ -483,6 +483,18 @@ export function GameDetailPage() {
     setGameStartFailedOpen(true)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isGameRunning])
+
+  // Tear down the quick-exit IPC subscription if the page unmounts before the
+  // event arrives (e.g. the user navigates away during the handoff grace).
+  // Since we now accept the event past the 12 s window, an orphaned listener
+  // could otherwise call setState on an unmounted page.
+  useEffect(() => {
+    return () => {
+      try { gameQuickExitUnsubRef.current?.() } catch { }
+      gameQuickExitUnsubRef.current = null
+      gameJustLaunchedRef.current = 0
+    }
+  }, [])
 
   const handleHVTagClick = () => {
     // The Important Note lives in the Overview tab — switch to it first so the
@@ -1346,11 +1358,17 @@ export function GameDetailPage() {
         setGameStartFailedOpen(true)
       }
 
-      // Fast path: IPC event from main process when it detects a quick exit
+      // Fast path: IPC event from main process when it detects a quick exit.
+      // The main process is authoritative here — it only emits this for a real
+      // quick exit (game died <5 s after launch, no successor adopted). Because
+      // of the Windows launcher-handoff grace the event can arrive AFTER our
+      // 12 s wall-clock window, so we trust it as long as we're still "armed"
+      // (ref !== 0) rather than re-checking the deadline, which previously
+      // swallowed the event and is why the modal stopped appearing.
       try { gameQuickExitUnsubRef.current?.() } catch { }
       gameQuickExitUnsubRef.current = window.ucDownloads?.onGameQuickExit?.((data) => {
         if (data?.appid !== game.appid) return
-        if (!(gameJustLaunchedRef.current > Date.now())) return
+        if (gameJustLaunchedRef.current === 0) return
         gameJustLaunchedRef.current = 0
         try { gameQuickExitUnsubRef.current?.() } catch { }
         gameQuickExitUnsubRef.current = null
@@ -1565,6 +1583,9 @@ export function GameDetailPage() {
                     <User className="h-4 w-4" />
                     {game.developer || "Unknown Developer"}
                   </div>
+                  {/* Live "who's in this game right now" — self-hides when
+                      nobody is currently playing. */}
+                  {game?.appid && <GameNowPlaying appid={game.appid} className="mt-3" />}
                 </div>
               </div>
             </div>

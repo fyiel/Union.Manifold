@@ -8572,11 +8572,19 @@ function registerRunningGame(appid, exePath, proc, gameName, showGameName = true
     if (payload.appid) runningGames.delete(payload.appid)
     if (payload.exePath) runningGames.delete(payload.exePath)
     payload.handoffPendingUntil = 0
+    payload.exitDetectedAt = 0
   }
 
   function finalizeTrackedExit(exitedPid) {
     if (!isTrackedPayloadCurrent()) return
-    const endedAt = Date.now()
+    // Attribute the exit to when the game ACTUALLY died, not to "now" — on
+    // Windows `finalizeTrackedExit` can run up to WINDOWS_GAME_HANDOFF_GRACE_MS
+    // after the real exit (we wait that long to see if a launcher handed off to
+    // a successor). Using Date.now() here would inflate `elapsed` by the grace
+    // window, which (a) recorded bogus extra playtime and (b) pushed genuine
+    // quick-exits past the 5 s threshold below so the "couldn't start" modal
+    // never fired. `exitDetectedAt` is stamped in handleTrackedExit.
+    const endedAt = payload.exitDetectedAt || Date.now()
     const elapsed = endedAt - payload.startedAt
     const injection = exitedPid ? overlayInjections.get(exitedPid) : null
     const injectedRecently = Boolean(injection?.injectedAt && (Date.now() - injection.injectedAt) < 15000)
@@ -8615,7 +8623,9 @@ function registerRunningGame(appid, exePath, proc, gameName, showGameName = true
       setOverlayEvent(`overlay injection safety denylist added for ${payload.appid}`)
     }
     if (runningGames.size === 0) hideOverlay()
-    if (elapsed < 5000) {
+    // A user-requested quit is never a "failed to start", even if they quit
+    // within the 5 s window — don't pop the quick-exit modal in that case.
+    if (elapsed < 5000 && !payload.userQuitRequested) {
       ucLog(`Game quick-exit detected: ${payload.appid} (elapsed=${elapsed}ms)`, 'warn')
       for (const win of BrowserWindow.getAllWindows()) {
         try {
@@ -8701,6 +8711,13 @@ $candidates | Sort-Object CreationDate | ForEach-Object { $_.ProcessId }`
   }
 
   function handleTrackedExit(exitedPid) {
+    // Stamp the real death time the first time we observe the currently-tracked
+    // PID exit. finalizeTrackedExit may not run until up to the handoff grace
+    // later, so without this the recorded session length / quick-exit decision
+    // would be measured from the wrong moment. Reset to 0 on successor adoption
+    // (below) so a launcher → game handoff re-stamps when the real game exits.
+    if (!payload.exitDetectedAt) payload.exitDetectedAt = Date.now()
+
     // User-initiated quit must skip the launcher → main-game adoption path.
     // Otherwise quitting a game like KSP1 kills the launcher, the successor
     // scan picks up the still-running main game, re-populates runningGames,
@@ -8743,6 +8760,9 @@ $candidates | Sort-Object CreationDate | ForEach-Object { $_.ProcessId }`
         ucLog(`[Game] ${payload.appid || 'unknown'} launcher exited (PID ${exitedPid}), adopting child PID ${adoptedPid}`)
         payload.pid = adoptedPid
         payload.handoffPendingUntil = 0
+        // The game didn't really exit — it handed off to a successor. Clear the
+        // death stamp so the next genuine exit (of the adopted PID) re-stamps.
+        payload.exitDetectedAt = 0
         if (payload.appid) runningGames.set(payload.appid, payload)
         if (payload.exePath) runningGames.set(payload.exePath, payload)
         cleanupOverlayInjection(exitedPid)

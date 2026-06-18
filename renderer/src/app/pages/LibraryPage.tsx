@@ -15,6 +15,7 @@ import { useGamesData } from "@/hooks/use-games"
 import type { Game } from "@/lib/types"
 import { hasInstalledVersionUpdate, pickGameExecutable, cn, proxyImageUrl } from "@/lib/utils"
 import { useDownloadsActions, useDownloadsSelector } from "@/context/downloads-context"
+import { useDownloadFlow } from "@/context/download-flow-context"
 import { getCatalogCache, type CatalogGame } from "@/lib/catalog"
 import { X } from "@/components/icons"
 import { CheckSquare2, ArrowUpDown, Clock, RefreshCw, StickyNote } from "lucide-react"
@@ -185,6 +186,7 @@ function formatRelativeTimestamp(timestamp?: number) {
 export function LibraryPage() {
   const { games, stats, loading: statsLoading } = useGamesData()
   const { clearByAppid } = useDownloadsActions()
+  const { requestDownload } = useDownloadFlow()
   // Narrow projection of the download list (appid + status only). The library's
   // download-derived memos below (cancelled / failed / membership signature)
   // never need byte progress, so subscribing to the raw `downloads` array
@@ -1869,7 +1871,7 @@ export function LibraryPage() {
               <div key={game.appid} className="relative">
                 <GameCard game={game} stats={stats[game.appid]} size="compact" />
                 <NotInstalledOverlay
-                  onInstall={() => { navigate(`/game/${encodeURIComponent(game.appid)}?download=1`) }}
+                  onInstall={() => { void requestDownload(game) }}
                 />
               </div>
             ))}
