@@ -2905,6 +2905,9 @@ function getAria2Manager() {
     _aria2Manager = new Aria2Manager({
       appRoot: app.getAppPath(),
       resourcesPath: process.resourcesPath,
+      // Writable dir used to stage an executable copy of aria2c when the
+      // bundled binary sits in a read-only mount (Linux AppImage squashfs).
+      userDataPath: (() => { try { return app.getPath('userData') } catch { return null } })(),
       log: (level, message) => ucLog(message, level === 'warn' || level === 'error' ? level : 'info'),
     })
     _aria2Manager.ensureStarted().then((ok) => {
@@ -8953,19 +8956,34 @@ async function checkForUpdatesDuringSplash(splashWin) {
     let settled = false
     splashUpdateCheckInFlight = true
 
+    // Two-phase watchdog. Phase 1 ("checking"): if GitHub doesn't answer
+    // within CHECK_TIMEOUT, proceed without blocking startup. Phase 2
+    // ("downloading"): once we KNOW an update is coming we must let it finish
+    // on the splash (that's the whole point — install before the window opens),
+    // so we switch to a STALL watchdog that resets on every progress chunk and
+    // only gives up if the download genuinely stalls. The old fixed 20s timer
+    // abandoned any update bigger than ~20s of bandwidth to the in-app pill.
+    const CHECK_TIMEOUT = 15000
+    const STALL_TIMEOUT = 90000
+    let watchdog = null
+    const armWatchdog = (ms) => {
+      if (watchdog) clearTimeout(watchdog)
+      watchdog = setTimeout(() => {
+        setSplashStatus(splashWin, 'Almost there...')
+        settle()
+      }, ms)
+    }
+
     const progressListener = (progress) => {
       const pct = Math.round(progress?.percent || 0)
       setSplashStatus(splashWin, `Downloading update... ${pct}%`)
       setSplashProgress(splashWin, pct)
+      armWatchdog(STALL_TIMEOUT) // reset stall timer on every chunk
     }
 
     // Listeners we register below — tracked so `settle()` can detach every
-    // one. Previously the `.once('update-downloaded', …)` listener was left
-    // dangling after the safety timer fired: the download kept going in the
-    // background, the main window opened and showed the "Restart to update"
-    // pill, and then the stale listener triggered `quitAndInstall` the
-    // moment the download finished — making the app appear to ignore the
-    // user's click-to-install button.
+    // one. Previously a dangling `update-downloaded` listener could fire
+    // `quitAndInstall` after the main window had already opened.
     const notAvailable = () => {
       setSplashStatus(splashWin, 'Up to date.')
       settle(600)
@@ -8973,10 +8991,15 @@ async function checkForUpdatesDuringSplash(splashWin) {
     const available = (info) => {
       const ver = String(info?.version || '').replace(/^v/i, '')
       setSplashStatus(splashWin, ver ? `Update v${ver} found. Downloading...` : 'Update found. Downloading...')
+      setSplashProgress(splashWin, 0)
       autoUpdater.on('download-progress', progressListener)
+      // Commit to the download: replace the short check-timeout with the
+      // progress-resetting stall watchdog so big updates aren't cut off.
+      armWatchdog(STALL_TIMEOUT)
     }
     const downloaded = () => {
       if (settled) return
+      if (watchdog) { clearTimeout(watchdog); watchdog = null }
       setSplashProgress(splashWin, 100)
       setSplashStatus(splashWin, 'Installing update...')
       // App will restart inside quitAndInstall; if that fails (e.g. the
@@ -9000,7 +9023,7 @@ async function checkForUpdatesDuringSplash(splashWin) {
       if (settled) return
       settled = true
       splashUpdateCheckInFlight = false
-      clearTimeout(safetyTimer)
+      if (watchdog) { clearTimeout(watchdog); watchdog = null }
       autoUpdater.removeListener('download-progress', progressListener)
       autoUpdater.removeListener('update-not-available', notAvailable)
       autoUpdater.removeListener('update-available', available)
@@ -9009,19 +9032,12 @@ async function checkForUpdatesDuringSplash(splashWin) {
       setTimeout(resolve, delay)
     }
 
-    // Safety net: if nothing happens within 20s just proceed. We intentionally
-    // do NOT call `quitAndInstall` after this — the in-flight download (if
-    // any) will finish in the background and the renderer's pill takes over.
-    const safetyTimer = setTimeout(() => {
-      setSplashStatus(splashWin, 'Almost there...')
-      settle()
-    }, 20000)
-
     autoUpdater.once('update-not-available', notAvailable)
     autoUpdater.once('update-available', available)
     autoUpdater.once('update-downloaded', downloaded)
     autoUpdater.once('error', errored)
 
+    armWatchdog(CHECK_TIMEOUT)
     setSplashStatus(splashWin, 'Checking for updates...')
     autoUpdater.checkForUpdates().catch(() => settle())
   })
@@ -9063,13 +9079,32 @@ function createWindow(existingSplash) {
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('uc:window-maximized', false)
   })
 
-  // Inject the detected base URL into renderer localStorage before any JS runs.
+  // Inject the API base URLs into renderer localStorage before any JS runs.
   // dom-ready fires after HTML is parsed but before deferred/module scripts execute.
+  //
+  // main is the single source of truth at launch and writes BOTH keys:
+  //   uc_detected_api_base_url — the splash-probed reachable host, refreshed every
+  //                              launch (see detectBestBaseUrl).
+  //   uc_custom_api_base_url   — the user's explicit override, mirrored from the
+  //                              settings store. Cleared when the user hasn't set
+  //                              one, which also migrates older builds that wrongly
+  //                              parked the auto-detected fallback in this key.
+  // getApiBaseUrl() then applies precedence: user override > detected > default.
   mainWindow.webContents.once('dom-ready', () => {
     try {
-      const url = resolvedBaseUrl || DEFAULT_BASE_URL
+      const detected = resolvedBaseUrl || DEFAULT_BASE_URL
+      const override = (() => {
+        try {
+          const v = readSettings().customApiBaseUrl
+          return typeof v === 'string' && v.trim() ? v.trim() : ''
+        } catch { return '' }
+      })()
       mainWindow.webContents.executeJavaScript(
-        `(function(){try{const existing=localStorage.getItem('uc_custom_api_base_url');if(!existing||!String(existing).trim()){localStorage.setItem('uc_custom_api_base_url',${JSON.stringify(url)})}}catch(e){}})()`
+        `(function(){try{` +
+        `localStorage.setItem('uc_detected_api_base_url',${JSON.stringify(detected)});` +
+        `var o=${JSON.stringify(override)};` +
+        `if(o){localStorage.setItem('uc_custom_api_base_url',o)}else{localStorage.removeItem('uc_custom_api_base_url')}` +
+        `}catch(e){}})()`
       ).catch(() => {})
     } catch { }
   })
@@ -11903,26 +11938,44 @@ function resolveLaunchCommand(exePath) {
   }
 
   if (isExe) {
+    if (mode === 'umu') {
+      const umu = resolveUmuLaunch(exePath, cwd, protonPath)
+      if (umu) { ucLog(`umu launch (global): ${umu.command} exe=${exePath}`); return umu }
+      ucLog('umu mode selected but umu-run not found - falling back to proton/wine', 'warn')
+    }
     if (mode === 'proton') {
       if (!protonPath) {
         ucLog('Proton mode selected but no proton path configured - falling back to wine', 'warn')
         return { command: winePath, args: [exePath], cwd }
       }
-      
+
       // Validate proton executable exists
-      const protonExists = protonPath.includes('/') || protonPath.includes('\\') 
-        ? fs.existsSync(protonPath) 
+      const protonExists = protonPath.includes('/') || protonPath.includes('\\')
+        ? fs.existsSync(protonPath)
         : true // Bare command will be resolved at spawn time
-      
+
       if (!protonExists) {
         ucLog(`Proton executable not found: ${protonPath}, falling back to wine`, 'error')
         return { command: winePath, args: [exePath], cwd }
       }
-      
+
       ucLog(`Proton launch (global): path=${protonPath} exe=${exePath}`)
       return { command: protonPath, args: ['run', exePath], cwd, needsProtonEnv: true }
     }
-    if (mode === 'wine' || mode === 'auto') {
+    if (mode === 'auto') {
+      // Prefer umu-launcher — same Proton + Steam Linux Runtime path that makes
+      // games work when added as a non-Steam game, with zero per-game setup.
+      const umu = resolveUmuLaunch(exePath, cwd, protonPath)
+      if (umu) { ucLog(`umu launch (auto, global): ${umu.command} exe=${exePath}`); return umu }
+      // Next best: a configured Proton.
+      if (protonPath) {
+        ucLog(`Proton launch (auto, global): path=${protonPath} exe=${exePath}`)
+        return { command: protonPath, args: ['run', exePath], cwd, needsProtonEnv: true }
+      }
+      // Last resort: bare wine.
+      return { command: winePath, args: [exePath], cwd }
+    }
+    if (mode === 'wine') {
       return { command: winePath, args: [exePath], cwd }
     }
   }
@@ -12188,6 +12241,74 @@ function detectWineVersions() {
   return results
 }
 
+// ── umu-launcher (umu-run) ───────────────────────────────────────────────────
+// umu-launcher (https://github.com/Open-Wine-Components/umu-launcher) is the
+// standard open-source way to run a Windows game through Proton + the Steam
+// Linux Runtime container WITHOUT Steam — i.e. exactly what happens when a user
+// "adds a non-Steam game" and clicks Play, but as a CLI we can drive directly.
+// Heroic and Lutris both use it. It is far more reliable than bare `wine`
+// because it brings up the same sniper runtime + Proton (DXVK/VKD3D, deps,
+// protonfixes) that make games actually run, which is why those games launch
+// via Steam but not via our old wine path.
+let _umuCache = null
+function detectUmu() {
+  if (process.platform !== 'linux') return { found: false }
+  if (_umuCache) return _umuCache
+  const home = app.getPath('home')
+  const candidates = [
+    path.join(home, '.local', 'bin', 'umu-run'),
+    '/usr/bin/umu-run',
+    '/usr/local/bin/umu-run',
+    '/usr/local/share/umu/umu-run',
+    '/app/bin/umu-run', // Flatpak runtime layout
+  ]
+  for (const c of candidates) {
+    try { if (fs.existsSync(c)) { _umuCache = { found: true, path: c }; return _umuCache } } catch { /* ignore */ }
+  }
+  // Fall back to PATH resolution.
+  try {
+    const r = child_process.spawnSync('which', ['umu-run'], { encoding: 'utf8' })
+    const p = (r.stdout || '').trim()
+    if (r.status === 0 && p) { _umuCache = { found: true, path: p }; return _umuCache }
+  } catch { /* ignore */ }
+  _umuCache = { found: false }
+  return _umuCache
+}
+
+/** Resolve a umu-run launch spec for a Windows exe, or null if umu isn't present.
+ *  protonPath may be the `proton` script or its directory; umu wants PROTONPATH
+ *  to point at the Proton *directory* (handled in applyUmuEnv). */
+function resolveUmuLaunch(exePath, cwd, protonPath) {
+  const umu = detectUmu()
+  if (!umu.found) return null
+  return { command: umu.path, args: [exePath], cwd, needsUmuEnv: true, protonPath: protonPath || '' }
+}
+
+/** Merge the env vars umu-run needs: GAMEID (required), PROTONPATH (optional —
+ *  unset lets umu auto-fetch the latest UMU-Proton), and a stable per-game
+ *  WINEPREFIX so saves/config persist across launches. */
+function applyUmuEnv(env, appid, protonPath, umuGameId) {
+  const out = { ...env }
+  // GAMEID is mandatory for umu. `0` is the documented generic ("no protonfix")
+  // value; a real umu id (from the launch-options DB) enables game-specific fixes.
+  if (!out.GAMEID) out.GAMEID = (typeof umuGameId === 'string' && umuGameId.trim()) ? umuGameId.trim() : '0'
+  if (protonPath && typeof protonPath === 'string' && protonPath.trim()) {
+    let pp = protonPath.trim()
+    // linuxProtonPath usually points at the `proton` script; umu wants the dir.
+    if (path.basename(pp) === 'proton') pp = path.dirname(pp)
+    out.PROTONPATH = pp
+  }
+  // Isolated, stable prefix per game (umu honours WINEPREFIX). Reuses the same
+  // location our Proton path already uses so existing prefixes carry over.
+  if (!out.WINEPREFIX && !out.STEAM_COMPAT_DATA_PATH) {
+    const home = app.getPath('home')
+    const prefix = path.join(home, '.local', 'share', 'uc-proton', appid ? String(appid) : 'default')
+    try { fs.mkdirSync(prefix, { recursive: true }) } catch { /* ignore */ }
+    out.WINEPREFIX = prefix
+  }
+  return out
+}
+
 /**
  * Run a Linux tool (winetricks, protontricks, winecfg, etc.) with the
  * appropriate environment variables applied.
@@ -12259,6 +12380,18 @@ ipcMain.handle('uc:linux-detect-wine', () => {
     return { ok: true, versions }
   } catch (err) {
     return { ok: false, error: err.message, versions: [] }
+  }
+})
+
+// IPC: Detect umu-launcher (umu-run)
+ipcMain.handle('uc:linux-detect-umu', () => {
+  try {
+    if (process.platform !== 'linux') return { ok: false, error: 'not-linux', found: false }
+    _umuCache = null // force a fresh lookup when the user explicitly re-checks
+    const umu = detectUmu()
+    return { ok: true, ...umu }
+  } catch (err) {
+    return { ok: false, error: err.message, found: false }
   }
 })
 
@@ -12833,7 +12966,10 @@ function buildGameLaunchPreflight(appid, exePath) {
     checks.push({ level: 'error', code: 'resolve-launch-command-failed', message: err?.message || 'Unable to build the launch command.' })
   }
 
-  if (process.platform !== 'win32') {
+  // Only the native path actually execs the file directly; when it's routed
+  // through wine/proton/umu the exec bit on the .exe is irrelevant, so don't
+  // raise a misleading warning in that (common) case.
+  if (process.platform !== 'win32' && resolved && resolved.command === exePath) {
     try {
       fs.accessSync(exePath, fs.constants.X_OK)
     } catch {
@@ -12938,7 +13074,12 @@ async function launchGameExecutableFromMain(appid, exePath, gameName, showGameNa
         })
       }
 
-      const env = buildGameLaunchEnv(appid, process.env)
+      let env = buildGameLaunchEnv(appid, process.env)
+      // umu-launcher needs GAMEID/PROTONPATH/WINEPREFIX in its environment.
+      if (launchSpec.needsUmuEnv) {
+        const gc = getGameLinuxConfig(appid) || {}
+        env = applyUmuEnv(env, appid, launchSpec.protonPath, gc.umuGameId)
+      }
       env.PATH = `${cwd}:${env.PATH || ''}`
 
       return await launchTrackedGameProcess({
@@ -13436,26 +13577,45 @@ function resolveLaunchCommandWithGameConfig(exePath, appid) {
   }
 
   if (isExe) {
+    if (mode === 'umu') {
+      const umu = resolveUmuLaunch(exePath, cwd, protonPath)
+      if (umu) { ucLog(`umu launch: ${umu.command} exe=${exePath}`); return umu }
+      ucLog(`umu mode for ${appid} but umu-run not found - falling back to proton/wine`, 'warn')
+    }
     if (mode === 'proton') {
       if (!protonPath) {
         ucLog(`Proton mode for ${appid} but no proton path configured - falling back to wine`, 'warn')
         return { command: winePath, args: [exePath], cwd }
       }
-      
+
       // Validate proton executable exists
-      const protonExists = protonPath.includes('/') || protonPath.includes('\\') 
-        ? fs.existsSync(protonPath) 
+      const protonExists = protonPath.includes('/') || protonPath.includes('\\')
+        ? fs.existsSync(protonPath)
         : true // Bare command will be resolved at spawn time
-      
+
       if (!protonExists) {
         ucLog(`Proton executable not found: ${protonPath}, falling back to wine`, 'error')
         return { command: winePath, args: [exePath], cwd }
       }
-      
+
       ucLog(`Proton launch: path=${protonPath} exe=${exePath} prefix=~/.local/share/uc-proton/${appid || 'default'}`)
       return { command: protonPath, args: ['run', exePath], cwd, needsProtonEnv: true }
     }
-    if (mode === 'wine' || mode === 'auto') {
+    if (mode === 'auto') {
+      // Prefer umu-launcher (Proton + Steam Linux Runtime, the reliable
+      // "non-Steam game" path), then a configured Proton, then bare wine.
+      const umu = resolveUmuLaunch(exePath, cwd, protonPath)
+      if (umu) { ucLog(`umu launch (auto): ${umu.command} exe=${exePath}`); return umu }
+      if (protonPath) {
+        const protonExists = protonPath.includes('/') || protonPath.includes('\\') ? fs.existsSync(protonPath) : true
+        if (protonExists) {
+          ucLog(`Proton launch (auto): path=${protonPath} exe=${exePath}`)
+          return { command: protonPath, args: ['run', exePath], cwd, needsProtonEnv: true }
+        }
+      }
+      return { command: winePath, args: [exePath], cwd }
+    }
+    if (mode === 'wine') {
       return { command: winePath, args: [exePath], cwd }
     }
   }

@@ -7,7 +7,7 @@ type AppPreferences = {
   defaultMirrorHost?: PreferredDownloadHost
   discordRpcEnabled?: boolean
   alwaysCreateDesktopShortcut?: boolean
-  linuxLaunchMode?: "auto" | "native" | "wine" | "proton"
+  linuxLaunchMode?: "auto" | "native" | "wine" | "proton" | "umu"
   developerMode?: boolean
   verboseDownloadLogging?: boolean
   animatedBackgroundsEnabled?: boolean
@@ -73,7 +73,7 @@ function normalizePreferences(input: unknown): AppPreferences {
   }
 
   const linuxLaunchMode = record.linuxLaunchMode
-  if (linuxLaunchMode === "auto" || linuxLaunchMode === "native" || linuxLaunchMode === "wine" || linuxLaunchMode === "proton") {
+  if (linuxLaunchMode === "auto" || linuxLaunchMode === "native" || linuxLaunchMode === "wine" || linuxLaunchMode === "proton" || linuxLaunchMode === "umu") {
     prefs.linuxLaunchMode = linuxLaunchMode
   }
 
@@ -102,7 +102,7 @@ async function readLocalPreferences(): Promise<AppPreferences> {
 
   try {
     const launchMode = await window.ucSettings.get("linuxLaunchMode")
-    if (launchMode === "auto" || launchMode === "native" || launchMode === "wine" || launchMode === "proton") {
+    if (launchMode === "auto" || launchMode === "native" || launchMode === "wine" || launchMode === "proton" || launchMode === "umu") {
       prefs.linuxLaunchMode = launchMode
     }
   } catch {}

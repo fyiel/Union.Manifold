@@ -174,10 +174,11 @@ export function GameLinuxConfigModal({ open, appid, gameName, onClose }: Props) 
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="inherit">Inherit from global settings</SelectItem>
-                    <SelectItem value="auto">Auto (native or Wine)</SelectItem>
-                    <SelectItem value="native">Native only</SelectItem>
-                    <SelectItem value="wine">Wine</SelectItem>
+                    <SelectItem value="auto">Auto (recommended)</SelectItem>
+                    <SelectItem value="umu">umu-launcher (Proton, no Steam)</SelectItem>
                     <SelectItem value="proton">Proton (Steam)</SelectItem>
+                    <SelectItem value="wine">Wine</SelectItem>
+                    <SelectItem value="native">Native only</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
