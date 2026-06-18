@@ -82,10 +82,13 @@ class Aria2Manager {
    * @param {string} [opts.binaryPath]  explicit aria2c path (else auto-resolve)
    * @param {string} [opts.appRoot]     app dir for binary resolution
    * @param {string} [opts.resourcesPath] process.resourcesPath for packaged apps
+   * @param {string} [opts.userDataPath] writable dir to stage an executable copy
+   *   of the binary when the bundled location is read-only (AppImage squashfs).
    * @param {(level:string,msg:string)=>void} [opts.log]
    */
-  constructor({ binaryPath, appRoot, resourcesPath, log } = {}) {
+  constructor({ binaryPath, appRoot, resourcesPath, userDataPath, log } = {}) {
     this.binaryPath = binaryPath || resolveAria2Binary({ appRoot, resourcesPath })
+    this.userDataPath = userDataPath || null
     this.log = typeof log === 'function' ? log : () => {}
     this.proc = null
     this.port = 0
@@ -114,11 +117,83 @@ class Aria2Manager {
     return ok
   }
 
+  /**
+   * Return a path to an aria2c binary we can actually exec on this OS.
+   *
+   * The bundled Linux/macOS binary frequently arrives WITHOUT the exec bit:
+   * it's fetched/packaged on a Windows CI host (which has no Unix mode bits),
+   * and even a correctly-chmod'd binary ends up inside the AppImage's
+   * read-only squashfs mount (`/tmp/.mount_*`) where we can't chmod it at
+   * runtime. The symptom is `spawn … aria2c EACCES`.
+   *
+   * Strategy, cheapest first:
+   *   1. Already executable → use as-is.
+   *   2. chmod +x in place → works for dev / writable installs.
+   *   3. Copy into a writable dir (userData) and chmod the copy → the
+   *      read-only-mount (AppImage) case.
+   * Falls back to the original path if all of that fails; spawn will then
+   * surface the real error and we degrade to the in-process downloader.
+   */
+  _ensureExecutable(binPath) {
+    if (process.platform === 'win32' || !binPath) return binPath
+    // Bare command (e.g. 'aria2c' from PATH) — let the OS resolve + exec it.
+    if (!path.isAbsolute(binPath)) return binPath
+    try { if (!fs.statSync(binPath).isFile()) return binPath } catch { return binPath }
+
+    // 1. Already executable.
+    try { fs.accessSync(binPath, fs.constants.X_OK); return binPath } catch { /* not yet */ }
+
+    // 2. chmod in place (writable install).
+    try {
+      fs.chmodSync(binPath, 0o755)
+      fs.accessSync(binPath, fs.constants.X_OK)
+      this.log('info', `[aria2] marked bundled binary executable: ${binPath}`)
+      return binPath
+    } catch (err) {
+      this.log('warn', `[aria2] cannot chmod bundled binary in place (${err?.code || err?.message || err}); staging a writable copy`)
+    }
+
+    // 3. Stage an executable copy in a writable location.
+    if (!this.userDataPath) {
+      this.log('warn', '[aria2] no userData path to stage an executable copy from a read-only bundle')
+      return binPath
+    }
+    try {
+      const exe = path.basename(binPath)
+      const destDir = path.join(this.userDataPath, 'bin', 'aria2', `${process.platform}-${process.arch}`)
+      const dest = path.join(destDir, exe)
+      // Reuse a prior good copy: present, same size as the source, executable.
+      let reuse = false
+      try {
+        const src = fs.statSync(binPath)
+        const dst = fs.statSync(dest)
+        if (dst.isFile() && dst.size === src.size) {
+          fs.accessSync(dest, fs.constants.X_OK)
+          reuse = true
+        }
+      } catch { /* missing / not executable → (re)copy */ }
+      if (!reuse) {
+        fs.mkdirSync(destDir, { recursive: true })
+        fs.copyFileSync(binPath, dest)
+        fs.chmodSync(dest, 0o755)
+        fs.accessSync(dest, fs.constants.X_OK)
+        this.log('info', `[aria2] staged executable copy at ${dest}`)
+      }
+      return dest
+    } catch (err) {
+      this.log('warn', `[aria2] failed to stage executable copy: ${err?.message || err}`)
+      return binPath
+    }
+  }
+
   async _start() {
     if (!this.binaryPath) {
       this.log('warn', '[aria2] no binary found (bundle it via scripts/fetch-aria2.cjs); using in-process downloader')
       return false
     }
+    // Make sure we have an executable path before spawning — the bundled
+    // binary may not have the exec bit (Windows build host / read-only mount).
+    const runBin = this._ensureExecutable(this.binaryPath)
     this.port = await getFreePort()
     const args = [
       '--enable-rpc',
@@ -149,8 +224,8 @@ class Aria2Manager {
       // but aria2 does not. Force IPv4 to avoid spurious failures.
       '--disable-ipv6=true',
     ]
-    this.log('info', `[aria2] spawning ${this.binaryPath} on rpc port ${this.port}`)
-    this.proc = spawn(this.binaryPath, args, { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true })
+    this.log('info', `[aria2] spawning ${runBin} on rpc port ${this.port}`)
+    this.proc = spawn(runBin, args, { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true })
     this.proc.on('exit', (code, signal) => {
       this.log('warn', `[aria2] daemon exited code=${code} signal=${signal}`)
       this._ready = false

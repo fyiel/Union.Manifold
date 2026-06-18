@@ -1,7 +1,13 @@
 import { apiLogger } from "./logger"
 
 const DEFAULT_BASE_URL = "https://union-crax.xyz"
+// The user's explicit override, set from Settings. Empty unless the user picks one.
 const CUSTOM_API_BASE_URL_STORAGE_KEY = "uc_custom_api_base_url"
+// The reachable host picked by the splash probe (detectBestBaseUrl in main.cjs).
+// Refreshed on every launch. Kept separate from the user override so a stale
+// auto-detected value can never masquerade as a manual choice — and so the
+// splash result always wins over the hardcoded default.
+const DETECTED_API_BASE_URL_STORAGE_KEY = "uc_detected_api_base_url"
 const API_REACHABILITY_STORAGE_KEY = "uc_api_service_reachable"
 
 type ApiConnectivitySnapshot = {
@@ -205,8 +211,20 @@ function readCustomApiBaseUrl(): string {
   }
 }
 
+function readDetectedApiBaseUrl(): string {
+  if (typeof window === "undefined") return ""
+  try {
+    return normalizeApiBaseUrl(window.localStorage.getItem(DETECTED_API_BASE_URL_STORAGE_KEY) || "")
+  } catch {
+    return ""
+  }
+}
+
+// Precedence: an explicit user override always wins; otherwise use the host the
+// splash probe found reachable this launch; fall back to the primary only when
+// neither is available.
 export function getApiBaseUrl(): string {
-  return readCustomApiBaseUrl() || DEFAULT_BASE_URL
+  return readCustomApiBaseUrl() || readDetectedApiBaseUrl() || DEFAULT_BASE_URL
 }
 
 export function setApiBaseUrl(url: string): void {

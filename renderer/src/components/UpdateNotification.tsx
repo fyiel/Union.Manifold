@@ -107,6 +107,14 @@ export function UpdateNotification() {
             {isError ? "Update failed" : isDownloaded ? "Update ready" : isDownloading ? "Downloading update" : status.state === "checking" ? "Checking for updates" : "Update available"}
           </h3>
           <p className="mt-1 text-sm text-foreground/80">{description}</p>
+          {isDownloading && (
+            <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-white/10">
+              <div
+                className="h-full rounded-full bg-white/70 transition-[width] duration-300 ease-out"
+                style={{ width: `${Math.max(2, Math.min(100, Math.round(status.progress)))}%` }}
+              />
+            </div>
+          )}
           <div className="mt-3 flex flex-wrap gap-2">
             {isDownloaded && (
               <Button size="sm" onClick={handleInstall}>Install now</Button>

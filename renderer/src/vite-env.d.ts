@@ -55,8 +55,10 @@ type DownloadUpdatePayload = {
 
 /** Per-game Linux/VR configuration stored as gameLinux:${appid} in settings */
 type GameLinuxConfig = {
-  /** Override launch mode for this game: 'auto' | 'native' | 'wine' | 'proton' | 'inherit' */
-  launchMode?: 'auto' | 'native' | 'wine' | 'proton' | 'inherit'
+  /** Override launch mode for this game: 'auto' | 'native' | 'wine' | 'proton' | 'umu' | 'inherit' */
+  launchMode?: 'auto' | 'native' | 'wine' | 'proton' | 'umu' | 'inherit'
+  /** umu-launcher GAMEID for protonfixes (e.g. 'umu-xxxx'); defaults to '0' (generic) */
+  umuGameId?: string
   /** Override Wine binary path for this game */
   winePath?: string
   /** Override Proton script path for this game */
@@ -433,6 +435,7 @@ declare global {
     ucLinux?: {
       detectProton: () => Promise<{ ok: boolean; versions: Array<{ label: string; path: string }>; autoApplied?: boolean; appliedVersion?: { label: string; path: string }; error?: string }>
       detectWine: () => Promise<{ ok: boolean; versions: Array<{ label: string; path: string }>; error?: string }>
+      detectUmu: () => Promise<{ ok: boolean; found: boolean; path?: string; error?: string }>
       runWinecfg: () => Promise<{ ok: boolean; pid?: number; error?: string }>
       runWinetricks: (packages?: string[]) => Promise<{ ok: boolean; pid?: number; error?: string }>
       runProtontricks: (appId?: string, packages?: string[]) => Promise<{ ok: boolean; pid?: number; error?: string }>
