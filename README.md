@@ -1,5 +1,6 @@
 # UnionCrax.Direct
-<img width="960" height="540" alt="main" src="https://github.com/user-attachments/assets/e6e7050a-3d7a-4f3c-9fb2-e466fd5f017b" />
+<img width="1200" height="675" alt="image" src="https://github.com/user-attachments/assets/2aad6a86-4dd6-4ab1-8b27-b5d1d43abeab" />
+
 
 
 A fast, standalone Electron desktop application for managing and launching games from the UnionCrax platform. Direct downloads with minimal overhead and full control over your gaming library.
