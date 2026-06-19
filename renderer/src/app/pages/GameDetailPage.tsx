@@ -19,7 +19,7 @@ import type { Game } from "@/lib/types"
 import { useGamesData } from "@/hooks/use-games"
 import { addViewedGameToHistory, hasCookieConsent } from "@/lib/user-history"
 import { useConnectivityStatus } from "@/hooks/use-online-status"
-import { OfflineBanner } from "@/components/OfflineBanner"
+import { OfflineLockout } from "@/components/OfflineLockout"
 import { CriticalLoadModal } from "@/components/CriticalLoadModal"
 import { X } from "@/components/icons"
 import { Calendar, HardDrive, RefreshCw, Square } from "lucide-react"
@@ -315,7 +315,10 @@ export function GameDetailPage() {
               setGame(meta)
               persistGameName(appid, meta?.name)
               window.dispatchEvent(new CustomEvent("uc_game_name", { detail: { appid, name: meta?.name, genres: meta?.genres } }))
-              setSelectedImage(meta.hero_image || meta.splash || "")
+              // This branch is the offline / installed-manifest path: prefer the
+              // locally-cached hero so the banner renders without a network round
+              // trip (the remote URL would just 404 while offline).
+              setSelectedImage(meta.localHeroImage || meta.localSplash || meta.hero_image || meta.splash || "")
               setError(null)
               gameLogger.info("Game detail fallback loaded from local manifest", {
                 context: "Game",
@@ -874,6 +877,24 @@ export function GameDetailPage() {
   const hasInstalledVersions = installedVersions.length > 0 || Boolean(installedManifest)
 
   const installedMeta = installedManifest?.metadata || null
+  // Local (uc-local://) copies of the art the metadata cacher wrote next to the
+  // install. Source from the dedicated installedManifest effect first, but also
+  // fall back to the game object itself — when we load offline from the local
+  // manifest, `game` IS that metadata and already carries these fields, which
+  // covers the first render before the installedManifest effect resolves.
+  const localArt = {
+    hero: installedMeta?.localHeroImage || game?.localHeroImage,
+    splash: installedMeta?.localSplash || game?.localSplash,
+    image: installedMeta?.localImage || game?.localImage,
+    logo: installedMeta?.localHeroLogo || game?.localHeroLogo,
+  }
+  // Offline, the remote CDN art (hero_image/splash/image) can't load — but the
+  // local copies can. So when offline, prefer the locally-cached art; online
+  // keeps remote first (freshest / highest quality). Returns first usable URL.
+  const pickArt = (remote: Array<string | undefined | null>, local: Array<string | undefined | null>): string => {
+    const ordered = isOnline ? [...remote, ...local] : [...local, ...remote]
+    return ordered.find((u) => typeof u === "string" && u.trim().length > 0) || ""
+  }
   const localScreenshots: string[] = Array.isArray(installedMeta?.localScreenshots)
     ? installedMeta.localScreenshots.filter((entry: unknown): entry is string => typeof entry === "string" && entry.length > 0)
     : []
@@ -958,14 +979,10 @@ export function GameDetailPage() {
 
   if (error || !game) {
     if (!isOnline) {
-      return (
-        <div className="space-y-4">
-          <OfflineBanner variant="compact" />
-          <div className="rounded-2xl border border-border bg-card/50 px-4 py-3 text-sm text-muted-foreground">
-            This game isn't available offline. Check your Library for installed games.
-          </div>
-        </div>
-      )
+      // Offline and the game isn't installed locally (an installed game would
+      // have loaded from its manifest above). Show the standard lockout rather
+      // than a half-broken page — installed games stay reachable from Library.
+      return <OfflineLockout />
     }
     // Dedicated "not found" path — the API returned 404, so retrying isn't
     // going to help. Show a calm explanation instead of a critical error.
@@ -1045,13 +1062,10 @@ export function GameDetailPage() {
   // stretched across the banner.
   const heroImage =
     selectedImage ||
-    game.hero_image ||
-    game.splash ||
-    installedMeta?.localHeroImage ||
-    installedMeta?.localSplash ||
-    game.image ||
-    installedMeta?.localImage ||
-    ""
+    pickArt(
+      [game.hero_image, game.splash, game.image],
+      [localArt.hero, localArt.splash, localArt.image],
+    )
   const appDownloads = downloads.filter((item) => item.appid === game.appid)
   const isActiveDownload = appDownloads.some((item) =>
     ["downloading", "paused", "extracting", "installing"].includes(item.status)
@@ -1439,14 +1453,13 @@ export function GameDetailPage() {
   // Background source. Two mutually exclusive modes:
   //   • Animated backgrounds ON  → colour glow blobs only (no image)
   //   • Animated backgrounds OFF → static blurred cover image only
-  const backgroundImage =
-    game.hero_image ||
-    game.splash ||
-    installedMeta?.localHeroImage ||
-    installedMeta?.localSplash ||
-    game.image ||
-    installedMeta?.localImage ||
-    ""
+  const backgroundImage = pickArt(
+    [game.hero_image, game.splash, game.image],
+    [localArt.hero, localArt.splash, localArt.image],
+  )
+  // Wordmark/logo — offline prefers the cached copy so installed games keep
+  // their logo instead of falling back to the plain text title.
+  const heroLogo = pickArt([game.hero_logo], [localArt.logo])
 
   return (
     <div className="relative">
@@ -1559,12 +1572,12 @@ export function GameDetailPage() {
                 </div>
 
                 <div className="space-y-3">
-                  {game.hero_logo ? (
+                  {heroLogo ? (
                     <div className="relative h-20 w-full max-w-[min(70vw,520px)] md:h-28">
                       {!logoLoaded && <div className="udl-skeleton absolute inset-0 rounded-lg" />}
                       <MediaImage
                         unwrapped
-                        src={proxyImageUrl(game.hero_logo) || ""}
+                        src={proxyImageUrl(heroLogo) || ""}
                         alt={`${game.name} logo`}
                         showErrorState={false}
                         className="h-full w-full object-contain object-left drop-shadow-[0_8px_32px_rgba(0,0,0,0.45)]"
@@ -1575,7 +1588,7 @@ export function GameDetailPage() {
                   ) : null}
                   <h1 className={cn(
                     "text-4xl md:text-6xl font-black text-white tracking-tight",
-                    game.hero_logo ? "text-xl md:text-2xl text-white/90" : ""
+                    heroLogo ? "text-xl md:text-2xl text-white/90" : ""
                   )}>
                     {game.name}
                   </h1>
