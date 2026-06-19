@@ -37,10 +37,10 @@ function CollapsibleContent({
           to { height: 0; }
         }
         .collapsible-anim[data-state="open"] {
-          animation: collapsible-down 220ms cubic-bezier(0.16, 1, 0.3, 1);
+          animation: collapsible-down 220ms ease-in-out;
         }
         .collapsible-anim[data-state="closed"] {
-          animation: collapsible-up 220ms cubic-bezier(0.16, 1, 0.3, 1);
+          animation: collapsible-up 220ms ease-in-out;
         }
       `}</style>
       <CollapsiblePrimitive.CollapsibleContent
