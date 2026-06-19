@@ -475,7 +475,7 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, aut
             </p>
             {hasDeadInApp && availability.fullyDeadParts.length > 0 && (
               <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-200">
-                Dead parts: {availability.fullyDeadParts.map((p) => `Part ${p}`).join(", ")}
+                Dead links: {availability.fullyDeadParts.map((p) => `Link ${p}`).join(", ")}
               </div>
             )}
             {/* Web-only hosts guidance */}
@@ -619,7 +619,7 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, aut
             {availability && currentHostAvail && !currentHostAvail.allAlive && (
               <div className="space-y-2">
                 <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
-                  <div className="font-medium mb-1">Some parts are dead on {hostLabel(selectedHost)}</div>
+                  <div className="font-medium mb-1">Some links are dead on {hostLabel(selectedHost)}</div>
                   {currentHostAvail.parts
                     .filter((p) => p.status === "dead")
                     .map((p) => {
@@ -643,7 +643,7 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, aut
                             ) : (
                               <CircleX className="h-3 w-3 text-red-400" />
                             )}
-                            Part {p.part}
+                            Link {p.part}
                             {isOverridden && overriddenHost && (
                               <span className="text-emerald-300">
                                 → {hostLabel(overriddenHost)}
@@ -676,7 +676,7 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, aut
                   return filteredAlive.length === 0
                 }) && (
                   <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-200 space-y-1.5">
-                    <p>Some parts are dead on every host. Please try{" "}
+                    <p>Some links are dead on every host. Please try{" "}
                     <strong>downloading from the website</strong> where more hosts may be available.</p>
                     <button
                       onClick={() => setShowArchiveInstall(true)}
@@ -690,11 +690,10 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, aut
               </div>
             )}
 
-            {/* All-clear message */}
             {currentHostAvail?.allAlive && (
               <div className="flex items-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200">
                 <CheckCircle2 className="h-3.5 w-3.5" />
-                All {currentHostAvail.totalParts} part{currentHostAvail.totalParts === 1 ? "" : "s"} verified alive
+                All {currentHostAvail.totalParts} link{currentHostAvail.totalParts === 1 ? "" : "s"} verified alive
               </div>
             )}
 
@@ -811,9 +810,9 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, aut
                       const deadParts = hostData.parts.filter((p) => p.status === 'dead')
                       if (deadParts.length === 0) continue
                       if (deadParts.length === hostData.totalParts) {
-                        deadLines.push(`${h}: all ${hostData.totalParts} parts dead`)
+                        deadLines.push(`${h}: all ${hostData.totalParts} links dead`)
                       } else {
-                        deadLines.push(`${h}: part${deadParts.length > 1 ? 's' : ''} ${deadParts.map((p) => p.part).join(', ')} dead`)
+                        deadLines.push(`${h}: link${deadParts.length > 1 ? 's' : ''} ${deadParts.map((p) => p.part).join(', ')} dead`)
                       }
                     }
                     if (deadLines.length > 0) {

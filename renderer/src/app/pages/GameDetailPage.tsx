@@ -1047,8 +1047,8 @@ export function GameDetailPage() {
   const isPopular = popularAppIds.has(game.appid)
   const isExternalGame = Boolean(installedManifest?.isExternal)
   const isUCMatched = isExternalGame && game.source !== "external"
-  const dateAdded = game.release_time
-    ? new Date(game.release_time)
+  const dateAdded = game.posted_time || game.release_time
+    ? new Date(game.posted_time || game.release_time || "")
     : typeof game.addedAt === "number"
       ? new Date(game.addedAt)
       : null
@@ -2199,14 +2199,14 @@ export function GameDetailPage() {
                     </span>
                   </div>
 
-                  {game.update_time && (
+                  {game.edited_time && (
                     <div className="flex items-center justify-between py-1.5 border-b border-white/[.07] pb-3">
                       <span className="text-muted-foreground flex items-center gap-2.5">
                         <RefreshCw className="h-4 w-4" />
                         Edited
                       </span>
                       <span className="font-bold text-white">
-                        {timeAgoLong(game.update_time) || "just now"}
+                        {timeAgoLong(game.edited_time) || "just now"}
                       </span>
                     </div>
                   )}

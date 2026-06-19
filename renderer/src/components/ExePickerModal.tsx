@@ -20,6 +20,7 @@ export function ExePickerModal({ open, title, message, exes, gameName, baseFolde
   // --- All hooks MUST be called unconditionally (React Rules of Hooks) ---
   const [search, setSearch] = useState("")
   const [browsing, setBrowsing] = useState(false)
+  const [expanded, setExpanded] = useState(false)
   const searchRef = useRef<HTMLInputElement>(null)
 
   // Reset search when modal opens with new data
@@ -27,6 +28,7 @@ export function ExePickerModal({ open, title, message, exes, gameName, baseFolde
     if (open) {
       setSearch("")
       setBrowsing(false)
+      setExpanded(false)
       // Auto-focus search after render
       requestAnimationFrame(() => searchRef.current?.focus())
     }
@@ -112,85 +114,144 @@ export function ExePickerModal({ open, title, message, exes, gameName, baseFolde
         <p className="mt-1 text-sm text-muted-foreground">{message}</p>
 
         <div className="mt-4 space-y-3">
-          {/* Search bar - only show when there are enough exes to warrant searching */}
-          {ranked.length > 3 && (
-            <div className="flex flex-wrap items-center gap-2">
-              <Input
-                ref={searchRef}
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder="Search exe name or path..."
-                className="h-9 flex-1 rounded-xl bg-[#09090b]/70"
-              />
-            </div>
-          )}
-
-          {/* Recommended exe (highlighted at top, only when there are 2+ exes) */}
-          {showRecommended && recommended ? (
-            <div className="rounded-xl border border-border bg-white/10 px-3 py-2 text-sm">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="min-w-0 flex-1">
-                  <div className="text-xs uppercase tracking-wide text-white/80">Recommended</div>
-                  <div className="truncate text-sm font-semibold text-white">{recommended.name}</div>
-                  <div className="truncate text-xs text-white/70">{getRelativePath(recommended.path)}</div>
-                </div>
-                <Button size="sm" onClick={() => onSelect(recommended.path)}>
-                  {actionLabel}
-                </Button>
-              </div>
-            </div>
-          ) : null}
-
-          {/* Main exe list */}
-          <div className="max-h-72 space-y-2 overflow-y-auto">
-            {visible.length > 0 ? (
-              visible.map((exe) => {
-                const isCurrent = !!currentExePath && exe.path.toLowerCase() === currentExePath.toLowerCase()
-                const relativePath = getRelativePath(exe.path)
-                return (
-                  <div
-                    key={exe.path}
-                    className={`flex items-center justify-between gap-3 rounded-xl border px-3 py-2 transition-colors ${
-                      isCurrent
-                        ? "border-white/60 bg-white/10"
-                        : "border-white/[.07] bg-[#09090b]/70 hover:border-foreground/30 hover:bg-foreground/5"
-                    }`}
-                  >
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2 truncate text-sm font-medium">
-                        <span className={`truncate ${isCurrent ? "text-white" : ""}`}>{exe.name}</span>
-                        {isCurrent ? (
-                          <span className="flex-none rounded-full border border-border bg-white/10 px-2 py-0.5 text-[10px] font-semibold uppercase text-white/90">
-                            Current
-                          </span>
-                        ) : null}
-                      </div>
-                      <div className={`truncate text-xs ${isCurrent ? "text-white/70" : "text-muted-foreground"}`}>{relativePath}</div>
-                      {typeof exe.size === "number" && exe.size > 0 ? (
-                        <div className="text-[10px] text-muted-foreground">{formatFileSize(exe.size)}</div>
-                      ) : null}
+          {/* If recommended exists, collapse/expand extra executables and search smoothly */}
+          {showRecommended ? (
+            <div
+              className={`grid transition-[grid-template-rows,opacity] duration-300 ease-in-out ${
+                expanded ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"
+              }`}
+            >
+              <div className="overflow-hidden">
+                <div className="pt-3 space-y-3">
+                  {ranked.length > 3 && (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Input
+                        ref={searchRef}
+                        value={search}
+                        onChange={(event) => setSearch(event.target.value)}
+                        placeholder="Search exe name or path..."
+                        className="h-9 flex-1 rounded-xl bg-[#09090b]/70"
+                      />
                     </div>
-                    <Button
-                      size="sm"
-                      variant={isCurrent ? "default" : "secondary"}
-                      onClick={() => onSelect(exe.path)}
-                    >
-                      {actionLabel}
-                    </Button>
+                  )}
+
+                  <div className="max-h-72 space-y-2 overflow-y-auto">
+                    {visible.length > 0 ? (
+                      visible.map((exe) => {
+                        const isCurrent = !!currentExePath && exe.path.toLowerCase() === currentExePath.toLowerCase()
+                        const relativePath = getRelativePath(exe.path)
+                        return (
+                          <div
+                            key={exe.path}
+                            className={`flex items-center justify-between gap-3 rounded-xl border px-3 py-2 transition-colors ${
+                              isCurrent
+                                ? "border-white/60 bg-white/10"
+                                : "border-white/[.07] bg-[#09090b]/70 hover:border-foreground/30 hover:bg-foreground/5"
+                            }`}
+                          >
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-2 truncate text-sm font-medium">
+                                <span className={`truncate ${isCurrent ? "text-white" : ""}`}>{exe.name}</span>
+                                {isCurrent ? (
+                                  <span className="flex-none rounded-full border border-border bg-white/10 px-2 py-0.5 text-[10px] font-semibold uppercase text-white/90">
+                                    Current
+                                  </span>
+                                ) : null}
+                              </div>
+                              <div className={`truncate text-xs ${isCurrent ? "text-white/70" : "text-muted-foreground"}`}>{relativePath}</div>
+                              {typeof exe.size === "number" && exe.size > 0 ? (
+                                <div className="text-[10px] text-muted-foreground">{formatFileSize(exe.size)}</div>
+                              ) : null}
+                            </div>
+                            <Button
+                              size="sm"
+                              variant={isCurrent ? "default" : "secondary"}
+                              onClick={() => onSelect(exe.path)}
+                            >
+                              {actionLabel}
+                            </Button>
+                          </div>
+                        )
+                      })
+                    ) : hasExes && search.trim() ? (
+                      <div className="rounded-xl border border-white/[.07] bg-[#09090b]/70 px-3 py-3 text-sm text-muted-foreground">
+                        No executables matching &quot;{search.trim()}&quot;.
+                      </div>
+                    ) : !hasExes ? (
+                      <div className="rounded-xl border border-white/[.07] bg-[#09090b]/70 px-3 py-4 text-center text-sm text-muted-foreground">
+                        <p>No executables found in this game folder.</p>
+                        <p className="mt-1 text-xs text-muted-foreground">The game may still be extracting, or the folder structure is unusual.</p>
+                      </div>
+                    ) : null}
                   </div>
-                )
-              })
-            ) : hasExes && search.trim() ? (
-              <div className="rounded-xl border border-white/[.07] bg-[#09090b]/70 px-3 py-3 text-sm text-muted-foreground">
-                No executables matching &quot;{search.trim()}&quot;.
+                </div>
               </div>
-            ) : !hasExes ? (
-              <div className="rounded-xl border border-white/[.07] bg-[#09090b]/70 px-3 py-4 text-center text-sm text-muted-foreground">
-                <p>No executables found in this game folder.</p>
-                <p className="mt-1 text-xs text-muted-foreground">The game may still be extracting, or the folder structure is unusual.</p>
+            </div>
+          ) : (
+            <>
+              {ranked.length > 3 && (
+                <div className="flex flex-wrap items-center gap-2">
+                  <Input
+                    ref={searchRef}
+                    value={search}
+                    onChange={(event) => setSearch(event.target.value)}
+                    placeholder="Search exe name or path..."
+                    className="h-9 flex-1 rounded-xl bg-[#09090b]/70"
+                  />
+                </div>
+              )}
+
+              <div className="max-h-72 space-y-2 overflow-y-auto">
+                {visible.length > 0 ? (
+                  visible.map((exe) => {
+                    const isCurrent = !!currentExePath && exe.path.toLowerCase() === currentExePath.toLowerCase()
+                    const relativePath = getRelativePath(exe.path)
+                    return (
+                      <div
+                        key={exe.path}
+                        className={`flex items-center justify-between gap-3 rounded-xl border px-3 py-2 transition-colors ${
+                          isCurrent
+                            ? "border-white/60 bg-white/10"
+                            : "border-white/[.07] bg-[#09090b]/70 hover:border-foreground/30 hover:bg-foreground/5"
+                        }`}
+                      >
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2 truncate text-sm font-medium">
+                            <span className={`truncate ${isCurrent ? "text-white" : ""}`}>{exe.name}</span>
+                            {isCurrent ? (
+                              <span className="flex-none rounded-full border border-border bg-white/10 px-2 py-0.5 text-[10px] font-semibold uppercase text-white/90">
+                                Current
+                              </span>
+                            ) : null}
+                          </div>
+                          <div className={`truncate text-xs ${isCurrent ? "text-white/70" : "text-muted-foreground"}`}>{relativePath}</div>
+                          {typeof exe.size === "number" && exe.size > 0 ? (
+                            <div className="text-[10px] text-muted-foreground">{formatFileSize(exe.size)}</div>
+                          ) : null}
+                        </div>
+                        <Button
+                          size="sm"
+                          variant={isCurrent ? "default" : "secondary"}
+                          onClick={() => onSelect(exe.path)}
+                        >
+                          {actionLabel}
+                        </Button>
+                      </div>
+                    )
+                  })
+                ) : hasExes && search.trim() ? (
+                  <div className="rounded-xl border border-white/[.07] bg-[#09090b]/70 px-3 py-3 text-sm text-muted-foreground">
+                    No executables matching &quot;{search.trim()}&quot;.
+                  </div>
+                ) : !hasExes ? (
+                  <div className="rounded-xl border border-white/[.07] bg-[#09090b]/70 px-3 py-4 text-center text-sm text-muted-foreground">
+                    <p>No executables found in this game folder.</p>
+                    <p className="mt-1 text-xs text-muted-foreground">The game may still be extracting, or the folder structure is unusual.</p>
+                  </div>
+                ) : null}
               </div>
-            ) : null}
-          </div>
+            </>
+          )}
         </div>
 
         <div className="mt-4 flex items-center justify-between gap-2">
