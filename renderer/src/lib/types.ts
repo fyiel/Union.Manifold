@@ -46,6 +46,8 @@ export interface Game {
   store: string
   comment?: string
   dlc: string[]
+  posted_time?: string
+  edited_time?: string
   update_time?: string
   release_time?: string
   addedAt?: number

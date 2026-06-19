@@ -52,6 +52,8 @@ interface GameCardProps {
     dlc?: string[]
     comment?: string
     hasCoOp?: boolean
+    posted_time?: string
+    edited_time?: string
     update_time?: string
     release_time?: string
     /** Admin-selected launcher exe (relative to install folder). Preferred

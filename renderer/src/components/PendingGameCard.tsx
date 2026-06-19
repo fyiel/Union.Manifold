@@ -148,7 +148,7 @@ export const PendingGameCard = memo(function PendingGameCard({ game }: PendingGa
   const vikingSummary = game.current_mirror_info?.vikingfile || null
 
   const statusDescription = isUploading
-    ? "Streaming to UC.Files. Mirror queue starts as each part finishes."
+    ? "Streaming to UC.Files. Mirror queue starts as each file finishes."
     : isMirroring
       ? "Mirroring to alternate hosts server-side. No upload bandwidth on your end."
       : game.mirror_status === "partial"

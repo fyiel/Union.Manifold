@@ -588,14 +588,15 @@ export function timeAgoLong(dateStr?: string | null): string {
   return `${years} year${years === 1 ? "" : "s"} ago`
 }
 
-export function isGameVersionUpdate(game: { update_time?: string; release_time?: string }): boolean {
+export function isGameVersionUpdate(game: { update_time?: string; release_time?: string; posted_time?: string }): boolean {
   if (!game.update_time) return false
   const updateDate = new Date(game.update_time)
   if (isNaN(updateDate.getTime())) return false
   const daysSinceUpdate = Math.floor((Date.now() - updateDate.getTime()) / (1000 * 60 * 60 * 24))
   if (daysSinceUpdate > 14) return false
-  if (!game.release_time) return true
-  const releaseDate = new Date(game.release_time)
-  if (isNaN(releaseDate.getTime())) return true
-  return updateDate.getTime() > releaseDate.getTime() + 86400000
+  const postedOrReleased = game.posted_time || game.release_time
+  if (!postedOrReleased) return true
+  const postedDate = new Date(postedOrReleased)
+  if (isNaN(postedDate.getTime())) return false
+  return updateDate.getTime() > postedDate.getTime() + 60000
 }
