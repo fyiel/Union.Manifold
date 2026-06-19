@@ -19,6 +19,9 @@ import { cn } from "@/lib/utils"
 import { getApiBaseUrl } from "@/lib/api"
 import { useAuth } from "@/hooks/useAuth"
 import { useHasRunningGames } from "@/hooks/use-running-games"
+import { useOnlineStatus } from "@/hooks/use-online-status"
+import { isOfflineAllowedPath } from "@/lib/navigation"
+import { OfflineLockout } from "@/components/OfflineLockout"
 
 const UpdateNotification = lazy(() => import("@/components/UpdateNotification").then((m) => ({ default: m.UpdateNotification })))
 const KeyboardShortcutsDialog = lazy(() => import("@/components/KeyboardShortcutsDialog").then((m) => ({ default: m.KeyboardShortcutsDialog })))
@@ -40,6 +43,18 @@ export function AppLayout() {
   const location = useLocation()
   const navigationType = useNavigationType()
   const navigate = useNavigate()
+  const isOnline = useOnlineStatus()
+
+  // Offline lockdown. When we can't reach Union Crax, online-only pages are
+  // replaced by <OfflineLockout/> (see isOfflineAllowedPath) instead of loading
+  // into a broken state, and the home/Browse landing is bounced to the Library
+  // so the app opens on something usable rather than an empty catalogue.
+  const offlineLocked = !isOnline && !isOfflineAllowedPath(location.pathname)
+  useEffect(() => {
+    if (!isOnline && (location.pathname === "/" || location.pathname === "/launcher")) {
+      navigate("/library", { replace: true })
+    }
+  }, [isOnline, location.pathname, navigate])
 
   // Listen for one-shot deep-link navigation actions delivered by the
   // main process (e.g. `unioncrax://scan` from the website's "Scan in
@@ -384,7 +399,7 @@ export function AppLayout() {
                       reserves no specific layout — pages animate in via
                       uc-page-transition once they're ready. */}
                   <Suspense fallback={<div className="min-h-[60vh]" aria-hidden="true" />}>
-                    <Outlet />
+                    {offlineLocked ? <OfflineLockout /> : <Outlet />}
                   </Suspense>
                 </div>
               </main>

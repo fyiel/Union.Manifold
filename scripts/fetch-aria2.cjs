@@ -29,14 +29,30 @@ const os = require('node:os')
 const path = require('node:path')
 const { execSync } = require('node:child_process')
 
-const VERSION = process.env.ARIA2_VERSION || '1.37.0'        // official aria2 (Windows)
+const VERSION = process.env.ARIA2_VERSION || '1.37.0'        // aria2 release pinned for all targets
 const ABCFY2_TAG = process.env.ARIA2_LINUX_TAG || '1.37.0'   // abcfy2 static musl builds (Linux)
+// Mozilla CA bundle (curl distribution). aria2's OpenSSL build does NOT ship a
+// trust store, so without this it fails every HTTPS handshake with "unable to
+// get local issuer certificate". Bundled once, shared across platforms.
+const CACERT_URL = process.env.ARIA2_CACERT_URL || 'https://curl.se/ca/cacert.pem'
 
 // Each target maps to a release zip + the binary name inside it.
 const TARGETS = {
   'win32-x64': {
+    // IMPORTANT: this is the OpenSSL-linked Windows build, NOT the official
+    // aria2 release. The official Windows build links Windows Schannel (WinTLS),
+    // which fails the TLS handshake on some machines with
+    //   "SSL/TLS handshake failure: The token supplied to the function is
+    //    invalid (80090308)"  (SEC_E_INVALID_TOKEN)
+    // — a cipher/protocol negotiation failure in the OS TLS stack — while
+    // Chromium (the catalog) connects fine with its own BoringSSL. Switching to
+    // an OpenSSL build moves TLS into aria2 itself (immune to the OS Schannel
+    // state) and makes downloads work wherever browsing already does. OpenSSL
+    // needs the bundled cacert.pem (see CACERT_URL + aria2-manager's
+    // --ca-certificate). abcfy2 is NOT an option here: its mingw Windows builds
+    // force WinTLS, so they'd reproduce the same bug.
     url: process.env.ARIA2_WIN_URL ||
-      `https://github.com/aria2/aria2/releases/download/release-${VERSION}/aria2-${VERSION}-win-64bit-build1.zip`,
+      `https://github.com/zhengqwe/aria2-static-builds-with-patches/releases/download/v${VERSION}/aria2-${VERSION}-win-x86-64.zip`,
     bin: 'aria2c.exe',
   },
   'linux-x64': {
@@ -143,6 +159,32 @@ async function fetchTarget(key) {
   }
 }
 
+/**
+ * Download the shared CA bundle into assets/bin/aria2/cacert.pem. aria2's
+ * OpenSSL build (Windows) needs an explicit trust store; the daemon is started
+ * with --ca-certificate pointing here (see aria2-manager.cjs). Best-effort: if
+ * a copy already exists we keep it (offline installs / CI without curl.se).
+ */
+async function fetchCaCert() {
+  const dest = path.join(__dirname, '..', 'assets', 'bin', 'aria2', 'cacert.pem')
+  if (fs.existsSync(dest)) { log(`cacert already present: ${dest}`); return }
+  fs.mkdirSync(path.dirname(dest), { recursive: true })
+  const tmp = path.join(os.tmpdir(), `cacert-${Date.now()}.pem`)
+  try {
+    log(`downloading CA bundle ${CACERT_URL}`)
+    await download(CACERT_URL, tmp)
+    // Sanity-check it looks like a PEM bundle before committing it.
+    const head = fs.readFileSync(tmp, 'utf8').slice(0, 64)
+    if (!head.includes('BEGIN CERTIFICATE') && !head.includes('##')) {
+      throw new Error('downloaded cacert.pem does not look like a PEM bundle')
+    }
+    fs.copyFileSync(tmp, dest)
+    log(`installed CA bundle → ${dest}`)
+  } finally {
+    try { fs.unlinkSync(tmp) } catch { /* ignore */ }
+  }
+}
+
 async function main() {
   const targets = selectedTargets()
   if (!targets.length || (targets.length === 1 && !TARGETS[targets[0]])) {
@@ -153,6 +195,8 @@ async function main() {
     // One target's failure shouldn't abort the others.
     try { await fetchTarget(key) } catch (err) { log(`[${key}] skipped (${err?.message || err})`) }
   }
+  // CA bundle is platform-agnostic and required by the OpenSSL aria2 build.
+  try { await fetchCaCert() } catch (err) { log(`cacert skipped (${err?.message || err})`) }
 }
 
 main().catch((err) => {

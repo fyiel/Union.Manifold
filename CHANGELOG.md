@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Downloads
+
+- **Fixed: downloads failing on Windows with `SSL/TLS handshake failure … The token supplied to the function is invalid (80090308)`.** The catalog loaded fine but every download died at the TLS handshake. Cause: the bundled `aria2c` was the official Windows build, which links **Schannel** (the OS TLS stack); on affected machines Schannel couldn't negotiate the handshake with the files host (`SEC_E_INVALID_TOKEN`), even though Chromium — with its own bundled TLS — connected without issue. We now ship an **OpenSSL-linked `aria2c`** so TLS lives inside the downloader and no longer depends on the machine's Schannel state: downloads work wherever browsing already does. The OpenSSL build needs a trust store, so a Mozilla CA bundle (`cacert.pem`) is bundled and passed via `--ca-certificate` (without it OpenSSL fails every HTTPS request with "unable to get local issuer certificate"). `scripts/fetch-aria2.cjs` fetches both for fresh installs/CI.
+- **Updated: the "whitelist your game folder" prompt now also covers the app itself.** Third-party antivirus (Avast, AVG, Kaspersky, ESET, Bitdefender…) can block downloads — sometimes by scanning encrypted connections — while leaving browsers untouched. The Windows Defender prompt now suggests excluding **UnionCrax.Direct** (and turning off HTTPS/SSL scanning for it), not just the download folder.
+
+### Offline mode
+
+- **Changed: offline mode now locks down online-only pages instead of letting them load into errors.** Previously every page tried to load while offline and collapsed into a generic error with only a small "offline" note. Now online-only pages (Browse, Search, Wishlist, Liked, History, Account, public collection browser) show a clear **full-page offline screen** — distinguishing "your device is offline" from "Union Crax isn't reachable", with a working **Try again** re-probe and a link to the status page. Pages that work offline stay open: **Library, Activity, Collections, Screenshots, Settings**.
+- **Changed: launching offline opens on your Library, not the home page.** The Browse/home landing needs the catalogue, so while offline the app routes straight to the Library rather than an empty home.
+- **Added: installed game pages — with their cover, hero art, logo, and screenshots — now open offline.** Opening an installed game while offline renders fully from its local manifest and locally-cached art (no network round trip). Non-installed games show the offline screen instead.
+- **Added: the startup splash now reflects offline state.** It retries the server/mirror sweep once, and if nothing is reachable shows **"Starting offline."** in red before booting into offline mode (the update check is skipped, since the update feed is unreachable too).
+
 ## v2.7.0 — Launch Options & Linux
 
 ### Updates

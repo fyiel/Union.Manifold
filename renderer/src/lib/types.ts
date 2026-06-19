@@ -25,6 +25,15 @@ export interface Game {
   hero_image?: string
   hero_animated?: string
   hero_logo?: string
+  /** Locally-cached (uc-local://) copies of the art the metadata cacher writes
+   *  next to an install. Only present on installed records (e.g. when a game is
+   *  loaded from its local manifest), so the renderer can show art offline. */
+  localImage?: string
+  localSplash?: string
+  localHeroImage?: string
+  localHeroLogo?: string
+  localBackgroundImage?: string
+  localScreenshots?: string[]
   release_date: string
   size: string
   /** Best-effort numeric size of the downloadable archive(s), in bytes. */

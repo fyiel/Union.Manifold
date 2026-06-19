@@ -161,6 +161,28 @@ export function resetApiReachability(): void {
   setServiceReachable(true)
 }
 
+/**
+ * Actively re-probe the API and update the connectivity flag from the result.
+ * Used by the offline UI's "Retry" button so a click gives a real answer
+ * instead of optimistically flipping to online and bouncing back on the next
+ * failed fetch. Resolves to the new reachability.
+ */
+export async function recheckApiReachability(): Promise<boolean> {
+  try {
+    const response = await fetch(apiUrl("/api/health"), {
+      method: "GET",
+      cache: "no-store",
+      credentials: "include",
+    })
+    const ok = response.ok
+    setServiceReachable(ok)
+    return ok
+  } catch {
+    setServiceReachable(false)
+    return false
+  }
+}
+
 export function subscribeApiConnectivity(callback: () => void): () => void {
   connectivityListeners.add(callback)
   return () => {

@@ -80,6 +80,34 @@ export const bottomNavItems: PrimaryNavItem[] = [
   },
 ]
 
+/**
+ * Pages that are usable without a connection — their data is local to this
+ * machine (installed games, download state, captures, settings) or already
+ * cached. Everything else (Browse/home, Search, Wishlist, Liked, History,
+ * Account, and the public collection browser) is online-only and is replaced by
+ * <OfflineLockout/> while offline instead of loading into an error.
+ *
+ * Game detail pages (`/game/:id`) are allowed through because installed games
+ * render fully offline from their local manifest + cached art; GameDetailPage
+ * itself shows the offline lockout when a *non-installed* game is opened with no
+ * connection, so the guard doesn't need to know install state here.
+ *
+ * Note: `/collections/browse` is the public discovery page (online-only); the
+ * user's own `/collections` and `/collections/view/:id` stay available.
+ */
+export function isOfflineAllowedPath(pathname: string): boolean {
+  const p = (pathname || "/").split("?")[0]
+  if (p.startsWith("/collections/browse")) return false
+  if (p.startsWith("/collections")) return true
+  return (
+    p.startsWith("/library") ||
+    p.startsWith("/downloads") ||
+    p.startsWith("/settings") ||
+    p.startsWith("/screenshots") ||
+    p.startsWith("/game/")
+  )
+}
+
 export function getRouteChrome(pathname: string) {
   if (pathname === "/") {
     return {

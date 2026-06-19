@@ -27,15 +27,10 @@ const fs = require('node:fs')
 const path = require('node:path')
 const { spawn, spawnSync } = require('node:child_process')
 
-/** Resolve the aria2c binary path for this platform, or null if not found.
- *  Looks first in the bundled assets dir (packaged + dev), then falls back to
- *  whatever `aria2c` is on PATH so power users / Linux distros can supply it. */
-function resolveAria2Binary({ appRoot, resourcesPath } = {}) {
-  const platform = process.platform // 'win32' | 'darwin' | 'linux'
-  const arch = process.arch // 'x64' | 'arm64' | ...
-  const exe = platform === 'win32' ? 'aria2c.exe' : 'aria2c'
-  // Candidate roots, in priority order. `assets/bin/aria2/<platform>-<arch>/`
-  // is where scripts/fetch-aria2.cjs drops the binary.
+/** The bundle roots that hold the aria2 binary + its sidecar files
+ *  (cacert.pem), in priority order. `assets/bin/aria2/` is where
+ *  scripts/fetch-aria2.cjs drops everything. */
+function aria2BundleRoots({ appRoot, resourcesPath } = {}) {
   const roots = []
   // Packaged apps run from an asar archive, but native binaries can't be
   // executed from inside asar — electron-builder's asarUnpack drops them under
@@ -51,8 +46,18 @@ function resolveAria2Binary({ appRoot, resourcesPath } = {}) {
     roots.push(path.join(appRoot, 'assets', 'bin', 'aria2'))
   }
   roots.push(path.join(__dirname, '..', 'assets', 'bin', 'aria2'))
+  return roots
+}
+
+/** Resolve the aria2c binary path for this platform, or null if not found.
+ *  Looks first in the bundled assets dir (packaged + dev), then falls back to
+ *  whatever `aria2c` is on PATH so power users / Linux distros can supply it. */
+function resolveAria2Binary({ appRoot, resourcesPath } = {}) {
+  const platform = process.platform // 'win32' | 'darwin' | 'linux'
+  const arch = process.arch // 'x64' | 'arm64' | ...
+  const exe = platform === 'win32' ? 'aria2c.exe' : 'aria2c'
   const subdirs = [`${platform}-${arch}`, platform, '']
-  for (const root of roots) {
+  for (const root of aria2BundleRoots({ appRoot, resourcesPath })) {
     for (const sub of subdirs) {
       const candidate = path.join(root, sub, exe)
       try {
@@ -62,6 +67,21 @@ function resolveAria2Binary({ appRoot, resourcesPath } = {}) {
   }
   // PATH fallback — only meaningful on platforms where it's commonly installed.
   return exe === 'aria2c' ? 'aria2c' : null
+}
+
+/** Resolve the bundled CA bundle (cacert.pem), or null if absent.
+ *  The Windows aria2 build links OpenSSL, which has no built-in trust store —
+ *  every HTTPS handshake fails with "unable to get local issuer certificate"
+ *  unless we point it at this bundle via --ca-certificate. Lives at the root of
+ *  assets/bin/aria2/ (shared across platforms). */
+function resolveAria2CaCert({ appRoot, resourcesPath } = {}) {
+  for (const root of aria2BundleRoots({ appRoot, resourcesPath })) {
+    const candidate = path.join(root, 'cacert.pem')
+    try {
+      if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) return candidate
+    } catch { /* ignore */ }
+  }
+  return null
 }
 
 function getFreePort() {
@@ -88,6 +108,10 @@ class Aria2Manager {
    */
   constructor({ binaryPath, appRoot, resourcesPath, userDataPath, log } = {}) {
     this.binaryPath = binaryPath || resolveAria2Binary({ appRoot, resourcesPath })
+    // CA bundle for the OpenSSL build's certificate verification (see
+    // resolveAria2CaCert). null on a build that didn't ship one — we then leave
+    // verification to whatever default store aria2 finds (Linux system certs).
+    this.caCertPath = resolveAria2CaCert({ appRoot, resourcesPath })
     this.userDataPath = userDataPath || null
     this.log = typeof log === 'function' ? log : () => {}
     this.proc = null
@@ -224,6 +248,18 @@ class Aria2Manager {
       // but aria2 does not. Force IPv4 to avoid spurious failures.
       '--disable-ipv6=true',
     ]
+    // TLS verification. The Windows aria2 build links OpenSSL (chosen so the
+    // handshake doesn't depend on the OS Schannel state — see fetch-aria2.cjs),
+    // but OpenSSL ships no trust store, so we hand it the bundled CA bundle.
+    // Without --ca-certificate every HTTPS download dies with
+    // "SSL/TLS handshake failure: unable to get local issuer certificate".
+    if (this.caCertPath) {
+      args.push('--check-certificate=true')
+      args.push(`--ca-certificate=${this.caCertPath}`)
+      this.log('info', `[aria2] using CA bundle ${this.caCertPath}`)
+    } else {
+      this.log('warn', '[aria2] no bundled cacert.pem found — relying on system trust store (HTTPS may fail on the OpenSSL Windows build)')
+    }
     this.log('info', `[aria2] spawning ${runBin} on rpc port ${this.port}`)
     this.proc = spawn(runBin, args, { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true })
     this.proc.on('exit', (code, signal) => {

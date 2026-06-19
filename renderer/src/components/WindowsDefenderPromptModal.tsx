@@ -31,6 +31,9 @@ export function WindowsDefenderPromptModal({
             <span className="block">
               If Defender is interrupting installs, add this folder to your exclusions in Windows Security. If you add external games elsewhere, exclude those folders too.
             </span>
+            <span className="block">
+              Third-party antivirus (Avast, AVG, Kaspersky, ESET, Bitdefender…) can also block downloads — sometimes by scanning encrypted connections. If downloads keep failing, add an exclusion for <span className="font-medium text-foreground/90">UnionCrax.Direct</span> itself (and turn off "HTTPS/SSL scanning" for it) in your antivirus, not just the game folder.
+            </span>
           </DialogDescription>
         </DialogHeader>
         <DialogFooter className="flex-row gap-2 sm:justify-end">

@@ -2781,6 +2781,11 @@ const BASE_URL_CANDIDATES = [
 
 // Set during startup by detectBestBaseUrl(); used to pre-configure renderer localStorage.
 let resolvedBaseUrl = DEFAULT_BASE_URL
+// Whether ANY Union Crax origin answered the readiness probe at launch. When
+// false we boot straight into offline mode: the renderer locks online-only
+// pages and the splash shows "Starting offline." Seeded into renderer
+// localStorage (uc_api_service_reachable) so the very first paint is correct.
+let startupReachable = true
 
 // Must match CLIENT_READY_MARKER in union-crax.xyz app/api/client-ready/route.ts.
 // School / ISP filters that intercept the request and respond with their own
@@ -2790,8 +2795,11 @@ const CLIENT_READY_MARKER = 'union-crax-api-ready-v1'
 
 /**
  * Probe each candidate with app-specific readiness checks and return the first
- * usable origin, or the primary as a fallback if none respond.
+ * usable origin. When none respond, falls back to the primary origin but flags
+ * `reachable: false` so the caller can start the app in offline mode (lock down
+ * online-only pages, show the offline splash, etc.).
  * @param {(status: string) => void} onStatus - callback to push status text to splash
+ * @returns {Promise<{ baseUrl: string, reachable: boolean }>}
  */
 async function detectBestBaseUrl(onStatus) {
   async function fetchJsonWithTimeout(url, timeoutMs) {
@@ -2875,12 +2883,12 @@ async function detectBestBaseUrl(onStatus) {
     const result = await probe(candidate)
     if (result.ok) {
       ucLog(`detectBestBaseUrl: resolved to ${candidate} (${result.reason})`)
-      return candidate
+      return { baseUrl: candidate, reachable: true }
     }
     ucLog(`detectBestBaseUrl: rejected ${candidate} (${result.reason})`, 'warn')
   }
   ucLog('detectBestBaseUrl: all candidates unreachable, defaulting to primary', 'warn')
-  return DEFAULT_BASE_URL
+  return { baseUrl: DEFAULT_BASE_URL, reachable: false }
 }
 
 let tray = null
@@ -8945,12 +8953,13 @@ function createSplashWindow() {
   return splashWin
 }
 
-/** Push a status string into the splash window's #status element. */
-function setSplashStatus(splashWin, text) {
+/** Push a status string into the splash window's #status element.
+ *  Pass { error: true } to render it red (e.g. the "Starting offline." state). */
+function setSplashStatus(splashWin, text, { error = false } = {}) {
   if (!splashWin || splashWin.isDestroyed()) return
   const escaped = JSON.stringify(String(text))
   splashWin.webContents.executeJavaScript(
-    `(function(){var el=document.getElementById('status');if(el)el.textContent=${escaped};})()`
+    `(function(){var el=document.getElementById('status');if(el){el.textContent=${escaped};el.classList.toggle('status-error',${error ? 'true' : 'false'});}})()`
   ).catch(() => {})
 }
 
@@ -9124,6 +9133,11 @@ function createWindow(existingSplash) {
         `localStorage.setItem('uc_detected_api_base_url',${JSON.stringify(detected)});` +
         `var o=${JSON.stringify(override)};` +
         `if(o){localStorage.setItem('uc_custom_api_base_url',o)}else{localStorage.removeItem('uc_custom_api_base_url')}` +
+        // Seed the connectivity flag so the renderer paints the correct online/
+        // offline state on first render (no flash of online-only pages before
+        // the first failed fetch flips it). Mirrors API_REACHABILITY_STORAGE_KEY
+        // in renderer/src/lib/api.ts ('1' = reachable, '0' = offline).
+        `localStorage.setItem('uc_api_service_reachable',${JSON.stringify(startupReachable ? '1' : '0')});` +
         `}catch(e){}})()`
       ).catch(() => {})
     } catch { }
@@ -9972,16 +9986,35 @@ app.whenReady().then(async () => {
   setSplashStatus(splashWin, 'Loading configuration...')
   await hydratePersistedLauncherState()
 
-  // Show status for domain/server checks
+  // Show status for domain/server checks. Probe the primary + mirrors; if the
+  // whole set is unreachable, retry the sweep once (transient DNS / a network
+  // interface still coming up right after login is common) before committing to
+  // offline mode.
   setSplashStatus(splashWin, 'Connecting to servers...')
-  resolvedBaseUrl = await detectBestBaseUrl((status) => {
-    setSplashStatus(splashWin, status)
-  })
+  const onProbeStatus = (status) => setSplashStatus(splashWin, status)
+  let detection = await detectBestBaseUrl(onProbeStatus)
+  if (!detection.reachable) {
+    setSplashStatus(splashWin, 'Connection failed — retrying mirrors...')
+    await new Promise((r) => setTimeout(r, 1500))
+    detection = await detectBestBaseUrl(onProbeStatus)
+  }
+  resolvedBaseUrl = detection.baseUrl
+  startupReachable = detection.reachable
+  if (!startupReachable) {
+    // Red, so it reads as a real state change and not just another step.
+    setSplashStatus(splashWin, 'Starting offline.', { error: true })
+    ucLog('Startup: no Union Crax origin reachable — entering offline mode', 'warn')
+    await new Promise((r) => setTimeout(r, 1100))
+  }
 
   configureAutoUpdater()
-  if (!isDev) {
+  if (!isDev && startupReachable) {
     // Check for updates during splash (Discord-style: download and install before main window opens)
     await checkForUpdatesDuringSplash(splashWin)
+  } else if (!isDev && !startupReachable) {
+    // Offline: the update feed is unreachable too — don't burn the splash
+    // waiting on a check that can only time out.
+    ucLog('Startup: skipping update check (offline)')
   } else {
     setSplashStatus(splashWin, 'Almost there...')
     await new Promise((r) => setTimeout(r, 600))

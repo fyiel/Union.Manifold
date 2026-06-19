@@ -93,6 +93,14 @@
       transition: all 0.3s ease;
     }
 
+    /* Offline / failure state — red + slightly bolder so "Starting offline."
+       reads as a real status change rather than another loading step. */
+    .status.status-error {
+      color: #f87171;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+    }
+
     /* Progress Bar */
     .bar-track {
       position: absolute;
@@ -195,10 +203,13 @@
       if (version) versionEl.textContent = 'v' + version
     })()
 
-    // Optional: Allow updating status from main process
-    window.updateStatus = function(text) {
+    // Optional: Allow updating status from main process. Pass isError=true to
+    // render the red "Starting offline." style.
+    window.updateStatus = function(text, isError) {
       const statusEl = document.getElementById('status')
-      if (statusEl) statusEl.textContent = text
+      if (!statusEl) return
+      statusEl.textContent = text
+      statusEl.classList.toggle('status-error', isError === true)
     }
   </script>
 </body>
