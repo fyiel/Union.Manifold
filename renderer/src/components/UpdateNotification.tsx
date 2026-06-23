@@ -2,6 +2,7 @@ import { useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { RefreshCw } from "lucide-react"
 import { Download } from "@/components/icons"
+import { formatVersion } from "@/lib/utils"
 
 type UpdateStatus = {
   enabled: boolean
@@ -85,11 +86,11 @@ export function UpdateNotification() {
   if (status.state === "checking") {
     description = "Checking for a new UnionCrax.Direct build."
   } else if (isDownloading) {
-    description = `Downloading ${status.version ? `v${status.version}` : "the update"} - ${Math.round(status.progress)}%.`
+    description = `Downloading ${status.version ? formatVersion(status.version) : "the update"} - ${Math.round(status.progress)}%.`
   } else if (isDownloaded) {
-    description = `${status.version ? `v${status.version}` : "The update"} is ready to install.`
+    description = `${status.version ? formatVersion(status.version) : "The update"} is ready to install.`
   } else if (status.state === "available") {
-    description = `${status.version ? `v${status.version}` : "A new version"} is available. Download will start automatically.`
+    description = `${status.version ? formatVersion(status.version) : "A new version"} is available. Download will start automatically.`
   } else if (status.state === "installing") {
     description = "Closing the app to install the downloaded update."
   } else if (isError) {

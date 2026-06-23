@@ -600,3 +600,13 @@ export function isGameVersionUpdate(game: { update_time?: string; release_time?:
   if (isNaN(postedDate.getTime())) return false
   return updateDate.getTime() > postedDate.getTime() + 60000
 }
+
+export function formatVersion(version: string | undefined | null): string {
+  if (!version) return ""
+  const trimmed = version.trim()
+  if (/^[vvbb]/i.test(trimmed)) {
+    return trimmed
+  }
+  return `v${trimmed}`
+}
+

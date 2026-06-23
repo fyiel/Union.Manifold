@@ -13,7 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { PaginationBar } from "@/components/PaginationBar"
 import { useGamesData } from "@/hooks/use-games"
 import type { Game } from "@/lib/types"
-import { hasInstalledVersionUpdate, pickGameExecutable, cn, proxyImageUrl } from "@/lib/utils"
+import { hasInstalledVersionUpdate, pickGameExecutable, cn, proxyImageUrl, formatVersion } from "@/lib/utils"
 import { useDownloadsActions, useDownloadsSelector } from "@/context/downloads-context"
 import { useDownloadFlow } from "@/context/download-flow-context"
 import { getCatalogCache, type CatalogGame } from "@/lib/catalog"
@@ -1551,7 +1551,7 @@ export function LibraryPage() {
                           {[
                             lastPlayed ? `Last played ${lastPlayed}` : null,
                             game.size || null,
-                            game.version ? `v${game.version}` : null,
+                            game.version ? formatVersion(game.version) : null,
                             collections.length > 0 ? `${collections.length} collection${collections.length === 1 ? "" : "s"}` : null,
                           ].filter(Boolean).join(" · ")}
                         </div>
