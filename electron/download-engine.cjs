@@ -126,6 +126,74 @@ class DownloadEngine extends EventEmitter {
 
     /** Cancelled ids so a late status poll doesn't get misread. */
     this.cancelledIds = new Set()
+
+    /**
+     * CDN failover. Some networks (school/ISP DPI) block our download host by
+     * its TLS SNI, so aria2 dies at the handshake even though the catalog still
+     * loads via an API mirror. `cdnHosts` is an ordered list of interchangeable
+     * CDN domains (all fronting the same object storage); on a TLS/transport
+     * failure we rewrite the download URL's host to the next one and retry.
+     * `preferredCdnHost` is the one we've seen working this session, so later
+     * downloads start there instead of re-hitting a blocked host. Populated by
+     * main via setCdnHosts() once hydrated from /api/cdn-mirrors. Empty = the
+     * feature is inert and downloads behave exactly as before.
+     * @type {string[]}
+     */
+    this.cdnHosts = []
+    /** @type {string|null} */ this.preferredCdnHost = null
+    /**
+     * The host we've actually seen deliver bytes this session. Distinct from
+     * preferredCdnHost (which is optimistic — set the instant we fail over).
+     * main persists this so a blocked user starts straight on the working mirror
+     * next launch instead of re-probing the blocked primary. Once set, an
+     * explicit restored `preferred` no longer overrides it.
+     * @type {string|null}
+     */
+    this._confirmedCdnHost = null
+  }
+
+  /**
+   * Set the ordered CDN failover hosts (lowercased, de-duped). `preferred` is an
+   * optional restored "last-working host" (from settings); it's used as the
+   * start host only when valid AND we haven't already confirmed a working host
+   * this session. Otherwise the current preferred is kept if still valid, else
+   * the first host wins.
+   */
+  setCdnHosts(hosts, preferred) {
+    const list = Array.isArray(hosts)
+      ? hosts.map((h) => String(h || '').trim().toLowerCase()).filter(Boolean)
+      : []
+    this.cdnHosts = [...new Set(list)]
+    const seed = String(preferred || '').trim().toLowerCase()
+    if (!this._confirmedCdnHost && seed && this.cdnHosts.includes(seed)) {
+      this.preferredCdnHost = seed
+    } else if (this.cdnHosts.length && (!this.preferredCdnHost || !this.cdnHosts.includes(this.preferredCdnHost))) {
+      this.preferredCdnHost = this.cdnHosts[0]
+    }
+  }
+
+  /**
+   * Called when a download is actively receiving bytes: the host in its URL is
+   * proven reachable on this network. Records it and emits 'cdn-host' (once per
+   * new host) so main can persist it. No-op for non-CDN hosts.
+   */
+  _confirmCdnHost(dl) {
+    const host = this._urlHost(dl && dl.url)
+    if (!host || !this.cdnHosts.includes(host) || this._confirmedCdnHost === host) return
+    this._confirmedCdnHost = host
+    this.preferredCdnHost = host
+    this.log('info', `[engine] CDN host confirmed working: ${host}`)
+    this.emit('cdn-host', host)
+  }
+
+  /** Lowercased host of a URL, or '' if unparseable. */
+  _urlHost(url) {
+    try { return new NodeURL(url).host.toLowerCase() } catch { return '' }
+  }
+
+  /** Return `url` with its host swapped to `host` (keeps path/query/scheme). */
+  _withHost(url, host) {
+    try { const u = new NodeURL(url); u.host = host; return u.toString() } catch { return url }
   }
 
   /** No-op: aria2 downloads don't use the Electron DownloadManager session.
@@ -174,6 +242,17 @@ class DownloadEngine extends EventEmitter {
     }
 
     this.byId.set(downloadId, dl)
+
+    // If this is a CDN download and we've already locked onto a reachable CDN
+    // mirror this session, start there — so a user whose network blocks the
+    // primary host doesn't eat a failed first attempt on every new download.
+    if (this.preferredCdnHost) {
+      const host = this._urlHost(dl.url)
+      if (host && this.cdnHosts.includes(host) && host !== this.preferredCdnHost) {
+        dl.url = this._withHost(dl.url, this.preferredCdnHost)
+        this.log('info', `[engine] CDN: starting ${dl.id} on preferred mirror ${this.preferredCdnHost}`)
+      }
+    }
 
     // Adopt any partial already on disk *now*, before the download is queued or
     // _kickOff runs. _kickOff also locates the partial, but only once it
@@ -547,6 +626,8 @@ class DownloadEngine extends EventEmitter {
           dl.speedBps = dl.status === 'paused' ? 0 : speed
           const remaining = total > 0 ? Math.max(0, total - completed) : 0
           dl.etaSeconds = speed > 0 && remaining > 0 ? Math.round(remaining / speed) : null
+          // Bytes are flowing → the current CDN host works on this network.
+          if (speed > 0) this._confirmCdnHost(dl)
           this.emit('update', this._publicView(dl))
           this._writeManifestSnapshotThrottled(dl)
         }
@@ -585,7 +666,57 @@ class DownloadEngine extends EventEmitter {
     }
     // error
     this._stopAria2PollerIfIdle()
+    // Before giving up, try the next CDN mirror — covers SNI/DPI blocks where
+    // the handshake to one host fails but an interchangeable domain works.
+    if (this._tryCdnFailover(dl, errorMsg)) return
     this._fail(dl, errorMsg || 'aria2 download failed')
+  }
+
+  /**
+   * On a transport/TLS failure against a CDN host, re-queue the download against
+   * the next untried CDN mirror. Returns true if a failover was started (caller
+   * must NOT then mark the download failed). Only fires for network-shaped
+   * errors — a 404 / auth / disk error means the file or setup is wrong, and
+   * swapping hosts would just mask it.
+   */
+  _tryCdnFailover(dl, errorMsg) {
+    if (!dl || this.cdnHosts.length < 2) return false
+    const msg = String(errorMsg || '')
+    // Transport/TLS shapes only. aria2 surfaces SNI/DPI blocks as
+    // "SSL/TLS handshake failure: protocol error", plus the usual connect-level
+    // failures; never fail over on HTTP status errors (404/403/5xx) — those are
+    // forwarded verbatim and the next host would fail identically.
+    const isTransport = /handshake|protocol error|\bssl\b|\btls\b|timed?\s*out|timeout|connection|reset|refused|unreachable|could ?n.t? connect|resolve|name resolution|network|EOF/i.test(msg)
+    if (!isTransport) return false
+    const host = this._urlHost(dl.url)
+    if (!host || !this.cdnHosts.includes(host)) return false // not a CDN download
+
+    if (!dl._triedCdnHosts) dl._triedCdnHosts = new Set()
+    dl._triedCdnHosts.add(host)
+    const next = this.cdnHosts.find((h) => !dl._triedCdnHosts.has(h))
+    if (!next) {
+      this.log('warn', `[engine] CDN failover exhausted for ${dl.id} (tried ${[...dl._triedCdnHosts].join(', ')})`)
+      return false
+    }
+
+    this.log('warn', `[engine] CDN ${host} unreachable for ${dl.id} (${msg}); failing over to ${next}`)
+    // Remember the new host for the rest of the session so other downloads skip
+    // the blocked one. (Cleared back if it also fails on a later failover.)
+    this.preferredCdnHost = next
+    dl.url = this._withHost(dl.url, next)
+    dl._gid = null
+    dl.error = null
+    dl.speedBps = 0
+    dl.etaSeconds = null
+    // The blocked attempt left no usable bytes (it died at the handshake); drop
+    // any stray partial/control file so the new host starts clean.
+    safeUnlink(dl.savePath + '.aria2')
+    dl.status = 'queued'
+    if (this.activeId === dl.id) this.activeId = null
+    if (!this.queue.includes(dl.id)) this.queue.unshift(dl.id)
+    this.emit('update', this._publicView(dl))
+    this._maybeStartNext()
+    return true
   }
 
 
