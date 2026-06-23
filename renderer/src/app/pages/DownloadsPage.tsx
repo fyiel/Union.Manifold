@@ -1,14 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useDownloads, type DownloadItem } from "@/context/downloads-context"
 import { useNavigate } from "react-router-dom"
-import { useToast } from "@/context/toast-context"
 import { useGamesData } from "@/hooks/use-games"
 import { useRunningGamesSessions } from "@/hooks/use-running-games"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { getUnambiguousExecutable, matchAdminExecutable, proxyImageUrl } from "@/lib/utils"
+import { proxyImageUrl } from "@/lib/utils"
 import {
   HardDrive,
   PauseCircle,
@@ -21,9 +20,8 @@ import {
   Download,
   Play,
 } from "@/components/icons"
-import { ExePickerModal } from "@/components/ExePickerModal"
-import { DesktopShortcutModal } from "@/components/DesktopShortcutModal"
-import { GameLaunchPreflightModal, type LaunchPreflightResult } from "@/components/GameLaunchPreflightModal"
+import { useGameLaunch } from "@/context/game-launch-context"
+import type { PreferredDownloadHost } from "@/lib/downloads"
 import { CommentMarkdown } from "@/components/CommentMarkdown"
 import { gameLogger } from "@/lib/logger"
 
@@ -194,6 +192,31 @@ function ChartGradients() {
       </linearGradient>
     </defs>
   )
+}
+
+// Single source of truth for a download group's status pill (label + colour),
+// so the primary card, "Also Running" rows and the queue all read the same.
+function getPhaseStatus(phase: string, paused = false): { label: string; tone: string } {
+  const isPaused = paused || phase === "paused"
+  const label = isPaused
+    ? "Paused"
+    : phase === "installing"
+      ? "Installing"
+      : phase === "extracting"
+        ? "Extracting"
+        : phase === "verifying"
+          ? "Verifying"
+          : phase === "retrying"
+            ? "Retrying"
+            : phase === "queued"
+              ? "Queued"
+              : "Downloading"
+  const tone = isPaused
+    ? "text-amber-300 bg-amber-500/10 border-amber-500/20"
+    : phase === "installing" || phase === "extracting"
+      ? "text-sky-300 bg-sky-500/10 border-sky-500/20"
+      : "text-foreground/80 bg-white/[.06] border-white/10"
+  return { label, tone }
 }
 
 function computeGroupStats(
@@ -388,7 +411,6 @@ function SessionTimer({ startedAt }: { startedAt: number }) {
 
 export function DownloadsPage() {
   const isWindows = typeof navigator !== 'undefined' && /windows/i.test(navigator.userAgent)
-  const { toast } = useToast()
   const {
     downloads,
     startGameDownload,
@@ -466,15 +488,17 @@ export function DownloadsPage() {
   // Move the dragged queued game so it lands in `toAppid`'s slot, then persist
   // the new order. Built from the currently-displayed queue order so it stays
   // correct regardless of prior reorders.
-  const reorderQueue = (fromAppid: string, toAppid: string) => {
+  const reorderQueue = (fromAppid: string, toAppid: string, below = false) => {
     if (!fromAppid || !toAppid || fromAppid === toAppid) return
     const appids = queuedGroups.map((items) => items[0]?.appid).filter(Boolean) as string[]
     const fromIdx = appids.indexOf(fromAppid)
-    const toIdx = appids.indexOf(toAppid)
-    if (fromIdx === -1 || toIdx === -1) return
+    if (fromIdx === -1 || appids.indexOf(toAppid) === -1) return
     const next = [...appids]
     next.splice(fromIdx, 1)
-    next.splice(toIdx, 0, fromAppid)
+    // Re-find the target after removal so indices stay correct, then insert
+    // before it (above) or after it (below — also reaches the end of the list).
+    const insertIdx = next.indexOf(toAppid) + (below ? 1 : 0)
+    next.splice(insertIdx, 0, fromAppid)
     reorderQueuedGroups(next)
   }
 
@@ -502,21 +526,11 @@ export function DownloadsPage() {
   const [peakSpeed, setPeakSpeed] = useState(
     _persistedForAppId === currentAppId ? _persistedPeakSpeed : 0
   )
-  const [exePickerOpen, setExePickerOpen] = useState(false)
-  const [exePickerTitle, setExePickerTitle] = useState("")
-  const [exePickerMessage, setExePickerMessage] = useState("")
-  const [exePickerAppId, setExePickerAppId] = useState<string | null>(null)
-  const [exePickerGameName, setExePickerGameName] = useState<string | null>(null)
-  const [exePickerFolder, setExePickerFolder] = useState<string | null>(null)
-  const [exePickerExes, setExePickerExes] = useState<Array<{ name: string; path: string; size?: number; depth?: number }>>([])
   const [retryingAppId, setRetryingAppId] = useState<string | null>(null)
   const [runningGames, setRunningGames] = useState<Array<{ appid: string; gameName: string; pid: number }>>([])
-  const [pendingExePath, setPendingExePath] = useState<string | null>(null)
-  const [pendingAppId, setPendingAppId] = useState<string | null>(null);
-  const [shortcutModalOpen, setShortcutModalOpen] = useState(false)
-  const [shortcutModalAlwaysCreate, setShortcutModalAlwaysCreate] = useState(false)
-  const [launchPreflightOpen, setLaunchPreflightOpen] = useState(false)
-  const [launchPreflightResult, setLaunchPreflightResult] = useState<LaunchPreflightResult | null>(null)
+  // Launch picker / shortcut / preflight / failed modals are mounted once at the
+  // app root by GameLaunchProvider; the page just calls into it.
+  const { requestLaunch, stopGame } = useGameLaunch()
   const [installingAppId, setInstallingAppId] = useState<string | null>(null)
   // Drag-and-drop reordering of the "Up Next" queue. `draggingAppid` is the
   // game currently being dragged; `dragOverAppid` is the card it's hovering so
@@ -524,6 +538,9 @@ export function DownloadsPage() {
   // new slot and persist the order via reorderQueuedGroups.
   const [draggingAppid, setDraggingAppid] = useState<string | null>(null)
   const [dragOverAppid, setDragOverAppid] = useState<string | null>(null)
+  // Whether the drop would land below (vs above) the hovered row — drives the
+  // insertion-line indicator and lets the user drop a game at the very end.
+  const [dragOverBelow, setDragOverBelow] = useState(false)
   const [spacePrompt, setSpacePrompt] = useState<SpacePromptState | null>(null)
   const [selectedSpaceDriveId, setSelectedSpaceDriveId] = useState("")
   const [switchingDrive, setSwitchingDrive] = useState(false)
@@ -741,104 +758,6 @@ export function DownloadsPage() {
     return peakSpeed
   }, [networkHistory, peakSpeed])
 
-  const getSavedExe = async (appid: string) => {
-    if (!window.ucSettings?.get) return null
-    try {
-      return await window.ucSettings.get(`gameExe:${appid}`)
-    } catch {
-      return null
-    }
-  }
-
-  const setSavedExe = async (appid: string, path: string | null) => {
-    if (!window.ucSettings?.set) return
-    try {
-      await window.ucSettings.set(`gameExe:${appid}`, path || null)
-    } catch {}
-  }
-
-  const getShortcutAskedForGame = async (appid: string) => {
-    if (!window.ucSettings?.get) return false
-    try {
-      return await window.ucSettings.get(`shortcutAsked:${appid}`)
-    } catch {
-      return false
-    }
-  }
-
-  const setShortcutAskedForGame = async (appid: string) => {
-    if (!window.ucSettings?.set) return
-    try {
-      await window.ucSettings.set(`shortcutAsked:${appid}`, true)
-    } catch {}
-  }
-
-  const getAlwaysCreateShortcut = async () => {
-    if (!window.ucSettings?.get) return false
-    try {
-      return await window.ucSettings.get('alwaysCreateDesktopShortcut')
-    } catch {
-      return false
-    }
-  }
-
-  const setAlwaysCreateShortcut = async (value: boolean) => {
-    if (!window.ucSettings?.set) return
-    try {
-      await window.ucSettings.set('alwaysCreateDesktopShortcut', value)
-    } catch {}
-  }
-
-  const createDesktopShortcut = async (appid: string, exePath?: string | null) => {
-    if (!window.ucDownloads?.createDesktopShortcut) return
-    const game = games.find((g) => g.appid === appid)
-    if (!game) return
-    try {
-      const result = await window.ucDownloads.createDesktopShortcut(game.name, appid, exePath || undefined)
-      if (result?.ok) {
-        gameLogger.info('Desktop shortcut created', { appid })
-      } else {
-        gameLogger.error('Failed to create desktop shortcut', { data: result })
-      }
-    } catch (err) {
-      gameLogger.error('Error creating desktop shortcut', { data: err })
-    }
-  }
-
-  const openExePicker = (appid: string, gameName: string, exes: Array<{ name: string; path: string; size?: number; depth?: number }>, folder?: string | null, message?: string) => {
-    setExePickerTitle("Select executable")
-    setExePickerMessage(message || `We couldn't confidently detect the correct exe for "${gameName}". Please choose the one to launch.`)
-    setExePickerAppId(appid)
-    setExePickerGameName(gameName)
-    setExePickerFolder(folder || null)
-    setExePickerExes(exes)
-    setExePickerOpen(true)
-  }
-
-  const runLaunchPreflight = async (appid: string, path: string) => {
-    const result = await window.ucDownloads?.preflightGameLaunch?.(appid, path)
-    if (!result?.ok) return true
-    if (result.canLaunch && result.checks.length === 0) return true
-
-    setPendingAppId(appid)
-    setPendingExePath(path)
-    setLaunchPreflightResult(result)
-    setLaunchPreflightOpen(true)
-    return false
-  }
-
-  const reopenExecutablePicker = async () => {
-    if (!pendingAppId) return
-    const game = games.find((entry) => entry.appid === pendingAppId)
-    if (!game || !window.ucDownloads?.listGameExecutables) return
-
-    try {
-      const result = await window.ucDownloads.listGameExecutables(pendingAppId)
-      openExePicker(pendingAppId, game.name, result?.exes || [], result?.folder || null)
-    } finally {
-      setLaunchPreflightOpen(false)
-    }
-  }
 
   const handleRetry = async (appid?: string) => {
     if (!appid) return
@@ -846,13 +765,17 @@ export function DownloadsPage() {
     if (!game) return
     setRetryingAppId(appid)
     try {
-      // Re-resolve a fresh URL and enqueue through the aria2 engine.
-      const { requestDownloadToken, fetchDownloadLinks, selectHost, resolveDownloadUrl } = await import("@/lib/downloads")
+      // Re-resolve a fresh URL and enqueue through the aria2 engine. Honor the
+      // user's preferred download host instead of always forcing ucfiles —
+      // retry should behave like a fresh download from the host they chose.
+      const { requestDownloadToken, fetchDownloadLinks, selectHost, resolveDownloadUrl, getPreferredDownloadHost } = await import("@/lib/downloads")
+      let preferredHost: PreferredDownloadHost = "ucfiles"
+      try { preferredHost = await getPreferredDownloadHost() } catch { /* keep default */ }
       const token = await requestDownloadToken(appid)
       const links = await fetchDownloadLinks(appid, token)
-      const sourceUrl = links.redirectUrl || selectHost(links.hosts, "ucfiles").links[0]?.url
+      const sourceUrl = links.redirectUrl || selectHost(links.hosts, preferredHost).links[0]?.url
       if (!sourceUrl) throw new Error("No download link available")
-      const resolved = await resolveDownloadUrl("ucfiles", sourceUrl)
+      const resolved = await resolveDownloadUrl(preferredHost, sourceUrl)
       const finalUrl = resolved?.resolved ? resolved.url : sourceUrl
 
       // Reuse the existing downloadId so the UI row updates in-place.
@@ -939,123 +862,20 @@ export function DownloadsPage() {
     }
   }
 
-  const launchGame = async (appid: string, path: string) => {
-    if (!window.ucDownloads?.launchGameExecutable) return
-    const game = games.find((g) => g.appid === appid)
-    const gameName = game?.name || appid
-    const showGameName = await window.ucSettings?.get?.('rpcShowGameName') ?? true
-    const res = await window.ucDownloads.launchGameExecutable(appid, path, gameName, showGameName)
-    if (res && res.ok) {
-      await setSavedExe(appid, path)
-      setExePickerOpen(false)
-      setShortcutModalOpen(false)
-      setPendingExePath(null)
-      setPendingAppId(null)
-    } else {
-      // Previously silent — clicking Play on a broken exe did nothing. Surface
-      // the failure with an action to re-pick the executable.
-      toast(
-        res?.error ? `Couldn't launch ${gameName}: ${res.error}` : `Couldn't launch ${gameName}.`,
-        "error",
-        { action: { label: "Pick executable", onClick: () => { void handleLaunch(appid, gameName) } } },
-      )
-    }
-  }
-
-  const handleLaunchWithShortcutCheck = async (appid: string, path: string, options?: { skipPreflight?: boolean }) => {
-    if (!options?.skipPreflight) {
-      const passed = await runLaunchPreflight(appid, path)
-      if (!passed) return
-    }
-
-    // Check if we should show shortcut modal BEFORE launching
-    const alreadyAsked = await getShortcutAskedForGame(appid)
-    const alwaysCreate = await getAlwaysCreateShortcut()
-    
-    if (alwaysCreate && !alreadyAsked) {
-      // Auto-create shortcut without asking, then launch
-      await createDesktopShortcut(appid, path)
-      await setShortcutAskedForGame(appid)
-      await launchGame(appid, path)
-    } else if (!alreadyAsked && !alwaysCreate) {
-      // Show the shortcut prompt BEFORE launching
-      setPendingExePath(path)
-      setPendingAppId(appid)
-      setShortcutModalAlwaysCreate(false)
-      setExePickerOpen(false)
-      setShortcutModalOpen(true)
-    } else {
-      // No shortcut needed, just launch
-      await launchGame(appid, path)
-    }
-  }
-
-  const handleExePicked = async (path: string) => {
-    if (!exePickerAppId) return
-    setPendingExePath(path)
-    setPendingAppId(exePickerAppId)
-    await handleLaunchWithShortcutCheck(exePickerAppId, path)
-  }
-
+  // Launching now goes through the shared GameLaunchProvider — resolve exe →
+  // preflight → shortcut prompt → launch → quick-exit watch, with one portaled
+  // picker mounted at the app root.
   const handleLaunch = async (appid: string, gameName: string, fallbackPath?: string) => {
     if (!appid) return
-    if (!window.ucDownloads?.listGameExecutables || !window.ucDownloads?.launchGameExecutable) {
-      if (fallbackPath) openPath(fallbackPath)
-      return
-    }
-    try {
-      const savedExe = await getSavedExe(appid)
-      
-      if (savedExe) {
-        await handleLaunchWithShortcutCheck(appid, savedExe)
-        return
-      }
-      
-      const result = await window.ucDownloads.listGameExecutables(appid)
-      const exes = result?.exes || []
-      const folder = result?.folder || null
-
-      // Prefer the executable staff set in the admin panel (persisted into the
-      // installed manifest at download time), then the picker — never a silent
-      // heuristic guess.
-      const game = games.find((g) => g.appid === appid)
-      const adminExe = matchAdminExecutable(exes, (game as { game_executable_path?: string | null } | undefined)?.game_executable_path, folder)
-      if (adminExe) {
-        await handleLaunchWithShortcutCheck(appid, adminExe.path)
-        return
-      }
-
-      // Single unambiguous exe → launch directly; ambiguous → picker.
-      const single = getUnambiguousExecutable(exes)
-      if (single) {
-        await handleLaunchWithShortcutCheck(appid, single.path)
-        return
-      }
-
-      openExePicker(
-        appid,
-        gameName,
-        exes,
-        folder,
-        exes.length
-          ? `Our team hasn't set the launch file for "${gameName}" yet. Pick the executable to run — usually the largest, named after the game.`
-          : undefined,
-      )
-    } catch {
-      openExePicker(appid, gameName, [], null, `Unable to list executables for "${gameName}".`)
-    }
+    const found = games.find((g) => g.appid === appid)
+    if (found) { await requestLaunch(found); return }
+    if (gameName) { await requestLaunch({ appid, name: gameName }); return }
+    if (fallbackPath) openPath(fallbackPath)
   }
 
   const handleQuitGame = async (appid: string) => {
-    if (!window.ucDownloads?.quitGameExecutable) return
-    try {
-      const result = await window.ucDownloads.quitGameExecutable(appid)
-      if (result?.ok && result.stopped) {
-        setRunningGames((prev) => prev.filter((g) => g.appid !== appid))
-      }
-    } catch (err) {
-      gameLogger.error('Failed to quit game', { data: err })
-    }
+    await stopGame(appid)
+    setRunningGames((prev) => prev.filter((g) => g.appid !== appid))
   }
 
   const isCompletelyIdle =
@@ -1263,13 +1083,8 @@ export function DownloadsPage() {
 
                     {/* Meta chips */}
                     <div className="flex flex-wrap items-center gap-1.5">
-                      <span className="rounded-full border border-white/10 bg-card/70 px-2.5 py-0.5 text-[11px] font-medium text-foreground/80 backdrop-blur-sm">
-                        {primaryStats?.phase === "queued" ? "Queued" :
-                         primaryStats?.phase === "paused" ? "Paused" :
-                         primaryStats?.phase === "verifying" ? "Verifying" :
-                         primaryStats?.phase === "retrying" ? "Retrying" :
-                         primaryStats?.phase === "installing" || primaryStats?.phase === "extracting" ? "Installing" :
-                         "Downloading"}
+                      <span className={`rounded-full border px-2.5 py-0.5 text-[11px] font-medium backdrop-blur-sm ${getPhaseStatus(primaryStats.phase, primaryIsPaused).tone}`}>
+                        {getPhaseStatus(primaryStats.phase, primaryIsPaused).label}
                       </span>
                       {primaryGame?.version && (
                         <span className="rounded-full border border-white/10 bg-card/70 px-2.5 py-0.5 text-[11px] font-mono text-foreground/80 backdrop-blur-sm">
@@ -1469,20 +1284,7 @@ export function DownloadsPage() {
               const game = appid ? games.find((g) => g.appid === appid) : null
               const canPause = groupCanPause(items)
               const isPausedGroup = groupIsPaused(items, phase)
-              const groupStatus = phase === "installing"
-                ? "Installing"
-                : phase === "extracting"
-                  ? "Extracting"
-                  : phase === "paused"
-                    ? "Paused"
-                    : phase === "verifying"
-                      ? "Verifying"
-                      : phase === "retrying"
-                        ? "Retrying"
-                        : "Downloading"
-              const statusTone = phase === "paused" ? "text-amber-300 bg-amber-500/10 border-amber-500/20"
-                : phase === "installing" || phase === "extracting" ? "text-sky-300 bg-sky-500/10 border-sky-500/20"
-                : "text-foreground/80 bg-white/[.06] border-white/10"
+              const { label: groupStatus, tone: statusTone } = getPhaseStatus(phase, isPausedGroup)
 
               return (
                 <div
@@ -1619,6 +1421,12 @@ export function DownloadsPage() {
               {queuedGroups.length}
             </Badge>
           </div>
+          {queuedGroups.length > 1 && (
+            <span className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground/70">
+              <GripVertical className="h-3.5 w-3.5" />
+              Drag to reorder
+            </span>
+          )}
         </div>
 
         <div className="space-y-2.5">
@@ -1641,13 +1449,10 @@ export function DownloadsPage() {
             const appid = items[0]?.appid
             const game = appid ? games.find((g) => g.appid === appid) : null
             const queuedOnly = items.every((item) => item.status === "queued")
-            const groupStatus = items.some((item) => item.status === "paused")
-              ? "Paused"
-              : phase === "installing"
-                ? "Installing"
-                : phase === "extracting"
-                  ? "Extracting"
-                  : "Queued"
+            const { label: groupStatus, tone: groupStatusTone } = getPhaseStatus(
+              queuedOnly ? "queued" : phase,
+              items.some((item) => item.status === "paused"),
+            )
 
             const canReorder = queuedGroups.length > 1
             const isDragging = draggingAppid === appid
@@ -1663,36 +1468,51 @@ export function DownloadsPage() {
                   e.dataTransfer.effectAllowed = "move"
                 }}
                 onDragOver={(e) => {
-                  if (!canReorder || !draggingAppid) return
+                  if (!canReorder || !draggingAppid || !appid) return
                   e.preventDefault()
                   e.dataTransfer.dropEffect = "move"
-                  if (appid && appid !== dragOverAppid) setDragOverAppid(appid)
+                  // Decide insert-above vs insert-below from the cursor's
+                  // position within the row so the indicator tracks the drop.
+                  const rect = e.currentTarget.getBoundingClientRect()
+                  const below = e.clientY > rect.top + rect.height / 2
+                  if (appid !== dragOverAppid || below !== dragOverBelow) {
+                    setDragOverAppid(appid)
+                    setDragOverBelow(below)
+                  }
                 }}
                 onDrop={(e) => {
                   if (!canReorder || !draggingAppid || !appid) return
                   e.preventDefault()
-                  reorderQueue(draggingAppid, appid)
+                  reorderQueue(draggingAppid, appid, dragOverBelow)
                   setDraggingAppid(null)
                   setDragOverAppid(null)
+                  setDragOverBelow(false)
                 }}
                 onDragEnd={() => {
                   setDraggingAppid(null)
                   setDragOverAppid(null)
+                  setDragOverBelow(false)
                 }}
-                className={`group overflow-hidden rounded-2xl border bg-card/60 backdrop-blur-sm transition-all hover:border-border ${
+                className={`group relative overflow-hidden rounded-2xl border bg-card/60 backdrop-blur-sm transition-all ${
                   isDragging
-                    ? "border-primary/60 opacity-50"
-                    : isDragOver
-                      ? "border-primary/60 ring-1 ring-primary/40"
-                      : "border-white/[.07]"
+                    ? "border-primary/50 opacity-40 scale-[0.98] ring-2 ring-primary/30"
+                    : "border-white/[.07] hover:border-border"
                 }`}
               >
+                {/* Insertion indicator — a glowing line at the row edge showing
+                    exactly where the dragged game will land on drop. */}
+                {isDragOver && (
+                  <span
+                    aria-hidden
+                    className={`pointer-events-none absolute inset-x-2 z-10 h-[3px] rounded-full bg-primary shadow-[0_0_10px_1px] shadow-primary/70 ${dragOverBelow ? "bottom-0" : "top-0"}`}
+                  />
+                )}
                 <div className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center">
                   {/* Game Info */}
                   <div className="flex items-center gap-4 sm:w-[280px]">
                     {canReorder && (
                       <span
-                        className="flex-shrink-0 cursor-grab text-muted-foreground/40 transition-colors hover:text-muted-foreground active:cursor-grabbing"
+                        className="flex h-8 w-6 flex-shrink-0 cursor-grab items-center justify-center rounded-md text-muted-foreground/50 transition-colors hover:bg-white/[.06] hover:text-foreground active:cursor-grabbing"
                         title="Drag to reorder the queue"
                         aria-label="Drag to reorder"
                       >
@@ -1713,11 +1533,7 @@ export function DownloadsPage() {
                         {game?.version && (
                           <span className="rounded bg-secondary/80 px-1.5 py-0.5 font-mono">{game.version}</span>
                         )}
-                        <span className={`rounded px-1.5 py-0.5 ${
-                          groupStatus === "Paused" 
-                            ? "bg-amber-500/10 text-amber-400" 
-                            : "bg-secondary/80 text-muted-foreground"
-                        }`}>
+                        <span className={`rounded-full border px-2 py-0.5 font-medium ${groupStatusTone}`}>
                           {groupStatus}
                         </span>
                       </div>
@@ -2161,75 +1977,6 @@ export function DownloadsPage() {
         </div>
       )}
 
-      <ExePickerModal
-        open={exePickerOpen}
-        title={exePickerTitle}
-        message={exePickerMessage}
-        exes={exePickerExes}
-        gameName={exePickerGameName || undefined}
-        baseFolder={exePickerFolder}
-        onSelect={handleExePicked}
-        onClose={() => setExePickerOpen(false)}
-      />
-      <DesktopShortcutModal
-        open={shortcutModalOpen}
-        gameName={games.find((g) => g.appid === pendingAppId)?.name || "Game"}
-        defaultAlwaysCreate={shortcutModalAlwaysCreate}
-        onCreateShortcut={async (alwaysCreate) => {
-          if (alwaysCreate) {
-            await setAlwaysCreateShortcut(true)
-          }
-          if (pendingExePath && pendingAppId) {
-            await createDesktopShortcut(pendingAppId, pendingExePath)
-            await setShortcutAskedForGame(pendingAppId)
-            await launchGame(pendingAppId, pendingExePath)
-          }
-        }}
-        onSkip={async (alwaysCreate) => {
-          if (alwaysCreate) {
-            await setAlwaysCreateShortcut(true)
-          }
-          if (pendingAppId) {
-            await setShortcutAskedForGame(pendingAppId)
-          }
-          if (pendingExePath && pendingAppId) {
-            await launchGame(pendingAppId, pendingExePath)
-          }
-        }}
-        onClose={async (alwaysCreate) => {
-          if (alwaysCreate) {
-            await setAlwaysCreateShortcut(true)
-          }
-          if (pendingAppId) {
-            await setShortcutAskedForGame(pendingAppId)
-          }
-          setShortcutModalOpen(false)
-          setPendingExePath(null)
-          setPendingAppId(null)
-          setShortcutModalAlwaysCreate(false)
-        }}
-      />
-      <GameLaunchPreflightModal
-        open={launchPreflightOpen}
-        gameName={games.find((g) => g.appid === pendingAppId)?.name || 'Game'}
-        result={launchPreflightResult}
-        onClose={() => {
-          setLaunchPreflightOpen(false)
-          setLaunchPreflightResult(null)
-          setPendingExePath(null)
-          setPendingAppId(null)
-        }}
-        onChooseAnother={reopenExecutablePicker}
-        onContinue={launchPreflightResult?.canLaunch && pendingExePath && pendingAppId
-          ? async () => {
-              const nextPath = pendingExePath
-              const nextAppId = pendingAppId
-              setLaunchPreflightOpen(false)
-              setLaunchPreflightResult(null)
-              await handleLaunchWithShortcutCheck(nextAppId, nextPath, { skipPreflight: true })
-            }
-          : undefined}
-      />
     </div>
   )
 }

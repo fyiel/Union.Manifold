@@ -10,22 +10,17 @@ import {
   Flame,
   Play,
 } from "@/components/icons"
-import { formatNumber, getCardImage, getUnambiguousExecutable, hasOnlineMode, isGameVersionUpdate, matchAdminExecutable, proxyImageUrl, timeAgo } from "@/lib/utils"
-import { reportPlayEvent } from "@/lib/cloud-collections"
+import { formatNumber, getCardImage, hasOnlineMode, isGameVersionUpdate, proxyImageUrl, timeAgo } from "@/lib/utils"
 import { GameActionContextMenu } from "@/components/GameActionMenu"
 import { useDownloads, useDownloadsSelector } from "@/context/downloads-context"
+import { useGameLaunch } from "@/context/game-launch-context"
 import { apiUrl } from "@/lib/api"
 import { useNsfwReveal } from "@/hooks/use-nsfw-reveal"
 import { useRunningGame } from "@/hooks/use-running-games"
 import { useUniversalGameMenuProps } from "@/hooks/use-universal-game-menu"
 import { schedulePrefetchGameDetail } from "@/lib/game-detail-prefetch"
 import { isImageKnownBad, markImageFailed, forgetImageFailure } from "@/lib/image-failure-cache"
-import { ExePickerModal } from "@/components/ExePickerModal"
-import { DesktopShortcutModal } from "@/components/DesktopShortcutModal"
-import { GameLaunchFailedModal } from "@/components/GameLaunchFailedModal"
-import { GameLaunchPreflightModal, type LaunchPreflightResult } from "@/components/GameLaunchPreflightModal"
 import { GameArtAura } from "@/components/game-art-aura"
-import { gameLogger } from "@/lib/logger"
 
 interface GameCardProps {
   game: {
@@ -120,26 +115,16 @@ export const GameCard = memo(function GameCard({
   // subscription, then push-based updates via ucPresence.onChanged). Replaces
   // the per-card 60s polling loop that used to fire ~N IPC calls/minute on a
   // populated library grid.
-  const cachedRunning = useRunningGame(isInstalled ? game.appid : null)
-  const [isRunning, setIsRunning] = useState(false)
-  // Keep the local isRunning in sync with the cache, but allow launchGame() to
-  // optimistically flip it true before the presence event lands.
-  useEffect(() => { setIsRunning(cachedRunning) }, [cachedRunning])
+  // Running state comes straight from the shared running-games cache. The
+  // central GameLaunchProvider flips it optimistically (setRunningOptimistic)
+  // on launch/stop, so the card no longer needs a local mirror or its own
+  // quick-exit watch.
+  const isRunning = useRunningGame(isInstalled ? game.appid : null)
   const [imageLoaded, setImageLoaded] = useState(false)
   const [imageFailed, setImageFailed] = useState(false)
   const [imageCandidateIndex, setImageCandidateIndex] = useState(0)
-  const [exePickerOpen, setExePickerOpen] = useState(false)
-  const [exePickerExes, setExePickerExes] = useState<Array<{ name: string; path: string; size?: number; depth?: number }>>([])
-  const [exePickerFolder, setExePickerFolder] = useState<string | null>(null)
-  const [pendingExePath, setPendingExePath] = useState<string | null>(null)
-  const [shortcutModalOpen, setShortcutModalOpen] = useState(false)
-  const [shortcutModalAlwaysCreate, setShortcutModalAlwaysCreate] = useState(false)
-  const [gameStartFailedOpen, setGameStartFailedOpen] = useState(false)
-  const [launchPreflightOpen, setLaunchPreflightOpen] = useState(false)
-  const [launchPreflightResult, setLaunchPreflightResult] = useState<LaunchPreflightResult | null>(null)
-  const gameJustLaunchedRef = useRef<number>(0)
-  const gameQuickExitUnsubRef = useRef<(() => void) | null>(null)
   const prefetchCancelRef = useRef<(() => void) | null>(null)
+  const { requestLaunch, stopGame } = useGameLaunch()
 
   useEffect(() => {
     let mounted = true
@@ -170,30 +155,8 @@ export const GameCard = memo(function GameCard({
     }
   }, [game.appid])
 
-  // The dedicated per-card running poll has been replaced by the shared
-  // useRunningGame() hook above (single IPC for the whole grid + push-based
-  // updates). Leaving the effect here as a deliberate no-op so future edits
-  // know not to re-introduce polling.
-
-  // If the running state flips to false within the quick-exit window, show the modal
-  useEffect(() => {
-    if (isRunning || !(gameJustLaunchedRef.current > Date.now())) return
-    gameJustLaunchedRef.current = 0
-    try { gameQuickExitUnsubRef.current?.() } catch { }
-    gameQuickExitUnsubRef.current = null
-    setGameStartFailedOpen(true)
-  }, [isRunning])
-
-  // Drop the quick-exit subscription if the card unmounts (grid re-renders,
-  // navigation) before the event arrives — we now accept it past the 12 s
-  // window, so an orphaned listener could setState on an unmounted card.
-  useEffect(() => {
-    return () => {
-      try { gameQuickExitUnsubRef.current?.() } catch { }
-      gameQuickExitUnsubRef.current = null
-      gameJustLaunchedRef.current = 0
-    }
-  }, [])
+  // Running poll + quick-exit detection now live in the shared running-games
+  // cache and the central GameLaunchProvider respectively — nothing per-card.
 
   const fetchStatsOnHover = useCallback(async () => {
     if (initialStats && (initialStats.downloads > 0 || initialStats.views > 0)) {
@@ -223,180 +186,6 @@ export const GameCard = memo(function GameCard({
 
   const { isQueued, isInstalling } = downloadState
 
-  const getSavedExe = async () => {
-    if (!window.ucSettings?.get) return null
-    try {
-      return await window.ucSettings.get(`gameExe:${game.appid}`)
-    } catch {
-      return null
-    }
-  }
-
-  const setSavedExe = async (path: string | null) => {
-    if (!window.ucSettings?.set) return
-    try {
-      await window.ucSettings.set(`gameExe:${game.appid}`, path || null)
-    } catch { }
-  }
-
-  const getShortcutAskedForGame = async () => {
-    if (!window.ucSettings?.get) return false
-    try {
-      return await window.ucSettings.get(`shortcutAsked:${game.appid}`)
-    } catch {
-      return false
-    }
-  }
-
-  const setShortcutAskedForGame = async () => {
-    if (!window.ucSettings?.set) return
-    try {
-      await window.ucSettings.set(`shortcutAsked:${game.appid}`, true)
-    } catch { }
-  }
-
-  const getAlwaysCreateShortcut = async () => {
-    if (!window.ucSettings?.get) return false
-    try {
-      return await window.ucSettings.get('alwaysCreateDesktopShortcut')
-    } catch {
-      return false
-    }
-  }
-
-  const setAlwaysCreateShortcut = async (value: boolean) => {
-    if (!window.ucSettings?.set) return
-    try {
-      await window.ucSettings.set('alwaysCreateDesktopShortcut', value)
-    } catch { }
-  }
-
-  const createDesktopShortcut = async (exePath?: string | null) => {
-    if (!window.ucDownloads?.createDesktopShortcut) return
-    try {
-      const result = await window.ucDownloads.createDesktopShortcut(game.name, game.appid, exePath || undefined)
-      if (result?.ok) {
-        gameLogger.info('Desktop shortcut created', { appid: game.appid })
-      } else {
-        gameLogger.error('Failed to create desktop shortcut', { data: result })
-      }
-    } catch (err) {
-      gameLogger.error('Error creating desktop shortcut', { data: err })
-    }
-  }
-
-  const listGameExecutables = async () => {
-    if (!window.ucDownloads?.listGameExecutables) return null
-    return await window.ucDownloads.listGameExecutables(game.appid)
-  }
-
-  const openExePicker = (exes: Array<{ name: string; path: string; size?: number; depth?: number }>, folder?: string | null) => {
-    setExePickerExes(exes)
-    setExePickerFolder(folder || null)
-    setExePickerOpen(true)
-  }
-
-  const runLaunchPreflight = async (path: string) => {
-    const result = await window.ucDownloads?.preflightGameLaunch?.(game.appid, path)
-    if (!result?.ok) return true
-    if (result.canLaunch && result.checks.length === 0) return true
-
-    setPendingExePath(path)
-    setLaunchPreflightResult(result)
-    setLaunchPreflightOpen(true)
-    return false
-  }
-
-  const reopenExecutablePicker = async () => {
-    try {
-      const result = await listGameExecutables()
-      const exes = result?.exes || []
-      const folder = result?.folder || null
-      setLaunchPreflightOpen(false)
-      openExePicker(exes, folder)
-    } catch {
-      setLaunchPreflightOpen(false)
-    }
-  }
-
-  const launchGame = async (path: string) => {
-    if (!window.ucDownloads?.launchGameExecutable) return
-    const showGameName = await window.ucSettings?.get?.('rpcShowGameName') ?? true
-    const res = await window.ucDownloads.launchGameExecutable(game.appid, path, game.name, showGameName)
-    if (res && res.ok) {
-      // Fire-and-forget: record a 'play' event for the account so the
-      // recently-played view stays current across devices.
-      void reportPlayEvent(game.appid, "play")
-      await setSavedExe(path)
-      setIsRunning(true)
-      setExePickerOpen(false)
-      setShortcutModalOpen(false)
-      setPendingExePath(null)
-      setGameStartFailedOpen(false)
-
-      // Quick-exit detection window: 12 seconds after launch
-      gameJustLaunchedRef.current = Date.now() + 12000
-
-      const showStartFailedModal = () => {
-        setIsRunning(false)
-        setGameStartFailedOpen(true)
-      }
-
-      // The main process is authoritative for quick-exit detection — it only
-      // emits this for a genuine quick exit (game died <5 s after launch, no
-      // launcher handoff). Because of the Windows handoff grace the event can
-      // land AFTER our 12 s wall-clock window, so trust it while still armed
-      // (ref !== 0) instead of re-checking the deadline (which used to swallow
-      // it, so the "couldn't start" modal stopped appearing).
-      try { gameQuickExitUnsubRef.current?.() } catch { }
-      gameQuickExitUnsubRef.current = window.ucDownloads?.onGameQuickExit?.((data) => {
-        if (data?.appid !== game.appid) return
-        if (gameJustLaunchedRef.current === 0) return
-        gameJustLaunchedRef.current = 0
-        try { gameQuickExitUnsubRef.current?.() } catch { }
-        gameQuickExitUnsubRef.current = null
-        void showStartFailedModal()
-      }) ?? null
-    } else {
-      // Launch failed outright — surface it instead of silently doing nothing
-      // (this was the "click Play on the activity/card and nothing happens" bug).
-      setIsRunning(false)
-      setGameStartFailedOpen(true)
-    }
-  }
-
-  const handleLaunchWithShortcutCheck = async (path: string, options?: { skipPreflight?: boolean }) => {
-    if (!options?.skipPreflight) {
-      const passed = await runLaunchPreflight(path)
-      if (!passed) return
-    }
-
-    // Check if we should show shortcut modal BEFORE launching
-    const alreadyAsked = await getShortcutAskedForGame()
-    const alwaysCreate = await getAlwaysCreateShortcut()
-
-    if (alwaysCreate && !alreadyAsked) {
-      // Auto-create shortcut without asking, then launch
-      await createDesktopShortcut(path)
-      await setShortcutAskedForGame()
-      await launchGame(path)
-    } else if (!alreadyAsked && !alwaysCreate) {
-      // Show the shortcut prompt BEFORE launching
-      setPendingExePath(path)
-      setShortcutModalAlwaysCreate(false)
-      setExePickerOpen(false)
-      setShortcutModalOpen(true)
-    } else {
-      // No shortcut needed, just launch
-      await launchGame(path)
-    }
-  }
-
-  const handleExePicked = async (path: string) => {
-    setPendingExePath(path)
-    await handleLaunchWithShortcutCheck(path)
-  }
-
   const handlePlayClick = async (event: MouseEvent) => {
     event.preventDefault()
     event.stopPropagation()
@@ -411,71 +200,14 @@ export const GameCard = memo(function GameCard({
       return
     }
 
-    // If game is running, stop it
-    if (isRunning && window.ucDownloads?.quitGameExecutable) {
-      try {
-        gameJustLaunchedRef.current = 0
-        try { gameQuickExitUnsubRef.current?.() } catch { }
-        gameQuickExitUnsubRef.current = null
-        const result = await window.ucDownloads.quitGameExecutable(game.appid)
-        if (result?.ok && result.stopped) {
-          setIsRunning(false)
-        }
-      } catch (err) {
-        gameLogger.error('Failed to quit game', { data: err })
-      }
+    // Running → stop, otherwise launch. Both go through the shared
+    // GameLaunchProvider (resolve exe → preflight → shortcut → launch →
+    // quick-exit), which renders the single, portaled picker at the app root.
+    if (isRunning) {
+      void stopGame(game.appid)
       return
     }
-
-    if (!window.ucDownloads?.listGameExecutables || !window.ucDownloads?.launchGameExecutable) {
-      if (installedPath) openPath(installedPath)
-      return
-    }
-    try {
-      const savedExe = await getSavedExe()
-
-      if (savedExe) {
-        // Saved exe paths go stale after an update re-extracts the game. If the
-        // path no longer resolves, clear it and re-detect rather than dead-ending
-        // on the "executable no longer exists" modal.
-        const pre = await window.ucDownloads?.preflightGameLaunch?.(game.appid, savedExe)
-        const exeMissing = pre?.ok && pre.checks?.some((c) => c.code === "exe-not-found")
-        if (exeMissing) {
-          await setSavedExe(null)
-        } else {
-          await handleLaunchWithShortcutCheck(savedExe)
-          return
-        }
-      }
-
-      const result = await listGameExecutables()
-      if (!result) {
-        if (installedPath) openPath(installedPath)
-        return
-      }
-      const exes = result?.exes || []
-      const folder = result?.folder || null
-      const browseFolder = folder
-
-      // Prefer the admin-selected executable for our release over the heuristic.
-      const adminExe = matchAdminExecutable(exes, game.game_executable_path, folder)
-      if (adminExe) {
-        await handleLaunchWithShortcutCheck(adminExe.path)
-        return
-      }
-
-      // No admin exe set. A single unambiguous executable launches directly;
-      // anything ambiguous (2+ candidates) opens the picker rather than
-      // guessing the wrong file.
-      const single = getUnambiguousExecutable(exes)
-      if (single) {
-        await handleLaunchWithShortcutCheck(single.path)
-        return
-      }
-      openExePicker(exes, browseFolder)
-    } catch {
-      if (installedPath) openPath(installedPath)
-    }
+    void requestLaunch(game)
   }
 
   // Universal right-click menu. All surfaces (GameCard, GameCardCompact,
@@ -789,87 +521,9 @@ export const GameCard = memo(function GameCard({
           </div>
         </div>
       </Link>
-      <ExePickerModal
-        open={exePickerOpen}
-        title="Select executable"
-        message={`Pick the executable to launch for "${game.name}" — usually the largest one named after the game. Your choice is saved for next time.`}
-        exes={exePickerExes}
-        gameName={game.name}
-        baseFolder={exePickerFolder}
-        onSelect={handleExePicked}
-        onClose={() => setExePickerOpen(false)}
-      />
-      <DesktopShortcutModal
-        open={shortcutModalOpen}
-        gameName={game.name}
-        defaultAlwaysCreate={shortcutModalAlwaysCreate}
-        onCreateShortcut={async (alwaysCreate) => {
-          if (alwaysCreate) {
-            await setAlwaysCreateShortcut(true)
-          }
-          if (pendingExePath) {
-            await createDesktopShortcut(pendingExePath)
-            await setShortcutAskedForGame()
-            await launchGame(pendingExePath)
-          }
-        }}
-        onSkip={async (alwaysCreate) => {
-          if (alwaysCreate) {
-            await setAlwaysCreateShortcut(true)
-          }
-          await setShortcutAskedForGame()
-          if (pendingExePath) {
-            await launchGame(pendingExePath)
-          }
-        }}
-        onClose={async (alwaysCreate) => {
-          if (alwaysCreate) {
-            await setAlwaysCreateShortcut(true)
-          }
-          await setShortcutAskedForGame()
-          setShortcutModalOpen(false)
-          setPendingExePath(null)
-          setShortcutModalAlwaysCreate(false)
-        }}
-      />
-      <GameLaunchPreflightModal
-        open={launchPreflightOpen}
-        gameName={game.name}
-        result={launchPreflightResult}
-        onClose={() => {
-          setLaunchPreflightOpen(false)
-          setLaunchPreflightResult(null)
-          setPendingExePath(null)
-        }}
-        onChooseAnother={reopenExecutablePicker}
-        onContinue={launchPreflightResult?.canLaunch && pendingExePath
-          ? async () => {
-              const nextPath = pendingExePath
-              setLaunchPreflightOpen(false)
-              setLaunchPreflightResult(null)
-              await handleLaunchWithShortcutCheck(nextPath, { skipPreflight: true })
-            }
-          : undefined}
-      />
-      <GameLaunchFailedModal
-        open={gameStartFailedOpen}
-        gameName={game.name}
-        hasOnlineSupport={hasOnlineMode(game.hasCoOp)}
-        onClose={() => setGameStartFailedOpen(false)}
-        onPickExecutable={async () => {
-          // Open the exe picker pre-loaded with the game's executables so the
-          // user can immediately pick a different one instead of re-traversing
-          // the gear menu after a failed launch.
-          try {
-            const result = await listGameExecutables()
-            const exes = result?.exes || []
-            const folder = result?.folder || null
-            openExePicker(exes, folder)
-          } catch {
-            openExePicker([], null)
-          }
-        }}
-      />
+
+      {/* The launch picker / shortcut / preflight / failed modals are mounted
+          once at the app root by GameLaunchProvider — not per card. */}
 
       {/* Universal right-click menu — appears on every card site-wide. */}
       <GameActionContextMenu

@@ -1,7 +1,9 @@
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { GameExecutable, getExecutableRelativePath, rankGameExecutables } from "@/lib/utils"
+import { Folder, Search, Sparkles } from "@/components/icons"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { createPortal } from "react-dom"
 
 type ExePickerModalProps = {
   open: boolean
@@ -20,19 +22,21 @@ export function ExePickerModal({ open, title, message, exes, gameName, baseFolde
   // --- All hooks MUST be called unconditionally (React Rules of Hooks) ---
   const [search, setSearch] = useState("")
   const [browsing, setBrowsing] = useState(false)
-  const [expanded, setExpanded] = useState(false)
   const searchRef = useRef<HTMLInputElement>(null)
 
   // Reset search when modal opens with new data
   useEffect(() => {
-    if (open) {
-      setSearch("")
-      setBrowsing(false)
-      setExpanded(false)
-      // Auto-focus search after render
-      requestAnimationFrame(() => searchRef.current?.focus())
-    }
+    if (open) setSearch("")
   }, [open, exes])
+
+  // Close on Escape — matches the Radix dialogs used elsewhere so keyboard
+  // behaviour is consistent across every launch modal.
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose() }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [open, onClose])
 
   // Deduplicate exes by normalised path (case-insensitive on Windows)
   const dedupedExes = useMemo(() => {
@@ -61,11 +65,10 @@ export function ExePickerModal({ open, title, message, exes, gameName, baseFolde
     return top
   }, [ranked])
 
-  // Build the visible list: apply search filter, keep recommended separate only if shown
+  // Build the visible list: drop the recommended (shown separately) + filter
   const visible = useMemo(() => {
     const needle = search.trim().toLowerCase()
     return ranked.filter((exe) => {
-      // Only hide the recommended exe from the main list if it will be shown in the header
       if (recommended && exe.path === recommended.path && exe.name === recommended.name) return false
       if (!needle) return true
       return exe.name.toLowerCase().includes(needle) || exe.path.toLowerCase().includes(needle)
@@ -83,8 +86,6 @@ export function ExePickerModal({ open, title, message, exes, gameName, baseFolde
     if (browsing) return
     setBrowsing(true)
     try {
-      // Use the Electron native file dialog via the pickExternalGameFolder-style IPC
-      // We'll call the new browseForGameExe IPC or fall back to pickExternalGameFolder
       const w = window as any
       if (w.ucDownloads?.browseForGameExe) {
         const result = await w.ucDownloads.browseForGameExe(baseFolder || undefined)
@@ -104,172 +105,111 @@ export function ExePickerModal({ open, title, message, exes, gameName, baseFolde
   if (!open) return null
 
   const hasExes = ranked.length > 0
-  const showRecommended = !!recommended
+  const showSearch = ranked.length > 5
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
-      <div className="absolute inset-0 bg-black/72 backdrop-blur-md animate-in fade-in duration-300 ease-out" onClick={onClose} />
-      <div className="relative w-full max-w-lg overflow-hidden rounded-3xl border border-white/[.07] bg-background/88 backdrop-blur-2xl p-5 text-foreground shadow-[0_24px_80px_rgba(0,0,0,0.55)] animate-in slide-in-from-top-4 duration-300 ease-out">
-        <div className="text-lg font-semibold">{title}</div>
-        <p className="mt-1 text-sm text-muted-foreground">{message}</p>
+  // A single executable row, shared by the recommended highlight and the list.
+  const renderRow = (exe: typeof ranked[number], opts?: { recommended?: boolean }) => {
+    const isCurrent = !!currentExePath && exe.path.toLowerCase() === currentExePath.toLowerCase()
+    const relativePath = getRelativePath(exe.path)
+    return (
+      <div
+        key={exe.path}
+        className={`flex items-center justify-between gap-3 rounded-xl border px-3 py-2.5 transition-colors ${
+          opts?.recommended
+            ? "border-primary/40 bg-primary/[.07]"
+            : isCurrent
+              ? "border-white/40 bg-white/[.06]"
+              : "border-white/[.07] bg-black/20 hover:border-white/20 hover:bg-white/[.04]"
+        }`}
+      >
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 text-sm font-medium">
+            <span className="truncate">{exe.name}</span>
+            {opts?.recommended ? (
+              <span className="flex-none inline-flex items-center gap-1 rounded-full border border-primary/40 bg-primary/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary-foreground/90">
+                <Sparkles className="h-2.5 w-2.5" /> Recommended
+              </span>
+            ) : isCurrent ? (
+              <span className="flex-none rounded-full border border-border bg-white/10 px-2 py-0.5 text-[10px] font-semibold uppercase text-white/90">
+                Current
+              </span>
+            ) : null}
+          </div>
+          <div className="truncate text-xs text-muted-foreground">{relativePath}</div>
+          {typeof exe.size === "number" && exe.size > 0 ? (
+            <div className="text-[10px] text-muted-foreground/70">{formatFileSize(exe.size)}</div>
+          ) : null}
+        </div>
+        <Button
+          size="sm"
+          variant={opts?.recommended || isCurrent ? "default" : "secondary"}
+          className="flex-none"
+          onClick={() => onSelect(exe.path)}
+        >
+          {actionLabel}
+        </Button>
+      </div>
+    )
+  }
 
-        <div className="mt-4 space-y-3">
-          {/* If recommended exists, collapse/expand extra executables and search smoothly */}
-          {showRecommended ? (
-            <div
-              className={`grid transition-[grid-template-rows,opacity] duration-300 ease-in-out ${
-                expanded ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"
-              }`}
-            >
-              <div className="overflow-hidden">
-                <div className="pt-3 space-y-3">
-                  {ranked.length > 3 && (
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Input
-                        ref={searchRef}
-                        value={search}
-                        onChange={(event) => setSearch(event.target.value)}
-                        placeholder="Search exe name or path..."
-                        className="h-9 flex-1 rounded-xl bg-[#09090b]/70"
-                      />
-                    </div>
-                  )}
-
-                  <div className="max-h-72 space-y-2 overflow-y-auto">
-                    {visible.length > 0 ? (
-                      visible.map((exe) => {
-                        const isCurrent = !!currentExePath && exe.path.toLowerCase() === currentExePath.toLowerCase()
-                        const relativePath = getRelativePath(exe.path)
-                        return (
-                          <div
-                            key={exe.path}
-                            className={`flex items-center justify-between gap-3 rounded-xl border px-3 py-2 transition-colors ${
-                              isCurrent
-                                ? "border-white/60 bg-white/10"
-                                : "border-white/[.07] bg-[#09090b]/70 hover:border-foreground/30 hover:bg-foreground/5"
-                            }`}
-                          >
-                            <div className="min-w-0 flex-1">
-                              <div className="flex items-center gap-2 truncate text-sm font-medium">
-                                <span className={`truncate ${isCurrent ? "text-white" : ""}`}>{exe.name}</span>
-                                {isCurrent ? (
-                                  <span className="flex-none rounded-full border border-border bg-white/10 px-2 py-0.5 text-[10px] font-semibold uppercase text-white/90">
-                                    Current
-                                  </span>
-                                ) : null}
-                              </div>
-                              <div className={`truncate text-xs ${isCurrent ? "text-white/70" : "text-muted-foreground"}`}>{relativePath}</div>
-                              {typeof exe.size === "number" && exe.size > 0 ? (
-                                <div className="text-[10px] text-muted-foreground">{formatFileSize(exe.size)}</div>
-                              ) : null}
-                            </div>
-                            <Button
-                              size="sm"
-                              variant={isCurrent ? "default" : "secondary"}
-                              onClick={() => onSelect(exe.path)}
-                            >
-                              {actionLabel}
-                            </Button>
-                          </div>
-                        )
-                      })
-                    ) : hasExes && search.trim() ? (
-                      <div className="rounded-xl border border-white/[.07] bg-[#09090b]/70 px-3 py-3 text-sm text-muted-foreground">
-                        No executables matching &quot;{search.trim()}&quot;.
-                      </div>
-                    ) : !hasExes ? (
-                      <div className="rounded-xl border border-white/[.07] bg-[#09090b]/70 px-3 py-4 text-center text-sm text-muted-foreground">
-                        <p>No executables found in this game folder.</p>
-                        <p className="mt-1 text-xs text-muted-foreground">The game may still be extracting, or the folder structure is unusual.</p>
-                      </div>
-                    ) : null}
-                  </div>
-                </div>
-              </div>
-            </div>
-          ) : (
-            <>
-              {ranked.length > 3 && (
-                <div className="flex flex-wrap items-center gap-2">
-                  <Input
-                    ref={searchRef}
-                    value={search}
-                    onChange={(event) => setSearch(event.target.value)}
-                    placeholder="Search exe name or path..."
-                    className="h-9 flex-1 rounded-xl bg-[#09090b]/70"
-                  />
-                </div>
-              )}
-
-              <div className="max-h-72 space-y-2 overflow-y-auto">
-                {visible.length > 0 ? (
-                  visible.map((exe) => {
-                    const isCurrent = !!currentExePath && exe.path.toLowerCase() === currentExePath.toLowerCase()
-                    const relativePath = getRelativePath(exe.path)
-                    return (
-                      <div
-                        key={exe.path}
-                        className={`flex items-center justify-between gap-3 rounded-xl border px-3 py-2 transition-colors ${
-                          isCurrent
-                            ? "border-white/60 bg-white/10"
-                            : "border-white/[.07] bg-[#09090b]/70 hover:border-foreground/30 hover:bg-foreground/5"
-                        }`}
-                      >
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-2 truncate text-sm font-medium">
-                            <span className={`truncate ${isCurrent ? "text-white" : ""}`}>{exe.name}</span>
-                            {isCurrent ? (
-                              <span className="flex-none rounded-full border border-border bg-white/10 px-2 py-0.5 text-[10px] font-semibold uppercase text-white/90">
-                                Current
-                              </span>
-                            ) : null}
-                          </div>
-                          <div className={`truncate text-xs ${isCurrent ? "text-white/70" : "text-muted-foreground"}`}>{relativePath}</div>
-                          {typeof exe.size === "number" && exe.size > 0 ? (
-                            <div className="text-[10px] text-muted-foreground">{formatFileSize(exe.size)}</div>
-                          ) : null}
-                        </div>
-                        <Button
-                          size="sm"
-                          variant={isCurrent ? "default" : "secondary"}
-                          onClick={() => onSelect(exe.path)}
-                        >
-                          {actionLabel}
-                        </Button>
-                      </div>
-                    )
-                  })
-                ) : hasExes && search.trim() ? (
-                  <div className="rounded-xl border border-white/[.07] bg-[#09090b]/70 px-3 py-3 text-sm text-muted-foreground">
-                    No executables matching &quot;{search.trim()}&quot;.
-                  </div>
-                ) : !hasExes ? (
-                  <div className="rounded-xl border border-white/[.07] bg-[#09090b]/70 px-3 py-4 text-center text-sm text-muted-foreground">
-                    <p>No executables found in this game folder.</p>
-                    <p className="mt-1 text-xs text-muted-foreground">The game may still be extracting, or the folder structure is unusual.</p>
-                  </div>
-                ) : null}
-              </div>
-            </>
-          )}
+  return createPortal(
+    <div className="fixed inset-0 z-[120] flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/70 backdrop-blur-md animate-in fade-in duration-200 ease-out" onClick={onClose} />
+      <div
+        role="dialog"
+        aria-modal="true"
+        className="relative flex max-h-[85vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-white/10 bg-background/95 text-foreground shadow-[0_24px_80px_rgba(0,0,0,0.6)] backdrop-blur-2xl animate-in fade-in zoom-in-95 duration-200 ease-out"
+      >
+        {/* Header */}
+        <div className="px-6 pt-6 pb-4">
+          <h2 className="text-lg font-semibold leading-tight">{title}</h2>
+          <p className="mt-1 text-sm text-muted-foreground">{message}</p>
         </div>
 
-        <div className="mt-4 flex items-center justify-between gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            className="text-xs"
-            disabled={browsing}
-            onClick={handleBrowse}
-          >
-            {browsing ? "Browsing..." : "Browse..."}
+        {/* Body */}
+        <div className="flex-1 space-y-3 overflow-y-auto px-6 pb-3">
+          {recommended ? renderRow(recommended, { recommended: true }) : null}
+
+          {showSearch ? (
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                ref={searchRef}
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Search exe name or path…"
+                className="h-9 rounded-xl bg-black/30 pl-9"
+              />
+            </div>
+          ) : null}
+
+          {visible.length > 0 ? (
+            visible.map((exe) => renderRow(exe))
+          ) : hasExes && search.trim() ? (
+            <div className="rounded-xl border border-white/[.07] bg-black/20 px-3 py-3 text-sm text-muted-foreground">
+              No executables matching &quot;{search.trim()}&quot;.
+            </div>
+          ) : !hasExes ? (
+            <div className="rounded-xl border border-dashed border-white/10 bg-black/20 px-4 py-6 text-center text-sm text-muted-foreground">
+              <p className="font-medium text-foreground/80">No executables found in this game folder.</p>
+              <p className="mt-1 text-xs text-muted-foreground">The game may still be extracting, or its folder layout is unusual. Use <span className="font-medium text-foreground/80">Browse…</span> to pick the file manually.</p>
+            </div>
+          ) : null}
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center justify-between gap-2 border-t border-white/10 px-6 py-4">
+          <Button variant="outline" size="sm" disabled={browsing} onClick={handleBrowse}>
+            <Folder className="mr-1.5 h-4 w-4" />
+            {browsing ? "Browsing…" : "Browse…"}
           </Button>
-          <Button variant="ghost" onClick={onClose}>
-            Close
+          <Button variant="ghost" size="sm" onClick={onClose}>
+            Cancel
           </Button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
 
@@ -279,4 +219,3 @@ function formatFileSize(bytes: number): string {
   if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`
 }
-

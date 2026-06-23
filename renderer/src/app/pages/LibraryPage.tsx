@@ -39,7 +39,7 @@ import {
   LayoutGrid,
   LayoutList,
 } from "@/components/icons"
-import { ExePickerModal } from "@/components/ExePickerModal"
+import { useGameLaunch } from "@/context/game-launch-context"
 import { EditGameMetadataModal } from "@/components/EditGameMetadataModal"
 import { GameLinuxConfigModal } from "@/components/GameLinuxConfigModal"
 import { LaunchOptionsModal } from "@/components/LaunchOptionsModal"
@@ -227,13 +227,9 @@ export function LibraryPage() {
       map.clear()
     }
   }, [])
-  const [exePickerOpen, setExePickerOpen] = useState(false)
-  const [exePickerTitle, setExePickerTitle] = useState("")
-  const [exePickerMessage, setExePickerMessage] = useState("")
-  const [exePickerAppId, setExePickerAppId] = useState<string | null>(null)
-  const [exePickerExes, setExePickerExes] = useState<Array<{ name: string; path: string; size?: number; depth?: number }>>([])
-  const [exePickerCurrentPath, setExePickerCurrentPath] = useState<string | null>(null)
-  const [exePickerFolder, setExePickerFolder] = useState<string | null>(null)
+  // The "set launch executable" picker is the single, portaled one mounted by
+  // GameLaunchProvider — no per-page picker state or modal anymore.
+  const { requestSetExecutable } = useGameLaunch()
   const [settingsPopupOpen, setSettingsPopupOpen] = useState(false)
   const [settingsPopupGame, setSettingsPopupGame] = useState<LibraryGame | null>(null)
   const [shortcutFeedback, setShortcutFeedback] = useState<{ appid: string; type: 'success' | 'error'; message: string } | null>(null)
@@ -786,13 +782,6 @@ export function LibraryPage() {
     }
   }
 
-  const setSavedExe = async (appid: string, path: string | null) => {
-    if (!window.ucSettings?.set) return
-    try {
-      await window.ucSettings.set(`gameExe:${appid}`, path || null)
-    } catch { }
-  }
-
   const dirname = (targetPath: string | null | undefined) => {
     if (!targetPath) return null
     const parts = targetPath.split(/[/\\]+/).filter(Boolean)
@@ -801,30 +790,8 @@ export function LibraryPage() {
   }
 
   const openExecutablePicker = async (game: Game) => {
-    if (!window.ucDownloads?.listGameExecutables) return
-    try {
-      const [result, savedExe] = await Promise.all([
-        window.ucDownloads.listGameExecutables(game.appid),
-        getSavedExe(game.appid),
-      ])
-      const exes = result?.exes || []
-      const folder = result?.folder || null
-      setExePickerTitle("Set launch executable")
-      setExePickerMessage(`Select the exe to launch for "${game.name}".`)
-      setExePickerAppId(game.appid)
-      setExePickerExes(exes)
-      setExePickerCurrentPath(savedExe)
-      setExePickerFolder(folder)
-      setExePickerOpen(true)
-    } catch {
-      setExePickerTitle("Set launch executable")
-      setExePickerMessage(`Unable to list executables for "${game.name}".`)
-      setExePickerAppId(null)
-      setExePickerExes([])
-      setExePickerCurrentPath(null)
-      setExePickerFolder(null)
-      setExePickerOpen(true)
-    }
+    const savedExe = await getSavedExe(game.appid)
+    await requestSetExecutable(game, { currentPath: savedExe })
   }
 
   const handleOpenGameFiles = async (game: Game) => {
@@ -880,12 +847,6 @@ export function LibraryPage() {
     window.setTimeout(() => {
       setShortcutFeedback((current) => current?.appid === game.appid ? null : current)
     }, 3000)
-  }
-
-  const handleExePicked = async (path: string) => {
-    if (!exePickerAppId) return
-    await setSavedExe(exePickerAppId, path)
-    setExePickerCurrentPath(path)
   }
 
   const openGameActionPopover = (game: LibraryGame) => {
@@ -2115,18 +2076,6 @@ export function LibraryPage() {
           )}
         </DialogContent>
       </Dialog>
-      <ExePickerModal
-        open={exePickerOpen}
-        title={exePickerTitle}
-        message={exePickerMessage}
-        exes={exePickerExes}
-        currentExePath={exePickerCurrentPath}
-        actionLabel="Set"
-        gameName={settingsPopupGame?.name}
-        baseFolder={exePickerFolder}
-        onSelect={handleExePicked}
-        onClose={() => setExePickerOpen(false)}
-      />
       {settingsPopupGame && (
         <EditGameMetadataModal
           open={editMetadataOpen}

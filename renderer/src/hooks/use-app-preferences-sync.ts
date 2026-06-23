@@ -1,10 +1,8 @@
 import { useEffect, useRef } from "react"
 import { apiFetch } from "@/lib/api"
-import { getPreferredDownloadHost, setPreferredDownloadHost, type PreferredDownloadHost } from "@/lib/downloads"
 import { useDiscordAccount } from "@/hooks/use-discord-account"
 
 type AppPreferences = {
-  defaultMirrorHost?: PreferredDownloadHost
   discordRpcEnabled?: boolean
   alwaysCreateDesktopShortcut?: boolean
   linuxLaunchMode?: "auto" | "native" | "wine" | "proton" | "umu"
@@ -18,7 +16,6 @@ type AppPreferences = {
 }
 
 const ALLOWED_KEYS = new Set<keyof AppPreferences>([
-  "defaultMirrorHost",
   "discordRpcEnabled",
   "alwaysCreateDesktopShortcut",
   "linuxLaunchMode",
@@ -35,11 +32,6 @@ function normalizePreferences(input: unknown): AppPreferences {
   if (!input || typeof input !== "object") return {}
   const record = input as Record<string, unknown>
   const prefs: AppPreferences = {}
-
-  const mirrorHost = record.defaultMirrorHost
-  if (mirrorHost === "ucfiles") {
-    prefs.defaultMirrorHost = mirrorHost as PreferredDownloadHost
-  }
 
   if (typeof record.discordRpcEnabled === "boolean") {
     prefs.discordRpcEnabled = record.discordRpcEnabled
@@ -82,11 +74,6 @@ function normalizePreferences(input: unknown): AppPreferences {
 
 async function readLocalPreferences(): Promise<AppPreferences> {
   const prefs: AppPreferences = {}
-  try {
-    prefs.defaultMirrorHost = await getPreferredDownloadHost()
-  } catch {
-    // ignore
-  }
 
   if (typeof window === "undefined" || !window.ucSettings?.get) return prefs
 
@@ -150,10 +137,6 @@ async function readLocalPreferences(): Promise<AppPreferences> {
 }
 
 async function applyPreferences(prefs: AppPreferences) {
-  if (prefs.defaultMirrorHost) {
-    setPreferredDownloadHost(prefs.defaultMirrorHost)
-  }
-
   // Motion prefs also live in localStorage so non-electron reads (e.g. tabs
   // pre-hydration, the prefers-reduced-motion fallback) stay consistent.
   if (typeof window !== "undefined") {
@@ -176,7 +159,6 @@ async function applyPreferences(prefs: AppPreferences) {
   const entries = Object.entries(prefs) as Array<[keyof AppPreferences, AppPreferences[keyof AppPreferences]]>
   await Promise.all(
     entries.map(async ([key, value]) => {
-      if (key === "defaultMirrorHost") return
       await window.ucSettings?.set?.(key, value)
     })
   )

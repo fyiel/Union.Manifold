@@ -160,6 +160,22 @@ export function refreshRunningGames() {
   return hydrate(true)
 }
 
+/**
+ * Optimistically flip a game's running state in the shared cache so every
+ * surface (cards, library, downloads, detail page) updates instantly — before
+ * the authoritative `ucPresence` event lands. The real event reconciles it a
+ * moment later. Used by the central game-launch flow on launch / stop / quick
+ * exit so we don't need per-page optimistic state juggling anymore.
+ */
+export function setRunningOptimistic(appid: string, running: boolean) {
+  if (!appid) return
+  if (running === cache.has(appid)) return
+  const next = new Set(cache)
+  if (running) next.add(appid)
+  else next.delete(appid)
+  setCache(next)
+}
+
 /** Synchronous check for callers outside React. */
 export function isRunningGameSync(appid: string): boolean {
   return cache.has(appid)
