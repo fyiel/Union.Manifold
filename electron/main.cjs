@@ -2781,6 +2781,58 @@ const BASE_URL_CANDIDATES = [
 
 // Set during startup by detectBestBaseUrl(); used to pre-configure renderer localStorage.
 let resolvedBaseUrl = DEFAULT_BASE_URL
+
+// Primary download CDN host (Backblaze bucket fronted by Cloudflare). Some
+// networks block this by TLS SNI, so downloads die at the handshake while the
+// catalog still works via an API mirror. cdnMirrorHosts is an ordered list of
+// interchangeable CDN domains the download engine fails over across; it's
+// hydrated from /api/cdn-mirrors at startup so new domains can be added
+// server-side WITHOUT shipping an app update. The default is just the primary,
+// so the feature is inert until mirrors are configured.
+const CDN_PRIMARY_HOST = 'cdn.union-crax.xyz'
+let cdnMirrorHosts = [CDN_PRIMARY_HOST]
+
+/** The last CDN host we saw deliver bytes, persisted across launches so a
+ *  blocked user resumes straight on the working mirror. '' if none/unreadable. */
+function readPersistedCdnHost() {
+  try {
+    const v = readSettings().lastWorkingCdnHost
+    return typeof v === 'string' ? v.trim().toLowerCase() : ''
+  } catch {
+    return ''
+  }
+}
+
+/**
+ * Best-effort fetch of the CDN mirror host list from the active API base (which
+ * is itself already resolved to a reachable mirror). Shape: a JSON array of
+ * hostnames, or { hosts: [...] }. The primary host is always kept in the list
+ * as a fallback. Never throws — on any failure we keep whatever we have.
+ */
+async function refreshCdnMirrorHosts() {
+  try {
+    const url = new URL('/api/cdn-mirrors', normalizeBaseUrl(resolvedBaseUrl || DEFAULT_BASE_URL)).toString()
+    const res = await fetch(url, { signal: AbortSignal.timeout(4000), cache: 'no-store' })
+    if (!res.ok) return
+    const json = await res.json().catch(() => null)
+    const raw = Array.isArray(json) ? json : (json && Array.isArray(json.hosts) ? json.hosts : null)
+    if (!raw) return
+    const cleaned = raw
+      .map((h) => String(h || '').trim().toLowerCase())
+      .filter((h) => /^[a-z0-9.-]+\.[a-z]{2,}$/.test(h))
+    if (!cleaned.length) return
+    // De-dupe, keep server-specified priority order, ensure the primary is a
+    // last-resort member so we never drop the canonical host entirely.
+    cdnMirrorHosts = [...new Set([...cleaned, CDN_PRIMARY_HOST])]
+    ucLog(`CDN mirror hosts: ${cdnMirrorHosts.join(', ')}`)
+    // Re-apply with the full (hydrated) list + restored last-working host. The
+    // engine ignores the restored host once a working one is confirmed live, so
+    // this never clobbers an in-session failover.
+    try { getDownloadEngine().setCdnHosts(cdnMirrorHosts, readPersistedCdnHost()) } catch { /* engine not up yet */ }
+  } catch {
+    // offline / endpoint missing / bad payload — keep the default
+  }
+}
 // Whether ANY Union Crax origin answered the readiness probe at launch. When
 // false we boot straight into offline mode: the renderer locks online-only
 // pages and the splash shows "Starting offline." Seeded into renderer
@@ -2951,6 +3003,24 @@ function getDownloadEngine() {
     safeFolderName,
     aria2,
     log: (level, message) => ucLog(message, level === 'warn' || level === 'error' ? level : 'info'),
+  })
+  // Seed CDN failover hosts (refreshed from the API at startup; see
+  // refreshCdnMirrorHosts) and restore the last-working host so a previously
+  // blocked user starts straight on the working mirror instead of re-probing
+  // the blocked primary on every launch.
+  try {
+    _downloadEngine.setCdnHosts(cdnMirrorHosts, readPersistedCdnHost())
+  } catch { /* ignore */ }
+  // Persist whichever CDN host actually delivers bytes this session.
+  _downloadEngine.on('cdn-host', (host) => {
+    try {
+      const s = readSettings()
+      if (s.lastWorkingCdnHost !== host) {
+        s.lastWorkingCdnHost = host
+        writeSettings(s)
+        ucLog(`Persisted last-working CDN host: ${host}`)
+      }
+    } catch { /* ignore */ }
   })
   // Apply persisted bandwidth limit on engine creation. The setting is
   // stored as KB/s for human-friendliness; the engine wants raw bytes/s.
@@ -10000,6 +10070,10 @@ app.whenReady().then(async () => {
   }
   resolvedBaseUrl = detection.baseUrl
   startupReachable = detection.reachable
+  // Pull the CDN failover list from the (now-resolved) API base in the
+  // background — don't block the splash on it. Downloads started before it
+  // lands still get reactive failover from the in-code default.
+  if (startupReachable) void refreshCdnMirrorHosts()
   if (!startupReachable) {
     // Red, so it reads as a real state change and not just another step.
     setSplashStatus(splashWin, 'Starting offline.', { error: true })
