@@ -31,10 +31,6 @@ import { Textarea } from "@/components/ui/textarea"
 import { Switch } from "@/components/ui/switch"
 import { DiscordAvatar } from "@/components/DiscordAvatar"
 import { apiFetch, apiUpload, apiUrl, getApiBaseUrl, normalizeApiBaseUrl, setApiBaseUrl } from "@/lib/api"
-import {
-  getPreferredDownloadHost,
-  setPreferredDownloadHost,
-} from "@/lib/downloads"
 import { LogViewer } from "@/components/LogViewer"
 import { KeybindingsPanel } from "@/components/KeybindingsPanel"
 import { SessionManager } from "@/components/SessionManager"
@@ -47,9 +43,6 @@ import {
   SETTINGS_KEYS,
   TEXT_CONSTRAINTS,
   APP_INFO,
-  MIRROR_HOSTS,
-  type MirrorHost,
-  type MirrorHostInfo,
 } from "@/lib/settings-constants"
 import { LINUX_PRESETS, applyGlobalLinuxPreset, type LinuxGlobalSettings, type LinuxPresetId } from "@/lib/linux-presets"
 import { useToast } from "@/context/toast-context"
@@ -161,7 +154,6 @@ export function SettingsPage() {
   const [error, setError] = useState<string | null>(null)
   const [ucSizeBytes, setUcSizeBytes] = useState<number | null>(null)
   const [usageLoading, setUsageLoading] = useState(false)
-  const [defaultHost, setDefaultHost] = useState<MirrorHost>('ucfiles')
   const [checkingUpdate, setCheckingUpdate] = useState(false)
   const [appVersion, setAppVersion] = useState<string>("")
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus>(INITIAL_UPDATE_STATUS)
@@ -347,30 +339,6 @@ export function SettingsPage() {
     }
 
     load()
-  }, [])
-
-  useEffect(() => {
-    let mounted = true
-    const loadDefault = async () => {
-      try {
-        const v = await getPreferredDownloadHost()
-        if (!mounted) return
-        if (v && MIRROR_HOSTS.some((h) => h.key === v)) setDefaultHost(v as MirrorHost)
-      } catch {
-        // ignore
-      }
-    }
-    loadDefault()
-    const off = window.ucSettings?.onChanged?.((data: any) => {
-      if (!data || !data.key) return
-      if (data.key === 'defaultMirrorHost' && data.value && MIRROR_HOSTS.some((h) => h.key === data.value)) {
-        setDefaultHost(data.value)
-      }
-    })
-    return () => {
-      mounted = false
-      if (typeof off === 'function') off()
-    }
   }, [])
 
   useEffect(() => {
@@ -1684,7 +1652,7 @@ export function SettingsPage() {
     { id: 'account' as const, label: 'Account', icon: UserRound, description: 'Profile & preferences' },
     { id: 'membership' as const, label: 'UC+', icon: Crown, description: 'Membership & Ko-fi' },
     { id: 'appearance' as const, label: 'Appearance', icon: Palette, description: 'Themes & customization' },
-    { id: 'downloads' as const, label: 'Downloads', icon: ArrowDownToLine, description: 'Storage & mirrors' },
+    { id: 'downloads' as const, label: 'Downloads', icon: ArrowDownToLine, description: 'Storage & install behavior' },
     { id: 'game-launch' as const, label: 'Game Launch', icon: Gamepad2, description: 'Launch & compatibility' },
     { id: 'controller' as const, label: 'Controller', icon: Gamepad2, description: 'Controller support' },
     { id: 'overlay' as const, label: 'Overlay', icon: Layers, description: 'In-game overlay' },
@@ -2465,55 +2433,6 @@ export function SettingsPage() {
                     >
                       Install downloaded update
                     </Button>
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card className="border-white/[.07]">
-                <CardContent className="p-6 space-y-6">
-                  <div>
-                    <h2 className="text-lg font-semibold">Mirror host</h2>
-                    <p className="text-sm text-muted-foreground">Choose the default mirror host for downloads.</p>
-                  </div>
-
-                  <div className="space-y-3">
-                    <label className="text-sm font-medium">Default host</label>
-                    <Select
-                      value={defaultHost}
-                      onValueChange={async (v) => {
-                        setDefaultHost(v as MirrorHost)
-                        try {
-                          setPreferredDownloadHost(v as MirrorHost)
-                        } catch { }
-                      }}
-                    >
-                      <SelectTrigger className="h-12">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {MIRROR_HOSTS.map((h) => (
-                          <SelectItem key={h.key} value={h.key}>
-                            <div className="flex items-center justify-between w-full">
-                              <span>{h.label}</span>
-                              {h.tag ? (
-                                <span
-                                  className={`ml-2 inline-block text-[10px] font-medium px-2 py-0.5 rounded-full ${h.tag === 'beta' ? 'bg-amber-100 text-amber-800' : h.tag === 'retiring' ? 'bg-red-100 text-red-800' : 'bg-slate-100 text-slate-800'
-                                    }`}
-                                >
-                                  {h.tag}
-                                </span>
-                              ) : null}
-                            </div>
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    {MIRROR_HOSTS.find((h) => h.key === defaultHost)?.supportsResume === false && (
-                      <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
-                        Download resuming is currently not supported for this host. Please do not close the app while
-                        downloading with {MIRROR_HOSTS.find((h) => h.key === defaultHost)?.label || defaultHost}.
-                      </div>
-                    )}
                   </div>
                 </CardContent>
               </Card>
@@ -3943,7 +3862,6 @@ export function SettingsPage() {
                                 if (result?.ok) {
                                   // Reset all local state to defaults
                                   setAlwaysCreateDesktopShortcut(false)
-                                  setDefaultHost('ucfiles')
                                   setDiscordRpcEnabled(true)
                                   setDeveloperMode(false)
                                   setVerboseDownloadLogging(false)

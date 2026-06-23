@@ -19,18 +19,3 @@ export const TEXT_CONSTRAINTS = {
 export const APP_INFO = {
   DOWNLOAD_DIR_NAME: 'UnionCrax.Direct',
 } as const
-
-// Mirror host configuration. UC.Files is the only in-app downloadable host.
-export type MirrorHost = 'ucfiles'
-export type MirrorHostTag = 'beta' | 'soon' | 'retiring'
-
-export interface MirrorHostInfo {
-  key: MirrorHost
-  label: string
-  tag?: MirrorHostTag
-  supportsResume?: boolean
-}
-
-export const MIRROR_HOSTS: MirrorHostInfo[] = [
-  { key: 'ucfiles', label: 'UC.Files', supportsResume: true },
-]
