@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react"
-import { cn, proxyImageUrl } from "@/lib/utils"
+import { cn, proxyImageUrl, formatVersion } from "@/lib/utils"
 import { UserRound, X } from "@/components/icons"
 import { ArrowDownToLine, HardDrive, ImageIcon, Pencil, RefreshCw, Cpu, FlaskConical, Palette, Crown } from "lucide-react"
 import { UcPlusPanel } from "@/components/UcPlusPanel"
@@ -113,11 +113,11 @@ function getUpdateStatusMessage(status: UpdateStatus) {
     case 'checking':
       return 'Checking for updates.'
     case 'available':
-      return status.version ? `Update available: v${status.version}. Download will start automatically.` : 'Update available. Download will start automatically.'
+      return status.version ? `Update available: ${formatVersion(status.version)}. Download will start automatically.` : 'Update available. Download will start automatically.'
     case 'downloading':
-      return status.version ? `Downloading v${status.version} (${Math.round(status.progress)}%).` : `Downloading update (${Math.round(status.progress)}%).`
+      return status.version ? `Downloading ${formatVersion(status.version)} (${Math.round(status.progress)}%).` : `Downloading update (${Math.round(status.progress)}%).`
     case 'downloaded':
-      return status.version ? `v${status.version} is ready to install.` : 'Update is ready to install.'
+      return status.version ? `${formatVersion(status.version)} is ready to install.` : 'Update is ready to install.'
     case 'installing':
       return 'Installing update and restarting the app.'
     case 'not-available':
@@ -2390,7 +2390,7 @@ export function SettingsPage() {
                   </div>
                   <div className="flex items-center justify-between text-sm">
                     <span className="text-muted-foreground">Current version</span>
-                    <span className="font-mono font-medium">{appVersion ? `v${appVersion}` : 'Loading...'}</span>
+                    <span className="font-mono font-medium">{appVersion ? formatVersion(appVersion) : 'Loading...'}</span>
                   </div>
                   <div className="flex items-center justify-between text-sm">
                     <span className="text-muted-foreground">Updater state</span>

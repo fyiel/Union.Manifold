@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button"
 import { Sparkles, ChevronDown } from "@/components/icons"
 import { Wrench, Brush } from "lucide-react"
 import { loadReleaseNotes, type ReleaseHighlight, type ReleaseNotes } from "@/lib/whats-new"
+import { formatVersion } from "@/lib/utils"
 
 const LAST_SEEN_KEY = "lastSeenWhatsNewVersion"
 const OPEN_EVENT = "uc_open_whats_new"
@@ -182,11 +183,11 @@ export function WhatsNewModal() {
   }
 
   const headline = openedAfterUpdate && prevSeenVersion && appVersion
-    ? `Updated to v${appVersion}`
+    ? `Updated to ${formatVersion(appVersion)}`
     : "What's new"
 
   const description = openedAfterUpdate && prevSeenVersion
-    ? `Here's everything we shipped since v${prevSeenVersion}.`
+    ? `Here's everything we shipped since ${formatVersion(prevSeenVersion)}.`
     : "See what's been added, improved and fixed in recent updates."
 
   return (

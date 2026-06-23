@@ -10,7 +10,7 @@ import { CommentMarkdown } from "@/components/CommentMarkdown"
 import { useDownloads } from "@/context/downloads-context"
 import { apiUrl, apiFetch } from "@/lib/api"
 import { getPreferredDownloadHost, setPreferredDownloadHost, requestDownloadToken, type PreferredDownloadHost, type DownloadConfig } from "@/lib/downloads"
-import { formatNumber, hasOnlineMode, proxyImageUrl, cn, timeAgoLong } from "@/lib/utils"
+import { formatNumber, hasOnlineMode, proxyImageUrl, cn, timeAgoLong, formatVersion } from "@/lib/utils"
 import { rememberGameName } from "@/lib/rpc-game-cache"
 import { getPrefetchedGameDetail } from "@/lib/game-detail-prefetch"
 import { useAccountLists } from "@/hooks/use-account-lists"
@@ -1526,7 +1526,7 @@ export function GameDetailPage() {
                   } else if (isInstalled) {
                     dotClass = hasUpdate ? "bg-amber-400" : "bg-emerald-400"
                     label = hasUpdate ? "Update available" : "Installed"
-                    if (installedVersionLabels[0]) sub = `v${installedVersionLabels[0]}`
+                    if (installedVersionLabels[0]) sub = formatVersion(installedVersionLabels[0])
                   }
                   return (
                     <div className="flex items-center justify-between gap-3 px-6 pt-5 pb-4 border-b border-white/[.05]">
