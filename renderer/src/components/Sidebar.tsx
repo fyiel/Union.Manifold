@@ -19,6 +19,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { useUserCollections, type UserCollection } from "@/hooks/use-user-collections"
 import { useFollowedCollections, type FollowedCollection } from "@/hooks/use-followed-collections"
 import { useRunningGamesSessions, type RunningSession } from "@/hooks/use-running-games"
+import { useGameLaunch } from "@/context/game-launch-context"
 import { useGamesData } from "@/hooks/use-games"
 import {
   CollectionActionContextMenu,
@@ -63,6 +64,7 @@ export function Sidebar({ mobileOpen, onClose, collapsed, onToggleCollapse }: Si
   const followedItems = followed.items || []
   const followedUpdateCount = followedItems.filter((c) => c.hasUpdates).length
   const runningSessions = useRunningGamesSessions()
+  const { stopGame } = useGameLaunch()
   const { games } = useGamesData()
   const [ownedContextMenu, setOwnedContextMenu] = useState<
     { collection: UserCollection; point: CollectionMenuPoint } | null
@@ -72,12 +74,9 @@ export function Sidebar({ mobileOpen, onClose, collapsed, onToggleCollapse }: Si
   >(null)
 
   const handleQuitSession = async (appid: string) => {
-    if (!window.ucDownloads?.quitGameExecutable) return
-    try {
-      await window.ucDownloads.quitGameExecutable(appid)
-    } catch {
-      // ignore — presence events will update the running state automatically
-    }
+    // Route through the shared launch flow so the running state flips
+    // optimistically (and quick-exit watches are cleared) everywhere at once.
+    await stopGame(appid)
   }
 
   const buildOwnedContextSections = (collection: UserCollection): CollectionMenuSection[] => {
