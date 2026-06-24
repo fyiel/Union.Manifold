@@ -21,7 +21,31 @@ import {
   Terminal,
   Trash2,
   Unlink2,
+  Play,
+  Pause,
+  CheckCheck,
+  X,
 } from "@/components/icons"
+import { LIBRARY_STATUS_ORDER, LIBRARY_STATUS_LABELS, type LibraryStatus } from "@/lib/account-lists"
+
+// Per-status row icons + tones for the library status group.
+const LIBRARY_STATUS_ICONS: Record<LibraryStatus, MenuIconComponent> = {
+  playing: Play,
+  plan: Star,
+  completed: CheckCheck,
+  onhold: Pause,
+  dropped: X,
+  favorite: Heart,
+}
+
+const LIBRARY_STATUS_TONES: Record<LibraryStatus, string> = {
+  playing: "text-emerald-400",
+  plan: "text-sky-400",
+  completed: "text-violet-400",
+  onhold: "text-amber-400",
+  dropped: "text-rose-400",
+  favorite: "text-pink-400",
+}
 
 import { cn } from "@/lib/utils"
 
@@ -80,10 +104,17 @@ type GameActionMenuPanelProps = {
     mode: "download" | "active"
     onClick: () => void | Promise<void>
   }
-  /** Wishlist toggle — when provided the menu shows an Add/Remove entry. */
+  /** Wishlist toggle — when provided the menu shows an Add/Remove entry.
+   *  Legacy — prefer `libraryStatus`. */
   wishlist?: { inList: boolean; toggle: () => void | Promise<void> }
-  /** Favorites/Liked toggle. */
+  /** Favorites/Liked toggle. Legacy — prefer `libraryStatus`. */
   favorites?: { inList: boolean; toggle: () => void | Promise<void> }
+  /** Unified MAL-style library status picker. When provided it replaces the
+   *  legacy wishlist/favorites rows with the full status list. */
+  libraryStatus?: {
+    status: LibraryStatus | null
+    setStatus: (next: LibraryStatus | null) => void | Promise<void>
+  }
   /** Per-game Discord RPC mute. When `muted` is true the game is hidden
    *  from the Playing-X presence card on Discord. Independent from the
    *  global "Show in Discord" toggle. */
@@ -266,6 +297,7 @@ export function GameActionMenuPanel({
   download,
   wishlist,
   favorites,
+  libraryStatus,
   rpcMute,
   collectionPicker,
   className,
@@ -274,7 +306,9 @@ export function GameActionMenuPanel({
 
   const hasInstallGroup = Boolean(download)
   const hasLibraryGroup = Boolean(onSetExecutable || onOpenFiles || onCreateShortcut || onEditDetails || onLaunchOptions || (isLinux && onLinuxConfig))
-  const hasListGroup = Boolean(wishlist || favorites || rpcMute)
+  // The unified status picker supersedes the legacy wishlist/favorites rows.
+  const hasStatusGroup = Boolean(libraryStatus)
+  const hasListGroup = Boolean((!hasStatusGroup && (wishlist || favorites)) || rpcMute)
 
   return (
     <div
@@ -308,11 +342,42 @@ export function GameActionMenuPanel({
         </>
       )}
 
-      {hasListGroup && (
+      {hasStatusGroup && libraryStatus && (
         <>
           {(hasInstallGroup || hasLibraryGroup) && <div className="my-1 h-px bg-white/[.06]" />}
+          <div className="px-2.5 pt-0.5 pb-1 text-[11px] font-medium text-muted-foreground/80">Library</div>
           <div className="space-y-px">
-            {wishlist ? (
+            {LIBRARY_STATUS_ORDER.map((s) => {
+              const active = libraryStatus.status === s
+              return (
+                <MenuItem
+                  key={s}
+                  icon={LIBRARY_STATUS_ICONS[s]}
+                  label={LIBRARY_STATUS_LABELS[s]}
+                  iconClassName={active ? LIBRARY_STATUS_TONES[s] : undefined}
+                  iconFilled={active}
+                  trailing={active ? <Check className="h-3.5 w-3.5 text-primary" /> : undefined}
+                  onClick={() => void libraryStatus.setStatus(active ? null : s)}
+                />
+              )
+            })}
+            {libraryStatus.status ? (
+              <MenuItem
+                icon={Trash2}
+                label="Remove from library"
+                destructive
+                onClick={() => void libraryStatus.setStatus(null)}
+              />
+            ) : null}
+          </div>
+        </>
+      )}
+
+      {hasListGroup && (
+        <>
+          {(hasInstallGroup || hasLibraryGroup || hasStatusGroup) && <div className="my-1 h-px bg-white/[.06]" />}
+          <div className="space-y-px">
+            {!hasStatusGroup && wishlist ? (
               <MenuItem
                 icon={Star}
                 label={wishlist.inList ? "Remove from wishlist" : "Add to wishlist"}
@@ -321,7 +386,7 @@ export function GameActionMenuPanel({
                 onClick={wishlist.toggle}
               />
             ) : null}
-            {favorites ? (
+            {!hasStatusGroup && favorites ? (
               <MenuItem
                 icon={Heart}
                 label={favorites.inList ? "Remove from liked" : "Add to liked"}
@@ -345,7 +410,7 @@ export function GameActionMenuPanel({
 
       {collectionPicker ? (
         <>
-          {(hasInstallGroup || hasLibraryGroup || hasListGroup) && <div className="my-1 h-px bg-white/[.06]" />}
+          {(hasInstallGroup || hasLibraryGroup || hasStatusGroup || hasListGroup) && <div className="my-1 h-px bg-white/[.06]" />}
           {(() => {
             const includedCount = collectionPicker.collections.filter((c) => c.included).length
             return (

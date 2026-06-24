@@ -96,19 +96,13 @@ export function useUniversalGameMenuProps(
     }
   }, [appid, game, hasActiveDownload, overrides.downloadable, requestDownload])
 
-  const wishlist = useMemo(() => {
+  const libraryStatus = useMemo(() => {
     if (accountLists.authed === false || !appid) return undefined
     return {
-      inList: accountLists.wishlist.has(appid),
-      toggle: () => { void accountLists.toggleWishlist(appid, game?.name) },
-    }
-  }, [accountLists, appid, game?.name])
-
-  const favorites = useMemo(() => {
-    if (accountLists.authed === false || !appid) return undefined
-    return {
-      inList: accountLists.favorites.has(appid),
-      toggle: () => { void accountLists.toggleFavorite(appid, game?.name) },
+      status: accountLists.statusFor(appid),
+      setStatus: (next: Parameters<typeof accountLists.setStatus>[1]) => {
+        void accountLists.setStatus(appid, next, game?.name)
+      },
     }
   }, [accountLists, appid, game?.name])
 
@@ -155,8 +149,7 @@ export function useUniversalGameMenuProps(
     onEditDetails: overrides.onEditDetails,
     onLinuxConfig: overrides.onLinuxConfig,
     onDelete: overrides.onDelete ?? null,
-    wishlist,
-    favorites,
+    libraryStatus,
     rpcMute: rpcMuteProp,
     collectionPicker,
   }

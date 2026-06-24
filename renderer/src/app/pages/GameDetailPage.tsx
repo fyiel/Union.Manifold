@@ -1592,13 +1592,9 @@ export function GameDetailPage() {
                                 setActionMenuOpen(false)
                                 void handleDeleteGame()
                               } : null}
-                              wishlist={accountLists.authed === false || !game?.appid ? undefined : {
-                                inList: accountLists.wishlist.has(game.appid),
-                                toggle: () => { void accountLists.toggleWishlist(game.appid, game.name) },
-                              }}
-                              favorites={accountLists.authed === false || !game?.appid ? undefined : {
-                                inList: accountLists.favorites.has(game.appid),
-                                toggle: () => { void accountLists.toggleFavorite(game.appid, game.name) },
+                              libraryStatus={accountLists.authed === false || !game?.appid ? undefined : {
+                                status: accountLists.statusFor(game.appid),
+                                setStatus: (next) => { void accountLists.setStatus(game.appid, next, game.name) },
                               }}
                               rpcMute={game?.appid ? {
                                 muted: rpcMute.muted,
@@ -1702,24 +1698,9 @@ export function GameDetailPage() {
                       onClick: () => { void openExecutablePicker() },
                     })
                   }
-                  if (accountLists.authed !== false && game?.appid) {
-                    chips.push({
-                      key: "wishlist",
-                      icon: Star,
-                      label: accountLists.wishlist.has(game.appid) ? "Wishlisted" : "Wishlist",
-                      onClick: () => { void accountLists.toggleWishlist(game.appid, game.name) },
-                      active: accountLists.wishlist.has(game.appid),
-                      activeIconClass: "text-amber-400",
-                    })
-                    chips.push({
-                      key: "liked",
-                      icon: Heart,
-                      label: accountLists.favorites.has(game.appid) ? "Liked" : "Like",
-                      onClick: () => { void accountLists.toggleFavorite(game.appid, game.name) },
-                      active: accountLists.favorites.has(game.appid),
-                      activeIconClass: "text-rose-400",
-                    })
-                  }
+                  // Wishlist / Like quick-chips were retired — the library
+                  // status dropdown (LibraryStatusControl, above) is the single
+                  // control for all statuses now.
                   if (game?.appid) {
                     chips.push({
                       key: "rpc",
@@ -1792,13 +1773,9 @@ export function GameDetailPage() {
                   setActionMenuContextPosition(null)
                   void handleDeleteGame()
                 } : undefined}
-                wishlist={accountLists.authed === false || !game?.appid ? undefined : {
-                  inList: accountLists.wishlist.has(game.appid),
-                  toggle: () => { void accountLists.toggleWishlist(game.appid, game.name) },
-                }}
-                favorites={accountLists.authed === false || !game?.appid ? undefined : {
-                  inList: accountLists.favorites.has(game.appid),
-                  toggle: () => { void accountLists.toggleFavorite(game.appid, game.name) },
+                libraryStatus={accountLists.authed === false || !game?.appid ? undefined : {
+                  status: accountLists.statusFor(game.appid),
+                  setStatus: (next) => { void accountLists.setStatus(game.appid, next, game.name) },
                 }}
                 rpcMute={game?.appid ? {
                   muted: rpcMute.muted,
