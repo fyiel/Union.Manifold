@@ -1883,13 +1883,9 @@ export function LibraryPage() {
           setPendingDeleteAction("installed")
           setCardContextMenu(null)
         }}
-        wishlist={accountLists.authed === false || !cardContextMenu ? undefined : {
-          inList: accountLists.wishlist.has(cardContextMenu.game.appid),
-          toggle: () => { void accountLists.toggleWishlist(cardContextMenu.game.appid, cardContextMenu.game.name) },
-        }}
-        favorites={accountLists.authed === false || !cardContextMenu ? undefined : {
-          inList: accountLists.favorites.has(cardContextMenu.game.appid),
-          toggle: () => { void accountLists.toggleFavorite(cardContextMenu.game.appid, cardContextMenu.game.name) },
+        libraryStatus={accountLists.authed === false || !cardContextMenu ? undefined : {
+          status: accountLists.statusFor(cardContextMenu.game.appid),
+          setStatus: (next) => { void accountLists.setStatus(cardContextMenu.game.appid, next, cardContextMenu.game.name) },
         }}
         rpcMute={cardContextMenu ? {
           muted: rpcMutedAppids[cardContextMenu.game.appid] === true,
