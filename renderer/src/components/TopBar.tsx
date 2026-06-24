@@ -313,15 +313,7 @@ export function TopBar({ onOpenMenu }: TopBarProps) {
                       className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-[13px] text-muted-foreground transition hover:bg-secondary hover:text-foreground"
                     >
                       <Heart className="h-4 w-4" />
-                      Liked
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => navigate("/wishlist")}
-                      className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-[13px] text-muted-foreground transition hover:bg-secondary hover:text-foreground"
-                    >
-                      <Star className="h-4 w-4" />
-                      Wishlist
+                      Library
                     </button>
                     <button
                       type="button"

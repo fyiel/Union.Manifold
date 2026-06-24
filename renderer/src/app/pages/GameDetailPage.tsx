@@ -57,6 +57,7 @@ import { GameRatingSummary } from "@/components/GameRatingSummary"
 import { DownloadCheckModal } from "@/components/DownloadCheckModal"
 import { EditGameMetadataModal } from "@/components/EditGameMetadataModal"
 import { GameActionContextMenu, GameActionMenuPanel, type CollectionPickerEntry } from "@/components/GameActionMenu"
+import { LibraryStatusControl } from "@/components/LibraryStatusControl"
 import { useUserCollections } from "@/hooks/use-user-collections"
 import { UpdateBackupWarningModal } from "@/components/VersionConflictModal"
 import { GameLinuxConfigModal } from "@/components/GameLinuxConfigModal"
@@ -1805,6 +1806,19 @@ export function GameDetailPage() {
                 } : undefined}
                 collectionPicker={collectionPicker}
               />
+
+              {/* MAL-style library status dropdown — single control for
+                  Playing / Plan to Play / Completed / On Hold / Dropped /
+                  Favorite (replaces the old separate Like + Wishlist toggles). */}
+              {accountLists.authed !== false && game?.appid && (
+                <LibraryStatusControl
+                  appid={game.appid}
+                  name={game.name}
+                  status={accountLists.statusFor(game.appid)}
+                  onSelect={(next) => { void accountLists.setStatus(game.appid, next, game.name) }}
+                  className="w-full justify-center"
+                />
+              )}
 
               {/* Compact stats strip. Was two oversized cards with giant icons +
                   shadows — now a single horizontal panel so the sidebar stays
