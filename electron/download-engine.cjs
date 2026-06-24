@@ -669,7 +669,59 @@ class DownloadEngine extends EventEmitter {
     // Before giving up, try the next CDN mirror — covers SNI/DPI blocks where
     // the handshake to one host fails but an interchangeable domain works.
     if (this._tryCdnFailover(dl, errorMsg)) return
+    // Failover was unavailable (no mirror loaded) or exhausted (every mirror
+    // also blocked). If this was a transport/TLS shape against a CDN host it's a
+    // network-level block — almost always school/ISP DPI rejecting the TLS
+    // ClientHello by its SNI (cdn.union-crax.xyz). No aria2/cert change can beat
+    // that; only a different hostname can. Tell main: it will (re)hydrate the
+    // mirror list and retry, and if there's still nothing reachable, surface a
+    // clear popup explaining the block instead of looping silently.
+    if (this._isTransportError(errorMsg)) {
+      const blockedHost = this._urlHost(dl.url)
+      if (blockedHost && this.cdnHosts.includes(blockedHost)) {
+        dl._cdnTransportBlocked = true
+        this.emit('cdn-blocked', {
+          id: dl.id,
+          appid: dl.appid,
+          gameName: dl.gameName || null,
+          host: blockedHost,
+          error: String(errorMsg || ''),
+          // True when we have no alternate mirror to even try — main should
+          // re-fetch /api/cdn-mirrors before deciding the user is stuck.
+          noMirrorLoaded: this.cdnHosts.length < 2,
+        })
+      }
+    }
     this._fail(dl, errorMsg || 'aria2 download failed')
+  }
+
+  /** True for network/TLS-shaped errors that another interchangeable host might
+   *  survive (handshake/SNI blocks, connect failures, timeouts). False for HTTP
+   *  status errors (404/403/5xx) and the like, where swapping hosts only masks a
+   *  real problem. */
+  _isTransportError(errorMsg) {
+    return /handshake|protocol error|\bssl\b|\btls\b|timed?\s*out|timeout|connection|reset|refused|unreachable|could ?n.t? connect|resolve|name resolution|network|EOF/i.test(String(errorMsg || ''))
+  }
+
+  /**
+   * After the mirror list is (re)hydrated, retry any download that previously
+   * failed at the TLS/transport layer against a CDN host — moving it onto an
+   * untried mirror. No-op until we actually have an alternate mirror. Returns
+   * the number of downloads re-queued. Called by main once a fresh
+   * /api/cdn-mirrors fetch lands (see main's 'cdn-blocked' handler).
+   */
+  retryCdnBlocked() {
+    if (this.cdnHosts.length < 2) return 0
+    let requeued = 0
+    for (const dl of this.byId.values()) {
+      if (!dl || !dl._cdnTransportBlocked || dl.status !== 'failed') continue
+      if (this._tryCdnFailover(dl, dl.error || 'protocol error')) {
+        dl._cdnTransportBlocked = false
+        requeued++
+      }
+    }
+    if (requeued) this.log('info', `[engine] re-queued ${requeued} CDN-blocked download(s) on a mirror after refresh`)
+    return requeued
   }
 
   /**
@@ -686,8 +738,7 @@ class DownloadEngine extends EventEmitter {
     // "SSL/TLS handshake failure: protocol error", plus the usual connect-level
     // failures; never fail over on HTTP status errors (404/403/5xx) — those are
     // forwarded verbatim and the next host would fail identically.
-    const isTransport = /handshake|protocol error|\bssl\b|\btls\b|timed?\s*out|timeout|connection|reset|refused|unreachable|could ?n.t? connect|resolve|name resolution|network|EOF/i.test(msg)
-    if (!isTransport) return false
+    if (!this._isTransportError(msg)) return false
     const host = this._urlHost(dl.url)
     if (!host || !this.cdnHosts.includes(host)) return false // not a CDN download
 

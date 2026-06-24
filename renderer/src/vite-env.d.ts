@@ -283,6 +283,7 @@ declare global {
       deleteArchiveFiles: (payload: { archivePaths: string[] }) => Promise<{ ok: boolean; deletedCount?: number; error?: string }>
       browseForGameExe: (defaultPath?: string) => Promise<{ ok: boolean; path?: string }>
       onUpdate: (callback: (update: DownloadUpdatePayload) => void) => () => void
+      onBlocked: (callback: (data: { host: string; gameName: string | null; appid: string | null; reason: string }) => void) => () => void
       onGameQuickExit: (callback: (data: { appid: string | null; exePath: string | null; elapsed: number }) => void) => () => void
       onArchiveDeletePrompt: (callback: (payload: { appid?: string | null; gameName?: string | null; archivePaths: string[]; totalBytes: number }) => void) => () => void
     }

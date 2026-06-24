@@ -123,10 +123,58 @@ function ExtractionCloseGuard() {
   )
 }
 
+function DownloadBlockedGuard() {
+  // Surfaced when a download can't proceed because the network is blocking our
+  // download host at the TLS layer (DPI/SNI) and there's no reachable mirror to
+  // fall back to. Without this the app just looped on the failure silently;
+  // users (and support) had no idea *why*. Main throttles the event, so this
+  // shows at most once a minute.
+  const [blocked, setBlocked] = useState<{ host: string; gameName: string | null } | null>(null)
+
+  useEffect(() => {
+    if (!window.ucDownloads?.onBlocked) return
+    return window.ucDownloads.onBlocked((data) => {
+      setBlocked({ host: data?.host || "our download server", gameName: data?.gameName ?? null })
+    })
+  }, [])
+
+  return (
+    <Dialog open={Boolean(blocked)} onOpenChange={(open) => { if (!open) setBlocked(null) }}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <AlertTriangle className="h-5 w-5 text-amber-400" />
+            Your network is blocking downloads
+          </DialogTitle>
+          <DialogDescription className="text-left pt-2 text-foreground/80">
+            {blocked?.gameName ? <><span className="font-medium text-foreground">{blocked.gameName}</span> couldn't download because your </> : "Your "}
+            network is refusing the secure connection to our download server
+            {blocked?.host ? <> (<span className="font-mono text-xs">{blocked.host}</span>)</> : null} — the TLS
+            handshake is being blocked. This is almost always a school, workplace,
+            or ISP firewall, not a problem with your PC or the file.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-foreground/90 space-y-2">
+          <div className="font-medium text-foreground">What works:</div>
+          <ul className="list-disc pl-5 space-y-1 text-foreground/80">
+            <li>Connect through a VPN, then retry the download.</li>
+            <li>Try a different network (e.g. a phone hotspot).</li>
+            <li>Browsing and the catalog keep working — only large downloads are blocked.</li>
+          </ul>
+        </div>
+        <DialogFooter>
+          <Button onClick={() => setBlocked(null)}>Got it</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 function AppWithDownloads() {
   return (
     <>
       <ExtractionCloseGuard />
+      <DownloadBlockedGuard />
       <WebDownloadQueueConsumer />
       <ControllerNavigation />
       <AppLayout />

@@ -136,6 +136,17 @@ try {
   if (typeof app.setName === 'function') app.setName('UnionCrax.Direct')
   else app.name = 'UnionCrax.Direct'
 } catch { }
+// Linux taskbar/dock icon. electron-builder writes the installed .desktop file
+// with `StartupWMClass=UnionCrax.Direct`, but the running window's WM_CLASS is
+// otherwise derived from argv[0] — which for an AppImage is a random
+// /tmp/.mount_* path. That mismatch means GNOME/most X11 DEs can't tie the
+// window back to the installed icon and fall back to a generic one. Pinning
+// Chromium's --class makes the window's WM_CLASS deterministically match the
+// desktop entry, so the real icon shows in the taskbar/dock. (Harmless on
+// Wayland and ignored on win32/mac.)
+if (process.platform === 'linux') {
+  try { app.commandLine.appendSwitch('class', WINDOW_DISPLAY_NAME) } catch { }
+}
 const pendingDownloads = []
 let lastPixeldrainDownloadTime = 0
 const PIXELDRAIN_DELAY_MS = 2000 // 2 second delay between pixeldrain downloads to avoid rate limiting
@@ -2792,6 +2803,16 @@ let resolvedBaseUrl = DEFAULT_BASE_URL
 const CDN_PRIMARY_HOST = 'cdn.union-crax.xyz'
 let cdnMirrorHosts = [CDN_PRIMARY_HOST]
 
+// Throttle for the on-failure mirror re-fetch (see the 'cdn-blocked'
+// handler). Keeps a download stuck in a fail→retry loop from spamming
+// /api/cdn-mirrors while still recovering within a retry or two.
+const CDN_MIRROR_REFRESH_THROTTLE_MS = 30_000
+let lastMirrorRefreshAt = 0
+// Show the "network is blocking downloads" popup at most this often, so a
+// download stuck in a fail→retry loop doesn't spam the user.
+const CDN_BLOCKED_NOTICE_THROTTLE_MS = 60_000
+let lastBlockedNoticeAt = 0
+
 /** The last CDN host we saw deliver bytes, persisted across launches so a
  *  blocked user resumes straight on the working mirror. '' if none/unreadable. */
 function readPersistedCdnHost() {
@@ -3011,6 +3032,53 @@ function getDownloadEngine() {
   try {
     _downloadEngine.setCdnHosts(cdnMirrorHosts, readPersistedCdnHost())
   } catch { /* ignore */ }
+  // A download failed at the TLS/transport layer against a CDN host (DPI/SNI
+  // block — see download-engine's 'cdn-blocked'). Recover if we can, otherwise
+  // tell the user *why* instead of looping silently:
+  //   1. If no alternate mirror is loaded, re-fetch /api/cdn-mirrors (a mirror
+  //      may have been added server-side since launch) and retry the blocked
+  //      download(s) on it — no app restart needed.
+  //   2. If nothing reachable remains, push a one-shot popup to the renderer
+  //      explaining the network block and the workaround (VPN / other network).
+  // Both paths are throttled so a fail→retry loop doesn't hammer the API or
+  // spam popups.
+  _downloadEngine.on('cdn-blocked', (info) => {
+    const now = Date.now()
+    const finishBlocked = () => {
+      if (now - lastBlockedNoticeAt < CDN_BLOCKED_NOTICE_THROTTLE_MS) return
+      lastBlockedNoticeAt = now
+      ucLog(`CDN: ${info?.host || 'download host'} blocked by network (${info?.error || 'TLS handshake'}) — no reachable mirror`, 'warn')
+      try {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('uc:download-blocked', {
+            host: info?.host || CDN_PRIMARY_HOST,
+            gameName: info?.gameName || null,
+            appid: info?.appid || null,
+            reason: 'network-tls-block',
+          })
+        }
+      } catch { /* ignore */ }
+    }
+    // Try to self-heal first when we simply have no mirror to fall back on.
+    if (info?.noMirrorLoaded && now - lastMirrorRefreshAt >= CDN_MIRROR_REFRESH_THROTTLE_MS) {
+      lastMirrorRefreshAt = now
+      ucLog('CDN: transport block with no mirror loaded — re-fetching mirror list', 'warn')
+      refreshCdnMirrorHosts().then(() => {
+        let recovered = 0
+        try { recovered = _downloadEngine.retryCdnBlocked() } catch { /* ignore */ }
+        if (recovered) {
+          ucLog(`CDN: retried ${recovered} blocked download(s) on a mirror`)
+          return // recovering — don't alarm the user
+        }
+        ucLog('CDN: no usable mirror returned by /api/cdn-mirrors (set UC_CDN_MIRROR_HOSTS on the website)', 'warn')
+        finishBlocked()
+      }).catch(finishBlocked)
+      return
+    }
+    // Mirrors exist but all are blocked (failover exhausted), or we already
+    // refreshed recently — go straight to the popup.
+    finishBlocked()
+  })
   // Persist whichever CDN host actually delivers bytes this session.
   _downloadEngine.on('cdn-host', (host) => {
     try {
@@ -3365,6 +3433,98 @@ function buildUcOwnedLinuxDesktopExec(ucExePath, appid) {
     .replace(/\\/g, '\\\\')
     .replace(/"/g, '\\"')
   return `"${escapedExe}" --launch-appid=${safeAppid}`
+}
+
+/**
+ * Self-install a freedesktop `.desktop` entry + themed icons for the app itself
+ * on Linux, so the taskbar/dock shows the real icon.
+ *
+ * Why this is necessary (and BrowserWindow `icon` isn't enough): a downloaded
+ * AppImage / tarball is not "integrated", so no `.desktop` file exists for the
+ * desktop environment to associate the running window with. On KDE Plasma and
+ * GNOME — especially on **Wayland**, which has no per-window icon protocol — the
+ * taskbar icon is resolved purely by matching the window's app_id / WM_CLASS to
+ * an installed `.desktop` file. No match → generic icon, regardless of the icon
+ * we hand BrowserWindow. We pin WM_CLASS/app_id to "UnionCrax.Direct" (see the
+ * `--class` switch up top), name this entry to match, and install themed PNGs as
+ * `UnionCrax.Direct.png` so `Icon=UnionCrax.Direct` resolves.
+ *
+ * Best-effort and idempotent: only (re)writes when the entry is missing or the
+ * exec target changed (e.g. the AppImage was moved or updated).
+ */
+function ensureLinuxDesktopIntegration() {
+  if (process.platform !== 'linux' || !app.isPackaged) return
+  try {
+    const os = require('os')
+    const home = os.homedir()
+    if (!home) return
+    const appId = WINDOW_DISPLAY_NAME // must match the pinned --class / WM_CLASS
+
+    // Exec target: the AppImage path when launched from one (APPIMAGE is set by
+    // the runtime), otherwise the unpacked executable.
+    const execTarget = process.env.APPIMAGE && fs.existsSync(process.env.APPIMAGE)
+      ? process.env.APPIMAGE
+      : process.execPath
+
+    // 1) Install themed icons named after appId so Icon=UnionCrax.Direct resolves.
+    const iconSrcDir = path.join(__dirname, '..', 'assets', 'icons')
+    const sizes = ['16x16', '32x32', '48x48', '64x64', '128x128', '256x256', '512x512']
+    let installedAnyIcon = false
+    for (const size of sizes) {
+      try {
+        const src = path.join(iconSrcDir, `${size}.png`)
+        if (!fs.existsSync(src)) continue
+        const destDir = path.join(home, '.local', 'share', 'icons', 'hicolor', size, 'apps')
+        fs.mkdirSync(destDir, { recursive: true })
+        fs.copyFileSync(src, path.join(destDir, `${appId}.png`))
+        installedAnyIcon = true
+      } catch { /* ignore individual size */ }
+    }
+
+    // 2) Write the .desktop entry (filename = appId so app_id/WM_CLASS matches).
+    const appsDir = path.join(home, '.local', 'share', 'applications')
+    fs.mkdirSync(appsDir, { recursive: true })
+    const desktopPath = path.join(appsDir, `${appId}.desktop`)
+    const escExec = execTarget.replace(/(["$`\\])/g, '\\$1')
+    const iconValue = installedAnyIcon ? appId : path.join(__dirname, '..', 'assets', 'icon.png')
+    const entry = [
+      '[Desktop Entry]',
+      'Type=Application',
+      `Name=${WINDOW_DISPLAY_NAME}`,
+      'GenericName=Game Launcher',
+      `Exec="${escExec}" %U`,
+      `Icon=${iconValue}`,
+      'Terminal=false',
+      'Categories=Game;',
+      `StartupWMClass=${appId}`,
+      'StartupNotify=true',
+      `MimeType=x-scheme-handler/${UC_DEEP_LINK_SCHEME};`,
+      '',
+    ].join('\n')
+
+    let needWrite = true
+    try {
+      if (fs.readFileSync(desktopPath, 'utf8').includes(`Exec="${escExec}"`)) needWrite = false
+    } catch { /* missing — write it */ }
+    if (!needWrite) return
+
+    fs.writeFileSync(desktopPath, entry, 'utf8')
+    try { fs.chmodSync(desktopPath, 0o755) } catch { /* ignore */ }
+    ucLog(`Linux desktop integration installed: ${desktopPath} (exec=${execTarget})`)
+
+    // Best-effort cache refresh so the icon appears without a relog. Missing
+    // tools are fine — the entry is on disk for the next session regardless.
+    for (const [cmd, cmdArgs] of [
+      ['update-desktop-database', [appsDir]],
+      ['xdg-icon-resource', ['forceupdate']],
+      ['kbuildsycoca6', []],
+      ['kbuildsycoca5', []],
+    ]) {
+      try { child_process.spawn(cmd, cmdArgs, { stdio: 'ignore' }).on('error', () => {}) } catch { /* ignore */ }
+    }
+  } catch (err) {
+    ucLog(`Linux desktop integration skipped: ${err?.message || err}`, 'warn')
+  }
 }
 
 /**
@@ -10040,6 +10200,10 @@ app.whenReady().then(async () => {
   ensureDownloadDir()
   registerRendererAssetProtocol()
   registerLocalMediaProtocol()
+  // Install/refresh the Linux .desktop entry + themed icons so KDE/GNOME show
+  // the real taskbar icon (an un-integrated AppImage has nothing to match the
+  // window against otherwise). Best-effort, never blocks startup.
+  try { ensureLinuxDesktopIntegration() } catch { /* ignore */ }
 
   setSplashStatus(splashWin, 'Scanning drives...')
   try {

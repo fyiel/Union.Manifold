@@ -1,5 +1,18 @@
 # Changelog
 
+## v2.7.3 — Linux Icon & Blocked-Download Clarity
+
+A focused fix release: the Linux taskbar icon now shows up, and downloads that a network blocks at the TLS layer now explain *why* instead of looping silently.
+
+### Linux
+
+- **Fixed: the app icon was missing from the taskbar/dock (reported on Nobara + KDE).** A downloaded AppImage isn't "integrated", so no `.desktop` file is installed — and on KDE Plasma and GNOME, **especially on Wayland** (which has no per-window icon protocol, so the window icon we set is ignored), the taskbar icon is resolved purely by matching the window's `app_id`/`WM_CLASS` to an installed `.desktop` entry. With nothing to match, the desktop environment fell back to a generic icon no matter what. The app now **self-installs desktop integration on launch**: it writes `~/.local/share/applications/UnionCrax.Direct.desktop` (pointing at the AppImage / executable) and installs the themed PNGs into `~/.local/share/icons/hicolor/<size>/apps/`, then refreshes the icon/desktop caches so it appears without a relog. The window's `WM_CLASS` is also pinned (`--class`) so it deterministically matches the entry. It's best-effort and idempotent — it only rewrites when the executable path changes (e.g. the AppImage moved or updated).
+
+### Downloads
+
+- **Added: a clear popup when your network is blocking downloads.** On networks that block our download host at the TLS layer (school/ISP DPI rejecting the connection by its SNI), downloads previously just failed and retried over and over with no explanation. Now, when a download can't proceed and there's no reachable mirror to fall back to, the app shows a plain-language popup — it's your network refusing the secure connection, not your PC or the file — with the workarounds that actually help (connect through a VPN, or try a different network such as a phone hotspot). Throttled so a retry loop can't spam it.
+- **Improved: CDN mirror failover now self-heals without a restart.** If a download hits a TLS/transport block and the launcher has no alternate mirror loaded, it now re-fetches the mirror list from `/api/cdn-mirrors` on the spot and retries the blocked download on a working mirror. Previously the mirror list was only fetched once at startup, so a mirror added server-side (`UC_CDN_MIRROR_HOSTS`) wouldn't reach already-running clients until they relaunched. (Reminder: failover is still inert until at least one alternate domain on a different SNI is configured server-side — that's what the popup above covers when nothing reachable exists.)
+
 ## v2.7.2 — Downloads Reliability & Launch Flow
 
 A focused follow-up to v2.7.1: downloads now survive blocked networks and the launch flow is unified across every screen.

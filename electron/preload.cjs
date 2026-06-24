@@ -88,6 +88,14 @@ contextBridge.exposeInMainWorld('ucDownloads', {
     ipcRenderer.on('uc:download-update', listener)
     return () => ipcRenderer.removeListener('uc:download-update', listener)
   },
+  // Fired when a download can't proceed because the network is blocking our
+  // download host at the TLS layer (DPI/SNI) and no reachable mirror exists.
+  // Renderer surfaces a clear popup explaining why + the VPN workaround.
+  onBlocked: (callback) => {
+    const listener = (_event, data) => callback(data)
+    ipcRenderer.on('uc:download-blocked', listener)
+    return () => ipcRenderer.removeListener('uc:download-blocked', listener)
+  },
   onGameQuickExit: (callback) => {
     const listener = (_event, data) => callback(data)
     ipcRenderer.on('uc:game-quick-exit', listener)
