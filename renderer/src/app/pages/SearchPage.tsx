@@ -844,11 +844,8 @@ export function SearchPage() {
           <p className="text-sm text-muted-foreground">Find your next adventure with detailed filters.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button variant="outline" size="sm" className="gap-1.5" onClick={() => navigate("/wishlist")}>
-            <Star className="h-3.5 w-3.5" /> Wishlist
-          </Button>
           <Button variant="outline" size="sm" className="gap-1.5" onClick={() => navigate("/liked")}>
-            <Heart className="h-3.5 w-3.5" /> Liked
+            <Heart className="h-3.5 w-3.5" /> Library
           </Button>
           <Button
             variant="outline"
