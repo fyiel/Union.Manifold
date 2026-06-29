@@ -2,9 +2,21 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { Bell, Download, Gamepad2, Pause, Play, X, Zap } from "@/components/icons"
 import { Camera, Clock, Square, Volume2, VolumeX } from "lucide-react"
 import { ControllerOverlayFlyout } from './ControllerOverlayFlyout'
-import { LogoStaticDark } from './brand/brand-assets'
 import { CustomTooltipManager } from './CustomTooltipManager'
 import { proxyImageUrl } from '@/lib/utils'
+
+// Union.Manifold mark, the converging-strokes glyph (matches the sidebar).
+function ManifoldMark({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} fill="none" stroke="#111" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 6h5c3 0 3.5 6 7 6" />
+      <path d="M3 12h12" />
+      <path d="M3 18h5c3 0 3.5-6 7-6" />
+      <path d="M15 12h6" />
+      <circle cx="15" cy="12" r="1.7" fill="#111" stroke="none" />
+    </svg>
+  )
+}
 
 type OverlayApi = NonNullable<Window['ucOverlay']> & {
   onToast?: (callback: (data: {
@@ -472,7 +484,7 @@ export function InGameOverlay() {
             <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-primary">
               {gameInfo?.image
                 ? <img src={proxyImageUrl(gameInfo.image)} alt="" className="h-full w-full object-cover" />
-                : <LogoStaticDark className="h-6 w-6" />}
+                : <ManifoldMark className="h-6 w-6" />}
             </div>
             <div className="min-w-0 flex-1">
               <div className="section-label !text-muted-foreground">{hasSession ? 'Now Playing' : 'UnionCrax'}</div>
@@ -607,9 +619,9 @@ export function InGameOverlay() {
                 wordmark next to it. */}
             <div className="flex items-center gap-2">
               <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary">
-                <LogoStaticDark className="h-[18px] w-[18px]" />
+                <ManifoldMark className="h-[18px] w-[18px]" />
               </div>
-              <span className="text-sm font-brand text-white tracking-tight">UnionCrax</span>
+              <span className="text-sm font-brand text-white tracking-tight">Union.Manifold</span>
             </div>
             <div className="flex-1" />
             <button
