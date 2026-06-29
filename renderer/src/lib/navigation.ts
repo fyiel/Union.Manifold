@@ -166,7 +166,7 @@ export function getRouteChrome(pathname: string) {
   }
 
   return {
-    eyebrow: "UnionCrax.Direct",
+    eyebrow: "Union.Manifold",
     title: "Desktop launcher",
     description: "Core launcher tools, without the website clutter.",
   }
@@ -174,7 +174,7 @@ export function getRouteChrome(pathname: string) {
 
 export function getLauncherHomeMeta() {
   return {
-    eyebrow: "UnionCrax.Direct",
+    eyebrow: "Union.Manifold",
     title: "Your library, one click away",
     description: "A faster launcher flow inspired by the best desktop game hubs: spotlight, activity, and library-first navigation.",
     icon: Gamepad2,
