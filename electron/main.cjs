@@ -50,14 +50,34 @@ if (!isDev) {
         bypassCSP: true,
       },
     },
+    {
+      scheme: 'uc-asset',
+      privileges: {
+        standard: true,
+        secure: true,
+        supportFetchAPI: true,
+        corsEnabled: true,
+        bypassCSP: true,
+      },
+    },
   ])
 } else {
-  // Dev mode: still need to register uc-local as privileged so the renderer
-  // (which is loaded from localhost:5173) can read installing/installed images.
-  // `ucd` isn't registered in dev because the renderer is the Vite server.
+  // Dev mode: still need to register uc-local + uc-asset as privileged so the
+  // renderer (loaded from localhost:5173) can read installed images + cached
+  // assets. `ucd` isn't registered in dev because the renderer is the Vite server.
   protocol.registerSchemesAsPrivileged([
     {
       scheme: 'uc-local',
+      privileges: {
+        standard: true,
+        secure: true,
+        supportFetchAPI: true,
+        corsEnabled: true,
+        bypassCSP: true,
+      },
+    },
+    {
+      scheme: 'uc-asset',
       privileges: {
         standard: true,
         secure: true,
@@ -128,10 +148,10 @@ async function fetchLatestReleaseInfo() {
 }
 if (process.platform === 'win32') {
   try {
-    app.setAppUserModelId(packageJson?.build?.appId || 'xyz.unioncrax.direct')
+    app.setAppUserModelId(packageJson?.build?.appId || 'fyi.pumg.unionmanifold')
   } catch { }
 }
-const WINDOW_DISPLAY_NAME = 'UnionCrax.Direct'
+const WINDOW_DISPLAY_NAME = 'Union.Manifold'
 try {
   if (typeof app.setName === 'function') app.setName('UnionCrax.Direct')
   else app.name = 'UnionCrax.Direct'
@@ -1823,6 +1843,7 @@ const LOG_SHARE_ENDPOINTS = ['/api/account/diagnostics/logs', '/api/account/logs
 const recentArchivePromptSignatures = new Map()
 let cachedSettings = null
 let downloadsStateStorePromise = null
+let downloadsStateDbHandle = null
 let persistedInstallingState = new Map()
 let persistedQueueState = { global: [], byApp: {} }
 
@@ -2216,6 +2237,82 @@ function registerLocalMediaProtocol() {
   })
 }
 
+// asset cache protocol
+function assetCacheDir() {
+  return path.join(app.getPath('userData'), 'asset-cache')
+}
+
+async function assetCacheSizeBytes() {
+  const dir = assetCacheDir()
+  let total = 0
+  try {
+    for (const name of await fs.promises.readdir(dir)) {
+      try { total += (await fs.promises.stat(path.join(dir, name))).size } catch { /* skip */ }
+    }
+  } catch { /* no dir yet */ }
+  return total
+}
+
+async function clearAssetCache() {
+  const dir = assetCacheDir()
+  let freed = 0
+  try { freed = await assetCacheSizeBytes() } catch { /* ignore */ }
+  try { await fs.promises.rm(dir, { recursive: true, force: true }) } catch (err) { ucLog(`clearAssetCache failed: ${err?.message || err}`, 'warn') }
+  return freed
+}
+
+function registerAssetCacheProtocol() {
+  const dir = assetCacheDir()
+  try { fs.mkdirSync(dir, { recursive: true }) } catch { /* ignore */ }
+
+  protocol.handle('uc-asset', async (request) => {
+    try {
+      const u = new URL(request.url).searchParams.get('u')
+      if (!u) return new Response('Bad request', { status: 400 })
+      const remote = u
+      let parsedRemote
+      try {
+        parsedRemote = new URL(remote)
+      } catch {
+        return new Response('Bad request', { status: 400 })
+      }
+      if (parsedRemote.protocol !== 'http:' && parsedRemote.protocol !== 'https:') {
+        return new Response('Unsupported scheme', { status: 400 })
+      }
+      const key = crypto.createHash('sha1').update(remote).digest('hex')
+      const file = path.join(dir, key)
+      const typeFile = `${file}.t`
+
+      try {
+        const data = await fs.promises.readFile(file)
+        let type = 'image/jpeg'
+        try { type = (await fs.promises.readFile(typeFile, 'utf8')) || type } catch { /* default */ }
+        return new Response(data, { status: 200, headers: { 'Content-Type': type, 'Cache-Control': 'public, max-age=31536000, immutable' } })
+      } catch { /* miss → fetch below */ }
+
+      const resp = await net.fetch(remote, { redirect: 'follow' })
+      if (!resp.ok) return new Response('Upstream error', { status: resp.status })
+      const buf = Buffer.from(await resp.arrayBuffer())
+      const type = resp.headers.get('content-type') || 'application/octet-stream'
+      if (/^image\//i.test(type) && buf.byteLength > 0) {
+        // Write the type sidecar first, then rename the bytes in. The rename is
+        // atomic so a concurrent reader sees either no file or the whole image,
+        // never a half-written one, and the .t is already there by then.
+        try {
+          const tmp = `${file}.${crypto.randomBytes(6).toString('hex')}.tmp`
+          await fs.promises.writeFile(typeFile, type)
+          await fs.promises.writeFile(tmp, buf)
+          await fs.promises.rename(tmp, file)
+        } catch (err) { ucLog(`asset cache write failed: ${err?.message || err}`, 'warn') }
+      }
+      return new Response(buf, { status: 200, headers: { 'Content-Type': type, 'Cache-Control': 'public, max-age=31536000, immutable' } })
+    } catch (err) {
+      ucLog(`uc-asset protocol failed: ${err?.message || err}`, 'warn')
+      return new Response('Internal error', { status: 500 })
+    }
+  })
+}
+
 function registerProcessLogging() {
   process.on('uncaughtException', (err) => ucLog('Uncaught exception', 'error', err))
   process.on('unhandledRejection', (reason) => ucLog('Unhandled rejection', 'error', reason))
@@ -2456,7 +2553,15 @@ function resolveWindowIcon() {
 }
 
 function resolveTrayIcon() {
-  return resolveWindowIcon()
+  // The tray uses a DEDICATED dark badge (charcoal square + light glyph,
+  // transparent corners) since the light app icon showed as an ugly white box
+  // in gray/dark system trays. Fall back to the window icon if it's missing.
+  const asset = 'tray.png'
+  const devPath = path.join(__dirname, '..', 'assets', asset)
+  const packagedPath = app.isPackaged ? path.join(process.resourcesPath, 'assets', asset) : null
+  const trayPath = packagedPath && fs.existsSync(packagedPath) ? packagedPath : devPath
+  const img = nativeImage.createFromPath(trayPath)
+  return img.isEmpty() ? resolveWindowIcon() : img
 }
 
 // Statuses we consider "actively running" for the tray downloads section.
@@ -2487,6 +2592,11 @@ function refreshTrayMenu() {
     try {
       if (trayPopupWindow && !trayPopupWindow.isDestroyed() && trayPopupWindow.isVisible()) {
         trayPopupWindow.webContents.send('tray-popup:data', await buildTrayPopupData())
+      }
+      // Keep the native Linux context menu's dynamic items (e.g. "Stop <game>")
+      // in sync with the current running-game state.
+      if (tray && process.platform === 'linux') {
+        try { tray.setContextMenu(buildTrayContextMenu()) } catch { /* ignore */ }
       }
     } catch (err) {
       ucLog(`refreshTrayMenu failed: ${err?.message || err}`, 'warn')
@@ -2716,6 +2826,17 @@ function createTray() {
     destroyTrayPopupWindow()
     showMainWindow()
   })
+
+  // On Linux the click/right-click events above generally never fire, so give
+  // the tray a real (native) context menu with the same actions. Rebuilt by
+  // refreshTrayMenu() when a game starts/stops so "Stop <game>" stays accurate.
+  if (process.platform === 'linux') {
+    try {
+      tray.setContextMenu(buildTrayContextMenu())
+    } catch (err) {
+      ucLog(`tray.setContextMenu failed: ${err?.message || err}`, 'warn')
+    }
+  }
 }
 
 ipcMain.on('tray-popup:ready', (event, { height }) => {
@@ -2733,9 +2854,9 @@ ipcMain.on('tray-popup:ready', (event, { height }) => {
   }
 })
 
-ipcMain.on('tray-popup:action', async (event, { type, payload }) => {
-  const win = BrowserWindow.fromWebContents(event.sender)
-  if (win && !win.isDestroyed()) win.close()
+// Shared tray action dispatcher, used by both the custom popup (IPC) and the
+// native Linux context menu so they stay in lockstep.
+async function performTrayAction(type, payload) {
   try {
     switch (type) {
       case 'show':
@@ -2774,12 +2895,43 @@ ipcMain.on('tray-popup:action', async (event, { type, payload }) => {
         app.quit()
         break
       default:
-        ucLog(`tray-popup:action — unknown type: ${type}`, 'warn')
+        ucLog(`tray action unknown type: ${type}`, 'warn')
     }
   } catch (err) {
-    ucLog(`tray-popup:action handler failed: ${err?.message || err}`, 'warn')
+    ucLog(`tray action handler failed: ${err?.message || err}`, 'warn')
   }
+}
+
+ipcMain.on('tray-popup:action', async (event, { type, payload }) => {
+  const win = BrowserWindow.fromWebContents(event.sender)
+  if (win && !win.isDestroyed()) win.close()
+  await performTrayAction(type, payload)
 })
+
+// Native tray context menu. Required on Linux: the StatusNotifierItem /
+// libappindicator tray used by most Linux desktops does NOT deliver
+// click/right-click events to Electron, so the custom styled popup never opens
+// there (a tray icon is only interactive if a native context menu is attached
+// via setContextMenu). Windows and macOS keep the styled right-click popup, so
+// we only attach this on Linux (where there'd otherwise be no buttons at all).
+function buildTrayContextMenu() {
+  const running = pickCurrentRunningGame()
+  const template = [
+    { label: `Open ${WINDOW_DISPLAY_NAME}`, click: () => { void performTrayAction('show') } },
+    { type: 'separator' },
+    { label: 'Browse', click: () => { void performTrayAction('navigate', '/') } },
+    { label: 'Library', click: () => { void performTrayAction('navigate', '/library') } },
+    { label: 'Downloads', click: () => { void performTrayAction('navigate', '/downloads') } },
+    { label: 'Settings', click: () => { void performTrayAction('navigate', '/settings') } },
+  ]
+  if (running?.appid) {
+    template.push({ type: 'separator' })
+    template.push({ label: `Stop ${running.name || 'game'}`, click: () => { void performTrayAction('quit-game', running.appid) } })
+  }
+  template.push({ type: 'separator' })
+  template.push({ label: `Quit ${WINDOW_DISPLAY_NAME}`, click: () => { void performTrayAction('quit') } })
+  return Menu.buildFromTemplate(template)
+}
 
 const DEFAULT_BASE_URL = 'https://union-crax.xyz'
 
@@ -3910,26 +4062,32 @@ function writeSettings(next) {
   }
 }
 
+// Lock contention (another electron instance / hot-reload race) and transient
+// IO errors must NOT trigger a wipe. That's what was causing download state to
+// vanish across restarts in dev.
+function isLevelLockError(err) {
+  const code = err?.code || ''
+  const msg = String(err?.message || err || '')
+  return code === 'LEVEL_LOCKED' || /lock|resource temporarily unavailable|already held/i.test(msg)
+}
+
+// Genuine corruption. The "not an sstable (bad magic number)" variant only
+// surfaces at read/write time (a single .ldb block is bad), not at open, so we
+// match it here and self-heal in runStateOp below.
+function isLevelCorruptionError(err) {
+  const code = err?.code || ''
+  const msg = String(err?.message || err || '')
+  return code === 'LEVEL_CORRUPTION' || /corrupt|manifest|checksum mismatch|bad block|truncated|not an sstable|bad magic number/i.test(msg)
+}
+
 async function getDownloadsStateStore() {
   if (!ClassicLevel) {
     throw new Error('classic_level_unavailable')
   }
   if (!downloadsStateStorePromise) {
     downloadsStateStorePromise = (async () => {
-      // Classify the open error so we only wipe the DB for genuine corruption.
-      // Lock contention (another electron instance / hot-reload race) and
-      // transient IO errors must NOT trigger a wipe — that's what was causing
-      // download state to vanish across restarts in dev.
-      const isLockError = (err) => {
-        const code = err?.code || ''
-        const msg = String(err?.message || err || '')
-        return code === 'LEVEL_LOCKED' || /lock|resource temporarily unavailable|already held/i.test(msg)
-      }
-      const isCorruptionError = (err) => {
-        const code = err?.code || ''
-        const msg = String(err?.message || err || '')
-        return code === 'LEVEL_CORRUPTION' || /corrupt|manifest|checksum mismatch|bad block|truncated/i.test(msg)
-      }
+      const isLockError = isLevelLockError
+      const isCorruptionError = isLevelCorruptionError
 
       async function tryOpen() {
         const db = new ClassicLevel(downloadsStateDbPath, { valueEncoding: 'json' })
@@ -3993,6 +4151,7 @@ async function getDownloadsStateStore() {
         }
       }
       const db = await openDbWithRecovery()
+      downloadsStateDbHandle = db
       const store = db.sublevel('downloads', { valueEncoding: 'json' })
       await store.open()
       return store
@@ -4004,13 +4163,44 @@ async function getDownloadsStateStore() {
   return downloadsStateStorePromise
 }
 
+// Close the current handle, drop the cached store, and delete the corrupt
+// on-disk db so the next open rebuilds it fresh.
+async function resetCorruptStateStore() {
+  downloadsStateStorePromise = null
+  const handle = downloadsStateDbHandle
+  downloadsStateDbHandle = null
+  if (handle) {
+    try { await handle.close() } catch { }
+  }
+  try { fs.rmSync(downloadsStateDbPath, { recursive: true, force: true }) } catch { }
+}
+
+// Run a get/put against the state store. If a read or write hits genuine
+// corruption (a bad .ldb block, which open() can't catch), wipe and reopen,
+// then retry the op once on the clean store. Callers still handle
+// LEVEL_NOT_FOUND themselves, which is what the post-wipe retry of a read
+// throws, so they fall back to their empty defaults.
+async function runStateOp(operation) {
+  const store = await getDownloadsStateStore()
+  try {
+    return await operation(store)
+  } catch (error) {
+    if (!isLevelCorruptionError(error)) throw error
+    ucLog(`[State] LevelDB corruption during op (${error?.message || error}), wiping state-db and reopening`, 'warn')
+    await resetCorruptStateStore()
+    const fresh = await getDownloadsStateStore()
+    return operation(fresh)
+  }
+}
+
 async function readPersistedDownloadsState() {
   try {
-    const store = await getDownloadsStateStore()
-    const snapshot = await store.get(downloadsStateSnapshotKey)
-    if (Array.isArray(snapshot)) return snapshot
-    if (snapshot && Array.isArray(snapshot.downloads)) return snapshot.downloads
-    return []
+    return await runStateOp(async (store) => {
+      const snapshot = await store.get(downloadsStateSnapshotKey)
+      if (Array.isArray(snapshot)) return snapshot
+      if (snapshot && Array.isArray(snapshot.downloads)) return snapshot.downloads
+      return []
+    })
   } catch (error) {
     if (error && error.code === 'LEVEL_NOT_FOUND') return []
     throw error
@@ -4018,30 +4208,30 @@ async function readPersistedDownloadsState() {
 }
 
 async function writePersistedDownloadsState(downloads) {
-  const store = await getDownloadsStateStore()
   const snapshot = {
     version: 1,
     updatedAt: Date.now(),
     downloads: Array.isArray(downloads) ? downloads : [],
   }
-  await store.put(downloadsStateSnapshotKey, snapshot)
+  await runStateOp((store) => store.put(downloadsStateSnapshotKey, snapshot))
   return snapshot.downloads.length
 }
 
 async function readPersistedCatalogState() {
   try {
-    const store = await getDownloadsStateStore()
-    const snapshot = await store.get(downloadsStateCatalogKey)
-    if (!snapshot || typeof snapshot !== 'object') {
-      return { games: [], stats: {}, updatedAt: 0, gamesUpdatedAt: 0, statsUpdatedAt: 0 }
-    }
-    return {
-      games: Array.isArray(snapshot.games) ? snapshot.games : [],
-      stats: snapshot.stats && typeof snapshot.stats === 'object' ? snapshot.stats : {},
-      updatedAt: Number(snapshot.updatedAt || 0),
-      gamesUpdatedAt: Number(snapshot.gamesUpdatedAt || snapshot.updatedAt || 0),
-      statsUpdatedAt: Number(snapshot.statsUpdatedAt || snapshot.updatedAt || 0),
-    }
+    return await runStateOp(async (store) => {
+      const snapshot = await store.get(downloadsStateCatalogKey)
+      if (!snapshot || typeof snapshot !== 'object') {
+        return { games: [], stats: {}, updatedAt: 0, gamesUpdatedAt: 0, statsUpdatedAt: 0 }
+      }
+      return {
+        games: Array.isArray(snapshot.games) ? snapshot.games : [],
+        stats: snapshot.stats && typeof snapshot.stats === 'object' ? snapshot.stats : {},
+        updatedAt: Number(snapshot.updatedAt || 0),
+        gamesUpdatedAt: Number(snapshot.gamesUpdatedAt || snapshot.updatedAt || 0),
+        statsUpdatedAt: Number(snapshot.statsUpdatedAt || snapshot.updatedAt || 0),
+      }
+    })
   } catch (error) {
     if (error && error.code === 'LEVEL_NOT_FOUND') {
       return { games: [], stats: {}, updatedAt: 0, gamesUpdatedAt: 0, statsUpdatedAt: 0 }
@@ -4051,7 +4241,6 @@ async function readPersistedCatalogState() {
 }
 
 async function writePersistedCatalogState(payload) {
-  const store = await getDownloadsStateStore()
   const now = Date.now()
   const snapshot = {
     version: 1,
@@ -4061,15 +4250,16 @@ async function writePersistedCatalogState(payload) {
     games: Array.isArray(payload?.games) ? payload.games : [],
     stats: payload?.stats && typeof payload.stats === 'object' ? payload.stats : {},
   }
-  await store.put(downloadsStateCatalogKey, snapshot)
+  await runStateOp((store) => store.put(downloadsStateCatalogKey, snapshot))
   return snapshot
 }
 
 async function readPersistedInstallingState() {
   try {
-    const store = await getDownloadsStateStore()
-    const snapshot = await store.get(downloadsStateInstallingKey)
-    return snapshot && typeof snapshot === 'object' ? snapshot : {}
+    return await runStateOp(async (store) => {
+      const snapshot = await store.get(downloadsStateInstallingKey)
+      return snapshot && typeof snapshot === 'object' ? snapshot : {}
+    })
   } catch (error) {
     if (error && error.code === 'LEVEL_NOT_FOUND') return {}
     throw error
@@ -4077,19 +4267,19 @@ async function readPersistedInstallingState() {
 }
 
 async function writePersistedInstallingState(records) {
-  const store = await getDownloadsStateStore()
-  await store.put(downloadsStateInstallingKey, {
+  await runStateOp((store) => store.put(downloadsStateInstallingKey, {
     version: 1,
     updatedAt: Date.now(),
     records: records && typeof records === 'object' ? records : {},
-  })
+  }))
 }
 
 async function readPersistedQueueState() {
   try {
-    const store = await getDownloadsStateStore()
-    const snapshot = await store.get(downloadsStateQueueKey)
-    return snapshot && typeof snapshot === 'object' ? snapshot : { global: [], byApp: {} }
+    return await runStateOp(async (store) => {
+      const snapshot = await store.get(downloadsStateQueueKey)
+      return snapshot && typeof snapshot === 'object' ? snapshot : { global: [], byApp: {} }
+    })
   } catch (error) {
     if (error && error.code === 'LEVEL_NOT_FOUND') return { global: [], byApp: {} }
     throw error
@@ -4097,13 +4287,12 @@ async function readPersistedQueueState() {
 }
 
 async function writePersistedQueueState(snapshot) {
-  const store = await getDownloadsStateStore()
-  await store.put(downloadsStateQueueKey, {
+  await runStateOp((store) => store.put(downloadsStateQueueKey, {
     version: 1,
     updatedAt: Date.now(),
     global: Array.isArray(snapshot?.global) ? snapshot.global : [],
     byApp: snapshot?.byApp && typeof snapshot.byApp === 'object' ? snapshot.byApp : {},
-  })
+  }))
 }
 
 function shouldRetainInstallingStatus(status) {
@@ -8252,57 +8441,106 @@ function terminateChildProcess(proc) {
     proc.kill('SIGTERM')
   } catch { }
 }
-function resolve7zipBinary() {
-  const candidates = []
+/** Resolve a bare command name (e.g. "7z") to an absolute path via which/where,
+ *  or '' if it isn't on PATH. Lets us skip non-installed system binaries instead
+ *  of returning a name that spawn would ENOENT on. */
+function whichBinary(name) {
+  try {
+    const finder = process.platform === 'win32' ? 'where' : 'which'
+    const out = child_process
+      .execFileSync(finder, [name], { stdio: ['ignore', 'pipe', 'ignore'] })
+      .toString()
+      .trim()
+      .split(/\r?\n/)[0]
+    return out && fs.existsSync(out) ? out : ''
+  } catch {
+    return ''
+  }
+}
 
+/** True when the archive is RAR (by extension or the "Rar!" magic). */
+function archiveIsRar(archivePath) {
+  if (!archivePath) return false
+  if (/\.rar$/i.test(archivePath) || /\.r\d{2}$/i.test(archivePath) || /\.part\d+\.rar$/i.test(archivePath)) return true
+  try {
+    const fd = fs.openSync(archivePath, 'r')
+    const buf = Buffer.alloc(4)
+    fs.readSync(fd, buf, 0, 4, 0)
+    fs.closeSync(fd)
+    return buf.toString('latin1') === 'Rar!'
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Pick a 7-Zip binary to extract `archivePath`.
+ *
+ * IMPORTANT: the bundled `7za` (7zip-bin) is the *reduced* p7zip build — it
+ * handles 7z/zip/tar but CANNOT read RAR. Several of our sources ship RAR5
+ * archives, so for those we must prefer a full 7-Zip (`7zz`) or p7zip-full
+ * (`7z`) found on PATH. For non-RAR archives the always-present bundled binary
+ * is preferred (no dependency on a system install).
+ */
+function resolve7zipBinary(archivePath) {
+  const wantsRar = archiveIsRar(archivePath)
+
+  let bundled = ''
   try {
     const seven = require('7zip-bin')
-    let resolvedPath = seven.path7za || seven.path7z || seven.path7zip || ''
-
-    if (resolvedPath) {
-      // If packaged, the path might sit inside the ASAR; prefer the unpacked location.
-      if (app.isPackaged && resolvedPath.includes('.asar')) {
-        resolvedPath = resolvedPath.replace(/\.asar([\\/])/, `.asar.unpacked$1`)
-        uc_log(`Adjusted 7zip path for packaged app: ${resolvedPath}`)
-      }
-      candidates.push(resolvedPath)
+    bundled = seven.path7za || seven.path7z || seven.path7zip || ''
+    if (bundled && app.isPackaged && bundled.includes('.asar')) {
+      bundled = bundled.replace(/\.asar([\\/])/, `.asar.unpacked$1`)
     }
   } catch (e) {
     uc_log(`7zip-bin not available, will try system 7z: ${String(e)}`)
   }
 
-  // System fallbacks (most distros ship 7z or 7za via p7zip-full)
-  if (process.platform === 'win32') {
-    candidates.push('7z.exe', '7za.exe', '7z')
-  } else {
-    candidates.push('7z', '7za')
-  }
+  // Full 7-Zip / p7zip-full binaries that DO support RAR.
+  const systemNames = process.platform === 'win32'
+    ? ['7z.exe', '7zz.exe', '7z', '7zz']
+    : ['7zz', '7z']
+  const systemPaths = systemNames.map(whichBinary).filter(Boolean)
+
+  // Ordering: for RAR, RAR-capable system binaries first (bundled 7za can't read
+  // RAR — keep it only as a last resort so the error is "no RAR extractor" not a
+  // silent miss). For everything else, the bundled binary first.
+  const candidates = wantsRar
+    ? [...systemPaths, ...(bundled ? [bundled] : [])]
+    : [...(bundled ? [bundled] : []), ...systemPaths]
 
   for (const candidate of candidates) {
-    const looksLikePath = candidate.includes(path.sep) || candidate.includes('/') || candidate.includes('\\')
-    if (looksLikePath) {
-      if (fs.existsSync(candidate)) {
-        uc_log(`7zip binary resolved to: ${candidate}`)
-        return candidate
+    if (!candidate || !fs.existsSync(candidate)) continue
+    // On Linux/macOS the bundled 7za can lose its execute bit (npm install
+    // doesn't preserve mode 0755), so spawning it fails with EACCES right after
+    // a successful download. Restore +x defensively before handing it to spawn.
+    if (process.platform !== 'win32') {
+      try {
+        const mode = fs.statSync(candidate).mode
+        if (!(mode & 0o111)) {
+          fs.chmodSync(candidate, 0o755)
+          uc_log(`7zip binary was not executable; set +x on ${candidate}`)
+        }
+      } catch (e) {
+        uc_log(`Failed to ensure 7zip binary is executable (${candidate}): ${String(e)}`, 'warn')
       }
-      uc_log(`7zip candidate missing: ${candidate}`)
-      continue
     }
-
-    // Command without a path; assume it is available on PATH and let spawn handle failures.
-    uc_log(`Using system 7zip command: ${candidate}`)
+    uc_log(`7zip binary resolved to: ${candidate}${wantsRar ? ' (RAR archive)' : ''}`)
     return candidate
   }
 
+  uc_log(`No 7zip binary found (wantsRar=${wantsRar}); bundled=${bundled || 'none'}`, 'warn')
   return null
 }
 
 function run7zExtract(archivePath, destDir, onProgress, options = {}) {
   return new Promise((resolve) => {
     try {
-      const cmd = resolve7zipBinary()
+      const cmd = resolve7zipBinary(archivePath)
       if (!cmd) {
-        const error = '7zip binary not found. Please install p7zip (7z) on this system or reinstall the app with bundled binaries.'
+        const error = archiveIsRar(archivePath)
+          ? 'This is a RAR archive and no RAR-capable extractor was found. Install 7-Zip (Windows) or p7zip-full (Linux), then retry.'
+          : '7zip binary not found. Please install p7zip (7z) on this system or reinstall the app with bundled binaries.'
         uc_log(error)
         resolve({ ok: false, error })
         return
@@ -9421,10 +9659,18 @@ function createWindow(existingSplash) {
   })
 
   mainWindow.on('close', (event) => {
-    if (!app.isQuitting) {
-      event.preventDefault()
-      mainWindow.hide()
+    if (app.isQuitting) return
+    // Honor the user's close behavior. This fires for the titlebar X AND for
+    // window-manager close requests like Hyprland's killactive, so 'quit' there
+    // really quits instead of silently hiding to the tray.
+    const behavior = String(readSettings()?.closeBehavior || 'hide').toLowerCase()
+    if (behavior === 'quit') {
+      app.isQuitting = true
+      app.quit()
+      return
     }
+    event.preventDefault()
+    mainWindow.hide()
   })
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -10200,6 +10446,7 @@ app.whenReady().then(async () => {
   ensureDownloadDir()
   registerRendererAssetProtocol()
   registerLocalMediaProtocol()
+  registerAssetCacheProtocol()
   // Install/refresh the Linux .desktop entry + themed icons so KDE/GNOME show
   // the real taskbar icon (an un-integrated AppImage has nothing to match the
   // window against otherwise). Best-effort, never blocks startup.
@@ -10520,9 +10767,15 @@ app.on('window-all-closed', () => {
     app.quit()
     return
   }
-  
-  // Keep running in background if controller support is enabled
+
   const settings = readSettings()
+  // Explicit "quit entirely" close behavior wins over background keepalive.
+  if (String(settings.closeBehavior || 'hide').toLowerCase() === 'quit') {
+    app.quit()
+    return
+  }
+
+  // Keep running in background if controller support is enabled
   if (settings.controllerSettings?.enabled) {
     ucLog('All windows closed — keeping app running in background for controller support')
     
@@ -10581,6 +10834,127 @@ app.on('before-quit', (event) => {
   }
 })
 
+// ── Multi-source catalog (GameVault fork) ──────────────────────────────────
+// The source-adapter layer (electron/sources) ingests titles from several game
+// sites, dedups them across sources, and resolves downloads to aria2-ready
+// URLs. It's required lazily so a load error can't take down the whole app.
+let _sourcesRegistry = null
+function getSourcesRegistry() {
+  if (!_sourcesRegistry) {
+    _sourcesRegistry = require('./sources/index.cjs')
+  }
+  return _sourcesRegistry
+}
+
+ipcMain.handle('uc:sources:list', () => {
+  try {
+    return { ok: true, sources: getSourcesRegistry().listSources() }
+  } catch (err) {
+    ucLog(`uc:sources:list failed: ${err?.message || err}`, 'warn')
+    return { ok: false, error: String(err?.message || err), sources: [] }
+  }
+})
+
+ipcMain.handle('uc:sources:set-enabled', (_event, { id, enabled } = {}) => {
+  try {
+    return { ok: getSourcesRegistry().setEnabled(id, Boolean(enabled)) }
+  } catch (err) {
+    return { ok: false, error: String(err?.message || err) }
+  }
+})
+
+ipcMain.handle('uc:sources:search', async (_event, { query, limit } = {}) => {
+  try {
+    const games = await getSourcesRegistry().searchAll(String(query || ''), { limit: Number(limit) || 24 })
+    return { ok: true, games }
+  } catch (err) {
+    ucLog(`uc:sources:search failed: ${err?.message || err}`, 'warn')
+    return { ok: false, error: String(err?.message || err), games: [] }
+  }
+})
+
+ipcMain.handle('uc:sources:catalog', async (_event, { offset, limit } = {}) => {
+  try {
+    const games = await getSourcesRegistry().catalog({ offset: Number(offset) || 0, limit: Number(limit) || 36 })
+    return { ok: true, games }
+  } catch (err) {
+    ucLog(`uc:sources:catalog failed: ${err?.message || err}`, 'warn')
+    return { ok: false, error: String(err?.message || err), games: [] }
+  }
+})
+
+ipcMain.handle('uc:sources:detail', async (_event, { sources } = {}) => {
+  try {
+    const game = await getSourcesRegistry().detail(Array.isArray(sources) ? sources : [])
+    return { ok: Boolean(game), game }
+  } catch (err) {
+    ucLog(`uc:sources:detail failed: ${err?.message || err}`, 'warn')
+    return { ok: false, error: String(err?.message || err), game: null }
+  }
+})
+
+ipcMain.handle('uc:assets:size', async () => {
+  try { return { ok: true, bytes: await assetCacheSizeBytes() } }
+  catch (err) { return { ok: false, bytes: 0, error: String(err?.message || err) } }
+})
+
+ipcMain.handle('uc:assets:clear', async () => {
+  try {
+    const freed = await clearAssetCache()
+    try { fs.mkdirSync(assetCacheDir(), { recursive: true }) } catch { /* ignore */ }
+    return { ok: true, freed }
+  } catch (err) {
+    return { ok: false, freed: 0, error: String(err?.message || err) }
+  }
+})
+
+ipcMain.handle('uc:sources:steam-art', async (_event, { appid } = {}) => {
+  try {
+    const art = await getSourcesRegistry().steamArt(appid)
+    return { ok: true, art }
+  } catch (err) {
+    ucLog(`uc:sources:steam-art failed: ${err?.message || err}`, 'warn')
+    return { ok: false, art: { header: '', background: '' } }
+  }
+})
+
+ipcMain.handle('uc:sources:resolve', async (_event, { sourceId, option } = {}) => {
+  try {
+    const result = await getSourcesRegistry().resolveDownload(sourceId, option || {})
+    return { ok: true, result }
+  } catch (err) {
+    ucLog(`uc:sources:resolve failed: ${err?.message || err}`, 'warn')
+    return { ok: false, error: String(err?.message || err), result: { resolvable: false } }
+  }
+})
+
+ipcMain.handle('uc:sources:query', async (_event, params = {}) => {
+  try {
+    const result = await getSourcesRegistry().query(params || {})
+    return { ok: true, ...result }
+  } catch (err) {
+    ucLog(`uc:sources:query failed: ${err?.message || err}`, 'warn')
+    return { ok: false, error: String(err?.message || err), games: [], total: 0 }
+  }
+})
+
+ipcMain.handle('uc:sources:capabilities', (_event, { sourceIds } = {}) => {
+  try {
+    return { ok: true, capabilities: getSourcesRegistry().capabilities(Array.isArray(sourceIds) ? sourceIds : null) }
+  } catch (err) {
+    return { ok: false, error: String(err?.message || err) }
+  }
+})
+
+ipcMain.handle('uc:sources:tags', async () => {
+  try {
+    return { ok: true, ...(await getSourcesRegistry().availableTags()) }
+  } catch (err) {
+    ucLog(`uc:sources:tags failed: ${err?.message || err}`, 'warn')
+    return { ok: false, error: String(err?.message || err), tags: [], bySource: {} }
+  }
+})
+
 ipcMain.handle('uc:download-start', (event, payload) => {
   const win = BrowserWindow.fromWebContents(event.sender)
   if (!win || win.isDestroyed()) return { ok: false }
@@ -10622,6 +10996,7 @@ ipcMain.handle('uc:download-start', (event, payload) => {
         url: payload.url,
         filename: payload.filename,
         totalBytes: payload.totalBytes,
+        headers: payload.headers,
       })
       ucLog(`[engine] download-start: enqueued ${id} appid=${payload.appid}`)
       return { ok: true, queued: true, engine: true }
@@ -11047,6 +11422,7 @@ ipcMain.handle('uc:download-resume-with-fresh-url', (event, payload) => {
         url: payload.url,
         filename: payload.filename,
         totalBytes: payload.totalBytes,
+        headers: payload.headers,
       })
       ucLog(`[engine] resume-with-fresh-url adopted as engine download: ${id}`)
       // enqueue() now adopts the on-disk partial up front, so the engine
@@ -11654,8 +12030,13 @@ async function runArchiveInstallJob(win, payload, options = {}) {
     // Give a clear, actionable message instead of dumping the 7z error wall.
     const isCorruptArchive = /Headers Error|Can't open as archive|Cannot open the file as/i.test(rawError)
     if (isCorruptArchive) {
-      const friendlyError = 'The archive is incomplete — the download was interrupted before the last bytes were written. ' +
-        'Delete this file and re-download the game to repair it.'
+      // A RAR that "can't open" usually means the chosen 7-Zip can't read RAR
+      // (the bundled reduced 7za doesn't) rather than a truncated download —
+      // don't send the user chasing a re-download that won't help.
+      const friendlyError = archiveIsRar(archiveToExtract)
+        ? 'Could not open this RAR archive. Install 7-Zip (Windows) or p7zip-full (Linux) for RAR support, then retry — or re-download if the file is corrupt.'
+        : 'The archive is incomplete — the download was interrupted before the last bytes were written. ' +
+          'Delete this file and re-download the game to repair it.'
       ucLog(`[Archive Install] Incomplete archive detected: ${path.basename(archiveToExtract)}`, 'error')
       updateInstallingManifestStatus(appid, 'downloaded', friendlyError)
       sendDownloadUpdate(win, {
@@ -12447,46 +12828,60 @@ function detectProtonVersions() {
     }
   }
 
+  // A folder is a Proton runner if it ships a runnable `proton` script at its
+  // root (or under bin/). We gate on the script, not the folder name, so
+  // GE-Proton / Proton-GE / Proton-tkg get picked up, not just "Proton*".
+  const protonScriptIn = (dir) => {
+    const root = path.join(dir, 'proton')
+    if (fs.existsSync(root)) return root
+    const bin = path.join(dir, 'bin', 'proton')
+    if (fs.existsSync(bin)) return bin
+    return null
+  }
+  const pushRunner = (label, scriptPath, source) => {
+    if (scriptPath) results.push({ label, path: scriptPath, source })
+  }
+
+  // Steam-shipped Proton lives under each library's steamapps/common.
   for (const steamRoot of libraryFolders) {
     const commonDir = path.join(steamRoot, 'steamapps', 'common')
     if (!fs.existsSync(commonDir)) continue
     try {
-      const entries = fs.readdirSync(commonDir, { withFileTypes: true })
-      for (const entry of entries) {
+      for (const entry of fs.readdirSync(commonDir, { withFileTypes: true })) {
         if (!entry.isDirectory()) continue
-        const lower = entry.name.toLowerCase()
-        // Match Proton versions (Proton, Proton Experimental, etc.)
-        if (!lower.startsWith('proton')) continue
-        const protonScript = path.join(commonDir, entry.name, 'proton')
-        if (fs.existsSync(protonScript)) {
-          results.push({ label: entry.name, path: protonScript })
-        }
-        // Also check for proton script in bin directory
-        const protonBin = path.join(commonDir, entry.name, 'bin', 'proton')
-        if (fs.existsSync(protonBin)) {
-          results.push({ label: entry.name, path: protonBin })
-        }
+        pushRunner(entry.name, protonScriptIn(path.join(commonDir, entry.name)), 'steam')
       }
     } catch {}
   }
 
-  // Sort results by version (newest first)
-  results.sort((a, b) => {
-    const aVersion = extractProtonVersion(a.label)
-    const bVersion = extractProtonVersion(b.label)
-    return compareVersions(bVersion, aVersion)
-  })
+  // Community runners (GE-Proton, custom compat tools) install to
+  // compatibilitytools.d at the Steam root level, never under steamapps/common,
+  // so the old scan missed them entirely. It only lives under the main Steam
+  // roots, not secondary library folders.
+  const compatRoots = new Set([...steamRoots, path.join(home, '.steam', 'root')])
+  for (const steamRoot of compatRoots) {
+    const compatDir = path.join(steamRoot, 'compatibilitytools.d')
+    if (!fs.existsSync(compatDir)) continue
+    try {
+      for (const entry of fs.readdirSync(compatDir, { withFileTypes: true })) {
+        if (!entry.isDirectory()) continue
+        pushRunner(entry.name, protonScriptIn(path.join(compatDir, entry.name)), 'community')
+      }
+    } catch {}
+  }
 
-  // Deduplicate by path
+  // Newest first.
+  results.sort((a, b) => compareVersions(extractProtonVersion(b.label), extractProtonVersion(a.label)))
+
+  // Dedup by path, keeping the first hit (steam scan runs before community).
   const seen = new Set()
   const unique = []
   for (const r of results) {
-    if (!seen.has(r.path)) {
-      seen.add(r.path)
-      unique.push(r)
-    }
+    if (seen.has(r.path)) continue
+    seen.add(r.path)
+    unique.push(r)
   }
-  
+
   return unique
 }
 
