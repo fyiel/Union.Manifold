@@ -55,7 +55,7 @@ export function LoginPage() {
           <CardContent className="p-6 space-y-6">
             <div className="text-center space-y-2">
               <h1 className="text-2xl font-semibold text-foreground">
-                Sign in to UnionCrax.Direct
+                Sign in to Union.Manifold
               </h1>
               <p className="text-sm text-muted-foreground/80">
                 Sign in with your UnionCrax account. A secure window will open

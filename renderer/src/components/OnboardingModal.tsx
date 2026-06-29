@@ -116,7 +116,7 @@ export function OnboardingModal() {
       <DialogContent showCloseButton={false} className="sm:max-w-lg">
         <DialogHeader>
           <div className="flex items-center justify-between gap-3">
-            <DialogTitle className="text-base">Welcome to UnionCrax.Direct</DialogTitle>
+            <DialogTitle className="text-base">Welcome to Union.Manifold</DialogTitle>
             <span className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground/80">{stepProgress}</span>
           </div>
           <DialogDescription>
