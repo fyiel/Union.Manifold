@@ -1,6 +1,6 @@
 {
   "name": "union-manifold",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Union.Manifold, a multi source game launcher forked from UnionCrax.Direct",
   "type": "module",
   "main": "electron/main.cjs",
