@@ -2488,6 +2488,10 @@ function refreshTrayMenu() {
       if (trayPopupWindow && !trayPopupWindow.isDestroyed() && trayPopupWindow.isVisible()) {
         trayPopupWindow.webContents.send('tray-popup:data', await buildTrayPopupData())
       }
+      // Keep the native Linux context menu in sync with running-game state
+      if (tray && process.platform === 'linux') {
+        try { tray.setContextMenu(buildTrayContextMenu()) } catch { /* ignore */ }
+      }
     } catch (err) {
       ucLog(`refreshTrayMenu failed: ${err?.message || err}`, 'warn')
     }
@@ -2689,6 +2693,52 @@ function showTrayPopup() {
   })()
 }
 
+// Native tray context menu, attached only on Linux. The StatusNotifierItem and
+// libappindicator tray used by most Linux desktops does not deliver click or
+// right-click events to Electron, so the custom styled popup never opens there
+// and a tray icon is only interactive when a native menu is attached via
+// setContextMenu. Windows and macOS keep the styled right-click popup, so this
+// stays Linux only where there would otherwise be no buttons at all
+function buildTrayContextMenu() {
+  const running = pickCurrentRunningGame()
+  const navTo = (targetPath) => {
+    showMainWindow()
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('uc:navigation-action', { path: targetPath })
+    }
+  }
+  const template = [
+    { label: `Open ${WINDOW_DISPLAY_NAME}`, click: () => showMainWindow() },
+    { type: 'separator' },
+    { label: 'Browse', click: () => navTo('/') },
+    { label: 'Library', click: () => navTo('/library') },
+    { label: 'Downloads', click: () => navTo('/downloads') },
+    { label: 'Settings', click: () => navTo('/settings') },
+  ]
+  if (running && running.appid) {
+    template.push({ type: 'separator' })
+    template.push({
+      label: `Stop ${running.name || 'game'}`,
+      click: () => {
+        const gp = runningGames.get(running.appid)
+        if (gp) {
+          gp.userQuitRequested = true
+          if (typeof killProcessTree === 'function' && gp.pid) void killProcessTree(gp.pid)
+        }
+      },
+    })
+  }
+  template.push({ type: 'separator' })
+  template.push({
+    label: `Quit ${WINDOW_DISPLAY_NAME}`,
+    click: () => {
+      app.isQuitting = true
+      app.quit()
+    },
+  })
+  return Menu.buildFromTemplate(template)
+}
+
 function createTray() {
   if (tray) return
   const iconImage = resolveTrayIcon()
@@ -2716,6 +2766,17 @@ function createTray() {
     destroyTrayPopupWindow()
     showMainWindow()
   })
+
+  // On Linux the click and right-click events above generally never fire, so the
+  // tray needs a real native context menu to be interactive. Rebuilt by
+  // refreshTrayMenu when a game starts or stops so the Stop entry stays accurate
+  if (process.platform === 'linux') {
+    try {
+      tray.setContextMenu(buildTrayContextMenu())
+    } catch (err) {
+      ucLog(`tray.setContextMenu failed: ${err?.message || err}`, 'warn')
+    }
+  }
 }
 
 ipcMain.on('tray-popup:ready', (event, { height }) => {
