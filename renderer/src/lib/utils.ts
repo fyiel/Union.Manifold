@@ -259,15 +259,19 @@ export function proxyMediaUrl(mediaUrl: string): string {
         return ""
       }
       // Private UC.Files app URLs use the authenticated bridge proxy.
+      // `raw=1` makes it STREAM the bytes server-side instead of 302-redirecting
+      // back to files/cdn.union-crax.xyz, which an Electron <img> can't follow
+      // (no cf_clearance cookie so Cloudflare blocks it). Streaming is what makes
+      // these load on a network that blocks the CDN directly.
       if (isUcFilesAppUrl(parsed.hostname) && shouldProxyUcFilesMedia()) {
-        return apiUrl(`/api/ucfiles/media?url=${encodeURIComponent(normalizedRemoteUrl)}`)
+        return apiUrl(`/api/ucfiles/media?url=${encodeURIComponent(normalizedRemoteUrl)}&raw=1`)
       }
-      // Public image CDNs go through the mirror's /api/image-proxy so the
-      // launcher inherits whatever network reachability the active API base
-      // already has (e.g. note-tool.study still loads images when school
-      // blocks cdn.union-crax.xyz and images.igdb.com).
+      // Public image CDNs go through the mirror's /api/image-proxy (also with
+      // raw=1 to stream, not redirect) so the launcher inherits whatever network
+      // reachability the active API base has, e.g. images still load when the
+      // user's network blocks cdn.union-crax.xyz / images.igdb.com directly.
       if (isPublicImageHost(parsed.hostname)) {
-        return apiUrl(`/api/image-proxy?url=${encodeURIComponent(normalizedRemoteUrl)}`)
+        return apiUrl(`/api/image-proxy?url=${encodeURIComponent(normalizedRemoteUrl)}&raw=1`)
       }
     } catch {}
     return normalizedRemoteUrl
@@ -277,7 +281,14 @@ export function proxyMediaUrl(mediaUrl: string): string {
 }
 
 export function proxyImageUrl(imageUrl: string): string {
-  return proxyMediaUrl(imageUrl)
+  const u = proxyMediaUrl(imageUrl)
+  // Route every remote image through the infinite on-disk asset cache
+  // (uc-asset:// → main fetches once, stores forever, serves from disk after).
+  // Local (uc-local://) / renderer-served / empty URLs pass through untouched.
+  if (u.startsWith("http://") || u.startsWith("https://")) {
+    return `uc-asset://img/?u=${encodeURIComponent(u)}`
+  }
+  return u
 }
 
 export type GameExecutable = { name: string; path: string; size?: number; depth?: number }
