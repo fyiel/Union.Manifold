@@ -2,6 +2,7 @@ import { Outlet, useLocation, useNavigate } from "react-router-dom"
 import { Suspense, useEffect, useRef, type CSSProperties } from "react"
 import { Minus, Square, X } from "lucide-react"
 import { Sidebar } from "@/app/manifold/Sidebar"
+import { usePauseDownloadsWhilePlaying } from "@/hooks/use-pause-on-launch"
 import { cn } from "@/lib/utils"
 
 const drag = { WebkitAppRegion: "drag" } as CSSProperties
@@ -15,6 +16,9 @@ export function ForkLayout() {
   const location = useLocation()
   const navigate = useNavigate()
   const scrollRef = useRef<HTMLDivElement | null>(null)
+
+  // pause downloads while a game runs when the setting is on
+  usePauseDownloadsWhilePlaying()
 
   // Pages that don't manage their own scroller get reset to top on navigation.
   useEffect(() => {
