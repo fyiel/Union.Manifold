@@ -308,6 +308,14 @@ declare global {
   }
 
   interface Window {
+    // frameless window controls, was declared in the now removed TopBar
+    ucWindow?: {
+      minimize: () => void
+      maximize: () => void
+      close: () => void
+      isMaximized: () => Promise<boolean>
+      onMaximizeChange: (cb: (isMaximized: boolean) => void) => () => void
+    }
     ucDownloads?: {
       start: (payload: {
         downloadId: string
