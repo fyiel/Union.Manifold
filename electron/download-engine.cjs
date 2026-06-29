@@ -207,7 +207,7 @@ class DownloadEngine extends EventEmitter {
    * `webContents` is accepted for backwards-compatibility but unused — the
    * aria2 daemon downloads headlessly, so a window isn't required.
    */
-  enqueue({ webContents, appid, gameName, url, filename, totalBytes, id }) {
+  enqueue({ webContents, appid, gameName, url, filename, totalBytes, id, headers }) {
     void webContents
     if (!appid) throw new Error('appid required')
     if (!url || typeof url !== 'string') throw new Error('url required')
@@ -228,6 +228,9 @@ class DownloadEngine extends EventEmitter {
       appid,
       gameName: gameName || null,
       url,
+      // Optional per-download request headers (e.g. a Referer required by a
+      // source's file host). Plain object of name->value; null when unused.
+      headers: headers && typeof headers === 'object' ? headers : null,
       filename: resolvedFilename,
       savePath,
       installingDir,
@@ -550,7 +553,14 @@ class DownloadEngine extends EventEmitter {
       'auto-file-renaming': 'false',
       'allow-overwrite': 'true',
     }
-    if (dl.authHeader) options.header = [`Authorization: ${dl.authHeader}`]
+    const headerLines = []
+    if (dl.authHeader) headerLines.push(`Authorization: ${dl.authHeader}`)
+    if (dl.headers && typeof dl.headers === 'object') {
+      for (const [name, value] of Object.entries(dl.headers)) {
+        if (name && value != null) headerLines.push(`${name}: ${value}`)
+      }
+    }
+    if (headerLines.length) options.header = headerLines
     const gid = await this.aria2.addUri([dl.url], options)
     dl._gid = gid
     this._gidToId.set(gid, dl.id)
