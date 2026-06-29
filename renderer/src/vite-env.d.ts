@@ -80,6 +80,140 @@ type GameLinuxConfig = {
 }
 
 declare global {
+  // ── Multi-source catalog (GameVault fork) ──
+  // A resolvable download for a game on a given source.
+  type SourceDownloadOption = {
+    label: string
+    hostType: string
+    url?: string
+    pageUrl?: string
+    fileName?: string
+    sizeBytes?: number
+    sizeText?: string
+    resolvable: boolean
+  }
+  // One source's record for a game (a unified game has one per contributing site).
+  type SourceGame = {
+    sourceId: string
+    sourceSlug: string
+    sourceUrl: string
+    steamAppId: number | null
+    dedupKey: string
+    title: string
+    description?: string
+    image?: string
+    heroImage?: string
+    genres?: string[]
+    developer?: string
+    releaseDate?: string
+    // sort/filter signals (null when the source doesn't expose them)
+    releaseYear?: number | null
+    addedAt?: number | null
+    updatedAt?: number | null
+    popularity?: number | null
+    version?: string
+    sizeBytes?: number
+    sizeText?: string
+    nsfw?: boolean
+    downloadOptions?: SourceDownloadOption[]
+  }
+  // A deduped game merged across sources, sources lists every contributor.
+  type UnifiedSourceGame = {
+    dedupKey: string
+    steamAppId: number | null
+    title: string
+    description?: string
+    image?: string
+    heroImage?: string
+    genres?: string[]
+    developer?: string
+    releaseDate?: string
+    releaseYear?: number | null
+    addedAt?: number | null
+    updatedAt?: number | null
+    popularity?: number | null
+    version?: string
+    sizeBytes?: number
+    sizeText?: string
+    nsfw?: boolean
+    sources: SourceGame[]
+    // set by registry.detail() once this game has been cross-source surfaced
+    // (every source that has the title merged in) + Steam-enriched, so the
+    // detail page treats it as complete and serves it from cache without re-hydrating
+    fullyResolved?: boolean
+  }
+  // What a source can do, drives the filter/sort UI and "unsupported" notices.
+  type SourceCapabilityFlags = {
+    search?: boolean
+    catalog?: boolean
+    appid?: boolean
+    bulkBrowse?: boolean
+    tags?: boolean
+    releaseDate?: boolean
+    size?: boolean
+    sort?: Array<"popular" | "latest" | "updated" | "title">
+  }
+  type SourceInfo = {
+    id: string
+    name: string
+    homepage: string
+    capabilities: SourceCapabilityFlags
+    enabled: boolean
+  }
+  type SourceSortKey = "popular" | "latest" | "updated" | "title" | "relevance"
+  // Parameters for the unified cross-source query.
+  type SourceQueryParams = {
+    text?: string
+    tags?: string[]
+    tagMode?: "and" | "or"
+    minYear?: number | null
+    maxYear?: number | null
+    minSizeBytes?: number | null
+    maxSizeBytes?: number | null
+    sort?: SourceSortKey
+    order?: "asc" | "desc"
+    offset?: number
+    limit?: number
+    sources?: string[]
+    // round-robin results across sources so no single prolific source dominates
+    // the first page, used for the default (text-less) Browse
+    balanced?: boolean
+  }
+  type SourceFacets = {
+    tags: Array<{ tag: string; count: number }>
+    years: { min: number | null; max: number | null }
+    size: { min: number | null; max: number | null }
+  }
+  type FeatureCoverage = "full" | "partial" | "none"
+  // Per-source + aggregate capability report for the active source set.
+  type SourceCapabilityReport = {
+    perSource: Array<{ id: string; name: string; enabled: boolean } & SourceCapabilityFlags>
+    scope: string[]
+    coverage: Record<string, FeatureCoverage>
+    supports: Record<string, string[]>
+  }
+  type SourceQueryResult = {
+    ok: boolean
+    games: UnifiedSourceGame[]
+    total: number
+    facets: SourceFacets
+    applied: SourceQueryParams
+    capabilities: SourceCapabilityReport
+    error?: string
+  }
+  // Result of resolving a download option to an aria2-ready target.
+  type SourceResolveResult = {
+    resolvable: boolean
+    url?: string
+    files?: Array<{ url: string; fileName?: string; sizeBytes?: number }>
+    fileName?: string
+    sizeBytes?: number
+    headers?: Record<string, string>
+    ephemeral?: boolean
+    openUrl?: string
+    reason?: string
+  }
+
   /** Canonical hardware/OS spec captured by the UC system profile scanner. */
   type SystemProfile = {
     version: number
@@ -185,6 +319,9 @@ declare global {
         partTotal?: number
         authHeader?: string
         savePath?: string
+        totalBytes?: number
+        /** Per-download request headers (e.g. a Referer a source's host needs). */
+        headers?: Record<string, string>
       }) => Promise<{ ok: boolean; queued?: boolean; error?: string }>
       cancel: (downloadId: string) => Promise<{ ok: boolean; status?: DownloadUpdatePayload["status"]; preservedArchive?: boolean; error?: string; downloadId?: string; appid?: string | null }>
       pause: (downloadId: string) => Promise<{ ok: boolean }>
@@ -676,6 +813,22 @@ declare global {
       openScreenshot: (filePath: string) => Promise<{ ok: boolean; error?: string }>
       getNotifications: () => Promise<{ ok: boolean; notifications: SystemNotification[] }>
       onNotificationActivated: (callback: (data: { id: string }) => void) => () => void
+    }
+    ucSources?: {
+      list: () => Promise<{ ok: boolean; sources: SourceInfo[]; error?: string }>
+      setEnabled: (id: string, enabled: boolean) => Promise<{ ok: boolean; error?: string }>
+      search: (query: string, limit?: number) => Promise<{ ok: boolean; games: UnifiedSourceGame[]; error?: string }>
+      catalog: (offset?: number, limit?: number) => Promise<{ ok: boolean; games: UnifiedSourceGame[]; error?: string }>
+      detail: (sources: Array<{ sourceId: string; sourceSlug: string }>) => Promise<{ ok: boolean; game: UnifiedSourceGame | null; error?: string }>
+      resolve: (sourceId: string, option: SourceDownloadOption) => Promise<{ ok: boolean; result: SourceResolveResult; error?: string }>
+      steamArt: (appid: number) => Promise<{ ok: boolean; art: { header: string; background: string } }>
+      query: (params: SourceQueryParams) => Promise<SourceQueryResult>
+      capabilities: (sourceIds?: string[]) => Promise<{ ok: boolean; capabilities: SourceCapabilityReport; error?: string }>
+      tags: () => Promise<{ ok: boolean; tags: string[]; bySource: Record<string, string[]>; error?: string }>
+    }
+    ucAssets?: {
+      size: () => Promise<{ ok: boolean; bytes: number; error?: string }>
+      clear: () => Promise<{ ok: boolean; freed: number; error?: string }>
     }
   }
 }
