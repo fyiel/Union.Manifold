@@ -14,13 +14,12 @@ import type { LinuxDetectionOption } from "@/lib/linux-presets"
 
 const IS_LINUX = typeof navigator !== "undefined" && /linux/i.test(navigator.userAgent)
 
-// Settings, General / Downloads / Sources / Appearance / About. Only the Sources
-// tab is wired to real behavior (the source registry, enable/disable persists
-// via saveDisabledSources + setSourceEnabled and takes effect immediately in
-// Browse/Advanced). About reads the real app version and can check for updates.
-// General / Downloads / Appearance render the controls and remember their values
-// (persisted under manifoldUiPrefs) but aren't yet honored by the main process /
-// theme engine (see the "missing screens" handoff list).
+// Settings, General / Downloads / Sources / Linux / About. Every control is wired
+// to a setting the app actually reads, close behavior and the source registry by
+// the main process, the bandwidth cap by the aria2 engine (live), delete-archive
+// by the downloads context, the proton runner by the linux launch path. Controls
+// with no backend (notifications, concurrency, auto-extract) were removed rather
+// than shipped as no-ops.
 
 type Section = "general" | "downloads" | "sources" | "linux" | "about"
 const SECTIONS: Array<{ id: Section; label: string; sub: string }> = [
@@ -32,57 +31,95 @@ const SECTIONS: Array<{ id: Section; label: string; sub: string }> = [
   { id: "about", label: "About", sub: "version, stats, and links" },
 ]
 
-type Prefs = {
-  tray: boolean; notify: boolean; quit: boolean
-  capOn: boolean; cap: number; extract: boolean; deleteArchive: boolean
-  concurrency: number; installPath: string
-}
-const DEFAULT_PREFS: Prefs = {
-  tray: true, notify: true, quit: true,
-  capOn: false, cap: 25, extract: true, deleteArchive: false,
-  concurrency: 3, installPath: "",
-}
-const PREFS_KEY = "manifoldUiPrefs"
-
 export function SettingsPage() {
   const [section, setSection] = useState<Section>("general")
-  const [prefs, setPrefs] = useState<Prefs>(DEFAULT_PREFS)
-  // closeBehavior is a TOP-LEVEL settings.json key the main process reads on
-  // window close (and on Hyprland killactive), not part of the UI prefs blob.
+  // Every control here is wired to a setting the app actually reads. closeBehavior
+  // is read by the main process on window close (and Hyprland killactive). The
+  // bandwidth cap and autoDeleteArchives are read by the download engine/context.
   const [closeBehavior, setCloseBehavior] = useState<"hide" | "quit">("hide")
+  const [bwOn, setBwOn] = useState(false)
+  const [bwMbps, setBwMbps] = useState(25)
+  const [autoDelete, setAutoDelete] = useState(false)
+  const [installPath, setInstallPath] = useState("")
+  // the real upstream settings, each consumed somewhere (main process or a kept
+  // renderer context), preventSleep defaults on like upstream
+  const [shortcut, setShortcut] = useState(false)
+  const [preventSleep, setPreventSleep] = useState(true)
+  const [autoShareLogs, setAutoShareLogs] = useState(false)
+  const [pauseWhilePlaying, setPauseWhilePlaying] = useState(false)
 
-  // Load persisted UI prefs once.
   useEffect(() => {
     let alive = true
-    void window.ucSettings?.get?.(PREFS_KEY).then((v: unknown) => {
-      if (alive && v && typeof v === "object" && !Array.isArray(v)) setPrefs((p) => ({ ...p, ...(v as Partial<Prefs>) }))
+    void (async () => {
+      try {
+        const [cb, kbps, del, path, sc, sleep, share, pause] = await Promise.all([
+          window.ucSettings?.get?.("closeBehavior"),
+          window.ucSettings?.get?.("downloadBandwidthLimitKBps"),
+          window.ucSettings?.get?.("autoDeleteArchives"),
+          window.ucDownloads?.getDownloadPath?.(),
+          window.ucSettings?.get?.("alwaysCreateDesktopShortcut"),
+          window.ucSettings?.get?.("preventSleepDuringOperations"),
+          window.ucSettings?.get?.("autoShareErrorLogs"),
+          window.ucSettings?.get?.("pauseDownloadsWhilePlaying"),
+        ])
+        if (!alive) return
+        if (cb === "hide" || cb === "quit") setCloseBehavior(cb)
+        const k = Number(kbps) || 0
+        if (k > 0) { setBwOn(true); setBwMbps(Math.max(1, Math.round(k / 1024))) }
+        setAutoDelete(del === true)
+        const p = typeof path === "string" ? path : (path && typeof path === "object" ? (path as { path?: string }).path : "")
+        if (p) setInstallPath(p)
+        setShortcut(sc === true)
+        setPreventSleep(sleep !== false)
+        setAutoShareLogs(share === true)
+        setPauseWhilePlaying(pause === true)
+      } catch { /* ignore */ }
+    })()
+    // reflect changes made elsewhere (e.g. the archive prompt flips autoDeleteArchives)
+    const off = window.ucSettings?.onChanged?.((d) => {
+      if (!d || !alive) return
+      if (d.key === "autoDeleteArchives") setAutoDelete(d.value === true)
+      if (d.key === "alwaysCreateDesktopShortcut") setShortcut(d.value === true)
+      if (d.key === "preventSleepDuringOperations") setPreventSleep(d.value !== false)
+      if (d.key === "autoShareErrorLogs") setAutoShareLogs(d.value === true)
+      if (d.key === "pauseDownloadsWhilePlaying") setPauseWhilePlaying(d.value === true)
     })
-    void window.ucSettings?.get?.("closeBehavior").then((v: unknown) => {
-      if (alive && (v === "hide" || v === "quit")) setCloseBehavior(v)
-    })
-    return () => { alive = false }
+    return () => { alive = false; off?.() }
   }, [])
+
+  // toggle a boolean setting and persist it
+  const setBool = (key: string, value: boolean, apply: (v: boolean) => void) => {
+    apply(value)
+    try { void window.ucSettings?.set?.(key, value) } catch { /* ignore */ }
+  }
 
   const changeCloseBehavior = (v: "hide" | "quit") => {
     setCloseBehavior(v)
     try { void window.ucSettings?.set?.("closeBehavior", v) } catch { /* ignore */ }
   }
 
-  // Open the native folder picker. pickDownloadPath persists the backend download
-  // root itself and returns the chosen path, which we mirror into the displayed prefs.
+  // Bandwidth cap is stored as downloadBandwidthLimitKBps (0 = unlimited). The
+  // main process applies it to the aria2 engine immediately on set.
+  const persistBw = (on: boolean, mbps: number) => {
+    const kbps = on ? Math.max(1, mbps) * 1024 : 0
+    try { void window.ucSettings?.set?.("downloadBandwidthLimitKBps", kbps) } catch { /* ignore */ }
+  }
+  const toggleBw = () => { const on = !bwOn; setBwOn(on); persistBw(on, bwMbps) }
+  const changeBw = (mbps: number) => { setBwMbps(mbps); persistBw(bwOn, mbps) }
+
+  const toggleAutoDelete = () => {
+    const v = !autoDelete
+    setAutoDelete(v)
+    try { void window.ucSettings?.set?.("autoDeleteArchives", v) } catch { /* ignore */ }
+  }
+
+  // Native folder picker. pickDownloadPath persists the backend download root and
+  // returns the chosen path, which we mirror into the display.
   const pickInstallPath = async () => {
     try {
       const r = await window.ucDownloads?.pickDownloadPath?.()
-      if (r?.ok && r.path) setPref("installPath", r.path)
+      if (r?.ok && r.path) setInstallPath(r.path)
     } catch { /* ignore */ }
-  }
-
-  const setPref = <K extends keyof Prefs>(key: K, val: Prefs[K]) => {
-    setPrefs((p) => {
-      const next = { ...p, [key]: val }
-      try { void window.ucSettings?.set?.(PREFS_KEY, next) } catch { /* ignore */ }
-      return next
-    })
   }
 
   const sub = SECTIONS.find((s) => s.id === section)?.sub || ""
@@ -118,8 +155,8 @@ export function SettingsPage() {
                     <option value="quit">Quit entirely</option>
                   </select>
                 </Row>
-                <ToggleRow title="Desktop notifications" desc="Notify when downloads finish or fail" on={prefs.notify} onToggle={() => setPref("notify", !prefs.notify)} />
-                <ToggleRow title="Confirm before quitting" desc="Ask for confirmation if downloads are active" on={prefs.quit} onToggle={() => setPref("quit", !prefs.quit)} />
+                <ToggleRow title="Prevent sleep during downloads" desc="Keep the system awake while downloads or installs are running" on={preventSleep} onToggle={() => setBool("preventSleepDuringOperations", !preventSleep, setPreventSleep)} />
+                <ToggleRow title="Auto-share error logs" desc="Send diagnostic logs automatically when something fails" on={autoShareLogs} onToggle={() => setBool("autoShareErrorLogs", !autoShareLogs, setAutoShareLogs)} />
                 <ClearAssetsRow />
               </div>
             )}
@@ -129,36 +166,30 @@ export function SettingsPage() {
                 <div style={{ padding: "16px 0", borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
                   <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--mf-t1)", marginBottom: 10 }}>Install location</div>
                   <div style={{ display: "flex", gap: 10 }}>
-                    <div style={{ flex: 1, display: "flex", alignItems: "center", height: 38, padding: "0 13px", borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "var(--mf-panel)", fontFamily: MONO, fontSize: 12, color: "var(--mf-t2)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{prefs.installPath || "default install folder"}</div>
+                    <div style={{ flex: 1, display: "flex", alignItems: "center", height: 38, padding: "0 13px", borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "var(--mf-panel)", fontFamily: MONO, fontSize: 12, color: "var(--mf-t2)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{installPath || "default install folder"}</div>
                     <button type="button" onClick={() => void pickInstallPath()} className="mf-ghost" style={{ display: "flex", alignItems: "center", gap: 7, padding: "0 15px", height: 38, borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "transparent", color: "var(--mf-t1)", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
                       <FolderOpen size={14} strokeWidth={1.6} />Change
                     </button>
                   </div>
                 </div>
-                <Row title="Max concurrent downloads" desc="How many games download at once">
-                  <div style={{ display: "flex", alignItems: "center", gap: 2, border: "1px solid var(--mf-line-2)", borderRadius: 8, background: "var(--mf-panel)", overflow: "hidden" }}>
-                    <Stepper onClick={() => setPref("concurrency", Math.max(1, prefs.concurrency - 1))}>−</Stepper>
-                    <span style={{ width: 36, textAlign: "center", fontFamily: MONO, fontSize: 14, fontWeight: 600, color: "#ededed" }}>{prefs.concurrency}</span>
-                    <Stepper onClick={() => setPref("concurrency", Math.min(8, prefs.concurrency + 1))}>+</Stepper>
-                  </div>
-                </Row>
                 <div style={{ padding: "16px 0", borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
                     <div style={{ flex: 1 }}>
                       <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--mf-t1)" }}>Limit download speed</div>
-                      <div style={{ fontFamily: MONO, fontSize: 11, color: "var(--mf-t4)", marginTop: 3 }}>Cap bandwidth so games stay playable</div>
+                      <div style={{ fontFamily: MONO, fontSize: 11, color: "var(--mf-t4)", marginTop: 3 }}>Cap bandwidth so games stay playable, applied live</div>
                     </div>
-                    <Toggle on={prefs.capOn} onToggle={() => setPref("capOn", !prefs.capOn)} />
+                    <Toggle on={bwOn} onToggle={toggleBw} />
                   </div>
-                  {prefs.capOn && (
+                  {bwOn && (
                     <div style={{ display: "flex", alignItems: "center", gap: 16, marginTop: 16 }}>
-                      <input type="range" className="uc-range" min={1} max={100} value={prefs.cap} onChange={(e) => setPref("cap", Number(e.target.value))} style={{ flex: 1 }} />
-                      <span style={{ fontFamily: MONO, fontSize: 12.5, color: "#ededed", width: 78, textAlign: "right" }}>{prefs.cap >= 100 ? "unlimited" : `${prefs.cap} MB/s`}</span>
+                      <input type="range" className="uc-range" min={1} max={100} value={bwMbps} onChange={(e) => changeBw(Number(e.target.value))} style={{ flex: 1 }} />
+                      <span style={{ fontFamily: MONO, fontSize: 12.5, color: "#ededed", width: 78, textAlign: "right" }}>{bwMbps} MB/s</span>
                     </div>
                   )}
                 </div>
-                <ToggleRow title="Auto-extract after download" desc="Unpack archives automatically when complete" on={prefs.extract} onToggle={() => setPref("extract", !prefs.extract)} />
-                <ToggleRow title="Delete archive after extract" desc="Reclaim disk space once unpacking succeeds" on={prefs.deleteArchive} onToggle={() => setPref("deleteArchive", !prefs.deleteArchive)} last />
+                <ToggleRow title="Pause downloads while playing" desc="Pause active downloads when a game launches, resume on exit" on={pauseWhilePlaying} onToggle={() => setBool("pauseDownloadsWhilePlaying", !pauseWhilePlaying, setPauseWhilePlaying)} />
+                <ToggleRow title="Always create desktop shortcut" desc="Add a desktop shortcut for each game after it installs" on={shortcut} onToggle={() => setBool("alwaysCreateDesktopShortcut", !shortcut, setShortcut)} />
+                <ToggleRow title="Delete archive after extract" desc="Reclaim disk space once unpacking succeeds" on={autoDelete} onToggle={toggleAutoDelete} last />
               </div>
             )}
 
@@ -437,13 +468,6 @@ function ClearAssetsRow() {
     </Row>
   )
 }
-
-function Stepper({ onClick, children }: { onClick: () => void; children: React.ReactNode }) {
-  return (
-    <button type="button" onClick={onClick} className="mf-iconbtn" style={{ width: 34, height: 34, border: "none", background: "transparent", color: "var(--mf-t2)", fontSize: 18, cursor: "pointer" }}>{children}</button>
-  )
-}
-
 const ico = { fill: "none", stroke: "currentColor" as const, strokeWidth: 1.6, strokeLinecap: "round" as const, strokeLinejoin: "round" as const }
 const SECTION_ICON: Record<Section, React.ReactNode> = {
   general: <svg viewBox="0 0 16 16" width="15" height="15" {...ico}><circle cx="8" cy="8" r="2" /><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M12.6 3.4l-1.4 1.4M4.8 11.2l-1.4 1.4" /></svg>,
