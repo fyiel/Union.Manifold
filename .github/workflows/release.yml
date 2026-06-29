@@ -1,0 +1,74 @@
+name: release
+
+# auto release whenever package.json version changes on main. a plain push that
+# touches package.json but leaves the version alone is detected and skipped.
+on:
+  push:
+    branches: [main]
+    paths: ['package.json']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      release: ${{ steps.v.outputs.release }}
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - id: v
+        run: |
+          new=$(jq -r .version package.json)
+          old=$(git show HEAD~1:package.json 2>/dev/null | jq -r .version 2>/dev/null || echo "")
+          echo "version=$new" >> "$GITHUB_OUTPUT"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "$new" != "$old" ]; then
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "version $old to $new (event ${{ github.event_name }})"
+
+  release:
+    needs: check
+    if: needs.check.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      USE_HARD_LINKS: false
+      CSC_IDENTITY_AUTO_DISCOVERY: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - name: install
+        run: pnpm install
+      - name: build linux app
+        run: pnpm -s build && pnpm exec electron-builder --linux --publish never
+      - name: publish release
+        uses: ncipollo/release-action@v1
+        with:
+          tag: v${{ needs.check.outputs.version }}
+          name: v${{ needs.check.outputs.version }}
+          commit: ${{ github.sha }}
+          allowUpdates: true
+          artifacts: "dist-packaged/*.AppImage,dist-packaged/*.tar.gz"
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
