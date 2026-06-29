@@ -477,3 +477,24 @@ contextBridge.exposeInMainWorld('ucSystem', {
     return () => ipcRenderer.removeListener('uc:system-notification-activated', listener)
   }
 })
+
+// Multi-source catalog (GameVault fork) — browse/search/detail across the
+// configured game sources, plus just-in-time download-link resolution.
+contextBridge.exposeInMainWorld('ucSources', {
+  list: () => ipcRenderer.invoke('uc:sources:list'),
+  setEnabled: (id, enabled) => ipcRenderer.invoke('uc:sources:set-enabled', { id, enabled }),
+  search: (query, limit) => ipcRenderer.invoke('uc:sources:search', { query, limit }),
+  catalog: (offset, limit) => ipcRenderer.invoke('uc:sources:catalog', { offset, limit }),
+  detail: (sources) => ipcRenderer.invoke('uc:sources:detail', { sources }),
+  resolve: (sourceId, option) => ipcRenderer.invoke('uc:sources:resolve', { sourceId, option }),
+  steamArt: (appid) => ipcRenderer.invoke('uc:sources:steam-art', { appid }),
+  query: (params) => ipcRenderer.invoke('uc:sources:query', params || {}),
+  capabilities: (sourceIds) => ipcRenderer.invoke('uc:sources:capabilities', { sourceIds }),
+  tags: () => ipcRenderer.invoke('uc:sources:tags'),
+})
+
+// Infinite on-disk cache for remote thumbnails/art (see uc-asset:// in main).
+contextBridge.exposeInMainWorld('ucAssets', {
+  size: () => ipcRenderer.invoke('uc:assets:size'),
+  clear: () => ipcRenderer.invoke('uc:assets:clear'),
+})
