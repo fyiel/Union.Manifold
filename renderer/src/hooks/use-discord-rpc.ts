@@ -93,7 +93,7 @@ function buildRouteActivity(
   const openOnWeb = getOpenOnWebUrl(pathname)
   const buttons = buildButtons(openOnWeb)
   const present = (details: string, state?: string) => ({
-    details: showStatus ? details : "UnionCrax.Direct",
+    details: showStatus ? details : "Union.Manifold",
     state: showStatus ? state : undefined,
     buttons,
   })
@@ -154,7 +154,7 @@ function buildRouteActivity(
     }
     const details = showStatus
       ? (appid ? `Viewing ${name || "A game"}` : "Viewing game")
-      : (name || "UnionCrax.Direct")
+      : (name || "Union.Manifold")
     return {
       details,
       state: showStatus ? "Game details" : undefined,

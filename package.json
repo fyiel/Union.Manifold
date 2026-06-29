@@ -1,10 +1,10 @@
 {
-  "name": "unioncrax-direct",
-  "version": "2.7.3",
-  "description": "UC.D",
+  "name": "union-manifold",
+  "version": "1.0.0",
+  "description": "Union.Manifold, a multi source game launcher forked from UnionCrax.Direct",
   "type": "module",
   "main": "electron/main.cjs",
-  "author": "UnionCrax",
+  "author": "fyiel",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -83,8 +83,8 @@
   },
   "build": {
     "icon": "assets/icon.ico",
-    "appId": "xyz.unioncrax.direct",
-    "productName": "UnionCrax.Direct",
+    "appId": "fyi.pumg.unionmanifold",
+    "productName": "Union.Manifold",
     "npmRebuild": false,
     "publish": [
       {

@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <!-- Union.Manifold TRAY icon: dark charcoal badge + light glyph, transparent
+       corners. Reads on gray/dark trays without the white-box problem the light
+       app icon caused. -->
+  <rect width="512" height="512" rx="116" ry="116" fill="#1c1c1c"/>
+  <g transform="translate(86 86) scale(14.166)" fill="none" stroke="#ededed" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M3 6h5c3 0 3.5 6 7 6"/>
+    <path d="M3 12h12"/>
+    <path d="M3 18h5c3 0 3.5-6 7-6"/>
+    <path d="M15 12h6"/>
+    <circle cx="15" cy="12" r="1.7" fill="#ededed" stroke="none"/>
+  </g>
+</svg>

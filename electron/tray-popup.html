@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>UnionCrax.Direct Tray</title>
+<title>Union.Manifold Tray</title>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -440,7 +440,7 @@ function render(data) {
   let html = ''
   html += `<div class="app-header">`
   html += `<img class="app-logo" src="../assets/icons/32x32.png" alt="" draggable="false" onerror="this.style.display='none'">`
-  html += `<span class="app-name">UnionCrax.Direct</span>`
+  html += `<span class="app-name">Union.Manifold</span>`
   if (version) html += `<span class="app-version">${esc(version)}</span>`
   html += `</div>`
 
@@ -482,7 +482,7 @@ function render(data) {
 
   html += sep()
   html += `<div class="section">`
-  html += row({ svg: IC.show, label: 'Show UnionCrax.Direct', action: 'show', payload: '', iconName: 'show' })
+  html += row({ svg: IC.show, label: 'Show Union.Manifold', action: 'show', payload: '', iconName: 'show' })
   html += row({ svg: IC.library, label: 'Library', action: 'navigate', payload: '/library', iconName: 'library' })
   html += row({ svg: IC.browse, label: 'Browse', action: 'navigate', payload: '/', iconName: 'browse' })
   html += row({ svg: IC.dl, label: 'Downloads', action: 'navigate', payload: '/downloads', badge: activeDownloads > 0 ? String(activeDownloads) : null, iconName: 'downloads', cls: activeDownloads > 0 ? 'active' : '' })
@@ -491,7 +491,7 @@ function render(data) {
 
   html += sep()
   html += `<div class="section">`
-  html += row({ svg: IC.quit, label: 'Quit UnionCrax.Direct', action: 'quit', payload: '', iconName: 'quit', cls: 'dest' })
+  html += row({ svg: IC.quit, label: 'Quit Union.Manifold', action: 'quit', payload: '', iconName: 'quit', cls: 'dest' })
   html += `</div>`
 
   popup.innerHTML = html
