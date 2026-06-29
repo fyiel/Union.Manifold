@@ -84,7 +84,7 @@ export function UpdateNotification() {
 
   let description = ""
   if (status.state === "checking") {
-    description = "Checking for a new UnionCrax.Direct build."
+    description = "Checking for a new Union.Manifold build."
   } else if (isDownloading) {
     description = `Downloading ${status.version ? formatVersion(status.version) : "the update"} - ${Math.round(status.progress)}%.`
   } else if (isDownloaded) {

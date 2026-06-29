@@ -931,8 +931,14 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
       )
       if (hasActive) return
 
+      // Only the LEGACY renderer-resolved path is driven from here. Fork
+      // downloads (started via `window.ucDownloads.start` with an already-direct
+      // URL) are owned by the aria2 engine in main, which queues and starts them
+      // itself. Their synthetic items carry host "local". Re-resolving those
+      // here would fail with "Local link could not be resolved" and wrongly mark
+      // every queued-behind download as failed, so skip them.
       const queued = downloadsRef.current
-        .filter((item) => item.status === "queued")
+        .filter((item) => item.status === "queued" && item.host && item.host !== "local")
         .sort(compareQueuePosition)
       if (!queued.length) return
       const next = queued[0]
