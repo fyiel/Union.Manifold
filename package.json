@@ -89,8 +89,8 @@
     "publish": [
       {
         "provider": "github",
-        "owner": "UnionCrax-Team",
-        "repo": "UnionCrax.Direct"
+        "owner": "fyiel",
+        "repo": "Union.Manifold"
       }
     ],
     "directories": {
