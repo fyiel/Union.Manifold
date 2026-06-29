@@ -1,38 +1,27 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from "react"
 import { HashRouter, Route, Routes, Navigate } from "react-router-dom"
-import { AppLayout } from "@/app/Layout"
+import { ForkLayout } from "@/app/ForkLayout"
 import { DownloadsProvider, useDownloadsSelector } from "@/context/downloads-context"
 import { DownloadFlowProvider } from "@/context/download-flow-context"
 import { GameLaunchProvider } from "@/context/game-launch-context"
 import { ToastProvider } from "@/context/toast-context"
 import { AuthProvider } from "@/context/auth-context"
 import { Toaster } from "@/components/Toaster"
-import { WebDownloadQueueConsumer } from "@/components/WebDownloadQueueConsumer"
 import { ControllerNavigation } from "@/components/ControllerNavigation"
 import { ThemeBoundary } from "@/components/ThemeBoundary"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { AlertTriangle } from "@/components/icons"
 
-const LauncherPage = lazy(() => import("@/app/pages/LauncherPage").then((m) => ({ default: m.LauncherPage })))
-const SearchPage = lazy(() => import("@/app/pages/SearchPage").then((m) => ({ default: m.SearchPage })))
-const GameDetailPage = lazy(() => import("@/app/pages/GameDetailPage").then((m) => ({ default: m.GameDetailPage })))
+// Fork pages — multi-source browse + detail. Library/Downloads/Settings are
+// reused from the original app (they're source-agnostic: installed manifests,
+// the aria2 queue, and local settings). Account/social pages are dropped.
+const BrowsePage = lazy(() => import("@/app/pages/BrowsePage").then((m) => ({ default: m.BrowsePage })))
+const AdvancedSearchPage = lazy(() => import("@/app/pages/AdvancedSearchPage").then((m) => ({ default: m.AdvancedSearchPage })))
+const SourceGamePage = lazy(() => import("@/app/pages/SourceGamePage").then((m) => ({ default: m.SourceGamePage })))
 const LibraryPage = lazy(() => import("@/app/pages/LibraryPage").then((m) => ({ default: m.LibraryPage })))
-const CollectionsPage = lazy(() => import("@/app/pages/CollectionsPage").then((m) => ({ default: m.CollectionsPage })))
-const BrowseCollectionsPage = lazy(() => import("@/app/pages/BrowseCollectionsPage").then((m) => ({ default: m.BrowseCollectionsPage })))
-const CollectionDetailPage = lazy(() => import("@/app/pages/CollectionDetailPage").then((m) => ({ default: m.CollectionDetailPage })))
 const DownloadsPage = lazy(() => import("@/app/pages/DownloadsPage").then((m) => ({ default: m.DownloadsPage })))
 const SettingsPage = lazy(() => import("@/app/pages/SettingsPage").then((m) => ({ default: m.SettingsPage })))
-const WishlistPage = lazy(() => import("@/app/pages/WishlistPage").then((m) => ({ default: m.WishlistPage })))
-const LikedPage = lazy(() => import("@/app/pages/LikedPage").then((m) => ({ default: m.LikedPage })))
-const AccountOverviewPage = lazy(() => import("@/app/pages/AccountOverviewPage").then((m) => ({ default: m.AccountOverviewPage })))
-const ViewHistoryPage = lazy(() => import("@/app/pages/ViewHistoryPage").then((m) => ({ default: m.ViewHistoryPage })))
-const SearchHistoryPage = lazy(() => import("@/app/pages/SearchHistoryPage").then((m) => ({ default: m.SearchHistoryPage })))
-const ScreenshotsPage = lazy(() => import("@/app/pages/ScreenshotsPage").then((m) => ({ default: m.ScreenshotsPage })))
-const LoginPage = lazy(() => import("@/app/pages/LoginPage").then((m) => ({ default: m.LoginPage })))
-const VerifyEmailPage = lazy(() => import("@/app/pages/VerifyEmailPage").then((m) => ({ default: m.VerifyEmailPage })))
-const ForgotPasswordPage = lazy(() => import("@/app/pages/ForgotPasswordPage").then((m) => ({ default: m.ForgotPasswordPage })))
-const ResetPasswordPage = lazy(() => import("@/app/pages/ResetPasswordPage").then((m) => ({ default: m.ResetPasswordPage })))
 const InGameOverlay = lazy(() => import("@/components/InGameOverlay").then((m) => ({ default: m.InGameOverlay })))
 const ThemeEditorWindow = lazy(() => import("@/app/pages/settings/ThemeEditorWindow"))
 
@@ -171,13 +160,17 @@ function DownloadBlockedGuard() {
 }
 
 function AppWithDownloads() {
+  // Push the user's saved source enable/disable into the main registry on boot
+  // (the registry's enabled set is in-memory and resets each launch).
+  useEffect(() => {
+    void import("@/lib/sources").then((m) => m.applySavedSourceSettings())
+  }, [])
   return (
     <>
       <ExtractionCloseGuard />
       <DownloadBlockedGuard />
-      <WebDownloadQueueConsumer />
       <ControllerNavigation />
-      <AppLayout />
+      <ForkLayout />
     </>
   )
 }
@@ -196,30 +189,14 @@ export default function App() {
               <Route path="/overlay" element={<InGameOverlay />} />
               <Route path="/theme-editor" element={<ThemeEditorWindow />} />
 
-              {/* Auth pages (inside app layout) */}
-              <Route path="/login" element={<LoginPage />} />
-              <Route path="/verify-email" element={<VerifyEmailPage />} />
-              <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-              <Route path="/reset-password" element={<ResetPasswordPage />} />
-
-              {/* App routes - no login required */}
+              {/* App routes — multi-source, no login */}
               <Route element={<AppWithDownloads />}>
-                <Route path="/" element={<LauncherPage />} />
-                <Route path="/launcher" element={<LauncherPage />} />
-                <Route path="/search" element={<SearchPage />} />
-                <Route path="/game/:id" element={<GameDetailPage />} />
+                <Route path="/" element={<BrowsePage />} />
+                <Route path="/advanced" element={<AdvancedSearchPage />} />
+                <Route path="/g/:key" element={<SourceGamePage />} />
                 <Route path="/library" element={<LibraryPage />} />
-                <Route path="/collections" element={<CollectionsPage />} />
-                <Route path="/collections/browse" element={<BrowseCollectionsPage />} />
-                <Route path="/collections/view/:id" element={<CollectionDetailPage />} />
                 <Route path="/downloads" element={<DownloadsPage />} />
                 <Route path="/settings" element={<SettingsPage />} />
-                <Route path="/wishlist" element={<WishlistPage />} />
-                <Route path="/liked" element={<LikedPage />} />
-                <Route path="/account" element={<AccountOverviewPage />} />
-                <Route path="/view-history" element={<ViewHistoryPage />} />
-                <Route path="/search-history" element={<SearchHistoryPage />} />
-                <Route path="/screenshots" element={<ScreenshotsPage />} />
               </Route>
 
               {/* Fallback */}
