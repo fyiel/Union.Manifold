@@ -37,3 +37,10 @@ CMakeCache.txt
 CMakeFiles/
 cmake_install.cmake
 *.vcxproj.user
+
+# fork dev artifacts (not part of the app)
+redesign/
+review-prompt.md
+FORK_PLAN.md
+ds-bundle/
+.design-sync/
