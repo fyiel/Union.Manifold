@@ -1,5 +1,89 @@
 # Changelog
 
+All notable changes to Union.Manifold. This project is a fork of
+[UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
+The app shows its version as 1.0.0b (beta). 1.0.1 is the first packaged release.
+
+## 1.0.1
+
+First published build, produced by the new auto release pipeline (Linux AppImage
+plus tar.gz). Same feature set as the initial fork below.
+
+## 1.0.0b, initial Union.Manifold fork
+
+### Added
+
+Multi source backend
+- a source adapter layer with a registry that fans out across every enabled
+  source and merges results, deduped by steam appid or by normalized title
+  (union find), so one title from many sites collapses into one card with many mirrors
+- UnionCrax, AnkerGames, SteamRIP and GameBounty adapters behind that registry
+- AnkerGames now bulk browsable via its Livewire games-list listing, with real
+  genres, size, release date and a popular all time sort plus a 127 genre taxonomy
+- SteamRIP search matches against the wp sitemap slugs (its `?search=` is
+  unreliable for multi word queries) and pulls art from the steam cdn
+- UnionCrax reads the real steam appid out of each record's `store` url (the
+  catalog appid is an internal id, not steam's) with a protondb fallback, which
+  fixes cross source dedup and steam art for those titles
+- a unified query api with tag, release year and install size filters, popular,
+  latest, updated, title and relevance sorts, facets and a per source capability
+  matrix, plus a balanced round robin browse so no one prolific source dominates
+- steam enrichment that fills thin descriptions, missing genres and release year
+  from the steam store, surfaces other sources with the same title, then stamps
+  the game fullyResolved so the renderer caches it
+- an infinite on disk asset cache (uc-asset) that fetches a remote image once,
+  stores the bytes forever and serves from disk after, with a clear button in settings
+- a steam art fallback ladder for covers, ending in the authoritative store art
+- leveldb state store self heal that wipes and reopens on genuine corruption
+  instead of losing download state to a transient or lock error
+
+Manifold UI
+- a full monochrome design system (manifold.css tokens) and a collapsible
+  sidebar with live source toggles
+- redesigned Browse (one search across catalogs into a deduped endless grid with
+  scroll position restored on back), Advanced Search (a persistent filter rail),
+  Game Detail (hero, cover, cross source mirrors, steam steamdb protondb links,
+  one primary download), Library, Downloads (the aria2 queue grouped by game) and Settings
+- a library card menu (open files, set executable, linux and vr config, launch
+  options, edit details, refresh metadata, favorite, delete) reachable from a cog
+  or a right click, with last played moved onto the title row
+- manifold native dialogs, launch options (with a force vulkan quick option),
+  edit details (inset well fields plus cover and hero dropzones) and a linux and
+  vr config modal that groups detected runners by source (steam proton vs community ge)
+- a settings linux area for the global proton runner, launch mode, prefix and extra env
+- a close behavior setting (hide to tray vs quit entirely) that also honors
+  window manager closes like hyprland killactive
+- a three hour per game library cache so cards and the detail page open instantly
+- the in app version shows 1.0.0b and credits UnionCrax.Direct v2.7.3
+
+Tooling and release
+- a github action that cuts a tagged linux release automatically whenever the
+  package.json version changes on main
+- the existing tag and dispatch multi os build workflow kept for manual releases
+
+### Changed
+- rebranded the product to Union.Manifold (name, productName, appId, icons,
+  splash, window title and user facing copy), leaving on disk identity (userData
+  dir, download folder, wm class) intact so existing installs keep working
+- proton detection now also scans compatibilitytools.d and matches on a runnable
+  proton script instead of the folder name, so GE-Proton and custom tools are
+  found, and each result reports its source for the grouped picker
+- the tray menu actions now drive the fork router so its page buttons work
+- every icon on the new surfaces comes from lucide
+- settings source toggles and the sidebar source toggles stay in sync in real time
+
+### Removed
+- the entire upstream account, collections, community, profile, playtime, search
+  history and auth UI, 162 orphan files (about 37k lines) the new app no longer reaches
+- the appearance tab, the language selector and the launch on system startup
+  toggle
+
+<sub><i>the account stuff isn't gone for fun, i'll reimplement it if the devs are okay with that</i></sub>
+
+---
+
+The entries below are the upstream UnionCrax.Direct changelog, from before the fork.
+
 ## v2.7.3 — Linux Icon & Blocked-Download Clarity
 
 A focused fix release: the Linux taskbar icon now shows up, and downloads that a network blocks at the TLS layer now explain *why* instead of looping silently.
