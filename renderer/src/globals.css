@@ -1,43 +1,45 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
-/* UC Universal Design Language — Dark Mode Only (synced with union-crax.xyz) */
+/* GameVault — kyun-refined dark theme (charcoal + white-glow accent, no color).
+   Derived from kyun.sh's palette but with readable type + subtle rounding.
+   Token names kept shadcn-compatible so existing components recolor cleanly. */
 
 :root {
-  /* UDL Color Tokens — zinc palette, dark-only Electron app */
-  --background:        oklch(0.035 0.002 285);    /* #09090b — zinc-950 */
-  --foreground:        oklch(0.968 0.001 286);    /* #f4f4f5 — zinc-100 */
-  --card:              oklch(0.12 0.002 285);     /* #18181b — zinc-900 */
-  --card-foreground:   oklch(0.968 0.001 286);
-  --popover:           oklch(0.12 0.002 285);
-  --popover-foreground:oklch(0.968 0.001 286);
-  --primary:           oklch(1 0 0);              /* #FFFFFF — white accent */
-  --primary-foreground:oklch(0 0 0);              /* #000000 */
-  --secondary:         oklch(0.16 0.002 285);     /* #27272a — zinc-800 */
-  --secondary-foreground: oklch(0.968 0.001 286);
-  --muted:             oklch(0.16 0.002 285);
-  --muted-foreground:  oklch(0.55 0.003 286);     /* #71717a — zinc-500 */
-  --accent:            oklch(1 0 0);
-  --accent-foreground: oklch(0 0 0);
-  --destructive:       oklch(0.577 0.245 27.325); /* #EF4444 */
-  --destructive-foreground: oklch(1 0 0);
-  --border:            oklch(0.16 0.002 285 / 0.5); /* zinc-800/50 */
-  --input:             oklch(0.16 0.002 285);
-  --ring:              oklch(1 0 0);
-  --chart-1:           oklch(0.968 0.001 286);
-  --chart-2:           oklch(0.696 0.17 162.48);
-  --chart-3:           oklch(0.769 0.188 70.08);
-  --chart-4:           oklch(0.55 0.003 286);
-  --chart-5:           oklch(0.40 0.003 286);
-  --radius:            0.625rem;
-  --sidebar:           oklch(0.035 0.002 285);
-  --sidebar-foreground:oklch(0.968 0.001 286);
-  --sidebar-primary:   oklch(1 0 0);
-  --sidebar-primary-foreground: oklch(0 0 0);
-  --sidebar-accent:    oklch(0.16 0.002 285);
-  --sidebar-accent-foreground: oklch(0.968 0.001 286);
-  --sidebar-border:    oklch(0.16 0.002 285 / 0.5);
-  --sidebar-ring:      oklch(1 0 0);
+  /* Charcoal surfaces, white-glow accent, neutral grays. */
+  --background:        #151515;                  /* kyun --main-bg */
+  --foreground:        #e6e6e6;                  /* readable body (kyun focus #d2d2d2, lifted) */
+  --card:              #1a1a1a;                  /* kyun --bg-a */
+  --card-foreground:   #e6e6e6;
+  --popover:           #1c1c1c;
+  --popover-foreground:#e6e6e6;
+  --primary:           #ffffff;                  /* white accent (glow, not color) */
+  --primary-foreground:#0a0a0a;
+  --secondary:         #232323;                  /* kyun --bg-c */
+  --secondary-foreground: #e6e6e6;
+  --muted:             #1f1f1f;
+  --muted-foreground:  #8f8f8f;                  /* kyun --text / --text-dark */
+  --accent:            #262626;                  /* hover surface */
+  --accent-foreground: #f0f0f0;
+  --destructive:       #f87171;                  /* kyun --danger */
+  --destructive-foreground: #ffffff;
+  --border:            #ffffff14;                /* white ~8% (kyun --border) */
+  --input:             #232323;
+  --ring:              #ffffff;
+  --chart-1:           #e6e6e6;
+  --chart-2:           #22c55e;
+  --chart-3:           #f59e0b;
+  --chart-4:           #8f8f8f;
+  --chart-5:           #5a5a5a;
+  --radius:            0.4rem;                    /* subtle rounding (refined, not square) */
+  --sidebar:           #151515;
+  --sidebar-foreground:#e6e6e6;
+  --sidebar-primary:   #ffffff;
+  --sidebar-primary-foreground: #0a0a0a;
+  --sidebar-accent:    #232323;
+  --sidebar-accent-foreground: #e6e6e6;
+  --sidebar-border:    #ffffff14;
+  --sidebar-ring:      #ffffff;
 
   /* Runtime-mutable font stacks, swapped by the theme engine. */
   --font-sans-active: "Inter", "Geist", "Segoe UI", ui-sans-serif, system-ui, -apple-system, sans-serif;
@@ -914,4 +916,40 @@ html[data-uc-gamepad] [data-uc-focusable]:focus {
   html[data-uc-gamepad] [data-uc-focusable]:focus {
     animation: none;
   }
+}
+
+/* ── GameVault (kyun-refined) shell helpers ───────────────────────────────── */
+
+/* White-glow accent — kyun's "brand" is a drop-shadow on grayscale, not color. */
+.gv-glow {
+  text-shadow: 0 0 12px rgba(255, 255, 255, 0.45), 0 0 2px rgba(255, 255, 255, 0.35);
+}
+
+/* Subtle dither/grain overlay for panels (kyun's --box-texture, simplified to
+   an inline SVG noise so we ship no binary asset). Apply on a ::before. */
+.gv-grain::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.035;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  border-radius: inherit;
+}
+
+/* The fixed game-HUD header plate: 2px border + flat shadow, faint inner grain. */
+.gv-plate {
+  border: 2px solid var(--border);
+  background: linear-gradient(180deg, #1c1c1c 0%, #161616 100%);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+}
+
+/* Card hover: lift + white edge glow rather than a colored highlight. */
+.gv-card {
+  transition: transform 140ms ease, box-shadow 140ms ease, border-color 140ms ease;
+}
+.gv-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(255, 255, 255, 0.22);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.05);
 }

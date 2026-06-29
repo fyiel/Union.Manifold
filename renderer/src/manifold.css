@@ -1,0 +1,117 @@
+/* ============================================================================
+   Union.Manifold, minimal/functional design system (ported from the handoff
+   comps). Pure monochrome on charcoal, no accent color baked in. Pages are
+   inline-styled with these exact tokens, this file holds only what inline
+   styles can't do, the collapsible-sidebar contract, scrollbars, keyframes,
+   and a handful of :hover helpers.
+   ============================================================================ */
+
+:root {
+  /* Surfaces */
+  --mf-bg: #151515;
+  --mf-aside: #141414;
+  --mf-panel: #1a1a1a;
+  --mf-panel-2: #181818;
+  /* Hairlines */
+  --mf-line: rgba(255, 255, 255, 0.06);
+  --mf-line-2: rgba(255, 255, 255, 0.10);
+  /* Text ramp */
+  --mf-t0: #f0f0f0;
+  --mf-t1: #e6e6e6;
+  --mf-t2: #cfcfcf;
+  --mf-t3: #9a9a9a;
+  --mf-t4: #7d7d7d;
+  --mf-t5: #5f5f5f;
+  --mf-t6: #4f4f4f;
+  --mf-mono: "JetBrains Mono", "Geist Mono", ui-monospace, monospace;
+  --mf-sans: "Inter", system-ui, sans-serif;
+}
+
+/* border-box everywhere so width:100% + padding never overflows (the source of
+   stray horizontal scrollbars). Redundant with Tailwind preflight but guaranteed. */
+*, *::before, *::after { box-sizing: border-box; }
+
+/* ---- animations ---- */
+@keyframes uc-spin { to { transform: rotate(360deg); } }
+@keyframes uc-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+.uc-spin { animation: uc-spin 0.7s linear infinite; }
+.uc-pulse { animation: uc-pulse 1s ease-in-out infinite; }
+
+/* card menu + dialog entrances (Library overhaul) */
+@keyframes mfFade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes mfMenu { from { opacity: 0; transform: scale(0.95) translateY(-6px); } to { opacity: 1; transform: none; } }
+@keyframes mfDialog { from { opacity: 0; transform: scale(0.96) translateY(10px); } to { opacity: 1; transform: none; } }
+
+/* menu row, brightens on hover */
+.mfrow { transition: background 0.12s ease, color 0.12s ease; }
+.mfrow:hover { background: rgba(255, 255, 255, 0.05); }
+.mfrow.mfrow-danger:hover { background: rgba(248, 113, 113, 0.12); }
+
+/* ---- collapsible sidebar contract (shared across every page) ----
+   Collapse state lives in localStorage["uc_nav_collapsed"] and is applied as
+   `body.uc-nav-collapsed` so toggling never depends on a React re-render. */
+.uc-aside { width: 228px; transition: width 0.32s cubic-bezier(0.4, 0, 0.2, 1); overflow: hidden; }
+body.uc-nav-collapsed .uc-aside { width: 64px; }
+.uc-navlabel { white-space: nowrap; transition: opacity 0.2s ease; }
+/* collapsed: labels take NO space (width 0, not just faded) so the icon sits
+   centered in the rail instead of being pushed by the still-laid-out label */
+body.uc-nav-collapsed .uc-navlabel { opacity: 0; width: 0; min-width: 0; margin: 0; overflow: hidden; pointer-events: none; }
+/* collapsed nav/settings rows center their lone icon. !important because navBase
+   sets gap/padding INLINE (inline styles otherwise beat these stylesheet rules),
+   which was leaving the gap + side padding in place and shoving the icon off-center. */
+body.uc-nav-collapsed .mf-navitem { justify-content: center !important; gap: 0 !important; padding-left: 0 !important; padding-right: 0 !important; }
+/* nav icons keep their full size, flex must never compress the svg (which made
+   the collapsed icons shrink to near-invisible) */
+.uc-aside .mf-navitem > svg { flex-shrink: 0; width: 16px; height: 16px; }
+.uc-navsection { transition: opacity 0.2s ease; }
+/* the Sources roster disappears entirely when collapsed (nav icons stay) */
+body.uc-nav-collapsed .uc-navsection { display: none; }
+.uc-expand { display: none; }
+body.uc-nav-collapsed .uc-expand { display: flex; }
+body.uc-nav-collapsed .uc-collapse { display: none; }
+
+/* ---- range sliders (Advanced Search) ---- */
+.uc-range { -webkit-appearance: none; appearance: none; height: 4px; border-radius: 99px; background: rgba(255, 255, 255, 0.13); outline: none; }
+.uc-range::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 14px; height: 14px; border-radius: 99px; background: #ededed; cursor: pointer; border: 2px solid var(--mf-panel); }
+.uc-range::-moz-range-thumb { width: 14px; height: 14px; border-radius: 99px; background: #ededed; cursor: pointer; border: 2px solid var(--mf-panel); }
+
+/* ---- scrollbars ----
+   The manifold scrollbar is applied to EVERYTHING (loads after globals.css so it
+   wins the universal rule), so every scroll container matches instead of the
+   handful that opt into .mf-scroll. .mf-scroll is kept for explicit intent. */
+*::-webkit-scrollbar,
+.mf-scroll::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-thumb,
+.mf-scroll::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.10); border-radius: 99px; border: 3px solid var(--mf-bg); }
+*::-webkit-scrollbar-thumb:hover,
+.mf-scroll::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.18); }
+*::-webkit-scrollbar-track,
+.mf-scroll::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-corner { background: transparent; }
+
+/* ---- :hover helpers (inline styles can't express :hover) ----
+   Class names describe the role; the static look stays inline on the element. */
+.mf-navitem { transition: background 0.14s ease, color 0.14s ease; }
+.mf-navitem:hover:not(.mf-navitem-active) { background: rgba(255, 255, 255, 0.04); color: var(--mf-t2); }
+
+.mf-card { transition: border-color 0.14s ease, transform 0.14s ease; }
+.mf-card:hover { border-color: rgba(255, 255, 255, 0.24); transform: translateY(-3px); }
+
+/* Library list row, subtle row highlight on hover. */
+.mf-listrow { transition: background 0.12s ease; }
+.mf-listrow:hover { background: rgba(255, 255, 255, 0.04); }
+
+/* Outlined/ghost control: brightens border + text on hover. */
+.mf-ghost { transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease; }
+.mf-ghost:hover { border-color: rgba(255, 255, 255, 0.28); color: var(--mf-t1); }
+
+/* Small filled icon button (e.g. clear-search ✕). */
+.mf-iconbtn { transition: background 0.14s ease, color 0.14s ease; }
+.mf-iconbtn:hover { background: rgba(255, 255, 255, 0.14); color: var(--mf-t1); }
+
+/* Subtle text link that brightens. */
+.mf-textbtn { transition: color 0.14s ease, border-color 0.14s ease; }
+.mf-textbtn:hover { color: var(--mf-t2); border-color: rgba(255, 255, 255, 0.18); }
+
+.mf-iconcircle { transition: background 0.14s ease, color 0.14s ease; }
+.mf-iconcircle:hover { background: rgba(255, 255, 255, 0.07); color: var(--mf-t2); }
