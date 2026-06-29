@@ -360,6 +360,10 @@ export function GameLaunchProvider({ children }: { children: React.ReactNode }) 
       } catch { /* ignore */ }
       return // keep the picker open so the choice is visibly confirmed
     }
+    // Launch mode: the picker's job is done the moment a file is chosen. Close it
+    // immediately so it never lingers behind the preflight / shortcut / failed
+    // modal that the launch path may open next.
+    setPickerOpen(false)
     setPendingPath(path)
     await handleLaunchWithShortcutCheck(g, path)
   }, [game, pickerMode, handleLaunchWithShortcutCheck])
