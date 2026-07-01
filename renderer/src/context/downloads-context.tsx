@@ -1463,9 +1463,12 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
     // showing under the Library's "Downloading" shelf and its files stay on
     // disk forever, which is exactly the lingering-cancelled-download bug.
     if (appid && !becameInstallReady) {
+      // A bare completed/extracted sibling is a transient multi-part step, not a
+      // reason to keep the group alive on disk (that resurrected X'd downloads on
+      // reload) — only in-flight work or a kept install_ready archive counts.
       const KEEPABLE_STATUSES = [
         "downloading", "queued", "paused", "extracting", "installing",
-        "verifying", "retrying", "completed", "extracted", "install_ready",
+        "verifying", "retrying", "install_ready",
       ]
       const otherLivePart = downloadsRef.current.some(
         (d) => d.appid === appid && d.id !== downloadId && KEEPABLE_STATUSES.includes(String(d.status))
@@ -1513,17 +1516,17 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
       } catch (e) { }
     }
 
-    // If any part produced a keepable archive (install_ready) the user can
-    // still finish installing, so preserve the group. Otherwise the download
-    // was discarded outright — delete the on-disk installing folder (partials,
-    // cached screenshots, manifest) and drop the rows so the game stops
-    // lingering in the Library "Downloading" shelf and its files don't pile up
-    // on disk.
+    // Keep the group only when a part is (or just became) install_ready — the
+    // "archive kept, click Install to continue" state the user can still act on.
+    // A bare completed/extracted part is a transient multi-part step, NOT a
+    // reason to keep: leaving it (and its on-disk installing folder) is exactly
+    // why an X'd download reappeared after a reload. Otherwise the download was
+    // discarded — delete the installing folder (partials, cached screenshots,
+    // manifest) and drop the rows so it stays gone and stops lingering in the
+    // Library "Downloading" shelf.
     const keepArchive =
       Array.from(cancelResults.values()).some((r) => r?.status === "install_ready") ||
-      // Don't nuke a download that already finished into an installable archive
-      // (completed/extracted) — only discard work that was still in flight.
-      downloadsRef.current.some((d) => d.appid === appid && ["completed", "extracted", "install_ready"].includes(String(d.status)))
+      downloadsRef.current.some((d) => d.appid === appid && String(d.status) === "install_ready")
     if (!keepArchive) {
       // Drop the rows first so the UI updates instantly, then clean the disk.
       setDownloads((prev) => {
