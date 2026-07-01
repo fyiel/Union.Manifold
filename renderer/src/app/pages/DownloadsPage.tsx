@@ -318,10 +318,16 @@ export function DownloadsPage() {
 // striped placeholder.
 function Cover({ appid, w, h, r, border }: { appid: string; w: number; h: number; r: number; border?: boolean }) {
   // Recorded enqueue art first, then any in-session resolved game for this appid.
-  const img = getDownloadArt(appid)?.image || getRememberedGame(appid)?.image
+  const raw = getDownloadArt(appid)?.image || getRememberedGame(appid)?.image
+  // A proxied cover can fail (mirror rotation invalidates the on-disk cache key,
+  // or the upstream CDN rate-limits) — fall back to the placeholder instead of a
+  // broken-image box.
+  const [failed, setFailed] = useState(false)
+  useEffect(() => { setFailed(false) }, [raw])
+  const img = failed ? undefined : raw
   return (
     <div style={{ width: w, height: h, borderRadius: r, flexShrink: 0, overflow: "hidden", background: img ? "#0f0f0f" : COVER_LINES, border: border ? "1px solid var(--mf-line)" : undefined }}>
-      {img && <img src={proxyImageUrl(img)} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />}
+      {img && <img src={proxyImageUrl(img)} alt="" onError={() => setFailed(true)} style={{ width: "100%", height: "100%", objectFit: "cover" }} />}
     </div>
   )
 }

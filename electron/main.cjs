@@ -2290,7 +2290,16 @@ function registerAssetCacheProtocol() {
       if (parsedRemote.protocol !== 'http:' && parsedRemote.protocol !== 'https:') {
         return new Response('Unsupported scheme', { status: 400 })
       }
-      const key = crypto.createHash('sha1').update(remote).digest('hex')
+      // Key the cache on the innermost original image URL, not the full proxied
+      // URL: the /api/image-proxy prefix carries the ACTIVE mirror host, which
+      // rotates per launch, so keying on `remote` made every cover a guaranteed
+      // miss (and a re-fetch storm) after a rotation.
+      let cacheSrc = remote
+      if (/\/api\/image-proxy/i.test(parsedRemote.pathname)) {
+        const inner = parsedRemote.searchParams.get('url')
+        if (inner) cacheSrc = inner
+      }
+      const key = crypto.createHash('sha1').update(cacheSrc).digest('hex')
       const file = path.join(dir, key)
       const typeFile = `${file}.t`
 
