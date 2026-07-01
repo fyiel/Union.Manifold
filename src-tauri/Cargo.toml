@@ -1,0 +1,58 @@
+[package]
+name = "union-manifold"
+version = "1.0.4"
+description = "Union.Manifold, a multi source game launcher"
+authors = ["fyiel"]
+license = "MIT"
+edition = "2021"
+rust-version = "1.80"
+
+[lib]
+name = "union_manifold_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon", "image-png", "protocol-asset"] }
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-shell = "2"
+tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
+tauri-plugin-deep-link = "2"
+tauri-plugin-updater = "2"
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "gzip", "brotli", "rustls-tls", "charset", "http2"] }
+futures = "0.3"
+regex = "1"
+once_cell = "1"
+url = "2"
+percent-encoding = "2"
+unicode-normalization = "0.1"
+sha2 = "0.10"
+hex = "0.4"
+rand = "0.8"
+thiserror = "2"
+anyhow = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+dirs = "5"
+tempfile = "3"
+walkdir = "2"
+fs4 = "0.12"
+sysinfo = "0.32"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[target.'cfg(windows)'.dependencies]
+winreg = "0.52"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true
