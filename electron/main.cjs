@@ -24,6 +24,11 @@ const isDev = !app.isPackaged
 const UPDATE_PROVIDER = packageJson?.build?.publish?.[0] || {}
 const UPDATE_OWNER = UPDATE_PROVIDER.owner || 'Union-Crax'
 const UPDATE_REPO = UPDATE_PROVIDER.repo || 'UnionCrax.Direct'
+// Auto-update is OFF by default in this fork's builds. Launching must never
+// silently download+install a release over the running app — that once pulled
+// the upstream UnionCrax.Direct AppImage in over a local Manifold build. Opt
+// back in per-launch with UC_AUTO_UPDATE=1.
+const AUTO_UPDATE_ENABLED = /^(1|true)$/i.test(String(process.env.UC_AUTO_UPDATE || '').trim())
 
 try {
   app.commandLine.appendSwitch('disable-features', 'OverlayScrollbar')
@@ -741,7 +746,7 @@ function getOverlayDiagnostics() {
 let splashUpdateCheckInFlight = false
 
 function configureAutoUpdater() {
-  if (isDev) {
+  if (isDev || !AUTO_UPDATE_ENABLED) {
     setUpdateStatus({ enabled: false, state: 'disabled' })
     return
   }
@@ -835,7 +840,7 @@ function configureAutoUpdater() {
 }
 
 async function triggerAutoUpdateCheck() {
-  if (isDev) {
+  if (isDev || !AUTO_UPDATE_ENABLED) {
     setUpdateStatus({ enabled: false, state: 'disabled', error: null })
     return getUpdateStatusSnapshot()
   }
@@ -854,7 +859,7 @@ async function triggerAutoUpdateCheck() {
 }
 
 async function retryAutoUpdate() {
-  if (isDev) {
+  if (isDev || !AUTO_UPDATE_ENABLED) {
     setUpdateStatus({ enabled: false, state: 'disabled', error: null })
     return getUpdateStatusSnapshot()
   }
@@ -10493,10 +10498,10 @@ app.whenReady().then(async () => {
   }
 
   configureAutoUpdater()
-  if (!isDev && startupReachable) {
+  if (!isDev && AUTO_UPDATE_ENABLED && startupReachable) {
     // Check for updates during splash (Discord-style: download and install before main window opens)
     await checkForUpdatesDuringSplash(splashWin)
-  } else if (!isDev && !startupReachable) {
+  } else if (!isDev && AUTO_UPDATE_ENABLED && !startupReachable) {
     // Offline: the update feed is unreachable too — don't burn the splash
     // waiting on a check that can only time out.
     ucLog('Startup: skipping update check (offline)')
@@ -10567,13 +10572,13 @@ app.whenReady().then(async () => {
     }
   }, 15000)
 
-  if (!isDev) {
+  if (!isDev && AUTO_UPDATE_ENABLED) {
     // Splash already ran the initial check; schedule background hourly re-checks
     setInterval(() => {
       triggerAutoUpdateCheck().catch(() => { })
     }, 60 * 60 * 1000)
   } else {
-    ucLog('DEV mode - automatic update checks disabled.')
+    ucLog(isDev ? 'DEV mode - automatic update checks disabled.' : 'Auto-update disabled (set UC_AUTO_UPDATE=1 to enable).')
   }
 
   app.on('activate', () => {
@@ -10590,7 +10595,7 @@ ipcMain.handle('uc:update-retry', async () => {
 })
 
 ipcMain.handle('uc:install-update', () => {
-  if (isDev) return { ok: false, error: 'updates-disabled-in-dev' }
+  if (isDev || !AUTO_UPDATE_ENABLED) return { ok: false, error: 'updates-disabled' }
   if (!updateState.downloaded) return { ok: false, error: 'update-not-downloaded' }
   try {
     setUpdateStatus({ state: 'installing', error: null })
