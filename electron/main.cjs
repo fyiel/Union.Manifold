@@ -8502,6 +8502,22 @@ function formatSevenZipVersion(score) {
   return `${Math.floor(score / 100)}.${String(score % 100).padStart(2, '0')}`
 }
 
+function vendoredSevenZipPath() {
+  const key = `${process.platform}-${process.arch}`
+  const name = process.platform === 'win32' ? '7za.exe' : '7zz'
+  const roots = []
+  if (process.resourcesPath) {
+    roots.push(path.join(process.resourcesPath, 'app.asar.unpacked', 'assets', 'bin', '7zip', key))
+    roots.push(path.join(process.resourcesPath, 'assets', 'bin', '7zip', key))
+  }
+  roots.push(path.join(__dirname, '..', 'assets', 'bin', '7zip', key))
+  for (const r of roots) {
+    const p = path.join(r, name)
+    try { if (fs.existsSync(p)) return p } catch { }
+  }
+  return ''
+}
+
 function resolve7zipBinary(archivePath) {
   const wantsRar = archiveIsRar(archivePath)
 
@@ -8516,19 +8532,23 @@ function resolve7zipBinary(archivePath) {
     uc_log(`7zip-bin not available, will try system 7z: ${String(e)}`)
   }
 
-  // Full 7-Zip / p7zip-full binaries that DO support RAR.
   const systemNames = process.platform === 'win32'
     ? ['7z.exe', '7zz.exe', '7z', '7zz']
     : ['7zz', '7z']
   const systemPaths = systemNames.map(whichBinary).filter(Boolean)
 
-  const pool = [...systemPaths, ...(bundled ? [bundled] : [])]
+  const vendored = vendoredSevenZipPath()
+  const rawCandidates = [
+    ...(vendored ? [{ path: vendored, rarCapable: process.platform !== 'win32' }] : []),
+    ...systemPaths.map((p) => ({ path: p, rarCapable: true })),
+    ...(bundled ? [{ path: bundled, rarCapable: false }] : []),
+  ]
   const seenPaths = new Set()
-  const candidates = pool
-    .filter((p) => p && !seenPaths.has(p) && seenPaths.add(p))
-    .map((p) => ({ path: p, isBundled: p === bundled, score: sevenZipVersionScore(p) }))
+  const candidates = rawCandidates
+    .filter((c) => c.path && !seenPaths.has(c.path) && seenPaths.add(c.path))
+    .map((c) => ({ ...c, score: sevenZipVersionScore(c.path) }))
     .sort((a, b) => {
-      if (wantsRar && a.isBundled !== b.isBundled) return a.isBundled ? 1 : -1
+      if (wantsRar && a.rarCapable !== b.rarCapable) return a.rarCapable ? -1 : 1
       return b.score - a.score
     })
     .map((c) => c.path)
