@@ -280,27 +280,34 @@ async function _doBrowse({ updates = {}, firstCalls = [], limit = 24 } = {}) {
 const BROWSE_TTL_MS = 1000 * 60 * 5
 const _browse = new Map() // key -> { at, games }
 const _browseLastGood = new Map() // key -> games, no expiry, served when rate limited
+const _browseInflight = new Map() // key -> Promise<games>
 
 function browseKey({ updates = {}, firstCalls = [], limit = 24 }) {
   return JSON.stringify({ u: updates, c: firstCalls.map((x) => x.method), limit })
 }
 
-// Cached browse with a stale fallback. A recent result is reused for the TTL, and
-// if a fresh crawl comes back empty (almost always a 429) we serve the last good
-// games so AnkerGames still shows up in the merged grid instead of vanishing.
+// Cached browse with a stale fallback and single-flight. Concurrent callers (a
+// Ctrl+R reload restarts the renderer but NOT this main-process crawl) join the
+// in-flight crawl instead of racing a second one into the rate limiter, and an
+// empty crawl (almost always a 429) falls back to the last good games so
+// AnkerGames still shows in the grid instead of vanishing.
 async function livewireBrowse(opts = {}) {
   const key = browseKey(opts)
-  const now = Date.now()
   const hit = _browse.get(key)
-  if (hit && now - hit.at < BROWSE_TTL_MS) return hit.games
-  let games = []
-  try { games = await _doBrowse(opts) } catch { games = [] }
-  if (games.length) {
-    _browse.set(key, { at: now, games })
-    _browseLastGood.set(key, games)
-    return games
-  }
-  return _browseLastGood.get(key) || []
+  if (hit && Date.now() - hit.at < BROWSE_TTL_MS) return hit.games
+  if (_browseInflight.has(key)) return _browseInflight.get(key)
+  const p = (async () => {
+    let games = []
+    try { games = await _doBrowse(opts) } catch { games = [] }
+    if (games.length) {
+      _browse.set(key, { at: Date.now(), games })
+      _browseLastGood.set(key, games)
+      return games
+    }
+    return _browseLastGood.get(key) || []
+  })().finally(() => { _browseInflight.delete(key) })
+  _browseInflight.set(key, p)
+  return p
 }
 
 const APPLY_FILTERS_CALL = { method: 'applyAllFilters', params: [], metadata: {} }
