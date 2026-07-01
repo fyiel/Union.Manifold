@@ -8479,13 +8479,49 @@ function archiveIsRar(archivePath) {
 }
 
 /**
+ * Probe a 7-Zip binary's version and return a comparable score (major*100 +
+ * minor), or 0 if it can't be determined. Cached per path — the banner is
+ * printed on the no-argument help output, which every p7zip / 7-Zip build emits.
+ */
+const _sevenZipVersionScores = new Map()
+function sevenZipVersionScore(binPath) {
+  if (!binPath) return 0
+  if (_sevenZipVersionScores.has(binPath)) return _sevenZipVersionScores.get(binPath)
+  let score = 0
+  try {
+    const res = child_process.spawnSync(binPath, [], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: 5000,
+      windowsHide: true,
+    })
+    const banner = `${res.stdout || ''}${res.stderr || ''}`.toString()
+    const m = banner.match(/7-Zip[^\n]*?(\d+)\.(\d+)/i)
+    if (m) score = Number(m[1]) * 100 + Number(m[2])
+  } catch { /* leave score at 0 */ }
+  _sevenZipVersionScores.set(binPath, score)
+  return score
+}
+
+function formatSevenZipVersion(score) {
+  if (!score) return 'unknown'
+  return `${Math.floor(score / 100)}.${String(score % 100).padStart(2, '0')}`
+}
+
+/**
  * Pick a 7-Zip binary to extract `archivePath`.
  *
  * IMPORTANT: the bundled `7za` (7zip-bin) is the *reduced* p7zip build — it
  * handles 7z/zip/tar but CANNOT read RAR. Several of our sources ship RAR5
  * archives, so for those we must prefer a full 7-Zip (`7zz`) or p7zip-full
- * (`7z`) found on PATH. For non-RAR archives the always-present bundled binary
- * is preferred (no dependency on a system install).
+ * (`7z`) found on PATH.
+ *
+ * The bundled 7za is also frozen at 16.02 (2016), which does NOT understand
+ * newer archive methods (e.g. Zstandard-in-zip, added to 7-Zip in 22.00). Game
+ * repacks increasingly use those, and 16.02 "extracts" the affected entries as
+ * 0-byte stubs with `ERROR: Unsupported Method`, silently producing a broken
+ * install. So we prefer whichever available binary reports the NEWEST version —
+ * a system 7z is almost always newer than the bundled one — and fall back to
+ * the bundled binary only when nothing better exists.
  */
 function resolve7zipBinary(archivePath) {
   const wantsRar = archiveIsRar(archivePath)
@@ -8507,12 +8543,22 @@ function resolve7zipBinary(archivePath) {
     : ['7zz', '7z']
   const systemPaths = systemNames.map(whichBinary).filter(Boolean)
 
-  // Ordering: for RAR, RAR-capable system binaries first (bundled 7za can't read
-  // RAR — keep it only as a last resort so the error is "no RAR extractor" not a
-  // silent miss). For everything else, the bundled binary first.
-  const candidates = wantsRar
-    ? [...systemPaths, ...(bundled ? [bundled] : [])]
-    : [...(bundled ? [bundled] : []), ...systemPaths]
+  // Rank every usable binary newest-first so modern archive methods decode
+  // instead of extracting as empty files. The bundled 7za can't read RAR at all,
+  // so it's excluded from RAR candidates (kept as a last resort so the error is
+  // "no RAR extractor" rather than a silent miss).
+  const pool = [...systemPaths, ...(bundled ? [bundled] : [])]
+  const seenPaths = new Set()
+  const candidates = pool
+    .filter((p) => p && !seenPaths.has(p) && seenPaths.add(p))
+    .map((p) => ({ path: p, isBundled: p === bundled, score: sevenZipVersionScore(p) }))
+    // Newest version wins. For RAR, the bundled 7za is always last regardless of
+    // version because it physically cannot read RAR.
+    .sort((a, b) => {
+      if (wantsRar && a.isBundled !== b.isBundled) return a.isBundled ? 1 : -1
+      return b.score - a.score
+    })
+    .map((c) => c.path)
 
   for (const candidate of candidates) {
     if (!candidate || !fs.existsSync(candidate)) continue
@@ -8530,7 +8576,7 @@ function resolve7zipBinary(archivePath) {
         uc_log(`Failed to ensure 7zip binary is executable (${candidate}): ${String(e)}`, 'warn')
       }
     }
-    uc_log(`7zip binary resolved to: ${candidate}${wantsRar ? ' (RAR archive)' : ''}`)
+    uc_log(`7zip binary resolved to: ${candidate} (v${formatSevenZipVersion(sevenZipVersionScore(candidate))})${wantsRar ? ' (RAR archive)' : ''}`)
     return candidate
   }
 
@@ -8704,10 +8750,18 @@ function run7zExtract(archivePath, destDir, onProgress, options = {}) {
             return
           }
 
-          const errorLines = details
-            .split(/[\r\n]+/)
-            .map((line) => String(line || '').trim())
-            .filter((line) => /^ERROR:/i.test(line))
+          // p7zip redraws its progress meter in place using backspaces (\b),
+          // NOT carriage returns, and doesn't emit a newline before per-file
+          // errors — so a raw line looks like " 99% 98\b\b\b   ERROR: Unsupported
+          // Method : path". Strip the control chars and the leading progress
+          // token before matching, or `^ERROR:` never fires and every code-2
+          // failure is misreported as the bare 7-Zip banner.
+          const cleanReportLine = (raw) => String(raw || '')
+            .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, '') // backspaces & other redraw control chars
+            .replace(/^\s*\d{1,3}%\s+\d+\s*/, '')          // a leading "NN% NN" progress token
+            .trim()
+          const reportLines = details.split(/[\r\n]+/).map(cleanReportLine).filter(Boolean)
+          const errorLines = reportLines.filter((line) => /^ERROR:/i.test(line))
           const unsupportedLines = errorLines.filter((line) => /Unsupported Method/i.test(line))
           const allErrorsUnsupported = errorLines.length > 0 && unsupportedLines.length === errorLines.length
           const skipped = unsupportedLines
@@ -8718,20 +8772,25 @@ function run7zExtract(archivePath, destDir, onProgress, options = {}) {
             .filter(Boolean)
 
           // 7-Zip code 1 is warning-only. Code 2 can still be usable when the
-          // only per-item failures are Unsupported Method (common with ARM64-
-          // only plugin DLLs inside otherwise-working x64 game archives).
+          // only per-item failures are a HANDFUL of Unsupported Method entries
+          // (e.g. ARM64-only plugin DLLs inside an otherwise-working x64 game
+          // archive). But when hundreds of files are skipped, the archive uses a
+          // method this 7-Zip build can't read and every affected file lands as a
+          // 0-byte stub — that's a broken install, not a warning, so fail loudly.
           //
           // Do NOT require `extracted.length > 0` here: retries often re-extract
           // into an existing folder where every file already exists, so the
           // before/after snapshot delta is 0 even though extraction completed.
+          const UNSUPPORTED_SKIP_TOLERANCE = 8
+          const skippedCount = skipped.length || unsupportedLines.length
           const fatalSignature = /Headers Error|Data Error|CRC Failed|Unexpected end of data|Can(?:not|'t) open (?:as )?archive|Is not archive|Cannot open the file as/i.test(details)
           const usableWarningCode = code === 1
           const usableUnsupportedMethod = code === 2 && allErrorsUnsupported && !fatalSignature
+            && skippedCount <= UNSUPPORTED_SKIP_TOLERANCE
           if (usableWarningCode || usableUnsupportedMethod) {
             const warnings = []
             if (usableWarningCode) warnings.push('7-Zip reported non-fatal warnings while extracting this archive.')
             if (usableUnsupportedMethod) {
-              const skippedCount = skipped.length || unsupportedLines.length
               warnings.push(`${skippedCount} file${skippedCount === 1 ? '' : 's'} skipped (incompatible archive method).`)
             }
             if (warnings.length > 0) {
@@ -8741,8 +8800,28 @@ function run7zExtract(archivePath, destDir, onProgress, options = {}) {
             return
           }
 
-          const errorMsg = details
-            ? `7zip exited with code ${code}: ${details}`
+          // A mass Unsupported-Method failure means the installed 7-Zip is too
+          // old for this archive's compression method. Say so, and name the
+          // version actually used so the fix ("get a newer 7-Zip") is obvious.
+          if (code === 2 && allErrorsUnsupported && !fatalSignature) {
+            const usedVersion = formatSevenZipVersion(sevenZipVersionScore(cmd))
+            const errorMsg = `This archive uses a compression method your 7-Zip (${usedVersion}) can't read — ${skippedCount} file${skippedCount === 1 ? '' : 's'} could not be extracted and would be empty. Install a newer 7-Zip / p7zip (24 or later) and retry.`
+            uc_log(errorMsg)
+            finish({ ok: false, error: errorMsg })
+            return
+          }
+
+          // Surface the real 7-Zip error, not the copyright banner. Prefer the
+          // parsed ERROR: lines; fall back to cleaned output with banner/progress
+          // noise dropped so the message is actionable.
+          const surfaced = errorLines.length
+            ? errorLines.slice(0, 5).join('; ')
+            : reportLines
+                .filter((line) => !/^7-Zip|Copyright \(c\)|^p7zip|^Scanning|^Extracting archive|^--$|^Path =|^Type =/i.test(line))
+                .slice(-5)
+                .join('; ')
+          const errorMsg = surfaced
+            ? `7zip exited with code ${code}: ${surfaced}`
             : `7zip exited with code ${code}`
           uc_log(errorMsg)
           finish({ ok: false, error: errorMsg })
