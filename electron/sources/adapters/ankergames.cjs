@@ -21,10 +21,14 @@ const ORIGIN = 'https://ankergames.net'
 const LIST_PAGE_SIZE = 56 // ankergames /games-list renders 56 cards per page
 
 let _slugCache = { at: 0, slugs: [] }
+let _slugInflight = null
 const SLUG_TTL_MS = 1000 * 60 * 60 * 6
-// ankergames.net rate-limits bursts (429), so keep detail hydration gentle even
-// for search. Bulk browse is disabled entirely (see capabilities.bulkBrowse).
-const AK_CONCURRENCY = 3
+// ankergames.net rate-limits aggressively (429 on any burst), so the whole
+// adapter is built to minimize request volume: single-flight the shared fetches
+// so concurrent browses share one round trip, cache browse results, search off
+// the cached slug list with no per-game hits, and keep fallback hydration gentle.
+const AK_CONCURRENCY = 2
+const AK_RETRIES = 4 // extra attempts, paired with the http layer's 429 backoff
 
 function titleFromSlug(slug) {
   return slug.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()).trim()
@@ -48,32 +52,37 @@ function extractGameSlugs(markup) {
 async function allSlugs() {
   const now = Date.now()
   if (_slugCache.slugs.length && now - _slugCache.at < SLUG_TTL_MS) return _slugCache.slugs
-
-  let indexXml = ''
-  try {
-    ;({ text: indexXml } = await requestText(`${ORIGIN}/sitemap.xml`))
-  } catch {
-    indexXml = ''
-  }
-  const shards = []
-  const locRe = /<loc>\s*([^<]+sitemap_post_\d+\.xml)\s*<\/loc>/g
-  let m
-  while ((m = locRe.exec(indexXml))) shards.push(m[1].trim())
-  if (!shards.length) shards.push(`${ORIGIN}/sitemap_post_1.xml`) // best-effort fallback
-
-  const seen = new Set()
-  for (const shard of shards) {
-    let xml
+  // single-flight: concurrent callers share one sitemap crawl instead of each
+  // firing their own (which is what gets us rate limited)
+  if (_slugInflight) return _slugInflight
+  _slugInflight = (async () => {
+    let indexXml = ''
     try {
-      ;({ text: xml } = await requestText(shard))
+      ;({ text: indexXml } = await requestText(`${ORIGIN}/sitemap.xml`, { retries: AK_RETRIES }))
     } catch {
-      continue
+      indexXml = ''
     }
-    for (const slug of extractGameSlugs(xml)) seen.add(slug)
-  }
+    const shards = []
+    const locRe = /<loc>\s*([^<]+sitemap_post_\d+\.xml)\s*<\/loc>/g
+    let m
+    while ((m = locRe.exec(indexXml))) shards.push(m[1].trim())
+    if (!shards.length) shards.push(`${ORIGIN}/sitemap_post_1.xml`) // best-effort fallback
 
-  _slugCache = { at: now, slugs: Array.from(seen) }
-  return _slugCache.slugs
+    const seen = new Set()
+    for (const shard of shards) {
+      let xml
+      try {
+        ;({ text: xml } = await requestText(shard, { retries: AK_RETRIES }))
+      } catch {
+        continue
+      }
+      for (const slug of extractGameSlugs(xml)) seen.add(slug)
+    }
+    // keep the previous list if a crawl came back empty (rate limited), don't blank it
+    if (seen.size) _slugCache = { at: Date.now(), slugs: Array.from(seen) }
+    return _slugCache.slugs
+  })().finally(() => { _slugInflight = null })
+  return _slugInflight
 }
 
 function cleanTitle(raw) {
@@ -136,6 +145,7 @@ function parseGamePage(html, slug) {
 
 const LW_TTL_MS = 1000 * 60 * 10
 let _lw = { at: 0, csrf: '', updateUrl: '', snapshot: '', jar: null }
+let _lwInflight = null
 
 function unescapeHtmlAttr(s) {
   return String(s || '')
@@ -148,22 +158,28 @@ function unescapeHtmlAttr(s) {
 async function livewireSession() {
   const now = Date.now()
   if (_lw.snapshot && now - _lw.at < LW_TTL_MS) return _lw
-  const jar = new CookieJar()
-  const { res, text: html } = await requestText(`${ORIGIN}/games-list`, { jar })
-  if (!res.ok) throw new Error(`ankergames games-list ${res.status}`)
-  const csrf = firstMatch(html, /<meta name="csrf-token" content="([^"]+)"/)
-  let uri = firstMatch(html, /"uri"\s*:\s*"([^"]+\/update)"/) || ''
-  uri = uri.replace(/\\\//g, '/')
-  const updateUrl = uri ? (uri.startsWith('http') ? uri : ORIGIN + uri) : ''
-  // The page mounts several Livewire components, pick the games-list one.
-  let snapshot = ''
-  for (const m of html.matchAll(/wire:snapshot="([^"]+)"/g)) {
-    const s = unescapeHtmlAttr(m[1])
-    try { if (JSON.parse(s)?.memo?.name === 'games-list') { snapshot = s; break } } catch { /* skip */ }
-  }
-  if (!csrf || !updateUrl || !snapshot) throw new Error('ankergames livewire session incomplete')
-  _lw = { at: now, csrf, updateUrl, snapshot, jar }
-  return _lw
+  // single-flight: a fresh session is one GET; concurrent browses must not each
+  // open their own or we instantly trip the rate limit
+  if (_lwInflight) return _lwInflight
+  _lwInflight = (async () => {
+    const jar = new CookieJar()
+    const { res, text: html } = await requestText(`${ORIGIN}/games-list`, { jar, retries: AK_RETRIES })
+    if (!res.ok) throw new Error(`ankergames games-list ${res.status}`)
+    const csrf = firstMatch(html, /<meta name="csrf-token" content="([^"]+)"/)
+    let uri = firstMatch(html, /"uri"\s*:\s*"([^"]+\/update)"/) || ''
+    uri = uri.replace(/\\\//g, '/')
+    const updateUrl = uri ? (uri.startsWith('http') ? uri : ORIGIN + uri) : ''
+    // The page mounts several Livewire components, pick the games-list one.
+    let snapshot = ''
+    for (const m of html.matchAll(/wire:snapshot="([^"]+)"/g)) {
+      const s = unescapeHtmlAttr(m[1])
+      try { if (JSON.parse(s)?.memo?.name === 'games-list') { snapshot = s; break } } catch { /* skip */ }
+    }
+    if (!csrf || !updateUrl || !snapshot) throw new Error('ankergames livewire session incomplete')
+    _lw = { at: Date.now(), csrf, updateUrl, snapshot, jar }
+    return _lw
+  })().finally(() => { _lwInflight = null })
+  return _lwInflight
 }
 
 // One Livewire commit (optionally with extra calls like gotoPage). Returns the
@@ -180,6 +196,7 @@ async function livewireCommit(session, updates, snapshot, extraCalls = []) {
   const { res, text } = await requestText(session.updateUrl, {
     jar: session.jar,
     method: 'POST',
+    retries: AK_RETRIES,
     headers: {
       'Content-Type': 'application/json', 'X-Livewire': '1', 'Accept': '*/*',
       Referer: `${ORIGIN}/games-list`, Origin: ORIGIN,
@@ -236,7 +253,7 @@ function parseListingCards(html) {
 // until `limit` records are gathered (or pages run dry). The registry fetches
 // each adapter from the start and paginates the merged result itself, so this
 // is intentionally offset-agnostic.
-async function livewireBrowse({ updates = {}, firstCalls = [], limit = 24 } = {}) {
+async function _doBrowse({ updates = {}, firstCalls = [], limit = 24 } = {}) {
   const session = await livewireSession()
   const out = []
   let snap = session.snapshot
@@ -260,6 +277,32 @@ async function livewireBrowse({ updates = {}, firstCalls = [], limit = 24 } = {}
   return out
 }
 
+const BROWSE_TTL_MS = 1000 * 60 * 5
+const _browse = new Map() // key -> { at, games }
+const _browseLastGood = new Map() // key -> games, no expiry, served when rate limited
+
+function browseKey({ updates = {}, firstCalls = [], limit = 24 }) {
+  return JSON.stringify({ u: updates, c: firstCalls.map((x) => x.method), limit })
+}
+
+// Cached browse with a stale fallback. A recent result is reused for the TTL, and
+// if a fresh crawl comes back empty (almost always a 429) we serve the last good
+// games so AnkerGames still shows up in the merged grid instead of vanishing.
+async function livewireBrowse(opts = {}) {
+  const key = browseKey(opts)
+  const now = Date.now()
+  const hit = _browse.get(key)
+  if (hit && now - hit.at < BROWSE_TTL_MS) return hit.games
+  let games = []
+  try { games = await _doBrowse(opts) } catch { games = [] }
+  if (games.length) {
+    _browse.set(key, { at: now, games })
+    _browseLastGood.set(key, games)
+    return games
+  }
+  return _browseLastGood.get(key) || []
+}
+
 const APPLY_FILTERS_CALL = { method: 'applyAllFilters', params: [], metadata: {} }
 
 // ── Genre taxonomy (the /games-list filter) ──
@@ -269,22 +312,27 @@ const APPLY_FILTERS_CALL = { method: 'applyAllFilters', params: [], metadata: {}
 // and query() can translate a tag name → genre id for the selectedGenres filter.
 const GENRE_TTL_MS = 1000 * 60 * 60 * 6
 let _genres = { at: 0, idToName: new Map(), nameToId: new Map() }
+let _genresInflight = null
 
 async function livewireGenres() {
   const now = Date.now()
   if (_genres.idToName.size && now - _genres.at < GENRE_TTL_MS) return _genres
-  const session = await livewireSession()
-  const { html } = await livewireCommit(session, { filterOpen: true }, session.snapshot)
-  const idToName = new Map(), nameToId = new Map()
-  const re = /id="genre(\d+)"[\s\S]{0,300}?value="(\d+)"[\s\S]{0,900}?<span class="truncate">([^<]+)<\/span>/g
-  let m
-  while ((m = re.exec(html))) {
-    const id = m[2]
-    const name = decodeEntities(m[3].trim())
-    if (id && name && !idToName.has(id)) { idToName.set(id, name); nameToId.set(name.toLowerCase(), id) }
-  }
-  if (idToName.size) _genres = { at: now, idToName, nameToId }
-  return _genres
+  if (_genresInflight) return _genresInflight
+  _genresInflight = (async () => {
+    const session = await livewireSession()
+    const { html } = await livewireCommit(session, { filterOpen: true }, session.snapshot)
+    const idToName = new Map(), nameToId = new Map()
+    const re = /id="genre(\d+)"[\s\S]{0,300}?value="(\d+)"[\s\S]{0,900}?<span class="truncate">([^<]+)<\/span>/g
+    let m
+    while ((m = re.exec(html))) {
+      const id = m[2]
+      const name = decodeEntities(m[3].trim())
+      if (id && name && !idToName.has(id)) { idToName.set(id, name); nameToId.set(name.toLowerCase(), id) }
+    }
+    if (idToName.size) _genres = { at: Date.now(), idToName, nameToId }
+    return _genres
+  })().finally(() => { _genresInflight = null })
+  return _genresInflight
 }
 
 // Every genre AnkerGames' filter offers (127), for the cross-source tag list.
@@ -303,9 +351,14 @@ function listingUpdatesForSort(sort) {
 // ── Adapter interface ──
 
 async function getDetail(slug) {
-  const { res, text } = await requestText(`${ORIGIN}/game/${slug}`)
+  const { res, text } = await requestText(`${ORIGIN}/game/${slug}`, { retries: AK_RETRIES })
   if (!res.ok) throw new Error(`ankergames detail ${res.status} for ${slug}`)
   return parseGamePage(text, slug)
+}
+
+// titleFromSlug, minus the "-free-download[-version]" suffix anker appends
+function cleanSlugTitle(slug) {
+  return titleFromSlug(slug.replace(/-free-download.*$/i, ''))
 }
 
 async function search(query, { limit = 24 } = {}) {
@@ -317,7 +370,18 @@ async function search(query, { limit = 24 } = {}) {
     const hay = s.replace(/-/g, ' ')
     return terms.every((t) => hay.includes(t))
   }).slice(0, limit)
-  return (await mapLimit(matches, AK_CONCURRENCY, (slug) => getDetail(slug))).filter(Boolean)
+  // Build stubs straight from the slug, NO per-game page fetch. Hitting N detail
+  // pages per search is what made anker "barely work" (instant 429). Full
+  // metadata + download ids hydrate via getDetail() when a card opens, and
+  // cross-source dedup borrows a cover from another source meanwhile.
+  return matches.map((slug) => makeGame({
+    sourceId: ID,
+    sourceSlug: slug,
+    sourceUrl: `${ORIGIN}/game/${slug}`,
+    steamAppId: null,
+    title: cleanSlugTitle(slug),
+    downloadOptions: [],
+  }))
 }
 
 async function listCatalog({ offset = 0, limit = 24 } = {}) {
@@ -333,7 +397,7 @@ async function listCatalog({ offset = 0, limit = 24 } = {}) {
 }
 
 // Native unified query. Text searches still go through the slug list (the
-// Livewire `search` field is unreliable), text-less browse drives the Livewire
+// Livewire `search` field is unreliable), text-less browse drives the Livewire 
 // listing with its real sort/year filters. The registry applies the
 // authoritative filter+sort over the merged pool, so we only need to (a) hand it
 // candidates and (b) populate the sort signals, which parseListingCards does.
