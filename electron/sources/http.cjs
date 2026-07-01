@@ -140,15 +140,17 @@ async function request(url, opts = {}) {
       if (jar) jar.store(url, getSetCookies(response))
 
       // Retry transient upstream failures (CDN hiccups, edge cache misses) and
-      // rate limits. For 429, honour Retry-After when the server sends it
-      // (capped) so we back off the way the host asks instead of hammering.
+      // rate limits. Exponential backoff with jitter so parallel requests to a
+      // rate-limiting host (ankergames) don't retry in lockstep. For 429 we
+      // honour Retry-After when the server sends it, capped higher than the
+      // default backoff since the host is telling us exactly how long to wait.
       if ((response.status === 429 || response.status >= 500) && attempt < retries) {
-        let waitMs = 400 * (attempt + 1)
+        let waitMs = Math.min(500 * 2 ** attempt, 8000)
         if (response.status === 429) {
           const ra = Number(response.headers.get('retry-after'))
-          if (Number.isFinite(ra) && ra > 0) waitMs = Math.min(ra * 1000, 5000)
+          if (Number.isFinite(ra) && ra > 0) waitMs = Math.min(ra * 1000, 15000)
         }
-        await sleep(waitMs)
+        await sleep(waitMs + Math.floor(Math.random() * 300))
         continue
       }
       return response
@@ -156,7 +158,7 @@ async function request(url, opts = {}) {
       clearTimeout(timer)
       lastErr = err
       if (attempt < retries) {
-        await sleep(400 * (attempt + 1))
+        await sleep(Math.min(500 * 2 ** attempt, 8000) + Math.floor(Math.random() * 300))
         continue
       }
     }
