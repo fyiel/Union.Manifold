@@ -33,12 +33,20 @@ jobs:
           fi
           echo "version $old to $new (event ${{ github.event_name }})"
 
-  release:
+  build:
     needs: check
     if: needs.check.outputs.release == 'true'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux
+            args: --linux
+          - os: windows-latest
+            platform: win
+            args: --win
+    runs-on: ${{ matrix.os }}
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       USE_HARD_LINKS: false
@@ -58,16 +66,45 @@ jobs:
           version: 10
       - name: install
         run: pnpm install
-      - name: build linux app
-        run: pnpm -s build && pnpm exec electron-builder --linux --publish never
+      # Controller (gcpad) binaries are fetched per-platform; best-effort so a
+      # missing upstream release never fails the build (electron-builder only
+      # warns on absent extraResources).
+      - name: fetch gcpad
+        run: pnpm -s fetch-gcpad
+        continue-on-error: true
+      - name: build ${{ matrix.platform }} app
+        run: pnpm -s build && pnpm exec electron-builder ${{ matrix.args }} --publish never
+      - name: upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.platform }}
+          if-no-files-found: ignore
+          path: |
+            dist-packaged/*.AppImage
+            dist-packaged/*.tar.gz
+            dist-packaged/*.exe
+            dist-packaged/*.zip
+
+  release:
+    needs: [check, build]
+    # always() so a failing platform (e.g. a flaky Windows job) still publishes
+    # whatever other platforms produced instead of blocking the whole release.
+    if: always() && needs.check.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist-artifacts
+          merge-multiple: true
       - name: publish release
         uses: ncipollo/release-action@v1
         with:
           tag: v${{ needs.check.outputs.version }}
           name: v${{ needs.check.outputs.version }}
-          commit: ${{ github.sha }}
           allowUpdates: true
-          artifacts: "dist-packaged/*.AppImage,dist-packaged/*.tar.gz"
+          artifacts: "dist-artifacts/*"
           draft: false
           prerelease: false
         env:
