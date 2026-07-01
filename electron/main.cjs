@@ -961,9 +961,15 @@ function createOverlayWindow() {
   return overlayWindow
 }
 
+// True when the user turned off all in-game overlaying; a simple in-app
+// "game is opening" toast replaces it (see game-launch-context.tsx).
+function gameOverlayDisabled() {
+  try { return readSettings().disableGameOverlay === true } catch { return false }
+}
+
 // Show the overlay window (full panel mode)
 function showOverlay(appid = null) {
-  if (!overlayEnabled) return
+  if (!overlayEnabled || gameOverlayDisabled()) return
   // If no appid given, use current overlay appid or fall back to first running game
   if (!appid) {
     appid = currentOverlayAppid || (runningGames.size > 0 ? [...runningGames.values()].find(g => g.appid)?.appid || null : null)
@@ -994,7 +1000,7 @@ function showOverlay(appid = null) {
 
 // Show a transient toast notification when a game launches (auto-dismisses)
 function showOverlayToast(appid = null) {
-  if (!overlayEnabled) {
+  if (!overlayEnabled || gameOverlayDisabled()) {
     ucLog(`Overlay toast skipped (disabled) for game: ${appid || 'unknown'}`)
     return
   }
@@ -1598,7 +1604,7 @@ function getDllPath() {
  * that paints the overlay UI into the shared memory region.
  */
 function injectOverlayIntoGame(pid, appid) {
-  if (!nativeOverlay || !overlayEnabled) return
+  if (!nativeOverlay || !overlayEnabled || gameOverlayDisabled()) return
   if (overlayInjections.has(pid)) return
   if (appid && overlayInjectionDenylistAppids.has(appid)) {
     ucLog(`Overlay injection skipped for ${appid} (session safety denylist)`, 'warn')

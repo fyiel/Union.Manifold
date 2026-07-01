@@ -47,12 +47,13 @@ export function SettingsPage() {
   const [preventSleep, setPreventSleep] = useState(true)
   const [autoShareLogs, setAutoShareLogs] = useState(false)
   const [pauseWhilePlaying, setPauseWhilePlaying] = useState(false)
+  const [disableOverlay, setDisableOverlay] = useState(false)
 
   useEffect(() => {
     let alive = true
     void (async () => {
       try {
-        const [cb, kbps, del, path, sc, sleep, share, pause] = await Promise.all([
+        const [cb, kbps, del, path, sc, sleep, share, pause, ovl] = await Promise.all([
           window.ucSettings?.get?.("closeBehavior"),
           window.ucSettings?.get?.("downloadBandwidthLimitKBps"),
           window.ucSettings?.get?.("autoDeleteArchives"),
@@ -61,6 +62,7 @@ export function SettingsPage() {
           window.ucSettings?.get?.("preventSleepDuringOperations"),
           window.ucSettings?.get?.("autoShareErrorLogs"),
           window.ucSettings?.get?.("pauseDownloadsWhilePlaying"),
+          window.ucSettings?.get?.("disableGameOverlay"),
         ])
         if (!alive) return
         if (cb === "hide" || cb === "quit") setCloseBehavior(cb)
@@ -73,6 +75,7 @@ export function SettingsPage() {
         setPreventSleep(sleep !== false)
         setAutoShareLogs(share === true)
         setPauseWhilePlaying(pause === true)
+        setDisableOverlay(ovl === true)
       } catch { /* ignore */ }
     })()
     // reflect changes made elsewhere (e.g. the archive prompt flips autoDeleteArchives)
@@ -83,6 +86,7 @@ export function SettingsPage() {
       if (d.key === "preventSleepDuringOperations") setPreventSleep(d.value !== false)
       if (d.key === "autoShareErrorLogs") setAutoShareLogs(d.value === true)
       if (d.key === "pauseDownloadsWhilePlaying") setPauseWhilePlaying(d.value === true)
+      if (d.key === "disableGameOverlay") setDisableOverlay(d.value === true)
     })
     return () => { alive = false; off?.() }
   }, [])
@@ -188,6 +192,7 @@ export function SettingsPage() {
                   )}
                 </div>
                 <ToggleRow title="Pause downloads while playing" desc="Pause active downloads when a game launches, resume on exit" on={pauseWhilePlaying} onToggle={() => setBool("pauseDownloadsWhilePlaying", !pauseWhilePlaying, setPauseWhilePlaying)} />
+                <ToggleRow title="Disable in-game overlay" desc="Turn off the game overlay and its launch popup; show a simple in-app toast when a game opens instead" on={disableOverlay} onToggle={() => setBool("disableGameOverlay", !disableOverlay, setDisableOverlay)} />
                 <ToggleRow title="Always create desktop shortcut" desc="Add a desktop shortcut for each game after it installs" on={shortcut} onToggle={() => setBool("alwaysCreateDesktopShortcut", !shortcut, setShortcut)} />
                 <ToggleRow title="Delete archive after extract" desc="Reclaim disk space once unpacking succeeds" on={autoDelete} onToggle={toggleAutoDelete} last />
               </div>

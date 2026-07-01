@@ -187,6 +187,15 @@ export function GameLaunchProvider({ children }: { children: React.ReactNode }) 
       setFailedOpen(false)
       setPendingPath(null)
       armQuickExit(g)
+      // With the in-game overlay turned off, replace its launch popup with a
+      // simple in-app toast (routed through the toast-context window bridge).
+      try {
+        if ((await window.ucSettings?.get?.("disableGameOverlay")) === true) {
+          window.dispatchEvent(new CustomEvent("uc_toast", {
+            detail: { message: `${g.name} is opening…`, type: "info", duration: 3000 },
+          }))
+        }
+      } catch { /* ignore */ }
     } else {
       // Launch failed outright (wrong/missing exe, spawn error) — surface the
       // failure modal so the user can pick a different executable.
