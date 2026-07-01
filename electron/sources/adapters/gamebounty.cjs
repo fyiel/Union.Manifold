@@ -25,6 +25,7 @@ const ORIGIN = 'https://gamebounty.world'
 const SLUG_SUFFIX = '-free-pc-download'
 
 let _slugCache = { at: 0, slugs: [] }
+let _slugInflight = null
 const SLUG_TTL_MS = 1000 * 60 * 60 * 6
 
 function titleFromSlug(slug) {
@@ -35,27 +36,31 @@ function titleFromSlug(slug) {
     .trim()
 }
 
-/** All game slugs from the sitemap (cached). */
+/** All game slugs from the sitemap (cached, single-flight). */
 async function allSlugs() {
   const now = Date.now()
   if (_slugCache.slugs.length && now - _slugCache.at < SLUG_TTL_MS) return _slugCache.slugs
-  const { text } = await requestText(`${ORIGIN}/sitemap.xml`)
-  const slugs = []
-  const re = /<loc>\s*([^<]+?)\s*<\/loc>/g
-  let m
-  while ((m = re.exec(text))) {
-    try {
-      const u = new URL(m[1])
-      if (u.hostname.endsWith('gamebounty.world')) {
-        const path = u.pathname.replace(/^\/+|\/+$/g, '')
-        if (path.endsWith(SLUG_SUFFIX)) slugs.push(path)
+  if (_slugInflight) return _slugInflight
+  _slugInflight = (async () => {
+    const { text } = await requestText(`${ORIGIN}/sitemap.xml`)
+    const slugs = []
+    const re = /<loc>\s*([^<]+?)\s*<\/loc>/g
+    let m
+    while ((m = re.exec(text))) {
+      try {
+        const u = new URL(m[1])
+        if (u.hostname.endsWith('gamebounty.world')) {
+          const path = u.pathname.replace(/^\/+|\/+$/g, '')
+          if (path.endsWith(SLUG_SUFFIX)) slugs.push(path)
+        }
+      } catch {
+        /* ignore */
       }
-    } catch {
-      /* ignore */
     }
-  }
-  _slugCache = { at: now, slugs }
-  return slugs
+    if (slugs.length) _slugCache = { at: Date.now(), slugs }
+    return _slugCache.slugs
+  })().finally(() => { _slugInflight = null })
+  return _slugInflight
 }
 
 function steamImage(appid, kind) {
@@ -133,17 +138,32 @@ function stripHtml(s) {
 
 // ── Adapter interface ──
 
+const DETAIL_TTL_MS = 1000 * 60 * 10
+const _detailCache = new Map() // path -> { at, game }
+const _detailInflight = new Map() // path -> Promise<game>
+
+// Memoized + single-flight so pagination, re-sorts and findOtherSources reuse a
+// page instead of re-fetching it, and concurrent callers share one round trip.
 async function getDetail(slug) {
   const path = slug.endsWith(SLUG_SUFFIX) ? slug : `${slug}${SLUG_SUFFIX}`
-  const { res, text } = await requestText(`${ORIGIN}/${path}`)
-  if (!res.ok) throw new Error(`gamebounty detail ${res.status} for ${path}`)
-  return parseGamePage(text, path)
+  const hit = _detailCache.get(path)
+  if (hit && Date.now() - hit.at < DETAIL_TTL_MS) return hit.game
+  if (_detailInflight.has(path)) return _detailInflight.get(path)
+  const p = (async () => {
+    const { res, text } = await requestText(`${ORIGIN}/${path}`)
+    if (!res.ok) throw new Error(`gamebounty detail ${res.status} for ${path}`)
+    const game = parseGamePage(text, path)
+    _detailCache.set(path, { at: Date.now(), game })
+    return game
+  })().finally(() => { _detailInflight.delete(path) })
+  _detailInflight.set(path, p)
+  return p
 }
 
-/**
- * Lightweight search: filter sitemap slugs by the query, then hydrate the top
- * matches with a detail fetch (so the card has art + appid + mirrors).
- */
+// Search builds stubs straight from the slug — NO per-game page fetch. Hitting a
+// detail page per match is what made GameBounty crawl on every search and on
+// every card open (findOtherSources searches all sources). Full metadata +
+// mirrors hydrate via getDetail() when a card opens.
 async function search(query, { limit = 24 } = {}) {
   const q = String(query || '').toLowerCase().trim()
   if (!q) return []
@@ -154,15 +174,45 @@ async function search(query, { limit = 24 } = {}) {
     const hay = slug.replace(SLUG_SUFFIX, '').replace(/-/g, ' ')
     if (terms.every((t) => hay.includes(t))) scored.push(slug)
   }
-  const top = scored.slice(0, limit)
-  return (await mapLimit(top, 8, (slug) => getDetail(slug))).filter(Boolean)
+  return scored.slice(0, limit).map((slug) => makeGame({
+    sourceId: ID,
+    sourceSlug: slug,
+    sourceUrl: `${ORIGIN}/${slug}`,
+    steamAppId: null,
+    title: titleFromSlug(slug),
+    downloadOptions: [],
+  }))
 }
 
-/** Catalog page: slug list → hydrate a window of detail pages (concurrently). */
+const CATALOG_TTL_MS = 1000 * 60 * 5
+const _catalog = new Map() // key -> { at, games }
+const _catalogInflight = new Map() // key -> Promise<games>
+const _catalogLastGood = new Map() // key -> games, served when a crawl comes back empty
+
+/** Catalog page: slug window hydrated into rich cards, cached + single-flight
+ *  with a stale fallback so re-browses and reloads don't re-crawl (getDetail's
+ *  memo means only slugs new to a wider window actually fetch). */
 async function listCatalog({ offset = 0, limit = 24 } = {}) {
-  const slugs = await allSlugs()
-  const window = slugs.slice(offset, offset + limit)
-  return (await mapLimit(window, 8, (slug) => getDetail(slug))).filter(Boolean)
+  const key = `${offset}:${limit}`
+  const hit = _catalog.get(key)
+  if (hit && Date.now() - hit.at < CATALOG_TTL_MS) return hit.games
+  if (_catalogInflight.has(key)) return _catalogInflight.get(key)
+  const p = (async () => {
+    let games = []
+    try {
+      const slugs = await allSlugs()
+      const window = slugs.slice(offset, offset + limit)
+      games = (await mapLimit(window, 12, (slug) => getDetail(slug))).filter(Boolean)
+    } catch { games = [] }
+    if (games.length) {
+      _catalog.set(key, { at: Date.now(), games })
+      _catalogLastGood.set(key, games)
+      return games
+    }
+    return _catalogLastGood.get(key) || []
+  })().finally(() => { _catalogInflight.delete(key) })
+  _catalogInflight.set(key, p)
+  return p
 }
 
 /** GameBounty download options carry real URLs — resolution is host-based. */
