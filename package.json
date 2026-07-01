@@ -25,10 +25,12 @@
     "fetch-gcpad": "node ./scripts/fetch-gcpad.cjs",
     "fetch-aria2": "node ./scripts/fetch-aria2.cjs",
     "fetch-aria2:all": "node ./scripts/fetch-aria2.cjs --all",
-    "pack": "pnpm -s fetch-gcpad && pnpm -s fetch-aria2:all && pnpm -s build && electron-builder",
+    "fetch-7zip": "node ./scripts/fetch-7zip.cjs",
+    "fetch-7zip:all": "node ./scripts/fetch-7zip.cjs --all",
+    "pack": "pnpm -s fetch-gcpad && pnpm -s fetch-aria2:all && pnpm -s fetch-7zip:all && pnpm -s build && electron-builder",
     "release:version": "node ./scripts/release-version.cjs",
     "rebuild-native": "node scripts/rebuild-native.cjs",
-    "postinstall": "pnpm rebuild-native || echo 'Native overlay addon build skipped (install C++ build tools to enable)' && node ./scripts/fetch-aria2.cjs"
+    "postinstall": "pnpm rebuild-native || echo 'Native overlay addon build skipped (install C++ build tools to enable)' && node ./scripts/fetch-aria2.cjs && node ./scripts/fetch-7zip.cjs"
   },
   "dependencies": {
     "7zip-bin": "^5.0.0",
@@ -108,7 +110,8 @@
     "asarUnpack": [
       "node_modules/7zip-bin",
       "electron/native/build/**/*",
-      "assets/bin/aria2/**"
+      "assets/bin/aria2/**",
+      "assets/bin/7zip/**"
     ],
     "protocols": [
       {
@@ -121,7 +124,9 @@
     "win": {
       "icon": "assets/icon.ico",
       "files": [
-        "!assets/bin/aria2/linux-*/**"
+        "!assets/bin/aria2/linux-*/**",
+        "!assets/bin/7zip/linux-*/**",
+        "!assets/bin/7zip/darwin-*/**"
       ],
       "target": [
         "nsis",
@@ -153,7 +158,9 @@
     },
     "linux": {
       "files": [
-        "!assets/bin/aria2/win32-*/**"
+        "!assets/bin/aria2/win32-*/**",
+        "!assets/bin/7zip/win32-*/**",
+        "!assets/bin/7zip/darwin-*/**"
       ],
       "target": [
         "AppImage",
