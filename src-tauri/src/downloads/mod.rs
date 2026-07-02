@@ -130,7 +130,7 @@ impl DownloadEngine {
             state: Mutex::new(EngineState::default()),
         });
         let poll = engine.clone();
-        tokio::spawn(async move {
+        tauri::async_runtime::spawn(async move {
             loop {
                 tokio::time::sleep(std::time::Duration::from_millis(700)).await;
                 poll.poll().await;
@@ -297,7 +297,7 @@ impl DownloadEngine {
         if was_downloading {
             if let Some(gid) = gid {
                 let aria2 = self.aria2.clone();
-                tokio::spawn(async move { aria2.pause(&gid).await });
+                tauri::async_runtime::spawn(async move { aria2.pause(&gid).await });
             }
         }
         true
@@ -325,7 +325,7 @@ impl DownloadEngine {
                 self.emit(&snap);
                 drop(st);
                 let aria2 = self.aria2.clone();
-                tokio::spawn(async move { aria2.unpause(&gid).await });
+                tauri::async_runtime::spawn(async move { aria2.unpause(&gid).await });
                 return true;
             }
         }
@@ -365,7 +365,7 @@ impl DownloadEngine {
         drop(st);
         if let Some(gid) = gid {
             let aria2 = self.aria2.clone();
-            tokio::spawn(async move {
+            tauri::async_runtime::spawn(async move {
                 aria2.force_remove(&gid).await;
                 aria2.remove_download_result(&gid).await;
             });
@@ -413,7 +413,7 @@ impl DownloadEngine {
         };
         if let Some(id) = next {
             let engine = self.clone();
-            tokio::spawn(async move { engine.kick_off(id).await });
+            tauri::async_runtime::spawn(async move { engine.kick_off(id).await });
         }
     }
 
