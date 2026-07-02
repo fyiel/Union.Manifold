@@ -425,6 +425,7 @@ pub async fn resolve_download(option: &DownloadOption) -> ResolveResult {
             .and_then(|v| v.as_i64().or_else(|| v.as_f64().map(|f| f as i64)))
             .unwrap_or(0)
     });
+    let expected = ordered.len();
 
     let files = http::map_limit(ordered, 4, |entry| async move {
         let url = match &entry {
@@ -456,7 +457,8 @@ pub async fn resolve_download(option: &DownloadOption) -> ResolveResult {
     })
     .await;
 
-    if files.is_empty() {
+    if files.len() != expected {
+        crate::logging::write_line("warn", &format!("ucfiles resolved {}/{} parts", files.len(), expected));
         return ResolveResult {
             resolvable: false,
             open_url: Some(page_url),

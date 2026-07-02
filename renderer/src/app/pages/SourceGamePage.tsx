@@ -139,7 +139,7 @@ export function SourceGamePage() {
         rememberGameAs(dedupKey, full) // cache under the manifest appid → instant re-open
       }
       setLoading(false)
-    })
+    }).catch(() => { if (alive) setLoading(false) })
     return () => { alive = false }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dedupKey])

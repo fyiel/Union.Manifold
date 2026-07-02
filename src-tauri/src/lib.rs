@@ -103,9 +103,6 @@ pub fn run() {
             settings::setting_set,
             settings::setting_clear_all,
             logging::log,
-            logging::logs_get,
-            logging::logs_clear,
-            logging::logs_open_folder,
             window_cmds::window_minimize,
             window_cmds::window_maximize,
             window_cmds::window_close,
@@ -136,13 +133,11 @@ pub fn run() {
             downloads::catalog_state_save,
             downloads::download_path_get,
             downloads::download_path_set,
-            downloads::disk_list,
             install::install_from_archive,
             install::install_downloaded_archive,
             install::delete_archive_files,
             library::installed_list,
             library::installed_get,
-            library::installed_list_by_appid,
             library::installing_list,
             library::installing_get,
             library::installed_save,
@@ -151,21 +146,14 @@ pub fn run() {
             library::installed_delete,
             library::installing_delete,
             library::installing_dismiss,
-            library::installed_backup_create,
-            library::add_external_game,
             launch::game_exe_list,
             launch::game_subfolder_find,
             launch::game_exe_preflight,
             launch::game_exe_launch,
-            launch::game_exe_running,
             launch::game_exe_running_list,
             launch::game_exe_quit,
             launch::linux::game_linux_config_get,
             launch::linux::game_linux_config_set,
-            launch::linux::linux_check_tool,
-            launch::linux::linux_get_steam_path,
-            launch::linux::linux_detect_umu,
-            launch::linux::linux_detect_wine,
             launch::linux::linux_detect_proton,
             storage::storage_precheck,
             storage::storage_summary,
@@ -173,14 +161,10 @@ pub fn run() {
             assets::assets_size,
             assets::assets_clear,
             updater::check_for_updates,
-            updater::get_update_status,
-            updater::update_retry,
             updater::install_update,
             updater::get_version,
-            updater::get_changelog,
             shortcuts::create_desktop_shortcut,
             shortcuts::delete_desktop_shortcut,
-            dialogs::pick_external_game_folder,
             dialogs::download_path_pick,
             dialogs::pick_image,
             dialogs::browse_for_game_exe,
@@ -193,11 +177,36 @@ pub fn run() {
             misc::theme_preview_end,
             misc::presence_heartbeat,
             misc::system_notifications,
-            misc::network_test,
-            misc::settings_export,
-            misc::settings_import,
             net::auth_fetch,
         ])
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() != "main" {
+                    return;
+                }
+                let state = window.app_handle().state::<AppState>();
+                if state.settings.get_string("closeBehavior").as_deref() != Some("quit") {
+                    api.prevent_close();
+                    window.hide().ok();
+                    return;
+                }
+                let (downloading, extracting) = state.downloads.busy_appids();
+                if downloading > 0 || !extracting.is_empty() {
+                    api.prevent_close();
+                    window
+                        .emit(
+                            "uc:app-close-requested",
+                            serde_json::json!({
+                                "mode": "quit",
+                                "extractionCount": extracting.len(),
+                                "downloadCount": downloading,
+                                "appids": extracting,
+                            }),
+                        )
+                        .ok();
+                }
+            }
+        })
         .build(tauri::generate_context!())
         .expect("error building union.manifold")
         .run(|app, event| {

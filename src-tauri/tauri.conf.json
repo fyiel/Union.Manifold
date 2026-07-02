@@ -58,7 +58,7 @@
   "plugins": {
     "deep-link": {
       "desktop": {
-        "schemes": ["unioncrax", "unionmanifold"]
+        "schemes": ["unionmanifold"]
       }
     },
     "updater": {

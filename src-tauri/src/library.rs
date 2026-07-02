@@ -104,15 +104,6 @@ pub fn installed_get(state: State<'_, AppState>, appid: String) -> Value {
 }
 
 #[tauri::command]
-pub fn installed_list_by_appid(state: State<'_, AppState>, appid: String) -> Vec<Value> {
-    load_all(&state.download_root())
-        .into_iter()
-        .filter(|(_, v)| v.get("appid").and_then(|a| a.as_str()) == Some(appid.as_str()))
-        .map(|(_, v)| v)
-        .collect()
-}
-
-#[tauri::command]
 pub fn installing_list(state: State<'_, AppState>) -> Vec<Value> {
     list_by(&state.download_root(), INSTALLING)
 }
@@ -179,38 +170,3 @@ pub fn installing_dismiss(state: State<'_, AppState>, appid: String) -> Value {
     json!({ "ok": true, "prompted": false })
 }
 
-#[tauri::command]
-pub fn installed_backup_create(state: State<'_, AppState>, appid: String) -> Value {
-    if let Some(dir) = find_dir(&state.download_root(), &appid) {
-        let backup = dir.with_file_name(format!(
-            "{}.backup-{}",
-            dir.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default(),
-            now_ms()
-        ));
-        match std::fs::rename(&dir, &backup) {
-            Ok(_) => return json!({ "ok": true, "backupPath": backup.to_string_lossy() }),
-            Err(e) => return json!({ "ok": false, "error": e.to_string() }),
-        }
-    }
-    json!({ "ok": false, "error": "not found" })
-}
-
-#[tauri::command]
-pub fn add_external_game(state: State<'_, AppState>, appid: String, metadata: Value, game_path: String) -> Value {
-    let root = state.download_root();
-    let name = metadata.get("name").and_then(|v| v.as_str()).unwrap_or(&appid).to_string();
-    let folder = root.join(crate::downloads::safe_folder_name(&name));
-    std::fs::create_dir_all(&folder).ok();
-    let mut manifest = serde_json::Map::new();
-    manifest.insert("metadata".into(), metadata.clone());
-    manifest.insert("appid".into(), json!(appid));
-    manifest.insert("name".into(), json!(name));
-    manifest.insert("installStatus".into(), json!("installed"));
-    manifest.insert("installPath".into(), json!(game_path));
-    manifest.insert("external".into(), json!(true));
-    manifest.insert("installedAt".into(), json!(now_ms()));
-    manifest.insert("updatedAt".into(), json!(now_ms()));
-    let manifest_path = folder.join(MANIFEST_NAME);
-    crate::downloads::write_manifest_atomic(&manifest_path, &Value::Object(manifest));
-    json!({ "ok": true })
-}

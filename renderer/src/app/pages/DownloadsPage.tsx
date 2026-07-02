@@ -119,10 +119,9 @@ export function DownloadsPage() {
     if (!window.ucDownloads?.installDownloadedArchive) return
     setInstalling((s) => new Set(s).add(appid))
     try {
-      clearByAppid(appid)
       const res = await window.ucDownloads.installDownloadedArchive(appid)
-      if (res?.code === "INSUFFICIENT_SPACE" || res?.error === "insufficient_space") toast("Not enough disk space to install.", "error")
-      else if (!res?.ok) toast(res?.error || "Failed to install.", "error")
+      if (!res?.ok) toast(res?.error || "Failed to install.", "error")
+      else clearByAppid(appid)
     } catch (err) {
       toast(String(err), "error")
     } finally {

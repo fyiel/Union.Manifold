@@ -11,12 +11,7 @@ use tauri::{AppHandle, Emitter, State};
 use crate::downloads::now_ms;
 use crate::state::AppState;
 
-struct Running {
-    pid: u32,
-    exe_path: String,
-}
-
-static RUNNING: Lazy<Mutex<HashMap<String, Running>>> = Lazy::new(|| Mutex::new(HashMap::new()));
+static RUNNING: Lazy<Mutex<HashMap<String, u32>>> = Lazy::new(|| Mutex::new(HashMap::new()));
 
 fn install_dir_for(state: &AppState, appid: &str) -> Option<PathBuf> {
     crate::install::find_installing(&state.download_root(), appid).map(|(dir, manifest)| {
@@ -96,7 +91,7 @@ pub fn game_exe_preflight(state: State<'_, AppState>, appid: String, exe_path: S
     let mut checks = Vec::new();
     let exists = Path::new(&exe_path).is_file();
     if !exists {
-        checks.push(json!({ "level": "error", "code": "missing", "message": "executable not found" }));
+        checks.push(json!({ "level": "error", "code": "exe-not-found", "message": "executable not found" }));
     }
     let resolved = linux::build_launch_command(&state, &appid, &exe_path);
     json!({
@@ -116,16 +111,10 @@ fn spawn_and_track(app: &AppHandle, appid: &str, command: &str, args: &[String],
     let child = cmd.spawn().map_err(|e| e.to_string())?;
     let pid = child.id();
     let started_at = now_ms();
-    RUNNING.lock().unwrap().insert(
-        appid.to_string(),
-        Running {
-            pid,
-            exe_path: exe_path.to_string(),
-        },
-    );
+    RUNNING.lock().unwrap().insert(appid.to_string(), pid);
     app.emit(
         "uc:presence-changed",
-        json!({ "reason": "started", "appid": appid, "gameName": game_name }),
+        json!({ "reason": "game-started", "appid": appid, "gameName": game_name }),
     )
     .ok();
     let app2 = app.clone();
@@ -138,7 +127,7 @@ fn spawn_and_track(app: &AppHandle, appid: &str, command: &str, args: &[String],
         RUNNING.lock().unwrap().remove(&appid2);
         app2.emit(
             "uc:presence-changed",
-            json!({ "reason": "stopped", "appid": appid2 }),
+            json!({ "reason": "game-exited", "appid": appid2 }),
         )
         .ok();
         if elapsed < 10_000 {
@@ -169,15 +158,6 @@ pub fn game_exe_launch(state: State<'_, AppState>, app: AppHandle, appid: String
 }
 
 #[tauri::command]
-pub fn game_exe_running(appid: String) -> Value {
-    let running = RUNNING.lock().unwrap();
-    match running.get(&appid) {
-        Some(r) => json!({ "ok": true, "running": true, "pid": r.pid, "exePath": r.exe_path }),
-        None => json!({ "ok": true, "running": false }),
-    }
-}
-
-#[tauri::command]
 pub fn game_exe_running_list() -> Value {
     let running = RUNNING.lock().unwrap();
     let appids: Vec<String> = running.keys().cloned().collect();
@@ -186,7 +166,7 @@ pub fn game_exe_running_list() -> Value {
 
 #[tauri::command]
 pub fn game_exe_quit(appid: String) -> Value {
-    let pid = RUNNING.lock().unwrap().get(&appid).map(|r| r.pid);
+    let pid = RUNNING.lock().unwrap().get(&appid).copied();
     if let Some(pid) = pid {
         kill_pid(pid);
         RUNNING.lock().unwrap().remove(&appid);

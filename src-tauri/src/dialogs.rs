@@ -35,14 +35,6 @@ async fn pick_files(app: AppHandle, exts: &[&str]) -> Vec<String> {
 }
 
 #[tauri::command]
-pub async fn pick_external_game_folder(app: AppHandle) -> Value {
-    match pick_folder(app).await {
-        Some(p) => json!(p),
-        None => Value::Null,
-    }
-}
-
-#[tauri::command]
 pub async fn download_path_pick(app: AppHandle) -> Value {
     match pick_folder(app).await {
         Some(p) => json!({ "ok": true, "path": p }),
