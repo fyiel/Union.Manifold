@@ -18,7 +18,6 @@ export type ResolvedDownload = {
   filename?: string
   size?: number
   resolved: boolean
-  authHeader?: string
 }
 
 // ── Link availability check types ──

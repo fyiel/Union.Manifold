@@ -59,7 +59,6 @@ export type DownloadItem = {
   filename: string
   partIndex?: number
   partTotal?: number
-  authHeader?: string
   status: DownloadStatus
   receivedBytes: number
   totalBytes: number
@@ -976,7 +975,6 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
                 originalUrl: item.originalUrl || next.url,
                 filename,
                 totalBytes: resolved.size || 0,
-                authHeader: resolved.authHeader,
                 error: null,
               }
               : item
@@ -1003,7 +1001,6 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
           gameName: next.gameName,
           partIndex: next.partIndex,
           partTotal: next.partTotal,
-          authHeader: resolved.authHeader,
         })
         if (res && typeof res === "object" && "ok" in res && !res.ok) {
           throw new Error((res as { error?: string }).error || "Failed to start download")
@@ -1691,9 +1688,8 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
             data: { host: freshSource?.host || target.host, resolveUrl, usedFreshSource: Boolean(freshSource?.sourceUrl) },
           })
           const resolved = await resolveDownloadUrl(freshSource?.host || target.host, resolveUrl)
-          downloadLogger.info("Resume Level 2 resolved", { data: { resolvedUrl: resolved?.url, resolvedOk: resolved?.resolved, hasAuth: Boolean(resolved?.authHeader) } })
+          downloadLogger.info("Resume Level 2 resolved", { data: { resolvedUrl: resolved?.url, resolvedOk: resolved?.resolved } })
           const freshUrl = resolved?.resolved ? resolved.url : target.url
-          const freshAuth = resolved?.authHeader || target.authHeader
 
           // Try resuming from the partial file on disk using the fresh URL.
           // This sends a Range request so we don't re-download bytes we already have.
@@ -1710,7 +1706,6 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
                 partTotal: target.partTotal,
                 savePath: target.savePath,
                 totalBytes: resolved?.size || target.totalBytes,
-                authHeader: freshAuth,
               })
               downloadLogger.info("Resume Level 2 resumeWithFreshUrl result", { data: resumeRes })
               if (resumeRes && typeof resumeRes === "object" && resumeRes.ok) {
@@ -1769,7 +1764,6 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
               gameName: target.gameName,
               partIndex: target.partIndex,
               partTotal: target.partTotal,
-              authHeader: freshAuth,
               savePath: target.savePath,
             } as Parameters<typeof window.ucDownloads.start>[0])
             downloadLogger.info("Resume Level 2 start result", { data: res })
@@ -1783,7 +1777,6 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
                   ...item,
                   originalUrl: freshSource?.sourceUrl || item.originalUrl || resolveUrl,
                   url: freshUrl,
-                  authHeader: freshAuth,
                   // Promote the placeholder "local" host to the real host we
                   // just re-resolved against; otherwise the next persist run
                   // would still get filtered out as a synthetic.
