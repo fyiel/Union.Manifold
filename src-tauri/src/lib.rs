@@ -9,6 +9,7 @@ mod launch;
 mod library;
 mod logging;
 mod misc;
+mod net;
 mod paths;
 mod settings;
 mod shortcuts;
@@ -59,19 +60,6 @@ pub fn run() {
             let uri = request.uri().to_string();
             tauri::async_runtime::spawn(async move {
                 let (status, body, ct) = assets::respond(app, uri).await;
-                let resp = tauri::http::Response::builder()
-                    .status(status)
-                    .header("Content-Type", ct)
-                    .header("Access-Control-Allow-Origin", "*")
-                    .body(body)
-                    .unwrap();
-                responder.respond(resp);
-            });
-        })
-        .register_asynchronous_uri_scheme_protocol("uc-local", |_ctx, request, responder| {
-            let uri = request.uri().to_string();
-            tauri::async_runtime::spawn(async move {
-                let (status, body, ct) = assets::respond_local(uri).await;
                 let resp = tauri::http::Response::builder()
                     .status(status)
                     .header("Content-Type", ct)
@@ -204,6 +192,8 @@ pub fn run() {
             misc::network_test,
             misc::settings_export,
             misc::settings_import,
+            net::auth_fetch,
+            net::auth_upload,
         ])
         .build(tauri::generate_context!())
         .expect("error building union.manifold")

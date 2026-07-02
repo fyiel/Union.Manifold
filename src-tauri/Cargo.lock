@@ -4996,6 +4996,7 @@ name = "union-manifold"
 version = "1.0.4"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "chrono",
  "dirs 5.0.1",
  "fs4",
