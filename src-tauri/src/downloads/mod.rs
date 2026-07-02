@@ -167,7 +167,11 @@ impl DownloadEngine {
         if let Ok(parsed) = url::Url::parse(url) {
             if let Some(last) = parsed.path_segments().and_then(|s| s.last()) {
                 let decoded = percent_encoding::percent_decode_str(last).decode_utf8_lossy().to_string();
-                if regex::Regex::new(r"(?i)\.[a-z0-9]{1,6}$").unwrap().is_match(&decoded) {
+                let has_ext = decoded
+                    .rsplit_once('.')
+                    .map(|(stem, ext)| !stem.is_empty() && (1..=6).contains(&ext.len()) && ext.chars().all(|c| c.is_ascii_alphanumeric()))
+                    .unwrap_or(false);
+                if has_ext {
                     return decoded;
                 }
             }

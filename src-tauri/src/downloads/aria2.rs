@@ -15,6 +15,7 @@ pub struct Aria2Manager {
     ready: AtomicBool,
     starting: tokio::sync::Mutex<()>,
     rpc_id: AtomicU64,
+    http: reqwest::Client,
 }
 
 fn limit_arg(kbps: u64) -> String {
@@ -48,6 +49,10 @@ impl Aria2Manager {
             ready: AtomicBool::new(false),
             starting: tokio::sync::Mutex::new(()),
             rpc_id: AtomicU64::new(0),
+            http: reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(8))
+                .build()
+                .unwrap_or_default(),
         }
     }
 
@@ -164,11 +169,10 @@ impl Aria2Manager {
         let mut full = vec![json!(format!("token:{}", self.secret))];
         full.extend(params);
         let body = json!({ "jsonrpc": "2.0", "id": format!("uc-{id}"), "method": method, "params": full });
-        let client = reqwest::Client::new();
-        let resp = client
+        let resp = self
+            .http
             .post(format!("http://127.0.0.1:{port}/jsonrpc"))
             .json(&body)
-            .timeout(std::time::Duration::from_secs(8))
             .send()
             .await
             .map_err(|e| crate::error::AppError::msg(format!("aria2 rpc: {e}")))?;

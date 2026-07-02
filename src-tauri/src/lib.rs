@@ -60,13 +60,14 @@ pub fn run() {
             let uri = request.uri().to_string();
             tauri::async_runtime::spawn(async move {
                 let (status, body, ct) = assets::respond(app, uri).await;
-                let resp = tauri::http::Response::builder()
+                let mut builder = tauri::http::Response::builder()
                     .status(status)
                     .header("Content-Type", ct)
-                    .header("Access-Control-Allow-Origin", "*")
-                    .body(body)
-                    .unwrap();
-                responder.respond(resp);
+                    .header("Access-Control-Allow-Origin", "*");
+                if status == 200 {
+                    builder = builder.header("Cache-Control", "public, max-age=604800, immutable");
+                }
+                responder.respond(builder.body(body).unwrap());
             });
         })
         .setup(|app| {

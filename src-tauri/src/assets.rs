@@ -44,10 +44,9 @@ pub async fn respond(app: AppHandle, uri: String) -> (u16, Vec<u8>, String) {
         _ => return (400, b"missing u".to_vec(), "text/plain".to_string()),
     };
     let dir = cache_dir(&app);
-    std::fs::create_dir_all(&dir).ok();
     let key = hex::encode(Sha256::digest(remote.as_bytes()));
     let path = dir.join(&key);
-    if let Ok(bytes) = std::fs::read(&path) {
+    if let Ok(bytes) = tokio::fs::read(&path).await {
         let ct = content_type_of(&bytes).to_string();
         return (200, bytes, ct);
     }
@@ -55,7 +54,8 @@ pub async fn respond(app: AppHandle, uri: String) -> (u16, Vec<u8>, String) {
         Ok(resp) => match resp.bytes().await {
             Ok(body) => {
                 let bytes = body.to_vec();
-                std::fs::write(&path, &bytes).ok();
+                tokio::fs::create_dir_all(&dir).await.ok();
+                tokio::fs::write(&path, &bytes).await.ok();
                 let ct = content_type_of(&bytes).to_string();
                 (200, bytes, ct)
             }
