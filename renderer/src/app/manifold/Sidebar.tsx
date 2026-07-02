@@ -169,7 +169,7 @@ export function Sidebar() {
       }}
     >
       {/* logo lockup + collapse toggle (this row is also the window drag handle) */}
-      <div style={{ display: "flex", alignItems: "center", gap: 11, padding: "20px 16px 18px", WebkitAppRegion: "drag" } as CSSProperties}>
+      <div data-tauri-drag-region style={{ display: "flex", alignItems: "center", gap: 11, padding: "20px 16px 18px", WebkitAppRegion: "drag" } as CSSProperties}>
         <span style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 32, height: 32, borderRadius: 9, background: "#e9e9e9", flexShrink: 0 }}>
           <ManifoldGlyph size={20} />
         </span>

@@ -4,39 +4,13 @@ dist-packaged
 secrets.md
 .env
 
-# UnionCrax.Launcher build outputs
-UnionCrax.Launcher/build*
-UnionCrax.Launcher/*.exe
-UnionCrax.Launcher/*.ico
-UnionCrax.Launcher/*.png
+# rust build output
+src-tauri/target/
+src-tauri/gen/
 
-# Native addon & C++ build directories (compiled, never commit)
-build/
-electron/native/build/
-overlay-dll/build/
-
-# Vendored third-party C++ libraries (MinHook etc. - fetched at build time)
-overlay-dll/vendor/
-
-# GCPad_API stuff (fetched at build time from latest release)
-gcpad-dll/
-
-# Compiled binary artifacts
-*.node
-*.dll
-*.lib
-*.exp
-*.obj
-*.pdb
-*.ilk
-*.iobj
-*.ipdb
-
-# CMake / MSBuild generated files (outside tracked source)
-CMakeCache.txt
-CMakeFiles/
-cmake_install.cmake
-*.vcxproj.user
+# bundled sidecars and CA bundle, fetched at build time
+src-tauri/binaries/
+src-tauri/resources/cacert.pem
 
 # fork dev artifacts (not part of the app)
 redesign/
@@ -44,5 +18,3 @@ review-prompt.md
 FORK_PLAN.md
 ds-bundle/
 .design-sync/
-src-tauri/binaries/
-src-tauri/resources/cacert.pem
