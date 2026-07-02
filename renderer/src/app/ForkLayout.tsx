@@ -1,12 +1,39 @@
 import { Outlet, useLocation, useNavigate } from "react-router-dom"
-import { Suspense, useEffect, useRef, type CSSProperties } from "react"
+import { Suspense, useEffect, useRef, type CSSProperties, type ReactNode } from "react"
 import { Minus, Square, X } from "lucide-react"
 import { Sidebar } from "@/app/manifold/Sidebar"
+import { BrowsePage } from "@/app/pages/BrowsePage"
+import { AdvancedSearchPage } from "@/app/pages/AdvancedSearchPage"
+import { LibraryPage } from "@/app/pages/LibraryPage"
+import { DownloadsPage } from "@/app/pages/DownloadsPage"
+import { SettingsPage } from "@/app/pages/SettingsPage"
 import { usePauseDownloadsWhilePlaying } from "@/hooks/use-pause-on-launch"
 import { cn } from "@/lib/utils"
 
 const drag = { WebkitAppRegion: "drag" } as CSSProperties
 const noDrag = { WebkitAppRegion: "no-drag" } as CSSProperties
+
+const TABS: Record<string, ReactNode> = {
+  "/": <BrowsePage />,
+  "/advanced": <AdvancedSearchPage />,
+  "/library": <LibraryPage />,
+  "/downloads": <DownloadsPage />,
+  "/settings": <SettingsPage />,
+}
+
+function TabHost({ path }: { path: string }) {
+  const seen = useRef<Set<string>>(new Set())
+  if (TABS[path]) seen.current.add(path)
+  return (
+    <>
+      {Object.keys(TABS).filter((p) => seen.current.has(p)).map((p) => (
+        <div key={p} style={{ display: p === path ? "flex" : "none", flex: 1, minWidth: 0, minHeight: 0, flexDirection: "column" }}>
+          {TABS[p]}
+        </div>
+      ))}
+    </>
+  )
+}
 
 // Union.Manifold shell, a collapsible sidebar plus a single full-height main
 // column (each page owns its own header + scroller, per the handoff comps). The
@@ -54,9 +81,12 @@ export function ForkLayout() {
         </div>
 
         <div ref={scrollRef} style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column", overflowX: "hidden" }}>
-          <Suspense fallback={<div style={{ flex: 1 }} aria-hidden />}>
-            <Outlet />
-          </Suspense>
+          <TabHost path={location.pathname} />
+          {!TABS[location.pathname] && (
+            <Suspense fallback={<div style={{ flex: 1 }} aria-hidden />}>
+              <Outlet />
+            </Suspense>
+          )}
         </div>
       </div>
     </div>
