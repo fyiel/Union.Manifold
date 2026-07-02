@@ -224,20 +224,4 @@ export function installBridge(): void {
       return { ok: true }
     },
   }
-
-  w.ucSystemProfile = {
-    getCached: () => Promise.resolve({ ok: true, profile: null }),
-    scan: () => Promise.resolve({ ok: false, error: "disabled in this build" }),
-    summary: () => Promise.resolve({ ok: true, summary: null }),
-    clearCache: () => Promise.resolve({ ok: true }),
-    upload: disabled,
-    serverGetVisibility: () => Promise.resolve({ ok: true, visibility: null }),
-    serverSetVisibility: () => Promise.resolve({ ok: true, visibility: null }),
-    serverDelete: () => Promise.resolve({ ok: true }),
-    listDevices: () => Promise.resolve({ ok: true, devices: [] }),
-    renameDevice: () => Promise.resolve({ ok: true }),
-    deleteDevice: () => Promise.resolve({ ok: true }),
-    activateDevice: () => Promise.resolve({ ok: true }),
-    upgradeSuggest: () => Promise.resolve({ ok: true, report: null }),
-  }
 }

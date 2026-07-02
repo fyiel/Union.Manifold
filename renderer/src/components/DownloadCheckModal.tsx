@@ -16,7 +16,6 @@ import {
   ShieldAlert,
   ArrowRightLeft,
   HardDrive,
-  Cpu,
 } from "lucide-react"
 import {
   AlertTriangle,
@@ -24,7 +23,6 @@ import {
   Loader2,
 } from "@/components/icons"
 import { ArchiveInstallModal } from "@/components/ArchiveInstallModal"
-import { compareToProfile, evaluateGpuDriver, type RequirementVerdict, type RequirementCheck, type DriverStatus } from "@/lib/system-requirements"
 
 type HostOption = {
   key: PreferredDownloadHost
@@ -85,10 +83,6 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, aut
   const [deadLinksReported, setDeadLinksReported] = useState(false)
   const [showArchiveInstall, setShowArchiveInstall] = useState(false)
   const [storageCheck, setStorageCheck] = useState<StoragePrecheckResult | null>(null)
-  const [storageHint, setStorageHint] = useState<{ targetMedia: string | null; hasFastAlternative: boolean; isLargeInstall: boolean } | null>(null)
-  const [sysreqVerdict, setSysreqVerdict] = useState<RequirementVerdict | null>(null)
-  const [sysreqProfileMissing, setSysreqProfileMissing] = useState(false)
-  const [driverStatus, setDriverStatus] = useState<DriverStatus | null>(null)
   const reportSentRef = useRef(false)
 
   // Reset state when modal opens
@@ -171,21 +165,11 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, aut
     onCheckingChange?.(Boolean(open && downloadToken && phase === "loading"))
   }, [open, downloadToken, phase, onCheckingChange])
 
-  // Storage precheck + sysreq comparison. Runs whenever the modal opens
-  // with a game so the user sees the verdict before clicking download.
-  //
-  // Storage reservation always runs (it's a functional safety net, not a
-  // privacy feature). The sysreq comparison, driver warning, and storage-
-  // type hint all *read the user's profile* and are gated on the
-  // `systemProfileVisibility.sysreqCheck` setting so users who don't want
-  // their PC inspected here can disable it from Settings → System Profile.
+  // Storage precheck. Runs whenever the modal opens with a game so the
+  // user sees the verdict before clicking download.
   useEffect(() => {
     if (!open || !game) {
       setStorageCheck(null)
-      setSysreqVerdict(null)
-      setSysreqProfileMissing(false)
-      setStorageHint(null)
-      setDriverStatus(null)
       return
     }
     let cancelled = false
@@ -193,81 +177,12 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, aut
     ;(async () => {
       const downloadBytes = game.sizeBytes || parseSizeStringToBytes(game.size)
       const declaredInstallBytes = game.installedSizeBytes || 0
-      let precheckResult: StoragePrecheckResult | null = null
       if (downloadBytes > 0 && window.ucStorage?.precheck) {
         try {
-          precheckResult = await window.ucStorage.precheck({ downloadBytes, declaredInstallBytes })
+          const precheckResult = await window.ucStorage.precheck({ downloadBytes, declaredInstallBytes })
           if (!cancelled) setStorageCheck(precheckResult)
         } catch {
           /* ignore — pre-download check is best-effort */
-        }
-      }
-
-      // Read the privacy setting once for all profile-derived panels below.
-      let sysreqCheckEnabled = true
-      try {
-        const setting = await window.ucSettings?.get?.("systemProfileVisibility")
-        if (setting && typeof setting === "object" && setting.sysreqCheck === "off") {
-          sysreqCheckEnabled = false
-        }
-      } catch { /* default to enabled */ }
-
-      if (!sysreqCheckEnabled) return
-
-      // Storage-type hint: warn if the user is installing to a slow drive
-      // when a faster one is available. Best-effort; depends on the scanner
-      // having tagged volumes with mediaType (Windows: always; Linux: not yet).
-      if (window.ucSystemProfile?.getCached && precheckResult?.mountRoot) {
-        try {
-          const profileRes = await window.ucSystemProfile.getCached()
-          if (!cancelled && profileRes.ok && profileRes.profile) {
-            const volumes = profileRes.profile.spec.storage?.volumes || []
-            const targetRoot = precheckResult.mountRoot.replace(/\\$/, "").toUpperCase()
-            const targetVol = volumes.find(
-              (v) => v.mount && v.mount.toUpperCase().replace(/\\$/, "") === targetRoot
-            )
-            const targetMedia = targetVol?.mediaType ?? null
-            const hasFastAlternative = volumes.some(
-              (v) => v.mediaType === "ssd" || v.mediaType === "nvme"
-            ) && targetMedia === "hdd"
-            // Threshold: 30+ GB installed is when HDD load times start hurting.
-            const isLargeInstall = (precheckResult.extractBytes || 0) > 30 * 1024 ** 3
-            setStorageHint({ targetMedia, hasFastAlternative, isLargeInstall })
-          }
-        } catch {
-          /* ignore */
-        }
-      }
-
-      const hasWindowsReqs = game.minRequirements || game.recommendedRequirements
-      const hasLinuxReqs = game.linuxMinRequirements || game.linuxRecommendedRequirements
-      const hasReqs = hasWindowsReqs || hasLinuxReqs
-      if (window.ucSystemProfile?.getCached) {
-        try {
-          const res = await window.ucSystemProfile.getCached()
-          if (cancelled) return
-          if (!res.ok || !res.profile) {
-            if (hasReqs) setSysreqProfileMissing(true)
-            return
-          }
-          if (hasReqs) {
-            // Pick the platform that matches the user's scanned OS. Fall
-            // back to the other side when the preferred platform isn't
-            // published — a Linux user on a Windows-only title still gets
-            // a meaningful "does my hardware clear it" verdict against the
-            // Windows specs (relevant for Proton).
-            const platform = String(res.profile.spec?.os?.platform || "").toLowerCase()
-            const preferLinux = platform === "linux" && hasLinuxReqs
-            const target = preferLinux
-              ? (game.linuxRecommendedRequirements || game.linuxMinRequirements || null)
-              : (game.recommendedRequirements || game.minRequirements || null)
-            if (target) setSysreqVerdict(compareToProfile(res.profile.spec, target))
-          }
-          // Driver status is independent of game sysreq — we can warn even
-          // for games whose specs aren't published yet.
-          setDriverStatus(evaluateGpuDriver(res.profile.spec))
-        } catch {
-          /* ignore */
         }
       }
     })()
@@ -350,7 +265,6 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, aut
     && Boolean(currentHostAvail?.allAlive)
     && Object.keys(partOverrides).length === 0
     && (storageCheck === null || storageCheck.ok)
-    && (sysreqVerdict === null || sysreqVerdict.status !== "fail")
     && !game?.hasHv
     && selectedHost === defaultHost
   const autoConfirmFiredRef = useRef(false)
@@ -723,62 +637,6 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, aut
               </div>
             )}
 
-            {/* Storage-type hint: HDD install with SSDs available, large install. */}
-            {storageHint && storageHint.hasFastAlternative && storageHint.isLargeInstall && (
-              <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200 space-y-1">
-                <div className="flex items-center gap-1.5 font-medium">
-                  <HardDrive className="h-3.5 w-3.5" />
-                  Slow install drive detected
-                </div>
-                <p className="text-[11px] opacity-80">
-                  Your download drive is an HDD. Large games load noticeably faster from an SSD or NVMe — open Settings to switch the download path if you'd prefer.
-                </p>
-              </div>
-            )}
-
-            {/* System requirement comparison */}
-            {sysreqProfileMissing && (game?.minRequirements || game?.recommendedRequirements || game?.linuxMinRequirements || game?.linuxRecommendedRequirements) && (
-              <div className="rounded-lg border border-white/[.07] bg-secondary/30 px-3 py-2 text-xs text-foreground/80">
-                <div className="flex items-center gap-1.5 font-medium">
-                  <Cpu className="h-3.5 w-3.5" />
-                  Scan your PC to see if it meets the requirements
-                </div>
-                <div className="text-[11px] text-muted-foreground mt-1">
-                  Settings → System Profile → Scan now.
-                </div>
-              </div>
-            )}
-            {sysreqVerdict && sysreqVerdict.checks.length > 0 && (
-              <SysreqPanel verdict={sysreqVerdict} />
-            )}
-
-            {driverStatus?.status === "stale" && driverStatus.ageDays != null && (
-              <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200 space-y-1">
-                <div className="flex items-center gap-1.5 font-medium">
-                  <AlertTriangle className="h-3.5 w-3.5" />
-                  GPU driver is {Math.floor(driverStatus.ageDays / 30)} month{Math.floor(driverStatus.ageDays / 30) === 1 ? "" : "s"} old
-                </div>
-                <p className="text-[11px] opacity-80">
-                  Older drivers can cause crashes or poor performance in new games. Consider updating before installing.
-                </p>
-                {driverStatus.driverPageUrl && (
-                  <a
-                    href={driverStatus.driverPageUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    onClick={(e) => {
-                      e.preventDefault()
-                      window.ucSystem?.openExternal?.(driverStatus.driverPageUrl!)
-                    }}
-                    className="inline-flex items-center gap-1 text-[11px] underline hover:no-underline"
-                  >
-                    <ExternalLink className="h-2.5 w-2.5" />
-                    {driverStatus.vendor ? `${driverStatus.vendor.toUpperCase()} drivers` : "Vendor drivers"}
-                  </a>
-                )}
-              </div>
-            )}
-
             {/* Dead links reported notice */}
             {deadLinksReported && (
               <p className="text-[11px] text-muted-foreground/60 text-center">
@@ -870,48 +728,3 @@ function formatBytes(bytes: number | null | undefined): string {
   const digits = value >= 10 || unit === 0 ? 0 : 1
   return `${value.toFixed(digits)} ${units[unit]}`
 }
-
-function SysreqPanel({ verdict }: { verdict: RequirementVerdict }) {
-  const containerColor =
-    verdict.status === "pass" ? "border-emerald-500/20 bg-emerald-500/5 text-emerald-200" :
-    verdict.status === "warn" ? "border-amber-500/30 bg-amber-500/10 text-amber-200" :
-    verdict.status === "fail" ? "border-red-500/30 bg-red-500/10 text-red-200" :
-    "border-white/[.07] bg-secondary/30 text-foreground/80"
-
-  const summary =
-    verdict.status === "pass" ? "Your PC meets all checked requirements." :
-    verdict.status === "warn" ? `${verdict.warnCount} requirement${verdict.warnCount === 1 ? " is" : "s are"} close to the minimum.` :
-    verdict.status === "fail" ? `${verdict.failCount} requirement${verdict.failCount === 1 ? "" : "s"} not met.` :
-    "Compared against your scanned hardware."
-
-  return (
-    <div className={`rounded-lg border px-3 py-2 text-xs space-y-1.5 ${containerColor}`}>
-      <div className="flex items-center gap-1.5 font-medium">
-        <Cpu className="h-3.5 w-3.5" />
-        {summary}
-      </div>
-      <div className="space-y-0.5">
-        {verdict.checks.map((c) => <SysreqRow key={c.component} check={c} />)}
-      </div>
-    </div>
-  )
-}
-
-function SysreqRow({ check }: { check: RequirementCheck }) {
-  const icon = check.status === "pass" ? <CheckCircle2 className="h-3 w-3 text-emerald-400" />
-    : check.status === "warn" ? <AlertTriangle className="h-3 w-3 text-amber-400" />
-    : check.status === "fail" ? <CircleX className="h-3 w-3 text-red-400" />
-    : <span className="h-3 w-3 rounded-full bg-zinc-500/40 inline-block" />
-  return (
-    <div className="flex items-start gap-2 text-[11px] py-0.5">
-      <span className="pt-0.5 shrink-0">{icon}</span>
-      <span className="flex-1 min-w-0">
-        <span className="uppercase text-[10px] opacity-70 mr-1">{check.component}</span>
-        <span className="opacity-90">{check.have || "Unknown"}</span>
-        <span className="opacity-50"> · needs </span>
-        <span className="opacity-90">{check.required || "?"}</span>
-      </span>
-    </div>
-  )
-}
-
