@@ -59,8 +59,6 @@ export function installBridge(): void {
 
   w.ucDownloads = {
     start: (payload: any) => call("download_start", { payload }),
-    smartStart: (payload: any) => call("download_smart_start", { payload }),
-    resumeInterrupted: (payload: any) => call("download_start", { payload }),
     resumeWithFreshUrl: (payload: any) => call("download_start", { payload }),
     cancel: (downloadId: string) => call("download_cancel", { downloadId }),
     pause: (downloadId: string) => call("download_pause", { downloadId }),
@@ -157,8 +155,6 @@ export function installBridge(): void {
   w.ucAuth = {
     fetch: (baseUrl: string, path: string, init?: any) =>
       call("auth_fetch", { baseUrl, path, init }),
-    upload: (baseUrl: string, path: string, payload: any) =>
-      call("auth_upload", { baseUrl, path, payload }),
     login: disabled,
     logout: disabled,
     getSession: () => Promise.resolve({ ok: false }),
