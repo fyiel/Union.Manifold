@@ -6,7 +6,7 @@ use serde_json::Value;
 use url::Url;
 
 use crate::http::{self, FetchOpts};
-use crate::sources::cache::Cached;
+use crate::sources::cache::{Cached, KeyedCache};
 use crate::sources::hosts::{detect_host_type, is_resolvable};
 use crate::sources::parse::{collect_next_flight, find_object_by_key, find_steam_app_id};
 use crate::sources::schema::{self, DownloadOption, SourceGame};
@@ -18,6 +18,9 @@ const SLUG_SUFFIX: &str = "-free-pc-download";
 
 static SLUG_CACHE: Lazy<Cached<Vec<String>>> =
     Lazy::new(|| Cached::new(Duration::from_secs(60 * 60 * 6)));
+
+static DETAIL_CACHE: Lazy<KeyedCache<SourceGame>> =
+    Lazy::new(|| KeyedCache::new(Duration::from_secs(60 * 60 * 6)));
 
 static LOC_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"<loc>\s*([^<]+?)\s*</loc>").unwrap());
 
@@ -402,12 +405,17 @@ pub async fn get_detail(slug: &str) -> Option<SourceGame> {
     } else {
         format!("{slug}{SLUG_SUFFIX}")
     };
-    let url = format!("{ORIGIN}/{path}");
-    let resp = http::fetch(&url, &FetchOpts::default()).await.ok()?;
-    if !resp.status().is_success() {
-        return None;
-    }
-    let text = resp.text().await.ok()?;
-    Some(parse_game_page(&text, &path))
+    let key = path.clone();
+    DETAIL_CACHE
+        .get_or(&key, || async move {
+            let url = format!("{ORIGIN}/{path}");
+            let resp = http::fetch(&url, &FetchOpts::default()).await.ok()?;
+            if !resp.status().is_success() {
+                return None;
+            }
+            let text = resp.text().await.ok()?;
+            Some(parse_game_page(&text, &path))
+        })
+        .await
 }
 
