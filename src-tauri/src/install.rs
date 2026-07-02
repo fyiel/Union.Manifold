@@ -172,31 +172,38 @@ async fn run_7z(archive: &Path, out_dir: &Path, on_progress: impl Fn(u8)) -> Res
         cmd.creation_flags(0x08000000);
     }
     let mut child = cmd.spawn().map_err(|e| crate::error::AppError::msg(format!("7z spawn: {e}")))?;
-    let mut stdout = child.stdout.take();
-    let mut stderr = child.stderr.take();
-    if let Some(out) = stdout.as_mut() {
-        let mut buf = [0u8; 4096];
-        let mut last = 0u8;
-        while let Ok(n) = out.read(&mut buf).await {
-            if n == 0 {
-                break;
-            }
-            if let Some(p) = last_percent(&String::from_utf8_lossy(&buf[..n])) {
-                if p != last {
-                    last = p;
-                    on_progress(p);
+    let stdout = child.stdout.take();
+    let stderr = child.stderr.take();
+    let progress = async {
+        if let Some(mut out) = stdout {
+            let mut buf = [0u8; 4096];
+            let mut last = 0u8;
+            while let Ok(n) = out.read(&mut buf).await {
+                if n == 0 {
+                    break;
+                }
+                if let Some(p) = last_percent(&String::from_utf8_lossy(&buf[..n])) {
+                    if p != last {
+                        last = p;
+                        on_progress(p);
+                    }
                 }
             }
         }
-    }
-    let mut err_text = String::new();
-    if let Some(e) = stderr.as_mut() {
-        e.read_to_string(&mut err_text).await.ok();
-    }
+    };
+    let drain_err = async {
+        let mut err_text = String::new();
+        if let Some(mut e) = stderr {
+            e.read_to_string(&mut err_text).await.ok();
+        }
+        err_text
+    };
+    let (_, err_text) = tokio::join!(progress, drain_err);
     let status = child.wait().await.map_err(|e| crate::error::AppError::msg(format!("7z wait: {e}")))?;
     if !status.success() {
         return Err(crate::error::AppError::msg(format!("extraction failed: {}", err_text.trim())));
     }
+    on_progress(100);
     Ok(())
 }
 
