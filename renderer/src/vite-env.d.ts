@@ -325,7 +325,6 @@ declare global {
         gameName?: string
         partIndex?: number
         partTotal?: number
-        authHeader?: string
         savePath?: string
         totalBytes?: number
         /** Per-download request headers (e.g. a Referer a source's host needs). */
@@ -334,18 +333,6 @@ declare global {
       cancel: (downloadId: string) => Promise<{ ok: boolean; status?: DownloadUpdatePayload["status"]; preservedArchive?: boolean; error?: string; downloadId?: string; appid?: string | null }>
       pause: (downloadId: string) => Promise<{ ok: boolean }>
       resume: (downloadId: string) => Promise<{ ok: boolean }>
-      resumeInterrupted: (payload: {
-        downloadId: string
-        url: string
-        filename?: string
-        appid?: string
-        gameName?: string
-        partIndex?: number
-        partTotal?: number
-        savePath?: string
-        resumeData?: DownloadUpdatePayload["resumeData"]
-        authHeader?: string
-      }) => Promise<{ ok: boolean; error?: string }>
       resumeWithFreshUrl: (payload: {
         downloadId: string
         url: string
@@ -356,17 +343,7 @@ declare global {
         partTotal?: number
         savePath?: string
         totalBytes?: number
-        authHeader?: string
       }) => Promise<{ ok: boolean; actualOffset?: number; error?: string }>
-      // New simplified entry point — main process decides resume vs fresh.
-      smartStart: (payload: {
-        appid: string
-        downloadId: string
-        gameName?: string
-        url: string
-        filename?: string
-        totalBytes?: number
-      }) => Promise<{ ok: boolean; resumed?: boolean; actualOffset?: number; savePath?: string; alreadyComplete?: boolean; alreadyActive?: boolean; error?: string }>
       showInFolder: (path: string) => Promise<{ ok: boolean }>
       openPath: (path: string) => Promise<{ ok: boolean }>
       listDisks: () => Promise<
@@ -478,21 +455,6 @@ declare global {
         baseUrl: string,
         path: string,
         init?: { method?: string; headers?: Record<string, string>; body?: string | null }
-      ) => Promise<{
-        ok: boolean
-        status: number
-        statusText: string
-        headers: [string, string][]
-        body?: string
-      }>
-      upload: (
-        baseUrl: string,
-        path: string,
-        payload: {
-          method?: string
-          fields?: Record<string, string>
-          file?: { field?: string; name: string; type: string; base64: string }
-        }
       ) => Promise<{
         ok: boolean
         status: number

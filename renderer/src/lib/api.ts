@@ -432,47 +432,6 @@ export async function apiUpload(
   const fileName = options.fileName || (file && 'name' in (file as any) ? (file as File).name : "upload.bin")
   const fileField = options.fileField || "file"
 
-  const canUseAuthUpload = typeof window !== "undefined" && Boolean(window.ucAuth?.upload)
-  if (canUseAuthUpload) {
-    let filePayload: { field: string; name: string; type: string; base64: string } | undefined
-    if (file) {
-      const buffer = await file.arrayBuffer()
-      const bytes = new Uint8Array(buffer)
-      let binary = ""
-      for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i])
-      const base64 = typeof btoa === "function" ? btoa(binary) : ""
-      filePayload = {
-        field: fileField,
-        name: fileName,
-        type: (file as Blob).type || "application/octet-stream",
-        base64,
-      }
-    }
-    const result = await window.ucAuth!.upload(getApiBaseUrl(), path, {
-      method,
-      fields,
-      file: filePayload,
-    })
-    setServiceReachable(!(result.status === 0 || result.statusText === "upload_failed"))
-    const bytes = result.body ? base64ToUint8Array(result.body) : new Uint8Array()
-    const rawStatus = result.status || 0
-    const safeStatus = rawStatus >= 200 && rawStatus <= 599 ? rawStatus : 503
-    if (safeStatus >= 400) {
-      logApiFailure({
-        stage: "auth-upload",
-        path,
-        method,
-        status: safeStatus,
-        statusText: result.statusText || "",
-      })
-    }
-    return new Response(bytes as any, {
-      status: safeStatus,
-      statusText: result.statusText || (safeStatus !== rawStatus ? "Network Error" : ""),
-      headers: new Headers(result.headers || []),
-    })
-  }
-
   // Browser / fallback path — relies on cross-site cookies being available.
   const form = new FormData()
   for (const [key, value] of Object.entries(fields)) {
