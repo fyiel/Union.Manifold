@@ -96,6 +96,20 @@ pub fn run() {
                 use tauri_plugin_deep_link::DeepLinkExt;
                 app.deep_link().register_all().ok();
             }
+            #[cfg(target_os = "linux")]
+            if let Some(main) = app.get_webview_window("main") {
+                main.with_webview(|webview| {
+                    use webkit2gtk::{SettingsExt, WebViewExt};
+                    let wv = webview.inner();
+                    if let Some(settings) = WebViewExt::settings(&wv) {
+                        settings.set_enable_smooth_scrolling(true);
+                        settings.set_hardware_acceleration_policy(
+                            webkit2gtk::HardwareAccelerationPolicy::Always,
+                        );
+                    }
+                })
+                .ok();
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

@@ -4957,6 +4957,7 @@ dependencies = [
  "unicode-normalization",
  "url",
  "walkdir",
+ "webkit2gtk",
  "winreg 0.52.0",
 ]
 
