@@ -39,6 +39,10 @@ type OptState = "idle" | "working" | "queued" | "opened" | "error"
 
 const HERO_LINES = "repeating-linear-gradient(135deg, rgba(255,255,255,0.04) 0 1px, transparent 1px 16px), #181818"
 
+const PROTON_TIER_COLORS: Record<string, string> = {
+  platinum: "#b9c7d6", gold: "#e2c15a", silver: "#a7a7a7", bronze: "#c08457", borked: "#d0625f",
+}
+
 function relTime(ms?: number | null): string {
   if (!ms) return ""
   const s = Math.max(0, Math.floor((Date.now() - ms) / 1000))
@@ -144,6 +148,23 @@ export function SourceGamePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dedupKey])
 
+  const [protonData, setProtonData] = useState<ProtonDbSummary | null>(null)
+  const [steamMeta, setSteamMeta] = useState<SteamMeta | null>(null)
+  useEffect(() => {
+    const id = game?.steamAppId
+    setProtonData(null)
+    setSteamMeta(null)
+    if (!id) return
+    let alive = true
+    void Promise.resolve(window.ucSources?.protondb?.(id))
+      .then((res) => { if (alive && res?.ok) setProtonData(res.data) })
+      .catch(() => undefined)
+    void Promise.resolve(window.ucSources?.steamMeta?.(id))
+      .then((res) => { if (alive && res?.ok) setSteamMeta(res.meta) })
+      .catch(() => undefined)
+    return () => { alive = false }
+  }, [game?.steamAppId])
+
   const ordered = useMemo(() => orderSourcesByPreference(game?.sources || [], priority), [game, priority])
   const entries = useMemo(() => collectDownloadEntries(ordered), [ordered])
   const primary = useMemo(() => pickPrimaryDownload(entries), [entries])
@@ -198,6 +219,8 @@ export function SourceGamePage() {
   const size = game?.sizeText || gbLabel(game?.sizeBytes)
   const appid = game?.steamAppId
   const genres = game?.genres || []
+  const protonTier = protonData?.tier && protonData.tier !== "pending" ? protonData.tier : ""
+  const protonColor = PROTON_TIER_COLORS[protonTier] || "#8a8a8a"
   const pk = primary ? keyOf(primary) : ""
   const pst: OptState = optState[pk] || "idle"
   const updatedAny = relTime(game?.updatedAt)
@@ -252,6 +275,13 @@ export function SourceGamePage() {
                 <ExtLink title="ProtonDB" onClick={() => openSourcePage(`https://www.protondb.com/app/${appid}`)}>
                   <ProtonDbIcon />
                 </ExtLink>
+                {protonData && protonTier && (
+                  <span title={`ProtonDB rating${protonData.total > 0 ? ` · ${protonData.total} reports` : ""}`} style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 11px", borderRadius: 999, border: "1px solid var(--mf-line-2)", background: "var(--mf-panel)", fontFamily: MONO, fontSize: 10.5, color: protonColor }}>
+                    <span style={{ width: 6, height: 6, borderRadius: 99, background: protonColor, flexShrink: 0 }} />
+                    {protonTier.charAt(0).toUpperCase() + protonTier.slice(1)}
+                    {protonData.total > 0 && <span style={{ color: "var(--mf-t5)" }}>· {Math.round(protonData.score * 100)}%</span>}
+                  </span>
+                )}
               </div>
             )}
           </div>
@@ -298,6 +328,34 @@ export function SourceGamePage() {
         {/* description */}
         {game?.description && (
           <p style={{ margin: "30px 0 0", fontSize: 14, lineHeight: 1.72, color: "var(--mf-t3)", maxWidth: 680, whiteSpace: "pre-line", overflowWrap: "anywhere" }}>{game.description}</p>
+        )}
+
+        {steamMeta && steamMeta.screenshots.length > 0 && (
+          <div className="mf-scroll" style={{ display: "flex", gap: 10, marginTop: 26, overflowX: "auto", paddingBottom: 8 }}>
+            {steamMeta.screenshots.slice(0, 12).map((src) => (
+              <img key={src} src={src} alt="" loading="lazy" style={{ height: 150, width: "auto", flexShrink: 0, borderRadius: 8, border: "1px solid var(--mf-line-2)", objectFit: "cover" }} />
+            ))}
+          </div>
+        )}
+
+        {steamMeta && (steamMeta.requirements.minimum || steamMeta.requirements.recommended) && (
+          <div style={{ marginTop: 30 }}>
+            <h2 style={{ margin: 0, fontSize: 15, fontWeight: 600, color: "var(--mf-t1)", letterSpacing: "-0.01em" }}>System requirements</h2>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 14, marginTop: 12 }}>
+              {steamMeta.requirements.minimum && (
+                <div style={{ flex: "1 1 300px", minWidth: 0, padding: "14px 16px", borderRadius: 10, border: "1px solid var(--mf-line)", background: "var(--mf-panel-2)" }}>
+                  <div style={{ fontFamily: MONO, fontSize: 9.5, letterSpacing: "0.16em", textTransform: "uppercase", color: "var(--mf-t5)" }}>Minimum</div>
+                  <div style={{ marginTop: 8, fontSize: 12, lineHeight: 1.6, color: "var(--mf-t3)", overflowWrap: "anywhere" }} dangerouslySetInnerHTML={{ __html: steamMeta.requirements.minimum }} />
+                </div>
+              )}
+              {steamMeta.requirements.recommended && (
+                <div style={{ flex: "1 1 300px", minWidth: 0, padding: "14px 16px", borderRadius: 10, border: "1px solid var(--mf-line)", background: "var(--mf-panel-2)" }}>
+                  <div style={{ fontFamily: MONO, fontSize: 9.5, letterSpacing: "0.16em", textTransform: "uppercase", color: "var(--mf-t5)" }}>Recommended</div>
+                  <div style={{ marginTop: 8, fontSize: 12, lineHeight: 1.6, color: "var(--mf-t3)", overflowWrap: "anywhere" }} dangerouslySetInnerHTML={{ __html: steamMeta.requirements.recommended }} />
+                </div>
+              )}
+            </div>
+          </div>
         )}
 
         {/* download sources (collapsible) */}

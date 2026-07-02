@@ -214,6 +214,29 @@ declare global {
     reason?: string
   }
 
+  type ProtonDbSummary = {
+    tier: string
+    trendingTier: string
+    bestReportedTier: string
+    confidence: string
+    score: number
+    total: number
+  }
+
+  type Movie = {
+    id: number
+    name: string
+    thumbnail: string
+    mp4: string
+    webm: string
+  }
+
+  type SteamMeta = {
+    screenshots: string[]
+    movies: Movie[]
+    requirements: { minimum: string; recommended: string }
+  }
+
   /** Pre-download storage reservation check result from window.ucStorage.precheck. */
   type StoragePrecheckResult = {
     ok: boolean
@@ -474,6 +497,8 @@ declare global {
       detail: (sources: Array<{ sourceId: string; sourceSlug: string }>) => Promise<{ ok: boolean; game: UnifiedSourceGame | null; error?: string }>
       resolve: (sourceId: string, option: SourceDownloadOption) => Promise<{ ok: boolean; result: SourceResolveResult; error?: string }>
       steamArt: (appid: number) => Promise<{ ok: boolean; art: { header: string; background: string } }>
+      protondb: (appid: number) => Promise<{ ok: boolean; data: ProtonDbSummary | null }>
+      steamMeta: (appid: number) => Promise<{ ok: boolean; meta: SteamMeta }>
       query: (params: SourceQueryParams) => Promise<SourceQueryResult>
       capabilities: (sourceIds?: string[]) => Promise<{ ok: boolean; capabilities: SourceCapabilityReport; error?: string }>
       tags: () => Promise<{ ok: boolean; tags: string[]; bySource: Record<string, string[]>; error?: string }>
