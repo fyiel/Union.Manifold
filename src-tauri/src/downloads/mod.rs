@@ -220,7 +220,7 @@ impl DownloadEngine {
         best
     }
 
-    pub fn enqueue(&self, appid: String, game_name: Option<String>, url: String, filename: Option<String>, total_bytes: u64, id: String, headers: Option<HashMap<String, String>>) -> Result<String> {
+    pub fn enqueue(self: &Arc<Self>, appid: String, game_name: Option<String>, url: String, filename: Option<String>, total_bytes: u64, id: String, headers: Option<HashMap<String, String>>) -> Result<String> {
         if appid.is_empty() {
             return Err(AppError::msg("appid required"));
         }
@@ -303,7 +303,7 @@ impl DownloadEngine {
         true
     }
 
-    pub fn resume(&self, id: &str) -> bool {
+    pub fn resume(self: &Arc<Self>, id: &str) -> bool {
         let mut st = self.state.lock().unwrap();
         let dl = match st.by_id.get_mut(id) {
             Some(d) => d,
@@ -340,21 +340,20 @@ impl DownloadEngine {
         true
     }
 
-    pub fn cancel(&self, id: &str, keep_file: bool) -> Value {
+    pub fn cancel(self: &Arc<Self>, id: &str, keep_file: bool) -> Value {
         let mut st = self.state.lock().unwrap();
-        let dl = match st.by_id.get_mut(id) {
-            Some(d) => d,
+        st.cancelled.insert(id.to_string());
+        let (gid, save_path, appid, snap) = match st.by_id.get_mut(id) {
+            Some(dl) => {
+                let gid = dl.gid.take();
+                dl.status = "cancelled".to_string();
+                dl.speed_bps = 0;
+                dl.eta_seconds = None;
+                dl.error = None;
+                (gid, dl.save_path.clone(), dl.appid.clone(), dl.clone())
+            }
             None => return json!({ "ok": false }),
         };
-        st.cancelled.insert(id.to_string());
-        let gid = dl.gid.take();
-        let save_path = dl.save_path.clone();
-        let appid = dl.appid.clone();
-        dl.status = "cancelled".to_string();
-        dl.speed_bps = 0;
-        dl.eta_seconds = None;
-        dl.error = None;
-        let snap = dl.clone();
         if let Some(g) = &gid {
             st.gid_to_id.remove(g);
         }
@@ -572,23 +571,25 @@ impl DownloadEngine {
     async fn finish_complete(self: &Arc<Self>, id: &str) {
         let snap = {
             let mut st = self.state.lock().unwrap();
+            if st.active.as_deref() == Some(id) {
+                st.active = None;
+            }
             let dl = match st.by_id.get_mut(id) {
                 Some(d) => d,
                 None => return,
             };
-            if let Some(g) = dl.gid.take() {
-                st.gid_to_id.remove(&g);
-            }
+            let gid = dl.gid.take();
             if let Ok(meta) = std::fs::metadata(&dl.save_path) {
                 dl.received_bytes = meta.len();
             }
             dl.status = "completed".to_string();
             dl.speed_bps = 0;
             dl.eta_seconds = None;
-            if st.active.as_deref() == Some(id) {
-                st.active = None;
+            let snap = dl.clone();
+            if let Some(g) = gid {
+                st.gid_to_id.remove(&g);
             }
-            dl.clone()
+            snap
         };
         std::fs::remove_file(format!("{}{}", snap.save_path.display(), RESUME_EXT)).ok();
         self.emit(&snap);
