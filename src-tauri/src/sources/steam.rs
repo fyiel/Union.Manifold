@@ -20,7 +20,6 @@ pub struct StoreDetails {
     pub release_year: Option<i32>,
     pub header_image: String,
     pub background: String,
-    pub screenshots: Vec<String>,
 }
 
 pub async fn get_store_details(appid: u64) -> Option<StoreDetails> {
@@ -69,20 +68,6 @@ pub async fn get_store_details(appid: u64) -> Option<StoreDetails> {
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string(),
-            screenshots: d
-                .get("screenshots")
-                .and_then(|v| v.as_array())
-                .map(|arr| {
-                    arr.iter()
-                        .filter_map(|s| {
-                            s.get("path_full")
-                                .or_else(|| s.get("path_thumbnail"))
-                                .and_then(|v| v.as_str())
-                                .map(String::from)
-                        })
-                        .collect()
-                })
-                .unwrap_or_default(),
         }
     });
     DETAILS_CACHE.lock().unwrap().insert(appid, out.clone());
