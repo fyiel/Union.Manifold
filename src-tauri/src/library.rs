@@ -78,7 +78,7 @@ fn merge_into_manifest(root: &Path, appid: &str, updates: &Value) -> bool {
             }
         }
         manifest.insert("updatedAt".into(), json!(now_ms()));
-        std::fs::write(&manifest_path, serde_json::to_string_pretty(&manifest).unwrap_or_default()).ok();
+        crate::downloads::write_manifest_atomic(&manifest_path, &Value::Object(manifest));
         return true;
     }
     false
@@ -184,8 +184,6 @@ pub fn add_external_game(state: State<'_, AppState>, appid: String, metadata: Va
     manifest.insert("installedAt".into(), json!(now_ms()));
     manifest.insert("updatedAt".into(), json!(now_ms()));
     let manifest_path = folder.join(MANIFEST_NAME);
-    match std::fs::write(&manifest_path, serde_json::to_string_pretty(&manifest).unwrap_or_default()) {
-        Ok(_) => json!({ "ok": true }),
-        Err(e) => json!({ "ok": false, "error": e.to_string() }),
-    }
+    crate::downloads::write_manifest_atomic(&manifest_path, &Value::Object(manifest));
+    json!({ "ok": true })
 }

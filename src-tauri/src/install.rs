@@ -89,10 +89,7 @@ fn finalize_installed(dir: &Path, appid: &str, game_name: &Option<String>, insta
             manifest.insert(k.clone(), v.clone());
         }
     }
-    let tmp = manifest_path.with_extension("json.tmp");
-    if std::fs::write(&tmp, serde_json::to_string_pretty(&manifest).unwrap_or_default()).is_ok() {
-        std::fs::rename(&tmp, &manifest_path).ok();
-    }
+    crate::downloads::write_manifest_atomic(&manifest_path, &Value::Object(manifest));
 }
 
 pub async fn auto_install(app: AppHandle, appid: String, download_id: String, game_name: Option<String>, save_path: PathBuf, installing_dir: PathBuf) {
@@ -125,7 +122,7 @@ pub async fn auto_install(app: AppHandle, appid: String, download_id: String, ga
                     if let Some(obj) = v.as_object_mut() {
                         obj.insert("installStatus".into(), json!("failed"));
                         obj.insert("installError".into(), json!(e.to_string()));
-                        std::fs::write(&manifest_path, serde_json::to_string_pretty(&v).unwrap_or_default()).ok();
+                        crate::downloads::write_manifest_atomic(&manifest_path, &v);
                     }
                 }
             }
