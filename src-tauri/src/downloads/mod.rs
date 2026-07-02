@@ -90,7 +90,7 @@ impl Download {
 struct EngineState {
     by_id: HashMap<String, Download>,
     queue: Vec<String>,
-    active: Option<String>,
+    active: std::collections::HashSet<String>,
     gid_to_id: HashMap<String, String>,
 }
 
@@ -101,6 +101,7 @@ pub struct DownloadEngine {
     aria2: Arc<Aria2Manager>,
     state: Mutex<EngineState>,
     extracting: Mutex<std::collections::HashSet<String>>,
+    install_guard: Mutex<std::collections::HashSet<String>>,
 }
 
 impl DownloadEngine {
@@ -112,6 +113,7 @@ impl DownloadEngine {
             aria2,
             state: Mutex::new(EngineState::default()),
             extracting: Mutex::new(Default::default()),
+            install_guard: Mutex::new(Default::default()),
         });
         let poll = engine.clone();
         tauri::async_runtime::spawn(async move {
@@ -286,9 +288,7 @@ impl DownloadEngine {
         if !st.queue.contains(&id.to_string()) {
             st.queue.insert(0, id.to_string());
         }
-        if st.active.as_deref() == Some(id) {
-            st.active = None;
-        }
+        st.active.remove(id);
         self.emit(&snap);
         drop(st);
         self.maybe_start_next();
@@ -312,9 +312,7 @@ impl DownloadEngine {
             st.gid_to_id.remove(g);
         }
         st.queue.retain(|x| x != id);
-        if st.active.as_deref() == Some(id) {
-            st.active = None;
-        }
+        st.active.remove(id);
         self.emit(&snap);
         drop(st);
         if let Some(gid) = gid {
@@ -366,29 +364,41 @@ impl DownloadEngine {
         json!({ "extracting": extracting, "downloading": downloading })
     }
 
+    fn max_concurrent(&self) -> usize {
+        self.settings
+            .get("maxConcurrentDownloads")
+            .as_u64()
+            .map(|n| n.clamp(1, 8) as usize)
+            .unwrap_or(3)
+    }
+
     fn maybe_start_next(self: &Arc<Self>) {
-        let next = {
+        let limit = self.max_concurrent();
+        let mut to_start = Vec::new();
+        {
             let mut st = self.state.lock().unwrap();
-            if st.active.is_some() {
-                return;
-            }
-            let mut chosen = None;
-            while let Some(id) = st.queue.first().cloned() {
-                st.queue.remove(0);
-                match st.by_id.get(&id) {
-                    Some(dl) if dl.status == "queued" || dl.status == "paused" || dl.status == "failed" => {
-                        chosen = Some(id);
-                        break;
+            while st.active.len() < limit {
+                let mut chosen = None;
+                while let Some(id) = st.queue.first().cloned() {
+                    st.queue.remove(0);
+                    match st.by_id.get(&id) {
+                        Some(dl) if dl.status == "queued" || dl.status == "paused" || dl.status == "failed" => {
+                            chosen = Some(id);
+                            break;
+                        }
+                        _ => continue,
                     }
-                    _ => continue,
+                }
+                match chosen {
+                    Some(id) => {
+                        st.active.insert(id.clone());
+                        to_start.push(id);
+                    }
+                    None => break,
                 }
             }
-            if let Some(id) = &chosen {
-                st.active = Some(id.clone());
-            }
-            chosen
-        };
-        if let Some(id) = next {
+        }
+        for id in to_start {
             let engine = self.clone();
             tauri::async_runtime::spawn(async move { engine.kick_off(id).await });
         }
@@ -408,9 +418,7 @@ impl DownloadEngine {
             write_manifest(&dl);
             {
                 let mut st = self.state.lock().unwrap();
-                if st.active.as_deref() == Some(&id) {
-                    st.active = None;
-                }
+                st.active.remove(&id);
             }
             self.maybe_start_next();
             self.on_complete(dl).await;
@@ -482,9 +490,7 @@ impl DownloadEngine {
                 dl.speed_bps = 0;
                 dl.eta_seconds = None;
                 let snap = dl.clone();
-                if st.active.as_deref() == Some(id) {
-                    st.active = None;
-                }
+                st.active.remove(id);
                 Some(snap)
             } else {
                 None
@@ -579,9 +585,7 @@ impl DownloadEngine {
     async fn finish_complete(self: &Arc<Self>, id: &str) {
         let snap = {
             let mut st = self.state.lock().unwrap();
-            if st.active.as_deref() == Some(id) {
-                st.active = None;
-            }
+            st.active.remove(id);
             let dl = match st.by_id.get_mut(id) {
                 Some(d) => d,
                 None => return,
@@ -627,6 +631,10 @@ impl DownloadEngine {
         if pending {
             return;
         }
+        if !self.install_guard.lock().unwrap().insert(dl.appid.clone()) {
+            return;
+        }
+        let appid = dl.appid.clone();
         crate::install::auto_install(
             self.app.clone(),
             dl.appid,
@@ -636,6 +644,7 @@ impl DownloadEngine {
             dl.installing_dir,
         )
         .await;
+        self.install_guard.lock().unwrap().remove(&appid);
     }
 }
 
