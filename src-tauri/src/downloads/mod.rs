@@ -114,16 +114,18 @@ struct EngineState {
 
 pub struct DownloadEngine {
     app: AppHandle,
-    root: PathBuf,
+    settings: Arc<crate::settings::SettingsStore>,
+    default_root: PathBuf,
     aria2: Arc<Aria2Manager>,
     state: Mutex<EngineState>,
 }
 
 impl DownloadEngine {
-    pub fn new(app: AppHandle, root: PathBuf, aria2: Arc<Aria2Manager>) -> Arc<Self> {
+    pub fn new(app: AppHandle, settings: Arc<crate::settings::SettingsStore>, default_root: PathBuf, aria2: Arc<Aria2Manager>) -> Arc<Self> {
         let engine = Arc::new(DownloadEngine {
             app,
-            root,
+            settings,
+            default_root,
             aria2,
             state: Mutex::new(EngineState::default()),
         });
@@ -145,9 +147,16 @@ impl DownloadEngine {
         self.app.emit("uc:download-update", dl.payload()).ok();
     }
 
+    fn root(&self) -> PathBuf {
+        self.settings
+            .get_string("downloadPath")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| self.default_root.clone())
+    }
+
     fn installing_dir(&self, game_name: &Option<String>, appid: &str) -> PathBuf {
         let folder = safe_folder_name(game_name.as_deref().unwrap_or(appid));
-        let dir = self.root.join(folder);
+        let dir = self.root().join(folder);
         std::fs::create_dir_all(&dir).ok();
         dir
     }
