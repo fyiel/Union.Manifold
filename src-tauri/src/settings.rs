@@ -55,10 +55,6 @@ impl SettingsStore {
         self.persist(&map);
     }
 
-    pub fn get_bool(&self, key: &str, default: bool) -> bool {
-        self.get(key).as_bool().unwrap_or(default)
-    }
-
     pub fn get_string(&self, key: &str) -> Option<String> {
         self.get(key).as_str().map(|s| s.to_string())
     }

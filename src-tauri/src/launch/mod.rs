@@ -14,8 +14,6 @@ use crate::state::AppState;
 struct Running {
     pid: u32,
     exe_path: String,
-    started_at: i64,
-    game_name: Option<String>,
 }
 
 static RUNNING: Lazy<Mutex<HashMap<String, Running>>> = Lazy::new(|| Mutex::new(HashMap::new()));
@@ -123,8 +121,6 @@ fn spawn_and_track(app: &AppHandle, appid: &str, command: &str, args: &[String],
         Running {
             pid,
             exe_path: exe_path.to_string(),
-            started_at,
-            game_name: game_name.clone(),
         },
     );
     app.emit(
@@ -214,13 +210,4 @@ fn kill_pid(pid: u32) {
             .spawn()
             .ok();
     }
-}
-
-pub fn running_game_names() -> Vec<(String, Option<String>, i64)> {
-    RUNNING
-        .lock()
-        .unwrap()
-        .iter()
-        .map(|(appid, r)| (appid.clone(), r.game_name.clone(), r.started_at))
-        .collect()
 }

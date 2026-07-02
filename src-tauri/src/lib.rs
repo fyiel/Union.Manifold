@@ -92,7 +92,6 @@ pub fn run() {
             let default_root = default_download_root(&paths.data_dir);
             let downloads = DownloadEngine::new(handle.clone(), settings.clone(), default_root, aria2);
             app.manage(AppState {
-                app: handle.clone(),
                 paths,
                 settings,
                 sources,

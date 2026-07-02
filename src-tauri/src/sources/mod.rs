@@ -15,7 +15,7 @@ use tauri::State;
 
 use crate::error::Result;
 use crate::state::AppState;
-use schema::{SourceGame, UnifiedGame};
+use schema::SourceGame;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -153,6 +153,7 @@ async fn adapter_detail(id: &str, slug: &str) -> Option<SourceGame> {
 
 async fn adapter_tags(id: &str) -> Vec<String> {
     match id {
+        "unioncrax" => adapters::unioncrax::list_tags().await,
         "ankergames" => adapters::ankergames::list_tags().await,
         "steamrip" => adapters::steamrip::list_tags().await,
         _ => Vec::new(),
@@ -333,5 +334,3 @@ pub fn sources_capabilities(state: State<'_, AppState>, source_ids: Option<Vec<S
     let ids = state.sources.active_ids(&source_ids);
     json!({ "ok": true, "capabilities": filters::capability_report(&ids, &state.sources) })
 }
-
-pub type UnifiedList = Vec<UnifiedGame>;

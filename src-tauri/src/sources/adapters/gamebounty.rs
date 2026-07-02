@@ -10,7 +10,7 @@ use crate::sources::cache::Cached;
 use crate::sources::hosts::{detect_host_type, is_resolvable};
 use crate::sources::parse::{collect_next_flight, find_object_by_key, find_steam_app_id};
 use crate::sources::schema::{self, DownloadOption, SourceGame};
-use crate::sources::{Capabilities, QueryParams, ResolveResult};
+use crate::sources::{Capabilities, QueryParams};
 
 const ID: &str = "gamebounty";
 const ORIGIN: &str = "https://gamebounty.world";
@@ -405,10 +405,3 @@ pub async fn get_detail(slug: &str) -> Option<SourceGame> {
     Some(parse_game_page(&text, &path))
 }
 
-pub async fn list_tags() -> Vec<String> {
-    Vec::new()
-}
-
-pub async fn resolve_download(_option: &DownloadOption) -> ResolveResult {
-    ResolveResult::default()
-}

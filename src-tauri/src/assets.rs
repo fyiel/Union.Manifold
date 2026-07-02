@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Manager};
 
 use crate::state::AppState;
 
@@ -112,5 +112,3 @@ pub fn assets_clear(app: AppHandle) -> Value {
     }
     json!({ "ok": true, "freed": freed })
 }
-
-pub fn assets_state(_state: State<'_, AppState>) {}

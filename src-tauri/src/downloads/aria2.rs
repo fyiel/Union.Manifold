@@ -183,16 +183,6 @@ impl Aria2Manager {
         self.rpc("aria2.removeDownloadResult", vec![json!(gid)]).await.ok();
     }
 
-    pub async fn set_max_overall_download_limit(&self, bps: u64) {
-        let v = if bps > 0 { bps.to_string() } else { "0".to_string() };
-        self.rpc(
-            "aria2.changeGlobalOption",
-            vec![json!({ "max-overall-download-limit": v })],
-        )
-        .await
-        .ok();
-    }
-
     pub async fn tell_status(&self, gid: &str) -> crate::error::Result<Value> {
         self.rpc(
             "aria2.tellStatus",

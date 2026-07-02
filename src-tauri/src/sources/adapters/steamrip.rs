@@ -13,7 +13,7 @@ use crate::sources::schema::{
     dedup_key_for, parse_size_to_bytes, to_epoch_ms, DownloadOption, SourceGame,
 };
 use crate::sources::steam;
-use crate::sources::{Capabilities, QueryParams, ResolveResult};
+use crate::sources::{Capabilities, QueryParams};
 
 const ID: &str = "steamrip";
 const ORIGIN: &str = "https://steamrip.com";
@@ -453,8 +453,4 @@ pub async fn list_tags() -> Vec<String> {
     let mut items: Vec<(String, i64)> = cats.by_id.values().cloned().collect();
     items.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
     items.into_iter().map(|(name, _)| name).collect()
-}
-
-pub async fn resolve_download(_option: &DownloadOption) -> ResolveResult {
-    ResolveResult::default()
 }
