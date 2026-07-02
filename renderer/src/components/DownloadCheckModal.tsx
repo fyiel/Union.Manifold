@@ -165,8 +165,6 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, aut
     onCheckingChange?.(Boolean(open && downloadToken && phase === "loading"))
   }, [open, downloadToken, phase, onCheckingChange])
 
-  // Storage precheck. Runs whenever the modal opens with a game so the
-  // user sees the verdict before clicking download.
   useEffect(() => {
     if (!open || !game) {
       setStorageCheck(null)

@@ -39,7 +39,7 @@ pub fn write_line(level: &str, message: &str) {
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn log(level: String, message: String, data: Option<Value>) {
     let extra = data.map(|d| format!(" {d}")).unwrap_or_default();
     write_line(&level, &format!("{message}{extra}"));

@@ -717,7 +717,7 @@ fn to_headers(v: Option<Value>) -> Option<HashMap<String, String>> {
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn download_start(state: State<'_, AppState>, payload: Value) -> Value {
     let req = DownloadRequest {
         appid: payload.get("appid").and_then(|v| v.as_str()).unwrap_or("").to_string(),
@@ -739,27 +739,27 @@ pub fn download_start(state: State<'_, AppState>, payload: Value) -> Value {
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn download_pause(state: State<'_, AppState>, download_id: String) -> Value {
     json!({ "ok": state.downloads.pause(&download_id) })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn download_resume(state: State<'_, AppState>, download_id: String) -> Value {
     json!({ "ok": state.downloads.resume(&download_id) })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn download_cancel(state: State<'_, AppState>, download_id: String) -> Value {
     state.downloads.cancel(&download_id, false)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn download_active_status(state: State<'_, AppState>, appid: String) -> Value {
     state.downloads.active_status(&appid)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn downloads_state_load(state: State<'_, AppState>) -> Value {
     let path = state.paths.downloads_state_file();
     let downloads = std::fs::read_to_string(&path)
@@ -769,7 +769,7 @@ pub fn downloads_state_load(state: State<'_, AppState>) -> Value {
     json!({ "ok": true, "downloads": downloads })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn downloads_state_save(state: State<'_, AppState>, downloads: Value) -> Value {
     let path = state.paths.downloads_state_file();
     let count = downloads.as_array().map(|a| a.len()).unwrap_or(0);
@@ -777,7 +777,7 @@ pub fn downloads_state_save(state: State<'_, AppState>, downloads: Value) -> Val
     json!({ "ok": true, "count": count })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn catalog_state_load(state: State<'_, AppState>) -> Value {
     let path = state.paths.catalog_state_file();
     std::fs::read_to_string(&path)
@@ -792,7 +792,7 @@ pub fn catalog_state_load(state: State<'_, AppState>) -> Value {
         .unwrap_or_else(|| json!({ "ok": true, "games": [], "stats": {}, "updatedAt": 0, "gamesUpdatedAt": 0, "statsUpdatedAt": 0 }))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn catalog_state_save(state: State<'_, AppState>, payload: Value) -> Value {
     let path = state.paths.catalog_state_file();
     let mut stored = payload.clone();
@@ -804,12 +804,12 @@ pub fn catalog_state_save(state: State<'_, AppState>, payload: Value) -> Value {
     json!({ "ok": true, "games": games, "updatedAt": now_ms() })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn download_path_get(state: State<'_, AppState>) -> Value {
     json!({ "path": state.download_root().to_string_lossy() })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn download_path_set(state: State<'_, AppState>, target_path: String) -> Value {
     state.settings.set("downloadPath", json!(target_path));
     json!({ "ok": true, "path": target_path })

@@ -41,7 +41,7 @@ fn human(bytes: u64) -> String {
     format!("{val:.1} {}", units[i])
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn storage_precheck(state: State<'_, AppState>, opts: Value) -> Value {
     let target = opts
         .get("targetPath")
@@ -72,7 +72,7 @@ pub fn storage_precheck(state: State<'_, AppState>, opts: Value) -> Value {
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn storage_summary(state: State<'_, AppState>, target_path: Option<String>) -> Value {
     let target = target_path.map(PathBuf::from).unwrap_or_else(|| state.download_root());
     let free = free_bytes(&target);
@@ -90,7 +90,7 @@ pub fn storage_summary(state: State<'_, AppState>, target_path: Option<String>) 
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn storage_snapshot() -> Value {
     json!({ "ok": true, "reservations": [] })
 }

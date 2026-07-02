@@ -370,7 +370,7 @@ pub fn find_installing(root: &Path, appid: &str) -> Option<(PathBuf, Value)> {
     None
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn delete_archive_files(payload: Value) -> Value {
     let paths = payload.get("archivePaths").and_then(|v| v.as_array()).cloned().unwrap_or_default();
     let mut deleted = 0;
