@@ -83,8 +83,6 @@ pub async fn network_test(base_url: Option<String>) -> Value {
 
 #[tauri::command]
 pub fn settings_export(state: tauri::State<'_, crate::state::AppState>) -> Value {
-    let all = state.settings.get("");
-    let _ = all;
     match std::fs::read_to_string(state.paths.settings_file()) {
         Ok(data) => json!({ "ok": true, "data": data }),
         Err(e) => json!({ "ok": false, "error": e.to_string() }),

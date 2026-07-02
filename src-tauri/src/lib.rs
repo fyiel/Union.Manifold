@@ -76,7 +76,12 @@ pub fn run() {
             let settings = Arc::new(SettingsStore::load(paths.settings_file()));
             let cacert = app.path().resource_dir().ok().map(|d| d.join("cacert.pem"));
             let aria2 = Arc::new(Aria2Manager::new(cacert));
-            let sources = Arc::new(Registry::new());
+            let disabled_sources: Vec<String> = settings
+                .get("disabledSources")
+                .as_array()
+                .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                .unwrap_or_default();
+            let sources = Arc::new(Registry::new(&disabled_sources));
             let default_root = default_download_root(&paths.data_dir);
             let downloads = DownloadEngine::new(handle.clone(), settings.clone(), default_root, aria2);
             app.manage(AppState {
@@ -121,7 +126,6 @@ pub fn run() {
             sources::sources_tags,
             sources::sources_capabilities,
             downloads::download_start,
-            downloads::download_smart_start,
             downloads::download_pause,
             downloads::download_resume,
             downloads::download_cancel,
@@ -193,7 +197,6 @@ pub fn run() {
             misc::settings_export,
             misc::settings_import,
             net::auth_fetch,
-            net::auth_upload,
         ])
         .build(tauri::generate_context!())
         .expect("error building union.manifold")
