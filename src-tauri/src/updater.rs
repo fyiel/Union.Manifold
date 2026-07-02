@@ -34,16 +34,6 @@ pub async fn check_for_updates(app: AppHandle) -> Value {
 }
 
 #[tauri::command]
-pub async fn get_update_status(app: AppHandle) -> Value {
-    check_for_updates(app).await
-}
-
-#[tauri::command]
-pub async fn update_retry(app: AppHandle) -> Value {
-    check_for_updates(app).await
-}
-
-#[tauri::command]
 pub async fn install_update(app: AppHandle) -> Value {
     let updater = match app.updater() {
         Ok(u) => u,
@@ -64,9 +54,4 @@ pub async fn install_update(app: AppHandle) -> Value {
 #[tauri::command]
 pub fn get_version(app: AppHandle) -> String {
     version(&app)
-}
-
-#[tauri::command]
-pub fn get_changelog() -> Value {
-    json!({ "ok": true, "markdown": "" })
 }

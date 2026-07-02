@@ -19,12 +19,10 @@ impl SettingsStore {
             .and_then(|s| serde_json::from_str::<Value>(&s).ok())
             .and_then(|v| v.as_object().cloned())
             .unwrap_or_default();
-        let store = Self {
+        Self {
             path,
             inner: Mutex::new(inner),
-        };
-        store.apply_defaults();
-        store
+        }
     }
 
     fn persist(&self, map: &Map<String, Value>) {
@@ -59,14 +57,6 @@ impl SettingsStore {
         self.get(key).as_str().map(|s| s.to_string())
     }
 
-    fn apply_defaults(&self) {
-        let mut map = self.inner.lock().unwrap();
-        let before = map.len();
-        map.entry("preventSleepDuringOperations".to_string()).or_insert(json!(true));
-        if map.len() != before {
-            self.persist(&map);
-        }
-    }
 }
 
 #[tauri::command]
@@ -77,6 +67,11 @@ pub fn setting_get(state: State<'_, AppState>, key: String) -> Value {
 #[tauri::command]
 pub fn setting_set(app: AppHandle, state: State<'_, AppState>, key: String, value: Value) -> Value {
     state.settings.set(&key, value.clone());
+    if key == "downloadBandwidthLimitKBps" {
+        let aria2 = state.downloads.aria2();
+        let kbps = value.as_u64().unwrap_or(0);
+        tauri::async_runtime::spawn(async move { aria2.set_bandwidth_limit(kbps).await });
+    }
     app.emit("uc:setting-changed", json!({ "key": key, "value": value }))
         .ok();
     json!({ "ok": true })

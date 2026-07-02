@@ -3,11 +3,7 @@ use std::sync::Mutex;
 
 use once_cell::sync::Lazy;
 use regex::Regex;
-use serde_json::{json, Value};
-use tauri::State;
-
-use crate::error::Result;
-use crate::state::AppState;
+use serde_json::Value;
 
 static LOG_PATH: Lazy<Mutex<Option<PathBuf>>> = Lazy::new(|| Mutex::new(None));
 static REDACT: Lazy<Vec<(Regex, &'static str)>> = Lazy::new(|| {
@@ -49,26 +45,3 @@ pub fn log(level: String, message: String, data: Option<Value>) {
     write_line(&level, &format!("{message}{extra}"));
 }
 
-#[tauri::command]
-pub fn logs_get() -> String {
-    let guard = LOG_PATH.lock().unwrap();
-    guard
-        .as_ref()
-        .and_then(|p| std::fs::read_to_string(p).ok())
-        .unwrap_or_default()
-}
-
-#[tauri::command]
-pub fn logs_clear() {
-    let guard = LOG_PATH.lock().unwrap();
-    if let Some(p) = guard.as_ref() {
-        std::fs::write(p, "").ok();
-    }
-}
-
-#[tauri::command]
-pub fn logs_open_folder(state: State<'_, AppState>) -> Result<Value> {
-    let dir = state.paths.logs_dir.clone();
-    crate::system::open_path_os(&dir)?;
-    Ok(json!({ "ok": true }))
-}

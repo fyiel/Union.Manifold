@@ -346,14 +346,9 @@ declare global {
       }) => Promise<{ ok: boolean; actualOffset?: number; error?: string }>
       showInFolder: (path: string) => Promise<{ ok: boolean }>
       openPath: (path: string) => Promise<{ ok: boolean }>
-      listDisks: () => Promise<
-        { id: string; name: string; path: string; totalBytes: number; freeBytes: number }[]
-      >
       getDownloadPath: () => Promise<{ path: string }>
       setDownloadPath: (targetPath: string) => Promise<{ ok: boolean; path?: string }>
       pickDownloadPath: () => Promise<{ ok: boolean; path?: string }>
-      getDownloadUsage: (targetPath?: string) => Promise<{ ok: boolean; sizeBytes: number; path: string }>
-      clearDownloadCache: () => Promise<{ ok: boolean; error?: string }>
       loadPersistedState: () => Promise<{ ok: boolean; downloads: any[]; error?: string }>
       savePersistedState: (downloads: any[]) => Promise<{ ok: boolean; count?: number; error?: string }>
       loadCatalogState: () => Promise<{ ok: boolean; games: any[]; stats: Record<string, { downloads: number; views: number }>; updatedAt: number; gamesUpdatedAt: number; statsUpdatedAt: number; error?: string }>
@@ -361,7 +356,6 @@ declare global {
       // Installed manifests written by the main process. Renderer can read/save installed metadata.
       listInstalled: () => Promise<any[]>
       getInstalled: (appid: string) => Promise<any | null>
-      listInstalledByAppid: (appid: string) => Promise<any[]>
       listInstalling: () => Promise<any[]>
       getInstalling: (appid: string) => Promise<any | null>
       listInstalledGlobal: () => Promise<any[]>
@@ -377,21 +371,17 @@ declare global {
         resolved?: { command: string; args: string[]; cwd: string } | null
       }>
       launchGameExecutable: (appid: string, exePath: string, gameName?: string, showGameName?: boolean) => Promise<{ ok: boolean; error?: string; pid?: number }>
-      getRunningGame: (appid: string) => Promise<{ ok: boolean; running: boolean; pid?: number; exePath?: string }>
       listRunningGameAppids: () => Promise<{ ok: boolean; appids: string[] }>
       quitGameExecutable: (appid: string) => Promise<{ ok: boolean; stopped?: boolean }>
       deleteInstalled: (appid: string) => Promise<{ ok: boolean }>
       deleteInstalling: (appid: string) => Promise<{ ok: boolean }>
-      createUpdateBackup: (appid: string) => Promise<{ ok: boolean; backupPath?: string; error?: string }>
       dismissInstalling: (appid: string) => Promise<{ ok: boolean; prompted?: boolean }>
       saveInstalledMetadata: (appid: string, metadata: any) => Promise<{ ok: boolean }>
       setInstallingStatus: (appid: string, status: string, error?: string | null) => Promise<{ ok: boolean }>
       getActiveStatus: (appid: string) => Promise<{ extracting: boolean; downloading: boolean }>
       createDesktopShortcut: (gameName: string, appid: string, exePath?: string) => Promise<{ ok: boolean; error?: string; existed?: boolean }>
       deleteDesktopShortcut: (gameName: string) => Promise<{ ok: boolean; error?: string }>
-      addExternalGame: (appid: string, metadata: any, gamePath: string) => Promise<{ ok: boolean; error?: string }>
       updateInstalledMetadata: (appid: string, updates: Record<string, any>) => Promise<{ ok: boolean; error?: string }>
-      pickExternalGameFolder: () => Promise<string | null>
       pickImage: () => Promise<string | null>
       pickArchiveFiles: () => Promise<{ ok: boolean; cancelled?: boolean; files?: { path: string; name: string; size: number }[]; error?: string }>
       installFromArchive: (payload: {
@@ -422,9 +412,6 @@ declare global {
       get: (key: string) => Promise<any>
       set: (key: string, value: any) => Promise<{ ok: boolean }>
       clearAll: () => Promise<{ ok: boolean; shortcutsRemoved?: number }>
-      exportSettings: () => Promise<{ ok: boolean; data?: string; error?: string }>
-      importSettings: () => Promise<{ ok: boolean; error?: string }>
-      runNetworkTest: (baseUrl?: string) => Promise<{ ok: boolean; results?: Array<{ label: string; url: string; ok: boolean; status: number; elapsedMs: number; error?: string }>; error?: string }>
       onChanged: (callback: (data: { key: string; value: any }) => void) => () => void
     }
     ucThemeEditor?: {
@@ -439,14 +426,7 @@ declare global {
     ucAuth?: {
       login: (baseUrl?: string, provider?: string) => Promise<{ ok: boolean; error?: string }>
       logout: (baseUrl?: string) => Promise<{ ok: boolean; error?: string }>
-      getSession: (baseUrl?: string) => Promise<{ ok: boolean; discordId?: string | null }>
       websiteLogin: (baseUrl?: string) => Promise<{ ok: boolean; user?: any; error?: string }>
-      emailLogin: (baseUrl: string, email: string, password: string) => Promise<{ ok: boolean; error?: string }>
-      register: (baseUrl: string, email: string, username: string, password: string) => Promise<{ ok: boolean; error?: string }>
-      forgotPassword: (baseUrl: string, email: string) => Promise<{ ok: boolean; error?: string }>
-      resetPassword: (baseUrl: string, token: string, password: string) => Promise<{ ok: boolean; error?: string }>
-      verifyEmail: (baseUrl: string, token: string) => Promise<{ ok: boolean; error?: string }>
-      getMe: (baseUrl: string) => Promise<{ ok: boolean; error?: string; user?: any }>
       linkProvider: (baseUrl: string, provider: string) => Promise<{ ok: boolean; error?: string }>
       unlinkProvider: (baseUrl: string, provider: string) => Promise<{ ok: boolean; error?: string }>
       updateProfile: (baseUrl: string, data: any) => Promise<{ ok: boolean; error?: string }>
@@ -477,107 +457,19 @@ declare global {
       }>
       installUpdate: () => Promise<{ ok: boolean; error?: string }>
       getVersion: () => Promise<string>
-      getChangelog: () => Promise<{ ok: boolean; markdown?: string; error?: string }>
-      getUpdateStatus: () => Promise<{
-        enabled: boolean
-        state: 'disabled' | 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'installing' | 'not-available' | 'error'
-        currentVersion: string
-        version?: string | null
-        available: boolean
-        downloaded: boolean
-        progress: number
-        error?: string | null
-        checkedAt?: number | null
-      }>
-      retryUpdate: () => Promise<{
-        enabled: boolean
-        state: 'disabled' | 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'installing' | 'not-available' | 'error'
-        currentVersion: string
-        version?: string | null
-        available: boolean
-        downloaded: boolean
-        progress: number
-        error?: string | null
-        checkedAt?: number | null
-      }>
-      onStatusChanged: (callback: (status: {
-        enabled: boolean
-        state: 'disabled' | 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'installing' | 'not-available' | 'error'
-        currentVersion: string
-        version?: string | null
-        available: boolean
-        downloaded: boolean
-        progress: number
-        error?: string | null
-        checkedAt?: number | null
-      }) => void) => () => void
     }
     ucLogs?: {
       log: (level: string, message: string, data?: any) => Promise<void>
-      getLogs: () => Promise<string>
-      clearLogs: () => Promise<void>
-      openLogsFolder: () => Promise<{ ok: boolean; error?: string }>
       shareLogs: (payload?: { baseUrl?: string }) => Promise<{ ok: boolean; error?: string; endpoint?: string; status?: number }>
-    }
-    ucRpc?: {
-      setActivity: (payload: {
-        details?: string
-        state?: string
-        startTimestamp?: number
-        endTimestamp?: number
-        largeImageKey?: string
-        largeImageText?: string
-        smallImageKey?: string
-        smallImageText?: string
-        buttons?: Array<{ label: string; url: string }>
-      }) => Promise<{ ok: boolean }>
-      clearActivity: () => Promise<{ ok: boolean }>
-      getStatus: () => Promise<{ ok: boolean; enabled: boolean; ready: boolean; clientId?: string | null }>
-    }
-    electron?: {
-      ipcRenderer: {
-        on: (channel: string, func: (...args: any[]) => void) => void
-        removeListener: (channel: string, func: (...args: any[]) => void) => void
-      }
     }
     ucLinux?: {
       detectProton: () => Promise<{ ok: boolean; versions: Array<{ label: string; path: string }>; autoApplied?: boolean; appliedVersion?: { label: string; path: string }; error?: string }>
-      detectWine: () => Promise<{ ok: boolean; versions: Array<{ label: string; path: string }>; error?: string }>
-      detectUmu: () => Promise<{ ok: boolean; found: boolean; path?: string; error?: string }>
-      runWinecfg: () => Promise<{ ok: boolean; pid?: number; error?: string }>
-      runWinetricks: (packages?: string[]) => Promise<{ ok: boolean; pid?: number; error?: string }>
-      runProtontricks: (appId?: string, packages?: string[]) => Promise<{ ok: boolean; pid?: number; error?: string }>
-      createPrefix: (prefixPath: string, arch?: '32' | '64' | 'win32' | 'win64') => Promise<{ ok: boolean; code?: number; stdout?: string; stderr?: string; error?: string }>
       pickPrefixDir: () => Promise<{ ok: boolean; path?: string; cancelled?: boolean; error?: string }>
       pickBinary: () => Promise<{ ok: boolean; path?: string; cancelled?: boolean; error?: string }>
-      pickSo: () => Promise<{ ok: boolean; path?: string; cancelled?: boolean; error?: string }>
-      checkTool: (toolName: string) => Promise<{ ok: boolean; available: boolean; path?: string; error?: string }>
-      getSteamPath: () => Promise<{ ok: boolean; path?: string; error?: string }>
       // Per-game Linux config
       getGameConfig: (appid: string) => Promise<{ ok: boolean; config: GameLinuxConfig; error?: string }>
       setGameConfig: (appid: string, config: GameLinuxConfig | null) => Promise<{ ok: boolean; error?: string }>
       // SLSteam
-      detectSLSSteam: () => Promise<{ ok: boolean; found: boolean; dir?: string | null; slsSteamPath?: string | null; slsInjectPath?: string | null; error?: string }>
-      slsSteamDownload: () => Promise<{ ok: boolean; error?: string }>
-      slsSteamSetupGame: (appid: string, steamAppId?: string) => Promise<{ ok: boolean; path?: string; steamAppId?: string; error?: string }>
-      slsSteamCheckGame: (appid: string) => Promise<{ ok: boolean; found: boolean; path?: string; steamAppId?: string; error?: string }>
-    }
-    ucVR?: {
-      detectSteamVR: () => Promise<{ ok: boolean; found: boolean; dir?: string | null; vrserver?: string | null; startup?: string | null; error?: string }>
-      detectOpenXR: () => Promise<{ ok: boolean; found: boolean; path?: string | null; error?: string }>
-      launchSteamVR: () => Promise<{ ok: boolean; method?: string; error?: string }>
-      pickRuntimeJson: () => Promise<{ ok: boolean; path?: string; cancelled?: boolean; error?: string }>
-      pickSteamVRDir: () => Promise<{ ok: boolean; path?: string; cancelled?: boolean; error?: string }>
-      getSettings: () => Promise<{
-        ok: boolean
-        vrEnabled?: boolean
-        vrSteamVrPath?: string
-        vrXrRuntimeJson?: string
-        vrSteamVrRuntime?: string
-        vrExtraEnv?: string
-        vrAutoLaunchSteamVr?: boolean
-        error?: string
-      }>
     }
     ucOverlay?: {
       show: (appid?: string) => Promise<{ ok: boolean; error?: string }>
@@ -743,24 +635,6 @@ declare global {
       summary: (targetPath?: string) => Promise<StorageSummaryResult>
       snapshot: () => Promise<{ ok: boolean; reservations?: Array<{ id: string; mountRoot: string; downloadBytes: number; extractBytes: number; status: string; createdAt: number }>; error?: string }>
     }
-    ucPlaytime?: {
-      localSummary: () => Promise<{
-        ok: boolean
-        summary?: {
-          totalSeconds: number
-          weekSeconds: number
-          sessionCount: number
-          pendingCount: number
-          topGames: Array<{ appid: string; gameName: string | null; totalSeconds: number; sessionCount: number; lastPlayedAt: string | null }>
-        }
-        error?: string
-      }>
-      pending: () => Promise<{ ok: boolean; sessions?: Array<{ id: string; appid: string; gameName: string | null; durationSeconds: number; startedAt: string; endedAt: string; sourceAppVersion?: string | null }>; error?: string }>
-      ack: (sessionIds: string[]) => Promise<{ ok: boolean; cleared?: number; remaining?: number; error?: string }>
-      flush: (baseUrl: string) => Promise<{ ok: boolean; uploaded?: number; remaining?: number; status?: number; error?: string }>
-      serverTotals: (baseUrl: string) => Promise<{ ok: boolean; totals?: { totalSeconds: number; weekSeconds: number; sessionCount: number; lastPlayedAt: string | null }; topGames?: Array<{ appid: string; gameName: string | null; totalSeconds: number; sessionCount: number; lastPlayedAt: string | null }>; error?: string }>
-      onSessionRecorded: (callback: (data: { session: { id: string; appid: string; gameName: string | null; durationSeconds: number; startedAt: string; endedAt: string }; totals?: { totalSeconds: number; sessionCount: number } | null }) => void) => () => void
-    }
     ucPresence?: {
       heartbeat: (
         baseUrl: string,
@@ -777,10 +651,6 @@ declare global {
       getMuted: () => Promise<{ ok: boolean; muted: boolean }>
       setMuted: (muted: boolean) => Promise<{ ok: boolean }>
       takeScreenshot: () => Promise<{ ok: boolean; path?: string }>
-      getScreenshotPath: () => Promise<{ ok: boolean; path: string }>
-      listScreenshots: () => Promise<{ ok: boolean; screenshots: Array<{ filename: string; path: string; size: number; takenAt: number }>; error?: string }>
-      deleteScreenshot: (filePath: string) => Promise<{ ok: boolean; error?: string }>
-      openScreenshot: (filePath: string) => Promise<{ ok: boolean; error?: string }>
       getNotifications: () => Promise<{ ok: boolean; notifications: SystemNotification[] }>
       onNotificationActivated: (callback: (data: { id: string }) => void) => () => void
     }
