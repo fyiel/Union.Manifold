@@ -8,14 +8,16 @@ What changed from the original:
 - the library page got a proper card menu, launch options and Linux Proton config
 - browse, search and filters all run through one query layer
 
-Everything the original did well is still here. I just reshaped it for how I actually use it.
+The desktop shell is now Tauri and Rust instead of Electron, so the whole backend is one lean Rust crate under `src-tauri`. The React front end is the same, it just talks to Rust over the Tauri bridge now.
 
 ### running it
+You need Rust, Node and pnpm, plus the usual Tauri Linux deps (webkit2gtk 4.1, librsvg, libappindicator).
 ```
 pnpm install
+pnpm fetch-sidecars
 pnpm dev
 ```
-`pnpm pack` builds a packaged app.
+`pnpm fetch-sidecars` grabs the aria2c and 7z binaries the app shells out to. `pnpm build` produces a packaged app.
 
 ### credit
 Built on [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3. Huge thanks to the original team, none of this exists without their work.
