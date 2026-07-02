@@ -146,6 +146,19 @@ pub fn installing_status_set(state: State<'_, AppState>, appid: String, status: 
     json!({ "ok": merge_into_manifest(&state.download_root(), &appid, &updates) })
 }
 
+fn remove_dir_unless_installed(root: &Path, appid: &str) {
+    if let Some(dir) = find_dir(root, appid) {
+        let installed = std::fs::read_to_string(dir.join(MANIFEST_NAME))
+            .ok()
+            .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+            .map(|v| status_of(&v) == "installed")
+            .unwrap_or(false);
+        if !installed {
+            std::fs::remove_dir_all(&dir).ok();
+        }
+    }
+}
+
 #[tauri::command(async)]
 pub fn installed_delete(state: State<'_, AppState>, appid: String) -> Value {
     if let Some(dir) = find_dir(&state.download_root(), &appid) {
@@ -156,17 +169,13 @@ pub fn installed_delete(state: State<'_, AppState>, appid: String) -> Value {
 
 #[tauri::command(async)]
 pub fn installing_delete(state: State<'_, AppState>, appid: String) -> Value {
-    if let Some(dir) = find_dir(&state.download_root(), &appid) {
-        std::fs::remove_dir_all(&dir).ok();
-    }
+    remove_dir_unless_installed(&state.download_root(), &appid);
     json!({ "ok": true })
 }
 
 #[tauri::command(async)]
 pub fn installing_dismiss(state: State<'_, AppState>, appid: String) -> Value {
-    if let Some(dir) = find_dir(&state.download_root(), &appid) {
-        std::fs::remove_dir_all(&dir).ok();
-    }
+    remove_dir_unless_installed(&state.download_root(), &appid);
     json!({ "ok": true, "prompted": false })
 }
 

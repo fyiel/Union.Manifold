@@ -15,7 +15,8 @@ static REDACT: Lazy<Vec<(Regex, &'static str)>> = Lazy::new(|| {
 });
 
 pub fn init(path: PathBuf) {
-    std::fs::write(&path, "").ok();
+    let prev = path.with_extension("prev.txt");
+    std::fs::rename(&path, &prev).ok();
     *LOG_PATH.lock().unwrap() = Some(path);
 }
 
