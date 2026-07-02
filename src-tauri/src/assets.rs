@@ -65,26 +65,6 @@ pub async fn respond(app: AppHandle, uri: String) -> (u16, Vec<u8>, String) {
     }
 }
 
-pub async fn respond_local(uri: String) -> (u16, Vec<u8>, String) {
-    let raw = uri
-        .strip_prefix("uc-local://")
-        .or_else(|| uri.strip_prefix("uc-local:/"))
-        .unwrap_or(&uri);
-    let decoded = percent_encoding::percent_decode_str(raw).decode_utf8_lossy().to_string();
-    let path = if cfg!(windows) {
-        decoded.replace('/', "\\")
-    } else {
-        format!("/{}", decoded.trim_start_matches('/'))
-    };
-    match std::fs::read(&path) {
-        Ok(bytes) => {
-            let ct = content_type_of(&bytes).to_string();
-            (200, bytes, ct)
-        }
-        Err(_) => (404, b"not found".to_vec(), "text/plain".to_string()),
-    }
-}
-
 #[tauri::command]
 pub fn assets_size(app: AppHandle) -> Value {
     let dir = cache_dir(&app);
