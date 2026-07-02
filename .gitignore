@@ -44,3 +44,5 @@ review-prompt.md
 FORK_PLAN.md
 ds-bundle/
 .design-sync/
+src-tauri/binaries/
+src-tauri/resources/cacert.pem

@@ -280,7 +280,7 @@ pub async fn sources_catalog(state: State<'_, AppState>, offset: Option<usize>, 
 }
 
 #[tauri::command]
-pub async fn sources_detail(state: State<'_, AppState>, sources: Vec<Value>) -> Result<Value> {
+pub async fn sources_detail(_state: State<'_, AppState>, sources: Vec<Value>) -> Result<Value> {
     let mut records: Vec<SourceGame> = Vec::new();
     for stub in &sources {
         let sid = stub.get("sourceId").and_then(|v| v.as_str()).unwrap_or("");
@@ -300,8 +300,7 @@ pub async fn sources_detail(state: State<'_, AppState>, sources: Vec<Value>) -> 
 }
 
 #[tauri::command]
-pub async fn sources_resolve(state: State<'_, AppState>, source_id: String, option: schema::DownloadOption) -> Result<Value> {
-    let _ = &state;
+pub async fn sources_resolve(_state: State<'_, AppState>, source_id: String, option: schema::DownloadOption) -> Result<Value> {
     let result = adapter_resolve(&source_id, &option).await;
     Ok(json!({ "ok": true, "result": result }))
 }
