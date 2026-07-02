@@ -5,7 +5,7 @@ import { useGamesData } from "@/hooks/use-games"
 import { useGameLaunch } from "@/context/game-launch-context"
 import { useDownloadsSelector } from "@/context/downloads-context"
 import { hasInstalledVersionUpdate, proxyImageUrl } from "@/lib/utils"
-import { rememberGames, rememberGameAs, getRememberedGame, resolveInstalledGame } from "@/lib/sources"
+import { rememberGames, rememberGameAs, getRememberedGame, resolveInstalledGame, getDownloadArt, hydrateDownloadArt } from "@/lib/sources"
 import { MONO, COVER_LINES, gbLabel, SearchIcon, CenterState } from "@/app/manifold/ui"
 import { GameMenu, LaunchOptionsDialog, EditDetailsDialog, LinuxConfigDialog, type MenuGame } from "@/app/manifold/library-overlays"
 
@@ -99,8 +99,8 @@ export function LibraryPage() {
 
   // Live download progress for the installing strip (appid → bytes/status).
   const progress = useDownloadsSelector(
-    (downloads) => downloads.map((d) => ({ appid: d.appid, status: d.status, received: d.receivedBytes, total: d.totalBytes, speed: d.speedBps })),
-    (a, b) => a.length === b.length && a.every((x, i) => x.appid === b[i].appid && x.status === b[i].status && x.received === b[i].received && x.total === b[i].total),
+    (downloads) => downloads.map((d) => ({ appid: d.appid, status: d.status, received: d.receivedBytes, total: d.totalBytes, speed: d.speedBps, extract: d.extractProgress ?? null })),
+    (a, b) => a.length === b.length && a.every((x, i) => x.appid === b[i].appid && x.status === b[i].status && x.received === b[i].received && x.total === b[i].total && x.extract === b[i].extract),
   )
 
   // Load installed + installing manifests + library meta.
@@ -108,6 +108,7 @@ export function LibraryPage() {
     let alive = true
     void (async () => {
       try {
+        await hydrateDownloadArt()
         const [value, gcValue] = await Promise.all([
           window.ucSettings?.get?.("libraryGameMeta"),
           window.ucSettings?.get?.(GAME_CACHE_KEY),
@@ -147,7 +148,7 @@ export function LibraryPage() {
         setInstalled(games)
         setInstallingMeta((installingList as any[]).map((e) => {
           const g = entryToLib(e, m)
-          return g ? { appid: g.appid, name: g.name, image: g.image, status: e?.installStatus } : null
+          return g ? { appid: g.appid, name: g.name, image: g.image || getDownloadArt(g.appid)?.image, status: e?.installStatus } : null
         }).filter(Boolean) as Array<{ appid: string; name: string; image?: string; status?: string }>)
       } finally {
         if (alive) setLoading(false)
@@ -245,19 +246,24 @@ export function LibraryPage() {
 
   // Installing items joined with live progress.
   const installing = useMemo(() => {
-    const byId = new Map<string, { received: number; total: number; status: string; speed: number }>()
+    const byId = new Map<string, { received: number; total: number; status: string; speed: number; extract: number | null }>()
     for (const p of progress) {
       if (!p.appid) continue
       const cur = byId.get(p.appid)
-      if (!cur || p.received > cur.received) byId.set(p.appid, { received: p.received, total: p.total, status: String(p.status), speed: p.speed })
+      if (!cur || p.received > cur.received) byId.set(p.appid, { received: p.received, total: p.total, status: String(p.status), speed: p.speed, extract: p.extract })
     }
     return installingMeta.map((g) => {
       const p = byId.get(g.appid)
-      const pct = p && p.total > 0 ? Math.min(100, Math.round((p.received / p.total) * 100)) : 0
+      const live = p?.status || g.status || "queued"
+      const extracting = live === "extracting" || live === "installing"
+      const done = ["completed", "extracted", "installed"].includes(live)
+      const pct = extracting
+        ? (typeof p?.extract === "number" ? Math.min(100, Math.max(0, Math.round(p.extract))) : 100)
+        : p && p.total > 0 ? Math.min(100, Math.round((p.received / p.total) * 100)) : 0
       const speed = p?.speed ? `${(p.speed / 1e6).toFixed(1)} MB/s` : ""
-      const status = p?.status === "extracting" ? "extracting" : p?.status === "downloading" ? `downloading${speed ? ` · ${speed}` : ""}` : g.status || (p?.status ?? "queued")
-      return { ...g, pct, status }
-    })
+      const status = extracting ? "extracting" : live === "downloading" ? `downloading${speed ? ` · ${speed}` : ""}` : live
+      return { ...g, pct, status, done }
+    }).filter((g) => !g.done)
   }, [installingMeta, progress])
 
   const showInstalling = installing.length > 0 && filter === "All" && !query.trim()
