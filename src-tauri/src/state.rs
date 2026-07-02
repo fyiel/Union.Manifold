@@ -1,14 +1,11 @@
 use std::sync::Arc;
 
-use tauri::AppHandle;
-
 use crate::downloads::DownloadEngine;
 use crate::paths::AppPaths;
 use crate::settings::SettingsStore;
 use crate::sources::Registry;
 
 pub struct AppState {
-    pub app: AppHandle,
     pub paths: Arc<AppPaths>,
     pub settings: Arc<SettingsStore>,
     pub sources: Arc<Registry>,

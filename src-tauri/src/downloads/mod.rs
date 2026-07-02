@@ -380,10 +380,6 @@ impl DownloadEngine {
         json!({ "ok": true, "status": "cancelled", "downloadId": id, "appid": appid })
     }
 
-    pub fn list(&self) -> Vec<Value> {
-        self.state.lock().unwrap().by_id.values().map(|d| d.payload()).collect()
-    }
-
     pub fn active_status(&self, appid: &str) -> Value {
         let st = self.state.lock().unwrap();
         let downloading = st
