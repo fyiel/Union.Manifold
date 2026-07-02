@@ -56,7 +56,6 @@ export function ArchiveInstallModal({ open, game, installMetadata, onInstalled, 
   const [progress, setProgress] = useState({ percent: 0, speedBps: 0, etaSeconds: null as number | null, status: "" })
   const [errorMsg, setErrorMsg] = useState("")
   const [dragOver, setDragOver] = useState(false)
-  const dropRef = useRef<HTMLDivElement>(null)
   const installedNotifiedRef = useRef(false)
   const resolvedName = installMetadata?.name?.trim() || game?.name || "archive"
   const resolvedMetadata = {
@@ -100,13 +99,10 @@ export function ArchiveInstallModal({ open, game, installMetadata, onInstalled, 
     const unsub = window.ucDownloads?.onUpdate?.((update) => {
       if (update.downloadId !== downloadId) return
       if (update.status === "extracting") {
-        const total = update.totalBytes || 1
-        const received = update.receivedBytes || 0
-        const rawPercent = Math.round((received / total) * 100)
         setProgress({
-          percent: Math.min(rawPercent, 99),
-          speedBps: update.speedBps || 0,
-          etaSeconds: update.etaSeconds ?? null,
+          percent: Math.min(update.extractProgress ?? 0, 99),
+          speedBps: 0,
+          etaSeconds: null,
           status: "Extracting...",
         })
       } else if (update.status === "extracted" || update.status === "completed") {
@@ -141,46 +137,30 @@ export function ArchiveInstallModal({ open, game, installMetadata, onInstalled, 
     }
   }, [mode])
 
-  const handleDrop = useCallback(
-    (e: React.DragEvent) => {
-      e.preventDefault()
-      e.stopPropagation()
-      setDragOver(false)
-
-      const droppedFiles: SelectedFile[] = []
-      const items = Array.from(e.dataTransfer.files)
-      for (const file of items) {
-        const filePath = (file as any).path as string | undefined
-        if (!filePath) continue
-        droppedFiles.push({ path: filePath, name: file.name, size: file.size })
-      }
-      if (droppedFiles.length === 0) return
-
-      if (mode === "single") {
-        setFiles([droppedFiles[0]])
-      } else {
-        setFiles((prev) => {
-          const existing = new Set(prev.map((f) => f.path))
-          const next = [...prev]
-          for (const f of droppedFiles) {
-            if (!existing.has(f.path)) next.push(f)
-          }
-          return next.sort((a, b) => a.name.localeCompare(b.name))
-        })
-      }
-    },
-    [mode]
-  )
-
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    setDragOver(true)
-  }
-  const handleDragLeave = (e: React.DragEvent) => {
-    e.preventDefault()
-    setDragOver(false)
-  }
+  useEffect(() => {
+    if (step !== "pick") return
+    const unsubs = [
+      window.ucDownloads?.onFileDragEnter?.(() => setDragOver(true)),
+      window.ucDownloads?.onFileDragLeave?.(() => setDragOver(false)),
+      window.ucDownloads?.onFileDrop?.(async ({ paths }) => {
+        setDragOver(false)
+        if (!paths?.length) return
+        const result = await window.ucDownloads?.statArchiveFiles?.(paths)
+        const droppedFiles = result?.files
+        if (!droppedFiles?.length) return
+        if (mode === "single") {
+          setFiles([droppedFiles[0]])
+        } else {
+          setFiles((prev) => {
+            const existing = new Set(prev.map((f) => f.path))
+            const next = [...prev, ...droppedFiles.filter((f) => !existing.has(f.path))]
+            return next.sort((a, b) => a.name.localeCompare(b.name))
+          })
+        }
+      }),
+    ]
+    return () => { unsubs.forEach((u) => u?.()) }
+  }, [step, mode])
 
   const removeFile = (path: string) => {
     setFiles((prev) => prev.filter((f) => f.path !== path))
@@ -322,10 +302,6 @@ export function ArchiveInstallModal({ open, game, installMetadata, onInstalled, 
 
             {/* Drop zone */}
             <div
-              ref={dropRef}
-              onDrop={handleDrop}
-              onDragOver={handleDragOver}
-              onDragLeave={handleDragLeave}
               className={`flex min-h-[120px] flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed transition-colors ${
                 dragOver
                   ? "border-white bg-white/10"
