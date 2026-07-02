@@ -72,9 +72,3 @@ pub async fn auth_fetch(base_url: String, path: String, init: Option<Value>) -> 
     let body = init.get("body").and_then(|v| v.as_str()).map(|s| s.as_bytes().to_vec());
     do_fetch(&join(&base_url, &path), &method, headers, body).await
 }
-
-#[tauri::command]
-pub async fn auth_upload(base_url: String, path: String, payload: Value) -> Value {
-    let method = payload.get("method").and_then(|v| v.as_str()).unwrap_or("POST").to_string();
-    do_fetch(&join(&base_url, &path), &method, HashMap::new(), None).await
-}
