@@ -65,19 +65,10 @@ impl SettingsStore {
 
     fn apply_defaults(&self) {
         let mut map = self.inner.lock().unwrap();
-        let mut changed = false;
-        let mut seed = |m: &mut Map<String, Value>, k: &str, v: Value| {
-            if !m.contains_key(k) {
-                m.insert(k.to_string(), v);
-            }
-        };
         let before = map.len();
-        seed(&mut map, "preventSleepDuringOperations", json!(true));
-        seed(&mut map, "autoShareErrorLogs", Value::Null);
+        map.entry("preventSleepDuringOperations".to_string()).or_insert(json!(true));
+        map.entry("autoShareErrorLogs".to_string()).or_insert(Value::Null);
         if map.len() != before {
-            changed = true;
-        }
-        if changed {
             self.persist(&map);
         }
     }

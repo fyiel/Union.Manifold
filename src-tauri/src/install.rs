@@ -157,10 +157,8 @@ pub async fn install_from_archive(state: State<'_, AppState>, app: AppHandle, pa
     std::fs::create_dir_all(&dir).ok();
     let primary = archive_paths[0].clone();
     emit_status(&app, &download_id, &appid, &game_name, "extracting", None);
-    let mut extracted = 0;
     match run_7z(&primary, &dir).await {
         Ok(_) => {
-            extracted = 1;
             finalize_installed(&dir, &appid, &game_name, &dir, metadata.as_ref());
             emit_status(&app, &download_id, &appid, &game_name, "extracted", None);
         }
@@ -169,7 +167,7 @@ pub async fn install_from_archive(state: State<'_, AppState>, app: AppHandle, pa
             return Ok(json!({ "ok": false, "error": e.to_string(), "downloadId": download_id }));
         }
     }
-    Ok(json!({ "ok": true, "downloadId": download_id, "extracted": extracted }))
+    Ok(json!({ "ok": true, "downloadId": download_id, "extracted": 1 }))
 }
 
 #[tauri::command]
