@@ -103,9 +103,6 @@ pub fn run() {
                     let wv = webview.inner();
                     if let Some(settings) = WebViewExt::settings(&wv) {
                         settings.set_enable_smooth_scrolling(true);
-                        settings.set_hardware_acceleration_policy(
-                            webkit2gtk::HardwareAccelerationPolicy::Always,
-                        );
                     }
                 })
                 .ok();
