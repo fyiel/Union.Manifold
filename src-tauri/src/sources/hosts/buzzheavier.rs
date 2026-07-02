@@ -120,6 +120,10 @@ pub async fn resolve(url: &str) -> ResolveResult {
         }
         let text = resp.text().await.unwrap_or_default();
 
+        if text.contains("Just a moment") || text.contains("challenge-platform") || text.contains("cf-browser-verification") {
+            return not_resolvable(url, Some("buzzheavier is behind a cloudflare check, opening in browser".to_string()));
+        }
+
         file_name = TITLE_RE
             .captures(&text)
             .and_then(|c| c.get(1))
