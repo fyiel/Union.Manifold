@@ -90,7 +90,7 @@ export function BrowsePage() {
       const nextGames = append ? mergeUnique(games, res.games) : res.games
       setGames(nextGames)
       offsetRef.current = startOffset + PAGE
-      setTotal(res.total)
+      setTotal(append && res.games.length === 0 ? nextGames.length : res.total)
       const counts: Record<string, number> = {}
       for (const g of nextGames) for (const s of g.sources) counts[s.sourceId] = (counts[s.sourceId] || 0) + 1
       setSourceCounts(counts)
