@@ -63,7 +63,6 @@ impl SettingsStore {
         let mut map = self.inner.lock().unwrap();
         let before = map.len();
         map.entry("preventSleepDuringOperations".to_string()).or_insert(json!(true));
-        map.entry("autoShareErrorLogs".to_string()).or_insert(Value::Null);
         if map.len() != before {
             self.persist(&map);
         }

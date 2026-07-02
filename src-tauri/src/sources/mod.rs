@@ -176,8 +176,12 @@ pub struct Registry {
 }
 
 impl Registry {
-    pub fn new() -> Self {
-        let enabled = SOURCES.iter().map(|s| s.id.to_string()).collect();
+    pub fn new(disabled: &[String]) -> Self {
+        let enabled = SOURCES
+            .iter()
+            .map(|s| s.id.to_string())
+            .filter(|id| !disabled.contains(id))
+            .collect();
         Registry {
             enabled: Mutex::new(enabled),
         }
@@ -243,6 +247,12 @@ pub fn sources_list(state: State<'_, AppState>) -> Value {
 #[tauri::command]
 pub fn sources_set_enabled(state: State<'_, AppState>, id: String, enabled: bool) -> Value {
     state.sources.set_enabled(&id, enabled);
+    let disabled: Vec<String> = SOURCES
+        .iter()
+        .map(|s| s.id.to_string())
+        .filter(|id| !state.sources.is_enabled(id))
+        .collect();
+    state.settings.set("disabledSources", json!(disabled));
     json!({ "ok": true })
 }
 
