@@ -18,6 +18,23 @@ fn is_archive(path: &Path) -> bool {
         || name.contains(".part01.")
 }
 
+fn sniff_archive(path: &Path) -> bool {
+    use std::io::Read;
+    let mut head = [0u8; 8];
+    let read = std::fs::File::open(path)
+        .and_then(|mut f| f.read(&mut head))
+        .unwrap_or(0);
+    let h = &head[..read];
+    h.starts_with(b"PK\x03\x04")
+        || h.starts_with(b"PK\x05\x06")
+        || h.starts_with(b"PK\x07\x08")
+        || h.starts_with(b"Rar!\x1a\x07")
+        || h.starts_with(b"7z\xbc\xaf\x27\x1c")
+        || h.starts_with(b"\x1f\x8b")
+        || h.starts_with(b"\xfd7zXZ\x00")
+        || h.starts_with(b"BZh")
+}
+
 fn is_first_part(name: &str) -> bool {
     name.contains(".part1.") || name.contains(".part01.") || name.ends_with(".001")
 }
@@ -207,7 +224,8 @@ fn finalize_installed(dir: &Path, appid: &str, game_name: &Option<String>, insta
 }
 
 pub async fn auto_install(app: AppHandle, appid: String, download_id: String, game_name: Option<String>, save_path: PathBuf, installing_dir: PathBuf) {
-    if !is_archive(&save_path) {
+    let archive = extract_entry_point(&installing_dir, &save_path);
+    if !is_archive(&archive) && !sniff_archive(&archive) {
         finalize_installed(&installing_dir, &appid, &game_name, &installing_dir, None);
         emit_status(&app, &download_id, &appid, &game_name, "extracted", None);
         return;
@@ -215,7 +233,6 @@ pub async fn auto_install(app: AppHandle, appid: String, download_id: String, ga
     let engine = app.state::<AppState>().downloads.clone();
     emit_status(&app, &download_id, &appid, &game_name, "extracting", None);
     engine.set_extracting(&appid, true);
-    let archive = extract_entry_point(&installing_dir, &save_path);
     let result = run_7z(&archive, &installing_dir, progress_emitter(&app, &download_id, &appid, &game_name)).await;
     engine.set_extracting(&appid, false);
     match result {
