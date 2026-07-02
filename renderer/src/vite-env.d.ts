@@ -214,67 +214,6 @@ declare global {
     reason?: string
   }
 
-  /** Canonical hardware/OS spec captured by the UC system profile scanner. */
-  type SystemProfile = {
-    version: number
-    capturedAt: string
-    scanDurationMs: number
-    fingerprint: string
-    spec: {
-      cpu: {
-        model: string | null
-        vendor: string | null
-        arch: string | null
-        cores: number | null
-        threads: number | null
-        baseClockMhz: number | null
-      }
-      gpus: Array<{
-        name: string | null
-        vendor: string
-        vramBytes: number | null
-        driverVersion: string | null
-        driverDate: string | null
-        videoProcessor?: string | null
-      }>
-      ram: {
-        totalBytes: number
-        modules: number | null
-        speedMhz: number | null
-        channels: string | null
-        type?: string | null
-        formFactor?: string | null
-      }
-      storage: {
-        drives: Array<{ model: string | null; sizeBytes: number | null; mediaType: string | null; interfaceType: string | null; busType?: string | null; serial?: string | null }>
-        volumes: Array<{ mount: string | null; sizeBytes: number | null; freeBytes: number | null; fs: string | null; mediaType?: string | null; busType?: string | null }>
-      }
-      os: {
-        platform: string
-        name: string
-        version: string
-        build: string | null
-        arch: string
-        locale: string | null
-      }
-      displays: Array<{ label: string | null; width: number | null; height: number | null; refreshHz: number | null }>
-      graphics: { directx: string | null; vulkan: string | null; opengl: string | null }
-    }
-  }
-
-  /** Per-surface visibility for the user's hardware profile. */
-  type SystemProfileVisibilityTier = 'off' | 'summary' | 'full'
-  type SystemProfileVisibility = {
-    comments: SystemProfileVisibilityTier
-    forums: SystemProfileVisibilityTier
-    profilePublic: SystemProfileVisibilityTier
-    sysreqCheck: 'off' | 'on'
-    /** When false, user is excluded from the playtime leaderboard and the
-     *  playtime card on their public profile. Sessions still record locally
-     *  and on the server, so flipping back on restores everything. */
-    shareGamePlaytime: boolean
-  }
-
   /** Pre-download storage reservation check result from window.ucStorage.precheck. */
   type StoragePrecheckResult = {
     ok: boolean
@@ -501,40 +440,6 @@ declare global {
         controllerId: string | null
         controllerName: string | null
         controllerType: string | null
-      }>
-    }
-    ucSystemProfile?: {
-      getCached: () => Promise<{ ok: boolean; profile: SystemProfile | null; error?: string }>
-      scan: (opts?: { force?: boolean }) => Promise<{ ok: boolean; profile?: SystemProfile; cached?: boolean; error?: string }>
-      summary: () => Promise<{ ok: boolean; summary?: string | null; fingerprint?: string; error?: string }>
-      clearCache: () => Promise<{ ok: boolean; error?: string }>
-      upload: (baseUrl?: string) => Promise<{ ok: boolean; status?: number; fingerprint?: string; summary?: string; error?: string }>
-      serverGetVisibility: (baseUrl?: string) => Promise<{ ok: boolean; status?: number; visibility?: { comments: 'off' | 'summary' | 'full'; forums: 'off' | 'summary' | 'full'; profilePublic: 'off' | 'summary' | 'full' } | null; error?: string }>
-      serverSetVisibility: (baseUrl: string | undefined, patch: Partial<{ comments: 'off' | 'summary' | 'full'; forums: 'off' | 'summary' | 'full'; profilePublic: 'off' | 'summary' | 'full'; shareGamePlaytime: boolean }>) => Promise<{ ok: boolean; status?: number; visibility?: { comments: 'off' | 'summary' | 'full'; forums: 'off' | 'summary' | 'full'; profilePublic: 'off' | 'summary' | 'full'; shareGamePlaytime?: boolean } | null; error?: string }>
-      serverDelete: (baseUrl?: string) => Promise<{ ok: boolean; status?: number; error?: string }>
-      // Multi-rig
-      listDevices: (baseUrl?: string) => Promise<{ ok: boolean; devices?: Array<{ fingerprint: string; deviceName: string | null; summary: string | null; sourceAppVersion: string | null; capturedAt: string; isActive: boolean }>; error?: string }>
-      renameDevice: (baseUrl: string | undefined, fingerprint: string, name: string | null) => Promise<{ ok: boolean; error?: string }>
-      deleteDevice: (baseUrl: string | undefined, fingerprint: string) => Promise<{ ok: boolean; error?: string }>
-      activateDevice: (baseUrl: string | undefined, fingerprint: string) => Promise<{ ok: boolean; fingerprint?: string; error?: string }>
-      upgradeSuggest: (baseUrl?: string) => Promise<{
-        ok: boolean
-        status?: number
-        reason?: string
-        error?: string
-        report?: {
-          considered: number
-          smoothCount: number
-          bottleneckedCount: number
-          unknownCount: number
-          primaryUnlockCount: number | null
-          bottlenecks: Array<{
-            component: 'cpu' | 'gpu' | 'ram' | 'storage' | 'directx'
-            gamesAffected: number
-            suggestion: string | null
-            examples: Array<{ appid: string; name: string | null }>
-          }>
-        } | null
       }>
     }
     ucStorage?: {

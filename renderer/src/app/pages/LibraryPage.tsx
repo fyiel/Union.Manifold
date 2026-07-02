@@ -305,15 +305,14 @@ export function LibraryPage() {
   const isFavorite = (appid: string) => (meta[appid]?.collections || []).some((c) => c.toLowerCase() === "favorites")
 
   const toggleFavorite = (appid: string) => {
-    setMeta((prev) => {
-      const cur = prev[appid] || {}
-      const cols = (cur.collections || []).filter((c) => c.toLowerCase() !== "favorites")
-      if (!isFavorite(appid)) cols.push("Favorites")
-      const next = { ...prev, [appid]: { ...cur, collections: cols } }
-      void window.ucSettings?.set?.("libraryGameMeta", next)
-      return next
-    })
-    setInstalled((prev) => prev.map((g) => g.appid !== appid ? g : { ...g, collections: isFavorite(appid) ? g.collections.filter((c) => c.toLowerCase() !== "favorites") : [...g.collections, "Favorites"] }))
+    const fav = isFavorite(appid)
+    const cur = meta[appid] || {}
+    const cols = (cur.collections || []).filter((c) => c.toLowerCase() !== "favorites")
+    if (!fav) cols.push("Favorites")
+    const next = { ...meta, [appid]: { ...cur, collections: cols } }
+    setMeta(next)
+    void window.ucSettings?.set?.("libraryGameMeta", next)
+    setInstalled((prev) => prev.map((g) => g.appid !== appid ? g : { ...g, collections: fav ? g.collections.filter((c) => c.toLowerCase() !== "favorites") : [...g.collections, "Favorites"] }))
   }
 
   const getSavedExe = async (appid: string): Promise<string | null> => {

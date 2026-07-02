@@ -151,7 +151,7 @@ export function AdvancedSearchPage() {
         const seen = new Set(prev.map((g) => g.dedupKey))
         return [...prev, ...res.games.filter((g) => !seen.has(g.dedupKey))]
       })
-      setTotal(res.total)
+      setTotal(res.games.length === 0 ? 0 : res.total)
       offsetRef.current += ADV_PAGE
     } finally {
       loadingMoreRef.current = false
