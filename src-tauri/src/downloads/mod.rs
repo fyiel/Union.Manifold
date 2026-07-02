@@ -12,19 +12,6 @@ use crate::state::AppState;
 use aria2::Aria2Manager;
 
 pub const MANIFEST_NAME: &str = "installed.json";
-const RESUME_EXT: &str = ".ucresume";
-const NON_ARCHIVE_EXTS: &[&str] = &[
-    ".jpg", ".jpeg", ".png", ".webp", ".avif", ".gif", ".svg", ".bmp", ".ico", ".mp4", ".webm",
-    ".mov", ".mkv", ".json", ".txt", ".md", ".log", ".html", ".htm", ".css", ".js", ".aria2",
-];
-const SIDECAR_STEMS: &[&str] = &[
-    "image",
-    "splash",
-    "hero-image",
-    "hero-animated",
-    "hero-logo",
-    "background-image",
-];
 
 pub fn safe_folder_name(name: &str) -> String {
     let cleaned: String = name
@@ -43,26 +30,6 @@ pub fn safe_folder_name(name: &str) -> String {
     } else {
         trimmed.to_string()
     }
-}
-
-fn is_sidecar(name: &str) -> bool {
-    let lower = name.to_lowercase();
-    if lower == MANIFEST_NAME {
-        return true;
-    }
-    if lower == "screenshots" {
-        return true;
-    }
-    let (stem, ext) = match lower.rfind('.') {
-        Some(d) => (&lower[..d], &lower[d..]),
-        None => (lower.as_str(), ""),
-    };
-    for s in SIDECAR_STEMS {
-        if stem == *s || stem.starts_with(&format!("{s}-")) || stem.starts_with(&format!("{s}@")) {
-            return true;
-        }
-    }
-    NON_ARCHIVE_EXTS.contains(&ext)
 }
 
 #[derive(Clone)]
@@ -117,6 +84,7 @@ pub struct DownloadEngine {
     default_root: PathBuf,
     aria2: Arc<Aria2Manager>,
     state: Mutex<EngineState>,
+    extracting: Mutex<std::collections::HashSet<String>>,
 }
 
 impl DownloadEngine {
@@ -127,6 +95,7 @@ impl DownloadEngine {
             default_root,
             aria2,
             state: Mutex::new(EngineState::default()),
+            extracting: Mutex::new(Default::default()),
         });
         let poll = engine.clone();
         tauri::async_runtime::spawn(async move {
@@ -188,44 +157,16 @@ impl DownloadEngine {
         format!("{}.archive", safe_folder_name(appid))
     }
 
-    fn find_partial(&self, dl: &Download) -> Option<(PathBuf, u64)> {
-        for cand in [
-            dl.save_path.clone(),
-            PathBuf::from(format!("{}.crdownload", dl.save_path.display())),
-            PathBuf::from(format!("{}{}", dl.save_path.display(), RESUME_EXT)),
-        ] {
-            if let Ok(meta) = std::fs::metadata(&cand) {
-                if meta.is_file() && meta.len() > 0 {
-                    return Some((cand, meta.len()));
-                }
-            }
-        }
-        let mut best: Option<(PathBuf, u64)> = None;
-        if let Ok(entries) = std::fs::read_dir(&dl.installing_dir) {
-            for entry in entries.flatten() {
-                let name = entry.file_name().to_string_lossy().to_string();
-                if is_sidecar(&name) {
-                    continue;
-                }
-                if let Ok(meta) = entry.metadata() {
-                    if meta.is_file() && meta.len() > 0 {
-                        if best.as_ref().map(|(_, s)| meta.len() > *s).unwrap_or(true) {
-                            best = Some((entry.path(), meta.len()));
-                        }
-                    }
-                }
-            }
-        }
-        best
-    }
-
     pub fn enqueue(self: &Arc<Self>, appid: String, game_name: Option<String>, url: String, filename: Option<String>, total_bytes: u64, id: String, headers: Option<HashMap<String, String>>) -> Result<String> {
         if appid.is_empty() {
             return Err(AppError::msg("appid required"));
         }
         let mut st = self.state.lock().unwrap();
-        if st.by_id.contains_key(&id) {
-            return Ok(id);
+        if let Some(existing) = st.by_id.get(&id) {
+            if !matches!(existing.status.as_str(), "failed" | "cancelled" | "completed") {
+                return Ok(id);
+            }
+            st.queue.retain(|x| x != &id);
         }
         let dir = self.installing_dir(&game_name, &appid);
         let fname = self.resolve_filename(&dir, &filename, &url, &appid);
@@ -247,15 +188,8 @@ impl DownloadEngine {
             error: None,
             gid: None,
         };
-        if let Some((path, size)) = self.find_partial(&dl) {
-            if path != dl.save_path {
-                std::fs::rename(&path, &dl.save_path).ok();
-            }
-            if let Ok(meta) = std::fs::metadata(&dl.save_path) {
-                dl.received_bytes = meta.len();
-            } else {
-                dl.received_bytes = size;
-            }
+        if let Ok(meta) = std::fs::metadata(&dl.save_path) {
+            dl.received_bytes = meta.len();
         }
         st.queue.push(id.clone());
         self.emit(&dl);
@@ -372,7 +306,7 @@ impl DownloadEngine {
             });
         }
         if !keep_file {
-            for suffix in ["", ".crdownload", RESUME_EXT, ".aria2"] {
+            for suffix in ["", ".aria2"] {
                 let p = PathBuf::from(format!("{}{}", save_path.display(), suffix));
                 std::fs::remove_file(&p).ok();
             }
@@ -381,13 +315,23 @@ impl DownloadEngine {
         json!({ "ok": true, "status": "cancelled", "downloadId": id, "appid": appid })
     }
 
+    pub fn set_extracting(&self, appid: &str, on: bool) {
+        let mut ex = self.extracting.lock().unwrap();
+        if on {
+            ex.insert(appid.to_string());
+        } else {
+            ex.remove(appid);
+        }
+    }
+
     pub fn active_status(&self, appid: &str) -> Value {
+        let extracting = self.extracting.lock().unwrap().contains(appid);
         let st = self.state.lock().unwrap();
         let downloading = st
             .by_id
             .values()
             .any(|d| d.appid == appid && (d.status == "downloading" || d.status == "queued"));
-        json!({ "extracting": false, "downloading": downloading })
+        json!({ "extracting": extracting, "downloading": downloading })
     }
 
     fn maybe_start_next(self: &Arc<Self>) {
@@ -423,11 +367,6 @@ impl DownloadEngine {
             Some(d) => d,
             None => return,
         };
-        if let Some((path, _)) = self.find_partial(&dl) {
-            if path != dl.save_path {
-                std::fs::rename(&path, &dl.save_path).ok();
-            }
-        }
         let offset = std::fs::metadata(&dl.save_path).map(|m| m.len()).unwrap_or(0);
         if offset > 0 && dl.total_bytes > 0 && offset >= dl.total_bytes {
             dl.received_bytes = offset;
@@ -564,17 +503,23 @@ impl DownloadEngine {
                         let mut st = self.state.lock().unwrap();
                         match st.by_id.get_mut(&id) {
                             Some(dl) if !(dl.status == "paused" && s != "paused") => {
-                                if total > 0 {
-                                    dl.total_bytes = total;
+                                let status = if s == "paused" { "paused" } else { "downloading" };
+                                let speed = if s == "paused" { 0 } else { speed };
+                                if dl.status == status && dl.received_bytes == completed && dl.speed_bps == speed {
+                                    None
+                                } else {
+                                    if total > 0 {
+                                        dl.total_bytes = total;
+                                    }
+                                    if completed > 0 {
+                                        dl.received_bytes = completed;
+                                    }
+                                    dl.status = status.to_string();
+                                    dl.speed_bps = speed;
+                                    let remaining = total.saturating_sub(completed);
+                                    dl.eta_seconds = if speed > 0 && remaining > 0 { Some(remaining / speed) } else { None };
+                                    Some(dl.clone())
                                 }
-                                if completed > 0 {
-                                    dl.received_bytes = completed;
-                                }
-                                dl.status = if s == "paused" { "paused".to_string() } else { "downloading".to_string() };
-                                dl.speed_bps = if s == "paused" { 0 } else { speed };
-                                let remaining = total.saturating_sub(completed);
-                                dl.eta_seconds = if speed > 0 && remaining > 0 { Some(remaining / speed) } else { None };
-                                Some(dl.clone())
                             }
                             _ => None,
                         }
@@ -611,7 +556,6 @@ impl DownloadEngine {
             }
             snap
         };
-        std::fs::remove_file(format!("{}{}", snap.save_path.display(), RESUME_EXT)).ok();
         self.emit(&snap);
         write_manifest(&snap);
         self.maybe_start_next();
@@ -631,6 +575,15 @@ impl DownloadEngine {
     }
 
     async fn on_complete(self: &Arc<Self>, dl: Download) {
+        let pending = {
+            let st = self.state.lock().unwrap();
+            st.by_id.values().any(|d| {
+                d.appid == dl.appid && d.id != dl.id && !matches!(d.status.as_str(), "completed" | "cancelled")
+            })
+        };
+        if pending {
+            return;
+        }
         crate::install::auto_install(
             self.app.clone(),
             dl.appid,
@@ -721,20 +674,6 @@ pub fn download_start(state: State<'_, AppState>, payload: Value) -> Value {
     let total = payload.get("totalBytes").and_then(|v| v.as_u64()).unwrap_or(0);
     let headers = to_headers(payload.get("headers").cloned());
     match state.downloads.enqueue(appid, game_name, url, filename, total, id, headers) {
-        Ok(_) => json!({ "ok": true }),
-        Err(e) => json!({ "ok": false, "error": e.to_string() }),
-    }
-}
-
-#[tauri::command]
-pub fn download_smart_start(state: State<'_, AppState>, payload: Value) -> Value {
-    let appid = payload.get("appid").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let id = payload.get("downloadId").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let url = payload.get("url").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let filename = payload.get("filename").and_then(|v| v.as_str()).map(String::from);
-    let game_name = payload.get("gameName").and_then(|v| v.as_str()).map(String::from);
-    let total = payload.get("totalBytes").and_then(|v| v.as_u64()).unwrap_or(0);
-    match state.downloads.enqueue(appid, game_name, url, filename, total, id, None) {
         Ok(_) => json!({ "ok": true }),
         Err(e) => json!({ "ok": false, "error": e.to_string() }),
     }
