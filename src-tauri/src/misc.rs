@@ -17,7 +17,7 @@ pub async fn theme_editor_open(app: AppHandle, seed: Value) -> bool {
     match built {
         Ok(window) => {
             let seed = seed.clone();
-            tokio::spawn(async move {
+            tauri::async_runtime::spawn(async move {
                 for _ in 0..6 {
                     tokio::time::sleep(std::time::Duration::from_millis(250)).await;
                     window.emit("uc:theme-editor-seed", seed.clone()).ok();
