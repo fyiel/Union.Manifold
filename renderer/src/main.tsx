@@ -1,9 +1,12 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
+import { installBridge } from './lib/bridge'
 import './fonts.css'
 import App from './app/App'
 import './globals.css'
 import './manifold.css'
+
+installBridge()
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
