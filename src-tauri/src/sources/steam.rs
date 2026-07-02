@@ -98,10 +98,12 @@ pub async fn get_store_details(appid: u64) -> Option<StoreDetails> {
                                 "id": m.get("id").and_then(|v| v.as_u64()).unwrap_or(0),
                                 "name": str_of(m.get("name")),
                                 "thumbnail": str_of(m.get("thumbnail")),
-                                "mp4": str_of(
-                                    m.get("mp4")
-                                        .and_then(|v| v.get("max").or_else(|| v.get("480")))
-                                ),
+                                "mp4": {
+                                    let nested = m.get("mp4").and_then(|v| v.get("max").or_else(|| v.get("480"))).and_then(|v| v.as_str());
+                                    let hls = m.get("hls_h264").and_then(|v| v.as_str());
+                                    let dash = m.get("dash_h264").and_then(|v| v.as_str());
+                                    nested.or(hls).or(dash).unwrap_or("").to_string()
+                                },
                                 "webm": str_of(
                                     m.get("webm")
                                         .and_then(|v| v.get("max").or_else(|| v.get("480")))
