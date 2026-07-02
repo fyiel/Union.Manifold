@@ -364,10 +364,8 @@ pub fn capabilities() -> Capabilities {
 
 pub async fn query(params: &QueryParams) -> Vec<SourceGame> {
     let slugs = all_slugs().await;
-    let len = slugs.len();
-    let start = params.offset.min(len);
-    let end = (params.offset + params.limit).min(len);
-    let window: Vec<String> = slugs[start..end].to_vec();
+    let end = (params.offset + params.limit).min(slugs.len());
+    let window: Vec<String> = slugs[..end].to_vec();
     http::map_limit(window, 8, |slug| async move { get_detail(&slug).await }).await
 }
 

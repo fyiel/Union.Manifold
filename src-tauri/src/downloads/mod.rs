@@ -1,6 +1,6 @@
 pub mod aria2;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -109,7 +109,6 @@ struct EngineState {
     queue: Vec<String>,
     active: Option<String>,
     gid_to_id: HashMap<String, String>,
-    cancelled: HashSet<String>,
 }
 
 pub struct DownloadEngine {
@@ -334,6 +333,9 @@ impl DownloadEngine {
         if !st.queue.contains(&id.to_string()) {
             st.queue.insert(0, id.to_string());
         }
+        if st.active.as_deref() == Some(id) {
+            st.active = None;
+        }
         self.emit(&snap);
         drop(st);
         self.maybe_start_next();
@@ -342,7 +344,6 @@ impl DownloadEngine {
 
     pub fn cancel(self: &Arc<Self>, id: &str, keep_file: bool) -> Value {
         let mut st = self.state.lock().unwrap();
-        st.cancelled.insert(id.to_string());
         let (gid, save_path, appid, snap) = match st.by_id.get_mut(id) {
             Some(dl) => {
                 let gid = dl.gid.take();
@@ -434,6 +435,13 @@ impl DownloadEngine {
             self.commit(&dl);
             self.emit(&dl);
             write_manifest(&dl);
+            {
+                let mut st = self.state.lock().unwrap();
+                if st.active.as_deref() == Some(&id) {
+                    st.active = None;
+                }
+            }
+            self.maybe_start_next();
             self.on_complete(dl).await;
             return;
         }
@@ -464,10 +472,23 @@ impl DownloadEngine {
         }
         match self.aria2.add_uri(&dl.url, options).await {
             Ok(gid) => {
-                let mut st = self.state.lock().unwrap();
-                st.gid_to_id.insert(gid.clone(), id.clone());
-                if let Some(d) = st.by_id.get_mut(&id) {
-                    d.gid = Some(gid);
+                let keep = {
+                    let mut st = self.state.lock().unwrap();
+                    match st.by_id.get_mut(&id) {
+                        Some(d) if d.status != "cancelled" => {
+                            d.gid = Some(gid.clone());
+                            st.gid_to_id.insert(gid.clone(), id.clone());
+                            true
+                        }
+                        _ => false,
+                    }
+                };
+                if !keep {
+                    let aria2 = self.aria2.clone();
+                    tauri::async_runtime::spawn(async move {
+                        aria2.force_remove(&gid).await;
+                        aria2.remove_download_result(&gid).await;
+                    });
                 }
             }
             Err(e) => self.fail(&id, &format!("aria2 download failed: {e}")),
@@ -541,19 +562,22 @@ impl DownloadEngine {
                 _ => {
                     let snap = {
                         let mut st = self.state.lock().unwrap();
-                        st.by_id.get_mut(&id).map(|dl| {
-                            if total > 0 {
-                                dl.total_bytes = total;
+                        match st.by_id.get_mut(&id) {
+                            Some(dl) if !(dl.status == "paused" && s != "paused") => {
+                                if total > 0 {
+                                    dl.total_bytes = total;
+                                }
+                                if completed > 0 {
+                                    dl.received_bytes = completed;
+                                }
+                                dl.status = if s == "paused" { "paused".to_string() } else { "downloading".to_string() };
+                                dl.speed_bps = if s == "paused" { 0 } else { speed };
+                                let remaining = total.saturating_sub(completed);
+                                dl.eta_seconds = if speed > 0 && remaining > 0 { Some(remaining / speed) } else { None };
+                                Some(dl.clone())
                             }
-                            if completed > 0 {
-                                dl.received_bytes = completed;
-                            }
-                            dl.status = if s == "paused" { "paused".to_string() } else { "downloading".to_string() };
-                            dl.speed_bps = if s == "paused" { 0 } else { speed };
-                            let remaining = total.saturating_sub(completed);
-                            dl.eta_seconds = if speed > 0 && remaining > 0 { Some(remaining / speed) } else { None };
-                            dl.clone()
-                        })
+                            _ => None,
+                        }
                     };
                     if let Some(dl) = snap {
                         self.emit(&dl);
@@ -662,9 +686,13 @@ fn write_manifest(dl: &Download) {
             "updatedAt": now_ms(),
         }),
     );
+    write_manifest_atomic(&path, &Value::Object(manifest));
+}
+
+pub fn write_manifest_atomic(path: &Path, manifest: &Value) {
     let tmp = path.with_extension("json.tmp");
-    if std::fs::write(&tmp, serde_json::to_string_pretty(&manifest).unwrap_or_default()).is_ok() {
-        std::fs::rename(&tmp, &path).ok();
+    if std::fs::write(&tmp, serde_json::to_string_pretty(manifest).unwrap_or_default()).is_ok() {
+        std::fs::rename(&tmp, path).ok();
     }
 }
 
