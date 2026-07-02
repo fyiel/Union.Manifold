@@ -82,7 +82,7 @@ pub async fn pick_archive_files(app: AppHandle) -> Value {
     json!({ "ok": true, "files": file_entries(&files) })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn archive_files_stat(paths: Vec<String>) -> Value {
     json!({ "ok": true, "files": file_entries(&paths) })
 }

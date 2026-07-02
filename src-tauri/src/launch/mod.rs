@@ -44,7 +44,7 @@ fn is_executable_candidate(path: &Path) -> bool {
     false
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn game_exe_list(state: State<'_, AppState>, appid: String) -> Value {
     let dir = match install_dir_for(&state, &appid) {
         Some(d) => d,
@@ -74,7 +74,7 @@ pub fn game_exe_list(state: State<'_, AppState>, appid: String) -> Value {
     json!({ "ok": true, "folder": dir.to_string_lossy(), "exes": exes })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn game_subfolder_find(folder: String) -> Value {
     let path = Path::new(&folder);
     let entries: Vec<PathBuf> = std::fs::read_dir(path)
@@ -86,7 +86,7 @@ pub fn game_subfolder_find(folder: String) -> Value {
     Value::Null
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn game_exe_preflight(state: State<'_, AppState>, appid: String, exe_path: String) -> Value {
     let mut checks = Vec::new();
     let exists = Path::new(&exe_path).is_file();
@@ -141,7 +141,7 @@ fn spawn_and_track(app: &AppHandle, appid: &str, command: &str, args: &[String],
     Ok(pid)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn game_exe_launch(state: State<'_, AppState>, app: AppHandle, appid: String, exe_path: String, game_name: Option<String>, _show_game_name: Option<bool>) -> Value {
     if !Path::new(&exe_path).is_file() {
         return json!({ "ok": false, "error": "executable not found" });
@@ -157,14 +157,14 @@ pub fn game_exe_launch(state: State<'_, AppState>, app: AppHandle, appid: String
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn game_exe_running_list() -> Value {
     let running = RUNNING.lock().unwrap();
     let appids: Vec<String> = running.keys().cloned().collect();
     json!({ "ok": true, "appids": appids })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn game_exe_quit(appid: String) -> Value {
     let pid = RUNNING.lock().unwrap().get(&appid).copied();
     if let Some(pid) = pid {

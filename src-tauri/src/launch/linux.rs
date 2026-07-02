@@ -124,19 +124,19 @@ fn steam_root() -> Option<String> {
     None
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn game_linux_config_get(state: State<'_, AppState>, appid: String) -> Value {
     let config = config_for(&state, &appid);
     json!({ "ok": true, "config": if config.is_null() { json!({}) } else { config } })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn game_linux_config_set(state: State<'_, AppState>, appid: String, config: Value) -> Value {
     state.settings.set(&format!("gameLinux:{appid}"), config);
     json!({ "ok": true })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn linux_detect_proton() -> Value {
     let mut versions = Vec::new();
     if let Some(steam) = steam_root() {
