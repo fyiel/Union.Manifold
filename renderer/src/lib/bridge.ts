@@ -211,78 +211,14 @@ export function installBridge(): void {
   }
 
   w.ucController = {
-    getSettings: () =>
-      Promise.resolve({
-        ok: true,
-        settings: {
-          enabled: false,
-          controllerType: "generic",
-          vibrationEnabled: false,
-          deadzone: 0.2,
-          triggerDeadzone: 0.2,
-          buttonLayout: "default",
-        },
-      }),
-    setSettings: () => Promise.resolve({ ok: true }),
-    getConnected: () =>
-      Promise.resolve({ connected: false, controllerId: null, controllerName: null, controllerType: null }),
-    getAvailable: () => Promise.resolve({ ok: true, controllers: [] }),
-    getProfiles: () => Promise.resolve({ ok: true, profiles: [] }),
-    getActiveProfile: () => Promise.resolve({ ok: true, profile: null }),
-    getActiveMapping: () => Promise.resolve({ ok: true, mapping: null }),
-    getMappingPresets: () => Promise.resolve({ ok: true, presets: [] }),
-    getOverlaySettings: () => Promise.resolve({ ok: true }),
-    setOverlaySettings: () => Promise.resolve({ ok: true }),
-    createProfile: () => Promise.resolve({ ok: true }),
-    updateProfile: () => Promise.resolve({ ok: true }),
-    deleteProfile: () => Promise.resolve({ ok: true }),
-    setActiveProfile: () => Promise.resolve({ ok: true }),
-    setActiveMapping: () => Promise.resolve({ ok: true }),
-    setSlot: () => Promise.resolve({ ok: true }),
-    rumble: () => Promise.resolve({ ok: true }),
-    onInput: noop,
-    onControllerConnected: noop,
-    onControllerDisconnected: noop,
-  }
-
-  w.ucOverlay = {
-    show: () => Promise.resolve({ ok: false }),
-    hide: () => Promise.resolve({ ok: false }),
-    toggle: () => Promise.resolve({ ok: false, visible: false }),
-    getStatus: () =>
-      Promise.resolve({
-        ok: true,
-        enabled: false,
-        visible: false,
-        hotkey: "",
-        autoShow: false,
-        position: "right",
-        toastDurationMs: 0,
-        toastVertical: "bottom",
-        currentAppid: null,
-      }),
-    getSettings: () =>
-      Promise.resolve({
-        ok: true,
-        enabled: false,
-        hotkey: "",
-        autoShow: false,
-        position: "right",
-        toastDurationMs: 0,
-        toastVertical: "bottom",
-      }),
-    getDiagnostics: () => Promise.resolve({ ok: true }),
-    setSettings: () => Promise.resolve({ ok: true }),
-    getGameInfo: () => Promise.resolve({ ok: false }),
-    getRunningGames: () => Promise.resolve({ ok: true, games: [] }),
-    getDownloads: () => Promise.resolve({ ok: true, downloads: [] }),
-    pauseDownload: (downloadId: string) => call("download_pause", { downloadId }),
-    resumeDownload: (downloadId: string) => call("download_resume", { downloadId }),
-    onShow: noop,
-    onHide: noop,
-    onStateChanged: noop,
-    onPositionChanged: noop,
-    onDownloadUpdate: (cb: Cb) => on("uc:download-update", cb),
+    getSettings: async () => {
+      const settings = await call("setting_get", { key: "controllerSettings" })
+      return { ok: true, settings: settings ?? undefined }
+    },
+    setSettings: async (settings: any) => {
+      await call("setting_set", { key: "controllerSettings", value: settings })
+      return { ok: true }
+    },
   }
 
   w.ucSystemProfile = {
