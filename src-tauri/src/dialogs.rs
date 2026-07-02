@@ -59,13 +59,8 @@ pub async fn browse_for_game_exe(app: AppHandle, _default_path: Option<String>) 
     }
 }
 
-#[tauri::command]
-pub async fn pick_archive_files(app: AppHandle) -> Value {
-    let files = pick_files(app, &["zip", "rar", "7z", "001", "part1", "tar", "gz"]).await;
-    if files.is_empty() {
-        return json!({ "ok": false, "cancelled": true });
-    }
-    let entries: Vec<Value> = files
+fn file_entries(files: &[String]) -> Vec<Value> {
+    files
         .iter()
         .map(|p| {
             let path = std::path::Path::new(p);
@@ -75,8 +70,21 @@ pub async fn pick_archive_files(app: AppHandle) -> Value {
                 "size": std::fs::metadata(path).map(|m| m.len()).unwrap_or(0),
             })
         })
-        .collect();
-    json!({ "ok": true, "files": entries })
+        .collect()
+}
+
+#[tauri::command]
+pub async fn pick_archive_files(app: AppHandle) -> Value {
+    let files = pick_files(app, &["zip", "rar", "7z", "001", "part1", "tar", "gz"]).await;
+    if files.is_empty() {
+        return json!({ "ok": false, "cancelled": true });
+    }
+    json!({ "ok": true, "files": file_entries(&files) })
+}
+
+#[tauri::command]
+pub fn archive_files_stat(paths: Vec<String>) -> Value {
+    json!({ "ok": true, "files": file_entries(&paths) })
 }
 
 #[tauri::command]
