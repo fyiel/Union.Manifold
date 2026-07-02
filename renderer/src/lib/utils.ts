@@ -1,6 +1,6 @@
 import { type ClassValue, clsx } from "clsx"
 import { twMerge } from "tailwind-merge"
-import { isMainWebsiteBaseUrl } from "@/lib/auth-origin"
+import { convertFileSrc } from "@tauri-apps/api/core"
 import { apiUrl, getApiBaseUrl } from "@/lib/api"
 
 export function cn(...inputs: ClassValue[]) {
@@ -198,8 +198,13 @@ const RENDERER_DIST_PREFIXES = ["/assets/", "/fallbacks/", "/icons/", "/images/"
 // reliably across all platforms.
 function toUcLocalUrl(absolutePath: string): string {
   const normalized = absolutePath.replace(/\\/g, "/")
-  return `uc-local://app/?p=${encodeURIComponent(normalized)}`
+  return convertFileSrc(normalized)
 }
+
+const UC_ASSET_BASE =
+  typeof navigator !== "undefined" && navigator.userAgent.includes("Windows")
+    ? "http://uc-asset.localhost"
+    : "uc-asset://localhost"
 
 export function proxyMediaUrl(mediaUrl: string): string {
   if (!mediaUrl) return mediaUrl
@@ -286,7 +291,7 @@ export function proxyImageUrl(imageUrl: string): string {
   // (uc-asset:// → main fetches once, stores forever, serves from disk after).
   // Local (uc-local://) / renderer-served / empty URLs pass through untouched.
   if (u.startsWith("http://") || u.startsWith("https://")) {
-    return `uc-asset://img/?u=${encodeURIComponent(u)}`
+    return `${UC_ASSET_BASE}/img?u=${encodeURIComponent(u)}`
   }
   return u
 }
