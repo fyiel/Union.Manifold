@@ -1,6 +1,11 @@
 pub mod buzzheavier;
+pub mod datanodes;
 pub mod dlproxy;
+pub mod fuckingfast;
+pub mod gofile;
+pub mod mediafire;
 pub mod pixeldrain;
+pub mod rootz;
 
 use crate::sources::schema::DownloadOption;
 use crate::sources::ResolveResult;
@@ -9,9 +14,7 @@ use std::collections::HashMap;
 
 static KNOWN_UNRESOLVABLE: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| {
     let mut m = HashMap::new();
-    m.insert("gofile.io", "gofile (browser only)");
     m.insert("megadb.net", "megadb (resolver pending)");
-    m.insert("datanodes.to", "datanodes (resolver pending)");
     m.insert("filecrypt.cc", "filecrypt (captcha \u{2014} browser only)");
     m.insert("www.filecrypt.cc", "filecrypt (captcha \u{2014} browser only)");
     m.insert("fileq.net", "fileq (browser only)");
@@ -38,6 +41,21 @@ pub fn detect_host_type(url: &str) -> String {
     if dlproxy::matches(url) {
         return "dlproxy".to_string();
     }
+    if gofile::matches(url) {
+        return "gofile".to_string();
+    }
+    if datanodes::matches(url) {
+        return "datanodes".to_string();
+    }
+    if fuckingfast::matches(url) {
+        return "fuckingfast".to_string();
+    }
+    if mediafire::matches(url) {
+        return "mediafire".to_string();
+    }
+    if rootz::matches(url) {
+        return "rootz".to_string();
+    }
     let host = hostname_of(url);
     let base = host.strip_prefix("www.").unwrap_or(&host);
     let label = base.split('.').next().unwrap_or("");
@@ -49,7 +67,14 @@ pub fn detect_host_type(url: &str) -> String {
 }
 
 pub fn is_resolvable(url: &str) -> bool {
-    pixeldrain::matches(url) || buzzheavier::matches(url) || dlproxy::matches(url)
+    pixeldrain::matches(url)
+        || buzzheavier::matches(url)
+        || dlproxy::matches(url)
+        || gofile::matches(url)
+        || datanodes::matches(url)
+        || fuckingfast::matches(url)
+        || mediafire::matches(url)
+        || rootz::matches(url)
 }
 
 pub async fn resolve_url(option: &DownloadOption) -> ResolveResult {
@@ -67,6 +92,21 @@ pub async fn resolve_url(option: &DownloadOption) -> ResolveResult {
     }
     if dlproxy::matches(url) {
         return dlproxy::resolve(url).await;
+    }
+    if gofile::matches(url) {
+        return gofile::resolve(url).await;
+    }
+    if datanodes::matches(url) {
+        return datanodes::resolve(url).await;
+    }
+    if fuckingfast::matches(url) {
+        return fuckingfast::resolve(url).await;
+    }
+    if mediafire::matches(url) {
+        return mediafire::resolve(url).await;
+    }
+    if rootz::matches(url) {
+        return rootz::resolve(url).await;
     }
 
     let host = hostname_of(url);
