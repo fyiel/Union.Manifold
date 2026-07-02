@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 static HOSTS_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"(?i)(^|\.)(buzzheavier\.com|bzzhr\.to)$").unwrap());
+    Lazy::new(|| Regex::new(r"(?i)(^|\.)(buzzheavier\.com|bzzhr\.(?:to|co))$").unwrap());
 static TS_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?i)^ts\.").unwrap());
 static ID_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^/([A-Za-z0-9]{4,})").unwrap());
 static TITLE_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?i)<title>([^<]+)</title>").unwrap());
