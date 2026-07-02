@@ -220,6 +220,13 @@ export async function saveDisabledSources(ids: string[]): Promise<void> {
   try { await window.ucSettings?.set?.(SOURCE_DISABLED_KEY, ids) } catch { /* ignore */ }
 }
 
+export function onSourcesChanged(cb: () => void): () => void {
+  if (!window.ucSettings?.onChanged) return () => { }
+  return window.ucSettings.onChanged((d) => {
+    if (d?.key === SOURCE_DISABLED_KEY) cb()
+  })
+}
+
 // Push the persisted enable/disable state into the main registry. Call once at
 // startup (the registry's enabled set is in-memory and resets each launch).
 export async function applySavedSourceSettings(): Promise<void> {

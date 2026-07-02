@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Link } from "react-router-dom"
-import { querySources, rememberGames, sourcesAvailable, listSources } from "@/lib/sources"
+import { querySources, rememberGames, sourcesAvailable, listSources, onSourcesChanged } from "@/lib/sources"
 import { getBrowseCache, setBrowseCache, setBrowseScroll } from "@/lib/browse-cache"
 import { GameCard } from "@/app/manifold/GameCard"
 import { MONO, SearchIcon, Spinner, CenterState } from "@/app/manifold/ui"
@@ -142,6 +142,16 @@ export function BrowsePage() {
     return () => { if (debounce.current) clearTimeout(debounce.current) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query, sources.length, available])
+
+  useEffect(() => {
+    return onSourcesChanged(() => {
+      void listSources().then((s) => {
+        sourcesRef.current = s
+        setSources(s)
+        void runQuery(committed)
+      })
+    })
+  }, [committed, runQuery])
 
   const onKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") {
