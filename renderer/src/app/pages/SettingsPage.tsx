@@ -44,7 +44,6 @@ export function SettingsPage() {
   // the real upstream settings, each consumed somewhere (main process or a kept
   // renderer context), preventSleep defaults on like upstream
   const [shortcut, setShortcut] = useState(false)
-  const [preventSleep, setPreventSleep] = useState(true)
   const [autoShareLogs, setAutoShareLogs] = useState(false)
   const [pauseWhilePlaying, setPauseWhilePlaying] = useState(false)
 
@@ -52,13 +51,12 @@ export function SettingsPage() {
     let alive = true
     void (async () => {
       try {
-        const [cb, kbps, del, path, sc, sleep, share, pause] = await Promise.all([
+        const [cb, kbps, del, path, sc, share, pause] = await Promise.all([
           window.ucSettings?.get?.("closeBehavior"),
           window.ucSettings?.get?.("downloadBandwidthLimitKBps"),
           window.ucSettings?.get?.("autoDeleteArchives"),
           window.ucDownloads?.getDownloadPath?.(),
           window.ucSettings?.get?.("alwaysCreateDesktopShortcut"),
-          window.ucSettings?.get?.("preventSleepDuringOperations"),
           window.ucSettings?.get?.("autoShareErrorLogs"),
           window.ucSettings?.get?.("pauseDownloadsWhilePlaying"),
         ])
@@ -70,7 +68,6 @@ export function SettingsPage() {
         const p = typeof path === "string" ? path : (path && typeof path === "object" ? (path as { path?: string }).path : "")
         if (p) setInstallPath(p)
         setShortcut(sc === true)
-        setPreventSleep(sleep !== false)
         setAutoShareLogs(share === true)
         setPauseWhilePlaying(pause === true)
       } catch { /* ignore */ }
@@ -80,7 +77,6 @@ export function SettingsPage() {
       if (!d || !alive) return
       if (d.key === "autoDeleteArchives") setAutoDelete(d.value === true)
       if (d.key === "alwaysCreateDesktopShortcut") setShortcut(d.value === true)
-      if (d.key === "preventSleepDuringOperations") setPreventSleep(d.value !== false)
       if (d.key === "autoShareErrorLogs") setAutoShareLogs(d.value === true)
       if (d.key === "pauseDownloadsWhilePlaying") setPauseWhilePlaying(d.value === true)
     })
@@ -155,7 +151,6 @@ export function SettingsPage() {
                     <option value="quit">Quit entirely</option>
                   </select>
                 </Row>
-                <ToggleRow title="Prevent sleep during downloads" desc="Keep the system awake while downloads or installs are running" on={preventSleep} onToggle={() => setBool("preventSleepDuringOperations", !preventSleep, setPreventSleep)} />
                 <ToggleRow title="Auto-share error logs" desc="Send diagnostic logs automatically when something fails" on={autoShareLogs} onToggle={() => setBool("autoShareErrorLogs", !autoShareLogs, setAutoShareLogs)} />
                 <ClearAssetsRow />
               </div>
@@ -375,15 +370,35 @@ const BASED_ON = "UnionCrax.Direct v2.7.3"
 function AboutTab() {
   const [updMsg, setUpdMsg] = useState("up to date")
   const [checking, setChecking] = useState(false)
+  const [installable, setInstallable] = useState(false)
+  const [version, setVersion] = useState(FORK_VERSION)
+
+  useEffect(() => {
+    void window.ucUpdater?.getVersion?.().then((v) => { if (v) setVersion(v) }).catch(() => { })
+  }, [])
 
   const check = async () => {
     if (!window.ucUpdater?.checkForUpdates) return
     setChecking(true)
     try {
       const r = await window.ucUpdater.checkForUpdates()
+      setInstallable(Boolean(r.available))
       setUpdMsg(r.available ? `update available · ${r.version || ""}` : r.state === "error" ? `check failed${r.error ? ` · ${r.error}` : ""}` : "up to date")
     } catch (err) {
       setUpdMsg(`check failed · ${String(err)}`)
+    } finally {
+      setChecking(false)
+    }
+  }
+
+  const install = async () => {
+    setChecking(true)
+    setUpdMsg("downloading update…")
+    try {
+      const r = await window.ucUpdater?.installUpdate?.()
+      if (r && r.ok === false) setUpdMsg(`update failed${r.error ? ` · ${r.error}` : ""}`)
+    } catch (err) {
+      setUpdMsg(`update failed · ${String(err)}`)
     } finally {
       setChecking(false)
     }
@@ -397,12 +412,12 @@ function AboutTab() {
         </span>
         <div>
           <div style={{ fontSize: 17, fontWeight: 700, color: "#f4f4f4" }}>{BRAND.name}</div>
-          <div style={{ fontFamily: MONO, fontSize: 11.5, color: "var(--mf-t4)", marginTop: 3 }}>version {FORK_VERSION} · {updMsg}</div>
+          <div style={{ fontFamily: MONO, fontSize: 11.5, color: "var(--mf-t4)", marginTop: 3 }}>version {version} · {updMsg}</div>
           <div style={{ fontFamily: MONO, fontSize: 10.5, color: "var(--mf-t5)", marginTop: 4 }}>based on {BASED_ON}</div>
         </div>
-        <button type="button" onClick={() => void check()} disabled={checking} className="mf-ghost" style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8, padding: "10px 16px", borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "transparent", color: "var(--mf-t1)", fontSize: 12.5, fontWeight: 600, cursor: checking ? "default" : "pointer", opacity: checking ? 0.7 : 1 }}>
+        <button type="button" onClick={() => void (installable ? install() : check())} disabled={checking} className="mf-ghost" style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8, padding: "10px 16px", borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "transparent", color: "var(--mf-t1)", fontSize: 12.5, fontWeight: 600, cursor: checking ? "default" : "pointer", opacity: checking ? 0.7 : 1 }}>
           <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round"><path d="M2 8a6 6 0 0 1 10-4.5L14 5" /><polyline points="14 2 14 5 11 5" /><path d="M14 8a6 6 0 0 1-10 4.5L2 11" /><polyline points="2 14 2 11 5 11" /></svg>
-          {checking ? "Checking…" : "Check for updates"}
+          {checking ? "Working…" : installable ? "Install update" : "Check for updates"}
         </button>
       </div>
       <p style={{ margin: "22px 0 0", fontFamily: MONO, fontSize: 11, color: "var(--mf-t5)" }}>{BRAND.tagline}</p>

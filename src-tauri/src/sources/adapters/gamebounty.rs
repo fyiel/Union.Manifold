@@ -363,8 +363,16 @@ pub fn capabilities() -> Capabilities {
 }
 
 pub async fn query(params: &QueryParams) -> Vec<SourceGame> {
+    if let Some(text) = params.text.as_deref() {
+        if !text.trim().is_empty() {
+            return search(text, params.limit).await;
+        }
+    }
     let slugs = all_slugs().await;
-    let end = (params.offset + params.limit).min(slugs.len());
+    if slugs.is_empty() {
+        crate::logging::write_line("warn", "gamebounty sitemap yielded no slugs");
+    }
+    let end = params.limit.min(slugs.len());
     let window: Vec<String> = slugs[..end].to_vec();
     http::map_limit(window, 8, |slug| async move { get_detail(&slug).await }).await
 }

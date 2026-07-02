@@ -35,6 +35,9 @@ pub fn window_is_maximized(window: Window) -> Result<bool> {
 }
 
 #[tauri::command]
-pub fn app_close_response(_should_proceed: bool) -> Value {
-    json!({ "ok": true, "proceeded": true })
+pub fn app_close_response(app: tauri::AppHandle, should_proceed: bool) -> Value {
+    if should_proceed {
+        app.exit(0);
+    }
+    json!({ "ok": true, "proceeded": should_proceed })
 }

@@ -60,36 +60,3 @@ pub fn system_notifications() -> Value {
     json!({ "ok": true, "notifications": [] })
 }
 
-#[tauri::command]
-pub async fn network_test(base_url: Option<String>) -> Value {
-    let base = base_url.unwrap_or_else(|| "https://union-crax.xyz".to_string());
-    let url = format!("{}/api/health", base.trim_end_matches('/'));
-    let start = std::time::Instant::now();
-    let (ok, statusc) = match crate::http::fetch(&url, &crate::http::FetchOpts::default()).await {
-        Ok(r) => (r.status().is_success(), r.status().as_u16()),
-        Err(_) => (false, 0),
-    };
-    json!({
-        "ok": true,
-        "results": [{
-            "label": "health",
-            "url": url,
-            "ok": ok,
-            "status": statusc,
-            "elapsedMs": start.elapsed().as_millis(),
-        }]
-    })
-}
-
-#[tauri::command]
-pub fn settings_export(state: tauri::State<'_, crate::state::AppState>) -> Value {
-    match std::fs::read_to_string(state.paths.settings_file()) {
-        Ok(data) => json!({ "ok": true, "data": data }),
-        Err(e) => json!({ "ok": false, "error": e.to_string() }),
-    }
-}
-
-#[tauri::command]
-pub fn settings_import() -> Value {
-    json!({ "ok": false, "error": "not supported" })
-}

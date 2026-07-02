@@ -75,6 +75,22 @@ fn archive_files(dir: &Path, save_path: &Path) -> Vec<PathBuf> {
     found
 }
 
+fn progress_emitter<'a>(app: &'a AppHandle, download_id: &'a str, appid: &'a str, game_name: &'a Option<String>) -> impl Fn(u8) + 'a {
+    move |p| {
+        app.emit(
+            "uc:download-update",
+            json!({
+                "downloadId": download_id,
+                "status": "extracting",
+                "appid": appid,
+                "gameName": game_name,
+                "extractProgress": p,
+            }),
+        )
+        .ok();
+    }
+}
+
 fn emit_status(app: &AppHandle, download_id: &str, appid: &str, game_name: &Option<String>, status: &str, error: Option<&str>) {
     app.emit(
         "uc:download-update",
@@ -99,7 +115,27 @@ fn dir_size(dir: &Path) -> u64 {
         .sum()
 }
 
-async fn run_7z(archive: &Path, out_dir: &Path) -> Result<()> {
+fn last_percent(s: &str) -> Option<u8> {
+    let b = s.as_bytes();
+    let mut out = None;
+    for (i, &c) in b.iter().enumerate() {
+        if c == b'%' {
+            let mut j = i;
+            while j > 0 && b[j - 1].is_ascii_digit() {
+                j -= 1;
+            }
+            if j < i {
+                if let Ok(p) = s[j..i].parse::<u8>() {
+                    out = Some(p.min(100));
+                }
+            }
+        }
+    }
+    out
+}
+
+async fn run_7z(archive: &Path, out_dir: &Path, on_progress: impl Fn(u8)) -> Result<()> {
+    use tokio::io::AsyncReadExt;
     let bin = crate::bins::resolve_sidecar("7z")
         .ok_or_else(|| crate::error::AppError::msg("7z binary not found, run pnpm fetch-sidecars"))?;
     std::fs::create_dir_all(out_dir).ok();
@@ -109,19 +145,40 @@ async fn run_7z(archive: &Path, out_dir: &Path) -> Result<()> {
         .arg(format!("-o{}", out_dir.display()))
         .arg("-y")
         .arg("-bso0")
-        .arg("-bsp0")
+        .arg("-bsp1")
         .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
         cmd.creation_flags(0x08000000);
     }
-    let output = cmd.output().await.map_err(|e| crate::error::AppError::msg(format!("7z spawn: {e}")))?;
-    if !output.status.success() {
-        let err = String::from_utf8_lossy(&output.stderr);
-        return Err(crate::error::AppError::msg(format!("extraction failed: {}", err.trim())));
+    let mut child = cmd.spawn().map_err(|e| crate::error::AppError::msg(format!("7z spawn: {e}")))?;
+    let mut stdout = child.stdout.take();
+    let mut stderr = child.stderr.take();
+    if let Some(out) = stdout.as_mut() {
+        let mut buf = [0u8; 4096];
+        let mut last = 0u8;
+        while let Ok(n) = out.read(&mut buf).await {
+            if n == 0 {
+                break;
+            }
+            if let Some(p) = last_percent(&String::from_utf8_lossy(&buf[..n])) {
+                if p != last {
+                    last = p;
+                    on_progress(p);
+                }
+            }
+        }
+    }
+    let mut err_text = String::new();
+    if let Some(e) = stderr.as_mut() {
+        e.read_to_string(&mut err_text).await.ok();
+    }
+    let status = child.wait().await.map_err(|e| crate::error::AppError::msg(format!("7z wait: {e}")))?;
+    if !status.success() {
+        return Err(crate::error::AppError::msg(format!("extraction failed: {}", err_text.trim())));
     }
     Ok(())
 }
@@ -159,7 +216,7 @@ pub async fn auto_install(app: AppHandle, appid: String, download_id: String, ga
     emit_status(&app, &download_id, &appid, &game_name, "extracting", None);
     engine.set_extracting(&appid, true);
     let archive = extract_entry_point(&installing_dir, &save_path);
-    let result = run_7z(&archive, &installing_dir).await;
+    let result = run_7z(&archive, &installing_dir, progress_emitter(&app, &download_id, &appid, &game_name)).await;
     engine.set_extracting(&appid, false);
     match result {
         Ok(_) => {
@@ -218,7 +275,7 @@ pub async fn install_from_archive(state: State<'_, AppState>, app: AppHandle, pa
     let primary = archive_paths[0].clone();
     emit_status(&app, &download_id, &appid, &game_name, "extracting", None);
     state.downloads.set_extracting(&appid, true);
-    let result = run_7z(&primary, &dir).await;
+    let result = run_7z(&primary, &dir, progress_emitter(&app, &download_id, &appid, &game_name)).await;
     state.downloads.set_extracting(&appid, false);
     match result {
         Ok(_) => {
@@ -258,7 +315,7 @@ pub async fn install_downloaded_archive(state: State<'_, AppState>, app: AppHand
     };
     emit_status(&app, &download_id, &appid, &game_name, "extracting", None);
     state.downloads.set_extracting(&appid, true);
-    let result = run_7z(&extract_entry_point(&dir, &save_path), &dir).await;
+    let result = run_7z(&extract_entry_point(&dir, &save_path), &dir, progress_emitter(&app, &download_id, &appid, &game_name)).await;
     state.downloads.set_extracting(&appid, false);
     match result {
         Ok(_) => {

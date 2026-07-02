@@ -24,7 +24,6 @@ function call<T = any>(cmd: string, args?: Record<string, unknown>): Promise<T> 
 }
 
 const disabled = () => Promise.resolve({ ok: false, error: "disabled in this build" })
-const okFalse = () => Promise.resolve({ ok: true, found: false })
 const noop = () => () => {}
 
 function apiBaseUrl(): string {
@@ -65,20 +64,15 @@ export function installBridge(): void {
     resume: (downloadId: string) => call("download_resume", { downloadId }),
     showInFolder: (path: string) => call("download_show", { path }),
     openPath: (path: string) => call("download_open", { path }),
-    listDisks: () => call("disk_list"),
     getDownloadPath: () => call("download_path_get"),
     setDownloadPath: (targetPath: string) => call("download_path_set", { targetPath }),
     pickDownloadPath: () => call("download_path_pick"),
-    getDownloadUsage: (targetPath?: string) =>
-      Promise.resolve({ ok: true, sizeBytes: 0, path: targetPath || "" }),
-    clearDownloadCache: () => Promise.resolve({ ok: true }),
     loadPersistedState: () => call("downloads_state_load"),
     savePersistedState: (downloads: any[]) => call("downloads_state_save", { downloads }),
     loadCatalogState: () => call("catalog_state_load"),
     saveCatalogState: (payload: any) => call("catalog_state_save", { payload }),
     listInstalled: () => call("installed_list"),
     getInstalled: (appid: string) => call("installed_get", { appid }),
-    listInstalledByAppid: (appid: string) => call("installed_list_by_appid", { appid }),
     listInstalling: () => call("installing_list"),
     getInstalling: (appid: string) => call("installing_get", { appid }),
     listInstalledGlobal: () => call("installed_list"),
@@ -91,12 +85,10 @@ export function installBridge(): void {
       call("game_exe_preflight", { appid, exePath }),
     launchGameExecutable: (appid: string, exePath: string, gameName?: string, showGameName?: boolean) =>
       call("game_exe_launch", { appid, exePath, gameName, showGameName }),
-    getRunningGame: (appid: string) => call("game_exe_running", { appid }),
     listRunningGameAppids: () => call("game_exe_running_list"),
     quitGameExecutable: (appid: string) => call("game_exe_quit", { appid }),
     deleteInstalled: (appid: string) => call("installed_delete", { appid }),
     deleteInstalling: (appid: string) => call("installing_delete", { appid }),
-    createUpdateBackup: (appid: string) => call("installed_backup_create", { appid }),
     dismissInstalling: (appid: string) => call("installing_dismiss", { appid }),
     saveInstalledMetadata: (appid: string, metadata: any) =>
       call("installed_save", { appid, metadata }),
@@ -106,11 +98,8 @@ export function installBridge(): void {
     createDesktopShortcut: (gameName: string, appid: string, exePath?: string) =>
       call("create_desktop_shortcut", { gameName, appid, exePath }),
     deleteDesktopShortcut: (gameName: string) => call("delete_desktop_shortcut", { gameName }),
-    addExternalGame: (appid: string, metadata: any, gamePath: string) =>
-      call("add_external_game", { appid, metadata, gamePath }),
     updateInstalledMetadata: (appid: string, updates: any) =>
       call("installed_update_metadata", { appid, updates }),
-    pickExternalGameFolder: () => call("pick_external_game_folder"),
     pickImage: () => call("pick_image"),
     pickArchiveFiles: () => call("pick_archive_files"),
     installFromArchive: (payload: any) => call("install_from_archive", { payload }),
@@ -136,9 +125,6 @@ export function installBridge(): void {
     get: (key: string) => call("setting_get", { key }),
     set: (key: string, value: any) => call("setting_set", { key, value }),
     clearAll: () => call("setting_clear_all"),
-    exportSettings: () => call("settings_export"),
-    importSettings: () => call("settings_import"),
-    runNetworkTest: (baseUrl?: string) => call("network_test", { baseUrl }),
     onChanged: (cb: Cb) => on("uc:setting-changed", cb),
   }
 
@@ -157,14 +143,7 @@ export function installBridge(): void {
       call("auth_fetch", { baseUrl, path, init }),
     login: disabled,
     logout: disabled,
-    getSession: () => Promise.resolve({ ok: false }),
     websiteLogin: disabled,
-    emailLogin: disabled,
-    register: disabled,
-    forgotPassword: disabled,
-    resetPassword: disabled,
-    verifyEmail: disabled,
-    getMe: disabled,
     linkProvider: disabled,
     unlinkProvider: disabled,
     updateProfile: disabled,
@@ -175,48 +154,19 @@ export function installBridge(): void {
     checkForUpdates: () => call("check_for_updates"),
     installUpdate: () => call("install_update"),
     getVersion: () => call("get_version"),
-    getChangelog: () => call("get_changelog"),
-    getUpdateStatus: () => call("get_update_status"),
-    retryUpdate: () => call("update_retry"),
-    onStatusChanged: (cb: Cb) => on("uc:update-status-changed", cb),
   }
 
   w.ucLogs = {
     log: (level: string, message: string, data?: any) => call("log", { level, message, data }),
-    getLogs: () => call("logs_get"),
-    clearLogs: () => call("logs_clear"),
-    openLogsFolder: () => call("logs_open_folder"),
     shareLogs: disabled,
   }
 
   w.ucLinux = {
     detectProton: () => call("linux_detect_proton"),
-    detectWine: () => call("linux_detect_wine"),
-    detectUmu: () => call("linux_detect_umu"),
-    runWinecfg: disabled,
-    runWinetricks: disabled,
-    runProtontricks: disabled,
-    createPrefix: disabled,
     pickPrefixDir: () => call("linux_pick_prefix_dir"),
     pickBinary: () => call("linux_pick_binary"),
-    pickSo: () => Promise.resolve({ ok: true, cancelled: true }),
-    checkTool: (toolName: string) => call("linux_check_tool", { toolName }),
-    getSteamPath: () => call("linux_get_steam_path"),
     getGameConfig: (appid: string) => call("game_linux_config_get", { appid }),
     setGameConfig: (appid: string, config: any) => call("game_linux_config_set", { appid, config }),
-    detectSLSSteam: () => Promise.resolve({ ok: true, found: false }),
-    slsSteamDownload: disabled,
-    slsSteamSetupGame: disabled,
-    slsSteamCheckGame: () => Promise.resolve({ ok: true, found: false }),
-  }
-
-  w.ucVR = {
-    detectSteamVR: okFalse,
-    detectOpenXR: okFalse,
-    launchSteamVR: disabled,
-    pickRuntimeJson: () => Promise.resolve({ ok: true, cancelled: true }),
-    pickSteamVRDir: () => Promise.resolve({ ok: true, cancelled: true }),
-    getSettings: () => Promise.resolve({ ok: true }),
   }
 
   w.ucStorage = {
@@ -233,10 +183,6 @@ export function installBridge(): void {
     getMuted: () => Promise.resolve({ ok: true, muted: false }),
     setMuted: () => Promise.resolve({ ok: true }),
     takeScreenshot: () => Promise.resolve({ ok: false }),
-    getScreenshotPath: () => Promise.resolve({ ok: true, path: "" }),
-    listScreenshots: () => Promise.resolve({ ok: true, screenshots: [] }),
-    deleteScreenshot: () => Promise.resolve({ ok: false }),
-    openScreenshot: () => Promise.resolve({ ok: false }),
     getNotifications: () => call("system_notifications"),
     onNotificationActivated: noop,
   }
@@ -337,21 +283,6 @@ export function installBridge(): void {
     onStateChanged: noop,
     onPositionChanged: noop,
     onDownloadUpdate: (cb: Cb) => on("uc:download-update", cb),
-  }
-
-  w.ucRpc = {
-    setActivity: () => Promise.resolve({ ok: true }),
-    clearActivity: () => Promise.resolve({ ok: true }),
-    getStatus: () => Promise.resolve({ ok: true, enabled: false, ready: false, clientId: null }),
-  }
-
-  w.ucPlaytime = {
-    localSummary: () => Promise.resolve({ ok: true }),
-    pending: () => Promise.resolve({ ok: true, sessions: [] }),
-    ack: () => Promise.resolve({ ok: true }),
-    flush: () => Promise.resolve({ ok: true }),
-    serverTotals: () => Promise.resolve({ ok: true }),
-    onSessionRecorded: noop,
   }
 
   w.ucSystemProfile = {

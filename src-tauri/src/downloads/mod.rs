@@ -32,6 +32,18 @@ pub fn safe_folder_name(name: &str) -> String {
     }
 }
 
+pub struct DownloadRequest {
+    pub appid: String,
+    pub id: String,
+    pub game_name: Option<String>,
+    pub url: String,
+    pub filename: Option<String>,
+    pub total_bytes: u64,
+    pub headers: Option<HashMap<String, String>>,
+    pub part_index: Option<u64>,
+    pub part_total: Option<u64>,
+}
+
 #[derive(Clone)]
 struct Download {
     id: String,
@@ -49,6 +61,8 @@ struct Download {
     status: String,
     error: Option<String>,
     gid: Option<String>,
+    part_index: Option<u64>,
+    part_total: Option<u64>,
 }
 
 impl Download {
@@ -66,6 +80,8 @@ impl Download {
             "gameName": self.game_name,
             "url": self.url,
             "error": self.error,
+            "partIndex": self.part_index,
+            "partTotal": self.part_total,
         })
     }
 }
@@ -157,7 +173,8 @@ impl DownloadEngine {
         format!("{}.archive", safe_folder_name(appid))
     }
 
-    pub fn enqueue(self: &Arc<Self>, appid: String, game_name: Option<String>, url: String, filename: Option<String>, total_bytes: u64, id: String, headers: Option<HashMap<String, String>>) -> Result<String> {
+    pub fn enqueue(self: &Arc<Self>, req: DownloadRequest) -> Result<String> {
+        let DownloadRequest { appid, id, game_name, url, filename, total_bytes, headers, part_index, part_total } = req;
         if appid.is_empty() {
             return Err(AppError::msg("appid required"));
         }
@@ -187,6 +204,8 @@ impl DownloadEngine {
             status: "queued".to_string(),
             error: None,
             gid: None,
+            part_index,
+            part_total,
         };
         if let Ok(meta) = std::fs::metadata(&dl.save_path) {
             dl.received_bytes = meta.len();
@@ -315,6 +334,19 @@ impl DownloadEngine {
         json!({ "ok": true, "status": "cancelled", "downloadId": id, "appid": appid })
     }
 
+    pub fn busy_appids(&self) -> (usize, Vec<String>) {
+        let extracting: Vec<String> = self.extracting.lock().unwrap().iter().cloned().collect();
+        let downloading = self
+            .state
+            .lock()
+            .unwrap()
+            .by_id
+            .values()
+            .filter(|d| d.status == "downloading")
+            .count();
+        (downloading, extracting)
+    }
+
     pub fn set_extracting(&self, appid: &str, on: bool) {
         let mut ex = self.extracting.lock().unwrap();
         if on {
@@ -392,7 +424,8 @@ impl DownloadEngine {
         self.commit(&dl);
         self.emit(&dl);
 
-        if !self.aria2.ensure_started().await {
+        let limit_kbps = self.settings.get("downloadBandwidthLimitKBps").as_u64().unwrap_or(0);
+        if !self.aria2.ensure_started(limit_kbps).await {
             self.fail(&id, "aria2 downloader unavailable, run pnpm fetch-sidecars to bundle it");
             return;
         }
@@ -460,6 +493,16 @@ impl DownloadEngine {
         if let Some(dl) = snap {
             self.emit(&dl);
             write_manifest(&dl);
+            let lower = error.to_lowercase();
+            if lower.contains("certificate") || lower.contains("ssl") || lower.contains("tls") {
+                let host = url::Url::parse(&dl.url).ok().and_then(|u| u.host_str().map(String::from)).unwrap_or_default();
+                self.app
+                    .emit(
+                        "uc:download-blocked",
+                        json!({ "host": host, "gameName": dl.game_name, "appid": dl.appid, "reason": error }),
+                    )
+                    .ok();
+            }
         }
         self.maybe_start_next();
     }
@@ -663,17 +706,21 @@ fn to_headers(v: Option<Value>) -> Option<HashMap<String, String>> {
 
 #[tauri::command]
 pub fn download_start(state: State<'_, AppState>, payload: Value) -> Value {
-    let appid = payload.get("appid").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let id = payload.get("downloadId").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let url = payload.get("url").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    if url.is_empty() || id.is_empty() {
+    let req = DownloadRequest {
+        appid: payload.get("appid").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+        id: payload.get("downloadId").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+        url: payload.get("url").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+        filename: payload.get("filename").and_then(|v| v.as_str()).map(String::from),
+        game_name: payload.get("gameName").and_then(|v| v.as_str()).map(String::from),
+        total_bytes: payload.get("totalBytes").and_then(|v| v.as_u64()).unwrap_or(0),
+        headers: to_headers(payload.get("headers").cloned()),
+        part_index: payload.get("partIndex").and_then(|v| v.as_u64()),
+        part_total: payload.get("partTotal").and_then(|v| v.as_u64()),
+    };
+    if req.url.is_empty() || req.id.is_empty() {
         return json!({ "ok": false, "error": "url and downloadId required" });
     }
-    let filename = payload.get("filename").and_then(|v| v.as_str()).map(String::from);
-    let game_name = payload.get("gameName").and_then(|v| v.as_str()).map(String::from);
-    let total = payload.get("totalBytes").and_then(|v| v.as_u64()).unwrap_or(0);
-    let headers = to_headers(payload.get("headers").cloned());
-    match state.downloads.enqueue(appid, game_name, url, filename, total, id, headers) {
+    match state.downloads.enqueue(req) {
         Ok(_) => json!({ "ok": true }),
         Err(e) => json!({ "ok": false, "error": e.to_string() }),
     }
@@ -755,21 +802,3 @@ pub fn download_path_set(state: State<'_, AppState>, target_path: String) -> Val
     json!({ "ok": true, "path": target_path })
 }
 
-#[tauri::command]
-pub fn disk_list() -> Vec<Value> {
-    use sysinfo::Disks;
-    let disks = Disks::new_with_refreshed_list();
-    disks
-        .iter()
-        .map(|d| {
-            let mount = d.mount_point().to_string_lossy().to_string();
-            json!({
-                "id": mount,
-                "name": d.name().to_string_lossy(),
-                "path": mount,
-                "totalBytes": d.total_space(),
-                "freeBytes": d.available_space(),
-            })
-        })
-        .collect()
-}

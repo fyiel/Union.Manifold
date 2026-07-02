@@ -43,7 +43,6 @@ dirs = "5"
 tempfile = "3"
 walkdir = "2"
 fs4 = "0.12"
-sysinfo = "0.32"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 

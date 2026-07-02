@@ -55,7 +55,6 @@ static SITEMAP_SLUG_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"<loc>\s*https?://[^/]+/([^</]+)/?\s*</loc>").unwrap());
 static STATIC_SKIP_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"(?i)^(?:about|contact|privacy|terms|dmca|faq|how-to|request)").unwrap());
-static TRAILING_SLASH_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"/+$").unwrap());
 
 #[derive(Clone, Default)]
 struct Cats {
@@ -128,7 +127,7 @@ async fn build_slugs() -> Vec<String> {
             Err(_) => continue,
         };
         for c in SITEMAP_SLUG_RE.captures_iter(&xml) {
-            let slug = TRAILING_SLASH_RE.replace(&c[1], "").to_string();
+            let slug = c[1].to_string();
             if slug.is_empty() || STATIC_SKIP_RE.is_match(&slug) {
                 continue;
             }
@@ -368,12 +367,30 @@ pub async fn query(params: &QueryParams) -> Vec<SourceGame> {
         url.push_str(&format!("&categories={}", cat_ids.join(",")));
     }
     let orderby = orderby_for(params.sort.as_deref().unwrap_or(""), !text.is_empty());
-    url.push_str(&format!("&orderby={orderby}&order=desc"));
-    let json: Value = match http::get_json(&url).await {
-        Ok(v) => v,
-        Err(_) => return Vec::new(),
-    };
-    posts_to_games(&json, None, &cats)
+    let order = if orderby == "title" { "asc" } else { "desc" };
+    url.push_str(&format!("&orderby={orderby}&order={order}"));
+    let mut games = Vec::new();
+    let mut page = 1;
+    while games.len() < params.limit && page <= 10 {
+        let paged = format!("{url}&page={page}");
+        let json: Value = match http::get_json(&paged).await {
+            Ok(v) => v,
+            Err(e) => {
+                if page == 1 {
+                    crate::logging::write_line("warn", &format!("steamrip posts fetch failed: {e}"));
+                }
+                break;
+            }
+        };
+        let batch = posts_to_games(&json, None, &cats);
+        let short = batch.len() < per_page;
+        games.extend(batch);
+        if short {
+            break;
+        }
+        page += 1;
+    }
+    games
 }
 
 pub async fn search(q: &str, limit: usize) -> Vec<SourceGame> {

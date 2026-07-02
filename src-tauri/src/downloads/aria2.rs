@@ -17,6 +17,14 @@ pub struct Aria2Manager {
     rpc_id: AtomicU64,
 }
 
+fn limit_arg(kbps: u64) -> String {
+    if kbps > 0 {
+        format!("{kbps}K")
+    } else {
+        "0".to_string()
+    }
+}
+
 fn free_port() -> u16 {
     std::net::TcpListener::bind("127.0.0.1:0")
         .ok()
@@ -47,7 +55,7 @@ impl Aria2Manager {
         self.ready.load(Ordering::SeqCst)
     }
 
-    pub async fn ensure_started(&self) -> bool {
+    pub async fn ensure_started(&self, limit_kbps: u64) -> bool {
         if self.is_ready() {
             return true;
         }
@@ -84,6 +92,8 @@ impl Aria2Manager {
             "--connect-timeout=30".to_string(),
             "--timeout=60".to_string(),
             "--disable-ipv6=true".to_string(),
+            format!("--stop-with-process={}", std::process::id()),
+            format!("--max-overall-download-limit={}", limit_arg(limit_kbps)),
         ];
         if let Some(ca) = &self.ca_cert {
             if ca.is_file() {
@@ -120,7 +130,22 @@ impl Aria2Manager {
             tokio::time::sleep(std::time::Duration::from_millis(150)).await;
         }
         crate::logging::write_line("warn", "aria2 daemon did not become ready");
+        if let Some(mut child) = self.child.lock().unwrap().take() {
+            child.start_kill().ok();
+        }
         false
+    }
+
+    pub async fn set_bandwidth_limit(&self, kbps: u64) {
+        if !self.is_ready() {
+            return;
+        }
+        self.rpc(
+            "aria2.changeGlobalOption",
+            vec![json!({ "max-overall-download-limit": limit_arg(kbps) })],
+        )
+        .await
+        .ok();
     }
 
     pub fn stop(&self) {

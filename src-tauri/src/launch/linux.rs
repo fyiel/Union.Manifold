@@ -137,50 +137,18 @@ pub fn game_linux_config_set(state: State<'_, AppState>, appid: String, config: 
 }
 
 #[tauri::command]
-pub fn linux_check_tool(tool_name: String) -> Value {
-    match which(&tool_name) {
-        Some(path) => json!({ "ok": true, "available": true, "path": path }),
-        None => json!({ "ok": true, "available": false }),
-    }
-}
-
-#[tauri::command]
-pub fn linux_get_steam_path() -> Value {
-    match steam_root() {
-        Some(path) => json!({ "ok": true, "path": path }),
-        None => json!({ "ok": false, "error": "steam not found" }),
-    }
-}
-
-#[tauri::command]
-pub fn linux_detect_umu() -> Value {
-    match which("umu-run") {
-        Some(path) => json!({ "ok": true, "found": true, "path": path }),
-        None => json!({ "ok": true, "found": false }),
-    }
-}
-
-#[tauri::command]
-pub fn linux_detect_wine() -> Value {
-    let mut versions = Vec::new();
-    if let Some(path) = which("wine") {
-        versions.push(json!({ "label": "system wine", "path": path }));
-    }
-    json!({ "ok": true, "versions": versions })
-}
-
-#[tauri::command]
 pub fn linux_detect_proton() -> Value {
     let mut versions = Vec::new();
     if let Some(steam) = steam_root() {
-        let common = Path::new(&steam).join("steamapps/common");
-        if let Ok(entries) = std::fs::read_dir(&common) {
-            for entry in entries.flatten() {
-                let name = entry.file_name().to_string_lossy().to_string();
-                if name.to_lowercase().contains("proton") {
-                    let script = entry.path().join("proton");
-                    if script.is_file() {
-                        versions.push(json!({ "label": name, "path": script.to_string_lossy() }));
+        for (sub, source) in [("steamapps/common", "steam"), ("compatibilitytools.d", "community")] {
+            if let Ok(entries) = std::fs::read_dir(Path::new(&steam).join(sub)) {
+                for entry in entries.flatten() {
+                    let name = entry.file_name().to_string_lossy().to_string();
+                    if source == "community" || name.to_lowercase().contains("proton") {
+                        let script = entry.path().join("proton");
+                        if script.is_file() {
+                            versions.push(json!({ "label": name, "path": script.to_string_lossy(), "source": source }));
+                        }
                     }
                 }
             }
