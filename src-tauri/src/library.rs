@@ -93,27 +93,27 @@ fn merge_into_manifest(root: &Path, appid: &str, updates: &Value) -> bool {
     false
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn installed_list(state: State<'_, AppState>) -> Vec<Value> {
     list_by(&state.download_root(), INSTALLED)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn installed_get(state: State<'_, AppState>, appid: String) -> Value {
     get_by(&state.download_root(), &appid, INSTALLED).unwrap_or(Value::Null)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn installing_list(state: State<'_, AppState>) -> Vec<Value> {
     list_by(&state.download_root(), INSTALLING)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn installing_get(state: State<'_, AppState>, appid: String) -> Value {
     get_by(&state.download_root(), &appid, INSTALLING).unwrap_or(Value::Null)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn installed_save(state: State<'_, AppState>, appid: String, metadata: Value) -> Value {
     let root = state.download_root();
     if merge_into_manifest(&root, &appid, &json!({ "metadata": metadata })) {
@@ -135,18 +135,18 @@ pub fn installed_save(state: State<'_, AppState>, appid: String, metadata: Value
     json!({ "ok": true })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn installed_update_metadata(state: State<'_, AppState>, appid: String, updates: Value) -> Value {
     json!({ "ok": merge_into_manifest(&state.download_root(), &appid, &json!({ "metadata": updates })) })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn installing_status_set(state: State<'_, AppState>, appid: String, status: String, error: Option<String>) -> Value {
     let updates = json!({ "installStatus": status, "installError": error });
     json!({ "ok": merge_into_manifest(&state.download_root(), &appid, &updates) })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn installed_delete(state: State<'_, AppState>, appid: String) -> Value {
     if let Some(dir) = find_dir(&state.download_root(), &appid) {
         std::fs::remove_dir_all(&dir).ok();
@@ -154,7 +154,7 @@ pub fn installed_delete(state: State<'_, AppState>, appid: String) -> Value {
     json!({ "ok": true })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn installing_delete(state: State<'_, AppState>, appid: String) -> Value {
     if let Some(dir) = find_dir(&state.download_root(), &appid) {
         std::fs::remove_dir_all(&dir).ok();
@@ -162,7 +162,7 @@ pub fn installing_delete(state: State<'_, AppState>, appid: String) -> Value {
     json!({ "ok": true })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn installing_dismiss(state: State<'_, AppState>, appid: String) -> Value {
     if let Some(dir) = find_dir(&state.download_root(), &appid) {
         std::fs::remove_dir_all(&dir).ok();

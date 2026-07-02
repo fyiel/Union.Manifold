@@ -65,7 +65,7 @@ pub async fn respond(app: AppHandle, uri: String) -> (u16, Vec<u8>, String) {
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn assets_size(app: AppHandle) -> Value {
     let dir = cache_dir(&app);
     let bytes: u64 = walkdir::WalkDir::new(&dir)
@@ -78,7 +78,7 @@ pub fn assets_size(app: AppHandle) -> Value {
     json!({ "ok": true, "bytes": bytes })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn assets_clear(app: AppHandle) -> Value {
     let dir = cache_dir(&app);
     let mut freed = 0u64;

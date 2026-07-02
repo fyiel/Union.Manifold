@@ -4,7 +4,7 @@ fn desktop_dir() -> Option<std::path::PathBuf> {
     dirs::desktop_dir()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn create_desktop_shortcut(game_name: String, _appid: String, exe_path: Option<String>) -> Value {
     let desktop = match desktop_dir() {
         Some(d) => d,
@@ -65,7 +65,7 @@ pub fn create_desktop_shortcut(game_name: String, _appid: String, exe_path: Opti
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn delete_desktop_shortcut(game_name: String) -> Value {
     let desktop = match desktop_dir() {
         Some(d) => d,

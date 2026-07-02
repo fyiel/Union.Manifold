@@ -64,7 +64,7 @@ pub fn setting_get(state: State<'_, AppState>, key: String) -> Value {
     state.settings.get(&key)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn setting_set(app: AppHandle, state: State<'_, AppState>, key: String, value: Value) -> Value {
     state.settings.set(&key, value.clone());
     if key == "downloadBandwidthLimitKBps" {
@@ -77,7 +77,7 @@ pub fn setting_set(app: AppHandle, state: State<'_, AppState>, key: String, valu
     json!({ "ok": true })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn setting_clear_all(state: State<'_, AppState>) -> Result<Value> {
     let mut map = state.settings.inner.lock().unwrap();
     map.clear();

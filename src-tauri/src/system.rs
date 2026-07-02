@@ -48,7 +48,7 @@ pub fn reveal_in_folder(path: &Path) -> Result<()> {
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn system_open_external(app: AppHandle, target: String) -> Value {
     match app.opener().open_url(&target, None::<&str>) {
         Ok(_) => json!({ "ok": true }),
@@ -56,7 +56,7 @@ pub fn system_open_external(app: AppHandle, target: String) -> Value {
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn system_launch_steam(app: AppHandle) -> Value {
     match app.opener().open_url("steam://open/main", None::<&str>) {
         Ok(_) => json!({ "ok": true, "method": "uri" }),
@@ -64,7 +64,7 @@ pub fn system_launch_steam(app: AppHandle) -> Value {
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn download_open(_state: State<'_, AppState>, path: String) -> Value {
     match open_path_os(Path::new(&path)) {
         Ok(_) => json!({ "ok": true }),
@@ -72,7 +72,7 @@ pub fn download_open(_state: State<'_, AppState>, path: String) -> Value {
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn download_show(_state: State<'_, AppState>, path: String) -> Value {
     match reveal_in_folder(Path::new(&path)) {
         Ok(_) => json!({ "ok": true }),
