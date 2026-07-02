@@ -22,7 +22,6 @@ import { AlertTriangle } from "@/components/icons"
 // Fork pages — multi-source browse + detail. Library/Downloads/Settings are
 // reused from the original app (they're source-agnostic: installed manifests,
 // the aria2 queue, and local settings). Account/social pages are dropped.
-const InGameOverlay = lazy(() => import("@/components/InGameOverlay").then((m) => ({ default: m.InGameOverlay })))
 const ThemeEditorWindow = lazy(() => import("@/app/pages/settings/ThemeEditorWindow"))
 
 function RouteFallback() {
@@ -186,7 +185,6 @@ export default function App() {
         <ThemeBoundary>
           <Suspense fallback={<RouteFallback />}>
             <Routes>
-              <Route path="/overlay" element={<InGameOverlay />} />
               <Route path="/theme-editor" element={<ThemeEditorWindow />} />
 
               {/* App routes — multi-source, no login */}
