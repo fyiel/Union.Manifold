@@ -132,6 +132,8 @@ pub fn run() {
             sources::sources_detail,
             sources::sources_resolve,
             sources::sources_steam_art,
+            sources::sources_steam_meta,
+            sources::sources_protondb,
             sources::sources_tags,
             sources::sources_capabilities,
             downloads::download_start,

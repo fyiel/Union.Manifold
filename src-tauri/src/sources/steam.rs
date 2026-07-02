@@ -20,6 +20,10 @@ pub struct StoreDetails {
     pub release_year: Option<i32>,
     pub header_image: String,
     pub background: String,
+    pub screenshots: Vec<String>,
+    pub movies: Vec<Value>,
+    pub req_minimum: String,
+    pub req_recommended: String,
 }
 
 pub async fn get_store_details(appid: u64) -> Option<StoreDetails> {
@@ -44,6 +48,8 @@ pub async fn get_store_details(appid: u64) -> Option<StoreDetails> {
             .and_then(|r| r.get("date"))
             .and_then(|v| v.as_str())
             .unwrap_or("");
+        let str_of = |v: Option<&Value>| v.and_then(|x| x.as_str()).unwrap_or("").to_string();
+        let reqs = d.get("pc_requirements").filter(|v| v.is_object());
         StoreDetails {
             description: http::strip_tags(
                 d.get("short_description")
@@ -68,6 +74,45 @@ pub async fn get_store_details(appid: u64) -> Option<StoreDetails> {
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string(),
+            screenshots: d
+                .get("screenshots")
+                .and_then(|v| v.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|s| {
+                            s.get("path_full")
+                                .or_else(|| s.get("path_thumbnail"))
+                                .and_then(|v| v.as_str())
+                                .map(String::from)
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
+            movies: d
+                .get("movies")
+                .and_then(|v| v.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .map(|m| {
+                            json!({
+                                "id": m.get("id").and_then(|v| v.as_u64()).unwrap_or(0),
+                                "name": str_of(m.get("name")),
+                                "thumbnail": str_of(m.get("thumbnail")),
+                                "mp4": str_of(
+                                    m.get("mp4")
+                                        .and_then(|v| v.get("max").or_else(|| v.get("480")))
+                                ),
+                                "webm": str_of(
+                                    m.get("webm")
+                                        .and_then(|v| v.get("max").or_else(|| v.get("480")))
+                                ),
+                            })
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
+            req_minimum: str_of(reqs.and_then(|r| r.get("minimum"))),
+            req_recommended: str_of(reqs.and_then(|r| r.get("recommended"))),
         }
     });
     DETAILS_CACHE.lock().unwrap().insert(appid, out.clone());
@@ -111,6 +156,21 @@ pub async fn steam_art(appid: u64) -> Value {
         return json!({ "header": d.header_image, "background": d.background });
     }
     json!({ "header": "", "background": "" })
+}
+
+pub async fn steam_meta(appid: u64) -> Value {
+    if let Some(d) = get_store_details(appid).await {
+        return json!({
+            "screenshots": d.screenshots,
+            "movies": d.movies,
+            "requirements": { "minimum": d.req_minimum, "recommended": d.req_recommended },
+        });
+    }
+    json!({
+        "screenshots": [],
+        "movies": [],
+        "requirements": { "minimum": "", "recommended": "" },
+    })
 }
 
 pub async fn enrich(game: &mut UnifiedGame) {

@@ -3,6 +3,7 @@ pub mod cache;
 pub mod filters;
 pub mod hosts;
 pub mod parse;
+pub mod protondb;
 pub mod schema;
 pub mod steam;
 
@@ -320,6 +321,16 @@ pub async fn sources_resolve(_state: State<'_, AppState>, source_id: String, opt
 pub async fn sources_steam_art(appid: u64) -> Result<Value> {
     let art = steam::steam_art(appid).await;
     Ok(json!({ "ok": true, "art": art }))
+}
+
+#[tauri::command]
+pub async fn sources_steam_meta(appid: u64) -> Result<Value> {
+    Ok(json!({ "ok": true, "meta": steam::steam_meta(appid).await }))
+}
+
+#[tauri::command]
+pub async fn sources_protondb(appid: u64) -> Result<Value> {
+    Ok(json!({ "ok": true, "data": protondb::summary(appid).await }))
 }
 
 #[tauri::command]
