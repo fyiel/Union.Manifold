@@ -180,6 +180,7 @@ pub fn run() {
             dialogs::pick_image,
             dialogs::browse_for_game_exe,
             dialogs::pick_archive_files,
+            dialogs::archive_files_stat,
             dialogs::linux_pick_binary,
             dialogs::linux_pick_prefix_dir,
             misc::theme_editor_open,

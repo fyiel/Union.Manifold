@@ -384,6 +384,10 @@ declare global {
       updateInstalledMetadata: (appid: string, updates: Record<string, any>) => Promise<{ ok: boolean; error?: string }>
       pickImage: () => Promise<string | null>
       pickArchiveFiles: () => Promise<{ ok: boolean; cancelled?: boolean; files?: { path: string; name: string; size: number }[]; error?: string }>
+      statArchiveFiles: (paths: string[]) => Promise<{ ok: boolean; files?: { path: string; name: string; size: number }[] }>
+      onFileDrop: (callback: (payload: { paths: string[] }) => void) => () => void
+      onFileDragEnter: (callback: (payload: unknown) => void) => () => void
+      onFileDragLeave: (callback: (payload: unknown) => void) => () => void
       installFromArchive: (payload: {
         appid?: string
         gameName?: string
