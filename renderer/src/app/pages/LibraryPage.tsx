@@ -106,7 +106,7 @@ export function LibraryPage() {
   // Load installed + installing manifests + library meta.
   useEffect(() => {
     let alive = true
-    void (async () => {
+    const load = async () => {
       try {
         await hydrateDownloadArt()
         const [value, gcValue] = await Promise.all([
@@ -153,8 +153,14 @@ export function LibraryPage() {
       } finally {
         if (alive) setLoading(false)
       }
-    })()
-    return () => { alive = false }
+    }
+    void load()
+    const refresh = () => { void load() }
+    window.addEventListener("uc_game_installed", refresh)
+    return () => {
+      alive = false
+      window.removeEventListener("uc_game_installed", refresh)
+    }
   }, [])
 
   // Resolve and cache the FULL game info for every library entry whose cache is
