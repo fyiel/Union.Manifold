@@ -258,7 +258,7 @@ pub fn finalize(pool: Vec<SourceGame>, params: &QueryParams, ids: &[String], reg
     sort_games(&mut filtered, params);
     let facets = build_facets(&filtered);
     let total = filtered.len();
-    let ordered = if params.balanced && params.sort.as_deref().unwrap_or("relevance") == "relevance" {
+    let ordered = if params.balanced {
         balanced_interleave(filtered)
     } else {
         filtered
