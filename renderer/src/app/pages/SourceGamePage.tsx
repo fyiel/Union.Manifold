@@ -150,6 +150,7 @@ export function SourceGamePage() {
 
   const [protonData, setProtonData] = useState<ProtonDbSummary | null>(null)
   const [steamMeta, setSteamMeta] = useState<SteamMeta | null>(null)
+  const [protonHover, setProtonHover] = useState(false)
   useEffect(() => {
     const id = game?.steamAppId
     setProtonData(null)
@@ -272,16 +273,22 @@ export function SourceGamePage() {
                 <ExtLink title="SteamDB" onClick={() => openSourcePage(`https://steamdb.info/app/${appid}`)}>
                   <SteamDbIcon />
                 </ExtLink>
-                <ExtLink title="ProtonDB" onClick={() => openSourcePage(`https://www.protondb.com/app/${appid}`)}>
-                  <ProtonDbIcon />
-                </ExtLink>
-                {protonData && protonTier && (
-                  <span title={`ProtonDB rating${protonData.total > 0 ? ` · ${protonData.total} reports` : ""}`} style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 11px", borderRadius: 999, border: "1px solid var(--mf-line-2)", background: "var(--mf-panel)", fontFamily: MONO, fontSize: 10.5, color: protonColor }}>
-                    <span style={{ width: 6, height: 6, borderRadius: 99, background: protonColor, flexShrink: 0 }} />
-                    {protonTier.charAt(0).toUpperCase() + protonTier.slice(1)}
-                    {protonData.total > 0 && <span style={{ color: "var(--mf-t5)" }}>· {Math.round(protonData.score * 100)}%</span>}
-                  </span>
-                )}
+                <span
+                  style={{ position: "relative", display: "inline-flex" }}
+                  onMouseEnter={() => setProtonHover(true)}
+                  onMouseLeave={() => setProtonHover(false)}
+                >
+                  <ExtLink title="ProtonDB" onClick={() => openSourcePage(`https://www.protondb.com/app/${appid}`)}>
+                    <ProtonDbIcon />
+                  </ExtLink>
+                  {protonHover && protonData && protonTier && (
+                    <span style={{ position: "absolute", bottom: "calc(100% + 8px)", left: "50%", transform: "translateX(-50%)", display: "inline-flex", alignItems: "center", gap: 6, padding: "5px 11px", borderRadius: 999, border: "1px solid var(--mf-line-2)", background: "var(--mf-panel)", fontFamily: MONO, fontSize: 10.5, color: protonColor, whiteSpace: "nowrap", zIndex: 5, boxShadow: "0 6px 18px rgba(0,0,0,0.4)", pointerEvents: "none" }}>
+                      <span style={{ width: 6, height: 6, borderRadius: 99, background: protonColor, flexShrink: 0 }} />
+                      {protonTier.charAt(0).toUpperCase() + protonTier.slice(1)}
+                      {protonData.total > 0 && <span style={{ color: "var(--mf-t5)" }}>· {Math.round(protonData.score * 100)}% · {protonData.total} reports</span>}
+                    </span>
+                  )}
+                </span>
               </div>
             )}
           </div>
