@@ -168,6 +168,7 @@ fn spawn_and_track(app: &AppHandle, appid: &str, command: &str, args: &[String],
     let app2 = app.clone();
     let appid2 = appid.to_string();
     let exe2 = exe_path.to_string();
+    let name2 = game_name.clone();
     std::thread::spawn(move || {
         let mut child = child;
         let _ = child.wait();
@@ -178,6 +179,10 @@ fn spawn_and_track(app: &AppHandle, appid: &str, command: &str, args: &[String],
             json!({ "reason": "game-exited", "appid": appid2 }),
         )
         .ok();
+        if elapsed >= 10_000 {
+            let name = name2.unwrap_or_else(|| appid2.clone());
+            crate::notify::send_if(&app2, "notifyGameExit", false, "Game exited", &format!("{name} closed"));
+        }
         if elapsed < 10_000 {
             app2.emit(
                 "uc:game-quick-exit",

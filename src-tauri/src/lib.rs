@@ -10,6 +10,7 @@ mod library;
 mod logging;
 mod misc;
 mod net;
+mod notify;
 mod paths;
 mod settings;
 mod shortcuts;
@@ -55,6 +56,8 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, None))
         .register_asynchronous_uri_scheme_protocol("uc-asset", |ctx, request, responder| {
             let app = ctx.app_handle().clone();
             let uri = request.uri().to_string();
@@ -97,6 +100,21 @@ pub fn run() {
                 sources::warm_catalog(&sources_warm).await;
             });
             build_tray(app)?;
+            {
+                let state: tauri::State<AppState> = app.state();
+                if state.settings.get("startMinimized").as_bool().unwrap_or(false) {
+                    if let Some(main) = app.get_webview_window("main") {
+                        main.hide().ok();
+                    }
+                }
+                if state.settings.get("autoCheckUpdates").as_bool().unwrap_or(true) {
+                    let handle2 = handle.clone();
+                    tauri::async_runtime::spawn(async move {
+                        tokio::time::sleep(std::time::Duration::from_secs(20)).await;
+                        updater::notify_if_update_available(&handle2).await;
+                    });
+                }
+            }
             #[cfg(desktop)]
             {
                 use tauri_plugin_deep_link::DeepLinkExt;
@@ -196,6 +214,9 @@ pub fn run() {
             misc::theme_preview,
             misc::theme_preview_end,
             misc::presence_heartbeat,
+            misc::autostart_get,
+            misc::autostart_set,
+            dialogs::folder_pick,
             misc::system_notifications,
             net::auth_fetch,
         ])

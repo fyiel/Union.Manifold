@@ -43,6 +43,14 @@ pub async fn download_path_pick(app: AppHandle) -> Value {
 }
 
 #[tauri::command]
+pub async fn folder_pick(app: AppHandle) -> Value {
+    match pick_folder(app).await {
+        Some(p) => json!({ "ok": true, "path": p }),
+        None => json!({ "ok": false }),
+    }
+}
+
+#[tauri::command]
 pub async fn pick_image(app: AppHandle) -> Value {
     match pick_file(app, &["png", "jpg", "jpeg", "webp", "gif", "bmp"]).await {
         Some(p) => json!(p),
