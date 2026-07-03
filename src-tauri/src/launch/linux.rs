@@ -86,6 +86,21 @@ fn onlinefix_overrides(exe_path: &str) -> Option<String> {
     }
 }
 
+#[derive(Default)]
+pub(crate) struct GlobalLaunchOpts {
+    pub extra_env: Vec<(String, String)>,
+    pub gamemode: bool,
+    pub mangohud: bool,
+    pub dll_overrides: Option<String>,
+}
+
+fn parse_env_lines(s: &str) -> Vec<(String, String)> {
+    s.lines()
+        .filter_map(|line| line.split_once('='))
+        .map(|(k, v)| (k.trim().to_string(), v.trim().to_string()))
+        .collect()
+}
+
 pub fn resolve_launch(state: &AppState, appid: &str, exe_path: &str) -> LaunchPlan {
     let cfg = config_for(state, appid);
     let global_mode = state
@@ -96,7 +111,20 @@ pub fn resolve_launch(state: &AppState, appid: &str, exe_path: &str) -> LaunchPl
         .settings
         .get_string("linuxProtonPath")
         .filter(|s| !s.is_empty());
-    plan_launch(&cfg, global_mode, global_proton, &state.download_root(), appid, exe_path)
+    let globals = GlobalLaunchOpts {
+        extra_env: state
+            .settings
+            .get_string("linuxExtraEnv")
+            .map(|s| parse_env_lines(&s))
+            .unwrap_or_default(),
+        gamemode: state.settings.get("linuxGamemode").as_bool().unwrap_or(false),
+        mangohud: state.settings.get("linuxMangohud").as_bool().unwrap_or(false),
+        dll_overrides: state
+            .settings
+            .get_string("linuxDllOverrides")
+            .filter(|s| !s.trim().is_empty()),
+    };
+    plan_launch_with(&cfg, global_mode, global_proton, &globals, &state.download_root(), appid, exe_path)
 }
 
 pub(crate) fn plan_launch(
@@ -107,12 +135,61 @@ pub(crate) fn plan_launch(
     appid: &str,
     exe_path: &str,
 ) -> LaunchPlan {
+    plan_launch_with(cfg, global_mode, global_proton, &GlobalLaunchOpts::default(), download_root, appid, exe_path)
+}
+
+// Wrap the planned command in gamemoderun / mangohud when enabled and installed,
+// innermost mangohud so the pattern matches the usual "gamemoderun mangohud %command%".
+fn apply_wrappers(mut plan: LaunchPlan, globals: &GlobalLaunchOpts) -> LaunchPlan {
+    for tool in ["mangohud", "gamemoderun"] {
+        let wanted = (tool == "mangohud" && globals.mangohud) || (tool == "gamemoderun" && globals.gamemode);
+        if !wanted {
+            continue;
+        }
+        if let Some(path) = which(tool) {
+            let mut args = vec![plan.command.clone()];
+            args.append(&mut plan.args);
+            plan.command = path;
+            plan.args = args;
+        }
+    }
+    plan
+}
+
+fn merge_global_env(envs: &mut Vec<(String, String)>, globals: &GlobalLaunchOpts) {
+    // Per-game env wins; the global list only fills the gaps.
+    for (k, v) in &globals.extra_env {
+        if !envs.iter().any(|(ek, _)| ek == k) {
+            envs.push((k.clone(), v.clone()));
+        }
+    }
+    if let Some(overrides) = &globals.dll_overrides {
+        if !envs.iter().any(|(k, _)| k == "WINEDLLOVERRIDES") {
+            envs.push(("WINEDLLOVERRIDES".to_string(), overrides.clone()));
+        }
+    }
+}
+
+pub(crate) fn plan_launch_with(
+    cfg: &Value,
+    global_mode: Option<String>,
+    global_proton: Option<String>,
+    globals: &GlobalLaunchOpts,
+    download_root: &Path,
+    appid: &str,
+    exe_path: &str,
+) -> LaunchPlan {
     if cfg!(windows) || !is_windows_exe(exe_path) {
-        return LaunchPlan {
-            command: exe_path.to_string(),
-            args: vec![],
-            envs: parse_extra_env(cfg),
-        };
+        let mut envs = parse_extra_env(cfg);
+        merge_global_env(&mut envs, globals);
+        return apply_wrappers(
+            LaunchPlan {
+                command: exe_path.to_string(),
+                args: vec![],
+                envs,
+            },
+            globals,
+        );
     }
     let mode = cfg
         .get("launchMode")
@@ -145,6 +222,7 @@ pub(crate) fn plan_launch(
             envs.push(("WINEDLLOVERRIDES".to_string(), overrides));
         }
     }
+    merge_global_env(&mut envs, globals);
 
     let umu = which("umu-run");
     let use_umu = mode == "umu" || (mode == "auto" && umu.is_some());
@@ -155,11 +233,14 @@ pub(crate) fn plan_launch(
             if let Some(proton) = cfg.get("protonPath").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
                 envs.push(("PROTONPATH".to_string(), proton.to_string()));
             }
-            return LaunchPlan {
-                command: umu,
-                args: vec![exe_path.to_string()],
-                envs,
-            };
+            return apply_wrappers(
+                LaunchPlan {
+                    command: umu,
+                    args: vec![exe_path.to_string()],
+                    envs,
+                },
+                globals,
+            );
         }
     }
 
@@ -180,11 +261,14 @@ pub(crate) fn plan_launch(
                 std::fs::create_dir_all(&compat).ok();
                 envs.push(("STEAM_COMPAT_DATA_PATH".to_string(), compat.to_string_lossy().to_string()));
             }
-            return LaunchPlan {
-                command: proton.clone(),
-                args: vec!["waitforexitandrun".to_string(), exe_path.to_string()],
-                envs,
-            };
+            return apply_wrappers(
+                LaunchPlan {
+                    command: proton.clone(),
+                    args: vec!["waitforexitandrun".to_string(), exe_path.to_string()],
+                    envs,
+                },
+                globals,
+            );
         }
     }
     let wine = cfg
@@ -194,11 +278,14 @@ pub(crate) fn plan_launch(
         .map(String::from)
         .or_else(|| which("wine"))
         .unwrap_or_else(|| "wine".to_string());
-    LaunchPlan {
-        command: wine,
-        args: vec![exe_path.to_string()],
-        envs,
-    }
+    apply_wrappers(
+        LaunchPlan {
+            command: wine,
+            args: vec![exe_path.to_string()],
+            envs,
+        },
+        globals,
+    )
 }
 
 pub fn build_launch_command(state: &AppState, appid: &str, exe_path: &str) -> Value {
