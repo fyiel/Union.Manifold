@@ -181,11 +181,20 @@ fn find_proton() -> Option<String> {
     None
 }
 
+fn kill_by_compat(compat: &Path) {
+    let script = format!(
+        "for p in /proc/[0-9]*; do grep -qa 'STEAM_COMPAT_DATA_PATH={}' \"$p/environ\" 2>/dev/null && kill -9 \"${{p##*/}}\" 2>/dev/null; done",
+        compat.display()
+    );
+    let _ = std::process::Command::new("bash").arg("-c").arg(script).status();
+}
+
 fn pick_exe(dir: &Path) -> Option<PathBuf> {
     const SKIP: &[&str] = &[
         "unins", "vcredist", "vc_redist", "dxsetup", "dxwebsetup", "dotnet", "ndp",
         "crashhandler", "notification_helper", "python", "redist", "directx", "oalinst",
         "setup", "cleanup", "touchup", "config", "launcher_installer", "handler", "activation",
+        "physx", "systemsoftware", "msiexec", "dotnetfx", "xnafx", "prereq", "install", "eula",
     ];
     let mut best: Option<(u64, PathBuf)> = None;
     for e in walkdir::WalkDir::new(dir).into_iter().flatten() {
@@ -272,10 +281,13 @@ fn launch_game(install_dir: &Path, out: &Path, appid: &str, secs: u64) -> (bool,
             Err(e) => break (false, format!("wait error {e}")),
         }
     };
+    let compat = out.join("compatdata").join(appid);
     let gid = format!("-{pid}");
     let _ = std::process::Command::new("kill").arg("-TERM").arg(&gid).status();
+    kill_by_compat(&compat);
     std::thread::sleep(Duration::from_millis(1500));
     let _ = std::process::Command::new("kill").arg("-KILL").arg(&gid).status();
+    kill_by_compat(&compat);
     let _ = child.wait();
     let tail = std::fs::read_to_string(&log_path)
         .ok()
