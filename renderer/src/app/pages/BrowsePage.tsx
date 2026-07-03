@@ -85,7 +85,7 @@ export function BrowsePage() {
       const params: SourceQueryParams = q
         ? { text: q, sort: "relevance", offset: startOffset, limit: PAGE }
         : { sort: "latest", balanced: true, offset: startOffset, limit: PAGE }
-      const res = await querySources(params)
+      const res = await querySources(params, id)
       if (id !== reqId.current) return
       rememberGames(res.games)
       const nextGames = append ? mergeUnique(games, res.games) : res.games
@@ -153,6 +153,25 @@ export function BrowsePage() {
       })
     })
   }, [committed, runQuery])
+
+  useEffect(() => {
+    const off = window.ucSources?.onBrowsePartial?.((payload) => {
+      if (!payload || payload.reqId !== reqId.current) return
+      rememberGames(payload.games)
+      setGames(payload.games)
+      setTotal(payload.total)
+      const counts: Record<string, number> = {}
+      for (const g of payload.games) for (const s of g.sources) counts[s.sourceId] = (counts[s.sourceId] || 0) + 1
+      setSourceCounts(counts)
+      const done = new Set(payload.doneSources)
+      setStatus((prev) => {
+        const next = { ...prev }
+        for (const s of sourcesRef.current) if (s.enabled) next[s.id] = done.has(s.id) ? "done" : "searching"
+        return next
+      })
+    })
+    return off
+  }, [])
 
   const onKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") {
