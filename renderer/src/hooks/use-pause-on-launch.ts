@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react"
-import { useDownloads } from "@/context/downloads-context"
+import { useDownloadsActions, useDownloadsSelector } from "@/context/downloads-context"
 
 const SETTING_KEY = "pauseDownloadsWhilePlaying"
 const ACTIVE = ["downloading", "extracting", "installing", "verifying", "retrying", "queued"]
@@ -10,12 +10,13 @@ const ACTIVE = ["downloading", "extracting", "installing", "verifying", "retryin
 // applies wherever a game launches. Restored from the upstream hook, adapted to
 // the fork's group level pauseAll/resumeAll.
 export function usePauseDownloadsWhilePlaying() {
-  const { downloads, pauseAll, resumeAll } = useDownloads()
+  const { pauseAll, resumeAll } = useDownloadsActions()
   const enabledRef = useRef(false)
   const autoPausedRef = useRef(false)
   // keep the latest downloads off a ref so the presence listener stays stable
-  const downloadsRef = useRef(downloads)
-  downloadsRef.current = downloads
+  const hasActive = useDownloadsSelector((dls) => dls.some((x) => ACTIVE.includes(x.status)), (a, b) => a === b)
+  const hasActiveRef = useRef(hasActive)
+  hasActiveRef.current = hasActive
 
   useEffect(() => {
     let cancelled = false
@@ -37,8 +38,7 @@ export function usePauseDownloadsWhilePlaying() {
     const off = window.ucPresence?.onChanged?.((detail) => {
       if (!detail || !enabledRef.current) return
       if (detail.reason === "game-started") {
-        const active = downloadsRef.current.some((x) => ACTIVE.includes(x.status))
-        if (!active) return
+        if (!hasActiveRef.current) return
         autoPausedRef.current = true
         void pauseAll()
       } else if (detail.reason === "game-exited") {
