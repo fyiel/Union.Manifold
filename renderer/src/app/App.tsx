@@ -1,12 +1,6 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from "react"
 import { HashRouter, Route, Routes, Navigate } from "react-router-dom"
 import { ForkLayout } from "@/app/ForkLayout"
-import { BrowsePage } from "@/app/pages/BrowsePage"
-import { AdvancedSearchPage } from "@/app/pages/AdvancedSearchPage"
-import { SourceGamePage } from "@/app/pages/SourceGamePage"
-import { LibraryPage } from "@/app/pages/LibraryPage"
-import { DownloadsPage } from "@/app/pages/DownloadsPage"
-import { SettingsPage } from "@/app/pages/SettingsPage"
 import { DownloadsProvider, useDownloadsSelector } from "@/context/downloads-context"
 import { DownloadFlowProvider } from "@/context/download-flow-context"
 import { GameLaunchProvider } from "@/context/game-launch-context"
@@ -18,6 +12,13 @@ import { ThemeBoundary } from "@/components/ThemeBoundary"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { AlertTriangle } from "@/components/icons"
+
+const BrowsePage = lazy(() => import("@/app/pages/BrowsePage").then((m) => ({ default: m.BrowsePage })))
+const AdvancedSearchPage = lazy(() => import("@/app/pages/AdvancedSearchPage").then((m) => ({ default: m.AdvancedSearchPage })))
+const SourceGamePage = lazy(() => import("@/app/pages/SourceGamePage").then((m) => ({ default: m.SourceGamePage })))
+const LibraryPage = lazy(() => import("@/app/pages/LibraryPage").then((m) => ({ default: m.LibraryPage })))
+const DownloadsPage = lazy(() => import("@/app/pages/DownloadsPage").then((m) => ({ default: m.DownloadsPage })))
+const SettingsPage = lazy(() => import("@/app/pages/SettingsPage").then((m) => ({ default: m.SettingsPage })))
 
 // Fork pages — multi-source browse + detail. Library/Downloads/Settings are
 // reused from the original app (they're source-agnostic: installed manifests,
