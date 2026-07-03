@@ -6,10 +6,24 @@ import { BrowsePage } from "@/app/pages/BrowsePage"
 import { usePauseDownloadsWhilePlaying } from "@/hooks/use-pause-on-launch"
 import { cn } from "@/lib/utils"
 
-const AdvancedSearchPage = lazy(() => import("@/app/pages/AdvancedSearchPage").then((m) => ({ default: m.AdvancedSearchPage })))
-const LibraryPage = lazy(() => import("@/app/pages/LibraryPage").then((m) => ({ default: m.LibraryPage })))
-const DownloadsPage = lazy(() => import("@/app/pages/DownloadsPage").then((m) => ({ default: m.DownloadsPage })))
-const SettingsPage = lazy(() => import("@/app/pages/SettingsPage").then((m) => ({ default: m.SettingsPage })))
+const importAdvanced = () => import("@/app/pages/AdvancedSearchPage")
+const importLibrary = () => import("@/app/pages/LibraryPage")
+const importDownloads = () => import("@/app/pages/DownloadsPage")
+const importSettings = () => import("@/app/pages/SettingsPage")
+const importDetail = () => import("@/app/pages/SourceGamePage")
+
+const AdvancedSearchPage = lazy(() => importAdvanced().then((m) => ({ default: m.AdvancedSearchPage })))
+const LibraryPage = lazy(() => importLibrary().then((m) => ({ default: m.LibraryPage })))
+const DownloadsPage = lazy(() => importDownloads().then((m) => ({ default: m.DownloadsPage })))
+const SettingsPage = lazy(() => importSettings().then((m) => ({ default: m.SettingsPage })))
+
+function prefetchRoutes() {
+  void importAdvanced()
+  void importLibrary()
+  void importDownloads()
+  void importSettings()
+  void importDetail()
+}
 
 const drag = { WebkitAppRegion: "drag" } as CSSProperties
 const noDrag = { WebkitAppRegion: "no-drag" } as CSSProperties
@@ -47,6 +61,16 @@ export function ForkLayout() {
 
   // pause downloads while a game runs when the setting is on
   usePauseDownloadsWhilePlaying()
+
+  useEffect(() => {
+    const ric = (window as unknown as { requestIdleCallback?: (cb: () => void) => number }).requestIdleCallback
+    if (ric) {
+      const id = ric(prefetchRoutes)
+      return () => (window as unknown as { cancelIdleCallback?: (id: number) => void }).cancelIdleCallback?.(id)
+    }
+    const t = setTimeout(prefetchRoutes, 200)
+    return () => clearTimeout(t)
+  }, [])
 
   // Pages that don't manage their own scroller get reset to top on navigation.
   useEffect(() => {
