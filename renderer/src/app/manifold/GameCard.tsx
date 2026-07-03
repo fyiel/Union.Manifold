@@ -1,13 +1,15 @@
-import { useState } from "react"
+import { memo, useState } from "react"
 import { Link } from "react-router-dom"
 import { ArrowDownToLine } from "lucide-react"
-import { sourceAbbr, sourceName, sourceIsDirect } from "@/lib/sources"
+import { sourceAbbr, sourceName, sourceIsDirect, getSourceDetail, getRememberedGame, rememberGames, rememberGameAs } from "@/lib/sources"
 import { MONO, COVER_LINES, gbLabel, SmartImage, useGameImages } from "@/app/manifold/ui"
+
+const prefetched = new Set<string>()
 
 // The catalog card, a 3:4 cover (real art or striped placeholder), title,
 // genre + year, install size, and a badge per contributing source (direct
 // sources brighter). Used on Browse + Advanced Search.
-export function GameCard({ game }: { game: UnifiedSourceGame }) {
+export const GameCard = memo(function GameCard({ game }: { game: UnifiedSourceGame }) {
   const candidates = useGameImages(game)
   const [imgOk, setImgOk] = useState(true)
   const hasImg = imgOk && candidates.length > 0
@@ -16,11 +18,21 @@ export function GameCard({ game }: { game: UnifiedSourceGame }) {
   const resolvable = game.sources.some(sourceIsDirect)
   const n = game.sources.length
 
+  const prefetchDetail = () => {
+    const key = game.dedupKey
+    if (!key || game.fullyResolved || prefetched.has(key) || getRememberedGame(key)?.fullyResolved) return
+    prefetched.add(key)
+    const stubs = game.sources.map((s) => ({ sourceId: s.sourceId, sourceSlug: s.sourceSlug }))
+    void getSourceDetail(stubs).then((full) => { if (full) { rememberGames([full]); rememberGameAs(key, full) } }).catch(() => {})
+  }
+
   return (
     <Link
       to={`/g/${encodeURIComponent(game.dedupKey)}`}
       state={{ game }}
       className="mf-card"
+      onMouseEnter={prefetchDetail}
+      onFocus={prefetchDetail}
       style={{ display: "flex", flexDirection: "column", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 10, overflow: "hidden", background: "var(--mf-panel)", textDecoration: "none", cursor: "pointer" }}
     >
       <div style={{ position: "relative", aspectRatio: "3 / 4", background: hasImg ? "#0f0f0f" : COVER_LINES, display: "flex", alignItems: "flex-end", padding: 12 }}>
@@ -54,4 +66,4 @@ export function GameCard({ game }: { game: UnifiedSourceGame }) {
       </div>
     </Link>
   )
-}
+})
