@@ -1,10 +1,32 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
+use once_cell::sync::Lazy;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Manager};
 
 use crate::state::AppState;
+
+static NEG_CACHE: Lazy<Mutex<HashMap<String, Instant>>> = Lazy::new(|| Mutex::new(HashMap::new()));
+const NEG_TTL: Duration = Duration::from_secs(60);
+
+fn neg_hit(key: &str) -> bool {
+    let mut map = NEG_CACHE.lock().unwrap();
+    if let Some(at) = map.get(key) {
+        if at.elapsed() < NEG_TTL {
+            return true;
+        }
+        map.remove(key);
+    }
+    false
+}
+
+fn neg_mark(key: &str) {
+    NEG_CACHE.lock().unwrap().insert(key.to_string(), Instant::now());
+}
 
 fn cache_dir(app: &AppHandle) -> PathBuf {
     app.state::<AppState>().paths.asset_cache_dir.clone()
@@ -50,8 +72,16 @@ pub async fn respond(app: AppHandle, uri: String) -> (u16, Vec<u8>, String) {
         let ct = content_type_of(&bytes).to_string();
         return (200, bytes, ct);
     }
-    match crate::http::fetch(&remote, &crate::http::FetchOpts::default()).await {
-        Ok(resp) => match resp.bytes().await {
+    if neg_hit(&key) {
+        return (404, b"cached miss".to_vec(), "text/plain".to_string());
+    }
+    let opts = crate::http::FetchOpts {
+        retries: Some(0),
+        timeout: Some(Duration::from_secs(6)),
+        ..Default::default()
+    };
+    match crate::http::fetch(&remote, &opts).await {
+        Ok(resp) if resp.status().is_success() => match resp.bytes().await {
             Ok(body) => {
                 let bytes = body.to_vec();
                 tokio::fs::create_dir_all(&dir).await.ok();
@@ -59,9 +89,19 @@ pub async fn respond(app: AppHandle, uri: String) -> (u16, Vec<u8>, String) {
                 let ct = content_type_of(&bytes).to_string();
                 (200, bytes, ct)
             }
-            Err(_) => (502, b"fetch body failed".to_vec(), "text/plain".to_string()),
+            Err(_) => {
+                neg_mark(&key);
+                (502, b"fetch body failed".to_vec(), "text/plain".to_string())
+            }
         },
-        Err(_) => (502, b"fetch failed".to_vec(), "text/plain".to_string()),
+        Ok(resp) => {
+            neg_mark(&key);
+            (resp.status().as_u16(), b"upstream error".to_vec(), "text/plain".to_string())
+        }
+        Err(_) => {
+            neg_mark(&key);
+            (502, b"fetch failed".to_vec(), "text/plain".to_string())
+        }
     }
 }
 
