@@ -21,8 +21,16 @@ jobs:
         include:
           - os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
+            sidecars: linux-x64
           - os: windows-latest
             target: x86_64-pc-windows-msvc
+            sidecars: win32-x64
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            sidecars: darwin-arm64
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            sidecars: darwin-x64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -54,7 +62,7 @@ jobs:
         run: pnpm install
 
       - name: Fetch sidecars
-        run: pnpm fetch-sidecars ${{ matrix.os == 'windows-latest' && 'win32-x64' || 'linux-x64' }}
+        run: pnpm fetch-sidecars ${{ matrix.sidecars }}
 
       - uses: tauri-apps/tauri-action@v0
         env:
