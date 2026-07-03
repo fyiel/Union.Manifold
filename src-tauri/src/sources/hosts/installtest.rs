@@ -248,16 +248,37 @@ fn launch_game(install_dir: &Path, out: &Path, appid: &str, secs: u64) -> (bool,
         Ok(f) => f,
         Err(e) => return (false, format!("log clone {e}")),
     };
-    let mut cmd = std::process::Command::new(&plan.command);
-    cmd.args(&plan.args)
-        .current_dir(exe_dir)
+    let has_systemd = std::env::var("PATH")
+        .ok()
+        .map(|path| path.split(':').any(|d| Path::new(d).join("systemd-run").is_file()))
+        .unwrap_or(false);
+    let unit = format!("um-launch-{}-{}", std::process::id(), sanitize(appid).replace(' ', "-"));
+    let mut cmd = if has_systemd {
+        let mut c = std::process::Command::new("systemd-run");
+        c.arg("--user")
+            .arg("--scope")
+            .arg("--collect")
+            .arg("--quiet")
+            .arg(format!("--unit={unit}"))
+            .arg("--")
+            .arg(&plan.command)
+            .args(&plan.args);
+        c
+    } else {
+        let mut c = std::process::Command::new(&plan.command);
+        c.args(&plan.args);
+        c
+    };
+    cmd.current_dir(exe_dir)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::from(log))
         .stderr(std::process::Stdio::from(log2));
     for (k, v) in &plan.envs {
         cmd.env(k, v);
     }
-    cmd.process_group(0);
+    if !has_systemd {
+        cmd.process_group(0);
+    }
     let mut child = match cmd.spawn() {
         Ok(c) => c,
         Err(e) => return (false, format!("spawn {e}")),
@@ -282,12 +303,23 @@ fn launch_game(install_dir: &Path, out: &Path, appid: &str, secs: u64) -> (bool,
         }
     };
     let compat = out.join("compatdata").join(appid);
-    let gid = format!("-{pid}");
-    let _ = std::process::Command::new("kill").arg("-TERM").arg(&gid).status();
+    if has_systemd {
+        let scope = format!("{unit}.scope");
+        let _ = std::process::Command::new("systemctl")
+            .args(["--user", "kill", "--signal=SIGKILL", &scope])
+            .status();
+        let _ = std::process::Command::new("systemctl")
+            .args(["--user", "stop", &scope])
+            .status();
+    } else {
+        let gid = format!("-{pid}");
+        let _ = std::process::Command::new("kill").arg("-TERM").arg(&gid).status();
+        kill_by_compat(&compat);
+        std::thread::sleep(Duration::from_millis(1500));
+        let _ = std::process::Command::new("kill").arg("-KILL").arg(&gid).status();
+    }
     kill_by_compat(&compat);
-    std::thread::sleep(Duration::from_millis(1500));
-    let _ = std::process::Command::new("kill").arg("-KILL").arg(&gid).status();
-    kill_by_compat(&compat);
+    let _ = std::process::Command::new("kill").arg("-KILL").arg(pid.to_string()).status();
     let _ = child.wait();
     let tail = std::fs::read_to_string(&log_path)
         .ok()
