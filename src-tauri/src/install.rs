@@ -39,7 +39,7 @@ fn is_first_part(name: &str) -> bool {
     name.contains(".part1.") || name.contains(".part01.") || name.ends_with(".001")
 }
 
-fn extract_entry_point(dir: &Path, fallback: &Path) -> PathBuf {
+pub(crate) fn extract_entry_point(dir: &Path, fallback: &Path) -> PathBuf {
     let name = fallback.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
     if is_first_part(&name) {
         return fallback.to_path_buf();
@@ -196,7 +196,7 @@ async fn run_libarchive(bin: &str, archive: &Path, out_dir: &Path) -> Result<()>
     }
 }
 
-async fn run_7z(archive: &Path, out_dir: &Path, on_progress: impl Fn(u8)) -> Result<()> {
+pub(crate) async fn run_7z(archive: &Path, out_dir: &Path, on_progress: impl Fn(u8)) -> Result<()> {
     use tokio::io::AsyncReadExt;
     let bin = crate::bins::resolve_sidecar("7z")
         .ok_or_else(|| crate::error::AppError::msg("7z binary not found, run pnpm fetch-sidecars"))?;

@@ -1,6 +1,8 @@
 pub mod buzzheavier;
 pub mod datanodes;
 #[cfg(test)]
+mod installtest;
+#[cfg(test)]
 mod livetest;
 pub mod dlproxy;
 pub mod fuckingfast;

@@ -149,3 +149,66 @@ async fn host_resolvers_live() {
         eprintln!("no samples:     {}", no_sample.join(", "));
     }
 }
+
+#[tokio::test]
+#[ignore]
+async fn catalog_coverage() {
+    let params = QueryParams {
+        limit: 200,
+        ..Default::default()
+    };
+    let mut games = Vec::new();
+    for g in adapters::steamrip::query(&params).await {
+        games.push(("steamrip", g));
+    }
+    for g in adapters::gamebounty::query(&params).await {
+        games.push(("gamebounty", g));
+    }
+
+    let mut total = 0usize;
+    let mut with_options = 0usize;
+    let mut covered = 0usize;
+    let mut orphan_hosts: HashMap<String, usize> = HashMap::new();
+    let mut orphan_titles: Vec<String> = Vec::new();
+
+    for (src, g) in &games {
+        total += 1;
+        if g.download_options.is_empty() {
+            continue;
+        }
+        with_options += 1;
+        let any_resolvable = g.download_options.iter().any(|o| o.resolvable);
+        if any_resolvable {
+            covered += 1;
+        } else {
+            for o in &g.download_options {
+                *orphan_hosts.entry(o.host_type.clone()).or_default() += 1;
+            }
+            if orphan_titles.len() < 25 {
+                let hosts: Vec<&str> =
+                    g.download_options.iter().map(|o| o.host_type.as_str()).collect();
+                orphan_titles.push(format!("[{src}] {} -> {:?}", g.title, hosts));
+            }
+        }
+    }
+
+    let orphans = with_options - covered;
+    eprintln!("games scanned:            {total}");
+    eprintln!("games with any host:      {with_options}");
+    eprintln!("games with in-app host:   {covered}");
+    eprintln!(
+        "games browser-only ONLY:  {orphans} ({:.1}% of games with hosts)",
+        if with_options == 0 {
+            0.0
+        } else {
+            100.0 * orphans as f64 / with_options as f64
+        }
+    );
+    let mut oh: Vec<(String, usize)> = orphan_hosts.into_iter().collect();
+    oh.sort_by(|a, b| b.1.cmp(&a.1));
+    eprintln!("orphan reliance by host:  {oh:?}");
+    eprintln!("---- sample browser-only-only games ----");
+    for t in &orphan_titles {
+        eprintln!("{t}");
+    }
+}
