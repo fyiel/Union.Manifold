@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Link } from "react-router-dom"
 import { querySources, rememberGames, sourcesAvailable, listSources, onSourcesChanged } from "@/lib/sources"
-import { getBrowseCache, setBrowseCache, setBrowseScroll } from "@/lib/browse-cache"
+import { getBrowseCache, setBrowseCache, setBrowseScroll, consumeDiskRestore } from "@/lib/browse-cache"
 import { GameCard } from "@/app/manifold/GameCard"
 import { MONO, SearchIcon, Spinner, CenterState } from "@/app/manifold/ui"
 
@@ -134,7 +134,7 @@ export function BrowsePage() {
           for (const s of sources) if (s.enabled) next[s.id] = "done"
           return next
         })
-        return
+        if (!consumeDiskRestore()) return
       }
     }
     if (debounce.current) clearTimeout(debounce.current)
