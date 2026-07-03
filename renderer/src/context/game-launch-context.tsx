@@ -5,7 +5,7 @@ import { GameLaunchFailedModal } from "@/components/GameLaunchFailedModal"
 import { GameLaunchPreflightModal, type LaunchPreflightResult } from "@/components/GameLaunchPreflightModal"
 import { getUnambiguousExecutable, hasOnlineMode, matchAdminExecutable, type GameExecutable } from "@/lib/utils"
 import { reportPlayEvent } from "@/lib/cloud-collections"
-import { setRunningOptimistic } from "@/hooks/use-running-games"
+import { setRunningOptimistic, isRunningGameSync } from "@/hooks/use-running-games"
 import { gameLogger } from "@/lib/logger"
 
 /**
@@ -187,6 +187,15 @@ export function GameLaunchProvider({ children }: { children: React.ReactNode }) 
       setFailedOpen(false)
       setPendingPath(null)
       armQuickExit(g)
+    } else if (typeof res?.error === "string" && res.error.toLowerCase().includes("already running")) {
+      // Not a failure — the game is up. Keep the running indicator instead of
+      // clearing it and popping the launch-failed modal.
+      setRunningOptimistic(g.appid, true)
+      setPickerOpen(false)
+      setShortcutOpen(false)
+      setPreflightOpen(false)
+      setFailedOpen(false)
+      setPendingPath(null)
     } else {
       // Launch failed outright (wrong/missing exe, spawn error) — surface the
       // failure modal so the user can pick a different executable.
@@ -262,6 +271,9 @@ export function GameLaunchProvider({ children }: { children: React.ReactNode }) 
   // ── public API ────────────────────────────────────────────────────────────
   const requestLaunch = useCallback(async (g: LaunchableGame) => {
     if (!g?.appid) return
+    // Already running — don't relaunch (the backend would reject it and the
+    // failure path would wrongly clear the running state).
+    if (isRunningGameSync(g.appid)) return
     if (!window.ucDownloads?.listGameExecutables || !window.ucDownloads?.launchGameExecutable) return
     disarmQuickExit()
     try {
