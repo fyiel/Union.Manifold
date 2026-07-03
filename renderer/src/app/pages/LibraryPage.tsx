@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { Play, Settings, ArrowUpDown, LayoutGrid, List, Inbox } from "lucide-react"
+import { Play, Square, Settings, ArrowUpDown, LayoutGrid, List, Inbox } from "lucide-react"
 import { useGamesData } from "@/hooks/use-games"
 import { useGameLaunch } from "@/context/game-launch-context"
+import { useRunningGame } from "@/hooks/use-running-games"
 import { useDownloadsSelector } from "@/context/downloads-context"
 import { hasInstalledVersionUpdate, proxyImageUrl } from "@/lib/utils"
 import { rememberGames, rememberGameAs, getRememberedGame, resolveInstalledGame, getDownloadArt, hydrateDownloadArt } from "@/lib/sources"
@@ -144,7 +145,7 @@ function InstallingStrip({ installingMeta, installedIds, filter, query }: { inst
 
 export function LibraryPage() {
   const { games: catalog } = useGamesData()
-  const { requestLaunch, requestSetExecutable } = useGameLaunch()
+  const { requestLaunch, requestSetExecutable, stopGame } = useGameLaunch()
   const navigate = useNavigate()
 
   const [installed, setInstalled] = useState<LibGame[]>([])
@@ -489,9 +490,7 @@ export function LibraryPage() {
                     <span style={{ fontFamily: MONO, fontSize: 10, color: "var(--mf-t5)", whiteSpace: "nowrap", flexShrink: 0 }}>{lastPlayedLabel(g.lastPlayedAt)}</span>
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <button type="button" onClick={(e) => { e.stopPropagation(); play(g) }} className="mf-ghost" style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, height: 32, flex: 1, borderRadius: 7, border: "none", background: "#e9e9e9", color: "#111", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
-                      <Play size={12} fill="currentColor" strokeWidth={0} />Play
-                    </button>
+                    <PlayButton appid={g.appid} full onPlay={() => play(g)} onStop={() => void stopGame(g.appid)} />
                     <button type="button" title="More" onClick={(e) => { e.stopPropagation(); openMenu(g, e.currentTarget) }} className="mf-ghost" style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 32, height: 32, flexShrink: 0, borderRadius: 7, border: "1px solid var(--mf-line-2)", background: "transparent", color: "var(--mf-t3)", cursor: "pointer" }}>
                       <Settings size={15} strokeWidth={1.8} />
                     </button>
@@ -522,9 +521,7 @@ export function LibraryPage() {
                   <span style={{ fontFamily: MONO, fontSize: 11, color: "var(--mf-t3)" }}>{g.sizeText || gbLabel(g.sizeBytes) || "—"}</span>
                   <span style={{ fontFamily: MONO, fontSize: 11, color: "var(--mf-t3)" }}>{lastPlayedLabel(g.lastPlayedAt)}</span>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, justifySelf: "end" }}>
-                    <button type="button" onClick={(e) => { e.stopPropagation(); play(g) }} className="mf-ghost" style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, height: 32, borderRadius: 7, border: "none", background: "#e9e9e9", color: "#111", fontSize: 12, fontWeight: 600, cursor: "pointer", padding: "0 14px" }}>
-                      <Play size={12} fill="currentColor" strokeWidth={0} />Play
-                    </button>
+                    <PlayButton appid={g.appid} onPlay={() => play(g)} onStop={() => void stopGame(g.appid)} />
                     <button type="button" title="More" onClick={(e) => { e.stopPropagation(); openMenu(g, e.currentTarget) }} className="mf-ghost" style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 32, height: 32, flexShrink: 0, borderRadius: 7, border: "1px solid var(--mf-line-2)", background: "transparent", color: "var(--mf-t3)", cursor: "pointer" }}>
                       <Settings size={15} strokeWidth={1.8} />
                     </button>
@@ -574,6 +571,30 @@ function rectFromPoint(x: number, y: number): DOMRect {
 }
 
 const listHead = { fontFamily: MONO, fontSize: 9.5, letterSpacing: "0.14em", textTransform: "uppercase" as const, color: "var(--mf-t5)" }
+
+// Play/Stop button that reflects live running state. When the game is already
+// running it flips to "Stop" so a second click stops it instead of trying (and
+// failing) to relaunch it.
+function PlayButton({ appid, onPlay, onStop, full }: { appid: string; onPlay: () => void; onStop: () => void; full?: boolean }) {
+  const running = useRunningGame(appid)
+  return (
+    <button
+      type="button"
+      onClick={(e) => { e.stopPropagation(); running ? onStop() : onPlay() }}
+      className="mf-ghost"
+      style={{
+        display: "flex", alignItems: "center", justifyContent: "center", gap: 6, height: 32, borderRadius: 7, border: "none", cursor: "pointer", fontSize: 12, fontWeight: 600,
+        ...(full ? { flex: 1 } : { padding: "0 14px" }),
+        background: running ? "rgba(255,255,255,0.12)" : "#e9e9e9",
+        color: running ? "#e9e9e9" : "#111",
+      }}
+    >
+      {running
+        ? <><Square size={11} fill="currentColor" strokeWidth={0} />Stop</>
+        : <><Play size={12} fill="currentColor" strokeWidth={0} />Play</>}
+    </button>
+  )
+}
 
 function ViewBtn({ active, onClick, title, children }: { active: boolean; onClick: () => void; title: string; children: React.ReactNode }) {
   return (
