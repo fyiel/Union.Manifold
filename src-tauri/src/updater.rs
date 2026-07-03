@@ -55,3 +55,21 @@ pub async fn install_update(app: AppHandle) -> Value {
 pub fn get_version(app: AppHandle) -> String {
     version(&app)
 }
+
+// Startup check behind the autoCheckUpdates setting. Surfaces a desktop
+// notification and an event the About tab picks up, never installs on its own.
+pub async fn notify_if_update_available(app: &AppHandle) {
+    let updater = match app.updater() {
+        Ok(u) => u,
+        Err(_) => return,
+    };
+    if let Ok(Some(update)) = updater.check().await {
+        use tauri::Emitter;
+        app.emit("uc:update-available", json!({ "version": update.version })).ok();
+        crate::notify::send(
+            app,
+            "Update available",
+            &format!("Union.Manifold {} is ready to install from Settings", update.version),
+        );
+    }
+}

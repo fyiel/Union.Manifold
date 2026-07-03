@@ -2,7 +2,10 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Capabilities for the main and theme editor windows",
-  "windows": ["main", "theme-editor"],
+  "windows": [
+    "main",
+    "theme-editor"
+  ],
   "permissions": [
     "core:default",
     "core:window:allow-start-dragging",
@@ -17,6 +20,8 @@
     "dialog:default",
     "opener:default",
     "updater:default",
-    "deep-link:default"
+    "deep-link:default",
+    "notification:default",
+    "autostart:default"
   ]
 }
