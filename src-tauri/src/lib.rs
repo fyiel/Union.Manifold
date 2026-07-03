@@ -73,6 +73,7 @@ pub fn run() {
         .setup(|app| {
             let handle = app.handle().clone();
             let paths = Arc::new(AppPaths::resolve(&handle)?);
+            sources::metacache::init(paths.data_dir.join("metadata"));
             logging::init(paths.log_file());
             let settings = Arc::new(SettingsStore::load(paths.settings_file()));
             let cacert = app.path().resource_dir().ok().map(|d| d.join("cacert.pem"));

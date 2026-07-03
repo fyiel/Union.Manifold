@@ -2,18 +2,20 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 use once_cell::sync::Lazy;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::http;
 
+use super::metacache;
 use super::schema::{normalize_title, UnifiedGame};
 
 static APPID_CACHE: Lazy<Mutex<HashMap<String, Option<u64>>>> =
-    Lazy::new(|| Mutex::new(HashMap::new()));
-static DETAILS_CACHE: Lazy<Mutex<HashMap<u64, Option<StoreDetails>>>> =
-    Lazy::new(|| Mutex::new(HashMap::new()));
+    Lazy::new(|| Mutex::new(metacache::load("steam-appids.json")));
+static DETAILS_CACHE: Lazy<Mutex<HashMap<String, Option<StoreDetails>>>> =
+    Lazy::new(|| Mutex::new(metacache::load("steam-details.json")));
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Serialize, Deserialize)]
 pub struct StoreDetails {
     pub description: String,
     pub genres: Vec<String>,
@@ -30,7 +32,7 @@ pub async fn get_store_details(appid: u64) -> Option<StoreDetails> {
     if appid == 0 {
         return None;
     }
-    if let Some(cached) = DETAILS_CACHE.lock().unwrap().get(&appid).cloned() {
+    if let Some(cached) = DETAILS_CACHE.lock().unwrap().get(&appid.to_string()).cloned() {
         return cached;
     }
     let url = format!("https://store.steampowered.com/api/appdetails?appids={appid}&l=en&cc=US");
@@ -116,7 +118,11 @@ pub async fn get_store_details(appid: u64) -> Option<StoreDetails> {
             req_recommended: str_of(reqs.and_then(|r| r.get("recommended"))),
         }
     });
-    DETAILS_CACHE.lock().unwrap().insert(appid, out.clone());
+    {
+        let mut map = DETAILS_CACHE.lock().unwrap();
+        map.insert(appid.to_string(), out.clone());
+        metacache::save("steam-details.json", &map);
+    }
     out
 }
 
@@ -148,7 +154,11 @@ pub async fn search_app_id(title: &str) -> Option<u64> {
                 .filter(|id| *id > 0);
         }
     }
-    APPID_CACHE.lock().unwrap().insert(norm, appid);
+    {
+        let mut map = APPID_CACHE.lock().unwrap();
+        map.insert(norm, appid);
+        metacache::save("steam-appids.json", &map);
+    }
     appid
 }
 
