@@ -50,9 +50,9 @@ export const GameCard = memo(function GameCard({ game }: { game: UnifiedSourceGa
       </div>
       <div style={{ padding: "11px 12px 12px", display: "flex", flexDirection: "column", gap: 8 }}>
         <span style={{ fontSize: 13, fontWeight: 600, color: "var(--mf-t1)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{game.title}</span>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <span style={{ fontFamily: MONO, fontSize: 10, color: "#6f6f6f", letterSpacing: "0.02em" }}>{meta || " "}</span>
-          <span style={{ fontFamily: MONO, fontSize: 10, color: "var(--mf-t4)" }}>{size}</span>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+          <span style={{ fontFamily: MONO, fontSize: 10, color: "#6f6f6f", letterSpacing: "0.02em", minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{meta || " "}</span>
+          <span style={{ fontFamily: MONO, fontSize: 10, color: "var(--mf-t4)", whiteSpace: "nowrap", flexShrink: 0 }}>{size}</span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
           {game.sources.map((s) => {
