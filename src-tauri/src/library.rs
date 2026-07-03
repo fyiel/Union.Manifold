@@ -1,5 +1,8 @@
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
+use once_cell::sync::Lazy;
 use serde_json::{json, Value};
 use tauri::State;
 
@@ -8,6 +11,27 @@ use crate::state::AppState;
 
 const INSTALLED: &[&str] = &["installed"];
 const INSTALLING: &[&str] = &["installing", "queued", "paused", "downloaded", "extracting", "failed", "cancelled"];
+
+static SCAN_CACHE: Lazy<Mutex<Option<(Instant, PathBuf, Vec<(PathBuf, Value)>)>>> = Lazy::new(|| Mutex::new(None));
+const SCAN_TTL: Duration = Duration::from_millis(2000);
+
+fn load_all_cached(root: &Path) -> Vec<(PathBuf, Value)> {
+    {
+        let guard = SCAN_CACHE.lock().unwrap();
+        if let Some((at, cached_root, data)) = guard.as_ref() {
+            if cached_root == root && at.elapsed() < SCAN_TTL {
+                return data.clone();
+            }
+        }
+    }
+    let data = load_all(root);
+    *SCAN_CACHE.lock().unwrap() = Some((Instant::now(), root.to_path_buf(), data.clone()));
+    data
+}
+
+fn invalidate_scan() {
+    *SCAN_CACHE.lock().unwrap() = None;
+}
 
 fn load_all(root: &Path) -> Vec<(PathBuf, Value)> {
     let mut out = Vec::new();
@@ -37,7 +61,7 @@ fn status_of(v: &Value) -> String {
 }
 
 fn list_by(root: &Path, statuses: &[&str]) -> Vec<Value> {
-    load_all(root)
+    load_all_cached(root)
         .into_iter()
         .filter(|(_, v)| statuses.contains(&status_of(v).as_str()))
         .map(|(_, v)| v)
@@ -45,7 +69,7 @@ fn list_by(root: &Path, statuses: &[&str]) -> Vec<Value> {
 }
 
 fn get_by(root: &Path, appid: &str, statuses: &[&str]) -> Option<Value> {
-    load_all(root)
+    load_all_cached(root)
         .into_iter()
         .find(|(_, v)| {
             v.get("appid").and_then(|a| a.as_str()) == Some(appid) && statuses.contains(&status_of(v).as_str())
@@ -54,7 +78,7 @@ fn get_by(root: &Path, appid: &str, statuses: &[&str]) -> Option<Value> {
 }
 
 fn find_dir(root: &Path, appid: &str) -> Option<PathBuf> {
-    load_all(root)
+    load_all_cached(root)
         .into_iter()
         .find(|(_, v)| v.get("appid").and_then(|a| a.as_str()) == Some(appid))
         .map(|(dir, _)| dir)
@@ -88,6 +112,7 @@ fn merge_into_manifest(root: &Path, appid: &str, updates: &Value) -> bool {
         }
         manifest.insert("updatedAt".into(), json!(now_ms()));
         crate::downloads::write_manifest_atomic(&manifest_path, &Value::Object(manifest));
+        invalidate_scan();
         return true;
     }
     false
@@ -132,6 +157,7 @@ pub fn installed_save(state: State<'_, AppState>, appid: String, metadata: Value
             "updatedAt": now_ms(),
         }),
     );
+    invalidate_scan();
     json!({ "ok": true })
 }
 
@@ -155,6 +181,7 @@ fn remove_dir_unless_installed(root: &Path, appid: &str) {
             .unwrap_or(false);
         if !installed {
             std::fs::remove_dir_all(&dir).ok();
+            invalidate_scan();
         }
     }
 }
@@ -163,6 +190,7 @@ fn remove_dir_unless_installed(root: &Path, appid: &str) {
 pub fn installed_delete(state: State<'_, AppState>, appid: String) -> Value {
     if let Some(dir) = find_dir(&state.download_root(), &appid) {
         std::fs::remove_dir_all(&dir).ok();
+        invalidate_scan();
     }
     json!({ "ok": true })
 }
