@@ -11,6 +11,7 @@ const binDir = path.join(root, 'src-tauri', 'binaries')
 const resDir = path.join(root, 'src-tauri', 'resources')
 
 const ARIA2_VERSION = process.env.ARIA2_VERSION || '1.37.0'
+const ARIA2_DARWIN_VERSION = process.env.ARIA2_DARWIN_VERSION || '1.35.0'
 const SEVENZIP_VERSION = process.env.SEVENZIP_VERSION || '2301'
 const CACERT_URL = process.env.ARIA2_CACERT_URL || 'https://curl.se/ca/cacert.pem'
 
@@ -26,6 +27,8 @@ const ARIA2 = {
   'win32-x64': { url: `https://github.com/zhengqwe/aria2-static-builds-with-patches/releases/download/v${ARIA2_VERSION}/aria2-${ARIA2_VERSION}-win-x86-64.zip`, bin: 'aria2c.exe' },
   'linux-x64': { url: `https://github.com/abcfy2/aria2-static-build/releases/download/${ARIA2_VERSION}/aria2-x86_64-linux-musl_static.zip`, bin: 'aria2c' },
   'linux-arm64': { url: `https://github.com/abcfy2/aria2-static-build/releases/download/${ARIA2_VERSION}/aria2-aarch64-linux-musl_static.zip`, bin: 'aria2c' },
+  'darwin-x64': { url: `https://github.com/aria2/aria2/releases/download/release-${ARIA2_DARWIN_VERSION}/aria2-${ARIA2_DARWIN_VERSION}-osx-darwin.tar.bz2`, bin: 'aria2c' },
+  'darwin-arm64': { url: `https://github.com/aria2/aria2/releases/download/release-${ARIA2_DARWIN_VERSION}/aria2-${ARIA2_DARWIN_VERSION}-osx-darwin.tar.bz2`, bin: 'aria2c' },
 }
 
 const SEVENZIP = {

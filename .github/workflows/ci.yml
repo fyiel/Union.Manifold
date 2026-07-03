@@ -20,6 +20,8 @@ jobs:
             sidecars: linux-x64
           - os: windows-latest
             sidecars: win32-x64
+          - os: macos-latest
+            sidecars: darwin-arm64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
