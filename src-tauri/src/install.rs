@@ -287,6 +287,7 @@ fn finalize_installed(dir: &Path, appid: &str, game_name: &Option<String>, insta
         }
     }
     crate::downloads::write_manifest_atomic(&manifest_path, &Value::Object(manifest));
+    crate::library::invalidate_scan();
 }
 
 pub async fn auto_install(app: AppHandle, appid: String, download_id: String, game_name: Option<String>, save_path: PathBuf, installing_dir: PathBuf) {
@@ -329,6 +330,7 @@ pub async fn auto_install(app: AppHandle, appid: String, download_id: String, ga
                     }
                 }
             }
+            crate::library::invalidate_scan();
             emit_status(&app, &download_id, &appid, &game_name, "extract_failed", Some(&e.to_string()));
         }
     }

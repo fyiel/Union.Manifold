@@ -29,7 +29,7 @@ fn load_all_cached(root: &Path) -> Vec<(PathBuf, Value)> {
     data
 }
 
-fn invalidate_scan() {
+pub(crate) fn invalidate_scan() {
     *SCAN_CACHE.lock().unwrap() = None;
 }
 

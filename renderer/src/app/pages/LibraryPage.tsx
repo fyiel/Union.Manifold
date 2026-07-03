@@ -113,7 +113,7 @@ function InstallingStrip({ installingMeta, installedIds, filter, query }: { inst
         {installing.map((g) => (
           <div key={g.appid} style={{ display: "flex", alignItems: "center", gap: 14, padding: "12px 16px", border: "1px solid var(--mf-line)", borderRadius: 11, background: "var(--mf-panel-2)" }}>
             <div style={{ width: 38, height: 50, borderRadius: 6, flexShrink: 0, background: g.image ? "#0f0f0f" : COVER_LINES, overflow: "hidden" }}>
-              {g.image && <img src={g.image} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />}
+              {g.image && <img src={proxyImageUrl(g.image)} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />}
             </div>
             <div style={{ minWidth: 0, flex: 1 }}>
               <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
