@@ -3,7 +3,6 @@ import { Link } from "react-router-dom"
 import { querySources, rememberGames, sourcesAvailable, listSources, onSourcesChanged } from "@/lib/sources"
 import { getBrowseCache, setBrowseCache, setBrowseScroll, consumeDiskRestore } from "@/lib/browse-cache"
 import { GameCard } from "@/app/manifold/GameCard"
-import { VirtualGrid } from "@/app/manifold/VirtualGrid"
 import { MONO, SearchIcon, Spinner, CenterState } from "@/app/manifold/ui"
 
 // Browse, one search across every catalog, deduped into one grid, with endless
@@ -330,15 +329,11 @@ export function BrowsePage() {
           <EmptyState text="source backend unavailable" />
         ) : sorted.length > 0 ? (
           <>
-            <VirtualGrid
-              items={sorted}
-              scrollRef={scrollerRef}
-              getKey={(g) => g.dedupKey}
-              renderItem={(g) => <GameCard game={g} />}
-              minColWidth={168}
-              gap={18}
-              rowHeightFor={(cw) => cw * (4 / 3) + 82}
-            />
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(168px, 1fr))", gap: 18, alignContent: "start" }}>
+              {sorted.map((g) => (
+                <GameCard key={g.dedupKey} game={g} />
+              ))}
+            </div>
             {(loadingMore || hasMore) && (
               <div style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: "26px 0 4px", gap: 10 }}>
                 {loadingMore ? <Spinner size={16} stroke="#5f5f5f" /> : null}
