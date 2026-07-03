@@ -6,7 +6,7 @@ use regex::Regex;
 use serde_json::Value;
 
 use crate::http;
-use crate::sources::cache::Cached;
+use crate::sources::cache::{Cached, KeyedCache};
 use crate::sources::hosts;
 use crate::sources::parse::find_steam_app_id;
 use crate::sources::schema::{
@@ -65,6 +65,10 @@ struct Cats {
 static CATS: Lazy<Cached<Cats>> = Lazy::new(|| Cached::new(Duration::from_secs(6 * 60 * 60)));
 static SLUGS: Lazy<Cached<Vec<String>>> =
     Lazy::new(|| Cached::new(Duration::from_secs(6 * 60 * 60)));
+static POSTS: Lazy<KeyedCache<Vec<SourceGame>>> =
+    Lazy::new(|| KeyedCache::new(Duration::from_secs(600)));
+static DETAIL_CACHE: Lazy<KeyedCache<SourceGame>> =
+    Lazy::new(|| KeyedCache::new(Duration::from_secs(60 * 60 * 6)));
 
 pub fn capabilities() -> Capabilities {
     Capabilities {
@@ -369,28 +373,42 @@ pub async fn query(params: &QueryParams) -> Vec<SourceGame> {
     let orderby = orderby_for(params.sort.as_deref().unwrap_or(""), !text.is_empty());
     let order = if orderby == "title" { "asc" } else { "desc" };
     url.push_str(&format!("&orderby={orderby}&order={order}"));
-    let mut games = Vec::new();
-    let mut page = 1;
-    while games.len() < params.limit && page <= 10 {
-        let paged = format!("{url}&page={page}");
-        let json: Value = match http::get_json(&paged).await {
-            Ok(v) => v,
-            Err(e) => {
-                if page == 1 {
-                    crate::logging::write_line("warn", &format!("steamrip posts fetch failed: {e}"));
+    let key = format!("{url}&page=1&_limit={}", params.limit);
+    let limit = params.limit;
+    POSTS
+        .get_or(&key, || async move {
+            let mut games = Vec::new();
+            let mut page = 1;
+            while games.len() < limit && page <= 10 {
+                let paged = format!("{url}&page={page}");
+                let json: Value = match http::get_json(&paged).await {
+                    Ok(v) => v,
+                    Err(e) => {
+                        if page == 1 {
+                            crate::logging::write_line(
+                                "warn",
+                                &format!("steamrip posts fetch failed: {e}"),
+                            );
+                        }
+                        break;
+                    }
+                };
+                let batch = posts_to_games(&json, None, &cats);
+                let short = batch.len() < per_page;
+                games.extend(batch);
+                if short {
+                    break;
                 }
-                break;
+                page += 1;
             }
-        };
-        let batch = posts_to_games(&json, None, &cats);
-        let short = batch.len() < per_page;
-        games.extend(batch);
-        if short {
-            break;
-        }
-        page += 1;
-    }
-    games
+            if games.is_empty() {
+                None
+            } else {
+                Some(games)
+            }
+        })
+        .await
+        .unwrap_or_default()
 }
 
 pub async fn search(q: &str, limit: usize) -> Vec<SourceGame> {
@@ -443,26 +461,31 @@ pub async fn search(q: &str, limit: usize) -> Vec<SourceGame> {
 
 pub async fn get_detail(slug: &str) -> Option<SourceGame> {
     let clean = slug.trim_matches('/').to_string();
-    let cats = load_category_map().await;
-    let url = format!("{API}/posts?slug={}&_fields={FIELDS}", enc(&clean));
-    let json: Value = http::get_json(&url).await.ok()?;
-    let post = json.as_array().and_then(|a| a.first())?;
-    let content = post
-        .get("content")
-        .and_then(|c| c.get("rendered"))
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
-    let mut appid = find_steam_app_id(content);
-    if appid.is_none() {
-        let title_rendered = post
-            .get("title")
-            .and_then(|c| c.get("rendered"))
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        let (title, _) = clean_title(title_rendered);
-        appid = steam::search_app_id(&title).await;
-    }
-    Some(build_game(post, appid, &cats))
+    let key = clean.clone();
+    DETAIL_CACHE
+        .get_or(&key, || async move {
+            let cats = load_category_map().await;
+            let url = format!("{API}/posts?slug={}&_fields={FIELDS}", enc(&clean));
+            let json: Value = http::get_json(&url).await.ok()?;
+            let post = json.as_array().and_then(|a| a.first())?;
+            let content = post
+                .get("content")
+                .and_then(|c| c.get("rendered"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let mut appid = find_steam_app_id(content);
+            if appid.is_none() {
+                let title_rendered = post
+                    .get("title")
+                    .and_then(|c| c.get("rendered"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let (title, _) = clean_title(title_rendered);
+                appid = steam::search_app_id(&title).await;
+            }
+            Some(build_game(post, appid, &cats))
+        })
+        .await
 }
 
 pub async fn list_tags() -> Vec<String> {

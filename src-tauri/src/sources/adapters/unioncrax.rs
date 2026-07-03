@@ -7,7 +7,7 @@ use regex::Regex;
 use serde_json::{json, Value};
 
 use crate::http::{self, FetchOpts};
-use crate::sources::cache::Cached;
+use crate::sources::cache::{Cached, KeyedCache};
 use crate::sources::schema::{dedup_key_for, parse_size_to_bytes, to_epoch_ms, year_from, DownloadOption, SourceGame};
 use crate::sources::{Capabilities, QueryParams, ResolveResult, ResolvedFile};
 
@@ -15,6 +15,8 @@ const ID: &str = "unioncrax";
 const ORIGIN: &str = "https://union-crax.xyz";
 
 static CATALOG: Lazy<Cached<Vec<Value>>> = Lazy::new(|| Cached::new(Duration::from_secs(60 * 30)));
+static DETAIL_CACHE: Lazy<KeyedCache<SourceGame>> =
+    Lazy::new(|| KeyedCache::new(Duration::from_secs(60 * 60 * 6)));
 static STEAM_APPID: Lazy<Mutex<HashMap<String, Option<u64>>>> = Lazy::new(|| Mutex::new(HashMap::new()));
 static STORE_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"store\.steampowered\.com/app/(\d+)").unwrap());
 
@@ -321,33 +323,38 @@ pub async fn search(q: &str, limit: usize) -> Vec<SourceGame> {
 
 pub async fn get_detail(slug: &str) -> Option<SourceGame> {
     let internal_id = slug.to_string();
-    let url = format!("{ORIGIN}/api/games/{}", urlencode(&internal_id));
-    let (ok, json) = request_json(&url, "GET", None).await;
+    let key = internal_id.clone();
+    DETAIL_CACHE
+        .get_or(&key, || async move {
+            let url = format!("{ORIGIN}/api/games/{}", urlencode(&internal_id));
+            let (ok, json) = request_json(&url, "GET", None).await;
 
-    let mut uc: Option<Value> = None;
-    if ok {
-        if let Some(j) = json {
-            if is_truthy(j.get("appid")) || is_truthy(j.get("name")) {
-                uc = Some(j);
+            let mut uc: Option<Value> = None;
+            if ok {
+                if let Some(j) = json {
+                    if is_truthy(j.get("appid")) || is_truthy(j.get("name")) {
+                        uc = Some(j);
+                    }
+                }
             }
-        }
-    }
 
-    if uc.is_none() {
-        let catalog = fetch_catalog().await;
-        uc = catalog.into_iter().find(|g| match g.get("appid") {
-            Some(Value::Number(n)) => n.to_string() == internal_id,
-            Some(Value::String(s)) => *s == internal_id,
-            _ => false,
-        });
-    }
+            if uc.is_none() {
+                let catalog = fetch_catalog().await;
+                uc = catalog.into_iter().find(|g| match g.get("appid") {
+                    Some(Value::Number(n)) => n.to_string() == internal_id,
+                    Some(Value::String(s)) => *s == internal_id,
+                    _ => false,
+                });
+            }
 
-    let uc = uc?;
+            let uc = uc?;
 
-    if steam_app_id_from_store(uc.get("store")).is_none() {
-        resolve_steam_app_id(&internal_id).await;
-    }
-    Some(normalize(&uc))
+            if steam_app_id_from_store(uc.get("store")).is_none() {
+                resolve_steam_app_id(&internal_id).await;
+            }
+            Some(normalize(&uc))
+        })
+        .await
 }
 
 pub async fn list_tags() -> Vec<String> {
