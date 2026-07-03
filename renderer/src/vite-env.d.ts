@@ -428,6 +428,13 @@ declare global {
       log: (level: string, message: string, data?: any) => Promise<void>
       shareLogs: (payload?: { baseUrl?: string }) => Promise<{ ok: boolean; error?: string; endpoint?: string; status?: number }>
     }
+    ucAutostart?: {
+      get: () => Promise<{ ok: boolean; enabled: boolean }>
+      set: (enabled: boolean) => Promise<{ ok: boolean; enabled?: boolean; error?: string }>
+    }
+    ucDialogs?: {
+      pickFolder: () => Promise<{ ok: boolean; path?: string }>
+    }
     ucLinux?: {
       detectProton: () => Promise<{ ok: boolean; versions: Array<{ label: string; path: string }>; autoApplied?: boolean; appliedVersion?: { label: string; path: string }; error?: string }>
       pickPrefixDir: () => Promise<{ ok: boolean; path?: string; cancelled?: boolean; error?: string }>
