@@ -2,6 +2,7 @@ pub mod adapters;
 pub mod cache;
 pub mod filters;
 pub mod hosts;
+pub mod metacache;
 pub mod parse;
 pub mod protondb;
 pub mod schema;
