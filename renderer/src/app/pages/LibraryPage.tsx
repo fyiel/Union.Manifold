@@ -74,6 +74,64 @@ function entryToLib(entry: any, meta: Record<string, LibraryGameMeta>): LibGame 
   }
 }
 
+function InstallingStrip({ installingMeta, installedIds, filter, query }: { installingMeta: Array<{ appid: string; name: string; image?: string; status?: string }>; installedIds: Set<string>; filter: string; query: string }) {
+  // Live download progress for the installing strip (appid → bytes/status).
+  const progress = useDownloadsSelector(
+    (downloads) => downloads.map((d) => ({ appid: d.appid, status: d.status, received: d.receivedBytes, total: d.totalBytes, speed: d.speedBps, extract: d.extractProgress ?? null })),
+    (a, b) => a.length === b.length && a.every((x, i) => x.appid === b[i].appid && x.status === b[i].status && x.received === b[i].received && x.total === b[i].total && x.extract === b[i].extract),
+  )
+
+  // Installing items joined with live progress.
+  const installing = useMemo(() => {
+    const byId = new Map<string, { received: number; total: number; status: string; speed: number; extract: number | null }>()
+    for (const p of progress) {
+      if (!p.appid) continue
+      const cur = byId.get(p.appid)
+      if (!cur || p.received > cur.received) byId.set(p.appid, { received: p.received, total: p.total, status: String(p.status), speed: p.speed, extract: p.extract })
+    }
+    return installingMeta.map((g) => {
+      const p = byId.get(g.appid)
+      const live = p?.status || g.status || "queued"
+      const extracting = live === "extracting" || live === "installing"
+      const done = ["completed", "extracted", "installed", "cancelled", "failed", "extract_failed"].includes(live)
+      const pct = extracting
+        ? (typeof p?.extract === "number" ? Math.min(100, Math.max(0, Math.round(p.extract))) : 100)
+        : p && p.total > 0 ? Math.min(100, Math.round((p.received / p.total) * 100)) : 0
+      const speed = p?.speed ? `${(p.speed / 1e6).toFixed(1)} MB/s` : ""
+      const status = extracting ? "extracting" : live === "downloading" ? `downloading${speed ? ` · ${speed}` : ""}` : live
+      return { ...g, pct, status, done }
+    }).filter((g) => !g.done && !installedIds.has(g.appid))
+  }, [installingMeta, progress, installedIds])
+
+  const showInstalling = installing.length > 0 && filter === "All" && !query.trim()
+  if (!showInstalling) return null
+
+  return (
+    <div style={{ marginBottom: 24 }}>
+      <div style={{ fontFamily: MONO, fontSize: 9.5, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--mf-t5)", marginBottom: 10 }}>Installing</div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {installing.map((g) => (
+          <div key={g.appid} style={{ display: "flex", alignItems: "center", gap: 14, padding: "12px 16px", border: "1px solid var(--mf-line)", borderRadius: 11, background: "var(--mf-panel-2)" }}>
+            <div style={{ width: 38, height: 50, borderRadius: 6, flexShrink: 0, background: g.image ? "#0f0f0f" : COVER_LINES, overflow: "hidden" }}>
+              {g.image && <img src={g.image} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />}
+            </div>
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+                <span style={{ fontSize: 13.5, fontWeight: 600, color: "#ededed" }}>{g.name}</span>
+                <span style={{ fontFamily: MONO, fontSize: 10.5, color: "var(--mf-t4)" }}>{g.status}</span>
+                <span style={{ marginLeft: "auto", fontFamily: MONO, fontSize: 10.5, color: "var(--mf-t3)" }}>{g.pct}%</span>
+              </div>
+              <div style={{ marginTop: 9, height: 4, borderRadius: 99, background: "rgba(255,255,255,0.08)", overflow: "hidden" }}>
+                <div style={{ height: "100%", width: `${g.pct}%`, background: "#e9e9e9", borderRadius: 99 }} />
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export function LibraryPage() {
   const { games: catalog } = useGamesData()
   const { requestLaunch, requestSetExecutable } = useGameLaunch()
@@ -96,12 +154,6 @@ export function LibraryPage() {
   const [filter, setFilter] = useState<FilterKey>("All")
   const [sort, setSort] = useState<SortMode>("recent")
   const [view, setView] = useState<"grid" | "list">("grid")
-
-  // Live download progress for the installing strip (appid → bytes/status).
-  const progress = useDownloadsSelector(
-    (downloads) => downloads.map((d) => ({ appid: d.appid, status: d.status, received: d.receivedBytes, total: d.totalBytes, speed: d.speedBps, extract: d.extractProgress ?? null })),
-    (a, b) => a.length === b.length && a.every((x, i) => x.appid === b[i].appid && x.status === b[i].status && x.received === b[i].received && x.total === b[i].total && x.extract === b[i].extract),
-  )
 
   // Load installed + installing manifests + library meta.
   useEffect(() => {
@@ -252,29 +304,6 @@ export function LibraryPage() {
 
   const installedIds = useMemo(() => new Set(installed.map((g) => g.appid)), [installed])
 
-  // Installing items joined with live progress.
-  const installing = useMemo(() => {
-    const byId = new Map<string, { received: number; total: number; status: string; speed: number; extract: number | null }>()
-    for (const p of progress) {
-      if (!p.appid) continue
-      const cur = byId.get(p.appid)
-      if (!cur || p.received > cur.received) byId.set(p.appid, { received: p.received, total: p.total, status: String(p.status), speed: p.speed, extract: p.extract })
-    }
-    return installingMeta.map((g) => {
-      const p = byId.get(g.appid)
-      const live = p?.status || g.status || "queued"
-      const extracting = live === "extracting" || live === "installing"
-      const done = ["completed", "extracted", "installed", "cancelled", "failed", "extract_failed"].includes(live)
-      const pct = extracting
-        ? (typeof p?.extract === "number" ? Math.min(100, Math.max(0, Math.round(p.extract))) : 100)
-        : p && p.total > 0 ? Math.min(100, Math.round((p.received / p.total) * 100)) : 0
-      const speed = p?.speed ? `${(p.speed / 1e6).toFixed(1)} MB/s` : ""
-      const status = extracting ? "extracting" : live === "downloading" ? `downloading${speed ? ` · ${speed}` : ""}` : live
-      return { ...g, pct, status, done }
-    }).filter((g) => !g.done && !installedIds.has(g.appid))
-  }, [installingMeta, progress, installedIds])
-
-  const showInstalling = installing.length > 0 && filter === "All" && !query.trim()
   const play = (g: LibGame) => void requestLaunch({ appid: g.appid, name: g.name })
   const openDetail = (g: LibGame) => {
     // Prefer the cached fully-resolved game (seeded from libraryGameCache on load
@@ -424,30 +453,7 @@ export function LibraryPage() {
 
       {/* scroller */}
       <div className="mf-scroll" style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "22px 36px 40px" }}>
-        {showInstalling && (
-          <div style={{ marginBottom: 24 }}>
-            <div style={{ fontFamily: MONO, fontSize: 9.5, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--mf-t5)", marginBottom: 10 }}>Installing</div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {installing.map((g) => (
-                <div key={g.appid} style={{ display: "flex", alignItems: "center", gap: 14, padding: "12px 16px", border: "1px solid var(--mf-line)", borderRadius: 11, background: "var(--mf-panel-2)" }}>
-                  <div style={{ width: 38, height: 50, borderRadius: 6, flexShrink: 0, background: g.image ? "#0f0f0f" : COVER_LINES, overflow: "hidden" }}>
-                    {g.image && <img src={g.image} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />}
-                  </div>
-                  <div style={{ minWidth: 0, flex: 1 }}>
-                    <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
-                      <span style={{ fontSize: 13.5, fontWeight: 600, color: "#ededed" }}>{g.name}</span>
-                      <span style={{ fontFamily: MONO, fontSize: 10.5, color: "var(--mf-t4)" }}>{g.status}</span>
-                      <span style={{ marginLeft: "auto", fontFamily: MONO, fontSize: 10.5, color: "var(--mf-t3)" }}>{g.pct}%</span>
-                    </div>
-                    <div style={{ marginTop: 9, height: 4, borderRadius: 99, background: "rgba(255,255,255,0.08)", overflow: "hidden" }}>
-                      <div style={{ height: "100%", width: `${g.pct}%`, background: "#e9e9e9", borderRadius: 99 }} />
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+        <InstallingStrip installingMeta={installingMeta} installedIds={installedIds} filter={filter} query={query} />
 
         {loading ? null : shown.length === 0 ? (
           <CenterState>
@@ -459,7 +465,7 @@ export function LibraryPage() {
         ) : view === "grid" ? (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(168px, 1fr))", gap: 18, alignContent: "start" }}>
             {shown.map((g) => (
-              <div key={g.appid} onClick={() => openDetail(g)} onContextMenu={(e) => { e.preventDefault(); setMenu({ game: toMenuGame(g), anchor: rectFromPoint(e.clientX, e.clientY) }) }} className="mf-card" style={{ display: "flex", flexDirection: "column", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 10, overflow: "hidden", background: "var(--mf-panel)", cursor: "pointer" }}>
+              <div key={g.appid} onClick={() => openDetail(g)} onContextMenu={(e) => { e.preventDefault(); setMenu({ game: toMenuGame(g), anchor: rectFromPoint(e.clientX, e.clientY) }) }} className="mf-card" style={{ display: "flex", flexDirection: "column", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 10, overflow: "hidden", background: "var(--mf-panel)", cursor: "pointer", contentVisibility: "auto", containIntrinsicSize: "auto 300px" }}>
                 <div style={{ position: "relative", aspectRatio: "3 / 4", background: g.image ? "#0f0f0f" : COVER_LINES, display: "flex", alignItems: "flex-end", padding: 12 }}>
                   {g.image && <img src={proxyImageUrl(g.image)} alt={g.name} loading="lazy" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />}
                   {updates.has(g.appid) && (
@@ -495,7 +501,7 @@ export function LibraryPage() {
             </div>
             <div style={{ display: "flex", flexDirection: "column", paddingTop: 4 }}>
               {shown.map((g) => (
-                <div key={g.appid} onClick={() => openDetail(g)} onContextMenu={(e) => { e.preventDefault(); setMenu({ game: toMenuGame(g), anchor: rectFromPoint(e.clientX, e.clientY) }) }} className="mf-listrow" style={{ display: "grid", gridTemplateColumns: "44px minmax(0,1fr) 150px 120px 140px", gap: 14, alignItems: "center", padding: "8px 14px", borderRadius: 8, cursor: "pointer" }}>
+                <div key={g.appid} onClick={() => openDetail(g)} onContextMenu={(e) => { e.preventDefault(); setMenu({ game: toMenuGame(g), anchor: rectFromPoint(e.clientX, e.clientY) }) }} className="mf-listrow" style={{ display: "grid", gridTemplateColumns: "44px minmax(0,1fr) 150px 120px 140px", gap: 14, alignItems: "center", padding: "8px 14px", borderRadius: 8, cursor: "pointer", contentVisibility: "auto", containIntrinsicSize: "auto 64px" }}>
                   <div style={{ width: 40, height: 50, borderRadius: 5, overflow: "hidden", background: g.image ? "#0f0f0f" : COVER_LINES }}>
                     {g.image && <img src={proxyImageUrl(g.image)} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />}
                   </div>
