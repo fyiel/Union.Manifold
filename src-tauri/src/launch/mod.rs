@@ -14,13 +14,9 @@ use crate::state::AppState;
 static RUNNING: Lazy<Mutex<HashMap<String, u32>>> = Lazy::new(|| Mutex::new(HashMap::new()));
 
 fn install_dir_for(state: &AppState, appid: &str) -> Option<PathBuf> {
-    crate::install::find_installing(&state.download_root(), appid).map(|(dir, manifest)| {
-        manifest
-            .get("installPath")
-            .and_then(|v| v.as_str())
-            .map(PathBuf::from)
-            .unwrap_or(dir)
-    })
+    // Scan the primary install dir AND any legacy roots so old UnionCrax.Direct
+    // installs resolve their folder and launch.
+    crate::library::find_dir(&crate::library::scan_roots(state), appid)
 }
 
 fn is_executable_candidate(path: &Path) -> bool {
