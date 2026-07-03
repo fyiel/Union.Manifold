@@ -95,8 +95,8 @@ const EMPTY_QUERY_RESULT: SourceQueryResult = {
 // year/size ranges) and a capability report. Read `capabilities.coverage` /
 // `capabilities.supports` to announce when a filter or sort isn't supported by
 // every active source.
-export async function querySources(params: SourceQueryParams): Promise<SourceQueryResult> {
-  const res = await api()?.query?.(params)
+export async function querySources(params: SourceQueryParams, reqId?: number): Promise<SourceQueryResult> {
+  const res = await api()?.query?.(params, reqId)
   if (!res?.ok) {
     if (res?.error) sourceLogger.warn("sources query failed", { data: res.error })
     return { ...EMPTY_QUERY_RESULT, applied: params }
