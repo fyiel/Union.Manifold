@@ -292,9 +292,11 @@ fn finalize_installed(dir: &Path, appid: &str, game_name: &Option<String>, insta
 
 pub async fn auto_install(app: AppHandle, appid: String, download_id: String, game_name: Option<String>, save_path: PathBuf, installing_dir: PathBuf) {
     let archive = extract_entry_point(&installing_dir, &save_path);
+    let display_name = game_name.clone().unwrap_or_else(|| appid.clone());
     if !is_archive(&archive) && !sniff_archive(&archive) {
         finalize_installed(&installing_dir, &appid, &game_name, &installing_dir, None);
         emit_status(&app, &download_id, &appid, &game_name, "extracted", None);
+        crate::notify::send_if(&app, "notifyInstallDone", true, "Ready to play", &format!("{display_name} finished installing"));
         return;
     }
     let engine = app.state::<AppState>().downloads.clone();
@@ -306,6 +308,7 @@ pub async fn auto_install(app: AppHandle, appid: String, download_id: String, ga
         Ok(_) => {
             finalize_installed(&installing_dir, &appid, &game_name, &installing_dir, None);
             emit_status(&app, &download_id, &appid, &game_name, "extracted", None);
+            crate::notify::send_if(&app, "notifyInstallDone", true, "Ready to play", &format!("{display_name} finished installing"));
             let parts = archive_files(&installing_dir, &save_path);
             let size: u64 = parts.iter().filter_map(|p| std::fs::metadata(p).ok()).map(|m| m.len()).sum();
             app.emit(
@@ -332,6 +335,7 @@ pub async fn auto_install(app: AppHandle, appid: String, download_id: String, ga
             }
             crate::library::invalidate_scan();
             emit_status(&app, &download_id, &appid, &game_name, "extract_failed", Some(&e.to_string()));
+            crate::notify::send_if(&app, "notifyInstallDone", true, "Install failed", &format!("{display_name} could not be extracted"));
         }
     }
 }

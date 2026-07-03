@@ -56,6 +56,27 @@ pub fn presence_heartbeat() -> Value {
 }
 
 #[tauri::command]
+pub fn autostart_get(app: AppHandle) -> Value {
+    use tauri_plugin_autostart::ManagerExt;
+    let enabled = app.autolaunch().is_enabled().unwrap_or(false);
+    json!({ "ok": true, "enabled": enabled })
+}
+
+#[tauri::command]
+pub fn autostart_set(app: AppHandle, enabled: bool) -> Value {
+    use tauri_plugin_autostart::ManagerExt;
+    let result = if enabled {
+        app.autolaunch().enable()
+    } else {
+        app.autolaunch().disable()
+    };
+    match result {
+        Ok(_) => json!({ "ok": true, "enabled": enabled }),
+        Err(e) => json!({ "ok": false, "error": e.to_string() }),
+    }
+}
+
+#[tauri::command]
 pub fn system_notifications() -> Value {
     json!({ "ok": true, "notifications": [] })
 }
