@@ -75,33 +75,43 @@ function entryToLib(entry: any, meta: Record<string, LibraryGameMeta>): LibGame 
 }
 
 function InstallingStrip({ installingMeta, installedIds, filter, query }: { installingMeta: Array<{ appid: string; name: string; image?: string; status?: string }>; installedIds: Set<string>; filter: string; query: string }) {
-  // Live download progress for the installing strip (appid → bytes/status).
-  const progress = useDownloadsSelector(
-    (downloads) => downloads.map((d) => ({ appid: d.appid, status: d.status, received: d.receivedBytes, total: d.totalBytes, speed: d.speedBps, extract: d.extractProgress ?? null })),
+  // Live download state (real-time) drives the strip so a game shows the moment
+  // it starts downloading, not only once extraction begins. Merged with the
+  // backend installing snapshot for states the live queue may not hold (e.g. a
+  // "downloaded, awaiting extract" item restored after a restart).
+  const live = useDownloadsSelector(
+    (downloads) => downloads.map((d) => ({ appid: d.appid, name: d.gameName, status: d.status, received: d.receivedBytes, total: d.totalBytes, speed: d.speedBps, extract: d.extractProgress ?? null })),
     (a, b) => a.length === b.length && a.every((x, i) => x.appid === b[i].appid && x.status === b[i].status && x.received === b[i].received && x.total === b[i].total && x.extract === b[i].extract),
   )
 
-  // Installing items joined with live progress.
   const installing = useMemo(() => {
-    const byId = new Map<string, { received: number; total: number; status: string; speed: number; extract: number | null }>()
-    for (const p of progress) {
+    const byId = new Map<string, { name?: string; received: number; total: number; status: string; speed: number; extract: number | null }>()
+    for (const p of live) {
       if (!p.appid) continue
       const cur = byId.get(p.appid)
-      if (!cur || p.received > cur.received) byId.set(p.appid, { received: p.received, total: p.total, status: String(p.status), speed: p.speed, extract: p.extract })
+      if (!cur || p.received > cur.received) byId.set(p.appid, { name: p.name, received: p.received, total: p.total, status: String(p.status), speed: p.speed, extract: p.extract })
     }
-    return installingMeta.map((g) => {
-      const p = byId.get(g.appid)
-      const live = p?.status || g.status || "queued"
-      const extracting = live === "extracting" || live === "installing"
-      const done = ["completed", "extracted", "installed", "cancelled", "failed", "extract_failed"].includes(live)
+    const metaById = new Map(installingMeta.map((g) => [g.appid, g]))
+    const ids = new Set<string>([...byId.keys(), ...metaById.keys()])
+    const out: Array<{ appid: string; name: string; image?: string; pct: number; status: string }> = []
+    for (const appid of ids) {
+      if (!appid) continue
+      const p = byId.get(appid)
+      const m = metaById.get(appid)
+      const st = p?.status || m?.status || "queued"
+      const extracting = st === "extracting" || st === "installing"
+      const done = ["completed", "extracted", "installed", "cancelled", "failed", "extract_failed"].includes(st)
+      if (done || installedIds.has(appid)) continue
       const pct = extracting
         ? (typeof p?.extract === "number" ? Math.min(100, Math.max(0, Math.round(p.extract))) : 100)
         : p && p.total > 0 ? Math.min(100, Math.round((p.received / p.total) * 100)) : 0
       const speed = p?.speed ? `${(p.speed / 1e6).toFixed(1)} MB/s` : ""
-      const status = extracting ? "extracting" : live === "downloading" ? `downloading${speed ? ` · ${speed}` : ""}` : live
-      return { ...g, pct, status, done }
-    }).filter((g) => !g.done && !installedIds.has(g.appid))
-  }, [installingMeta, progress, installedIds])
+      const status = extracting ? "extracting" : st === "downloading" ? `downloading${speed ? ` · ${speed}` : ""}` : st
+      const art = getDownloadArt(appid)
+      out.push({ appid, name: m?.name || p?.name || art?.title || appid, image: m?.image || art?.image, pct, status })
+    }
+    return out
+  }, [live, installingMeta, installedIds])
 
   const showInstalling = installing.length > 0 && filter === "All" && !query.trim()
   if (!showInstalling) return null
