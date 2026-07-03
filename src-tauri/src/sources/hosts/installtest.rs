@@ -156,6 +156,7 @@ fn verify_extracted(dir: &Path) -> (u64, usize, Vec<String>) {
     (bytes, files, samples)
 }
 
+#[cfg(target_os = "linux")]
 fn find_proton() -> Option<String> {
     if let Some(p) = env("UM_PROTON") {
         if Path::new(&p).is_file() {
@@ -181,6 +182,7 @@ fn find_proton() -> Option<String> {
     None
 }
 
+#[cfg(target_os = "linux")]
 fn kill_by_compat(compat: &Path) {
     let script = format!(
         "for p in /proc/[0-9]*; do grep -qa 'STEAM_COMPAT_DATA_PATH={}' \"$p/environ\" 2>/dev/null && kill -9 \"${{p##*/}}\" 2>/dev/null; done",
@@ -189,6 +191,7 @@ fn kill_by_compat(compat: &Path) {
     let _ = std::process::Command::new("bash").arg("-c").arg(script).status();
 }
 
+#[cfg(target_os = "linux")]
 fn pick_exe(dir: &Path) -> Option<PathBuf> {
     const SKIP: &[&str] = &[
         "unins", "vcredist", "vc_redist", "dxsetup", "dxwebsetup", "dotnet", "ndp",
@@ -216,6 +219,12 @@ fn pick_exe(dir: &Path) -> Option<PathBuf> {
     best.map(|(_, p)| p)
 }
 
+#[cfg(not(target_os = "linux"))]
+fn launch_game(_install_dir: &Path, _out: &Path, _appid: &str, _secs: u64) -> (bool, String) {
+    (false, "proton launch is linux only, skipped".to_string())
+}
+
+#[cfg(target_os = "linux")]
 fn launch_game(install_dir: &Path, out: &Path, appid: &str, secs: u64) -> (bool, String) {
     use std::os::unix::process::CommandExt;
     let proton = match find_proton() {
