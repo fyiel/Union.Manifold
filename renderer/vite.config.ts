@@ -33,9 +33,6 @@ export default defineConfig({
             if (id.includes('@radix-ui')) {
               return 'vendor-radix'
             }
-            if (id.includes('react-markdown') || id.includes('remark') || id.includes('unist') || id.includes('mdast') || id.includes('micromark') || id.includes('vfile')) {
-              return 'vendor-markdown'
-            }
             if (id.includes('react-dom')) {
               return 'vendor-react-dom'
             }

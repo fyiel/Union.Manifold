@@ -1,14 +1,15 @@
 import { Outlet, useLocation, useNavigate } from "react-router-dom"
-import { Suspense, useEffect, useRef, type CSSProperties, type ReactNode } from "react"
+import { lazy, Suspense, useEffect, useRef, type CSSProperties, type ReactNode } from "react"
 import { Minus, Square, X } from "lucide-react"
 import { Sidebar } from "@/app/manifold/Sidebar"
 import { BrowsePage } from "@/app/pages/BrowsePage"
-import { AdvancedSearchPage } from "@/app/pages/AdvancedSearchPage"
-import { LibraryPage } from "@/app/pages/LibraryPage"
-import { DownloadsPage } from "@/app/pages/DownloadsPage"
-import { SettingsPage } from "@/app/pages/SettingsPage"
 import { usePauseDownloadsWhilePlaying } from "@/hooks/use-pause-on-launch"
 import { cn } from "@/lib/utils"
+
+const AdvancedSearchPage = lazy(() => import("@/app/pages/AdvancedSearchPage").then((m) => ({ default: m.AdvancedSearchPage })))
+const LibraryPage = lazy(() => import("@/app/pages/LibraryPage").then((m) => ({ default: m.LibraryPage })))
+const DownloadsPage = lazy(() => import("@/app/pages/DownloadsPage").then((m) => ({ default: m.DownloadsPage })))
+const SettingsPage = lazy(() => import("@/app/pages/SettingsPage").then((m) => ({ default: m.SettingsPage })))
 
 const drag = { WebkitAppRegion: "drag" } as CSSProperties
 const noDrag = { WebkitAppRegion: "no-drag" } as CSSProperties
@@ -81,7 +82,9 @@ export function ForkLayout() {
         </div>
 
         <div ref={scrollRef} style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column", overflowX: "hidden" }}>
-          <TabHost path={location.pathname} />
+          <Suspense fallback={<div style={{ flex: 1 }} aria-hidden />}>
+            <TabHost path={location.pathname} />
+          </Suspense>
           {!TABS[location.pathname] && (
             <Suspense fallback={<div style={{ flex: 1 }} aria-hidden />}>
               <Outlet />
