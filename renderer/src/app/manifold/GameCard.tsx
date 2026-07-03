@@ -33,7 +33,7 @@ export const GameCard = memo(function GameCard({ game }: { game: UnifiedSourceGa
       className="mf-card"
       onMouseEnter={prefetchDetail}
       onFocus={prefetchDetail}
-      style={{ display: "flex", flexDirection: "column", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 10, overflow: "hidden", background: "var(--mf-panel)", textDecoration: "none", cursor: "pointer" }}
+      style={{ display: "flex", flexDirection: "column", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 10, overflow: "hidden", background: "var(--mf-panel)", textDecoration: "none", cursor: "pointer", contentVisibility: "auto", containIntrinsicSize: "auto 300px" }}
     >
       <div style={{ position: "relative", aspectRatio: "3 / 4", background: hasImg ? "#0f0f0f" : COVER_LINES, display: "flex", alignItems: "flex-end", padding: 12 }}>
         {hasImg && (
