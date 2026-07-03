@@ -44,13 +44,16 @@ impl SettingsStore {
     }
 
     pub fn set(&self, key: &str, value: Value) {
-        let mut map = self.inner.lock().unwrap();
-        if value.is_null() {
-            map.remove(key);
-        } else {
-            map.insert(key.to_string(), value);
-        }
-        self.persist(&map);
+        let snapshot = {
+            let mut map = self.inner.lock().unwrap();
+            if value.is_null() {
+                map.remove(key);
+            } else {
+                map.insert(key.to_string(), value);
+            }
+            map.clone()
+        };
+        self.persist(&snapshot);
     }
 
     pub fn get_string(&self, key: &str) -> Option<String> {
@@ -59,7 +62,7 @@ impl SettingsStore {
 
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn setting_get(state: State<'_, AppState>, key: String) -> Value {
     state.settings.get(&key)
 }
