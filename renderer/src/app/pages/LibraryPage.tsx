@@ -163,8 +163,26 @@ export function LibraryPage() {
 
   const [query, setQuery] = useState("")
   const [filter, setFilter] = useState<FilterKey>("All")
-  const [sort, setSort] = useState<SortMode>("recent")
-  const [view, setView] = useState<"grid" | "list">("grid")
+  // View + sort survive restarts, remembering the last choice.
+  const [sort, setSortState] = useState<SortMode>(() => {
+    try { const v = localStorage.getItem("uc_library_sort"); if (v === "recent" || v === "a-z" || v === "installed") return v } catch { /* ignore */ }
+    return "recent"
+  })
+  const [view, setViewState] = useState<"grid" | "list">(() => {
+    try { const v = localStorage.getItem("uc_library_view"); if (v === "grid" || v === "list") return v } catch { /* ignore */ }
+    return "grid"
+  })
+  const setSort = (v: SortMode | ((prev: SortMode) => SortMode)) => {
+    setSortState((prev) => {
+      const next = typeof v === "function" ? v(prev) : v
+      try { localStorage.setItem("uc_library_sort", next) } catch { /* ignore */ }
+      return next
+    })
+  }
+  const setView = (v: "grid" | "list") => {
+    setViewState(v)
+    try { localStorage.setItem("uc_library_view", v) } catch { /* ignore */ }
+  }
 
   // Load installed + installing manifests + library meta.
   useEffect(() => {
