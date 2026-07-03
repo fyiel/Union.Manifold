@@ -247,7 +247,15 @@ pub(crate) async fn run_7z(archive: &Path, out_dir: &Path, on_progress: impl Fn(
     let status = child.wait().await.map_err(|e| crate::error::AppError::msg(format!("7z wait: {e}")))?;
     if !status.success() {
         if let Some(bin) = which_extractor() {
+            crate::logging::write_line(
+                "warn",
+                &format!(
+                    "7z failed on {}, retrying with libarchive ({bin})",
+                    archive.display()
+                ),
+            );
             if run_libarchive(&bin, archive, out_dir).await.is_ok() {
+                crate::logging::write_line("info", "libarchive fallback extracted the archive");
                 on_progress(100);
                 return Ok(());
             }
