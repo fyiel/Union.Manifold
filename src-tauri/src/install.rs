@@ -151,6 +151,51 @@ fn last_percent(s: &str) -> Option<u8> {
     out
 }
 
+fn which_extractor() -> Option<String> {
+    let path = std::env::var("PATH").ok()?;
+    let sep = if cfg!(windows) { ';' } else { ':' };
+    for name in ["bsdtar", "tar"] {
+        let file = if cfg!(windows) { format!("{name}.exe") } else { name.to_string() };
+        for dir in path.split(sep) {
+            let p = std::path::Path::new(dir).join(&file);
+            if p.is_file() {
+                return Some(p.to_string_lossy().to_string());
+            }
+        }
+    }
+    None
+}
+
+async fn run_libarchive(bin: &str, archive: &Path, out_dir: &Path) -> Result<()> {
+    std::fs::create_dir_all(out_dir).ok();
+    let mut cmd = tokio::process::Command::new(bin);
+    cmd.arg("-x")
+        .arg("-f")
+        .arg(archive)
+        .arg("-C")
+        .arg(out_dir)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000);
+    }
+    let out = cmd
+        .output()
+        .await
+        .map_err(|e| crate::error::AppError::msg(format!("libarchive spawn: {e}")))?;
+    if out.status.success() {
+        Ok(())
+    } else {
+        Err(crate::error::AppError::msg(format!(
+            "libarchive extract failed: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        )))
+    }
+}
+
 async fn run_7z(archive: &Path, out_dir: &Path, on_progress: impl Fn(u8)) -> Result<()> {
     use tokio::io::AsyncReadExt;
     let bin = crate::bins::resolve_sidecar("7z")
@@ -201,6 +246,12 @@ async fn run_7z(archive: &Path, out_dir: &Path, on_progress: impl Fn(u8)) -> Res
     let (_, err_text) = tokio::join!(progress, drain_err);
     let status = child.wait().await.map_err(|e| crate::error::AppError::msg(format!("7z wait: {e}")))?;
     if !status.success() {
+        if let Some(bin) = which_extractor() {
+            if run_libarchive(&bin, archive, out_dir).await.is_ok() {
+                on_progress(100);
+                return Ok(());
+            }
+        }
         return Err(crate::error::AppError::msg(format!("extraction failed: {}", err_text.trim())));
     }
     on_progress(100);
