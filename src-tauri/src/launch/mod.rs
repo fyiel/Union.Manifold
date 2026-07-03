@@ -11,7 +11,21 @@ use tauri::{AppHandle, Emitter, State};
 use crate::downloads::now_ms;
 use crate::state::AppState;
 
-static RUNNING: Lazy<Mutex<HashMap<String, u32>>> = Lazy::new(|| Mutex::new(HashMap::new()));
+#[derive(Clone)]
+struct RunHandle {
+    pid: u32,
+    scope: Option<String>,
+}
+
+static RUNNING: Lazy<Mutex<HashMap<String, RunHandle>>> = Lazy::new(|| Mutex::new(HashMap::new()));
+
+#[cfg(target_os = "linux")]
+fn systemd_run_available() -> bool {
+    std::env::var("PATH")
+        .ok()
+        .map(|path| path.split(':').any(|d| Path::new(d).join("systemd-run").is_file()))
+        .unwrap_or(false)
+}
 
 fn install_dir_for(state: &AppState, appid: &str) -> Option<PathBuf> {
     // Scan the primary install dir AND any legacy roots so old UnionCrax.Direct
@@ -99,15 +113,53 @@ pub fn game_exe_preflight(state: State<'_, AppState>, appid: String, exe_path: S
 }
 
 fn spawn_and_track(app: &AppHandle, appid: &str, command: &str, args: &[String], cwd: &Path, envs: &[(String, String)], exe_path: &str, game_name: Option<String>) -> Result<u32, String> {
-    let mut cmd = std::process::Command::new(command);
-    cmd.args(args).current_dir(cwd);
+    // Proton's pressure-vessel reparents the game away from our child, so a
+    // plain pid kill leaves the game alive. On Linux wrap the launch in a
+    // transient systemd user scope; stopping the scope reaps the whole tree.
+    #[cfg_attr(not(target_os = "linux"), allow(unused_mut))]
+    let mut scope: Option<String> = None;
+    #[cfg(target_os = "linux")]
+    let mut cmd = if systemd_run_available() {
+        let unit = format!(
+            "uc-game-{}-{}",
+            std::process::id(),
+            appid.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect::<String>()
+        );
+        let mut c = std::process::Command::new("systemd-run");
+        c.arg("--user")
+            .arg("--scope")
+            .arg("--collect")
+            .arg("--quiet")
+            .arg(format!("--unit={unit}"))
+            .arg("--")
+            .arg(command)
+            .args(args);
+        scope = Some(format!("{unit}.scope"));
+        c
+    } else {
+        let mut c = std::process::Command::new(command);
+        c.args(args);
+        c
+    };
+    #[cfg(not(target_os = "linux"))]
+    let mut cmd = {
+        let mut c = std::process::Command::new(command);
+        c.args(args);
+        c
+    };
+    #[cfg(unix)]
+    if scope.is_none() {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
+    cmd.current_dir(cwd);
     for (k, v) in envs {
         cmd.env(k, v);
     }
     let child = cmd.spawn().map_err(|e| e.to_string())?;
     let pid = child.id();
     let started_at = now_ms();
-    RUNNING.lock().unwrap().insert(appid.to_string(), pid);
+    RUNNING.lock().unwrap().insert(appid.to_string(), RunHandle { pid, scope });
     app.emit(
         "uc:presence-changed",
         json!({ "reason": "game-started", "appid": appid, "gameName": game_name }),
@@ -162,28 +214,92 @@ pub fn game_exe_running_list() -> Value {
 
 #[tauri::command(async)]
 pub fn game_exe_quit(appid: String) -> Value {
-    let pid = RUNNING.lock().unwrap().get(&appid).copied();
-    if let Some(pid) = pid {
-        kill_pid(pid);
-        RUNNING.lock().unwrap().remove(&appid);
+    let handle = RUNNING.lock().unwrap().get(&appid).cloned();
+    if let Some(handle) = handle {
+        kill_handle(&handle);
+        // The reaper thread in spawn_and_track owns removal from RUNNING and
+        // the presence-changed emit, so state only flips once the tree is
+        // actually gone.
         return json!({ "ok": true, "stopped": true });
     }
     json!({ "ok": true, "stopped": false })
 }
 
-fn kill_pid(pid: u32) {
+fn kill_handle(handle: &RunHandle) {
+    if let Some(scope) = &handle.scope {
+        let scope = scope.clone();
+        std::process::Command::new("systemctl")
+            .args(["--user", "kill", "--signal=SIGTERM", &scope])
+            .status()
+            .ok();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_secs(4));
+            std::process::Command::new("systemctl")
+                .args(["--user", "kill", "--signal=SIGKILL", &scope])
+                .status()
+                .ok();
+        });
+        return;
+    }
     #[cfg(windows)]
     {
         std::process::Command::new("taskkill")
-            .args(["/PID", &pid.to_string(), "/T", "/F"])
+            .args(["/PID", &handle.pid.to_string(), "/T", "/F"])
             .spawn()
             .ok();
     }
     #[cfg(unix)]
     {
+        // Spawned with process_group(0), so signal the whole group.
+        let group = format!("-{}", handle.pid);
         std::process::Command::new("kill")
-            .args(["-TERM", &pid.to_string()])
-            .spawn()
+            .args(["-TERM", "--", &group])
+            .status()
             .ok();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_secs(4));
+            std::process::Command::new("kill")
+                .args(["-KILL", "--", &group])
+                .status()
+                .ok();
+        });
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod tests {
+    use super::*;
+
+    // Spawn a survivor the way spawn_and_track does (scope on systemd, process
+    // group otherwise) and prove kill_handle reaps it even though the direct
+    // child double-forked away, which is the pressure-vessel reparent shape.
+    #[test]
+    fn kill_handle_reaps_detached_tree() {
+        if !systemd_run_available() {
+            eprintln!("skipping, no systemd-run");
+            return;
+        }
+        let unit = format!("uc-game-test-{}", std::process::id());
+        let scope = format!("{unit}.scope");
+        let mut child = std::process::Command::new("systemd-run")
+            .args(["--user", "--scope", "--collect", "--quiet", &format!("--unit={unit}"), "--", "sh", "-c", "sleep 300 & sleep 300"])
+            .spawn()
+            .expect("spawn scope");
+        std::thread::sleep(std::time::Duration::from_millis(600));
+        kill_handle(&RunHandle { pid: child.id(), scope: Some(scope.clone()) });
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(8);
+        loop {
+            let alive = std::process::Command::new("systemctl")
+                .args(["--user", "is-active", "--quiet", &scope])
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false);
+            if !alive {
+                break;
+            }
+            assert!(std::time::Instant::now() < deadline, "scope survived kill_handle");
+            std::thread::sleep(std::time::Duration::from_millis(300));
+        }
+        let _ = child.wait();
     }
 }
