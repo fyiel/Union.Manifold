@@ -73,6 +73,7 @@ export function SmartImage({ candidates, steamAppId, alt, onAllFailed, style, la
       src={src}
       alt={alt}
       loading={lazy ? "lazy" : undefined}
+      decoding="async"
       onError={() => {
         if (idx + 1 < all.length) { setIdx(idx + 1); return }
         if (steamAppId && !steamTried.current) {
