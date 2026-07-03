@@ -156,6 +156,144 @@ fn verify_extracted(dir: &Path) -> (u64, usize, Vec<String>) {
     (bytes, files, samples)
 }
 
+fn find_proton() -> Option<String> {
+    if let Some(p) = env("UM_PROTON") {
+        if Path::new(&p).is_file() {
+            return Some(p);
+        }
+    }
+    let home = std::env::var("HOME").ok()?;
+    let roots = [".local/share/Steam", ".steam/steam", ".steam/root"];
+    let names = [
+        "Proton 10.0",
+        "Proton - Experimental",
+        "Proton 9.0 (Beta)",
+        "Proton 8.0",
+    ];
+    for r in roots {
+        for n in names {
+            let p = format!("{home}/{r}/steamapps/common/{n}/proton");
+            if Path::new(&p).is_file() {
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
+fn pick_exe(dir: &Path) -> Option<PathBuf> {
+    const SKIP: &[&str] = &[
+        "unins", "vcredist", "vc_redist", "dxsetup", "dxwebsetup", "dotnet", "ndp",
+        "crashhandler", "notification_helper", "python", "redist", "directx", "oalinst",
+        "setup", "cleanup", "touchup", "config", "launcher_installer", "handler", "activation",
+    ];
+    let mut best: Option<(u64, PathBuf)> = None;
+    for e in walkdir::WalkDir::new(dir).into_iter().flatten() {
+        if !e.file_type().is_file() {
+            continue;
+        }
+        let name = e.file_name().to_string_lossy().to_lowercase();
+        if !name.ends_with(".exe") {
+            continue;
+        }
+        if SKIP.iter().any(|s| name.contains(s)) {
+            continue;
+        }
+        let size = e.metadata().map(|m| m.len()).unwrap_or(0);
+        if best.as_ref().map(|(b, _)| size > *b).unwrap_or(true) {
+            best = Some((size, e.path().to_path_buf()));
+        }
+    }
+    best.map(|(_, p)| p)
+}
+
+fn launch_game(install_dir: &Path, out: &Path, appid: &str, secs: u64) -> (bool, String) {
+    use std::os::unix::process::CommandExt;
+    let proton = match find_proton() {
+        Some(p) => p,
+        None => return (false, "no proton install found".to_string()),
+    };
+    let exe = match pick_exe(install_dir) {
+        Some(e) => e,
+        None => return (false, "no launchable .exe found".to_string()),
+    };
+    let exe_str = exe.to_string_lossy().to_string();
+    let plan = crate::launch::linux::plan_launch(
+        &serde_json::json!({}),
+        None,
+        Some(proton.clone()),
+        out,
+        appid,
+        &exe_str,
+    );
+    if !plan.command.contains("proton") {
+        return (false, format!("launch plan did not choose proton (cmd={})", plan.command));
+    }
+    let exe_dir = exe.parent().unwrap_or(install_dir);
+    let log_path = out.join("__launch.log");
+    let log = match std::fs::File::create(&log_path) {
+        Ok(f) => f,
+        Err(e) => return (false, format!("log create {e}")),
+    };
+    let log2 = match log.try_clone() {
+        Ok(f) => f,
+        Err(e) => return (false, format!("log clone {e}")),
+    };
+    let mut cmd = std::process::Command::new(&plan.command);
+    cmd.args(&plan.args)
+        .current_dir(exe_dir)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::from(log))
+        .stderr(std::process::Stdio::from(log2));
+    for (k, v) in &plan.envs {
+        cmd.env(k, v);
+    }
+    cmd.process_group(0);
+    let mut child = match cmd.spawn() {
+        Ok(c) => c,
+        Err(e) => return (false, format!("spawn {e}")),
+    };
+    let pid = child.id();
+    let deadline = Instant::now() + Duration::from_secs(secs);
+    let (launched, note) = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                let code = status.code();
+                let pfx = out.join("compatdata").join(appid).join("pfx").is_dir();
+                break (pfx && code == Some(0), format!("exited early code={code:?} prefixBuilt={pfx}"));
+            }
+            Ok(None) => {
+                if Instant::now() >= deadline {
+                    let pfx = out.join("compatdata").join(appid).join("pfx").is_dir();
+                    break (true, format!("still running after {secs}s prefixBuilt={pfx}"));
+                }
+                std::thread::sleep(Duration::from_millis(500));
+            }
+            Err(e) => break (false, format!("wait error {e}")),
+        }
+    };
+    let gid = format!("-{pid}");
+    let _ = std::process::Command::new("kill").arg("-TERM").arg(&gid).status();
+    std::thread::sleep(Duration::from_millis(1500));
+    let _ = std::process::Command::new("kill").arg("-KILL").arg(&gid).status();
+    let _ = child.wait();
+    let tail = std::fs::read_to_string(&log_path)
+        .ok()
+        .map(|s| {
+            s.lines()
+                .rev()
+                .take(4)
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev()
+                .collect::<Vec<_>>()
+                .join(" | ")
+        })
+        .unwrap_or_default();
+    let exe_name = exe.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+    (launched, format!("exe={exe_name} {note} log[{tail}]"))
+}
+
 #[tokio::test]
 #[ignore]
 async fn install_one_game() {
@@ -165,6 +303,8 @@ async fn install_one_game() {
     let max_gb: f64 = env("UM_MAX_GB").and_then(|s| s.parse().ok()).unwrap_or(5.0);
     let out = PathBuf::from(env("UM_OUT").unwrap_or_else(|| "/tmp/um_install".to_string()));
     let keep = env("UM_KEEP").is_some();
+    let do_launch = env("UM_LAUNCH").is_some();
+    let launch_secs: u64 = env("UM_LAUNCH_SECS").and_then(|s| s.parse().ok()).unwrap_or(30);
     let max_bytes = (max_gb * 1_000_000_000.0) as u64;
 
     eprintln!(
@@ -303,13 +443,25 @@ async fn install_one_game() {
                     }
                     continue;
                 }
+                let mut launch_report = String::new();
+                if do_launch {
+                    let launch_appid = match gg.steam_app_id {
+                        Some(id) => format!("steam-{id}"),
+                        None => sanitize(&gg.title).replace(' ', "-"),
+                    };
+                    eprintln!("   launching under proton (appid={launch_appid}, {launch_secs}s window)...");
+                    let (ok, info) = launch_game(&install_dir, &out, &launch_appid, launch_secs);
+                    eprintln!("   LAUNCH {} {}", if ok { "OK" } else { "FAIL" }, info);
+                    launch_report = format!(" launch={} ({})", if ok { "OK" } else { "FAIL" }, info);
+                }
                 eprintln!(
-                    "\nRESULT PASS source={source} host={} game=\"{}\" dlBytes={dl_bytes} extractBytes={bytes} files={files}",
+                    "\nRESULT PASS source={source} host={} game=\"{}\" dlBytes={dl_bytes} extractBytes={bytes} files={files}{launch_report}",
                     opt.host_type, gg.title
                 );
                 if !keep {
                     let _ = std::fs::remove_dir_all(&game_dir);
                     let _ = std::fs::remove_dir_all(&install_dir);
+                    let _ = std::fs::remove_dir_all(&out.join("compatdata"));
                 }
                 return;
             }

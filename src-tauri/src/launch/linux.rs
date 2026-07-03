@@ -87,24 +87,42 @@ fn onlinefix_overrides(exe_path: &str) -> Option<String> {
 }
 
 pub fn resolve_launch(state: &AppState, appid: &str, exe_path: &str) -> LaunchPlan {
+    let cfg = config_for(state, appid);
+    let global_mode = state
+        .settings
+        .get_string("linuxLaunchMode")
+        .or_else(|| state.settings.get_string("linuxDefaultLaunchMode"));
+    let global_proton = state
+        .settings
+        .get_string("linuxProtonPath")
+        .filter(|s| !s.is_empty());
+    plan_launch(&cfg, global_mode, global_proton, &state.download_root(), appid, exe_path)
+}
+
+pub(crate) fn plan_launch(
+    cfg: &Value,
+    global_mode: Option<String>,
+    global_proton: Option<String>,
+    download_root: &Path,
+    appid: &str,
+    exe_path: &str,
+) -> LaunchPlan {
     if cfg!(windows) || !is_windows_exe(exe_path) {
         return LaunchPlan {
             command: exe_path.to_string(),
             args: vec![],
-            envs: parse_extra_env(&config_for(state, appid)),
+            envs: parse_extra_env(cfg),
         };
     }
-    let cfg = config_for(state, appid);
     let mode = cfg
         .get("launchMode")
         .and_then(|v| v.as_str())
         .filter(|m| *m != "auto" && *m != "inherit")
         .map(String::from)
-        .or_else(|| state.settings.get_string("linuxLaunchMode"))
-        .or_else(|| state.settings.get_string("linuxDefaultLaunchMode"))
+        .or(global_mode)
         .filter(|m| m != "auto" && m != "inherit")
         .unwrap_or_else(|| "auto".to_string());
-    let mut envs = parse_extra_env(&cfg);
+    let mut envs = parse_extra_env(cfg);
     if let Some(id) = steam_appid(appid) {
         envs.push(("STEAM_COMPAT_APP_ID".to_string(), id.clone()));
         envs.push(("SteamAppId".to_string(), id.clone()));
@@ -150,7 +168,7 @@ pub fn resolve_launch(state: &AppState, appid: &str, exe_path: &str) -> LaunchPl
         .and_then(|v| v.as_str())
         .filter(|s| !s.is_empty())
         .map(String::from)
-        .or_else(|| state.settings.get_string("linuxProtonPath").filter(|s| !s.is_empty()));
+        .or(global_proton);
     if mode == "proton" || (mode == "auto" && proton_path.is_some()) {
         if let Some(proton) = &proton_path {
             if let Some(steam) = steam_root() {
@@ -158,7 +176,7 @@ pub fn resolve_launch(state: &AppState, appid: &str, exe_path: &str) -> LaunchPl
             }
             envs.push(("STEAM_COMPAT_INSTALL_PATH".to_string(), install_path_for(exe_path)));
             if proton_prefix.is_none() {
-                let compat = state.download_root().join("compatdata").join(appid);
+                let compat = download_root.join("compatdata").join(appid);
                 std::fs::create_dir_all(&compat).ok();
                 envs.push(("STEAM_COMPAT_DATA_PATH".to_string(), compat.to_string_lossy().to_string()));
             }
