@@ -265,17 +265,3 @@ pub fn finalize_pool(pool: Vec<SourceGame>, params: &QueryParams) -> (Vec<Unifie
     };
     (ordered, facets, total)
 }
-
-pub fn finalize(pool: Vec<SourceGame>, params: &QueryParams, ids: &[String], reg: &Registry) -> QueryResult {
-    let (ordered, facets, total) = finalize_pool(pool, params);
-    let page: Vec<UnifiedGame> = ordered.into_iter().skip(params.offset).take(params.limit).collect();
-    QueryResult {
-        ok: true,
-        games: page,
-        total,
-        facets,
-        applied: params.clone(),
-        capabilities: capability_report(ids, reg),
-        error: None,
-    }
-}

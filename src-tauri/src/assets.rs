@@ -1,17 +1,35 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use once_cell::sync::Lazy;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Manager};
+use tokio::sync::Mutex as AsyncMutex;
 
 use crate::state::AppState;
 
 static NEG_CACHE: Lazy<Mutex<HashMap<String, Instant>>> = Lazy::new(|| Mutex::new(HashMap::new()));
 const NEG_TTL: Duration = Duration::from_secs(60);
+
+static MEM_CACHE: Lazy<Mutex<HashMap<String, (Arc<Vec<u8>>, &'static str)>>> = Lazy::new(|| Mutex::new(HashMap::new()));
+const MEM_MAX: usize = 512;
+static INFLIGHT: Lazy<Mutex<HashMap<String, Arc<AsyncMutex<()>>>>> = Lazy::new(|| Mutex::new(HashMap::new()));
+
+fn mem_get(key: &str) -> Option<(Vec<u8>, &'static str)> {
+    let map = MEM_CACHE.lock().unwrap();
+    map.get(key).map(|(b, ct)| (b.as_ref().clone(), *ct))
+}
+
+fn mem_put(key: &str, bytes: &[u8], ct: &'static str) {
+    let mut map = MEM_CACHE.lock().unwrap();
+    if map.len() >= MEM_MAX {
+        map.clear();
+    }
+    map.insert(key.to_string(), (Arc::new(bytes.to_vec()), ct));
+}
 
 fn neg_hit(key: &str) -> bool {
     let mut map = NEG_CACHE.lock().unwrap();
@@ -68,12 +86,31 @@ pub async fn respond(app: AppHandle, uri: String) -> (u16, Vec<u8>, String) {
     let dir = cache_dir(&app);
     let key = hex::encode(Sha256::digest(remote.as_bytes()));
     let path = dir.join(&key);
+    if let Some((bytes, ct)) = mem_get(&key) {
+        return (200, bytes, ct.to_string());
+    }
     if let Ok(bytes) = tokio::fs::read(&path).await {
-        let ct = content_type_of(&bytes).to_string();
-        return (200, bytes, ct);
+        let ct = content_type_of(&bytes);
+        mem_put(&key, &bytes, ct);
+        return (200, bytes, ct.to_string());
     }
     if neg_hit(&key) {
         return (404, b"cached miss".to_vec(), "text/plain".to_string());
+    }
+    let gate = {
+        let mut inflight = INFLIGHT.lock().unwrap();
+        inflight.entry(key.clone()).or_insert_with(|| Arc::new(AsyncMutex::new(()))).clone()
+    };
+    let _held = gate.lock().await;
+    if let Some((bytes, ct)) = mem_get(&key) {
+        INFLIGHT.lock().unwrap().remove(&key);
+        return (200, bytes, ct.to_string());
+    }
+    if let Ok(bytes) = tokio::fs::read(&path).await {
+        let ct = content_type_of(&bytes);
+        mem_put(&key, &bytes, ct);
+        INFLIGHT.lock().unwrap().remove(&key);
+        return (200, bytes, ct.to_string());
     }
     let opts = crate::http::FetchOpts {
         retries: Some(0),
@@ -86,20 +123,25 @@ pub async fn respond(app: AppHandle, uri: String) -> (u16, Vec<u8>, String) {
                 let bytes = body.to_vec();
                 tokio::fs::create_dir_all(&dir).await.ok();
                 tokio::fs::write(&path, &bytes).await.ok();
-                let ct = content_type_of(&bytes).to_string();
-                (200, bytes, ct)
+                let ct = content_type_of(&bytes);
+                mem_put(&key, &bytes, ct);
+                INFLIGHT.lock().unwrap().remove(&key);
+                (200, bytes, ct.to_string())
             }
             Err(_) => {
                 neg_mark(&key);
+                INFLIGHT.lock().unwrap().remove(&key);
                 (502, b"fetch body failed".to_vec(), "text/plain".to_string())
             }
         },
         Ok(resp) => {
             neg_mark(&key);
+            INFLIGHT.lock().unwrap().remove(&key);
             (resp.status().as_u16(), b"upstream error".to_vec(), "text/plain".to_string())
         }
         Err(_) => {
             neg_mark(&key);
+            INFLIGHT.lock().unwrap().remove(&key);
             (502, b"fetch failed".to_vec(), "text/plain".to_string())
         }
     }
