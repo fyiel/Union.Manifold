@@ -7,8 +7,10 @@ use serde_json::Value;
 
 use crate::http;
 
-static SUMMARY_CACHE: Lazy<Mutex<HashMap<u64, Option<ProtonDbSummary>>>> =
-    Lazy::new(|| Mutex::new(HashMap::new()));
+use super::metacache;
+
+static SUMMARY_CACHE: Lazy<Mutex<HashMap<String, Option<ProtonDbSummary>>>> =
+    Lazy::new(|| Mutex::new(metacache::load("protondb.json")));
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -25,7 +27,7 @@ pub async fn summary(appid: u64) -> Option<ProtonDbSummary> {
     if appid == 0 {
         return None;
     }
-    if let Some(cached) = SUMMARY_CACHE.lock().unwrap().get(&appid).cloned() {
+    if let Some(cached) = SUMMARY_CACHE.lock().unwrap().get(&appid.to_string()).cloned() {
         return cached;
     }
     let url = format!("https://www.protondb.com/api/v1/reports/summaries/{appid}.json");
@@ -53,6 +55,10 @@ pub async fn summary(appid: u64) -> Option<ProtonDbSummary> {
         }
         Err(_) => None,
     };
-    SUMMARY_CACHE.lock().unwrap().insert(appid, out.clone());
+    {
+        let mut map = SUMMARY_CACHE.lock().unwrap();
+        map.insert(appid.to_string(), out.clone());
+        metacache::save("protondb.json", &map);
+    }
     out
 }

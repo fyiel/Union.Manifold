@@ -8,6 +8,7 @@ use serde_json::{json, Value};
 
 use crate::http::{self, FetchOpts};
 use crate::sources::cache::{Cached, KeyedCache};
+use crate::sources::metacache;
 use crate::sources::schema::{dedup_key_for, parse_size_to_bytes, to_epoch_ms, year_from, DownloadOption, SourceGame};
 use crate::sources::{Capabilities, QueryParams, ResolveResult, ResolvedFile};
 
@@ -17,7 +18,8 @@ const ORIGIN: &str = "https://union-crax.xyz";
 static CATALOG: Lazy<Cached<Vec<Value>>> = Lazy::new(|| Cached::new(Duration::from_secs(60 * 30)));
 static DETAIL_CACHE: Lazy<KeyedCache<SourceGame>> =
     Lazy::new(|| KeyedCache::new(Duration::from_secs(60 * 60 * 6)));
-static STEAM_APPID: Lazy<Mutex<HashMap<String, Option<u64>>>> = Lazy::new(|| Mutex::new(HashMap::new()));
+static STEAM_APPID: Lazy<Mutex<HashMap<String, Option<u64>>>> =
+    Lazy::new(|| Mutex::new(metacache::load("unioncrax-appids.json")));
 static STORE_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"store\.steampowered\.com/app/(\d+)").unwrap());
 
 fn urlencode(s: &str) -> String {
@@ -108,7 +110,11 @@ async fn resolve_steam_app_id(internal_id: &str) -> Option<u64> {
             }
         }
     }
-    STEAM_APPID.lock().unwrap().insert(key, appid);
+    {
+        let mut map = STEAM_APPID.lock().unwrap();
+        map.insert(key, appid);
+        metacache::save("unioncrax-appids.json", &map);
+    }
     appid
 }
 
