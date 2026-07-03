@@ -10,6 +10,7 @@ pub mod steam;
 use std::collections::HashSet;
 use std::sync::Mutex;
 
+use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tauri::State;
@@ -17,6 +18,39 @@ use tauri::State;
 use crate::error::Result;
 use crate::state::AppState;
 use schema::SourceGame;
+
+const POOL_SIZE: usize = 300;
+
+#[derive(Clone)]
+struct CachedPool {
+    ordered: Vec<schema::UnifiedGame>,
+    facets: filters::Facets,
+    total: usize,
+}
+
+static QUERY_POOL: Lazy<cache::KeyedCache<std::sync::Arc<CachedPool>>> =
+    Lazy::new(|| cache::KeyedCache::new(std::time::Duration::from_secs(90)));
+
+fn pool_sig(params: &QueryParams, ids: &[String]) -> String {
+    let mut tags = params.tags.clone();
+    tags.sort();
+    let mut sources = ids.to_vec();
+    sources.sort();
+    format!(
+        "{}|{}|{}|{:?}|{:?}|{:?}|{:?}|{}|{}|{}|{}",
+        params.text.as_deref().unwrap_or(""),
+        tags.join(","),
+        params.tag_mode.as_deref().unwrap_or(""),
+        params.min_year,
+        params.max_year,
+        params.min_size_bytes,
+        params.max_size_bytes,
+        params.sort.as_deref().unwrap_or(""),
+        params.order.as_deref().unwrap_or(""),
+        params.balanced,
+        sources.join(","),
+    )
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -226,18 +260,55 @@ impl Registry {
 
 async fn run_query(reg: &Registry, params: QueryParams) -> filters::QueryResult {
     let ids = reg.active_ids(&params.sources);
-    let candidate_limit = (params.offset + params.limit).max(36) + 24;
-    let mut pool: Vec<SourceGame> = Vec::new();
-    let per_source = crate::http::map_limit(ids.clone(), ids.len().max(1), |id| {
-        let mut p = params.clone();
-        p.limit = candidate_limit;
-        async move { Some(adapter_query(&id, &p).await) }
-    })
-    .await;
-    for mut v in per_source {
-        pool.append(&mut v);
+    let sig = pool_sig(&params, &ids);
+    let params_fetch = params.clone();
+    let ids_fetch = ids.clone();
+    let cached = QUERY_POOL
+        .get_or(&sig, || async move {
+            let mut p = params_fetch;
+            p.limit = POOL_SIZE;
+            p.offset = 0;
+            let per_source = crate::http::map_limit(ids_fetch.clone(), ids_fetch.len().max(1), |id| {
+                let p = p.clone();
+                async move { Some(adapter_query(&id, &p).await) }
+            })
+            .await;
+            let mut pool: Vec<SourceGame> = Vec::new();
+            for mut v in per_source {
+                pool.append(&mut v);
+            }
+            let (ordered, facets, total) = filters::finalize_pool(pool, &p);
+            Some(std::sync::Arc::new(CachedPool { ordered, facets, total }))
+        })
+        .await;
+    match cached {
+        Some(cp) => {
+            let page: Vec<schema::UnifiedGame> =
+                cp.ordered.iter().skip(params.offset).take(params.limit).cloned().collect();
+            filters::QueryResult {
+                ok: true,
+                games: page,
+                total: cp.total,
+                facets: cp.facets.clone(),
+                applied: params.clone(),
+                capabilities: filters::capability_report(&ids, reg),
+                error: None,
+            }
+        }
+        None => filters::QueryResult {
+            ok: true,
+            games: Vec::new(),
+            total: 0,
+            facets: filters::Facets {
+                tags: Vec::new(),
+                years: filters::MinMax { min: None, max: None },
+                size: filters::MinMax { min: None, max: None },
+            },
+            applied: params.clone(),
+            capabilities: filters::capability_report(&ids, reg),
+            error: None,
+        },
     }
-    filters::finalize(pool, &params, &ids, reg)
 }
 
 pub async fn warm_catalog(reg: &Registry) {
