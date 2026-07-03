@@ -22,6 +22,8 @@ static SLUGS: Lazy<Cached<Vec<String>>> =
 static LW: Lazy<Cached<LwSession>> = Lazy::new(|| Cached::new(Duration::from_secs(60 * 10)));
 static BROWSE: Lazy<KeyedCache<Vec<SourceGame>>> =
     Lazy::new(|| KeyedCache::new(Duration::from_secs(60 * 5)));
+static DETAIL_CACHE: Lazy<KeyedCache<SourceGame>> =
+    Lazy::new(|| KeyedCache::new(Duration::from_secs(60 * 60 * 6)));
 static GENRES: Lazy<Cached<GenreMap>> =
     Lazy::new(|| Cached::new(Duration::from_secs(60 * 60 * 6)));
 
@@ -728,18 +730,24 @@ pub async fn search(q: &str, limit: usize) -> Vec<SourceGame> {
 }
 
 pub async fn get_detail(slug: &str) -> Option<SourceGame> {
-    let (status, text) = fetch_full(
-        &format!("{ORIGIN}/game/{slug}"),
-        FetchOpts {
-            retries: Some(AK_RETRIES),
-            ..Default::default()
-        },
-    )
-    .await?;
-    if !ok_status(status) {
-        return None;
-    }
-    Some(parse_game_page(&text, slug))
+    let slug = slug.to_string();
+    let key = slug.clone();
+    DETAIL_CACHE
+        .get_or(&key, || async move {
+            let (status, text) = fetch_full(
+                &format!("{ORIGIN}/game/{slug}"),
+                FetchOpts {
+                    retries: Some(AK_RETRIES),
+                    ..Default::default()
+                },
+            )
+            .await?;
+            if !ok_status(status) {
+                return None;
+            }
+            Some(parse_game_page(&text, &slug))
+        })
+        .await
 }
 
 pub async fn list_tags() -> Vec<String> {
