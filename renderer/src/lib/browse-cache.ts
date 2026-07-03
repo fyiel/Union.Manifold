@@ -18,15 +18,34 @@ export type BrowseCache = {
   scrollTop: number
 }
 
+const LS_KEY = "uc_browse_snapshot_v1"
+let diskRestore = false
+
 let cache: BrowseCache | null = null
+
+try {
+  const raw = localStorage.getItem(LS_KEY)
+  if (raw) { cache = JSON.parse(raw) as BrowseCache; diskRestore = true }
+} catch { cache = null }
 
 export function getBrowseCache(): BrowseCache | null {
   return cache
 }
 
+export function consumeDiskRestore(): boolean {
+  const was = diskRestore
+  diskRestore = false
+  return was
+}
+
 export function setBrowseCache(next: Omit<BrowseCache, "scrollTop"> & { scrollTop?: number }): void {
   // preserve the live scrollTop across the frequent state-driven cache writes
   cache = { ...next, scrollTop: next.scrollTop ?? cache?.scrollTop ?? 0 }
+  diskRestore = false
+  try {
+    const snap: BrowseCache = { ...cache, games: cache.games.slice(0, 48), offset: Math.min(cache.offset, 48) }
+    localStorage.setItem(LS_KEY, JSON.stringify(snap))
+  } catch { /* quota — ignore */ }
 }
 
 // Cheap scroll-only update, called on every scroll without rebuilding the entry.
