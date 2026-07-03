@@ -499,7 +499,8 @@ declare global {
       steamArt: (appid: number) => Promise<{ ok: boolean; art: { header: string; background: string } }>
       protondb: (appid: number) => Promise<{ ok: boolean; data: ProtonDbSummary | null }>
       steamMeta: (appid: number) => Promise<{ ok: boolean; meta: SteamMeta }>
-      query: (params: SourceQueryParams) => Promise<SourceQueryResult>
+      query: (params: SourceQueryParams, reqId?: number) => Promise<SourceQueryResult>
+      onBrowsePartial: (cb: (payload: { reqId: number; games: UnifiedSourceGame[]; total: number; doneSources: string[] }) => void) => () => void
       capabilities: (sourceIds?: string[]) => Promise<{ ok: boolean; capabilities: SourceCapabilityReport; error?: string }>
       tags: () => Promise<{ ok: boolean; tags: string[]; bySource: Record<string, string[]>; error?: string }>
     }

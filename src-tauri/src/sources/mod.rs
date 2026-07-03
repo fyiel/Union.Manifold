@@ -14,7 +14,7 @@ use std::sync::Mutex;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use tauri::State;
+use tauri::{AppHandle, Emitter, State};
 
 use crate::error::Result;
 use crate::state::AppState;
@@ -312,6 +312,80 @@ async fn run_query(reg: &Registry, params: QueryParams) -> filters::QueryResult 
     }
 }
 
+fn page_from(cp: &CachedPool, params: &QueryParams, ids: &[String], reg: &Registry) -> filters::QueryResult {
+    let page: Vec<schema::UnifiedGame> =
+        cp.ordered.iter().skip(params.offset).take(params.limit).cloned().collect();
+    filters::QueryResult {
+        ok: true,
+        games: page,
+        total: cp.total,
+        facets: cp.facets.clone(),
+        applied: params.clone(),
+        capabilities: filters::capability_report(ids, reg),
+        error: None,
+    }
+}
+
+fn empty_pool() -> std::sync::Arc<CachedPool> {
+    std::sync::Arc::new(CachedPool {
+        ordered: Vec::new(),
+        facets: filters::Facets {
+            tags: Vec::new(),
+            years: filters::MinMax { min: None, max: None },
+            size: filters::MinMax { min: None, max: None },
+        },
+        total: 0,
+    })
+}
+
+async fn run_query_stream(
+    app: &AppHandle,
+    req_id: u64,
+    reg: &Registry,
+    params: QueryParams,
+) -> filters::QueryResult {
+    use futures::stream::{FuturesUnordered, StreamExt};
+    let ids = reg.active_ids(&params.sources);
+    let sig = pool_sig(&params, &ids);
+    if let Some(cp) = QUERY_POOL
+        .get_or(&sig, || async { None::<std::sync::Arc<CachedPool>> })
+        .await
+    {
+        return page_from(&cp, &params, &ids, reg);
+    }
+    let mut p = params.clone();
+    p.limit = POOL_SIZE;
+    p.offset = 0;
+    let mut futs = FuturesUnordered::new();
+    for id in ids.clone() {
+        let pp = p.clone();
+        futs.push(async move {
+            let games = adapter_query(&id, &pp).await;
+            (id, games)
+        });
+    }
+    let mut pool: Vec<SourceGame> = Vec::new();
+    let mut done: Vec<String> = Vec::new();
+    let mut latest: Option<std::sync::Arc<CachedPool>> = None;
+    while let Some((id, mut games)) = futs.next().await {
+        pool.append(&mut games);
+        done.push(id);
+        let (ordered, facets, total) = filters::finalize_pool(pool.clone(), &p);
+        let page: Vec<schema::UnifiedGame> =
+            ordered.iter().skip(params.offset).take(params.limit).cloned().collect();
+        app.emit(
+            "uc:browse-partial",
+            json!({ "reqId": req_id, "games": page, "total": total, "doneSources": done }),
+        )
+        .ok();
+        latest = Some(std::sync::Arc::new(CachedPool { ordered, facets, total }));
+    }
+    let cp = latest.unwrap_or_else(empty_pool);
+    let stored = cp.clone();
+    QUERY_POOL.get_or(&sig, || async move { Some(stored) }).await;
+    page_from(&cp, &params, &ids, reg)
+}
+
 pub async fn warm_catalog(reg: &Registry) {
     let params = QueryParams { balanced: true, limit: 48, ..Default::default() };
     let _ = run_query(reg, params).await;
@@ -335,8 +409,18 @@ pub fn sources_set_enabled(state: State<'_, AppState>, id: String, enabled: bool
 }
 
 #[tauri::command]
-pub async fn sources_query(state: State<'_, AppState>, params: QueryParams) -> Result<filters::QueryResult> {
-    Ok(run_query(&state.sources, params).await)
+pub async fn sources_query(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    params: QueryParams,
+    req_id: Option<u64>,
+) -> Result<filters::QueryResult> {
+    match req_id {
+        Some(rid) if params.offset == 0 => {
+            Ok(run_query_stream(&app, rid, &state.sources, params).await)
+        }
+        _ => Ok(run_query(&state.sources, params).await),
+    }
 }
 
 #[tauri::command]
