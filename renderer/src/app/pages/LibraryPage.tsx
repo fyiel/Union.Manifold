@@ -264,7 +264,7 @@ export function LibraryPage() {
       const p = byId.get(g.appid)
       const live = p?.status || g.status || "queued"
       const extracting = live === "extracting" || live === "installing"
-      const done = ["completed", "extracted", "installed", "cancelled"].includes(live)
+      const done = ["completed", "extracted", "installed", "cancelled", "failed", "extract_failed"].includes(live)
       const pct = extracting
         ? (typeof p?.extract === "number" ? Math.min(100, Math.max(0, Math.round(p.extract))) : 100)
         : p && p.total > 0 ? Math.min(100, Math.round((p.received / p.total) * 100)) : 0
