@@ -41,15 +41,11 @@
     "@tauri-apps/api": "^2",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
-    "embla-carousel-react": "^8.5.1",
-    "fuse.js": "^7.1.0",
     "geist": "^1.5.1",
     "lucide-react": "^0.454.0",
     "react": "19.2.3",
     "react-dom": "19.2.3",
-    "react-markdown": "^10.1.0",
     "react-router-dom": "^7.0.2",
-    "remark-gfm": "^4.0.1",
     "tailwind-merge": "^2.5.5"
   },
   "devDependencies": {
