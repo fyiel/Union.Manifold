@@ -240,6 +240,11 @@ async fn run_query(reg: &Registry, params: QueryParams) -> filters::QueryResult 
     filters::finalize(pool, &params, &ids, reg)
 }
 
+pub async fn warm_catalog(reg: &Registry) {
+    let params = QueryParams { balanced: true, limit: 48, ..Default::default() };
+    let _ = run_query(reg, params).await;
+}
+
 #[tauri::command]
 pub fn sources_list(state: State<'_, AppState>) -> Value {
     json!({ "ok": true, "sources": state.sources.list() })

@@ -83,6 +83,7 @@ pub fn run() {
                 .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
                 .unwrap_or_default();
             let sources = Arc::new(Registry::new(&disabled_sources));
+            let sources_warm = sources.clone();
             let default_root = default_download_root(&paths.data_dir);
             let downloads = DownloadEngine::new(handle.clone(), settings.clone(), default_root, aria2);
             app.manage(AppState {
@@ -90,6 +91,9 @@ pub fn run() {
                 settings,
                 sources,
                 downloads,
+            });
+            tauri::async_runtime::spawn(async move {
+                sources::warm_catalog(&sources_warm).await;
             });
             build_tray(app)?;
             #[cfg(desktop)]
