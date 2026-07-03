@@ -305,6 +305,7 @@ async fn install_one_game() {
     let keep = env("UM_KEEP").is_some();
     let do_launch = env("UM_LAUNCH").is_some();
     let launch_secs: u64 = env("UM_LAUNCH_SECS").and_then(|s| s.parse().ok()).unwrap_or(30);
+    let skip: usize = env("UM_SKIP").and_then(|s| s.parse().ok()).unwrap_or(0);
     let max_bytes = (max_gb * 1_000_000_000.0) as u64;
 
     eprintln!(
@@ -315,6 +316,7 @@ async fn install_one_game() {
     eprintln!("catalog returned {} games", games.len());
 
     let mut tried = 0usize;
+    let mut eligible = 0usize;
     for g in &games {
         let detail_holder;
         let gg: &SourceGame = if g.download_options.is_empty() {
@@ -341,6 +343,10 @@ async fn install_one_game() {
             if sz > max_bytes {
                 continue;
             }
+        }
+        eligible += 1;
+        if eligible <= skip {
+            continue;
         }
         if tried >= 8 {
             break;
