@@ -1,5 +1,9 @@
 import { useEffect, useMemo, useState } from "react"
-import { Terminal, FolderOpen } from "lucide-react"
+import { Terminal, FolderOpen, Palette, Library as LibraryIcon, Plus, X, Pencil } from "lucide-react"
+import { PRESET_THEMES } from "@/lib/themes/presets"
+import type { ThemeDef } from "@/lib/themes/types"
+import { useActiveTheme } from "@/hooks/use-active-theme"
+import { useCustomThemes } from "@/hooks/use-custom-themes"
 import {
   listSources,
   loadDisabledSources,
@@ -21,10 +25,12 @@ const IS_LINUX = typeof navigator !== "undefined" && /linux/i.test(navigator.use
 // with no backend (notifications, concurrency, auto-extract) were removed rather
 // than shipped as no-ops.
 
-type Section = "general" | "downloads" | "sources" | "linux" | "about"
+type Section = "general" | "appearance" | "downloads" | "library" | "sources" | "linux" | "about"
 const SECTIONS: Array<{ id: Section; label: string; sub: string }> = [
-  { id: "general", label: "General", sub: "app behavior, notifications, and close behavior" },
+  { id: "general", label: "General", sub: "app behavior, startup, notifications, and close behavior" },
+  { id: "appearance", label: "Appearance", sub: "theme presets and the theme editor" },
   { id: "downloads", label: "Downloads", sub: "install location, concurrency, and bandwidth" },
+  { id: "library", label: "Library", sub: "extra folders scanned for installed games" },
   { id: "sources", label: "Sources", sub: "which catalog sources are active" },
   // Linux runner config only matters on Linux, filtered out of the rail elsewhere.
   ...(IS_LINUX ? [{ id: "linux" as const, label: "Linux", sub: "global Proton / Wine runner and launch options" }] : []),
@@ -46,12 +52,20 @@ export function SettingsPage() {
   const [shortcut, setShortcut] = useState(false)
   const [autoShareLogs, setAutoShareLogs] = useState(false)
   const [pauseWhilePlaying, setPauseWhilePlaying] = useState(false)
+  const [launchAtLogin, setLaunchAtLogin] = useState(false)
+  const [startMinimized, setStartMinimized] = useState(false)
+  const [autoCheckUpdates, setAutoCheckUpdates] = useState(true)
+  const [notifyInstallDone, setNotifyInstallDone] = useState(true)
+  const [notifyGameExit, setNotifyGameExit] = useState(false)
+  const [maxConcurrent, setMaxConcurrent] = useState(3)
+  const [connsPerDl, setConnsPerDl] = useState(8)
+  const [diskMargin, setDiskMargin] = useState(2)
 
   useEffect(() => {
     let alive = true
     void (async () => {
       try {
-        const [cb, kbps, del, path, sc, share, pause] = await Promise.all([
+        const [cb, kbps, del, path, sc, share, pause, mini, upd, nid, nge, maxC, conns, margin, auto] = await Promise.all([
           window.ucSettings?.get?.("closeBehavior"),
           window.ucSettings?.get?.("downloadBandwidthLimitKBps"),
           window.ucSettings?.get?.("autoDeleteArchives"),
@@ -59,6 +73,14 @@ export function SettingsPage() {
           window.ucSettings?.get?.("alwaysCreateDesktopShortcut"),
           window.ucSettings?.get?.("autoShareErrorLogs"),
           window.ucSettings?.get?.("pauseDownloadsWhilePlaying"),
+          window.ucSettings?.get?.("startMinimized"),
+          window.ucSettings?.get?.("autoCheckUpdates"),
+          window.ucSettings?.get?.("notifyInstallDone"),
+          window.ucSettings?.get?.("notifyGameExit"),
+          window.ucSettings?.get?.("maxConcurrentDownloads"),
+          window.ucSettings?.get?.("aria2ConnectionsPerDownload"),
+          window.ucSettings?.get?.("diskSpaceMarginGiB"),
+          window.ucAutostart?.get?.(),
         ])
         if (!alive) return
         if (cb === "hide" || cb === "quit") setCloseBehavior(cb)
@@ -70,6 +92,14 @@ export function SettingsPage() {
         setShortcut(sc === true)
         setAutoShareLogs(share === true)
         setPauseWhilePlaying(pause === true)
+        setStartMinimized(mini === true)
+        setAutoCheckUpdates(upd !== false)
+        setNotifyInstallDone(nid !== false)
+        setNotifyGameExit(nge === true)
+        if (Number(maxC) >= 1) setMaxConcurrent(Math.min(8, Number(maxC)))
+        if (Number(conns) >= 1) setConnsPerDl(Math.min(16, Number(conns)))
+        if (margin != null && Number(margin) >= 0) setDiskMargin(Math.min(64, Number(margin)))
+        setLaunchAtLogin(Boolean(auto?.enabled))
       } catch { /* ignore */ }
     })()
     // reflect changes made elsewhere (e.g. the archive prompt flips autoDeleteArchives)
@@ -151,10 +181,17 @@ export function SettingsPage() {
                     <option value="quit">Quit entirely</option>
                   </select>
                 </Row>
+                <ToggleRow title="Launch at login" desc="Start the app automatically when you log in" on={launchAtLogin} onToggle={() => { const v = !launchAtLogin; setLaunchAtLogin(v); void window.ucAutostart?.set?.(v) }} />
+                <ToggleRow title="Start minimized to tray" desc="Keep the window hidden on startup until you open it from the tray" on={startMinimized} onToggle={() => setBool("startMinimized", !startMinimized, setStartMinimized)} />
+                <ToggleRow title="Check for updates on startup" desc="Look for a new version shortly after launch and notify when one is ready" on={autoCheckUpdates} onToggle={() => setBool("autoCheckUpdates", !autoCheckUpdates, setAutoCheckUpdates)} />
+                <ToggleRow title="Notify when a game is ready" desc="Desktop notification when a download finishes installing" on={notifyInstallDone} onToggle={() => setBool("notifyInstallDone", !notifyInstallDone, setNotifyInstallDone)} />
+                <ToggleRow title="Notify when a game exits" desc="Desktop notification when a running game closes" on={notifyGameExit} onToggle={() => setBool("notifyGameExit", !notifyGameExit, setNotifyGameExit)} />
                 <ToggleRow title="Auto-share error logs" desc="Send diagnostic logs automatically when something fails" on={autoShareLogs} onToggle={() => setBool("autoShareErrorLogs", !autoShareLogs, setAutoShareLogs)} />
                 <ClearAssetsRow />
               </div>
             )}
+
+            {section === "appearance" && <AppearanceTab />}
 
             {section === "downloads" && (
               <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
@@ -182,11 +219,28 @@ export function SettingsPage() {
                     </div>
                   )}
                 </div>
+                <Row title="Max parallel downloads" desc="How many downloads run at once, the rest wait in the queue">
+                  <select className="uc-select" value={maxConcurrent} onChange={(e) => { const v = Number(e.target.value); setMaxConcurrent(v); try { void window.ucSettings?.set?.("maxConcurrentDownloads", v) } catch { /* ignore */ } }} style={{ height: 36, minWidth: 90, padding: "0 32px 0 13px", borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "var(--mf-panel)", color: "var(--mf-t1)", fontSize: 12.5, cursor: "pointer", WebkitAppearance: "none", appearance: "none" }}>
+                    {[1, 2, 3, 4, 5, 6, 7, 8].map((n) => <option key={n} value={n}>{n}</option>)}
+                  </select>
+                </Row>
+                <Row title="Connections per download" desc="Parallel connections aria2 opens to the mirror, applies to newly started downloads">
+                  <select className="uc-select" value={connsPerDl} onChange={(e) => { const v = Number(e.target.value); setConnsPerDl(v); try { void window.ucSettings?.set?.("aria2ConnectionsPerDownload", v) } catch { /* ignore */ } }} style={{ height: 36, minWidth: 90, padding: "0 32px 0 13px", borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "var(--mf-panel)", color: "var(--mf-t1)", fontSize: 12.5, cursor: "pointer", WebkitAppearance: "none", appearance: "none" }}>
+                    {[1, 2, 4, 8, 16].map((n) => <option key={n} value={n}>{n}</option>)}
+                  </select>
+                </Row>
+                <Row title="Free space safety margin" desc="Extra headroom the pre-download disk check demands on top of the estimated install size">
+                  <select className="uc-select" value={diskMargin} onChange={(e) => { const v = Number(e.target.value); setDiskMargin(v); try { void window.ucSettings?.set?.("diskSpaceMarginGiB", v) } catch { /* ignore */ } }} style={{ height: 36, minWidth: 110, padding: "0 32px 0 13px", borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "var(--mf-panel)", color: "var(--mf-t1)", fontSize: 12.5, cursor: "pointer", WebkitAppearance: "none", appearance: "none" }}>
+                    {[0, 1, 2, 4, 8, 16].map((n) => <option key={n} value={n}>{n} GiB</option>)}
+                  </select>
+                </Row>
                 <ToggleRow title="Pause downloads while playing" desc="Pause active downloads when a game launches, resume on exit" on={pauseWhilePlaying} onToggle={() => setBool("pauseDownloadsWhilePlaying", !pauseWhilePlaying, setPauseWhilePlaying)} />
                 <ToggleRow title="Always create desktop shortcut" desc="Add a desktop shortcut for each game after it installs" on={shortcut} onToggle={() => setBool("alwaysCreateDesktopShortcut", !shortcut, setShortcut)} />
                 <ToggleRow title="Delete archive after extract" desc="Reclaim disk space once unpacking succeeds" on={autoDelete} onToggle={toggleAutoDelete} last />
               </div>
             )}
+
+            {section === "library" && <LibraryTab />}
 
             {section === "sources" && <SourcesTab />}
 
@@ -195,6 +249,127 @@ export function SettingsPage() {
             {section === "about" && <AboutTab />}
           </div>
         </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Appearance tab, preset picker + custom themes + theme editor entry ──
+function ThemeSwatch({ theme, active, onSelect }: { theme: ThemeDef; active: boolean; onSelect: () => void }) {
+  const c = theme.colors
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      style={{ display: "flex", flexDirection: "column", gap: 0, padding: 0, borderRadius: 10, overflow: "hidden", border: active ? "1px solid #e6e6e6" : "1px solid var(--mf-line-2)", background: "var(--mf-panel)", cursor: "pointer", textAlign: "left" }}
+    >
+      <span style={{ display: "flex", height: 44, background: c.background }}>
+        <span style={{ flex: 1, margin: "10px 0 10px 10px", borderRadius: 5, background: c.card, border: `1px solid ${c.border}` }} />
+        <span style={{ width: 26, margin: 10, borderRadius: 5, background: c.primary }} />
+        <span style={{ width: 26, margin: "10px 10px 10px 0", borderRadius: 5, background: c.accent }} />
+      </span>
+      <span style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 10px", borderTop: "1px solid var(--mf-line)" }}>
+        <span style={{ fontSize: 12, fontWeight: 600, color: active ? "#f0f0f0" : "var(--mf-t2)" }}>{theme.name}</span>
+        {active && <span style={{ fontFamily: MONO, fontSize: 9, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--mf-t4)" }}>active</span>}
+      </span>
+    </button>
+  )
+}
+
+function AppearanceTab() {
+  const { activeThemeId, activeTheme, setActiveThemeId } = useActiveTheme()
+  const { customThemes, deleteCustomTheme } = useCustomThemes()
+
+  const openEditor = (seed?: ThemeDef) => {
+    void window.ucThemeEditor?.open?.({ theme: seed ?? activeTheme, mode: seed ? "edit" : "new" })
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
+      <div>
+        <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--mf-t1)", marginBottom: 10 }}>Presets</div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(170px, 1fr))", gap: 10 }}>
+          {PRESET_THEMES.map((t) => (
+            <ThemeSwatch key={t.id} theme={t} active={activeThemeId === t.id} onSelect={() => setActiveThemeId(t.id)} />
+          ))}
+        </div>
+      </div>
+      <div>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+          <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--mf-t1)" }}>Custom themes</div>
+          <button type="button" className="mf-ghost" onClick={() => openEditor()} style={{ display: "flex", alignItems: "center", gap: 7, padding: "0 13px", height: 32, borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "transparent", color: "var(--mf-t1)", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+            <Plus size={13} strokeWidth={1.8} />New theme
+          </button>
+        </div>
+        {customThemes.length === 0 ? (
+          <p style={{ margin: 0, fontFamily: MONO, fontSize: 11, color: "var(--mf-t5)" }}>no custom themes yet — the editor opens in its own window and previews live</p>
+        ) : (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(170px, 1fr))", gap: 10 }}>
+            {customThemes.map((t) => (
+              <div key={t.id} style={{ position: "relative" }}>
+                <ThemeSwatch theme={t} active={activeThemeId === t.id} onSelect={() => setActiveThemeId(t.id)} />
+                <div style={{ position: "absolute", top: 6, right: 6, display: "flex", gap: 4 }}>
+                  <button type="button" title="Edit" onClick={() => openEditor(t)} style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 22, height: 22, borderRadius: 6, border: "1px solid rgba(255,255,255,0.15)", background: "rgba(0,0,0,0.55)", color: "var(--mf-t2)", cursor: "pointer" }}>
+                    <Pencil size={11} strokeWidth={1.8} />
+                  </button>
+                  <button type="button" title="Delete" onClick={() => deleteCustomTheme(t.id)} style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 22, height: 22, borderRadius: 6, border: "1px solid rgba(255,255,255,0.15)", background: "rgba(0,0,0,0.55)", color: "var(--mf-t3)", cursor: "pointer" }}>
+                    <X size={12} strokeWidth={1.8} />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ── Library tab, extra scan roots ──
+// Backed by the same legacyLibraryPaths key the scanner already reads, so every
+// entry shows its games in the library and can launch immediately.
+function LibraryTab() {
+  const [roots, setRoots] = useState<string[]>([])
+
+  useEffect(() => {
+    let alive = true
+    void window.ucSettings?.get?.("legacyLibraryPaths").then((v) => {
+      if (!alive) return
+      if (Array.isArray(v)) setRoots(v.filter((x): x is string => typeof x === "string"))
+    })
+    return () => { alive = false }
+  }, [])
+
+  const persist = (next: string[]) => {
+    setRoots(next)
+    try { void window.ucSettings?.set?.("legacyLibraryPaths", next) } catch { /* ignore */ }
+  }
+
+  const addRoot = async () => {
+    try {
+      const r = await window.ucDialogs?.pickFolder?.()
+      if (r?.ok && r.path && !roots.includes(r.path)) persist([...roots, r.path])
+    } catch { /* ignore */ }
+  }
+
+  return (
+    <div>
+      <p style={{ margin: "0 0 18px", fontFamily: MONO, fontSize: 11.5, lineHeight: 1.6, color: "var(--mf-t4)" }}>
+        Folders scanned for installed games on top of the install location, e.g. an old UnionCrax.Direct install or a second drive. Each game folder needs its installed.json manifest.
+      </p>
+      <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
+        {roots.map((root) => (
+          <div key={root} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 14px", border: "1px solid var(--mf-line)", borderRadius: 10, background: "var(--mf-panel-2)" }}>
+            <FolderOpen size={14} strokeWidth={1.6} color="var(--mf-t4)" />
+            <span style={{ flex: 1, minWidth: 0, fontFamily: MONO, fontSize: 12, color: "var(--mf-t2)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{root}</span>
+            <button type="button" title="Remove" onClick={() => persist(roots.filter((r) => r !== root))} style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 26, height: 26, borderRadius: 7, border: "1px solid var(--mf-line-2)", background: "transparent", color: "var(--mf-t3)", cursor: "pointer" }}>
+              <X size={13} strokeWidth={1.8} />
+            </button>
+          </div>
+        ))}
+        <button type="button" className="mf-ghost" onClick={() => void addRoot()} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, padding: "12px 14px", borderRadius: 10, border: "1px dashed var(--mf-line-2)", background: "transparent", color: "var(--mf-t3)", fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>
+          <Plus size={14} strokeWidth={1.8} />Add folder
+        </button>
       </div>
     </div>
   )
@@ -284,16 +459,22 @@ function LinuxSettingsTab() {
   const [protonPrefix, setProtonPrefix] = useState("")
   const [extraEnv, setExtraEnv] = useState("")
   const [proton, setProton] = useState<LinuxDetectionOption[]>([])
+  const [gamemode, setGamemode] = useState(false)
+  const [mangohud, setMangohud] = useState(false)
+  const [dllOverrides, setDllOverrides] = useState("")
 
   useEffect(() => {
     let alive = true
     void (async () => {
-      const [lm, pp, ppfx, env, detect] = await Promise.all([
+      const [lm, pp, ppfx, env, detect, gm, mh, dll] = await Promise.all([
         window.ucSettings?.get?.("linuxLaunchMode"),
         window.ucSettings?.get?.("linuxProtonPath"),
         window.ucSettings?.get?.("linuxProtonPrefix"),
         window.ucSettings?.get?.("linuxExtraEnv"),
         window.ucLinux?.detectProton?.(),
+        window.ucSettings?.get?.("linuxGamemode"),
+        window.ucSettings?.get?.("linuxMangohud"),
+        window.ucSettings?.get?.("linuxDllOverrides"),
       ])
       if (!alive) return
       if (typeof lm === "string") setLaunchMode(lm)
@@ -301,11 +482,15 @@ function LinuxSettingsTab() {
       if (typeof ppfx === "string") setProtonPrefix(ppfx)
       if (typeof env === "string") setExtraEnv(env)
       if (detect?.ok && Array.isArray(detect.versions)) setProton(detect.versions as LinuxDetectionOption[])
+      setGamemode(gm === true)
+      setMangohud(mh === true)
+      if (typeof dll === "string") setDllOverrides(dll)
     })()
     return () => { alive = false }
   }, [])
 
   const persist = (key: string, value: string) => { try { void window.ucSettings?.set?.(key, value) } catch { /* ignore */ } }
+  const persist2 = (key: string, value: boolean) => { try { void window.ucSettings?.set?.(key, value) } catch { /* ignore */ } }
   const pickPrefix = async () => {
     const r = await window.ucLinux?.pickPrefixDir?.()
     if (r?.ok && r.path) { setProtonPrefix(r.path); persist("linuxProtonPrefix", r.path) }
@@ -343,6 +528,25 @@ function LinuxSettingsTab() {
             <FolderOpen size={14} strokeWidth={1.6} />Browse
           </button>
         </div>
+      </div>
+
+      <Row title="GameMode" desc="Wrap launches in gamemoderun for CPU governor and priority tweaks, skipped when not installed">
+        <Toggle on={gamemode} onToggle={() => { const v = !gamemode; setGamemode(v); persist2("linuxGamemode", v) }} />
+      </Row>
+      <Row title="MangoHud" desc="Show the MangoHud performance overlay in game, skipped when not installed">
+        <Toggle on={mangohud} onToggle={() => { const v = !mangohud; setMangohud(v); persist2("linuxMangohud", v) }} />
+      </Row>
+
+      <div style={{ padding: "16px 0", borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
+        <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--mf-t1)", marginBottom: 3 }}>Default WINEDLLOVERRIDES</div>
+        <div style={{ fontFamily: MONO, fontSize: 11, color: "var(--mf-t4)", marginBottom: 10 }}>Used when neither the game folder (OnlineFix) nor per-game env set overrides, e.g. winmm=n,b;dinput8=n,b</div>
+        <input
+          value={dllOverrides}
+          onChange={(e) => setDllOverrides(e.target.value)}
+          onBlur={() => persist("linuxDllOverrides", dllOverrides)}
+          placeholder="empty for none"
+          style={{ width: "100%", boxSizing: "border-box", height: 38, border: "1px solid var(--mf-line-2)", background: "var(--mf-panel)", borderRadius: 8, padding: "0 12px", fontFamily: MONO, fontSize: 12.5, color: "var(--mf-t1)", outline: "none" }}
+        />
       </div>
 
       <div style={{ padding: "16px 0" }}>
@@ -486,6 +690,8 @@ function ClearAssetsRow() {
 const ico = { fill: "none", stroke: "currentColor" as const, strokeWidth: 1.6, strokeLinecap: "round" as const, strokeLinejoin: "round" as const }
 const SECTION_ICON: Record<Section, React.ReactNode> = {
   general: <svg viewBox="0 0 16 16" width="15" height="15" {...ico}><circle cx="8" cy="8" r="2" /><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M12.6 3.4l-1.4 1.4M4.8 11.2l-1.4 1.4" /></svg>,
+  appearance: <Palette size={15} strokeWidth={1.6} />,
+  library: <LibraryIcon size={15} strokeWidth={1.6} />,
   downloads: <svg viewBox="0 0 16 16" width="15" height="15" {...ico}><line x1="8" y1="2.5" x2="8" y2="9.5" /><polyline points="5 7 8 10 11 7" /><line x1="3" y1="13.5" x2="13" y2="13.5" /></svg>,
   sources: <svg viewBox="0 0 16 16" width="15" height="15" {...ico}><ellipse cx="8" cy="4" rx="5.5" ry="2" /><path d="M2.5 4v8c0 1.1 2.5 2 5.5 2s5.5-.9 5.5-2V4" /><path d="M2.5 8c0 1.1 2.5 2 5.5 2s5.5-.9 5.5-2" /></svg>,
   linux: <Terminal size={15} strokeWidth={1.6} />,

@@ -165,6 +165,15 @@ export function installBridge(): void {
     shareLogs: disabled,
   }
 
+  w.ucAutostart = {
+    get: () => call("autostart_get"),
+    set: (enabled: boolean) => call("autostart_set", { enabled }),
+  }
+
+  w.ucDialogs = {
+    pickFolder: () => call("folder_pick"),
+  }
+
   w.ucLinux = {
     detectProton: () => call("linux_detect_proton"),
     pickPrefixDir: () => call("linux_pick_prefix_dir"),
