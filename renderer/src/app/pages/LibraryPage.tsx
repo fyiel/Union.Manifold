@@ -250,6 +250,8 @@ export function LibraryPage() {
     return arr
   }, [installed, query, filter, sort, updates])
 
+  const installedIds = useMemo(() => new Set(installed.map((g) => g.appid)), [installed])
+
   // Installing items joined with live progress.
   const installing = useMemo(() => {
     const byId = new Map<string, { received: number; total: number; status: string; speed: number; extract: number | null }>()
@@ -262,15 +264,15 @@ export function LibraryPage() {
       const p = byId.get(g.appid)
       const live = p?.status || g.status || "queued"
       const extracting = live === "extracting" || live === "installing"
-      const done = ["completed", "extracted", "installed"].includes(live)
+      const done = ["completed", "extracted", "installed", "cancelled"].includes(live)
       const pct = extracting
         ? (typeof p?.extract === "number" ? Math.min(100, Math.max(0, Math.round(p.extract))) : 100)
         : p && p.total > 0 ? Math.min(100, Math.round((p.received / p.total) * 100)) : 0
       const speed = p?.speed ? `${(p.speed / 1e6).toFixed(1)} MB/s` : ""
       const status = extracting ? "extracting" : live === "downloading" ? `downloading${speed ? ` · ${speed}` : ""}` : live
       return { ...g, pct, status, done }
-    }).filter((g) => !g.done)
-  }, [installingMeta, progress])
+    }).filter((g) => !g.done && !installedIds.has(g.appid))
+  }, [installingMeta, progress, installedIds])
 
   const showInstalling = installing.length > 0 && filter === "All" && !query.trim()
   const play = (g: LibGame) => void requestLaunch({ appid: g.appid, name: g.name })
