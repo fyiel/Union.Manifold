@@ -441,12 +441,20 @@ impl DownloadEngine {
             self.fail(&id, "aria2 downloader unavailable, run pnpm fetch-sidecars to bundle it");
             return;
         }
+        let conns = self
+            .settings
+            .get("aria2ConnectionsPerDownload")
+            .as_u64()
+            .map(|n| n.clamp(1, 16))
+            .unwrap_or(8);
         let mut options = json!({
             "dir": dl.installing_dir.to_string_lossy(),
             "out": dl.filename,
             "continue": "true",
             "auto-file-renaming": "false",
             "allow-overwrite": "true",
+            "max-connection-per-server": conns.to_string(),
+            "split": conns.to_string(),
         });
         if let Some(headers) = &dl.headers {
             let lines: Vec<String> = headers.iter().map(|(k, v)| format!("{k}: {v}")).collect();

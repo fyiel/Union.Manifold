@@ -25,9 +25,9 @@ fn free_bytes(path: &Path) -> u64 {
     fs4::available_space(&target).unwrap_or(0)
 }
 
-fn estimate_extract(download_bytes: u64, declared: u64) -> u64 {
+fn estimate_extract(download_bytes: u64, declared: u64, margin_gib: u64) -> u64 {
     let base = declared.max(download_bytes.saturating_mul(2));
-    base + (2 * GIB).max(base / 20)
+    base + (margin_gib * GIB).max(base / 20)
 }
 
 fn human(bytes: u64) -> String {
@@ -50,7 +50,13 @@ pub fn storage_precheck(state: State<'_, AppState>, opts: Value) -> Value {
         .unwrap_or_else(|| state.download_root());
     let download_bytes = opts.get("downloadBytes").and_then(|v| v.as_u64()).unwrap_or(0);
     let declared = opts.get("declaredInstallBytes").and_then(|v| v.as_u64()).unwrap_or(0);
-    let extract = estimate_extract(download_bytes, declared);
+    let margin_gib = state
+        .settings
+        .get("diskSpaceMarginGiB")
+        .as_u64()
+        .map(|n| n.clamp(0, 64))
+        .unwrap_or(2);
+    let extract = estimate_extract(download_bytes, declared, margin_gib);
     let required = download_bytes + extract;
     let free = free_bytes(&target);
     let ok = free >= required;
