@@ -43,6 +43,8 @@ const PROTON_TIER_COLORS: Record<string, string> = {
   platinum: "#b9c7d6", gold: "#e2c15a", silver: "#a7a7a7", bronze: "#c08457", borked: "#d0625f",
 }
 
+const stripReqHeading = (html: string) => html.replace(/^\s*<strong>[^<]*<\/strong>\s*(<br\s*\/?>)?\s*/i, "")
+
 function relTime(ms?: number | null): string {
   if (!ms) return ""
   const s = Math.max(0, Math.floor((Date.now() - ms) / 1000))
@@ -352,13 +354,13 @@ export function SourceGamePage() {
               {steamMeta.requirements.minimum && (
                 <div style={{ flex: "1 1 300px", minWidth: 0, padding: "14px 16px", borderRadius: 10, border: "1px solid var(--mf-line)", background: "var(--mf-panel-2)" }}>
                   <div style={{ fontFamily: MONO, fontSize: 9.5, letterSpacing: "0.16em", textTransform: "uppercase", color: "var(--mf-t5)" }}>Minimum</div>
-                  <div style={{ marginTop: 8, fontSize: 12, lineHeight: 1.6, color: "var(--mf-t3)", overflowWrap: "anywhere" }} dangerouslySetInnerHTML={{ __html: steamMeta.requirements.minimum }} />
+                  <div style={{ marginTop: 8, fontSize: 12, lineHeight: 1.6, color: "var(--mf-t3)", overflowWrap: "anywhere" }} dangerouslySetInnerHTML={{ __html: stripReqHeading(steamMeta.requirements.minimum) }} />
                 </div>
               )}
               {steamMeta.requirements.recommended && (
                 <div style={{ flex: "1 1 300px", minWidth: 0, padding: "14px 16px", borderRadius: 10, border: "1px solid var(--mf-line)", background: "var(--mf-panel-2)" }}>
                   <div style={{ fontFamily: MONO, fontSize: 9.5, letterSpacing: "0.16em", textTransform: "uppercase", color: "var(--mf-t5)" }}>Recommended</div>
-                  <div style={{ marginTop: 8, fontSize: 12, lineHeight: 1.6, color: "var(--mf-t3)", overflowWrap: "anywhere" }} dangerouslySetInnerHTML={{ __html: steamMeta.requirements.recommended }} />
+                  <div style={{ marginTop: 8, fontSize: 12, lineHeight: 1.6, color: "var(--mf-t3)", overflowWrap: "anywhere" }} dangerouslySetInnerHTML={{ __html: stripReqHeading(steamMeta.requirements.recommended) }} />
                 </div>
               )}
             </div>
