@@ -1,5 +1,7 @@
 pub mod buzzheavier;
 pub mod datanodes;
+#[cfg(test)]
+mod livetest;
 pub mod dlproxy;
 pub mod fuckingfast;
 pub mod gofile;
@@ -21,6 +23,9 @@ static KNOWN_UNRESOLVABLE: Lazy<HashMap<&'static str, &'static str>> = Lazy::new
     m.insert("mocha.my", "mocha (browser only)");
     m.insert("zerofs.link", "zerofs (browser only)");
     m.insert("fileditchfiles.me", "fileditch (browser only)");
+    m.insert("vikingfile.com", "vikingfile (captcha \u{2014} browser only)");
+    m.insert("www.vikingfile.com", "vikingfile (captcha \u{2014} browser only)");
+    m.insert("vik1ngfile.site", "vikingfile (captcha \u{2014} browser only)");
     m
 });
 
