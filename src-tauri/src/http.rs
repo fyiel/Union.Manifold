@@ -213,8 +213,26 @@ pub fn decode_entities(s: &str) -> String {
     ] {
         out = out.replace(from, to);
     }
+    if out.contains("&#") {
+        out = NUMERIC_ENTITY_RE
+            .replace_all(&out, |cap: &regex::Captures| {
+                let body = &cap[1];
+                let code = if let Some(hex) = body.strip_prefix('x').or_else(|| body.strip_prefix('X')) {
+                    u32::from_str_radix(hex, 16).ok()
+                } else {
+                    body.parse::<u32>().ok()
+                };
+                code.and_then(char::from_u32)
+                    .map(String::from)
+                    .unwrap_or_else(|| cap[0].to_string())
+            })
+            .to_string();
+    }
     out
 }
+
+static NUMERIC_ENTITY_RE: Lazy<regex::Regex> =
+    Lazy::new(|| regex::Regex::new(r"&#([xX][0-9a-fA-F]{1,6}|[0-9]{1,7});").unwrap());
 
 static TAG_RE: Lazy<regex::Regex> = Lazy::new(|| regex::Regex::new(r"(?s)<[^>]*>").unwrap());
 

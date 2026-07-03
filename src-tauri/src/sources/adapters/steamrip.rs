@@ -23,6 +23,9 @@ const SR_SEARCH_CONCURRENCY: usize = 6;
 
 static VERSION_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"(?i)\(\s*(?:v\.?\s*)?([\w.\-]+(?:\s*build\s*\d+)?)\s*\)\s*$").unwrap());
+static JUNK_PARENS_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"(?i)\s*\(\s*(?:v\.?\s*)?[^()]*(?:build\s*\d+|v?\d+(?:\.\d+)+|\+\s*(?:online|multiplayer|co-?op)|all\s+dlc|update\s*\d*)[^()]*\)\s*$").unwrap()
+});
 static V_STRIP_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?i)^v\.?\s*").unwrap());
 static TITLE_SUFFIX_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"(?i)\s*free\s+download\s*$").unwrap());
@@ -176,6 +179,15 @@ fn clean_title(rendered: &str) -> (String, String) {
         version = V_STRIP_RE.replace(&g1, "").to_string();
         t = t[..start].trim().to_string();
     }
+    // Scrape titles carry suffixes like "Free Download (Build 123 + Online)"
+    // that the end-anchored version regex can't parse; peel those off too.
+    loop {
+        let stripped = JUNK_PARENS_RE.replace(&t, "").trim().to_string();
+        if stripped == t || stripped.is_empty() {
+            break;
+        }
+        t = stripped;
+    }
     t = TITLE_SUFFIX_RE.replace(&t, "").trim().to_string();
     (t, version)
 }
@@ -191,7 +203,16 @@ fn blurb(content: &str) -> String {
             paras.push(text);
         }
     }
-    paras.join("\n\n").chars().take(800).collect()
+    let joined = paras.join("\n\n");
+    if joined.chars().count() <= 800 {
+        return joined;
+    }
+    let cut: String = joined.chars().take(800).collect();
+    let trimmed = match cut.rfind(char::is_whitespace) {
+        Some(i) if i > 400 => cut[..i].trim_end_matches(|c: char| c.is_whitespace() || ",;:.-".contains(c)).to_string(),
+        _ => cut,
+    };
+    format!("{trimmed}\u{2026}")
 }
 
 fn find_size(content: &str) -> Option<u64> {
@@ -493,4 +514,20 @@ pub async fn list_tags() -> Vec<String> {
     let mut items: Vec<(String, i64)> = cats.by_id.values().cloned().collect();
     items.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
     items.into_iter().map(|(name, _)| name).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clean_title_strips_entities_and_junk() {
+        let (t, _) = clean_title("Don&#8217;t Panic! It is Just Turbulence Free Download (Build 23252247 + Online)");
+        assert_eq!(t, "Don\u{2019}t Panic! It is Just Turbulence");
+        let (t, v) = clean_title("Elden Ring Free Download (v1.12)");
+        assert_eq!(t, "Elden Ring");
+        assert_eq!(v, "1.12");
+        let (t, _) = clean_title("Regalia: Of Men and Monarchs (Royal Edition)");
+        assert_eq!(t, "Regalia: Of Men and Monarchs (Royal Edition)");
+    }
 }
