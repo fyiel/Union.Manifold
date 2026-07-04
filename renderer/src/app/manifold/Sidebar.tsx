@@ -45,7 +45,7 @@ const stroke = {
   strokeLinejoin: "round" as const,
 }
 
-export function ManifoldGlyph({ size = 24, color = "#111" }: { size?: number; color?: string }) {
+export function ManifoldGlyph({ size = 24, color = "var(--mf-accent-ink)" }: { size?: number; color?: string }) {
   // Converging strokes that meet at a node, the "manifold" mark.
   return (
     <svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" style={{ display: "block" }}>
@@ -170,7 +170,7 @@ export function Sidebar() {
     >
       {/* logo lockup + collapse toggle (this row is also the window drag handle) */}
       <div data-tauri-drag-region style={{ display: "flex", alignItems: "center", gap: 11, padding: "20px 16px 18px", WebkitAppRegion: "drag" } as CSSProperties}>
-        <span style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 32, height: 32, borderRadius: 9, background: "#e9e9e9", flexShrink: 0 }}>
+        <span style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 32, height: 32, borderRadius: 9, background: "var(--mf-accent)", flexShrink: 0 }}>
           <ManifoldGlyph size={20} />
         </span>
         <div className="uc-navlabel" style={{ lineHeight: 1 }}>
@@ -213,7 +213,7 @@ export function Sidebar() {
               ...navBase,
               fontWeight: isActive ? 600 : 500,
               color: isActive ? "var(--mf-t0)" : "var(--mf-t3)",
-              background: isActive ? "rgba(255,255,255,0.07)" : "transparent",
+              background: isActive ? "color-mix(in srgb, var(--mf-t0) 7%, transparent)" : "transparent",
             })}
           >
             {ICONS[item.icon]}
@@ -238,7 +238,7 @@ export function Sidebar() {
               onClick={() => toggleSource(s.id)}
               style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "7px 12px", fontFamily: "inherit", fontSize: 12.5, color: "var(--mf-t3)", background: "transparent", border: "none", borderRadius: 7, cursor: "pointer", textAlign: "left" }}
             >
-              <span style={{ width: 6, height: 6, borderRadius: 99, background: s.enabled ? "#8a8a8a" : "var(--mf-t6)", flexShrink: 0 }} />
+              <span style={{ width: 6, height: 6, borderRadius: 99, background: s.enabled ? "var(--mf-t3)" : "var(--mf-t6)", flexShrink: 0 }} />
               <span style={{ flex: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", color: s.enabled ? "var(--mf-t2)" : "var(--mf-t5)" }}>{s.name}</span>
               {!s.enabled && <span style={{ fontFamily: "var(--mf-mono)", fontSize: 9.5, color: "var(--mf-t6)" }}>off</span>}
             </button>
@@ -255,7 +255,7 @@ export function Sidebar() {
             ...navBase,
             fontWeight: isActive ? 600 : 500,
             color: isActive ? "var(--mf-t0)" : "var(--mf-t3)",
-            background: isActive ? "rgba(255,255,255,0.07)" : "transparent",
+            background: isActive ? "color-mix(in srgb, var(--mf-t0) 7%, transparent)" : "transparent",
           })}
         >
           {ICONS.settings}

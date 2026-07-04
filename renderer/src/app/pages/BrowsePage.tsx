@@ -218,7 +218,7 @@ export function BrowsePage() {
       <header style={{ flexShrink: 0, padding: "26px 36px 0" }}>
         <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", marginBottom: 18 }}>
           <div>
-            <h1 style={{ margin: 0, fontSize: 22, fontWeight: 600, color: "#ededed", letterSpacing: "-0.015em" }}>Browse</h1>
+            <h1 style={{ margin: 0, fontSize: 22, fontWeight: 600, color: "var(--mf-t0)", letterSpacing: "-0.015em" }}>Browse</h1>
             <p style={{ margin: "6px 0 0", fontFamily: MONO, fontSize: 11.5, color: "var(--mf-t4)" }}>
               one search across {sources.length ? `${sources.length} ${sources.length === 1 ? "catalog" : "catalogs"}` : "every catalog"} · deduped into one library
             </p>
@@ -237,7 +237,7 @@ export function BrowsePage() {
                   height: 42,
                   padding: "0 42px 0 37px",
                   borderRadius: 10,
-                  border: `1px solid ${searching ? "rgba(255,255,255,0.28)" : "var(--mf-line-2)"}`,
+                  border: `1px solid ${searching ? "color-mix(in srgb, var(--mf-t0) 28%, transparent)" : "var(--mf-line-2)"}`,
                   background: "var(--mf-panel)",
                   color: "var(--mf-t1)",
                   fontFamily: MONO,
@@ -247,7 +247,7 @@ export function BrowsePage() {
                 }}
               />
               {searching && (
-                <Spinner size={15} stroke="#9a9a9a" style={{ position: "absolute", right: 14, top: "50%", transform: "translateY(-50%)" }} />
+                <Spinner size={15} stroke="var(--mf-t3)" style={{ position: "absolute", right: 14, top: "50%", transform: "translateY(-50%)" }} />
               )}
               {query.length > 0 && !searching && (
                 <button
@@ -255,7 +255,7 @@ export function BrowsePage() {
                   title="clear"
                   onClick={() => setQuery("")}
                   className="mf-iconbtn"
-                  style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", display: "flex", alignItems: "center", justifyContent: "center", width: 22, height: 22, borderRadius: 6, border: "none", background: "rgba(255,255,255,0.07)", color: "var(--mf-t3)", cursor: "pointer" }}
+                  style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", display: "flex", alignItems: "center", justifyContent: "center", width: 22, height: 22, borderRadius: 6, border: "none", background: "color-mix(in srgb, var(--mf-t0) 7%, transparent)", color: "var(--mf-t3)", cursor: "pointer" }}
                 >
                   <svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round"><line x1="4" y1="4" x2="12" y2="12" /><line x1="12" y1="4" x2="4" y2="12" /></svg>
                 </button>
@@ -296,9 +296,9 @@ export function BrowsePage() {
                   opacity: s.enabled ? 1 : 0.45,
                 }}
               >
-                <span className={isSearching ? "uc-pulse" : ""} style={{ width: 6, height: 6, borderRadius: 99, background: isFailed ? "#7a4a4a" : isSearching ? "#7d7d7d" : "#8a8a8a", flexShrink: 0 }} />
+                <span className={isSearching ? "uc-pulse" : ""} style={{ width: 6, height: 6, borderRadius: 99, background: isFailed ? "#7a4a4a" : isSearching ? "var(--mf-t4)" : "var(--mf-t3)", flexShrink: 0 }} />
                 <span style={{ fontSize: 11.5, fontWeight: 500, color: isFailed ? "var(--mf-t4)" : "var(--mf-t2)" }}>{s.name}</span>
-                {isSearching && <Spinner size={11} stroke="#7d7d7d" />}
+                {isSearching && <Spinner size={11} stroke="var(--mf-t4)" />}
                 {isFailed && (
                   <span onClick={() => void runQuery(committed)} style={{ fontFamily: MONO, fontSize: 10, color: "#c98080", cursor: "pointer", textDecoration: "underline" }}>retry</span>
                 )}
@@ -314,7 +314,7 @@ export function BrowsePage() {
               type="button"
               onClick={() => setSortMode((m) => SORT_CYCLE[(SORT_CYCLE.indexOf(m) + 1) % SORT_CYCLE.length])}
               className="mf-textbtn"
-              style={{ display: "flex", alignItems: "center", gap: 7, padding: "7px 13px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.09)", background: "transparent", color: "var(--mf-t3)", fontFamily: MONO, fontSize: 11, cursor: "pointer" }}
+              style={{ display: "flex", alignItems: "center", gap: 7, padding: "7px 13px", borderRadius: 8, border: "1px solid color-mix(in srgb, var(--mf-t0) 9%, transparent)", background: "transparent", color: "var(--mf-t3)", fontFamily: MONO, fontSize: 11, cursor: "pointer" }}
             >
               <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round"><line x1="3" y1="4.5" x2="13" y2="4.5" /><line x1="3" y1="8" x2="10" y2="8" /><line x1="3" y1="11.5" x2="7" y2="11.5" /></svg>
               {sortLabel}
@@ -336,19 +336,19 @@ export function BrowsePage() {
             </div>
             {(loadingMore || hasMore) && (
               <div style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: "26px 0 4px", gap: 10 }}>
-                {loadingMore ? <Spinner size={16} stroke="#5f5f5f" /> : null}
+                {loadingMore ? <Spinner size={16} stroke="var(--mf-t5)" /> : null}
                 <span style={{ fontFamily: MONO, fontSize: 11, color: "var(--mf-t5)" }}>{loadingMore ? "loading more…" : `scroll for more · ${sorted.length} of ${total}`}</span>
               </div>
             )}
           </>
         ) : searching ? (
           <CenterState>
-            <Spinner size={26} stroke="#5f5f5f" />
+            <Spinner size={26} stroke="var(--mf-t5)" />
             <span style={{ fontFamily: MONO, fontSize: 12, color: "var(--mf-t4)" }}>querying {sources.length} sources{committed ? ` for “${committed}”` : ""}…</span>
           </CenterState>
         ) : hasQuery ? (
           <CenterState>
-            <SearchIcon size={30} stroke="#4a4a4a" />
+            <SearchIcon size={30} stroke="var(--mf-t6)" />
             <span style={{ fontFamily: MONO, fontSize: 12, color: "var(--mf-t5)" }}>no source returned a match for “{committed}”</span>
           </CenterState>
         ) : (
@@ -362,7 +362,7 @@ export function BrowsePage() {
 function EmptyState({ text }: { text: string }) {
   return (
     <CenterState>
-      <SearchIcon size={30} stroke="#4a4a4a" />
+      <SearchIcon size={30} stroke="var(--mf-t6)" />
       <span style={{ fontFamily: MONO, fontSize: 12, color: "var(--mf-t5)" }}>{text}</span>
     </CenterState>
   )

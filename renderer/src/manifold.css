@@ -7,24 +7,34 @@
    ============================================================================ */
 
 :root {
+  /* Every --mf-* token is DERIVED from the shadcn theme tokens that the theme
+     engine (lib/themes/applyTheme.ts) writes onto <html>, so switching themes
+     recolors the inline-styled pages too. With no theme applied the chain
+     bottoms out at the globals.css charcoal defaults and these resolve to the
+     exact original values (bg #151515, panel #1a1a1a, t1 #e6e6e6, ...). */
   /* Surfaces */
-  --mf-bg: #151515;
-  --mf-aside: #141414;
-  --mf-panel: #1a1a1a;
-  --mf-panel-2: #181818;
+  --mf-bg: var(--background);
+  --mf-aside: var(--sidebar);
+  --mf-panel: var(--card);
+  --mf-panel-2: color-mix(in srgb, var(--card) 60%, var(--background));
+  /* Filled "do it" control: accent surface + the ink that sits on it */
+  --mf-accent: var(--primary);
+  --mf-accent-ink: var(--primary-foreground);
+  --mf-danger: var(--destructive);
   /* Hairlines */
-  --mf-line: rgba(255, 255, 255, 0.06);
-  --mf-line-2: rgba(255, 255, 255, 0.10);
-  /* Text ramp */
-  --mf-t0: #f0f0f0;
-  --mf-t1: #e6e6e6;
-  --mf-t2: #cfcfcf;
-  --mf-t3: #9a9a9a;
-  --mf-t4: #7d7d7d;
-  --mf-t5: #5f5f5f;
-  --mf-t6: #4f4f4f;
-  --mf-mono: "JetBrains Mono", "Geist Mono", ui-monospace, monospace;
-  --mf-sans: "Inter", system-ui, sans-serif;
+  --mf-line: var(--border);
+  --mf-line-2: color-mix(in srgb, var(--foreground) 10%, transparent);
+  /* Text ramp: t0..t2 fade foreground into the background, t3..t6 fade
+     muted-foreground the same way, so any theme keeps the hierarchy */
+  --mf-t0: var(--foreground);
+  --mf-t1: color-mix(in srgb, var(--foreground) 96%, var(--background));
+  --mf-t2: color-mix(in srgb, var(--foreground) 88%, var(--background));
+  --mf-t3: var(--muted-foreground);
+  --mf-t4: color-mix(in srgb, var(--muted-foreground) 85%, var(--background));
+  --mf-t5: color-mix(in srgb, var(--muted-foreground) 60%, var(--background));
+  --mf-t6: color-mix(in srgb, var(--muted-foreground) 48%, var(--background));
+  --mf-mono: var(--font-mono-active, ui-monospace, monospace);
+  --mf-sans: var(--font-sans-active, system-ui, sans-serif);
 }
 
 /* border-box everywhere so width:100% + padding never overflows (the source of
@@ -44,8 +54,8 @@
 
 /* menu row, brightens on hover */
 .mfrow { transition: background 0.12s ease, color 0.12s ease; }
-.mfrow:hover { background: rgba(255, 255, 255, 0.05); }
-.mfrow.mfrow-danger:hover { background: rgba(248, 113, 113, 0.12); }
+.mfrow:hover { background: color-mix(in srgb, var(--mf-t0) 5%, transparent); }
+.mfrow.mfrow-danger:hover { background: color-mix(in srgb, var(--mf-danger) 12%, transparent); }
 
 /* ---- collapsible sidebar contract (shared across every page) ----
    Collapse state lives in localStorage["uc_nav_collapsed"] and is applied as
@@ -71,9 +81,9 @@ body.uc-nav-collapsed .uc-expand { display: flex; }
 body.uc-nav-collapsed .uc-collapse { display: none; }
 
 /* ---- range sliders (Advanced Search) ---- */
-.uc-range { -webkit-appearance: none; appearance: none; height: 4px; border-radius: 99px; background: rgba(255, 255, 255, 0.13); outline: none; }
-.uc-range::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 14px; height: 14px; border-radius: 99px; background: #ededed; cursor: pointer; border: 2px solid var(--mf-panel); }
-.uc-range::-moz-range-thumb { width: 14px; height: 14px; border-radius: 99px; background: #ededed; cursor: pointer; border: 2px solid var(--mf-panel); }
+.uc-range { -webkit-appearance: none; appearance: none; height: 4px; border-radius: 99px; background: color-mix(in srgb, var(--mf-t0) 13%, transparent); outline: none; }
+.uc-range::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 14px; height: 14px; border-radius: 99px; background: var(--mf-accent); cursor: pointer; border: 2px solid var(--mf-panel); }
+.uc-range::-moz-range-thumb { width: 14px; height: 14px; border-radius: 99px; background: var(--mf-accent); cursor: pointer; border: 2px solid var(--mf-panel); }
 
 /* ---- scrollbars ----
    The manifold scrollbar is applied to EVERYTHING (loads after globals.css so it
@@ -82,9 +92,9 @@ body.uc-nav-collapsed .uc-collapse { display: none; }
 *::-webkit-scrollbar,
 .mf-scroll::-webkit-scrollbar { width: 10px; height: 10px; }
 *::-webkit-scrollbar-thumb,
-.mf-scroll::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.10); border-radius: 99px; border: 3px solid var(--mf-bg); }
+.mf-scroll::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--mf-t0) 10%, transparent); border-radius: 99px; border: 3px solid var(--mf-bg); }
 *::-webkit-scrollbar-thumb:hover,
-.mf-scroll::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.18); }
+.mf-scroll::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, var(--mf-t0) 18%, transparent); }
 *::-webkit-scrollbar-track,
 .mf-scroll::-webkit-scrollbar-track { background: transparent; }
 *::-webkit-scrollbar-corner { background: transparent; }
@@ -92,26 +102,26 @@ body.uc-nav-collapsed .uc-collapse { display: none; }
 /* ---- :hover helpers (inline styles can't express :hover) ----
    Class names describe the role; the static look stays inline on the element. */
 .mf-navitem { transition: background 0.14s ease, color 0.14s ease; }
-.mf-navitem:hover:not(.mf-navitem-active) { background: rgba(255, 255, 255, 0.04); color: var(--mf-t2); }
+.mf-navitem:hover:not(.mf-navitem-active) { background: color-mix(in srgb, var(--mf-t0) 4%, transparent); color: var(--mf-t2); }
 
 .mf-card { transition: border-color 0.14s ease, transform 0.14s ease; content-visibility: auto; contain-intrinsic-size: auto 300px; }
-.mf-card:hover { border-color: rgba(255, 255, 255, 0.24); transform: translateY(-3px); }
+.mf-card:hover { border-color: color-mix(in srgb, var(--mf-t0) 24%, transparent); transform: translateY(-3px); }
 
 /* Library list row, subtle row highlight on hover. */
 .mf-listrow { transition: background 0.12s ease; }
-.mf-listrow:hover { background: rgba(255, 255, 255, 0.04); }
+.mf-listrow:hover { background: color-mix(in srgb, var(--mf-t0) 4%, transparent); }
 
 /* Outlined/ghost control: brightens border + text on hover. */
 .mf-ghost { transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease; }
-.mf-ghost:hover { border-color: rgba(255, 255, 255, 0.28); color: var(--mf-t1); }
+.mf-ghost:hover { border-color: color-mix(in srgb, var(--mf-t0) 28%, transparent); color: var(--mf-t1); }
 
 /* Small filled icon button (e.g. clear-search ✕). */
 .mf-iconbtn { transition: background 0.14s ease, color 0.14s ease; }
-.mf-iconbtn:hover { background: rgba(255, 255, 255, 0.14); color: var(--mf-t1); }
+.mf-iconbtn:hover { background: color-mix(in srgb, var(--mf-t0) 14%, transparent); color: var(--mf-t1); }
 
 /* Subtle text link that brightens. */
 .mf-textbtn { transition: color 0.14s ease, border-color 0.14s ease; }
-.mf-textbtn:hover { color: var(--mf-t2); border-color: rgba(255, 255, 255, 0.18); }
+.mf-textbtn:hover { color: var(--mf-t2); border-color: color-mix(in srgb, var(--mf-t0) 18%, transparent); }
 
 .mf-iconcircle { transition: background 0.14s ease, color 0.14s ease; }
-.mf-iconcircle:hover { background: rgba(255, 255, 255, 0.07); color: var(--mf-t2); }
+.mf-iconcircle:hover { background: color-mix(in srgb, var(--mf-t0) 7%, transparent); color: var(--mf-t2); }

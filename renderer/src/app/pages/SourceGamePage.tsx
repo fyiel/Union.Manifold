@@ -37,10 +37,10 @@ const LIVE_ORDER = ["downloading", "extracting", "installing", "verifying", "ret
 
 type OptState = "idle" | "working" | "queued" | "opened" | "error"
 
-const HERO_LINES = "repeating-linear-gradient(135deg, rgba(255,255,255,0.04) 0 1px, transparent 1px 16px), #181818"
+const HERO_LINES = "repeating-linear-gradient(135deg, color-mix(in srgb, var(--mf-t0) 4%, transparent) 0 1px, transparent 1px 16px), var(--mf-panel-2)"
 
 const PROTON_TIER_COLORS: Record<string, string> = {
-  platinum: "#b9c7d6", gold: "#e2c15a", silver: "#a7a7a7", bronze: "#c08457", borked: "#d0625f",
+  platinum: "#b9c7d6", gold: "#e2c15a", silver: "var(--mf-t3)", bronze: "#c08457", borked: "#d0625f",
 }
 
 const stripReqHeading = (html: string) => html.replace(/^\s*<strong>[^<]*<\/strong>\s*(<br\s*\/?>)?\s*/i, "")
@@ -223,7 +223,7 @@ export function SourceGamePage() {
   const appid = game?.steamAppId
   const genres = game?.genres || []
   const protonTier = protonData?.tier && protonData.tier !== "pending" ? protonData.tier : ""
-  const protonColor = PROTON_TIER_COLORS[protonTier] || "#8a8a8a"
+  const protonColor = PROTON_TIER_COLORS[protonTier] || "var(--mf-t3)"
   const pk = primary ? keyOf(primary) : ""
   const pst: OptState = optState[pk] || "idle"
   const updatedAny = relTime(game?.updatedAt)
@@ -237,7 +237,7 @@ export function SourceGamePage() {
             <SmartImage candidates={heroCandidates} steamAppId={game?.steamAppId} onAllFailed={() => setHeroFailed(true)} style={{ width: "100%", height: "100%", objectFit: "cover", opacity: 0.55 }} />
           )}
         </div>
-        <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to top, #151515 4%, rgba(21,21,21,0.55) 45%, rgba(21,21,21,0.25))" }} />
+        <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to top, var(--mf-bg) 4%, rgba(21,21,21,0.55) 45%, rgba(21,21,21,0.25))" }} />
         <button type="button" onClick={() => navigate(-1)} className="mf-ghost" style={{ position: "absolute", top: 22, left: 36, display: "flex", alignItems: "center", gap: 7, padding: "7px 12px", borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "rgba(0,0,0,0.4)", color: "var(--mf-t2)", fontFamily: MONO, fontSize: 11, cursor: "pointer", backdropFilter: "blur(6px)" }}>
           <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round"><polyline points="9 3 4 8 9 13" /><line x1="4" y1="8" x2="13" y2="8" /></svg>back
         </button>
@@ -249,10 +249,10 @@ export function SourceGamePage() {
           <div style={{ width: 152, height: 202, flexShrink: 0, borderRadius: 10, background: coverFailed || !coverCandidates.length ? COVER_LINES : "#0f0f0f", border: "1px solid var(--mf-line-2)", boxShadow: "0 20px 50px rgba(0,0,0,0.55)", display: "flex", alignItems: "flex-end", padding: 12, overflow: "hidden", position: "relative" }}>
             {!coverFailed && coverCandidates.length > 0
               ? <SmartImage candidates={coverCandidates} steamAppId={game?.steamAppId} alt={game?.title} onAllFailed={() => setCoverFailed(true)} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />
-              : <span style={{ fontFamily: MONO, fontSize: 11, letterSpacing: "0.05em", textTransform: "uppercase", color: "#bdbdbd" }}>{game?.title}</span>}
+              : <span style={{ fontFamily: MONO, fontSize: 11, letterSpacing: "0.05em", textTransform: "uppercase", color: "var(--mf-t2)" }}>{game?.title}</span>}
           </div>
           <div style={{ minWidth: 0, flex: 1, paddingBottom: 6 }}>
-            <h1 style={{ margin: 0, fontSize: 34, fontWeight: 700, color: "#f4f4f4", letterSpacing: "-0.025em", lineHeight: 1.05 }}>{game?.title}</h1>
+            <h1 style={{ margin: 0, fontSize: 34, fontWeight: 700, color: "var(--mf-t0)", letterSpacing: "-0.025em", lineHeight: 1.05 }}>{game?.title}</h1>
             <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 18, marginTop: 12, fontFamily: MONO, fontSize: 12, color: "var(--mf-t4)" }}>
               {game?.developer && game.developer !== "Unknown" && <span>{game.developer}</span>}
               {year && <span>{year}</span>}
@@ -303,7 +303,7 @@ export function SourceGamePage() {
               <Spinner size={16} /> loading links…
             </div>
           ) : installed ? (
-            <button type="button" onClick={() => void requestLaunch({ appid: dlAppid, name: game!.title })} className="mf-ghost" style={{ display: "flex", alignItems: "center", gap: 9, padding: "12px 22px", borderRadius: 9, border: "none", background: "#e9e9e9", color: "#111", fontSize: 14, fontWeight: 600, cursor: "pointer" }}>
+            <button type="button" onClick={() => void requestLaunch({ appid: dlAppid, name: game!.title })} className="mf-ghost" style={{ display: "flex", alignItems: "center", gap: 9, padding: "12px 22px", borderRadius: 9, border: "none", background: "var(--mf-accent)", color: "var(--mf-accent-ink)", fontSize: 14, fontWeight: 600, cursor: "pointer" }}>
               <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M5 3.5v9l8-4.5z" /></svg>Play
               <span style={{ fontFamily: MONO, fontSize: 11, fontWeight: 400, color: "rgba(17,17,17,0.6)" }}>installed</span>
             </button>
@@ -387,9 +387,9 @@ export function SourceGamePage() {
                     const upd = relTime(src.updatedAt)
                     return (
                       <div key={`${src.sourceId}:${src.sourceSlug}`} style={{ border: "1px solid var(--mf-line)", borderRadius: 11, background: "var(--mf-panel-2)", overflow: "hidden" }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 16px", borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
-                          <span style={{ width: 7, height: 7, borderRadius: 99, background: direct ? "#cfcfcf" : "#8a8a8a" }} />
-                          <span style={{ fontSize: 14, fontWeight: 600, color: "#ededed" }}>{sourceName(src.sourceId)}</span>
+                        <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 16px", borderBottom: "1px solid color-mix(in srgb, var(--mf-t0) 5%, transparent)" }}>
+                          <span style={{ width: 7, height: 7, borderRadius: 99, background: direct ? "var(--mf-t2)" : "var(--mf-t3)" }} />
+                          <span style={{ fontSize: 14, fontWeight: 600, color: "var(--mf-t0)" }}>{sourceName(src.sourceId)}</span>
                           {upd && <span style={{ fontFamily: MONO, fontSize: 10.5, color: "var(--mf-t5)" }}>{upd}</span>}
                           {src.sourceUrl && (
                             <button type="button" onClick={() => openSourcePage(src.sourceUrl)} className="mf-textbtn" style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 5, fontFamily: MONO, fontSize: 10.5, color: "var(--mf-t4)", background: "none", border: "none", cursor: "pointer" }}>
@@ -433,7 +433,7 @@ export function SourceGamePage() {
 
 function ExtLink({ title, onClick, children }: { title: string; onClick: () => void; children: React.ReactNode }) {
   return (
-    <button type="button" title={title} onClick={onClick} className="mf-ghost" style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 36, height: 36, borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "#1d1d1d", color: "var(--mf-t2)", cursor: "pointer" }}>
+    <button type="button" title={title} onClick={onClick} className="mf-ghost" style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 36, height: 36, borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "var(--mf-panel)", color: "var(--mf-t2)", cursor: "pointer" }}>
       {children}
     </button>
   )
@@ -483,12 +483,12 @@ function PrimaryButton({ state, resolvable, sourceLabel, sizeText, onClick }: { 
       style={{
         display: "flex", alignItems: "center", gap: 9, padding: "12px 22px", borderRadius: 9,
         border: queued ? "1px solid rgba(127,207,155,0.4)" : error ? "1px solid rgba(221,138,138,0.45)" : "none",
-        background: filled ? "#e9e9e9" : "transparent",
-        color: filled ? "#111" : queued ? "#7fcf9b" : "#dd8a8a",
+        background: filled ? "var(--mf-accent)" : "transparent",
+        color: filled ? "var(--mf-accent-ink)" : queued ? "#7fcf9b" : "#dd8a8a",
         fontSize: 14, fontWeight: 600, cursor: working || queued ? "default" : "pointer",
       }}
     >
-      {working ? <Spinner size={15} stroke="#111" />
+      {working ? <Spinner size={15} stroke="var(--mf-accent-ink)" />
         : queued ? <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round"><polyline points="3 8.5 6.5 12 13 4" /></svg>
         : resolvable ? <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round"><line x1="8" y1="2.5" x2="8" y2="10" /><polyline points="4.5 7 8 10.5 11.5 7" /><line x1="3" y1="13.5" x2="13" y2="13.5" /></svg>
         : <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round"><path d="M6 3.5H4a1.5 1.5 0 0 0-1.5 1.5v6A1.5 1.5 0 0 0 4 12.5h6a1.5 1.5 0 0 0 1.5-1.5V9" /><polyline points="9 2.5 13 2.5 13 6.5" /><line x1="7" y1="9" x2="13" y2="2.5" /></svg>}
@@ -507,7 +507,7 @@ function OptionButton({ state, resolvable, onClick }: { state: OptState; resolva
   const error = state === "error"
   const label = queued ? "queued" : working ? "…" : opened ? "opened" : error ? "failed" : resolvable ? "download" : "open"
   const color = queued ? "#7fcf9b" : error ? "#dd8a8a" : resolvable ? "var(--mf-t1)" : "var(--mf-t3)"
-  const border = queued ? "rgba(127,207,155,0.4)" : error ? "rgba(221,138,138,0.4)" : resolvable ? "rgba(255,255,255,0.16)" : "var(--mf-line-2)"
+  const border = queued ? "rgba(127,207,155,0.4)" : error ? "rgba(221,138,138,0.4)" : resolvable ? "color-mix(in srgb, var(--mf-t0) 16%, transparent)" : "var(--mf-line-2)"
   return (
     <button type="button" onClick={onClick} disabled={working || queued} className="mf-ghost" style={{ display: "flex", alignItems: "center", gap: 7, padding: "8px 15px", borderRadius: 8, border: `1px solid ${border}`, background: "transparent", color, fontFamily: MONO, fontSize: 11, fontWeight: 500, cursor: working || queued ? "default" : "pointer", whiteSpace: "nowrap" }}>
       {queued ? <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round"><polyline points="3 8.5 6.5 12 13 4" /></svg>

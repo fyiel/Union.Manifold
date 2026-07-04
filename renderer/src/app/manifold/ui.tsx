@@ -8,7 +8,7 @@ import { fetchSteamArt } from "@/lib/sources"
 
 export const MONO = "var(--mf-mono)"
 export const COVER_LINES =
-  "repeating-linear-gradient(135deg, rgba(255,255,255,0.045) 0 1px, transparent 1px 11px), #131313"
+  "repeating-linear-gradient(135deg, color-mix(in srgb, var(--mf-t0) 4.5%, transparent) 0 1px, transparent 1px 11px), #131313"
 
 // Steam art fallback ladder for a known appid. Older titles (e.g. Hylics 397740)
 // have NO modern library_600x900 / library_hero (those 404), but the legacy
@@ -107,11 +107,11 @@ export function gbLabel(bytes?: number): string {
   return (gb >= 10 ? Math.round(gb) : gb.toFixed(1)) + " GB"
 }
 
-export function SearchIcon({ size = 15, stroke = "#7d7d7d", style }: { size?: number; stroke?: string; style?: CSSProperties }) {
+export function SearchIcon({ size = 15, stroke = "var(--mf-t4)", style }: { size?: number; stroke?: string; style?: CSSProperties }) {
   return <Search size={size} color={stroke} strokeWidth={1.6} style={style} />
 }
 
-export function Spinner({ size = 14, stroke = "#9a9a9a", style }: { size?: number; stroke?: string; style?: CSSProperties }) {
+export function Spinner({ size = 14, stroke = "var(--mf-t3)", style }: { size?: number; stroke?: string; style?: CSSProperties }) {
   return <Loader2 className="uc-spin" size={size} color={stroke} strokeWidth={2} style={style} />
 }
 

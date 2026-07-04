@@ -137,17 +137,17 @@ export function DownloadsPage() {
       <header style={{ flexShrink: 0, padding: "26px 36px 18px", borderBottom: "1px solid var(--mf-line)" }}>
         <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between" }}>
           <div>
-            <h1 style={{ margin: 0, fontSize: 22, fontWeight: 600, color: "#ededed", letterSpacing: "-0.015em" }}>Downloads</h1>
+            <h1 style={{ margin: 0, fontSize: 22, fontWeight: 600, color: "var(--mf-t0)", letterSpacing: "-0.015em" }}>Downloads</h1>
             <p style={{ margin: "6px 0 0", fontFamily: MONO, fontSize: 11.5, color: "var(--mf-t4)" }}>
               {active.length} active · {queued.length} queued · {totalSpeed > 0 ? fmtSpeed(totalSpeed) : "idle"}
             </p>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             {completed.length > 0 && (
-              <button type="button" onClick={() => clearCompleted()} className="mf-textbtn" style={{ padding: "8px 14px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.09)", background: "transparent", color: "var(--mf-t3)", fontSize: 12, fontWeight: 500, cursor: "pointer" }}>Clear completed</button>
+              <button type="button" onClick={() => clearCompleted()} className="mf-textbtn" style={{ padding: "8px 14px", borderRadius: 8, border: "1px solid color-mix(in srgb, var(--mf-t0) 9%, transparent)", background: "transparent", color: "var(--mf-t3)", fontSize: 12, fontWeight: 500, cursor: "pointer" }}>Clear completed</button>
             )}
             {active.length > 0 && (
-              <button type="button" onClick={() => (allPaused ? void resumeAll() : void pauseAll())} className="mf-ghost" style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 16px", borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "#1d1d1d", color: "var(--mf-t1)", fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>
+              <button type="button" onClick={() => (allPaused ? void resumeAll() : void pauseAll())} className="mf-ghost" style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 16px", borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "var(--mf-panel)", color: "var(--mf-t1)", fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>
                 {allPaused ? <PlayIcon /> : <PauseIcon />}
                 {allPaused ? "Resume all" : "Pause all"}
               </button>
@@ -160,7 +160,7 @@ export function DownloadsPage() {
       <div className="mf-scroll" style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "24px 36px 44px" }}>
         {empty ? (
           <CenterState>
-            <svg viewBox="0 0 16 16" width="30" height="30" fill="none" stroke="#4a4a4a" strokeWidth={1.4} strokeLinecap="round" strokeLinejoin="round"><line x1="8" y1="2.5" x2="8" y2="9.5" /><polyline points="5 7 8 10 11 7" /><line x1="3" y1="13.5" x2="13" y2="13.5" /></svg>
+            <svg viewBox="0 0 16 16" width="30" height="30" fill="none" stroke="var(--mf-t6)" strokeWidth={1.4} strokeLinecap="round" strokeLinejoin="round"><line x1="8" y1="2.5" x2="8" y2="9.5" /><polyline points="5 7 8 10 11 7" /><line x1="3" y1="13.5" x2="13" y2="13.5" /></svg>
             <span style={{ fontFamily: MONO, fontSize: 12, color: "var(--mf-t5)" }}>nothing downloading — queue something from Browse</span>
           </CenterState>
         ) : (
@@ -176,11 +176,11 @@ export function DownloadsPage() {
                     <Cover appid={primary.appid} w={84} h={112} r={9} border />
                     <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                        <span style={{ fontSize: 18, fontWeight: 700, color: "#f4f4f4", letterSpacing: "-0.01em", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{primary.name}</span>
-                        <span style={{ padding: "4px 10px", borderRadius: 99, background: "rgba(255,255,255,0.08)", border: "1px solid var(--mf-line-2)", fontFamily: MONO, fontSize: 9.5, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--mf-t2)", flexShrink: 0 }}>{STATUS_LABEL[a.rep]}</span>
+                        <span style={{ fontSize: 18, fontWeight: 700, color: "var(--mf-t0)", letterSpacing: "-0.01em", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{primary.name}</span>
+                        <span style={{ padding: "4px 10px", borderRadius: 99, background: "color-mix(in srgb, var(--mf-t0) 8%, transparent)", border: "1px solid var(--mf-line-2)", fontFamily: MONO, fontSize: 9.5, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--mf-t2)", flexShrink: 0 }}>{STATUS_LABEL[a.rep]}</span>
                       </div>
-                      <div style={{ marginTop: 18, height: 8, borderRadius: 99, background: "rgba(255,255,255,0.08)", overflow: "hidden" }}>
-                        <div style={{ height: "100%", width: `${a.pct}%`, background: "#e9e9e9", borderRadius: 99, transition: "width .5s linear" }} />
+                      <div style={{ marginTop: 18, height: 8, borderRadius: 99, background: "color-mix(in srgb, var(--mf-t0) 8%, transparent)", overflow: "hidden" }}>
+                        <div style={{ height: "100%", width: `${a.pct}%`, background: "var(--mf-accent)", borderRadius: 99, transition: "width .5s linear" }} />
                       </div>
                       <div style={{ display: "flex", alignItems: "center", gap: 26, marginTop: 14, fontFamily: MONO, fontSize: 12, color: "var(--mf-t3)" }}>
                         <span style={{ color: "var(--mf-t1)", fontWeight: 500 }}>{Math.round(a.pct)}%</span>
@@ -218,12 +218,12 @@ export function DownloadsPage() {
                       <Cover appid={g.appid} w={34} h={44} r={6} />
                       <div style={{ minWidth: 0, flex: 1 }}>
                         <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
-                          <span style={{ fontSize: 13.5, fontWeight: 600, color: "#ededed", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{g.name}</span>
+                          <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--mf-t0)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{g.name}</span>
                           <span style={{ fontFamily: MONO, fontSize: 10, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--mf-t4)" }}>{STATUS_LABEL[a.rep]}</span>
                           <span style={{ marginLeft: "auto", fontFamily: MONO, fontSize: 10.5, color: "var(--mf-t3)" }}>{detail}</span>
                         </div>
-                        <div style={{ marginTop: 9, height: 4, borderRadius: 99, background: "rgba(255,255,255,0.08)", overflow: "hidden" }}>
-                          <div style={{ height: "100%", width: `${a.pct}%`, background: "#e9e9e9", borderRadius: 99, transition: "width .5s linear" }} />
+                        <div style={{ marginTop: 9, height: 4, borderRadius: 99, background: "color-mix(in srgb, var(--mf-t0) 8%, transparent)", overflow: "hidden" }}>
+                          <div style={{ height: "100%", width: `${a.pct}%`, background: "var(--mf-accent)", borderRadius: 99, transition: "width .5s linear" }} />
                         </div>
                       </div>
                       <button type="button" title={paused ? "Resume" : "Pause"} onClick={() => togglePause(g)} className="mf-iconcircle" style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 34, height: 34, borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "transparent", color: "var(--mf-t3)", cursor: "pointer", flexShrink: 0 }}>
@@ -241,7 +241,7 @@ export function DownloadsPage() {
                 {queued.map((g, i) => {
                   const total = g.items.reduce((n, it) => n + (it.totalBytes || 0), 0)
                   return (
-                    <div key={g.appid} style={{ display: "flex", alignItems: "center", gap: 14, padding: "10px 14px", border: "1px solid var(--mf-line)", borderRadius: 10, background: "#171717" }}>
+                    <div key={g.appid} style={{ display: "flex", alignItems: "center", gap: 14, padding: "10px 14px", border: "1px solid var(--mf-line)", borderRadius: 10, background: "var(--mf-panel-2)" }}>
                       <span style={{ display: "flex", alignItems: "center", justifyContent: "center", color: "var(--mf-t6)", flexShrink: 0 }}><GripIcon /></span>
                       <span style={{ fontFamily: MONO, fontSize: 11, color: "var(--mf-t5)", width: 18 }}>{String(i + 1).padStart(2, "0")}</span>
                       <Cover appid={g.appid} w={30} h={40} r={5} />
@@ -262,14 +262,14 @@ export function DownloadsPage() {
                   const ready = has(g.items, "install_ready")
                   const busy = installing.has(g.appid)
                   return (
-                    <div key={g.appid} style={{ display: "flex", alignItems: "center", gap: 14, padding: "11px 16px", border: "1px solid var(--mf-line)", borderRadius: 10, background: "#171717" }}>
+                    <div key={g.appid} style={{ display: "flex", alignItems: "center", gap: 14, padding: "11px 16px", border: "1px solid var(--mf-line)", borderRadius: 10, background: "var(--mf-panel-2)" }}>
                       <Cover appid={g.appid} w={30} h={40} r={5} />
                       <div style={{ minWidth: 0, flex: 1 }}>
                         <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--mf-t1)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{g.name}</div>
                         <div style={{ fontFamily: MONO, fontSize: 10, color: "var(--mf-t5)", marginTop: 2 }}>{ready ? "ready to install" : "installed"}{total > 0 ? ` · ${gbLabel(total)}` : ""}</div>
                       </div>
                       {ready ? (
-                        <button type="button" disabled={busy} onClick={() => void install(g.appid)} className="mf-ghost" style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 7, height: 32, padding: "0 16px", borderRadius: 7, border: "none", background: "#e9e9e9", color: "#111", fontSize: 12, fontWeight: 600, cursor: busy ? "default" : "pointer", flexShrink: 0, opacity: busy ? 0.7 : 1 }}>
+                        <button type="button" disabled={busy} onClick={() => void install(g.appid)} className="mf-ghost" style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 7, height: 32, padding: "0 16px", borderRadius: 7, border: "none", background: "var(--mf-accent)", color: "var(--mf-accent-ink)", fontSize: 12, fontWeight: 600, cursor: busy ? "default" : "pointer", flexShrink: 0, opacity: busy ? 0.7 : 1 }}>
                           <DownIcon />{busy ? "Installing…" : "Install"}
                         </button>
                       ) : (
@@ -289,7 +289,7 @@ export function DownloadsPage() {
                 {failed.map((g) => {
                   const err = g.items.find((i) => i.error)?.error || "download failed"
                   return (
-                    <div key={g.appid} style={{ display: "flex", alignItems: "center", gap: 14, padding: "11px 16px", border: "1px solid rgba(220,120,120,0.18)", borderRadius: 10, background: "#1b1717" }}>
+                    <div key={g.appid} style={{ display: "flex", alignItems: "center", gap: 14, padding: "11px 16px", border: "1px solid rgba(220,120,120,0.18)", borderRadius: 10, background: "color-mix(in srgb, var(--mf-danger) 6%, var(--mf-bg))" }}>
                       <span style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 30, height: 40, flexShrink: 0, color: "#c98080" }}>
                         <svg viewBox="0 0 16 16" width="17" height="17" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round"><circle cx="8" cy="8" r="6" /><line x1="8" y1="5" x2="8" y2="9" /><circle cx="8" cy="11.3" r="0.7" fill="currentColor" stroke="none" /></svg>
                       </span>
