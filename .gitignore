@@ -18,3 +18,4 @@ review-prompt.md
 FORK_PLAN.md
 ds-bundle/
 .design-sync/
+*.pkg.tar.zst
