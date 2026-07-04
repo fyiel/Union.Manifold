@@ -2,17 +2,66 @@ name: build and release
 
 on:
   push:
+    branches: [main, master]
     tags:
       - 'v*.*.*'
   workflow_dispatch:
     inputs:
-      tag:
-        description: 'Tag to build and release (e.g. v1.0.4)'
+      version:
+        description: 'Version to release (e.g. 2.8.0). Blank uses package.json.'
         required: false
         type: string
 
 jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      release: ${{ steps.decide.outputs.release }}
+      tag: ${{ steps.decide.outputs.tag }}
+      version: ${{ steps.decide.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: decide
+        env:
+          EVENT: ${{ github.event_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = "push" ] && [ "$REF_TYPE" = "tag" ]; then
+            tag="$REF_NAME"
+            version="${tag#v}"
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          elif [ "$EVENT" = "workflow_dispatch" ]; then
+            version="${INPUT_VERSION:-$(jq -r .version package.json)}"
+            version="${version#v}"
+            tag="v$version"
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          else
+            new=$(jq -r .version package.json)
+            old=$(git show HEAD~1:package.json 2>/dev/null | jq -r .version 2>/dev/null || echo "")
+            version="$new"
+            tag="v$new"
+            if [ "$new" = "$old" ]; then
+              echo "version unchanged ($new), no release"
+              echo "release=false" >> "$GITHUB_OUTPUT"
+            elif git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+              echo "::warning::tag $tag already exists (old fork tags run up to v2.7.3). skipping release. bump to a version above the highest existing tag."
+              echo "release=false" >> "$GITHUB_OUTPUT"
+            else
+              echo "version $old -> $new, releasing $tag"
+              echo "release=true" >> "$GITHUB_OUTPUT"
+            fi
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
   build:
+    needs: check
+    if: needs.check.outputs.release == 'true'
     permissions:
       contents: write
     strategy:
@@ -34,6 +83,16 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Sync version into tauri.conf.json
+        shell: bash
+        run: |
+          set -euo pipefail
+          v="${{ needs.check.outputs.version }}"
+          tmp=$(mktemp)
+          jq --arg v "$v" '.version = $v' src-tauri/tauri.conf.json > "$tmp"
+          mv "$tmp" src-tauri/tauri.conf.json
+          echo "tauri.conf.json version set to $v"
 
       - name: Install linux deps
         if: matrix.os == 'ubuntu-22.04'
@@ -70,8 +129,8 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          tagName: ${{ github.event.inputs.tag || github.ref_name }}
-          releaseName: 'Union.Manifold ${{ github.event.inputs.tag || github.ref_name }}'
+          tagName: ${{ needs.check.outputs.tag }}
+          releaseName: 'Union.Manifold ${{ needs.check.outputs.tag }}'
           releaseDraft: false
           prerelease: false
           args: --target ${{ matrix.target }}
