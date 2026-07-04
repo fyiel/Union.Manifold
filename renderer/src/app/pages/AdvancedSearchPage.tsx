@@ -253,7 +253,7 @@ export function AdvancedSearchPage() {
           <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round"><polyline points="9 3 4 8 9 13" /><line x1="4" y1="8" x2="13" y2="8" /></svg>
           back to browse
         </Link>
-        <h1 style={{ margin: "0 0 22px", fontSize: 18, fontWeight: 600, color: "#ededed", letterSpacing: "-0.01em" }}>Advanced search</h1>
+        <h1 style={{ margin: "0 0 22px", fontSize: 18, fontWeight: 600, color: "var(--mf-t0)", letterSpacing: "-0.01em" }}>Advanced search</h1>
 
         {/* query */}
         <div style={{ position: "relative", marginBottom: 24 }}>
@@ -280,10 +280,10 @@ export function AdvancedSearchPage() {
                   type="button"
                   onClick={() => toggleSource(s.id)}
                   className="mf-ghost"
-                  style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 12px", borderRadius: 9, border: `1px solid ${on ? "var(--mf-line-2)" : "var(--mf-line)"}`, background: on ? "rgba(255,255,255,0.04)" : "var(--mf-panel-2)", cursor: "pointer", textAlign: "left" }}
+                  style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 12px", borderRadius: 9, border: `1px solid ${on ? "var(--mf-line-2)" : "var(--mf-line)"}`, background: on ? "color-mix(in srgb, var(--mf-t0) 4%, transparent)" : "var(--mf-panel-2)", cursor: "pointer", textAlign: "left" }}
                 >
-                  <span style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 17, height: 17, borderRadius: 5, border: `1.5px solid ${on ? "#e6e6e6" : "rgba(255,255,255,0.22)"}`, background: on ? "#e6e6e6" : "transparent", flexShrink: 0 }}>
-                    <svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke={on ? "#111" : "transparent"} strokeWidth={2.3} strokeLinecap="round" strokeLinejoin="round"><polyline points="3 8.5 6.5 12 13 4" /></svg>
+                  <span style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 17, height: 17, borderRadius: 5, border: `1.5px solid ${on ? "var(--mf-t1)" : "color-mix(in srgb, var(--mf-t0) 22%, transparent)"}`, background: on ? "var(--mf-t1)" : "transparent", flexShrink: 0 }}>
+                    <svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke={on ? "var(--mf-accent-ink)" : "transparent"} strokeWidth={2.3} strokeLinecap="round" strokeLinejoin="round"><polyline points="3 8.5 6.5 12 13 4" /></svg>
                   </span>
                   <span style={{ fontSize: 12.5, fontWeight: 500, color: on ? "var(--mf-t1)" : "var(--mf-t4)" }}>{s.name}</span>
                   {unsupported && (
@@ -345,8 +345,8 @@ export function AdvancedSearchPage() {
             <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--mf-t1)" }}>Direct downloads only</div>
             <div style={{ fontFamily: MONO, fontSize: 10, color: "var(--mf-t4)", marginTop: 2 }}>Hide browser-resolve-only titles</div>
           </div>
-          <button type="button" onClick={() => setDirectOnly((v) => !v)} style={{ position: "relative", width: 40, height: 23, borderRadius: 99, border: "none", cursor: "pointer", background: directOnly ? "#e6e6e6" : "rgba(255,255,255,0.13)", transition: "background .15s", flexShrink: 0 }}>
-            <span style={{ position: "absolute", top: 3, left: directOnly ? 20 : 3, width: 17, height: 17, borderRadius: 99, background: directOnly ? "#111" : "#cfcfcf", transition: "left .15s" }} />
+          <button type="button" onClick={() => setDirectOnly((v) => !v)} style={{ position: "relative", width: 40, height: 23, borderRadius: 99, border: "none", cursor: "pointer", background: directOnly ? "var(--mf-t1)" : "color-mix(in srgb, var(--mf-t0) 13%, transparent)", transition: "background .15s", flexShrink: 0 }}>
+            <span style={{ position: "absolute", top: 3, left: directOnly ? 20 : 3, width: 17, height: 17, borderRadius: 99, background: directOnly ? "var(--mf-accent-ink)" : "var(--mf-t2)", transition: "left .15s" }} />
           </button>
         </div>
 
@@ -361,14 +361,14 @@ export function AdvancedSearchPage() {
         {/* extra right padding clears the frameless window controls (min/max/close) */}
         <header style={{ flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "24px 104px 24px 36px", borderBottom: "1px solid var(--mf-line)" }}>
           <div style={{ display: "flex", alignItems: "baseline", gap: 12 }}>
-            <span style={{ fontSize: 16, fontWeight: 600, color: "#ededed" }}>{sorted.length} {sorted.length === 1 ? "title" : "titles"}</span>
+            <span style={{ fontSize: 16, fontWeight: 600, color: "var(--mf-t0)" }}>{sorted.length} {sorted.length === 1 ? "title" : "titles"}</span>
             <span style={{ fontFamily: MONO, fontSize: 11, color: "var(--mf-t4)" }}>{mirrors} mirrors across selected sources</span>
-            {loading && <Spinner size={12} stroke="#7d7d7d" />}
+            {loading && <Spinner size={12} stroke="var(--mf-t4)" />}
             {activeFilterCount > 0 && (
               <span style={{ fontFamily: MONO, fontSize: 10, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--mf-t3)", padding: "3px 9px", borderRadius: 99, border: "1px solid var(--mf-line-2)" }}>{activeFilterCount} filters</span>
             )}
           </div>
-          <button type="button" onClick={cycleSort} className="mf-textbtn" style={{ display: "flex", alignItems: "center", gap: 7, padding: "8px 14px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.09)", background: "transparent", color: "var(--mf-t3)", fontFamily: MONO, fontSize: 11, cursor: "pointer" }}>
+          <button type="button" onClick={cycleSort} className="mf-textbtn" style={{ display: "flex", alignItems: "center", gap: 7, padding: "8px 14px", borderRadius: 8, border: "1px solid color-mix(in srgb, var(--mf-t0) 9%, transparent)", background: "transparent", color: "var(--mf-t3)", fontFamily: MONO, fontSize: 11, cursor: "pointer" }}>
             <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round"><line x1="3" y1="4.5" x2="13" y2="4.5" /><line x1="3" y1="8" x2="10" y2="8" /><line x1="3" y1="11.5" x2="7" y2="11.5" /></svg>
             {sortLabel}
           </button>
@@ -377,7 +377,7 @@ export function AdvancedSearchPage() {
         <div className="mf-scroll" onScroll={onScroll} style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "24px 36px 40px" }}>
           {!available ? (
             <CenterState>
-              <SearchIcon size={30} stroke="#4a4a4a" />
+              <SearchIcon size={30} stroke="var(--mf-t6)" />
               <span style={{ fontFamily: MONO, fontSize: 12, color: "var(--mf-t5)" }}>source backend unavailable</span>
             </CenterState>
           ) : sorted.length > 0 ? (
@@ -389,19 +389,19 @@ export function AdvancedSearchPage() {
               </div>
               {(loadingMore || hasMore) && (
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: "26px 0 4px", gap: 10 }}>
-                  {loadingMore ? <Spinner size={16} stroke="#5f5f5f" /> : null}
+                  {loadingMore ? <Spinner size={16} stroke="var(--mf-t5)" /> : null}
                   <span style={{ fontFamily: MONO, fontSize: 11, color: "var(--mf-t5)" }}>{loadingMore ? "loading more…" : `scroll for more · ${games.length} of ${total}`}</span>
                 </div>
               )}
             </>
           ) : loading ? (
             <CenterState>
-              <Spinner size={26} stroke="#5f5f5f" />
+              <Spinner size={26} stroke="var(--mf-t5)" />
               <span style={{ fontFamily: MONO, fontSize: 12, color: "var(--mf-t4)" }}>querying sources…</span>
             </CenterState>
           ) : (
             <CenterState>
-              <SearchIcon size={30} stroke="#4a4a4a" />
+              <SearchIcon size={30} stroke="var(--mf-t6)" />
               <span style={{ fontFamily: MONO, fontSize: 12, color: "var(--mf-t4)" }}>no titles match these filters</span>
               <button type="button" onClick={reset} className="mf-ghost" style={{ padding: "8px 16px", borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "transparent", color: "var(--mf-t2)", fontSize: 12, fontWeight: 500, cursor: "pointer" }}>Reset filters</button>
             </CenterState>
@@ -417,7 +417,7 @@ function Chip({ label, active, onClick }: { label: string; active: boolean; onCl
     <button
       type="button"
       onClick={onClick}
-      style={{ padding: "6px 12px", borderRadius: 999, fontSize: 11.5, fontWeight: 500, border: `1px solid ${active ? "var(--mf-line-2)" : "var(--mf-line)"}`, background: active ? "rgba(255,255,255,0.12)" : "transparent", color: active ? "#f0f0f0" : "var(--mf-t4)", cursor: "pointer" }}
+      style={{ padding: "6px 12px", borderRadius: 999, fontSize: 11.5, fontWeight: 500, border: `1px solid ${active ? "var(--mf-line-2)" : "var(--mf-line)"}`, background: active ? "color-mix(in srgb, var(--mf-t0) 12%, transparent)" : "transparent", color: active ? "var(--mf-t0)" : "var(--mf-t4)", cursor: "pointer" }}
     >
       {label}
     </button>

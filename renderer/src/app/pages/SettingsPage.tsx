@@ -153,7 +153,7 @@ export function SettingsPage() {
   return (
     <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column" }}>
       <header style={{ flexShrink: 0, padding: "26px 36px 22px", borderBottom: "1px solid var(--mf-line)" }}>
-        <h1 style={{ margin: 0, fontSize: 22, fontWeight: 600, color: "#ededed", letterSpacing: "-0.015em" }}>Settings</h1>
+        <h1 style={{ margin: 0, fontSize: 22, fontWeight: 600, color: "var(--mf-t0)", letterSpacing: "-0.015em" }}>Settings</h1>
         <p style={{ margin: "6px 0 0", fontFamily: MONO, fontSize: 11.5, color: "var(--mf-t4)" }}>{sub}</p>
       </header>
 
@@ -163,7 +163,7 @@ export function SettingsPage() {
           {SECTIONS.map((s) => {
             const active = section === s.id
             return (
-              <button key={s.id} type="button" onClick={() => setSection(s.id)} className="mf-navitem" style={{ display: "flex", alignItems: "center", gap: 11, padding: "9px 12px", borderRadius: 8, border: "none", fontSize: 13, fontWeight: active ? 600 : 500, color: active ? "#f0f0f0" : "var(--mf-t4)", background: active ? "rgba(255,255,255,0.07)" : "transparent", cursor: "pointer", textAlign: "left" }}>
+              <button key={s.id} type="button" onClick={() => setSection(s.id)} className="mf-navitem" style={{ display: "flex", alignItems: "center", gap: 11, padding: "9px 12px", borderRadius: 8, border: "none", fontSize: 13, fontWeight: active ? 600 : 500, color: active ? "var(--mf-t0)" : "var(--mf-t4)", background: active ? "color-mix(in srgb, var(--mf-t0) 7%, transparent)" : "transparent", cursor: "pointer", textAlign: "left" }}>
                 {SECTION_ICON[s.id]}{s.label}
               </button>
             )
@@ -195,7 +195,7 @@ export function SettingsPage() {
 
             {section === "downloads" && (
               <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                <div style={{ padding: "16px 0", borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
+                <div style={{ padding: "16px 0", borderBottom: "1px solid color-mix(in srgb, var(--mf-t0) 5%, transparent)" }}>
                   <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--mf-t1)", marginBottom: 10 }}>Install location</div>
                   <div style={{ display: "flex", gap: 10 }}>
                     <div style={{ flex: 1, display: "flex", alignItems: "center", height: 38, padding: "0 13px", borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "var(--mf-panel)", fontFamily: MONO, fontSize: 12, color: "var(--mf-t2)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{installPath || "default install folder"}</div>
@@ -204,7 +204,7 @@ export function SettingsPage() {
                     </button>
                   </div>
                 </div>
-                <div style={{ padding: "16px 0", borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
+                <div style={{ padding: "16px 0", borderBottom: "1px solid color-mix(in srgb, var(--mf-t0) 5%, transparent)" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
                     <div style={{ flex: 1 }}>
                       <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--mf-t1)" }}>Limit download speed</div>
@@ -215,7 +215,7 @@ export function SettingsPage() {
                   {bwOn && (
                     <div style={{ display: "flex", alignItems: "center", gap: 16, marginTop: 16 }}>
                       <input type="range" className="uc-range" min={1} max={100} value={bwMbps} onChange={(e) => changeBw(Number(e.target.value))} style={{ flex: 1 }} />
-                      <span style={{ fontFamily: MONO, fontSize: 12.5, color: "#ededed", width: 78, textAlign: "right" }}>{bwMbps} MB/s</span>
+                      <span style={{ fontFamily: MONO, fontSize: 12.5, color: "var(--mf-t0)", width: 78, textAlign: "right" }}>{bwMbps} MB/s</span>
                     </div>
                   )}
                 </div>
@@ -261,7 +261,7 @@ function ThemeSwatch({ theme, active, onSelect }: { theme: ThemeDef; active: boo
     <button
       type="button"
       onClick={onSelect}
-      style={{ display: "flex", flexDirection: "column", gap: 0, padding: 0, borderRadius: 10, overflow: "hidden", border: active ? "1px solid #e6e6e6" : "1px solid var(--mf-line-2)", background: "var(--mf-panel)", cursor: "pointer", textAlign: "left" }}
+      style={{ display: "flex", flexDirection: "column", gap: 0, padding: 0, borderRadius: 10, overflow: "hidden", border: active ? "1px solid var(--mf-t1)" : "1px solid var(--mf-line-2)", background: "var(--mf-panel)", cursor: "pointer", textAlign: "left" }}
     >
       <span style={{ display: "flex", height: 44, background: c.background }}>
         <span style={{ flex: 1, margin: "10px 0 10px 10px", borderRadius: 5, background: c.card, border: `1px solid ${c.border}` }} />
@@ -269,7 +269,7 @@ function ThemeSwatch({ theme, active, onSelect }: { theme: ThemeDef; active: boo
         <span style={{ width: 26, margin: "10px 10px 10px 0", borderRadius: 5, background: c.accent }} />
       </span>
       <span style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 10px", borderTop: "1px solid var(--mf-line)" }}>
-        <span style={{ fontSize: 12, fontWeight: 600, color: active ? "#f0f0f0" : "var(--mf-t2)" }}>{theme.name}</span>
+        <span style={{ fontSize: 12, fontWeight: 600, color: active ? "var(--mf-t0)" : "var(--mf-t2)" }}>{theme.name}</span>
         {active && <span style={{ fontFamily: MONO, fontSize: 9, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--mf-t4)" }}>active</span>}
       </span>
     </button>
@@ -309,10 +309,10 @@ function AppearanceTab() {
               <div key={t.id} style={{ position: "relative" }}>
                 <ThemeSwatch theme={t} active={activeThemeId === t.id} onSelect={() => setActiveThemeId(t.id)} />
                 <div style={{ position: "absolute", top: 6, right: 6, display: "flex", gap: 4 }}>
-                  <button type="button" title="Edit" onClick={() => openEditor(t)} style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 22, height: 22, borderRadius: 6, border: "1px solid rgba(255,255,255,0.15)", background: "rgba(0,0,0,0.55)", color: "var(--mf-t2)", cursor: "pointer" }}>
+                  <button type="button" title="Edit" onClick={() => openEditor(t)} style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 22, height: 22, borderRadius: 6, border: "1px solid color-mix(in srgb, var(--mf-t0) 15%, transparent)", background: "rgba(0,0,0,0.55)", color: "var(--mf-t2)", cursor: "pointer" }}>
                     <Pencil size={11} strokeWidth={1.8} />
                   </button>
-                  <button type="button" title="Delete" onClick={() => deleteCustomTheme(t.id)} style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 22, height: 22, borderRadius: 6, border: "1px solid rgba(255,255,255,0.15)", background: "rgba(0,0,0,0.55)", color: "var(--mf-t3)", cursor: "pointer" }}>
+                  <button type="button" title="Delete" onClick={() => deleteCustomTheme(t.id)} style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 22, height: 22, borderRadius: 6, border: "1px solid color-mix(in srgb, var(--mf-t0) 15%, transparent)", background: "rgba(0,0,0,0.55)", color: "var(--mf-t3)", cursor: "pointer" }}>
                     <X size={12} strokeWidth={1.8} />
                   </button>
                 </div>
@@ -434,9 +434,9 @@ function SourcesTab() {
           const on = Boolean(enabled[s.id])
           return (
             <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 16px", border: "1px solid var(--mf-line)", borderRadius: 11, background: "var(--mf-panel-2)" }}>
-              <span style={{ width: 8, height: 8, borderRadius: 99, background: on ? "#cfcfcf" : "#444", flexShrink: 0 }} />
+              <span style={{ width: 8, height: 8, borderRadius: 99, background: on ? "var(--mf-t2)" : "var(--mf-t6)", flexShrink: 0 }} />
               <div style={{ minWidth: 0, flex: 1 }}>
-                <div style={{ fontSize: 13.5, fontWeight: 600, color: "#ededed" }}>{s.name}</div>
+                <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--mf-t0)" }}>{s.name}</div>
                 <div style={{ fontFamily: MONO, fontSize: 10.5, color: "var(--mf-t5)", marginTop: 2 }}>{on ? detailFor(s.id) : "disabled · hidden from browse"}</div>
               </div>
               <Toggle on={on} onToggle={() => void toggle(s.id)} />
@@ -519,7 +519,7 @@ function LinuxSettingsTab() {
         </select>
       </Row>
 
-      <div style={{ padding: "16px 0", borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
+      <div style={{ padding: "16px 0", borderBottom: "1px solid color-mix(in srgb, var(--mf-t0) 5%, transparent)" }}>
         <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--mf-t1)", marginBottom: 3 }}>Proton prefix</div>
         <div style={{ fontFamily: MONO, fontSize: 11, color: "var(--mf-t4)", marginBottom: 10 }}>STEAM_COMPAT_DATA_PATH, blank uses the per-game auto path</div>
         <div style={{ display: "flex", gap: 10 }}>
@@ -537,7 +537,7 @@ function LinuxSettingsTab() {
         <Toggle on={mangohud} onToggle={() => { const v = !mangohud; setMangohud(v); persist2("linuxMangohud", v) }} />
       </Row>
 
-      <div style={{ padding: "16px 0", borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
+      <div style={{ padding: "16px 0", borderBottom: "1px solid color-mix(in srgb, var(--mf-t0) 5%, transparent)" }}>
         <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--mf-t1)", marginBottom: 3 }}>Default WINEDLLOVERRIDES</div>
         <div style={{ fontFamily: MONO, fontSize: 11, color: "var(--mf-t4)", marginBottom: 10 }}>Used when neither the game folder (OnlineFix) nor per-game env set overrides, e.g. winmm=n,b;dinput8=n,b</div>
         <input
@@ -611,11 +611,11 @@ function AboutTab() {
   return (
     <>
       <div style={{ display: "flex", alignItems: "center", gap: 16, paddingBottom: 22, borderBottom: "1px solid var(--mf-line)" }}>
-        <span style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 54, height: 54, borderRadius: 14, background: "#e9e9e9", color: "#111" }}>
-          <svg viewBox="0 0 24 24" style={{ width: "62%", height: "62%", display: "block" }} fill="none" stroke="#111" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h5c3 0 3.5 6 7 6" /><path d="M3 12h12" /><path d="M3 18h5c3 0 3.5-6 7-6" /><path d="M15 12h6" /><circle cx="15" cy="12" r="1.7" fill="#111" stroke="none" /></svg>
+        <span style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 54, height: 54, borderRadius: 14, background: "var(--mf-accent)", color: "var(--mf-accent-ink)" }}>
+          <svg viewBox="0 0 24 24" style={{ width: "62%", height: "62%", display: "block" }} fill="none" stroke="var(--mf-accent-ink)" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h5c3 0 3.5 6 7 6" /><path d="M3 12h12" /><path d="M3 18h5c3 0 3.5-6 7-6" /><path d="M15 12h6" /><circle cx="15" cy="12" r="1.7" fill="var(--mf-accent-ink)" stroke="none" /></svg>
         </span>
         <div>
-          <div style={{ fontSize: 17, fontWeight: 700, color: "#f4f4f4" }}>{BRAND.name}</div>
+          <div style={{ fontSize: 17, fontWeight: 700, color: "var(--mf-t0)" }}>{BRAND.name}</div>
           <div style={{ fontFamily: MONO, fontSize: 11.5, color: "var(--mf-t4)", marginTop: 3 }}>version {version} · {updMsg}</div>
           <div style={{ fontFamily: MONO, fontSize: 10.5, color: "var(--mf-t5)", marginTop: 4 }}>based on {BASED_ON}</div>
         </div>
@@ -632,15 +632,15 @@ function AboutTab() {
 // ── shared bits ──
 function Toggle({ on, onToggle }: { on: boolean; onToggle: () => void }) {
   return (
-    <button type="button" onClick={onToggle} style={{ position: "relative", width: 40, height: 23, borderRadius: 99, border: "none", cursor: "pointer", background: on ? "#e6e6e6" : "rgba(255,255,255,0.13)", transition: "background .15s", flexShrink: 0 }}>
-      <span style={{ position: "absolute", top: 3, left: on ? 20 : 3, width: 17, height: 17, borderRadius: 99, background: on ? "#111" : "#cfcfcf", transition: "left .15s" }} />
+    <button type="button" onClick={onToggle} style={{ position: "relative", width: 40, height: 23, borderRadius: 99, border: "none", cursor: "pointer", background: on ? "var(--mf-t1)" : "color-mix(in srgb, var(--mf-t0) 13%, transparent)", transition: "background .15s", flexShrink: 0 }}>
+      <span style={{ position: "absolute", top: 3, left: on ? 20 : 3, width: 17, height: 17, borderRadius: 99, background: on ? "var(--mf-accent-ink)" : "var(--mf-t2)", transition: "left .15s" }} />
     </button>
   )
 }
 
 function Row({ title, desc, last, children }: { title: string; desc: string; last?: boolean; children: React.ReactNode }) {
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 18, padding: "16px 0", borderBottom: last ? "none" : "1px solid rgba(255,255,255,0.05)" }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 18, padding: "16px 0", borderBottom: last ? "none" : "1px solid color-mix(in srgb, var(--mf-t0) 5%, transparent)" }}>
       <div style={{ flex: 1 }}>
         <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--mf-t1)" }}>{title}</div>
         <div style={{ fontFamily: MONO, fontSize: 11, color: "var(--mf-t4)", marginTop: 3 }}>{desc}</div>

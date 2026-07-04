@@ -17,13 +17,13 @@ import {
 
 // the inset field "well" used across every dialog input
 const WELL: CSSProperties = {
-  border: "1px solid rgba(255,255,255,0.16)",
+  border: "1px solid color-mix(in srgb, var(--mf-t0) 16%, transparent)",
   background: "#0e0e0e",
   boxShadow: "inset 0 1px 3px rgba(0,0,0,0.4)",
   borderRadius: 10,
   color: "var(--mf-t1)",
 }
-const COVER_LINES = "repeating-linear-gradient(135deg, rgba(255,255,255,0.05) 0 1px, transparent 1px 9px), #131313"
+const COVER_LINES = "repeating-linear-gradient(135deg, color-mix(in srgb, var(--mf-t0) 5%, transparent) 0 1px, transparent 1px 9px), #131313"
 
 export type MenuGame = {
   appid: string
@@ -85,7 +85,7 @@ export function GameMenu({ game, anchor, handlers, onClose }: { game: MenuGame; 
       <div
         ref={panelRef}
         onMouseDown={(e) => e.stopPropagation()}
-        style={{ position: "fixed", left: pos?.left ?? anchor.left, top: pos?.top ?? anchor.bottom + 6, width: MENU_WIDTH, transformOrigin: pos?.origin ?? "top left", visibility: pos ? "visible" : "hidden", animation: "mfMenu .15s ease both", borderRadius: 12, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(20,20,20,0.98)", padding: 5, boxShadow: "0 20px 50px rgba(0,0,0,0.55)" }}
+        style={{ position: "fixed", left: pos?.left ?? anchor.left, top: pos?.top ?? anchor.bottom + 6, width: MENU_WIDTH, transformOrigin: pos?.origin ?? "top left", visibility: pos ? "visible" : "hidden", animation: "mfMenu .15s ease both", borderRadius: 12, border: "1px solid color-mix(in srgb, var(--mf-t0) 8%, transparent)", background: "rgba(20,20,20,0.98)", padding: 5, boxShadow: "0 20px 50px rgba(0,0,0,0.55)" }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 11, padding: "8px 9px 10px" }}>
           <div style={{ width: 34, height: 45, borderRadius: 5, flexShrink: 0, background: game.image ? `center/cover no-repeat url("${proxyImageUrl(game.image)}")` : COVER_LINES }} />
@@ -94,7 +94,7 @@ export function GameMenu({ game, anchor, handlers, onClose }: { game: MenuGame; 
             {meta ? <div style={{ fontFamily: MONO, fontSize: 10, color: "var(--mf-t4)", marginTop: 3 }}>{meta}</div> : null}
           </div>
         </div>
-        <div style={{ height: 1, background: "rgba(255,255,255,0.06)", margin: "0 6px 5px" }} />
+        <div style={{ height: 1, background: "color-mix(in srgb, var(--mf-t0) 6%, transparent)", margin: "0 6px 5px" }} />
 
         <MenuRow icon={FolderOpen} label="Open files" onClick={run(handlers.onOpenFiles)} />
         <MenuRow icon={Settings} label="Set executable" onClick={run(handlers.onSetExecutable)} />
@@ -104,7 +104,7 @@ export function GameMenu({ game, anchor, handlers, onClose }: { game: MenuGame; 
         <MenuRow icon={RefreshCw} label="Refresh metadata" onClick={run(handlers.onRefreshMetadata)} />
         <MenuRow icon={Heart} label={handlers.isFavorite ? "Unfavorite" : "Favorite"} iconColor={handlers.isFavorite ? "#e06b8b" : undefined} onClick={run(handlers.onToggleFavorite)} />
 
-        <div style={{ height: 1, background: "rgba(255,255,255,0.06)", margin: "5px 6px" }} />
+        <div style={{ height: 1, background: "color-mix(in srgb, var(--mf-t0) 6%, transparent)", margin: "5px 6px" }} />
         <MenuRow icon={Trash2} label="Delete game" danger onClick={run(handlers.onDelete)} />
       </div>
     </div>,
@@ -212,8 +212,8 @@ export function LaunchOptionsDialog({ appid, gameName, onClose }: { appid: strin
             return `${cur.trim()} ${o.args}`.trim()
           })
           return (
-            <button key={o.args} type="button" onClick={toggle} style={{ display: "flex", alignItems: "center", gap: 8, textAlign: "left", border: `1px solid ${on ? "var(--mf-line-2)" : "var(--mf-line)"}`, background: on ? "rgba(255,255,255,0.06)" : "rgba(255,255,255,0.02)", borderRadius: 10, padding: "9px 12px", cursor: "pointer" }}>
-              <span style={{ width: 15, flexShrink: 0, display: "inline-flex" }}>{on ? <Check size={14} strokeWidth={2.4} color="#f0f0f0" /> : null}</span>
+            <button key={o.args} type="button" onClick={toggle} style={{ display: "flex", alignItems: "center", gap: 8, textAlign: "left", border: `1px solid ${on ? "var(--mf-line-2)" : "var(--mf-line)"}`, background: on ? "color-mix(in srgb, var(--mf-t0) 6%, transparent)" : "color-mix(in srgb, var(--mf-t0) 2%, transparent)", borderRadius: 10, padding: "9px 12px", cursor: "pointer" }}>
+              <span style={{ width: 15, flexShrink: 0, display: "inline-flex" }}>{on ? <Check size={14} strokeWidth={2.4} color="var(--mf-t0)" /> : null}</span>
               <span style={{ display: "flex", flexDirection: "column", gap: 3, minWidth: 0 }}>
                 <span style={{ fontFamily: MONO, fontSize: 12, color: on ? "var(--mf-t0)" : "var(--mf-t2)" }}>{o.label}</span>
                 <span style={{ fontFamily: MONO, fontSize: 11, color: "var(--mf-t4)" }}>{o.args}</span>
@@ -399,7 +399,7 @@ export function LinuxConfigDialog({ appid, gameName, onClose }: { appid: string;
       <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 9, fontSize: 15, fontWeight: 600, color: "var(--mf-t0)" }}>
           <Terminal size={15} strokeWidth={1.8} color="var(--mf-t2)" />Linux / VR config
-          <span style={{ marginLeft: "auto", border: "1px solid var(--mf-line)", background: "rgba(255,255,255,0.04)", padding: "2px 8px", borderRadius: 99, fontFamily: MONO, fontSize: 9, fontWeight: 600, letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--mf-t4)" }}>{gameName}</span>
+          <span style={{ marginLeft: "auto", border: "1px solid var(--mf-line)", background: "color-mix(in srgb, var(--mf-t0) 4%, transparent)", padding: "2px 8px", borderRadius: 99, fontFamily: MONO, fontSize: 9, fontWeight: 600, letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--mf-t4)" }}>{gameName}</span>
         </div>
         <div style={{ fontSize: 12.5, lineHeight: 1.5, color: "var(--mf-t4)" }}>How this game launches on Linux. Runners are picked up from Steam and <span style={{ fontFamily: MONO, fontSize: 11.5, color: "var(--mf-t3)" }}>compatibilitytools.d</span>.</div>
       </div>
@@ -410,7 +410,7 @@ export function LinuxConfigDialog({ appid, gameName, onClose }: { appid: string;
           {PRESET_ORDER.map((id) => {
             const on = activePreset === id
             return (
-              <button key={id} type="button" onClick={() => applyPreset(id)} style={{ borderRadius: 99, border: `1px solid ${on ? "var(--mf-line-2)" : "var(--mf-line)"}`, background: on ? "rgba(255,255,255,0.10)" : "rgba(255,255,255,0.03)", padding: "6px 13px", fontSize: 12, fontWeight: on ? 600 : 500, color: on ? "#f0f0f0" : "var(--mf-t3)", cursor: "pointer" }}>{PRESET_LABELS[id] || (LINUX_PRESETS.find((p) => p.id === id)?.label ?? id)}</button>
+              <button key={id} type="button" onClick={() => applyPreset(id)} style={{ borderRadius: 99, border: `1px solid ${on ? "var(--mf-line-2)" : "var(--mf-line)"}`, background: on ? "color-mix(in srgb, var(--mf-t0) 10%, transparent)" : "color-mix(in srgb, var(--mf-t0) 3%, transparent)", padding: "6px 13px", fontSize: 12, fontWeight: on ? 600 : 500, color: on ? "var(--mf-t0)" : "var(--mf-t3)", cursor: "pointer" }}>{PRESET_LABELS[id] || (LINUX_PRESETS.find((p) => p.id === id)?.label ?? id)}</button>
             )
           })}
         </div>
@@ -450,8 +450,8 @@ export function LinuxConfigDialog({ appid, gameName, onClose }: { appid: string;
             {g.items.map((p, i) => {
               const on = config.protonPath === p.path
               return (
-                <button key={p.path} type="button" onClick={() => update({ launchMode: "proton", protonPath: p.path })} style={{ display: "flex", alignItems: "center", gap: 11, textAlign: "left", border: `1px solid ${on ? "var(--mf-line-2)" : "var(--mf-line)"}`, background: on ? "rgba(255,255,255,0.06)" : "rgba(255,255,255,0.02)", borderRadius: 10, padding: "9px 12px", cursor: "pointer" }}>
-                  <span style={{ width: 15, flexShrink: 0, display: "inline-flex" }}>{on ? <Check size={15} strokeWidth={2.4} color="#f0f0f0" /> : null}</span>
+                <button key={p.path} type="button" onClick={() => update({ launchMode: "proton", protonPath: p.path })} style={{ display: "flex", alignItems: "center", gap: 11, textAlign: "left", border: `1px solid ${on ? "var(--mf-line-2)" : "var(--mf-line)"}`, background: on ? "color-mix(in srgb, var(--mf-t0) 6%, transparent)" : "color-mix(in srgb, var(--mf-t0) 2%, transparent)", borderRadius: 10, padding: "9px 12px", cursor: "pointer" }}>
+                  <span style={{ width: 15, flexShrink: 0, display: "inline-flex" }}>{on ? <Check size={15} strokeWidth={2.4} color="var(--mf-t0)" /> : null}</span>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
                       <span style={{ fontSize: 13, fontWeight: on ? 600 : 500, color: on ? "var(--mf-t0)" : "var(--mf-t2)" }}>{p.label}</span>
@@ -469,16 +469,16 @@ export function LinuxConfigDialog({ appid, gameName, onClose }: { appid: string;
       <PathField label="Proton script" hint="overrides global" value={config.protonPath || ""} onBrowse={() => void pickProtonScript()} />
       <PathField label="Proton prefix" hint="STEAM_COMPAT_DATA_PATH" value={config.protonPrefix || ""} placeholder="Auto" onBrowse={() => void pickProtonPrefix()} />
 
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, border: "1px solid var(--mf-line)", background: "rgba(255,255,255,0.02)", borderRadius: 10, padding: "10px 12px" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, border: "1px solid var(--mf-line)", background: "color-mix(in srgb, var(--mf-t0) 2%, transparent)", borderRadius: 10, padding: "10px 12px" }}>
         <div style={{ minWidth: 0 }}>
           <div style={{ fontSize: 12, fontWeight: 600, color: "var(--mf-t2)" }}>VR support</div>
           <div style={{ fontSize: 10.5, color: "var(--mf-t5)", marginTop: 2 }}>{vr === "auto" ? "Inherit from global settings" : vr === "on" ? "Forced on for this game" : "Forced off for this game"}</div>
         </div>
-        <div style={{ display: "inline-flex", alignItems: "center", border: "1px solid var(--mf-line)", background: "rgba(255,255,255,0.03)", borderRadius: 99, padding: 2, flexShrink: 0 }}>
+        <div style={{ display: "inline-flex", alignItems: "center", border: "1px solid var(--mf-line)", background: "color-mix(in srgb, var(--mf-t0) 3%, transparent)", borderRadius: 99, padding: 2, flexShrink: 0 }}>
           {(["auto", "on", "off"] as const).map((v) => {
             const on = vr === v
             return (
-              <button key={v} type="button" onClick={() => update({ vrEnabled: v === "auto" ? undefined : v === "on" })} style={{ borderRadius: 99, border: "none", padding: "3px 10px", fontSize: 11, fontWeight: on ? 600 : 500, background: on ? "rgba(255,255,255,0.10)" : "transparent", color: on ? "#f0f0f0" : "var(--mf-t4)", cursor: "pointer", textTransform: "capitalize" }}>{v}</button>
+              <button key={v} type="button" onClick={() => update({ vrEnabled: v === "auto" ? undefined : v === "on" })} style={{ borderRadius: 99, border: "none", padding: "3px 10px", fontSize: 11, fontWeight: on ? 600 : 500, background: on ? "color-mix(in srgb, var(--mf-t0) 10%, transparent)" : "transparent", color: on ? "var(--mf-t0)" : "var(--mf-t4)", cursor: "pointer", textTransform: "capitalize" }}>{v}</button>
             )
           })}
         </div>

@@ -137,8 +137,8 @@ function WindowButton({
       aria-label={label}
       onClick={onClick}
       className={cn(
-        "flex h-6 w-7 items-center justify-center rounded text-[#7d7d7d] transition-colors",
-        danger ? "hover:bg-[#7a2a2a] hover:text-white" : "hover:bg-white/10 hover:text-[#e6e6e6]"
+        "flex h-6 w-7 items-center justify-center rounded text-[var(--mf-t4)] transition-colors",
+        danger ? "hover:bg-[#7a2a2a] hover:text-white" : "hover:bg-white/10 hover:text-[var(--mf-t1)]"
       )}
     >
       {children}
