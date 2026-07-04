@@ -128,12 +128,12 @@ function InstallingStrip({ installingMeta, installedIds, filter, query }: { inst
             </div>
             <div style={{ minWidth: 0, flex: 1 }}>
               <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
-                <span style={{ fontSize: 13.5, fontWeight: 600, color: "#ededed" }}>{g.name}</span>
+                <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--mf-t0)" }}>{g.name}</span>
                 <span style={{ fontFamily: MONO, fontSize: 10.5, color: "var(--mf-t4)" }}>{g.status}</span>
                 <span style={{ marginLeft: "auto", fontFamily: MONO, fontSize: 10.5, color: "var(--mf-t3)" }}>{g.pct}%</span>
               </div>
-              <div style={{ marginTop: 9, height: 4, borderRadius: 99, background: "rgba(255,255,255,0.08)", overflow: "hidden" }}>
-                <div style={{ height: "100%", width: `${g.pct}%`, background: "#e9e9e9", borderRadius: 99 }} />
+              <div style={{ marginTop: 9, height: 4, borderRadius: 99, background: "color-mix(in srgb, var(--mf-t0) 8%, transparent)", overflow: "hidden" }}>
+                <div style={{ height: "100%", width: `${g.pct}%`, background: "var(--mf-accent)", borderRadius: 99 }} />
               </div>
             </div>
           </div>
@@ -438,7 +438,7 @@ export function LibraryPage() {
       <header style={{ flexShrink: 0, padding: "26px 36px 0" }}>
         <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", marginBottom: 20 }}>
           <div>
-            <h1 style={{ margin: 0, fontSize: 22, fontWeight: 600, color: "#ededed", letterSpacing: "-0.015em" }}>Library</h1>
+            <h1 style={{ margin: 0, fontSize: 22, fontWeight: 600, color: "var(--mf-t0)", letterSpacing: "-0.015em" }}>Library</h1>
             <p style={{ margin: "6px 0 0", fontFamily: MONO, fontSize: 11.5, color: "var(--mf-t4)" }}>{loading ? "loading…" : subtitle}</p>
           </div>
           <div style={{ position: "relative", width: 320 }}>
@@ -457,18 +457,18 @@ export function LibraryPage() {
           {FILTERS.map((f) => {
             const active = filter === f
             return (
-              <button key={f} type="button" onClick={() => setFilter(f)} style={{ display: "flex", alignItems: "center", gap: 7, padding: "7px 14px", borderRadius: 999, fontSize: 12, fontWeight: 500, border: `1px solid ${active ? "var(--mf-line-2)" : "rgba(255,255,255,0.09)"}`, background: active ? "rgba(255,255,255,0.10)" : "transparent", color: active ? "#f0f0f0" : "var(--mf-t4)", cursor: "pointer", whiteSpace: "nowrap" }}>
+              <button key={f} type="button" onClick={() => setFilter(f)} style={{ display: "flex", alignItems: "center", gap: 7, padding: "7px 14px", borderRadius: 999, fontSize: 12, fontWeight: 500, border: `1px solid ${active ? "var(--mf-line-2)" : "color-mix(in srgb, var(--mf-t0) 9%, transparent)"}`, background: active ? "color-mix(in srgb, var(--mf-t0) 10%, transparent)" : "transparent", color: active ? "var(--mf-t0)" : "var(--mf-t4)", cursor: "pointer", whiteSpace: "nowrap" }}>
                 {f}
                 <span style={{ fontFamily: MONO, fontSize: 10, color: active ? "var(--mf-t3)" : "var(--mf-t5)" }}>{counts[f]}</span>
               </button>
             )
           })}
           <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 12 }}>
-            <button type="button" onClick={() => setSort((s) => SORT_CYCLE[(SORT_CYCLE.indexOf(s) + 1) % SORT_CYCLE.length])} className="mf-textbtn" style={{ display: "flex", alignItems: "center", gap: 7, padding: "7px 13px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.09)", background: "transparent", color: "var(--mf-t3)", fontFamily: MONO, fontSize: 11, cursor: "pointer" }}>
+            <button type="button" onClick={() => setSort((s) => SORT_CYCLE[(SORT_CYCLE.indexOf(s) + 1) % SORT_CYCLE.length])} className="mf-textbtn" style={{ display: "flex", alignItems: "center", gap: 7, padding: "7px 13px", borderRadius: 8, border: "1px solid color-mix(in srgb, var(--mf-t0) 9%, transparent)", background: "transparent", color: "var(--mf-t3)", fontFamily: MONO, fontSize: 11, cursor: "pointer" }}>
               <ArrowUpDown size={13} strokeWidth={1.6} />
               {SORT_LABEL[sort]}
             </button>
-            <div style={{ display: "flex", gap: 2, padding: 3, borderRadius: 9, border: "1px solid rgba(255,255,255,0.09)", background: "var(--mf-panel-2)" }}>
+            <div style={{ display: "flex", gap: 2, padding: 3, borderRadius: 9, border: "1px solid color-mix(in srgb, var(--mf-t0) 9%, transparent)", background: "var(--mf-panel-2)" }}>
               <ViewBtn active={view === "grid"} onClick={() => setView("grid")} title="grid">
                 <LayoutGrid size={14} strokeWidth={1.6} />
               </ViewBtn>
@@ -486,7 +486,7 @@ export function LibraryPage() {
 
         {loading ? null : shown.length === 0 ? (
           <CenterState>
-            <Inbox size={30} strokeWidth={1.4} color="#4a4a4a" />
+            <Inbox size={30} strokeWidth={1.4} color="var(--mf-t6)" />
             <span style={{ fontFamily: MONO, fontSize: 12, color: "var(--mf-t5)" }}>
               {query.trim() ? `nothing here — “${query.trim()}” matched no installed games` : filter === "All" ? "no games installed yet" : `no games under “${filter}”`}
             </span>
@@ -494,13 +494,13 @@ export function LibraryPage() {
         ) : view === "grid" ? (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(168px, 1fr))", gap: 18, alignContent: "start" }}>
             {shown.map((g) => (
-              <div key={g.appid} onClick={() => openDetail(g)} onContextMenu={(e) => { e.preventDefault(); setMenu({ game: toMenuGame(g), anchor: rectFromPoint(e.clientX, e.clientY) }) }} className="mf-card" style={{ display: "flex", flexDirection: "column", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 10, overflow: "hidden", background: "var(--mf-panel)", cursor: "pointer", contentVisibility: "auto", containIntrinsicSize: "auto 300px" }}>
+              <div key={g.appid} onClick={() => openDetail(g)} onContextMenu={(e) => { e.preventDefault(); setMenu({ game: toMenuGame(g), anchor: rectFromPoint(e.clientX, e.clientY) }) }} className="mf-card" style={{ display: "flex", flexDirection: "column", border: "1px solid color-mix(in srgb, var(--mf-t0) 7%, transparent)", borderRadius: 10, overflow: "hidden", background: "var(--mf-panel)", cursor: "pointer", contentVisibility: "auto", containIntrinsicSize: "auto 300px" }}>
                 <div style={{ position: "relative", aspectRatio: "3 / 4", background: g.image ? "#0f0f0f" : COVER_LINES, display: "flex", alignItems: "flex-end", padding: 12 }}>
                   {g.image && <img src={proxyImageUrl(g.image)} alt={g.name} loading="lazy" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />}
                   {updates.has(g.appid) && (
                     <span title="update available" style={{ position: "absolute", top: 10, right: 10, padding: "3px 8px", borderRadius: 99, background: "rgba(0,0,0,0.6)", border: "1px solid var(--mf-line-2)", fontFamily: MONO, fontSize: 9, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--mf-t1)" }}>update</span>
                   )}
-                  {!g.image && <span style={{ fontFamily: MONO, fontSize: 11, lineHeight: 1.35, letterSpacing: "0.05em", textTransform: "uppercase", color: "#bdbdbd" }}>{g.name}</span>}
+                  {!g.image && <span style={{ fontFamily: MONO, fontSize: 11, lineHeight: 1.35, letterSpacing: "0.05em", textTransform: "uppercase", color: "var(--mf-t2)" }}>{g.name}</span>}
                 </div>
                 <div style={{ padding: "11px 12px 12px", display: "flex", flexDirection: "column", gap: 9 }}>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
@@ -603,8 +603,8 @@ function PlayButton({ appid, onPlay, onStop, full }: { appid: string; onPlay: ()
       style={{
         display: "flex", alignItems: "center", justifyContent: "center", gap: 6, height: 32, borderRadius: 7, border: "none", cursor: "pointer", fontSize: 12, fontWeight: 600,
         ...(full ? { flex: 1 } : { padding: "0 14px" }),
-        background: running ? "rgba(255,255,255,0.12)" : "#e9e9e9",
-        color: running ? "#e9e9e9" : "#111",
+        background: running ? "color-mix(in srgb, var(--mf-t0) 12%, transparent)" : "var(--mf-accent)",
+        color: running ? "var(--mf-accent)" : "var(--mf-accent-ink)",
       }}
     >
       {running
@@ -616,7 +616,7 @@ function PlayButton({ appid, onPlay, onStop, full }: { appid: string; onPlay: ()
 
 function ViewBtn({ active, onClick, title, children }: { active: boolean; onClick: () => void; title: string; children: React.ReactNode }) {
   return (
-    <button type="button" onClick={onClick} title={title} style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 30, height: 28, borderRadius: 6, border: "none", cursor: "pointer", background: active ? "rgba(255,255,255,0.10)" : "transparent", color: active ? "#f0f0f0" : "var(--mf-t4)" }}>
+    <button type="button" onClick={onClick} title={title} style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 30, height: 28, borderRadius: 6, border: "none", cursor: "pointer", background: active ? "color-mix(in srgb, var(--mf-t0) 10%, transparent)" : "transparent", color: active ? "var(--mf-t0)" : "var(--mf-t4)" }}>
       {children}
     </button>
   )
