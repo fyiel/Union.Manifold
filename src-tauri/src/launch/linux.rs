@@ -127,6 +127,7 @@ pub fn resolve_launch(state: &AppState, appid: &str, exe_path: &str) -> LaunchPl
     plan_launch_with(&cfg, global_mode, global_proton, &globals, &state.download_root(), appid, exe_path)
 }
 
+#[allow(dead_code)]
 pub(crate) fn plan_launch(
     cfg: &Value,
     global_mode: Option<String>,
