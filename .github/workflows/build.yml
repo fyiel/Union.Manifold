@@ -134,3 +134,11 @@ jobs:
           releaseDraft: false
           prerelease: false
           args: --target ${{ matrix.target }}
+
+      - name: Build and upload pacman package
+        if: matrix.sidecars == 'linux-x64'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          bash scripts/build-arch-pkg.sh "${{ needs.check.outputs.version }}" "${{ matrix.target }}"
+          gh release upload "${{ needs.check.outputs.tag }}" union-manifold-*.pkg.tar.zst --clobber
