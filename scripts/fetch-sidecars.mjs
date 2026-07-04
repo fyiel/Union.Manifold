@@ -14,6 +14,7 @@ const ARIA2_VERSION = process.env.ARIA2_VERSION || '1.37.0'
 const ARIA2_DARWIN_VERSION = process.env.ARIA2_DARWIN_VERSION || '1.35.0'
 const SEVENZIP_VERSION = process.env.SEVENZIP_VERSION || '2301'
 const CACERT_URL = process.env.ARIA2_CACERT_URL || 'https://curl.se/ca/cacert.pem'
+const SEVENZR_URL = process.env.SEVENZR_URL || 'https://www.7-zip.org/a/7zr.exe'
 
 const TRIPLES = {
   'linux-x64': 'x86_64-unknown-linux-gnu',
@@ -78,7 +79,33 @@ function download(url, dest, redirects = 0) {
   })
 }
 
-function extract(archive, dir) {
+function hasCmd(name) {
+  try {
+    execSync(process.platform === 'win32' ? `where ${name}` : `command -v ${name}`, { stdio: 'ignore' })
+    return true
+  } catch {
+    return false
+  }
+}
+
+let sevenZip = null
+async function sevenZipCmd() {
+  if (sevenZip) return sevenZip
+  for (const c of ['7z', '7za', '7zz']) {
+    if (hasCmd(c)) return (sevenZip = c)
+  }
+  if (process.platform === 'win32') {
+    const zr = path.join(os.tmpdir(), '7zr.exe')
+    if (!fs.existsSync(zr)) {
+      log(`bootstrapping ${SEVENZR_URL}`)
+      await download(SEVENZR_URL, zr)
+    }
+    return (sevenZip = `"${zr}"`)
+  }
+  throw new Error('no 7z extractor found, install p7zip')
+}
+
+async function extract(archive, dir) {
   if (archive.endsWith('.zip')) {
     if (process.platform === 'win32') {
       execSync(`powershell -NoProfile -Command "Expand-Archive -LiteralPath '${archive}' -DestinationPath '${dir}' -Force"`, { stdio: 'inherit' })
@@ -88,7 +115,8 @@ function extract(archive, dir) {
   } else if (/\.tar\.(xz|gz|bz2)$/.test(archive)) {
     execSync(`tar -xf "${archive}" -C "${dir}"`, { stdio: 'inherit' })
   } else if (archive.endsWith('.7z')) {
-    execSync(`7z x -y -o"${dir}" "${archive}"`, { stdio: 'inherit' })
+    const zip = await sevenZipCmd()
+    execSync(`${zip} x -y -o"${dir}" "${archive}"`, { stdio: 'inherit' })
   } else {
     throw new Error(`cannot extract ${archive}`)
   }
@@ -116,7 +144,7 @@ async function stage(spec, outName, triple, isWin) {
   try {
     log(`downloading ${spec.url}`)
     await download(spec.url, tmp)
-    extract(tmp, work)
+    await extract(tmp, work)
     const bin = findFile(work, spec.src ?? spec.bin, spec.srcSub)
     if (!bin) throw new Error(`${spec.src ?? spec.bin} not found`)
     fs.mkdirSync(binDir, { recursive: true })
