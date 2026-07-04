@@ -12,6 +12,22 @@ pub fn resolve_sidecar(name: &str) -> Option<PathBuf> {
             if direct.is_file() {
                 return Some(direct);
             }
+            // arch package layout: exe in /usr/bin, sidecars tucked into
+            // /usr/lib/Union.Manifold so they never collide with the system
+            // aria2/p7zip packages
+            let libdir = dir.join("../lib/Union.Manifold").join(&exe);
+            if libdir.is_file() {
+                return Some(libdir);
+            }
+        }
+    }
+    if let Ok(path) = std::env::var("PATH") {
+        let sep = if cfg!(windows) { ';' } else { ':' };
+        for dir in path.split(sep) {
+            let candidate = PathBuf::from(dir).join(&exe);
+            if candidate.is_file() {
+                return Some(candidate);
+            }
         }
     }
     let bindir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("binaries");
