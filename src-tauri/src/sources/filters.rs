@@ -55,6 +55,9 @@ pub struct QueryResult {
     pub capabilities: CapabilityReport,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// True when >=1 enabled source hard-failed its fetch (vs a genuinely empty
+    /// result). Serialized as `sourcesErrored`.
+    pub sources_errored: bool,
 }
 
 fn matches_filters(g: &UnifiedGame, p: &QueryParams) -> bool {
@@ -116,9 +119,15 @@ fn matches_filters(g: &UnifiedGame, p: &QueryParams) -> bool {
 
 fn sort_games(games: &mut [UnifiedGame], p: &QueryParams) {
     let sort = p.sort.as_deref().unwrap_or("relevance");
-    let desc = p.order.as_deref() != Some("asc");
+    let order = p.order.as_deref();
     match sort {
-        "title" => games.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase())),
+        "title" => {
+            games.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
+            // Ascending (A-Z) by default; honor an explicit descending request.
+            if order == Some("desc") {
+                games.reverse();
+            }
+        }
         "latest" => games.sort_by(|a, b| b.added_at.unwrap_or(i64::MIN).cmp(&a.added_at.unwrap_or(i64::MIN))),
         "updated" => games.sort_by(|a, b| b.updated_at.unwrap_or(i64::MIN).cmp(&a.updated_at.unwrap_or(i64::MIN))),
         "popular" => games.sort_by(|a, b| {
@@ -130,7 +139,8 @@ fn sort_games(games: &mut [UnifiedGame], p: &QueryParams) {
         }),
         _ => {}
     }
-    if !desc && sort != "title" {
+    // latest/updated/popular already order descending; reverse them for ascending.
+    if order == Some("asc") && sort != "title" {
         games.reverse();
     }
 }
