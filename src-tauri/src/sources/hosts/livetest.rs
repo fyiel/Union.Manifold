@@ -65,10 +65,10 @@ async fn collect_options() -> Vec<DownloadOption> {
         ..Default::default()
     };
     let mut opts = Vec::new();
-    for g in adapters::steamrip::query(&params).await {
+    for g in adapters::steamrip::query(&params).await.unwrap_or_default() {
         opts.extend(g.download_options);
     }
-    for g in adapters::gamebounty::query(&params).await {
+    for g in adapters::gamebounty::query(&params).await.unwrap_or_default() {
         opts.extend(g.download_options);
     }
     opts
@@ -158,10 +158,10 @@ async fn catalog_coverage() {
         ..Default::default()
     };
     let mut games = Vec::new();
-    for g in adapters::steamrip::query(&params).await {
+    for g in adapters::steamrip::query(&params).await.unwrap_or_default() {
         games.push(("steamrip", g));
     }
-    for g in adapters::gamebounty::query(&params).await {
+    for g in adapters::gamebounty::query(&params).await.unwrap_or_default() {
         games.push(("gamebounty", g));
     }
 
