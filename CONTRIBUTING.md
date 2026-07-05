@@ -1,77 +1,81 @@
-# Contributing to UnionCrax.Direct
+# Contributing to Union.Manifold
 
-Thank you for your interest in contributing! This guide will help you set up the development environment and understand how to contribute.
+Thanks for your interest in contributing! This guide covers setting up the development environment and how the project fits together.
 
 ## Prerequisites
 
-- Node.js 20 or higher
-- pnpm 8 or higher
-- Windows 10+ (Linux support later on)
+- Node.js 22 or higher
+- pnpm 11 (pinned via `packageManager` in `package.json`, `corepack enable` handles it)
+- Rust (stable toolchain)
+- Tauri Linux deps on Linux: `webkit2gtk-4.1`, `librsvg`, `libappindicator`
 
 ## Setup
 
 ### 1. Clone the repository
 ```bash
-git clone https://github.com/UnionCrax-Team/UnionCrax.Direct.git
-cd UnionCrax.Direct
+git clone https://github.com/fyiel/Union.Manifold.git
+cd Union.Manifold
 ```
 
-### 2. Install dependencies
+### 2. Install dependencies and sidecars
 ```bash
 pnpm install
-pnpm run setup  # downloads electron
+pnpm fetch-sidecars   # downloads the aria2c and 7z binaries the app shells out to
 ```
+
+Sidecar downloads are pinned to SHA-256 checksums. If you override `ARIA2_VERSION` or `SEVENZIP_VERSION`, set `SIDECAR_ALLOW_UNVERIFIED=1` or add new pins in `scripts/fetch-sidecars.mjs`.
 
 ## Development
 
-### Start development server
+### Start the app in dev mode
 ```bash
 pnpm dev
 ```
 
-This starts:
-- React renderer on `http://localhost:5173`
-- Electron app connected to the dev server
+This starts the Vite renderer on `http://localhost:5173` and a Tauri window connected to it.
 
 ### Build the application
 ```bash
-pnpm run build
+pnpm build
 ```
 
-### Package the installer
+### Other useful commands
 ```bash
-pnpm run pack
+pnpm typecheck            # TypeScript check for the renderer
+cargo check --locked      # from src-tauri/, checks the Rust backend
+cargo test                # from src-tauri/, runs backend unit tests
 ```
-
-Output: `dist-packaged/UnionCrax.Direct Setup X.X.X.exe`
 
 ## Project Structure
 
 ```
-UnionCrax.Direct/
-├── electron/           # Main process (Electron)
-│   ├── main.cjs       # App entry point, window management, downloads
-│   └── preload.cjs    # Preload script for IPC
-├── renderer/          # Renderer process (React + Vite)
+Union.Manifold/
+├── src-tauri/          # Rust backend (Tauri 2)
 │   ├── src/
-│   │   ├── app/       # Page components and routes
-│   │   ├── components/# Shared UI components
-│   │   ├── lib/       # Utilities (API, downloads, storage)
-│   │   ├── context/   # React context providers
-│   │   ├── hooks/     # Custom React hooks
-│   │   └── main.tsx   # React entry point
-│   └── vite.config.ts # Vite configuration
-├── scripts/           # Build and dev scripts
-├── .github/workflows/ # GitHub Actions CI/CD
-└── assets/           # App icon and resources
+│   │   ├── sources/    # Game sources, dedupe, metadata, filters
+│   │   ├── downloads/  # Download engine + aria2 RPC wrapper
+│   │   ├── launch/     # Game launching, Linux Proton support
+│   │   ├── install.rs  # Archive extraction pipeline (7z sidecar)
+│   │   └── lib.rs      # Tauri setup, command registration
+│   ├── binaries/       # Fetched sidecars (gitignored)
+│   └── tauri.conf.json # Tauri configuration
+├── renderer/           # React 19 + Vite frontend
+│   └── src/
+│       ├── app/        # Page components and routes
+│       ├── components/ # Shared UI components
+│       ├── lib/        # Bridge to Rust, query layer, utilities
+│       ├── context/    # React context providers
+│       └── hooks/      # Custom React hooks
+├── scripts/            # fetch-sidecars, arch package build
+└── .github/workflows/  # CI (ci.yml) and release (build.yml)
 ```
 
 ## Code Style
 
-- **TypeScript**: Strongly typed, no `any` unless necessary
-- **React**: Functional components with hooks
-- **Styling**: Tailwind CSS with @layer utilities
-- **Components**: Follow existing patterns in `renderer/src/components/`
+- **TypeScript**: strongly typed, no `any` unless necessary
+- **React**: functional components with hooks
+- **Rust**: keep commands thin, return `Result`, no `unwrap` on user input
+- **Styling**: Tailwind CSS 4
 
 ## Making Changes
 
@@ -79,82 +83,16 @@ UnionCrax.Direct/
 2. Make your changes with meaningful commits
 3. Push to your fork and create a Pull Request
 
-### Commit Message Format
-```
-type: description
-
-- Bullet points for changes
-```
-
-Types: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`
+CI runs a 3-OS build check (renderer build + `cargo check --locked`), the renderer typecheck, and asserts that `package.json`, `src-tauri/tauri.conf.json`, and `src-tauri/Cargo.toml` agree on the version.
 
 ## Releases
 
-Releases are automated via GitHub Actions. To create a new release:
+Releases are automated via GitHub Actions (`build.yml`):
 
-1. Update `version` in `package.json`
-2. Commit: `git commit -am "Release vX.X.X - Description"`
-3. Create tag: `git tag vX.X.X`
-4. Push: `git push origin main && git push origin vX.X.X`
+1. Bump `version` in `package.json`, `src-tauri/tauri.conf.json`, and `src-tauri/Cargo.toml` (all three must match)
+2. Commit and push to `main`, or tag `vX.X.X`, or trigger the workflow manually
 
-GitHub Actions will:
-- Build the Windows installer
-- Create a GitHub Release
-- Upload artifacts
-
-The app auto-updates users to new versions via the UpdateNotification component.
-
-## Architecture
-
-### Main Process (Electron)
-- Window management
-- File system operations (downloads, settings)
-- IPC communication with renderer
-- Auto-update checks
-- Game execution via 7-Zip extraction and launch
-
-### Renderer Process (React)
-- UI components and pages
-- Game library management
-- Download management
-- Settings and preferences
-- API communication with UnionCrax backend
-
-### Communication
-- IPC channels for main/renderer process communication
-- REST API calls to `https://union-crax.xyz`
-- Auth handled via cookies (credentials: 'include')
-
-## API Integration
-
-The app communicates with UnionCrax backend API:
-- Games list: `GET /api/games`
-- Download token: `POST /api/downloads/{appid}/token`
-- Download links: `GET /api/downloads/{appid}?fetchLinks=true`
-
-Base URL: `https://union-crax.xyz` (configurable via env)
-
-## Troubleshooting
-
-### Dev server not connecting
-```bash
-# Kill port 5173 if something else is using it
-# Then restart
-pnpm dev
-```
-
-### Build fails
-```bash
-rm -r node_modules pnpm-lock.yaml
-pnpm install
-pnpm run pack
-```
-
-### Electron won't start
-```bash
-pnpm run setup  # Reinstall Electron
-pnpm dev
-```
+The workflow builds Linux (AppImage, deb, pacman), Windows (NSIS), and macOS bundles, and uploads them to a draft GitHub release.
 
 ## Need Help?
 
@@ -163,7 +101,6 @@ pnpm dev
   - Steps to reproduce
   - Expected vs actual behavior
   - OS and version info
-  - Node/pnpm versions
 
 ## License
 
