@@ -20,17 +20,17 @@ fn first_existing_ancestor(path: &Path) -> PathBuf {
     }
 }
 
-fn free_bytes(path: &Path) -> u64 {
+pub(crate) fn free_bytes(path: &Path) -> u64 {
     let target = first_existing_ancestor(path);
     fs4::available_space(&target).unwrap_or(0)
 }
 
-fn estimate_extract(download_bytes: u64, declared: u64, margin_gib: u64) -> u64 {
+pub(crate) fn estimate_extract(download_bytes: u64, declared: u64, margin_gib: u64) -> u64 {
     let base = declared.max(download_bytes.saturating_mul(2));
     base + (margin_gib * GIB).max(base / 20)
 }
 
-fn human(bytes: u64) -> String {
+pub(crate) fn human(bytes: u64) -> String {
     let units = ["B", "KB", "MB", "GB", "TB"];
     let mut val = bytes as f64;
     let mut i = 0;
