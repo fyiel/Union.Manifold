@@ -27,6 +27,8 @@ struct CachedPool {
     ordered: Vec<schema::UnifiedGame>,
     facets: filters::Facets,
     total: usize,
+    /// True when a source hard-failed while building this pool.
+    errored: bool,
 }
 
 static QUERY_POOL: Lazy<cache::KeyedCache<std::sync::Arc<CachedPool>>> =
@@ -157,13 +159,13 @@ pub fn capabilities_for(id: &str) -> Capabilities {
     }
 }
 
-async fn adapter_query(id: &str, params: &QueryParams) -> Vec<SourceGame> {
+async fn adapter_query(id: &str, params: &QueryParams) -> Option<Vec<SourceGame>> {
     match id {
         "unioncrax" => adapters::unioncrax::query(params).await,
         "gamebounty" => adapters::gamebounty::query(params).await,
         "ankergames" => adapters::ankergames::query(params).await,
         "steamrip" => adapters::steamrip::query(params).await,
-        _ => Vec::new(),
+        _ => Some(Vec::new()),
     }
 }
 
@@ -275,27 +277,19 @@ async fn run_query(reg: &Registry, params: QueryParams) -> filters::QueryResult 
             })
             .await;
             let mut pool: Vec<SourceGame> = Vec::new();
-            for mut v in per_source {
-                pool.append(&mut v);
+            let mut errored = false;
+            for v in per_source {
+                match v {
+                    Some(mut games) => pool.append(&mut games),
+                    None => errored = true,
+                }
             }
             let (ordered, facets, total) = filters::finalize_pool(pool, &p);
-            Some(std::sync::Arc::new(CachedPool { ordered, facets, total }))
+            Some(std::sync::Arc::new(CachedPool { ordered, facets, total, errored }))
         })
         .await;
     match cached {
-        Some(cp) => {
-            let page: Vec<schema::UnifiedGame> =
-                cp.ordered.iter().skip(params.offset).take(params.limit).cloned().collect();
-            filters::QueryResult {
-                ok: true,
-                games: page,
-                total: cp.total,
-                facets: cp.facets.clone(),
-                applied: params.clone(),
-                capabilities: filters::capability_report(&ids, reg),
-                error: None,
-            }
-        }
+        Some(cp) => page_from(&cp, &params, &ids, reg),
         None => filters::QueryResult {
             ok: true,
             games: Vec::new(),
@@ -308,6 +302,7 @@ async fn run_query(reg: &Registry, params: QueryParams) -> filters::QueryResult 
             applied: params.clone(),
             capabilities: filters::capability_report(&ids, reg),
             error: None,
+            sources_errored: false,
         },
     }
 }
@@ -323,6 +318,7 @@ fn page_from(cp: &CachedPool, params: &QueryParams, ids: &[String], reg: &Regist
         applied: params.clone(),
         capabilities: filters::capability_report(ids, reg),
         error: None,
+        sources_errored: cp.errored,
     }
 }
 
@@ -335,6 +331,7 @@ fn empty_pool() -> std::sync::Arc<CachedPool> {
             size: filters::MinMax { min: None, max: None },
         },
         total: 0,
+        errored: false,
     })
 }
 
@@ -347,10 +344,7 @@ async fn run_query_stream(
     use futures::stream::{FuturesUnordered, StreamExt};
     let ids = reg.active_ids(&params.sources);
     let sig = pool_sig(&params, &ids);
-    if let Some(cp) = QUERY_POOL
-        .get_or(&sig, || async { None::<std::sync::Arc<CachedPool>> })
-        .await
-    {
+    if let Some(cp) = QUERY_POOL.peek(&sig).await {
         return page_from(&cp, &params, &ids, reg);
     }
     let mut p = params.clone();
@@ -366,9 +360,13 @@ async fn run_query_stream(
     }
     let mut pool: Vec<SourceGame> = Vec::new();
     let mut done: Vec<String> = Vec::new();
+    let mut errored = false;
     let mut latest: Option<std::sync::Arc<CachedPool>> = None;
-    while let Some((id, mut games)) = futs.next().await {
-        pool.append(&mut games);
+    while let Some((id, games)) = futs.next().await {
+        match games {
+            Some(mut g) => pool.append(&mut g),
+            None => errored = true,
+        }
         done.push(id);
         let (ordered, facets, total) = filters::finalize_pool(pool.clone(), &p);
         let page: Vec<schema::UnifiedGame> =
@@ -378,7 +376,7 @@ async fn run_query_stream(
             json!({ "reqId": req_id, "games": page, "total": total, "doneSources": done }),
         )
         .ok();
-        latest = Some(std::sync::Arc::new(CachedPool { ordered, facets, total }));
+        latest = Some(std::sync::Arc::new(CachedPool { ordered, facets, total, errored }));
     }
     let cp = latest.unwrap_or_else(empty_pool);
     let stored = cp.clone();
