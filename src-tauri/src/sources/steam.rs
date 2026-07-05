@@ -40,8 +40,14 @@ pub async fn get_store_details(appid: u64) -> Option<StoreDetails> {
         Ok(v) => v,
         Err(_) => return None,
     };
-    let data = json
-        .get(appid.to_string())
+    // A well-formed appdetails response always carries the appid key (with a
+    // `success` flag). A missing key means an unexpected/5xx body: bail WITHOUT
+    // caching so a transient blip can't poison the details mapping.
+    let entry = json.get(appid.to_string());
+    if entry.is_none() {
+        return None;
+    }
+    let data = entry
         .filter(|v| v.get("success").and_then(|s| s.as_bool()).unwrap_or(false))
         .and_then(|v| v.get("data"));
     let out = data.map(|d| {
@@ -118,11 +124,12 @@ pub async fn get_store_details(appid: u64) -> Option<StoreDetails> {
             req_recommended: str_of(reqs.and_then(|r| r.get("recommended"))),
         }
     });
-    {
+    let snapshot = {
         let mut map = DETAILS_CACHE.lock().unwrap();
         map.insert(appid.to_string(), out.clone());
-        metacache::save("steam-details.json", &map);
-    }
+        map.clone()
+    };
+    metacache::save_async("steam-details.json", snapshot).await;
     out
 }
 
@@ -139,25 +146,36 @@ pub async fn search_app_id(title: &str) -> Option<u64> {
         urlencoding(&norm)
     );
     let mut appid = None;
+    let mut definitive = false;
     if let Ok(json) = http::get_json::<Value>(&url).await {
         if let Some(items) = json.get("items").and_then(|v| v.as_array()) {
-            let exact = items.iter().find(|it| {
-                it.get("name")
-                    .and_then(|v| v.as_str())
-                    .map(|n| normalize_title(n) == norm)
-                    .unwrap_or(false)
-            });
-            let pick = exact.or_else(|| items.first());
-            appid = pick
+            // A parseable response with an items array is a definitive answer
+            // (an empty list means "no such app"), so it is safe to cache.
+            definitive = true;
+            // Require an exact normalized-title match; a fuzzy first-item pick
+            // assigns wrong art/ProtonDB, wrong merges, and gets persisted.
+            appid = items
+                .iter()
+                .find(|it| {
+                    it.get("name")
+                        .and_then(|v| v.as_str())
+                        .map(|n| normalize_title(n) == norm)
+                        .unwrap_or(false)
+                })
                 .and_then(|p| p.get("id"))
                 .and_then(|v| v.as_u64())
                 .filter(|id| *id > 0);
         }
     }
-    {
-        let mut map = APPID_CACHE.lock().unwrap();
-        map.insert(norm, appid);
-        metacache::save("steam-appids.json", &map);
+    // Only persist a negative result on a definitive not-found; a transport or
+    // 5xx blip must not poison the title->appid mapping (it has no TTL).
+    if definitive {
+        let snapshot = {
+            let mut map = APPID_CACHE.lock().unwrap();
+            map.insert(norm, appid);
+            map.clone()
+        };
+        metacache::save_async("steam-appids.json", snapshot).await;
     }
     appid
 }
