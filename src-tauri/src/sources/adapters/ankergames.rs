@@ -41,8 +41,11 @@ static META_DESC_RE: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r#"(?i)<meta[^>]+name="description"[^>]+content="([^"]+)""#).unwrap()
 });
 static GEN_DL_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"generateDownloadUrl\((\d+)\)").unwrap());
-static SIZE_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"(?i)(\d[\d.]*\s*(?:TB|GB|MB))\b").unwrap());
+static SIZE_RE: Lazy<Regex> = Lazy::new(|| {
+    // Anchor to a "size" label so system-requirements text (e.g. "Memory: 8 GB
+    // RAM") isn't misread as the repack size.
+    Regex::new(r"(?i)\bsize\b\s*[:\-\u{2013}]?\s*(\d[\d.]*\s*(?:TB|GB|MB))").unwrap()
+});
 static SLUG_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"/game/([a-z0-9][a-z0-9-]*)").unwrap());
 static LOC_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"<loc>\s*([^<]+sitemap_post_\d+\.xml)\s*</loc>").unwrap());
@@ -526,11 +529,8 @@ fn goto_page(page: i64) -> Value {
     json!({ "method": "gotoPage", "params": [page, "page"], "metadata": { "type": "model.live" } })
 }
 
-async fn do_browse(updates: Value, first_calls: Vec<Value>, limit: usize) -> Vec<SourceGame> {
-    let session = match livewire_session().await {
-        Some(s) => s,
-        None => return Vec::new(),
-    };
+async fn do_browse(updates: Value, first_calls: Vec<Value>, limit: usize) -> Option<Vec<SourceGame>> {
+    let session = livewire_session().await?;
     let mut out = Vec::new();
     let mut snap = session.snapshot.clone();
     let mut page: i64 = 1;
@@ -546,7 +546,14 @@ async fn do_browse(updates: Value, first_calls: Vec<Value>, limit: usize) -> Vec
         let up = if page == 1 { updates.clone() } else { json!({}) };
         let result = match livewire_commit(&session, up, &snap, calls).await {
             Some(r) => r,
-            None => break,
+            None => {
+                // A page-1 fetch failure is a hard failure (no data at all): signal
+                // it so the browse cache isn't populated and the source is flagged.
+                if page == 1 {
+                    return None;
+                }
+                break;
+            }
         };
         snap = result.1;
         let cards = parse_listing_cards(&result.0);
@@ -563,30 +570,24 @@ async fn do_browse(updates: Value, first_calls: Vec<Value>, limit: usize) -> Vec
         }
         page += 1;
     }
-    out
+    Some(out)
 }
 
 fn browse_key(updates: &Value, methods: &[String], limit: usize) -> String {
     json!({ "u": updates, "c": methods, "limit": limit }).to_string()
 }
 
-async fn livewire_browse(updates: Value, first_calls: Vec<Value>, limit: usize) -> Vec<SourceGame> {
+async fn livewire_browse(updates: Value, first_calls: Vec<Value>, limit: usize) -> Option<Vec<SourceGame>> {
     let methods: Vec<String> = first_calls
         .iter()
         .filter_map(|c| c.get("method").and_then(|m| m.as_str()).map(String::from))
         .collect();
     let key = browse_key(&updates, &methods, limit);
+    // do_browse returns None only on a hard fetch failure (session or page-1
+    // commit); a genuine empty result is Some(vec![]) and is safe to cache.
     BROWSE
-        .get_or(&key, || async {
-            let games = do_browse(updates, first_calls, limit).await;
-            if games.is_empty() {
-                None
-            } else {
-                Some(games)
-            }
-        })
+        .get_or(&key, || async { do_browse(updates, first_calls, limit).await })
         .await
-        .unwrap_or_default()
 }
 
 async fn livewire_genres() -> Option<GenreMap> {
@@ -645,10 +646,10 @@ pub fn capabilities() -> Capabilities {
     }
 }
 
-pub async fn query(params: &QueryParams) -> Vec<SourceGame> {
+pub async fn query(params: &QueryParams) -> Option<Vec<SourceGame>> {
     let text = params.text.clone().unwrap_or_default();
     if !text.trim().is_empty() {
-        return search(text.trim(), params.limit).await;
+        return Some(search(text.trim(), params.limit).await);
     }
 
     let sort = params.sort.clone().unwrap_or_default();
@@ -664,7 +665,7 @@ pub async fn query(params: &QueryParams) -> Vec<SourceGame> {
             }
         }
         if ids.is_empty() {
-            return Vec::new();
+            return Some(Vec::new());
         }
         updates.insert("selectedGenres".to_string(), json!(ids));
         if params.tag_mode.as_deref() == Some("and") {
@@ -693,14 +694,14 @@ pub async fn query(params: &QueryParams) -> Vec<SourceGame> {
         params.limit
     };
 
-    let mut games = livewire_browse(Value::Object(updates), first_calls, fetch_limit).await;
+    let mut games = livewire_browse(Value::Object(updates), first_calls, fetch_limit).await?;
     if sort == "popular" {
         let base = games.len() as f64;
         for (i, g) in games.iter_mut().enumerate() {
             g.popularity = Some(base - i as f64);
         }
     }
-    games
+    Some(games)
 }
 
 pub async fn search(q: &str, limit: usize) -> Vec<SourceGame> {
