@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
 
@@ -31,7 +31,7 @@ fn free_port() -> u16 {
         .ok()
         .and_then(|l| l.local_addr().ok())
         .map(|a| a.port())
-        .unwrap_or(6810)
+        .unwrap_or_else(|| rand::thread_rng().gen_range(20000..60000))
 }
 
 impl Aria2Manager {
@@ -52,7 +52,7 @@ impl Aria2Manager {
             http: reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(8))
                 .build()
-                .unwrap_or_default(),
+                .expect("build aria2 rpc http client"),
         }
     }
 
@@ -61,8 +61,17 @@ impl Aria2Manager {
     }
 
     pub async fn ensure_started(&self, limit_kbps: u64) -> bool {
+        // Don't trust the ready latch forever: if we think we're up, confirm the
+        // daemon still answers. If it died, drop the stale child and relaunch.
         if self.is_ready() {
-            return true;
+            if self.rpc("aria2.getVersion", vec![]).await.is_ok() {
+                return true;
+            }
+            self.ready.store(false, Ordering::SeqCst);
+            if let Some(mut child) = self.child.lock().unwrap().take() {
+                child.start_kill().ok();
+            }
+            crate::logging::write_line("warn", "aria2 daemon unresponsive, relaunching");
         }
         let _g = self.starting.lock().await;
         if self.is_ready() {
@@ -75,6 +84,17 @@ impl Aria2Manager {
                 return false;
             }
         };
+        // A picked free port can be taken before aria2 binds it; retry on a fresh port.
+        for _ in 0..3 {
+            if self.spawn_and_probe(&binary, limit_kbps).await {
+                return true;
+            }
+        }
+        crate::logging::write_line("warn", "aria2 daemon failed to start after retries");
+        false
+    }
+
+    async fn spawn_and_probe(&self, binary: &Path, limit_kbps: u64) -> bool {
         let port = free_port();
         self.port.store(port as u64, Ordering::SeqCst);
         let mut args = vec![
@@ -106,7 +126,7 @@ impl Aria2Manager {
                 args.push(format!("--ca-certificate={}", ca.display()));
             }
         }
-        let mut cmd = tokio::process::Command::new(&binary);
+        let mut cmd = tokio::process::Command::new(binary);
         cmd.args(&args)
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
@@ -134,7 +154,7 @@ impl Aria2Manager {
             }
             tokio::time::sleep(std::time::Duration::from_millis(150)).await;
         }
-        crate::logging::write_line("warn", "aria2 daemon did not become ready");
+        crate::logging::write_line("warn", &format!("aria2 daemon did not become ready on port {port}"));
         if let Some(mut child) = self.child.lock().unwrap().take() {
             child.start_kill().ok();
         }
