@@ -94,27 +94,31 @@ async fn resolve_steam_app_id(internal_id: &str) -> Option<u64> {
     if let Some(v) = STEAM_APPID.lock().unwrap().get(&key).copied() {
         return v;
     }
-    let mut appid = None;
     let url = format!("{ORIGIN}/api/protondb/{}", urlencode(&key));
     let (ok, json) = request_json(&url, "GET", None).await;
-    if ok {
-        if let Some(j) = json {
-            if let Some(sv) = j.get("steamAppId") {
-                if !sv.is_null() {
-                    if let Some(n) = json_num(sv) {
-                        if n > 0 {
-                            appid = Some(n);
-                        }
+    // A transport error / non-2xx (ok == false) must not poison the persisted
+    // mapping; only cache a result when the request definitively succeeded.
+    if !ok {
+        return None;
+    }
+    let mut appid = None;
+    if let Some(j) = json {
+        if let Some(sv) = j.get("steamAppId") {
+            if !sv.is_null() {
+                if let Some(n) = json_num(sv) {
+                    if n > 0 {
+                        appid = Some(n);
                     }
                 }
             }
         }
     }
-    {
+    let snapshot = {
         let mut map = STEAM_APPID.lock().unwrap();
         map.insert(key, appid);
-        metacache::save("unioncrax-appids.json", &map);
-    }
+        map.clone()
+    };
+    metacache::save_async("unioncrax-appids.json", snapshot).await;
     appid
 }
 
@@ -241,7 +245,7 @@ async fn request_json(url: &str, method: &str, body: Option<Vec<u8>>) -> (bool, 
     }
 }
 
-async fn fetch_catalog() -> Vec<Value> {
+async fn fetch_catalog() -> Option<Vec<Value>> {
     CATALOG
         .get_or(|| async {
             let (ok, json) = request_json(&format!("{ORIGIN}/api/games"), "GET", None).await;
@@ -253,7 +257,6 @@ async fn fetch_catalog() -> Vec<Value> {
             None
         })
         .await
-        .unwrap_or_default()
 }
 
 pub fn capabilities() -> Capabilities {
@@ -269,22 +272,26 @@ pub fn capabilities() -> Capabilities {
     }
 }
 
-pub async fn query(params: &QueryParams) -> Vec<SourceGame> {
-    let catalog = fetch_catalog().await;
+pub async fn query(params: &QueryParams) -> Option<Vec<SourceGame>> {
+    // None => the catalog fetch hard-failed (no data, not even stale); the
+    // caller flags the source as errored rather than reporting an empty result.
+    let catalog = fetch_catalog().await?;
     let games: Vec<SourceGame> = catalog.iter().map(normalize).collect();
     let lowered = params.text.as_deref().unwrap_or("").to_lowercase();
     let q = lowered.trim();
     if q.is_empty() {
-        return games;
+        return Some(games);
     }
     let terms: Vec<&str> = q.split_whitespace().collect();
-    games
-        .into_iter()
-        .filter(|g| {
-            let hay = g.title.to_lowercase();
-            terms.iter().all(|t| hay.contains(t))
-        })
-        .collect()
+    Some(
+        games
+            .into_iter()
+            .filter(|g| {
+                let hay = g.title.to_lowercase();
+                terms.iter().all(|t| hay.contains(t))
+            })
+            .collect(),
+    )
 }
 
 pub async fn search(q: &str, limit: usize) -> Vec<SourceGame> {
@@ -315,7 +322,7 @@ pub async fn search(q: &str, limit: usize) -> Vec<SourceGame> {
     }
 
     let terms: Vec<String> = q.to_lowercase().split_whitespace().map(String::from).collect();
-    let catalog = fetch_catalog().await;
+    let catalog = fetch_catalog().await.unwrap_or_default();
     catalog
         .iter()
         .filter(|g| {
@@ -345,7 +352,7 @@ pub async fn get_detail(slug: &str) -> Option<SourceGame> {
             }
 
             if uc.is_none() {
-                let catalog = fetch_catalog().await;
+                let catalog = fetch_catalog().await.unwrap_or_default();
                 uc = catalog.into_iter().find(|g| match g.get("appid") {
                     Some(Value::Number(n)) => n.to_string() == internal_id,
                     Some(Value::String(s)) => *s == internal_id,
@@ -365,7 +372,7 @@ pub async fn get_detail(slug: &str) -> Option<SourceGame> {
 
 pub async fn list_tags() -> Vec<String> {
     let mut set: BTreeSet<String> = BTreeSet::new();
-    for uc in fetch_catalog().await.iter() {
+    for uc in fetch_catalog().await.unwrap_or_default().iter() {
         for g in coerce_genres(uc.get("genres")) {
             let t = g.trim().to_string();
             if !t.is_empty() {
