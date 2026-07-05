@@ -22,4 +22,3 @@ pnpm dev
 ### credit
 Built on [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3. Huge thanks to the original team, none of this exists without their work.
 
-v1.0.0b
