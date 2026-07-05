@@ -2,21 +2,24 @@ use once_cell::sync::Lazy;
 use regex::Regex;
 use serde_json::Value;
 
-pub fn extract_balanced_json(text: &str, open_index: usize) -> Option<String> {
-    let bytes: Vec<char> = text.chars().collect();
-    if open_index >= bytes.len() {
+pub fn extract_balanced_json(text: &str, open_byte: usize) -> Option<String> {
+    // Byte-indexed: ASCII delimiters can never collide with UTF-8 continuation
+    // bytes, so this scans in O(n) without the per-call `chars().collect()` and
+    // the caller avoids recomputing a char offset for every candidate.
+    let bytes = text.as_bytes();
+    if open_byte >= bytes.len() {
         return None;
     }
-    let open = bytes[open_index];
-    let close = if open == '[' { ']' } else { '}' };
+    let open = bytes[open_byte];
+    let close = if open == b'[' { b']' } else { b'}' };
     let mut depth = 0i32;
     let mut in_str = false;
-    let mut quote = '"';
-    let mut i = open_index;
+    let mut quote = b'"';
+    let mut i = open_byte;
     while i < bytes.len() {
         let ch = bytes[i];
         if in_str {
-            if ch == '\\' {
+            if ch == b'\\' {
                 i += 2;
                 continue;
             }
@@ -26,7 +29,7 @@ pub fn extract_balanced_json(text: &str, open_index: usize) -> Option<String> {
             i += 1;
             continue;
         }
-        if ch == '"' || ch == '\'' {
+        if ch == b'"' || ch == b'\'' {
             in_str = true;
             quote = ch;
             i += 1;
@@ -37,7 +40,7 @@ pub fn extract_balanced_json(text: &str, open_index: usize) -> Option<String> {
         } else if ch == close {
             depth -= 1;
             if depth == 0 {
-                return Some(bytes[open_index..=i].iter().collect());
+                return Some(text[open_byte..=i].to_string());
             }
         }
         i += 1;
@@ -56,8 +59,7 @@ pub fn find_object_by_key(text: &str, key: &str) -> Option<Value> {
             j += 1;
         }
         if j < bytes.len() && (bytes[j] == b'{' || bytes[j] == b'[') {
-            let char_index = text[..j].chars().count();
-            if let Some(raw) = extract_balanced_json(text, char_index) {
+            if let Some(raw) = extract_balanced_json(text, j) {
                 if let Ok(v) = serde_json::from_str::<Value>(&raw) {
                     return Some(v);
                 }
