@@ -334,7 +334,7 @@ function isUCFilesShareDownloadUrl(url: string): boolean {
   }
 }
 
-export async function resolveUCFilesDownload(url: string): Promise<ResolvedDownload> {
+export async function resolveUCFilesDownload(url: string, signal?: AbortSignal): Promise<ResolvedDownload> {
   if (!url) return { url, resolved: false }
 
   const sanitizedUrl = sanitizeUCFilesUrl(url)
@@ -353,6 +353,7 @@ export async function resolveUCFilesDownload(url: string): Promise<ResolvedDownl
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
+      signal,
     })
 
     if (response.status === 404) {
@@ -379,7 +380,7 @@ export async function resolveUCFilesDownload(url: string): Promise<ResolvedDownl
   }
 }
 
-export async function resolveDownloadUrl(_host: string, url: string): Promise<ResolvedDownload> {
+export async function resolveDownloadUrl(_host: string, url: string, signal?: AbortSignal): Promise<ResolvedDownload> {
   // Defensive guard for legacy persisted state where "url" may be an object
   const normalizedUrl =
     typeof url === "string"
@@ -389,7 +390,7 @@ export async function resolveDownloadUrl(_host: string, url: string): Promise<Re
         : String(url ?? "")
 
   if (isUCFilesUrl(normalizedUrl) || Boolean(getUCFilesResolvePayload(normalizedUrl))) {
-    return resolveUCFilesDownload(normalizedUrl)
+    return resolveUCFilesDownload(normalizedUrl, signal)
   }
   return { url: normalizedUrl, resolved: false }
 }
