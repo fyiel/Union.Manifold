@@ -156,10 +156,23 @@ fn spawn_and_track(app: &AppHandle, appid: &str, command: &str, args: &[String],
     for (k, v) in envs {
         cmd.env(k, v);
     }
-    let child = cmd.spawn().map_err(|e| e.to_string())?;
+    // Reserve the slot BEFORE spawning, atomically with the spawn, so two
+    // concurrent launches for the same appid can't both spawn and orphan the
+    // first process handle. This `entry` is the single gate.
+    use std::collections::hash_map::Entry;
+    let child = {
+        let mut running = RUNNING.lock().unwrap();
+        match running.entry(appid.to_string()) {
+            Entry::Occupied(_) => return Err("already running".to_string()),
+            Entry::Vacant(slot) => {
+                let child = cmd.spawn().map_err(|e| e.to_string())?;
+                slot.insert(RunHandle { pid: child.id(), scope });
+                child
+            }
+        }
+    };
     let pid = child.id();
     let started_at = now_ms();
-    RUNNING.lock().unwrap().insert(appid.to_string(), RunHandle { pid, scope });
     app.emit(
         "uc:presence-changed",
         json!({ "reason": "game-started", "appid": appid, "gameName": game_name }),
@@ -199,11 +212,11 @@ pub fn game_exe_launch(state: State<'_, AppState>, app: AppHandle, appid: String
     if !Path::new(&exe_path).is_file() {
         return json!({ "ok": false, "error": "executable not found" });
     }
-    if RUNNING.lock().unwrap().contains_key(&appid) {
-        return json!({ "ok": false, "error": "already running" });
-    }
     let cwd = Path::new(&exe_path).parent().map(PathBuf::from).unwrap_or_else(|| state.download_root());
-    let plan = linux::resolve_launch(&state, &appid, &exe_path);
+    let plan = match linux::resolve_launch(&state, &appid, &exe_path) {
+        Ok(p) => p,
+        Err(e) => return json!({ "ok": false, "error": e }),
+    };
     match spawn_and_track(&app, &appid, &plan.command, &plan.args, &cwd, &plan.envs, &exe_path, game_name) {
         Ok(pid) => json!({ "ok": true, "pid": pid }),
         Err(e) => json!({ "ok": false, "error": e }),
