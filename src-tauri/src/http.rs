@@ -192,49 +192,51 @@ where
 }
 
 pub fn decode_entities(s: &str) -> String {
-    let mut out = s.to_string();
-    for (from, to) in [
-        ("&lt;", "<"),
-        ("&gt;", ">"),
-        ("&quot;", "\""),
-        ("&#039;", "'"),
-        ("&#39;", "'"),
-        ("&apos;", "'"),
-        ("&nbsp;", " "),
-        ("&mdash;", "\u{2014}"),
-        ("&ndash;", "\u{2013}"),
-        ("&hellip;", "\u{2026}"),
-        ("&rsquo;", "\u{2019}"),
-        ("&lsquo;", "\u{2018}"),
-        ("&reg;", "\u{00ae}"),
-        ("&trade;", "\u{2122}"),
-        ("&copy;", "\u{00a9}"),
-        // Decode &amp; LAST so an already-escaped entity like "&amp;lt;" decodes
-        // to the literal "&lt;" instead of being double-decoded into "<".
-        ("&amp;", "&"),
-    ] {
-        out = out.replace(from, to);
+    if !s.contains('&') {
+        return s.to_string();
     }
-    if out.contains("&#") {
-        out = NUMERIC_ENTITY_RE
-            .replace_all(&out, |cap: &regex::Captures| {
-                let body = &cap[1];
-                let code = if let Some(hex) = body.strip_prefix('x').or_else(|| body.strip_prefix('X')) {
+    // Single pass over the input: each entity decodes exactly once, so
+    // already-escaped text like "&amp;lt;" or "&amp;#65;" never double-decodes.
+    ENTITY_RE
+        .replace_all(s, |cap: &regex::Captures| {
+            let ent = &cap[0];
+            let inner = &ent[1..ent.len() - 1];
+            if let Some(num) = inner.strip_prefix('#') {
+                let code = if let Some(hex) = num.strip_prefix('x').or_else(|| num.strip_prefix('X')) {
                     u32::from_str_radix(hex, 16).ok()
                 } else {
-                    body.parse::<u32>().ok()
+                    num.parse::<u32>().ok()
                 };
-                code.and_then(char::from_u32)
+                return code
+                    .and_then(char::from_u32)
                     .map(String::from)
-                    .unwrap_or_else(|| cap[0].to_string())
-            })
-            .to_string();
-    }
-    out
+                    .unwrap_or_else(|| ent.to_string());
+            }
+            match inner {
+                "amp" => "&",
+                "lt" => "<",
+                "gt" => ">",
+                "quot" => "\"",
+                "apos" => "'",
+                "nbsp" => " ",
+                "mdash" => "\u{2014}",
+                "ndash" => "\u{2013}",
+                "hellip" => "\u{2026}",
+                "rsquo" => "\u{2019}",
+                "lsquo" => "\u{2018}",
+                "reg" => "\u{00ae}",
+                "trade" => "\u{2122}",
+                "copy" => "\u{00a9}",
+                _ => return ent.to_string(),
+            }
+            .to_string()
+        })
+        .to_string()
 }
 
-static NUMERIC_ENTITY_RE: Lazy<regex::Regex> =
-    Lazy::new(|| regex::Regex::new(r"&#([xX][0-9a-fA-F]{1,6}|[0-9]{1,7});").unwrap());
+static ENTITY_RE: Lazy<regex::Regex> = Lazy::new(|| {
+    regex::Regex::new(r"&(?:#(?:[xX][0-9a-fA-F]{1,6}|[0-9]{1,7})|[a-zA-Z]+);").unwrap()
+});
 
 static TAG_RE: Lazy<regex::Regex> = Lazy::new(|| regex::Regex::new(r"(?s)<[^>]*>").unwrap());
 
@@ -272,5 +274,13 @@ mod tests {
     fn t_decode_entities_numeric() {
         assert_eq!(decode_entities("&#65;"), "A");
         assert_eq!(decode_entities("&#x41;"), "A");
+    }
+
+    #[test]
+    fn t_decode_entities_no_double_decode_numeric() {
+        // "&amp;#65;" is the literal text "&#65;", not "A".
+        assert_eq!(decode_entities("&amp;#65;"), "&#65;");
+        // Unknown named entities pass through untouched.
+        assert_eq!(decode_entities("&bogus;"), "&bogus;");
     }
 }
