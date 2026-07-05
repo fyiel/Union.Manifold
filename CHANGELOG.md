@@ -29,6 +29,10 @@ Downloads and install
   out instead of stalling the queue, a game left queued at shutdown no longer
   returns as failed, and an install that finishes while the window is hidden
   still refreshes the library
+- retry on a failed fork download now reaches the download engine instead of
+  flipping a status only the ui could see, and a failure like a full disk no
+  longer pins its stale aria2 error so the retry re-fails instantly; the
+  download re-attaches and continues from the partial already on disk
 
 Sources and launch
 - browse honors its cache lifetime again so results refresh, and a network blip
