@@ -26,7 +26,36 @@ pub fn safe_folder_name(name: &str) -> String {
         .collect();
     let trimmed = cleaned.trim().trim_matches('.').trim();
     if trimmed.is_empty() {
-        "unknown".to_string()
+        return "unknown".to_string();
+    }
+    // Dodge Windows device names, which can't be used as file/folder names.
+    const RESERVED: &[&str] = &[
+        "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7",
+        "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+    ];
+    let stem = trimmed.split('.').next().unwrap_or(trimmed).to_ascii_uppercase();
+    if RESERVED.contains(&stem.as_str()) {
+        return format!("_{trimmed}");
+    }
+    trimmed.to_string()
+}
+
+fn sanitize_filename(name: &str) -> String {
+    // Reduce to a bare basename (strip path components from either platform), map
+    // filesystem-invalid characters, and drop trailing dots/spaces so titles like
+    // "Half-Life: Alyx" still produce a creatable file on Windows.
+    let base = name.rsplit(|c| c == '/' || c == '\\').next().unwrap_or(name);
+    let cleaned: String = base
+        .chars()
+        .map(|c| match c {
+            '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*' => '_',
+            c if (c as u32) < 0x20 => '_',
+            c => c,
+        })
+        .collect();
+    let trimmed = cleaned.trim().trim_end_matches(|c| c == '.' || c == ' ');
+    if trimmed.is_empty() {
+        "download.archive".to_string()
     } else {
         trimmed.to_string()
     }
@@ -63,6 +92,7 @@ struct Download {
     gid: Option<String>,
     part_index: Option<u64>,
     part_total: Option<u64>,
+    poll_failures: u32,
 }
 
 impl Download {
@@ -192,7 +222,7 @@ impl DownloadEngine {
             st.queue.retain(|x| x != &id);
         }
         let dir = self.installing_dir(&game_name, &appid);
-        let fname = self.resolve_filename(&dir, &filename, &url, &appid);
+        let fname = sanitize_filename(&self.resolve_filename(&dir, &filename, &url, &appid));
         let save_path = dir.join(&fname);
         let mut dl = Download {
             id: id.clone(),
@@ -212,46 +242,41 @@ impl DownloadEngine {
             gid: None,
             part_index,
             part_total,
+            poll_failures: 0,
         };
         if let Ok(meta) = std::fs::metadata(&dl.save_path) {
             dl.received_bytes = meta.len();
         }
         st.queue.push(id.clone());
         self.emit(&dl);
-        write_manifest(&dl);
+        let snap = dl.clone();
         st.by_id.insert(id.clone(), dl);
         drop(st);
+        write_manifest(&snap);
         self.maybe_start_next();
         Ok(id)
     }
 
     pub fn pause(&self, id: &str) -> bool {
         let mut st = self.state.lock().unwrap();
-        let (gid, was_downloading) = match st.by_id.get_mut(id) {
-            Some(dl) => {
-                if dl.status == "queued" {
-                    dl.status = "paused".to_string();
-                    let snap = dl.clone();
-                    st.queue.retain(|x| x != id);
-                    self.emit(&snap);
-                    write_manifest(&snap);
-                    return true;
-                }
-                if dl.status != "downloading" {
-                    return false;
-                }
+        let (snap, gid, was_downloading) = match st.by_id.get_mut(id) {
+            Some(dl) if dl.status == "queued" => {
+                dl.status = "paused".to_string();
+                let snap = dl.clone();
+                st.queue.retain(|x| x != id);
+                (snap, None, false)
+            }
+            Some(dl) if dl.status == "downloading" => {
                 dl.status = "paused".to_string();
                 dl.speed_bps = 0;
                 dl.eta_seconds = None;
-                (dl.gid.clone(), true)
+                (dl.clone(), dl.gid.clone(), true)
             }
-            None => return false,
+            _ => return false,
         };
-        if let Some(dl) = st.by_id.get(id).cloned() {
-            self.emit(&dl);
-            write_manifest(&dl);
-        }
         drop(st);
+        self.emit(&snap);
+        write_manifest(&snap);
         if was_downloading {
             if let Some(gid) = gid {
                 let aria2 = self.aria2.clone();
@@ -301,14 +326,35 @@ impl DownloadEngine {
 
     pub fn cancel(self: &Arc<Self>, id: &str, keep_file: bool) -> Value {
         let mut st = self.state.lock().unwrap();
-        let (gid, save_path, appid, snap) = match st.by_id.get_mut(id) {
+        let (gid, save_path, appid, total_bytes, was_completed) = match st.by_id.get(id) {
+            Some(dl) => (
+                dl.gid.clone(),
+                dl.save_path.clone(),
+                dl.appid.clone(),
+                dl.total_bytes,
+                dl.status == "completed",
+            ),
+            None => return json!({ "ok": false }),
+        };
+        // A fully-downloaded archive is ready to install, not garbage: keep the file and
+        // report install_ready instead of deleting it. Decided per download-id (part).
+        let control_present = PathBuf::from(format!("{}.aria2", save_path.display())).exists();
+        let file_len = std::fs::metadata(&save_path).map(|m| m.len()).unwrap_or(0);
+        let archive_complete =
+            was_completed || (total_bytes > 0 && file_len >= total_bytes && !control_present);
+        let snap = match st.by_id.get_mut(id) {
             Some(dl) => {
-                let gid = dl.gid.take();
-                dl.status = "cancelled".to_string();
+                dl.gid = None;
                 dl.speed_bps = 0;
                 dl.eta_seconds = None;
                 dl.error = None;
-                (gid, dl.save_path.clone(), dl.appid.clone(), dl.clone())
+                if archive_complete {
+                    dl.status = "completed".to_string();
+                    dl.received_bytes = file_len.max(dl.received_bytes);
+                } else {
+                    dl.status = "cancelled".to_string();
+                }
+                dl.clone()
             }
             None => return json!({ "ok": false }),
         };
@@ -319,21 +365,29 @@ impl DownloadEngine {
         st.active.remove(id);
         self.emit(&snap);
         drop(st);
-        if let Some(gid) = gid {
-            let aria2 = self.aria2.clone();
-            tauri::async_runtime::spawn(async move {
+        if archive_complete {
+            // Persist installStatus "downloaded" so the archive can be installed later.
+            write_manifest(&snap);
+        }
+        // Release the aria2 handle first, then delete on disk in the same task so aria2
+        // can't re-create partials (Linux) or block the delete (Windows).
+        let should_delete = !archive_complete && !keep_file;
+        let aria2 = self.aria2.clone();
+        tauri::async_runtime::spawn(async move {
+            if let Some(gid) = gid {
                 aria2.force_remove(&gid).await;
                 aria2.remove_download_result(&gid).await;
-            });
-        }
-        if !keep_file {
-            for suffix in ["", ".aria2"] {
-                let p = PathBuf::from(format!("{}{}", save_path.display(), suffix));
-                std::fs::remove_file(&p).ok();
             }
-        }
+            if should_delete {
+                for suffix in ["", ".aria2"] {
+                    let p = PathBuf::from(format!("{}{}", save_path.display(), suffix));
+                    std::fs::remove_file(&p).ok();
+                }
+            }
+        });
         self.maybe_start_next();
-        json!({ "ok": true, "status": "cancelled", "downloadId": id, "appid": appid })
+        let status = if archive_complete { "install_ready" } else { "cancelled" };
+        json!({ "ok": true, "status": status, "downloadId": id, "appid": appid })
     }
 
     pub fn busy_appids(&self) -> (usize, Vec<String>) {
@@ -356,6 +410,23 @@ impl DownloadEngine {
         } else {
             ex.remove(appid);
         }
+    }
+
+    pub fn try_install_lock(&self, appid: &str) -> bool {
+        self.install_guard.lock().unwrap().insert(appid.to_string())
+    }
+
+    pub fn install_unlock(&self, appid: &str) {
+        self.install_guard.lock().unwrap().remove(appid);
+    }
+
+    pub fn appid_active(&self, appid: &str) -> bool {
+        self.state
+            .lock()
+            .unwrap()
+            .by_id
+            .values()
+            .any(|d| d.appid == appid && (d.status == "downloading" || d.status == "queued"))
     }
 
     pub fn active_status(&self, appid: &str) -> Value {
@@ -414,7 +485,11 @@ impl DownloadEngine {
             None => return,
         };
         let offset = std::fs::metadata(&dl.save_path).map(|m| m.len()).unwrap_or(0);
-        if offset > 0 && dl.total_bytes > 0 && offset >= dl.total_bytes {
+        // aria2 --split writes segments at high offsets, so file length can reach total
+        // long before the content is complete; the `.aria2` control file is the real
+        // completion signal. Only short-circuit when it is absent.
+        let control_present = PathBuf::from(format!("{}.aria2", dl.save_path.display())).exists();
+        if offset > 0 && dl.total_bytes > 0 && offset >= dl.total_bytes && !control_present {
             dl.received_bytes = offset;
             dl.status = "completed".to_string();
             self.commit(&dl);
@@ -425,7 +500,8 @@ impl DownloadEngine {
                 st.active.remove(&id);
             }
             self.maybe_start_next();
-            self.on_complete(dl).await;
+            let engine = self.clone();
+            tauri::async_runtime::spawn(async move { engine.on_complete(dl).await });
             return;
         }
         dl.status = "downloading".to_string();
@@ -464,15 +540,16 @@ impl DownloadEngine {
         }
         match self.aria2.add_uri(&dl.url, options).await {
             Ok(gid) => {
-                let keep = {
+                let (keep, should_pause) = {
                     let mut st = self.state.lock().unwrap();
                     match st.by_id.get_mut(&id) {
                         Some(d) if d.status != "cancelled" => {
                             d.gid = Some(gid.clone());
+                            let paused = d.status == "paused";
                             st.gid_to_id.insert(gid.clone(), id.clone());
-                            true
+                            (true, paused)
                         }
-                        _ => false,
+                        _ => (false, false),
                     }
                 };
                 if !keep {
@@ -481,6 +558,9 @@ impl DownloadEngine {
                         aria2.force_remove(&gid).await;
                         aria2.remove_download_result(&gid).await;
                     });
+                } else if should_pause {
+                    // Paused during the startup window; stop the freshly-attached download.
+                    self.aria2.pause(&gid).await;
                 }
             }
             Err(e) => self.fail(&id, &format!("aria2 download failed: {e}")),
@@ -489,6 +569,11 @@ impl DownloadEngine {
 
     fn commit(&self, dl: &Download) {
         if let Some(existing) = self.state.lock().unwrap().by_id.get_mut(&dl.id) {
+            // Preserve a cancel/pause the user issued during the startup window instead
+            // of reverting it with this stale startup snapshot.
+            if matches!(existing.status.as_str(), "cancelled" | "paused") {
+                return;
+            }
             *existing = dl.clone();
         }
     }
@@ -539,8 +624,28 @@ impl DownloadEngine {
         };
         for (id, gid) in active {
             let status = match self.aria2.tell_status(&gid).await {
-                Ok(s) => s,
-                Err(_) => continue,
+                Ok(s) => {
+                    if let Some(d) = self.state.lock().unwrap().by_id.get_mut(&id) {
+                        d.poll_failures = 0;
+                    }
+                    s
+                }
+                Err(_) => {
+                    let failures = {
+                        let mut st = self.state.lock().unwrap();
+                        match st.by_id.get_mut(&id) {
+                            Some(d) => {
+                                d.poll_failures = d.poll_failures.saturating_add(1);
+                                d.poll_failures
+                            }
+                            None => continue,
+                        }
+                    };
+                    if failures >= 8 {
+                        self.fail(&id, "download stalled: aria2 stopped responding");
+                    }
+                    continue;
+                }
             };
             let s = status.get("status").and_then(|v| v.as_str()).unwrap_or("");
             let completed = status.get("completedLength").and_then(|v| v.as_str()).and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
@@ -618,7 +723,8 @@ impl DownloadEngine {
         self.emit(&snap);
         write_manifest(&snap);
         self.maybe_start_next();
-        self.on_complete(snap).await;
+        let engine = self.clone();
+        tauri::async_runtime::spawn(async move { engine.on_complete(snap).await });
     }
 
     fn finish_error(self: &Arc<Self>, id: &str, msg: &str) {
@@ -634,16 +740,28 @@ impl DownloadEngine {
     }
 
     async fn on_complete(self: &Arc<Self>, dl: Download) {
-        let pending = {
+        let ready = {
             let st = self.state.lock().unwrap();
-            st.by_id.values().any(|d| {
-                d.appid == dl.appid && d.id != dl.id && !matches!(d.status.as_str(), "completed" | "cancelled")
-            })
+            match dl.part_total {
+                // Multi-part sets are enqueued incrementally, so scanning in-memory
+                // siblings misfires; gate on the known part total when we have it.
+                Some(total) if total > 1 => {
+                    let done = st
+                        .by_id
+                        .values()
+                        .filter(|d| d.appid == dl.appid && d.status == "completed")
+                        .count() as u64;
+                    done >= total
+                }
+                _ => !st.by_id.values().any(|d| {
+                    d.appid == dl.appid && d.id != dl.id && !matches!(d.status.as_str(), "completed" | "cancelled")
+                }),
+            }
         };
-        if pending {
+        if !ready {
             return;
         }
-        if !self.install_guard.lock().unwrap().insert(dl.appid.clone()) {
+        if !self.try_install_lock(&dl.appid) {
             return;
         }
         let appid = dl.appid.clone();
@@ -656,7 +774,7 @@ impl DownloadEngine {
             dl.installing_dir,
         )
         .await;
-        self.install_guard.lock().unwrap().remove(&appid);
+        self.install_unlock(&appid);
     }
 }
 
@@ -706,10 +824,24 @@ fn write_manifest(dl: &Download) {
     write_manifest_atomic(&path, &Value::Object(manifest));
 }
 
+fn unique_tmp_path(path: &Path) -> PathBuf {
+    static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    path.with_extension(format!("tmp.{}.{}", std::process::id(), n))
+}
+
+pub fn write_json_atomic(path: &Path, value: &Value) -> std::io::Result<()> {
+    let data = serde_json::to_vec_pretty(value)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    let tmp = unique_tmp_path(path);
+    std::fs::write(&tmp, &data)?;
+    std::fs::rename(&tmp, path)?;
+    Ok(())
+}
+
 pub fn write_manifest_atomic(path: &Path, manifest: &Value) {
-    let tmp = path.with_extension("json.tmp");
-    if std::fs::write(&tmp, serde_json::to_string_pretty(manifest).unwrap_or_default()).is_ok() {
-        std::fs::rename(&tmp, path).ok();
+    if let Err(e) = write_json_atomic(path, manifest) {
+        crate::logging::write_line("warn", &format!("manifest write failed {}: {e}", path.display()));
     }
 }
 
@@ -781,8 +913,10 @@ pub fn downloads_state_load(state: State<'_, AppState>) -> Value {
 pub fn downloads_state_save(state: State<'_, AppState>, downloads: Value) -> Value {
     let path = state.paths.downloads_state_file();
     let count = downloads.as_array().map(|a| a.len()).unwrap_or(0);
-    std::fs::write(&path, serde_json::to_string(&downloads).unwrap_or_default()).ok();
-    json!({ "ok": true, "count": count })
+    match write_json_atomic(&path, &downloads) {
+        Ok(_) => json!({ "ok": true, "count": count }),
+        Err(e) => json!({ "ok": false, "error": e.to_string() }),
+    }
 }
 
 #[tauri::command(async)]
@@ -807,9 +941,11 @@ pub fn catalog_state_save(state: State<'_, AppState>, payload: Value) -> Value {
     if let Some(obj) = stored.as_object_mut() {
         obj.insert("updatedAt".into(), json!(now_ms()));
     }
-    std::fs::write(&path, serde_json::to_string(&stored).unwrap_or_default()).ok();
     let games = payload.get("games").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0);
-    json!({ "ok": true, "games": games, "updatedAt": now_ms() })
+    match write_json_atomic(&path, &stored) {
+        Ok(_) => json!({ "ok": true, "games": games, "updatedAt": now_ms() }),
+        Err(e) => json!({ "ok": false, "error": e.to_string() }),
+    }
 }
 
 #[tauri::command(async)]
