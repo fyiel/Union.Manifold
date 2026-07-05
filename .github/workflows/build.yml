@@ -29,33 +29,47 @@ jobs:
           REF_TYPE: ${{ github.ref_type }}
           REF_NAME: ${{ github.ref_name }}
           INPUT_VERSION: ${{ github.event.inputs.version }}
+          BEFORE: ${{ github.event.before }}
         run: |
           set -euo pipefail
+          pkg=$(jq -r .version package.json)
+          release=true
+          tag_push=0
           if [ "$EVENT" = "push" ] && [ "$REF_TYPE" = "tag" ]; then
             tag="$REF_NAME"
             version="${tag#v}"
-            echo "release=true" >> "$GITHUB_OUTPUT"
+            tag_push=1
           elif [ "$EVENT" = "workflow_dispatch" ]; then
-            version="${INPUT_VERSION:-$(jq -r .version package.json)}"
+            version="${INPUT_VERSION:-$pkg}"
             version="${version#v}"
             tag="v$version"
-            echo "release=true" >> "$GITHUB_OUTPUT"
           else
-            new=$(jq -r .version package.json)
-            old=$(git show HEAD~1:package.json 2>/dev/null | jq -r .version 2>/dev/null || echo "")
-            version="$new"
-            tag="v$new"
-            if [ "$new" = "$old" ]; then
-              echo "version unchanged ($new), no release"
-              echo "release=false" >> "$GITHUB_OUTPUT"
-            elif git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
-              echo "::warning::tag $tag already exists (old fork tags run up to v2.7.3). skipping release. bump to a version above the highest existing tag."
-              echo "release=false" >> "$GITHUB_OUTPUT"
-            else
-              echo "version $old -> $new, releasing $tag"
-              echo "release=true" >> "$GITHUB_OUTPUT"
+            version="$pkg"
+            tag="v$version"
+            old=$(git show "$BEFORE:package.json" 2>/dev/null | jq -r .version 2>/dev/null || echo "")
+            if [ "$version" = "$old" ]; then
+              echo "version unchanged ($version), no release"
+              release=false
             fi
           fi
+          # same version-sanity + existing-tag guard on every trigger path so a
+          # stray tag or a bogus dispatch input can't release an arbitrary or
+          # drifting version
+          if [ "$release" = "true" ]; then
+            if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "::error::version '$version' is not semver X.Y.Z, refusing to release"
+              release=false
+            elif [ "$version" != "$pkg" ]; then
+              echo "::error::version '$version' does not match package.json ($pkg), refusing to release"
+              release=false
+            elif [ "$tag_push" = "0" ] && git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+              echo "::warning::tag $tag already exists (old fork tags run up to v2.7.3). skipping release. bump to a version above the highest existing tag."
+              release=false
+            else
+              echo "releasing $tag"
+            fi
+          fi
+          echo "release=$release" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
@@ -131,7 +145,7 @@ jobs:
         with:
           tagName: ${{ needs.check.outputs.tag }}
           releaseName: 'Union.Manifold ${{ needs.check.outputs.tag }}'
-          releaseDraft: false
+          releaseDraft: true
           prerelease: false
           args: --target ${{ matrix.target }}
 
