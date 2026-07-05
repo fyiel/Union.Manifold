@@ -4,6 +4,7 @@
   "description": "Union.Manifold, a multi source game launcher",
   "type": "module",
   "author": "fyiel",
+  "packageManager": "pnpm@11.9.0",
   "license": "MIT",
   "repository": {
     "type": "git",
