@@ -31,6 +31,7 @@ export function BrowsePage() {
   const [status, setStatus] = useState<Record<string, SrcStatus>>({})
   const [sourceCounts, setSourceCounts] = useState<Record<string, number>>(() => cached?.counts ?? {})
   const [loadingMore, setLoadingMore] = useState(false)
+  const [sourcesErrored, setSourcesErrored] = useState(false)
 
   const reqId = useRef(0)
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -50,6 +51,9 @@ export function BrowsePage() {
     requestAnimationFrame(() => { if (scrollerRef.current) scrollerRef.current.scrollTop = top })
   }, [])
   const loadingMoreRef = useRef(false)
+  const appendReqRef = useRef<number | null>(null) // reqId of an in-flight loadMore append: partials merge, not replace
+  const gamesRef = useRef(games)
+  useEffect(() => { gamesRef.current = games }, [games])
   const available = sourcesAvailable()
 
   useEffect(() => {
@@ -70,6 +74,7 @@ export function BrowsePage() {
   const runQuery = useCallback(async (text: string, append = false) => {
     const q = text.trim()
     const id = ++reqId.current
+    appendReqRef.current = append ? id : null
     const srcs = sourcesRef.current
     const startOffset = append ? offsetRef.current : 0
     if (!append) {
@@ -91,6 +96,7 @@ export function BrowsePage() {
       setGames(nextGames)
       offsetRef.current = startOffset + PAGE
       setTotal(append && res.games.length === 0 ? nextGames.length : res.total)
+      setSourcesErrored("sourcesErrored" in res && res.sourcesErrored === true)
       const counts: Record<string, number> = {}
       for (const g of nextGames) for (const s of g.sources) counts[s.sourceId] = (counts[s.sourceId] || 0) + 1
       setSourceCounts(counts)
@@ -156,11 +162,15 @@ export function BrowsePage() {
   useEffect(() => {
     const off = window.ucSources?.onBrowsePartial?.((payload) => {
       if (!payload || payload.reqId !== reqId.current) return
+      // loadMore appends: merge partials into the existing grid instead of
+      // replacing it, or infinite-scroll would flash-collapse to the new page.
+      const isAppend = appendReqRef.current === payload.reqId
+      const merged = isAppend ? mergeUnique(gamesRef.current, payload.games) : payload.games
       rememberGames(payload.games)
-      setGames(payload.games)
+      setGames(merged)
       setTotal(payload.total)
       const counts: Record<string, number> = {}
-      for (const g of payload.games) for (const s of g.sources) counts[s.sourceId] = (counts[s.sourceId] || 0) + 1
+      for (const g of merged) for (const s of g.sources) counts[s.sourceId] = (counts[s.sourceId] || 0) + 1
       setSourceCounts(counts)
       const done = new Set(payload.doneSources)
       setStatus((prev) => {
@@ -325,6 +335,13 @@ export function BrowsePage() {
 
       {/* grid scroller */}
       <div ref={scrollerRef} className="mf-scroll" onScroll={onScroll} style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "22px 36px 40px" }}>
+        {sourcesErrored && (
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16, fontFamily: MONO, fontSize: 11, color: "var(--mf-t4)" }}>
+            <span style={{ width: 6, height: 6, borderRadius: 99, background: "#7a4a4a", flexShrink: 0 }} />
+            Some sources unavailable
+            <button type="button" onClick={() => void runQuery(committed)} style={{ fontFamily: MONO, fontSize: 10, color: "#c98080", cursor: "pointer", textDecoration: "underline", background: "none", border: "none", padding: 0 }}>retry</button>
+          </div>
+        )}
         {!available ? (
           <EmptyState text="source backend unavailable" />
         ) : sorted.length > 0 ? (
