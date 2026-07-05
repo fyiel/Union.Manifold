@@ -50,7 +50,6 @@ export function SettingsPage() {
   // the real upstream settings, each consumed somewhere (main process or a kept
   // renderer context), preventSleep defaults on like upstream
   const [shortcut, setShortcut] = useState(false)
-  const [autoShareLogs, setAutoShareLogs] = useState(false)
   const [pauseWhilePlaying, setPauseWhilePlaying] = useState(false)
   const [launchAtLogin, setLaunchAtLogin] = useState(false)
   const [startMinimized, setStartMinimized] = useState(false)
@@ -65,13 +64,12 @@ export function SettingsPage() {
     let alive = true
     void (async () => {
       try {
-        const [cb, kbps, del, path, sc, share, pause, mini, upd, nid, nge, maxC, conns, margin, auto] = await Promise.all([
+        const [cb, kbps, del, path, sc, pause, mini, upd, nid, nge, maxC, conns, margin, auto] = await Promise.all([
           window.ucSettings?.get?.("closeBehavior"),
           window.ucSettings?.get?.("downloadBandwidthLimitKBps"),
           window.ucSettings?.get?.("autoDeleteArchives"),
           window.ucDownloads?.getDownloadPath?.(),
           window.ucSettings?.get?.("alwaysCreateDesktopShortcut"),
-          window.ucSettings?.get?.("autoShareErrorLogs"),
           window.ucSettings?.get?.("pauseDownloadsWhilePlaying"),
           window.ucSettings?.get?.("startMinimized"),
           window.ucSettings?.get?.("autoCheckUpdates"),
@@ -90,7 +88,6 @@ export function SettingsPage() {
         const p = typeof path === "string" ? path : (path && typeof path === "object" ? (path as { path?: string }).path : "")
         if (p) setInstallPath(p)
         setShortcut(sc === true)
-        setAutoShareLogs(share === true)
         setPauseWhilePlaying(pause === true)
         setStartMinimized(mini === true)
         setAutoCheckUpdates(upd !== false)
@@ -107,7 +104,6 @@ export function SettingsPage() {
       if (!d || !alive) return
       if (d.key === "autoDeleteArchives") setAutoDelete(d.value === true)
       if (d.key === "alwaysCreateDesktopShortcut") setShortcut(d.value === true)
-      if (d.key === "autoShareErrorLogs") setAutoShareLogs(d.value === true)
       if (d.key === "pauseDownloadsWhilePlaying") setPauseWhilePlaying(d.value === true)
     })
     return () => { alive = false; off?.() }
@@ -186,7 +182,6 @@ export function SettingsPage() {
                 <ToggleRow title="Check for updates on startup" desc="Look for a new version shortly after launch and notify when one is ready" on={autoCheckUpdates} onToggle={() => setBool("autoCheckUpdates", !autoCheckUpdates, setAutoCheckUpdates)} />
                 <ToggleRow title="Notify when a game is ready" desc="Desktop notification when a download finishes installing" on={notifyInstallDone} onToggle={() => setBool("notifyInstallDone", !notifyInstallDone, setNotifyInstallDone)} />
                 <ToggleRow title="Notify when a game exits" desc="Desktop notification when a running game closes" on={notifyGameExit} onToggle={() => setBool("notifyGameExit", !notifyGameExit, setNotifyGameExit)} />
-                <ToggleRow title="Auto-share error logs" desc="Send diagnostic logs automatically when something fails" on={autoShareLogs} onToggle={() => setBool("autoShareErrorLogs", !autoShareLogs, setAutoShareLogs)} />
                 <ClearAssetsRow />
               </div>
             )}
@@ -579,6 +574,16 @@ function AboutTab() {
 
   useEffect(() => {
     void window.ucUpdater?.getVersion?.().then((v) => { if (v) setVersion(v) }).catch(() => { })
+  }, [])
+
+  // The main-process startup update check emits uc:update-available; reflect it
+  // in the About tab so a detected update shows without a manual re-check.
+  useEffect(() => {
+    const off = window.ucUpdater?.onUpdateAvailable?.((data) => {
+      setInstallable(true)
+      setUpdMsg(`update available · ${data?.version || ""}`)
+    })
+    return () => { off?.() }
   }, [])
 
   const check = async () => {
