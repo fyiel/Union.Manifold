@@ -959,3 +959,76 @@ pub fn download_path_set(state: State<'_, AppState>, target_path: String) -> Val
     json!({ "ok": true, "path": target_path })
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn t_sanitize_filename_keeps_normal_name() {
+        assert_eq!(sanitize_filename("Portal 2.zip"), "Portal 2.zip");
+    }
+
+    #[test]
+    fn t_sanitize_filename_strips_invalid_chars_keeps_ext() {
+        let out = sanitize_filename("Half-Life: Alyx.zip");
+        assert!(!out.contains(':'), "colon must be stripped: {out}");
+        assert!(out.ends_with(".zip"), "extension must survive: {out}");
+        assert_eq!(out, "Half-Life_ Alyx.zip");
+    }
+
+    #[test]
+    fn t_sanitize_filename_reduces_to_basename() {
+        // Path traversal / separators from either platform collapse to a bare name.
+        let a = sanitize_filename("../../etc/passwd");
+        assert_eq!(a, "passwd");
+        assert!(!a.contains('/') && !a.contains(".."));
+
+        assert_eq!(sanitize_filename("a/b/c.zip"), "c.zip");
+
+        let w = sanitize_filename("C:\\x\\y.zip");
+        assert_eq!(w, "y.zip");
+        assert!(!w.contains('\\') && !w.contains(':'));
+    }
+
+    #[test]
+    fn t_sanitize_filename_drops_trailing_dots_and_spaces() {
+        assert_eq!(sanitize_filename("trailing.dat..."), "trailing.dat");
+        assert_eq!(sanitize_filename("spaced.dat   "), "spaced.dat");
+        let out = sanitize_filename("game.zip. . .");
+        assert!(!out.ends_with('.') && !out.ends_with(' '));
+        assert_eq!(out, "game.zip");
+    }
+
+    #[test]
+    fn t_sanitize_filename_falls_back_when_empty() {
+        // Empty or all-separator input still yields a usable, non-empty basename
+        // with no path separators (the exact sentinel is an implementation detail).
+        assert!(!sanitize_filename("").is_empty());
+        let s = sanitize_filename("///");
+        assert!(!s.is_empty());
+        assert!(!s.contains('/') && !s.contains('\\'));
+    }
+
+    #[test]
+    fn t_safe_folder_name_keeps_alnum_title() {
+        assert_eq!(safe_folder_name("Portal 2"), "Portal 2");
+    }
+
+    #[test]
+    fn t_safe_folder_name_falls_back_on_blank() {
+        assert!(!safe_folder_name("").is_empty());
+        assert!(!safe_folder_name("   ").is_empty());
+        assert!(!safe_folder_name("...").is_empty());
+    }
+
+    #[test]
+    fn t_safe_folder_name_escapes_reserved_devices() {
+        // Windows-reserved device names must not survive as a bare folder name.
+        assert!(!safe_folder_name("CON").eq_ignore_ascii_case("CON"));
+        assert!(!safe_folder_name("aux").eq_ignore_ascii_case("aux"));
+        assert!(!safe_folder_name("NUL").eq_ignore_ascii_case("NUL"));
+        // A longer name that merely starts with a reserved stem is left intact.
+        assert_eq!(safe_folder_name("CONSOLE"), "CONSOLE");
+    }
+}

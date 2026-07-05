@@ -275,3 +275,55 @@ pub fn finalize_pool(pool: Vec<SourceGame>, params: &QueryParams) -> (Vec<Unifie
     };
     (ordered, facets, total)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ug(title: &str) -> UnifiedGame {
+        UnifiedGame { title: title.to_string(), ..Default::default() }
+    }
+
+    fn titles(games: &[UnifiedGame]) -> Vec<String> {
+        games.iter().map(|g| g.title.clone()).collect()
+    }
+
+    #[test]
+    fn t_sort_games_title_ascending_is_a_to_z_case_insensitive() {
+        let mut games = vec![ug("Charlie"), ug("alpha"), ug("Bravo")];
+        let p = QueryParams {
+            sort: Some("title".to_string()),
+            order: Some("asc".to_string()),
+            ..Default::default()
+        };
+        sort_games(&mut games, &p);
+        assert_eq!(titles(&games), vec!["alpha", "Bravo", "Charlie"]);
+    }
+
+    #[test]
+    fn t_sort_games_title_descending_reverses_ascending() {
+        let input = vec![ug("Charlie"), ug("alpha"), ug("Bravo")];
+
+        let mut asc = input.clone();
+        let p_asc = QueryParams {
+            sort: Some("title".to_string()),
+            order: Some("asc".to_string()),
+            ..Default::default()
+        };
+        sort_games(&mut asc, &p_asc);
+
+        let mut desc = input.clone();
+        let p_desc = QueryParams {
+            sort: Some("title".to_string()),
+            order: Some("desc".to_string()),
+            ..Default::default()
+        };
+        sort_games(&mut desc, &p_desc);
+
+        assert_eq!(titles(&desc), vec!["Charlie", "Bravo", "alpha"]);
+
+        let mut asc_reversed = titles(&asc);
+        asc_reversed.reverse();
+        assert_eq!(titles(&desc), asc_reversed);
+    }
+}
