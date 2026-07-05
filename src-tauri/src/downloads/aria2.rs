@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::Mutex;
+
+use parking_lot::Mutex;
 
 use rand::Rng;
 use serde_json::{json, Value};
@@ -68,7 +69,7 @@ impl Aria2Manager {
                 return true;
             }
             self.ready.store(false, Ordering::SeqCst);
-            if let Some(mut child) = self.child.lock().unwrap().take() {
+            if let Some(mut child) = self.child.lock().take() {
                 child.start_kill().ok();
             }
             crate::logging::write_line("warn", "aria2 daemon unresponsive, relaunching");
@@ -143,7 +144,7 @@ impl Aria2Manager {
                 return false;
             }
         };
-        *self.child.lock().unwrap() = Some(child);
+        *self.child.lock() = Some(child);
 
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(6);
         while std::time::Instant::now() < deadline {
@@ -155,7 +156,7 @@ impl Aria2Manager {
             tokio::time::sleep(std::time::Duration::from_millis(150)).await;
         }
         crate::logging::write_line("warn", &format!("aria2 daemon did not become ready on port {port}"));
-        if let Some(mut child) = self.child.lock().unwrap().take() {
+        if let Some(mut child) = self.child.lock().take() {
             child.start_kill().ok();
         }
         false
@@ -175,7 +176,7 @@ impl Aria2Manager {
 
     pub fn stop(&self) {
         self.ready.store(false, Ordering::SeqCst);
-        if let Some(mut child) = self.child.lock().unwrap().take() {
+        if let Some(mut child) = self.child.lock().take() {
             child.start_kill().ok();
         }
     }

@@ -1764,7 +1764,44 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
           const next = prev.map((item) => {
             if (item.appid !== appid) return item
             if (item.id === pausedWithProgress.id) return item
-            if ((item.status === "paused" && item.receivedBytes === 0) || item.status === "failed" || item.status === "extract_failed") {
+            if (item.status === "paused" && item.receivedBytes === 0) {
+              return { ...item, status: "queued" as DownloadStatus }
+            }
+            return item
+          })
+          downloadsRef.current = next
+          return next
+        })
+        // Failed siblings can't ride the renderer queue (startNextQueuedPart
+        // skips engine-owned "local" hosts), so retry them directly; the main
+        // engine's own queue caps concurrency.
+        const failedSiblings = current.filter(
+          (item) => item.id !== pausedWithProgress.id && (item.status === "failed" || item.status === "extract_failed")
+        )
+        for (const item of failedSiblings) {
+          await resumeDownload(item.id)
+        }
+        return
+      }
+
+      // Failed parts can never be restarted through the renderer queue: fork
+      // (engine-owned) items carry host "local", which startNextQueuedPart
+      // deliberately skips, so flipping them to "queued" strands them forever.
+      // Drive each one through resumeDownload instead — Level 1 asks the main
+      // engine to re-enqueue it (fresh aria2 add_uri resuming the on-disk
+      // partial), Level 2 re-resolves a fresh URL when the engine no longer
+      // knows the id (e.g. after an app restart).
+      const failed = current
+        .filter((item) => item.status === "failed" || item.status === "extract_failed")
+        .sort((a, b) => (a.partIndex || 0) - (b.partIndex || 0))
+      if (failed.length > 0) {
+        for (const item of failed) {
+          await resumeDownload(item.id)
+        }
+        // Re-queue any zero-progress paused siblings behind the retried parts.
+        setDownloads((prev) => {
+          const next = prev.map((item) => {
+            if (item.appid === appid && item.status === "paused" && item.receivedBytes === 0) {
               return { ...item, status: "queued" as DownloadStatus }
             }
             return item
@@ -1777,7 +1814,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
 
       setDownloads((prev) => {
         const next = prev.map((item) => {
-          if (item.appid === appid && (item.status === "paused" || item.status === "failed" || item.status === "extract_failed")) {
+          if (item.appid === appid && item.status === "paused") {
             return { ...item, status: "queued" as DownloadStatus }
           }
           return item
