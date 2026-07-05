@@ -12,6 +12,10 @@ on:
         required: false
         type: string
 
+# jobs that release (build) redeclare contents: write themselves
+permissions:
+  contents: read
+
 jobs:
   check:
     runs-on: ubuntu-latest
