@@ -3,6 +3,7 @@ import { lazy, Suspense, useEffect, useRef, type CSSProperties, type ReactNode }
 import { Minus, Square, X } from "lucide-react"
 import { Sidebar } from "@/app/manifold/Sidebar"
 import { usePauseDownloadsWhilePlaying } from "@/hooks/use-pause-on-launch"
+import { TabVisibleProvider } from "@/context/tab-visibility"
 import { cn } from "@/lib/utils"
 
 const importAdvanced = () => import("@/app/pages/AdvancedSearchPage")
@@ -43,7 +44,7 @@ function TabHost({ path }: { path: string }) {
     <>
       {Object.keys(TABS).filter((p) => seen.current.has(p)).map((p) => (
         <div key={p} style={{ display: p === path ? "flex" : "none", flex: 1, minWidth: 0, minHeight: 0, flexDirection: "column" }}>
-          {TABS[p]}
+          <TabVisibleProvider value={p === path}>{TABS[p]}</TabVisibleProvider>
         </div>
       ))}
     </>

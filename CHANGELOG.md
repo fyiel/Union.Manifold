@@ -60,6 +60,37 @@ Sources and launch
 - the custom theme cap is respected on bulk import and logged errors carry real
   detail instead of an empty object
 
+### Performance
+
+A dedicated optimization round aimed at instant tab switching.
+
+Renderer
+- hidden tabs now freeze: pages kept alive under the tab host stop re-rendering
+  on download progress ticks while not visible and catch up instantly on show,
+  so switching stays smooth during heavy downloads
+- library rows are memoized (a keystroke no longer re-renders every card),
+  enrichment applies in batches instead of once per game, install events are
+  debounced, and progress selectors quantize to whole percents
+- the paused download reconcile poll is gone, replaced by an event driven
+  resync on window focus; the catalog refresh normalizes in slices off the
+  switch path and defers its disk write to idle time
+- browse cache stops writing localStorage per keystroke, source listings share
+  one cached lookup instead of three at startup, known dead art urls are
+  remembered instead of re-requested, and the gamepad loop only runs at 60fps
+  while a controller is actually connected
+
+Backend
+- textual api responses skip the base64 round trip over ipc entirely, so the
+  multi mb games catalog no longer stalls the ui thread on decode
+- steady downloads checkpoint their manifest every 5s instead of every poll
+  tick, aria2 statuses are fetched concurrently instead of serially, and
+  stalled speed jitter no longer spams update events
+- library scans coalesce concurrent callers into one filesystem pass with a
+  10s cache, steam and protondb metadata caches batch their multi mb file
+  rewrites behind a 2s write behind (flushed on quit), and the default browse
+  catalog is cached for 10 minutes
+- the window declares its background color so launch no longer flashes white
+
 ### Removed
 
 - dead electron era surface with no backend behind it, the unused auth provider

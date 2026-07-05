@@ -1,7 +1,5 @@
-use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::LazyLock;
 
-use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -9,8 +7,8 @@ use crate::http;
 
 use super::metacache;
 
-static SUMMARY_CACHE: Lazy<Mutex<HashMap<String, Option<ProtonDbSummary>>>> =
-    Lazy::new(|| Mutex::new(metacache::load("protondb.json")));
+static SUMMARY_CACHE: LazyLock<metacache::WriteBehind<Option<ProtonDbSummary>>> =
+    LazyLock::new(|| metacache::WriteBehind::load("protondb.json"));
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -27,7 +25,7 @@ pub async fn summary(appid: u64) -> Option<ProtonDbSummary> {
     if appid == 0 {
         return None;
     }
-    if let Some(cached) = SUMMARY_CACHE.lock().unwrap().get(&appid.to_string()).cloned() {
+    if let Some(cached) = SUMMARY_CACHE.get(&appid.to_string()) {
         return cached;
     }
     let url = format!("https://www.protondb.com/api/v1/reports/summaries/{appid}.json");
@@ -71,11 +69,9 @@ pub async fn summary(appid: u64) -> Option<ProtonDbSummary> {
         // 404: definitive "no reports".
         None
     };
-    let snapshot = {
-        let mut map = SUMMARY_CACHE.lock().unwrap();
-        map.insert(appid.to_string(), out.clone());
-        map.clone()
-    };
-    metacache::save_async("protondb.json", snapshot).await;
+    // Write-behind: the insert only mutates memory; the debounced metacache
+    // flush persists the whole map (it grows large enough to make a per-insert
+    // file rewrite the dominant cost of opening a detail view).
+    SUMMARY_CACHE.insert(appid.to_string(), out.clone());
     out
 }

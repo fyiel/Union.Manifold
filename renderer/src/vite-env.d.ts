@@ -396,6 +396,7 @@ declare global {
         statusText: string
         headers: [string, string][]
         body?: string
+        bodyText?: string
       }>
     }
     ucUpdater?: {

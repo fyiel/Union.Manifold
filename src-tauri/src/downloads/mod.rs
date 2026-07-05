@@ -3,6 +3,7 @@ pub mod aria2;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
 
@@ -14,6 +15,14 @@ use crate::state::AppState;
 use aria2::Aria2Manager;
 
 pub const MANIFEST_NAME: &str = "installed.json";
+
+// Steady-progress manifest checkpoints are throttled to this interval; status
+// transitions (queued/downloading/paused/completed/failed/cancelled) still
+// write immediately, so on-disk state never misses a lifecycle change.
+const MANIFEST_CHECKPOINT_INTERVAL: Duration = Duration::from_secs(5);
+// Raw per-tick speed jitter would defeat the poll emit dedupe (a stalled
+// download's speed wobbles a few KB/s); compare speeds at this granularity.
+const SPEED_EMIT_QUANTUM: u64 = 50 * 1024;
 
 pub fn safe_folder_name(name: &str) -> String {
     let cleaned: String = name
@@ -95,6 +104,9 @@ struct Download {
     part_index: Option<u64>,
     part_total: Option<u64>,
     poll_failures: u32,
+    // Last time this download's manifest hit disk from the poll loop; gates
+    // steady-progress checkpoints, never lifecycle writes.
+    last_manifest_write: Instant,
 }
 
 impl Download {
@@ -245,6 +257,7 @@ impl DownloadEngine {
             part_index,
             part_total,
             poll_failures: 0,
+            last_manifest_write: Instant::now(),
         };
         if let Ok(meta) = std::fs::metadata(&dl.save_path) {
             dl.received_bytes = meta.len();
@@ -635,8 +648,17 @@ impl DownloadEngine {
                 .filter_map(|d| d.gid.clone().map(|g| (d.id.clone(), g)))
                 .collect()
         };
-        for (id, gid) in active {
-            let status = match self.aria2.tell_status(&gid).await {
+        // One serial RPC round-trip per download adds up at the 700ms cadence;
+        // fetch every status concurrently, then apply the results with the same
+        // per-id poll_failures bookkeeping the serial loop had. No state lock is
+        // held during the fetches.
+        let statuses = futures::future::join_all(active.into_iter().map(|(id, gid)| async move {
+            let status = self.aria2.tell_status(&gid).await;
+            (id, gid, status)
+        }))
+        .await;
+        for (id, gid, fetched) in statuses {
+            let status = match fetched {
                 Ok(s) => {
                     if let Some(d) = self.state.lock().by_id.get_mut(&id) {
                         d.poll_failures = 0;
@@ -684,9 +706,15 @@ impl DownloadEngine {
                             Some(dl) if !(dl.status == "paused" && s != "paused") => {
                                 let status = if s == "paused" { "paused" } else { "downloading" };
                                 let speed = if s == "paused" { 0 } else { speed };
-                                if dl.status == status && dl.received_bytes == completed && dl.speed_bps == speed {
+                                // Compare speed by bucket so pure jitter on a stalled
+                                // download doesn't emit; byte or status changes always do.
+                                if dl.status == status
+                                    && dl.received_bytes == completed
+                                    && dl.speed_bps / SPEED_EMIT_QUANTUM == speed / SPEED_EMIT_QUANTUM
+                                {
                                     None
                                 } else {
+                                    let status_changed = dl.status != status;
                                     if total > 0 {
                                         dl.total_bytes = total;
                                     }
@@ -697,15 +725,25 @@ impl DownloadEngine {
                                     dl.speed_bps = speed;
                                     let remaining = total.saturating_sub(completed);
                                     dl.eta_seconds = if speed > 0 && remaining > 0 { Some(remaining / speed) } else { None };
-                                    Some(dl.clone())
+                                    // Transitions persist immediately; steady progress only
+                                    // checkpoints the manifest every few seconds, keeping the
+                                    // per-tick path free of disk writes.
+                                    let write = status_changed
+                                        || dl.last_manifest_write.elapsed() >= MANIFEST_CHECKPOINT_INTERVAL;
+                                    if write {
+                                        dl.last_manifest_write = Instant::now();
+                                    }
+                                    Some((dl.clone(), write))
                                 }
                             }
                             _ => None,
                         }
                     };
-                    if let Some(dl) = snap {
+                    if let Some((dl, write)) = snap {
                         self.emit(&dl);
-                        write_manifest(&dl);
+                        if write {
+                            write_manifest(&dl);
+                        }
                     }
                 }
             }

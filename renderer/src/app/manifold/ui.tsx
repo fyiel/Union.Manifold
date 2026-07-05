@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type CSSProperties } from "react"
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react"
 import { Search, Loader2 } from "lucide-react"
 import { proxyImageUrl } from "@/lib/utils"
 import { fetchSteamArt } from "@/lib/sources"
@@ -43,15 +43,37 @@ export function gameImageCandidates(game: { image?: string; heroImage?: string; 
   return out
 }
 
-// An <img> that walks a list of candidate sources, advancing on error. When
-// every candidate fails AND a steamAppId is given, it asks main for Steam's
-// authoritative store art (one cached call) and tries that before giving up,
-// which rescues titles like Rugrats Retro Rewind whose predictable
-// library_*.jpg URLs all 404. onAllFailed fires only if that fails too.
+// Candidate URLs that already failed to load this session. Detail imagery
+// remounts on every Browse → detail → Browse trip, and every retry of a
+// known-dead candidate is a real network request. Module-level like
+// GameCard's `prefetched` set, but capped: at the cap the whole set is
+// dropped wholesale (no recency bookkeeping) so it can't grow unbounded.
+const failedSrcs = new Set<string>()
+const FAILED_SRCS_CAP = 500
+
+function rememberFailed(url: string) {
+  if (failedSrcs.size >= FAILED_SRCS_CAP) failedSrcs.clear()
+  failedSrcs.add(url)
+}
+
+// First index at or after `from` whose URL isn't a known failure.
+function nextAlive(list: string[], from: number): number {
+  let i = from
+  while (i < list.length && failedSrcs.has(list[i])) i++
+  return i
+}
+
+// An <img> that walks a list of candidate sources, advancing on error (and
+// skipping candidates that already failed this session). When every candidate
+// fails AND a steamAppId is given, it asks main for Steam's authoritative
+// store art (one cached call) and tries that before giving up, which rescues
+// titles like Rugrats Retro Rewind whose predictable library_*.jpg URLs all
+// 404. onAllFailed fires only if that fails too.
 export function SmartImage({ candidates, steamAppId, alt, onAllFailed, style, lazy }: { candidates: string[]; steamAppId?: number | null; alt?: string; onAllFailed?: () => void; style?: CSSProperties; lazy?: boolean }) {
   const [extra, setExtra] = useState<string[]>([])
-  const [idx, setIdx] = useState(0)
+  const [idx, setIdx] = useState(() => nextAlive(candidates, 0))
   const steamTried = useRef(false)
+  const exhaustedFired = useRef(false)
 
   // Restart the walk when the candidate set actually changes (a detail page
   // hydrates thin to full and swaps in a different cover). Without this the stale
@@ -60,13 +82,42 @@ export function SmartImage({ candidates, steamAppId, alt, onAllFailed, style, la
   const prevSig = useRef(sig)
   if (prevSig.current !== sig) {
     prevSig.current = sig
-    setIdx(0)
+    setIdx(nextAlive(candidates, 0))
     setExtra([])
     steamTried.current = false
+    exhaustedFired.current = false
   }
 
   const all = useMemo(() => [...candidates, ...extra], [candidates, extra])
-  const src = all[idx]
+  const src: string | undefined = all[idx]
+
+  // Every candidate is dead: one (cached) steam-art lookup, then onAllFailed.
+  // Shared by the onError walk and the all-cached-failures mount path below.
+  const exhausted = () => {
+    if (steamAppId && !steamTried.current) {
+      steamTried.current = true
+      const sigAtError = sig
+      void fetchSteamArt(steamAppId).then((urls) => {
+        // game swapped while the fetch was in flight, drop its stale art
+        if (prevSig.current !== sigAtError) return
+        const next = urls.map((u) => proxyImageUrl(u)).filter((u) => !all.includes(u) && !failedSrcs.has(u))
+        if (next.length) { setIdx(all.length); setExtra((p) => [...p, ...next]) }
+        else onAllFailed?.()
+      })
+      return
+    }
+    onAllFailed?.()
+  }
+
+  // A remount can find every candidate already in the failed cache, so no
+  // <img> mounts to drive the onError walk — kick the steam/onAllFailed tail
+  // directly. The ref guard keeps StrictMode's double effect run to one kick.
+  useEffect(() => {
+    if (src !== undefined || all.length === 0 || exhaustedFired.current) return
+    exhaustedFired.current = true
+    exhausted()
+  })
+
   if (!src) return null
   return (
     <img
@@ -75,20 +126,10 @@ export function SmartImage({ candidates, steamAppId, alt, onAllFailed, style, la
       loading={lazy ? "lazy" : undefined}
       decoding="async"
       onError={() => {
-        if (idx + 1 < all.length) { setIdx(idx + 1); return }
-        if (steamAppId && !steamTried.current) {
-          steamTried.current = true
-          const sigAtError = sig
-          void fetchSteamArt(steamAppId).then((urls) => {
-            // game swapped while the fetch was in flight, drop its stale art
-            if (prevSig.current !== sigAtError) return
-            const next = urls.map((u) => proxyImageUrl(u)).filter((u) => !all.includes(u))
-            if (next.length) { setIdx(all.length); setExtra((p) => [...p, ...next]) }
-            else onAllFailed?.()
-          })
-          return
-        }
-        onAllFailed?.()
+        rememberFailed(src)
+        const next = nextAlive(all, idx + 1)
+        if (next < all.length) { setIdx(next); return }
+        exhausted()
       }}
       style={style}
     />

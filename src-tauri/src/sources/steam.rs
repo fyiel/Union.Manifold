@@ -1,7 +1,5 @@
-use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::LazyLock;
 
-use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
@@ -10,10 +8,10 @@ use crate::http;
 use super::metacache;
 use super::schema::{normalize_title, UnifiedGame};
 
-static APPID_CACHE: Lazy<Mutex<HashMap<String, Option<u64>>>> =
-    Lazy::new(|| Mutex::new(metacache::load("steam-appids.json")));
-static DETAILS_CACHE: Lazy<Mutex<HashMap<String, Option<StoreDetails>>>> =
-    Lazy::new(|| Mutex::new(metacache::load("steam-details.json")));
+static APPID_CACHE: LazyLock<metacache::WriteBehind<Option<u64>>> =
+    LazyLock::new(|| metacache::WriteBehind::load("steam-appids.json"));
+static DETAILS_CACHE: LazyLock<metacache::WriteBehind<Option<StoreDetails>>> =
+    LazyLock::new(|| metacache::WriteBehind::load("steam-details.json"));
 
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub struct StoreDetails {
@@ -32,7 +30,7 @@ pub async fn get_store_details(appid: u64) -> Option<StoreDetails> {
     if appid == 0 {
         return None;
     }
-    if let Some(cached) = DETAILS_CACHE.lock().unwrap().get(&appid.to_string()).cloned() {
+    if let Some(cached) = DETAILS_CACHE.get(&appid.to_string()) {
         return cached;
     }
     let url = format!("https://store.steampowered.com/api/appdetails?appids={appid}&l=en&cc=US");
@@ -124,12 +122,9 @@ pub async fn get_store_details(appid: u64) -> Option<StoreDetails> {
             req_recommended: str_of(reqs.and_then(|r| r.get("recommended"))),
         }
     });
-    let snapshot = {
-        let mut map = DETAILS_CACHE.lock().unwrap();
-        map.insert(appid.to_string(), out.clone());
-        map.clone()
-    };
-    metacache::save_async("steam-details.json", snapshot).await;
+    // Write-behind: the details map grows to megabytes, so the insert only
+    // mutates memory; the debounced metacache flush persists the file.
+    DETAILS_CACHE.insert(appid.to_string(), out.clone());
     out
 }
 
@@ -138,7 +133,7 @@ pub async fn search_app_id(title: &str) -> Option<u64> {
     if norm.is_empty() {
         return None;
     }
-    if let Some(cached) = APPID_CACHE.lock().unwrap().get(&norm).cloned() {
+    if let Some(cached) = APPID_CACHE.get(&norm) {
         return cached;
     }
     let url = format!(
@@ -170,12 +165,7 @@ pub async fn search_app_id(title: &str) -> Option<u64> {
     // Only persist a negative result on a definitive not-found; a transport or
     // 5xx blip must not poison the title->appid mapping (it has no TTL).
     if definitive {
-        let snapshot = {
-            let mut map = APPID_CACHE.lock().unwrap();
-            map.insert(norm, appid);
-            map.clone()
-        };
-        metacache::save_async("steam-appids.json", snapshot).await;
+        APPID_CACHE.insert(norm, appid);
     }
     appid
 }

@@ -1,9 +1,8 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
-use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use once_cell::sync::Lazy;
+use parking_lot::Mutex;
 use serde_json::{json, Value};
 use tauri::State;
 
@@ -13,8 +12,18 @@ use crate::state::AppState;
 const INSTALLED: &[&str] = &["installed"];
 const INSTALLING: &[&str] = &["installing", "queued", "paused", "downloaded", "extracting", "failed", "cancelled"];
 
-static SCAN_CACHE: Lazy<Mutex<Option<(Instant, String, Vec<(PathBuf, Value)>)>>> = Lazy::new(|| Mutex::new(None));
-const SCAN_TTL: Duration = Duration::from_millis(2000);
+static SCAN_CACHE: Mutex<Option<(Instant, String, Vec<(PathBuf, Value)>)>> = Mutex::new(None);
+// Serializes the filesystem scan itself so concurrent cache misses (Library
+// activation racing the renderer's 3s reconcile tick) coalesce into a single
+// read_dir pass. SCAN_CACHE is only ever held for short copy-in/copy-out
+// windows; the gate is always acquired first, never while holding SCAN_CACHE.
+static SCAN_GATE: Mutex<()> = Mutex::new(());
+// 10s TTL: every in-app mutation invalidates explicitly (invalidate_scan), so
+// the TTL only bounds staleness from EXTERNAL manifest writes — the download
+// engine writes manifests directly (throttled to ~5s) without invalidating this
+// cache. 10s keeps installing-progress reads acceptably fresh while letting the
+// renderer's 3s reconcile tick hit the cache instead of rescanning every tick.
+const SCAN_TTL: Duration = Duration::from_millis(10_000);
 
 // The primary install dir plus any legacy library roots (games installed by the
 // old UnionCrax.Direct app). Read-through so old installs still show and launch.
@@ -28,9 +37,22 @@ pub(crate) fn scan_roots(state: &AppState) -> Vec<PathBuf> {
     roots
 }
 
+// Legacy roots cost a stat() per configured path plus the home-dir probe on
+// every scan, but legacy install roots do not appear at runtime. Cache the
+// existence checks keyed by the legacyLibraryPaths setting: recompute only if
+// the setting changes, otherwise reuse for the lifetime of the process.
+static LEGACY_ROOTS: Mutex<Option<(Value, Vec<PathBuf>)>> = Mutex::new(None);
+
 fn legacy_roots(state: &AppState) -> Vec<PathBuf> {
+    let configured = state.settings.get("legacyLibraryPaths");
+    let mut cache = LEGACY_ROOTS.lock();
+    if let Some((key, roots)) = cache.as_ref() {
+        if *key == configured {
+            return roots.clone();
+        }
+    }
     let mut out: Vec<PathBuf> = Vec::new();
-    if let Some(arr) = state.settings.get("legacyLibraryPaths").as_array() {
+    if let Some(arr) = configured.as_array() {
         for v in arr {
             if let Some(s) = v.as_str().filter(|s| !s.is_empty()) {
                 let p = PathBuf::from(s);
@@ -46,6 +68,7 @@ fn legacy_roots(state: &AppState) -> Vec<PathBuf> {
             out.push(legacy);
         }
     }
+    *cache = Some((configured, out.clone()));
     out
 }
 
@@ -57,23 +80,34 @@ fn roots_key(roots: &[PathBuf]) -> String {
         .join("\u{0}")
 }
 
+fn cached_scan(key: &str) -> Option<Vec<(PathBuf, Value)>> {
+    let guard = SCAN_CACHE.lock();
+    match guard.as_ref() {
+        Some((at, cached_key, data)) if cached_key == key && at.elapsed() < SCAN_TTL => Some(data.clone()),
+        _ => None,
+    }
+}
+
 fn load_all_cached(roots: &[PathBuf]) -> Vec<(PathBuf, Value)> {
     let key = roots_key(roots);
-    {
-        let guard = SCAN_CACHE.lock().unwrap();
-        if let Some((at, cached_key, data)) = guard.as_ref() {
-            if *cached_key == key && at.elapsed() < SCAN_TTL {
-                return data.clone();
-            }
-        }
+    if let Some(data) = cached_scan(&key) {
+        return data;
+    }
+    // Coalesce concurrent misses: one caller scans while the rest block on the
+    // gate, then find the winner's fresh result on the re-check (double-checked
+    // locking). Without this, Library activation and the reconcile tick could
+    // run the full read_dir + parse pass twice in parallel.
+    let _scan = SCAN_GATE.lock();
+    if let Some(data) = cached_scan(&key) {
+        return data;
     }
     let data = load_all(roots);
-    *SCAN_CACHE.lock().unwrap() = Some((Instant::now(), key, data.clone()));
+    *SCAN_CACHE.lock() = Some((Instant::now(), key, data.clone()));
     data
 }
 
 pub(crate) fn invalidate_scan() {
-    *SCAN_CACHE.lock().unwrap() = None;
+    *SCAN_CACHE.lock() = None;
 }
 
 fn load_all(roots: &[PathBuf]) -> Vec<(PathBuf, Value)> {

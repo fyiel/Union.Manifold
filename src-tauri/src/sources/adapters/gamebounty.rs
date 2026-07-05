@@ -1,3 +1,4 @@
+use std::sync::LazyLock;
 use std::time::Duration;
 
 use once_cell::sync::Lazy;
@@ -22,6 +23,12 @@ static SLUG_CACHE: Lazy<Cached<Vec<String>>> =
 
 static DETAIL_CACHE: Lazy<KeyedCache<SourceGame>> =
     Lazy::new(|| KeyedCache::new(Duration::from_secs(60 * 60 * 6)));
+
+// Browse-level cache, matching the other adapters (ankergames BROWSE 5m,
+// steamrip POSTS 600s): one entry per assembled listing so a Browse revisit
+// skips the 60-slug detail fan-out entirely.
+static BROWSE: LazyLock<KeyedCache<Vec<SourceGame>>> =
+    LazyLock::new(|| KeyedCache::new(Duration::from_secs(600)));
 
 static LOC_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"<loc>\s*([^<]+?)\s*</loc>").unwrap());
 
@@ -368,24 +375,48 @@ pub fn capabilities() -> Capabilities {
 }
 
 pub async fn query(params: &QueryParams) -> Option<Vec<SourceGame>> {
+    let limit = params.limit;
     if let Some(text) = params.text.as_deref() {
-        if !text.trim().is_empty() {
-            return Some(search(text, params.limit).await);
+        let text = text.trim();
+        if !text.is_empty() {
+            // search() returns empty both for "no matches" and for a sitemap
+            // hard-fail; only cache non-empty results so a transient failure
+            // can't pin an empty listing for the whole TTL. (Re-running a
+            // genuinely empty search is a scan over the cached slug list.)
+            let key = format!("s|{}|{limit}", text.to_lowercase());
+            let cached = BROWSE
+                .get_or(&key, || async move {
+                    let out = search(text, limit).await;
+                    if out.is_empty() {
+                        None
+                    } else {
+                        Some(out)
+                    }
+                })
+                .await;
+            return Some(cached.unwrap_or_default());
         }
     }
-    // None => the sitemap fetch hard-failed (no slugs, not even stale).
-    let slugs = match all_slugs().await {
-        Some(s) => s,
-        None => {
-            crate::logging::write_line("warn", "gamebounty sitemap yielded no slugs");
-            return None;
-        }
-    };
-    // Cap the per-fill catalog window well below POOL_SIZE: one page fetch per
-    // slug up to POOL_SIZE (300) is slow and fragile.
-    let end = params.limit.min(CATALOG_WINDOW).min(slugs.len());
-    let window: Vec<String> = slugs[..end].to_vec();
-    Some(http::map_limit(window, 8, |slug| async move { get_detail(&slug).await }).await)
+    let key = format!("c|{limit}");
+    BROWSE
+        .get_or(&key, || async move {
+            // None => the sitemap fetch hard-failed (no slugs, not even
+            // stale): don't cache, so the next browse retries (get_or serves
+            // a stale listing here if it has one, like the other adapters).
+            let slugs = match all_slugs().await {
+                Some(s) => s,
+                None => {
+                    crate::logging::write_line("warn", "gamebounty sitemap yielded no slugs");
+                    return None;
+                }
+            };
+            // Cap the per-fill catalog window well below POOL_SIZE: one page
+            // fetch per slug up to POOL_SIZE (300) is slow and fragile.
+            let end = limit.min(CATALOG_WINDOW).min(slugs.len());
+            let window: Vec<String> = slugs[..end].to_vec();
+            Some(http::map_limit(window, 8, |slug| async move { get_detail(&slug).await }).await)
+        })
+        .await
 }
 
 pub async fn search(q: &str, limit: usize) -> Vec<SourceGame> {
