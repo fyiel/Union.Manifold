@@ -35,7 +35,6 @@ static BOILERPLATE_RE: Lazy<Regex> =
 static SIZE1_RE: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"(?i)(?:game\s*size|size)\s*[:\-]?\s*([\d.]+\s*(?:TB|GB|MB))").unwrap()
 });
-static SIZE2_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?i)([\d.]+\s*(?:TB|GB))\b").unwrap());
 static ANCHOR_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r#"(?is)<a\b([^>]*)href="([^"]+)"([^>]*)>(.*?)</a>"#).unwrap());
 static HTTP_PREFIX_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?i)^https?://").unwrap());
@@ -216,10 +215,9 @@ fn blurb(content: &str) -> String {
 }
 
 fn find_size(content: &str) -> Option<u64> {
-    let cap = SIZE1_RE
-        .captures(content)
-        .or_else(|| SIZE2_RE.captures(content))?;
-    parse_size_to_bytes(cap.get(1)?.as_str())
+    // Only accept a size next to a "size" label; a bare "N GB" fallback grabs
+    // system-requirements text like "Memory: 8 GB RAM".
+    parse_size_to_bytes(SIZE1_RE.captures(content)?.get(1)?.as_str())
 }
 
 fn extract_download_options(content: &str) -> Vec<DownloadOption> {
@@ -375,7 +373,7 @@ fn enc(s: &str) -> String {
     percent_encoding::utf8_percent_encode(s, percent_encoding::NON_ALPHANUMERIC).to_string()
 }
 
-pub async fn query(params: &QueryParams) -> Vec<SourceGame> {
+pub async fn query(params: &QueryParams) -> Option<Vec<SourceGame>> {
     let cats = load_category_map().await;
     let per_page = params.limit.min(100);
     let text = params.text.as_deref().unwrap_or("").trim();
@@ -399,6 +397,7 @@ pub async fn query(params: &QueryParams) -> Vec<SourceGame> {
     POSTS
         .get_or(&key, || async move {
             let mut games = Vec::new();
+            let mut fetched_ok = false;
             let mut page = 1;
             while games.len() < limit && page <= 10 {
                 let paged = format!("{url}&page={page}");
@@ -414,6 +413,7 @@ pub async fn query(params: &QueryParams) -> Vec<SourceGame> {
                         break;
                     }
                 };
+                fetched_ok = true;
                 let batch = posts_to_games(&json, None, &cats);
                 let short = batch.len() < per_page;
                 games.extend(batch);
@@ -422,14 +422,16 @@ pub async fn query(params: &QueryParams) -> Vec<SourceGame> {
                 }
                 page += 1;
             }
-            if games.is_empty() {
-                None
-            } else {
+            // Some(vec) (even empty) is a definitive result we can cache; None
+            // only when the page-1 fetch hard-failed, so the caller flags the
+            // source as errored instead of caching a false-negative.
+            if fetched_ok {
                 Some(games)
+            } else {
+                None
             }
         })
         .await
-        .unwrap_or_default()
 }
 
 pub async fn search(q: &str, limit: usize) -> Vec<SourceGame> {
