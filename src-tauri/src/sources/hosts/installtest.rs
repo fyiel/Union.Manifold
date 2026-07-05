@@ -53,10 +53,10 @@ async fn source_games(source: &str, query: Option<&str>, limit: usize) -> Vec<So
         ..Default::default()
     };
     match source {
-        "unioncrax" => adapters::unioncrax::query(&params).await,
-        "gamebounty" => adapters::gamebounty::query(&params).await,
-        "ankergames" => adapters::ankergames::query(&params).await,
-        _ => adapters::steamrip::query(&params).await,
+        "unioncrax" => adapters::unioncrax::query(&params).await.unwrap_or_default(),
+        "gamebounty" => adapters::gamebounty::query(&params).await.unwrap_or_default(),
+        "ankergames" => adapters::ankergames::query(&params).await.unwrap_or_default(),
+        _ => adapters::steamrip::query(&params).await.unwrap_or_default(),
     }
 }
 
@@ -236,14 +236,17 @@ fn launch_game(install_dir: &Path, out: &Path, appid: &str, secs: u64) -> (bool,
         None => return (false, "no launchable .exe found".to_string()),
     };
     let exe_str = exe.to_string_lossy().to_string();
-    let plan = crate::launch::linux::plan_launch(
+    let plan = match crate::launch::linux::plan_launch(
         &serde_json::json!({}),
         None,
         Some(proton.clone()),
         out,
         appid,
         &exe_str,
-    );
+    ) {
+        Ok(p) => p,
+        Err(e) => return (false, format!("launch plan failed: {e}")),
+    };
     if !plan.command.contains("proton") {
         return (false, format!("launch plan did not choose proton (cmd={})", plan.command));
     }
