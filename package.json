@@ -18,6 +18,7 @@
     "dev:renderer": "vite --config renderer/vite.config.ts",
     "build": "tauri build",
     "build:renderer": "vite build --config renderer/vite.config.ts",
+    "typecheck": "tsc --noEmit -p renderer/tsconfig.json",
     "fetch-sidecars": "node ./scripts/fetch-sidecars.mjs",
     "fetch-sidecars:all": "node ./scripts/fetch-sidecars.mjs --all",
     "tauri": "tauri"
