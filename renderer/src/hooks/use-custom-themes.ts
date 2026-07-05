@@ -116,10 +116,10 @@ export function useCustomThemes(options?: { isUcPlus?: boolean }): {
   }, [customThemes])
 
   const replaceAll = useCallback((themes: ThemeDef[]) => {
-    const sliced = themes.slice(0, MAX_CUSTOM_THEMES)
+    const sliced = themes.slice(0, maxCustomThemes)
     setCustomThemes(sliced)
     persist(sliced)
-  }, [])
+  }, [maxCustomThemes])
 
   return { customThemes, maxCustomThemes, addCustomTheme, updateCustomTheme, deleteCustomTheme, replaceAll }
 }
