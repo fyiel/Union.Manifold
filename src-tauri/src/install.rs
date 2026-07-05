@@ -542,3 +542,53 @@ pub fn delete_archive_files(payload: Value) -> Value {
     }
     json!({ "ok": true, "deletedCount": deleted })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // `part_base` detects the shared base of a multi-part archive. Regression:
+    // it must never panic when byte-slicing multibyte/non-ASCII names, and it
+    // must only treat ".part" followed by a digit (or a 3-digit numeric
+    // extension) as a real multi-part marker.
+
+    #[test]
+    fn t_part_base_multibyte_never_panics() {
+        // Non-ASCII stem with a 2-char extension: falls through to None without
+        // panicking on a non-char-boundary byte slice.
+        assert_eq!(part_base("café.7z"), None);
+        assert_eq!(part_base("游戏.7z"), None);
+    }
+
+    #[test]
+    fn t_part_base_short_names() {
+        assert_eq!(part_base("a"), None);
+        assert_eq!(part_base("ab"), None);
+        assert_eq!(part_base(""), None);
+    }
+
+    #[test]
+    fn t_part_base_multibyte_slices_on_char_boundary() {
+        // ".partN" after multibyte chars returns the base via name[..i]; both
+        // that slice and name[i+5..] must land on UTF-8 char boundaries.
+        assert_eq!(part_base("café.part1.rar"), Some("café"));
+        assert_eq!(part_base("游戏.part01.7z"), Some("游戏"));
+        // 3-digit numeric extension on a multibyte stem.
+        assert_eq!(part_base("café.001"), Some("café"));
+    }
+
+    #[test]
+    fn t_part_base_detects_part_and_numeric_ext() {
+        assert_eq!(part_base("game.part01.rar"), Some("game"));
+        assert_eq!(part_base("archive.part2.rar"), Some("archive"));
+        assert_eq!(part_base("game.001"), Some("game"));
+    }
+
+    #[test]
+    fn t_part_base_rejects_plain_and_non_digit_part() {
+        assert_eq!(part_base("game.zip"), None);
+        assert_eq!(part_base("readme.txt"), None);
+        // ".part" not followed by a digit is not a multi-part marker.
+        assert_eq!(part_base("game.partial.zip"), None);
+    }
+}
