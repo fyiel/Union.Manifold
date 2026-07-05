@@ -149,6 +149,9 @@ export function useControllerNavigation(options: ControllerNavOptions) {
 
     let raf = 0
     let active = true
+    let looping = false   // rAF loop currently scheduled (a pad is known)
+    let fallbackTimer = 0 // slow poll handle while no pad is known
+    let noPadFrames = 0   // consecutive rAF frames that saw no connected pad
 
     // Per-button edge tracking + directional auto-repeat timers.
     const prevButtons: Record<number, boolean> = {}
@@ -272,13 +275,14 @@ export function useControllerNavigation(options: ControllerNavOptions) {
     }
 
     function loop() {
-      if (!active) return
+      if (!active || !looping) return
       const now = performance.now()
       const pads = navigator.getGamepads?.() || []
       // Use the first connected standard pad as the driver.
       const pad = Array.from(pads).find((p): p is Gamepad => !!p && p.connected) || null
 
       if (pad) {
+        noPadFrames = 0
         const dz = Math.max(0.05, optsRef.current.deadzone || 0.15)
         const lx = pad.axes[0] ?? 0
         const ly = pad.axes[1] ?? 0
@@ -318,12 +322,58 @@ export function useControllerNavigation(options: ControllerNavOptions) {
           const container = findScrollContainer(document.activeElement as HTMLElement | null)
           if (container) container.scrollTop += ry * 18
         }
+      } else if (++noPadFrames >= 600) {
+        // ~10s of visible frames without a pad — a webview missed the
+        // disconnect event. Drop back to the slow poll instead of spinning.
+        stopLoop()
+        return
       }
 
       raf = requestAnimationFrame(loop)
     }
 
-    raf = requestAnimationFrame(loop)
+    // A 60fps rAF loop with zero pads is pure waste, so it only runs while a
+    // pad is known. Pads announce via gamepadconnected/gamepaddisconnected,
+    // but some webviews only surface a pad in getGamepads() (and fire the
+    // connect event) after a button press — so while none is known, a slow
+    // poll watches getGamepads() and promotes to the rAF loop when one shows.
+    const padPresent = () => Array.from(navigator.getGamepads?.() || []).some((p) => !!p && p.connected)
+
+    function startLoop() {
+      if (!active || looping) return
+      looping = true
+      noPadFrames = 0
+      stopFallback()
+      raf = requestAnimationFrame(loop)
+    }
+
+    function stopLoop() {
+      looping = false
+      cancelAnimationFrame(raf)
+      if (active) startFallback()
+    }
+
+    function startFallback() {
+      if (fallbackTimer) return
+      fallbackTimer = window.setInterval(() => {
+        if (!document.hidden && padPresent()) startLoop()
+      }, 10_000)
+    }
+
+    function stopFallback() {
+      if (!fallbackTimer) return
+      clearInterval(fallbackTimer)
+      fallbackTimer = 0
+    }
+
+    const onPadConnected = () => startLoop()
+    const onPadDisconnected = () => { if (!padPresent()) stopLoop() }
+    window.addEventListener('gamepadconnected', onPadConnected)
+    window.addEventListener('gamepaddisconnected', onPadDisconnected)
+
+    // A pad plugged in before mount may already be visible without any event.
+    if (padPresent()) startLoop()
+    else startFallback()
 
     // Switching to mouse/keyboard clears the gamepad focus-ring styling.
     const clearGamepadFlag = () => document.documentElement.removeAttribute('data-uc-gamepad')
@@ -333,6 +383,9 @@ export function useControllerNavigation(options: ControllerNavOptions) {
     return () => {
       active = false
       cancelAnimationFrame(raf)
+      stopFallback()
+      window.removeEventListener('gamepadconnected', onPadConnected)
+      window.removeEventListener('gamepaddisconnected', onPadDisconnected)
       window.removeEventListener('mousemove', clearGamepadFlag)
       window.removeEventListener('mousedown', clearGamepadFlag)
       document.documentElement.removeAttribute('data-uc-gamepad')

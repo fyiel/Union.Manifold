@@ -252,6 +252,9 @@ pub fn run() {
         .expect("error building union.manifold")
         .run(|app, event| {
             if let tauri::RunEvent::Exit = event {
+                // Persist metacache inserts still inside the write-behind
+                // debounce window so a quick browse-then-quit loses nothing.
+                sources::metacache::flush_all();
                 if let Some(state) = app.try_state::<AppState>() {
                     state.downloads.aria2().stop();
                 }
