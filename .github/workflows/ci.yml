@@ -59,3 +59,35 @@ jobs:
       - name: Cargo check
         working-directory: src-tauri
         run: cargo check --locked
+
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Assert version single-source
+        run: |
+          set -euo pipefail
+          pkg=$(jq -r .version package.json)
+          conf=$(jq -r .version src-tauri/tauri.conf.json)
+          cargo=$(awk -F'"' '/^version[[:space:]]*=/{print $2; exit}' src-tauri/Cargo.toml)
+          if [ "$pkg" != "$conf" ] || [ "$pkg" != "$cargo" ]; then
+            echo "::error::version drift: package.json=$pkg tauri.conf.json=$conf Cargo.toml=$cargo"
+            exit 1
+          fi
+          echo "versions aligned at $pkg"
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Typecheck renderer
+        run: pnpm typecheck
