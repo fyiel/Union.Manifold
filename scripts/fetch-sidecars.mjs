@@ -11,7 +11,6 @@ const binDir = path.join(root, 'src-tauri', 'binaries')
 const resDir = path.join(root, 'src-tauri', 'resources')
 
 const ARIA2_VERSION = process.env.ARIA2_VERSION || '1.37.0'
-const ARIA2_DARWIN_VERSION = process.env.ARIA2_DARWIN_VERSION || '1.35.0'
 const SEVENZIP_VERSION = process.env.SEVENZIP_VERSION || '2301'
 const CACERT_URL = process.env.ARIA2_CACERT_URL || 'https://curl.se/ca/cacert.pem'
 const SEVENZR_URL = process.env.SEVENZR_URL || 'https://www.7-zip.org/a/7zr.exe'
@@ -28,8 +27,8 @@ const ARIA2 = {
   'win32-x64': { url: `https://github.com/zhengqwe/aria2-static-builds-with-patches/releases/download/v${ARIA2_VERSION}/aria2-${ARIA2_VERSION}-win-x86-64.zip`, bin: 'aria2c.exe' },
   'linux-x64': { url: `https://github.com/abcfy2/aria2-static-build/releases/download/${ARIA2_VERSION}/aria2-x86_64-linux-musl_static.zip`, bin: 'aria2c' },
   'linux-arm64': { url: `https://github.com/abcfy2/aria2-static-build/releases/download/${ARIA2_VERSION}/aria2-aarch64-linux-musl_static.zip`, bin: 'aria2c' },
-  'darwin-x64': { url: `https://github.com/aria2/aria2/releases/download/release-${ARIA2_DARWIN_VERSION}/aria2-${ARIA2_DARWIN_VERSION}-osx-darwin.tar.bz2`, bin: 'aria2c' },
-  'darwin-arm64': { url: `https://github.com/aria2/aria2/releases/download/release-${ARIA2_DARWIN_VERSION}/aria2-${ARIA2_DARWIN_VERSION}-osx-darwin.tar.bz2`, bin: 'aria2c' },
+  'darwin-x64': { url: `https://github.com/Morton-Li/Aria2-MacOS-Builder/releases/download/release-${ARIA2_VERSION}/aria2c-macos-x86_64.tar.gz`, bin: 'aria2c-macos-x86_64' },
+  'darwin-arm64': { url: `https://github.com/Morton-Li/Aria2-MacOS-Builder/releases/download/release-${ARIA2_VERSION}/aria2c-macos-arm64.tar.gz`, bin: 'aria2c-macos-arm64' },
 }
 
 const SEVENZIP = {
@@ -48,7 +47,7 @@ function log(msg) {
 
 function targets() {
   const args = process.argv.slice(2)
-  if (args.includes('--all')) return ['linux-x64', 'win32-x64']
+  if (args.includes('--all')) return ['linux-x64', 'win32-x64', 'darwin-x64', 'darwin-arm64']
   const explicit = args.filter((a) => TRIPLES[a])
   return explicit.length ? explicit : [hostKey]
 }
@@ -138,7 +137,13 @@ function findFile(dir, name, sub) {
 
 async function stage(spec, outName, triple, isWin) {
   const dest = path.join(binDir, `${outName}-${triple}${isWin ? '.exe' : ''}`)
-  if (fs.existsSync(dest)) return log(`present ${path.basename(dest)}`)
+  const stamp = `${dest}.src`
+  // the staged filename is fixed (Tauri resolves externalBin by triple), so
+  // record the source url in a stamp and refetch when it changes, e.g. a bumped
+  // ARIA2_VERSION/SEVENZIP_VERSION rewrites the url
+  if (fs.existsSync(dest) && fs.existsSync(stamp) && fs.readFileSync(stamp, 'utf8') === spec.url) {
+    return log(`present ${path.basename(dest)}`)
+  }
   const tmp = path.join(os.tmpdir(), `sc-${Date.now()}-${path.basename(spec.url)}`)
   const work = fs.mkdtempSync(path.join(os.tmpdir(), 'sc-'))
   try {
@@ -150,6 +155,7 @@ async function stage(spec, outName, triple, isWin) {
     fs.mkdirSync(binDir, { recursive: true })
     fs.copyFileSync(bin, dest)
     if (!isWin) fs.chmodSync(dest, 0o755)
+    fs.writeFileSync(stamp, spec.url)
     log(`installed ${path.basename(dest)}`)
   } finally {
     fs.rmSync(tmp, { force: true })
@@ -173,6 +179,7 @@ async function cacert() {
 }
 
 async function main() {
+  const failures = []
   for (const key of targets()) {
     const triple = TRIPLES[key]
     const isWin = key.startsWith('win32')
@@ -180,25 +187,32 @@ async function main() {
       try {
         await stage(ARIA2[key], 'aria2c', triple, isWin)
       } catch (e) {
-        log(`aria2 ${key} skipped (${e.message})`)
+        failures.push(`aria2 ${key}: ${e.message}`)
       }
     }
     if (SEVENZIP[key]) {
       try {
         await stage(SEVENZIP[key], '7z', triple, isWin)
       } catch (e) {
-        log(`7z ${key} skipped (${e.message})`)
+        failures.push(`7z ${key}: ${e.message}`)
       }
     }
   }
   try {
     await cacert()
   } catch (e) {
-    log(`cacert skipped (${e.message})`)
+    failures.push(`cacert: ${e.message}`)
+  }
+  // a requested target that fails to stage must fail the run, otherwise CI's
+  // "Fetch sidecars" goes green with zero binaries and tauri-action later dies
+  // with an opaque "external binary not found"
+  if (failures.length) {
+    for (const f of failures) log(`FAILED ${f}`)
+    throw new Error(`${failures.length} sidecar target(s) failed to stage`)
   }
 }
 
 main().catch((e) => {
-  log(`skipped (${e.message})`)
-  process.exit(0)
+  log(`error: ${e.message}`)
+  process.exit(1)
 })
