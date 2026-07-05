@@ -530,14 +530,24 @@ pub fn find_installing(root: &Path, appid: &str) -> Option<(PathBuf, Value)> {
 }
 
 #[tauri::command(async)]
-pub fn delete_archive_files(payload: Value) -> Value {
+pub fn delete_archive_files(state: State<'_, AppState>, payload: Value) -> Value {
+    // Every legitimate caller passes paths from the archive-delete prompt, which
+    // always live under the download root; refuse anything outside it so this
+    // command can never be turned into an arbitrary file deleter.
+    let root = match state.download_root().canonicalize() {
+        Ok(r) => r,
+        Err(_) => return json!({ "ok": false, "error": "download root unavailable" }),
+    };
     let paths = payload.get("archivePaths").and_then(|v| v.as_array()).cloned().unwrap_or_default();
     let mut deleted = 0;
     for p in paths {
-        if let Some(s) = p.as_str() {
-            if std::fs::remove_file(s).is_ok() {
-                deleted += 1;
-            }
+        let Some(s) = p.as_str() else { continue };
+        let Ok(real) = Path::new(s).canonicalize() else { continue };
+        if !real.starts_with(&root) || !real.is_file() {
+            continue;
+        }
+        if std::fs::remove_file(&real).is_ok() {
+            deleted += 1;
         }
     }
     json!({ "ok": true, "deletedCount": deleted })
