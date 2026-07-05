@@ -194,7 +194,6 @@ where
 pub fn decode_entities(s: &str) -> String {
     let mut out = s.to_string();
     for (from, to) in [
-        ("&amp;", "&"),
         ("&lt;", "<"),
         ("&gt;", ">"),
         ("&quot;", "\""),
@@ -210,6 +209,9 @@ pub fn decode_entities(s: &str) -> String {
         ("&reg;", "\u{00ae}"),
         ("&trade;", "\u{2122}"),
         ("&copy;", "\u{00a9}"),
+        // Decode &amp; LAST so an already-escaped entity like "&amp;lt;" decodes
+        // to the literal "&lt;" instead of being double-decoded into "<".
+        ("&amp;", "&"),
     ] {
         out = out.replace(from, to);
     }
