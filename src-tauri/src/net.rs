@@ -20,7 +20,13 @@ fn reason(status: u16) -> String {
         .to_string()
 }
 
-async fn do_fetch(url: &str, method: &str, headers: HashMap<String, String>, body: Option<Vec<u8>>) -> Value {
+async fn do_fetch(
+    url: &str,
+    method: &str,
+    headers: HashMap<String, String>,
+    body: Option<Vec<u8>>,
+    prefer_text: bool,
+) -> Value {
     let opts = FetchOpts {
         method: Some(method.to_string()),
         headers,
@@ -36,15 +42,43 @@ async fn do_fetch(url: &str, method: &str, headers: HashMap<String, String>, bod
                 .iter()
                 .filter_map(|(k, v)| v.to_str().ok().map(|val| [k.as_str().to_string(), val.to_string()]))
                 .collect();
+            // Textual payloads skip the base64 round-trip: the renderer used to
+            // atob + per-char copy multi-MB JSON bodies on the main thread. Only
+            // valid UTF-8 is sent as `bodyText` so bytes always round-trip
+            // exactly; anything else keeps the base64 `body` fallback.
+            let textual = prefer_text
+                || resp
+                    .headers()
+                    .get(reqwest::header::CONTENT_TYPE)
+                    .and_then(|v| v.to_str().ok())
+                    .map(|ct| {
+                        let mime = ct.split(';').next().unwrap_or("").trim().to_ascii_lowercase();
+                        mime.starts_with("text/") || mime == "application/json" || mime.ends_with("+json")
+                    })
+                    .unwrap_or(false);
             let bytes = resp.bytes().await.map(|b| b.to_vec()).unwrap_or_default();
-            let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
-            json!({
+            let mut out = json!({
                 "ok": (200..300).contains(&status),
                 "status": status,
                 "statusText": reason(status),
                 "headers": header_pairs,
-                "body": b64,
-            })
+            });
+            let (key, value) = if textual {
+                match String::from_utf8(bytes) {
+                    Ok(text) => ("bodyText", Value::String(text)),
+                    Err(err) => (
+                        "body",
+                        Value::String(base64::engine::general_purpose::STANDARD.encode(err.into_bytes())),
+                    ),
+                }
+            } else {
+                (
+                    "body",
+                    Value::String(base64::engine::general_purpose::STANDARD.encode(&bytes)),
+                )
+            };
+            out[key] = value;
+            out
         }
         Err(_) => json!({
             "ok": false,
@@ -70,5 +104,7 @@ pub async fn auth_fetch(base_url: String, path: String, init: Option<Value>) -> 
         })
         .unwrap_or_default();
     let body = init.get("body").and_then(|v| v.as_str()).map(|s| s.as_bytes().to_vec());
-    do_fetch(&join(&base_url, &path), &method, headers, body).await
+    // Callers may force text mode for content types the auto-detection misses.
+    let prefer_text = init.get("preferText").and_then(|v| v.as_bool()).unwrap_or(false);
+    do_fetch(&join(&base_url, &path), &method, headers, body, prefer_text).await
 }

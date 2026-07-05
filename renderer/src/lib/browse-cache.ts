@@ -38,14 +38,37 @@ export function consumeDiskRestore(): boolean {
   return was
 }
 
-export function setBrowseCache(next: Omit<BrowseCache, "scrollTop"> & { scrollTop?: number }): void {
-  // preserve the live scrollTop across the frequent state-driven cache writes
-  cache = { ...next, scrollTop: next.scrollTop ?? cache?.scrollTop ?? 0 }
-  diskRestore = false
+let persistTimer: number | null = null
+
+// JSON.stringify(48 games) + localStorage.setItem is a synchronous main-thread
+// cost and setBrowseCache runs on every keystroke (BrowsePage persists its live
+// view). Only the last state of a burst needs to reach disk, so the write is
+// debounced (trailing); the in-memory cache stays eager.
+function flushBrowseCacheToDisk(): void {
+  persistTimer = null
+  if (!cache) return
   try {
     const snap: BrowseCache = { ...cache, games: cache.games.slice(0, 48), offset: Math.min(cache.offset, 48) }
     localStorage.setItem(LS_KEY, JSON.stringify(snap))
   } catch { /* quota — ignore */ }
+}
+
+export function setBrowseCache(next: Omit<BrowseCache, "scrollTop"> & { scrollTop?: number }): void {
+  // preserve the live scrollTop across the frequent state-driven cache writes
+  cache = { ...next, scrollTop: next.scrollTop ?? cache?.scrollTop ?? 0 }
+  diskRestore = false
+  if (persistTimer !== null) window.clearTimeout(persistTimer)
+  persistTimer = window.setTimeout(flushBrowseCacheToDisk, 500)
+}
+
+// Flush a pending write when the page goes away so the last burst isn't lost.
+if (typeof window !== "undefined") {
+  window.addEventListener("pagehide", () => {
+    if (persistTimer !== null) {
+      window.clearTimeout(persistTimer)
+      flushBrowseCacheToDisk()
+    }
+  })
 }
 
 // Cheap scroll-only update, called on every scroll without rebuilding the entry.

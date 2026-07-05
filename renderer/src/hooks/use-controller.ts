@@ -128,12 +128,29 @@ export function useController() {
     }
   }, [settings.controllerSlot, updateConnectionState])
 
-  // Poll for controller connections
+  // Detect controllers from connect/disconnect events plus one initial check
+  // (a pad plugged in before mount may already be visible without any event).
   useEffect(() => {
     checkControllers()
-    const interval = setInterval(checkControllers, 5000)
-    return () => clearInterval(interval)
+    window.addEventListener('gamepadconnected', checkControllers)
+    window.addEventListener('gamepaddisconnected', checkControllers)
+    return () => {
+      window.removeEventListener('gamepadconnected', checkControllers)
+      window.removeEventListener('gamepaddisconnected', checkControllers)
+    }
   }, [checkControllers])
+
+  // Some webviews only surface a pad in getGamepads() (and fire the connect
+  // event) after a button press, so keep a slow safety-net poll — but only
+  // while the feature is enabled and no pad is known, and never while hidden.
+  useEffect(() => {
+    if (!settings.enabled || connected) return
+    const interval = setInterval(() => {
+      if (document.hidden) return
+      checkControllers()
+    }, 12_000)
+    return () => clearInterval(interval)
+  }, [settings.enabled, connected, checkControllers])
 
   // Enable/disable controller support
   const setEnabled = useCallback(async (enabled: boolean) => {

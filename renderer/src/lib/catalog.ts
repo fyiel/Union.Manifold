@@ -118,6 +118,25 @@ export function normalizeCatalogGame(game: any): CatalogGame {
   }
 }
 
+// Cooperative whole-catalog normalization. normalizeCatalogGame runs several
+// regexes plus an NFD searchText build per game; mapped over the full catalog
+// in one go that's a single long main-thread task right at Library-switch
+// time. Work in ~300-game slices, yielding to the event loop between slices so
+// paint and input stay live. Plain setTimeout(0) is the yield primitive
+// because it works in WebKit (macOS), WebView2 (Windows) and WebKitGTK (Linux)
+// alike, unlike scheduler.yield / requestIdleCallback.
+const NORMALIZE_SLICE = 300
+
+async function normalizeCatalogGamesChunked(games: unknown[]): Promise<CatalogGame[]> {
+  const out = new Array<CatalogGame>(games.length)
+  for (let i = 0; i < games.length; i += NORMALIZE_SLICE) {
+    const end = Math.min(i + NORMALIZE_SLICE, games.length)
+    for (let j = i; j < end; j++) out[j] = normalizeCatalogGame(games[j])
+    if (end < games.length) await new Promise<void>((resolve) => setTimeout(resolve, 0))
+  }
+  return out
+}
+
 export function getCatalogCache(): CatalogSnapshot {
   return {
     games: memoryCache.games,
@@ -130,7 +149,10 @@ export function getCatalogCache(): CatalogSnapshot {
 
 function setCatalogCache(snapshot: Partial<CatalogSnapshot>) {
   if (Array.isArray(snapshot.games)) {
-    memoryCache.games = snapshot.games.map((game) => normalizeCatalogGame(game))
+    // Games arrive pre-normalized: hydrateCatalogCache and persistCatalogCache
+    // both run normalizeCatalogGamesChunked before calling this, which keeps
+    // this setter synchronous and free of whole-catalog passes.
+    memoryCache.games = snapshot.games
   }
   if (snapshot.stats && typeof snapshot.stats === "object") {
     memoryCache.stats = snapshot.stats
@@ -191,7 +213,9 @@ export async function hydrateCatalogCache(): Promise<CatalogSnapshot> {
           return next
         })
         setCatalogCache({
-          games: cleaned,
+          // Chunked normalize: hydration lands at first Library switch; a
+          // synchronous whole-catalog map here blocked that paint.
+          games: await normalizeCatalogGamesChunked(cleaned),
           stats: result.stats && typeof result.stats === "object" ? result.stats : {},
           updatedAt: result.updatedAt,
           gamesUpdatedAt: result.gamesUpdatedAt,
@@ -247,6 +271,44 @@ function stripLocalMediaForPersistence(game: CatalogGame): CatalogGame {
   return next as CatalogGame
 }
 
+// ── Debounced disk write ──
+// saveCatalogState serializes the ENTIRE catalog into one IPC payload. Writing
+// it inline meant that cost landed synchronously with the very fetch that
+// refreshed the catalog (Library-switch time). The flush runs on idle instead
+// (short-timeout fallback for WebKit/WebKitGTK, which lack requestIdleCallback)
+// and coalesces back-to-back persists (games + stats refresh) into one write.
+// It reads memoryCache at flush time so the newest state always wins; worst
+// case on quit-before-flush is a refetch next launch (this is a cache, not the
+// source of truth).
+let catalogFlushScheduled = false
+
+async function flushCatalogToDisk(): Promise<void> {
+  try {
+    const result = await window.ucDownloads?.saveCatalogState?.({
+      games: memoryCache.games.map((game) => stripLocalMediaForPersistence(game)),
+      stats: memoryCache.stats,
+      gamesUpdatedAt: memoryCache.gamesUpdatedAt,
+      statsUpdatedAt: memoryCache.statsUpdatedAt,
+    })
+    if (!result?.ok) {
+      throw new Error(result?.error || "persist_catalog_failed")
+    }
+  } catch (error) {
+    gameLogger.warn("Failed to persist catalog cache", { data: { error: String(error) } })
+  }
+}
+
+function scheduleCatalogDiskFlush(): void {
+  if (catalogFlushScheduled) return
+  catalogFlushScheduled = true
+  const run = () => {
+    catalogFlushScheduled = false
+    void flushCatalogToDisk()
+  }
+  if (typeof requestIdleCallback === "function") requestIdleCallback(run, { timeout: 1000 })
+  else setTimeout(run, 250)
+}
+
 export async function persistCatalogCache(snapshot: Partial<CatalogSnapshot>): Promise<void> {
   // In-memory cache keeps the local hints (so the running session keeps using
   // them when valid). The persisted-to-disk form strips them so a future
@@ -257,33 +319,18 @@ export async function persistCatalogCache(snapshot: Partial<CatalogSnapshot>): P
   const nextStatsUpdatedAt = Number(snapshot.statsUpdatedAt ?? memoryCache.statsUpdatedAt ?? Date.now())
   const updatedAt = Math.max(nextGamesUpdatedAt, nextStatsUpdatedAt, Number(snapshot.updatedAt || 0))
 
-  // setCatalogCache normalizes the games array exactly once. Previously this
-  // function pre-normalized the array and then setCatalogCache normalized the
-  // SAME array a second time — a full redundant pass (regex developer
-  // extraction + NFD searchText build + object spread) over the entire catalog
-  // on every persist. Hand the raw array straight to setCatalogCache and read
-  // the normalized result back from memoryCache.
+  // Normalization still happens exactly once per persist, but chunked so it
+  // can't monopolize the main thread (setCatalogCache stores the result as-is;
+  // see its comment).
   setCatalogCache({
-    games: snapshot.games,
+    games: Array.isArray(snapshot.games) ? await normalizeCatalogGamesChunked(snapshot.games) : undefined,
     stats: nextStats,
     updatedAt,
     gamesUpdatedAt: nextGamesUpdatedAt,
     statsUpdatedAt: nextStatsUpdatedAt,
   })
 
-  try {
-    const result = await window.ucDownloads?.saveCatalogState?.({
-      games: memoryCache.games.map((game) => stripLocalMediaForPersistence(game)),
-      stats: nextStats,
-      gamesUpdatedAt: nextGamesUpdatedAt,
-      statsUpdatedAt: nextStatsUpdatedAt,
-    })
-    if (!result?.ok) {
-      throw new Error(result?.error || "persist_catalog_failed")
-    }
-  } catch (error) {
-    gameLogger.warn("Failed to persist catalog cache", { data: { error: String(error) } })
-  }
+  scheduleCatalogDiskFlush()
 }
 
 export async function readInstalledGames(): Promise<CatalogGame[]> {
@@ -413,7 +460,9 @@ export async function fetchCatalogGames(): Promise<CatalogGame[]> {
     throw new Error(`Failed to load games (${response.status})`)
   }
   const data = await response.json()
-  return Array.isArray(data) ? data.map((game) => normalizeCatalogGame(game)) : []
+  // Chunked: this used to be one synchronous map over the entire catalog,
+  // fired exactly when the 6h TTL lapsed — i.e. at Library-switch time.
+  return Array.isArray(data) ? normalizeCatalogGamesChunked(data) : []
 }
 
 export async function fetchCatalogStats(): Promise<GameStats> {

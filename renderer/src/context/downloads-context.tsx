@@ -1260,20 +1260,44 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (typeof window === "undefined") return
-    // Reconcile frequently - catches stuck extracting/installing items when the main
-    // process finishes but the status update was missed (e.g. window was hidden).
-    const interval = setInterval(() => {
-      const appids = new Set(
-        downloadsRef.current
-          .filter((item) => ["extracting", "installing", "paused"].includes(item.status))
-          .map((item) => item.appid)
-          .filter(Boolean) as string[]
-      )
+    // Reconcile the given statuses now: one installed_get IPC per distinct appid,
+    // none at all when nothing matches. Shared by the 3s poll and the
+    // focus/visible resync below.
+    const reconcile = (statuses: DownloadStatus[]) => {
+      const candidates = downloadsRef.current.filter((item) => statuses.includes(item.status))
+      if (!candidates.length) return
+      const appids = new Set(candidates.map((item) => item.appid).filter(Boolean) as string[])
       for (const appid of appids) {
         void reconcileInstalledState(appid)
       }
+    }
+    // Reconcile frequently - catches stuck extracting/installing items when the main
+    // process finishes but the status update was missed (e.g. window was hidden).
+    // "paused" is deliberately NOT polled anymore: it cost one installed_get IPC per
+    // paused appid every 3s for the whole session. Paused items are still resynced by
+    // the onUpdate completion path (which reconciles every item of a completed appid)
+    // and by the focus/visible resync below — including once at launch, when the
+    // window first gains focus.
+    const interval = setInterval(() => {
+      // Hidden window: nobody is watching; the focus/visible resync catches up
+      // the moment the window returns.
+      if (document.hidden) return
+      reconcile(["extracting", "installing"])
     }, 3000)
-    return () => clearInterval(interval)
+    // One-shot, event-driven resync when the window comes back. This is where
+    // paused items (e.g. paused-at-100% whose extraction finished while the
+    // window was away) still get reconciled — without polling them.
+    const onReturn = () => {
+      if (document.hidden) return
+      reconcile(["extracting", "installing", "paused"])
+    }
+    document.addEventListener("visibilitychange", onReturn)
+    window.addEventListener("focus", onReturn)
+    return () => {
+      clearInterval(interval)
+      document.removeEventListener("visibilitychange", onReturn)
+      window.removeEventListener("focus", onReturn)
+    }
   }, [reconcileInstalledState])
 
   // The main process writes installed manifests; renderer can call `window.ucDownloads.listInstalled()` when needed.

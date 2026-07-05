@@ -324,7 +324,14 @@ export async function apiFetch(path: string, init?: RequestInit) {
         ? await Promise.race([window.ucAuth!.fetch(getApiBaseUrl(), path, serializedInit), abortRejection])
         : await window.ucAuth!.fetch(getApiBaseUrl(), path, serializedInit)
       setServiceReachable(!(result.status === 0 || result.statusText === "fetch_failed"))
-      const bytes = result.body ? base64ToUint8Array(result.body) : new Uint8Array()
+      // Textual responses arrive as a plain string (`bodyText`) and skip the
+      // base64 decode entirely; binary bodies still come base64-encoded.
+      const responseBody: BodyInit =
+        typeof result.bodyText === "string"
+          ? result.bodyText
+          : result.body
+            ? base64ToUint8Array(result.body)
+            : new Uint8Array()
       // Response status must be in [200, 599]. A status of 0 means a network
       // error (DNS failure, server unreachable, CORS block, etc.).  Map it to
       // 503 so the Response object can be constructed and normal error handling
@@ -349,7 +356,7 @@ export async function apiFetch(path: string, init?: RequestInit) {
           statusText: result.statusText || "",
         })
       }
-      return new Response(bytes as any, {
+      return new Response(responseBody, {
         status: safeStatus,
         statusText: result.statusText || (safeStatus !== rawStatus ? "Network Error" : ""),
         headers: new Headers(result.headers || []),
@@ -384,15 +391,12 @@ export async function apiFetch(path: string, init?: RequestInit) {
   }
 }
 
-function base64ToUint8Array(base64: string): Uint8Array {
+function base64ToUint8Array(base64: string): Uint8Array<ArrayBuffer> {
   if (!base64) return new Uint8Array()
-  const binary = atob(base64)
-  const len = binary.length
-  const bytes = new Uint8Array(len)
-  for (let i = 0; i < len; i++) {
-    bytes[i] = binary.charCodeAt(i)
-  }
-  return bytes
+  // Single-pass decode: engines optimize Uint8Array.from over the atob string
+  // far better than a manual per-char loop. (Uint8Array.fromBase64 would be
+  // faster still but is not available in all shipping webviews yet.)
+  return Uint8Array.from(atob(base64), (c) => c.charCodeAt(0))
 }
 
 export async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {

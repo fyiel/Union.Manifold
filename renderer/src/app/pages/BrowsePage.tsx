@@ -92,7 +92,7 @@ export function BrowsePage() {
       const res = await querySources(params, id)
       if (id !== reqId.current) return
       rememberGames(res.games)
-      const nextGames = append ? mergeUnique(games, res.games) : res.games
+      const nextGames = append ? mergeUnique(gamesRef.current, res.games) : res.games
       setGames(nextGames)
       offsetRef.current = startOffset + PAGE
       setTotal(append && res.games.length === 0 ? nextGames.length : res.total)
@@ -113,8 +113,12 @@ export function BrowsePage() {
         return next
       })
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [games])
+    // `games` deliberately stays out of the deps: the previous page for append
+    // merges comes from gamesRef (synced by the effect above, and already used
+    // by the partial-batch handler below). With [games] this callback minted a
+    // new identity per result batch, so the onSourcesChanged effect below
+    // unsubscribed/resubscribed against main on every batch.
+  }, [])
 
   const loadMore = useCallback(async () => {
     if (loadingMoreRef.current) return

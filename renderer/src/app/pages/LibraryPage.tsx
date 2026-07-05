@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react"
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { Play, Square, Settings, ArrowUpDown, LayoutGrid, List, Inbox } from "lucide-react"
 import { useGamesData } from "@/hooks/use-games"
 import { useGameLaunch } from "@/context/game-launch-context"
 import { useRunningGame } from "@/hooks/use-running-games"
 import { useDownloadsSelector } from "@/context/downloads-context"
+import { useTabVisible } from "@/context/tab-visibility"
 import { hasInstalledVersionUpdate, proxyImageUrl } from "@/lib/utils"
 import { rememberGames, rememberGameAs, getRememberedGame, resolveInstalledGame, getDownloadArt, hydrateDownloadArt } from "@/lib/sources"
 import { MONO, COVER_LINES, gbLabel, SearchIcon, CenterState } from "@/app/manifold/ui"
@@ -80,17 +81,38 @@ function InstallingStrip({ installingMeta, installedIds, filter, query }: { inst
   // it starts downloading, not only once extraction begins. Merged with the
   // backend installing snapshot for states the live queue may not hold (e.g. a
   // "downloaded, awaiting extract" item restored after a restart).
+  // Frozen while the tab is hidden: equality claims "unchanged" so the ~5/s
+  // progress flushes never re-render the hidden Library tab. Flipping back to
+  // visible re-renders via the context change, and that render re-reads the
+  // store snapshot, so catch-up is free. The ref keeps even a stale equality
+  // closure reading the CURRENT visibility.
+  const visible = useTabVisible()
+  const visibleRef = useRef(visible)
+  visibleRef.current = visible
+  // Progress is quantized in the selector itself (integer percent, speed to
+  // 0.1 MB/s) so byte-level ticks that wouldn't move the rendered strip
+  // compare equal and re-render nothing.
   const live = useDownloadsSelector(
-    (downloads) => downloads.map((d) => ({ appid: d.appid, name: d.gameName, status: d.status, received: d.receivedBytes, total: d.totalBytes, speed: d.speedBps, extract: d.extractProgress ?? null })),
-    (a, b) => a.length === b.length && a.every((x, i) => x.appid === b[i].appid && x.status === b[i].status && x.received === b[i].received && x.total === b[i].total && x.extract === b[i].extract),
+    (downloads) => downloads.map((d) => ({
+      appid: d.appid,
+      name: d.gameName,
+      status: d.status,
+      pct: d.totalBytes > 0 ? Math.min(100, Math.round((d.receivedBytes / d.totalBytes) * 100)) : 0,
+      total: d.totalBytes,
+      speed: d.speedBps ? Math.round((d.speedBps / 1e6) * 10) / 10 : 0,
+      extract: typeof d.extractProgress === "number" ? Math.min(100, Math.max(0, Math.round(d.extractProgress))) : null,
+    })),
+    (a, b) => !visibleRef.current || (a.length === b.length && a.every((x, i) => x.appid === b[i].appid && x.name === b[i].name && x.status === b[i].status && x.pct === b[i].pct && x.total === b[i].total && x.speed === b[i].speed && x.extract === b[i].extract)),
   )
 
   const installing = useMemo(() => {
-    const byId = new Map<string, { name?: string; received: number; total: number; status: string; speed: number; extract: number | null }>()
+    const byId = new Map<string, { name?: string; pct: number; total: number; status: string; speed: number; extract: number | null }>()
     for (const p of live) {
       if (!p.appid) continue
       const cur = byId.get(p.appid)
-      if (!cur || p.received > cur.received) byId.set(p.appid, { name: p.name, received: p.received, total: p.total, status: String(p.status), speed: p.speed, extract: p.extract })
+      // pct·total ≈ received bytes, so the most-advanced duplicate entry still
+      // wins without carrying raw byte counts through the selector.
+      if (!cur || p.pct * p.total > cur.pct * cur.total) byId.set(p.appid, { name: p.name, pct: p.pct, total: p.total, status: String(p.status), speed: p.speed, extract: p.extract })
     }
     const metaById = new Map(installingMeta.map((g) => [g.appid, g]))
     const ids = new Set<string>([...byId.keys(), ...metaById.keys()])
@@ -104,9 +126,9 @@ function InstallingStrip({ installingMeta, installedIds, filter, query }: { inst
       const done = ["completed", "extracted", "installed", "cancelled", "failed", "extract_failed"].includes(st)
       if (done || installedIds.has(appid)) continue
       const pct = extracting
-        ? (typeof p?.extract === "number" ? Math.min(100, Math.max(0, Math.round(p.extract))) : 100)
-        : p && p.total > 0 ? Math.min(100, Math.round((p.received / p.total) * 100)) : 0
-      const speed = p?.speed ? `${(p.speed / 1e6).toFixed(1)} MB/s` : ""
+        ? (typeof p?.extract === "number" ? p.extract : 100)
+        : p ? p.pct : 0
+      const speed = p?.speed ? `${p.speed.toFixed(1)} MB/s` : ""
       const status = extracting ? "extracting" : st === "downloading" ? `downloading${speed ? ` · ${speed}` : ""}` : st
       const art = getDownloadArt(appid)
       out.push({ appid, name: m?.name || p?.name || art?.title || appid, image: m?.image || art?.image, pct, status })
@@ -124,7 +146,7 @@ function InstallingStrip({ installingMeta, installedIds, filter, query }: { inst
         {installing.map((g) => (
           <div key={g.appid} style={{ display: "flex", alignItems: "center", gap: 14, padding: "12px 16px", border: "1px solid var(--mf-line)", borderRadius: 11, background: "var(--mf-panel-2)" }}>
             <div style={{ width: 38, height: 50, borderRadius: 6, flexShrink: 0, background: g.image ? "#0f0f0f" : COVER_LINES, overflow: "hidden" }}>
-              {g.image && <img src={proxyImageUrl(g.image)} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />}
+              {g.image && <img src={proxyImageUrl(g.image)} alt="" loading="lazy" decoding="async" style={{ width: "100%", height: "100%", objectFit: "cover" }} />}
             </div>
             <div style={{ minWidth: 0, flex: 1 }}>
               <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
@@ -236,10 +258,18 @@ export function LibraryPage() {
       }
     }
     void load()
-    const refresh = () => { void load() }
+    // Multi-part installs fire uc_game_installed once per part; a full load()
+    // costs 2 settings IPCs + both manifest lists + art hydration, so coalesce
+    // bursts to one trailing-edge reload.
+    let reloadTimer: number | undefined
+    const refresh = () => {
+      window.clearTimeout(reloadTimer)
+      reloadTimer = window.setTimeout(() => { void load() }, 300)
+    }
     window.addEventListener("uc_game_installed", refresh)
     return () => {
       alive = false
+      window.clearTimeout(reloadTimer)
       window.removeEventListener("uc_game_installed", refresh)
     }
   }, [])
@@ -269,7 +299,9 @@ export function LibraryPage() {
     void (async () => {
       const CONC = 4
       for (let i = 0; i < targets.length; i += CONC) {
-        let dirty = false
+        // Accumulate the batch's results and apply them in ONE setInstalled so
+        // N games cost ceil(N/4) list updates, not N full-list re-renders.
+        const resolved = new Map<string, UnifiedSourceGame>()
         await Promise.all(targets.slice(i, i + CONC).map(async (g) => {
           try {
             const full = await resolveInstalledGame(g.appid, g.name)
@@ -277,19 +309,25 @@ export function LibraryPage() {
             rememberGames([full])
             rememberGameAs(g.appid, full)
             gameCacheRef.current[g.appid] = { cachedAt: Date.now(), game: full }
-            dirty = true
-            setInstalled((prev) => prev.map((x) => x.appid !== g.appid ? x : {
+            resolved.set(g.appid, full)
+          } catch { enrichTried.current.delete(g.appid) }
+        }))
+        if (resolved.size) {
+          setInstalled((prev) => prev.map((x) => {
+            const full = resolved.get(x.appid)
+            if (!full) return x
+            return {
               ...x,
               name: (!x.name || x.name === x.appid) ? (full.title || x.name) : x.name,
               image: x.image || full.image || undefined,
               sizeText: x.sizeText || full.sizeText || undefined,
               sizeBytes: x.sizeBytes ?? full.sizeBytes,
-            }))
-          } catch { enrichTried.current.delete(g.appid) }
-        }))
-        // Persist after each batch so a resolved game survives restarts (within
-        // the TTL) for both the card and an instant detail open.
-        if (dirty) void window.ucSettings?.set?.(GAME_CACHE_KEY, { ...gameCacheRef.current })
+            }
+          }))
+          // Persist after each batch so a resolved game survives restarts
+          // (within the TTL) for both the card and an instant detail open.
+          void window.ucSettings?.set?.(GAME_CACHE_KEY, { ...gameCacheRef.current })
+        }
       }
     })()
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -333,8 +371,12 @@ export function LibraryPage() {
 
   const installedIds = useMemo(() => new Set(installed.map((g) => g.appid)), [installed])
 
-  const play = (g: LibGame) => void requestLaunch({ appid: g.appid, name: g.name })
-  const openDetail = (g: LibGame) => {
+  // Row callbacks are useCallback-stable so the memoized LibCard/LibRow rows
+  // bail out of the re-renders the parent takes for keystrokes and enrichment
+  // ticks (a fresh closure per row per render would defeat React.memo).
+  const play = useCallback((g: LibGame) => void requestLaunch({ appid: g.appid, name: g.name }), [requestLaunch])
+  const onStop = useCallback((appid: string) => void stopGame(appid), [stopGame])
+  const openDetail = useCallback((g: LibGame) => {
     // Prefer the cached fully-resolved game (seeded from libraryGameCache on load
     // or a just-finished enrichment) so detail opens with no refetch. Otherwise
     // hand the route a minimal record it can hydrate from.
@@ -346,27 +388,11 @@ export function LibraryPage() {
     // installed:true seeds the detail page so the primary button is "Play" from
     // the first frame (no Download flash) since the library only holds installs.
     navigate(`/g/${encodeURIComponent(g.appid)}`, { state: { game, installed: true } })
-  }
+  }, [navigate])
 
-  // Build the menu/dialog payload, merging the LibGame with whatever the cached
-  // fully-resolved game adds (developer, description, genres, hero) so Edit
-  // details opens pre-filled.
-  const toMenuGame = (g: LibGame): MenuGame => {
-    const full = getRememberedGame(g.appid)
-    return {
-      appid: g.appid,
-      name: g.name,
-      image: g.image || full?.image,
-      sizeText: g.sizeText || full?.sizeText,
-      version: g.version || full?.version,
-      developer: full?.developer,
-      description: full?.description,
-      genres: full?.genres,
-      heroImage: full?.heroImage,
-    }
-  }
-
-  const openMenu = (g: LibGame, anchorEl: HTMLElement) => setMenu({ game: toMenuGame(g), anchor: anchorEl.getBoundingClientRect() })
+  const openMenu = useCallback((g: LibGame, anchorEl: HTMLElement) => setMenu({ game: toMenuGame(g), anchor: anchorEl.getBoundingClientRect() }), [])
+  // Right-click path: anchors the menu at the pointer instead of an element.
+  const openRowMenuAt = useCallback((g: LibGame, x: number, y: number) => setMenu({ game: toMenuGame(g), anchor: rectFromPoint(x, y) }), [])
 
   const isFavorite = (appid: string) => (meta[appid]?.collections || []).some((c) => c.toLowerCase() === "favorites")
 
@@ -494,27 +520,7 @@ export function LibraryPage() {
         ) : view === "grid" ? (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(168px, 1fr))", gap: 18, alignContent: "start" }}>
             {shown.map((g) => (
-              <div key={g.appid} onClick={() => openDetail(g)} onContextMenu={(e) => { e.preventDefault(); setMenu({ game: toMenuGame(g), anchor: rectFromPoint(e.clientX, e.clientY) }) }} className="mf-card" style={{ display: "flex", flexDirection: "column", border: "1px solid color-mix(in srgb, var(--mf-t0) 7%, transparent)", borderRadius: 10, overflow: "hidden", background: "var(--mf-panel)", cursor: "pointer", contentVisibility: "auto", containIntrinsicSize: "auto 300px" }}>
-                <div style={{ position: "relative", aspectRatio: "3 / 4", background: g.image ? "#0f0f0f" : COVER_LINES, display: "flex", alignItems: "flex-end", padding: 12 }}>
-                  {g.image && <img src={proxyImageUrl(g.image)} alt={g.name} loading="lazy" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />}
-                  {updates.has(g.appid) && (
-                    <span title="update available" style={{ position: "absolute", top: 10, right: 10, padding: "3px 8px", borderRadius: 99, background: "rgba(0,0,0,0.6)", border: "1px solid var(--mf-line-2)", fontFamily: MONO, fontSize: 9, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--mf-t1)" }}>update</span>
-                  )}
-                  {!g.image && <span style={{ fontFamily: MONO, fontSize: 11, lineHeight: 1.35, letterSpacing: "0.05em", textTransform: "uppercase", color: "var(--mf-t2)" }}>{g.name}</span>}
-                </div>
-                <div style={{ padding: "11px 12px 12px", display: "flex", flexDirection: "column", gap: 9 }}>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-                    <span style={{ fontSize: 13, fontWeight: 600, color: "var(--mf-t1)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{g.name}</span>
-                    <span style={{ fontFamily: MONO, fontSize: 10, color: "var(--mf-t5)", whiteSpace: "nowrap", flexShrink: 0 }}>{lastPlayedLabel(g.lastPlayedAt)}</span>
-                  </div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <PlayButton appid={g.appid} full onPlay={() => play(g)} onStop={() => void stopGame(g.appid)} />
-                    <button type="button" title="More" onClick={(e) => { e.stopPropagation(); openMenu(g, e.currentTarget) }} className="mf-ghost" style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 32, height: 32, flexShrink: 0, borderRadius: 7, border: "1px solid var(--mf-line-2)", background: "transparent", color: "var(--mf-t3)", cursor: "pointer" }}>
-                      <Settings size={15} strokeWidth={1.8} />
-                    </button>
-                  </div>
-                </div>
-              </div>
+              <LibCard key={g.appid} game={g} hasUpdate={updates.has(g.appid)} onOpen={openDetail} onContextMenu={openRowMenuAt} onPlay={play} onStop={onStop} onMenu={openMenu} />
             ))}
           </div>
         ) : (
@@ -528,23 +534,7 @@ export function LibraryPage() {
             </div>
             <div style={{ display: "flex", flexDirection: "column", paddingTop: 4 }}>
               {shown.map((g) => (
-                <div key={g.appid} onClick={() => openDetail(g)} onContextMenu={(e) => { e.preventDefault(); setMenu({ game: toMenuGame(g), anchor: rectFromPoint(e.clientX, e.clientY) }) }} className="mf-listrow" style={{ display: "grid", gridTemplateColumns: "44px minmax(0,1fr) 150px 120px 140px", gap: 14, alignItems: "center", padding: "8px 14px", borderRadius: 8, cursor: "pointer", contentVisibility: "auto", containIntrinsicSize: "auto 64px" }}>
-                  <div style={{ width: 40, height: 50, borderRadius: 5, overflow: "hidden", background: g.image ? "#0f0f0f" : COVER_LINES }}>
-                    {g.image && <img src={proxyImageUrl(g.image)} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />}
-                  </div>
-                  <div style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 9 }}>
-                    <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--mf-t1)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{g.name}</span>
-                    {updates.has(g.appid) && <span style={{ padding: "2px 7px", borderRadius: 99, border: "1px solid var(--mf-line-2)", fontFamily: MONO, fontSize: 8.5, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--mf-t3)", flexShrink: 0 }}>update</span>}
-                  </div>
-                  <span style={{ fontFamily: MONO, fontSize: 11, color: "var(--mf-t3)" }}>{g.sizeText || gbLabel(g.sizeBytes) || "—"}</span>
-                  <span style={{ fontFamily: MONO, fontSize: 11, color: "var(--mf-t3)" }}>{lastPlayedLabel(g.lastPlayedAt)}</span>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, justifySelf: "end" }}>
-                    <PlayButton appid={g.appid} onPlay={() => play(g)} onStop={() => void stopGame(g.appid)} />
-                    <button type="button" title="More" onClick={(e) => { e.stopPropagation(); openMenu(g, e.currentTarget) }} className="mf-ghost" style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 32, height: 32, flexShrink: 0, borderRadius: 7, border: "1px solid var(--mf-line-2)", background: "transparent", color: "var(--mf-t3)", cursor: "pointer" }}>
-                      <Settings size={15} strokeWidth={1.8} />
-                    </button>
-                  </div>
-                </div>
+                <LibRow key={g.appid} game={g} hasUpdate={updates.has(g.appid)} onOpen={openDetail} onContextMenu={openRowMenuAt} onPlay={play} onStop={onStop} onMenu={openMenu} />
               ))}
             </div>
           </>
@@ -582,6 +572,89 @@ export function LibraryPage() {
     </div>
   )
 }
+
+// Build the menu/dialog payload, merging the LibGame with whatever the cached
+// fully-resolved game adds (developer, description, genres, hero) so Edit
+// details opens pre-filled. Module scope: reads only the remembered-game
+// cache, so the parent's menu callbacks can be useCallback([])-stable.
+function toMenuGame(g: LibGame): MenuGame {
+  const full = getRememberedGame(g.appid)
+  return {
+    appid: g.appid,
+    name: g.name,
+    image: g.image || full?.image,
+    sizeText: g.sizeText || full?.sizeText,
+    version: g.version || full?.version,
+    developer: full?.developer,
+    description: full?.description,
+    genres: full?.genres,
+    heroImage: full?.heroImage,
+  }
+}
+
+// Shared props for the memoized library rows. `hasUpdate` is a plain boolean
+// (not the updates Set) and every callback is useCallback-stable in the
+// parent, so React.memo bails out unless the game object itself changed.
+type LibRowProps = {
+  game: LibGame
+  hasUpdate: boolean
+  onOpen: (g: LibGame) => void
+  onContextMenu: (g: LibGame, x: number, y: number) => void
+  onPlay: (g: LibGame) => void
+  onStop: (appid: string) => void
+  onMenu: (g: LibGame, anchorEl: HTMLElement) => void
+}
+
+// One grid card, memoized (same pattern as GameCard) so keystrokes in the
+// filter and enrichment ticks only re-render rows whose game changed.
+const LibCard = memo(function LibCard({ game: g, hasUpdate, onOpen, onContextMenu, onPlay, onStop, onMenu }: LibRowProps) {
+  return (
+    <div onClick={() => onOpen(g)} onContextMenu={(e) => { e.preventDefault(); onContextMenu(g, e.clientX, e.clientY) }} className="mf-card" style={{ display: "flex", flexDirection: "column", border: "1px solid color-mix(in srgb, var(--mf-t0) 7%, transparent)", borderRadius: 10, overflow: "hidden", background: "var(--mf-panel)", cursor: "pointer", contentVisibility: "auto", containIntrinsicSize: "auto 300px" }}>
+      <div style={{ position: "relative", aspectRatio: "3 / 4", background: g.image ? "#0f0f0f" : COVER_LINES, display: "flex", alignItems: "flex-end", padding: 12 }}>
+        {g.image && <img src={proxyImageUrl(g.image)} alt={g.name} loading="lazy" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />}
+        {hasUpdate && (
+          <span title="update available" style={{ position: "absolute", top: 10, right: 10, padding: "3px 8px", borderRadius: 99, background: "rgba(0,0,0,0.6)", border: "1px solid var(--mf-line-2)", fontFamily: MONO, fontSize: 9, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--mf-t1)" }}>update</span>
+        )}
+        {!g.image && <span style={{ fontFamily: MONO, fontSize: 11, lineHeight: 1.35, letterSpacing: "0.05em", textTransform: "uppercase", color: "var(--mf-t2)" }}>{g.name}</span>}
+      </div>
+      <div style={{ padding: "11px 12px 12px", display: "flex", flexDirection: "column", gap: 9 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: "var(--mf-t1)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{g.name}</span>
+          <span style={{ fontFamily: MONO, fontSize: 10, color: "var(--mf-t5)", whiteSpace: "nowrap", flexShrink: 0 }}>{lastPlayedLabel(g.lastPlayedAt)}</span>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <PlayButton appid={g.appid} full onPlay={() => onPlay(g)} onStop={() => onStop(g.appid)} />
+          <button type="button" title="More" onClick={(e) => { e.stopPropagation(); onMenu(g, e.currentTarget) }} className="mf-ghost" style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 32, height: 32, flexShrink: 0, borderRadius: 7, border: "1px solid var(--mf-line-2)", background: "transparent", color: "var(--mf-t3)", cursor: "pointer" }}>
+            <Settings size={15} strokeWidth={1.8} />
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+})
+
+// One list row, memoized for the same reason as LibCard.
+const LibRow = memo(function LibRow({ game: g, hasUpdate, onOpen, onContextMenu, onPlay, onStop, onMenu }: LibRowProps) {
+  return (
+    <div onClick={() => onOpen(g)} onContextMenu={(e) => { e.preventDefault(); onContextMenu(g, e.clientX, e.clientY) }} className="mf-listrow" style={{ display: "grid", gridTemplateColumns: "44px minmax(0,1fr) 150px 120px 140px", gap: 14, alignItems: "center", padding: "8px 14px", borderRadius: 8, cursor: "pointer", contentVisibility: "auto", containIntrinsicSize: "auto 64px" }}>
+      <div style={{ width: 40, height: 50, borderRadius: 5, overflow: "hidden", background: g.image ? "#0f0f0f" : COVER_LINES }}>
+        {g.image && <img src={proxyImageUrl(g.image)} alt="" loading="lazy" decoding="async" style={{ width: "100%", height: "100%", objectFit: "cover" }} />}
+      </div>
+      <div style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 9 }}>
+        <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--mf-t1)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{g.name}</span>
+        {hasUpdate && <span style={{ padding: "2px 7px", borderRadius: 99, border: "1px solid var(--mf-line-2)", fontFamily: MONO, fontSize: 8.5, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--mf-t3)", flexShrink: 0 }}>update</span>}
+      </div>
+      <span style={{ fontFamily: MONO, fontSize: 11, color: "var(--mf-t3)" }}>{g.sizeText || gbLabel(g.sizeBytes) || "—"}</span>
+      <span style={{ fontFamily: MONO, fontSize: 11, color: "var(--mf-t3)" }}>{lastPlayedLabel(g.lastPlayedAt)}</span>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, justifySelf: "end" }}>
+        <PlayButton appid={g.appid} onPlay={() => onPlay(g)} onStop={() => onStop(g.appid)} />
+        <button type="button" title="More" onClick={(e) => { e.stopPropagation(); onMenu(g, e.currentTarget) }} className="mf-ghost" style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 32, height: 32, flexShrink: 0, borderRadius: 7, border: "1px solid var(--mf-line-2)", background: "transparent", color: "var(--mf-t3)", cursor: "pointer" }}>
+          <Settings size={15} strokeWidth={1.8} />
+        </button>
+      </div>
+    </div>
+  )
+})
 
 // A zero-size rect at the cursor, so right-click opens the menu at the pointer.
 function rectFromPoint(x: number, y: number): DOMRect {

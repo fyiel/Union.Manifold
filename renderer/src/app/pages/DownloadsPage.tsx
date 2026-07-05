@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from "react"
-import { useDownloads, type DownloadItem } from "@/context/downloads-context"
+import { useEffect, useMemo, useRef, useState } from "react"
+import { useDownloadsActions, useDownloadsSelector, type DownloadItem } from "@/context/downloads-context"
+import { useTabVisible } from "@/context/tab-visibility"
 import { useGameLaunch } from "@/context/game-launch-context"
 import { useToast } from "@/context/toast-context"
 import { getDownloadArt, getRememberedGame, hydrateDownloadArt } from "@/lib/sources"
@@ -61,8 +62,21 @@ function fmtEta(sec: number | null) {
 }
 
 export function DownloadsPage() {
-  const dl = useDownloads()
-  const { downloads, pauseGroup, resumeGroup, cancelGroup, pauseAll, resumeAll, clearCompleted, clearByAppid } = dl
+  const { pauseGroup, resumeGroup, cancelGroup, pauseAll, resumeAll, clearCompleted, clearByAppid } = useDownloadsActions()
+  // Freeze-and-catch-up: progress flushes tick ~5/s even while this tab sits
+  // under display:none (paint stops, reconciliation doesn't). While hidden the
+  // equality fn reports every store update as "equal", so useSyncExternalStore
+  // keeps the old snapshot and the page never re-renders. Flipping back to
+  // visible re-renders via the TabVisible context change; that render updates
+  // the ref first (hook order) and re-reads the live snapshot, so the page
+  // catches up instantly with nothing missed.
+  const visible = useTabVisible()
+  const visibleRef = useRef(visible)
+  visibleRef.current = visible
+  const downloads = useDownloadsSelector(
+    (d) => d,
+    (a, b) => (visibleRef.current ? a === b : true)
+  )
   const { requestLaunch } = useGameLaunch()
   const { toast } = useToast()
   const [copied, setCopied] = useState<string | null>(null)
@@ -319,7 +333,7 @@ function Cover({ appid, w, h, r, border }: { appid: string; w: number; h: number
   const img = getDownloadArt(appid)?.image || getRememberedGame(appid)?.image
   return (
     <div style={{ width: w, height: h, borderRadius: r, flexShrink: 0, overflow: "hidden", background: img ? "#0f0f0f" : COVER_LINES, border: border ? "1px solid var(--mf-line)" : undefined }}>
-      {img && <img src={proxyImageUrl(img)} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />}
+      {img && <img src={proxyImageUrl(img)} alt="" loading="lazy" decoding="async" style={{ width: "100%", height: "100%", objectFit: "cover" }} />}
     </div>
   )
 }

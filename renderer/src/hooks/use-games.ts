@@ -123,10 +123,22 @@ export function useGamesData() {
       }
     }
 
-    void load()
+    // Defer the hydrate/refetch off the mount commit so the first switch to
+    // Library paints the memory-cache seed instantly and refreshes a beat
+    // later. requestIdleCallback is missing in WebKit (macOS) and older
+    // WebKitGTK (Linux) webviews, so fall back to a short timeout there.
+    let idleHandle: number | null = null
+    let timerHandle: number | null = null
+    if (typeof requestIdleCallback === "function") {
+      idleHandle = requestIdleCallback(() => void load(), { timeout: 500 })
+    } else {
+      timerHandle = window.setTimeout(() => void load(), 50)
+    }
 
     return () => {
       cancelled = true
+      if (idleHandle !== null && typeof cancelIdleCallback === "function") cancelIdleCallback(idleHandle)
+      if (timerHandle !== null) window.clearTimeout(timerHandle)
     }
   }, [connectivity.isOnline])
 

@@ -15,13 +15,32 @@ export function sourcesAvailable(): boolean {
   return Boolean(api())
 }
 
-export async function listSources(): Promise<SourceInfo[]> {
-  const res = await api()?.list?.()
-  return res?.ok ? res.sources : []
+// Sidebar, BrowsePage, AdvancedSearch/Settings and applySavedSourceSettings all
+// ask for the source list around startup; cache the promise module-wide (same
+// idea as fetchSteamArt's in-flight dedupe below) so they share one IPC.
+// Empty/failed reads are dropped so a later call retries, and the cache is
+// invalidated whenever the enabled set can change: setSourceEnabled here, plus
+// the sources-changed settings event (see onSourcesChanged).
+let _sourcesList: Promise<SourceInfo[]> | null = null
+
+export function listSources(): Promise<SourceInfo[]> {
+  if (_sourcesList) return _sourcesList
+  const p = (async () => {
+    const res = await api()?.list?.()
+    return res?.ok ? res.sources : []
+  })()
+  _sourcesList = p
+  p.then(
+    (sources) => { if (!sources.length && _sourcesList === p) _sourcesList = null },
+    () => { if (_sourcesList === p) _sourcesList = null }
+  )
+  return p
 }
 
 export async function setSourceEnabled(id: string, enabled: boolean): Promise<boolean> {
   const res = await api()?.setEnabled?.(id, enabled)
+  // The cached list's `enabled` flags are stale now; the next caller refetches.
+  _sourcesList = null
   return Boolean(res?.ok)
 }
 
@@ -223,7 +242,12 @@ export async function saveDisabledSources(ids: string[]): Promise<void> {
 export function onSourcesChanged(cb: () => void): () => void {
   if (!window.ucSettings?.onChanged) return () => { }
   return window.ucSettings.onChanged((d) => {
-    if (d?.key === SOURCE_DISABLED_KEY) cb()
+    if (d?.key === SOURCE_DISABLED_KEY) {
+      // The enabled set changed (possibly from another window): drop the
+      // cached list before subscribers re-query it.
+      _sourcesList = null
+      cb()
+    }
   })
 }
 

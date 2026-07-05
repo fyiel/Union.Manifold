@@ -21,7 +21,8 @@
         "decorations": false,
         "resizable": true,
         "center": true,
-        "dragDropEnabled": true
+        "dragDropEnabled": true,
+        "backgroundColor": "#151515"
       }
     ],
     "security": {
