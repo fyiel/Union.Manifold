@@ -218,7 +218,16 @@ pub fn merge_games(records: Vec<SourceGame>) -> Vec<UnifiedGame> {
         let key = normalize_title(&r.title);
         if !key.is_empty() {
             if let Some(&j) = by_title.get(&key) {
-                union(&mut parent, i, j);
+                // Don't title-union records asserting DIFFERENT non-zero Steam
+                // appids: normalize_title strips edition noise and would collapse
+                // e.g. "Dark Souls" and "Dark Souls Remastered" into one game.
+                // Same-appid records still merge via `by_appid` above.
+                let ai = r.steam_app_id.filter(|v| *v > 0);
+                let aj = records[j].steam_app_id.filter(|v| *v > 0);
+                let conflict = matches!((ai, aj), (Some(x), Some(y)) if x != y);
+                if !conflict {
+                    union(&mut parent, i, j);
+                }
             } else {
                 by_title.insert(key, i);
             }
@@ -230,9 +239,14 @@ pub fn merge_games(records: Vec<SourceGame>) -> Vec<UnifiedGame> {
         let root = find(&mut parent, i);
         groups.entry(root).or_default().push(i);
     }
+    // HashMap iteration order is nondeterministic; emit groups by their smallest
+    // member index so browse/search order and sources_detail stay stable across
+    // cache refreshes (`idxs` is ascending since we pushed i in 0..n order).
+    let mut groups: Vec<Vec<usize>> = groups.into_values().collect();
+    groups.sort_by_key(|idxs| idxs[0]);
 
     let mut out = Vec::new();
-    for (_, idxs) in groups {
+    for idxs in groups {
         let mut game = UnifiedGame::default();
         let mut appid: Option<u64> = None;
         for &i in &idxs {
