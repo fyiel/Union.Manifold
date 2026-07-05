@@ -4,6 +4,65 @@ All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 The app shows its version as 1.0.0b (beta). 1.0.1 is the first packaged release.
 
+## 1.0.2
+
+A correctness and hardening pass over the whole app, no new surface.
+
+### Fixed
+
+Downloads and install
+- cancelling a download that already finished keeps the archive as install ready
+  instead of deleting a multi gb file, and a download only counts as complete
+  once aria2's control file is gone so a half written archive is never extracted
+- a download paused or cancelled during the startup window no longer keeps
+  running in the background, and a slow extraction no longer freezes progress
+  for every other active download
+- a non ascii filename can no longer crash the installer, nested tarballs
+  (tar.gz, tar.xz, tar.bz2) fully unpack instead of leaving a stray .tar, two
+  extractions can no longer race the same folder, and extraction bails with a
+  clear message before it fills the disk
+- filenames with characters like a colon are cleaned so a title such as
+  Half-Life: Alyx actually downloads on windows
+- aria2 picks a fresh port on retry instead of a fixed fallback and relaunches
+  itself if the daemon dies, instead of leaving every download stuck
+- retry on a failed download actually requeues it, a hung link resolve now times
+  out instead of stalling the queue, a game left queued at shutdown no longer
+  returns as failed, and an install that finishes while the window is hidden
+  still refreshes the library
+
+Sources and launch
+- browse honors its cache lifetime again so results refresh, and a network blip
+  no longer permanently poisons steam appid, protondb or unioncrax lookups
+- two games with different steam ids stop collapsing into one card, browse order
+  is stable across refreshes, and a source that is down shows a retry line
+  instead of looking like an empty result
+- steamrip and ankergames read the labelled repack size instead of a system
+  requirements figure, gofile links come from gofile's own response instead of a
+  hardcoded mirror, and html entities decode correctly
+- two quick launches can no longer orphan the first process, a missing umu or
+  proton runtime errors instead of silently falling back to bare wine, and
+  flatpak plus multi drive proton installs are detected
+
+### Changed
+
+- descending title sort now actually reverses
+- persisted download and catalog state are written atomically so a crash mid
+  write cannot corrupt them, and metacache saves no longer stall a cold browse
+- the app version is single sourced at 2.8.3 across package, cargo and tauri
+  config with a ci guard against drift, and updater artifacts are generated
+- the sidecar fetch ships a real arm64 aria2, refetches on a version bump and
+  fails loudly instead of silently shipping nothing, and release builds stay
+  drafts until every platform is built
+- the custom theme cap is respected on bulk import and logged errors carry real
+  detail instead of an empty object
+
+### Removed
+
+- dead electron era surface with no backend behind it, the unused auth provider
+  and its focus refetch, the no op log share toggle and consent modal, an
+  unbacked controller profile api, dead mirror auth and system stubs, and a
+  duplicate route table
+
 ## 1.0.1
 
 First published build, produced by the new auto release pipeline (Linux AppImage
