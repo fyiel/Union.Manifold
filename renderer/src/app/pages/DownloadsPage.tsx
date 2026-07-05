@@ -242,7 +242,6 @@ export function DownloadsPage() {
                   const total = g.items.reduce((n, it) => n + (it.totalBytes || 0), 0)
                   return (
                     <div key={g.appid} style={{ display: "flex", alignItems: "center", gap: 14, padding: "10px 14px", border: "1px solid var(--mf-line)", borderRadius: 10, background: "var(--mf-panel-2)" }}>
-                      <span style={{ display: "flex", alignItems: "center", justifyContent: "center", color: "var(--mf-t6)", flexShrink: 0 }}><GripIcon /></span>
                       <span style={{ fontFamily: MONO, fontSize: 11, color: "var(--mf-t5)", width: 18 }}>{String(i + 1).padStart(2, "0")}</span>
                       <Cover appid={g.appid} w={30} h={40} r={5} />
                       <span style={{ flex: 1, minWidth: 0, fontSize: 13.5, fontWeight: 600, color: "var(--mf-t1)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{g.name}</span>
@@ -341,4 +340,3 @@ const RetryIcon = () => <svg viewBox="0 0 16 16" width="13" height="13" fill="no
 const CheckIcon = () => <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round"><polyline points="3 8.5 6.5 12 13 4" /></svg>
 const CopyIcon = () => <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5" /><path d="M3.5 10.5h-.5a1.5 1.5 0 0 1-1.5-1.5v-6A1.5 1.5 0 0 1 3 1.5h6A1.5 1.5 0 0 1 10.5 3v.5" /></svg>
 const XIcon = ({ size = 14 }: { size?: number }) => <svg viewBox="0 0 16 16" width={size} height={size} fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round"><line x1="4" y1="4" x2="12" y2="12" /><line x1="12" y1="4" x2="4" y2="12" /></svg>
-const GripIcon = () => <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><circle cx="6" cy="4" r="1.1" /><circle cx="10" cy="4" r="1.1" /><circle cx="6" cy="8" r="1.1" /><circle cx="10" cy="8" r="1.1" /><circle cx="6" cy="12" r="1.1" /><circle cx="10" cy="12" r="1.1" /></svg>
