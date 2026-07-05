@@ -270,6 +270,15 @@ export function apiUrl(path: string): string {
   return `${base}${normalized}`
 }
 
+function rejectOnAbort(signal: AbortSignal | null | undefined): Promise<never> | null {
+  if (!signal) return null
+  return new Promise<never>((_, reject) => {
+    const abort = () => reject(new DOMException("The operation was aborted.", "AbortError"))
+    if (signal.aborted) abort()
+    else signal.addEventListener("abort", abort, { once: true })
+  })
+}
+
 export async function apiFetch(path: string, init?: RequestInit) {
   const nextInit: RequestInit = { ...(init || {}) }
   if (!nextInit.credentials) {
@@ -283,11 +292,6 @@ export async function apiFetch(path: string, init?: RequestInit) {
     if (typeof nextInit.body === "string" && nextInit.body.startsWith("{")) {
       headers.set("content-type", "application/json")
     }
-  }
-  
-  // Add user-agent header
-  if (!headers.has("user-agent")) {
-    headers.set("User-Agent", "UnionCrax.Direct/Electron")
   }
 
   // Create new init with updated headers
@@ -312,9 +316,13 @@ export async function apiFetch(path: string, init?: RequestInit) {
         ...finalInit,
         headers: Object.fromEntries(authHeaders.entries()),
         body: body ?? null,
+        signal: undefined,
       }
 
-      const result = await window.ucAuth!.fetch(getApiBaseUrl(), path, serializedInit)
+      const abortRejection = rejectOnAbort(finalInit.signal)
+      const result = abortRejection
+        ? await Promise.race([window.ucAuth!.fetch(getApiBaseUrl(), path, serializedInit), abortRejection])
+        : await window.ucAuth!.fetch(getApiBaseUrl(), path, serializedInit)
       setServiceReachable(!(result.status === 0 || result.statusText === "fetch_failed"))
       const bytes = result.body ? base64ToUint8Array(result.body) : new Uint8Array()
       // Response status must be in [200, 599]. A status of 0 means a network
@@ -400,48 +408,4 @@ export async function fetchJson<T>(path: string, init?: RequestInit): Promise<T>
     throw new Error(detail)
   }
   return response.json() as Promise<T>
-}
-
-/**
- * Authenticated multipart upload that works in both the launcher and a
- * browser context. In Electron we route the upload through the
- * `uc:auth-upload` IPC so the BrowserWindow's session cookies are
- * applied; otherwise we fall back to a plain `fetch` with
- * `credentials: include`. Both paths end up POSTing the same multipart
- * payload — only the cookie source differs.
- *
- * Use this whenever you need to send a file to an endpoint guarded by
- * the user session (avatar, banner, screenshot uploads, etc.). A plain
- * `fetch(apiUrl(...), {credentials:'include'})` will appear to work in a
- * browser but returns 401 in the launcher because the cookies live in a
- * different session.
- */
-export async function apiUpload(
-  path: string,
-  options: {
-    file?: File | Blob | null
-    fileName?: string
-    fileField?: string
-    fields?: Record<string, string>
-    method?: string
-  }
-): Promise<Response> {
-  const fields = options.fields || {}
-  const method = options.method || "POST"
-  const file = options.file ?? null
-  const fileName = options.fileName || (file && 'name' in (file as any) ? (file as File).name : "upload.bin")
-  const fileField = options.fileField || "file"
-
-  // Browser / fallback path — relies on cross-site cookies being available.
-  const form = new FormData()
-  for (const [key, value] of Object.entries(fields)) {
-    if (value == null) continue
-    form.append(key, String(value))
-  }
-  if (file) form.append(fileField, file, fileName)
-  return await fetch(apiUrl(path), {
-    method,
-    body: form,
-    credentials: "include",
-  })
 }
