@@ -2,7 +2,6 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 
-const LogSharingConsentModal = React.lazy(() => import("@/components/LogSharingConsentModal").then((m) => ({ default: m.LogSharingConsentModal })))
 import type { Game } from "@/lib/types"
 import {
   fetchDownloadLinks,
@@ -19,7 +18,7 @@ import {
   type PreferredDownloadHost,
 } from "@/lib/downloads"
 import { apiFetch } from "@/lib/api"
-import { addDownloadedGameToHistory, hasCookieConsent } from "@/lib/user-history"
+import { addDownloadedGameToHistory } from "@/lib/user-history"
 import { downloadLogger } from "@/lib/logger"
 import { reportPlayEvent } from "@/lib/cloud-collections"
 
@@ -82,11 +81,10 @@ export type DownloadItem = {
   warning?: string | null
   skippedFiles?: string[]
   spaceCheck?: DownloadSpaceCheck | null
-  /** Explicit position in the download queue. Set by the user when they
-   *  reorder the "Up Next" list (drag-and-drop). Items that share an appid
-   *  carry the same value so a whole game moves as one unit; ties break on
-   *  partIndex. Items without it fall back to startedAt ordering (e.g. a
-   *  newly-queued game appends to the end). */
+  /** Explicit position in the download queue. Items that share an appid carry
+   *  the same value so a whole game moves as one unit; ties break on partIndex.
+   *  Items without it fall back to startedAt ordering (e.g. a newly-queued game
+   *  appends to the end). */
   queueOrder?: number
 }
 
@@ -167,19 +165,14 @@ type DownloadsActionsValue = {
   startGameDownload: (game: Game, preferredHost?: PreferredDownloadHost, config?: DownloadConfig) => Promise<void>
   cancelDownload: (downloadId: string) => Promise<void>
   cancelGroup: (appid: string) => Promise<void>
-  pauseDownload: (downloadId: string) => Promise<void>
   pauseGroup: (appid: string) => Promise<void>
   pauseAll: () => Promise<void>
   resumeDownload: (downloadId: string) => Promise<void>
   resumeGroup: (appid: string) => Promise<void>
   resumeAll: () => Promise<void>
-  reorderQueuedGroups: (orderedAppids: string[]) => void
   upsertDownload: (download: DownloadItem) => void
-  showInFolder: (path: string) => Promise<void>
   openPath: (path: string) => Promise<void>
-  removeDownload: (downloadId: string) => void
   clearByAppid: (appid: string) => void
-  dismissByAppid: (appid: string) => Promise<void>
   clearCompleted: () => void
 }
 
@@ -194,11 +187,11 @@ const DownloadsStoreContext = createContext<DownloadsStore | null>(null)
 const LEGACY_STORAGE_KEY = "uc_direct_downloads"
 const PAUSABLE_STATUSES: DownloadStatus[] = ["downloading", "retrying", "extracting", "installing", "verifying"]
 
-/** Ordering for queued items. Honours the user's explicit `queueOrder` first
- *  (set via drag-and-drop reordering), falling back to enqueue time so a fresh
- *  download lands at the end. Items sharing a queueOrder (same game, multiple
- *  parts) keep their natural part order. Exported shape kept simple so both the
- *  auto-start sequencer and the renderer's "Up Next" list sort identically. */
+/** Ordering for queued items. Honours an explicit `queueOrder` first, falling
+ *  back to enqueue time so a fresh download lands at the end. Items sharing a
+ *  queueOrder (same game, multiple parts) keep their natural part order. Used by
+ *  the auto-start sequencer and the renderer's "Up Next" list so both sort
+ *  identically. */
 function compareQueuePosition(
   a: { queueOrder?: number; startedAt: number; partIndex?: number },
   b: { queueOrder?: number; startedAt: number; partIndex?: number }
@@ -368,6 +361,8 @@ function createSyntheticDownloadFromInstallingManifest(
         ? "failed"
         : rawStatus === "cancelled"
           ? "cancelled"
+        : rawStatus === "queued"
+          ? "queued"
           : "failed"
   const metadata = manifest?.metadata || {}
 
@@ -455,7 +450,6 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
   const resumeLocksRef = useRef(new Set<string>())
   const pendingProgressRef = useRef<Map<string, DownloadUpdate>>(new Map())
   const progressFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const [showLogShareConsent, setShowLogShareConsent] = useState(false)
   const [archiveDeletionPrompts, setArchiveDeletionPrompts] = useState<ArchiveDeletionPrompt[]>([])
   const [archiveDontAskAgain, setArchiveDontAskAgain] = useState(false)
   const [archiveDeletionBusy, setArchiveDeletionBusy] = useState(false)
@@ -493,11 +487,9 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
       if (cancelled) return
 
       if (restored.length > 0) {
-        setDownloads((prev) => {
-          const next = mergeHydratedDownloads(prev, restored)
-          downloadsRef.current = next
-          return next
-        })
+        const next = mergeHydratedDownloads(downloadsRef.current, restored)
+        downloadsRef.current = next
+        setDownloads(next)
       }
 
       setPersistenceReady(true)
@@ -522,37 +514,48 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
     }
   }, [])
 
+  // Persist the current (non-synthetic) snapshot immediately. Shared by the
+  // debounce timer and the teardown/close flush so a download whose state
+  // changed inside the last debounce window is written before the process
+  // exits — otherwise a queued-at-shutdown game gets rebuilt from a stale
+  // manifest as "Failed" on the next launch.
+  const flushPersist = useCallback(() => {
+    if (typeof window === "undefined" || !persistenceReady) return
+    if (persistTimerRef.current) {
+      clearTimeout(persistTimerRef.current)
+      persistTimerRef.current = null
+    }
+    // Drop synthetic-from-manifest entries. They have `host: "local"` and
+    // either no url/savePath or a placeholder id, so round-tripping them
+    // through LevelDB just creates a stale shadow that outranks the real
+    // manifest snapshot on the next launch. The reconcile pass rebuilds them
+    // on every start anyway.
+    const snapshot = downloadsRef.current.filter((item) => {
+      if (item.host !== "local") return true
+      if (item.url && item.savePath) return true
+      return false
+    })
+    void (async () => {
+      try {
+        if (window.ucDownloads?.savePersistedState) {
+          const result = await window.ucDownloads.savePersistedState(snapshot)
+          if (!result?.ok) throw new Error(result?.error || "persist_failed")
+          try { localStorage.removeItem(LEGACY_STORAGE_KEY) } catch { }
+          return
+        }
+      } catch (error) {
+        downloadLogger.warn("Failed to persist downloads to LevelDB", { data: { error: String(error) } })
+      }
+
+      try {
+        localStorage.setItem(LEGACY_STORAGE_KEY, JSON.stringify(snapshot))
+      } catch { }
+    })()
+  }, [persistenceReady])
+
   useEffect(() => {
     if (typeof window === "undefined" || !persistenceReady) return
-    if (persistTimerRef.current) clearTimeout(persistTimerRef.current)
-    persistTimerRef.current = setTimeout(() => {
-      // Drop synthetic-from-manifest entries before persisting. They have
-      // `host: "local"` and either no url/savePath or a placeholder id, so
-      // round-tripping them through LevelDB just creates a stale shadow that
-      // outranks the real manifest snapshot on the next launch. The manifest
-      // reconcile pass rebuilds these on every start anyway.
-      const snapshot = downloadsRef.current.filter((item) => {
-        if (item.host !== "local") return true
-        if (item.url && item.savePath) return true
-        return false
-      })
-      void (async () => {
-        try {
-          if (window.ucDownloads?.savePersistedState) {
-            const result = await window.ucDownloads.savePersistedState(snapshot)
-            if (!result?.ok) throw new Error(result?.error || "persist_failed")
-            try { localStorage.removeItem(LEGACY_STORAGE_KEY) } catch { }
-            return
-          }
-        } catch (error) {
-          downloadLogger.warn("Failed to persist downloads to LevelDB", { data: { error: String(error) } })
-        }
-
-        try {
-          localStorage.setItem(LEGACY_STORAGE_KEY, JSON.stringify(snapshot))
-        } catch { }
-      })()
-    }, 1500)
+    persistTimerRef.current = setTimeout(flushPersist, 1500)
 
     return () => {
       if (persistTimerRef.current) {
@@ -560,7 +563,21 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         persistTimerRef.current = null
       }
     }
-  }, [downloads, persistenceReady])
+  }, [downloads, persistenceReady, flushPersist])
+
+  // Force a persist flush on teardown and on an app close/quit request so the
+  // debounced snapshot can't be lost when the window goes away.
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const onBeforeUnload = () => flushPersist()
+    window.addEventListener("beforeunload", onBeforeUnload)
+    const offCloseRequest = window.ucApp?.onCloseRequest?.(() => flushPersist())
+    return () => {
+      window.removeEventListener("beforeunload", onBeforeUnload)
+      offCloseRequest?.()
+      flushPersist()
+    }
+  }, [flushPersist])
 
   const reconcileInstalledState = useCallback(
     async (appid?: string | null) => {
@@ -570,35 +587,18 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
       try {
         const installed = await window.ucDownloads.getInstalled(appid)
         if (!installed) return
-        setDownloads((prev) => {
-          let mutated = false
-          const next = prev.map((item) => {
-            if (item.appid !== appid) return item
-            if (["completed", "extracted"].includes(item.status)) return item
+        const prev = downloadsRef.current
+        let mutated = false
+        const next = prev.map((item) => {
+          if (item.appid !== appid) return item
+          if (["completed", "extracted"].includes(item.status)) return item
 
-            // Force-complete items whose appid has an installed manifest on disk.
-            // For extracting/installing items this means extraction finished successfully.
-            // For paused/downloading items at 100% bytes, the download + extraction already
-            // completed but the renderer missed the status update.
-            if (["extracting", "installing"].includes(item.status)) {
-              // Extraction was in progress and installed manifest now exists → done.
-              mutated = true
-              return {
-                ...item,
-                status: "completed" as DownloadStatus,
-                error: null,
-                completedAt: Date.now(),
-                speedBps: 0,
-                etaSeconds: null,
-                receivedBytes: item.totalBytes || item.receivedBytes,
-              }
-            }
-
-            if (["downloading", "paused"].includes(item.status)) {
-              const isFinished = item.totalBytes > 0 && item.receivedBytes >= item.totalBytes
-              if (!isFinished) return item
-            }
-
+          // Force-complete items whose appid has an installed manifest on disk.
+          // For extracting/installing items this means extraction finished successfully.
+          // For paused/downloading items at 100% bytes, the download + extraction already
+          // completed but the renderer missed the status update.
+          if (["extracting", "installing"].includes(item.status)) {
+            // Extraction was in progress and installed manifest now exists → done.
             mutated = true
             return {
               ...item,
@@ -609,10 +609,34 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
               etaSeconds: null,
               receivedBytes: item.totalBytes || item.receivedBytes,
             }
-          })
-          if (mutated) downloadsRef.current = next
-          return next
+          }
+
+          if (["downloading", "paused"].includes(item.status)) {
+            const isFinished = item.totalBytes > 0 && item.receivedBytes >= item.totalBytes
+            if (!isFinished) return item
+          }
+
+          mutated = true
+          return {
+            ...item,
+            status: "completed" as DownloadStatus,
+            error: null,
+            completedAt: Date.now(),
+            speedBps: 0,
+            etaSeconds: null,
+            receivedBytes: item.totalBytes || item.receivedBytes,
+          }
         })
+        if (mutated) {
+          downloadsRef.current = next
+          setDownloads(next)
+          // Extraction/completion finished (possibly while the window was
+          // hidden) — announce it so the Library refreshes, matching the
+          // event onUpdate emits on a live completion.
+          if (typeof window !== "undefined") {
+            window.dispatchEvent(new CustomEvent("uc_game_installed", { detail: { appid } }))
+          }
+        }
         try {
           await window.ucDownloads.deleteInstalling?.(appid)
         } catch { }
@@ -756,60 +780,59 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
 
         if (cancelled) return
 
-        setDownloads((prev) => {
-          // Merge by appid: if a manifest item is fresher (has url/savePath
-          // that the existing item lacks, or supersedes a "local" placeholder),
-          // promote those fields onto the existing item. This is how a stale
-          // LevelDB row with host="local" and no url gets healed by the fresh
-          // downloadSnapshot the main process wrote on shutdown.
-          const byAppid = new Map<string, DownloadItem>()
-          for (const item of prev) {
-            if (item.appid) byAppid.set(item.appid, item)
+        const prev = downloadsRef.current
+        // Merge by appid: if a manifest item is fresher (has url/savePath
+        // that the existing item lacks, or supersedes a "local" placeholder),
+        // promote those fields onto the existing item. This is how a stale
+        // LevelDB row with host="local" and no url gets healed by the fresh
+        // downloadSnapshot the main process wrote on shutdown.
+        const byAppid = new Map<string, DownloadItem>()
+        for (const item of prev) {
+          if (item.appid) byAppid.set(item.appid, item)
+        }
+        const next = [...prev]
+        for (const item of hydrated) {
+          if (!item || !item.appid) continue
+          const existing = byAppid.get(item.appid)
+          if (!existing) {
+            next.unshift(item)
+            byAppid.set(item.appid, item)
+            continue
           }
-          const next = [...prev]
-          for (const item of hydrated) {
-            if (!item || !item.appid) continue
-            const existing = byAppid.get(item.appid)
-            if (!existing) {
-              next.unshift(item)
-              byAppid.set(item.appid, item)
-              continue
-            }
-            // Prefer the manifest's freshly-written url/savePath/host/byte
-            // counters over any stale placeholders on the existing row.
-            const shouldPromoteUrl = Boolean(item.url) && !existing.url
-            const shouldPromoteSavePath = Boolean(item.savePath) && !existing.savePath
-            const shouldPromoteHost = item.host && item.host !== "local" && existing.host === "local"
-            const shouldPromoteId = item.id && !item.id.startsWith("installing:") && existing.id.startsWith("installing:")
-            const shouldPromoteTotal = Number(item.totalBytes) > 0 && !(Number(existing.totalBytes) > 0)
-            const shouldPromoteReceived = Number(item.receivedBytes) > Number(existing.receivedBytes || 0)
-            if (
-              !shouldPromoteUrl &&
-              !shouldPromoteSavePath &&
-              !shouldPromoteHost &&
-              !shouldPromoteId &&
-              !shouldPromoteTotal &&
-              !shouldPromoteReceived
-            ) {
-              continue
-            }
-            const merged: DownloadItem = {
-              ...existing,
-              ...(shouldPromoteUrl ? { url: item.url, originalUrl: item.originalUrl || item.url } : {}),
-              ...(shouldPromoteSavePath ? { savePath: item.savePath } : {}),
-              ...(shouldPromoteHost ? { host: item.host } : {}),
-              ...(shouldPromoteId ? { id: item.id } : {}),
-              ...(shouldPromoteTotal ? { totalBytes: item.totalBytes } : {}),
-              ...(shouldPromoteReceived ? { receivedBytes: item.receivedBytes } : {}),
-              filename: existing.filename || item.filename,
-            }
-            const idx = next.findIndex((entry) => entry.appid === item.appid)
-            if (idx >= 0) next[idx] = merged
-            byAppid.set(item.appid, merged)
+          // Prefer the manifest's freshly-written url/savePath/host/byte
+          // counters over any stale placeholders on the existing row.
+          const shouldPromoteUrl = Boolean(item.url) && !existing.url
+          const shouldPromoteSavePath = Boolean(item.savePath) && !existing.savePath
+          const shouldPromoteHost = item.host && item.host !== "local" && existing.host === "local"
+          const shouldPromoteId = item.id && !item.id.startsWith("installing:") && existing.id.startsWith("installing:")
+          const shouldPromoteTotal = Number(item.totalBytes) > 0 && !(Number(existing.totalBytes) > 0)
+          const shouldPromoteReceived = Number(item.receivedBytes) > Number(existing.receivedBytes || 0)
+          if (
+            !shouldPromoteUrl &&
+            !shouldPromoteSavePath &&
+            !shouldPromoteHost &&
+            !shouldPromoteId &&
+            !shouldPromoteTotal &&
+            !shouldPromoteReceived
+          ) {
+            continue
           }
-          downloadsRef.current = next
-          return next
-        })
+          const merged: DownloadItem = {
+            ...existing,
+            ...(shouldPromoteUrl ? { url: item.url, originalUrl: item.originalUrl || item.url } : {}),
+            ...(shouldPromoteSavePath ? { savePath: item.savePath } : {}),
+            ...(shouldPromoteHost ? { host: item.host } : {}),
+            ...(shouldPromoteId ? { id: item.id } : {}),
+            ...(shouldPromoteTotal ? { totalBytes: item.totalBytes } : {}),
+            ...(shouldPromoteReceived ? { receivedBytes: item.receivedBytes } : {}),
+            filename: existing.filename || item.filename,
+          }
+          const idx = next.findIndex((entry) => entry.appid === item.appid)
+          if (idx >= 0) next[idx] = merged
+          byAppid.set(item.appid, merged)
+        }
+        downloadsRef.current = next
+        setDownloads(next)
       } catch {
         // ignore hydration failures
       }
@@ -826,7 +849,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), 12000)
     try {
-      const resolved = await resolveDownloadUrl(host, targetUrl)
+      const resolved = await resolveDownloadUrl(host, targetUrl, controller.signal)
       clearTimeout(timeout)
       return resolved
     } catch (err) {
@@ -1005,19 +1028,6 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         if (res && typeof res === "object" && "ok" in res && !res.ok) {
           throw new Error((res as { error?: string }).error || "Failed to start download")
         }
-        // If main process says this download was queued or already exists,
-        // mark the renderer item as "downloading" to break the retry loop.
-        // The main process will send real status updates (via onUpdate) once it begins processing.
-        const resObj = res as Record<string, unknown> | undefined
-        if (resObj && (resObj.already || resObj.queued)) {
-          setDownloads((prev) =>
-            prev.map((item) =>
-              item.id === next.id && item.status === "queued"
-                ? { ...item, status: "downloading" as DownloadStatus }
-                : item
-            )
-          )
-        }
       } catch (err) {
         const message = err instanceof Error ? err.message : "Failed to start download"
         setDownloads((prev) =>
@@ -1038,9 +1048,6 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!window.ucDownloads?.onUpdate) return
     const unsubscribe = window.ucDownloads.onUpdate((update: DownloadUpdate) => {
-      if (update.spaceCheck && typeof window !== "undefined") {
-        window.dispatchEvent(new CustomEvent("uc_insufficient_space", { detail: update }))
-      }
       // Batch pure "downloading" progress events to cap re-renders at ~5fps during active downloads
       const existingItem = downloadsRef.current.find((item) => item.id === update.downloadId)
       if (existingItem?.status === "downloading" && update.status === "downloading") {
@@ -1077,14 +1084,12 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
       // the batch for this id is now stale — drop it so the next 200ms flush
       // can't clobber the newer state we're about to apply.
       pendingProgressRef.current.delete(update.downloadId)
-      let nextDownloads: DownloadItem[] | null = null
       setDownloads((prev) => {
         const idx = prev.findIndex((item) => item.id === update.downloadId)
         if (idx === -1) {
           const created = createSyntheticDownloadFromUpdate(update)
           if (!created) return prev
           const clone = [created, ...prev]
-          nextDownloads = clone
           downloadsRef.current = clone
           return clone
         }
@@ -1144,22 +1149,9 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         }
         const clone = [...prev]
         clone[idx] = next
-        nextDownloads = clone
         downloadsRef.current = clone
         return clone
       })
-      if (update.status === "failed") {
-        // Auto-share logs silently if the user opted in. The consent modal is
-        // shown on first launch (via a separate onboarding flow), not here.
-        void (async () => {
-          try {
-            const consent = await window.ucSettings?.get?.("autoShareErrorLogs")
-            if (consent === true) {
-              await window.ucLogs?.shareLogs?.({ baseUrl: (window as any).ucApp?.getBaseUrl?.() ?? undefined })
-            }
-          } catch { /* ignore */ }
-        })()
-      }
 
       if (update.status === "completed" || update.status === "extracted") {
         queueMicrotask(() => {
@@ -1332,9 +1324,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
       }
 
       const downloadToken = await requestDownloadToken(game.appid)
-      if (hasCookieConsent()) {
-        addDownloadedGameToHistory(game.appid)
-      }
+      addDownloadedGameToHistory(game.appid)
 
       // Always fetch the current download links
       const linksResult = await fetchDownloadLinks(game.appid, downloadToken)
@@ -1418,13 +1408,11 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         }
       })
 
-      setDownloads((prev) => {
-        const staleStatuses: DownloadStatus[] = ["cancelled", "failed", "extract_failed"]
-        const cleared = prev.filter((item) => !(item.appid === game.appid && staleStatuses.includes(item.status)))
-        const next = [...newItems, ...cleared]
-        downloadsRef.current = next
-        return next
-      })
+      const staleStatuses: DownloadStatus[] = ["cancelled", "failed", "extract_failed"]
+      const cleared = downloadsRef.current.filter((item) => !(item.appid === game.appid && staleStatuses.includes(item.status)))
+      const next = [...newItems, ...cleared]
+      downloadsRef.current = next
+      setDownloads(next)
 
       // Clear any stale failed/cancelled manifest state when a fresh queue starts.
       // The Library page reads install manifests, so this must be updated immediately.
@@ -1469,11 +1457,9 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
       )
       if (!otherLivePart) {
         // Drop the rows first so the UI updates instantly, then clean the disk.
-        setDownloads((prev) => {
-          const next = prev.filter((item) => item.appid !== appid)
-          downloadsRef.current = next
-          return next
-        })
+        const next = downloadsRef.current.filter((item) => item.appid !== appid)
+        downloadsRef.current = next
+        setDownloads(next)
         try { await window.ucDownloads?.deleteInstalling?.(appid) } catch { }
         return
       }
@@ -1523,11 +1509,9 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
       downloadsRef.current.some((d) => d.appid === appid && ["completed", "extracted", "install_ready"].includes(String(d.status)))
     if (!keepArchive) {
       // Drop the rows first so the UI updates instantly, then clean the disk.
-      setDownloads((prev) => {
-        const next = prev.filter((item) => item.appid !== appid)
-        downloadsRef.current = next
-        return next
-      })
+      const next = downloadsRef.current.filter((item) => item.appid !== appid)
+      downloadsRef.current = next
+      setDownloads(next)
       try { await window.ucDownloads?.deleteInstalling?.(appid) } catch { }
       return
     }
@@ -1546,24 +1530,6 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
           : item
       )
     )
-  }, [])
-
-  const pauseDownload = useCallback(async (downloadId: string) => {
-    if (window.ucDownloads?.pause) {
-      await window.ucDownloads.pause(downloadId)
-    }
-    // Also pause any queued siblings in the same appid group so the queue
-    // doesn't auto-start the next part while the user has paused.
-    const target = downloadsRef.current.find((item) => item.id === downloadId)
-    if (target?.appid) {
-      setDownloads((prev) =>
-        prev.map((item) =>
-          item.appid === target.appid && item.id !== downloadId && item.status === "queued"
-            ? { ...item, status: "paused" as DownloadStatus, error: null }
-            : item
-        )
-      )
-    }
   }, [])
 
   const pauseGroup = useCallback(
@@ -1687,7 +1653,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
           downloadLogger.info("Resume Level 2 (re-resolve)", {
             data: { host: freshSource?.host || target.host, resolveUrl, usedFreshSource: Boolean(freshSource?.sourceUrl) },
           })
-          const resolved = await resolveDownloadUrl(freshSource?.host || target.host, resolveUrl)
+          const resolved = await resolveWithTimeout(freshSource?.host || target.host, resolveUrl)
           downloadLogger.info("Resume Level 2 resolved", { data: { resolvedUrl: resolved?.url, resolvedOk: resolved?.resolved } })
           const freshUrl = resolved?.resolved ? resolved.url : target.url
 
@@ -1711,43 +1677,6 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
               if (resumeRes && typeof resumeRes === "object" && resumeRes.ok) {
                 resumedFromDisk = true
                 ok = true
-              } else if (resumeRes && typeof resumeRes === "object" && resumeRes.error === "file-already-complete") {
-                // File on disk is already fully downloaded. Continue with extraction instead of
-                // pretending the whole install completed, otherwise the user gets stuck in a fake
-                // completed state until they cancel and redownload.
-                downloadLogger.info("Resume Level 2: file already complete, starting install from downloaded archive")
-                resumedFromDisk = true
-                if (target.appid && window.ucDownloads?.installDownloadedArchive) {
-                  const installRes = await window.ucDownloads.installDownloadedArchive(target.appid)
-                  if (installRes?.ok) {
-                    ok = true
-                    setDownloads((prev) =>
-                      prev.map((item) =>
-                        item.appid === target.appid
-                          ? {
-                            ...item,
-                            status: "extracting" as DownloadStatus,
-                            error: null,
-                            speedBps: 0,
-                            etaSeconds: null,
-                            receivedBytes: item.totalBytes || item.receivedBytes,
-                          }
-                          : item
-                      )
-                    )
-                  } else {
-                    throw new Error(installRes?.error || "Failed to continue install from downloaded archive")
-                  }
-                } else {
-                  ok = true
-                  setDownloads((prev) =>
-                    prev.map((item) =>
-                      item.id === downloadId
-                        ? { ...item, status: "install_ready" as DownloadStatus, receivedBytes: item.totalBytes || item.receivedBytes }
-                        : item
-                    )
-                  )
-                }
               }
             } catch (e) {
               downloadLogger.warn("Resume Level 2 resumeWithFreshUrl failed, falling back to fresh start", { data: e })
@@ -1809,7 +1738,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         resumeLocksRef.current.delete(downloadId)
       }
     },
-    [resolveFreshResumeSource]
+    [resolveFreshResumeSource, resolveWithTimeout]
   )
 
   const resumeGroup = useCallback(
@@ -1835,7 +1764,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
           const next = prev.map((item) => {
             if (item.appid !== appid) return item
             if (item.id === pausedWithProgress.id) return item
-            if (item.status === "paused" && item.receivedBytes === 0) {
+            if ((item.status === "paused" && item.receivedBytes === 0) || item.status === "failed" || item.status === "extract_failed") {
               return { ...item, status: "queued" as DownloadStatus }
             }
             return item
@@ -1848,7 +1777,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
 
       setDownloads((prev) => {
         const next = prev.map((item) => {
-          if (item.appid === appid && item.status === "paused") {
+          if (item.appid === appid && (item.status === "paused" || item.status === "failed" || item.status === "extract_failed")) {
             return { ...item, status: "queued" as DownloadStatus }
           }
           return item
@@ -1892,32 +1821,6 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
     }
   }, [resumeGroup])
 
-  // Apply a user-chosen order to the queued games. `orderedAppids` is the full
-  // list of currently-queued appids in their new top-to-bottom order. Every
-  // queued item for a given appid gets the same queueOrder so the whole game
-  // moves as one block; the auto-start sequencer and the "Up Next" list both
-  // read this via compareQueuePosition. Non-queued items are untouched.
-  const reorderQueuedGroups = useCallback((orderedAppids: string[]) => {
-    const orderMap = new Map<string, number>()
-    orderedAppids.forEach((appid, index) => orderMap.set(appid, index))
-    setDownloads((prev) => {
-      const next = prev.map((item) => {
-        if (item.status !== "queued") return item
-        const order = orderMap.get(item.appid)
-        if (order == null) return item
-        return { ...item, queueOrder: order }
-      })
-      downloadsRef.current = next
-      return next
-    })
-  }, [])
-
-  const showInFolder = useCallback(async (path: string) => {
-    if (window.ucDownloads?.showInFolder) {
-      await window.ucDownloads.showInFolder(path)
-    }
-  }, [])
-
   const upsertDownload = useCallback((download: DownloadItem) => {
     setDownloads((prev) => {
       const idx = prev.findIndex((item) => item.id === download.id)
@@ -1958,14 +1861,6 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
 
   const clearByAppid = useCallback((appid: string) => {
     if (!appid) return
-    setDownloads((prev) => prev.filter((item) => item.appid !== appid))
-  }, [])
-
-  const dismissByAppid = useCallback(async (appid: string) => {
-    if (!appid) return
-    try {
-      await window.ucDownloads?.dismissInstalling?.(appid)
-    } catch { }
     setDownloads((prev) => prev.filter((item) => item.appid !== appid))
   }, [])
 
@@ -2037,23 +1932,17 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
       startGameDownload,
       cancelDownload,
       cancelGroup,
-      pauseDownload,
       pauseGroup,
       pauseAll,
       resumeDownload,
       resumeGroup,
       resumeAll,
-      reorderQueuedGroups,
       upsertDownload,
-      showInFolder,
       openPath,
-      removeDownload: (downloadId: string) =>
-        setDownloads((prev) => prev.filter((item) => item.id !== downloadId)),
       clearByAppid,
-      dismissByAppid,
       clearCompleted,
     }),
-    [startGameDownload, cancelDownload, cancelGroup, pauseDownload, pauseGroup, pauseAll, resumeDownload, resumeGroup, resumeAll, reorderQueuedGroups, upsertDownload, showInFolder, openPath, clearByAppid, dismissByAppid, clearCompleted]
+    [startGameDownload, cancelDownload, cancelGroup, pauseGroup, pauseAll, resumeDownload, resumeGroup, resumeAll, upsertDownload, openPath, clearByAppid, clearCompleted]
   )
 
   const dataValue = useMemo(() => ({ downloads }), [downloads])
@@ -2124,20 +2013,6 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
           )}
         </DownloadsContext.Provider>
       </DownloadsActionsContext.Provider>
-      <React.Suspense fallback={null}>
-        <LogSharingConsentModal
-          open={showLogShareConsent}
-          onAccept={() => {
-            setShowLogShareConsent(false)
-            void window.ucSettings?.set?.("autoShareErrorLogs", true)
-            void window.ucLogs?.shareLogs?.({ baseUrl: (window as any).ucApp?.getBaseUrl?.() ?? undefined })
-          }}
-          onDecline={() => {
-            setShowLogShareConsent(false)
-            void window.ucSettings?.set?.("autoShareErrorLogs", false)
-          }}
-        />
-      </React.Suspense>
     </DownloadsStoreContext.Provider>
   )
 }
