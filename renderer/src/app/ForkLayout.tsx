@@ -2,7 +2,6 @@ import { Outlet, useLocation, useNavigate } from "react-router-dom"
 import { lazy, Suspense, useEffect, useRef, type CSSProperties, type ReactNode } from "react"
 import { Minus, Square, X } from "lucide-react"
 import { Sidebar } from "@/app/manifold/Sidebar"
-import { BrowsePage } from "@/app/pages/BrowsePage"
 import { usePauseDownloadsWhilePlaying } from "@/hooks/use-pause-on-launch"
 import { cn } from "@/lib/utils"
 
@@ -16,6 +15,7 @@ const AdvancedSearchPage = lazy(() => importAdvanced().then((m) => ({ default: m
 const LibraryPage = lazy(() => importLibrary().then((m) => ({ default: m.LibraryPage })))
 const DownloadsPage = lazy(() => importDownloads().then((m) => ({ default: m.DownloadsPage })))
 const SettingsPage = lazy(() => importSettings().then((m) => ({ default: m.SettingsPage })))
+const BrowsePage = lazy(() => import("@/app/pages/BrowsePage").then((m) => ({ default: m.BrowsePage })))
 
 function prefetchRoutes() {
   void importAdvanced()
