@@ -244,3 +244,33 @@ pub fn strip_tags(s: &str) -> String {
         .collect::<Vec<_>>()
         .join(" ")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn t_decode_entities_no_double_decode() {
+        // An already-escaped entity decodes exactly once: "&amp;lt;" is the
+        // literal text "&lt;", not the character "<".
+        assert_eq!(decode_entities("&amp;lt;"), "&lt;");
+    }
+
+    #[test]
+    fn t_decode_entities_named() {
+        assert_eq!(decode_entities("&lt;"), "<");
+        assert_eq!(decode_entities("&gt;"), ">");
+        assert_eq!(decode_entities("&amp;"), "&");
+    }
+
+    #[test]
+    fn t_decode_entities_mixed_string() {
+        assert_eq!(decode_entities("Tom &amp; Jerry &lt;3&gt;"), "Tom & Jerry <3>");
+    }
+
+    #[test]
+    fn t_decode_entities_numeric() {
+        assert_eq!(decode_entities("&#65;"), "A");
+        assert_eq!(decode_entities("&#x41;"), "A");
+    }
+}

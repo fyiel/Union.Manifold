@@ -319,3 +319,74 @@ fn max_opt_f(a: Option<f64>, b: Option<f64>) -> Option<f64> {
         (None, y) => y,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sg(title: &str, appid: Option<u64>) -> SourceGame {
+        SourceGame {
+            title: title.to_string(),
+            steam_app_id: appid,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn t_normalize_title_strips_edition_noise() {
+        assert_eq!(normalize_title("Dark Souls"), "dark souls");
+        // "Remastered" is edition noise, so the two titles normalize equal.
+        assert_eq!(
+            normalize_title("Dark Souls"),
+            normalize_title("Dark Souls Remastered"),
+        );
+    }
+
+    #[test]
+    fn t_merge_games_keeps_distinct_appids_apart() {
+        // Same normalized title but different non-zero Steam appids must NOT merge.
+        let out = merge_games(vec![
+            sg("Dark Souls", Some(1)),
+            sg("Dark Souls Remastered", Some(2)),
+        ]);
+        assert_eq!(out.len(), 2);
+    }
+
+    #[test]
+    fn t_merge_games_merges_same_title_without_appid_conflict() {
+        // Both appids absent -> title match merges into one game.
+        let no_ids = merge_games(vec![
+            sg("Dark Souls", None),
+            sg("Dark Souls Remastered", None),
+        ]);
+        assert_eq!(no_ids.len(), 1);
+
+        // Identical non-zero appid -> merges regardless of edition noise.
+        let same_id = merge_games(vec![
+            sg("Portal", Some(400)),
+            sg("Portal Deluxe Edition", Some(400)),
+        ]);
+        assert_eq!(same_id.len(), 1);
+    }
+
+    #[test]
+    fn t_merge_games_is_deterministic() {
+        let records = || {
+            vec![
+                sg("Alpha", Some(10)),
+                sg("Beta", Some(20)),
+                sg("Gamma", Some(30)),
+                sg("Delta", Some(40)),
+            ]
+        };
+        let order = |v: Vec<UnifiedGame>| {
+            v.into_iter()
+                .map(|g| (g.title, g.steam_app_id))
+                .collect::<Vec<_>>()
+        };
+        let first = order(merge_games(records()));
+        let second = order(merge_games(records()));
+        assert_eq!(first, second);
+        assert_eq!(first.len(), 4);
+    }
+}
