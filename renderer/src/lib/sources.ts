@@ -277,20 +277,35 @@ export function pickPrimaryDownload(entries: DownloadEntry[]): DownloadEntry | n
 // Browse/search results are remembered by dedupKey so the detail route can
 // rehydrate a game (and its source stubs) without re-querying every source,
 // and without depending solely on router navigation state.
+const REMEMBERED_MAX = 500
 const _remembered = new Map<string, UnifiedSourceGame>()
 
+// Bounded LRU so a long browsing session can't grow this map without limit.
+// Map preserves insertion order: re-inserting a key moves it to the newest
+// slot, and once over the cap we evict the oldest (least-recently-touched) key.
+function rememberSet(key: string, game: UnifiedSourceGame): void {
+  if (_remembered.has(key)) _remembered.delete(key)
+  _remembered.set(key, game)
+  if (_remembered.size > REMEMBERED_MAX) {
+    const oldest = _remembered.keys().next().value
+    if (oldest !== undefined) _remembered.delete(oldest)
+  }
+}
+
 export function rememberGames(games: UnifiedSourceGame[]): void {
-  for (const g of games) _remembered.set(g.dedupKey, g)
+  for (const g of games) rememberSet(g.dedupKey, g)
 }
 
 export function getRememberedGame(dedupKey: string): UnifiedSourceGame | undefined {
-  return _remembered.get(dedupKey)
+  const g = _remembered.get(dedupKey)
+  if (g !== undefined) { _remembered.delete(dedupKey); _remembered.set(dedupKey, g) } // bump to newest
+  return g
 }
 
 // Remember a game under an extra key (e.g. an installed manifest's appid, which
 // may differ from the game's real dedupKey) so a later detail open hits cache.
 export function rememberGameAs(key: string, game: UnifiedSourceGame): void {
-  if (key) _remembered.set(key, game)
+  if (key) rememberSet(key, game)
 }
 
 // ── Download art cache ──
