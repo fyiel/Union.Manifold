@@ -2,7 +2,9 @@ pub mod aria2;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+
+use parking_lot::Mutex;
 
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, State};
@@ -214,7 +216,7 @@ impl DownloadEngine {
         if appid.is_empty() {
             return Err(AppError::msg("appid required"));
         }
-        let mut st = self.state.lock().unwrap();
+        let mut st = self.state.lock();
         if let Some(existing) = st.by_id.get(&id) {
             if !matches!(existing.status.as_str(), "failed" | "cancelled" | "completed") {
                 return Ok(id);
@@ -258,7 +260,7 @@ impl DownloadEngine {
     }
 
     pub fn pause(&self, id: &str) -> bool {
-        let mut st = self.state.lock().unwrap();
+        let mut st = self.state.lock();
         let (snap, gid, was_downloading) = match st.by_id.get_mut(id) {
             Some(dl) if dl.status == "queued" => {
                 dl.status = "paused".to_string();
@@ -287,7 +289,7 @@ impl DownloadEngine {
     }
 
     pub fn resume(self: &Arc<Self>, id: &str) -> bool {
-        let mut st = self.state.lock().unwrap();
+        let mut st = self.state.lock();
         let dl = match st.by_id.get_mut(id) {
             Some(d) => d,
             None => return false,
@@ -300,32 +302,48 @@ impl DownloadEngine {
         if dl.status != "paused" && dl.status != "failed" && dl.status != "cancelled" {
             return false;
         }
-        let gid = dl.gid.clone();
-        if let Some(gid) = gid.clone() {
-            if self.aria2.is_ready() {
-                dl.status = "downloading".to_string();
-                let snap = dl.clone();
-                self.emit(&snap);
-                drop(st);
-                let aria2 = self.aria2.clone();
-                tauri::async_runtime::spawn(async move { aria2.unpause(&gid).await });
-                return true;
+        // Only a paused download holds a gid that aria2 can unpause. A failed or
+        // cancelled one sits in aria2's stopped list (or is gone entirely), where
+        // unpause is a silent no-op and the next poll would just re-surface the
+        // stale error and flip the download straight back to "failed". Drop the
+        // dead handle and go through a fresh add_uri instead, which resumes from
+        // the on-disk partial via --continue.
+        if dl.status == "paused" {
+            if let Some(gid) = dl.gid.clone() {
+                if self.aria2.is_ready() {
+                    dl.status = "downloading".to_string();
+                    let snap = dl.clone();
+                    self.emit(&snap);
+                    drop(st);
+                    let aria2 = self.aria2.clone();
+                    tauri::async_runtime::spawn(async move { aria2.unpause(&gid).await });
+                    return true;
+                }
             }
         }
+        let taken_gid = dl.gid.take();
         dl.status = "queued".to_string();
+        dl.error = None;
+        dl.poll_failures = 0;
         let snap = dl.clone();
+        if let Some(gid) = taken_gid {
+            st.gid_to_id.remove(&gid);
+            let aria2 = self.aria2.clone();
+            tauri::async_runtime::spawn(async move { aria2.remove_download_result(&gid).await });
+        }
         if !st.queue.contains(&id.to_string()) {
             st.queue.insert(0, id.to_string());
         }
         st.active.remove(id);
         self.emit(&snap);
         drop(st);
+        write_manifest(&snap);
         self.maybe_start_next();
         true
     }
 
     pub fn cancel(self: &Arc<Self>, id: &str, keep_file: bool) -> Value {
-        let mut st = self.state.lock().unwrap();
+        let mut st = self.state.lock();
         let (gid, save_path, appid, total_bytes, was_completed) = match st.by_id.get(id) {
             Some(dl) => (
                 dl.gid.clone(),
@@ -391,11 +409,8 @@ impl DownloadEngine {
     }
 
     pub fn busy_appids(&self) -> (usize, Vec<String>) {
-        let extracting: Vec<String> = self.extracting.lock().unwrap().iter().cloned().collect();
-        let downloading = self
-            .state
-            .lock()
-            .unwrap()
+        let extracting: Vec<String> = self.extracting.lock().iter().cloned().collect();
+        let downloading = self.state.lock()
             .by_id
             .values()
             .filter(|d| d.status == "downloading")
@@ -404,7 +419,7 @@ impl DownloadEngine {
     }
 
     pub fn set_extracting(&self, appid: &str, on: bool) {
-        let mut ex = self.extracting.lock().unwrap();
+        let mut ex = self.extracting.lock();
         if on {
             ex.insert(appid.to_string());
         } else {
@@ -413,25 +428,23 @@ impl DownloadEngine {
     }
 
     pub fn try_install_lock(&self, appid: &str) -> bool {
-        self.install_guard.lock().unwrap().insert(appid.to_string())
+        self.install_guard.lock().insert(appid.to_string())
     }
 
     pub fn install_unlock(&self, appid: &str) {
-        self.install_guard.lock().unwrap().remove(appid);
+        self.install_guard.lock().remove(appid);
     }
 
     pub fn appid_active(&self, appid: &str) -> bool {
-        self.state
-            .lock()
-            .unwrap()
+        self.state.lock()
             .by_id
             .values()
             .any(|d| d.appid == appid && (d.status == "downloading" || d.status == "queued"))
     }
 
     pub fn active_status(&self, appid: &str) -> Value {
-        let extracting = self.extracting.lock().unwrap().contains(appid);
-        let st = self.state.lock().unwrap();
+        let extracting = self.extracting.lock().contains(appid);
+        let st = self.state.lock();
         let downloading = st
             .by_id
             .values()
@@ -451,7 +464,7 @@ impl DownloadEngine {
         let limit = self.max_concurrent();
         let mut to_start = Vec::new();
         {
-            let mut st = self.state.lock().unwrap();
+            let mut st = self.state.lock();
             while st.active.len() < limit {
                 let mut chosen = None;
                 while let Some(id) = st.queue.first().cloned() {
@@ -480,7 +493,7 @@ impl DownloadEngine {
     }
 
     async fn kick_off(self: Arc<Self>, id: String) {
-        let mut dl = match self.state.lock().unwrap().by_id.get(&id).cloned() {
+        let mut dl = match self.state.lock().by_id.get(&id).cloned() {
             Some(d) => d,
             None => return,
         };
@@ -496,7 +509,7 @@ impl DownloadEngine {
             self.emit(&dl);
             write_manifest(&dl);
             {
-                let mut st = self.state.lock().unwrap();
+                let mut st = self.state.lock();
                 st.active.remove(&id);
             }
             self.maybe_start_next();
@@ -541,7 +554,7 @@ impl DownloadEngine {
         match self.aria2.add_uri(&dl.url, options).await {
             Ok(gid) => {
                 let (keep, should_pause) = {
-                    let mut st = self.state.lock().unwrap();
+                    let mut st = self.state.lock();
                     match st.by_id.get_mut(&id) {
                         Some(d) if d.status != "cancelled" => {
                             d.gid = Some(gid.clone());
@@ -568,7 +581,7 @@ impl DownloadEngine {
     }
 
     fn commit(&self, dl: &Download) {
-        if let Some(existing) = self.state.lock().unwrap().by_id.get_mut(&dl.id) {
+        if let Some(existing) = self.state.lock().by_id.get_mut(&dl.id) {
             // Preserve a cancel/pause the user issued during the startup window instead
             // of reverting it with this stale startup snapshot.
             if matches!(existing.status.as_str(), "cancelled" | "paused") {
@@ -580,7 +593,7 @@ impl DownloadEngine {
 
     fn fail(self: &Arc<Self>, id: &str, error: &str) {
         let snap = {
-            let mut st = self.state.lock().unwrap();
+            let mut st = self.state.lock();
             if let Some(dl) = st.by_id.get_mut(id) {
                 dl.status = "failed".to_string();
                 dl.error = Some(error.to_string());
@@ -615,7 +628,7 @@ impl DownloadEngine {
             return;
         }
         let active: Vec<(String, String)> = {
-            let st = self.state.lock().unwrap();
+            let st = self.state.lock();
             st.by_id
                 .values()
                 .filter(|d| d.status != "completed" && d.status != "failed" && d.status != "cancelled")
@@ -625,14 +638,14 @@ impl DownloadEngine {
         for (id, gid) in active {
             let status = match self.aria2.tell_status(&gid).await {
                 Ok(s) => {
-                    if let Some(d) = self.state.lock().unwrap().by_id.get_mut(&id) {
+                    if let Some(d) = self.state.lock().by_id.get_mut(&id) {
                         d.poll_failures = 0;
                     }
                     s
                 }
                 Err(_) => {
                     let failures = {
-                        let mut st = self.state.lock().unwrap();
+                        let mut st = self.state.lock();
                         match st.by_id.get_mut(&id) {
                             Some(d) => {
                                 d.poll_failures = d.poll_failures.saturating_add(1);
@@ -658,7 +671,7 @@ impl DownloadEngine {
                     self.finish_error(&id, &msg);
                 }
                 "removed" => {
-                    let mut st = self.state.lock().unwrap();
+                    let mut st = self.state.lock();
                     st.gid_to_id.remove(&gid);
                     if let Some(d) = st.by_id.get_mut(&id) {
                         d.gid = None;
@@ -666,7 +679,7 @@ impl DownloadEngine {
                 }
                 _ => {
                     let snap = {
-                        let mut st = self.state.lock().unwrap();
+                        let mut st = self.state.lock();
                         match st.by_id.get_mut(&id) {
                             Some(dl) if !(dl.status == "paused" && s != "paused") => {
                                 let status = if s == "paused" { "paused" } else { "downloading" };
@@ -701,7 +714,7 @@ impl DownloadEngine {
 
     async fn finish_complete(self: &Arc<Self>, id: &str) {
         let snap = {
-            let mut st = self.state.lock().unwrap();
+            let mut st = self.state.lock();
             st.active.remove(id);
             let dl = match st.by_id.get_mut(id) {
                 Some(d) => d,
@@ -729,7 +742,7 @@ impl DownloadEngine {
 
     fn finish_error(self: &Arc<Self>, id: &str, msg: &str) {
         {
-            let mut st = self.state.lock().unwrap();
+            let mut st = self.state.lock();
             if let Some(dl) = st.by_id.get_mut(id) {
                 if let Some(g) = dl.gid.take() {
                     st.gid_to_id.remove(&g);
@@ -741,7 +754,7 @@ impl DownloadEngine {
 
     async fn on_complete(self: &Arc<Self>, dl: Download) {
         let ready = {
-            let st = self.state.lock().unwrap();
+            let st = self.state.lock();
             match dl.part_total {
                 // Multi-part sets are enqueued incrementally, so scanning in-memory
                 // siblings misfires; gate on the known part total when we have it.
