@@ -5,7 +5,6 @@ import { DownloadsProvider, useDownloadsSelector } from "@/context/downloads-con
 import { DownloadFlowProvider } from "@/context/download-flow-context"
 import { GameLaunchProvider } from "@/context/game-launch-context"
 import { ToastProvider } from "@/context/toast-context"
-import { AuthProvider } from "@/context/auth-context"
 import { Toaster } from "@/components/Toaster"
 import { ControllerNavigation } from "@/components/ControllerNavigation"
 import { ThemeBoundary } from "@/components/ThemeBoundary"
@@ -13,12 +12,7 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { AlertTriangle } from "@/components/icons"
 
-const BrowsePage = lazy(() => import("@/app/pages/BrowsePage").then((m) => ({ default: m.BrowsePage })))
-const AdvancedSearchPage = lazy(() => import("@/app/pages/AdvancedSearchPage").then((m) => ({ default: m.AdvancedSearchPage })))
 const SourceGamePage = lazy(() => import("@/app/pages/SourceGamePage").then((m) => ({ default: m.SourceGamePage })))
-const LibraryPage = lazy(() => import("@/app/pages/LibraryPage").then((m) => ({ default: m.LibraryPage })))
-const DownloadsPage = lazy(() => import("@/app/pages/DownloadsPage").then((m) => ({ default: m.DownloadsPage })))
-const SettingsPage = lazy(() => import("@/app/pages/SettingsPage").then((m) => ({ default: m.SettingsPage })))
 
 // Fork pages — multi-source browse + detail. Library/Downloads/Settings are
 // reused from the original app (they're source-agnostic: installed manifests,
@@ -179,7 +173,6 @@ export default function App() {
   return (
     <HashRouter>
       <ToastProvider>
-        <AuthProvider>
         <DownloadsProvider>
         <DownloadFlowProvider>
         <GameLaunchProvider>
@@ -188,25 +181,19 @@ export default function App() {
             <Routes>
               <Route path="/theme-editor" element={<ThemeEditorWindow />} />
 
-              {/* App routes — multi-source, no login */}
+              {/* App shell — ForkLayout's TabHost is the single tab registry.
+                  The detail route mounts via the layout Outlet; an unmatched
+                  path (TabHost renders nothing, so Outlet is used) redirects home. */}
               <Route element={<AppWithDownloads />}>
-                <Route path="/" element={<BrowsePage />} />
-                <Route path="/advanced" element={<AdvancedSearchPage />} />
                 <Route path="/g/:key" element={<SourceGamePage />} />
-                <Route path="/library" element={<LibraryPage />} />
-                <Route path="/downloads" element={<DownloadsPage />} />
-                <Route path="/settings" element={<SettingsPage />} />
+                <Route path="*" element={<Navigate to="/" replace />} />
               </Route>
-
-              {/* Fallback */}
-              <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </Suspense>
         </ThemeBoundary>
         </GameLaunchProvider>
         </DownloadFlowProvider>
         </DownloadsProvider>
-        </AuthProvider>
         <Toaster />
       </ToastProvider>
     </HashRouter>
