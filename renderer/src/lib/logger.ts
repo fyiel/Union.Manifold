@@ -12,6 +12,15 @@ interface LogOptions {
   appid?: string
 }
 
+function toLoggable(value: unknown): unknown {
+  if (value instanceof Error) return value.stack ?? String(value)
+  if (Array.isArray(value)) return value.map(toLoggable)
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, toLoggable(v)]))
+  }
+  return value
+}
+
 class Logger {
   private enabled = true
   private context: string
@@ -30,7 +39,7 @@ class Logger {
 
     try {
       if (typeof window !== "undefined" && window.ucLogs?.log) {
-        await window.ucLogs.log(level, message, data)
+        await window.ucLogs.log(level, message, toLoggable(data))
       }
     } catch (err) {
       // Fallback to console if IPC fails
