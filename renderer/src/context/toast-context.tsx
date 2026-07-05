@@ -84,18 +84,6 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     return () => window.removeEventListener("uc_toast", onToast)
   }, [toast])
 
-  // Bridge for the main process: when sign-in is attempted from a non-primary
-  // mirror, main.cjs emits `uc:mirror-auth-blocked`. We surface it through the
-  // app's own toast pipeline instead of letting the main process raise a
-  // native Electron dialog (which clashes with the rest of the UI).
-  useEffect(() => {
-    if (typeof window === "undefined") return
-    const off = window.ucApp?.onMirrorAuthBlocked?.((data) => {
-      toast(data?.message || "Please sign in on union-crax.xyz", "info", 6000)
-    })
-    return () => { try { off?.() } catch { /* ignore */ } }
-  }, [toast])
-
   return (
     <ToastContext.Provider value={{ toasts, toast, dismiss }}>
       {children}
