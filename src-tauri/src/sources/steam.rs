@@ -26,6 +26,20 @@ pub struct StoreDetails {
     pub req_recommended: String,
 }
 
+// Steam pc_requirements arrive as raw store HTML. Flatten to plain text while
+// keeping line structure so the renderer never has to inject markup.
+fn req_text(html: &str) -> String {
+    static BREAKS: LazyLock<regex::Regex> =
+        LazyLock::new(|| regex::Regex::new(r"(?i)<br\s*/?>|</li>|</p>").unwrap());
+    BREAKS
+        .replace_all(html, "\n")
+        .split('\n')
+        .map(http::strip_tags)
+        .filter(|l| !l.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 pub async fn get_store_details(appid: u64) -> Option<StoreDetails> {
     if appid == 0 {
         return None;
@@ -118,8 +132,8 @@ pub async fn get_store_details(appid: u64) -> Option<StoreDetails> {
                         .collect()
                 })
                 .unwrap_or_default(),
-            req_minimum: str_of(reqs.and_then(|r| r.get("minimum"))),
-            req_recommended: str_of(reqs.and_then(|r| r.get("recommended"))),
+            req_minimum: req_text(&str_of(reqs.and_then(|r| r.get("minimum")))),
+            req_recommended: req_text(&str_of(reqs.and_then(|r| r.get("recommended")))),
         }
     });
     // Write-behind: the details map grows to megabytes, so the insert only
