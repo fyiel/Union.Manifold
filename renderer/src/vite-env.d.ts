@@ -200,6 +200,7 @@ declare global {
     applied: SourceQueryParams
     capabilities: SourceCapabilityReport
     error?: string
+    sourcesErrored?: boolean
   }
   // Result of resolving a download option to an aria2-ready target.
   type SourceResolveResult = {
@@ -276,7 +277,6 @@ declare global {
       maximize: () => void
       close: () => void
       isMaximized: () => Promise<boolean>
-      onMaximizeChange: (cb: (isMaximized: boolean) => void) => () => void
     }
     ucDownloads?: {
       start: (payload: {
@@ -368,11 +368,7 @@ declare global {
     ucApp?: {
       respondToCloseRequest: (shouldProceed: boolean) => Promise<{ ok: boolean; proceeded: boolean }>
       onCloseRequest: (callback: (data: { mode: "quit" | "hide"; extractionCount?: number; appids?: string[] }) => void) => () => void
-      onNavigationAction?: (callback: (data:
-        | { action: 'open-system-profile'; autoScan?: boolean }
-        | { action?: never; path: string }
-      ) => void) => () => void
-      onMirrorAuthBlocked?: (callback: (data: { message: string; baseUrl: string | null }) => void) => () => void
+      onNavigationAction?: (callback: (data: { path: string }) => void) => () => void
     }
     ucSettings?: {
       get: (key: string) => Promise<any>
@@ -390,13 +386,6 @@ declare global {
       onPreviewEnd: (callback: () => void) => () => void
     }
     ucAuth?: {
-      login: (baseUrl?: string, provider?: string) => Promise<{ ok: boolean; error?: string }>
-      logout: (baseUrl?: string) => Promise<{ ok: boolean; error?: string }>
-      websiteLogin: (baseUrl?: string) => Promise<{ ok: boolean; user?: any; error?: string }>
-      linkProvider: (baseUrl: string, provider: string) => Promise<{ ok: boolean; error?: string }>
-      unlinkProvider: (baseUrl: string, provider: string) => Promise<{ ok: boolean; error?: string }>
-      updateProfile: (baseUrl: string, data: any) => Promise<{ ok: boolean; error?: string }>
-      updatePassword: (baseUrl: string, currentPassword: string, newPassword: string) => Promise<{ ok: boolean; error?: string }>
       fetch: (
         baseUrl: string,
         path: string,
@@ -423,6 +412,7 @@ declare global {
       }>
       installUpdate: () => Promise<{ ok: boolean; error?: string }>
       getVersion: () => Promise<string>
+      onUpdateAvailable: (callback: (data: { version?: string }) => void) => () => void
     }
     ucLogs?: {
       log: (level: string, message: string, data?: any) => Promise<void>
@@ -444,34 +434,6 @@ declare global {
       setGameConfig: (appid: string, config: GameLinuxConfig | null) => Promise<{ ok: boolean; error?: string }>
       // SLSteam
     }
-    ucController?: {
-      getSettings: () => Promise<{
-        ok: boolean
-        settings?: {
-          enabled: boolean
-          controllerType: 'xbox' | 'playstation' | 'generic'
-          vibrationEnabled: boolean
-          deadzone: number
-          triggerDeadzone: number
-          buttonLayout: 'default' | 'legacy'
-        }
-        error?: string
-      }>
-      setSettings: (settings: {
-        enabled?: boolean
-        controllerType?: 'xbox' | 'playstation' | 'generic'
-        vibrationEnabled?: boolean
-        deadzone?: number
-        triggerDeadzone?: number
-        buttonLayout?: 'default' | 'legacy'
-      }) => Promise<{ ok: boolean; error?: string }>
-      getConnected: () => Promise<{
-        connected: boolean
-        controllerId: string | null
-        controllerName: string | null
-        controllerType: string | null
-      }>
-    }
     ucStorage?: {
       precheck: (opts: { targetPath?: string; downloadBytes: number; declaredInstallBytes?: number }) => Promise<StoragePrecheckResult>
       summary: (targetPath?: string) => Promise<StorageSummaryResult>
@@ -486,13 +448,8 @@ declare global {
       onChanged?: (handler: (detail: { reason?: string; appid?: string | null; gameName?: string | null }) => void) => () => void
     }
     ucSystem?: {
-      getVolume: () => Promise<{ ok: boolean; volume: number }>
       openExternal?: (target: string) => Promise<{ ok: boolean; error?: string }>
       launchSteam?: () => Promise<{ ok: boolean; method?: string; error?: string }>
-      setVolume: (level: number) => Promise<{ ok: boolean }>
-      getMuted: () => Promise<{ ok: boolean; muted: boolean }>
-      setMuted: (muted: boolean) => Promise<{ ok: boolean }>
-      takeScreenshot: () => Promise<{ ok: boolean; path?: string }>
       getNotifications: () => Promise<{ ok: boolean; notifications: SystemNotification[] }>
       onNotificationActivated: (callback: (data: { id: string }) => void) => () => void
     }
