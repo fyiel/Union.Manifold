@@ -60,9 +60,8 @@ fn part_base(name: &str) -> Option<&str> {
             return Some(&name[..i]);
         }
     }
-    if name.len() > 4 {
-        let (stem, ext) = name.split_at(name.len() - 4);
-        if ext.starts_with('.') && ext[1..].chars().all(|c| c.is_ascii_digit()) {
+    if let Some((stem, ext)) = name.rsplit_once('.') {
+        if !stem.is_empty() && ext.len() == 3 && ext.chars().all(|c| c.is_ascii_digit()) {
             return Some(stem);
         }
     }
@@ -266,7 +265,7 @@ pub(crate) async fn run_7z(archive: &Path, out_dir: &Path, on_progress: impl Fn(
     Ok(())
 }
 
-fn finalize_installed(dir: &Path, appid: &str, game_name: &Option<String>, install_path: &Path, metadata: Option<&Value>) {
+async fn finalize_installed(dir: &Path, appid: &str, game_name: &Option<String>, install_path: &Path, metadata: Option<&Value>) {
     let manifest_path = dir.join(MANIFEST_NAME);
     let mut manifest = std::fs::read_to_string(&manifest_path)
         .ok()
@@ -277,7 +276,11 @@ fn finalize_installed(dir: &Path, appid: &str, game_name: &Option<String>, insta
     manifest.insert("name".into(), json!(game_name.clone().unwrap_or_else(|| appid.to_string())));
     manifest.insert("installStatus".into(), json!("installed"));
     manifest.insert("installPath".into(), json!(install_path.to_string_lossy()));
-    manifest.insert("sizeBytes".into(), json!(dir_size(install_path)));
+    let size = {
+        let p = install_path.to_path_buf();
+        tokio::task::spawn_blocking(move || dir_size(&p)).await.unwrap_or(0)
+    };
+    manifest.insert("sizeBytes".into(), json!(size));
     manifest.insert("installedAt".into(), json!(now_ms()));
     manifest.insert("updatedAt".into(), json!(now_ms()));
     manifest.remove("installError");
@@ -290,23 +293,92 @@ fn finalize_installed(dir: &Path, appid: &str, game_name: &Option<String>, insta
     crate::library::invalidate_scan();
 }
 
+fn mark_install_failed(dir: &Path, error: &str) {
+    let manifest_path = dir.join(MANIFEST_NAME);
+    if let Ok(text) = std::fs::read_to_string(&manifest_path) {
+        if let Ok(mut v) = serde_json::from_str::<Value>(&text) {
+            if let Some(obj) = v.as_object_mut() {
+                obj.insert("installStatus".into(), json!("failed"));
+                obj.insert("installError".into(), json!(error));
+                crate::downloads::write_manifest_atomic(&manifest_path, &v);
+            }
+        }
+    }
+    crate::library::invalidate_scan();
+}
+
+// A single `7z x` on .tar.gz/.tar.xz/.tar.bz2 only strips the outer layer, leaving an
+// intermediate `.tar`. Unwrap a lone leftover `.tar` (never the source archive itself).
+async fn extract_leftover_tar(out_dir: &Path, source: &Path) -> Result<()> {
+    // A plain `.tar` is already fully extracted in one pass; only compressed tars leave
+    // a leftover, so never re-extract/delete when the source itself is a `.tar`.
+    if source.extension().map(|x| x.eq_ignore_ascii_case("tar")).unwrap_or(false) {
+        return Ok(());
+    }
+    let tars: Vec<PathBuf> = std::fs::read_dir(out_dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| {
+            p.is_file()
+                && p != source
+                && p.extension().map(|x| x.eq_ignore_ascii_case("tar")).unwrap_or(false)
+        })
+        .collect();
+    if let [tar] = tars.as_slice() {
+        run_7z(tar, out_dir, |_| {}).await?;
+        std::fs::remove_file(tar).ok();
+    }
+    Ok(())
+}
+
 pub async fn auto_install(app: AppHandle, appid: String, download_id: String, game_name: Option<String>, save_path: PathBuf, installing_dir: PathBuf) {
     let archive = extract_entry_point(&installing_dir, &save_path);
     let display_name = game_name.clone().unwrap_or_else(|| appid.clone());
     if !is_archive(&archive) && !sniff_archive(&archive) {
-        finalize_installed(&installing_dir, &appid, &game_name, &installing_dir, None);
+        finalize_installed(&installing_dir, &appid, &game_name, &installing_dir, None).await;
         emit_status(&app, &download_id, &appid, &game_name, "extracted", None);
         crate::notify::send_if(&app, "notifyInstallDone", true, "Ready to play", &format!("{display_name} finished installing"));
+        return;
+    }
+    // Disk precheck: refuse an extraction that would run the volume out of space and
+    // surface it through the existing "failed" download status (no new event/modal).
+    let margin_gib = app
+        .state::<AppState>()
+        .settings
+        .get("diskSpaceMarginGiB")
+        .as_u64()
+        .map(|n| n.clamp(0, 64))
+        .unwrap_or(2);
+    let download_bytes: u64 = archive_files(&installing_dir, &save_path)
+        .iter()
+        .filter_map(|p| std::fs::metadata(p).ok())
+        .map(|m| m.len())
+        .sum();
+    let required = download_bytes + crate::storage::estimate_extract(download_bytes, 0, margin_gib);
+    let free = crate::storage::free_bytes(&installing_dir);
+    if download_bytes > 0 && free < required {
+        let msg = format!(
+            "Not enough disk space (need {}, free {})",
+            crate::storage::human(required),
+            crate::storage::human(free),
+        );
+        mark_install_failed(&installing_dir, &msg);
+        emit_status(&app, &download_id, &appid, &game_name, "failed", Some(&msg));
         return;
     }
     let engine = app.state::<AppState>().downloads.clone();
     emit_status(&app, &download_id, &appid, &game_name, "extracting", None);
     engine.set_extracting(&appid, true);
-    let result = run_7z(&archive, &installing_dir, progress_emitter(&app, &download_id, &appid, &game_name)).await;
+    let mut result = run_7z(&archive, &installing_dir, progress_emitter(&app, &download_id, &appid, &game_name)).await;
+    if result.is_ok() {
+        result = extract_leftover_tar(&installing_dir, &archive).await;
+    }
     engine.set_extracting(&appid, false);
     match result {
         Ok(_) => {
-            finalize_installed(&installing_dir, &appid, &game_name, &installing_dir, None);
+            finalize_installed(&installing_dir, &appid, &game_name, &installing_dir, None).await;
             emit_status(&app, &download_id, &appid, &game_name, "extracted", None);
             crate::notify::send_if(&app, "notifyInstallDone", true, "Ready to play", &format!("{display_name} finished installing"));
             let parts = archive_files(&installing_dir, &save_path);
@@ -323,17 +395,7 @@ pub async fn auto_install(app: AppHandle, appid: String, download_id: String, ga
             .ok();
         }
         Err(e) => {
-            let manifest_path = installing_dir.join(MANIFEST_NAME);
-            if let Ok(text) = std::fs::read_to_string(&manifest_path) {
-                if let Ok(mut v) = serde_json::from_str::<Value>(&text) {
-                    if let Some(obj) = v.as_object_mut() {
-                        obj.insert("installStatus".into(), json!("failed"));
-                        obj.insert("installError".into(), json!(e.to_string()));
-                        crate::downloads::write_manifest_atomic(&manifest_path, &v);
-                    }
-                }
-            }
-            crate::library::invalidate_scan();
+            mark_install_failed(&installing_dir, &e.to_string());
             emit_status(&app, &download_id, &appid, &game_name, "extract_failed", Some(&e.to_string()));
             crate::notify::send_if(&app, "notifyInstallDone", true, "Install failed", &format!("{display_name} could not be extracted"));
         }
@@ -358,25 +420,39 @@ pub async fn install_from_archive(state: State<'_, AppState>, app: AppHandle, pa
     if archive_paths.is_empty() {
         return Ok(json!({ "ok": false, "error": "no archive paths" }));
     }
-    let folder = safe_folder_name(game_name.as_deref().unwrap_or(&appid));
-    let dir = state.download_root().join(folder);
-    std::fs::create_dir_all(&dir).ok();
-    let primary = archive_paths[0].clone();
-    emit_status(&app, &download_id, &appid, &game_name, "extracting", None);
-    state.downloads.set_extracting(&appid, true);
-    let result = run_7z(&primary, &dir, progress_emitter(&app, &download_id, &appid, &game_name)).await;
-    state.downloads.set_extracting(&appid, false);
-    match result {
-        Ok(_) => {
-            finalize_installed(&dir, &appid, &game_name, &dir, metadata.as_ref());
-            emit_status(&app, &download_id, &appid, &game_name, "extracted", None);
-        }
-        Err(e) => {
-            emit_status(&app, &download_id, &appid, &game_name, "extract_failed", Some(&e.to_string()));
-            return Ok(json!({ "ok": false, "error": e.to_string(), "downloadId": download_id }));
-        }
+    if state.downloads.appid_active(&appid) {
+        return Ok(json!({ "ok": false, "error": "download in progress for this app" }));
     }
-    Ok(json!({ "ok": true, "downloadId": download_id, "extracted": 1 }))
+    if !state.downloads.try_install_lock(&appid) {
+        return Ok(json!({ "ok": false, "error": "install already in progress" }));
+    }
+    let out = async {
+        let folder = safe_folder_name(game_name.as_deref().unwrap_or(&appid));
+        let dir = state.download_root().join(folder);
+        std::fs::create_dir_all(&dir).ok();
+        let primary = archive_paths[0].clone();
+        emit_status(&app, &download_id, &appid, &game_name, "extracting", None);
+        state.downloads.set_extracting(&appid, true);
+        let mut result = run_7z(&primary, &dir, progress_emitter(&app, &download_id, &appid, &game_name)).await;
+        if result.is_ok() {
+            result = extract_leftover_tar(&dir, &primary).await;
+        }
+        state.downloads.set_extracting(&appid, false);
+        match result {
+            Ok(_) => {
+                finalize_installed(&dir, &appid, &game_name, &dir, metadata.as_ref()).await;
+                emit_status(&app, &download_id, &appid, &game_name, "extracted", None);
+            }
+            Err(e) => {
+                emit_status(&app, &download_id, &appid, &game_name, "extract_failed", Some(&e.to_string()));
+                return Ok(json!({ "ok": false, "error": e.to_string(), "downloadId": download_id }));
+            }
+        }
+        Ok(json!({ "ok": true, "downloadId": download_id, "extracted": 1 }))
+    }
+    .await;
+    state.downloads.install_unlock(&appid);
+    out
 }
 
 #[tauri::command]
@@ -385,6 +461,9 @@ pub async fn install_downloaded_archive(state: State<'_, AppState>, app: AppHand
         let found = find_installing(&state.download_root(), &appid);
         match found {
             Some((dir, manifest)) => {
+                if manifest.get("installStatus").and_then(|v| v.as_str()) != Some("downloaded") {
+                    return Ok(json!({ "ok": false, "error": "archive is not ready to install" }));
+                }
                 let snap = manifest.get("downloadSnapshot");
                 let save = snap
                     .and_then(|s| s.get("savePath"))
@@ -402,21 +481,36 @@ pub async fn install_downloaded_archive(state: State<'_, AppState>, app: AppHand
             None => return Ok(json!({ "ok": false, "error": "no downloaded archive found" })),
         }
     };
-    emit_status(&app, &download_id, &appid, &game_name, "extracting", None);
-    state.downloads.set_extracting(&appid, true);
-    let result = run_7z(&extract_entry_point(&dir, &save_path), &dir, progress_emitter(&app, &download_id, &appid, &game_name)).await;
-    state.downloads.set_extracting(&appid, false);
-    match result {
-        Ok(_) => {
-            finalize_installed(&dir, &appid, &game_name, &dir, None);
-            emit_status(&app, &download_id, &appid, &game_name, "extracted", None);
-            Ok(json!({ "ok": true, "downloadId": download_id, "extracted": 1 }))
+    if state.downloads.appid_active(&appid) {
+        return Ok(json!({ "ok": false, "error": "download in progress for this app" }));
+    }
+    if !state.downloads.try_install_lock(&appid) {
+        return Ok(json!({ "ok": false, "error": "install already in progress" }));
+    }
+    let out = async {
+        emit_status(&app, &download_id, &appid, &game_name, "extracting", None);
+        state.downloads.set_extracting(&appid, true);
+        let entry = extract_entry_point(&dir, &save_path);
+        let mut result = run_7z(&entry, &dir, progress_emitter(&app, &download_id, &appid, &game_name)).await;
+        if result.is_ok() {
+            result = extract_leftover_tar(&dir, &entry).await;
         }
-        Err(e) => {
-            emit_status(&app, &download_id, &appid, &game_name, "extract_failed", Some(&e.to_string()));
-            Ok(json!({ "ok": false, "error": e.to_string(), "downloadId": download_id }))
+        state.downloads.set_extracting(&appid, false);
+        match result {
+            Ok(_) => {
+                finalize_installed(&dir, &appid, &game_name, &dir, None).await;
+                emit_status(&app, &download_id, &appid, &game_name, "extracted", None);
+                Ok(json!({ "ok": true, "downloadId": download_id, "extracted": 1 }))
+            }
+            Err(e) => {
+                emit_status(&app, &download_id, &appid, &game_name, "extract_failed", Some(&e.to_string()));
+                Ok(json!({ "ok": false, "error": e.to_string(), "downloadId": download_id }))
+            }
         }
     }
+    .await;
+    state.downloads.install_unlock(&appid);
+    out
 }
 
 pub fn find_installing(root: &Path, appid: &str) -> Option<(PathBuf, Value)> {
