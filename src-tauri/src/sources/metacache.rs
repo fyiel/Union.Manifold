@@ -32,3 +32,10 @@ pub fn save<V: Serialize>(name: &str, map: &HashMap<String, V>) {
         }
     }
 }
+
+/// Persist off the async worker: clone the map, then hand the blocking file
+/// write to the blocking pool. Callers MUST drop their `std::sync::Mutex`
+/// guard before awaiting this so the lock is never held across the fs write.
+pub async fn save_async<V: Serialize + Send + 'static>(name: &'static str, map: HashMap<String, V>) {
+    let _ = tokio::task::spawn_blocking(move || save(name, &map)).await;
+}
