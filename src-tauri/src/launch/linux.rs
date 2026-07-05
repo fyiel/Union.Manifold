@@ -101,7 +101,7 @@ fn parse_env_lines(s: &str) -> Vec<(String, String)> {
         .collect()
 }
 
-pub fn resolve_launch(state: &AppState, appid: &str, exe_path: &str) -> LaunchPlan {
+pub fn resolve_launch(state: &AppState, appid: &str, exe_path: &str) -> Result<LaunchPlan, String> {
     let cfg = config_for(state, appid);
     let global_mode = state
         .settings
@@ -135,7 +135,7 @@ pub(crate) fn plan_launch(
     download_root: &Path,
     appid: &str,
     exe_path: &str,
-) -> LaunchPlan {
+) -> Result<LaunchPlan, String> {
     plan_launch_with(cfg, global_mode, global_proton, &GlobalLaunchOpts::default(), download_root, appid, exe_path)
 }
 
@@ -179,18 +179,18 @@ pub(crate) fn plan_launch_with(
     download_root: &Path,
     appid: &str,
     exe_path: &str,
-) -> LaunchPlan {
+) -> Result<LaunchPlan, String> {
     if cfg!(windows) || !is_windows_exe(exe_path) {
         let mut envs = parse_extra_env(cfg);
         merge_global_env(&mut envs, globals);
-        return apply_wrappers(
+        return Ok(apply_wrappers(
             LaunchPlan {
                 command: exe_path.to_string(),
                 args: vec![],
                 envs,
             },
             globals,
-        );
+        ));
     }
     let mode = cfg
         .get("launchMode")
@@ -228,21 +228,25 @@ pub(crate) fn plan_launch_with(
     let umu = which("umu-run");
     let use_umu = mode == "umu" || (mode == "auto" && umu.is_some());
     if use_umu {
-        if let Some(umu) = umu {
-            let gameid = cfg.get("umuGameId").and_then(|v| v.as_str()).unwrap_or("0").to_string();
-            envs.push(("GAMEID".to_string(), gameid));
-            if let Some(proton) = cfg.get("protonPath").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
-                envs.push(("PROTONPATH".to_string(), proton.to_string()));
-            }
-            return apply_wrappers(
-                LaunchPlan {
-                    command: umu,
-                    args: vec![exe_path.to_string()],
-                    envs,
-                },
-                globals,
-            );
+        let umu = match umu {
+            Some(u) => u,
+            // Only reachable when mode == "umu" (auto requires umu.is_some());
+            // fail loudly instead of silently dropping to bare wine.
+            None => return Err("launch mode is 'umu' but umu-run is not installed".to_string()),
+        };
+        let gameid = cfg.get("umuGameId").and_then(|v| v.as_str()).unwrap_or("0").to_string();
+        envs.push(("GAMEID".to_string(), gameid));
+        if let Some(proton) = cfg.get("protonPath").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+            envs.push(("PROTONPATH".to_string(), proton.to_string()));
         }
+        return Ok(apply_wrappers(
+            LaunchPlan {
+                command: umu,
+                args: vec![exe_path.to_string()],
+                envs,
+            },
+            globals,
+        ));
     }
 
     let proton_path = cfg
@@ -252,25 +256,29 @@ pub(crate) fn plan_launch_with(
         .map(String::from)
         .or(global_proton);
     if mode == "proton" || (mode == "auto" && proton_path.is_some()) {
-        if let Some(proton) = &proton_path {
-            if let Some(steam) = steam_root() {
-                envs.push(("STEAM_COMPAT_CLIENT_INSTALL_PATH".to_string(), steam));
-            }
-            envs.push(("STEAM_COMPAT_INSTALL_PATH".to_string(), install_path_for(exe_path)));
-            if proton_prefix.is_none() {
-                let compat = download_root.join("compatdata").join(appid);
-                std::fs::create_dir_all(&compat).ok();
-                envs.push(("STEAM_COMPAT_DATA_PATH".to_string(), compat.to_string_lossy().to_string()));
-            }
-            return apply_wrappers(
-                LaunchPlan {
-                    command: proton.clone(),
-                    args: vec!["waitforexitandrun".to_string(), exe_path.to_string()],
-                    envs,
-                },
-                globals,
-            );
+        let proton = match &proton_path {
+            Some(p) => p,
+            // Only reachable when mode == "proton" (auto requires a path); fail
+            // loudly instead of silently dropping to bare wine with no compat env.
+            None => return Err("launch mode is 'proton' but no Proton path is configured".to_string()),
+        };
+        if let Some(steam) = steam_root() {
+            envs.push(("STEAM_COMPAT_CLIENT_INSTALL_PATH".to_string(), steam));
         }
+        envs.push(("STEAM_COMPAT_INSTALL_PATH".to_string(), install_path_for(exe_path)));
+        if proton_prefix.is_none() {
+            let compat = download_root.join("compatdata").join(appid);
+            std::fs::create_dir_all(&compat).ok();
+            envs.push(("STEAM_COMPAT_DATA_PATH".to_string(), compat.to_string_lossy().to_string()));
+        }
+        return Ok(apply_wrappers(
+            LaunchPlan {
+                command: proton.clone(),
+                args: vec!["waitforexitandrun".to_string(), exe_path.to_string()],
+                envs,
+            },
+            globals,
+        ));
     }
     let wine = cfg
         .get("winePath")
@@ -279,31 +287,62 @@ pub(crate) fn plan_launch_with(
         .map(String::from)
         .or_else(|| which("wine"))
         .unwrap_or_else(|| "wine".to_string());
-    apply_wrappers(
+    Ok(apply_wrappers(
         LaunchPlan {
             command: wine,
             args: vec![exe_path.to_string()],
             envs,
         },
         globals,
-    )
+    ))
 }
 
 pub fn build_launch_command(state: &AppState, appid: &str, exe_path: &str) -> Value {
-    let plan = resolve_launch(state, appid, exe_path);
     let cwd = Path::new(exe_path).parent().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
-    json!({ "command": plan.command, "args": plan.args, "cwd": cwd })
+    match resolve_launch(state, appid, exe_path) {
+        Ok(plan) => json!({ "command": plan.command, "args": plan.args, "cwd": cwd }),
+        Err(e) => json!({ "error": e, "cwd": cwd }),
+    }
 }
 
 fn steam_root() -> Option<String> {
     let home = dirs::home_dir()?;
-    for rel in [".steam/steam", ".local/share/Steam", ".steam/root"] {
+    for rel in [
+        ".steam/steam",
+        ".local/share/Steam",
+        ".steam/root",
+        // Flatpak Steam keeps its data under the sandbox home.
+        ".var/app/com.valvesoftware.Steam/data/Steam",
+    ] {
         let candidate = home.join(rel);
         if candidate.is_dir() {
             return Some(candidate.to_string_lossy().to_string());
         }
     }
     None
+}
+
+// Steam libraries can live on secondary drives; libraryfolders.vdf lists them
+// all. Returns the main root plus every library path it declares.
+fn steam_library_dirs(steam_root: &str) -> Vec<String> {
+    let mut dirs = vec![steam_root.to_string()];
+    for rel in ["steamapps/libraryfolders.vdf", "config/libraryfolders.vdf"] {
+        let vdf = Path::new(steam_root).join(rel);
+        let text = match std::fs::read_to_string(&vdf) {
+            Ok(t) => t,
+            Err(_) => continue,
+        };
+        for line in text.lines() {
+            if let Some(rest) = line.trim().strip_prefix("\"path\"") {
+                let path = rest.trim().trim_matches('"').replace("\\\\", "/");
+                if !path.is_empty() && !dirs.contains(&path) {
+                    dirs.push(path);
+                }
+            }
+        }
+        break;
+    }
+    dirs
 }
 
 #[tauri::command(async)]
@@ -322,15 +361,34 @@ pub fn game_linux_config_set(state: State<'_, AppState>, appid: String, config: 
 pub fn linux_detect_proton() -> Value {
     let mut versions = Vec::new();
     if let Some(steam) = steam_root() {
-        for (sub, source) in [("steamapps/common", "steam"), ("compatibilitytools.d", "community")] {
-            if let Ok(entries) = std::fs::read_dir(Path::new(&steam).join(sub)) {
+        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+        // Official Proton builds live under steamapps/common of EVERY library
+        // folder, including secondary drives from libraryfolders.vdf.
+        for lib in steam_library_dirs(&steam) {
+            if let Ok(entries) = std::fs::read_dir(Path::new(&lib).join("steamapps/common")) {
                 for entry in entries.flatten() {
                     let name = entry.file_name().to_string_lossy().to_string();
-                    if source == "community" || name.to_lowercase().contains("proton") {
+                    if name.to_lowercase().contains("proton") {
                         let script = entry.path().join("proton");
                         if script.is_file() {
-                            versions.push(json!({ "label": name, "path": script.to_string_lossy(), "source": source }));
+                            let path = script.to_string_lossy().to_string();
+                            if seen.insert(path.clone()) {
+                                versions.push(json!({ "label": name, "path": path, "source": "steam" }));
+                            }
                         }
+                    }
+                }
+            }
+        }
+        // Community builds live only under the main root's compatibilitytools.d.
+        if let Ok(entries) = std::fs::read_dir(Path::new(&steam).join("compatibilitytools.d")) {
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                let script = entry.path().join("proton");
+                if script.is_file() {
+                    let path = script.to_string_lossy().to_string();
+                    if seen.insert(path.clone()) {
+                        versions.push(json!({ "label": name, "path": path, "source": "community" }));
                     }
                 }
             }
