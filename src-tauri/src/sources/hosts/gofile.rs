@@ -3,7 +3,6 @@ use crate::sources::ResolveResult;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use std::collections::HashMap;
-use std::time::Duration;
 
 static HOST_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?i)(^|\.)gofile\.io$").unwrap());
 static ID_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?:/d/|/)([A-Za-z0-9]{4,})").unwrap());
@@ -36,43 +35,11 @@ fn not_resolvable(url: &str, reason: &str) -> ResolveResult {
     }
 }
 
-async fn cdn_shortcut(id: &str) -> Option<String> {
-    let cdn = format!("https://gofilecdn.eu.cc/{id}");
-    let opts = FetchOpts {
-        method: Some("HEAD".to_string()),
-        retries: Some(0),
-        timeout: Some(Duration::from_secs(6)),
-        ..Default::default()
-    };
-    let resp = http::fetch(&cdn, &opts).await.ok()?;
-    if !resp.status().is_success() {
-        return None;
-    }
-    let ct = resp
-        .headers()
-        .get(reqwest::header::CONTENT_TYPE)
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("")
-        .to_lowercase();
-    if ct.contains("text/html") {
-        return None;
-    }
-    Some(cdn)
-}
-
 pub async fn resolve(url: &str) -> ResolveResult {
     let id = match content_id(url) {
         Some(id) => id,
         None => return not_resolvable(url, "gofile link has no content id"),
     };
-
-    if let Some(cdn) = cdn_shortcut(&id).await {
-        return ResolveResult {
-            resolvable: true,
-            url: Some(cdn),
-            ..Default::default()
-        };
-    }
 
     if let Some(token) = std::env::var("GOFILE_TOKEN").ok().filter(|t| !t.is_empty()) {
         let api = format!(
