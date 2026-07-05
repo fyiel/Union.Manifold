@@ -26,7 +26,9 @@ impl AppPaths {
             .map_err(|e| AppError::msg(format!("log dir: {e}")))?;
         let asset_cache_dir = data_dir.join("uc-asset");
         for d in [&config_dir, &data_dir, &logs_dir, &asset_cache_dir] {
-            std::fs::create_dir_all(d).ok();
+            if let Err(e) = std::fs::create_dir_all(d) {
+                crate::logging::write_line("warn", &format!("create dir {}: {e}", d.display()));
+            }
         }
         Ok(Self {
             config_dir,
