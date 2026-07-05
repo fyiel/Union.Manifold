@@ -175,7 +175,7 @@ export function SourceGamePage() {
   const sourceCount = game?.sources?.length || 0
 
   const handleDownload = async (sourceId: string, option: SourceDownloadOption, optKey: string) => {
-    if (!game || installed) return
+    if (!game || installed || liveStatus) return
     setOptState((s) => ({ ...s, [optKey]: "working" }))
     setOptMsg((m) => ({ ...m, [optKey]: "" }))
     try {
