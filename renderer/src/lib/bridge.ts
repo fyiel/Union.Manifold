@@ -1,6 +1,5 @@
 import { invoke } from "@tauri-apps/api/core"
 import { listen } from "@tauri-apps/api/event"
-import { getCurrentWindow } from "@tauri-apps/api/window"
 
 type Cb = (payload: any) => void
 
@@ -23,7 +22,6 @@ function call<T = any>(cmd: string, args?: Record<string, unknown>): Promise<T> 
   })
 }
 
-const disabled = () => Promise.resolve({ ok: false, error: "disabled in this build" })
 const noop = () => () => {}
 
 function apiBaseUrl(): string {
@@ -46,14 +44,6 @@ export function installBridge(): void {
     maximize: () => call("window_maximize"),
     close: () => call("window_close"),
     isMaximized: () => call<boolean>("window_is_maximized"),
-    onMaximizeChange: (cb: (v: boolean) => void) => {
-      const win = getCurrentWindow()
-      let unlisten = () => {}
-      win.onResized(() => {
-        win.isMaximized().then(cb)
-      }).then((fn) => (unlisten = fn))
-      return () => unlisten()
-    },
   }
 
   w.ucDownloads = {
@@ -121,7 +111,6 @@ export function installBridge(): void {
       call("app_close_response", { shouldProceed }),
     onCloseRequest: (cb: Cb) => on("uc:app-close-requested", cb),
     onNavigationAction: (cb: Cb) => on("uc:navigation-action", cb),
-    onMirrorAuthBlocked: (cb: Cb) => on("uc:mirror-auth-blocked", cb),
     getBaseUrl: () => apiBaseUrl(),
   }
 
@@ -145,24 +134,17 @@ export function installBridge(): void {
   w.ucAuth = {
     fetch: (baseUrl: string, path: string, init?: any) =>
       call("auth_fetch", { baseUrl, path, init }),
-    login: disabled,
-    logout: disabled,
-    websiteLogin: disabled,
-    linkProvider: disabled,
-    unlinkProvider: disabled,
-    updateProfile: disabled,
-    updatePassword: disabled,
   }
 
   w.ucUpdater = {
     checkForUpdates: () => call("check_for_updates"),
     installUpdate: () => call("install_update"),
     getVersion: () => call("get_version"),
+    onUpdateAvailable: (cb: Cb) => on("uc:update-available", cb),
   }
 
   w.ucLogs = {
     log: (level: string, message: string, data?: any) => call("log", { level, message, data }),
-    shareLogs: disabled,
   }
 
   w.ucAutostart = {
@@ -191,11 +173,6 @@ export function installBridge(): void {
   w.ucSystem = {
     openExternal: (target: string) => call("system_open_external", { target }),
     launchSteam: () => call("system_launch_steam"),
-    getVolume: () => Promise.resolve({ ok: true, volume: 100 }),
-    setVolume: () => Promise.resolve({ ok: true }),
-    getMuted: () => Promise.resolve({ ok: true, muted: false }),
-    setMuted: () => Promise.resolve({ ok: true }),
-    takeScreenshot: () => Promise.resolve({ ok: false }),
     getNotifications: () => call("system_notifications"),
     onNotificationActivated: noop,
   }
