@@ -112,17 +112,6 @@ export function getRecentlyDownloadedGames(limit: number = 20): string[] {
   return history.downloadedGames.slice(-limit).reverse()
 }
 
-export function hasCookieConsent(): boolean {
-  if (typeof window === "undefined") return true
-
-  const consent = localStorage.getItem("cookie-consent")
-  if (consent === "accepted") return true
-  if (consent === "declined") return false
-
-  localStorage.setItem("cookie-consent", "accepted")
-  return true
-}
-
 export function clearSearchHistory(): void {
   const history = getUserHistory()
   history.searches = []
@@ -133,7 +122,6 @@ export function clearUserHistory(): void {
   if (typeof window === "undefined") return
 
   document.cookie = `${HISTORY_COOKIE_NAME}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;`
-  localStorage.removeItem("cookie-consent")
 }
 
 function getDefaultHistory(): UserHistory {
