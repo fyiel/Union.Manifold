@@ -15,6 +15,7 @@ use crate::sources::{Capabilities, QueryParams};
 const ID: &str = "gamebounty";
 const ORIGIN: &str = "https://gamebounty.world";
 const SLUG_SUFFIX: &str = "-free-pc-download";
+const CATALOG_WINDOW: usize = 60;
 
 static SLUG_CACHE: Lazy<Cached<Vec<String>>> =
     Lazy::new(|| Cached::new(Duration::from_secs(60 * 60 * 6)));
@@ -142,7 +143,7 @@ fn steam_image(appid: u64, kind: &str) -> String {
     format!("https://shared.steamstatic.com/store_item_assets/steam/apps/{appid}/{kind}")
 }
 
-async fn all_slugs() -> Vec<String> {
+async fn all_slugs() -> Option<Vec<String>> {
     SLUG_CACHE
         .get_or(|| async {
             let text = http::get_text(&format!("{ORIGIN}/sitemap.xml"))
@@ -173,7 +174,6 @@ async fn all_slugs() -> Vec<String> {
             }
         })
         .await
-        .unwrap_or_default()
 }
 
 fn mirrors_to_options(container: Option<&Value>) -> Vec<DownloadOption> {
@@ -238,10 +238,12 @@ fn mirrors_to_options(container: Option<&Value>) -> Vec<DownloadOption> {
     options
 }
 
-fn parse_game_page(html: &str, slug: &str) -> SourceGame {
+fn parse_game_page(html: &str, slug: &str) -> Option<SourceGame> {
     let flight = collect_next_flight(html);
-    let post =
-        find_object_by_key(&flight, "post").unwrap_or_else(|| Value::Object(Default::default()));
+    // No "post" object means the page didn't render the game payload (a transient
+    // render/fetch failure). Return None so get_detail doesn't cache an empty
+    // slug-title for 6h.
+    let post = find_object_by_key(&flight, "post")?;
 
     let appid = if post.get("appid").map(value_truthy).unwrap_or(false) {
         post.get("appid").and_then(value_to_u64).filter(|n| *n > 0)
@@ -324,7 +326,7 @@ fn parse_game_page(html: &str, slug: &str) -> SourceGame {
 
     let nsfw = post.get("is_nsfw").map(value_truthy).unwrap_or(false);
 
-    SourceGame {
+    Some(SourceGame {
         source_id: ID.to_string(),
         source_slug: slug.to_string(),
         source_url: format!("{ORIGIN}/{slug}"),
@@ -346,7 +348,7 @@ fn parse_game_page(html: &str, slug: &str) -> SourceGame {
         size_text: size_human,
         nsfw,
         download_options,
-    }
+    })
 }
 
 pub fn capabilities() -> Capabilities {
@@ -365,19 +367,25 @@ pub fn capabilities() -> Capabilities {
     }
 }
 
-pub async fn query(params: &QueryParams) -> Vec<SourceGame> {
+pub async fn query(params: &QueryParams) -> Option<Vec<SourceGame>> {
     if let Some(text) = params.text.as_deref() {
         if !text.trim().is_empty() {
-            return search(text, params.limit).await;
+            return Some(search(text, params.limit).await);
         }
     }
-    let slugs = all_slugs().await;
-    if slugs.is_empty() {
-        crate::logging::write_line("warn", "gamebounty sitemap yielded no slugs");
-    }
-    let end = params.limit.min(slugs.len());
+    // None => the sitemap fetch hard-failed (no slugs, not even stale).
+    let slugs = match all_slugs().await {
+        Some(s) => s,
+        None => {
+            crate::logging::write_line("warn", "gamebounty sitemap yielded no slugs");
+            return None;
+        }
+    };
+    // Cap the per-fill catalog window well below POOL_SIZE: one page fetch per
+    // slug up to POOL_SIZE (300) is slow and fragile.
+    let end = params.limit.min(CATALOG_WINDOW).min(slugs.len());
     let window: Vec<String> = slugs[..end].to_vec();
-    http::map_limit(window, 8, |slug| async move { get_detail(&slug).await }).await
+    Some(http::map_limit(window, 8, |slug| async move { get_detail(&slug).await }).await)
 }
 
 pub async fn search(q: &str, limit: usize) -> Vec<SourceGame> {
@@ -386,7 +394,7 @@ pub async fn search(q: &str, limit: usize) -> Vec<SourceGame> {
     if q.is_empty() {
         return Vec::new();
     }
-    let slugs = all_slugs().await;
+    let slugs = all_slugs().await.unwrap_or_default();
     let terms: Vec<&str> = q.split_whitespace().collect();
     let mut scored = Vec::new();
     for slug in &slugs {
@@ -414,7 +422,7 @@ pub async fn get_detail(slug: &str) -> Option<SourceGame> {
                 return None;
             }
             let text = resp.text().await.ok()?;
-            Some(parse_game_page(&text, &path))
+            parse_game_page(&text, &path)
         })
         .await
 }
