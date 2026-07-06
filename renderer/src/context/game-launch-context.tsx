@@ -276,6 +276,18 @@ export function GameLaunchProvider({ children }: { children: React.ReactNode }) 
     if (isRunningGameSync(g.appid)) return
     if (!window.ucDownloads?.listGameExecutables || !window.ucDownloads?.launchGameExecutable) return
     disarmQuickExit()
+    // Steam-imported entries have no exe of their own — hand the launch to the
+    // Steam client. Only steam-* appids can be steam imports, so the manifest
+    // lookup is skipped for everything else.
+    if (g.appid.startsWith("steam-")) {
+      const manifest: { installType?: string; steamAppId?: number } | null =
+        (await window.ucDownloads?.getInstalledGlobal?.(g.appid)) ?? null
+      if (manifest?.installType === "steam" && typeof manifest.steamAppId === "number") {
+        const res = await window.ucSystem?.runSteamGame?.(manifest.steamAppId)
+        if (res?.ok) void reportPlayEvent(g.appid, "play")
+        return
+      }
+    }
     try {
       const savedExe = await getSavedExe(g.appid)
       if (savedExe) {
