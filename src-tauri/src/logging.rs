@@ -1,7 +1,7 @@
 use std::path::PathBuf;
-use std::sync::Mutex;
 
 use once_cell::sync::Lazy;
+use parking_lot::Mutex;
 use regex::Regex;
 use serde_json::Value;
 
@@ -17,7 +17,7 @@ static REDACT: Lazy<Vec<(Regex, &'static str)>> = Lazy::new(|| {
 pub fn init(path: PathBuf) {
     let prev = path.with_extension("prev.txt");
     std::fs::rename(&path, &prev).ok();
-    *LOG_PATH.lock().unwrap() = Some(path);
+    *LOG_PATH.lock() = Some(path);
 }
 
 fn redact(text: &str) -> String {
@@ -29,14 +29,20 @@ fn redact(text: &str) -> String {
 }
 
 pub fn write_line(level: &str, message: &str) {
-    let guard = LOG_PATH.lock().unwrap();
-    if let Some(path) = guard.as_ref() {
-        let stamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
-        let line = format!("[{stamp}] [{}] {}\n", level.to_uppercase(), redact(message));
-        use std::io::Write;
-        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
-            f.write_all(line.as_bytes()).ok();
-        }
+    // Clone the path out and do the stamping/redaction/IO outside the lock:
+    // nothing that can panic (REDACT's lazy regex init, formatting, file IO)
+    // runs while LOG_PATH is held, so the panic hook — which calls back into
+    // write_line — can never re-enter a lock its own thread already holds and
+    // hang the abort. O_APPEND keeps concurrent one-shot line writes whole.
+    let path = match LOG_PATH.lock().clone() {
+        Some(p) => p,
+        None => return,
+    };
+    let stamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
+    let line = format!("[{stamp}] [{}] {}\n", level.to_uppercase(), redact(message));
+    use std::io::Write;
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+        f.write_all(line.as_bytes()).ok();
     }
 }
 

@@ -44,7 +44,36 @@ fn emit_deep_link(app: &tauri::AppHandle, arg: &str) {
     }
 }
 
+/// With `panic = "abort"` in release, any panic on any thread kills the whole
+/// process with nothing in our log — user reports become "the app closed
+/// itself". Log the panic (message + location + thread) through the buffered
+/// log before the abort so a crash is diagnosable from a bug report. Writes
+/// before logging::init (early startup) are dropped by write_line, same as
+/// every other pre-init log line.
+fn install_panic_hook() {
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let msg = info
+            .payload()
+            .downcast_ref::<&str>()
+            .copied()
+            .or_else(|| info.payload().downcast_ref::<String>().map(String::as_str))
+            .unwrap_or("<non-string panic payload>");
+        let location = info
+            .location()
+            .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
+            .unwrap_or_else(|| "<unknown>".to_string());
+        let thread = std::thread::current();
+        logging::write_line(
+            "fatal",
+            &format!("panic on thread '{}' at {location}: {msg}", thread.name().unwrap_or("<unnamed>")),
+        );
+        default_hook(info);
+    }));
+}
+
 pub fn run() {
+    install_panic_hook();
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             if let Some(arg) = argv.iter().find(|a| a.contains("://")) {
