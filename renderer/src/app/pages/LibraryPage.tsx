@@ -333,6 +333,10 @@ export function LibraryPage() {
         await Promise.all(targets.slice(i, i + CONC).map(async (g) => {
           try {
             const full = await resolveInstalledGame(g.appid, g.name, g.steamAppId)
+            // A Steam-id override landed while this resolve was in flight
+            // (onSaved clears the mark): committing now would resurrect the
+            // wrong match in the remembered + persisted caches. Drop it.
+            if (!enrichTried.current.has(g.appid)) return
             if (!full) { enrichTried.current.delete(g.appid); return }
             rememberGames([full])
             rememberGameAs(g.appid, full)
@@ -464,12 +468,18 @@ export function LibraryPage() {
     enrichTried.current.add(g.appid)
     try {
       const full = await resolveInstalledGame(g.appid, g.name, g.steamAppId)
+      // Same stale-commit guard as the enrichment loop: an override during the
+      // resolve cleared the mark, and this result describes the OLD id.
+      if (!enrichTried.current.has(g.appid)) return
       if (!full) return
       rememberGames([full])
       rememberGameAs(g.appid, full)
       gameCacheRef.current[g.appid] = { cachedAt: Date.now(), game: full }
       void window.ucSettings?.set?.(GAME_CACHE_KEY, { ...gameCacheRef.current })
-      setInstalled((prev) => prev.map((x) => x.appid !== g.appid ? x : { ...x, name: full.title || x.name, image: full.image || x.image, sizeText: full.sizeText || x.sizeText, sizeBytes: full.sizeBytes ?? x.sizeBytes }))
+      // Name is identity, not metadata: only fill it when the manifest gave us
+      // nothing (same rule as the enrichment loop), so a search mismatch can't
+      // rename the entry and poison every later title-based resolution.
+      setInstalled((prev) => prev.map((x) => x.appid !== g.appid ? x : { ...x, name: (!x.name || x.name === x.appid) ? (full.title || x.name) : x.name, image: full.image || x.image, sizeText: full.sizeText || x.sizeText, sizeBytes: full.sizeBytes ?? x.sizeBytes }))
     } catch { /* ignore */ }
   }
 
@@ -610,17 +620,23 @@ export function LibraryPage() {
           gameName={steamIdFor.name}
           current={steamIdFor.current}
           onClose={() => setSteamIdFor(null)}
-          onSaved={(id) => {
+          onSaved={async (id) => {
             const appid = steamIdFor.appid
-            // Drop the stale resolved-game cache (a wrong auto-match cached the
-            // wrong title/art) so the detail page re-resolves against the new id.
+            // Drop every stale trace of the wrong auto-match: the remembered
+            // record (under BOTH its keys), the enrichment mark (which also
+            // tells an in-flight resolve for this appid to discard its result)
+            // and the persisted resolved-game cache.
             forgetRememberedGame(appid)
             enrichTried.current.delete(appid)
             delete gameCacheRef.current[appid]
-            void window.ucSettings?.set?.(GAME_CACHE_KEY, { ...gameCacheRef.current })
             setInstalled((prev) => prev.map((x) => x.appid !== appid ? x : { ...x, steamAppId: id, image: steamCoverUrl(id) }))
+            // AWAIT the cache persist: the reload below re-reads GAME_CACHE_KEY
+            // from settings, and a fire-and-forget set losing that race would
+            // resurrect the wrong game we just evicted.
+            try { await window.ucSettings?.set?.(GAME_CACHE_KEY, { ...gameCacheRef.current }) } catch { /* ignore */ }
             // Reload from manifests so the card picks up the backend-resolved
-            // real cover (the optimistic steamCoverUrl guess 404s for some ids).
+            // real cover + official title (the optimistic steamCoverUrl guess
+            // 404s for some ids).
             try { window.dispatchEvent(new Event("uc_game_installed")) } catch { /* ignore */ }
           }}
         />

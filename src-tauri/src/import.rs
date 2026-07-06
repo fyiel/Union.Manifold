@@ -87,16 +87,30 @@ pub async fn import_exe(state: State<'_, AppState>, exe_path: String, name: Opti
     })
 }
 
-// Manual override for an imported game's Steam appid — used both when the
-// store search missed AND when it matched the wrong game (exe names are
-// ambiguous; "Card Corner"-style titles collide). Overwrites the cover too.
+// Manual override for a library game's Steam appid — used both when the store
+// search missed AND when it matched the wrong game (exe names are ambiguous;
+// "Card Corner"-style titles collide). The override is the user asserting
+// "this install IS steam game <id>", so the whole persisted identity follows:
+//  - top-level steamAppId (what entryToLib trusts first),
+//  - metadata.steamAppId (startSourceDownload stamps the source's — possibly
+//    wrong — id there at enqueue time; leaving it stale would resurface the
+//    old game through any reader that falls back to metadata),
+//  - metadata.image (real cover for the new id),
+//  - metadata.name (official store title) so future title-based resolution
+//    searches the right game instead of whatever a wrong auto-match or an exe
+//    stem left behind. The manifest's top-level `name` (original folder/exe
+//    name) is deliberately untouched. No store page → name stays as-is.
 #[tauri::command]
 pub async fn import_set_steam_appid(state: State<'_, AppState>, appid: String, steam_appid: u64) -> Result<Value, String> {
     let cover = crate::sources::steam::resolve_cover(steam_appid).await;
+    let mut metadata = json!({ "image": cover, "steamAppId": steam_appid });
+    if let Some(name) = crate::sources::steam::app_name(steam_appid).await {
+        metadata["name"] = json!(name);
+    }
     let roots = library::scan_roots(&state);
     let ok = library::merge_into_manifest(&roots, &appid, &json!({
         "steamAppId": steam_appid,
-        "metadata": { "image": cover },
+        "metadata": metadata,
     }));
     Ok(json!({ "ok": ok }))
 }

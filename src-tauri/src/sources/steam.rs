@@ -15,6 +15,11 @@ static DETAILS_CACHE: LazyLock<metacache::WriteBehind<Option<StoreDetails>>> =
 
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub struct StoreDetails {
+    // Official store title. Added without #[serde(default)] on purpose: a
+    // cached steam-details.json predating the field fails to parse wholesale,
+    // resets, and refills with names — a serde default would instead pin ""
+    // forever for already-cached appids (write-behind entries never refresh).
+    pub name: String,
     pub description: String,
     pub genres: Vec<String>,
     pub release_year: Option<i32>,
@@ -71,6 +76,7 @@ pub async fn get_store_details(appid: u64) -> Option<StoreDetails> {
         let str_of = |v: Option<&Value>| v.and_then(|x| x.as_str()).unwrap_or("").to_string();
         let reqs = d.get("pc_requirements").filter(|v| v.is_object());
         StoreDetails {
+            name: str_of(d.get("name")),
             description: http::strip_tags(
                 d.get("short_description")
                     .or_else(|| d.get("about_the_game"))
@@ -217,6 +223,12 @@ pub async fn resolve_cover(appid: u64) -> String {
         }
     }
     capsule
+}
+
+// The game's official store title, None when the store has no page for the id
+// (or the lookup failed). Cached through get_store_details like everything else.
+pub async fn app_name(appid: u64) -> Option<String> {
+    get_store_details(appid).await.map(|d| d.name).filter(|n| !n.is_empty())
 }
 
 pub async fn steam_meta(appid: u64) -> Value {

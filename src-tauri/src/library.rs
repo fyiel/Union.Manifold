@@ -337,6 +337,21 @@ mod tests {
         dir
     }
 
+    // The exact payload shape import_set_steam_appid persists (import.rs:111-114):
+    // top-level steamAppId plus a metadata patch. store_name: None mirrors an id
+    // with no store page (steam::app_name -> None) — the name key is absent.
+    fn override_payload(id: u64, store_name: Option<&str>) -> Value {
+        let mut metadata = json!({ "image": format!("https://cdn.test/{id}/capsule.jpg"), "steamAppId": id });
+        if let Some(name) = store_name {
+            metadata["name"] = json!(name);
+        }
+        json!({ "steamAppId": id, "metadata": metadata })
+    }
+
+    fn read_manifest(dir: &std::path::Path) -> Value {
+        serde_json::from_str(&std::fs::read_to_string(dir.join(MANIFEST_NAME)).unwrap()).unwrap()
+    }
+
     #[test]
     fn game_files_dir_prefers_manifest_install_path() {
         let tmp = tempfile::tempdir().unwrap();
@@ -368,5 +383,176 @@ mod tests {
         assert_eq!(game_files_dir(&roots, "42"), Some(normal));
         assert_eq!(game_files_dir(&roots, "local-dead"), Some(stale));
         assert_eq!(game_files_dir(&roots, "missing"), None);
+    }
+
+    // Steam appid override (import_set_steam_appid → merge_into_manifest): the
+    // override must replace the FULL persisted identity — top-level steamAppId
+    // AND the stale enqueue-time metadata.steamAppId — while leaving every
+    // sibling field (original name, paths, status, type, appid) untouched.
+    #[test]
+    fn steam_override_merge_persists_identity_and_preserves_siblings() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = write_stub(tmp.path(), "card-corner", &json!({
+            "appid": "local-0011223344556677",
+            "name": "CardCorner",
+            "installStatus": "installed",
+            "installType": "imported-exe",
+            "installPath": "/games/Card Corner",
+            "exePath": "/games/Card Corner/CardCorner.exe",
+            "updatedAt": 1_000,
+            "metadata": {
+                // Stale stamp from a wrong auto-match at enqueue time — the exact
+                // field that used to resurrect the old game after an override.
+                "steamAppId": 111,
+                "image": "https://cdn.test/111/capsule.jpg",
+                "name": "Card Corner (wrong)",
+                "genre": "Puzzle",
+            },
+        }));
+
+        let roots = vec![tmp.path().to_path_buf()];
+        let before = now_ms();
+        assert!(merge_into_manifest(&roots, "local-0011223344556677", &override_payload(620, Some("Card Corner"))));
+
+        let m = read_manifest(&dir);
+        // New identity, persisted as JSON numbers (as_u64 fails on a string).
+        assert_eq!(m["steamAppId"].as_u64(), Some(620));
+        assert_eq!(m["metadata"]["steamAppId"].as_u64(), Some(620));
+        assert_eq!(m["metadata"]["name"], json!("Card Corner"));
+        assert_eq!(m["metadata"]["image"], json!("https://cdn.test/620/capsule.jpg"));
+        // Fields the override must never touch.
+        assert_eq!(m["appid"], json!("local-0011223344556677"));
+        assert_eq!(m["name"], json!("CardCorner"));
+        assert_eq!(m["installStatus"], json!("installed"));
+        assert_eq!(m["installType"], json!("imported-exe"));
+        assert_eq!(m["installPath"], json!("/games/Card Corner"));
+        assert_eq!(m["exePath"], json!("/games/Card Corner/CardCorner.exe"));
+        // Deep merge, not replacement: unrelated metadata siblings survive.
+        assert_eq!(m["metadata"]["genre"], json!("Puzzle"));
+        assert!(m["updatedAt"].as_i64().unwrap() >= before);
+    }
+
+    // ok:false contract: an unknown appid must reject the override and leave
+    // every manifest in the root byte-identical — no partial write anywhere.
+    #[test]
+    fn steam_override_unknown_appid_is_rejected_and_writes_nothing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let a = write_stub(tmp.path(), "game-a", &json!({
+            "appid": "steam-620",
+            "installStatus": "installed",
+            "metadata": { "steamAppId": 620 },
+        }));
+        let b = write_stub(tmp.path(), "game-b", &json!({
+            "appid": "42",
+            "installStatus": "installed",
+        }));
+        let before_a = std::fs::read(a.join(MANIFEST_NAME)).unwrap();
+        let before_b = std::fs::read(b.join(MANIFEST_NAME)).unwrap();
+
+        let roots = vec![tmp.path().to_path_buf()];
+        assert!(!merge_into_manifest(&roots, "steam-999", &override_payload(999, Some("Nope"))));
+
+        assert_eq!(std::fs::read(a.join(MANIFEST_NAME)).unwrap(), before_a);
+        assert_eq!(std::fs::read(b.join(MANIFEST_NAME)).unwrap(), before_b);
+    }
+
+    // Re-applying the SAME override (user re-saves the dialog) must be
+    // idempotent: ok:true again and identical logical fields, only updatedAt
+    // may differ.
+    #[test]
+    fn steam_override_reapplied_is_idempotent() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = write_stub(tmp.path(), "portal-2", &json!({
+            "appid": "steam-1234",
+            "name": "Portal 2 Repack",
+            "installStatus": "installed",
+            "metadata": { "steamAppId": 1234, "name": "Some Other Game" },
+        }));
+
+        let roots = vec![tmp.path().to_path_buf()];
+        let payload = override_payload(620, Some("Portal 2"));
+        assert!(merge_into_manifest(&roots, "steam-1234", &payload));
+        let mut first = read_manifest(&dir);
+        assert!(merge_into_manifest(&roots, "steam-1234", &payload));
+        let mut second = read_manifest(&dir);
+
+        // Anchor the state so equality can't hold on two equally-wrong files.
+        assert_eq!(second["steamAppId"].as_u64(), Some(620));
+        assert_eq!(second["metadata"]["steamAppId"].as_u64(), Some(620));
+        first.as_object_mut().unwrap().remove("updatedAt");
+        second.as_object_mut().unwrap().remove("updatedAt");
+        assert_eq!(first, second);
+    }
+
+    // No-store-page edge: app_name returns None, so the payload carries no
+    // metadata.name key — an existing (possibly hand-picked) name must survive
+    // while the id and image still switch over.
+    #[test]
+    fn steam_override_without_store_name_keeps_existing_metadata_name() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = write_stub(tmp.path(), "obscure-game", &json!({
+            "appid": "local-ffffeeeeddddcccc",
+            "installStatus": "installed",
+            "metadata": {
+                "steamAppId": 111,
+                "name": "Hand Picked Name",
+                "image": "https://cdn.test/111/capsule.jpg",
+            },
+        }));
+
+        let roots = vec![tmp.path().to_path_buf()];
+        assert!(merge_into_manifest(&roots, "local-ffffeeeeddddcccc", &override_payload(3_489_700, None)));
+
+        let m = read_manifest(&dir);
+        assert_eq!(m["steamAppId"].as_u64(), Some(3_489_700));
+        assert_eq!(m["metadata"]["steamAppId"].as_u64(), Some(3_489_700));
+        assert_eq!(m["metadata"]["image"], json!("https://cdn.test/3489700/capsule.jpg"));
+        assert_eq!(m["metadata"]["name"], json!("Hand Picked Name"));
+    }
+
+    // Legacy/minimal manifests (bare numeric UnionCrax id, no metadata object at
+    // all) must still take the override: the metadata patch lands wholesale
+    // instead of being dropped by the deep-merge branch.
+    #[test]
+    fn steam_override_creates_metadata_on_entry_without_one() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = write_stub(tmp.path(), "legacy-game", &json!({
+            "appid": "777",
+            "name": "Legacy Game",
+            "installStatus": "installed",
+        }));
+
+        let roots = vec![tmp.path().to_path_buf()];
+        assert!(merge_into_manifest(&roots, "777", &override_payload(620, Some("Portal 2"))));
+
+        let m = read_manifest(&dir);
+        assert_eq!(m["steamAppId"].as_u64(), Some(620));
+        assert_eq!(m["metadata"]["steamAppId"].as_u64(), Some(620));
+        assert_eq!(m["metadata"]["name"], json!("Portal 2"));
+        assert_eq!(m["name"], json!("Legacy Game"));
+    }
+
+    // Durability: a later metadata-only merge (installed_update_metadata — e.g.
+    // a custom-cover import writing only `image`) must not resurrect the stale
+    // id or drop any part of the override.
+    #[test]
+    fn steam_override_survives_later_metadata_only_update() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = write_stub(tmp.path(), "kept-game", &json!({
+            "appid": "steam-4321",
+            "installStatus": "installed",
+            "metadata": { "steamAppId": 111, "image": "https://cdn.test/111/capsule.jpg" },
+        }));
+
+        let roots = vec![tmp.path().to_path_buf()];
+        assert!(merge_into_manifest(&roots, "steam-4321", &override_payload(620, Some("Portal 2"))));
+        // What installed_update_metadata sends for a cover swap (library.rs:284-286).
+        assert!(merge_into_manifest(&roots, "steam-4321", &json!({ "metadata": { "image": "uc-custom://abcd" } })));
+
+        let m = read_manifest(&dir);
+        assert_eq!(m["steamAppId"].as_u64(), Some(620));
+        assert_eq!(m["metadata"]["steamAppId"].as_u64(), Some(620));
+        assert_eq!(m["metadata"]["name"], json!("Portal 2"));
+        assert_eq!(m["metadata"]["image"], json!("uc-custom://abcd"));
     }
 }

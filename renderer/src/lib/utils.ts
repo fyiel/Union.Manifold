@@ -209,11 +209,15 @@ const UC_ASSET_BASE =
 export function proxyMediaUrl(mediaUrl: string): string {
   if (!mediaUrl) return mediaUrl
 
-  // data/blob URLs and already-built uc-local:// URLs pass through.
+  // data/blob URLs, already-built uc-local:// URLs and already-built asset
+  // protocol URLs pass through. The Windows asset base is plain
+  // http://uc-asset.localhost, so without the explicit check a second pass
+  // would classify an already-proxied URL as remote and wrap it again.
   if (
     mediaUrl.startsWith("data:") ||
     mediaUrl.startsWith("blob:") ||
-    mediaUrl.startsWith("uc-local://")
+    mediaUrl.startsWith("uc-local://") ||
+    mediaUrl.startsWith(`${UC_ASSET_BASE}/`)
   ) {
     return mediaUrl
   }
@@ -296,6 +300,12 @@ export function proxyImageUrl(imageUrl: string): string {
   // Route every remote image through the infinite on-disk asset cache
   // (uc-asset:// → main fetches once, stores forever, serves from disk after).
   // Local (uc-local://) / renderer-served / empty URLs pass through untouched.
+  // Already served by the asset protocol (a uc-custom:// cover resolved by
+  // proxyMediaUrl above). On Windows that base is http://uc-asset.localhost,
+  // which the remote check below would match — wrapping it again made the
+  // backend fetch its own protocol URL over the network and 502 (blank custom
+  // covers on Windows).
+  if (u.startsWith(`${UC_ASSET_BASE}/`)) return u
   if (u.startsWith("http://") || u.startsWith("https://")) {
     return `${UC_ASSET_BASE}/img?u=${encodeURIComponent(u)}`
   }
