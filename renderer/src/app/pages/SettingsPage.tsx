@@ -603,12 +603,20 @@ function AboutTab() {
   const install = async () => {
     setChecking(true)
     setUpdMsg("downloading update…")
+    // Live phase/percent feed while the backend downloads and installs; the
+    // pacman path pops a polkit auth prompt during "installing".
+    const offProgress = window.ucUpdater?.onUpdateProgress?.((p) => {
+      if (p.phase === "installing") setUpdMsg("installing update… (authentication may be required)")
+      else if (p.total) setUpdMsg(`downloading update… ${Math.min(100, Math.round((p.received / p.total) * 100))}%`)
+      else setUpdMsg(`downloading update… ${(p.received / 1e6).toFixed(0)} MB`)
+    })
     try {
       const r = await window.ucUpdater?.installUpdate?.()
       if (r && r.ok === false) setUpdMsg(`update failed${r.error ? ` · ${r.error}` : ""}`)
     } catch (err) {
       setUpdMsg(`update failed · ${String(err)}`)
     } finally {
+      offProgress?.()
       setChecking(false)
     }
   }
