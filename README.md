@@ -19,6 +19,12 @@ pnpm dev
 ```
 `pnpm fetch-sidecars` grabs the aria2c and 7z binaries the app shells out to. `pnpm build` produces a packaged app.
 
+### install / update on arch
+```
+sudo pacman -U https://github.com/fyiel/Union.Manifold/releases/latest/download/union-manifold-x86_64.pkg.tar.zst
+```
+Same command updates an existing install. Other Linux: grab the AppImage or deb from [releases](https://github.com/fyiel/Union.Manifold/releases).
+
 ### credit
 Built on [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3. Huge thanks to the original team, none of this exists without their work.
 

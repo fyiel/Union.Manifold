@@ -158,4 +158,6 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           bash scripts/build-arch-pkg.sh "${{ needs.check.outputs.version }}" "${{ matrix.target }}"
-          gh release upload "${{ needs.check.outputs.tag }}" union-manifold-*.pkg.tar.zst --clobber
+          # stable-named copy so the readme one-liner can point at releases/latest
+          cp "union-manifold-${{ needs.check.outputs.version }}-1-x86_64.pkg.tar.zst" union-manifold-x86_64.pkg.tar.zst
+          gh release upload "${{ needs.check.outputs.tag }}" "union-manifold-${{ needs.check.outputs.version }}-1-x86_64.pkg.tar.zst" union-manifold-x86_64.pkg.tar.zst --clobber
