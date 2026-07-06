@@ -77,42 +77,45 @@ function normTitle(s: string): string {
 
 // Resolve a fully-hydrated record for an installed game that shipped with only
 // an appid + title. Library installs use mixed appid schemes (UnionCrax
-// internal id, steam-<steamAppId>, steam-<sourceId>) so the appid alone isn't a
-// reliable key. We try the precise path first and ONLY fall back to a
-// cross-source title search when that resolves nothing. A title search is the
-// last resort, never run for a game the precise path already solved.
-export async function resolveInstalledGame(appid: string, title: string): Promise<UnifiedSourceGame | null> {
-  // Bare numeric appid is a UnionCrax internal id, resolve it directly.
-  if (/^\d+$/.test(appid)) {
+// internal id, steam-<steamAppId>, steam-<sourceId>, or local-<hash> for
+// imported exes) so the appid alone isn't a reliable key. A caller-supplied
+// steamAppId (from the manifest — set by auto-match, override, or steam import)
+// is authoritative: it drives the SAME art the card thumbnail uses, so the
+// preview and the detail page never resolve to two different games.
+export async function resolveInstalledGame(appid: string, title: string, knownSteamAppId?: number | null): Promise<UnifiedSourceGame | null> {
+  // Bare numeric appid is a UnionCrax internal id, resolve it directly — but
+  // only when no explicit steamAppId overrides it.
+  if (!knownSteamAppId && /^\d+$/.test(appid)) {
     const full = await getSourceDetail([{ sourceId: "unioncrax", sourceSlug: appid }])
     if (full) return full
   }
-  // Our own installs derive their id from the dedup key, so steam-<digits> IS
-  // the Steam appid. That alone buys cover art, hero art and store metadata on
-  // the detail page even when no source search can find the title.
-  const steamAppId = (() => {
+  // Explicit steamAppId wins; otherwise steam-<digits> encodes it in the appid.
+  const steamAppId = knownSteamAppId ?? (() => {
     const m = /^steam-(\d+)$/.exec(appid)
     return m ? Number(m[1]) : null
   })()
   const q = (title || "").trim()
   const hits = q ? await searchSources(q, 12) : []
   const want = normTitle(q)
-  // With a known steam appid the hit that agrees with it wins outright, then an
-  // exact title match. The blind hits[0] fallback is only safe when we have no
-  // appid to contradict it.
+  // The appid-agreeing hit wins. An exact-title hit is accepted ONLY when it
+  // doesn't contradict a known steamAppId — otherwise a same-named but
+  // different game (the "Card Corner" collision) would drive the detail page
+  // while the thumbnail shows the correct appid's art. The blind hits[0]
+  // fallback is only safe with no appid to contradict.
   const pick =
     (steamAppId ? hits.find((h) => h.steamAppId === steamAppId) : undefined) ||
-    hits.find((h) => normTitle(h.title) === want) ||
+    hits.find((h) => normTitle(h.title) === want && (!steamAppId || !h.steamAppId || h.steamAppId === steamAppId)) ||
     (steamAppId ? undefined : hits[0])
   if (pick) {
     const stubs = (pick.sources || []).map((s) => ({ sourceId: s.sourceId, sourceSlug: s.sourceSlug }))
     const full = stubs.length ? await getSourceDetail(stubs) : null
     const resolved = full || pick
-    if (steamAppId && !resolved.steamAppId) return { ...resolved, steamAppId }
+    if (steamAppId && resolved.steamAppId !== steamAppId) return { ...resolved, steamAppId }
     return resolved
   }
   // No source knows the title (fresh releases fall through search). Build a
-  // steam-backed record so the card and detail page still get art + metadata.
+  // steam-backed record so the card and detail page still get art + metadata,
+  // both keyed off the same steamAppId.
   if (steamAppId) {
     return {
       dedupKey: appid,
