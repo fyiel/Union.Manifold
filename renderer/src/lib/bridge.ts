@@ -102,6 +102,7 @@ export function installBridge(): void {
     browseForGameExe: (defaultPath?: string) => call("browse_for_game_exe", { defaultPath }),
     importExe: (exePath: string, name?: string) => call("import_exe", { exePath, name }),
     importSetSteamAppId: (appid: string, steamAppid: number) => call("import_set_steam_appid", { appid, steamAppid }),
+    importCustomImage: (path: string) => call("custom_image_import", { path }),
     steamLibraryScan: () => call("steam_library_scan"),
     steamLibraryImport: (apps: Array<{ steamAppId: number; name: string; installPath?: string; sizeBytes?: number }>) =>
       call("steam_library_import", { apps }),

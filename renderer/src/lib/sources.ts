@@ -363,6 +363,12 @@ export function rememberGameAs(key: string, game: UnifiedSourceGame): void {
   if (key) rememberSet(key, game)
 }
 
+// Drop a stale remembered record (e.g. after a manual Steam appid override
+// replaced what the wrong auto-match cached) so detail re-resolves fresh.
+export function forgetRememberedGame(key: string): void {
+  _remembered.delete(key)
+}
+
 // ── Download art cache ──
 // Downloads carry no image of their own, so when we enqueue one we stash the
 // game's cover (keyed by the same appid the download manager uses) for the

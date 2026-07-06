@@ -7,9 +7,9 @@ import { useRunningGame } from "@/hooks/use-running-games"
 import { useDownloadsSelector } from "@/context/downloads-context"
 import { useTabVisible } from "@/context/tab-visibility"
 import { hasInstalledVersionUpdate, proxyImageUrl } from "@/lib/utils"
-import { rememberGames, rememberGameAs, getRememberedGame, resolveInstalledGame, getDownloadArt, hydrateDownloadArt, steamCoverUrl } from "@/lib/sources"
+import { rememberGames, rememberGameAs, getRememberedGame, resolveInstalledGame, getDownloadArt, hydrateDownloadArt, steamCoverUrl, forgetRememberedGame } from "@/lib/sources"
 import { MONO, COVER_LINES, gbLabel, SearchIcon, CenterState } from "@/app/manifold/ui"
-import { GameMenu, LaunchOptionsDialog, EditDetailsDialog, LinuxConfigDialog, AddGamesDialog, type MenuGame } from "@/app/manifold/library-overlays"
+import { GameMenu, LaunchOptionsDialog, EditDetailsDialog, LinuxConfigDialog, AddGamesDialog, SteamIdDialog, type MenuGame } from "@/app/manifold/library-overlays"
 
 const IS_LINUX = typeof navigator !== "undefined" && /linux/i.test(navigator.userAgent)
 
@@ -158,7 +158,7 @@ function InstallingStrip({ installingMeta, installedIds, filter, query }: { inst
         {installing.map((g) => (
           <div key={g.appid} style={{ display: "flex", alignItems: "center", gap: 14, padding: "12px 16px", border: "1px solid var(--mf-line)", borderRadius: 11, background: "var(--mf-panel-2)" }}>
             <div style={{ width: 38, height: 50, borderRadius: 6, flexShrink: 0, background: g.image ? "#0f0f0f" : COVER_LINES, overflow: "hidden" }}>
-              {g.image && <img src={proxyImageUrl(g.image)} alt="" loading="lazy" decoding="async" style={{ width: "100%", height: "100%", objectFit: "cover" }} />}
+              {g.image && <img src={proxyImageUrl(g.image)} alt="" loading="lazy" decoding="async" onError={(e) => { e.currentTarget.style.display = "none" }} style={{ width: "100%", height: "100%", objectFit: "cover" }} />}
             </div>
             <div style={{ minWidth: 0, flex: 1 }}>
               <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
@@ -181,6 +181,7 @@ export function LibraryPage() {
   const { games: catalog } = useGamesData()
   const { requestLaunch, requestSetExecutable, stopGame } = useGameLaunch()
   const navigate = useNavigate()
+  const [steamIdFor, setSteamIdFor] = useState<{ appid: string; name: string; current?: number } | null>(null)
 
   const [installed, setInstalled] = useState<LibGame[]>([])
   const [installingMeta, setInstallingMeta] = useState<Array<{ appid: string; name: string; image?: string; status?: string }>>([])
@@ -577,6 +578,7 @@ export function LibraryPage() {
             onRefreshMetadata: () => { const g = installed.find((x) => x.appid === menu.game.appid); if (g) void refreshMetadata(g) },
             onToggleFavorite: () => toggleFavorite(menu.game.appid),
             onDelete: () => { const g = installed.find((x) => x.appid === menu.game.appid); if (g) void deleteGame(g) },
+            onSetSteamId: () => { const g = installed.find((x) => x.appid === menu.game.appid); setSteamIdFor({ appid: menu.game.appid, name: menu.game.name, current: g?.steamAppId }) },
           }}
           onClose={() => setMenu(null)}
         />
@@ -591,6 +593,24 @@ export function LibraryPage() {
         />
       )}
       {linuxFor && <LinuxConfigDialog appid={linuxFor.appid} gameName={linuxFor.name} onClose={() => setLinuxFor(null)} />}
+      {steamIdFor && (
+        <SteamIdDialog
+          appid={steamIdFor.appid}
+          gameName={steamIdFor.name}
+          current={steamIdFor.current}
+          onClose={() => setSteamIdFor(null)}
+          onSaved={(id) => {
+            const appid = steamIdFor.appid
+            // Drop the stale resolved-game cache (a wrong auto-match cached the
+            // wrong title/art) so the detail page re-resolves against the new id.
+            forgetRememberedGame(appid)
+            enrichTried.current.delete(appid)
+            delete gameCacheRef.current[appid]
+            void window.ucSettings?.set?.(GAME_CACHE_KEY, { ...gameCacheRef.current })
+            setInstalled((prev) => prev.map((x) => x.appid !== appid ? x : { ...x, steamAppId: id, image: steamCoverUrl(id) }))
+          }}
+        />
+      )}
     </div>
   )
 }
@@ -636,7 +656,7 @@ const LibCard = memo(function LibCard({ game: g, hasUpdate, onOpen, onContextMen
   return (
     <div onClick={() => onOpen(g)} onContextMenu={(e) => { e.preventDefault(); onContextMenu(g, e.clientX, e.clientY) }} className="mf-card" style={{ display: "flex", flexDirection: "column", border: "1px solid color-mix(in srgb, var(--mf-t0) 7%, transparent)", borderRadius: 10, overflow: "hidden", background: "var(--mf-panel)", cursor: "pointer", contentVisibility: "auto", containIntrinsicSize: "auto 300px" }}>
       <div style={{ position: "relative", aspectRatio: "3 / 4", background: g.image ? "#0f0f0f" : COVER_LINES, display: "flex", alignItems: "flex-end", padding: 12 }}>
-        {g.image && <img src={proxyImageUrl(g.image)} alt={g.name} loading="lazy" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />}
+        {g.image && <img src={proxyImageUrl(g.image)} alt={g.name} loading="lazy" onError={(e) => { e.currentTarget.style.display = "none" }} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />}
         {hasUpdate && (
           <span title="update available" style={{ position: "absolute", top: 10, right: 10, padding: "3px 8px", borderRadius: 99, background: "rgba(0,0,0,0.6)", border: "1px solid var(--mf-line-2)", fontFamily: MONO, fontSize: 9, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--mf-t1)" }}>update</span>
         )}
@@ -663,7 +683,7 @@ const LibRow = memo(function LibRow({ game: g, hasUpdate, onOpen, onContextMenu,
   return (
     <div onClick={() => onOpen(g)} onContextMenu={(e) => { e.preventDefault(); onContextMenu(g, e.clientX, e.clientY) }} className="mf-listrow" style={{ display: "grid", gridTemplateColumns: "44px minmax(0,1fr) 150px 120px 140px", gap: 14, alignItems: "center", padding: "8px 14px", borderRadius: 8, cursor: "pointer", contentVisibility: "auto", containIntrinsicSize: "auto 64px" }}>
       <div style={{ width: 40, height: 50, borderRadius: 5, overflow: "hidden", background: g.image ? "#0f0f0f" : COVER_LINES }}>
-        {g.image && <img src={proxyImageUrl(g.image)} alt="" loading="lazy" decoding="async" style={{ width: "100%", height: "100%", objectFit: "cover" }} />}
+        {g.image && <img src={proxyImageUrl(g.image)} alt="" loading="lazy" decoding="async" onError={(e) => { e.currentTarget.style.display = "none" }} style={{ width: "100%", height: "100%", objectFit: "cover" }} />}
       </div>
       <div style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 9 }}>
         <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--mf-t1)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{g.name}</span>
