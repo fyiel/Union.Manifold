@@ -234,7 +234,7 @@ export function SourceGamePage() {
   // pulled-up box uses the cover-first order. Both walk candidates so an
   // unreachable source image yields to a loadable one.
   const heroCandidates = game ? gameImageCandidates({ image: game.heroImage, heroImage: game.image, steamAppId: game.steamAppId, sources: game.sources }) : []
-  const coverCandidates = game ? gameImageCandidates(game) : []
+  const coverCandidates = game ? gameImageCandidates(game, { steamFirst: true }) : []
   const year = game?.releaseYear || game?.releaseDate?.match(/\d{4}/)?.[0]
   const size = game?.sizeText || gbLabel(game?.sizeBytes)
   const appid = game?.steamAppId
