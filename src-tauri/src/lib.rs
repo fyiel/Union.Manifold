@@ -4,6 +4,7 @@ mod dialogs;
 mod downloads;
 mod error;
 mod http;
+mod import;
 mod install;
 mod launch;
 mod library;
@@ -145,6 +146,11 @@ pub fn run() {
             window_cmds::app_close_response,
             system::system_open_external,
             system::system_launch_steam,
+            system::steam_game_run,
+            import::import_exe,
+            import::import_set_steam_appid,
+            import::steam_library_scan,
+            import::steam_library_import,
             system::download_open,
             system::download_show,
             sources::sources_list,
