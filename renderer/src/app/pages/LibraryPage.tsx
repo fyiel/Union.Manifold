@@ -32,6 +32,7 @@ type LibGame = {
   collections: string[]
   lastPlayedAt?: number
   steamAppId?: number
+  installType?: string
 }
 
 type LibraryGameMeta = { collections?: string[]; lastPlayedAt?: number }
@@ -83,6 +84,7 @@ function entryToLib(entry: any, meta: Record<string, LibraryGameMeta>): LibGame 
     collections: Array.isArray(gm.collections) ? gm.collections : [],
     lastPlayedAt: typeof gm.lastPlayedAt === "number" ? gm.lastPlayedAt : undefined,
     steamAppId,
+    installType: typeof entry?.installType === "string" ? entry.installType : undefined,
   }
 }
 
@@ -609,6 +611,9 @@ function toMenuGame(g: LibGame): MenuGame {
     description: full?.description,
     genres: full?.genres,
     heroImage: full?.heroImage,
+    // Imported entries only hold a manifest stub, deleting never touches the
+    // game's real files, so the menu says "Remove from library" instead.
+    imported: g.installType === "imported-exe" || g.installType === "steam",
   }
 }
 

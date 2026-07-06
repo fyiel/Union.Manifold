@@ -35,6 +35,8 @@ export type MenuGame = {
   description?: string
   genres?: string[]
   heroImage?: string
+  /** Manifest stub import (exe / steam): deleting removes only the library entry. */
+  imported?: boolean
 }
 
 type MenuHandlers = {
@@ -105,7 +107,7 @@ export function GameMenu({ game, anchor, handlers, onClose }: { game: MenuGame; 
         <MenuRow icon={Heart} label={handlers.isFavorite ? "Unfavorite" : "Favorite"} iconColor={handlers.isFavorite ? "#e06b8b" : undefined} onClick={run(handlers.onToggleFavorite)} />
 
         <div style={{ height: 1, background: "color-mix(in srgb, var(--mf-t0) 6%, transparent)", margin: "5px 6px" }} />
-        <MenuRow icon={Trash2} label="Delete game" danger onClick={run(handlers.onDelete)} />
+        <MenuRow icon={Trash2} label={game.imported ? "Remove from library" : "Delete game"} danger onClick={run(handlers.onDelete)} />
       </div>
     </div>,
     document.body,
@@ -518,7 +520,7 @@ export function AddGamesDialog({ onClose }: { onClose: () => void }) {
   const [steamIdInput, setSteamIdInput] = useState("")
   const [steamIdSaving, setSteamIdSaving] = useState(false)
 
-  const [scan, setScan] = useState<"loading" | "unavailable" | "ready">("loading")
+  const [scan, setScan] = useState<"loading" | "unavailable" | "empty" | "ready">("loading")
   const [apps, setApps] = useState<SteamScannedApp[]>([])
   const [sel, setSel] = useState<Set<number>>(new Set())
   const [importing, setImporting] = useState(false)
@@ -534,6 +536,8 @@ export function AddGamesDialog({ onClose }: { onClose: () => void }) {
           setApps(res.apps)
           setSel(new Set(res.apps.filter((a) => !a.imported).map((a) => a.steamAppId)))
           setScan("ready")
+        } else if (res?.ok && res.steamFound) {
+          setScan("empty")
         } else {
           setScan("unavailable")
         }
@@ -675,7 +679,10 @@ export function AddGamesDialog({ onClose }: { onClose: () => void }) {
           <span style={{ display: "flex", alignItems: "center", gap: 8, fontFamily: MONO, fontSize: 11.5, color: "var(--mf-t5)", padding: "8px 0" }}><RefreshCw size={13} className="uc-spin" /> scanning steam libraries…</span>
         )}
         {scan === "unavailable" && (
-          <span style={{ fontFamily: MONO, fontSize: 11.5, color: "var(--mf-t5)", padding: "8px 0" }}>No Steam installation with installed games was found.</span>
+          <span style={{ fontFamily: MONO, fontSize: 11.5, color: "var(--mf-t5)", padding: "8px 0" }}>No Steam installation was found.</span>
+        )}
+        {scan === "empty" && (
+          <span style={{ fontFamily: MONO, fontSize: 11.5, color: "var(--mf-t5)", padding: "8px 0" }}>Steam is installed, but it has no installed games to import.</span>
         )}
         {scan === "ready" && (
           <>
