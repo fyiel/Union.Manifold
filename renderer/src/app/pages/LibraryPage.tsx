@@ -7,7 +7,7 @@ import { useRunningGame } from "@/hooks/use-running-games"
 import { useDownloadsSelector } from "@/context/downloads-context"
 import { useTabVisible } from "@/context/tab-visibility"
 import { hasInstalledVersionUpdate, proxyImageUrl } from "@/lib/utils"
-import { rememberGames, rememberGameAs, getRememberedGame, resolveInstalledGame, getDownloadArt, hydrateDownloadArt } from "@/lib/sources"
+import { rememberGames, rememberGameAs, getRememberedGame, resolveInstalledGame, getDownloadArt, hydrateDownloadArt, steamCoverUrl } from "@/lib/sources"
 import { MONO, COVER_LINES, gbLabel, SearchIcon, CenterState } from "@/app/manifold/ui"
 import { GameMenu, LaunchOptionsDialog, EditDetailsDialog, LinuxConfigDialog, AddGamesDialog, type MenuGame } from "@/app/manifold/library-overlays"
 
@@ -64,17 +64,25 @@ function entryToLib(entry: any, meta: Record<string, LibraryGameMeta>): LibGame 
   const appid = String(entry?.appid || m.appid || "")
   if (!appid) return null
   const gm = meta[appid] || {}
+  // Our own installs derive their id from the dedup key, so steam-<digits> IS
+  // the Steam appid even when the manifest predates metadata stamping. It buys
+  // a CDN cover for the card and full art/meta on the detail page.
+  const steamAppId =
+    typeof entry?.steamAppId === "number" ? entry.steamAppId
+    : typeof m.steamAppId === "number" ? m.steamAppId
+    : (() => { const p = /^steam-(\d+)$/.exec(appid); return p ? Number(p[1]) : undefined })()
+  const image = m.image && m.image !== "./fallbacks/game-card-3x4.svg" ? m.image : undefined
   return {
     appid,
     name: m.name || entry?.name || appid,
-    image: m.image && m.image !== "./fallbacks/game-card-3x4.svg" ? m.image : undefined,
+    image: image || (steamAppId ? steamCoverUrl(steamAppId) : undefined),
     sizeBytes: typeof m.sizeBytes === "number" ? m.sizeBytes : undefined,
     sizeText: m.size || undefined,
     version: m.version || undefined,
     installedAt: typeof entry?.installedAt === "number" ? entry.installedAt : typeof m.installedAt === "number" ? m.installedAt : undefined,
     collections: Array.isArray(gm.collections) ? gm.collections : [],
     lastPlayedAt: typeof gm.lastPlayedAt === "number" ? gm.lastPlayedAt : undefined,
-    steamAppId: typeof entry?.steamAppId === "number" ? entry.steamAppId : typeof m.steamAppId === "number" ? m.steamAppId : undefined,
+    steamAppId,
   }
 }
 
