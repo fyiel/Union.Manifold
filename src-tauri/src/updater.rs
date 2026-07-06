@@ -1,5 +1,5 @@
 use serde_json::{json, Value};
-use tauri::AppHandle;
+use tauri::{AppHandle, Emitter};
 use tauri_plugin_updater::UpdaterExt;
 
 fn version(app: &AppHandle) -> String {
@@ -20,6 +20,15 @@ fn status(app: &AppHandle, state: &str, available: bool, new_version: Option<Str
     })
 }
 
+fn emit_progress(app: &AppHandle, phase: &str, received: u64, total: Option<u64>) {
+    app.emit("uc:update-progress", json!({
+        "phase": phase,
+        "received": received,
+        "total": total,
+    }))
+    .ok();
+}
+
 #[tauri::command]
 pub async fn check_for_updates(app: AppHandle) -> Value {
     let updater = match app.updater() {
@@ -33,20 +42,116 @@ pub async fn check_for_updates(app: AppHandle) -> Value {
     }
 }
 
+// The updater plugin has no pacman installer: on an Arch install (our repackaged
+// deb) it would download the .deb, fail `pkexec dpkg -i`, and finally block
+// forever on a terminal `sudo` prompt the windowed app can't show. Detect that
+// install type and drive `pacman -U` ourselves instead.
+#[cfg(target_os = "linux")]
+fn is_pacman_install() -> bool {
+    std::env::var_os("APPIMAGE").is_none() && std::path::Path::new("/usr/bin/pacman").exists()
+}
+
+#[cfg(target_os = "linux")]
+async fn install_via_pacman(app: &AppHandle, new_version: &str) -> Result<(), String> {
+    use std::io::Write;
+
+    let url = format!(
+        "https://github.com/fyiel/Union.Manifold/releases/download/v{new_version}/union-manifold-{new_version}-1-x86_64.pkg.tar.zst"
+    );
+    let mut resp = crate::http::fetch(&url, &crate::http::FetchOpts::default())
+        .await
+        .map_err(|e| format!("download failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("download failed: http {}", resp.status()));
+    }
+    let total = resp.content_length();
+
+    let dir = std::env::temp_dir();
+    let pkg_path = dir.join(format!("union-manifold-{new_version}-1-x86_64.pkg.tar.zst"));
+    let mut file = std::fs::File::create(&pkg_path).map_err(|e| format!("write package: {e}"))?;
+    let mut received: u64 = 0;
+    let mut last_emit: u64 = 0;
+    while let Some(chunk) = resp.chunk().await.map_err(|e| format!("download failed: {e}"))? {
+        file.write_all(&chunk).map_err(|e| format!("write package: {e}"))?;
+        received += chunk.len() as u64;
+        // Emit at most every 512 KiB so the event stream stays light.
+        if received - last_emit >= 512 * 1024 {
+            last_emit = received;
+            emit_progress(app, "downloading", received, total);
+        }
+    }
+    file.flush().ok();
+    drop(file);
+    emit_progress(app, "installing", received, total);
+
+    // pkexec pops the graphical polkit prompt; --noconfirm because the prompt
+    // IS the confirmation. Exit 126/127 = user dismissed / no auth agent.
+    let status = tokio::process::Command::new("pkexec")
+        .arg("pacman")
+        .arg("-U")
+        .arg("--noconfirm")
+        .arg(&pkg_path)
+        .status()
+        .await
+        .map_err(|e| format!("pkexec not available: {e}. install manually: sudo pacman -U {}", pkg_path.display()))?;
+    if status.success() {
+        std::fs::remove_file(&pkg_path).ok();
+        return Ok(());
+    }
+    match status.code() {
+        Some(126) | Some(127) => Err("authentication cancelled".into()),
+        _ => Err(format!(
+            "pacman failed (exit {:?}). install manually: sudo pacman -U {}",
+            status.code(),
+            pkg_path.display()
+        )),
+    }
+}
+
 #[tauri::command]
 pub async fn install_update(app: AppHandle) -> Value {
     let updater = match app.updater() {
         Ok(u) => u,
         Err(e) => return json!({ "ok": false, "error": e.to_string() }),
     };
-    match updater.check().await {
-        Ok(Some(update)) => match update.download_and_install(|_, _| {}, || {}).await {
-            Ok(_) => {
+    let update = match updater.check().await {
+        Ok(Some(u)) => u,
+        Ok(None) => return json!({ "ok": false, "error": "no update available" }),
+        Err(e) => return json!({ "ok": false, "error": e.to_string() }),
+    };
+
+    #[cfg(target_os = "linux")]
+    if is_pacman_install() {
+        return match install_via_pacman(&app, &update.version).await {
+            Ok(()) => {
                 app.restart();
             }
-            Err(e) => json!({ "ok": false, "error": e.to_string() }),
-        },
-        Ok(None) => json!({ "ok": false, "error": "no update available" }),
+            Err(e) => json!({ "ok": false, "error": e }),
+        };
+    }
+
+    let progress_app = app.clone();
+    let mut received: u64 = 0;
+    let mut last_emit: u64 = 0;
+    let install_app = app.clone();
+    match update
+        .download_and_install(
+            move |chunk, total| {
+                received += chunk as u64;
+                if received - last_emit >= 512 * 1024 {
+                    last_emit = received;
+                    emit_progress(&progress_app, "downloading", received, total);
+                }
+            },
+            move || {
+                emit_progress(&install_app, "installing", 0, None);
+            },
+        )
+        .await
+    {
+        Ok(_) => {
+            app.restart();
+        }
         Err(e) => json!({ "ok": false, "error": e.to_string() }),
     }
 }
@@ -64,7 +169,6 @@ pub async fn notify_if_update_available(app: &AppHandle) {
         Err(_) => return,
     };
     if let Ok(Some(update)) = updater.check().await {
-        use tauri::Emitter;
         app.emit("uc:update-available", json!({ "version": update.version })).ok();
         crate::notify::send(
             app,
