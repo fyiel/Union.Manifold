@@ -146,6 +146,7 @@ export function installBridge(): void {
     installUpdate: () => call("install_update"),
     getVersion: () => call("get_version"),
     onUpdateAvailable: (cb: Cb) => on("uc:update-available", cb),
+    onUpdateProgress: (cb: Cb) => on("uc:update-progress", cb),
   }
 
   w.ucLogs = {
