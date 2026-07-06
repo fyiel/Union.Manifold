@@ -2,7 +2,7 @@ import { createPortal } from "react-dom"
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react"
 import {
   Play, Settings, FolderOpen, Terminal, SquareTerminal, Pencil, RefreshCw, Heart, Trash2,
-  X, Check, ChevronDown, Image as ImageIcon,
+  X, Check, ChevronDown, Hash, Image as ImageIcon,
 } from "lucide-react"
 import { MONO } from "@/app/manifold/ui"
 import { proxyImageUrl } from "@/lib/utils"
@@ -50,6 +50,8 @@ type MenuHandlers = {
   onRefreshMetadata: () => void
   onToggleFavorite: () => void
   onDelete: () => void
+  /** Imported entries only: override the Steam appid driving art/metadata. */
+  onSetSteamId?: () => void
 }
 
 const MENU_WIDTH = 250
@@ -100,6 +102,7 @@ export function GameMenu({ game, anchor, handlers, onClose }: { game: MenuGame; 
 
         <MenuRow icon={FolderOpen} label="Open files" onClick={run(handlers.onOpenFiles)} />
         <MenuRow icon={Settings} label="Set executable" onClick={run(handlers.onSetExecutable)} />
+        {game.imported && handlers.onSetSteamId ? <MenuRow icon={Hash} label="Set Steam App ID" onClick={run(handlers.onSetSteamId)} /> : null}
         {handlers.isLinux ? <MenuRow icon={Terminal} label="Linux / VR config" onClick={run(handlers.onLinuxConfig)} /> : null}
         <MenuRow icon={SquareTerminal} label="Launch options" onClick={run(handlers.onLaunchOptions)} />
         <MenuRow icon={Pencil} label="Edit details" onClick={run(handlers.onEditDetails)} />
@@ -250,7 +253,11 @@ export function EditDetailsDialog({ game, onClose, onSaved }: { game: MenuGame; 
   const pick = async (set: (v: string) => void) => {
     try {
       const path = await window.ucDownloads?.pickImage?.()
-      if (path) set(path)
+      if (!path) return
+      // Copy into app-managed storage; a raw filesystem path in metadata
+      // renders blank and dies when the source file moves.
+      const res = await window.ucDownloads?.importCustomImage?.(path)
+      set(res?.ok && res.url ? res.url : path)
     } catch { /* ignore */ }
   }
 
@@ -514,9 +521,10 @@ export function AddGamesDialog({ onClose }: { onClose: () => void }) {
   const [exeBusy, setExeBusy] = useState(false)
   const [exeAdded, setExeAdded] = useState<string | null>(null)
   const [exeError, setExeError] = useState<string | null>(null)
-  // Set when the store search couldn't match the imported exe's name. The
-  // detail page needs a Steam appid for art/meta, so ask for one (skippable).
-  const [steamIdFor, setSteamIdFor] = useState<{ appid: string; name: string } | null>(null)
+  // Shown after every exe import: when the store search missed (enter an id)
+  // AND when it matched (confirm/correct it) — exe-derived names are ambiguous
+  // enough that the auto-match can land on a different game entirely.
+  const [steamIdFor, setSteamIdFor] = useState<{ appid: string; name: string; matched: number | null } | null>(null)
   const [steamIdInput, setSteamIdInput] = useState("")
   const [steamIdSaving, setSteamIdSaving] = useState(false)
 
@@ -563,9 +571,10 @@ export function AddGamesDialog({ onClose }: { onClose: () => void }) {
         // Seed the saved exe so Play launches this file directly, no picker.
         if (res.exePath) await window.ucSettings?.set?.(`gameExe:${res.appid}`, res.exePath)
         setExeAdded(res.existed ? "already in library" : res.name || picked.path)
-        if (!res.existed && res.steamAppId == null) {
-          setSteamIdFor({ appid: res.appid, name: res.name || picked.path })
-          setSteamIdInput("")
+        if (!res.existed) {
+          const matched = typeof res.steamAppId === "number" ? res.steamAppId : null
+          setSteamIdFor({ appid: res.appid, name: res.name || picked.path, matched })
+          setSteamIdInput(matched ? String(matched) : "")
         }
         notifyLibrary()
       } else {
@@ -640,7 +649,9 @@ export function AddGamesDialog({ onClose }: { onClose: () => void }) {
         {steamIdFor && (
           <div style={{ ...WELL, display: "flex", flexDirection: "column", gap: 8, padding: 12 }}>
             <span style={{ fontFamily: MONO, fontSize: 11, color: "var(--mf-t3)" }}>
-              Couldn't match “{steamIdFor.name}” on the Steam store. Enter its Steam App ID to get art and store details, or skip.
+              {steamIdFor.matched
+                ? `Matched “${steamIdFor.name}” to Steam app ${steamIdFor.matched}. Wrong game? Enter the correct App ID.`
+                : `Couldn't match “${steamIdFor.name}” on the Steam store. Enter its Steam App ID to get art and store details, or skip.`}
             </span>
             <div style={{ display: "flex", gap: 8 }}>
               <input
@@ -652,7 +663,7 @@ export function AddGamesDialog({ onClose }: { onClose: () => void }) {
                 style={{ ...WELL, flex: 1, minWidth: 0, height: 34, padding: "0 10px", fontFamily: MONO, fontSize: 12, outline: "none", border: "1px solid var(--mf-line-2)" }}
               />
               <button type="button" onClick={() => void saveSteamId()} disabled={!steamIdInput || steamIdSaving} style={{ ...PRIMARY_BTN, height: 34, opacity: !steamIdInput || steamIdSaving ? 0.55 : 1 }}>Save</button>
-              <button type="button" onClick={() => setSteamIdFor(null)} style={{ ...CANCEL_BTN, height: 34 }}>Skip</button>
+              <button type="button" onClick={() => setSteamIdFor(null)} style={{ ...CANCEL_BTN, height: 34 }}>{steamIdFor.matched ? "Keep" : "Skip"}</button>
             </div>
           </div>
         )}
@@ -715,6 +726,57 @@ export function AddGamesDialog({ onClose }: { onClose: () => void }) {
             </div>
           </>
         )}
+      </div>
+    </DialogShell>
+  )
+}
+
+// ── Set Steam App ID ──
+// Manual appid override for imported games: fixes both a missed auto-match and
+// a WRONG auto-match (the "Card Corner found a different game" case). Saving
+// rewrites the manifest's steamAppId + cover; the caller invalidates caches.
+export function SteamIdDialog({ appid, gameName, current, onClose, onSaved }: { appid: string; gameName: string; current?: number; onClose: () => void; onSaved: (steamAppId: number) => void }) {
+  const [value, setValue] = useState(current ? String(current) : "")
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState("")
+
+  const save = async () => {
+    const id = Number(value)
+    if (!Number.isInteger(id) || id <= 0 || saving) return
+    setSaving(true)
+    setError("")
+    try {
+      const res = await window.ucDownloads?.importSetSteamAppId?.(appid, id)
+      if (res?.ok) {
+        onSaved(id)
+        onClose()
+      } else {
+        setError("could not update the game entry")
+      }
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <DialogShell width={400} onClose={onClose}>
+      <span style={{ fontSize: 16, fontWeight: 600, color: "var(--mf-t0)" }}>Set Steam App ID</span>
+      <span style={{ fontFamily: MONO, fontSize: 11, color: "var(--mf-t4)" }}>
+        The Steam appid drives “{gameName}”'s cover, store details and ProtonDB info. Find it in the game's store URL: store.steampowered.com/app/<b style={{ color: "var(--mf-t2)" }}>620</b>/…
+      </span>
+      <input
+        value={value}
+        onChange={(e) => setValue(e.target.value.replace(/\D/g, ""))}
+        onKeyDown={(e) => { if (e.key === "Enter") void save() }}
+        placeholder="e.g. 620"
+        inputMode="numeric"
+        autoFocus
+        style={{ ...WELL, height: 38, padding: "0 12px", fontFamily: MONO, fontSize: 13, outline: "none" }}
+      />
+      {error ? <span style={{ fontSize: 12, color: "#e5484d" }}>{error}</span> : null}
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+        <button type="button" onClick={onClose} style={CANCEL_BTN}>Cancel</button>
+        <button type="button" onClick={() => void save()} disabled={!value || saving} style={{ ...PRIMARY_BTN, opacity: !value || saving ? 0.6 : 1 }}>{saving ? "Saving…" : "Save"}</button>
       </div>
     </DialogShell>
   )

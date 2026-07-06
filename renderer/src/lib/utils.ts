@@ -217,6 +217,12 @@ export function proxyMediaUrl(mediaUrl: string): string {
   ) {
     return mediaUrl
   }
+  // App-managed custom images (picked in Edit details): resolve to the
+  // uc-asset protocol with the platform-correct base at render time, so the
+  // stored URL stays portable across Linux/Windows scheme handling.
+  if (mediaUrl.startsWith("uc-custom://")) {
+    return `${UC_ASSET_BASE}/img?c=${encodeURIComponent(mediaUrl.slice("uc-custom://".length))}`
+  }
   // Existing file:// URLs get rewritten to uc-local:// (the renderer can't
   // load file:// across origins; uc-local proxies through the main process).
   if (mediaUrl.startsWith("file://")) {

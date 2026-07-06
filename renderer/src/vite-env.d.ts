@@ -370,6 +370,7 @@ declare global {
       browseForGameExe: (defaultPath?: string) => Promise<{ ok: boolean; path?: string }>
       importExe: (exePath: string, name?: string) => Promise<{ ok: boolean; appid?: string; name?: string; exePath?: string; existed?: boolean; steamAppId?: number | null; error?: string }>
       importSetSteamAppId: (appid: string, steamAppid: number) => Promise<{ ok: boolean }>
+      importCustomImage: (path: string) => Promise<{ ok: boolean; url?: string; error?: string }>
       steamLibraryScan: () => Promise<{ ok: boolean; steamFound?: boolean; found: boolean; apps: SteamScannedApp[] }>
       steamLibraryImport: (apps: Array<Pick<SteamScannedApp, "steamAppId" | "name" | "installPath" | "sizeBytes">>) => Promise<{ ok: boolean; imported: number; errors: Array<{ name: string; error: string }> }>
       onUpdate: (callback: (update: DownloadUpdatePayload) => void) => () => void
