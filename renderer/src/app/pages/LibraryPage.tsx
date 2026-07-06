@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { Play, Square, Settings, ArrowUpDown, LayoutGrid, List, Inbox } from "lucide-react"
+import { Play, Square, Settings, ArrowUpDown, LayoutGrid, List, Inbox, Plus } from "lucide-react"
 import { useGamesData } from "@/hooks/use-games"
 import { useGameLaunch } from "@/context/game-launch-context"
 import { useRunningGame } from "@/hooks/use-running-games"
@@ -9,7 +9,7 @@ import { useTabVisible } from "@/context/tab-visibility"
 import { hasInstalledVersionUpdate, proxyImageUrl } from "@/lib/utils"
 import { rememberGames, rememberGameAs, getRememberedGame, resolveInstalledGame, getDownloadArt, hydrateDownloadArt } from "@/lib/sources"
 import { MONO, COVER_LINES, gbLabel, SearchIcon, CenterState } from "@/app/manifold/ui"
-import { GameMenu, LaunchOptionsDialog, EditDetailsDialog, LinuxConfigDialog, type MenuGame } from "@/app/manifold/library-overlays"
+import { GameMenu, LaunchOptionsDialog, EditDetailsDialog, LinuxConfigDialog, AddGamesDialog, type MenuGame } from "@/app/manifold/library-overlays"
 
 const IS_LINUX = typeof navigator !== "undefined" && /linux/i.test(navigator.userAgent)
 
@@ -31,6 +31,7 @@ type LibGame = {
   installedAt?: number
   collections: string[]
   lastPlayedAt?: number
+  steamAppId?: number
 }
 
 type LibraryGameMeta = { collections?: string[]; lastPlayedAt?: number }
@@ -73,6 +74,7 @@ function entryToLib(entry: any, meta: Record<string, LibraryGameMeta>): LibGame 
     installedAt: typeof entry?.installedAt === "number" ? entry.installedAt : typeof m.installedAt === "number" ? m.installedAt : undefined,
     collections: Array.isArray(gm.collections) ? gm.collections : [],
     lastPlayedAt: typeof gm.lastPlayedAt === "number" ? gm.lastPlayedAt : undefined,
+    steamAppId: typeof entry?.steamAppId === "number" ? entry.steamAppId : typeof m.steamAppId === "number" ? m.steamAppId : undefined,
   }
 }
 
@@ -182,6 +184,7 @@ export function LibraryPage() {
   const [launchFor, setLaunchFor] = useState<{ appid: string; name: string } | null>(null)
   const [editFor, setEditFor] = useState<MenuGame | null>(null)
   const [linuxFor, setLinuxFor] = useState<{ appid: string; name: string } | null>(null)
+  const [addOpen, setAddOpen] = useState(false)
 
   const [query, setQuery] = useState("")
   const [filter, setFilter] = useState<FilterKey>("All")
@@ -285,6 +288,9 @@ export function LibraryPage() {
   useEffect(() => {
     const now = Date.now()
     const targets = installed.filter((g) => {
+      // Imported executables aren't store games; a title search on an exe stem
+      // would attach a random catalog game's art/metadata. Never enrich them.
+      if (g.appid.startsWith("local-")) return false
       if (enrichTried.current.has(g.appid)) return false
       const c = gameCacheRef.current[g.appid]
       return !(c && c.game && now - (c.cachedAt || 0) < GAME_CACHE_TTL_MS)
@@ -383,7 +389,7 @@ export function LibraryPage() {
     const cached = getRememberedGame(g.appid)
     const game = cached?.fullyResolved
       ? cached
-      : ({ dedupKey: g.appid, steamAppId: null, title: g.name, image: g.image, sizeBytes: g.sizeBytes, sizeText: g.sizeText, genres: [], sources: [] } as unknown as UnifiedSourceGame)
+      : ({ dedupKey: g.appid, steamAppId: g.steamAppId ?? null, title: g.name, image: g.image, sizeBytes: g.sizeBytes, sizeText: g.sizeText, genres: [], sources: [] } as unknown as UnifiedSourceGame)
     if (!cached?.fullyResolved) rememberGames([game])
     // installed:true seeds the detail page so the primary button is "Play" from
     // the first frame (no Download flash) since the library only holds installs.
@@ -432,6 +438,7 @@ export function LibraryPage() {
 
   // Re-resolve one game's metadata on demand, bypassing the cache TTL.
   const refreshMetadata = async (g: LibGame) => {
+    if (g.appid.startsWith("local-")) return // imported exe: nothing to resolve
     enrichTried.current.add(g.appid)
     try {
       const full = await resolveInstalledGame(g.appid, g.name)
@@ -490,6 +497,10 @@ export function LibraryPage() {
             )
           })}
           <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 12 }}>
+            <button type="button" onClick={() => setAddOpen(true)} className="mf-textbtn" style={{ display: "flex", alignItems: "center", gap: 7, padding: "7px 13px", borderRadius: 8, border: "1px solid color-mix(in srgb, var(--mf-t0) 9%, transparent)", background: "transparent", color: "var(--mf-t3)", fontFamily: MONO, fontSize: 11, cursor: "pointer" }}>
+              <Plus size={13} strokeWidth={1.6} />
+              Add games
+            </button>
             <button type="button" onClick={() => setSort((s) => SORT_CYCLE[(SORT_CYCLE.indexOf(s) + 1) % SORT_CYCLE.length])} className="mf-textbtn" style={{ display: "flex", alignItems: "center", gap: 7, padding: "7px 13px", borderRadius: 8, border: "1px solid color-mix(in srgb, var(--mf-t0) 9%, transparent)", background: "transparent", color: "var(--mf-t3)", fontFamily: MONO, fontSize: 11, cursor: "pointer" }}>
               <ArrowUpDown size={13} strokeWidth={1.6} />
               {SORT_LABEL[sort]}
@@ -561,6 +572,7 @@ export function LibraryPage() {
         />
       )}
       {launchFor && <LaunchOptionsDialog appid={launchFor.appid} gameName={launchFor.name} onClose={() => setLaunchFor(null)} />}
+      {addOpen && <AddGamesDialog onClose={() => setAddOpen(false)} />}
       {editFor && (
         <EditDetailsDialog
           game={editFor}
