@@ -83,7 +83,10 @@ export function ForkLayout() {
     void (async () => {
       try {
         const sp = await window.ucSettings?.get?.("startPage")
-        if (sp === "library" && window.location.hash.replace(/^#/, "") === "/") {
+        // On a fresh boot the hash can still be empty ("") — HashRouter only
+        // normalizes it to "#/" after its first render. Treat empty as "/".
+        const route = window.location.hash.replace(/^#/, "").split("?")[0] || "/"
+        if (sp === "library" && route === "/") {
           navigate("/library", { replace: true })
         }
       } catch { /* ignore */ }
