@@ -97,15 +97,13 @@ export async function resolveInstalledGame(appid: string, title: string, knownSt
   const q = (title || "").trim()
   const hits = q ? await searchSources(q, 12) : []
   const want = normTitle(q)
-  // The appid-agreeing hit wins. An exact-title hit is accepted ONLY when it
-  // doesn't contradict a known steamAppId — otherwise a same-named but
-  // different game (the "Card Corner" collision) would drive the detail page
-  // while the thumbnail shows the correct appid's art. The blind hits[0]
-  // fallback is only safe with no appid to contradict.
-  const pick =
-    (steamAppId ? hits.find((h) => h.steamAppId === steamAppId) : undefined) ||
-    hits.find((h) => normTitle(h.title) === want && (!steamAppId || !h.steamAppId || h.steamAppId === steamAppId)) ||
-    (steamAppId ? undefined : hits[0])
+  // With a known steamAppId, ONLY a hit that positively matches it is trusted —
+  // never a same-named hit (a title collision like "Card Corner" would
+  // otherwise be stamped with the right id and masquerade as the game). No id
+  // → the exact-title hit, then the first result.
+  const pick = steamAppId
+    ? hits.find((h) => h.steamAppId === steamAppId)
+    : (hits.find((h) => normTitle(h.title) === want) || hits[0])
   if (pick) {
     const stubs = (pick.sources || []).map((s) => ({ sourceId: s.sourceId, sourceSlug: s.sourceSlug }))
     const full = stubs.length ? await getSourceDetail(stubs) : null
