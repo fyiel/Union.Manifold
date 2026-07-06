@@ -59,12 +59,13 @@ export function SettingsPage() {
   const [maxConcurrent, setMaxConcurrent] = useState(3)
   const [connsPerDl, setConnsPerDl] = useState(8)
   const [diskMargin, setDiskMargin] = useState(2)
+  const [startPage, setStartPage] = useState<"browse" | "library">("browse")
 
   useEffect(() => {
     let alive = true
     void (async () => {
       try {
-        const [cb, kbps, del, path, sc, pause, mini, upd, nid, nge, maxC, conns, margin, auto] = await Promise.all([
+        const [cb, kbps, del, path, sc, pause, mini, upd, nid, nge, maxC, conns, margin, sp, auto] = await Promise.all([
           window.ucSettings?.get?.("closeBehavior"),
           window.ucSettings?.get?.("downloadBandwidthLimitKBps"),
           window.ucSettings?.get?.("autoDeleteArchives"),
@@ -78,6 +79,7 @@ export function SettingsPage() {
           window.ucSettings?.get?.("maxConcurrentDownloads"),
           window.ucSettings?.get?.("aria2ConnectionsPerDownload"),
           window.ucSettings?.get?.("diskSpaceMarginGiB"),
+          window.ucSettings?.get?.("startPage"),
           window.ucAutostart?.get?.(),
         ])
         if (!alive) return
@@ -96,6 +98,7 @@ export function SettingsPage() {
         if (Number(maxC) >= 1) setMaxConcurrent(Math.min(8, Number(maxC)))
         if (Number(conns) >= 1) setConnsPerDl(Math.min(16, Number(conns)))
         if (margin != null && Number(margin) >= 0) setDiskMargin(Math.min(64, Number(margin)))
+        if (sp === "library") setStartPage("library")
         setLaunchAtLogin(Boolean(auto?.enabled))
       } catch { /* ignore */ }
     })()
@@ -175,6 +178,12 @@ export function SettingsPage() {
                   <select className="uc-select" value={closeBehavior} onChange={(e) => changeCloseBehavior(e.target.value as "hide" | "quit")} style={{ height: 36, minWidth: 150, padding: "0 32px 0 13px", borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "var(--mf-panel)", color: "var(--mf-t1)", fontSize: 12.5, cursor: "pointer", WebkitAppearance: "none", appearance: "none" }}>
                     <option value="hide">Hide to tray</option>
                     <option value="quit">Quit entirely</option>
+                  </select>
+                </Row>
+                <Row title="Startup page" desc="Which page the app opens on after launch">
+                  <select className="uc-select" value={startPage} onChange={(e) => { const v = e.target.value === "library" ? "library" : "browse"; setStartPage(v); void window.ucSettings?.set?.("startPage", v) }} style={{ height: 36, minWidth: 150, padding: "0 32px 0 13px", borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "var(--mf-panel)", color: "var(--mf-t1)", fontSize: 12.5, cursor: "pointer", WebkitAppearance: "none", appearance: "none" }}>
+                    <option value="browse">Browse</option>
+                    <option value="library">Library</option>
                   </select>
                 </Row>
                 <ToggleRow title="Launch at login" desc="Start the app automatically when you log in" on={launchAtLogin} onToggle={() => { const v = !launchAtLogin; setLaunchAtLogin(v); void window.ucAutostart?.set?.(v) }} />
