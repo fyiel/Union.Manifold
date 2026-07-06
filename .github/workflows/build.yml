@@ -156,8 +156,17 @@ jobs:
         if: matrix.sidecars == 'linux-x64'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GPG_SIGNING_KEY: ${{ secrets.GPG_SIGNING_KEY }}
         run: |
           bash scripts/build-arch-pkg.sh "${{ needs.check.outputs.version }}" "${{ matrix.target }}"
           # stable-named copy so the readme one-liner can point at releases/latest
           cp "union-manifold-${{ needs.check.outputs.version }}-1-x86_64.pkg.tar.zst" union-manifold-x86_64.pkg.tar.zst
-          gh release upload "${{ needs.check.outputs.tag }}" "union-manifold-${{ needs.check.outputs.version }}-1-x86_64.pkg.tar.zst" union-manifold-x86_64.pkg.tar.zst --clobber
+          # detached pgp signatures so pacman -U can install straight from the url
+          # (users trust the key once via union-manifold-signing-key.asc)
+          if [ -n "$GPG_SIGNING_KEY" ]; then
+            export GNUPGHOME=$(mktemp -d)
+            printf '%s' "$GPG_SIGNING_KEY" | gpg --batch --import
+            gpg --batch --yes --detach-sign "union-manifold-${{ needs.check.outputs.version }}-1-x86_64.pkg.tar.zst"
+            gpg --batch --yes --detach-sign union-manifold-x86_64.pkg.tar.zst
+          fi
+          gh release upload "${{ needs.check.outputs.tag }}" union-manifold-*x86_64.pkg.tar.zst* --clobber
