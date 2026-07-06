@@ -502,3 +502,213 @@ function PathField({ label, hint, value, placeholder, onBrowse }: { label: strin
     </div>
   )
 }
+
+// ── Add games (import) ──
+// Reached from the Library header. Two paths into the library without a
+// download: pick an arbitrary executable on disk, or bulk-import installed
+// games from the local Steam client (scanned via libraryfolders.vdf). Both
+// only write a manifest stub — the game files stay where they are.
+export function AddGamesDialog({ onClose }: { onClose: () => void }) {
+  const [exeBusy, setExeBusy] = useState(false)
+  const [exeAdded, setExeAdded] = useState<string | null>(null)
+  const [exeError, setExeError] = useState<string | null>(null)
+  // Set when the store search couldn't match the imported exe's name. The
+  // detail page needs a Steam appid for art/meta, so ask for one (skippable).
+  const [steamIdFor, setSteamIdFor] = useState<{ appid: string; name: string } | null>(null)
+  const [steamIdInput, setSteamIdInput] = useState("")
+  const [steamIdSaving, setSteamIdSaving] = useState(false)
+
+  const [scan, setScan] = useState<"loading" | "unavailable" | "ready">("loading")
+  const [apps, setApps] = useState<SteamScannedApp[]>([])
+  const [sel, setSel] = useState<Set<number>>(new Set())
+  const [importing, setImporting] = useState(false)
+  const [importedNow, setImportedNow] = useState<number | null>(null)
+
+  useEffect(() => {
+    let alive = true
+    void (async () => {
+      try {
+        const res = await window.ucDownloads?.steamLibraryScan?.()
+        if (!alive) return
+        if (res?.ok && res.found) {
+          setApps(res.apps)
+          setSel(new Set(res.apps.filter((a) => !a.imported).map((a) => a.steamAppId)))
+          setScan("ready")
+        } else {
+          setScan("unavailable")
+        }
+      } catch {
+        if (alive) setScan("unavailable")
+      }
+    })()
+    return () => { alive = false }
+  }, [])
+
+  const notifyLibrary = () => {
+    try { window.dispatchEvent(new Event("uc_game_installed")) } catch { /* ignore */ }
+  }
+
+  const pickExe = async () => {
+    setExeError(null)
+    const picked = await window.ucDownloads?.browseForGameExe?.()
+    if (!picked?.ok || !picked.path) return
+    setExeBusy(true)
+    try {
+      const res = await window.ucDownloads?.importExe?.(picked.path)
+      if (res?.ok && res.appid) {
+        // Seed the saved exe so Play launches this file directly, no picker.
+        if (res.exePath) await window.ucSettings?.set?.(`gameExe:${res.appid}`, res.exePath)
+        setExeAdded(res.existed ? "already in library" : res.name || picked.path)
+        if (!res.existed && res.steamAppId == null) {
+          setSteamIdFor({ appid: res.appid, name: res.name || picked.path })
+          setSteamIdInput("")
+        }
+        notifyLibrary()
+      } else {
+        setExeError(res?.error || "import failed")
+      }
+    } finally {
+      setExeBusy(false)
+    }
+  }
+
+  const saveSteamId = async () => {
+    const target = steamIdFor
+    const id = Number(steamIdInput)
+    if (!target || !Number.isInteger(id) || id <= 0 || steamIdSaving) return
+    setSteamIdSaving(true)
+    try {
+      const res = await window.ucDownloads?.importSetSteamAppId?.(target.appid, id)
+      if (res?.ok) {
+        setSteamIdFor(null)
+        setSteamIdInput("")
+        notifyLibrary()
+      }
+    } finally {
+      setSteamIdSaving(false)
+    }
+  }
+
+  const selectable = apps.filter((a) => !a.imported)
+  const allSelected = selectable.length > 0 && selectable.every((a) => sel.has(a.steamAppId))
+  const toggle = (id: number) => setSel((prev) => {
+    const next = new Set(prev)
+    if (next.has(id)) next.delete(id)
+    else next.add(id)
+    return next
+  })
+
+  const importSteam = async () => {
+    const chosen = apps.filter((a) => !a.imported && sel.has(a.steamAppId))
+    if (!chosen.length || importing) return
+    setImporting(true)
+    try {
+      const res = await window.ucDownloads?.steamLibraryImport?.(chosen.map(({ steamAppId, name, installPath, sizeBytes }) => ({ steamAppId, name, installPath, sizeBytes })))
+      const done = new Set(chosen.map((a) => a.steamAppId))
+      setApps((prev) => prev.map((a) => done.has(a.steamAppId) ? { ...a, imported: true } : a))
+      setSel(new Set())
+      setImportedNow(res?.imported ?? chosen.length)
+      notifyLibrary()
+    } finally {
+      setImporting(false)
+    }
+  }
+
+  const selCount = selectable.filter((a) => sel.has(a.steamAppId)).length
+
+  return (
+    <DialogShell width={520} onClose={onClose}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <h2 style={{ margin: 0, fontSize: 16, fontWeight: 600, color: "var(--mf-t0)" }}>Add games</h2>
+        <button type="button" onClick={onClose} title="Close" style={{ width: 30, height: 30, display: "flex", alignItems: "center", justifyContent: "center", border: "none", background: "transparent", color: "var(--mf-t4)", cursor: "pointer", borderRadius: 8 }}><X size={16} /></button>
+      </div>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        <span style={FIELD_LABEL}>Executable</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <button type="button" onClick={() => void pickExe()} disabled={exeBusy} style={{ ...CANCEL_BTN, display: "flex", alignItems: "center", gap: 8, opacity: exeBusy ? 0.6 : 1 }}>
+            <FolderOpen size={15} /> Browse for executable…
+          </button>
+          {exeAdded && <span style={{ display: "flex", alignItems: "center", gap: 6, fontFamily: MONO, fontSize: 11, color: "var(--mf-t3)" }}><Check size={13} /> {exeAdded}</span>}
+          {exeError && <span style={{ fontFamily: MONO, fontSize: 11, color: "#e5484d" }}>{exeError}</span>}
+        </div>
+        <span style={{ fontFamily: MONO, fontSize: 10.5, color: "var(--mf-t5)" }}>Adds the game where it is — nothing is moved or copied.</span>
+        {steamIdFor && (
+          <div style={{ ...WELL, display: "flex", flexDirection: "column", gap: 8, padding: 12 }}>
+            <span style={{ fontFamily: MONO, fontSize: 11, color: "var(--mf-t3)" }}>
+              Couldn't match “{steamIdFor.name}” on the Steam store. Enter its Steam App ID to get art and store details, or skip.
+            </span>
+            <div style={{ display: "flex", gap: 8 }}>
+              <input
+                value={steamIdInput}
+                onChange={(e) => setSteamIdInput(e.target.value.replace(/\D/g, ""))}
+                onKeyDown={(e) => { if (e.key === "Enter") void saveSteamId() }}
+                placeholder="e.g. 620"
+                inputMode="numeric"
+                style={{ ...WELL, flex: 1, minWidth: 0, height: 34, padding: "0 10px", fontFamily: MONO, fontSize: 12, outline: "none", border: "1px solid var(--mf-line-2)" }}
+              />
+              <button type="button" onClick={() => void saveSteamId()} disabled={!steamIdInput || steamIdSaving} style={{ ...PRIMARY_BTN, height: 34, opacity: !steamIdInput || steamIdSaving ? 0.55 : 1 }}>Save</button>
+              <button type="button" onClick={() => setSteamIdFor(null)} style={{ ...CANCEL_BTN, height: 34 }}>Skip</button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div style={{ height: 1, background: "var(--mf-line)" }} />
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 8, minHeight: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <span style={FIELD_LABEL}>Steam library</span>
+          {scan === "ready" && selectable.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setSel(allSelected ? new Set() : new Set(selectable.map((a) => a.steamAppId)))}
+              className="mf-textbtn"
+              style={{ border: "none", background: "transparent", color: "var(--mf-t4)", fontFamily: MONO, fontSize: 10.5, cursor: "pointer", padding: 0 }}
+            >
+              {allSelected ? "clear selection" : "select all"}
+            </button>
+          )}
+        </div>
+
+        {scan === "loading" && (
+          <span style={{ display: "flex", alignItems: "center", gap: 8, fontFamily: MONO, fontSize: 11.5, color: "var(--mf-t5)", padding: "8px 0" }}><RefreshCw size={13} className="uc-spin" /> scanning steam libraries…</span>
+        )}
+        {scan === "unavailable" && (
+          <span style={{ fontFamily: MONO, fontSize: 11.5, color: "var(--mf-t5)", padding: "8px 0" }}>No Steam installation with installed games was found.</span>
+        )}
+        {scan === "ready" && (
+          <>
+            <div className="mf-scroll" style={{ ...WELL, maxHeight: 260, overflowY: "auto", display: "flex", flexDirection: "column", padding: 6 }}>
+              {apps.map((a) => {
+                const checked = a.imported || sel.has(a.steamAppId)
+                return (
+                  <button
+                    key={a.steamAppId}
+                    type="button"
+                    disabled={a.imported}
+                    onClick={() => toggle(a.steamAppId)}
+                    style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", border: "none", background: "transparent", borderRadius: 7, cursor: a.imported ? "default" : "pointer", textAlign: "left", opacity: a.imported ? 0.5 : 1 }}
+                  >
+                    <span style={{ width: 16, height: 16, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 4, border: `1px solid ${checked ? "var(--mf-t3)" : "var(--mf-line-2)"}`, background: checked ? "color-mix(in srgb, var(--mf-t0) 14%, transparent)" : "transparent", color: "var(--mf-t1)" }}>
+                      {checked && <Check size={11} strokeWidth={2.4} />}
+                    </span>
+                    <span style={{ flex: 1, minWidth: 0, fontSize: 12.5, color: "var(--mf-t1)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{a.name}</span>
+                    <span style={{ fontFamily: MONO, fontSize: 10, color: "var(--mf-t5)", flexShrink: 0 }}>{a.imported ? "in library" : a.sizeBytes ? `${(a.sizeBytes / 1e9).toFixed(1)} GB` : ""}</span>
+                  </button>
+                )
+              })}
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <button type="button" onClick={() => void importSteam()} disabled={!selCount || importing} style={{ ...PRIMARY_BTN, opacity: !selCount || importing ? 0.55 : 1, cursor: !selCount || importing ? "default" : "pointer" }}>
+                {importing ? "Importing…" : `Import ${selCount || ""} selected`.replace("  ", " ")}
+              </button>
+              {importedNow != null && <span style={{ display: "flex", alignItems: "center", gap: 6, fontFamily: MONO, fontSize: 11, color: "var(--mf-t3)" }}><Check size={13} /> {importedNow} imported</span>}
+              <span style={{ marginLeft: "auto", fontFamily: MONO, fontSize: 10.5, color: "var(--mf-t5)" }}>launches through Steam</span>
+            </div>
+          </>
+        )}
+      </div>
+    </DialogShell>
+  )
+}
