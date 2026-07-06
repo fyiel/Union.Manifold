@@ -21,7 +21,7 @@ pnpm dev
 
 ### install / update on arch
 ```
-sudo pacman -U https://github.com/fyiel/Union.Manifold/releases/latest/download/union-manifold-x86_64.pkg.tar.zst
+curl -fLo /tmp/union-manifold.pkg.tar.zst https://github.com/fyiel/Union.Manifold/releases/latest/download/union-manifold-x86_64.pkg.tar.zst && sudo pacman -U /tmp/union-manifold.pkg.tar.zst
 ```
 Same command updates an existing install. Other Linux: grab the AppImage or deb from [releases](https://github.com/fyiel/Union.Manifold/releases).
 
