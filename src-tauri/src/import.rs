@@ -154,10 +154,14 @@ fn steam_library_dirs() -> Vec<PathBuf> {
             }
         };
         push(steamapps.clone());
-        if let Ok(text) = std::fs::read_to_string(steamapps.join("libraryfolders.vdf")) {
-            for (key, value) in vdf_pairs(&text) {
-                if key == "path" {
-                    push(PathBuf::from(value.replace("\\\\", "\\")).join("steamapps"));
+        // Modern Steam clients keep the authoritative list at
+        // config/libraryfolders.vdf; the steamapps/ copy may not exist at all.
+        for vdf in [steamapps.join("libraryfolders.vdf"), root.join("config/libraryfolders.vdf")] {
+            if let Ok(text) = std::fs::read_to_string(vdf) {
+                for (key, value) in vdf_pairs(&text) {
+                    if key == "path" {
+                        push(PathBuf::from(value.replace("\\\\", "\\")).join("steamapps"));
+                    }
                 }
             }
         }
@@ -226,7 +230,7 @@ pub fn steam_library_scan(state: State<'_, AppState>) -> Value {
         a.get("name").and_then(|v| v.as_str()).unwrap_or("").to_lowercase()
             .cmp(&b.get("name").and_then(|v| v.as_str()).unwrap_or("").to_lowercase())
     });
-    json!({ "ok": true, "found": !apps.is_empty(), "apps": apps })
+    json!({ "ok": true, "steamFound": !steam_roots().is_empty(), "found": !apps.is_empty(), "apps": apps })
 }
 
 #[derive(Deserialize)]
