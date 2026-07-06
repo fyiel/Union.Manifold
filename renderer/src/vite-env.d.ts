@@ -270,6 +270,14 @@ declare global {
     error?: string
   }
 
+  type SteamScannedApp = {
+    steamAppId: number
+    name: string
+    installPath?: string
+    sizeBytes?: number
+    imported: boolean
+  }
+
   interface Window {
     // frameless window controls, was declared in the now removed TopBar
     ucWindow?: {
@@ -360,6 +368,10 @@ declare global {
       installDownloadedArchive: (appid: string) => Promise<{ ok: boolean; downloadId?: string; extracted?: number; error?: string; code?: string; spaceCheck?: DownloadUpdatePayload["spaceCheck"] }>
       deleteArchiveFiles: (payload: { archivePaths: string[] }) => Promise<{ ok: boolean; deletedCount?: number; error?: string }>
       browseForGameExe: (defaultPath?: string) => Promise<{ ok: boolean; path?: string }>
+      importExe: (exePath: string, name?: string) => Promise<{ ok: boolean; appid?: string; name?: string; exePath?: string; existed?: boolean; steamAppId?: number | null; error?: string }>
+      importSetSteamAppId: (appid: string, steamAppid: number) => Promise<{ ok: boolean }>
+      steamLibraryScan: () => Promise<{ ok: boolean; found: boolean; apps: SteamScannedApp[] }>
+      steamLibraryImport: (apps: Array<Pick<SteamScannedApp, "steamAppId" | "name" | "installPath" | "sizeBytes">>) => Promise<{ ok: boolean; imported: number; errors: Array<{ name: string; error: string }> }>
       onUpdate: (callback: (update: DownloadUpdatePayload) => void) => () => void
       onBlocked: (callback: (data: { host: string; gameName: string | null; appid: string | null; reason: string }) => void) => () => void
       onGameQuickExit: (callback: (data: { appid: string | null; exePath: string | null; elapsed: number }) => void) => () => void
@@ -451,6 +463,7 @@ declare global {
     ucSystem?: {
       openExternal?: (target: string) => Promise<{ ok: boolean; error?: string }>
       launchSteam?: () => Promise<{ ok: boolean; method?: string; error?: string }>
+      runSteamGame?: (steamAppid: number) => Promise<{ ok: boolean; error?: string }>
       getNotifications: () => Promise<{ ok: boolean; notifications: SystemNotification[] }>
       onNotificationActivated: (callback: (data: { id: string }) => void) => () => void
     }
