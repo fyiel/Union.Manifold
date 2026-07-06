@@ -1,6 +1,6 @@
 use std::path::PathBuf;
-use std::sync::Mutex;
 
+use parking_lot::Mutex;
 use serde_json::{json, Map, Value};
 use tauri::{AppHandle, Emitter, State};
 
@@ -37,7 +37,6 @@ impl SettingsStore {
     pub fn get(&self, key: &str) -> Value {
         self.inner
             .lock()
-            .unwrap()
             .get(key)
             .cloned()
             .unwrap_or(Value::Null)
@@ -45,7 +44,7 @@ impl SettingsStore {
 
     pub fn set(&self, key: &str, value: Value) {
         let snapshot = {
-            let mut map = self.inner.lock().unwrap();
+            let mut map = self.inner.lock();
             if value.is_null() {
                 map.remove(key);
             } else {
@@ -82,7 +81,7 @@ pub fn setting_set(app: AppHandle, state: State<'_, AppState>, key: String, valu
 
 #[tauri::command(async)]
 pub fn setting_clear_all(state: State<'_, AppState>) -> Result<Value> {
-    let mut map = state.settings.inner.lock().unwrap();
+    let mut map = state.settings.inner.lock();
     map.clear();
     state.settings.persist(&map);
     Ok(json!({ "ok": true }))

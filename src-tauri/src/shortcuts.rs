@@ -51,7 +51,14 @@ pub fn create_desktop_shortcut(game_name: String, _appid: String, exe_path: Opti
             exe,
             std::path::Path::new(&exe).parent().map(|p| p.to_string_lossy().to_string()).unwrap_or_default()
         );
-        match std::process::Command::new("powershell").args(["-NoProfile", "-Command", &script]).output() {
+        // CREATE_NO_WINDOW: powershell is a console app; without the flag a
+        // console window flashes over the launcher mid launch flow.
+        use std::os::windows::process::CommandExt;
+        match std::process::Command::new("powershell")
+            .args(["-NoProfile", "-Command", &script])
+            .creation_flags(0x08000000)
+            .output()
+        {
             Ok(o) if o.status.success() => json!({ "ok": true }),
             Ok(o) => json!({ "ok": false, "error": String::from_utf8_lossy(&o.stderr).to_string() }),
             Err(e) => json!({ "ok": false, "error": e.to_string() }),

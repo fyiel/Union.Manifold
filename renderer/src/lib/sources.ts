@@ -365,9 +365,14 @@ export function rememberGameAs(key: string, game: UnifiedSourceGame): void {
 }
 
 // Drop a stale remembered record (e.g. after a manual Steam appid override
-// replaced what the wrong auto-match cached) so detail re-resolves fresh.
+// replaced what the wrong auto-match cached) so detail re-resolves fresh. The
+// same record is stored under TWO keys (its dedupKey via rememberGames and the
+// manifest appid via rememberGameAs); follow the record to its dedupKey so the
+// stale match can't be rehydrated through the other key.
 export function forgetRememberedGame(key: string): void {
+  const g = _remembered.get(key)
   _remembered.delete(key)
+  if (g?.dedupKey && g.dedupKey !== key) _remembered.delete(g.dedupKey)
 }
 
 // ── Download art cache ──

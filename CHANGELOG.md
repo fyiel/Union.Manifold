@@ -4,6 +4,55 @@ All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 The app shows its version as 1.0.0b (beta). 1.0.1 is the first packaged release.
 
+## 2.10.4
+
+A Windows repair pass driven by field reports; everything below reproduces or
+is only reachable on Windows unless noted.
+
+### Fixed
+
+Images
+- covers finally render on windows: the renderer re-wrapped its own asset
+  protocol urls on windows (the base is http:// there, unlike linux), so every
+  custom cover asked the backend to fetch uc-asset.localhost as a remote host
+  and blanked; backend https now also trusts the windows certificate store, so
+  antivirus/corporate tls interception no longer kills every cover fetch
+- a transient network error (boot before wifi, a cdn blip) no longer blanks a
+  cover for the session: only definitive upstream rejections are negatively
+  cached, and the renderer's failed-image memory expires after 5 minutes
+- avif, ico and bmp covers are recognized, svg detection survives a byte order
+  mark, and image fetches send a browser image accept header so waf-fronted
+  cdns stop rejecting them
+
+Library identity
+- setting the correct steam id on a game can no longer turn it into another
+  game: an in-flight metadata resolve that finishes after the save is
+  discarded instead of re-caching the old wrong match, the stale record is
+  evicted under both of its cache keys, and the cache persist is awaited so a
+  reload cannot resurrect it
+- the override now also repairs the manifest metadata (steam id, cover, and
+  the official store name when one exists), so later title searches find the
+  right game instead of resolving through a poisoned name
+- refresh metadata no longer renames an entry to whatever the first search hit
+  was
+
+Launch and stability
+- launching a console-subsystem game no longer pops a console window over the
+  app (game, taskkill and shortcut spawns get windows creation flags)
+- a crash anywhere in the app now writes a fatal line with location to the app
+  log before exiting, so "the app closed itself" reports carry a cause
+- the launch path is panic-free: lock poisoning in launch/settings/logging can
+  no longer wedge or abort the app, a game exiting during quit no longer races
+  state teardown, and a failed reaper thread frees the running slot instead of
+  pinning the game as "already running" forever
+
+Installer
+- updating from 2.10.0 or older migrates the old per-machine install to the
+  new per-user one with a single uac prompt, keeping library, settings and
+  downloads and repointing shortcuts; afterwards auto updates stay silent with
+  no admin prompt (previously the update left two copies installed with
+  shortcuts launching the old one)
+
 ## 1.0.2
 
 A correctness and hardening pass over the whole app, no new surface.

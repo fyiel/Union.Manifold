@@ -49,23 +49,36 @@ export function gameImageCandidates(
   return out
 }
 
-// Candidate URLs that already failed to load this session. Detail imagery
-// remounts on every Browse → detail → Browse trip, and every retry of a
-// known-dead candidate is a real network request. Module-level like
-// GameCard's `prefetched` set, but capped: at the cap the whole set is
-// dropped wholesale (no recency bookkeeping) so it can't grow unbounded.
-const failedSrcs = new Set<string>()
+// Candidate URLs that failed to load recently. Detail imagery remounts on
+// every Browse → detail → Browse trip, and every retry of a known-dead
+// candidate is a real network request. Module-level like GameCard's
+// `prefetched` set, but capped: at the cap the whole map is dropped wholesale
+// (no recency bookkeeping) so it can't grow unbounded. Entries expire after a
+// few minutes because a failure is often the machine's moment, not the URL's:
+// a launch before the network is up (boot autostart, installer relaunch)
+// fails every cover at once, and a session-permanent set kept them blank
+// until the next restart even after connectivity returned.
+const failedSrcs = new Map<string, number>()
 const FAILED_SRCS_CAP = 500
+const FAILED_TTL_MS = 5 * 60_000
 
 function rememberFailed(url: string) {
   if (failedSrcs.size >= FAILED_SRCS_CAP) failedSrcs.clear()
-  failedSrcs.add(url)
+  failedSrcs.set(url, Date.now() + FAILED_TTL_MS)
 }
 
-// First index at or after `from` whose URL isn't a known failure.
+function hasFailed(url: string): boolean {
+  const until = failedSrcs.get(url)
+  if (until === undefined) return false
+  if (Date.now() < until) return true
+  failedSrcs.delete(url)
+  return false
+}
+
+// First index at or after `from` whose URL isn't a known recent failure.
 function nextAlive(list: string[], from: number): number {
   let i = from
-  while (i < list.length && failedSrcs.has(list[i])) i++
+  while (i < list.length && hasFailed(list[i])) i++
   return i
 }
 
@@ -106,7 +119,7 @@ export function SmartImage({ candidates, steamAppId, alt, onAllFailed, style, la
       void fetchSteamArt(steamAppId).then((urls) => {
         // game swapped while the fetch was in flight, drop its stale art
         if (prevSig.current !== sigAtError) return
-        const next = urls.map((u) => proxyImageUrl(u)).filter((u) => !all.includes(u) && !failedSrcs.has(u))
+        const next = urls.map((u) => proxyImageUrl(u)).filter((u) => !all.includes(u) && !hasFailed(u))
         if (next.length) { setIdx(all.length); setExtra((p) => [...p, ...next]) }
         else onAllFailed?.()
       })

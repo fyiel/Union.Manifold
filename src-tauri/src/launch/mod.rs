@@ -2,9 +2,9 @@ pub mod linux;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 
 use once_cell::sync::Lazy;
+use parking_lot::Mutex;
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, State};
 
@@ -148,6 +148,22 @@ fn spawn_and_track(app: &AppHandle, appid: &str, command: &str, args: &[String],
         c.args(args);
         c
     };
+    #[cfg(windows)]
+    {
+        // We are a GUI-subsystem process with no console, so CreateProcess would
+        // allocate and show a fresh console window for any console-subsystem game
+        // or launcher stub it starts. CREATE_NO_WINDOW suppresses that and is
+        // documented as ignored for GUI applications, so real games are unaffected
+        // (unlike SW_HIDE-style hiding, which GUI games honor — the old Electron
+        // "game starts hidden with audio only" bug).
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000);
+        // Don't hand the game our stdio either: a console child writing into an
+        // inherited handle nobody drains can stall on a full pipe buffer.
+        cmd.stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
+    }
     #[cfg(unix)]
     if scope.is_none() {
         use std::os::unix::process::CommandExt;
@@ -162,7 +178,7 @@ fn spawn_and_track(app: &AppHandle, appid: &str, command: &str, args: &[String],
     // first process handle. This `entry` is the single gate.
     use std::collections::hash_map::Entry;
     let child = {
-        let mut running = RUNNING.lock().unwrap();
+        let mut running = RUNNING.lock();
         match running.entry(appid.to_string()) {
             Entry::Occupied(_) => return Err("already running".to_string()),
             Entry::Vacant(slot) => {
@@ -183,11 +199,11 @@ fn spawn_and_track(app: &AppHandle, appid: &str, command: &str, args: &[String],
     let appid2 = appid.to_string();
     let exe2 = exe_path.to_string();
     let name2 = game_name.clone();
-    std::thread::spawn(move || {
+    let reaper = std::thread::Builder::new().name(format!("game-reaper-{appid}")).spawn(move || {
         let mut child = child;
         let _ = child.wait();
         let elapsed = now_ms() - started_at;
-        RUNNING.lock().unwrap().remove(&appid2);
+        RUNNING.lock().remove(&appid2);
         app2.emit(
             "uc:presence-changed",
             json!({ "reason": "game-exited", "appid": appid2 }),
@@ -205,6 +221,13 @@ fn spawn_and_track(app: &AppHandle, appid: &str, command: &str, args: &[String],
             .ok();
         }
     });
+    if let Err(e) = reaper {
+        // Thread creation only fails under resource exhaustion. The game is
+        // already running; free the slot (nothing will ever reap it) and log
+        // instead of panicking — with panic=abort that would kill the app.
+        RUNNING.lock().remove(appid);
+        crate::logging::write_line("error", &format!("game reaper thread spawn failed for {appid}: {e}"));
+    }
     Ok(pid)
 }
 
@@ -226,14 +249,14 @@ pub fn game_exe_launch(state: State<'_, AppState>, app: AppHandle, appid: String
 
 #[tauri::command(async)]
 pub fn game_exe_running_list() -> Value {
-    let running = RUNNING.lock().unwrap();
+    let running = RUNNING.lock();
     let appids: Vec<String> = running.keys().cloned().collect();
     json!({ "ok": true, "appids": appids })
 }
 
 #[tauri::command(async)]
 pub fn game_exe_quit(appid: String) -> Value {
-    let handle = RUNNING.lock().unwrap().get(&appid).cloned();
+    let handle = RUNNING.lock().get(&appid).cloned();
     if let Some(handle) = handle {
         kill_handle(&handle);
         // The reaper thread in spawn_and_track owns removal from RUNNING and
@@ -251,19 +274,29 @@ fn kill_handle(handle: &RunHandle) {
             .args(["--user", "kill", "--signal=SIGTERM", &scope])
             .status()
             .ok();
-        std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_secs(4));
-            std::process::Command::new("systemctl")
-                .args(["--user", "kill", "--signal=SIGKILL", &scope])
-                .status()
-                .ok();
-        });
+        // Builder::spawn instead of thread::spawn: the latter panics on thread
+        // creation failure, and with panic=abort that would kill the whole app
+        // just to skip an escalation-to-SIGKILL nicety.
+        std::thread::Builder::new()
+            .name("game-kill-escalate".into())
+            .spawn(move || {
+                std::thread::sleep(std::time::Duration::from_secs(4));
+                std::process::Command::new("systemctl")
+                    .args(["--user", "kill", "--signal=SIGKILL", &scope])
+                    .status()
+                    .ok();
+            })
+            .ok();
         return;
     }
     #[cfg(windows)]
     {
+        // CREATE_NO_WINDOW: taskkill is a console app; without the flag a
+        // console window flashes over the launcher every time a game is quit.
+        use std::os::windows::process::CommandExt;
         std::process::Command::new("taskkill")
             .args(["/PID", &handle.pid.to_string(), "/T", "/F"])
+            .creation_flags(0x08000000)
             .spawn()
             .ok();
     }
@@ -275,13 +308,16 @@ fn kill_handle(handle: &RunHandle) {
             .args(["-TERM", "--", &group])
             .status()
             .ok();
-        std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_secs(4));
-            std::process::Command::new("kill")
-                .args(["-KILL", "--", &group])
-                .status()
-                .ok();
-        });
+        std::thread::Builder::new()
+            .name("game-kill-escalate".into())
+            .spawn(move || {
+                std::thread::sleep(std::time::Duration::from_secs(4));
+                std::process::Command::new("kill")
+                    .args(["-KILL", "--", &group])
+                    .status()
+                    .ok();
+            })
+            .ok();
     }
 }
 
