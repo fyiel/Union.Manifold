@@ -299,9 +299,10 @@ export function LibraryPage() {
   useEffect(() => {
     const now = Date.now()
     const targets = installed.filter((g) => {
-      // Imported executables aren't store games; a title search on an exe stem
-      // would attach a random catalog game's art/metadata. Never enrich them.
-      if (g.appid.startsWith("local-")) return false
+      // Imported exes with NO steamAppId aren't store games — a title search on
+      // an exe stem would attach a random catalog game. Skip only those; a
+      // local- import that has a steamAppId resolves correctly by that id.
+      if (g.appid.startsWith("local-") && g.steamAppId == null) return false
       if (enrichTried.current.has(g.appid)) return false
       const c = gameCacheRef.current[g.appid]
       return !(c && c.game && now - (c.cachedAt || 0) < GAME_CACHE_TTL_MS)
@@ -321,7 +322,7 @@ export function LibraryPage() {
         const resolved = new Map<string, UnifiedSourceGame>()
         await Promise.all(targets.slice(i, i + CONC).map(async (g) => {
           try {
-            const full = await resolveInstalledGame(g.appid, g.name)
+            const full = await resolveInstalledGame(g.appid, g.name, g.steamAppId)
             if (!full) { enrichTried.current.delete(g.appid); return }
             rememberGames([full])
             rememberGameAs(g.appid, full)
@@ -449,10 +450,10 @@ export function LibraryPage() {
 
   // Re-resolve one game's metadata on demand, bypassing the cache TTL.
   const refreshMetadata = async (g: LibGame) => {
-    if (g.appid.startsWith("local-")) return // imported exe: nothing to resolve
+    if (g.appid.startsWith("local-") && g.steamAppId == null) return // imported exe with no steam id: nothing to resolve
     enrichTried.current.add(g.appid)
     try {
-      const full = await resolveInstalledGame(g.appid, g.name)
+      const full = await resolveInstalledGame(g.appid, g.name, g.steamAppId)
       if (!full) return
       rememberGames([full])
       rememberGameAs(g.appid, full)
@@ -608,6 +609,9 @@ export function LibraryPage() {
             delete gameCacheRef.current[appid]
             void window.ucSettings?.set?.(GAME_CACHE_KEY, { ...gameCacheRef.current })
             setInstalled((prev) => prev.map((x) => x.appid !== appid ? x : { ...x, steamAppId: id, image: steamCoverUrl(id) }))
+            // Reload from manifests so the card picks up the backend-resolved
+            // real cover (the optimistic steamCoverUrl guess 404s for some ids).
+            try { window.dispatchEvent(new Event("uc_game_installed")) } catch { /* ignore */ }
           }}
         />
       )}

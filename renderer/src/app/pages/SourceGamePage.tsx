@@ -148,11 +148,12 @@ export function SourceGamePage() {
     let alive = true
     setLoading(true)
     // With source stubs we resolve them directly. Library games carry none, so
-    // resolveInstalledGame keys off the appid (numeric UnionCrax internal id, or
-    // the ORIGINAL UC.Direct install appid) and only title-searches when the
-    // appid resolves nothing, e.g. steam-<id> installs.
+    // resolveInstalledGame keys off the appid AND the authoritative steamAppId
+    // (from the manifest / route state) so the detail page resolves the SAME
+    // game the card thumbnail shows — never a same-named different title.
     const title = game?.title || initial?.title || ""
-    const work = stubs.length ? getSourceDetail(stubs) : resolveInstalledGame(dedupKey, title)
+    const knownSteam = game?.steamAppId ?? initial?.steamAppId ?? null
+    const work = stubs.length ? getSourceDetail(stubs) : resolveInstalledGame(dedupKey, title, knownSteam)
     void work.then((full) => {
       if (!alive) return
       if (full) {
