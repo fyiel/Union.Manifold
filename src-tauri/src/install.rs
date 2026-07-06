@@ -356,7 +356,9 @@ pub async fn auto_install(app: AppHandle, appid: String, download_id: String, ga
         .filter_map(|p| std::fs::metadata(p).ok())
         .map(|m| m.len())
         .sum();
-    let required = download_bytes + crate::storage::estimate_extract(download_bytes, 0, margin_gib);
+    // The archive is already on disk here, its bytes don't need to be free
+    // again — only the unpacked output does.
+    let required = crate::storage::estimate_extract(download_bytes, 0, margin_gib);
     let free = crate::storage::free_bytes(&installing_dir);
     if download_bytes > 0 && free < required {
         let msg = format!(
