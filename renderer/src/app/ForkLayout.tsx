@@ -73,6 +73,24 @@ export function ForkLayout() {
     return () => clearTimeout(t)
   }, [])
 
+  // Startup page setting: land on the Library instead of Browse when chosen.
+  // Runs once per app boot; only rewrites the initial "/" so deep links and
+  // later navigation are never touched.
+  const startupRouted = useRef(false)
+  useEffect(() => {
+    if (startupRouted.current) return
+    startupRouted.current = true
+    void (async () => {
+      try {
+        const sp = await window.ucSettings?.get?.("startPage")
+        if (sp === "library" && window.location.hash.replace(/^#/, "") === "/") {
+          navigate("/library", { replace: true })
+        }
+      } catch { /* ignore */ }
+    })()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   // Pages that don't manage their own scroller get reset to top on navigation.
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: 0, behavior: "auto" })
