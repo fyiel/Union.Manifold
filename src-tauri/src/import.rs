@@ -44,9 +44,6 @@ fn write_import_manifest(state: &AppState, manifest: &Value) -> Result<(), Strin
     Ok(())
 }
 
-fn steam_cover(steam_app_id: u64) -> String {
-    format!("https://cdn.cloudflare.steamstatic.com/steam/apps/{steam_app_id}/library_600x900.jpg")
-}
 
 #[tauri::command]
 pub async fn import_exe(state: State<'_, AppState>, exe_path: String, name: Option<String>) -> Result<Value, String> {
@@ -82,7 +79,7 @@ pub async fn import_exe(state: State<'_, AppState>, exe_path: String, name: Opti
     });
     if let Some(id) = steam_app_id {
         manifest["steamAppId"] = json!(id);
-        manifest["metadata"]["image"] = json!(steam_cover(id));
+        manifest["metadata"]["image"] = json!(crate::sources::steam::resolve_cover(id).await);
     }
     Ok(match write_import_manifest(&state, &manifest) {
         Ok(()) => json!({ "ok": true, "appid": appid, "name": name, "exePath": exe_path, "steamAppId": steam_app_id }),
@@ -90,15 +87,52 @@ pub async fn import_exe(state: State<'_, AppState>, exe_path: String, name: Opti
     })
 }
 
-// Manual fallback when the store search couldn't match an imported exe's name.
-#[tauri::command(async)]
-pub fn import_set_steam_appid(state: State<'_, AppState>, appid: String, steam_appid: u64) -> Value {
+// Manual override for an imported game's Steam appid — used both when the
+// store search missed AND when it matched the wrong game (exe names are
+// ambiguous; "Card Corner"-style titles collide). Overwrites the cover too.
+#[tauri::command]
+pub async fn import_set_steam_appid(state: State<'_, AppState>, appid: String, steam_appid: u64) -> Result<Value, String> {
+    let cover = crate::sources::steam::resolve_cover(steam_appid).await;
     let roots = library::scan_roots(&state);
     let ok = library::merge_into_manifest(&roots, &appid, &json!({
         "steamAppId": steam_appid,
-        "metadata": { "image": steam_cover(steam_appid) },
+        "metadata": { "image": cover },
     }));
-    json!({ "ok": ok })
+    Ok(json!({ "ok": ok }))
+}
+
+// Copy a user-picked image into app-managed storage and hand back a stable
+// uc-custom:// URL. Storing the raw filesystem path in metadata broke as soon
+// as the renderer tried to load it (blank cover) and died if the source file
+// moved; content-hashed copies served through the uc-asset protocol do neither.
+#[tauri::command(async)]
+pub fn custom_image_import(state: State<'_, AppState>, path: String) -> Value {
+    use sha2::Digest;
+    let src = Path::new(&path);
+    if !src.is_file() {
+        return json!({ "ok": false, "error": "file not found" });
+    }
+    let bytes = match std::fs::read(src) {
+        Ok(b) => b,
+        Err(e) => return json!({ "ok": false, "error": format!("read image: {e}") }),
+    };
+    let ext = src
+        .extension()
+        .map(|e| e.to_string_lossy().to_lowercase())
+        .filter(|e| ["png", "jpg", "jpeg", "webp", "gif", "bmp"].contains(&e.as_str()))
+        .unwrap_or_else(|| "png".to_string());
+    let name = format!("{}.{ext}", &hex::encode(sha2::Sha256::digest(&bytes))[..24]);
+    let dir = state.paths.data_dir.join("custom-images");
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        return json!({ "ok": false, "error": format!("create dir: {e}") });
+    }
+    let dest = dir.join(&name);
+    if !dest.exists() {
+        if let Err(e) = std::fs::write(&dest, &bytes) {
+            return json!({ "ok": false, "error": format!("write image: {e}") });
+        }
+    }
+    json!({ "ok": true, "url": format!("uc-custom://{name}") })
 }
 
 // ── Steam library discovery ──────────────────────────────────────────────────
@@ -244,8 +278,8 @@ pub struct SteamImportApp {
     pub size_bytes: Option<u64>,
 }
 
-#[tauri::command(async)]
-pub fn steam_library_import(state: State<'_, AppState>, apps: Vec<SteamImportApp>) -> Value {
+#[tauri::command]
+pub async fn steam_library_import(state: State<'_, AppState>, apps: Vec<SteamImportApp>) -> Result<Value, String> {
     let roots = library::scan_roots(&state);
     let existing: HashSet<String> = library::all_appids(&roots).into_iter().collect();
     let mut imported = 0u32;
@@ -255,6 +289,9 @@ pub fn steam_library_import(state: State<'_, AppState>, apps: Vec<SteamImportApp
         if existing.contains(&appid) {
             continue;
         }
+        // Real cover from the store API when the predictable capsule 404s
+        // (newer indie titles), so bulk-imported games aren't blank either.
+        let cover = crate::sources::steam::resolve_cover(app.steam_app_id).await;
         let manifest = json!({
             "appid": appid,
             "name": app.name,
@@ -266,7 +303,7 @@ pub fn steam_library_import(state: State<'_, AppState>, apps: Vec<SteamImportApp
             "metadata": {
                 "name": app.name,
                 "sizeBytes": app.size_bytes,
-                "image": steam_cover(app.steam_app_id),
+                "image": cover,
             },
         });
         match write_import_manifest(&state, &manifest) {
@@ -274,7 +311,7 @@ pub fn steam_library_import(state: State<'_, AppState>, apps: Vec<SteamImportApp
             Err(e) => errors.push(json!({ "name": app.name, "error": e })),
         }
     }
-    json!({ "ok": errors.is_empty(), "imported": imported, "errors": errors })
+    Ok(json!({ "ok": errors.is_empty(), "imported": imported, "errors": errors }))
 }
 
 #[cfg(test)]
