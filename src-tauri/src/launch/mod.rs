@@ -29,8 +29,9 @@ fn systemd_run_available() -> bool {
 
 fn install_dir_for(state: &AppState, appid: &str) -> Option<PathBuf> {
     // Scan the primary install dir AND any legacy roots so old UnionCrax.Direct
-    // installs resolve their folder and launch.
-    crate::library::find_dir(&crate::library::scan_roots(state), appid)
+    // installs resolve their folder and launch. Imported entries resolve to the
+    // real game dir (manifest installPath), not their manifest stub.
+    crate::library::game_files_dir(&crate::library::scan_roots(state), appid)
 }
 
 fn is_executable_candidate(path: &Path) -> bool {

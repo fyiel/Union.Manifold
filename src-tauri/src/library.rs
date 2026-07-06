@@ -178,7 +178,32 @@ pub(crate) fn find_dir(roots: &[PathBuf], appid: &str) -> Option<PathBuf> {
         .map(|(dir, _)| dir)
 }
 
-fn merge_into_manifest(roots: &[PathBuf], appid: &str, updates: &Value) -> bool {
+// Every appid present in any scan root regardless of status. Used by imports
+// to dedupe against both installed and installing entries.
+pub(crate) fn all_appids(roots: &[PathBuf]) -> Vec<String> {
+    load_all_cached(roots)
+        .into_iter()
+        .filter_map(|(_, v)| v.get("appid").and_then(|a| a.as_str()).map(str::to_string))
+        .collect()
+}
+
+// The directory holding the actual game files. Normally the manifest folder
+// itself, but imported entries (imported-exe / steam) are stubs whose manifest
+// points at the real game dir via installPath.
+pub(crate) fn game_files_dir(roots: &[PathBuf], appid: &str) -> Option<PathBuf> {
+    let (dir, v) = load_all_cached(roots)
+        .into_iter()
+        .find(|(_, v)| v.get("appid").and_then(|a| a.as_str()) == Some(appid))?;
+    if let Some(p) = v.get("installPath").and_then(|p| p.as_str()) {
+        let path = PathBuf::from(p);
+        if path != dir && path.is_dir() {
+            return Some(path);
+        }
+    }
+    Some(dir)
+}
+
+pub(crate) fn merge_into_manifest(roots: &[PathBuf], appid: &str, updates: &Value) -> bool {
     if let Some(dir) = find_dir(roots, appid) {
         let manifest_path = dir.join(MANIFEST_NAME);
         let mut manifest = std::fs::read_to_string(&manifest_path)
@@ -299,4 +324,49 @@ pub fn installing_delete(state: State<'_, AppState>, appid: String) -> Value {
 pub fn installing_dismiss(state: State<'_, AppState>, appid: String) -> Value {
     remove_dir_unless_installed(&scan_roots(&state), &appid);
     json!({ "ok": true, "prompted": false })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn write_stub(root: &std::path::Path, folder: &str, manifest: &Value) -> PathBuf {
+        let dir = root.join(folder);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(MANIFEST_NAME), serde_json::to_string(manifest).unwrap()).unwrap();
+        dir
+    }
+
+    #[test]
+    fn game_files_dir_prefers_manifest_install_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("library");
+        std::fs::create_dir_all(&root).unwrap();
+        let real = tmp.path().join("SteamLibrary/common/Portal 2");
+        std::fs::create_dir_all(&real).unwrap();
+
+        // Imported stub: manifest folder != installPath → resolve to installPath.
+        write_stub(&root, "portal-2", &json!({
+            "appid": "steam-620",
+            "installStatus": "installed",
+            "installPath": real.to_string_lossy(),
+        }));
+        // Normal install: installPath == manifest folder → unchanged.
+        let normal = write_stub(&root, "some-game", &json!({
+            "appid": "42",
+            "installStatus": "installed",
+        }));
+        // Stale installPath that no longer exists → fall back to manifest folder.
+        let stale = write_stub(&root, "gone-game", &json!({
+            "appid": "local-dead",
+            "installStatus": "installed",
+            "installPath": tmp.path().join("nowhere").to_string_lossy(),
+        }));
+
+        let roots = vec![root];
+        assert_eq!(game_files_dir(&roots, "steam-620"), Some(real));
+        assert_eq!(game_files_dir(&roots, "42"), Some(normal));
+        assert_eq!(game_files_dir(&roots, "local-dead"), Some(stale));
+        assert_eq!(game_files_dir(&roots, "missing"), None);
+    }
 }
