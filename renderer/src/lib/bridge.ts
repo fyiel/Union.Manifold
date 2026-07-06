@@ -100,6 +100,11 @@ export function installBridge(): void {
     installDownloadedArchive: (appid: string) => call("install_downloaded_archive", { appid }),
     deleteArchiveFiles: (payload: any) => call("delete_archive_files", { payload }),
     browseForGameExe: (defaultPath?: string) => call("browse_for_game_exe", { defaultPath }),
+    importExe: (exePath: string, name?: string) => call("import_exe", { exePath, name }),
+    importSetSteamAppId: (appid: string, steamAppid: number) => call("import_set_steam_appid", { appid, steamAppid }),
+    steamLibraryScan: () => call("steam_library_scan"),
+    steamLibraryImport: (apps: Array<{ steamAppId: number; name: string; installPath?: string; sizeBytes?: number }>) =>
+      call("steam_library_import", { apps }),
     onUpdate: (cb: Cb) => on("uc:download-update", cb),
     onBlocked: (cb: Cb) => on("uc:download-blocked", cb),
     onGameQuickExit: (cb: Cb) => on("uc:game-quick-exit", cb),
@@ -173,6 +178,7 @@ export function installBridge(): void {
   w.ucSystem = {
     openExternal: (target: string) => call("system_open_external", { target }),
     launchSteam: () => call("system_launch_steam"),
+    runSteamGame: (steamAppid: number) => call("steam_game_run", { steamAppid }),
     getNotifications: () => call("system_notifications"),
     onNotificationActivated: noop,
   }
