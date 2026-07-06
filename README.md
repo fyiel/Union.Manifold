@@ -19,20 +19,11 @@ pnpm dev
 ```
 `pnpm fetch-sidecars` grabs the aria2c and 7z binaries the app shells out to. `pnpm build` produces a packaged app.
 
-### install / update on arch
-One-time key trust (the packages are PGP signed):
+### install / update on linux
 ```
-curl -fsSL https://raw.githubusercontent.com/fyiel/Union.Manifold/main/union-manifold-signing-key.asc | sudo pacman-key --add - && sudo pacman-key --lsign-key AFC92EB633A5DB305F4511B5468871A04436AAAC
+curl -fsSL https://raw.githubusercontent.com/fyiel/Union.Manifold/main/install.sh | bash
 ```
-Then this installs AND updates, straight from the URL:
-```
-sudo pacman -U https://github.com/fyiel/Union.Manifold/releases/latest/download/union-manifold-x86_64.pkg.tar.zst
-```
-Skipping the key setup? Download first, install locally:
-```
-curl -fLo /tmp/union-manifold.pkg.tar.zst https://github.com/fyiel/Union.Manifold/releases/latest/download/union-manifold-x86_64.pkg.tar.zst && sudo pacman -U /tmp/union-manifold.pkg.tar.zst
-```
-Other Linux: grab the AppImage or deb from [releases](https://github.com/fyiel/Union.Manifold/releases).
+Picks the right artifact for your distro (pacman package on Arch, deb on Debian/Ubuntu, AppImage anywhere else). Run it again to update. Prefer manual? Everything's on [releases](https://github.com/fyiel/Union.Manifold/releases).
 
 ### credit
 Built on [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3. Huge thanks to the original team, none of this exists without their work.
