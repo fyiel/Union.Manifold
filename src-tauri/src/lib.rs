@@ -149,6 +149,7 @@ pub fn run() {
             system::steam_game_run,
             import::import_exe,
             import::import_set_steam_appid,
+            import::custom_image_import,
             import::steam_library_scan,
             import::steam_library_import,
             system::download_open,

@@ -79,6 +79,23 @@ fn query_param(uri: &str, key: &str) -> Option<String> {
 }
 
 pub async fn respond(app: AppHandle, uri: String) -> (u16, Vec<u8>, String) {
+    // Custom (user-picked) images: served from data_dir/custom-images, OUTSIDE
+    // the clearable asset cache so "clear cached assets" never eats them. The
+    // name is a content hash written by custom_image_import; reject anything
+    // that could traverse out of the directory.
+    if let Some(name) = query_param(&uri, "c") {
+        if name.is_empty() || name.contains("..") || name.contains(['/', '\\', ':']) {
+            return (400, b"bad name".to_vec(), "text/plain".to_string());
+        }
+        let path = app.state::<AppState>().paths.data_dir.join("custom-images").join(&name);
+        return match tokio::fs::read(&path).await {
+            Ok(bytes) => {
+                let ct = content_type_of(&bytes);
+                (200, bytes, ct.to_string())
+            }
+            Err(_) => (404, b"not found".to_vec(), "text/plain".to_string()),
+        };
+    }
     let remote = match query_param(&uri, "u") {
         Some(u) if !u.is_empty() => u,
         _ => return (400, b"missing u".to_vec(), "text/plain".to_string()),
