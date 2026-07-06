@@ -426,6 +426,7 @@ declare global {
       installUpdate: () => Promise<{ ok: boolean; error?: string }>
       getVersion: () => Promise<string>
       onUpdateAvailable: (callback: (data: { version?: string }) => void) => () => void
+      onUpdateProgress: (callback: (data: { phase: "downloading" | "installing"; received: number; total?: number | null }) => void) => () => void
     }
     ucLogs?: {
       log: (level: string, message: string, data?: any) => Promise<void>
