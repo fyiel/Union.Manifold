@@ -87,16 +87,47 @@ export async function resolveInstalledGame(appid: string, title: string): Promis
     const full = await getSourceDetail([{ sourceId: "unioncrax", sourceSlug: appid }])
     if (full) return full
   }
-  // Unsolved by appid (steam-<id> installs, or a union miss). Match by title.
+  // Our own installs derive their id from the dedup key, so steam-<digits> IS
+  // the Steam appid. That alone buys cover art, hero art and store metadata on
+  // the detail page even when no source search can find the title.
+  const steamAppId = (() => {
+    const m = /^steam-(\d+)$/.exec(appid)
+    return m ? Number(m[1]) : null
+  })()
   const q = (title || "").trim()
-  if (!q) return null
-  const hits = await searchSources(q, 12)
-  if (!hits.length) return null
+  const hits = q ? await searchSources(q, 12) : []
   const want = normTitle(q)
-  const pick = hits.find((h) => normTitle(h.title) === want) || hits[0]
-  const stubs = (pick.sources || []).map((s) => ({ sourceId: s.sourceId, sourceSlug: s.sourceSlug }))
-  const full = stubs.length ? await getSourceDetail(stubs) : null
-  return full || pick
+  // With a known steam appid the hit that agrees with it wins outright, then an
+  // exact title match. The blind hits[0] fallback is only safe when we have no
+  // appid to contradict it.
+  const pick =
+    (steamAppId ? hits.find((h) => h.steamAppId === steamAppId) : undefined) ||
+    hits.find((h) => normTitle(h.title) === want) ||
+    (steamAppId ? undefined : hits[0])
+  if (pick) {
+    const stubs = (pick.sources || []).map((s) => ({ sourceId: s.sourceId, sourceSlug: s.sourceSlug }))
+    const full = stubs.length ? await getSourceDetail(stubs) : null
+    const resolved = full || pick
+    if (steamAppId && !resolved.steamAppId) return { ...resolved, steamAppId }
+    return resolved
+  }
+  // No source knows the title (fresh releases fall through search). Build a
+  // steam-backed record so the card and detail page still get art + metadata.
+  if (steamAppId) {
+    return {
+      dedupKey: appid,
+      steamAppId,
+      title: q || appid,
+      image: steamCoverUrl(steamAppId),
+      genres: [],
+      sources: [],
+    }
+  }
+  return null
+}
+
+export function steamCoverUrl(steamAppId: number): string {
+  return `https://cdn.cloudflare.steamstatic.com/steam/apps/${steamAppId}/library_600x900.jpg`
 }
 
 const EMPTY_QUERY_RESULT: SourceQueryResult = {
@@ -445,6 +476,25 @@ export async function startSourceDownload(
   if (!files.length) {
     return { ok: false, openUrl: resolved.openUrl || option.pageUrl, reason: "no file url" }
   }
+
+  // Stamp the game's metadata into the install manifest BEFORE the engine's
+  // first write. Without this the library has nothing offline (no cover, size
+  // or version) and every card depends on a live cross-source search working.
+  // The engine merges manifests, so this survives its status/snapshot writes.
+  try {
+    await window.ucDownloads?.saveInstalledMetadata?.(appid, {
+      name: game.title,
+      image: game.image || (game.steamAppId ? steamCoverUrl(game.steamAppId) : undefined),
+      heroImage: game.heroImage || undefined,
+      steamAppId: game.steamAppId ?? undefined,
+      sizeBytes: game.sizeBytes,
+      size: game.sizeText || undefined,
+      version: game.version || undefined,
+      description: game.description || undefined,
+      genres: game.genres?.length ? game.genres : undefined,
+      developer: game.developer || undefined,
+    })
+  } catch { /* metadata is best effort, the download must still start */ }
 
   const partTotal = files.length
   let anyQueued = false
