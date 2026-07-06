@@ -191,6 +191,34 @@ pub async fn steam_art(appid: u64) -> Value {
     json!({ "header": "", "background": "" })
 }
 
+// The predictable vertical capsule exists for most games but 404s for many
+// newer/indie titles whose art moved to hashed store_item_assets URLs (e.g.
+// appid 3694480). Probe it; on a miss fall back to the store API's real header
+// image, then to the guess as a last resort.
+pub fn capsule_url(appid: u64) -> String {
+    format!("https://cdn.cloudflare.steamstatic.com/steam/apps/{appid}/library_600x900.jpg")
+}
+
+pub async fn resolve_cover(appid: u64) -> String {
+    let capsule = capsule_url(appid);
+    let opts = crate::http::FetchOpts {
+        retries: Some(0),
+        timeout: Some(std::time::Duration::from_secs(6)),
+        ..Default::default()
+    };
+    if let Ok(resp) = crate::http::fetch(&capsule, &opts).await {
+        if resp.status().is_success() {
+            return capsule;
+        }
+    }
+    if let Some(d) = get_store_details(appid).await {
+        if !d.header_image.is_empty() {
+            return d.header_image;
+        }
+    }
+    capsule
+}
+
 pub async fn steam_meta(appid: u64) -> Value {
     if let Some(d) = get_store_details(appid).await {
         return json!({
