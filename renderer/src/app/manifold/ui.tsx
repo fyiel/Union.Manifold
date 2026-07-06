@@ -25,21 +25,27 @@ export function steamArtLadder(appid?: number | null): string[] {
   ]
 }
 
-// Collect every distinct cover/hero a unified game offers, in preference order:
-// the merged image, then each source's own image, then the hero, then the steam
-// ladder. Lets a card fall back to another source's art when one URL won't load
-// (e.g. a UnionCrax signed link to an unreachable CDN while the same game's
-// AnkerGames poster loads fine).
-export function gameImageCandidates(game: { image?: string; heroImage?: string; steamAppId?: number | null; sources?: Array<{ image?: string }> }): string[] {
-  const raw = [
-    game.image,
-    ...(game.sources || []).map((s) => s.image),
-    game.heroImage,
-    ...steamArtLadder(game.steamAppId), // ensure old steam titles still resolve art
-  ].filter(Boolean) as string[]
+// Collect every distinct cover/hero a unified game offers. A user-set custom
+// cover (uc-custom://) always leads. With `steamFirst` (card/detail covers)
+// and a known appid, Steam's official portrait capsule leads and the source
+// art — which is often a wrong or watermarked scrape — falls back behind it;
+// the wide hero call leaves ordering alone so it doesn't lead with a portrait.
+// SmartImage walks the list so a 404 capsule still yields to the source art.
+export function gameImageCandidates(
+  game: { image?: string; heroImage?: string; steamAppId?: number | null; sources?: Array<{ image?: string }> },
+  opts?: { steamFirst?: boolean },
+): string[] {
+  const steam = steamArtLadder(game.steamAppId)
+  const sourceImgs = [game.image, ...(game.sources || []).map((s) => s.image), game.heroImage]
+  const custom = game.image && game.image.startsWith("uc-custom://") ? game.image : undefined
+  const raw = custom
+    ? [custom, ...steam, ...sourceImgs]
+    : opts?.steamFirst && game.steamAppId
+      ? [steam[0], ...sourceImgs, ...steam.slice(1)]
+      : [...sourceImgs, ...steam]
   const seen = new Set<string>()
   const out: string[] = []
-  for (const u of raw) { if (!seen.has(u)) { seen.add(u); out.push(proxyImageUrl(u)) } }
+  for (const u of raw.filter(Boolean) as string[]) { if (!seen.has(u)) { seen.add(u); out.push(proxyImageUrl(u)) } }
   return out
 }
 
