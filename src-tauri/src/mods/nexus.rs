@@ -349,63 +349,15 @@ async fn game_id_for_domain(key: &str, domain: &str) -> Result<Option<u64>, Stri
 // url, which we hand to the normal install pipeline. Only the nexusmods_session
 // value is sent; Slipgate mints the Cloudflare clearance itself.
 
-fn slipgate_base(state: &AppState) -> Option<String> {
-    state
-        .settings
-        .get_string("slipgateUrl")
-        .map(|s| s.trim().trim_end_matches('/').to_string())
-        .filter(|s| !s.is_empty())
-}
-
-fn slipgate_key(state: &AppState) -> Option<String> {
-    state.settings.get_string("slipgateKey").map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
-}
-
 fn nexus_session_value(state: &AppState) -> Option<String> {
     let cookie = session_cookie(state)?;
     parse_cookie_string(&cookie).into_iter().find(|(n, _)| n == "nexusmods_session").map(|(_, v)| v)
 }
 
-async fn slipgate_post(
-    base: &str,
-    key: Option<String>,
-    path: &str,
-    body: Value,
-    timeout: Duration,
-) -> Result<Value, String> {
-    let mut headers = HashMap::new();
-    headers.insert("Content-Type".to_string(), "application/json".to_string());
-    headers.insert("Accept".to_string(), "application/json".to_string());
-    if let Some(k) = key {
-        headers.insert("X-Slipgate-Key".to_string(), k);
-    }
-    let resp = http::fetch(
-        &format!("{base}{path}"),
-        &http::FetchOpts {
-            method: Some("POST".to_string()),
-            headers,
-            body: Some(serde_json::to_vec(&body).map_err(|e| format!("slipgate encode: {e}"))?),
-            timeout: Some(timeout),
-            ..Default::default()
-        },
-    )
-    .await
-    .map_err(|e| format!("Slipgate unreachable: {e}"))?;
-    let status = resp.status().as_u16();
-    let text = resp.text().await.unwrap_or_default();
-    if status == 401 {
-        return Err("Slipgate rejected the request (check the key)".to_string());
-    }
-    if !(200..300).contains(&status) {
-        return Err(format!("Slipgate HTTP {status}"));
-    }
-    serde_json::from_str(&text).map_err(|e| format!("Slipgate bad response: {e}"))
-}
-
 /// Resolve a free Nexus download url through the user's Slipgate instance.
 async fn slipgate_resolve(
     state: &AppState,
-    base: &str,
+    cfg: &crate::slipgate::Cfg,
     key: &str,
     domain: &str,
     mod_id: u64,
@@ -416,30 +368,14 @@ async fn slipgate_resolve(
     let game_id = game_id_for_domain(key, domain)
         .await?
         .ok_or_else(|| format!("no numeric NexusMods game id for {domain}"))?;
-    let body = json!({
-        "host": "nexusmods",
-        "params": {
-            "domain": domain,
-            "mod_id": mod_id.to_string(),
-            "file_id": file_id.to_string(),
-            "game_id": game_id.to_string(),
-        },
-        "cookies": [{ "name": "nexusmods_session", "value": session }],
+    let params = json!({
+        "domain": domain,
+        "mod_id": mod_id.to_string(),
+        "file_id": file_id.to_string(),
+        "game_id": game_id.to_string(),
     });
-    let v = slipgate_post(base, slipgate_key(state), "/resolve", body, Duration::from_secs(180)).await?;
-    if v.get("ok").and_then(|x| x.as_bool()).unwrap_or(false) {
-        v.get("download_url")
-            .and_then(|x| x.as_str())
-            .filter(|s| !s.is_empty())
-            .map(String::from)
-            .ok_or_else(|| "Slipgate returned no download url".to_string())
-    } else {
-        Err(v
-            .get("error")
-            .and_then(|x| x.as_str())
-            .unwrap_or("Slipgate could not resolve the download")
-            .to_string())
-    }
+    let cookies = json!([{ "name": "nexusmods_session", "value": session }]);
+    crate::slipgate::resolve(cfg, "nexusmods", params, cookies).await.map(|link| link.url)
 }
 
 /// Probe a Slipgate instance for the Settings connection test.
@@ -449,34 +385,7 @@ pub async fn slipgate_check(url: String, key: String) -> Result<Value, String> {
     if base.is_empty() {
         return Ok(json!({ "ok": false, "error": "enter a Slipgate URL" }));
     }
-    let mut headers = HashMap::new();
-    headers.insert("Accept".to_string(), "application/json".to_string());
-    let k = key.trim();
-    if !k.is_empty() {
-        headers.insert("X-Slipgate-Key".to_string(), k.to_string());
-    }
-    let res = async {
-        let resp = http::fetch(
-            &format!("{base}/health"),
-            &http::FetchOpts { headers, timeout: Some(Duration::from_secs(15)), ..Default::default() },
-        )
-        .await
-        .map_err(|e| format!("unreachable: {e}"))?;
-        let status = resp.status().as_u16();
-        let text = resp.text().await.unwrap_or_default();
-        if !(200..300).contains(&status) {
-            return Err(format!("HTTP {status}"));
-        }
-        let v: Value = serde_json::from_str(&text).map_err(|e| format!("bad response: {e}"))?;
-        Ok(json!({
-            "ok": true,
-            "version": v.get("version").and_then(|x| x.as_str()).unwrap_or(""),
-            "flaresolverrOk": v.get("flaresolverr_ok").and_then(|x| x.as_bool()).unwrap_or(false),
-            "recipes": v.get("recipes").cloned().unwrap_or_else(|| json!([])),
-        }))
-    }
-    .await;
-    Ok(fold(res))
+    Ok(fold(crate::slipgate::health(&base, key.trim()).await))
 }
 
 /// Split a pasted cookie blob into (name, value) pairs. Accepts a raw
@@ -855,8 +764,8 @@ pub async fn nexus_install(
             // Cloudflare with a real browser and returns a direct url, far more
             // reliable than replaying the site session in-app. Only the
             // nexusmods_session value is sent; Slipgate mints cf_clearance.
-            if let Some(base) = slipgate_base(&state) {
-                match slipgate_resolve(&state, &base, &key, &domain, mid, file_id).await {
+            if let Some(sg) = crate::slipgate::cfg() {
+                match slipgate_resolve(&state, &sg, &key, &domain, mid, file_id).await {
                     Ok(dl_url) => {
                         let spec = fetch_spec(&key, &appid, &domain, mid, Some(file_id)).await?;
                         tauri::async_runtime::spawn(run_archive_install(app.clone(), spec, dl_url, HashMap::new()));
