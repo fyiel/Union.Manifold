@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Union.Manifold",
-  "version": "2.15.1",
+  "version": "2.16.0",
   "identifier": "fyi.pumg.unionmanifold",
   "build": {
     "beforeDevCommand": "pnpm dev:renderer",
