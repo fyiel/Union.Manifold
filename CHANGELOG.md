@@ -4,6 +4,16 @@ All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 The app shows its version as 1.0.0b (beta). 1.0.1 is the first packaged release.
 
+## 2.15.1
+
+### Fixed
+
+- Steam demo covers stayed blank (for example Tower Lab Demo, Humanize Robotics
+  Demo, Cozy Game Restoration Demo): a demo appid has no store art of its own and
+  Steam's appdetails returns success=false for it, so nothing loaded. the library
+  now falls back to the base game's art for a demo or playtest, found by stripping
+  the suffix and resolving the base title
+
 ## 2.15.0
 
 ### Added

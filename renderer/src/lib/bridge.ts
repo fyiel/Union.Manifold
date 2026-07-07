@@ -192,7 +192,7 @@ export function installBridge(): void {
     catalog: (offset?: number, limit?: number) => call("sources_catalog", { offset, limit }),
     detail: (sources: any[]) => call("sources_detail", { sources }),
     resolve: (sourceId: string, option: any) => call("sources_resolve", { sourceId, option }),
-    steamArt: (appid: number) => call("sources_steam_art", { appid }),
+    steamArt: (appid: number, name?: string) => call("sources_steam_art", { appid, name }),
     protondb: (appid: number) => call("sources_protondb", { appid }),
     steamMeta: (appid: number) => call("sources_steam_meta", { appid }),
     query: (params: any, reqId?: number) => call("sources_query", { params, reqId }),

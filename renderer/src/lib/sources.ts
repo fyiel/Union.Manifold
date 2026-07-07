@@ -167,15 +167,17 @@ export async function sourceCapabilities(sourceIds?: string[]): Promise<SourceCa
 // empty result (transient failure or genuinely no art) is dropped so a later
 // attempt can retry instead of staying blank for the rest of the session.
 const _steamArt = new Map<number, Promise<string[]>>()
-export function fetchSteamArt(appid?: number | null): Promise<string[]> {
+export function fetchSteamArt(appid?: number | null, name?: string): Promise<string[]> {
   if (!appid) return Promise.resolve([])
   const hit = _steamArt.get(appid)
   if (hit) return hit
   const p = (async () => {
     try {
-      const res = await api()?.steamArt?.(appid)
+      const res = await api()?.steamArt?.(appid, name)
       const art = res?.art
-      return art ? [art.header, art.background].filter(Boolean) : []
+      // `cover` is the base game's portrait capsule for a demo/playtest appid,
+      // whose own appid has no store art; header/background back it up.
+      return art ? [art.cover, art.header, art.background].filter((u): u is string => Boolean(u)) : []
     } catch { return [] }
   })()
   _steamArt.set(appid, p)

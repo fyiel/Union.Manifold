@@ -88,7 +88,7 @@ function nextAlive(list: string[], from: number): number {
 // store art (one cached call) and tries that before giving up, which rescues
 // titles like Rugrats Retro Rewind whose predictable library_*.jpg URLs all
 // 404. onAllFailed fires only if that fails too.
-export function SmartImage({ candidates, steamAppId, alt, onAllFailed, style, lazy }: { candidates: string[]; steamAppId?: number | null; alt?: string; onAllFailed?: () => void; style?: CSSProperties; lazy?: boolean }) {
+export function SmartImage({ candidates, steamAppId, name, alt, onAllFailed, style, lazy }: { candidates: string[]; steamAppId?: number | null; name?: string; alt?: string; onAllFailed?: () => void; style?: CSSProperties; lazy?: boolean }) {
   const [extra, setExtra] = useState<string[]>([])
   const [idx, setIdx] = useState(() => nextAlive(candidates, 0))
   const steamTried = useRef(false)
@@ -116,7 +116,7 @@ export function SmartImage({ candidates, steamAppId, alt, onAllFailed, style, la
     if (steamAppId && !steamTried.current) {
       steamTried.current = true
       const sigAtError = sig
-      void fetchSteamArt(steamAppId).then((urls) => {
+      void fetchSteamArt(steamAppId, name).then((urls) => {
         // game swapped while the fetch was in flight, drop its stale art
         if (prevSig.current !== sigAtError) return
         const next = urls.map((u) => proxyImageUrl(u)).filter((u) => !all.includes(u) && !hasFailed(u))
