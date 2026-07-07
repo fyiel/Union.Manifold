@@ -15,7 +15,7 @@ Mods core
 - per-game mod manager: install, enable/disable, reorder (load order decides
   which mod wins a file conflict), uninstall, and a deploy engine that copies
   enabled mods into the game folder while backing up every original it
-  overwrites — toggling off or undeploying restores the game byte-identical
+  overwrites, so toggling off or undeploying restores the game byte-identical
 - mods live in their own staging area under the app data dir; a journal tracks
   every deployed file so nothing is ever orphaned in the game folder, and a
   corrupt journal can no longer cost you an original file
