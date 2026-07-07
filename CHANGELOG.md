@@ -4,6 +4,41 @@ All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 The app shows its version as 1.0.0b (beta). 1.0.1 is the first packaged release.
 
+## 2.11.0
+
+Mod support. Every installed game gets a Mods page (card menu → Mods) with
+NexusMods and Steam Workshop behind it.
+
+### Added
+
+Mods core
+- per-game mod manager: install, enable/disable, reorder (load order decides
+  which mod wins a file conflict), uninstall, and a deploy engine that copies
+  enabled mods into the game folder while backing up every original it
+  overwrites — toggling off or undeploying restores the game byte-identical
+- mods live in their own staging area under the app data dir; a journal tracks
+  every deployed file so nothing is ever orphaned in the game folder, and a
+  corrupt journal can no longer cost you an original file
+- deploy target is configurable per game (root or a subfolder like `Mods`)
+
+NexusMods
+- browse trending/latest/updated and full text search (search runs keyless
+  through the v2 graphql api; browse and downloads use your personal api key,
+  set under Settings → Mods with a validate button that shows your account and
+  premium status)
+- premium accounts install with one click; free accounts get the mod page
+  opened and the app registers the `nxm://` protocol, so "Mod Manager
+  Download" on the site lands in the launcher and installs into the matching
+  game automatically
+- file picker lists a mod's main/optional files with sizes before installing
+
+Steam Workshop
+- browse and search the workshop for any installed game with a known steam
+  app id (handles both the classic and the 2026 react workshop pages)
+- one-click install through a self-bootstrapping steamcmd (downloaded on
+  first use, anonymous login; items whose publisher requires game ownership
+  say so instead of failing silently)
+
 ## 2.10.4
 
 A Windows repair pass driven by field reports; everything below reproduces or

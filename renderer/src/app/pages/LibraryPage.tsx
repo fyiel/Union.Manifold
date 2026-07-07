@@ -600,6 +600,8 @@ export function LibraryPage() {
             onToggleFavorite: () => toggleFavorite(menu.game.appid),
             onDelete: () => { const g = installed.find((x) => x.appid === menu.game.appid); if (g) void deleteGame(g) },
             onSetSteamId: () => { const g = installed.find((x) => x.appid === menu.game.appid); setSteamIdFor({ appid: menu.game.appid, name: menu.game.name, current: g?.steamAppId }) },
+            // Library only lists installed games, so the mods entry is always offered here.
+            onMods: () => navigate(`/g/${encodeURIComponent(menu.game.appid)}/mods`, { state: { game: menu.game } }),
           }}
           onClose={() => setMenu(null)}
         />

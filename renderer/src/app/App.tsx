@@ -13,6 +13,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { AlertTriangle } from "@/components/icons"
 
 const SourceGamePage = lazy(() => import("@/app/pages/SourceGamePage").then((m) => ({ default: m.SourceGamePage })))
+const GameModsPage = lazy(() => import("@/app/pages/GameModsPage").then((m) => ({ default: m.GameModsPage })))
 
 // Fork pages — multi-source browse + detail. Library/Downloads/Settings are
 // reused from the original app (they're source-agnostic: installed manifests,
@@ -186,6 +187,7 @@ export default function App() {
                   path (TabHost renders nothing, so Outlet is used) redirects home. */}
               <Route element={<AppWithDownloads />}>
                 <Route path="/g/:key" element={<SourceGamePage />} />
+                <Route path="/g/:key/mods" element={<GameModsPage />} />
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Route>
             </Routes>

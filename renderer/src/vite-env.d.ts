@@ -278,6 +278,86 @@ declare global {
     imported: boolean
   }
 
+  /** One installed mod in a game's mods.json manifest. */
+  type ModEntry = {
+    id: string
+    provider: "nexus" | "workshop"
+    remoteId: string
+    fileId: number | null
+    name: string
+    version: string
+    author: string
+    picture: string | null
+    summary: string | null
+    enabled: boolean
+    /** Deploy order; higher order wins file conflicts. */
+    order: number
+    installedAt: number
+    sizeBytes: number
+    pageUrl: string
+  }
+
+  /** Full per-game mod state from mods_game_get. */
+  type ModGameState = {
+    ok: boolean
+    error?: string
+    nexusDomain?: string | null
+    /** True when nexusDomain came from auto title-matching (not a user override). */
+    nexusDomainAuto?: boolean
+    steamAppid?: number | null
+    workshopSupported?: boolean
+    deployTarget?: string
+    /** Deploy journal is non-empty. */
+    deployed?: boolean
+    mods?: ModEntry[]
+  }
+
+  /** One NexusMods browse/search result. */
+  type NexusBrowseMod = {
+    remoteId: string
+    name: string
+    summary?: string | null
+    author?: string
+    picture?: string | null
+    downloads?: number
+    endorsements?: number
+    version?: string
+    updatedAt?: number
+    pageUrl?: string
+    installed?: boolean
+  }
+
+  /** One downloadable file of a Nexus mod. */
+  type NexusModFile = {
+    fileId: number
+    name: string
+    version?: string
+    sizeBytes?: number
+    /** main | update | optional | misc */
+    category?: string
+    uploadedAt?: number
+    description?: string
+  }
+
+  /** One Steam Workshop browse result. */
+  type WorkshopBrowseItem = {
+    remoteId: string
+    name: string
+    author?: string
+    picture?: string | null
+    pageUrl?: string
+  }
+
+  type ModInstallProgress = {
+    appid: string
+    modId: string
+    name: string
+    phase: "downloading" | "extracting" | "installing" | "done" | "error"
+    /** 0-100 or null when indeterminate. */
+    progress: number | null
+    error?: string
+  }
+
   interface Window {
     // frameless window controls, was declared in the now removed TopBar
     ucWindow?: {
@@ -487,6 +567,29 @@ declare global {
     ucAssets?: {
       size: () => Promise<{ ok: boolean; bytes: number; error?: string }>
       clear: () => Promise<{ ok: boolean; freed: number; error?: string }>
+    }
+    /** Per-game mod management (NexusMods + Steam Workshop). */
+    ucMods?: {
+      gameGet?: (appid: string) => Promise<ModGameState>
+      gameSet?: (appid: string, config: { nexusDomain?: string | null; deployTarget?: string }) => Promise<{ ok: boolean; error?: string }>
+      toggle?: (appid: string, modId: string, enabled: boolean) => Promise<{ ok: boolean; error?: string }>
+      reorder?: (appid: string, orderedIds: string[]) => Promise<{ ok: boolean; error?: string }>
+      uninstall?: (appid: string, modId: string) => Promise<{ ok: boolean; error?: string }>
+      deploy?: (appid: string) => Promise<{ ok: boolean; fileCount?: number; error?: string }>
+      undeploy?: (appid: string) => Promise<{ ok: boolean; error?: string }>
+      openFolder?: (appid: string) => Promise<{ ok: boolean; error?: string }>
+      nexusValidate?: () => Promise<{ ok: boolean; user?: { name: string; premium: boolean; profileUrl?: string }; error?: string }>
+      nexusSearch?: (domain: string, query: string, page: number) => Promise<{ ok: boolean; mods?: NexusBrowseMod[]; hasMore?: boolean; error?: string }>
+      nexusBrowse?: (domain: string, category: string) => Promise<{ ok: boolean; mods?: NexusBrowseMod[]; hasMore?: boolean; error?: string }>
+      nexusModFiles?: (domain: string, modId: string) => Promise<{ ok: boolean; files?: NexusModFile[]; error?: string }>
+      nexusInstall?: (appid: string, domain: string, modId: string, fileId: number) => Promise<{ ok: boolean; started?: boolean; needsNxm?: boolean; modPageUrl?: string; error?: string }>
+      workshopBrowse?: (steamAppid: number, sort: string, page: number, query: string) => Promise<{ ok: boolean; items?: WorkshopBrowseItem[]; hasMore?: boolean; error?: string }>
+      workshopDetails?: (ids: string[]) => Promise<{ ok: boolean; items?: Array<{ remoteId: string; name: string; description?: string; sizeBytes?: number; updatedAt?: number; previewUrl?: string; subscriptions?: number }>; error?: string }>
+      workshopInstall?: (appid: string, steamAppid: number, publishedFileId: string) => Promise<{ ok: boolean; started?: boolean; error?: string }>
+      workshopStatus?: () => Promise<{ ok: boolean; steamcmd?: "absent" | "bootstrapping" | "ready"; error?: string }>
+      onInstallProgress?: (callback: (data: ModInstallProgress) => void) => () => void
+      onChanged?: (callback: (data: { appid: string }) => void) => () => void
+      onNxmUnmatched?: (callback: (data: { domain: string; modId: string }) => void) => () => void
     }
   }
 }
