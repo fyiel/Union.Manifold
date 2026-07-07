@@ -115,30 +115,41 @@ fn mod_page_url(domain: &str, mod_id: u64) -> String {
     format!("https://www.nexusmods.com/{domain}/mods/{mod_id}")
 }
 
-fn browse_mod_from_v1(domain: &str, m: &Value) -> Option<Value> {
-    let id = m.get("mod_id")?.as_u64()?;
-    if !m.get("available").and_then(|v| v.as_bool()).unwrap_or(true) {
-        return None;
-    }
-    let s = |k: &str| m.get(k).and_then(|x| x.as_str()).unwrap_or("").to_string();
+/// Map one v2 GraphQL `mods.nodes[*]` entry to the BrowseMod shape shared by
+/// search and browse. `fallback_domain` fills pageUrl when the node's
+/// game.domainName is empty. sizeBytes comes from fileSize, which browse
+/// requests but search does not, so it stays null for search results. Returns
+/// None when the node carries no numeric modId.
+fn browse_mod_from_graphql(n: &Value, fallback_domain: &str) -> Option<Value> {
+    let id = n.get("modId")?.as_u64()?;
+    let s = |k: &str| n.get(k).and_then(|x| x.as_str()).unwrap_or("").to_string();
     let author = {
         let a = s("author");
         if a.is_empty() {
-            s("uploaded_by")
+            n.pointer("/uploader/name")
+                .and_then(|x| x.as_str())
+                .unwrap_or("")
+                .to_string()
         } else {
             a
         }
     };
+    let domain = n
+        .pointer("/game/domainName")
+        .and_then(|d| d.as_str())
+        .filter(|d| !d.is_empty())
+        .unwrap_or(fallback_domain);
     Some(json!({
         "remoteId": id.to_string(),
         "name": s("name"),
         "summary": s("summary"),
         "author": author,
-        "picture": m.get("picture_url").and_then(|v| v.as_str()),
-        "downloads": m.get("mod_downloads").and_then(|v| v.as_u64()).unwrap_or(0),
-        "endorsements": m.get("endorsement_count").and_then(|v| v.as_u64()).unwrap_or(0),
+        "picture": n.get("pictureUrl").and_then(|p| p.as_str()),
+        "downloads": n.get("downloads").and_then(|d| d.as_u64()).unwrap_or(0),
+        "endorsements": n.get("endorsements").and_then(|e| e.as_u64()).unwrap_or(0),
         "version": s("version"),
-        "updatedAt": m.get("updated_timestamp").and_then(|v| v.as_u64()),
+        "updatedAt": to_unix_secs(n.get("updatedAt")),
+        "sizeBytes": n.get("fileSize").and_then(|v| v.as_u64()),
         "pageUrl": mod_page_url(domain, id),
     }))
 }
@@ -149,6 +160,12 @@ const SEARCH_PAGE_SIZE: u64 = 20;
 // v2; browse/validate/files/install stay on v1 + apikey.
 const GRAPHQL_URL: &str = "https://api.nexusmods.com/v2/graphql";
 const SEARCH_QUERY: &str = "query Mods($count: Int!, $offset: Int!, $filter: ModsFilter, $sort: [ModsSort!]) { mods(count: $count, offset: $offset, filter: $filter, sort: $sort) { totalCount nodes { modId name summary version author downloads endorsements pictureUrl updatedAt game { domainName } uploader { name } } } }";
+
+// Browse hits the same keyless v2 endpoint as search but drives its filter and
+// sort entirely from the UI, and it additionally requests fileSize so the list
+// can show mod sizes. count is fixed at 24 per page for the endless-scroll pager.
+const BROWSE_COUNT: u64 = 24;
+const BROWSE_QUERY: &str = "query($c:Int!,$o:Int!,$f:ModsFilter,$s:[ModsSort!]){mods(count:$c,offset:$o,filter:$f,sort:$s){totalCount nodes{modId name summary version author downloads endorsements fileSize pictureUrl updatedAt createdAt game{domainName} uploader{name}}}}";
 
 // updatedAt arrives as an ISO-8601 string from v2; the v1 mappers emit unix
 // seconds, so normalize to keep BrowseMod.updatedAt one shape.
@@ -174,41 +191,69 @@ fn map_graphql_search(v: &Value, fallback_domain: &str, offset: u64) -> (Vec<Val
         .unwrap_or_default();
     let mods: Vec<Value> = nodes
         .iter()
-        .filter_map(|n| {
-            let id = n.get("modId")?.as_u64()?;
-            let s = |k: &str| n.get(k).and_then(|x| x.as_str()).unwrap_or("").to_string();
-            let author = {
-                let a = s("author");
-                if a.is_empty() {
-                    n.pointer("/uploader/name")
-                        .and_then(|x| x.as_str())
-                        .unwrap_or("")
-                        .to_string()
-                } else {
-                    a
-                }
-            };
-            let domain = n
-                .pointer("/game/domainName")
-                .and_then(|d| d.as_str())
-                .filter(|d| !d.is_empty())
-                .unwrap_or(fallback_domain);
-            Some(json!({
-                "remoteId": id.to_string(),
-                "name": s("name"),
-                "summary": s("summary"),
-                "author": author,
-                "picture": n.get("pictureUrl").and_then(|p| p.as_str()),
-                "downloads": n.get("downloads").and_then(|d| d.as_u64()).unwrap_or(0),
-                "endorsements": n.get("endorsements").and_then(|e| e.as_u64()).unwrap_or(0),
-                "version": s("version"),
-                "updatedAt": to_unix_secs(n.get("updatedAt")),
-                "pageUrl": mod_page_url(domain, id),
-            }))
-        })
+        .filter_map(|n| browse_mod_from_graphql(n, fallback_domain))
         .collect();
     let has_more = !mods.is_empty() && offset + (mods.len() as u64) < total;
     (mods, has_more)
+}
+
+/// Map the renderer's sort argument onto a v2 ModsSort field name. size and
+/// lastComment exist only on v2, which is why browse no longer uses the v1 REST
+/// category endpoints. Anything unrecognized falls back to downloads.
+fn sort_field(sort: &str) -> &'static str {
+    match sort {
+        "updated" => "updatedAt",
+        "published" => "createdAt",
+        "size" => "size",
+        "endorsements" => "endorsements",
+        "lastComment" => "lastComment",
+        _ => "downloads",
+    }
+}
+
+/// Days back for a recency window, or None for "all" (no cutoff). Only 7 and 28
+/// are surfaced in the UI, so any other value means no time filter.
+fn period_days(period: &str) -> Option<i64> {
+    match period {
+        "7" => Some(7),
+        "28" => Some(28),
+        _ => None,
+    }
+}
+
+/// Build the v2 GraphQL `variables` object for a browse request. now_secs is
+/// injected so the recency cutoff is deterministic under test. The v2 API parses
+/// the updatedAt GT bound as UNIX SECONDS supplied as a string; ISO-8601 and
+/// epoch-millis are both rejected with parse_exception (verified live).
+fn browse_variables(
+    domain: &str,
+    sort: &str,
+    order: &str,
+    period: &str,
+    offset: u32,
+    now_secs: i64,
+) -> Value {
+    let direction = if order == "asc" { "ASC" } else { "DESC" };
+    let mut filter = serde_json::Map::new();
+    filter.insert(
+        "gameDomainName".to_string(),
+        json!({ "value": domain, "op": "EQUALS" }),
+    );
+    if let Some(days) = period_days(period) {
+        let cutoff = now_secs - days * 86_400;
+        filter.insert(
+            "updatedAt".to_string(),
+            json!({ "value": cutoff.to_string(), "op": "GT" }),
+        );
+    }
+    let mut sort_entry = serde_json::Map::new();
+    sort_entry.insert(sort_field(sort).to_string(), json!({ "direction": direction }));
+    json!({
+        "count": BROWSE_COUNT,
+        "offset": offset,
+        "filter": Value::Object(filter),
+        "sort": [Value::Object(sort_entry)],
+    })
 }
 
 /// download_link.json returns an array of CDN mirrors `{ name, short_name,
@@ -472,21 +517,64 @@ pub async fn nexus_validate(state: State<'_, AppState>) -> Result<Value, String>
 
 #[tauri::command]
 pub async fn nexus_browse(
-    state: State<'_, AppState>,
     domain: String,
-    category: String,
+    sort: String,
+    order: String,
+    period: String,
+    offset: u32,
 ) -> Result<Value, String> {
     let res = async {
-        if !matches!(category.as_str(), "trending" | "latest_added" | "latest_updated") {
-            return Err(format!("unknown browse category {category}"));
+        let now = chrono::Utc::now().timestamp();
+        let variables = browse_variables(&domain, &sort, &order, &period, offset, now);
+        let body = json!({ "query": BROWSE_QUERY, "variables": variables });
+        let mut headers = HashMap::new();
+        headers.insert("Content-Type".to_string(), "application/json".to_string());
+        headers.insert("Accept".to_string(), "application/json".to_string());
+        let opts = http::FetchOpts {
+            method: Some("POST".to_string()),
+            headers,
+            body: Some(serde_json::to_vec(&body).map_err(|e| format!("nexus browse encode: {e}"))?),
+            ..Default::default()
+        };
+        let resp = http::fetch(GRAPHQL_URL, &opts)
+            .await
+            .map_err(|e| format!("nexus browse: {e}"))?;
+        let status = resp.status();
+        if status.as_u16() == 429 {
+            return Err("NexusMods rate limit reached, wait a bit and try again".to_string());
         }
-        let key = api_key(&state)?;
-        let v = api_json(&key, &format!("{API}/v1/games/{domain}/mods/{category}.json")).await?;
-        let mods: Vec<Value> = v
-            .as_array()
-            .map(|arr| arr.iter().filter_map(|m| browse_mod_from_v1(&domain, m)).collect())
+        if !status.is_success() {
+            return Err(format!("nexus browse: HTTP {status}"));
+        }
+        let v: Value = resp.json().await.map_err(|e| format!("nexus browse parse: {e}"))?;
+        if v.pointer("/data/mods").is_none() {
+            let msg = v
+                .pointer("/errors/0/message")
+                .and_then(|m| m.as_str())
+                .unwrap_or("unexpected response");
+            return Err(format!("nexus browse: {msg}"));
+        }
+        let total = v
+            .pointer("/data/mods/totalCount")
+            .and_then(|t| t.as_u64())
+            .unwrap_or(0);
+        let nodes = v
+            .pointer("/data/mods/nodes")
+            .and_then(|n| n.as_array())
+            .cloned()
             .unwrap_or_default();
-        Ok(json!({ "ok": true, "mods": mods, "hasMore": false }))
+        let mods: Vec<Value> = nodes
+            .iter()
+            .filter_map(|n| browse_mod_from_graphql(n, &domain))
+            .collect();
+        let has_more = (offset as u64) + (nodes.len() as u64) < total;
+        Ok(json!({
+            "ok": true,
+            "mods": mods,
+            "hasMore": has_more,
+            "total": total,
+            "offset": offset,
+        }))
     }
     .await;
     Ok(fold(res))
@@ -928,5 +1016,98 @@ mod tests {
         let empty = json!({ "data": { "mods": { "totalCount": 1, "nodes": [] } } });
         let (_, has_more_last) = map_graphql_search(&empty, "d", 40);
         assert!(!has_more_last, "empty page ends pagination");
+    }
+
+    #[test]
+    fn maps_all_sort_keys_to_v2_fields() {
+        assert_eq!(sort_field("downloads"), "downloads");
+        assert_eq!(sort_field("updated"), "updatedAt");
+        assert_eq!(sort_field("published"), "createdAt");
+        assert_eq!(sort_field("size"), "size");
+        assert_eq!(sort_field("endorsements"), "endorsements");
+        assert_eq!(sort_field("lastComment"), "lastComment");
+        // An unknown sort falls back to downloads instead of erroring.
+        assert_eq!(sort_field("bogus"), "downloads");
+    }
+
+    #[test]
+    fn period_days_only_recognizes_7_and_28() {
+        assert_eq!(period_days("7"), Some(7));
+        assert_eq!(period_days("28"), Some(28));
+        assert_eq!(period_days("all"), None);
+        assert_eq!(period_days(""), None);
+    }
+
+    #[test]
+    fn browse_variables_encode_sort_order_and_paging() {
+        // Ascending order maps to SortDirection ASC nested under the sort field.
+        let v = browse_variables("skyrimspecialedition", "endorsements", "asc", "all", 24, 1_720_000_000);
+        assert_eq!(v["count"], 24);
+        assert_eq!(v["offset"], 24);
+        assert_eq!(v["filter"]["gameDomainName"]["value"], "skyrimspecialedition");
+        assert_eq!(v["filter"]["gameDomainName"]["op"], "EQUALS");
+        assert_eq!(v["sort"][0]["endorsements"]["direction"], "ASC");
+        // "all" carries no updatedAt window.
+        assert!(v["filter"].get("updatedAt").is_none());
+
+        // Any non-"asc" order is DESC, and each sort key nests its own direction.
+        let d = browse_variables("cyberpunk2077", "downloads", "desc", "all", 0, 1_720_000_000);
+        assert_eq!(d["sort"][0]["downloads"]["direction"], "DESC");
+        let p = browse_variables("cyberpunk2077", "published", "", "all", 0, 1_720_000_000);
+        assert_eq!(p["sort"][0]["createdAt"]["direction"], "DESC");
+    }
+
+    #[test]
+    fn browse_variables_period_cutoff_is_unix_seconds_string() {
+        let now = 1_720_000_000_i64;
+        // The 7-day window sets a GT bound at now minus 7 days, as a string.
+        let v7 = browse_variables("d", "updated", "desc", "7", 0, now);
+        assert_eq!(v7["filter"]["updatedAt"]["op"], "GT");
+        assert_eq!(v7["filter"]["updatedAt"]["value"], (now - 7 * 86_400).to_string());
+        // The value MUST be a JSON string; the API rejects numbers and ISO dates.
+        assert!(v7["filter"]["updatedAt"]["value"].is_string());
+
+        // The 28-day window uses 28 days back.
+        let v28 = browse_variables("d", "updated", "desc", "28", 0, now);
+        assert_eq!(v28["filter"]["updatedAt"]["value"], (now - 28 * 86_400).to_string());
+
+        // "all" omits the clause entirely.
+        let vall = browse_variables("d", "updated", "desc", "all", 0, now);
+        assert!(vall["filter"].get("updatedAt").is_none());
+    }
+
+    #[test]
+    fn iso_updated_at_converts_to_unix_secs() {
+        // ISO-8601 with an offset normalizes to unix seconds.
+        assert_eq!(
+            to_unix_secs(Some(&json!("2026-01-02T03:04:05+00:00"))),
+            json!(1767323045_i64)
+        );
+        // A numeric value passes through unchanged.
+        assert_eq!(to_unix_secs(Some(&json!(1_700_000_000_u64))), json!(1_700_000_000_u64));
+        // Null and unparseable strings become null.
+        assert_eq!(to_unix_secs(Some(&Value::Null)), Value::Null);
+        assert_eq!(to_unix_secs(Some(&json!("not-a-date"))), Value::Null);
+    }
+
+    #[test]
+    fn browse_mapper_includes_size_bytes() {
+        let node = json!({
+            "modId": 100,
+            "name": "Big Mod",
+            "author": "Someone",
+            "fileSize": 987654321_u64,
+            "updatedAt": "2026-01-02T03:04:05+00:00",
+            "game": { "domainName": "stardewvalley" }
+        });
+        let m = browse_mod_from_graphql(&node, "fallback").unwrap();
+        assert_eq!(m["remoteId"], "100");
+        assert_eq!(m["sizeBytes"], 987654321_u64);
+        assert_eq!(m["pageUrl"], "https://www.nexusmods.com/stardewvalley/mods/100");
+        // A node without fileSize (e.g. from search) yields null, not 0.
+        let no_size = json!({ "modId": 7, "name": "x", "game": { "domainName": "" } });
+        let ms = browse_mod_from_graphql(&no_size, "dom").unwrap();
+        assert_eq!(ms["sizeBytes"], Value::Null);
+        assert_eq!(ms["pageUrl"], "https://www.nexusmods.com/dom/mods/7");
     }
 }

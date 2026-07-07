@@ -16,7 +16,6 @@ use super::{
     emit_progress, finalize_install, fold, load_config, save_config, steamcmd, urlenc, InstallSpec,
 };
 
-const BROWSE_SORTS: &[&str] = &["trend", "mostrecent", "totaluniquesubscribers"];
 const PAGE_SIZE: usize = 30;
 
 fn workshop_page_url(file_id: &str) -> String {
@@ -137,20 +136,59 @@ fn parse_browse_total(html: &str) -> Option<u64> {
         .and_then(|c| c[1].parse::<u64>().ok())
 }
 
+/// Map the renderer's sort key onto Steam's `browsesort` value. All five are
+/// verified to return HTTP 200 from the community browse endpoint. An unknown
+/// key falls back to trend, which is Steam's own default.
+fn browse_sort(sort: &str) -> &'static str {
+    match sort {
+        "mostrecent" => "mostrecent",
+        "lastupdated" => "lastupdated",
+        "subscribers" => "totaluniquesubscribers",
+        "toprated" => "toprated",
+        _ => "trend",
+    }
+}
+
+/// Steam's `days` window only affects the trend sort, which ranks by recent
+/// popularity. all is -1 (all time), 7 stays 7, and 28 maps to Steam's 30-day
+/// bucket. Every non-trend sort returns None so the param is omitted.
+fn trend_days(browsesort: &str, period: &str) -> Option<i64> {
+    if browsesort != "trend" {
+        return None;
+    }
+    Some(match period {
+        "7" => 7,
+        "28" => 30,
+        _ => -1,
+    })
+}
+
+/// Assemble the community browse URL. days is appended only when present (the
+/// trend sort), and the search text is percent-encoded.
+fn browse_url(steam_appid: u64, browsesort: &str, days: Option<i64>, page: u32, query: &str) -> String {
+    let days_part = match days {
+        Some(d) => format!("&days={d}"),
+        None => String::new(),
+    };
+    format!(
+        "https://steamcommunity.com/workshop/browse/?appid={steam_appid}&browsesort={browsesort}&section=readytouseitems{days_part}&p={page}&searchtext={}",
+        urlenc(query.trim())
+    )
+}
+
 #[tauri::command]
 pub async fn workshop_browse(
     steam_appid: u64,
     sort: String,
+    period: String,
     page: u32,
     query: String,
 ) -> Result<Value, String> {
     let res = async {
-        let sort = if BROWSE_SORTS.contains(&sort.as_str()) { sort.as_str() } else { "trend" };
+        let browsesort = browse_sort(&sort);
+        let days = trend_days(browsesort, &period);
         let page = page.max(1);
-        let url = format!(
-            "https://steamcommunity.com/workshop/browse/?appid={steam_appid}&browsesort={sort}&section=readytouseitems&p={page}&searchtext={}",
-            urlenc(query.trim())
-        );
+        let url = browse_url(steam_appid, browsesort, days, page, &query);
         let html = http::get_text(&url).await.map_err(|e| format!("workshop browse: {e}"))?;
         // Old markup first (also keeps regional/older rollouts working);
         // otherwise the React/SSR layout.
@@ -435,5 +473,52 @@ mod tests {
         assert_eq!(parse_browse_total("<html>no blob</html>"), None);
         // Old parser yields nothing on the new markup: routing falls through.
         assert!(parse_browse(FIXTURE_NEW).is_empty());
+    }
+
+    #[test]
+    fn maps_sort_to_browsesort() {
+        assert_eq!(browse_sort("trend"), "trend");
+        assert_eq!(browse_sort("mostrecent"), "mostrecent");
+        assert_eq!(browse_sort("lastupdated"), "lastupdated");
+        assert_eq!(browse_sort("subscribers"), "totaluniquesubscribers");
+        assert_eq!(browse_sort("toprated"), "toprated");
+        // Unknown sorts fall back to Steam's default trend rather than erroring.
+        assert_eq!(browse_sort("bogus"), "trend");
+    }
+
+    #[test]
+    fn days_window_is_trend_only() {
+        // Trend honors the period: all is -1, 7 stays 7, 28 becomes Steam's 30.
+        assert_eq!(trend_days("trend", "all"), Some(-1));
+        assert_eq!(trend_days("trend", "7"), Some(7));
+        assert_eq!(trend_days("trend", "28"), Some(30));
+        // Any unrecognized period on trend means all-time.
+        assert_eq!(trend_days("trend", ""), Some(-1));
+        // Non-trend sorts never carry a days window.
+        assert_eq!(trend_days("mostrecent", "7"), None);
+        assert_eq!(trend_days("totaluniquesubscribers", "28"), None);
+        assert_eq!(trend_days("lastupdated", "all"), None);
+    }
+
+    #[test]
+    fn builds_browse_url() {
+        // Trend with a 7-day window includes &days and url-encodes the query.
+        let u = browse_url(294100, "trend", Some(7), 2, "cool mod");
+        assert_eq!(
+            u,
+            "https://steamcommunity.com/workshop/browse/?appid=294100&browsesort=trend&section=readytouseitems&days=7&p=2&searchtext=cool%20mod"
+        );
+        // A non-trend sort omits days entirely.
+        let n = browse_url(294100, "mostrecent", None, 1, "");
+        assert_eq!(
+            n,
+            "https://steamcommunity.com/workshop/browse/?appid=294100&browsesort=mostrecent&section=readytouseitems&p=1&searchtext="
+        );
+        // Trend all-time carries days=-1.
+        let a = browse_url(107410, "trend", Some(-1), 1, "");
+        assert_eq!(
+            a,
+            "https://steamcommunity.com/workshop/browse/?appid=107410&browsesort=trend&section=readytouseitems&days=-1&p=1&searchtext="
+        );
     }
 }
