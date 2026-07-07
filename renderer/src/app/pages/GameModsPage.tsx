@@ -511,10 +511,14 @@ export function GameModsPage() {
           : "Free in-app downloads need your Nexus session cookie (Settings → Mods, opt-in). Otherwise use “Mod Manager Download” on the mod page."
         toast(msg, r.sessionError ? "error" : "info", openPage ? { duration: 14000, action: openPage } : 14000)
       } else if (r.needsNxm) {
-        // Free account: downloads only start from the website. Open the mod
+        // Free account: either Slipgate is not set (fall back to the website nxm
+        // flow) or the configured Slipgate could not resolve it. Open the mod
         // page; the nxm:// deep link routes back into the app.
         if (r.modPageUrl) void window.ucSystem?.openExternal?.(r.modPageUrl)
-        toast("Click “Mod Manager Download” on the Nexus page — the download will start here automatically", "info", 12000)
+        const base = r.slipgateError
+          ? `Slipgate could not resolve this: ${r.slipgateError}. Falling back: click “Mod Manager Download” on the Nexus page.`
+          : "Click “Mod Manager Download” on the Nexus page — the download will start here automatically"
+        toast(base, r.slipgateError ? "error" : "info", r.slipgateError ? 14000 : 12000)
       } else {
         toast(`Downloading ${mod.name}…`, "info")
       }

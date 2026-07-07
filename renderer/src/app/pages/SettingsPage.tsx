@@ -672,21 +672,29 @@ function ModsTab() {
   const [sessionSaved, setSessionSaved] = useState(false)
   const [sessionUa, setSessionUa] = useState("")
   const [uaSaved, setUaSaved] = useState(false)
+  const [slipgateUrl, setSlipgateUrl] = useState("")
+  const [slipgateKey, setSlipgateKey] = useState("")
+  const [slipgateTesting, setSlipgateTesting] = useState(false)
+  const [slipgateStatus, setSlipgateStatus] = useState<{ ok: boolean; msg: string } | null>(null)
 
   useEffect(() => {
     let alive = true
     void (async () => {
       try {
-        const [k, sc, ua, ws] = await Promise.all([
+        const [k, sc, ua, sgu, sgk, ws] = await Promise.all([
           window.ucSettings?.get?.("nexusApiKey"),
           window.ucSettings?.get?.("nexusSessionCookie"),
           window.ucSettings?.get?.("nexusUserAgent"),
+          window.ucSettings?.get?.("slipgateUrl"),
+          window.ucSettings?.get?.("slipgateKey"),
           window.ucMods?.workshopStatus?.(),
         ])
         if (!alive) return
         if (typeof k === "string") setApiKey(k)
         if (typeof sc === "string") setSessionCookie(sc)
         if (typeof ua === "string") setSessionUa(ua)
+        if (typeof sgu === "string") setSlipgateUrl(sgu)
+        if (typeof sgk === "string") setSlipgateKey(sgk)
         setSteamcmd(ws?.ok && ws.steamcmd ? ws.steamcmd : "absent")
       } catch { /* ignore */ }
     })()
@@ -721,6 +729,24 @@ function ModsTab() {
       setUaSaved(true)
       window.setTimeout(() => setUaSaved(false), 1600)
     } catch { /* ignore */ }
+  }
+
+  const persistSlipgateUrl = async (value: string) => {
+    try { await window.ucSettings?.set?.("slipgateUrl", value.trim() || null) } catch { /* ignore */ }
+  }
+  const persistSlipgateKey = async (value: string) => {
+    try { await window.ucSettings?.set?.("slipgateKey", value.trim() || null) } catch { /* ignore */ }
+  }
+  // Save both, then probe /health so the user sees the instance is reachable and
+  // whether its FlareSolverr backend is up.
+  const testSlipgate = async () => {
+    setSlipgateTesting(true); setSlipgateStatus(null)
+    try {
+      await Promise.all([persistSlipgateUrl(slipgateUrl), persistSlipgateKey(slipgateKey)])
+      const r = await window.ucMods?.slipgateCheck?.(slipgateUrl.trim(), slipgateKey.trim())
+      if (r?.ok) setSlipgateStatus({ ok: true, msg: `reachable (v${r.version || "?"}), FlareSolverr ${r.flaresolverrOk ? "up" : "DOWN"}` })
+      else setSlipgateStatus({ ok: false, msg: r?.error || "unreachable" })
+    } catch (err) { setSlipgateStatus({ ok: false, msg: String(err) }) } finally { setSlipgateTesting(false) }
   }
 
   const validate = async () => {
@@ -771,6 +797,40 @@ function ModsTab() {
         <div style={{ marginTop: 10, fontFamily: MONO, fontSize: 10.5, color: "var(--mf-t5)" }}>
           nxm:// “Mod Manager Download” links from the Nexus site open in this app automatically. Free accounts install through those links; Premium accounts download directly.
         </div>
+      </div>
+
+      <div style={{ padding: "16px 0", borderBottom: "1px solid color-mix(in srgb, var(--mf-t0) 5%, transparent)" }}>
+        <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--mf-t1)" }}>Slipgate resolver (self-hosted)</div>
+        <div style={{ fontFamily: MONO, fontSize: 11, color: "var(--mf-t4)", marginTop: 3, lineHeight: 1.5 }}>
+          Point this at your own Slipgate instance to make free NexusMods downloads work in-app: it clears Cloudflare with a real browser and returns a direct link. It uses your nexusmods_session cookie (below) to log in. Leave blank to use the “Mod Manager Download” browser flow instead.
+        </div>
+        <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
+          <input
+            value={slipgateUrl}
+            onChange={(e) => setSlipgateUrl(e.target.value)}
+            onBlur={() => void persistSlipgateUrl(slipgateUrl)}
+            placeholder="https://slipgate.example.com"
+            autoComplete="off"
+            spellCheck={false}
+            style={{ flex: 1, height: 38, padding: "0 13px", borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "var(--mf-panel)", color: "var(--mf-t1)", fontFamily: MONO, fontSize: 12, outline: "none" }}
+          />
+          <button type="button" className="mf-ghost" disabled={slipgateTesting || !slipgateUrl.trim()} onClick={() => void testSlipgate()} style={{ display: "flex", alignItems: "center", gap: 7, padding: "0 15px", height: 38, borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "transparent", color: !slipgateUrl.trim() ? "var(--mf-t4)" : "var(--mf-t1)", fontSize: 12, fontWeight: 600, cursor: slipgateTesting || !slipgateUrl.trim() ? "default" : "pointer", opacity: slipgateTesting ? 0.6 : 1, flexShrink: 0 }}>
+            {slipgateTesting ? "Testing…" : "Test"}
+          </button>
+        </div>
+        <input
+          type="password"
+          value={slipgateKey}
+          onChange={(e) => setSlipgateKey(e.target.value)}
+          onBlur={() => void persistSlipgateKey(slipgateKey)}
+          placeholder="X-Slipgate-Key (optional, if your instance requires one)"
+          autoComplete="off"
+          spellCheck={false}
+          style={{ width: "100%", height: 38, padding: "0 13px", marginTop: 10, borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "var(--mf-panel)", color: "var(--mf-t1)", fontFamily: MONO, fontSize: 12, outline: "none", boxSizing: "border-box" }}
+        />
+        {slipgateStatus ? (
+          <div style={{ marginTop: 10, fontFamily: MONO, fontSize: 11.5, color: slipgateStatus.ok ? "var(--mf-t2)" : "var(--mf-danger)" }}>Slipgate {slipgateStatus.msg}</div>
+        ) : null}
       </div>
 
       <div style={{ padding: "16px 0", borderBottom: "1px solid color-mix(in srgb, var(--mf-t0) 5%, transparent)" }}>
