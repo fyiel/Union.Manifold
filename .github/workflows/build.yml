@@ -170,3 +170,39 @@ jobs:
             gpg --batch --yes --detach-sign union-manifold-x86_64.pkg.tar.zst
           fi
           gh release upload "${{ needs.check.outputs.tag }}" union-manifold-*x86_64.pkg.tar.zst* --clobber
+
+  # Everything above builds into a DRAFT release (tauri-action releaseDraft:true)
+  # so no platform asset or signature is ever public half-uploaded. This job runs
+  # only after every matrix build AND the pacman upload succeeded, fills the
+  # release notes from the matching CHANGELOG.md section, and publishes it, so a
+  # release ships automatically with no manual "publish" click.
+  publish:
+    needs: [check, build]
+    if: needs.check.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fill notes from changelog and publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.check.outputs.tag }}
+          VERSION: ${{ needs.check.outputs.version }}
+        run: |
+          set -euo pipefail
+          # Pull the section under "## <version>" up to the next "## " heading.
+          notes=$(awk -v ver="$VERSION" '
+            $1 == "##" && $2 == ver { f = 1; next }
+            f && /^## / { exit }
+            f { print }
+          ' CHANGELOG.md)
+          # Strip leading and trailing blank lines.
+          notes=$(printf '%s\n' "$notes" | awk 'NF {f=1} f' | tac | awk 'NF {f=1} f' | tac)
+          if [ -z "$notes" ]; then
+            echo "::warning::no CHANGELOG.md section for $VERSION, using a placeholder"
+            notes="Release $VERSION"
+          fi
+          printf '%s\n' "$notes" > notes.md
+          echo "----- release notes -----"; cat notes.md; echo "-------------------------"
+          gh release edit "$TAG" --notes-file notes.md --draft=false --latest
