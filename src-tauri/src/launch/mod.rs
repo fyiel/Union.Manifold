@@ -242,7 +242,20 @@ pub fn game_exe_launch(state: State<'_, AppState>, app: AppHandle, appid: String
         Err(e) => return json!({ "ok": false, "error": e }),
     };
     match spawn_and_track(&app, &appid, &plan.command, &plan.args, &cwd, &plan.envs, &exe_path, game_name) {
-        Ok(pid) => json!({ "ok": true, "pid": pid }),
+        Ok(pid) => {
+            // Opt-in "close for maximum performance": the game is already
+            // detached (its own systemd scope / process group), so exiting the
+            // launcher never takes it down. Delay briefly so this command's
+            // response reaches the UI and the process settles before we quit.
+            if state.settings.get("closeOnGameLaunch").as_bool().unwrap_or(false) {
+                let app2 = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                    app2.exit(0);
+                });
+            }
+            json!({ "ok": true, "pid": pid })
+        }
         Err(e) => json!({ "ok": false, "error": e }),
     }
 }

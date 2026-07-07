@@ -61,12 +61,13 @@ export function SettingsPage() {
   const [connsPerDl, setConnsPerDl] = useState(8)
   const [diskMargin, setDiskMargin] = useState(2)
   const [startPage, setStartPage] = useState<"browse" | "library">("browse")
+  const [closeOnLaunch, setCloseOnLaunch] = useState(false)
 
   useEffect(() => {
     let alive = true
     void (async () => {
       try {
-        const [cb, kbps, del, path, sc, pause, mini, upd, nid, nge, maxC, conns, margin, sp, auto] = await Promise.all([
+        const [cb, kbps, del, path, sc, pause, mini, upd, nid, nge, maxC, conns, margin, sp, auto, col] = await Promise.all([
           window.ucSettings?.get?.("closeBehavior"),
           window.ucSettings?.get?.("downloadBandwidthLimitKBps"),
           window.ucSettings?.get?.("autoDeleteArchives"),
@@ -82,6 +83,7 @@ export function SettingsPage() {
           window.ucSettings?.get?.("diskSpaceMarginGiB"),
           window.ucSettings?.get?.("startPage"),
           window.ucAutostart?.get?.(),
+          window.ucSettings?.get?.("closeOnGameLaunch"),
         ])
         if (!alive) return
         if (cb === "hide" || cb === "quit") setCloseBehavior(cb)
@@ -101,6 +103,7 @@ export function SettingsPage() {
         if (margin != null && Number(margin) >= 0) setDiskMargin(Math.min(64, Number(margin)))
         if (sp === "library") setStartPage("library")
         setLaunchAtLogin(Boolean(auto?.enabled))
+        setCloseOnLaunch(col === true)
       } catch { /* ignore */ }
     })()
     // reflect changes made elsewhere (e.g. the archive prompt flips autoDeleteArchives)
@@ -192,6 +195,7 @@ export function SettingsPage() {
                 <ToggleRow title="Check for updates on startup" desc="Look for a new version shortly after launch and notify when one is ready" on={autoCheckUpdates} onToggle={() => setBool("autoCheckUpdates", !autoCheckUpdates, setAutoCheckUpdates)} />
                 <ToggleRow title="Notify when a game is ready" desc="Desktop notification when a download finishes installing" on={notifyInstallDone} onToggle={() => setBool("notifyInstallDone", !notifyInstallDone, setNotifyInstallDone)} />
                 <ToggleRow title="Notify when a game exits" desc="Desktop notification when a running game closes" on={notifyGameExit} onToggle={() => setBool("notifyGameExit", !notifyGameExit, setNotifyGameExit)} />
+                <ToggleRow title="Close the app when a game launches" desc="Quit Union.Manifold a few seconds after a game starts, to free memory and CPU. The game keeps running." on={closeOnLaunch} onToggle={() => setBool("closeOnGameLaunch", !closeOnLaunch, setCloseOnLaunch)} />
                 <ClearAssetsRow />
               </div>
             )}
