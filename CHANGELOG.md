@@ -4,6 +4,23 @@ All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 The app shows its version as 1.0.0b (beta). 1.0.1 is the first packaged release.
 
+## 2.14.0
+
+Free NexusMods downloads can go through your own self-hosted Slipgate resolver.
+
+### Added
+
+- Settings > Mods gains a "Slipgate resolver" field: point it at your own
+  Slipgate instance (https://github.com/fyiel/Slipgate) and free Nexus downloads
+  resolve through it. Slipgate clears Cloudflare with a real browser and returns
+  a direct link, so it works where the raw in-app path is blocked by Cloudflare's
+  TLS fingerprinting. a Test button probes the instance and reports whether it
+  and its FlareSolverr backend are reachable
+- when a Slipgate url is set, free-account installs prefer it over the in-app
+  session replay: the app sends only your nexusmods_session value and Slipgate
+  mints the Cloudflare clearance itself. the nxm:// browser flow stays the
+  fallback when Slipgate is unset or cannot resolve a file
+
 ## 2.13.4
 
 ### Fixed

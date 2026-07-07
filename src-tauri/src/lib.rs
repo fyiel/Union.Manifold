@@ -285,6 +285,7 @@ pub fn run() {
             mods::nexus::nexus_browse,
             mods::nexus::nexus_mod_files,
             mods::nexus::nexus_install,
+            mods::nexus::slipgate_check,
             mods::workshop::workshop_browse,
             mods::workshop::workshop_details,
             mods::workshop::workshop_install,

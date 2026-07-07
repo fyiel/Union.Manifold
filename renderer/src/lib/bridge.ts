@@ -238,6 +238,7 @@ export function installBridge(): void {
     nexusBrowse: (domain: string, sort: string, order: string, period: string, offset: number) => call("nexus_browse", { domain, sort, order, period, offset }),
     nexusModFiles: (domain: string, modId: string) => call("nexus_mod_files", { domain, modId }),
     nexusInstall: (appid: string, domain: string, modId: string, fileId: number) => call("nexus_install", { appid, domain, modId, fileId }),
+    slipgateCheck: (url: string, key: string) => call("slipgate_check", { url, key }),
     workshopBrowse: (steamAppid: number, sort: string, period: string, page: number, query: string) => call("workshop_browse", { steamAppid, sort, period, page, query }),
     workshopDetails: (ids: string[]) => call("workshop_details", { ids }),
     workshopInstall: (appid: string, steamAppid: number, publishedFileId: string) => call("workshop_install", { appid, steamAppid, publishedFileId }),
