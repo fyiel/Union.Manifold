@@ -165,7 +165,7 @@ const SEARCH_QUERY: &str = "query Mods($count: Int!, $offset: Int!, $filter: Mod
 // sort entirely from the UI, and it additionally requests fileSize so the list
 // can show mod sizes. count is fixed at 24 per page for the endless-scroll pager.
 const BROWSE_COUNT: u64 = 24;
-const BROWSE_QUERY: &str = "query($c:Int!,$o:Int!,$f:ModsFilter,$s:[ModsSort!]){mods(count:$c,offset:$o,filter:$f,sort:$s){totalCount nodes{modId name summary version author downloads endorsements fileSize pictureUrl updatedAt createdAt game{domainName} uploader{name}}}}";
+const BROWSE_QUERY: &str = "query($count:Int!,$offset:Int!,$filter:ModsFilter,$sort:[ModsSort!]){mods(count:$count,offset:$offset,filter:$filter,sort:$sort){totalCount nodes{modId name summary version author downloads endorsements fileSize pictureUrl updatedAt createdAt game{domainName} uploader{name}}}}";
 
 // updatedAt arrives as an ISO-8601 string from v2; the v1 mappers emit unix
 // seconds, so normalize to keep BrowseMod.updatedAt one shape.
@@ -1055,6 +1055,29 @@ mod tests {
         assert_eq!(d["sort"][0]["downloads"]["direction"], "DESC");
         let p = browse_variables("cyberpunk2077", "published", "", "all", 0, 1_720_000_000);
         assert_eq!(p["sort"][0]["createdAt"]["direction"], "DESC");
+    }
+
+    #[test]
+    fn browse_query_declares_the_variables_browse_variables_emits() {
+        // The 2.13.0 release shipped a query declaring $c/$o/$f/$s while the
+        // variables object used full names, so $count bound null and the API
+        // rejected every browse. Parse the declaration list out of the query
+        // and require an exact match against the emitted keys, both ways.
+        let decl_list = BROWSE_QUERY
+            .split_once('(')
+            .and_then(|(_, rest)| rest.split_once(')'))
+            .map(|(inner, _)| inner)
+            .expect("BROWSE_QUERY has a variable declaration list");
+        let mut declared: Vec<&str> = decl_list
+            .split(',')
+            .filter_map(|d| d.trim().strip_prefix('$'))
+            .filter_map(|d| d.split(':').next())
+            .collect();
+        declared.sort_unstable();
+        let v = browse_variables("d", "downloads", "desc", "all", 0, 1_720_000_000);
+        let mut emitted: Vec<&str> = v.as_object().unwrap().keys().map(String::as_str).collect();
+        emitted.sort_unstable();
+        assert_eq!(declared, emitted);
     }
 
     #[test]
