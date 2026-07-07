@@ -582,7 +582,7 @@ declare global {
       nexusSearch?: (domain: string, query: string, page: number) => Promise<{ ok: boolean; mods?: NexusBrowseMod[]; hasMore?: boolean; error?: string }>
       nexusBrowse?: (domain: string, category: string) => Promise<{ ok: boolean; mods?: NexusBrowseMod[]; hasMore?: boolean; error?: string }>
       nexusModFiles?: (domain: string, modId: string) => Promise<{ ok: boolean; files?: NexusModFile[]; error?: string }>
-      nexusInstall?: (appid: string, domain: string, modId: string, fileId: number) => Promise<{ ok: boolean; started?: boolean; needsNxm?: boolean; modPageUrl?: string; error?: string }>
+      nexusInstall?: (appid: string, domain: string, modId: string, fileId: number) => Promise<{ ok: boolean; started?: boolean; needsNxm?: boolean; needsSession?: boolean; sessionError?: string; modPageUrl?: string; error?: string }>
       workshopBrowse?: (steamAppid: number, sort: string, page: number, query: string) => Promise<{ ok: boolean; items?: WorkshopBrowseItem[]; hasMore?: boolean; error?: string }>
       workshopDetails?: (ids: string[]) => Promise<{ ok: boolean; items?: Array<{ remoteId: string; name: string; description?: string; sizeBytes?: number; updatedAt?: number; previewUrl?: string; subscriptions?: number }>; error?: string }>
       workshopInstall?: (appid: string, steamAppid: number, publishedFileId: string) => Promise<{ ok: boolean; started?: boolean; error?: string }>

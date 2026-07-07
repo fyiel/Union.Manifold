@@ -325,7 +325,21 @@ export function GameModsPage() {
       const r = await window.ucMods?.nexusInstall?.(appid, nexusDomain, mod.remoteId, fileId)
       if (!r?.ok) { toast(r?.error || "install failed", "error", 7000); return }
       setFilePick(null)
-      if (r.needsNxm) {
+      if (r.started) {
+        toast(`Downloading ${mod.name}…`, "info")
+      } else if (r.needsSession) {
+        // Free account, native site-session path. No sessionError means no
+        // cookie is configured yet (nudge toward Settings); a sessionError
+        // means one was present but got rejected (say why). The sanctioned
+        // nxm:// browser flow stays one click away via the toast action.
+        const openPage = r.modPageUrl
+          ? { label: "Open mod page", onClick: () => void window.ucSystem?.openExternal?.(r.modPageUrl!) }
+          : undefined
+        const msg = r.sessionError
+          ? `Nexus session problem: ${r.sessionError}. Re-copy your nexusmods.com cookies under Settings → Mods, or use “Mod Manager Download” in your browser.`
+          : "Free in-app downloads need your Nexus session cookie (Settings → Mods, opt-in). Otherwise use “Mod Manager Download” on the mod page."
+        toast(msg, r.sessionError ? "error" : "info", openPage ? { duration: 14000, action: openPage } : 14000)
+      } else if (r.needsNxm) {
         // Free account: downloads only start from the website. Open the mod
         // page; the nxm:// deep link routes back into the app.
         if (r.modPageUrl) void window.ucSystem?.openExternal?.(r.modPageUrl)

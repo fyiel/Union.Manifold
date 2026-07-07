@@ -33,6 +33,19 @@ impl Jar {
         Jar(Arc::new(Mutex::new(HashMap::new())))
     }
 
+    /// Seed a cookie for `host` before any request runs, so an imported
+    /// browser session (the name=value pairs a user pasted) rides along with
+    /// whatever the jar captures from Set-Cookie afterwards. A later
+    /// Set-Cookie for the same name overwrites the seed.
+    pub fn set(&self, host: &str, name: &str, value: &str) {
+        self.0
+            .lock()
+            .unwrap()
+            .entry(host.to_string())
+            .or_default()
+            .insert(name.to_string(), value.to_string());
+    }
+
     pub fn header_for(&self, host: &str) -> Option<String> {
         let map = self.0.lock().unwrap();
         let jar = map.get(host)?;
