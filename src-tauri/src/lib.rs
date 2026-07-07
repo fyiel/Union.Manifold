@@ -10,6 +10,7 @@ mod launch;
 mod library;
 mod logging;
 mod misc;
+mod mods;
 mod net;
 mod notify;
 mod paths;
@@ -77,7 +78,11 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             if let Some(arg) = argv.iter().find(|a| a.contains("://")) {
-                emit_deep_link(app, arg);
+                if arg.starts_with("nxm://") {
+                    mods::nexus::handle_nxm(app, arg);
+                } else {
+                    emit_deep_link(app, arg);
+                }
             } else if let Some(main) = app.get_webview_window("main") {
                 main.set_focus().ok();
             }
@@ -149,6 +154,18 @@ pub fn run() {
             {
                 use tauri_plugin_deep_link::DeepLinkExt;
                 app.deep_link().register_all().ok();
+                // nxm:// links arrive here on macOS (no argv) and at cold
+                // start; runtime deliveries on Linux/Windows can hit both this
+                // and the single-instance argv scan — handle_nxm dedups.
+                let nxm_handle = handle.clone();
+                app.deep_link().on_open_url(move |event| {
+                    for url in event.urls() {
+                        let s = url.to_string();
+                        if s.starts_with("nxm://") {
+                            mods::nexus::handle_nxm(&nxm_handle, &s);
+                        }
+                    }
+                });
             }
             #[cfg(target_os = "linux")]
             if let Some(main) = app.get_webview_window("main") {
@@ -255,6 +272,23 @@ pub fn run() {
             dialogs::folder_pick,
             misc::system_notifications,
             net::auth_fetch,
+            mods::mods_game_get,
+            mods::mods_game_set,
+            mods::mods_toggle,
+            mods::mods_reorder,
+            mods::mods_uninstall,
+            mods::mods_deploy,
+            mods::mods_undeploy,
+            mods::mods_open_folder,
+            mods::nexus::nexus_validate,
+            mods::nexus::nexus_search,
+            mods::nexus::nexus_browse,
+            mods::nexus::nexus_mod_files,
+            mods::nexus::nexus_install,
+            mods::workshop::workshop_browse,
+            mods::workshop::workshop_details,
+            mods::workshop::workshop_install,
+            mods::workshop::workshop_status,
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {

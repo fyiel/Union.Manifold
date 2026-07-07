@@ -53,6 +53,10 @@ impl AppPaths {
     pub fn catalog_state_file(&self) -> PathBuf {
         self.data_dir.join("catalog-state.json")
     }
+
+    pub fn mods_dir(&self) -> PathBuf {
+        self.data_dir.join("mods")
+    }
 }
 
 pub fn default_download_root(data_dir: &std::path::Path) -> PathBuf {

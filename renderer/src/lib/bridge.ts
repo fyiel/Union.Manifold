@@ -221,4 +221,28 @@ export function installBridge(): void {
       return { ok: true }
     },
   }
+  // Per-game mod management (NexusMods + Steam Workshop). 1:1 wrappers over the
+  // mods_* / nexus_* / workshop_* commands; event names are the fixed mods:* set.
+  w.ucMods = {
+    gameGet: (appid: string) => call("mods_game_get", { appid }),
+    gameSet: (appid: string, config: { nexusDomain?: string | null; deployTarget?: string }) => call("mods_game_set", { appid, config }),
+    toggle: (appid: string, modId: string, enabled: boolean) => call("mods_toggle", { appid, modId, enabled }),
+    reorder: (appid: string, orderedIds: string[]) => call("mods_reorder", { appid, orderedIds }),
+    uninstall: (appid: string, modId: string) => call("mods_uninstall", { appid, modId }),
+    deploy: (appid: string) => call("mods_deploy", { appid }),
+    undeploy: (appid: string) => call("mods_undeploy", { appid }),
+    openFolder: (appid: string) => call("mods_open_folder", { appid }),
+    nexusValidate: () => call("nexus_validate"),
+    nexusSearch: (domain: string, query: string, page: number) => call("nexus_search", { domain, query, page }),
+    nexusBrowse: (domain: string, category: string) => call("nexus_browse", { domain, category }),
+    nexusModFiles: (domain: string, modId: string) => call("nexus_mod_files", { domain, modId }),
+    nexusInstall: (appid: string, domain: string, modId: string, fileId: number) => call("nexus_install", { appid, domain, modId, fileId }),
+    workshopBrowse: (steamAppid: number, sort: string, page: number, query: string) => call("workshop_browse", { steamAppid, sort, page, query }),
+    workshopDetails: (ids: string[]) => call("workshop_details", { ids }),
+    workshopInstall: (appid: string, steamAppid: number, publishedFileId: string) => call("workshop_install", { appid, steamAppid, publishedFileId }),
+    workshopStatus: () => call("workshop_status"),
+    onInstallProgress: (cb: Cb) => on("mods:install-progress", cb),
+    onChanged: (cb: Cb) => on("mods:changed", cb),
+    onNxmUnmatched: (cb: Cb) => on("mods:nxm-unmatched", cb),
+  }
 }
