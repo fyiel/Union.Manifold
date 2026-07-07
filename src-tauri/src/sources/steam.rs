@@ -190,9 +190,42 @@ pub async fn search_app_id(title: &str) -> Option<u64> {
     appid
 }
 
-pub async fn steam_art(appid: u64) -> Value {
+// A demo or playtest appid carries no store art of its own, so map its title
+// back to the base game whose art we actually want.
+fn base_title(name: &str) -> Option<String> {
+    let trimmed = name.trim();
+    let lower = trimmed.to_lowercase();
+    for suffix in [" (demo)", " - demo", " playtest", " demo"] {
+        if lower.ends_with(suffix) {
+            let base = trimmed[..trimmed.len() - suffix.len()].trim_end_matches([' ', '-', ':', '(']).trim();
+            if !base.is_empty() {
+                return Some(base.to_string());
+            }
+        }
+    }
+    None
+}
+
+pub async fn steam_art(appid: u64, name: Option<&str>) -> Value {
     if let Some(d) = get_store_details(appid).await {
         return json!({ "header": d.header_image, "background": d.background });
+    }
+    // Steam's appdetails returns success=false for demo/playtest appids, so this
+    // appid has no art. Fall back to the base game's art, resolved by title.
+    if let Some(base) = name.and_then(base_title) {
+        if let Some(base_id) = search_app_id(&base).await {
+            if base_id != appid {
+                if let Some(d) = get_store_details(base_id).await {
+                    // Offer the base game's portrait capsule first so a card shows
+                    // a real cover, with the store header behind it as a fallback.
+                    return json!({
+                        "cover": capsule_url(base_id),
+                        "header": d.header_image,
+                        "background": d.background,
+                    });
+                }
+            }
+        }
     }
     json!({ "header": "", "background": "" })
 }
@@ -271,4 +304,28 @@ pub async fn enrich(game: &mut UnifiedGame) {
 
 fn urlencoding(s: &str) -> String {
     percent_encoding::utf8_percent_encode(s, percent_encoding::NON_ALPHANUMERIC).to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::base_title;
+
+    #[test]
+    fn base_title_strips_demo_and_playtest_suffixes() {
+        assert_eq!(base_title("Tower Lab Demo").as_deref(), Some("Tower Lab"));
+        assert_eq!(base_title("Humanize Robotics Demo").as_deref(), Some("Humanize Robotics"));
+        assert_eq!(base_title("Cozy Game Restoration Demo").as_deref(), Some("Cozy Game Restoration"));
+        assert_eq!(base_title("Foo Playtest").as_deref(), Some("Foo"));
+        assert_eq!(base_title("Bar (Demo)").as_deref(), Some("Bar"));
+        assert_eq!(base_title("Baz - Demo").as_deref(), Some("Baz"));
+        assert_eq!(base_title("Qux DEMO").as_deref(), Some("Qux"));
+    }
+
+    #[test]
+    fn base_title_leaves_non_demo_titles_alone() {
+        assert_eq!(base_title("Tower Lab"), None);
+        assert_eq!(base_title("Democracy"), None);
+        assert_eq!(base_title("Demolition Derby"), None);
+        assert_eq!(base_title(""), None);
+    }
 }

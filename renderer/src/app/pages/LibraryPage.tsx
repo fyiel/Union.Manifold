@@ -690,7 +690,7 @@ const LibCard = memo(function LibCard({ game: g, hasUpdate, onOpen, onContextMen
   return (
     <div onClick={() => onOpen(g)} onContextMenu={(e) => { e.preventDefault(); onContextMenu(g, e.clientX, e.clientY) }} className="mf-card" style={{ display: "flex", flexDirection: "column", border: "1px solid color-mix(in srgb, var(--mf-t0) 7%, transparent)", borderRadius: 10, overflow: "hidden", background: "var(--mf-panel)", cursor: "pointer", contentVisibility: "auto", containIntrinsicSize: "auto 300px" }}>
       <div style={{ position: "relative", aspectRatio: "3 / 4", background: g.image ? "#0f0f0f" : COVER_LINES, display: "flex", alignItems: "flex-end", padding: 12 }}>
-        {g.image && <SmartImage candidates={g.covers || []} steamAppId={g.steamAppId} alt={g.name} lazy style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />}
+        {g.image && <SmartImage candidates={g.covers || []} steamAppId={g.steamAppId} name={g.name} alt={g.name} lazy style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />}
         {hasUpdate && (
           <span title="update available" style={{ position: "absolute", top: 10, right: 10, padding: "3px 8px", borderRadius: 99, background: "rgba(0,0,0,0.6)", border: "1px solid var(--mf-line-2)", fontFamily: MONO, fontSize: 9, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--mf-t1)" }}>update</span>
         )}
@@ -717,7 +717,7 @@ const LibRow = memo(function LibRow({ game: g, hasUpdate, onOpen, onContextMenu,
   return (
     <div onClick={() => onOpen(g)} onContextMenu={(e) => { e.preventDefault(); onContextMenu(g, e.clientX, e.clientY) }} className="mf-listrow" style={{ display: "grid", gridTemplateColumns: "44px minmax(0,1fr) 150px 120px 140px", gap: 14, alignItems: "center", padding: "8px 14px", borderRadius: 8, cursor: "pointer", contentVisibility: "auto", containIntrinsicSize: "auto 64px" }}>
       <div style={{ width: 40, height: 50, borderRadius: 5, overflow: "hidden", background: g.image ? "#0f0f0f" : COVER_LINES }}>
-        {g.image && <SmartImage candidates={g.covers || []} steamAppId={g.steamAppId} lazy style={{ width: "100%", height: "100%", objectFit: "cover" }} />}
+        {g.image && <SmartImage candidates={g.covers || []} steamAppId={g.steamAppId} name={g.name} lazy style={{ width: "100%", height: "100%", objectFit: "cover" }} />}
       </div>
       <div style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 9 }}>
         <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--mf-t1)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{g.name}</span>
