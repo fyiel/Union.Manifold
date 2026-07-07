@@ -18,6 +18,14 @@ use super::{emit_progress, fold, load_config, run_archive_install, urlenc, Insta
 
 const API: &str = "https://api.nexusmods.com";
 
+// The public website (behind Cloudflare), distinct from the api. host. The
+// site's own "Mod Manager Download" button posts to GenerateDownloadUrl and
+// gets back a signed CDN url for the caller's *website* session, which is how
+// free accounts obtain a direct link the v1 api refuses them.
+const WWW_HOST: &str = "www.nexusmods.com";
+const GENERATE_URL: &str =
+    "https://www.nexusmods.com/Core/Libs/Common/Managers/Downloads?GenerateDownloadUrl";
+
 fn api_key(state: &AppState) -> Result<String, String> {
     state
         .settings
@@ -251,6 +259,200 @@ async fn fetch_spec(
 }
 
 // ---------------------------------------------------------------------------
+// Free-account native download (site-session, opt-in)
+//
+// WARNING: this path replays a NexusMods *website* session (cookies the user
+// pastes from their logged-in browser) to call the same download-url generator
+// the site's "Mod Manager Download" button hits. NexusMods gates free direct
+// links behind that session on purpose, so automating it and replaying a
+// browser session is against their Terms of Service and can get an account
+// banned. It is therefore strictly opt-in (off unless the user supplies a
+// cookie) and labelled as risky in the UI. The premium v1 api path and the
+// sanctioned nxm:// deep link both stay intact as the safe routes.
+//
+// Why this is the only viable native option: a full auto flow (log in, then
+// download, no browser) is impossible with plain HTTP. NexusMods login is SSO
+// (users.nexusmods.com, OAuth) with no username/password POST, and every
+// www.nexusmods.com response is fronted by a Cloudflare managed challenge
+// ("Just a moment...") that needs JavaScript/Turnstile to mint a cf_clearance
+// cookie. A reqwest client cannot solve either, so the session must come from
+// a real browser that already cleared both.
+
+/// The one settings key that arms this path. Empty/unset means "use the nxm
+/// fallback"; the whole feature stays dark until the user opts in.
+fn session_cookie(state: &AppState) -> Option<String> {
+    state
+        .settings
+        .get_string("nexusSessionCookie")
+        .map(|c| c.trim().to_string())
+        .filter(|c| !c.is_empty())
+}
+
+/// Numeric NexusMods game id for a domain, from the cached games index. The
+/// site generator keys on the numeric id, not the domain slug.
+async fn game_id_for_domain(key: &str, domain: &str) -> Result<Option<u64>, String> {
+    let list = games_list(key).await?;
+    Ok(list.iter().find(|g| g.domain == domain).map(|g| g.id))
+}
+
+/// Split a pasted cookie blob into (name, value) pairs. Accepts a raw
+/// `Cookie:` header ("a=b; c=d"), devtools newline-separated lines, or a bare
+/// "nexusmods_session=..."; tolerates a leading "Cookie:" label, blank
+/// segments, and surrounding whitespace.
+fn parse_cookie_string(raw: &str) -> Vec<(String, String)> {
+    raw.split(|c| c == ';' || c == '\n' || c == '\r')
+        .filter_map(|part| {
+            let mut part = part.trim();
+            for label in ["Cookie:", "cookie:"] {
+                if let Some(rest) = part.strip_prefix(label) {
+                    part = rest.trim();
+                }
+            }
+            let (name, value) = part.split_once('=')?;
+            let (name, value) = (name.trim(), value.trim());
+            (!name.is_empty() && !value.is_empty())
+                .then(|| (name.to_string(), value.to_string()))
+        })
+        .collect()
+}
+
+/// The generator's form body. Both fields are integers so no escaping is
+/// needed; `nmm` is deliberately omitted to ask for a direct CDN url instead
+/// of an nxm link.
+fn build_generate_form(file_id: u64, game_id: u64) -> String {
+    format!("fid={file_id}&game_id={game_id}")
+}
+
+/// The generator answers with JSON carrying the signed url under one of a few
+/// keys across site versions, and the value can arrive HTML-entity-encoded.
+fn parse_generate_response(body: &str) -> Option<String> {
+    let v: Value = serde_json::from_str(body).ok()?;
+    ["url", "URI", "src", "download_url"]
+        .iter()
+        .find_map(|k| v.get(*k).and_then(|u| u.as_str()))
+        .map(http::decode_entities)
+        .filter(|s| s.starts_with("http"))
+}
+
+/// Cloudflare's interstitial ("Just a moment...") comes back as 403/503 HTML,
+/// not the JSON a valid session would get. Detect it so the user hears
+/// "refresh your cf_clearance cookie" instead of a bare HTTP error.
+fn is_cloudflare_challenge(status: u16, body: &str) -> bool {
+    (status == 403 || status == 503)
+        && (body.contains("Just a moment")
+            || body.contains("challenge-platform")
+            || body.contains("cf-chl"))
+}
+
+/// Outcome of the opt-in free download attempt. `NeedsSession` carries an
+/// optional reason: `None` when no cookie is configured at all, `Some(_)` when
+/// a cookie was present but the site rejected the request.
+enum FreeDownload {
+    Started,
+    NeedsSession(Option<String>),
+}
+
+async fn native_free_download(
+    app: &AppHandle,
+    state: &AppState,
+    key: &str,
+    appid: &str,
+    domain: &str,
+    mod_id: u64,
+    file_id: u64,
+) -> Result<FreeDownload, String> {
+    let Some(cookie) = session_cookie(state) else {
+        return Ok(FreeDownload::NeedsSession(None));
+    };
+    let pairs = parse_cookie_string(&cookie);
+    if !pairs.iter().any(|(n, _)| n == "nexusmods_session") {
+        return Ok(FreeDownload::NeedsSession(Some(
+            "the pasted cookie has no nexusmods_session value".to_string(),
+        )));
+    }
+    let game_id = game_id_for_domain(key, domain)
+        .await?
+        .ok_or_else(|| format!("no numeric NexusMods game id for {domain}"))?;
+
+    // Seed a per-host jar with the imported cookies, then warm it against the
+    // file page: a valid cf_clearance turns this into a 200 and refreshes the
+    // short-lived __cf_bm the POST wants, while a stale one surfaces here.
+    let jar = http::Jar::new();
+    for (n, v) in &pairs {
+        jar.set(WWW_HOST, n, v);
+    }
+    let referer = format!("{}?tab=files", mod_page_url(domain, mod_id));
+    let page = http::fetch(
+        &referer,
+        &http::FetchOpts {
+            headers: HashMap::from([("Accept".to_string(), "text/html".to_string())]),
+            jar: Some(jar.clone()),
+            ..Default::default()
+        },
+    )
+    .await
+    .map_err(|e| format!("nexus session probe: {e}"))?;
+    let page_status = page.status().as_u16();
+    let page_body = page.text().await.unwrap_or_default();
+    if is_cloudflare_challenge(page_status, &page_body) {
+        return Ok(FreeDownload::NeedsSession(Some(
+            "Cloudflare challenge blocked the request. Copy a fresh cf_clearance cookie from your browser".to_string(),
+        )));
+    }
+
+    // POST the exact request the site's download button makes.
+    let mut headers = HashMap::new();
+    headers.insert(
+        "Content-Type".to_string(),
+        "application/x-www-form-urlencoded; charset=UTF-8".to_string(),
+    );
+    headers.insert("X-Requested-With".to_string(), "XMLHttpRequest".to_string());
+    headers.insert(
+        "Accept".to_string(),
+        "application/json, text/javascript, */*; q=0.01".to_string(),
+    );
+    headers.insert("Referer".to_string(), referer);
+    let resp = http::fetch(
+        GENERATE_URL,
+        &http::FetchOpts {
+            method: Some("POST".to_string()),
+            headers,
+            body: Some(build_generate_form(file_id, game_id).into_bytes()),
+            jar: Some(jar),
+            ..Default::default()
+        },
+    )
+    .await
+    .map_err(|e| format!("nexus download generator: {e}"))?;
+    let status = resp.status().as_u16();
+    let body = resp.text().await.unwrap_or_default();
+    if is_cloudflare_challenge(status, &body) {
+        return Ok(FreeDownload::NeedsSession(Some(
+            "Cloudflare challenge blocked the request. Copy a fresh cf_clearance cookie from your browser".to_string(),
+        )));
+    }
+    if status == 401 || status == 403 {
+        return Ok(FreeDownload::NeedsSession(Some(
+            "NexusMods rejected the session. Copy a fresh nexusmods_session cookie".to_string(),
+        )));
+    }
+    if !(200..300).contains(&status) {
+        return Err(format!("nexus download generator: HTTP {status}"));
+    }
+    let Some(url) = parse_generate_response(&body) else {
+        // A logged-out session returns a login page / empty body rather than
+        // the url JSON; treat that as a session problem, not a hard failure.
+        return Ok(FreeDownload::NeedsSession(Some(
+            "no download url in the response, the session may have expired".to_string(),
+        )));
+    };
+
+    let spec = fetch_spec(key, appid, domain, mod_id, Some(file_id)).await?;
+    tauri::async_runtime::spawn(run_archive_install(app.clone(), spec, url, HashMap::new()));
+    Ok(FreeDownload::Started)
+}
+
+// ---------------------------------------------------------------------------
 // Commands
 
 #[tauri::command]
@@ -404,14 +606,28 @@ pub async fn nexus_install(
         let user = api_json(&key, &format!("{API}/v1/users/validate.json")).await?;
         let premium = user.get("is_premium").and_then(|v| v.as_bool()).unwrap_or(false);
         if !premium {
-            // Free accounts can't request direct links; the site's
-            // "Mod Manager Download" button sends an nxm:// deep link back.
-            return Ok(json!({
-                "ok": true,
-                "started": false,
-                "needsNxm": true,
-                "modPageUrl": format!("{}?tab=files", mod_page_url(&domain, mid)),
-            }));
+            // Free accounts can't get direct links from the v1 api. Two routes:
+            // the sanctioned nxm:// deep link (always offered via modPageUrl),
+            // and the opt-in native path that replays a pasted website session
+            // (see native_free_download for the ToS/ban caveat).
+            return match native_free_download(&app, &state, &key, &appid, &domain, mid, file_id)
+                .await?
+            {
+                FreeDownload::Started => Ok(json!({ "ok": true, "started": true })),
+                FreeDownload::NeedsSession(reason) => {
+                    let mut out = json!({
+                        "ok": true,
+                        "started": false,
+                        "needsSession": true,
+                        "needsNxm": true,
+                        "modPageUrl": format!("{}?tab=files", mod_page_url(&domain, mid)),
+                    });
+                    if let Some(r) = reason {
+                        out["sessionError"] = json!(r);
+                    }
+                    Ok(out)
+                }
+            };
         }
         let spec = fetch_spec(&key, &appid, &domain, mid, Some(file_id)).await?;
         let links = api_json(
@@ -563,6 +779,61 @@ async fn handle_nxm_inner(app: &AppHandle, url: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parses_cookie_header_and_devtools_forms() {
+        // Raw Cookie header with a leading label.
+        let p = parse_cookie_string("Cookie: nexusmods_session=abc; cf_clearance=xyz; __cf_bm=q");
+        assert_eq!(p.len(), 3);
+        assert_eq!(p[0], ("nexusmods_session".to_string(), "abc".to_string()));
+        assert_eq!(p[1], ("cf_clearance".to_string(), "xyz".to_string()));
+        // Newline-separated (devtools) with blank lines and stray whitespace.
+        let p2 = parse_cookie_string("\n nexusmods_session = def \n\n cf_clearance=123\n");
+        assert_eq!(p2, vec![
+            ("nexusmods_session".to_string(), "def".to_string()),
+            ("cf_clearance".to_string(), "123".to_string()),
+        ]);
+        // A bare single cookie.
+        assert_eq!(
+            parse_cookie_string("nexusmods_session=solo"),
+            vec![("nexusmods_session".to_string(), "solo".to_string())]
+        );
+        // Segments without a value are dropped, not emitted with empty strings.
+        assert!(parse_cookie_string("; junk ; =novalue ; noeq").is_empty());
+    }
+
+    #[test]
+    fn builds_generate_form_body() {
+        assert_eq!(build_generate_form(45678, 1704), "fid=45678&game_id=1704");
+    }
+
+    #[test]
+    fn parses_generate_response_variants() {
+        // Primary `url` key, HTML-entity-encoded query separators decoded.
+        assert_eq!(
+            parse_generate_response(r#"{"url":"https://cdn.nexus.com/file.zip?a=1&amp;b=2"}"#),
+            Some("https://cdn.nexus.com/file.zip?a=1&b=2".to_string())
+        );
+        // Legacy `URI` key still works.
+        assert_eq!(
+            parse_generate_response(r#"{"URI":"https://cdn.nexus.com/x.7z"}"#),
+            Some("https://cdn.nexus.com/x.7z".to_string())
+        );
+        // No url-bearing key, non-http value, and non-JSON all yield None.
+        assert_eq!(parse_generate_response(r#"{"error":"nope"}"#), None);
+        assert_eq!(parse_generate_response(r#"{"url":"/relative/path"}"#), None);
+        assert_eq!(parse_generate_response("<html>Just a moment</html>"), None);
+    }
+
+    #[test]
+    fn detects_cloudflare_challenge() {
+        assert!(is_cloudflare_challenge(403, "<title>Just a moment...</title>"));
+        assert!(is_cloudflare_challenge(503, r#"<div id="challenge-platform"></div>"#));
+        // A genuine JSON 403 (session rejected) is not the CF interstitial.
+        assert!(!is_cloudflare_challenge(403, r#"{"error":"forbidden"}"#));
+        // A 200 is never the challenge, even with the phrase in body.
+        assert!(!is_cloudflare_challenge(200, "Just a moment while we load"));
+    }
 
     #[test]
     fn parses_full_nxm_url() {

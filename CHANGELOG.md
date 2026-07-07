@@ -4,6 +4,39 @@ All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 The app shows its version as 1.0.0b (beta). 1.0.1 is the first packaged release.
 
+## 2.12.0
+
+Free NexusMods accounts can now install in the app without a browser round
+trip, if you opt in and accept the risk.
+
+### Added
+
+NexusMods
+- optional native free download: paste your nexusmods.com session cookie once
+  under Settings → Mods and free account mods install in-app through the same
+  download url generator the site's "Mod Manager Download" button calls, with
+  no browser visit and no nxm:// click. the numeric game id comes from the
+  cached games index and the CDN link is streamed straight into the existing
+  install pipeline
+- the install prompt now understands a "needs session" state: with no cookie
+  set it points you at the setting or the browser flow, and when a cookie is
+  present but rejected it tells you whether your login or your Cloudflare
+  clearance went stale, always leaving the nxm:// option one click away
+
+### Please read before enabling
+
+- this path is off by default and clearly labelled as risky in Settings.
+  replaying your nexusmods.com website session to auto-generate free download
+  links is against NexusMods' Terms of Service and can get your account
+  banned. it exists only as an opt-in for people who accept that, and premium
+  accounts never need it
+- the premium api path and the sanctioned nxm:// "Mod Manager Download" flow
+  are the default, safe routes and are unchanged
+- a full "log in and download" automation is deliberately not offered because
+  it is not possible with plain HTTP: NexusMods login is SSO with no password
+  POST, and the whole website is fronted by a Cloudflare challenge that needs a
+  real browser to clear, so the session has to be imported from one
+
 ## 2.11.0
 
 Mod support. Every installed game gets a Mods page (card menu → Mods) with

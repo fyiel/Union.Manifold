@@ -655,9 +655,10 @@ function AboutTab() {
 }
 
 // ── Mods tab — NexusMods account + Workshop downloader ──
-// nexusApiKey is the one settings key the Rust nexus client reads for every
-// API call. nxm:// deep links and Workshop installs need no further setup, so
-// the rest of this tab is status, not configuration.
+// nexusApiKey is the settings key the Rust nexus client reads for every API
+// call; nexusSessionCookie is the opt-in website session that arms native free
+// downloads (see the ToS warning below). nxm:// deep links and Workshop
+// installs need no further setup.
 function ModsTab() {
   const [apiKey, setApiKey] = useState("")
   const [reveal, setReveal] = useState(false)
@@ -666,17 +667,22 @@ function ModsTab() {
   const [account, setAccount] = useState<{ name: string; premium: boolean } | null>(null)
   const [valError, setValError] = useState("")
   const [steamcmd, setSteamcmd] = useState<"absent" | "bootstrapping" | "ready" | null>(null)
+  const [sessionCookie, setSessionCookie] = useState("")
+  const [sessionRevealed, setSessionRevealed] = useState(false)
+  const [sessionSaved, setSessionSaved] = useState(false)
 
   useEffect(() => {
     let alive = true
     void (async () => {
       try {
-        const [k, ws] = await Promise.all([
+        const [k, sc, ws] = await Promise.all([
           window.ucSettings?.get?.("nexusApiKey"),
+          window.ucSettings?.get?.("nexusSessionCookie"),
           window.ucMods?.workshopStatus?.(),
         ])
         if (!alive) return
         if (typeof k === "string") setApiKey(k)
+        if (typeof sc === "string") setSessionCookie(sc)
         setSteamcmd(ws?.ok && ws.steamcmd ? ws.steamcmd : "absent")
       } catch { /* ignore */ }
     })()
@@ -689,6 +695,16 @@ function ModsTab() {
       await window.ucSettings?.set?.("nexusApiKey", value.trim() || null)
       setSaved(true)
       window.setTimeout(() => setSaved(false), 1600)
+    } catch { /* ignore */ }
+  }
+
+  // Persist the opt-in Nexus website session cookie; emptying it disables the
+  // native free-download path and falls back to the nxm:// browser flow.
+  const persistSession = async (value: string) => {
+    try {
+      await window.ucSettings?.set?.("nexusSessionCookie", value.trim() || null)
+      setSessionSaved(true)
+      window.setTimeout(() => setSessionSaved(false), 1600)
     } catch { /* ignore */ }
   }
 
@@ -739,6 +755,34 @@ function ModsTab() {
         ) : null}
         <div style={{ marginTop: 10, fontFamily: MONO, fontSize: 10.5, color: "var(--mf-t5)" }}>
           nxm:// “Mod Manager Download” links from the Nexus site open in this app automatically. Free accounts install through those links; Premium accounts download directly.
+        </div>
+      </div>
+
+      <div style={{ padding: "16px 0", borderBottom: "1px solid color-mix(in srgb, var(--mf-t0) 5%, transparent)" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--mf-t1)" }}>Free in-app downloads (advanced, opt-in)</div>
+          <span style={{ padding: "2px 8px", borderRadius: 999, border: "1px solid var(--mf-danger)", color: "var(--mf-danger)", fontFamily: MONO, fontSize: 9, textTransform: "uppercase", letterSpacing: "0.08em" }}>ToS risk</span>
+        </div>
+        <div style={{ fontFamily: MONO, fontSize: 11, color: "var(--mf-danger)", marginTop: 6, lineHeight: 1.5 }}>
+          Replaying your nexusmods.com session to auto-generate free download links is against NexusMods' Terms of Service and can get your account banned. Leave this blank to keep using the sanctioned nxm:// "Mod Manager Download" flow. Premium accounts never need it.
+        </div>
+        <div style={{ fontFamily: MONO, fontSize: 10.5, color: "var(--mf-t4)", marginTop: 8, lineHeight: 1.5 }}>
+          To enable: in your browser open devtools (F12) on nexusmods.com → Application → Cookies → https://www.nexusmods.com, copy the nexusmods_session value and paste it here as name=value (or paste the whole Cookie header). If downloads fail with a Cloudflare error, also include cf_clearance.{sessionSaved ? " (saved)" : ""}
+        </div>
+        <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
+          <input
+            type={sessionRevealed ? "text" : "password"}
+            value={sessionCookie}
+            onChange={(e) => setSessionCookie(e.target.value)}
+            onBlur={() => void persistSession(sessionCookie)}
+            placeholder="nexusmods_session=…"
+            autoComplete="off"
+            spellCheck={false}
+            style={{ flex: 1, height: 38, padding: "0 13px", borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "var(--mf-panel)", color: "var(--mf-t1)", fontFamily: MONO, fontSize: 12, outline: "none" }}
+          />
+          <button type="button" className="mf-ghost" title={sessionRevealed ? "Hide cookie" : "Show cookie"} onClick={() => setSessionRevealed((v) => !v)} style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 38, height: 38, borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "transparent", color: "var(--mf-t3)", cursor: "pointer", flexShrink: 0 }}>
+            {sessionRevealed ? <EyeOff size={14} strokeWidth={1.6} /> : <Eye size={14} strokeWidth={1.6} />}
+          </button>
         </div>
       </div>
 
