@@ -579,7 +579,7 @@ declare global {
       catalog: (offset?: number, limit?: number) => Promise<{ ok: boolean; games: UnifiedSourceGame[]; error?: string }>
       detail: (sources: Array<{ sourceId: string; sourceSlug: string }>) => Promise<{ ok: boolean; game: UnifiedSourceGame | null; error?: string }>
       resolve: (sourceId: string, option: SourceDownloadOption) => Promise<{ ok: boolean; result: SourceResolveResult; error?: string }>
-      steamArt: (appid: number) => Promise<{ ok: boolean; art: { header: string; background: string } }>
+      steamArt: (appid: number, name?: string) => Promise<{ ok: boolean; art: { header: string; background: string; cover?: string } }>
       protondb: (appid: number) => Promise<{ ok: boolean; data: ProtonDbSummary | null }>
       steamMeta: (appid: number) => Promise<{ ok: boolean; meta: SteamMeta }>
       query: (params: SourceQueryParams, reqId?: number) => Promise<SourceQueryResult>

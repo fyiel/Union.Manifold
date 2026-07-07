@@ -510,8 +510,8 @@ pub async fn sources_resolve(_state: State<'_, AppState>, source_id: String, opt
 }
 
 #[tauri::command]
-pub async fn sources_steam_art(appid: u64) -> Result<Value> {
-    let art = steam::steam_art(appid).await;
+pub async fn sources_steam_art(appid: u64, name: Option<String>) -> Result<Value> {
+    let art = steam::steam_art(appid, name.as_deref()).await;
     Ok(json!({ "ok": true, "art": art }))
 }
 
