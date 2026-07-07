@@ -555,19 +555,36 @@ async fn versions_for(
 // ---------------------------------------------------------------------------
 // BepInEx layout transform
 
-/// Locate the effective package root. A package whose files are wrapped in a
-/// single top-level folder that itself holds `BepInEx/` (the BepInExPack
-/// layout) is unwrapped so its contents deploy to the game root.
+/// Thunderstore ships these metadata files at the root of every package zip
+/// beside the real payload; they must be ignored when reading the archive shape.
+fn is_ts_meta(name: &str) -> bool {
+    matches!(
+        name.to_lowercase().as_str(),
+        "manifest.json" | "icon.png" | "readme.md" | "changelog.md" | "license" | "license.md" | "license.txt"
+    )
+}
+
+/// Locate the effective package root. A BepInExPack zip wraps everything in a
+/// single folder (for example `BepInExPack_GTFO/`) that holds a `BepInEx/` tree
+/// next to the doorstop loader, and that folder sits BESIDE Thunderstore's
+/// metadata files. Ignore the metadata when checking for a sole wrapper folder,
+/// otherwise the pack fails to unwrap and its whole tree gets double-nested
+/// under `BepInEx/plugins/<full_name>/`.
 fn bepinex_root(src: &Path) -> PathBuf {
     if src.join("BepInEx").is_dir() {
         return src.to_path_buf();
     }
-    let entries: Vec<PathBuf> = std::fs::read_dir(src)
+    let payload: Vec<PathBuf> = std::fs::read_dir(src)
         .ok()
-        .map(|rd| rd.flatten().map(|e| e.path()).collect())
+        .map(|rd| {
+            rd.flatten()
+                .map(|e| e.path())
+                .filter(|p| !p.file_name().map(|n| is_ts_meta(&n.to_string_lossy())).unwrap_or(false))
+                .collect()
+        })
         .unwrap_or_default();
-    if entries.len() == 1 && entries[0].is_dir() && entries[0].join("BepInEx").is_dir() {
-        return entries[0].clone();
+    if payload.len() == 1 && payload[0].is_dir() && payload[0].join("BepInEx").is_dir() {
+        return payload[0].clone();
     }
     src.to_path_buf()
 }
@@ -962,6 +979,30 @@ mod tests {
         assert_eq!(std::fs::read_to_string(dst.join("winhttp.dll")).unwrap(), "doorstop");
         // The wrapper folder itself must not survive into the stage.
         assert!(!dst.join("BepInExPack").exists());
+    }
+
+    #[test]
+    fn bepinex_transform_unwraps_pack_beside_metadata() {
+        let tmp = tempdir().unwrap();
+        let src = tmp.path().join("src");
+        let dst = tmp.path().join("dst");
+        // GTFO's BepInExPack ships the wrapper folder BESIDE Thunderstore's
+        // metadata files, which previously defeated the single-folder unwrap and
+        // double-nested the whole tree under BepInEx/plugins/<full_name>/.
+        write_file(&src.join("BepInExPack_GTFO/BepInEx/core/0Harmony.dll"), "core");
+        write_file(&src.join("BepInExPack_GTFO/winhttp.dll"), "doorstop");
+        write_file(&src.join("BepInExPack_GTFO/doorstop_config.ini"), "cfg");
+        write_file(&src.join("manifest.json"), "{}");
+        write_file(&src.join("icon.png"), "png");
+        write_file(&src.join("README.md"), "readme");
+
+        apply_bepinex_layout(&src, &dst, "BepInEx-BepInExPack_GTFO").unwrap();
+
+        assert_eq!(std::fs::read_to_string(dst.join("BepInEx/core/0Harmony.dll")).unwrap(), "core");
+        assert_eq!(std::fs::read_to_string(dst.join("winhttp.dll")).unwrap(), "doorstop");
+        // No double-nesting: the old bug produced BepInEx/plugins/<full>/BepInExPack_GTFO/.
+        assert!(!dst.join("BepInEx/plugins/BepInEx-BepInExPack_GTFO").exists());
+        assert!(!dst.join("BepInExPack_GTFO").exists());
     }
 
     fn mk_pkg(

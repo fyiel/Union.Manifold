@@ -4,6 +4,22 @@ All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 The app shows its version as 1.0.0b (beta). 1.0.1 is the first packaged release.
 
+## 2.13.3
+
+### Fixed
+
+- mods installed on a repack that nests the real game one folder deep (the
+  common `GTFO/GTFO/` layout) deployed into the archive root instead of the
+  game folder, so the game never saw them. the deploy location now auto-detects
+  the actual game directory (the one holding the exe, the Unity data folder, or
+  BepInEx) and copies mods there. the manual "deploy to" field still overrides
+  it when you need a custom path. this covers Nexus, Workshop and Thunderstore
+- Thunderstore BepInEx packs (BepInExPack_GTFO and friends) were double-nested
+  under BepInEx/plugins/<name>/ because the pack's wrapper folder sits beside
+  the package's manifest.json and icon, which defeated the unwrap. we now ignore
+  those metadata files when detecting the wrapper, so the pack deploys its
+  BepInEx tree and doorstop loader to the game root as intended
+
 ## 2.13.2
 
 ### Fixed
