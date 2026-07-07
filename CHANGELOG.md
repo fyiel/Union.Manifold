@@ -4,6 +4,22 @@ All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 The app shows its version as 1.0.0b (beta). 1.0.1 is the first packaged release.
 
+## 2.15.0
+
+### Added
+
+- Settings > General: "Close the app when a game launches" quits Union.Manifold
+  a few seconds after a game starts, to free memory and CPU. the game runs in
+  its own detached scope, so closing the launcher never takes it down
+
+### Fixed
+
+- library covers no longer go blank for Steam demos and other titles whose
+  library_600x900 art 404s: the card now walks the full Steam art ladder
+  (portrait, hero, header, capsule) and, as a last resort, asks Steam for the
+  title's authoritative store art, so it shows the header capsule instead of an
+  empty tile
+
 ## 2.14.0
 
 Free NexusMods downloads can go through your own self-hosted Slipgate resolver.

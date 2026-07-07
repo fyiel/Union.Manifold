@@ -8,7 +8,7 @@ import { useDownloadsSelector } from "@/context/downloads-context"
 import { useTabVisible } from "@/context/tab-visibility"
 import { hasInstalledVersionUpdate, proxyImageUrl } from "@/lib/utils"
 import { rememberGames, rememberGameAs, getRememberedGame, resolveInstalledGame, getDownloadArt, hydrateDownloadArt, steamCoverUrl, forgetRememberedGame } from "@/lib/sources"
-import { MONO, COVER_LINES, gbLabel, SearchIcon, CenterState } from "@/app/manifold/ui"
+import { MONO, COVER_LINES, gbLabel, SearchIcon, CenterState, SmartImage, gameImageCandidates } from "@/app/manifold/ui"
 import { GameMenu, LaunchOptionsDialog, EditDetailsDialog, LinuxConfigDialog, AddGamesDialog, SteamIdDialog, type MenuGame } from "@/app/manifold/library-overlays"
 
 const IS_LINUX = typeof navigator !== "undefined" && /linux/i.test(navigator.userAgent)
@@ -32,8 +32,8 @@ type LibGame = {
   collections: string[]
   lastPlayedAt?: number
   steamAppId?: number
-  /** Shown if the primary cover 404s (e.g. a Steam capsule that doesn't exist). */
-  imageFallback?: string
+  /** Ordered, proxied cover candidates; SmartImage walks them on 404. */
+  covers?: string[]
   installType?: string
 }
 
@@ -77,16 +77,18 @@ function entryToLib(entry: any, meta: Record<string, LibraryGameMeta>): LibGame 
   const stored = m.image && m.image !== "./fallbacks/game-card-3x4.svg" ? m.image : undefined
   const custom = stored && String(stored).startsWith("uc-custom://") ? stored : undefined
   const steamCover = steamAppId ? steamCoverUrl(steamAppId) : undefined
-  // A custom cover always wins; otherwise Steam's official capsule leads (the
-  // source art is often a wrong/watermarked scrape) with the source image as
-  // the fallback when the capsule 404s.
+  // A custom cover always wins. For the rendered card we walk the full Steam art
+  // ladder (portrait -> hero -> header -> capsule) plus the stored scrape, so a
+  // demo or newer title whose library_600x900 404s still shows its header capsule
+  // instead of a blank tile. `image` stays the raw lead for the bg check, detail
+  // seeding, and edit-dialog reuse.
   const image = custom || steamCover || stored
-  const imageFallback = custom ? undefined : steamCover ? stored : undefined
+  const covers = gameImageCandidates({ image: custom || stored, steamAppId }, { steamFirst: true })
   return {
     appid,
     name: m.name || entry?.name || appid,
     image,
-    imageFallback,
+    covers,
     sizeBytes: typeof m.sizeBytes === "number" ? m.sizeBytes : undefined,
     sizeText: m.size || undefined,
     version: m.version || undefined,
@@ -688,7 +690,7 @@ const LibCard = memo(function LibCard({ game: g, hasUpdate, onOpen, onContextMen
   return (
     <div onClick={() => onOpen(g)} onContextMenu={(e) => { e.preventDefault(); onContextMenu(g, e.clientX, e.clientY) }} className="mf-card" style={{ display: "flex", flexDirection: "column", border: "1px solid color-mix(in srgb, var(--mf-t0) 7%, transparent)", borderRadius: 10, overflow: "hidden", background: "var(--mf-panel)", cursor: "pointer", contentVisibility: "auto", containIntrinsicSize: "auto 300px" }}>
       <div style={{ position: "relative", aspectRatio: "3 / 4", background: g.image ? "#0f0f0f" : COVER_LINES, display: "flex", alignItems: "flex-end", padding: 12 }}>
-        {g.image && <img src={proxyImageUrl(g.image)} alt={g.name} loading="lazy" onError={(e) => { const el = e.currentTarget; if (g.imageFallback && el.dataset.fb !== "1") { el.dataset.fb = "1"; el.src = proxyImageUrl(g.imageFallback); return } el.style.display = "none" }} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />}
+        {g.image && <SmartImage candidates={g.covers || []} steamAppId={g.steamAppId} alt={g.name} lazy style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />}
         {hasUpdate && (
           <span title="update available" style={{ position: "absolute", top: 10, right: 10, padding: "3px 8px", borderRadius: 99, background: "rgba(0,0,0,0.6)", border: "1px solid var(--mf-line-2)", fontFamily: MONO, fontSize: 9, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--mf-t1)" }}>update</span>
         )}
@@ -715,7 +717,7 @@ const LibRow = memo(function LibRow({ game: g, hasUpdate, onOpen, onContextMenu,
   return (
     <div onClick={() => onOpen(g)} onContextMenu={(e) => { e.preventDefault(); onContextMenu(g, e.clientX, e.clientY) }} className="mf-listrow" style={{ display: "grid", gridTemplateColumns: "44px minmax(0,1fr) 150px 120px 140px", gap: 14, alignItems: "center", padding: "8px 14px", borderRadius: 8, cursor: "pointer", contentVisibility: "auto", containIntrinsicSize: "auto 64px" }}>
       <div style={{ width: 40, height: 50, borderRadius: 5, overflow: "hidden", background: g.image ? "#0f0f0f" : COVER_LINES }}>
-        {g.image && <img src={proxyImageUrl(g.image)} alt="" loading="lazy" decoding="async" onError={(e) => { const el = e.currentTarget; if (g.imageFallback && el.dataset.fb !== "1") { el.dataset.fb = "1"; el.src = proxyImageUrl(g.imageFallback); return } el.style.display = "none" }} style={{ width: "100%", height: "100%", objectFit: "cover" }} />}
+        {g.image && <SmartImage candidates={g.covers || []} steamAppId={g.steamAppId} lazy style={{ width: "100%", height: "100%", objectFit: "cover" }} />}
       </div>
       <div style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 9 }}>
         <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--mf-t1)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{g.name}</span>
