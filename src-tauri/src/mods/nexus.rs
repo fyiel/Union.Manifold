@@ -426,11 +426,28 @@ async fn native_free_download(
     for (n, v) in &pairs {
         jar.set(WWW_HOST, n, v);
     }
+    // cf_clearance is bound to the exact User-Agent that solved the Cloudflare
+    // challenge. Our client defaults to a Windows Chrome UA, so a clearance
+    // minted by any other browser (Chrome/Firefox on Linux, a different Chrome
+    // build, etc.) is rejected however fresh it is. When the user pastes their
+    // browser's User-Agent, send it on these session requests so the imported
+    // clearance validates.
+    let session_ua = state
+        .settings
+        .get_string("nexusUserAgent")
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    let with_ua = |mut h: HashMap<String, String>| {
+        if let Some(ua) = &session_ua {
+            h.insert("User-Agent".to_string(), ua.clone());
+        }
+        h
+    };
     let referer = format!("{}?tab=files", mod_page_url(domain, mod_id));
     let page = http::fetch(
         &referer,
         &http::FetchOpts {
-            headers: HashMap::from([("Accept".to_string(), "text/html".to_string())]),
+            headers: with_ua(HashMap::from([("Accept".to_string(), "text/html".to_string())])),
             jar: Some(jar.clone()),
             ..Default::default()
         },
@@ -441,7 +458,7 @@ async fn native_free_download(
     let page_body = page.text().await.unwrap_or_default();
     if is_cloudflare_challenge(page_status, &page_body) {
         return Ok(FreeDownload::NeedsSession(Some(
-            "Cloudflare challenge blocked the request. Copy a fresh cf_clearance cookie from your browser".to_string(),
+            "Cloudflare blocked the request. A cf_clearance cookie only works from the same browser AND the same User-Agent that made it. Copy a fresh cf_clearance and paste your browser's User-Agent under Settings > Mods too".to_string(),
         )));
     }
 
@@ -457,6 +474,7 @@ async fn native_free_download(
         "application/json, text/javascript, */*; q=0.01".to_string(),
     );
     headers.insert("Referer".to_string(), referer);
+    let headers = with_ua(headers);
     let resp = http::fetch(
         GENERATE_URL,
         &http::FetchOpts {
@@ -473,7 +491,7 @@ async fn native_free_download(
     let body = resp.text().await.unwrap_or_default();
     if is_cloudflare_challenge(status, &body) {
         return Ok(FreeDownload::NeedsSession(Some(
-            "Cloudflare challenge blocked the request. Copy a fresh cf_clearance cookie from your browser".to_string(),
+            "Cloudflare blocked the request. A cf_clearance cookie only works from the same browser AND the same User-Agent that made it. Copy a fresh cf_clearance and paste your browser's User-Agent under Settings > Mods too".to_string(),
         )));
     }
     if status == 401 || status == 403 {
