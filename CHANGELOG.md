@@ -4,6 +4,15 @@ All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 The app shows its version as 1.0.0b (beta). 1.0.1 is the first packaged release.
 
+## 2.13.1
+
+### Fixed
+
+- nexus browsing was rejected by the api ("Variable $c of type Int! was
+  provided invalid value"): the browse query declared short variable names
+  while the variables object sent full ones, so nothing ever bound. the names
+  now match and a test pins the query and its variables together
+
 ## 2.13.0
 
 Browse filters everywhere and Thunderstore as a third mod source.
