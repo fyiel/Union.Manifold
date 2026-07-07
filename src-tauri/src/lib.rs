@@ -16,6 +16,7 @@ mod notify;
 mod paths;
 mod settings;
 mod shortcuts;
+mod slipgate;
 mod sources;
 mod state;
 mod storage;
@@ -114,6 +115,7 @@ pub fn run() {
             sources::metacache::init(paths.data_dir.join("metadata"));
             logging::init(paths.log_file());
             let settings = Arc::new(SettingsStore::load(paths.settings_file()));
+            slipgate::init(settings.clone());
             let cacert = app.path().resource_dir().ok().map(|d| d.join("cacert.pem"));
             let aria2 = Arc::new(Aria2Manager::new(cacert));
             let disabled_sources: Vec<String> = settings

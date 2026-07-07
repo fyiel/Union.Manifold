@@ -806,7 +806,7 @@ function ModsTab() {
       <div style={{ padding: "16px 0", borderBottom: "1px solid color-mix(in srgb, var(--mf-t0) 5%, transparent)" }}>
         <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--mf-t1)" }}>Slipgate resolver (self-hosted)</div>
         <div style={{ fontFamily: MONO, fontSize: 11, color: "var(--mf-t4)", marginTop: 3, lineHeight: 1.5 }}>
-          Point this at your own Slipgate instance to make free NexusMods downloads work in-app: it clears Cloudflare with a real browser and returns a direct link. It uses your nexusmods_session cookie (below) to log in. Leave blank to use the “Mod Manager Download” browser flow instead.
+          Point this at your own Slipgate instance to resolve captcha- and browser-gated downloads in-app: free NexusMods files plus file hosts like filecrypt, vikingfile, megadb, 1fichier, qiwi and akirabox. It clears the wall with a real browser and returns a direct link; Nexus downloads use your nexusmods_session cookie (below) to log in. Leave blank to open those links in the browser instead.
         </div>
         <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
           <input

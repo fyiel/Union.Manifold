@@ -4,6 +4,27 @@ All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 The app shows its version as 1.0.0b (beta). 1.0.1 is the first packaged release.
 
+## 2.16.0
+
+Captcha- and browser-gated file hosts resolve in-app through Slipgate.
+
+### Added
+
+- the Slipgate resolver now covers file hosts, not just NexusMods: megadb,
+  filecrypt, vikingfile (incl. vik1ngfile.site), 1fichier, akirabox, qiwi,
+  fileq, mocha, zerofs and fileditch resolve to direct links through your
+  instance's recipes and feed straight into the aria2 pipeline. without a
+  Slipgate url these hosts stay browser-only and the download panel says which
+  wall (captcha, wait timer, js-gated page) is in the way and where to set it up
+- mirrors on those hosts now count as resolvable in the download panel when a
+  Slipgate url is configured, instead of always kicking out to the browser
+
+### Changed
+
+- mega.nz links now say why they can never resolve in-app (the transfer is
+  AES-encrypted end to end, a direct url is useless without the official
+  client's decryption) instead of a generic "unsupported host"
+
 ## 2.15.1
 
 ### Fixed
