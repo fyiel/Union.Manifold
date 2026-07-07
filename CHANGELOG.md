@@ -4,6 +4,21 @@ All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 The app shows its version as 1.0.0b (beta). 1.0.1 is the first packaged release.
 
+## 2.13.2
+
+### Fixed
+
+- modded games with a BepInEx repack (GTFO and other IL2CPP titles) hung
+  forever on the loading screen under Proton. the game ships its loader as a
+  proxy winhttp.dll (BepInEx Doorstop) and, for these repacks, the offline
+  server crack is itself a BepInEx plugin, so if the loader never runs the game
+  waits on a server it can never reach. we only forced proxy dlls to load
+  native when an Online-Fix marker file was present, and that list left out
+  winhttp entirely. we now force every known loader/proxy dll (winhttp, winmm
+  and the usual injector names) that actually sits next to the game exe to load
+  native, so BepInEx and ASI-loader repacks boot regardless of how they were
+  packaged
+
 ## 2.13.1
 
 ### Fixed

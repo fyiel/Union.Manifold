@@ -65,16 +65,23 @@ fn install_path_for(exe_path: &str) -> String {
     }
 }
 
-fn onlinefix_overrides(exe_path: &str) -> Option<String> {
+// Mod loaders and repack cracks ship a proxy DLL beside the game exe that Wine
+// would otherwise satisfy with its own builtin, so the shipped loader never runs
+// and the game boots unmodded. For BepInEx repacks (GTFO and other IL2CPP
+// titles) that is fatal rather than cosmetic: the offline-server crack is itself
+// a BepInEx plugin, so a loader that never initializes leaves the game hanging
+// forever on the loading screen waiting for a server it can no longer reach.
+// Force every known proxy/injector DLL physically present next to the exe to
+// load native first. `n,b` still falls back to Wine's builtin when the shipped
+// file fails, and games do not ship their own copy of these system DLLs beside
+// the exe, so applying this whenever such a file exists is safe.
+fn proxy_dll_overrides(exe_path: &str) -> Option<String> {
     let dir = std::path::Path::new(exe_path).parent()?;
-    let is_onlinefix = dir.join("OnlineFix.ini").is_file()
-        || dir.join("OnlineFix64.dll").is_file()
-        || dir.join("dlllist.txt").is_file();
-    if !is_onlinefix {
-        return None;
-    }
-    let proxies = ["winmm", "dinput8", "dsound", "version", "dbghelp", "wininet", "xinput1_3"];
-    let found: Vec<String> = proxies
+    // winhttp is BepInEx 6's Doorstop; winmm/version/dinput8 are the Ultimate
+    // ASI Loader and Online-Fix proxies; the rest are common injector stems.
+    const PROXIES: &[&str] =
+        &["winhttp", "winmm", "version", "dinput8", "dsound", "dbghelp", "wininet", "xinput1_3"];
+    let found: Vec<String> = PROXIES
         .iter()
         .filter(|p| dir.join(format!("{p}.dll")).is_file())
         .map(|p| format!("{p}=n,b"))
@@ -219,7 +226,7 @@ pub(crate) fn plan_launch_with(
     }
 
     if !envs.iter().any(|(k, _)| k == "WINEDLLOVERRIDES") {
-        if let Some(overrides) = onlinefix_overrides(exe_path) {
+        if let Some(overrides) = proxy_dll_overrides(exe_path) {
             envs.push(("WINEDLLOVERRIDES".to_string(), overrides));
         }
     }
@@ -395,4 +402,48 @@ pub fn linux_detect_proton() -> Value {
         }
     }
     json!({ "ok": true, "versions": versions })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn touch(dir: &std::path::Path, name: &str) {
+        std::fs::write(dir.join(name), []).unwrap();
+    }
+
+    // GTFO's AnkerGames/SteamRiP repack ships BepInEx (winhttp Doorstop) and the
+    // Ultimate ASI Loader (winmm) beside the exe with no OnlineFix marker file.
+    // Both must be forced native or BepInEx never loads, its local DropServer
+    // plugin never loads, and the game hangs on the loading screen.
+    #[test]
+    fn bepinex_asi_repack_forces_winhttp_and_winmm_native() {
+        let tmp = tempfile::tempdir().unwrap();
+        touch(tmp.path(), "GTFO.exe");
+        touch(tmp.path(), "winhttp.dll");
+        touch(tmp.path(), "winmm.dll");
+        let exe = tmp.path().join("GTFO.exe");
+        let ov = proxy_dll_overrides(exe.to_str().unwrap()).expect("expected overrides");
+        assert!(ov.split(';').any(|e| e == "winhttp=n,b"), "winhttp missing: {ov}");
+        assert!(ov.split(';').any(|e| e == "winmm=n,b"), "winmm missing: {ov}");
+    }
+
+    #[test]
+    fn no_proxy_dll_beside_exe_yields_no_override() {
+        let tmp = tempfile::tempdir().unwrap();
+        touch(tmp.path(), "Game.exe");
+        let exe = tmp.path().join("Game.exe");
+        assert!(proxy_dll_overrides(exe.to_str().unwrap()).is_none());
+    }
+
+    // Only the proxy DLLs that actually exist are listed, so an unmodded game
+    // that happens to ship one loader gets exactly that one override.
+    #[test]
+    fn override_lists_only_present_dlls() {
+        let tmp = tempfile::tempdir().unwrap();
+        touch(tmp.path(), "g.exe");
+        touch(tmp.path(), "version.dll");
+        let exe = tmp.path().join("g.exe");
+        assert_eq!(proxy_dll_overrides(exe.to_str().unwrap()).unwrap(), "version=n,b");
+    }
 }
