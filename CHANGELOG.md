@@ -4,6 +4,26 @@ All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 The app shows its version as 1.0.0b (beta). 1.0.1 is the first packaged release.
 
+## 2.13.4
+
+### Fixed
+
+- free in-app Nexus downloads always failed with a Cloudflare error even with a
+  fresh cf_clearance cookie. cf_clearance is bound to the exact browser
+  User-Agent that solved the challenge, but the app sent a hardcoded Windows
+  Chrome User-Agent, so any clearance from a different browser (Chrome or
+  Firefox on Linux, a different Chrome build, and so on) was rejected. there is
+  now a "Browser User-Agent" field under Settings > Mods: paste your browser's
+  navigator.userAgent alongside the cookies and the app sends it on the session
+  requests so the clearance validates. the Cloudflare error message now spells
+  out that the User-Agent must match too
+
+### Notes
+
+- this does not guarantee success: if Cloudflare also fingerprints the TLS
+  client (JA3), a plain HTTP client can still be blocked, in which case the
+  sanctioned nxm:// "Mod Manager Download" flow remains the reliable route
+
 ## 2.13.3
 
 ### Fixed

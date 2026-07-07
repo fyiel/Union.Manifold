@@ -670,19 +670,23 @@ function ModsTab() {
   const [sessionCookie, setSessionCookie] = useState("")
   const [sessionRevealed, setSessionRevealed] = useState(false)
   const [sessionSaved, setSessionSaved] = useState(false)
+  const [sessionUa, setSessionUa] = useState("")
+  const [uaSaved, setUaSaved] = useState(false)
 
   useEffect(() => {
     let alive = true
     void (async () => {
       try {
-        const [k, sc, ws] = await Promise.all([
+        const [k, sc, ua, ws] = await Promise.all([
           window.ucSettings?.get?.("nexusApiKey"),
           window.ucSettings?.get?.("nexusSessionCookie"),
+          window.ucSettings?.get?.("nexusUserAgent"),
           window.ucMods?.workshopStatus?.(),
         ])
         if (!alive) return
         if (typeof k === "string") setApiKey(k)
         if (typeof sc === "string") setSessionCookie(sc)
+        if (typeof ua === "string") setSessionUa(ua)
         setSteamcmd(ws?.ok && ws.steamcmd ? ws.steamcmd : "absent")
       } catch { /* ignore */ }
     })()
@@ -705,6 +709,17 @@ function ModsTab() {
       await window.ucSettings?.set?.("nexusSessionCookie", value.trim() || null)
       setSessionSaved(true)
       window.setTimeout(() => setSessionSaved(false), 1600)
+    } catch { /* ignore */ }
+  }
+
+  // The browser User-Agent paired with the session cookies. cf_clearance is
+  // bound to the exact User-Agent that solved the Cloudflare challenge, so this
+  // must match the browser the cookies came from or every attempt is rejected.
+  const persistUa = async (value: string) => {
+    try {
+      await window.ucSettings?.set?.("nexusUserAgent", value.trim() || null)
+      setUaSaved(true)
+      window.setTimeout(() => setUaSaved(false), 1600)
     } catch { /* ignore */ }
   }
 
@@ -784,6 +799,18 @@ function ModsTab() {
             {sessionRevealed ? <EyeOff size={14} strokeWidth={1.6} /> : <Eye size={14} strokeWidth={1.6} />}
           </button>
         </div>
+        <div style={{ fontFamily: MONO, fontSize: 10.5, color: "var(--mf-t4)", marginTop: 12, lineHeight: 1.5 }}>
+          Browser User-Agent (required when using cf_clearance): in the SAME browser's devtools console run <code>navigator.userAgent</code> and paste the result here. A cf_clearance cookie only validates against the exact User-Agent that created it.{uaSaved ? " (saved)" : ""}
+        </div>
+        <input
+          value={sessionUa}
+          onChange={(e) => setSessionUa(e.target.value)}
+          onBlur={() => void persistUa(sessionUa)}
+          placeholder="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 …"
+          autoComplete="off"
+          spellCheck={false}
+          style={{ width: "100%", height: 38, padding: "0 13px", marginTop: 12, borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "var(--mf-panel)", color: "var(--mf-t1)", fontFamily: MONO, fontSize: 12, outline: "none", boxSizing: "border-box" }}
+        />
       </div>
 
       <Row title="Workshop downloader" desc="steamcmd fetches Workshop items — it installs itself automatically on your first Workshop mod install" last>
