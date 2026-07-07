@@ -1,5 +1,6 @@
 pub mod buzzheavier;
 pub mod datanodes;
+pub mod gate;
 #[cfg(test)]
 mod installtest;
 #[cfg(test)]
@@ -13,23 +14,6 @@ pub mod rootz;
 
 use crate::sources::schema::DownloadOption;
 use crate::sources::ResolveResult;
-use once_cell::sync::Lazy;
-use std::collections::HashMap;
-
-static KNOWN_UNRESOLVABLE: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| {
-    let mut m = HashMap::new();
-    m.insert("megadb.net", "megadb (resolver pending)");
-    m.insert("filecrypt.cc", "filecrypt (captcha \u{2014} browser only)");
-    m.insert("www.filecrypt.cc", "filecrypt (captcha \u{2014} browser only)");
-    m.insert("fileq.net", "fileq (browser only)");
-    m.insert("mocha.my", "mocha (browser only)");
-    m.insert("zerofs.link", "zerofs (browser only)");
-    m.insert("fileditchfiles.me", "fileditch (browser only)");
-    m.insert("vikingfile.com", "vikingfile (captcha \u{2014} browser only)");
-    m.insert("www.vikingfile.com", "vikingfile (captcha \u{2014} browser only)");
-    m.insert("vik1ngfile.site", "vikingfile (captcha \u{2014} browser only)");
-    m
-});
 
 fn hostname_of(url: &str) -> String {
     url::Url::parse(url)
@@ -63,6 +47,9 @@ pub fn detect_host_type(url: &str) -> String {
     if rootz::matches(url) {
         return "rootz".to_string();
     }
+    if let Some(t) = gate::host_type(url) {
+        return t.to_string();
+    }
     let host = hostname_of(url);
     let base = host.strip_prefix("www.").unwrap_or(&host);
     let label = base.split('.').next().unwrap_or("");
@@ -82,6 +69,7 @@ pub fn is_resolvable(url: &str) -> bool {
         || fuckingfast::matches(url)
         || mediafire::matches(url)
         || rootz::matches(url)
+        || (gate::matches(url) && crate::slipgate::cfg().is_some())
 }
 
 pub async fn resolve_url(option: &DownloadOption) -> ResolveResult {
@@ -115,12 +103,19 @@ pub async fn resolve_url(option: &DownloadOption) -> ResolveResult {
     if rootz::matches(url) {
         return rootz::resolve(url).await;
     }
+    if gate::matches(url) {
+        return gate::resolve(url).await;
+    }
 
     let host = hostname_of(url);
-    let reason = KNOWN_UNRESOLVABLE
-        .get(host.as_str())
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| format!("unsupported host: {host}"));
+    let base = host.strip_prefix("www.").unwrap_or(&host);
+    // mega serves AES-encrypted bytes; a direct url is useless without the
+    // client-side decryption the official apps do. Browser only, always.
+    let reason = if base == "mega.nz" {
+        "mega (encrypted transfer \u{2014} browser only)".to_string()
+    } else {
+        format!("unsupported host: {host}")
+    };
 
     ResolveResult {
         resolvable: false,
