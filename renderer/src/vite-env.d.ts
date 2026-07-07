@@ -281,7 +281,7 @@ declare global {
   /** One installed mod in a game's mods.json manifest. */
   type ModEntry = {
     id: string
-    provider: "nexus" | "workshop"
+    provider: "nexus" | "workshop" | "thunderstore"
     remoteId: string
     fileId: number | null
     name: string
@@ -306,14 +306,20 @@ declare global {
     nexusDomainAuto?: boolean
     steamAppid?: number | null
     workshopSupported?: boolean
+    /** Thunderstore community identifier bound to this game (null when unmatched). */
+    thunderstoreCommunity?: string | null
+    /** True when the Thunderstore community came from auto title-matching. */
+    thunderstoreCommunityAuto?: boolean
+    /** True once a Thunderstore community is bound or detected for this game. */
+    thunderstoreSupported?: boolean
     deployTarget?: string
     /** Deploy journal is non-empty. */
     deployed?: boolean
     mods?: ModEntry[]
   }
 
-  /** One NexusMods browse/search result. */
-  type NexusBrowseMod = {
+  /** One browse/search result shared by every mod provider. */
+  type BrowseMod = {
     remoteId: string
     name: string
     summary?: string | null
@@ -323,6 +329,7 @@ declare global {
     endorsements?: number
     version?: string
     updatedAt?: number
+    sizeBytes?: number
     pageUrl?: string
     installed?: boolean
   }
@@ -346,6 +353,22 @@ declare global {
     author?: string
     picture?: string | null
     pageUrl?: string
+  }
+
+  /** One Thunderstore community for the override picker. */
+  type ThunderstoreCommunity = {
+    identifier: string
+    name: string
+  }
+
+  /** One downloadable version of a Thunderstore package. */
+  type ThunderstoreVersion = {
+    version: string
+    downloads?: number
+    sizeBytes?: number
+    uploadedAt?: number
+    dependencyCount?: number
+    description?: string
   }
 
   type ModInstallProgress = {
@@ -568,10 +591,10 @@ declare global {
       size: () => Promise<{ ok: boolean; bytes: number; error?: string }>
       clear: () => Promise<{ ok: boolean; freed: number; error?: string }>
     }
-    /** Per-game mod management (NexusMods + Steam Workshop). */
+    /** Per-game mod management (NexusMods + Steam Workshop + Thunderstore). */
     ucMods?: {
       gameGet?: (appid: string) => Promise<ModGameState>
-      gameSet?: (appid: string, config: { nexusDomain?: string | null; deployTarget?: string }) => Promise<{ ok: boolean; error?: string }>
+      gameSet?: (appid: string, config: { nexusDomain?: string | null; deployTarget?: string; thunderstoreCommunity?: string | null }) => Promise<{ ok: boolean; error?: string }>
       toggle?: (appid: string, modId: string, enabled: boolean) => Promise<{ ok: boolean; error?: string }>
       reorder?: (appid: string, orderedIds: string[]) => Promise<{ ok: boolean; error?: string }>
       uninstall?: (appid: string, modId: string) => Promise<{ ok: boolean; error?: string }>
@@ -579,14 +602,18 @@ declare global {
       undeploy?: (appid: string) => Promise<{ ok: boolean; error?: string }>
       openFolder?: (appid: string) => Promise<{ ok: boolean; error?: string }>
       nexusValidate?: () => Promise<{ ok: boolean; user?: { name: string; premium: boolean; profileUrl?: string }; error?: string }>
-      nexusSearch?: (domain: string, query: string, page: number) => Promise<{ ok: boolean; mods?: NexusBrowseMod[]; hasMore?: boolean; error?: string }>
-      nexusBrowse?: (domain: string, category: string) => Promise<{ ok: boolean; mods?: NexusBrowseMod[]; hasMore?: boolean; error?: string }>
+      nexusSearch?: (domain: string, query: string, page: number) => Promise<{ ok: boolean; mods?: BrowseMod[]; hasMore?: boolean; error?: string }>
+      nexusBrowse?: (domain: string, sort: string, order: string, period: string, offset: number) => Promise<{ ok: boolean; mods?: BrowseMod[]; hasMore?: boolean; total?: number; offset?: number; error?: string }>
       nexusModFiles?: (domain: string, modId: string) => Promise<{ ok: boolean; files?: NexusModFile[]; error?: string }>
       nexusInstall?: (appid: string, domain: string, modId: string, fileId: number) => Promise<{ ok: boolean; started?: boolean; needsNxm?: boolean; needsSession?: boolean; sessionError?: string; modPageUrl?: string; error?: string }>
-      workshopBrowse?: (steamAppid: number, sort: string, page: number, query: string) => Promise<{ ok: boolean; items?: WorkshopBrowseItem[]; hasMore?: boolean; error?: string }>
+      workshopBrowse?: (steamAppid: number, sort: string, period: string, page: number, query: string) => Promise<{ ok: boolean; items?: WorkshopBrowseItem[]; hasMore?: boolean; error?: string }>
       workshopDetails?: (ids: string[]) => Promise<{ ok: boolean; items?: Array<{ remoteId: string; name: string; description?: string; sizeBytes?: number; updatedAt?: number; previewUrl?: string; subscriptions?: number }>; error?: string }>
       workshopInstall?: (appid: string, steamAppid: number, publishedFileId: string) => Promise<{ ok: boolean; started?: boolean; error?: string }>
       workshopStatus?: () => Promise<{ ok: boolean; steamcmd?: "absent" | "bootstrapping" | "ready"; error?: string }>
+      thunderstoreCommunities?: () => Promise<{ ok: boolean; communities?: ThunderstoreCommunity[]; error?: string }>
+      thunderstoreBrowse?: (community: string, sort: string, period: string, page: number, query: string) => Promise<{ ok: boolean; mods?: BrowseMod[]; hasMore?: boolean; error?: string }>
+      thunderstoreVersions?: (community: string, fullName: string) => Promise<{ ok: boolean; versions?: ThunderstoreVersion[]; error?: string }>
+      thunderstoreInstall?: (appid: string, community: string, fullName: string, version: string) => Promise<{ ok: boolean; started?: boolean; error?: string }>
       onInstallProgress?: (callback: (data: ModInstallProgress) => void) => () => void
       onChanged?: (callback: (data: { appid: string }) => void) => () => void
       onNxmUnmatched?: (callback: (data: { domain: string; modId: string }) => void) => () => void
