@@ -121,7 +121,7 @@ fn emit_status(app: &AppHandle, download_id: &str, appid: &str, game_name: &Opti
     .ok();
 }
 
-fn dir_size(dir: &Path) -> u64 {
+pub(crate) fn dir_size(dir: &Path) -> u64 {
     walkdir::WalkDir::new(dir)
         .into_iter()
         .flatten()
@@ -150,7 +150,7 @@ fn last_percent(s: &str) -> Option<u8> {
     out
 }
 
-fn which_extractor() -> Option<String> {
+pub(crate) fn which_extractor() -> Option<String> {
     let path = std::env::var("PATH").ok()?;
     let sep = if cfg!(windows) { ';' } else { ':' };
     for name in ["bsdtar", "tar"] {
@@ -165,7 +165,7 @@ fn which_extractor() -> Option<String> {
     None
 }
 
-async fn run_libarchive(bin: &str, archive: &Path, out_dir: &Path) -> Result<()> {
+pub(crate) async fn run_libarchive(bin: &str, archive: &Path, out_dir: &Path) -> Result<()> {
     std::fs::create_dir_all(out_dir).ok();
     let mut cmd = tokio::process::Command::new(bin);
     cmd.arg("-x")

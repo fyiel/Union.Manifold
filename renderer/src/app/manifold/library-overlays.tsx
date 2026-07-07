@@ -1,7 +1,7 @@
 import { createPortal } from "react-dom"
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react"
 import {
-  Play, Settings, FolderOpen, Terminal, SquareTerminal, Pencil, RefreshCw, Heart, Trash2,
+  Play, Settings, FolderOpen, Terminal, SquareTerminal, Pencil, Puzzle, RefreshCw, Heart, Trash2,
   X, Check, ChevronDown, Hash, Image as ImageIcon,
 } from "lucide-react"
 import { MONO } from "@/app/manifold/ui"
@@ -52,6 +52,8 @@ type MenuHandlers = {
   onDelete: () => void
   /** Imported entries only: override the Steam appid driving art/metadata. */
   onSetSteamId?: () => void
+  /** Installed games only: opens the per-game mod manager (Nexus / Workshop). */
+  onMods?: () => void
 }
 
 const MENU_WIDTH = 250
@@ -101,6 +103,7 @@ export function GameMenu({ game, anchor, handlers, onClose }: { game: MenuGame; 
         <div style={{ height: 1, background: "color-mix(in srgb, var(--mf-t0) 6%, transparent)", margin: "0 6px 5px" }} />
 
         <MenuRow icon={FolderOpen} label="Open files" onClick={run(handlers.onOpenFiles)} />
+        {handlers.onMods ? <MenuRow icon={Puzzle} label="Mods" onClick={run(handlers.onMods)} /> : null}
         <MenuRow icon={Settings} label="Set executable" onClick={run(handlers.onSetExecutable)} />
         {game.imported && handlers.onSetSteamId ? <MenuRow icon={Hash} label="Set Steam App ID" onClick={run(handlers.onSetSteamId)} /> : null}
         {handlers.isLinux ? <MenuRow icon={Terminal} label="Linux / VR config" onClick={run(handlers.onLinuxConfig)} /> : null}

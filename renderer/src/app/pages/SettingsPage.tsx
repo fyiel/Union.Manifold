@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
-import { Terminal, FolderOpen, Palette, Library as LibraryIcon, Plus, X, Pencil } from "lucide-react"
+import { Terminal, FolderOpen, Palette, Library as LibraryIcon, Plus, X, Pencil, Puzzle, Eye, EyeOff } from "lucide-react"
 import { PRESET_THEMES } from "@/lib/themes/presets"
 import type { ThemeDef } from "@/lib/themes/types"
 import { useActiveTheme } from "@/hooks/use-active-theme"
@@ -25,13 +25,14 @@ const IS_LINUX = typeof navigator !== "undefined" && /linux/i.test(navigator.use
 // with no backend (notifications, concurrency, auto-extract) were removed rather
 // than shipped as no-ops.
 
-type Section = "general" | "appearance" | "downloads" | "library" | "sources" | "linux" | "about"
+type Section = "general" | "appearance" | "downloads" | "library" | "sources" | "mods" | "linux" | "about"
 const SECTIONS: Array<{ id: Section; label: string; sub: string }> = [
   { id: "general", label: "General", sub: "app behavior, startup, notifications, and close behavior" },
   { id: "appearance", label: "Appearance", sub: "theme presets and the theme editor" },
   { id: "downloads", label: "Downloads", sub: "install location, concurrency, and bandwidth" },
   { id: "library", label: "Library", sub: "extra folders scanned for installed games" },
   { id: "sources", label: "Sources", sub: "which catalog sources are active" },
+  { id: "mods", label: "Mods", sub: "NexusMods account and the Steam Workshop downloader" },
   // Linux runner config only matters on Linux, filtered out of the rail elsewhere.
   ...(IS_LINUX ? [{ id: "linux" as const, label: "Linux", sub: "global Proton / Wine runner and launch options" }] : []),
   { id: "about", label: "About", sub: "version, stats, and links" },
@@ -247,6 +248,8 @@ export function SettingsPage() {
             {section === "library" && <LibraryTab />}
 
             {section === "sources" && <SourcesTab />}
+
+            {section === "mods" && <ModsTab />}
 
             {section === "linux" && <LinuxSettingsTab />}
 
@@ -651,6 +654,103 @@ function AboutTab() {
   )
 }
 
+// ── Mods tab — NexusMods account + Workshop downloader ──
+// nexusApiKey is the one settings key the Rust nexus client reads for every
+// API call. nxm:// deep links and Workshop installs need no further setup, so
+// the rest of this tab is status, not configuration.
+function ModsTab() {
+  const [apiKey, setApiKey] = useState("")
+  const [reveal, setReveal] = useState(false)
+  const [saved, setSaved] = useState(false)
+  const [validating, setValidating] = useState(false)
+  const [account, setAccount] = useState<{ name: string; premium: boolean } | null>(null)
+  const [valError, setValError] = useState("")
+  const [steamcmd, setSteamcmd] = useState<"absent" | "bootstrapping" | "ready" | null>(null)
+
+  useEffect(() => {
+    let alive = true
+    void (async () => {
+      try {
+        const [k, ws] = await Promise.all([
+          window.ucSettings?.get?.("nexusApiKey"),
+          window.ucMods?.workshopStatus?.(),
+        ])
+        if (!alive) return
+        if (typeof k === "string") setApiKey(k)
+        setSteamcmd(ws?.ok && ws.steamcmd ? ws.steamcmd : "absent")
+      } catch { /* ignore */ }
+    })()
+    return () => { alive = false }
+  }, [])
+
+  // Persist on blur; an emptied field removes the key from the store.
+  const persistKey = async (value: string) => {
+    try {
+      await window.ucSettings?.set?.("nexusApiKey", value.trim() || null)
+      setSaved(true)
+      window.setTimeout(() => setSaved(false), 1600)
+    } catch { /* ignore */ }
+  }
+
+  const validate = async () => {
+    setValidating(true); setValError(""); setAccount(null)
+    try {
+      // AWAIT the persist: nexus_validate reads the key from the settings
+      // store, so a fire-and-forget set could race it with the old value.
+      await window.ucSettings?.set?.("nexusApiKey", apiKey.trim() || null)
+      const r = await window.ucMods?.nexusValidate?.()
+      if (r?.ok && r.user) setAccount({ name: r.user.name, premium: r.user.premium })
+      else setValError(r?.error || "key rejected")
+    } catch (err) { setValError(String(err)) } finally { setValidating(false) }
+  }
+
+  const steamcmdLabel = steamcmd === "ready" ? "ready" : steamcmd === "bootstrapping" ? "installing…" : "not installed"
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      <div style={{ padding: "16px 0", borderBottom: "1px solid color-mix(in srgb, var(--mf-t0) 5%, transparent)" }}>
+        <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--mf-t1)" }}>NexusMods API key</div>
+        <div style={{ fontFamily: MONO, fontSize: 11, color: "var(--mf-t4)", marginTop: 3 }}>personal key from nexusmods.com → account settings → API keys, stored locally{saved ? " — saved" : ""}</div>
+        <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
+          <input
+            type={reveal ? "text" : "password"}
+            value={apiKey}
+            onChange={(e) => setApiKey(e.target.value)}
+            onBlur={() => void persistKey(apiKey)}
+            placeholder="paste your API key…"
+            autoComplete="off"
+            spellCheck={false}
+            style={{ flex: 1, height: 38, padding: "0 13px", borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "var(--mf-panel)", color: "var(--mf-t1)", fontFamily: MONO, fontSize: 12, outline: "none" }}
+          />
+          <button type="button" className="mf-ghost" title={reveal ? "Hide key" : "Show key"} onClick={() => setReveal((v) => !v)} style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 38, height: 38, borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "transparent", color: "var(--mf-t3)", cursor: "pointer", flexShrink: 0 }}>
+            {reveal ? <EyeOff size={14} strokeWidth={1.6} /> : <Eye size={14} strokeWidth={1.6} />}
+          </button>
+          <button type="button" className="mf-ghost" disabled={validating || !apiKey.trim()} onClick={() => void validate()} style={{ display: "flex", alignItems: "center", gap: 7, padding: "0 15px", height: 38, borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "transparent", color: !apiKey.trim() ? "var(--mf-t4)" : "var(--mf-t1)", fontSize: 12, fontWeight: 600, cursor: validating || !apiKey.trim() ? "default" : "pointer", opacity: validating ? 0.6 : 1, flexShrink: 0 }}>
+            {validating ? "Validating…" : "Validate"}
+          </button>
+        </div>
+        {account ? (
+          <div style={{ display: "flex", alignItems: "center", gap: 9, marginTop: 10, fontFamily: MONO, fontSize: 11.5, color: "var(--mf-t2)" }}>
+            <span>signed in as {account.name}</span>
+            <span style={{ padding: "2px 9px", borderRadius: 999, border: "1px solid var(--mf-line-2)", fontSize: 9.5, textTransform: "uppercase", letterSpacing: "0.09em", color: account.premium ? "var(--mf-t0)" : "var(--mf-t3)" }}>{account.premium ? "Premium" : "Free"}</span>
+          </div>
+        ) : valError ? (
+          <div style={{ marginTop: 10, fontFamily: MONO, fontSize: 11.5, color: "var(--mf-danger)" }}>{valError}</div>
+        ) : null}
+        <div style={{ marginTop: 10, fontFamily: MONO, fontSize: 10.5, color: "var(--mf-t5)" }}>
+          nxm:// “Mod Manager Download” links from the Nexus site open in this app automatically. Free accounts install through those links; Premium accounts download directly.
+        </div>
+      </div>
+
+      <Row title="Workshop downloader" desc="steamcmd fetches Workshop items — it installs itself automatically on your first Workshop mod install" last>
+        <span style={{ padding: "3px 10px", borderRadius: 999, border: "1px solid var(--mf-line-2)", fontFamily: MONO, fontSize: 10, textTransform: "uppercase", letterSpacing: "0.09em", color: steamcmd === "ready" ? "var(--mf-t0)" : "var(--mf-t4)" }}>
+          {steamcmd == null ? "…" : steamcmdLabel}
+        </span>
+      </Row>
+    </div>
+  )
+}
+
 // ── shared bits ──
 function Toggle({ on, onToggle }: { on: boolean; onToggle: () => void }) {
   return (
@@ -716,6 +816,7 @@ const SECTION_ICON: Record<Section, React.ReactNode> = {
   library: <LibraryIcon size={15} strokeWidth={1.6} />,
   downloads: <svg viewBox="0 0 16 16" width="15" height="15" {...ico}><line x1="8" y1="2.5" x2="8" y2="9.5" /><polyline points="5 7 8 10 11 7" /><line x1="3" y1="13.5" x2="13" y2="13.5" /></svg>,
   sources: <svg viewBox="0 0 16 16" width="15" height="15" {...ico}><ellipse cx="8" cy="4" rx="5.5" ry="2" /><path d="M2.5 4v8c0 1.1 2.5 2 5.5 2s5.5-.9 5.5-2V4" /><path d="M2.5 8c0 1.1 2.5 2 5.5 2s5.5-.9 5.5-2" /></svg>,
+  mods: <Puzzle size={15} strokeWidth={1.6} />,
   linux: <Terminal size={15} strokeWidth={1.6} />,
   about: <svg viewBox="0 0 16 16" width="15" height="15" {...ico}><circle cx="8" cy="8" r="6" /><line x1="8" y1="7.5" x2="8" y2="11.5" /><circle cx="8" cy="4.8" r="0.7" fill="currentColor" stroke="none" /></svg>,
 }
