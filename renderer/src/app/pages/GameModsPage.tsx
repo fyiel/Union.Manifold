@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import type { CSSProperties } from "react"
+import type { CSSProperties, ReactNode } from "react"
 import { useLocation, useNavigate, useParams } from "react-router-dom"
 import {
-  ArrowDown, ArrowUp, Check, Download, FolderOpen, Package, Pencil, Puzzle, RefreshCw, Rocket, Trash2, Undo2, X,
+  ArrowDown, ArrowUp, Check, Download, FolderOpen, Globe, Package, Pencil, Puzzle, RefreshCw, Rocket, Trash2, Undo2, X,
 } from "lucide-react"
 import { CenterState, COVER_LINES, MONO, SearchIcon, Spinner } from "@/app/manifold/ui"
 import { formatNumber, proxyImageUrl } from "@/lib/utils"
@@ -13,35 +13,63 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 
 // Per-game mod manager: Installed (order/toggle/deploy), Nexus (browse/search/
 // install via API or nxm deep link), Workshop (browse/search/install via
-// steamcmd). Backed 1:1 by window.ucMods; refreshes on the mods:changed event
-// and renders live mods:install-progress rows at the top of the scroller.
+// steamcmd) and Thunderstore (r2modman-style BepInEx packs with automatic
+// dependency resolution). The three browse tabs share one endless-scroll feed
+// (see useEndlessBrowse) so every provider gets filters plus infinite loading
+// with identical mechanics. Backed 1:1 by window.ucMods; refreshes on the
+// mods:changed event and renders live mods:install-progress rows at the top of
+// the scroller.
 
-type Tab = "installed" | "nexus" | "workshop"
+type Tab = "installed" | "nexus" | "workshop" | "thunderstore"
 
 const TABS: Array<{ id: Tab; label: string }> = [
   { id: "installed", label: "Installed" },
   { id: "nexus", label: "Nexus" },
   { id: "workshop", label: "Workshop" },
+  { id: "thunderstore", label: "Thunderstore" },
 ]
 
-const NEXUS_CATEGORIES = [
-  { id: "trending", label: "Trending" },
-  { id: "latest_added", label: "Latest" },
-  { id: "latest_updated", label: "Updated" },
+// Sort keys are the raw argument values each backend expects (see the browse
+// filters + thunderstore contracts); labels are the human-facing wording.
+const NEXUS_SORTS = [
+  { id: "downloads", label: "Most downloaded" },
+  { id: "updated", label: "Recently updated" },
+  { id: "published", label: "Recently published" },
+  { id: "size", label: "File size" },
+  { id: "endorsements", label: "Endorsements" },
+  { id: "lastComment", label: "Last comment" },
 ] as const
-type NexusCategory = (typeof NEXUS_CATEGORIES)[number]["id"]
+type NexusSort = (typeof NEXUS_SORTS)[number]["id"]
 
-const WS_SORTS = [
-  { id: "trend", label: "Trending" },
+const WORKSHOP_SORTS = [
+  { id: "trend", label: "Popular" },
   { id: "mostrecent", label: "Most recent" },
-  { id: "totaluniquesubscribers", label: "Most subscribed" },
+  { id: "lastupdated", label: "Last updated" },
+  { id: "subscribers", label: "Most subscribed" },
+  { id: "toprated", label: "Top rated" },
 ] as const
-type WorkshopSort = (typeof WS_SORTS)[number]["id"]
+type WorkshopSort = (typeof WORKSHOP_SORTS)[number]["id"]
+
+const THUNDERSTORE_SORTS = [
+  { id: "downloads", label: "Most downloaded" },
+  { id: "updated", label: "Recently updated" },
+  { id: "published", label: "Newest" },
+  { id: "rating", label: "Top rated" },
+] as const
+type ThunderstoreSort = (typeof THUNDERSTORE_SORTS)[number]["id"]
+
+const PERIODS = [
+  { id: "all", label: "All time" },
+  { id: "28", label: "Last 28 days" },
+  { id: "7", label: "Last 7 days" },
+] as const
+type Period = (typeof PERIODS)[number]["id"]
 
 const GHOST_BTN: CSSProperties = { display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 7, padding: "0 13px", height: 34, borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "transparent", color: "var(--mf-t1)", fontSize: 12, fontWeight: 600, cursor: "pointer" }
 const CHIP: CSSProperties = { display: "inline-flex", alignItems: "center", gap: 7, padding: "5px 11px", borderRadius: 999, border: "1px solid var(--mf-line-2)", background: "var(--mf-panel)", fontFamily: MONO, fontSize: 10.5, color: "var(--mf-t3)" }
 const CHIP_INPUT: CSSProperties = { background: "transparent", border: "none", outline: "none", color: "var(--mf-t1)", fontFamily: MONO, fontSize: 10.5, padding: 0 }
 const SEARCH_INPUT: CSSProperties = { width: "100%", height: 36, padding: "0 12px 0 34px", borderRadius: 9, border: "1px solid var(--mf-line-2)", background: "var(--mf-panel)", color: "var(--mf-t1)", fontFamily: MONO, fontSize: 12, outline: "none" }
+const SELECT: CSSProperties = { height: 36, minWidth: 150, padding: "0 32px 0 13px", borderRadius: 9, border: "1px solid var(--mf-line-2)", background: "var(--mf-panel)", color: "var(--mf-t1)", fontSize: 12, cursor: "pointer", WebkitAppearance: "none", appearance: "none" }
 const GRID: CSSProperties = { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(210px, 1fr))", gap: 14, alignContent: "start" }
 
 function fmtBytes(n?: number | null): string {
@@ -67,7 +95,7 @@ function ArrowBtn({ dir, disabled, onClick }: { dir: "up" | "down"; disabled: bo
   )
 }
 
-// One browse/search result card, shared shape for both providers.
+// One browse/search result card, shared shape for all three providers.
 function BrowseCard({ picture, name, author, metaLine, installed, busy, onInstall }: {
   picture?: string | null
   name: string
@@ -100,6 +128,165 @@ function BrowseCard({ picture, name, author, metaLine, installed, busy, onInstal
         </div>
       </div>
     </div>
+  )
+}
+
+type BrowsePage<T> = { ok: boolean; items?: T[]; hasMore?: boolean; error?: string }
+
+type EndlessBrowse<T> = {
+  items: T[]
+  loading: boolean
+  error: string
+  hasMore: boolean
+  sentinelRef: (el: HTMLDivElement | null) => void
+}
+
+// Shared endless-scroll feed for every browse tab. fetchPage receives a 0-based
+// page index; callers translate that into the provider's own pagination (Nexus
+// uses offset = page * 24, Workshop and Thunderstore use page + 1). The feed
+// resets and refetches from the top whenever resetKey changes (sort, period,
+// order, query, or the bound domain/appid/community), and de-dups appended
+// results by keyOf so overlapping pages never double up.
+function useEndlessBrowse<T>(config: {
+  enabled: boolean
+  resetKey: string
+  keyOf: (item: T) => string
+  fetchPage: (page: number) => Promise<BrowsePage<T>>
+}): EndlessBrowse<T> {
+  const { enabled, resetKey } = config
+  const [items, setItems] = useState<T[]>([])
+  const [loading, setLoading] = useState(false)
+  const [hasMore, setHasMore] = useState(false)
+  const [error, setError] = useState("")
+
+  // The config object is fresh every render; stash it so the stable callbacks
+  // below always read the latest fetchPage/keyOf without becoming reactive deps.
+  const cfgRef = useRef(config)
+  cfgRef.current = config
+  const pageRef = useRef(0)
+  const seenRef = useRef<Set<string>>(new Set())
+  const genRef = useRef(0)
+  const busyRef = useRef(false)
+  const sentinelElRef = useRef<HTMLDivElement | null>(null)
+  const observerRef = useRef<IntersectionObserver | null>(null)
+
+  const fetchNext = useCallback(async () => {
+    const cfg = cfgRef.current
+    if (!cfg.enabled || busyRef.current) return
+    busyRef.current = true
+    setLoading(true)
+    setError("")
+    // Snapshot the reset generation so a reset that fires mid-request discards
+    // this response instead of appending stale rows to the new feed.
+    const gen = genRef.current
+    const page = pageRef.current
+    try {
+      const r = await cfg.fetchPage(page)
+      if (gen !== genRef.current) return
+      if (!r || !r.ok) { setError(r?.error || "browse failed"); setHasMore(false); return }
+      pageRef.current = page + 1
+      setItems((prev) => {
+        const next = prev.slice()
+        for (const it of r.items || []) {
+          const k = cfg.keyOf(it)
+          if (seenRef.current.has(k)) continue
+          seenRef.current.add(k)
+          next.push(it)
+        }
+        return next
+      })
+      setHasMore(Boolean(r.hasMore))
+    } catch (err) {
+      if (gen !== genRef.current) return
+      setError(String(err)); setHasMore(false)
+    } finally {
+      if (gen === genRef.current) { busyRef.current = false; setLoading(false) }
+    }
+  }, [])
+
+  // Reset the feed and pull the first page whenever the query parameters change
+  // or the tab becomes enabled for the first time.
+  useEffect(() => {
+    genRef.current += 1
+    pageRef.current = 0
+    seenRef.current = new Set()
+    busyRef.current = false
+    setItems([]); setHasMore(false); setError(""); setLoading(false)
+    if (enabled) void fetchNext()
+  }, [enabled, resetKey, fetchNext])
+
+  // Attach the IntersectionObserver via a callback ref so it re-binds when the
+  // sentinel remounts (for example after switching away from and back to a tab,
+  // which never changes the effect deps and so would otherwise leave it stale).
+  const sentinelRef = useCallback((el: HTMLDivElement | null) => {
+    observerRef.current?.disconnect()
+    observerRef.current = null
+    sentinelElRef.current = el
+    if (!el) return
+    const obs = new IntersectionObserver((entries) => {
+      if (entries.some((e) => e.isIntersecting) && !busyRef.current) void fetchNext()
+    }, { rootMargin: "320px" })
+    obs.observe(el)
+    observerRef.current = obs
+  }, [fetchNext])
+
+  useEffect(() => () => observerRef.current?.disconnect(), [])
+
+  // The observer only fires on transitions, so a first page that never fills the
+  // viewport would stall waiting for a scroll that cannot happen. After each load
+  // settles we keep pulling while the sentinel is still within reach of the
+  // viewport. busyRef guards this against the observer firing concurrently.
+  useEffect(() => {
+    if (!enabled || !hasMore || loading || busyRef.current) return
+    const el = sentinelElRef.current
+    if (!el) return
+    const rect = el.getBoundingClientRect()
+    const viewport = window.innerHeight || document.documentElement.clientHeight
+    if (rect.top <= viewport + 320) void fetchNext()
+  }, [enabled, hasMore, loading, items.length, fetchNext])
+
+  return { items, loading, error, hasMore, sentinelRef }
+}
+
+// Renders the grid, its loading/empty/error states, the scroll sentinel and the
+// subtle end-of-feed marker for any browse tab driven by useEndlessBrowse.
+function BrowseResults<T>({ browse, renderCard, emptyLabel, errorAction }: {
+  browse: EndlessBrowse<T>
+  renderCard: (item: T) => ReactNode
+  emptyLabel: string
+  errorAction?: { label: string; onClick: () => void }
+}) {
+  const { items, loading, error, hasMore, sentinelRef } = browse
+  if (loading && items.length === 0) return <CenterState><Spinner size={18} /></CenterState>
+  if (error && items.length === 0) {
+    return (
+      <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 14px", borderRadius: 10, border: "1px solid color-mix(in srgb, var(--mf-danger) 35%, transparent)", background: "color-mix(in srgb, var(--mf-danger) 7%, transparent)" }}>
+        <span style={{ flex: 1, fontFamily: MONO, fontSize: 11.5, color: "var(--mf-t2)" }}>{error}</span>
+        {errorAction ? <button type="button" className="mf-ghost" style={{ ...GHOST_BTN, height: 30, fontSize: 11.5 }} onClick={errorAction.onClick}>{errorAction.label}</button> : null}
+      </div>
+    )
+  }
+  if (items.length === 0) {
+    return (
+      <CenterState>
+        <Package size={30} strokeWidth={1.4} color="var(--mf-t6)" />
+        <span style={{ fontFamily: MONO, fontSize: 12, color: "var(--mf-t5)" }}>{emptyLabel}</span>
+      </CenterState>
+    )
+  }
+  return (
+    <>
+      <div style={GRID}>{items.map(renderCard)}</div>
+      {hasMore ? <div ref={sentinelRef} aria-hidden style={{ height: 1 }} /> : null}
+      {loading ? (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 9, padding: "18px 0 4px", fontFamily: MONO, fontSize: 11, color: "var(--mf-t4)" }}>
+          <Spinner size={13} />loading more…
+        </div>
+      ) : !hasMore ? (
+        <div style={{ textAlign: "center", padding: "18px 0 4px", fontFamily: MONO, fontSize: 10.5, color: "var(--mf-t6)" }}>no more results</div>
+      ) : null}
+      {error ? <div style={{ textAlign: "center", padding: "10px 0 0", fontFamily: MONO, fontSize: 10.5, color: "var(--mf-danger)" }}>{error}</div> : null}
+    </>
   )
 }
 
@@ -257,58 +444,42 @@ export function GameModsPage() {
 
   // ── nexus tab ──
   const nexusDomain = gs?.nexusDomain || null
-  const [nxCat, setNxCat] = useState<NexusCategory>("trending")
+  const [nxSort, setNxSort] = useState<NexusSort>("downloads")
+  const [nxOrder, setNxOrder] = useState<"asc" | "desc">("desc")
+  const [nxPeriod, setNxPeriod] = useState<Period>("all")
   const [nxQuery, setNxQuery] = useState("")
   const [nxSubmitted, setNxSubmitted] = useState("")
-  const [nxMode, setNxMode] = useState<"browse" | "search">("browse")
-  const [nxMods, setNxMods] = useState<NexusBrowseMod[]>([])
-  const [nxPage, setNxPage] = useState(1)
-  const [nxHasMore, setNxHasMore] = useState(false)
-  const [nxLoading, setNxLoading] = useState(false)
-  const [nxError, setNxError] = useState("")
+  // Feeds stay lazy: a tab only starts fetching once it has been opened, then
+  // keeps its results across tab switches (the reset key stays stable).
+  const [nxActive, setNxActive] = useState(false)
+  useEffect(() => { if (tab === "nexus") setNxActive(true) }, [tab])
 
-  const runNexusBrowse = useCallback(async (category: NexusCategory) => {
-    if (!nexusDomain) return
-    setNxMode("browse"); setNxCat(category); setNxLoading(true); setNxError(""); setNxHasMore(false)
-    try {
-      const r = await window.ucMods?.nexusBrowse?.(nexusDomain, category)
-      if (r?.ok) setNxMods(r.mods || [])
-      else { setNxMods([]); setNxError(r?.error || "browse failed") }
-    } catch (err) { setNxMods([]); setNxError(String(err)) } finally { setNxLoading(false) }
-  }, [nexusDomain])
+  // A submitted query routes through nexus_search (page + 1); otherwise the
+  // filtered browse (offset = page * 24). Both share this single feed.
+  const nexusFetch = useCallback(async (page: number): Promise<BrowsePage<BrowseMod>> => {
+    if (!nexusDomain) return { ok: false, error: "Nexus is not matched for this game" }
+    const q = nxSubmitted.trim()
+    const r = q
+      ? await window.ucMods?.nexusSearch?.(nexusDomain, q, page + 1)
+      : await window.ucMods?.nexusBrowse?.(nexusDomain, nxSort, nxOrder, nxPeriod, page * 24)
+    if (!r) return { ok: false, error: "mods backend unavailable" }
+    return { ok: !!r.ok, items: r.mods, hasMore: r.hasMore, error: r.error }
+  }, [nexusDomain, nxSubmitted, nxSort, nxOrder, nxPeriod])
 
-  const runNexusSearch = useCallback(async (query: string, page: number, append: boolean) => {
-    const q = query.trim()
-    if (!nexusDomain || !q) return
-    setNxMode("search"); setNxSubmitted(q); setNxLoading(true); setNxError("")
-    try {
-      const r = await window.ucMods?.nexusSearch?.(nexusDomain, q, page)
-      if (r?.ok) {
-        setNxMods((prev) => (append ? [...prev, ...(r.mods || [])] : r.mods || []))
-        setNxHasMore(Boolean(r.hasMore))
-        setNxPage(page)
-      } else { if (!append) setNxMods([]); setNxError(r?.error || "search failed") }
-    } catch (err) { if (!append) setNxMods([]); setNxError(String(err)) } finally { setNxLoading(false) }
-  }, [nexusDomain])
+  const nexusBrowse = useEndlessBrowse<BrowseMod>({
+    enabled: nxActive && !!nexusDomain,
+    resetKey: `nexus|${nexusDomain || ""}|${nxSubmitted}|${nxSort}|${nxOrder}|${nxPeriod}`,
+    keyOf: (m) => m.remoteId,
+    fetchPage: nexusFetch,
+  })
 
-  // Seed the browse list once per domain when the tab first opens (and again
-  // after a domain override changes which game we're pointed at).
-  const nxSeededFor = useRef("")
-  useEffect(() => {
-    if (tab === "nexus" && nexusDomain && nxSeededFor.current !== nexusDomain) {
-      nxSeededFor.current = nexusDomain
-      setNxQuery(""); setNxSubmitted("")
-      void runNexusBrowse("trending")
-    }
-  }, [tab, nexusDomain, runNexusBrowse])
-
-  // Nexus file picker → install.
-  const [filePick, setFilePick] = useState<NexusBrowseMod | null>(null)
+  // Nexus file picker → install (premium direct, free session-cookie, or nxm).
+  const [filePick, setFilePick] = useState<BrowseMod | null>(null)
   const [files, setFiles] = useState<NexusModFile[] | null>(null)
   const [filesError, setFilesError] = useState("")
   const [installingFileId, setInstallingFileId] = useState<number | null>(null)
 
-  const openFilePicker = async (mod: NexusBrowseMod) => {
+  const openFilePicker = async (mod: BrowseMod) => {
     if (!nexusDomain) return
     setFilePick(mod); setFiles(null); setFilesError("")
     try {
@@ -318,7 +489,7 @@ export function GameModsPage() {
     } catch (err) { setFilesError(String(err)) }
   }
 
-  const installNexus = async (mod: NexusBrowseMod, fileId: number) => {
+  const installNexus = async (mod: BrowseMod, fileId: number) => {
     if (!nexusDomain) return
     setInstallingFileId(fileId)
     try {
@@ -354,35 +525,26 @@ export function GameModsPage() {
   const steamAppid = gs?.steamAppid || null
   const workshopOk = Boolean(steamAppid && gs?.workshopSupported)
   const [wsSort, setWsSort] = useState<WorkshopSort>("trend")
+  const [wsPeriod, setWsPeriod] = useState<Period>("all")
   const [wsQuery, setWsQuery] = useState("")
   const [wsSubmitted, setWsSubmitted] = useState("")
-  const [wsItems, setWsItems] = useState<WorkshopBrowseItem[]>([])
-  const [wsPage, setWsPage] = useState(1)
-  const [wsHasMore, setWsHasMore] = useState(false)
-  const [wsLoading, setWsLoading] = useState(false)
-  const [wsError, setWsError] = useState("")
+  const [wsActive, setWsActive] = useState(false)
   const [wsBusy, setWsBusy] = useState<string | null>(null)
+  useEffect(() => { if (tab === "workshop") setWsActive(true) }, [tab])
 
-  const runWorkshop = useCallback(async (sort: WorkshopSort, query: string, page: number, append: boolean) => {
-    if (!steamAppid) return
-    setWsLoading(true); setWsError("")
-    try {
-      const r = await window.ucMods?.workshopBrowse?.(steamAppid, sort, page, query.trim())
-      if (r?.ok) {
-        setWsItems((prev) => (append ? [...prev, ...(r.items || [])] : r.items || []))
-        setWsHasMore(Boolean(r.hasMore))
-        setWsPage(page)
-      } else { if (!append) setWsItems([]); setWsError(r?.error || "workshop browse failed") }
-    } catch (err) { if (!append) setWsItems([]); setWsError(String(err)) } finally { setWsLoading(false) }
-  }, [steamAppid])
+  const workshopFetch = useCallback(async (page: number): Promise<BrowsePage<WorkshopBrowseItem>> => {
+    if (!steamAppid) return { ok: false, error: "no Steam appid" }
+    const r = await window.ucMods?.workshopBrowse?.(steamAppid, wsSort, wsPeriod, page + 1, wsSubmitted.trim())
+    if (!r) return { ok: false, error: "mods backend unavailable" }
+    return { ok: !!r.ok, items: r.items, hasMore: r.hasMore, error: r.error }
+  }, [steamAppid, wsSort, wsPeriod, wsSubmitted])
 
-  const wsSeededFor = useRef(0)
-  useEffect(() => {
-    if (tab === "workshop" && workshopOk && steamAppid && wsSeededFor.current !== steamAppid) {
-      wsSeededFor.current = steamAppid
-      void runWorkshop("trend", "", 1, false)
-    }
-  }, [tab, workshopOk, steamAppid, runWorkshop])
+  const workshopBrowse = useEndlessBrowse<WorkshopBrowseItem>({
+    enabled: wsActive && workshopOk,
+    resetKey: `ws|${steamAppid || ""}|${wsSort}|${wsPeriod}|${wsSubmitted}`,
+    keyOf: (m) => m.remoteId,
+    fetchPage: workshopFetch,
+  })
 
   const installWorkshop = async (item: WorkshopBrowseItem) => {
     if (!steamAppid) return
@@ -392,6 +554,87 @@ export function GameModsPage() {
       if (r?.ok) toast(`Installing ${item.name}…`, "info")
       else toast(r?.error || "workshop install failed", "error", 8000)
     } catch (err) { toast(String(err), "error", 8000) } finally { setWsBusy(null) }
+  }
+
+  // ── thunderstore tab ──
+  const tsCommunity = gs?.thunderstoreCommunity || null
+  const tsSupported = Boolean(gs?.thunderstoreSupported && tsCommunity)
+  const [tsSort, setTsSort] = useState<ThunderstoreSort>("downloads")
+  const [tsPeriod, setTsPeriod] = useState<Period>("all")
+  const [tsQuery, setTsQuery] = useState("")
+  const [tsSubmitted, setTsSubmitted] = useState("")
+  const [tsActive, setTsActive] = useState(false)
+  useEffect(() => { if (tab === "thunderstore") setTsActive(true) }, [tab])
+
+  const thunderstoreFetch = useCallback(async (page: number): Promise<BrowsePage<BrowseMod>> => {
+    if (!tsCommunity) return { ok: false, error: "no Thunderstore community" }
+    const r = await window.ucMods?.thunderstoreBrowse?.(tsCommunity, tsSort, tsPeriod, page + 1, tsSubmitted.trim())
+    if (!r) return { ok: false, error: "mods backend unavailable" }
+    return { ok: !!r.ok, items: r.mods, hasMore: r.hasMore, error: r.error }
+  }, [tsCommunity, tsSort, tsPeriod, tsSubmitted])
+
+  const thunderstoreBrowse = useEndlessBrowse<BrowseMod>({
+    enabled: tsActive && tsSupported,
+    resetKey: `ts|${tsCommunity || ""}|${tsSort}|${tsPeriod}|${tsSubmitted}`,
+    keyOf: (m) => m.remoteId,
+    fetchPage: thunderstoreFetch,
+  })
+
+  // Community override picker, shown when no community was auto-detected.
+  const [tsCommunities, setTsCommunities] = useState<ThunderstoreCommunity[] | null>(null)
+  const [tsCommLoading, setTsCommLoading] = useState(false)
+  const [tsCommError, setTsCommError] = useState("")
+  const [tsCommPick, setTsCommPick] = useState("")
+  const [tsSaving, setTsSaving] = useState(false)
+
+  const loadCommunities = useCallback(async () => {
+    setTsCommLoading(true); setTsCommError("")
+    try {
+      const r = await window.ucMods?.thunderstoreCommunities?.()
+      if (r?.ok) setTsCommunities(r.communities || [])
+      else { setTsCommunities([]); setTsCommError(r?.error || "could not load the community list") }
+    } catch (err) { setTsCommunities([]); setTsCommError(String(err)) } finally { setTsCommLoading(false) }
+  }, [])
+
+  // Fetch the community list once, the first time the tab opens without a match.
+  useEffect(() => {
+    if (tab === "thunderstore" && !tsSupported && tsCommunities === null && !tsCommLoading) void loadCommunities()
+  }, [tab, tsSupported, tsCommunities, tsCommLoading, loadCommunities])
+
+  const saveCommunity = async (identifier: string) => {
+    if (!identifier) return
+    setTsSaving(true)
+    try {
+      const r = await window.ucMods?.gameSet?.(appid, { thunderstoreCommunity: identifier })
+      if (r && !r.ok) toast(r.error || "could not set the Thunderstore community", "error")
+    } catch (err) { toast(String(err), "error") } finally { setTsSaving(false); void reload() }
+  }
+
+  // Thunderstore version picker → install (dependencies resolve automatically).
+  const [tsVersionPick, setTsVersionPick] = useState<BrowseMod | null>(null)
+  const [tsVersions, setTsVersions] = useState<ThunderstoreVersion[] | null>(null)
+  const [tsVersionsError, setTsVersionsError] = useState("")
+  const [tsInstalling, setTsInstalling] = useState<string | null>(null)
+
+  const openTsVersions = async (mod: BrowseMod) => {
+    if (!tsCommunity) return
+    setTsVersionPick(mod); setTsVersions(null); setTsVersionsError("")
+    try {
+      const r = await window.ucMods?.thunderstoreVersions?.(tsCommunity, mod.remoteId)
+      if (r?.ok) setTsVersions(r.versions || [])
+      else setTsVersionsError(r?.error || "could not list the package versions")
+    } catch (err) { setTsVersionsError(String(err)) }
+  }
+
+  const installThunderstore = async (mod: BrowseMod, version: string) => {
+    if (!tsCommunity) return
+    setTsInstalling(version)
+    try {
+      const r = await window.ucMods?.thunderstoreInstall?.(appid, tsCommunity, mod.remoteId, version)
+      if (!r?.ok) { toast(r?.error || "install failed", "error", 7000); return }
+      setTsVersionPick(null)
+      toast(`Installing ${mod.name}… dependencies (including BepInEx) install automatically`, "info", 9000)
+    } catch (err) { toast(String(err), "error", 7000) } finally { setTsInstalling(null) }
   }
 
   // ── render ──
@@ -447,6 +690,12 @@ export function GameModsPage() {
             <span style={CHIP} title="Steam Workshop availability, detected from the matched Steam appid">
               <span style={{ color: "var(--mf-t5)" }}>workshop:</span>
               <span style={{ color: workshopOk ? "var(--mf-t2)" : "var(--mf-t5)" }}>{workshopOk ? `appid ${steamAppid}` : "unavailable"}</span>
+            </span>
+
+            <span style={CHIP} title="Thunderstore community bound to this game (r2modman-style BepInEx mods). Set it from the Thunderstore tab.">
+              <span style={{ color: "var(--mf-t5)" }}>thunderstore:</span>
+              <span style={{ color: tsCommunity ? "var(--mf-t2)" : "var(--mf-t5)" }}>{tsCommunity || "not matched"}</span>
+              {tsCommunity && gs.thunderstoreCommunityAuto ? <span style={{ color: "var(--mf-t6)" }}>auto</span> : null}
             </span>
 
             <span style={CHIP} title="Whether enabled mod files are currently copied into the game folder">
@@ -530,7 +779,7 @@ export function GameModsPage() {
             {mods.length === 0 ? (
               <CenterState>
                 <Package size={30} strokeWidth={1.4} color="var(--mf-t6)" />
-                <span style={{ fontFamily: MONO, fontSize: 12, color: "var(--mf-t5)" }}>no mods installed yet — grab some from the Nexus or Workshop tabs</span>
+                <span style={{ fontFamily: MONO, fontSize: 12, color: "var(--mf-t5)" }}>no mods installed yet — grab some from the Nexus, Workshop or Thunderstore tabs</span>
               </CenterState>
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -574,20 +823,23 @@ export function GameModsPage() {
           ) : (
             <>
               <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, marginBottom: 16 }}>
-                {NEXUS_CATEGORIES.map((c) => {
-                  const active = nxMode === "browse" && nxCat === c.id
-                  return (
-                    <button key={c.id} type="button" onClick={() => void runNexusBrowse(c.id)} style={{ padding: "6px 13px", borderRadius: 999, fontSize: 11.5, fontWeight: 500, border: `1px solid ${active ? "var(--mf-line-2)" : "color-mix(in srgb, var(--mf-t0) 9%, transparent)"}`, background: active ? "color-mix(in srgb, var(--mf-t0) 10%, transparent)" : "transparent", color: active ? "var(--mf-t0)" : "var(--mf-t4)", cursor: "pointer", whiteSpace: "nowrap" }}>{c.label}</button>
-                  )
-                })}
+                <select className="uc-select" value={nxSort} onChange={(e) => setNxSort(e.target.value as NexusSort)} title="Sort order" style={SELECT}>
+                  {NEXUS_SORTS.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
+                </select>
+                <select className="uc-select" value={nxPeriod} onChange={(e) => setNxPeriod(e.target.value as Period)} title="Time window" style={SELECT}>
+                  {PERIODS.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
+                </select>
+                <button type="button" className="mf-ghost" onClick={() => setNxOrder((o) => (o === "asc" ? "desc" : "asc"))} title={nxOrder === "asc" ? "Ascending (lowest first)" : "Descending (highest first)"} aria-label="Toggle sort direction" style={{ ...GHOST_BTN, width: 40, padding: 0 }}>
+                  {nxOrder === "asc" ? <ArrowUp size={14} strokeWidth={1.9} /> : <ArrowDown size={14} strokeWidth={1.9} />}
+                </button>
                 <div style={{ position: "relative", flex: 1, minWidth: 220, maxWidth: 340, marginLeft: "auto" }}>
                   <SearchIcon size={13} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)" }} />
                   <input
                     value={nxQuery}
                     onChange={(e) => setNxQuery(e.target.value)}
                     onKeyDown={(e) => {
-                      if (e.key === "Enter") void runNexusSearch(nxQuery, 1, false)
-                      if (e.key === "Escape") setNxQuery("")
+                      if (e.key === "Enter") setNxSubmitted(nxQuery.trim())
+                      if (e.key === "Escape") { setNxQuery(""); setNxSubmitted("") }
                     }}
                     placeholder={`search ${nexusDomain} mods… (Enter)`}
                     style={SEARCH_INPUT}
@@ -595,49 +847,26 @@ export function GameModsPage() {
                 </div>
               </div>
 
-              {nxError ? (
-                <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 14px", borderRadius: 10, border: "1px solid color-mix(in srgb, var(--mf-danger) 35%, transparent)", background: "color-mix(in srgb, var(--mf-danger) 7%, transparent)", marginBottom: 14 }}>
-                  <span style={{ flex: 1, fontFamily: MONO, fontSize: 11.5, color: "var(--mf-t2)" }}>{nxError}</span>
-                  <button type="button" className="mf-ghost" style={{ ...GHOST_BTN, height: 30, fontSize: 11.5 }} onClick={() => navigate("/settings")}>Open Settings</button>
-                </div>
-              ) : null}
-
-              {nxLoading && nxMods.length === 0 ? (
-                <CenterState><Spinner size={18} /></CenterState>
-              ) : nxMods.length === 0 && !nxError ? (
-                <CenterState>
-                  <Package size={30} strokeWidth={1.4} color="var(--mf-t6)" />
-                  <span style={{ fontFamily: MONO, fontSize: 12, color: "var(--mf-t5)" }}>{nxMode === "search" ? `nothing found for “${nxSubmitted}”` : "nothing here"}</span>
-                </CenterState>
-              ) : (
-                <>
-                  <div style={GRID}>
-                    {nxMods.map((mod) => (
-                      <BrowseCard
-                        key={mod.remoteId}
-                        picture={mod.picture}
-                        name={mod.name}
-                        author={mod.author}
-                        metaLine={`${formatNumber(mod.downloads || 0)} downloads · ${formatNumber(mod.endorsements || 0)} endorsements`}
-                        installed={mod.installed || installedIds.has(`nexus-${mod.remoteId}`)}
-                        busy={filePick?.remoteId === mod.remoteId}
-                        onInstall={() => void openFilePicker(mod)}
-                      />
-                    ))}
-                  </div>
-                  {nxMode === "search" && nxHasMore ? (
-                    <div style={{ display: "flex", justifyContent: "center", marginTop: 18 }}>
-                      <button type="button" className="mf-ghost" style={{ ...GHOST_BTN, opacity: nxLoading ? 0.6 : 1 }} disabled={nxLoading} onClick={() => void runNexusSearch(nxSubmitted, nxPage + 1, true)}>
-                        {nxLoading ? <Spinner size={13} /> : null}Load more
-                      </button>
-                    </div>
-                  ) : null}
-                </>
-              )}
+              <BrowseResults
+                browse={nexusBrowse}
+                emptyLabel={nxSubmitted ? `nothing found for “${nxSubmitted}”` : "nothing here"}
+                errorAction={{ label: "Open Settings", onClick: () => navigate("/settings") }}
+                renderCard={(mod) => (
+                  <BrowseCard
+                    key={mod.remoteId}
+                    picture={mod.picture}
+                    name={mod.name}
+                    author={mod.author}
+                    metaLine={`${formatNumber(mod.downloads || 0)} downloads · ${formatNumber(mod.endorsements || 0)} endorsements`}
+                    installed={mod.installed || installedIds.has(`nexus-${mod.remoteId}`)}
+                    busy={filePick?.remoteId === mod.remoteId}
+                    onInstall={() => void openFilePicker(mod)}
+                  />
+                )}
+              />
             </>
           )
-        ) : (
-          /* workshop */
+        ) : tab === "workshop" ? (
           !workshopOk ? (
             <CenterState>
               <Package size={30} strokeWidth={1.4} color="var(--mf-t6)" />
@@ -650,13 +879,18 @@ export function GameModsPage() {
           ) : (
             <>
               <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, marginBottom: 16 }}>
+                <select className="uc-select" value={wsSort} onChange={(e) => setWsSort(e.target.value as WorkshopSort)} title="Sort order" style={SELECT}>
+                  {WORKSHOP_SORTS.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
+                </select>
                 <select
                   className="uc-select"
-                  value={wsSort}
-                  onChange={(e) => { const v = e.target.value as WorkshopSort; setWsSort(v); void runWorkshop(v, wsSubmitted, 1, false) }}
-                  style={{ height: 36, minWidth: 160, padding: "0 32px 0 13px", borderRadius: 9, border: "1px solid var(--mf-line-2)", background: "var(--mf-panel)", color: "var(--mf-t1)", fontSize: 12, cursor: "pointer", WebkitAppearance: "none", appearance: "none" }}
+                  value={wsPeriod}
+                  onChange={(e) => setWsPeriod(e.target.value as Period)}
+                  disabled={wsSort !== "trend"}
+                  title={wsSort === "trend" ? "Time window" : "The time window applies only to the Popular sort"}
+                  style={{ ...SELECT, opacity: wsSort === "trend" ? 1 : 0.45, cursor: wsSort === "trend" ? "pointer" : "not-allowed" }}
                 >
-                  {WS_SORTS.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
+                  {PERIODS.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
                 </select>
                 <div style={{ position: "relative", flex: 1, minWidth: 220, maxWidth: 340, marginLeft: "auto" }}>
                   <SearchIcon size={13} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)" }} />
@@ -664,8 +898,8 @@ export function GameModsPage() {
                     value={wsQuery}
                     onChange={(e) => setWsQuery(e.target.value)}
                     onKeyDown={(e) => {
-                      if (e.key === "Enter") { setWsSubmitted(wsQuery); void runWorkshop(wsSort, wsQuery, 1, false) }
-                      if (e.key === "Escape") setWsQuery("")
+                      if (e.key === "Enter") setWsSubmitted(wsQuery.trim())
+                      if (e.key === "Escape") { setWsQuery(""); setWsSubmitted("") }
                     }}
                     placeholder="search the workshop… (Enter)"
                     style={SEARCH_INPUT}
@@ -673,41 +907,88 @@ export function GameModsPage() {
                 </div>
               </div>
 
-              {wsError ? (
-                <div style={{ padding: "11px 14px", borderRadius: 10, border: "1px solid color-mix(in srgb, var(--mf-danger) 35%, transparent)", background: "color-mix(in srgb, var(--mf-danger) 7%, transparent)", marginBottom: 14, fontFamily: MONO, fontSize: 11.5, color: "var(--mf-t2)" }}>{wsError}</div>
-              ) : null}
+              <BrowseResults
+                browse={workshopBrowse}
+                emptyLabel={wsSubmitted ? `nothing found for “${wsSubmitted}”` : "nothing here"}
+                renderCard={(item) => (
+                  <BrowseCard
+                    key={item.remoteId}
+                    picture={item.picture}
+                    name={item.name}
+                    author={item.author}
+                    installed={installedIds.has(`workshop-${item.remoteId}`)}
+                    busy={wsBusy === item.remoteId}
+                    onInstall={() => void installWorkshop(item)}
+                  />
+                )}
+              />
+            </>
+          )
+        ) : (
+          /* thunderstore */
+          !tsSupported ? (
+            <CenterState>
+              <Globe size={30} strokeWidth={1.4} color="var(--mf-t6)" />
+              <span style={{ fontFamily: MONO, fontSize: 12, color: "var(--mf-t5)", maxWidth: 520, textAlign: "center", lineHeight: 1.6 }}>
+                No Thunderstore community was matched for this game. Thunderstore hosts BepInEx-style mods grouped per game community; pick this game's community to browse and install them (dependencies, including BepInEx, install automatically).
+              </span>
+              {tsCommError ? <span style={{ fontFamily: MONO, fontSize: 11, color: "var(--mf-danger)" }}>{tsCommError}</span> : null}
+              <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+                <select
+                  className="uc-select"
+                  value={tsCommPick}
+                  disabled={tsCommLoading || tsSaving}
+                  onChange={(e) => setTsCommPick(e.target.value)}
+                  style={{ ...SELECT, minWidth: 240 }}
+                >
+                  <option value="">{tsCommLoading ? "loading communities…" : "select a community…"}</option>
+                  {(tsCommunities || []).map((c) => <option key={c.identifier} value={c.identifier}>{c.name}</option>)}
+                </select>
+                <button type="button" className="mf-ghost" style={{ ...GHOST_BTN, opacity: !tsCommPick || tsSaving ? 0.55 : 1 }} disabled={!tsCommPick || tsSaving} onClick={() => void saveCommunity(tsCommPick)}>
+                  {tsSaving ? <Spinner size={13} /> : <Check size={13} strokeWidth={1.8} />}Use community
+                </button>
+              </div>
+            </CenterState>
+          ) : (
+            <>
+              <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, marginBottom: 16 }}>
+                <select className="uc-select" value={tsSort} onChange={(e) => setTsSort(e.target.value as ThunderstoreSort)} title="Sort order" style={SELECT}>
+                  {THUNDERSTORE_SORTS.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
+                </select>
+                <select className="uc-select" value={tsPeriod} onChange={(e) => setTsPeriod(e.target.value as Period)} title="Time window" style={SELECT}>
+                  {PERIODS.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
+                </select>
+                <div style={{ position: "relative", flex: 1, minWidth: 220, maxWidth: 340, marginLeft: "auto" }}>
+                  <SearchIcon size={13} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)" }} />
+                  <input
+                    value={tsQuery}
+                    onChange={(e) => setTsQuery(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") setTsSubmitted(tsQuery.trim())
+                      if (e.key === "Escape") { setTsQuery(""); setTsSubmitted("") }
+                    }}
+                    placeholder="search Thunderstore… (Enter)"
+                    style={SEARCH_INPUT}
+                  />
+                </div>
+              </div>
 
-              {wsLoading && wsItems.length === 0 ? (
-                <CenterState><Spinner size={18} /></CenterState>
-              ) : wsItems.length === 0 && !wsError ? (
-                <CenterState>
-                  <Package size={30} strokeWidth={1.4} color="var(--mf-t6)" />
-                  <span style={{ fontFamily: MONO, fontSize: 12, color: "var(--mf-t5)" }}>{wsSubmitted ? `nothing found for “${wsSubmitted}”` : "nothing here"}</span>
-                </CenterState>
-              ) : (
-                <>
-                  <div style={GRID}>
-                    {wsItems.map((item) => (
-                      <BrowseCard
-                        key={item.remoteId}
-                        picture={item.picture}
-                        name={item.name}
-                        author={item.author}
-                        installed={installedIds.has(`workshop-${item.remoteId}`)}
-                        busy={wsBusy === item.remoteId}
-                        onInstall={() => void installWorkshop(item)}
-                      />
-                    ))}
-                  </div>
-                  {wsHasMore ? (
-                    <div style={{ display: "flex", justifyContent: "center", marginTop: 18 }}>
-                      <button type="button" className="mf-ghost" style={{ ...GHOST_BTN, opacity: wsLoading ? 0.6 : 1 }} disabled={wsLoading} onClick={() => void runWorkshop(wsSort, wsSubmitted, wsPage + 1, true)}>
-                        {wsLoading ? <Spinner size={13} /> : null}Load more
-                      </button>
-                    </div>
-                  ) : null}
-                </>
-              )}
+              <BrowseResults
+                browse={thunderstoreBrowse}
+                emptyLabel={tsSubmitted ? `nothing found for “${tsSubmitted}”` : "nothing here"}
+                renderCard={(mod) => (
+                  <BrowseCard
+                    key={mod.remoteId}
+                    picture={mod.picture}
+                    name={mod.name}
+                    author={mod.author}
+                    metaLine={`${formatNumber(mod.downloads || 0)} downloads · ${formatNumber(mod.endorsements || 0)} rating`}
+                    installed={mod.installed || installedIds.has(`thunderstore-${mod.remoteId}`)}
+                    busy={tsVersionPick?.remoteId === mod.remoteId}
+                    onInstall={() => void openTsVersions(mod)}
+                  />
+                )}
+              />
             </>
           )
         )}
@@ -719,7 +1000,7 @@ export function GameModsPage() {
           <DialogHeader>
             <DialogTitle>Uninstall {confirmRm?.name}?</DialogTitle>
             <DialogDescription>
-              Removes the mod's staged files and redeploys the game folder without it. You can reinstall it from the {confirmRm?.provider === "workshop" ? "Workshop" : "Nexus"} tab later.
+              Removes the mod's staged files and redeploys the game folder without it. You can reinstall it from the {confirmRm?.provider === "workshop" ? "Workshop" : confirmRm?.provider === "thunderstore" ? "Thunderstore" : "Nexus"} tab later.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -764,6 +1045,47 @@ export function GameModsPage() {
                     style={{ ...GHOST_BTN, height: 30, fontSize: 11.5, flexShrink: 0, opacity: installingFileId != null && installingFileId !== f.fileId ? 0.5 : 1 }}
                   >
                     {installingFileId === f.fileId ? <Spinner size={12} /> : <Download size={12} strokeWidth={1.8} />}
+                    Install
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* thunderstore version picker */}
+      <Dialog open={Boolean(tsVersionPick)} onOpenChange={(open) => { if (!open && tsInstalling == null) setTsVersionPick(null) }}>
+        <DialogContent className="sm:max-w-[560px]">
+          <DialogHeader>
+            <DialogTitle>Install {tsVersionPick?.name}</DialogTitle>
+            <DialogDescription>Pick a version. Dependencies (including BepInEx) are resolved and installed automatically.</DialogDescription>
+          </DialogHeader>
+          {tsVersions == null && !tsVersionsError ? (
+            <div style={{ display: "flex", justifyContent: "center", padding: "28px 0" }}><Spinner size={16} /></div>
+          ) : tsVersionsError ? (
+            <div style={{ fontFamily: MONO, fontSize: 11.5, color: "var(--mf-t3)", padding: "8px 0" }}>{tsVersionsError}</div>
+          ) : tsVersions && tsVersions.length === 0 ? (
+            <div style={{ fontFamily: MONO, fontSize: 11.5, color: "var(--mf-t4)", padding: "8px 0" }}>this package has no versions</div>
+          ) : (
+            <div className="mf-scroll" style={{ maxHeight: 380, overflowY: "auto", display: "flex", flexDirection: "column", gap: 8, margin: "4px 0" }}>
+              {(tsVersions || []).map((v) => (
+                <div key={v.version} className="mf-listrow" style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 12px", borderRadius: 10, border: "1px solid var(--mf-line)", background: "var(--mf-panel)" }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--mf-t1)" }}>v{v.version}</div>
+                    <div style={{ marginTop: 3, fontFamily: MONO, fontSize: 10, color: "var(--mf-t5)" }}>
+                      {[fmtBytes(v.sizeBytes), `${v.dependencyCount ?? 0} ${(v.dependencyCount ?? 0) === 1 ? "dependency" : "dependencies"}`, fmtDate(v.uploadedAt)].filter(Boolean).join(" · ")}
+                    </div>
+                    {v.description ? <div style={{ marginTop: 4, fontSize: 11, color: "var(--mf-t4)", lineHeight: 1.45, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{v.description}</div> : null}
+                  </div>
+                  <button
+                    type="button"
+                    className="mf-ghost"
+                    disabled={tsInstalling != null}
+                    onClick={() => { if (tsVersionPick) void installThunderstore(tsVersionPick, v.version) }}
+                    style={{ ...GHOST_BTN, height: 30, fontSize: 11.5, flexShrink: 0, opacity: tsInstalling != null && tsInstalling !== v.version ? 0.5 : 1 }}
+                  >
+                    {tsInstalling === v.version ? <Spinner size={12} /> : <Download size={12} strokeWidth={1.8} />}
                     Install
                   </button>
                 </div>

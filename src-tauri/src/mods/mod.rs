@@ -20,6 +20,7 @@ use crate::state::AppState;
 
 pub mod nexus;
 pub mod steamcmd;
+pub mod thunderstore;
 pub mod workshop;
 
 // ---------------------------------------------------------------------------
@@ -59,6 +60,13 @@ pub struct GameMods {
     pub steam_appid: Option<u64>,
     // None = not yet probed against the Steam store; probe again next get.
     pub workshop_supported: Option<bool>,
+    // Thunderstore community identifier bound to this game (r2modman-style
+    // BepInEx mods). Detection is keyless, so thunderstore_checked only stays
+    // false after a transient communities fetch failure, letting a later
+    // mods_game_get retry.
+    pub thunderstore_community: Option<String>,
+    pub thunderstore_community_auto: bool,
+    pub thunderstore_checked: bool,
     pub deploy_target: String,
     pub mods: Vec<ModEntry>,
 }
@@ -714,6 +722,18 @@ pub async fn mods_game_get(state: State<'_, AppState>, appid: String) -> Result<
             }
         }
     }
+    if cfg.thunderstore_community.is_none() && !cfg.thunderstore_checked {
+        // Keyless, so unlike nexus this needs no API key gate. A failed
+        // communities fetch leaves thunderstore_checked false to retry later.
+        if let Some(title) = game_title(&state, &appid) {
+            if let Ok(found) = thunderstore::match_community(&title).await {
+                cfg.thunderstore_checked = true;
+                cfg.thunderstore_community_auto = found.is_some();
+                cfg.thunderstore_community = found.map(|c| c.identifier);
+                dirty = true;
+            }
+        }
+    }
 
     if dirty || !existed {
         save_config(&state.paths, &appid, &cfg);
@@ -725,6 +745,9 @@ pub async fn mods_game_get(state: State<'_, AppState>, appid: String) -> Result<
         "nexusDomainAuto": cfg.nexus_domain_auto,
         "steamAppid": cfg.steam_appid,
         "workshopSupported": cfg.workshop_supported.unwrap_or(false),
+        "thunderstoreCommunity": cfg.thunderstore_community,
+        "thunderstoreCommunityAuto": cfg.thunderstore_community_auto,
+        "thunderstoreSupported": cfg.thunderstore_community.is_some(),
         "deployTarget": cfg.deploy_target,
         "deployed": deployed,
         "mods": serde_json::to_value(&cfg.mods).unwrap_or_else(|_| json!([])),
@@ -754,6 +777,21 @@ pub async fn mods_game_set(
                 cfg.nexus_domain = None;
                 cfg.nexus_domain_auto = false;
                 cfg.nexus_checked = false; // allow auto-detection to retry
+            }
+        }
+    }
+
+    if let Some(v) = config.get("thunderstoreCommunity") {
+        match v.as_str().map(str::trim).filter(|s| !s.is_empty()) {
+            Some(s) => {
+                cfg.thunderstore_community = Some(s.to_string());
+                cfg.thunderstore_community_auto = false;
+                cfg.thunderstore_checked = true;
+            }
+            None => {
+                cfg.thunderstore_community = None;
+                cfg.thunderstore_community_auto = false;
+                cfg.thunderstore_checked = false; // allow auto-detection to retry
             }
         }
     }

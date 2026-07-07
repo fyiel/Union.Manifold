@@ -4,6 +4,50 @@ All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 The app shows its version as 1.0.0b (beta). 1.0.1 is the first packaged release.
 
+## 2.13.0
+
+Browse filters everywhere and Thunderstore as a third mod source.
+
+### Added
+
+Thunderstore
+- full Thunderstore support on the Mods page: a fourth tab with browse, search,
+  sort and one-click install for r2modman-style BepInEx games (Lethal Company,
+  Valheim, Risk of Rain 2 and friends). completely keyless and browser-free,
+  it is the same open CDN r2modman uses
+- installs resolve the whole dependency chain automatically: BepInEx and every
+  required package download, extract and deploy together, and each dependency
+  shows up as its own entry in the installed list
+- packages are laid out the standard BepInEx way (plugins/config/patchers
+  mapped under BepInEx/, loose mods nested under BepInEx/plugins/) and deploy
+  through the same journaled copy engine as the other providers, so toggling
+  and uninstalling stay byte-identical safe. r2modman's rare per-package custom
+  install rules are not replicated
+- the game's community is auto-detected by title match and can be overridden
+  from a picker on the tab; a version picker lists every published version with
+  size and dependency count
+- browsing runs locally over the community package index, cached on disk for
+  three hours, because Thunderstore's paginated listing endpoint sits behind a
+  Cloudflare challenge that no plain HTTP client clears
+
+Mods browsing
+- time filter (all time / last 28 days / last 7 days), sort-by and
+  ascending/descending controls on the browse tabs. NexusMods gets the full
+  set (downloads, recently updated, recently published, file size,
+  endorsements, last comment) through the v2 GraphQL api; Workshop maps to
+  what Steam actually offers (popular, most recent, last updated, most
+  subscribed, top rated) and only shows the time filter where Steam supports
+  it, instead of faking unsupported combinations
+- endless scrolling replaces the "load more" button on every browse tab: the
+  next page loads as you approach the end of the list, results de-duplicate,
+  and the list resets cleanly when any filter changes
+
+### Changed
+
+- NexusMods browsing no longer needs an api key: the fixed
+  trending/latest-added/latest-updated shelves were replaced by the filter bar
+  above, driven by the keyless GraphQL endpoint
+
 ## 2.12.0
 
 Free NexusMods accounts can now install in the app without a browser round

@@ -289,6 +289,10 @@ pub fn run() {
             mods::workshop::workshop_details,
             mods::workshop::workshop_install,
             mods::workshop::workshop_status,
+            mods::thunderstore::thunderstore_communities,
+            mods::thunderstore::thunderstore_browse,
+            mods::thunderstore::thunderstore_versions,
+            mods::thunderstore::thunderstore_install,
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
