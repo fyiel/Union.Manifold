@@ -379,11 +379,70 @@ pub(crate) fn undeploy_from(game_dir: &Path, target: &Path) -> Result<(), String
     save_journal(game_dir, &Journal::default())
 }
 
+// A directory is the game's own folder when it holds the hallmarks of an
+// installed build: a Unity data folder, the IL2CPP/Mono runtime, a doorstop
+// loader, an existing BepInEx tree, or a game executable. UnityCrashHandler and
+// uninstaller exes do not count on their own.
+fn is_game_dir(dir: &Path) -> bool {
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return false;
+    };
+    for e in rd.flatten() {
+        let name = e.file_name().to_string_lossy().to_lowercase();
+        let path = e.path();
+        if path.is_dir() && (name == "bepinex" || name.ends_with("_data")) {
+            return true;
+        }
+        if path.is_file() {
+            if name == "gameassembly.dll" || name == "unityplayer.dll" || name == "doorstop_config.ini" {
+                return true;
+            }
+            if name.ends_with(".exe") && !name.contains("unitycrashhandler") && !name.contains("unins") {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+// Repacks (SteamRiP/AnkerGames and similar) wrap the real game one folder deep,
+// so the manifest install dir is not where the exe, the Unity data folder, or
+// BepInEx actually live. When the base itself is not a game dir, descend through
+// a wrapper (a child that is a game dir, or a sole subfolder) up to two levels
+// so mods deploy where the game reads them. Flat installs return unchanged.
+fn resolve_game_root(base: &Path) -> PathBuf {
+    if is_game_dir(base) {
+        return base.to_path_buf();
+    }
+    let mut cur = base.to_path_buf();
+    for _ in 0..2 {
+        let Ok(rd) = std::fs::read_dir(&cur) else {
+            break;
+        };
+        let subdirs: Vec<PathBuf> = rd.flatten().map(|e| e.path()).filter(|p| p.is_dir()).collect();
+        if let Some(hit) = subdirs.iter().find(|d| is_game_dir(d)) {
+            return hit.clone();
+        }
+        if subdirs.len() == 1 {
+            cur = subdirs.into_iter().next().unwrap();
+            continue;
+        }
+        break;
+    }
+    base.to_path_buf()
+}
+
 fn deploy_target_dir(state: &AppState, appid: &str, cfg: &GameMods) -> Result<PathBuf, String> {
     let roots = library::scan_roots(state);
     let base = library::game_files_dir(&roots, appid)
         .ok_or_else(|| format!("game {appid} not found in library"))?;
-    join_target(&base, &cfg.deploy_target)
+    // The default (empty) target auto-resolves to the real game dir so nested
+    // repacks work; an explicit override is honored literally against the base.
+    if cfg.deploy_target.is_empty() {
+        Ok(resolve_game_root(&base))
+    } else {
+        join_target(&base, &cfg.deploy_target)
+    }
 }
 
 fn redeploy(state: &AppState, appid: &str, cfg: &GameMods) -> Result<usize, String> {
@@ -1020,6 +1079,42 @@ mod tests {
         assert_eq!(read(&target.join("overwritten.txt")), "original");
         assert!(!target.join("added").exists(), "mod-created dirs cleaned up");
         assert!(load_journal(&dir).files.is_empty());
+    }
+
+    #[test]
+    fn resolve_game_root_descends_into_nested_repack_folder() {
+        let tmp = tempdir().unwrap();
+        // The manifest install dir (archive root) holds only repack chrome plus
+        // the wrapper folder that contains the real game.
+        let base = tmp.path().join("GTFO");
+        write_file(&base.join("Read Me.txt"), "x");
+        write_file(&base.join("Run me!.bat"), "x");
+        let game = base.join("GTFO");
+        write_file(&game.join("GTFO.exe"), "mz");
+        std::fs::create_dir_all(game.join("GTFO_Data")).unwrap();
+
+        assert_eq!(resolve_game_root(&base), game);
+    }
+
+    #[test]
+    fn resolve_game_root_leaves_flat_install_unchanged() {
+        let tmp = tempdir().unwrap();
+        let base = tmp.path().join("Game");
+        write_file(&base.join("Game.exe"), "mz");
+        std::fs::create_dir_all(base.join("Game_Data")).unwrap();
+
+        assert_eq!(resolve_game_root(&base), base);
+    }
+
+    #[test]
+    fn resolve_game_root_gives_up_when_no_game_dir_found() {
+        let tmp = tempdir().unwrap();
+        let base = tmp.path().join("empty");
+        std::fs::create_dir_all(base.join("docs")).unwrap();
+        std::fs::create_dir_all(base.join("extras")).unwrap();
+
+        // Two sibling non-game subdirs: no confident descent, return base as-is.
+        assert_eq!(resolve_game_root(&base), base);
     }
 
     #[test]
