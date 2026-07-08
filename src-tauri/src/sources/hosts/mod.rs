@@ -1,5 +1,6 @@
 pub mod buzzheavier;
 pub mod datanodes;
+pub mod datavaults;
 pub mod gate;
 #[cfg(test)]
 mod installtest;
@@ -47,6 +48,9 @@ pub fn detect_host_type(url: &str) -> String {
     if rootz::matches(url) {
         return "rootz".to_string();
     }
+    if datavaults::matches(url) {
+        return "datavaults".to_string();
+    }
     if let Some(t) = gate::host_type(url) {
         return t.to_string();
     }
@@ -69,6 +73,7 @@ pub fn is_resolvable(url: &str) -> bool {
         || fuckingfast::matches(url)
         || mediafire::matches(url)
         || rootz::matches(url)
+        || datavaults::matches(url)
         || (gate::matches(url) && crate::slipgate::cfg().is_some())
 }
 
@@ -102,6 +107,9 @@ pub async fn resolve_url(option: &DownloadOption) -> ResolveResult {
     }
     if rootz::matches(url) {
         return rootz::resolve(url).await;
+    }
+    if datavaults::matches(url) {
+        return datavaults::resolve(url).await;
     }
     if gate::matches(url) {
         return gate::resolve(url).await;
