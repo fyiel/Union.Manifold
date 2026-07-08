@@ -4,6 +4,23 @@ All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 The app shows its version as 1.0.0b (beta). 1.0.1 is the first packaged release.
 
+## 2.22.0
+
+GameBounty now runs on its official public API, with the site owner's approval.
+
+### Changed
+
+- GameBounty switched from scraping the public site (its sitemap plus each
+  game's Next.js flight payload) to the official API at
+  api.gamebounty.world/api/posts, which the site's owner explicitly approved
+  for use. browse and search now span the full catalog (~3.7k games) in one
+  paginated pass instead of the old 60-game window built from a page fetch per
+  game, and each title's download mirrors are read straight from the API's
+  container. Steam appids, art, genres, developer and popularity come from the
+  listing; a game's size and release date come from its detail view, which the
+  library hydrates on demand. verified end-to-end — a GameBounty title (MMORPG
+  Tycoon 2) browses, resolves through pixeldrain, downloads and extracts cleanly
+
 ## 2.21.0
 
 ### Removed
