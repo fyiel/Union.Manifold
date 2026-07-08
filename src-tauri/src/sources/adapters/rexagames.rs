@@ -194,14 +194,27 @@ fn parse_source(body: &str) -> Vec<Entry> {
     out
 }
 
-async fn catalogue() -> Arc<Vec<Entry>> {
+async fn catalogue() -> Option<Arc<Vec<Entry>>> {
     CATALOG
         .get_or(|| async {
             let body = http::get_text(SOURCE_JSON).await.ok()?;
-            Some(Arc::new(parse_source(&body)))
+            let entries = parse_source(&body);
+            // hydralinks.cloud challenges flagged IPs with a Cloudflare
+            // interstitial; that (or any error page) parses to zero entries.
+            // Returning None keeps it out of the cache, so a transient block
+            // can't pin the source blank for the whole TTL: the next browse
+            // retries while a stale catalogue (if any) is served.
+            if entries.is_empty() {
+                crate::logging::write_line(
+                    "warn",
+                    "rexagames: source fetch yielded no entries (Cloudflare block or empty body)",
+                );
+                None
+            } else {
+                Some(Arc::new(entries))
+            }
         })
         .await
-        .unwrap_or_default()
 }
 
 /// Lightweight browse/search stub from a catalogue entry. Steam art + appid are
@@ -303,10 +316,9 @@ async fn zeilink_options(slug: &str) -> Vec<DownloadOption> {
 }
 
 pub async fn query(_params: &QueryParams) -> Option<Vec<SourceGame>> {
-    let cat = catalogue().await;
-    if cat.is_empty() {
-        return Some(Vec::new());
-    }
+    // None => the catalogue fetch hard-failed (Cloudflare block, no stale copy);
+    // propagate it so the source is flagged errored instead of silently empty.
+    let cat = catalogue().await?;
     // Newest first, capped — the central layer applies the user's real sort and
     // filters over this pool.
     let mut idx: Vec<usize> = (0..cat.len()).collect();
@@ -322,7 +334,10 @@ pub async fn search(q: &str, limit: usize) -> Vec<SourceGame> {
         return Vec::new();
     }
     let terms: Vec<String> = ql.split_whitespace().map(str::to_string).collect();
-    let cat = catalogue().await;
+    let cat = match catalogue().await {
+        Some(c) => c,
+        None => return Vec::new(),
+    };
     let mut stubs = Vec::new();
     for e in cat.iter() {
         let title = e.title.to_lowercase();
@@ -338,7 +353,7 @@ pub async fn search(q: &str, limit: usize) -> Vec<SourceGame> {
 
 pub async fn get_detail(slug: &str) -> Option<SourceGame> {
     let clean = slug.trim_matches('/');
-    let cat = catalogue().await;
+    let cat = catalogue().await?;
     let entry = cat.iter().find(|e| e.slug == clean)?;
     let mut game = attach_steam_art(entry_to_stub(entry)).await;
     let options = options_from_uris(&entry.uris).await;
