@@ -4,6 +4,17 @@ All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 The app shows its version as 1.0.0b (beta). 1.0.1 is the first packaged release.
 
+## 2.19.1
+
+### Fixed
+
+- Steam Workshop installs reported "steamcmd download failed" even when the
+  download succeeded. On a machine with the Steam client installed, steamcmd
+  writes workshop content into the system Steam library
+  (~/.local/share/Steam/steamapps/workshop) rather than the app's own steamcmd
+  dir, so the app checked the wrong place and declared failure. it now reads the
+  destination steamcmd actually prints and picks up the files wherever they land
+
 ## 2.19.0
 
 ### Added
