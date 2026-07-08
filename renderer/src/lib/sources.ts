@@ -196,12 +196,11 @@ export async function sourceTags(): Promise<{ tags: string[]; bySource: Record<s
 // link drives the single big Download button and the rest become "other links".
 // The order is user-configurable (Settings, Download Sources), persisted in
 // ucSettings. This is the default. Sources not listed sort after.
-export const SOURCE_PRIORITY = ["unioncrax", "ankergames", "gamebounty", "steamrip", "rexagames"]
+export const SOURCE_PRIORITY = ["unioncrax", "gamebounty", "steamrip", "rexagames"]
 
 // Friendly display names for source ids.
 export const SOURCE_NAMES: Record<string, string> = {
   unioncrax: "UnionCrax",
-  ankergames: "AnkerGames",
   gamebounty: "GameBounty",
   steamrip: "SteamRIP",
   rexagames: "RexaGames",
@@ -210,10 +209,9 @@ export function sourceName(id: string): string {
   return SOURCE_NAMES[id] || id
 }
 
-// Two-letter source badges (UC/SR/GB/AG) used on cards + status chips.
+// Two-letter source badges (UC/GB/SR/RX) used on cards + status chips.
 export const SOURCE_ABBR: Record<string, string> = {
   unioncrax: "UC",
-  ankergames: "AG",
   gamebounty: "GB",
   steamrip: "SR",
   rexagames: "RX",
@@ -229,13 +227,12 @@ export function sourceIsDirect(source: SourceGame): boolean {
 }
 
 // General-purpose "this source resolves in-app" hint for source rows/filters
-// (vs per-game `sourceIsDirect`). AnkerGames is browser-resolve only.
+// (vs per-game `sourceIsDirect`).
 export const SOURCE_DIRECT: Record<string, boolean> = {
   unioncrax: true,
   steamrip: true,
   gamebounty: true,
   rexagames: true,
-  ankergames: false,
 }
 export function sourceDirect(id: string): boolean {
   return SOURCE_DIRECT[id] !== false
@@ -442,7 +439,7 @@ export function unifiedToGame(game: UnifiedSourceGame): Game {
     sizeBytes: game.sizeBytes,
     version: game.version || "",
     developer: game.developer || "Unknown",
-    // comma-joined source ids, handy for badges ("gamebounty+ankergames")
+    // comma-joined source ids, handy for badges ("gamebounty+steamrip")
     source: game.sources.map((s) => s.sourceId).join("+") || "sources",
     store: "",
     dlc: [],
