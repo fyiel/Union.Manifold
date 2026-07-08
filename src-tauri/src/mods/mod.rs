@@ -451,6 +451,61 @@ fn redeploy(state: &AppState, appid: &str, cfg: &GameMods) -> Result<usize, Stri
     deploy_to(&dir, &target, cfg)
 }
 
+// Games whose loose-file mods live under <game>/mods/<name>/ instead of the
+// game root (Noita and the like). For these a mod's staged files are wrapped in
+// mods/<folder>/ so the generic root deploy lands them where the game reads.
+fn wants_mods_subfolder(steam_appid: Option<u64>) -> bool {
+    matches!(steam_appid, Some(881100)) // Noita
+}
+
+// Restructure a freshly staged mod so its top level is mods/<folder>/ for the
+// games above. Idempotent: a stage that already has a top-level `mods/` dir is
+// left alone; a lone wrapping subfolder keeps its own name; bare mod files fall
+// back to the mod's sanitized name.
+fn wrap_in_mods_folder(staged: &Path, fallback_name: &str) -> Result<(), String> {
+    let entries: Vec<PathBuf> = std::fs::read_dir(staged)
+        .map_err(|e| format!("stage read: {e}"))?
+        .flatten()
+        .map(|e| e.path())
+        .collect();
+    let has_mods_dir = entries.iter().any(|p| {
+        p.is_dir() && p.file_name().map(|n| n.eq_ignore_ascii_case("mods")).unwrap_or(false)
+    });
+    if entries.is_empty() || has_mods_dir {
+        return Ok(());
+    }
+    let move_into = |from: &Path, to: &Path| -> Result<(), String> {
+        if std::fs::rename(from, to).is_ok() {
+            return Ok(());
+        }
+        if from.is_dir() {
+            copy_dir_recursive(from, to)?;
+            std::fs::remove_dir_all(from).ok();
+        } else {
+            std::fs::copy(from, to).map_err(|e| format!("mods wrap: {e}"))?;
+            std::fs::remove_file(from).ok();
+        }
+        Ok(())
+    };
+    let mods_dir = staged.join("mods");
+    std::fs::create_dir_all(&mods_dir).map_err(|e| format!("mods wrap: {e}"))?;
+    if entries.len() == 1 && entries[0].is_dir() {
+        // The archive already wraps the mod in its own folder: keep that name.
+        let name = entries[0].file_name().unwrap().to_os_string();
+        move_into(&entries[0], &mods_dir.join(name))?;
+    } else {
+        // Bare mod files: invent a folder from the mod's name.
+        let folder = safe_folder_name(fallback_name);
+        let dest = mods_dir.join(if folder.is_empty() { "mod" } else { &folder });
+        std::fs::create_dir_all(&dest).map_err(|e| format!("mods wrap: {e}"))?;
+        for p in &entries {
+            let name = p.file_name().unwrap().to_os_string();
+            move_into(p, &dest.join(name))?;
+        }
+    }
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Lazy per-game detection
 
@@ -641,6 +696,9 @@ pub(crate) async fn finalize_install(
         if move_src {
             std::fs::remove_dir_all(staged_src).ok();
         }
+    }
+    if wants_mods_subfolder(detect_steam_appid(&state, &spec.appid).await) {
+        wrap_in_mods_folder(&final_dir, &spec.name)?;
     }
     let size = crate::install::dir_size(&final_dir);
 
@@ -1369,5 +1427,37 @@ mod tests {
         // ...so a later undeploy still brings the true original home.
         undeploy_from(&dir, &target).unwrap();
         assert_eq!(read(&target.join("f.txt")), "original");
+    }
+
+    #[test]
+    fn wrap_lone_folder_keeps_its_name_under_mods() {
+        let tmp = tempdir().unwrap();
+        let staged = tmp.path().join("s");
+        write_file(&staged.join("CoolMod/mod.xml"), "x");
+        wrap_in_mods_folder(&staged, "Cool Mod display").unwrap();
+        assert!(staged.join("mods/CoolMod/mod.xml").is_file());
+        assert!(!staged.join("CoolMod").exists());
+    }
+
+    #[test]
+    fn wrap_bare_files_fall_back_to_mod_name() {
+        let tmp = tempdir().unwrap();
+        let staged = tmp.path().join("s");
+        write_file(&staged.join("mod.xml"), "x");
+        write_file(&staged.join("files/a.lua"), "y");
+        wrap_in_mods_folder(&staged, "My Noita Mod").unwrap();
+        let folder = safe_folder_name("My Noita Mod");
+        assert!(staged.join("mods").join(&folder).join("mod.xml").is_file());
+        assert!(staged.join("mods").join(&folder).join("files/a.lua").is_file());
+    }
+
+    #[test]
+    fn wrap_leaves_existing_mods_tree_untouched() {
+        let tmp = tempdir().unwrap();
+        let staged = tmp.path().join("s");
+        write_file(&staged.join("mods/Existing/mod.xml"), "x");
+        wrap_in_mods_folder(&staged, "whatever").unwrap();
+        assert!(staged.join("mods/Existing/mod.xml").is_file());
+        assert!(!staged.join("mods/mods").exists());
     }
 }
