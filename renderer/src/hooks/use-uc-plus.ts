@@ -50,15 +50,6 @@ async function fetchStatus(): Promise<UcPlusStatus> {
   }
 }
 
-/**
- * Returns the viewer's UC+ status. Caches the result in-memory for 60s so
- * multiple consumers don't trigger redundant /api/uc-plus/claim calls.
- *
- * Mirrors union-crax.xyz/hooks/use-uc-plus.ts (swaps fetch → apiFetch so the
- * desktop's base-URL/auth wrapper is used).
- *
- * Auth-required: anonymous viewers see `{ active: false }` and no claim.
- */
 export function useUcPlus(): UcPlusState {
   const [, force] = useState(0)
   const fetchingRef = useRef(false)

@@ -4,7 +4,6 @@ export type LinuxPerGameLaunchMode = LinuxLaunchMode | 'inherit'
 export type LinuxDetectionOption = {
   label: string
   path: string
-  // where the runner was found, set for proton ('steam' vs 'community' GE) so the UI can group
   source?: 'steam' | 'community'
 }
 

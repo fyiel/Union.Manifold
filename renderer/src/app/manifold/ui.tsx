@@ -3,34 +3,21 @@ import { Search, Loader2 } from "lucide-react"
 import { proxyImageUrl } from "@/lib/utils"
 import { fetchSteamArt } from "@/lib/sources"
 
-// Shared Union.Manifold primitives, monochrome tokens plus a couple of inline
-// SVG bits reused across pages.
-
 export const MONO = "var(--mf-mono)"
 export const COVER_LINES =
   "repeating-linear-gradient(135deg, color-mix(in srgb, var(--mf-t0) 4.5%, transparent) 0 1px, transparent 1px 11px), #131313"
 
-// Steam art fallback ladder for a known appid. Older titles (e.g. Hylics 397740)
-// have NO modern library_600x900 / library_hero (those 404), but the legacy
-// header.jpg / capsule_616x353 always exist, so a steamrip-only old game that
-// would otherwise be blank falls back to its capsule.
 export function steamArtLadder(appid?: number | null): string[] {
   if (!appid) return []
   const base = `https://shared.steamstatic.com/store_item_assets/steam/apps/${appid}`
   return [
-    `${base}/library_600x900.jpg`, // 3:4 portrait (best for cards)
-    `${base}/library_hero.jpg`,    // wide hero
-    `${base}/header.jpg`,          // 460x215 capsule (always present)
+    `${base}/library_600x900.jpg`,
+    `${base}/library_hero.jpg`,
+    `${base}/header.jpg`,
     `${base}/capsule_616x353.jpg`,
   ]
 }
 
-// Collect every distinct cover/hero a unified game offers. A user-set custom
-// cover (uc-custom://) always leads. With `steamFirst` (card/detail covers)
-// and a known appid, Steam's official portrait capsule leads and the source
-// art — which is often a wrong or watermarked scrape — falls back behind it;
-// the wide hero call leaves ordering alone so it doesn't lead with a portrait.
-// SmartImage walks the list so a 404 capsule still yields to the source art.
 export function gameImageCandidates(
   game: { image?: string; heroImage?: string; steamAppId?: number | null; sources?: Array<{ image?: string }> },
   opts?: { steamFirst?: boolean },
@@ -49,15 +36,6 @@ export function gameImageCandidates(
   return out
 }
 
-// Candidate URLs that failed to load recently. Detail imagery remounts on
-// every Browse → detail → Browse trip, and every retry of a known-dead
-// candidate is a real network request. Module-level like GameCard's
-// `prefetched` set, but capped: at the cap the whole map is dropped wholesale
-// (no recency bookkeeping) so it can't grow unbounded. Entries expire after a
-// few minutes because a failure is often the machine's moment, not the URL's:
-// a launch before the network is up (boot autostart, installer relaunch)
-// fails every cover at once, and a session-permanent set kept them blank
-// until the next restart even after connectivity returned.
 const failedSrcs = new Map<string, number>()
 const FAILED_SRCS_CAP = 500
 const FAILED_TTL_MS = 5 * 60_000
@@ -75,28 +53,18 @@ function hasFailed(url: string): boolean {
   return false
 }
 
-// First index at or after `from` whose URL isn't a known recent failure.
 function nextAlive(list: string[], from: number): number {
   let i = from
   while (i < list.length && hasFailed(list[i])) i++
   return i
 }
 
-// An <img> that walks a list of candidate sources, advancing on error (and
-// skipping candidates that already failed this session). When every candidate
-// fails AND a steamAppId is given, it asks main for Steam's authoritative
-// store art (one cached call) and tries that before giving up, which rescues
-// titles like Rugrats Retro Rewind whose predictable library_*.jpg URLs all
-// 404. onAllFailed fires only if that fails too.
 export function SmartImage({ candidates, steamAppId, name, alt, onAllFailed, style, lazy }: { candidates: string[]; steamAppId?: number | null; name?: string; alt?: string; onAllFailed?: () => void; style?: CSSProperties; lazy?: boolean }) {
   const [extra, setExtra] = useState<string[]>([])
   const [idx, setIdx] = useState(() => nextAlive(candidates, 0))
   const steamTried = useRef(false)
   const exhaustedFired = useRef(false)
 
-  // Restart the walk when the candidate set actually changes (a detail page
-  // hydrates thin to full and swaps in a different cover). Without this the stale
-  // idx/extra/steamTried from the old game would show wrong art or a blank.
   const sig = candidates.join("|")
   const prevSig = useRef(sig)
   if (prevSig.current !== sig) {
@@ -110,14 +78,11 @@ export function SmartImage({ candidates, steamAppId, name, alt, onAllFailed, sty
   const all = useMemo(() => [...candidates, ...extra], [candidates, extra])
   const src: string | undefined = all[idx]
 
-  // Every candidate is dead: one (cached) steam-art lookup, then onAllFailed.
-  // Shared by the onError walk and the all-cached-failures mount path below.
   const exhausted = () => {
     if (steamAppId && !steamTried.current) {
       steamTried.current = true
       const sigAtError = sig
       void fetchSteamArt(steamAppId, name).then((urls) => {
-        // game swapped while the fetch was in flight, drop its stale art
         if (prevSig.current !== sigAtError) return
         const next = urls.map((u) => proxyImageUrl(u)).filter((u) => !all.includes(u) && !hasFailed(u))
         if (next.length) { setIdx(all.length); setExtra((p) => [...p, ...next]) }
@@ -128,9 +93,6 @@ export function SmartImage({ candidates, steamAppId, name, alt, onAllFailed, sty
     onAllFailed?.()
   }
 
-  // A remount can find every candidate already in the failed cache, so no
-  // <img> mounts to drive the onError walk — kick the steam/onAllFailed tail
-  // directly. The ref guard keeps StrictMode's double effect run to one kick.
   useEffect(() => {
     if (src !== undefined || all.length === 0 || exhaustedFired.current) return
     exhaustedFired.current = true
@@ -155,12 +117,10 @@ export function SmartImage({ candidates, steamAppId, name, alt, onAllFailed, sty
   )
 }
 
-// Candidates memoized off a unified game.
 export function useGameImages(game: { image?: string; heroImage?: string; steamAppId?: number | null; sources?: Array<{ image?: string }> }): string[] {
   return useMemo(() => gameImageCandidates(game), [game])
 }
 
-// Bytes to a compact "x.x GB" / "xx GB" label (empty when unknown).
 export function gbLabel(bytes?: number): string {
   if (!bytes) return ""
   const gb = bytes / 1e9

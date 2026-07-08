@@ -15,9 +15,6 @@ import { AlertTriangle } from "@/components/icons"
 const SourceGamePage = lazy(() => import("@/app/pages/SourceGamePage").then((m) => ({ default: m.SourceGamePage })))
 const GameModsPage = lazy(() => import("@/app/pages/GameModsPage").then((m) => ({ default: m.GameModsPage })))
 
-// Fork pages — multi-source browse + detail. Library/Downloads/Settings are
-// reused from the original app (they're source-agnostic: installed manifests,
-// the aria2 queue, and local settings). Account/social pages are dropped.
 const ThemeEditorWindow = lazy(() => import("@/app/pages/settings/ThemeEditorWindow"))
 
 function RouteFallback() {
@@ -28,12 +25,6 @@ const EXTRACTION_GUARD_EXTRACTING = ["extracting", "installing"]
 const EXTRACTION_GUARD_DOWNLOADING = ["downloading", "verifying", "retrying"]
 
 function ExtractionCloseGuard() {
-  // This guard is mounted at the app root for the whole session. Subscribing to
-  // the raw `downloads` array (useDownloads) re-rendered it ~5×/sec for every
-  // active download — pure waste, since the dialog only cares about which items
-  // are active and their status/name, never their byte counters. Use a narrow
-  // selector with content equality so a progress tick that doesn't change the
-  // active set produces no re-render.
   const activeItems = useDownloadsSelector(
     (downloads) =>
       downloads
@@ -108,11 +99,6 @@ function ExtractionCloseGuard() {
 }
 
 function DownloadBlockedGuard() {
-  // Surfaced when a download can't proceed because the network is blocking our
-  // download host at the TLS layer (DPI/SNI) and there's no reachable mirror to
-  // fall back to. Without this the app just looped on the failure silently;
-  // users (and support) had no idea *why*. Main throttles the event, so this
-  // shows at most once a minute.
   const [blocked, setBlocked] = useState<{ host: string; gameName: string | null } | null>(null)
 
   useEffect(() => {
@@ -155,8 +141,6 @@ function DownloadBlockedGuard() {
 }
 
 function AppWithDownloads() {
-  // Push the user's saved source enable/disable into the main registry on boot
-  // (the registry's enabled set is in-memory and resets each launch).
   useEffect(() => {
     void import("@/lib/sources").then((m) => m.applySavedSourceSettings())
   }, [])
@@ -182,9 +166,7 @@ export default function App() {
             <Routes>
               <Route path="/theme-editor" element={<ThemeEditorWindow />} />
 
-              {/* App shell — ForkLayout's TabHost is the single tab registry.
-                  The detail route mounts via the layout Outlet; an unmatched
-                  path (TabHost renders nothing, so Outlet is used) redirects home. */}
+              {}
               <Route element={<AppWithDownloads />}>
                 <Route path="/g/:key" element={<SourceGamePage />} />
                 <Route path="/g/:key/mods" element={<GameModsPage />} />

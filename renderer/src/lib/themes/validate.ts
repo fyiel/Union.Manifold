@@ -88,8 +88,6 @@ function parseOklchLightness(value: string): number | null {
   return Number.isFinite(l) ? l : null
 }
 
-/** Reject themes where foreground/background contrast would be invisible.
- *  Cheap heuristic on OKLch lightness — full APCA contrast would be nicer. */
 export function hasReadableContrast(theme: ThemeDef): boolean {
   const bg = parseOklchLightness(theme.colors.background)
   const fg = parseOklchLightness(theme.colors.foreground)

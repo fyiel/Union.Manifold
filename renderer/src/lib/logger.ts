@@ -1,8 +1,3 @@
-/**
- * Centralized logging utility for UnionCrax.Direct
- * Logs are sent to the main process for persistent storage
- */
-
 type LogLevel = "debug" | "info" | "warn" | "error"
 
 interface LogOptions {
@@ -42,7 +37,6 @@ class Logger {
         await window.ucLogs.log(level, message, toLoggable(data))
       }
     } catch (err) {
-      // Fallback to console if IPC fails
       console.error("[Logger] Failed to send log to main process:", err)
     }
   }
@@ -51,7 +45,6 @@ class Logger {
     const formattedMessage = this.formatMessage(message, options)
     const data = options?.data
 
-    // Always log to console for immediate visibility
     const consoleMethod = level === "error" ? console.error : level === "warn" ? console.warn : console.log
     if (data !== undefined) {
       consoleMethod(formattedMessage, data)
@@ -59,7 +52,6 @@ class Logger {
       consoleMethod(formattedMessage)
     }
 
-    // Send to main process for persistent logging
     this.sendToMain(level, formattedMessage, data)
   }
 
@@ -88,7 +80,6 @@ class Logger {
   }
 }
 
-// Export singleton instances for different contexts
 export const logger = new Logger("App")
 export const apiLogger = new Logger("API")
 export const downloadLogger = new Logger("Download")

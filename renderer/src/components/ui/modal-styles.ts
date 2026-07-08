@@ -1,7 +1,3 @@
-// Shared modal/floating-surface tokens — kept in sync with union-crax.xyz
-// (components/ui/modal-styles.ts). The web app and launcher should look
-// identical when displaying any popover, dialog, sheet, tooltip, or select.
-
 export const modalOverlayClassName =
   "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 fixed inset-0 z-50 bg-black/72 backdrop-blur-md"
 

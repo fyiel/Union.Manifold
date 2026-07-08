@@ -11,10 +11,6 @@ export function applyTheme(def: ThemeDef): void {
     }
   }
   root.style.setProperty("--radius", def.radius)
-  // The Tailwind v4 `@theme inline` block redirects `--font-sans` → these
-  // runtime variables, so updating them re-flows every `.font-sans` /
-  // `.font-mono` utility class across the app, not just elements that read
-  // the var directly.
   root.style.setProperty("--font-sans-active", resolveFontStack(def.fontSans, "sans"))
   root.style.setProperty("--font-mono-active", resolveFontStack(def.fontMono, "mono"))
   root.dataset.themeId = def.id

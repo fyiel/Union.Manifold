@@ -9,8 +9,6 @@ export type DownloadLinksResult = {
   redirectUrl?: string
 }
 
-// UC.Files is the only in-app download host. Vikingfile links exist in the
-// catalog but aren't downloadable from within the app (web-only fallback).
 export type PreferredDownloadHost = "ucfiles"
 
 export type ResolvedDownload = {
@@ -19,8 +17,6 @@ export type ResolvedDownload = {
   size?: number
   resolved: boolean
 }
-
-// ── Link availability check types ──
 
 export type PartStatus = {
   part: number
@@ -87,9 +83,6 @@ function isUCFilesHostValue(value: string): boolean {
   return normalized.startsWith("files") && normalized.endsWith(".union-crax.xyz")
 }
 
-/**
- * Normalise host entries from API - handles both legacy string[] and new {url,part}[] shapes.
- */
 function sanitizeHosts(input: Record<string, any[]> | null | undefined): DownloadHosts {
   const hosts = input && typeof input === "object" ? input : {}
   const cleaned: DownloadHosts = {}
@@ -211,7 +204,6 @@ function pickHostLinks(available: DownloadHosts, host: PreferredDownloadHost) {
 export async function getPreferredDownloadHost(): Promise<PreferredDownloadHost> {
   if (typeof window === "undefined") return "ucfiles"
 
-  // Try to get from electron settings first (synchronized with Settings UI)
   if (window.ucSettings?.get) {
     try {
       const stored = await window.ucSettings.get('defaultMirrorHost')
@@ -223,7 +215,6 @@ export async function getPreferredDownloadHost(): Promise<PreferredDownloadHost>
     }
   }
 
-  // Fallback to localStorage for backwards compatibility
   const legacy = localStorage.getItem(DOWNLOAD_HOST_STORAGE_KEY)
   if (legacy && PREFERRED_HOSTS.includes(legacy as PreferredDownloadHost)) {
     return legacy as PreferredDownloadHost
@@ -236,14 +227,12 @@ export function setPreferredDownloadHost(host: PreferredDownloadHost) {
   if (typeof window === "undefined") return
   if (!PREFERRED_HOSTS.includes(host)) return
 
-  // Save to electron settings (synchronized with Settings UI)
   if (window.ucSettings?.set) {
     window.ucSettings.set('defaultMirrorHost', host).catch((err: any) => {
       downloadLogger.warn('Failed to set defaultMirrorHost', { data: err })
     })
   }
 
-  // Also keep localStorage for backwards compatibility
   localStorage.setItem(DOWNLOAD_HOST_STORAGE_KEY, host)
 }
 
@@ -264,18 +253,14 @@ export function inferFilenameFromUrl(url: string, fallback: string) {
   }
 }
 
-// ── UC.Files download resolution ──
-
 export function extractUCFilesFileId(url: string): string | null {
   try {
     const parsed = new URL(url)
     if (!isUCFilesHostValue(parsed.hostname)) return null
-    // /download/{token} is a share token URL, not a file id.
     const fMatch = parsed.pathname.match(/\/(?:f|file)\/([A-Za-z0-9_-]{1,64})(?:[/?#]|$)/)
     if (fMatch?.[1]) return fMatch[1]
-    // Matches /dl/{token} - already a direct download URL, no fileId to extract
     const dlMatch = parsed.pathname.match(/\/dl\/([A-Za-z0-9_-]{1,64})(?:[/?#]|$)/)
-    if (dlMatch?.[1]) return null // token, not a file ID
+    if (dlMatch?.[1]) return null
     return null
   } catch {
     return null
@@ -381,7 +366,6 @@ export async function resolveUCFilesDownload(url: string, signal?: AbortSignal):
 }
 
 export async function resolveDownloadUrl(_host: string, url: string, signal?: AbortSignal): Promise<ResolvedDownload> {
-  // Defensive guard for legacy persisted state where "url" may be an object
   const normalizedUrl =
     typeof url === "string"
       ? url

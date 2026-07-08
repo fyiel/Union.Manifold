@@ -1,6 +1,3 @@
-/** Converts any CSS color string (oklch, hex, rgb, hsl) to a 6-digit hex via
- *  the browser's CSS engine. Alpha is dropped. Falls back to #000000 if the
- *  browser can't parse the input. */
 export function cssColorToHex(value: string): string {
   if (typeof document === "undefined") return "#000000"
   const el = document.createElement("div")
@@ -16,14 +13,12 @@ export function cssColorToHex(value: string): string {
   return "#" + [r, g, b].map((n) => n.toString(16).padStart(2, "0")).join("")
 }
 
-/** Crockford-ish ID generator — short, URL-safe, no external dep. */
 export function generateThemeId(prefix = "ct"): string {
   const rand = Math.random().toString(36).slice(2, 10)
   const time = Date.now().toString(36)
   return `${prefix}-${time}-${rand}`
 }
 
-/** Lower-cased slug suitable for community gallery URLs. */
 export function slugify(name: string): string {
   return name
     .toLowerCase()

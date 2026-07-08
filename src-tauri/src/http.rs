@@ -33,10 +33,6 @@ impl Jar {
         Jar(Arc::new(Mutex::new(HashMap::new())))
     }
 
-    /// Seed a cookie for `host` before any request runs, so an imported
-    /// browser session (the name=value pairs a user pasted) rides along with
-    /// whatever the jar captures from Set-Cookie afterwards. A later
-    /// Set-Cookie for the same name overwrites the seed.
     pub fn set(&self, host: &str, name: &str, value: &str) {
         self.0
             .lock()
@@ -208,8 +204,6 @@ pub fn decode_entities(s: &str) -> String {
     if !s.contains('&') {
         return s.to_string();
     }
-    // Single pass over the input: each entity decodes exactly once, so
-    // already-escaped text like "&amp;lt;" or "&amp;#65;" never double-decodes.
     ENTITY_RE
         .replace_all(s, |cap: &regex::Captures| {
             let ent = &cap[0];
@@ -266,8 +260,6 @@ mod tests {
 
     #[test]
     fn t_decode_entities_no_double_decode() {
-        // An already-escaped entity decodes exactly once: "&amp;lt;" is the
-        // literal text "&lt;", not the character "<".
         assert_eq!(decode_entities("&amp;lt;"), "&lt;");
     }
 
@@ -291,9 +283,7 @@ mod tests {
 
     #[test]
     fn t_decode_entities_no_double_decode_numeric() {
-        // "&amp;#65;" is the literal text "&#65;", not "A".
         assert_eq!(decode_entities("&amp;#65;"), "&#65;");
-        // Unknown named entities pass through untouched.
         assert_eq!(decode_entities("&bogus;"), "&bogus;");
     }
 }

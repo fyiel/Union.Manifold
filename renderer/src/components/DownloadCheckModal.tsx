@@ -39,7 +39,6 @@ function hostLabel(key: string): string {
   return HOST_OPTIONS.find((h) => h.key === key)?.label || key
 }
 
-/** Compare a host key from the API (e.g. "UC.Files") against a local key (e.g. "ucfiles") */
 function hostMatchesKey(apiHost: string, key: string): boolean {
   const a = apiHost.toLowerCase().replace(/[^a-z0-9]/g, "")
   const b = key.toLowerCase().replace(/[^a-z0-9]/g, "")
@@ -51,11 +50,6 @@ type Props = {
   game: Game | null
   downloadToken: string | null
   defaultHost: PreferredDownloadHost
-  /** When true and every check completes green (preferred host has all parts
-   *  alive, no dead-parts overrides needed, storage precheck OK, no sysreq
-   *  fail, no HV warning) we automatically fire onConfirm after a short
-   *  grace. Used for the "Auto-confirm downloads when everything's fine"
-   *  mode so happy-path downloads don't require an extra click. */
   autoConfirmIfGreen?: boolean
   onCheckingChange?: (checking: boolean) => void
   onConfirm: (config: DownloadConfig) => void
@@ -85,7 +79,6 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, aut
   const [storageCheck, setStorageCheck] = useState<StoragePrecheckResult | null>(null)
   const reportSentRef = useRef(false)
 
-  // Reset state when modal opens
   useEffect(() => {
     if (!open) return
     setPhase("loading")
@@ -98,7 +91,6 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, aut
     reportSentRef.current = false
   }, [open, defaultHost])
 
-  // Run availability check
   const runCheck = useCallback(
     async () => {
       if (!game || !downloadToken) return
@@ -115,7 +107,6 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, aut
           return
         }
 
-        // Auto-select the best host based on availability
         const hostEntries = Object.entries(avail.hosts)
         const preferredEntry = hostEntries.find(
           ([h]) => hostMatchesKey(h, selectedHost)
@@ -123,12 +114,10 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, aut
         const preferredUsable = preferredEntry && preferredEntry[1].totalParts > 0
 
         if (preferredUsable && preferredEntry[1].allAlive) {
-          // Preferred host is fully alive - great
           setPhase("ready")
           return
         }
 
-        // Preferred host missing, has no parts, or all parts dead - switch to best alternative
         if (!preferredUsable || preferredEntry[1].aliveParts === 0) {
           const fullyAlive = hostEntries.find(([, h]) => h.allAlive && h.totalParts > 0)
           const partiallyAlive = !fullyAlive
@@ -156,10 +145,9 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, aut
     if (open && game && downloadToken) {
       void runCheck()
     } else if (open && game && !downloadToken) {
-      // Skip link check mode - show host picker immediately
       setPhase("ready")
     }
-  }, [open, game, downloadToken]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [open, game, downloadToken])
 
   useEffect(() => {
     onCheckingChange?.(Boolean(open && downloadToken && phase === "loading"))
@@ -180,7 +168,6 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, aut
           const precheckResult = await window.ucStorage.precheck({ downloadBytes, declaredInstallBytes })
           if (!cancelled) setStorageCheck(precheckResult)
         } catch {
-          /* ignore — pre-download check is best-effort */
         }
       }
     })()
@@ -188,7 +175,6 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, aut
     return () => { cancelled = true }
   }, [open, game])
 
-  // Auto-report dead links when game is fully unavailable
   useEffect(() => {
     if (phase !== "unavailable" || !availability || !game || reportSentRef.current) return
     const deadLines: string[] = []
@@ -212,12 +198,10 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, aut
     }
   }, [phase, availability, game])
 
-  // Apply a cross-host alternative for a dead part
   const applyAlternative = (partIndex: number, fromHost: string) => {
     if (!availability) return
     const alt = availability.alternatives[String(partIndex)]
     if (!alt || alt.aliveOn.length === 0) return
-    // Pick an alive host that is NOT the selected host
     const filteredAlive = alt.aliveOn.filter(
       (h) => !h.toLowerCase().includes(fromHost)
     )
@@ -225,14 +209,12 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, aut
     if (!aliveHost) return
     const hostAvail = availability.hosts[aliveHost]
     if (!hostAvail) return
-    // Record the host/part mapping for startGameDownload to resolve.
     setPartOverrides((prev) => ({
       ...prev,
-      [partIndex]: { host: aliveHost, url: "" }, // url filled by download engine
+      [partIndex]: { host: aliveHost, url: "" },
     }))
   }
 
-  // Determine health for current selected host
   const currentHostAvail = availability
     ? Object.entries(availability.hosts).find(([h]) =>
         hostMatchesKey(h, selectedHost)
@@ -251,12 +233,6 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, aut
       )
     : false
 
-  // Auto-confirm path. When the consumer opted in (smart download mode) AND
-  // every gate is fully green, we fire onConfirm a short moment after the
-  // checks settle so the user sees a brief loading flash and then their
-  // download just starts — no extra click for the happy path. The grace
-  // matters because storage/sysreq run asynchronously after `phase=ready`;
-  // checking them on the same tick would mis-fire.
   const autoConfirmEligible =
     autoConfirmIfGreen
     && phase === "ready"
@@ -266,14 +242,6 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, aut
     && !game?.hasHv
     && selectedHost === defaultHost
   const autoConfirmFiredRef = useRef(false)
-  // Keep the latest callback / host / eligibility in refs so the auto-confirm
-  // effect can depend ONLY on `[autoConfirmEligible, open]`. Previously the
-  // effect also listed `onConfirm` and `selectedHost`; `onConfirm` is an inline
-  // arrow recreated on every render, so each of the storage / sysreq / driver
-  // state updates that land within the 300ms grace re-ran the effect, whose
-  // cleanup cleared the pending timer — and the `firedRef` guard then blocked
-  // it from being rescheduled. Net result: on the all-green happy path the
-  // timer was almost always cancelled and the popup never auto-confirmed.
   const onConfirmRef = useRef(onConfirm)
   const selectedHostRef = useRef(selectedHost)
   const autoConfirmEligibleRef = useRef(autoConfirmEligible)
@@ -288,9 +256,6 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, aut
     if (!autoConfirmEligible || autoConfirmFiredRef.current) return
     autoConfirmFiredRef.current = true
     const timer = setTimeout(() => {
-      // Re-check eligibility at fire time: if an async check (e.g. storage
-      // precheck) came back unfavourable during the grace window, fall back to
-      // the manual popup instead of auto-firing.
       if (!autoConfirmEligibleRef.current) {
         autoConfirmFiredRef.current = false
         return
@@ -300,15 +265,6 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, aut
     return () => clearTimeout(timer)
   }, [autoConfirmEligible, open])
 
-  // Smart/auto mode visibility gate. When `autoConfirmIfGreen` is on we keep
-  // the modal mounted so every check (availability, storage, sysreq, driver)
-  // still runs — but we don't *paint* the popup unless a conflict actually
-  // surfaces. The happy path auto-confirms silently after the grace window, so
-  // the user only ever sees this modal when something needs their attention
-  // (dead/partial host, host auto-switched away from preferred, low disk,
-  // sysreq fail, HV title, or the check itself failing). Feedback during the
-  // silent check is provided by the parent's "Checking…" button state via
-  // onCheckingChange.
   const hasConflict =
     phase === "unavailable" ||
     phase === "error" ||
@@ -321,7 +277,7 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, aut
     <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
       <div className="absolute inset-0 bg-black/72 backdrop-blur-md animate-in fade-in duration-300 ease-out" onClick={onClose} />
       <div className="relative w-full max-w-lg overflow-hidden rounded-3xl border border-white/[.07] bg-background/88 backdrop-blur-2xl p-5 text-foreground shadow-[0_24px_80px_rgba(0,0,0,0.55)] animate-in slide-in-from-top-4 duration-300 ease-out">
-        {/* ── Loading Phase ── */}
+        {}
         {phase === "loading" && (
           <div className="flex flex-col items-center gap-3 py-8">
             <Loader2 className="h-8 w-8 animate-spin text-white" />
@@ -329,7 +285,7 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, aut
           </div>
         )}
 
-        {/* ── Error Phase ── */}
+        {}
         {phase === "error" && (
           <div className="space-y-4">
             <div className="flex items-center gap-2 text-lg font-semibold">
@@ -361,7 +317,7 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, aut
           </div>
         )}
 
-        {/* ── Unavailable Phase ── */}
+        {}
         {phase === "unavailable" && (() => {
           const webOnlyHostKeys = availability?.webOnlyHosts ? Object.keys(availability.webOnlyHosts) : []
           const hasWebOnly = webOnlyHostKeys.length > 0
@@ -390,7 +346,7 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, aut
                 Dead links: {availability.fullyDeadParts.map((p) => `Link ${p}`).join(", ")}
               </div>
             )}
-            {/* Web-only hosts guidance */}
+            {}
             {(() => {
               const webOnlyHosts = availability?.webOnlyHosts
                 ? Object.keys(availability.webOnlyHosts)
@@ -444,7 +400,7 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, aut
           )
         })()}
 
-        {/* ── Ready Phase ── */}
+        {}
         {phase === "ready" && (
           <div className="space-y-4">
             <div className="text-lg font-semibold">Download options</div>
@@ -452,12 +408,12 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, aut
               Choose a host for this download.
             </p>
 
-            {/* Host selector + health */}
+            {}
             <div className="space-y-1.5">
               <label className="text-sm font-medium text-foreground">Host</label>
               <Select value={selectedHost} onValueChange={(v) => {
                 setSelectedHost(v as PreferredDownloadHost)
-                setPartOverrides({}) // reset overrides when host changes
+                setPartOverrides({})
               }}>
                 <SelectTrigger className="h-10 w-full">
                   <SelectValue />
@@ -519,7 +475,7 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, aut
               </Select>
             </div>
 
-            {/* Host resume warning */}
+            {}
             {HOST_OPTIONS.find((h) => h.key === selectedHost)?.supportsResume === false && (
               <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
                 Download resuming is currently not supported for this host. Please do not close
@@ -527,7 +483,7 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, aut
               </div>
             )}
 
-            {/* Dead parts + alternatives */}
+            {}
             {availability && currentHostAvail && !currentHostAvail.allAlive && (
               <div className="space-y-2">
                 <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
@@ -538,7 +494,6 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, aut
                       const alt = availability.alternatives[String(p.part)]
                       const isOverridden = Boolean(partOverrides[p.part])
                       const overriddenHost = partOverrides[p.part]?.host
-                      // Filter aliveOn to exclude the currently selected host
                       const filteredAliveOn = alt?.aliveOn.filter(
                         (h) => !h.toLowerCase().includes(selectedHost)
                       ) ?? []
@@ -578,7 +533,7 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, aut
                       )
                     })}
                 </div>
-                {/* Show report / web download tip when any part is dead on all hosts */}
+                {}
                 {currentHostAvail.parts.some((p) => {
                   if (p.status !== "dead" || partOverrides[p.part]) return false
                   const alt = availability.alternatives[String(p.part)]
@@ -609,7 +564,7 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, aut
               </div>
             )}
 
-            {/* Storage reservation summary */}
+            {}
             {storageCheck && (
               <div className={`rounded-lg border px-3 py-2 text-xs space-y-1.5 ${
                 storageCheck.ok
@@ -635,14 +590,14 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, aut
               </div>
             )}
 
-            {/* Dead links reported notice */}
+            {}
             {deadLinksReported && (
               <p className="text-[11px] text-muted-foreground/60 text-center">
                 We detected dead links and have reported it for you.
               </p>
             )}
 
-            {/* Actions */}
+            {}
             <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
               <Button variant="ghost" onClick={onClose}>
                 Cancel
@@ -659,7 +614,6 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, aut
                   (storageCheck != null && !storageCheck.ok)
                 }
                 onClick={() => {
-                  // Auto-report dead links on download confirm
                   if (!reportSentRef.current && availability) {
                     const deadLines: string[] = []
                     for (const [h, hostData] of Object.entries(availability.hosts)) {
@@ -704,7 +658,7 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, aut
         )}
       </div>
 
-      {/* Archive Install overlay */}
+      {}
       <ArchiveInstallModal
         open={showArchiveInstall}
         game={game}

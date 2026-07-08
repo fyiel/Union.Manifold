@@ -1,8 +1,3 @@
-// Per-game mod management: NexusMods + Steam Workshop providers, copy-based
-// deployment with backup/restore journaling. Storage lives under
-// data_dir/mods/<appid>/ (mods.json config, staging/<modId> extracted files,
-// backup/ originals, deploy.json journal).
-
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock};
@@ -22,9 +17,6 @@ pub mod nexus;
 pub mod steamcmd;
 pub mod thunderstore;
 pub mod workshop;
-
-// ---------------------------------------------------------------------------
-// Models
 
 #[derive(Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -48,22 +40,12 @@ pub struct ModEntry {
 #[derive(Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct GameMods {
-    // Launcher appid this config belongs to. The folder name is a sanitized
-    // form of the appid, so the reverse lookup (nxm link -> game) reads this.
     pub appid: String,
     pub nexus_domain: Option<String>,
     pub nexus_domain_auto: bool,
-    // True once domain auto-detection ran against a successfully fetched games
-    // list (or the user set/cleared the domain). Distinguishes "no match" from
-    // "never tried / no API key yet" so detection can retry later.
     pub nexus_checked: bool,
     pub steam_appid: Option<u64>,
-    // None = not yet probed against the Steam store; probe again next get.
     pub workshop_supported: Option<bool>,
-    // Thunderstore community identifier bound to this game (r2modman-style
-    // BepInEx mods). Detection is keyless, so thunderstore_checked only stays
-    // false after a transient communities fetch failure, letting a later
-    // mods_game_get retry.
     pub thunderstore_community: Option<String>,
     pub thunderstore_community_auto: bool,
     pub thunderstore_checked: bool,
@@ -102,9 +84,6 @@ impl InstallSpec {
         format!("{}-{}", self.provider, self.remote_id)
     }
 }
-
-// ---------------------------------------------------------------------------
-// Storage
 
 pub(crate) fn game_mods_dir(paths: &AppPaths, appid: &str) -> PathBuf {
     paths.mods_dir().join(safe_folder_name(appid))
@@ -150,9 +129,6 @@ fn save_journal(dir: &Path, journal: &Journal) -> Result<(), String> {
     write_json_atomic(&journal_path(dir), &v).map_err(|e| format!("journal write: {e}"))
 }
 
-// ---------------------------------------------------------------------------
-// Shared helpers
-
 pub(crate) fn fold(r: Result<Value, String>) -> Value {
     r.unwrap_or_else(|e| json!({ "ok": false, "error": e }))
 }
@@ -165,8 +141,6 @@ pub(crate) fn now_secs() -> i64 {
     now_ms() / 1000
 }
 
-// One async lock per game: manifest mutation + deploy must not interleave
-// (parallel installs, a toggle racing an install's finalize step).
 static GAME_LOCKS: LazyLock<parking_lot::Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>> =
     LazyLock::new(|| parking_lot::Mutex::new(HashMap::new()));
 
@@ -200,10 +174,6 @@ pub(crate) fn emit_progress(
     app.emit("mods:install-progress", payload).ok();
 }
 
-// ---------------------------------------------------------------------------
-// Deployment engine (copy-based, journaled)
-
-// Journal keys are '/'-separated relpaths under the deploy target.
 fn rel_string(base: &Path, p: &Path) -> Option<String> {
     let rel = p.strip_prefix(base).ok()?;
     let parts: Vec<String> = rel
@@ -231,7 +201,7 @@ fn remove_empty_parents(path: &Path, stop: &Path) {
             break;
         }
         if std::fs::remove_dir(d).is_err() {
-            break; // non-empty or gone: stop climbing
+            break;
         }
         cur = d.parent();
     }
@@ -254,15 +224,10 @@ pub(crate) fn join_target(base: &Path, target: &str) -> Result<PathBuf, String> 
     Ok(out)
 }
 
-/// Sync the deploy target with the union of enabled mods' staged files.
-/// Higher `order` wins conflicts; pre-existing originals are moved into
-/// backup/ before the first overwrite and restored when their file is no
-/// longer desired. Returns the number of deployed files.
 pub(crate) fn deploy_to(game_dir: &Path, target: &Path, cfg: &GameMods) -> Result<usize, String> {
     let staging_root = game_dir.join("staging");
     let backup_root = game_dir.join("backup");
 
-    // Desired file map: enabled mods in ascending order, later wins.
     let mut enabled: Vec<&ModEntry> = cfg.mods.iter().filter(|m| m.enabled).collect();
     enabled.sort_by_key(|m| m.order);
     let mut desired: HashMap<String, (PathBuf, String)> = HashMap::new();
@@ -284,7 +249,6 @@ pub(crate) fn deploy_to(game_dir: &Path, target: &Path, cfg: &GameMods) -> Resul
 
     let mut journal = load_journal(game_dir);
 
-    // 1) Remove deployed files no longer desired; restore their backups.
     let stale: Vec<String> = journal
         .files
         .keys()
@@ -311,7 +275,6 @@ pub(crate) fn deploy_to(game_dir: &Path, target: &Path, cfg: &GameMods) -> Resul
         remove_empty_parents(&dst, target);
     }
 
-    // 2) Copy every desired file, backing up untouched originals first.
     for (rel, (src, owner)) in &desired {
         let dst = rel_to_path(target, rel);
         if let Some(parent) = dst.parent() {
@@ -321,11 +284,6 @@ pub(crate) fn deploy_to(game_dir: &Path, target: &Path, cfg: &GameMods) -> Resul
             Some(prior) => prior.backup.clone(),
             None => {
                 if dst.exists() {
-                    // Pre-existing original: move it aside before overwriting.
-                    // If an unjournaled backup already exists (corrupt/lost
-                    // journal, crash mid-deploy), the older file is the true
-                    // original — keep it and let the stale copy at dst be
-                    // overwritten below instead of clobbering the backup.
                     let bpath = rel_to_path(&backup_root, rel);
                     if !bpath.is_file() {
                         if let Some(parent) = bpath.parent() {
@@ -356,8 +314,6 @@ pub(crate) fn deploy_to(game_dir: &Path, target: &Path, cfg: &GameMods) -> Resul
     Ok(journal.files.len())
 }
 
-/// Remove every journaled file from the target, restore all backups, clear
-/// the journal.
 pub(crate) fn undeploy_from(game_dir: &Path, target: &Path) -> Result<(), String> {
     let backup_root = game_dir.join("backup");
     let journal = load_journal(game_dir);
@@ -379,10 +335,6 @@ pub(crate) fn undeploy_from(game_dir: &Path, target: &Path) -> Result<(), String
     save_journal(game_dir, &Journal::default())
 }
 
-// A directory is the game's own folder when it holds the hallmarks of an
-// installed build: a Unity data folder, the IL2CPP/Mono runtime, a doorstop
-// loader, an existing BepInEx tree, or a game executable. UnityCrashHandler and
-// uninstaller exes do not count on their own.
 fn is_game_dir(dir: &Path) -> bool {
     let Ok(rd) = std::fs::read_dir(dir) else {
         return false;
@@ -405,11 +357,6 @@ fn is_game_dir(dir: &Path) -> bool {
     false
 }
 
-// Repacks (SteamRiP/AnkerGames and similar) wrap the real game one folder deep,
-// so the manifest install dir is not where the exe, the Unity data folder, or
-// BepInEx actually live. When the base itself is not a game dir, descend through
-// a wrapper (a child that is a game dir, or a sole subfolder) up to two levels
-// so mods deploy where the game reads them. Flat installs return unchanged.
 fn resolve_game_root(base: &Path) -> PathBuf {
     if is_game_dir(base) {
         return base.to_path_buf();
@@ -436,8 +383,6 @@ fn deploy_target_dir(state: &AppState, appid: &str, cfg: &GameMods) -> Result<Pa
     let roots = library::scan_roots(state);
     let base = library::game_files_dir(&roots, appid)
         .ok_or_else(|| format!("game {appid} not found in library"))?;
-    // The default (empty) target auto-resolves to the real game dir so nested
-    // repacks work; an explicit override is honored literally against the base.
     if cfg.deploy_target.is_empty() {
         Ok(resolve_game_root(&base))
     } else {
@@ -451,17 +396,10 @@ fn redeploy(state: &AppState, appid: &str, cfg: &GameMods) -> Result<usize, Stri
     deploy_to(&dir, &target, cfg)
 }
 
-// Games whose loose-file mods live under <game>/mods/<name>/ instead of the
-// game root (Noita and the like). For these a mod's staged files are wrapped in
-// mods/<folder>/ so the generic root deploy lands them where the game reads.
 fn wants_mods_subfolder(steam_appid: Option<u64>) -> bool {
-    matches!(steam_appid, Some(881100)) // Noita
+    matches!(steam_appid, Some(881100))
 }
 
-// Restructure a freshly staged mod so its top level is mods/<folder>/ for the
-// games above. Idempotent: a stage that already has a top-level `mods/` dir is
-// left alone; a lone wrapping subfolder keeps its own name; bare mod files fall
-// back to the mod's sanitized name.
 fn wrap_in_mods_folder(staged: &Path, fallback_name: &str) -> Result<(), String> {
     let entries: Vec<PathBuf> = std::fs::read_dir(staged)
         .map_err(|e| format!("stage read: {e}"))?
@@ -490,11 +428,9 @@ fn wrap_in_mods_folder(staged: &Path, fallback_name: &str) -> Result<(), String>
     let mods_dir = staged.join("mods");
     std::fs::create_dir_all(&mods_dir).map_err(|e| format!("mods wrap: {e}"))?;
     if entries.len() == 1 && entries[0].is_dir() {
-        // The archive already wraps the mod in its own folder: keep that name.
         let name = entries[0].file_name().unwrap().to_os_string();
         move_into(&entries[0], &mods_dir.join(name))?;
     } else {
-        // Bare mod files: invent a folder from the mod's name.
         let folder = safe_folder_name(fallback_name);
         let dest = mods_dir.join(if folder.is_empty() { "mod" } else { &folder });
         std::fs::create_dir_all(&dest).map_err(|e| format!("mods wrap: {e}"))?;
@@ -505,9 +441,6 @@ fn wrap_in_mods_folder(staged: &Path, fallback_name: &str) -> Result<(), String>
     }
     Ok(())
 }
-
-// ---------------------------------------------------------------------------
-// Lazy per-game detection
 
 fn read_game_manifest(roots: &[PathBuf], appid: &str) -> Option<Value> {
     let dir = library::find_dir(roots, appid)?;
@@ -552,11 +485,6 @@ async fn detect_steam_appid(state: &AppState, appid: &str) -> Option<u64> {
     crate::sources::steam::search_app_id(&name).await
 }
 
-// ---------------------------------------------------------------------------
-// Shared install pipeline
-
-/// Stream `url` into `dest`, reporting percent progress (None when the total
-/// size is unknown). Returns received bytes.
 pub(crate) async fn download_to_file(
     url: &str,
     dest: &Path,
@@ -568,9 +496,6 @@ pub(crate) async fn download_to_file(
 
     let opts = http::FetchOpts {
         headers,
-        // Archive downloads run for minutes; the client-wide 25s timeout
-        // only fits API calls. reqwest's per-request timeout covers the
-        // whole body read, so give it generous headroom.
         timeout: Some(Duration::from_secs(2 * 60 * 60)),
         ..Default::default()
     };
@@ -637,7 +562,6 @@ pub(crate) fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
 fn upsert_mod(cfg: &mut GameMods, spec: &InstallSpec, size: u64) {
     let mod_id = spec.mod_id();
     if let Some(m) = cfg.mods.iter_mut().find(|m| m.id == mod_id) {
-        // Reinstall/update: keep the user's enabled flag + order.
         m.file_id = spec.file_id;
         m.name = spec.name.clone();
         m.version = spec.version.clone();
@@ -668,8 +592,6 @@ fn upsert_mod(cfg: &mut GameMods, spec: &InstallSpec, size: u64) {
     }
 }
 
-/// Move (or copy) a fully staged mod directory into staging/<modId>, upsert
-/// the manifest entry, redeploy, and emit events. Shared by both providers.
 pub(crate) async fn finalize_install(
     app: &AppHandle,
     spec: &InstallSpec,
@@ -690,7 +612,6 @@ pub(crate) async fn finalize_install(
         std::fs::create_dir_all(parent).map_err(|e| format!("staging dir: {e}"))?;
     }
     if move_src && std::fs::rename(staged_src, &final_dir).is_ok() {
-        // moved wholesale
     } else {
         copy_dir_recursive(staged_src, &final_dir)?;
         if move_src {
@@ -710,9 +631,6 @@ pub(crate) async fn finalize_install(
     Ok(n)
 }
 
-/// Full archive install: download -> extract (7z sidecar) -> stage -> deploy,
-/// with `mods:install-progress` events for every phase. Errors are emitted,
-/// never returned — this runs as a detached background task.
 pub(crate) async fn run_archive_install(
     app: AppHandle,
     spec: InstallSpec,
@@ -767,8 +685,6 @@ async fn archive_install_inner(
     Ok(())
 }
 
-/// 7z extracts foo.tar.gz to a single foo.tar in one pass; unwrap it so
-/// staging holds real files.
 async fn flatten_tar(dir: &Path) -> Result<(), String> {
     let entries: Vec<PathBuf> = std::fs::read_dir(dir)
         .map_err(|e| format!("extract dir: {e}"))?
@@ -794,9 +710,6 @@ async fn flatten_tar(dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
-// ---------------------------------------------------------------------------
-// Commands
-
 #[tauri::command]
 pub async fn mods_game_get(state: State<'_, AppState>, appid: String) -> Result<Value, String> {
     let lock = game_lock(&appid);
@@ -812,9 +725,6 @@ pub async fn mods_game_get(state: State<'_, AppState>, appid: String) -> Result<
         }
     }
     if cfg.nexus_domain.is_none() && !cfg.nexus_checked {
-        // Detection needs the games index, which needs an API key. No key or a
-        // transient fetch failure: leave nexus_checked false so a later call
-        // retries; the frontend shows the key prompt when domain is null.
         if let Some(key) = state
             .settings
             .get_string("nexusApiKey")
@@ -840,8 +750,6 @@ pub async fn mods_game_get(state: State<'_, AppState>, appid: String) -> Result<
         }
     }
     if cfg.thunderstore_community.is_none() && !cfg.thunderstore_checked {
-        // Keyless, so unlike nexus this needs no API key gate. A failed
-        // communities fetch leaves thunderstore_checked false to retry later.
         if let Some(title) = game_title(&state, &appid) {
             if let Ok(found) = thunderstore::match_community(&title).await {
                 cfg.thunderstore_checked = true;
@@ -893,7 +801,7 @@ pub async fn mods_game_set(
             None => {
                 cfg.nexus_domain = None;
                 cfg.nexus_domain_auto = false;
-                cfg.nexus_checked = false; // allow auto-detection to retry
+                cfg.nexus_checked = false;
             }
         }
     }
@@ -908,7 +816,7 @@ pub async fn mods_game_set(
             None => {
                 cfg.thunderstore_community = None;
                 cfg.thunderstore_community_auto = false;
-                cfg.thunderstore_checked = false; // allow auto-detection to retry
+                cfg.thunderstore_checked = false;
             }
         }
     }
@@ -917,7 +825,6 @@ pub async fn mods_game_set(
         if let Some(v) = config.get("deployTarget").and_then(|v| v.as_str()) {
             let new_target = v.trim().trim_matches('/').trim_matches('\\').to_string();
             if new_target != cfg.deploy_target {
-                // Pull everything out of the old target before switching.
                 if let Ok(old) = deploy_target_dir(&state, &appid, &cfg) {
                     undeploy_from(&dir, &old)?;
                 }
@@ -970,8 +877,6 @@ pub async fn mods_reorder(
         .enumerate()
         .map(|(i, id)| (id.as_str(), i))
         .collect();
-    // Stable sort keeps any id missing from the list at the tail in its
-    // current relative order, then orders are renumbered densely.
     cfg.mods
         .sort_by_key(|m| pos.get(m.id.as_str()).copied().unwrap_or(usize::MAX));
     for (i, m) in cfg.mods.iter_mut().enumerate() {
@@ -999,7 +904,6 @@ pub async fn mods_uninstall(
         return Ok(json!({ "ok": false, "error": format!("mod {mod_id} not found") }));
     }
     save_config(&state.paths, &appid, &cfg);
-    // Redeploy first: the diff restores this mod's files from backup.
     let res = redeploy(&state, &appid, &cfg);
     let dir = game_mods_dir(&state.paths, &appid);
     std::fs::remove_dir_all(dir.join("staging").join(&mod_id)).ok();
@@ -1142,8 +1046,6 @@ mod tests {
     #[test]
     fn resolve_game_root_descends_into_nested_repack_folder() {
         let tmp = tempdir().unwrap();
-        // The manifest install dir (archive root) holds only repack chrome plus
-        // the wrapper folder that contains the real game.
         let base = tmp.path().join("GTFO");
         write_file(&base.join("Read Me.txt"), "x");
         write_file(&base.join("Run me!.bat"), "x");
@@ -1171,7 +1073,6 @@ mod tests {
         std::fs::create_dir_all(base.join("docs")).unwrap();
         std::fs::create_dir_all(base.join("extras")).unwrap();
 
-        // Two sibling non-game subdirs: no confident descent, return base as-is.
         assert_eq!(resolve_game_root(&base), base);
     }
 
@@ -1212,7 +1113,6 @@ mod tests {
         assert_eq!(n1, n2);
         assert_eq!(j1, j2, "journal byte-identical across redeploys");
         assert_eq!(read(&target.join("orig.txt")), "modded");
-        // The original backup survives the second pass untouched.
         assert_eq!(read(&dir.join("backup/orig.txt")), "original");
     }
 
@@ -1244,13 +1144,10 @@ mod tests {
         deploy_to(&dir, &target, &cfg).unwrap();
         undeploy_from(&dir, &target).unwrap();
 
-        // Mod-created directory chains are pruned all the way up...
         assert!(!target.join("a/b").exists(), "mod-created nested dirs pruned");
         assert!(!target.join("top.txt").exists());
-        // ...but user dirs that still hold original files survive.
         assert_eq!(read(&target.join("a/keep.txt")), "keep");
         assert_eq!(read(&target.join("x/y/orig.txt")), "original");
-        // Nested backup dirs are pruned once their originals go home.
         assert!(!dir.join("backup/x").exists(), "backup subdirs pruned after restore");
     }
 
@@ -1267,9 +1164,6 @@ mod tests {
         deploy_to(&dir, &target, &cfg).unwrap();
         assert_eq!(read(&target.join("shared.txt")), "from-b");
 
-        // Uninstall = drop from the manifest, then redeploy (mods_uninstall).
-        // One pass must both withdraw B's exclusive file and hand the shared
-        // one back to the lower-order survivor.
         cfg.mods.retain(|m| m.id != "nexus-2");
         let n = deploy_to(&dir, &target, &cfg).unwrap();
 
@@ -1289,13 +1183,10 @@ mod tests {
         let a = mk_mod(&dir, "nexus-1", 0, &[("f.txt", "from-a")]);
         let b = mk_mod(&dir, "nexus-2", 1, &[("f.txt", "from-b")]);
 
-        // First deploy: only A installed; the original is backed up.
         let cfg_a = GameMods { mods: vec![a.clone()], ..Default::default() };
         deploy_to(&dir, &target, &cfg_a).unwrap();
         assert_eq!(read(&dir.join("backup/f.txt")), "original");
 
-        // B installs on top and wins. The backup must still be the original,
-        // not A's copy that B just overwrote.
         let cfg_ab = GameMods { mods: vec![a, b], ..Default::default() };
         deploy_to(&dir, &target, &cfg_ab).unwrap();
         assert_eq!(read(&target.join("f.txt")), "from-b");
@@ -1319,21 +1210,17 @@ mod tests {
         let a = mk_mod(&dir, "nexus-1", 0, &[("f.txt", "modded")]);
         let cfg = GameMods { mods: vec![a], ..Default::default() };
 
-        // Deployed at the game root.
         deploy_to(&dir, &game, &cfg).unwrap();
         assert_eq!(read(&game.join("f.txt")), "modded");
 
-        // deployTarget change (mods_game_set): undeploy old, deploy new.
         undeploy_from(&dir, &game).unwrap();
         let new_target = join_target(&game, "Data").unwrap();
         deploy_to(&dir, &new_target, &cfg).unwrap();
 
-        // Old target pristine again; new one claimed with its own backup.
         assert_eq!(read(&game.join("f.txt")), "root-original");
         assert_eq!(read(&game.join("Data/f.txt")), "modded");
         assert_eq!(read(&dir.join("backup/f.txt")), "data-original");
 
-        // Round-trip out of the new target too.
         undeploy_from(&dir, &new_target).unwrap();
         assert_eq!(read(&game.join("Data/f.txt")), "data-original");
         assert_eq!(read(&game.join("f.txt")), "root-original");
@@ -1352,7 +1239,6 @@ mod tests {
 
         let n = deploy_to(&dir, &target, &cfg).unwrap();
         assert_eq!(n, 2);
-        // A disabled mod never wins a conflict, whatever its order says.
         assert_eq!(read(&target.join("conflict.txt")), "from-a");
         assert!(!target.join("b.txt").exists());
 
@@ -1361,8 +1247,6 @@ mod tests {
         assert_eq!(n, 3);
         assert_eq!(read(&target.join("conflict.txt")), "from-b");
         assert_eq!(read(&target.join("b.txt")), "b");
-        // A's exclusive file keeps its content and journal entry; enabling B
-        // must not re-backup A's own deployed copy as if it were an original.
         let j = load_journal(&dir);
         assert_eq!(read(&target.join("a.txt")), "a");
         assert_eq!(j.files.get("a.txt").unwrap().mod_id, "nexus-1");
@@ -1380,8 +1264,6 @@ mod tests {
 
         deploy_to(&dir, &target, &cfg).unwrap();
 
-        // A staged file vanishes behind the engine's back: treated as removed,
-        // its backup goes home, the rest stays deployed.
         std::fs::remove_file(dir.join("staging/nexus-1/drift.txt")).unwrap();
         let n = deploy_to(&dir, &target, &cfg).unwrap();
         assert_eq!(n, 1);
@@ -1389,7 +1271,6 @@ mod tests {
         assert_eq!(read(&target.join("stay.txt")), "stay");
         assert!(load_journal(&dir).files.get("drift.txt").is_none());
 
-        // The whole staging dir vanishes: everything is cleanly withdrawn.
         std::fs::remove_dir_all(dir.join("staging/nexus-1")).unwrap();
         let n = deploy_to(&dir, &target, &cfg).unwrap();
         assert_eq!(n, 0);
@@ -1409,14 +1290,10 @@ mod tests {
         deploy_to(&dir, &target, &cfg).unwrap();
         std::fs::write(journal_path(&dir), "{ not json !!!").unwrap();
 
-        // Undeploy with an unreadable journal must not delete anything.
         undeploy_from(&dir, &target).unwrap();
         assert_eq!(read(&target.join("f.txt")), "modded");
         assert_eq!(read(&dir.join("backup/f.txt")), "original");
 
-        // Redeploy re-adopts the deployed copy. The on-target file looks like
-        // a pre-existing original, but the surviving backup must not be
-        // replaced by that stale mod copy.
         deploy_to(&dir, &target, &cfg).unwrap();
         assert_eq!(read(&dir.join("backup/f.txt")), "original");
         assert_eq!(
@@ -1424,7 +1301,6 @@ mod tests {
             Some("f.txt")
         );
 
-        // ...so a later undeploy still brings the true original home.
         undeploy_from(&dir, &target).unwrap();
         assert_eq!(read(&target.join("f.txt")), "original");
     }

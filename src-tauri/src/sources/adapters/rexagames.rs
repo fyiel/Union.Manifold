@@ -1,21 +1,3 @@
-//! RexaGames (https://rexagames.com) — catalogued from the Hydra download-source
-//! JSON published at hydralinks.cloud, rather than scraping the Invision forum.
-//!
-//! The source JSON is the standard Hydra shape: a flat `downloads` list of
-//! `{ title, uris, uploadDate, fileSize }`. Titles arrive in the site's
-//! "<Name> Free Download (<version>)" form, so `clean_title` peels the name and
-//! version; browse and search both read straight from one cached fetch of that
-//! list. Each entry's `uris` are the download links — direct file-host URLs that
-//! route through the shared host dispatch (`hosts::resolve_url`), with a
-//! `zeilink.net/c/<slug>` container expanded into its live mirrors via the
-//! public ZeiLink API first. Detail is an in-memory lookup over the same cache,
-//! so a game page costs no extra network beyond the (disk-cached) Steam art
-//! lookup and any container expansion.
-//!
-//! NOTE: hydralinks.cloud sits behind a Cloudflare check that challenges
-//! datacenter IPs; the shared client (browser UA) fetches it fine from a normal
-//! residential IP, which is where the app runs.
-
 use std::collections::HashSet;
 use std::sync::{Arc, LazyLock};
 use std::time::Duration;
@@ -37,8 +19,6 @@ const ID: &str = "rexagames";
 const ORIGIN: &str = "https://rexagames.com";
 const SOURCE_JSON: &str = "https://hydralinks.cloud/sources/rexagames.json";
 const ZEILINK_API: &str = "https://zeilink.net/api/public/container";
-// Cap the browse pool so the central layer sorts/filters a bounded, fresh set
-// and we do at most this many (disk-cached) Steam art lookups per refresh.
 const POOL_TARGET: usize = 300;
 const ART_CONCURRENCY: usize = 8;
 
@@ -53,7 +33,6 @@ static ZEILINK_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)^https?://(?:www\.)?zeilink\.net/c/([A-Za-z0-9]+)").unwrap()
 });
 
-/// A parsed catalogue entry: the cleaned game plus its raw download links.
 #[derive(Clone)]
 struct Entry {
     slug: String,
@@ -83,7 +62,6 @@ struct RawSource {
     downloads: Vec<RawDownload>,
 }
 
-// The whole source list behind one fetch; detail/search/browse share it.
 static CATALOG: LazyLock<Cached<Arc<Vec<Entry>>>> =
     LazyLock::new(|| Cached::new(Duration::from_secs(600)));
 
@@ -93,7 +71,6 @@ pub fn capabilities() -> Capabilities {
         catalog: true,
         appid: false,
         bulk_browse: true,
-        // The source JSON carries no genres, so no tag facet for this source.
         tags: false,
         release_date: false,
         size: true,
@@ -109,9 +86,6 @@ fn collapse(s: &str) -> String {
     WS.replace_all(s.trim(), " ").to_string()
 }
 
-/// Split "<Name> Free Download (<version/extras>)" into name + version. The
-/// trailing paren after "Free Download" is always version/DLC noise on this
-/// site, so peeling it is safe.
 fn clean_title(raw: &str) -> (String, Option<String>) {
     let mut t = collapse(&http::decode_entities(raw));
     let mut version = None;
@@ -129,8 +103,6 @@ fn clean_title(raw: &str) -> (String, Option<String>) {
     (t, version)
 }
 
-/// URL-safe, stable per cleaned title. Used as the detail slug (the source JSON
-/// has no ids of its own); collisions get a numeric suffix so lookups stay 1:1.
 fn slugify(title: &str) -> String {
     NONWORD
         .replace_all(&title.to_lowercase(), "-")
@@ -142,8 +114,6 @@ fn steam_image(appid: u64, kind: &str) -> String {
     format!("https://shared.steamstatic.com/store_item_assets/steam/apps/{appid}/{kind}")
 }
 
-/// Parse the source JSON body into deduped catalogue entries. Pure (no network)
-/// so it can be unit-tested against a fixture.
 fn parse_source(body: &str) -> Vec<Entry> {
     let raw: RawSource = match serde_json::from_str(body) {
         Ok(r) => r,
@@ -156,7 +126,6 @@ fn parse_source(body: &str) -> Vec<Entry> {
         if title.is_empty() {
             continue;
         }
-        // Only http(s) links are downloadable in-app; drop magnets / empties.
         let uris: Vec<String> = d
             .uris
             .into_iter()
@@ -199,11 +168,6 @@ async fn catalogue() -> Option<Arc<Vec<Entry>>> {
         .get_or(|| async {
             let body = http::get_text(SOURCE_JSON).await.ok()?;
             let entries = parse_source(&body);
-            // hydralinks.cloud challenges flagged IPs with a Cloudflare
-            // interstitial; that (or any error page) parses to zero entries.
-            // Returning None keeps it out of the cache, so a transient block
-            // can't pin the source blank for the whole TTL: the next browse
-            // retries while a stale catalogue (if any) is served.
             if entries.is_empty() {
                 crate::logging::write_line(
                     "warn",
@@ -217,8 +181,6 @@ async fn catalogue() -> Option<Arc<Vec<Entry>>> {
         .await
 }
 
-/// Lightweight browse/search stub from a catalogue entry. Steam art + appid are
-/// filled by `attach_steam_art`.
 fn entry_to_stub(e: &Entry) -> SourceGame {
     SourceGame {
         source_id: ID.to_string(),
@@ -235,10 +197,6 @@ fn entry_to_stub(e: &Entry) -> SourceGame {
     }
 }
 
-/// Resolve a Steam appid from the title so cards get Steam's portrait capsule
-/// (the source has no art of its own) and dedup by appid against other sources.
-/// `search_app_id` caches to disk with no TTL, so this is one lookup per new
-/// title and free thereafter.
 async fn attach_steam_art(mut g: SourceGame) -> SourceGame {
     if let Some(id) = steam::search_app_id(&g.title).await {
         g.steam_app_id = Some(id);
@@ -249,10 +207,6 @@ async fn attach_steam_art(mut g: SourceGame) -> SourceGame {
     g
 }
 
-/// Turn a game's `uris` into download options. A ZeiLink container URL expands
-/// into its live mirrors via the public API; every other URL is a direct file
-/// host routed through the shared host dispatch. Resolvable hosts sort first so
-/// the UI surfaces the in-app ones.
 async fn options_from_uris(uris: &[String]) -> Vec<DownloadOption> {
     let mut options = Vec::new();
     for uri in uris {
@@ -273,8 +227,6 @@ async fn options_from_uris(uris: &[String]) -> Vec<DownloadOption> {
     options
 }
 
-/// Read a ZeiLink container's public JSON and turn every active mirror into a
-/// download option, resolvable-first so the UI surfaces the easy hosts.
 async fn zeilink_options(slug: &str) -> Vec<DownloadOption> {
     let json: Value = match http::get_json(&format!("{ZEILINK_API}/{slug}")).await {
         Ok(v) => v,
@@ -316,11 +268,7 @@ async fn zeilink_options(slug: &str) -> Vec<DownloadOption> {
 }
 
 pub async fn query(_params: &QueryParams) -> Option<Vec<SourceGame>> {
-    // None => the catalogue fetch hard-failed (Cloudflare block, no stale copy);
-    // propagate it so the source is flagged errored instead of silently empty.
     let cat = catalogue().await?;
-    // Newest first, capped — the central layer applies the user's real sort and
-    // filters over this pool.
     let mut idx: Vec<usize> = (0..cat.len()).collect();
     idx.sort_by(|&a, &b| cat[b].added_at.cmp(&cat[a].added_at));
     idx.truncate(POOL_TARGET);
@@ -398,7 +346,6 @@ mod tests {
     #[test]
     fn parse_source_drops_magnet_only_and_blank_titles() {
         let entries = parse_source(FEED);
-        // Magnet-only "Torrent Only Game" and the blank-title row are both dropped.
         assert_eq!(entries.len(), 3);
         let titles: Vec<&str> = entries.iter().map(|e| e.title.as_str()).collect();
         assert!(titles.contains(&"Broforce"));
@@ -409,7 +356,6 @@ mod tests {
     #[test]
     fn parse_source_suffixes_slug_collisions() {
         let entries = parse_source(FEED);
-        // Both Broforce rows clean to the same name but survive with distinct slugs.
         let slugs: Vec<&str> = entries
             .iter()
             .filter(|e| e.title == "Broforce")
@@ -432,7 +378,6 @@ mod tests {
     #[test]
     fn parse_source_keeps_only_http_uris() {
         let entries = parse_source(FEED);
-        // The Arma row's magnet is filtered; only the direct http host remains.
         let arma = entries.iter().find(|e| e.title == "Arma Reforger").unwrap();
         assert_eq!(arma.uris, vec!["https://datavaults.co/file/9".to_string()]);
     }
@@ -440,8 +385,6 @@ mod tests {
     #[test]
     fn parse_source_parses_size_and_date_forms() {
         let entries = parse_source(FEED);
-        // Every surviving row yields positive bytes, retained size text, and a
-        // timestamp — the three rows cover +00:00, .000Z, and bare-Z date forms.
         for e in &entries {
             assert!(e.size_bytes.is_some_and(|b| b > 0), "size_bytes for {}", e.slug);
             assert!(e.size_text.is_some(), "size_text for {}", e.slug);
@@ -478,8 +421,6 @@ mod tests {
         let options = options_from_uris(&uris).await;
         assert_eq!(options.len(), 2);
         assert!(options.iter().all(|o| o.url.is_some()));
-        // buzzheavier is a known/resolvable host; the unknown host is not, and
-        // the resolvable option sorts ahead of it.
         assert!(options[0].resolvable);
         assert!(!options[1].resolvable);
         assert_eq!(options[0].url.as_deref(), Some("https://buzzheavier.com/xyz"));

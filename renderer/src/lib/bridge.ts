@@ -221,9 +221,6 @@ export function installBridge(): void {
       return { ok: true }
     },
   }
-  // Per-game mod management (NexusMods + Steam Workshop + Thunderstore). 1:1
-  // wrappers over the mods_* / nexus_* / workshop_* / thunderstore_* commands;
-  // event names are the fixed mods:* set.
   w.ucMods = {
     gameGet: (appid: string) => call("mods_game_get", { appid }),
     gameSet: (appid: string, config: { nexusDomain?: string | null; deployTarget?: string; thunderstoreCommunity?: string | null }) => call("mods_game_set", { appid, config }),

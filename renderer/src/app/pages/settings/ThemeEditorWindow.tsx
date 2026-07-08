@@ -11,14 +11,6 @@ import { useToast } from "@/context/toast-context"
 
 type Seed = { theme: ThemeDef; mode: "new" | "edit" | "duplicate" }
 
-/**
- * Standalone, full-window theme editor. The appearance tab opens this in its
- * own Electron window so the MAIN window can preview the draft theme live while
- * you edit. Persisting here rides the normal ucSettings sync (which broadcasts
- * to every window), so the main window's theme list updates automatically;
- * unsaved drafts are streamed over the `uc:theme-preview` relay and reverted on
- * close.
- */
 export default function ThemeEditorWindow() {
   const { setActiveThemeId } = useActiveTheme()
   const { active: isUcPlus } = useUcPlus()
@@ -29,12 +21,9 @@ export default function ThemeEditorWindow() {
   const [saved, setSaved] = useState(false)
   const savedRef = useRef(false)
 
-  // Receive the theme to edit from the main process once this window loads.
   useEffect(() => {
     const editor = window.ucThemeEditor
     if (!editor?.onSeed) {
-      // Not running under Electron (or preload missing) — seed a default so the
-      // page is still usable.
       setSeed({ theme: { ...PRESET_THEMES[0], name: "My Theme" }, mode: "new" })
       return
     }
@@ -46,7 +35,6 @@ export default function ThemeEditorWindow() {
     return () => { try { off?.() } catch {} }
   }, [])
 
-  // End the live preview when the window goes away (unless we already saved).
   useEffect(() => {
     const onUnload = () => {
       if (!savedRef.current) {
@@ -85,7 +73,6 @@ export default function ThemeEditorWindow() {
     savedRef.current = true
     setSaved(true)
     try { window.ucThemeEditor?.endPreview?.() } catch {}
-    // Let the settings write + broadcast flush before the window closes.
     setTimeout(closeWindow, 120)
   }, [customThemes, updateCustomTheme, addCustomTheme, maxCustomThemes, isUcPlus, setActiveThemeId, toast, closeWindow])
 

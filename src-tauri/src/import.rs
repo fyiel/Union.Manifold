@@ -9,17 +9,7 @@ use crate::downloads::{now_ms, safe_folder_name, write_manifest_atomic, MANIFEST
 use crate::library;
 use crate::state::AppState;
 
-// External games imported into the library. Two shapes:
-//  - "imported-exe": an arbitrary executable already on disk. The manifest stub
-//    lives under the download root (so the normal library scan picks it up) and
-//    points at the REAL game folder via installPath + exePath. Deleting the
-//    library entry removes only the stub, never the game files.
-//  - "steam": a game installed by the local Steam client, discovered from
-//    libraryfolders.vdf / appmanifest_*.acf. Launch goes through
-//    steam://rungameid/<id> instead of the exe flow.
-
 fn stable_local_id(path: &str) -> String {
-    // FNV-1a, stable across runs so re-importing the same exe dedupes by appid.
     let mut hash: u64 = 0xcbf29ce484222325;
     for b in path.as_bytes() {
         hash ^= u64::from(*b);
@@ -44,7 +34,6 @@ fn write_import_manifest(state: &AppState, manifest: &Value) -> Result<(), Strin
     Ok(())
 }
 
-
 #[tauri::command]
 pub async fn import_exe(state: State<'_, AppState>, exe_path: String, name: Option<String>) -> Result<Value, String> {
     let exe = Path::new(&exe_path);
@@ -62,10 +51,6 @@ pub async fn import_exe(state: State<'_, AppState>, exe_path: String, name: Opti
         .unwrap_or_else(|| prettify_stem(exe));
     let size = std::fs::metadata(exe).map(|m| m.len()).unwrap_or(0);
     let install_dir = exe.parent().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
-    // The detail page hangs its art, ProtonDB tier and store metadata off a
-    // Steam appid, so try to match the exe's name against the store (exact
-    // normalized-title matches only). A miss returns steamAppId: null and the
-    // renderer prompts for a manual id.
     let steam_app_id = crate::sources::steam::search_app_id(&name).await;
     let mut manifest = json!({
         "appid": appid,
@@ -87,19 +72,6 @@ pub async fn import_exe(state: State<'_, AppState>, exe_path: String, name: Opti
     })
 }
 
-// Manual override for a library game's Steam appid — used both when the store
-// search missed AND when it matched the wrong game (exe names are ambiguous;
-// "Card Corner"-style titles collide). The override is the user asserting
-// "this install IS steam game <id>", so the whole persisted identity follows:
-//  - top-level steamAppId (what entryToLib trusts first),
-//  - metadata.steamAppId (startSourceDownload stamps the source's — possibly
-//    wrong — id there at enqueue time; leaving it stale would resurface the
-//    old game through any reader that falls back to metadata),
-//  - metadata.image (real cover for the new id),
-//  - metadata.name (official store title) so future title-based resolution
-//    searches the right game instead of whatever a wrong auto-match or an exe
-//    stem left behind. The manifest's top-level `name` (original folder/exe
-//    name) is deliberately untouched. No store page → name stays as-is.
 #[tauri::command]
 pub async fn import_set_steam_appid(state: State<'_, AppState>, appid: String, steam_appid: u64) -> Result<Value, String> {
     let cover = crate::sources::steam::resolve_cover(steam_appid).await;
@@ -115,10 +87,6 @@ pub async fn import_set_steam_appid(state: State<'_, AppState>, appid: String, s
     Ok(json!({ "ok": ok }))
 }
 
-// Copy a user-picked image into app-managed storage and hand back a stable
-// uc-custom:// URL. Storing the raw filesystem path in metadata broke as soon
-// as the renderer tried to load it (blank cover) and died if the source file
-// moved; content-hashed copies served through the uc-asset protocol do neither.
 #[tauri::command(async)]
 pub fn custom_image_import(state: State<'_, AppState>, path: String) -> Value {
     use sha2::Digest;
@@ -149,13 +117,8 @@ pub fn custom_image_import(state: State<'_, AppState>, path: String) -> Value {
     json!({ "ok": true, "url": format!("uc-custom://{name}") })
 }
 
-// ── Steam library discovery ──────────────────────────────────────────────────
-
-// Minimal tolerant VDF line scan: yields ("key", "value") for every
-// `"key"  "value"` line. Nesting is irrelevant for the keys we pull.
 fn vdf_pairs(text: &str) -> impl Iterator<Item = (String, String)> + '_ {
     text.lines().filter_map(|line| {
-        // A quoted-pair line splits on '"' into: "", key, whitespace, value, ""
         let raw: Vec<&str> = line.trim().split('"').collect();
         if raw.len() >= 4 && raw[0].is_empty() && raw[2].trim().is_empty() {
             Some((raw[1].to_string(), raw[3].to_string()))
@@ -202,8 +165,6 @@ fn steam_library_dirs() -> Vec<PathBuf> {
             }
         };
         push(steamapps.clone());
-        // Modern Steam clients keep the authoritative list at
-        // config/libraryfolders.vdf; the steamapps/ copy may not exist at all.
         for vdf in [steamapps.join("libraryfolders.vdf"), root.join("config/libraryfolders.vdf")] {
             if let Ok(text) = std::fs::read_to_string(vdf) {
                 for (key, value) in vdf_pairs(&text) {
@@ -217,7 +178,6 @@ fn steam_library_dirs() -> Vec<PathBuf> {
     dirs
 }
 
-// Runtimes/tools that live in every Steam library but aren't games.
 fn is_steam_tool(name: &str) -> bool {
     let n = name.to_lowercase();
     n.starts_with("proton")
@@ -303,8 +263,6 @@ pub async fn steam_library_import(state: State<'_, AppState>, apps: Vec<SteamImp
         if existing.contains(&appid) {
             continue;
         }
-        // Real cover from the store API when the predictable capsule 404s
-        // (newer indie titles), so bulk-imported games aren't blank either.
         let cover = crate::sources::steam::resolve_cover(app.steam_app_id).await;
         let manifest = json!({
             "appid": appid,

@@ -14,14 +14,7 @@ type GameLaunchFailedModalProps = {
   open: boolean
   gameName: string
   onClose: () => void
-  /** Optional: opens the executable picker for the failed game. When
-   *  provided, the modal shows a primary "Pick executable" action so users
-   *  don't have to dig through the gear menu to fix a wrong-exe launch. */
   onPickExecutable?: () => void
-  /** When the game advertises online/multiplayer support, a launch failure is
-   *  often because Steam isn't running in the background (the game can't reach
-   *  the Steam client to bootstrap its online services). Surface a hint + a
-   *  one-click "Launch Steam" action in that case. */
   hasOnlineSupport?: boolean
 }
 
@@ -64,9 +57,7 @@ export function GameLaunchFailedModal({
           </DialogDescription>
         </DialogHeader>
 
-        {/* Online/multiplayer games frequently fail to launch when Steam isn't
-            already running — the game's online layer expects to talk to a live
-            Steam client. Offer to start Steam right here so the user can retry. */}
+        {}
         {hasOnlineSupport && (
           <div className="flex items-start gap-2 rounded-xl border border-sky-500/25 bg-sky-500/[.06] px-3 py-2.5 text-xs text-sky-100">
             <Wifi className="mt-0.5 h-3.5 w-3.5 shrink-0 text-sky-300" />
@@ -89,9 +80,7 @@ export function GameLaunchFailedModal({
           </div>
         )}
 
-        {/* When staff have set the executable for a release in the admin panel,
-            UC.D launches that automatically. This notice covers the cases where
-            no exe was set, or this particular release uses a different file. */}
+        {}
         <div className="flex items-start gap-2 rounded-xl border border-amber-500/25 bg-amber-500/[.06] px-3 py-2.5 text-xs text-amber-100">
           <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-300" />
           <p className="leading-relaxed">

@@ -218,10 +218,6 @@ pub fn merge_games(records: Vec<SourceGame>) -> Vec<UnifiedGame> {
         let key = normalize_title(&r.title);
         if !key.is_empty() {
             if let Some(&j) = by_title.get(&key) {
-                // Don't title-union records asserting DIFFERENT non-zero Steam
-                // appids: normalize_title strips edition noise and would collapse
-                // e.g. "Dark Souls" and "Dark Souls Remastered" into one game.
-                // Same-appid records still merge via `by_appid` above.
                 let ai = r.steam_app_id.filter(|v| *v > 0);
                 let aj = records[j].steam_app_id.filter(|v| *v > 0);
                 let conflict = matches!((ai, aj), (Some(x), Some(y)) if x != y);
@@ -239,9 +235,6 @@ pub fn merge_games(records: Vec<SourceGame>) -> Vec<UnifiedGame> {
         let root = find(&mut parent, i);
         groups.entry(root).or_default().push(i);
     }
-    // HashMap iteration order is nondeterministic; emit groups by their smallest
-    // member index so browse/search order and sources_detail stay stable across
-    // cache refreshes (`idxs` is ascending since we pushed i in 0..n order).
     let mut groups: Vec<Vec<usize>> = groups.into_values().collect();
     groups.sort_by_key(|idxs| idxs[0]);
 
@@ -335,7 +328,6 @@ mod tests {
     #[test]
     fn t_normalize_title_strips_edition_noise() {
         assert_eq!(normalize_title("Dark Souls"), "dark souls");
-        // "Remastered" is edition noise, so the two titles normalize equal.
         assert_eq!(
             normalize_title("Dark Souls"),
             normalize_title("Dark Souls Remastered"),
@@ -344,7 +336,6 @@ mod tests {
 
     #[test]
     fn t_merge_games_keeps_distinct_appids_apart() {
-        // Same normalized title but different non-zero Steam appids must NOT merge.
         let out = merge_games(vec![
             sg("Dark Souls", Some(1)),
             sg("Dark Souls Remastered", Some(2)),
@@ -354,14 +345,12 @@ mod tests {
 
     #[test]
     fn t_merge_games_merges_same_title_without_appid_conflict() {
-        // Both appids absent -> title match merges into one game.
         let no_ids = merge_games(vec![
             sg("Dark Souls", None),
             sg("Dark Souls Remastered", None),
         ]);
         assert_eq!(no_ids.len(), 1);
 
-        // Identical non-zero appid -> merges regardless of edition noise.
         let same_id = merge_games(vec![
             sg("Portal", Some(400)),
             sg("Portal Deluxe Edition", Some(400)),

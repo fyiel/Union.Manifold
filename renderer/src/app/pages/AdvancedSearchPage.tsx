@@ -13,27 +13,16 @@ import { getAdvancedCache, setAdvancedCache } from "@/lib/advanced-cache"
 import { GameCard } from "@/app/manifold/GameCard"
 import { MONO, SearchIcon, Spinner, CenterState } from "@/app/manifold/ui"
 
-// Advanced Search, a persistent filter rail (sources, genre, install size,
-// release year, direct-only) feeding the unified query, with a results grid on
-// the right. Each source row can show a "no <sort>" warning when the current
-// sort isn't one that source's index can do natively, driven by the real
-// per-source capability matrix (sourceCapabilities().perSource[].sort), not a
-// hardcoded table. 'size' maps to a key no source declares so every source
-// warns, relevance and mirror-count are ordered by us so none do.
-
 type AdvSort = "relevance" | "a-z" | "size" | "sources"
 const SORT_CYCLE: AdvSort[] = ["relevance", "a-z", "size", "sources"]
 const SIZE_MIN = 0, SIZE_MAX = 130, YEAR_MIN = 2010, YEAR_MAX = 2025
 const ADV_PAGE = 60
 
-// The native capability key a source needs to honour a UI sort. Null means we
-// order it ourselves (relevance / mirror count), so no source is ever "unsupported".
 function capKeyForSort(sort: AdvSort): "title" | "size" | null {
   if (sort === "a-z") return "title"
   if (sort === "size") return "size"
   return null
 }
-// Best backend sort hint for a UI sort (size/sources are finished client-side).
 function toBackendSort(sort: AdvSort, hasText: boolean): SourceSortKey {
   if (sort === "a-z") return "title"
   return hasText ? "relevance" : "latest"
@@ -47,7 +36,6 @@ export function AdvancedSearchPage() {
   const [caps, setCaps] = useState<SourceCapabilityReport | null>(null)
   const [genreOptions, setGenreOptions] = useState<string[]>(() => cached?.genreOptions ?? [])
 
-  // filter state (restored from the module cache when returning to the page)
   const [query, setQuery] = useState(() => cached?.query ?? "")
   const [enabled, setEnabled] = useState<Record<string, boolean>>(() => cached?.enabled ?? {})
   const [cats, setCats] = useState<Set<string>>(() => new Set(cached?.cats ?? []))
@@ -69,13 +57,11 @@ export function AdvancedSearchPage() {
   const loadingMoreRef = useRef(false)
   const bootedRef = useRef(false)
 
-  // sources + capability matrix, once
   useEffect(() => {
     let alive = true
     void listSources().then((s) => {
       if (!alive) return
       setSources(s)
-      // Default all-enabled only on a fresh visit; keep the restored selection.
       setEnabled((prev) => (Object.keys(prev).length ? prev : Object.fromEntries(s.map((x) => [x.id, true]))))
     })
     void sourceCapabilities().then((c) => { if (alive) setCaps(c) })
@@ -84,11 +70,9 @@ export function AdvancedSearchPage() {
 
   const enabledIds = useMemo(() => sources.filter((s) => enabled[s.id]).map((s) => s.id), [sources, enabled])
 
-  // sliders can cross, normalise before use
   const sLo = Math.min(sizeMin, sizeMax), sHi = Math.max(sizeMin, sizeMax)
   const yLo = Math.min(yearFrom, yearTo), yHi = Math.max(yearFrom, yearTo)
 
-  // every backend-affecting input, serialised, so the fetch fires on any change
   const paramsKey = JSON.stringify({ q: query.trim(), enabledIds, cats: [...cats].sort(), sLo, sHi, yLo, yHi, sort })
 
   const buildParams = useCallback((offset: number): SourceQueryParams => {
@@ -104,11 +88,8 @@ export function AdvancedSearchPage() {
     return params
   }, [query, sort, enabledIds, cats, sLo, sHi, yLo, yHi])
 
-  // Fresh fetch (offset 0, replace) whenever any filter changes.
   useEffect(() => {
     if (!available || !sources.length) return
-    // First mount: if the cached results were produced by these exact params,
-    // they're already in state, skip the refetch (instant restore on return).
     if (!bootedRef.current) {
       bootedRef.current = true
       if (cached && cached.paramsKey === paramsKey && cached.games.length) return
@@ -135,7 +116,6 @@ export function AdvancedSearchPage() {
         .catch(() => { if (id === reqId.current) setLoading(false) })
     }, 280)
     return () => { if (debounce.current) clearTimeout(debounce.current) }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [paramsKey, available, sources.length])
 
   const loadMore = useCallback(async () => {
@@ -159,8 +139,6 @@ export function AdvancedSearchPage() {
     }
   }, [buildParams])
 
-  // Persist the live view to the module cache so returning to the page restores
-  // the exact filters + results + scroll depth without refetching.
   useEffect(() => {
     setAdvancedCache({
       query, enabled, cats: [...cats], sizeMin, sizeMax, yearFrom, yearTo, directOnly, sort,
@@ -168,7 +146,6 @@ export function AdvancedSearchPage() {
     })
   }, [query, enabled, cats, sizeMin, sizeMax, yearFrom, yearTo, directOnly, sort, games, total, genreOptions, paramsKey])
 
-  // client-side: direct-only filter + the final ordering of the fetched page
   const sorted = useMemo(() => {
     let arr = games
     if (directOnly) arr = arr.filter((g) => g.sources.some(sourceIsDirect))
@@ -186,14 +163,12 @@ export function AdvancedSearchPage() {
     return arr
   }, [games, directOnly, sort, query])
 
-  // per-source contribution counts over the displayed set
   const sourceCounts = useMemo(() => {
     const m: Record<string, number> = {}
     for (const g of sorted) for (const s of g.sources) m[s.sourceId] = (m[s.sourceId] || 0) + 1
     return m
   }, [sorted])
 
-  // capability lookup: source id → the orderings its index supports natively
   const capBy = useMemo(() => {
     const m: Record<string, string[]> = {}
     for (const p of caps?.perSource || []) m[p.id] = (p.sort || []) as string[]
@@ -202,7 +177,6 @@ export function AdvancedSearchPage() {
   const capKey = capKeyForSort(sort)
   const sortUnsupported = (id: string) => capKey != null && !(capBy[id] || []).includes(capKey)
 
-  // derived labels
   const allOn = sources.length > 0 && sources.every((s) => enabled[s.id])
   const activeFilterCount = [
     query.trim().length > 0,
@@ -226,7 +200,6 @@ export function AdvancedSearchPage() {
     }
   }
 
-  // actions
   const toggleSource = (id: string) => setEnabled((e) => ({ ...e, [id]: !e[id] }))
   const toggleCat = (c: string) => setCats((prev) => {
     const next = new Set(prev)
@@ -247,7 +220,7 @@ export function AdvancedSearchPage() {
 
   return (
     <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex" }}>
-      {/* ============ FILTER RAIL ============ */}
+      {}
       <div className="mf-scroll" style={{ width: 272, flexShrink: 0, borderRight: "1px solid var(--mf-line)", overflowY: "auto", padding: "22px 22px 40px" }}>
         <Link to="/" className="mf-textbtn" style={{ display: "inline-flex", alignItems: "center", gap: 7, fontFamily: MONO, fontSize: 11, color: "var(--mf-t3)", textDecoration: "none", marginBottom: 18 }}>
           <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round"><polyline points="9 3 4 8 9 13" /><line x1="4" y1="8" x2="13" y2="8" /></svg>
@@ -255,7 +228,7 @@ export function AdvancedSearchPage() {
         </Link>
         <h1 style={{ margin: "0 0 22px", fontSize: 18, fontWeight: 600, color: "var(--mf-t0)", letterSpacing: "-0.01em" }}>Advanced search</h1>
 
-        {/* query */}
+        {}
         <div style={{ position: "relative", marginBottom: 24 }}>
           <SearchIcon size={14} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)" }} />
           <input
@@ -266,7 +239,7 @@ export function AdvancedSearchPage() {
           />
         </div>
 
-        {/* sources */}
+        {}
         <div style={{ marginBottom: 24 }}>
           <div style={{ ...SECTION_LABEL, marginBottom: 11 }}>Include sources</div>
           <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
@@ -303,7 +276,7 @@ export function AdvancedSearchPage() {
           </div>
         </div>
 
-        {/* genre (multi) */}
+        {}
         {genreOptions.length > 0 && (
           <div style={{ marginBottom: 24 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 11 }}>
@@ -319,7 +292,7 @@ export function AdvancedSearchPage() {
           </div>
         )}
 
-        {/* install size */}
+        {}
         <div style={{ marginBottom: 24 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 13 }}>
             <span style={SECTION_LABEL}>Install size</span>
@@ -329,7 +302,7 @@ export function AdvancedSearchPage() {
           <RangeRow label="max" min={SIZE_MIN} max={SIZE_MAX} value={sizeMax} onChange={setSizeMax} />
         </div>
 
-        {/* release year */}
+        {}
         <div style={{ marginBottom: 24 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 13 }}>
             <span style={SECTION_LABEL}>Release year</span>
@@ -339,7 +312,7 @@ export function AdvancedSearchPage() {
           <RangeRow label="to" min={YEAR_MIN} max={YEAR_MAX} value={yearTo} onChange={setYearTo} />
         </div>
 
-        {/* direct only */}
+        {}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, padding: "14px 0", borderTop: "1px solid var(--mf-line)", borderBottom: "1px solid var(--mf-line)" }}>
           <div>
             <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--mf-t1)" }}>Direct downloads only</div>
@@ -356,9 +329,9 @@ export function AdvancedSearchPage() {
         </button>
       </div>
 
-      {/* ============ RESULTS ============ */}
+      {}
       <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column" }}>
-        {/* extra right padding clears the frameless window controls (min/max/close) */}
+        {}
         <header style={{ flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "24px 104px 24px 36px", borderBottom: "1px solid var(--mf-line)" }}>
           <div style={{ display: "flex", alignItems: "baseline", gap: 12 }}>
             <span style={{ fontSize: 16, fontWeight: 600, color: "var(--mf-t0)" }}>{sorted.length} {sorted.length === 1 ? "title" : "titles"}</span>

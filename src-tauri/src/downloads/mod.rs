@@ -16,12 +16,7 @@ use aria2::Aria2Manager;
 
 pub const MANIFEST_NAME: &str = "installed.json";
 
-// Steady-progress manifest checkpoints are throttled to this interval; status
-// transitions (queued/downloading/paused/completed/failed/cancelled) still
-// write immediately, so on-disk state never misses a lifecycle change.
 const MANIFEST_CHECKPOINT_INTERVAL: Duration = Duration::from_secs(5);
-// Raw per-tick speed jitter would defeat the poll emit dedupe (a stalled
-// download's speed wobbles a few KB/s); compare speeds at this granularity.
 const SPEED_EMIT_QUANTUM: u64 = 50 * 1024;
 
 pub fn safe_folder_name(name: &str) -> String {
@@ -39,7 +34,6 @@ pub fn safe_folder_name(name: &str) -> String {
     if trimmed.is_empty() {
         return "unknown".to_string();
     }
-    // Dodge Windows device names, which can't be used as file/folder names.
     const RESERVED: &[&str] = &[
         "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7",
         "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
@@ -52,9 +46,6 @@ pub fn safe_folder_name(name: &str) -> String {
 }
 
 fn sanitize_filename(name: &str) -> String {
-    // Reduce to a bare basename (strip path components from either platform), map
-    // filesystem-invalid characters, and drop trailing dots/spaces so titles like
-    // "Half-Life: Alyx" still produce a creatable file on Windows.
     let base = name.rsplit(|c| c == '/' || c == '\\').next().unwrap_or(name);
     let cleaned: String = base
         .chars()
@@ -104,8 +95,6 @@ struct Download {
     part_index: Option<u64>,
     part_total: Option<u64>,
     poll_failures: u32,
-    // Last time this download's manifest hit disk from the poll loop; gates
-    // steady-progress checkpoints, never lifecycle writes.
     last_manifest_write: Instant,
 }
 
@@ -315,12 +304,6 @@ impl DownloadEngine {
         if dl.status != "paused" && dl.status != "failed" && dl.status != "cancelled" {
             return false;
         }
-        // Only a paused download holds a gid that aria2 can unpause. A failed or
-        // cancelled one sits in aria2's stopped list (or is gone entirely), where
-        // unpause is a silent no-op and the next poll would just re-surface the
-        // stale error and flip the download straight back to "failed". Drop the
-        // dead handle and go through a fresh add_uri instead, which resumes from
-        // the on-disk partial via --continue.
         if dl.status == "paused" {
             if let Some(gid) = dl.gid.clone() {
                 if self.aria2.is_ready() {
@@ -367,8 +350,6 @@ impl DownloadEngine {
             ),
             None => return json!({ "ok": false }),
         };
-        // A fully-downloaded archive is ready to install, not garbage: keep the file and
-        // report install_ready instead of deleting it. Decided per download-id (part).
         let control_present = PathBuf::from(format!("{}.aria2", save_path.display())).exists();
         let file_len = std::fs::metadata(&save_path).map(|m| m.len()).unwrap_or(0);
         let archive_complete =
@@ -397,11 +378,8 @@ impl DownloadEngine {
         self.emit(&snap);
         drop(st);
         if archive_complete {
-            // Persist installStatus "downloaded" so the archive can be installed later.
             write_manifest(&snap);
         }
-        // Release the aria2 handle first, then delete on disk in the same task so aria2
-        // can't re-create partials (Linux) or block the delete (Windows).
         let should_delete = !archive_complete && !keep_file;
         let aria2 = self.aria2.clone();
         tauri::async_runtime::spawn(async move {
@@ -511,9 +489,6 @@ impl DownloadEngine {
             None => return,
         };
         let offset = std::fs::metadata(&dl.save_path).map(|m| m.len()).unwrap_or(0);
-        // aria2 --split writes segments at high offsets, so file length can reach total
-        // long before the content is complete; the `.aria2` control file is the real
-        // completion signal. Only short-circuit when it is absent.
         let control_present = PathBuf::from(format!("{}.aria2", dl.save_path.display())).exists();
         if offset > 0 && dl.total_bytes > 0 && offset >= dl.total_bytes && !control_present {
             dl.received_bytes = offset;
@@ -585,7 +560,6 @@ impl DownloadEngine {
                         aria2.remove_download_result(&gid).await;
                     });
                 } else if should_pause {
-                    // Paused during the startup window; stop the freshly-attached download.
                     self.aria2.pause(&gid).await;
                 }
             }
@@ -595,8 +569,6 @@ impl DownloadEngine {
 
     fn commit(&self, dl: &Download) {
         if let Some(existing) = self.state.lock().by_id.get_mut(&dl.id) {
-            // Preserve a cancel/pause the user issued during the startup window instead
-            // of reverting it with this stale startup snapshot.
             if matches!(existing.status.as_str(), "cancelled" | "paused") {
                 return;
             }
@@ -648,10 +620,6 @@ impl DownloadEngine {
                 .filter_map(|d| d.gid.clone().map(|g| (d.id.clone(), g)))
                 .collect()
         };
-        // One serial RPC round-trip per download adds up at the 700ms cadence;
-        // fetch every status concurrently, then apply the results with the same
-        // per-id poll_failures bookkeeping the serial loop had. No state lock is
-        // held during the fetches.
         let statuses = futures::future::join_all(active.into_iter().map(|(id, gid)| async move {
             let status = self.aria2.tell_status(&gid).await;
             (id, gid, status)
@@ -706,8 +674,6 @@ impl DownloadEngine {
                             Some(dl) if !(dl.status == "paused" && s != "paused") => {
                                 let status = if s == "paused" { "paused" } else { "downloading" };
                                 let speed = if s == "paused" { 0 } else { speed };
-                                // Compare speed by bucket so pure jitter on a stalled
-                                // download doesn't emit; byte or status changes always do.
                                 if dl.status == status
                                     && dl.received_bytes == completed
                                     && dl.speed_bps / SPEED_EMIT_QUANTUM == speed / SPEED_EMIT_QUANTUM
@@ -725,9 +691,6 @@ impl DownloadEngine {
                                     dl.speed_bps = speed;
                                     let remaining = total.saturating_sub(completed);
                                     dl.eta_seconds = if speed > 0 && remaining > 0 { Some(remaining / speed) } else { None };
-                                    // Transitions persist immediately; steady progress only
-                                    // checkpoints the manifest every few seconds, keeping the
-                                    // per-tick path free of disk writes.
                                     let write = status_changed
                                         || dl.last_manifest_write.elapsed() >= MANIFEST_CHECKPOINT_INTERVAL;
                                     if write {
@@ -794,8 +757,6 @@ impl DownloadEngine {
         let ready = {
             let st = self.state.lock();
             match dl.part_total {
-                // Multi-part sets are enqueued incrementally, so scanning in-memory
-                // siblings misfires; gate on the known part total when we have it.
                 Some(total) if total > 1 => {
                     let done = st
                         .by_id
@@ -950,12 +911,6 @@ pub fn download_active_status(state: State<'_, AppState>, appid: String) -> Valu
     state.downloads.active_status(&appid)
 }
 
-// Every enqueued download creates its installing folder up front, so a row whose
-// savePath's parent dir is gone is dead: it can't be resumed or installed and
-// just restores from downloads-state.json on every launch (an install_ready with
-// no real archive — e.g. an old few-byte DataVaults miss parked as "ready" — is
-// the classic case). Drop those; a row without a savePath is left for the
-// renderer to reconcile. Returns the number pruned.
 fn prune_dead_downloads(downloads: &mut Value) -> usize {
     let Some(arr) = downloads.as_array_mut() else {
         return 0;
@@ -1035,7 +990,6 @@ pub fn download_path_set(state: State<'_, AppState>, target_path: String) -> Val
     json!({ "ok": true, "path": target_path })
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1055,7 +1009,6 @@ mod tests {
 
     #[test]
     fn t_sanitize_filename_reduces_to_basename() {
-        // Path traversal / separators from either platform collapse to a bare name.
         let a = sanitize_filename("../../etc/passwd");
         assert_eq!(a, "passwd");
         assert!(!a.contains('/') && !a.contains(".."));
@@ -1078,8 +1031,6 @@ mod tests {
 
     #[test]
     fn t_sanitize_filename_falls_back_when_empty() {
-        // Empty or all-separator input still yields a usable, non-empty basename
-        // with no path separators (the exact sentinel is an implementation detail).
         assert!(!sanitize_filename("").is_empty());
         let s = sanitize_filename("///");
         assert!(!s.is_empty());
@@ -1100,11 +1051,9 @@ mod tests {
 
     #[test]
     fn t_safe_folder_name_escapes_reserved_devices() {
-        // Windows-reserved device names must not survive as a bare folder name.
         assert!(!safe_folder_name("CON").eq_ignore_ascii_case("CON"));
         assert!(!safe_folder_name("aux").eq_ignore_ascii_case("aux"));
         assert!(!safe_folder_name("NUL").eq_ignore_ascii_case("NUL"));
-        // A longer name that merely starts with a reserved stem is left intact.
         assert_eq!(safe_folder_name("CONSOLE"), "CONSOLE");
     }
 
@@ -1112,14 +1061,11 @@ mod tests {
     fn t_prune_dead_downloads_drops_only_rows_whose_parent_dir_is_gone() {
         let tmp = tempfile::tempdir().unwrap();
 
-        // Live row: its install folder actually exists on disk, so it survives.
         let live_dir = tmp.path().join("GameA");
         std::fs::create_dir_all(&live_dir).unwrap();
         let live_save = live_dir.join("file.zip");
         let live_save = live_save.to_str().unwrap();
 
-        // Dead row: the parent "Gone" was never created, so its parent dir is
-        // missing and the row can never resume — it must be pruned.
         let dead_save = tmp.path().join("Gone").join("file.zip");
         let dead_save = dead_save.to_str().unwrap();
 
@@ -1133,7 +1079,6 @@ mod tests {
         let dropped = prune_dead_downloads(&mut downloads);
         assert_eq!(dropped, 1, "only the row with a missing parent dir is pruned");
 
-        // Order is preserved and exactly the three live rows remain.
         let kept: Vec<&str> = downloads
             .as_array()
             .unwrap()

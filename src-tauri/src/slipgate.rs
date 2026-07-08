@@ -1,12 +1,3 @@
-//! Shared client for the user's self-hosted Slipgate resolver.
-//!
-//! Slipgate drives a real browser (via FlareSolverr) to clear Cloudflare,
-//! captchas, and js-only download pages, then hands back a direct url. The
-//! app never solves anything itself: it POSTs a recipe name + params to
-//! `/resolve` and feeds the returned url into the normal aria2 pipeline.
-//! Consumers: the NexusMods free-download path (`mods::nexus`) and the
-//! captcha/browser-only file hosts (`sources::hosts::gate`).
-
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
@@ -16,9 +7,6 @@ use serde_json::{json, Value};
 use crate::http;
 use crate::settings::SettingsStore;
 
-// Runtime-injected (the store only exists after Tauri setup), so OnceLock
-// rather than LazyLock. Holding the live store means settings edits apply on
-// the next resolve without a restart.
 static SETTINGS: OnceLock<Arc<SettingsStore>> = OnceLock::new();
 
 pub fn init(settings: Arc<SettingsStore>) {
@@ -31,8 +19,6 @@ pub struct Cfg {
     pub key: Option<String>,
 }
 
-/// Current Slipgate endpoint, if the user configured one. Tests without a
-/// store (livetest) can point at an instance via SLIPGATE_URL / SLIPGATE_KEY.
 pub fn cfg() -> Option<Cfg> {
     let (url, key) = match SETTINGS.get() {
         Some(s) => (s.get_string("slipgateUrl"), s.get_string("slipgateKey")),
@@ -82,9 +68,6 @@ pub struct ResolvedLink {
     pub headers: HashMap<String, String>,
 }
 
-/// Run one `/resolve` recipe and normalize the reply. `file_name`,
-/// `size_bytes`, and `headers` are optional in the protocol; recipes that
-/// return cookies for the CDN put them in `headers`.
 pub async fn resolve(
     cfg: &Cfg,
     host: &str,
@@ -125,7 +108,6 @@ pub async fn resolve(
     Ok(ResolvedLink { url, file_name, size_bytes, headers })
 }
 
-/// Probe an instance's `/health` for the Settings connection test.
 pub async fn health(base: &str, key: &str) -> Result<Value, String> {
     let mut headers = HashMap::new();
     headers.insert("Accept".to_string(), "application/json".to_string());

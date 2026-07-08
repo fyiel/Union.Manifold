@@ -125,8 +125,6 @@ pub async fn resolve_url(option: &DownloadOption) -> ResolveResult {
 
     let host = hostname_of(url);
     let base = host.strip_prefix("www.").unwrap_or(&host);
-    // mega serves AES-encrypted bytes; a direct url is useless without the
-    // client-side decryption the official apps do. Browser only, always.
     let reason = if base == "mega.nz" {
         "mega (encrypted transfer \u{2014} browser only)".to_string()
     } else {

@@ -1,17 +1,3 @@
-//! DataVaults (XFileSharing) native resolver.
-//!
-//! DataVaults' free flow is a two-step form POST against the file page:
-//! `op=download1` returns the download2 page (a `rand` token, a short countdown
-//! and an XFS positional-digit captcha); `op=download2` submits the token plus
-//! the solved captcha and, once the countdown elapses, 302-redirects to the
-//! direct CDN link (`d<N>.datavaults.co/d/<token>/<name>`).
-//!
-//! This MUST run client-side: the direct link carries an `fp` fingerprint bound
-//! to the resolving IP, so a link minted on a remote resolver (Slipgate) returns
-//! HTML when the app downloads it. There is no Cloudflare gate, so a plain HTTP
-//! flow with the cookie jar is enough; we solve the deterministic captcha and
-//! read the 302 `Location` with redirects off.
-
 use std::time::Duration;
 
 use std::sync::LazyLock;
@@ -112,14 +98,12 @@ pub async fn resolve(url: &str) -> ResolveResult {
     let fname = *segs.last().unwrap();
 
     let jar = Jar::new();
-    // Seed the XFS session cookies.
     let _ = http::fetch(
         url,
         &FetchOpts { jar: Some(jar.clone()), timeout: Some(Duration::from_secs(30)), ..Default::default() },
     )
     .await;
 
-    // Step 1: op=download1 -> the download2 page (rand + captcha + countdown).
     let dl1 = form(&[
         ("op", "download1"),
         ("usr_login", ""),
@@ -135,7 +119,6 @@ pub async fn resolve(url: &str) -> ResolveResult {
     let rand = match RAND_RE.captures(&page2).and_then(|c| c.get(1)) {
         Some(m) => m.as_str().to_string(),
         None => {
-            // Maybe already the final page; otherwise gated.
             if let Some(m) = DIRECT_RE.find(&http::decode_entities(&page2)) {
                 return ok(m.as_str(), fname);
             }
@@ -145,7 +128,6 @@ pub async fn resolve(url: &str) -> ResolveResult {
     let code = solve_captcha(&page2);
     tokio::time::sleep(Duration::from_secs(wait_secs(&page2))).await;
 
-    // Step 2: op=download2 -> 302 to the direct CDN link.
     let dl2 = form(&[
         ("op", "download2"),
         ("id", file_id),
@@ -181,7 +163,6 @@ fn ok(direct: &str, fname: &str) -> ResolveResult {
         resolvable: true,
         url: Some(direct.to_string()),
         file_name: Some(fname.to_string()),
-        // The /d/ link is IP/session-fingerprinted; re-resolve on a later retry.
         ephemeral: true,
         ..Default::default()
     }

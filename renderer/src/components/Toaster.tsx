@@ -7,9 +7,6 @@ import { type ToastItem, type ToastType, useToast } from "@/context/toast-contex
 function ToastItemView({ item }: { item: ToastItem }) {
   const { dismiss } = useToast()
   const [exiting, setExiting] = useState(false)
-  // Tick a 1-second clock for the action countdown. Only ticks while the
-  // toast has an action and a duration > 1s, so it costs nothing for
-  // ordinary fire-and-forget toasts.
   const [secondsLeft, setSecondsLeft] = useState<number>(() => Math.ceil(item.duration / 1000))
 
   useEffect(() => {
@@ -51,7 +48,7 @@ function ToastItemView({ item }: { item: ToastItem }) {
       {item.action && (
         <button
           onClick={() => {
-            try { item.action?.onClick() } catch { /* ignore */ }
+            try { item.action?.onClick() } catch {  }
             dismiss(item.id)
           }}
           className="ml-1 rounded-full bg-white/[.05] hover:bg-white/[.12] px-2.5 py-0.5 text-xs font-semibold text-emerald-300 transition-colors active:scale-95 inline-flex items-center gap-1"
@@ -69,9 +66,7 @@ function ToastItemView({ item }: { item: ToastItem }) {
       >
         <X className="h-3.5 w-3.5" />
       </button>
-      {/* Progress bar for action-bearing toasts — gives the user a visual
-          cue of how long the undo window is. Animates from 100% → 0% over
-          the toast's duration. */}
+      {}
       {item.action && item.duration >= 1500 && !exiting && (
         <span
           className="absolute left-0 bottom-0 h-[2px] bg-emerald-400/40"
@@ -89,12 +84,6 @@ export function Toaster() {
 
   if (toasts.length === 0) return null
 
-  // Anchored above the always-present DownBar "Activity" pill (fixed at
-  // bottom-4). The bar's live height is published as `--uc-downbar-height` by
-  // DownBar, so toasts clear it even when it grows for a second concurrent
-  // download — a fixed offset left them overlapping / tucked behind it. The
-  // fallback (3.5rem ≈ a single-row pill) covers routes where the bar isn't
-  // mounted. `1rem` is the bar's own bottom offset, plus a `1rem` gap.
   return (
     <div
       style={{ bottom: "calc(var(--uc-downbar-height, 3.5rem) + 2rem)" }}
@@ -111,5 +100,4 @@ export function Toaster() {
   )
 }
 
-// Re-export for convenience if callers want to import type without the full context
 export type { ToastType }

@@ -1,10 +1,3 @@
-//! FileDitch native resolver.
-//!
-//! A FileDitch file page (`fileditchfiles.me/<a>/<b>/<name>`) is an HTML landing
-//! page that embeds the real, signed direct link on a sibling CDN host
-//! (`freakingfileditch.me/...?md5=<sig>&expires=<ts>`). No gate, no captcha — the
-//! resolver just fetches the page and lifts that signed URL out.
-
 use std::sync::LazyLock;
 use std::time::Duration;
 
@@ -15,8 +8,6 @@ use crate::sources::ResolveResult;
 
 static HOST_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i)(^|\.)(fileditchfiles\.me|fileditch\.com)$").unwrap());
-// The signed CDN link: any *fileditch* host, an archive/installer extension, and
-// the md5 signature query the landing page hands out.
 static SIGNED_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
         r#"(?i)https?://[a-z0-9.-]*fileditch[a-z0-9.-]*/[^\s"'<>]+?\.(?:zip|rar|7z|exe|bin|iso)\?md5=[^\s"'<>&]+(?:&(?:amp;)?expires=\d+)?"#,
@@ -63,7 +54,6 @@ pub async fn resolve(url: &str) -> ResolveResult {
                 resolvable: true,
                 url: Some(direct),
                 file_name,
-                // Signed with an `expires` timestamp; re-resolve on a later retry.
                 ephemeral: true,
                 ..Default::default()
             }

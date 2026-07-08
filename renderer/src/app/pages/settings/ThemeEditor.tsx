@@ -21,13 +21,6 @@ function tokenLabel(token: ColorToken): string {
   return token.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
 }
 
-/** Single color row.
- *  - Memoised so the other 25 rows don't re-render on every onChange.
- *  - Holds the picker value in *local* state so drag updates don't round-trip
- *    through the parent (~60fps state cascade was the source of the lag).
- *  - Commits the value to the parent via requestAnimationFrame, coalescing
- *    consecutive picker emissions into a single parent update per frame and
- *    flushing the latest value on unmount/blur. */
 const ColorRow = memo(function ColorRow({
   token,
   value,
@@ -37,8 +30,6 @@ const ColorRow = memo(function ColorRow({
   value: string
   onChange: (token: ColorToken, hex: string) => void
 }) {
-  // Hex for the picker — derived from incoming value but kept in local state
-  // so the picker can drive itself between rAF flushes without parent ping-pong.
   const initialHex = useMemo(() => {
     try {
       if (/^#[0-9a-f]{6}$/i.test(value.trim())) return value
@@ -51,9 +42,6 @@ const ColorRow = memo(function ColorRow({
   const [localHex, setLocalHex] = useState(initialHex)
   const lastIncomingRef = useRef(initialHex)
 
-  // If the parent drives the color externally (e.g. switching theme), pull
-  // the new value into local state — but only when *that* changes, not on
-  // every render.
   useEffect(() => {
     if (initialHex !== lastIncomingRef.current) {
       lastIncomingRef.current = initialHex
@@ -106,12 +94,6 @@ const ColorRow = memo(function ColorRow({
   )
 })
 
-/**
- * The editor's inner form + mockup preview. Manages its own draft state and
- * fires `onChange` on every mutation so the standalone editor window can stream
- * the live draft to the main window. Reused by both the {@link ThemeEditor}
- * Dialog (fallback) and the standalone `ThemeEditorWindow` page.
- */
 export function ThemeEditorBody({
   initial,
   onChange,
@@ -135,7 +117,6 @@ export function ThemeEditorBody({
   const onChangeRef = useRef(onChange)
   useEffect(() => { onChangeRef.current = onChange }, [onChange])
 
-  // Wrap setDraft so every mutation also notifies the live-preview listener.
   const setDraft = useCallback((next: ThemeDef | ((prev: ThemeDef) => ThemeDef)) => {
     setDraftState((prev) => {
       const resolved = typeof next === "function" ? (next as (p: ThemeDef) => ThemeDef)(prev) : next
@@ -144,7 +125,6 @@ export function ThemeEditorBody({
     })
   }, [])
 
-  // Stable callback so memoised ColorRows don't see a new ref each draft tick.
   const setColor = useCallback((token: ColorToken, hex: string) => {
     setDraft((prev) => ({ ...prev, colors: { ...prev.colors, [token]: hex } }))
   }, [setDraft])
@@ -179,7 +159,7 @@ export function ThemeEditorBody({
   return (
     <div className="flex flex-col min-h-0 flex-1">
         <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_400px] flex-1 min-h-0 overflow-hidden">
-          {/* Left: form */}
+          {}
           <div className="uc-themed-scroll overflow-y-auto overflow-x-hidden px-6 py-5 space-y-6 min-w-0 border-r border-white/[.05]">
             <div className="grid grid-cols-1 sm:grid-cols-[2fr_1fr_1fr] gap-4 items-end">
               <div>
@@ -257,17 +237,14 @@ export function ThemeEditorBody({
             ))}
           </div>
 
-          {/* Right: live preview, sticky inside its own column */}
+          {}
           <div className="overflow-y-auto uc-themed-scroll">
             <div className="p-5 space-y-4">
               <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Live preview</div>
 
-              {/* The preview "page" — uses the draft tokens directly, ignoring
-                  the global app theme so users see exactly what they're building.
-                  `font: inherit` is forced on every nested control so the
-                  Sans/Mono dropdowns actually drive what the preview renders. */}
+              {}
               <div className="p-5 space-y-4 [&_button]:font-[inherit] [&_input]:font-[inherit] [&_span]:font-[inherit] [&_div]:font-[inherit]" style={previewStyle}>
-                {/* Card */}
+                {}
                 <div
                   className="p-4 space-y-3"
                   style={{
@@ -301,7 +278,7 @@ export function ThemeEditorBody({
                   </div>
                 </div>
 
-                {/* Input + Badge */}
+                {}
                 <div className="space-y-2">
                   <input
                     type="text"
@@ -331,7 +308,7 @@ export function ThemeEditorBody({
                   </div>
                 </div>
 
-                {/* Popover-style surface */}
+                {}
                 <div className="p-3 text-xs"
                   style={{
                     background: draft.colors.popover,
@@ -342,8 +319,7 @@ export function ThemeEditorBody({
                   Popover surface (tooltips, menus, selects all use this)
                 </div>
 
-                {/* Mono sample — independent fontFamily so the Mono dropdown
-                    has somewhere to show off. */}
+                {}
                 <div className="p-3 text-[11px] leading-relaxed"
                   style={{
                     background: draft.colors.card,
@@ -358,7 +334,7 @@ export function ThemeEditorBody({
                   &nbsp;&nbsp;<span style={{ color: draft.colors.accent }}>okay.</span>
                 </div>
 
-                {/* Sidebar slice */}
+                {}
                 <div className="flex h-32"
                   style={{
                     background: draft.colors.sidebar,
@@ -400,11 +376,6 @@ export function ThemeEditorBody({
   )
 }
 
-/**
- * Dialog wrapper around {@link ThemeEditorBody}. Used as the fallback when the
- * standalone editor window isn't available (e.g. `window.ucThemeEditor` is
- * undefined outside Electron).
- */
 export function ThemeEditor({
   open,
   initial,

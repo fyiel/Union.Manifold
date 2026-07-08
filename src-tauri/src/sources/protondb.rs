@@ -29,9 +29,6 @@ pub async fn summary(appid: u64) -> Option<ProtonDbSummary> {
         return cached;
     }
     let url = format!("https://www.protondb.com/api/v1/reports/summaries/{appid}.json");
-    // Only a DEFINITIVE HTTP response is cacheable: 2xx (real data / empty tier
-    // == no reports) or 404 (no reports). A transport error or 5xx must NOT
-    // poison the cache (it has no TTL), so bail without writing.
     let resp = match http::fetch(&url, &http::FetchOpts::default()).await {
         Ok(r) => r,
         Err(_) => return None,
@@ -43,7 +40,6 @@ pub async fn summary(appid: u64) -> Option<ProtonDbSummary> {
     let out = if status.is_success() {
         let json = match resp.json::<Value>().await {
             Ok(v) => v,
-            // 2xx but unparseable body: treat as transient, don't cache.
             Err(_) => return None,
         };
         let str_field = |key: &str| {
@@ -66,12 +62,8 @@ pub async fn summary(appid: u64) -> Option<ProtonDbSummary> {
             })
         }
     } else {
-        // 404: definitive "no reports".
         None
     };
-    // Write-behind: the insert only mutates memory; the debounced metacache
-    // flush persists the whole map (it grows large enough to make a per-insert
-    // file rewrite the dominant cost of opening a detail view).
     SUMMARY_CACHE.insert(appid.to_string(), out.clone());
     out
 }

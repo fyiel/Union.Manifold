@@ -1,8 +1,3 @@
-// Runtime-bootstrapped SteamCMD in data_dir/steamcmd: downloaded on first
-// workshop install, self-updated once, then reused for anonymous
-// workshop_download_item runs. A single tokio Mutex serializes bootstrap and
-// every run — SteamCMD cannot share its install dir between processes.
-
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::LazyLock;
@@ -49,8 +44,6 @@ async fn extract_archive(archive: &Path, out: &Path) -> Result<(), String> {
         .map(|n| n.to_string_lossy().to_lowercase())
         .unwrap_or_default();
     if name.ends_with(".tar.gz") || name.ends_with(".tgz") {
-        // System tar/bsdtar auto-detects compression and preserves the unix
-        // permission bits the scripts need; the 7z two-pass is the fallback.
         if let Some(bin) = crate::install::which_extractor() {
             return crate::install::run_libarchive(&bin, archive, out)
                 .await
@@ -106,14 +99,10 @@ async fn bootstrap(paths: &AppPaths, exe: &Path) -> Result<(), String> {
     if !exe.is_file() {
         return Err("steamcmd archive did not contain the expected executable".to_string());
     }
-    // First run lets steamcmd pull its own update before we ask it to work.
-    // Exit status is intentionally ignored: self-update exits non-zero on
-    // some platforms even when it succeeded.
     run_steamcmd(&d, exe, &["+quit"], FIRST_RUN_TIMEOUT).await?;
     Ok(())
 }
 
-/// Bootstrap if needed. Caller must hold LOCK.
 async fn ensure_ready_locked(paths: &AppPaths) -> Result<PathBuf, String> {
     let exe = exe_path(paths);
     if exe.is_file() {
@@ -154,8 +143,6 @@ async fn run_steamcmd(
     ))
 }
 
-/// Download one workshop item anonymously; returns the content directory
-/// (<steamcmd>/steamapps/workshop/content/<appid>/<fileid>/).
 pub(crate) async fn run_workshop_download(
     paths: &AppPaths,
     steam_appid: u64,
@@ -176,11 +163,6 @@ pub(crate) async fn run_workshop_download(
         "+quit",
     ];
     let text = run_steamcmd(&d, &exe, &args, DOWNLOAD_TIMEOUT).await?;
-    // steamcmd normally writes under its own steamapps/workshop, but on a box
-    // with a real Steam client installed it redirects workshop content into the
-    // system Steam library (~/.local/share/Steam/steamapps/workshop) instead. It
-    // always prints the actual destination, so trust that path first, then fall
-    // back to the path we'd expect under our own steamcmd dir.
     let computed = d
         .join("steamapps/workshop/content")
         .join(&appid_s)
@@ -189,8 +171,6 @@ pub(crate) async fn run_workshop_download(
         .filter(|p| dir_has_content(p))
         .or_else(|| dir_has_content(&computed).then(|| computed.clone()));
     if let Some(p) = downloaded {
-        // Files landed somewhere — that is the authoritative success signal,
-        // regardless of how this steamcmd build phrases the result line.
         return Ok(p);
     }
     if text.contains("No subscription") || text.contains("Failure") || text.contains("Access Denied") {
@@ -209,9 +189,6 @@ pub(crate) async fn run_workshop_download(
     Err(format!("steamcmd download failed: {}", tail.join(" | ")))
 }
 
-/// steamcmd prints `Downloaded item <id> to "<path>" (<n> bytes)`; pull the
-/// quoted destination out so we read the files wherever steamcmd actually put
-/// them (its own dir, or a system Steam library it redirected into).
 fn reported_content_dir(text: &str) -> Option<PathBuf> {
     let after = &text[text.find("Downloaded item")?..];
     let open = after.find('"')? + 1;
@@ -220,8 +197,6 @@ fn reported_content_dir(text: &str) -> Option<PathBuf> {
     (!path.is_empty()).then(|| PathBuf::from(path))
 }
 
-/// A downloaded item dir with at least one entry. Guards against treating an
-/// empty dir left by a prior failed run as success.
 fn dir_has_content(p: &Path) -> bool {
     std::fs::read_dir(p).map(|mut it| it.next().is_some()).unwrap_or(false)
 }

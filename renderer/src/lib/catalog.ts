@@ -70,13 +70,8 @@ export function normalizeCatalogGame(game: any): CatalogGame {
       ? game.has_hv
       : undefined
 
-  // Snake_case → camelCase passthroughs for the structured system requirements
-  // (the website serves them straight from Postgres). Empty/null is preserved
-  // so the DownloadCheckModal can detect "no sysreq data".
   const minRequirements = game?.minRequirements ?? game?.min_requirements ?? null
   const recommendedRequirements = game?.recommendedRequirements ?? game?.recommended_requirements ?? null
-  // Linux peers — populated by the website from the new linux_*
-  // columns. Either side may be null (Windows-only / Linux-native title).
   const linuxMinRequirements = game?.linuxMinRequirements ?? game?.linux_min_requirements ?? null
   const linuxRecommendedRequirements = game?.linuxRecommendedRequirements ?? game?.linux_recommended_requirements ?? null
   const sizeBytes = typeof game?.sizeBytes === "number"
@@ -118,13 +113,6 @@ export function normalizeCatalogGame(game: any): CatalogGame {
   }
 }
 
-// Cooperative whole-catalog normalization. normalizeCatalogGame runs several
-// regexes plus an NFD searchText build per game; mapped over the full catalog
-// in one go that's a single long main-thread task right at Library-switch
-// time. Work in ~300-game slices, yielding to the event loop between slices so
-// paint and input stay live. Plain setTimeout(0) is the yield primitive
-// because it works in WebKit (macOS), WebView2 (Windows) and WebKitGTK (Linux)
-// alike, unlike scheduler.yield / requestIdleCallback.
 const NORMALIZE_SLICE = 300
 
 async function normalizeCatalogGamesChunked(games: unknown[]): Promise<CatalogGame[]> {
@@ -149,9 +137,6 @@ export function getCatalogCache(): CatalogSnapshot {
 
 function setCatalogCache(snapshot: Partial<CatalogSnapshot>) {
   if (Array.isArray(snapshot.games)) {
-    // Games arrive pre-normalized: hydrateCatalogCache and persistCatalogCache
-    // both run normalizeCatalogGamesChunked before calling this, which keeps
-    // this setter synchronous and free of whole-catalog passes.
     memoryCache.games = snapshot.games
   }
   if (snapshot.stats && typeof snapshot.stats === "object") {
@@ -182,11 +167,6 @@ export async function hydrateCatalogCache(): Promise<CatalogSnapshot> {
     try {
       const result = await window.ucDownloads?.loadCatalogState?.()
       if (result?.ok) {
-        // Existing on-disk caches from older builds may contain `local*` paths
-        // that are now stale (folders removed / drives unavailable). Scrub
-        // them on read so the launcher boots without flooding uc-local 404s.
-        // Subsequent merges will re-derive the hints from the current
-        // installed manifest set.
         const games = Array.isArray(result.games) ? result.games : []
         const cleaned = games.map((game) => {
           if (!game || typeof game !== "object") return game
@@ -213,8 +193,6 @@ export async function hydrateCatalogCache(): Promise<CatalogSnapshot> {
           return next
         })
         setCatalogCache({
-          // Chunked normalize: hydration lands at first Library switch; a
-          // synchronous whole-catalog map here blocked that paint.
           games: await normalizeCatalogGamesChunked(cleaned),
           stats: result.stats && typeof result.stats === "object" ? result.stats : {},
           updatedAt: result.updatedAt,
@@ -235,18 +213,6 @@ export async function hydrateCatalogCache(): Promise<CatalogSnapshot> {
   return memoryCache.hydratePromise
 }
 
-/**
- * Strip the `local*` filesystem-path hints from a catalog game before we
- * persist it to disk. Local paths are only meaningful for the install that
- * produced them — once the game is uninstalled (or the user clears
- * downloads), those paths point at folders that no longer exist and the
- * uc-local:// protocol handler 404s every request. By keeping local hints
- * out of the persisted cache, `mergeInstalledGames` re-derives them at
- * runtime from the current installed manifest set on every boot.
- *
- * Canonical remote URLs (`image`, `hero_image`, etc.) survive — those are
- * the source of truth and don't depend on local state.
- */
 function stripLocalMediaForPersistence(game: CatalogGame): CatalogGame {
   const meta = game as any
   if (
@@ -271,15 +237,6 @@ function stripLocalMediaForPersistence(game: CatalogGame): CatalogGame {
   return next as CatalogGame
 }
 
-// ── Debounced disk write ──
-// saveCatalogState serializes the ENTIRE catalog into one IPC payload. Writing
-// it inline meant that cost landed synchronously with the very fetch that
-// refreshed the catalog (Library-switch time). The flush runs on idle instead
-// (short-timeout fallback for WebKit/WebKitGTK, which lack requestIdleCallback)
-// and coalesces back-to-back persists (games + stats refresh) into one write.
-// It reads memoryCache at flush time so the newest state always wins; worst
-// case on quit-before-flush is a refetch next launch (this is a cache, not the
-// source of truth).
 let catalogFlushScheduled = false
 
 async function flushCatalogToDisk(): Promise<void> {
@@ -310,18 +267,11 @@ function scheduleCatalogDiskFlush(): void {
 }
 
 export async function persistCatalogCache(snapshot: Partial<CatalogSnapshot>): Promise<void> {
-  // In-memory cache keeps the local hints (so the running session keeps using
-  // them when valid). The persisted-to-disk form strips them so a future
-  // session can't inherit a localImage path whose folder has since been
-  // deleted / moved.
   const nextStats = snapshot.stats && typeof snapshot.stats === "object" ? snapshot.stats : memoryCache.stats
   const nextGamesUpdatedAt = Number(snapshot.gamesUpdatedAt ?? memoryCache.gamesUpdatedAt ?? Date.now())
   const nextStatsUpdatedAt = Number(snapshot.statsUpdatedAt ?? memoryCache.statsUpdatedAt ?? Date.now())
   const updatedAt = Math.max(nextGamesUpdatedAt, nextStatsUpdatedAt, Number(snapshot.updatedAt || 0))
 
-  // Normalization still happens exactly once per persist, but chunked so it
-  // can't monopolize the main thread (setCatalogCache stores the result as-is;
-  // see its comment).
   setCatalogCache({
     games: Array.isArray(snapshot.games) ? await normalizeCatalogGamesChunked(snapshot.games) : undefined,
     stats: nextStats,
@@ -365,17 +315,6 @@ export async function readInstalledGames(): Promise<CatalogGame[]> {
 }
 
 function withPreferredInstalledMedia(game: CatalogGame): CatalogGame {
-  // Surface local image hints WITHOUT clobbering the canonical remote URL.
-  //
-  // Previous behaviour: `image: localImage || game.image` — this turned the
-  // catalog's `image` field into a local filesystem path. Once persisted into
-  // the catalog cache, that path stuck around forever (even after the user
-  // uninstalled the game and its local files were gone), leaving permanently
-  // broken uc-local:// URLs all over the browse grid.
-  //
-  // Now: keep `image`/`splash` pointing at their canonical (remote) values,
-  // and let the renderer's candidate chain prioritise `localImage` /
-  // `localSplash` when those files actually exist.
   const meta: any = game as any
   const localImage = typeof meta?.localImage === "string" && meta.localImage
     ? meta.localImage
@@ -430,10 +369,6 @@ export async function mergeInstalledGames(games: CatalogGame[]): Promise<Catalog
       game.appid,
       normalizeCatalogGame({
         ...existing,
-        // Canonical (remote) URLs are preserved — local hints go through the
-        // dedicated localImage / localHeroImage etc. fields so the card's
-        // candidate chain can fall through cleanly when local files are
-        // missing or stale.
         hero_image: gameMedia?.hero_image || existingMeta?.hero_image,
         background_image: gameMedia?.background_image || existingMeta?.background_image,
         hero_logo: gameMedia?.hero_logo || existingMeta?.hero_logo,
@@ -460,8 +395,6 @@ export async function fetchCatalogGames(): Promise<CatalogGame[]> {
     throw new Error(`Failed to load games (${response.status})`)
   }
   const data = await response.json()
-  // Chunked: this used to be one synchronous map over the entire catalog,
-  // fired exactly when the 6h TTL lapsed — i.e. at Library-switch time.
   return Array.isArray(data) ? normalizeCatalogGamesChunked(data) : []
 }
 

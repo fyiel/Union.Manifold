@@ -1,12 +1,7 @@
 import { apiLogger } from "./logger"
 
 const DEFAULT_BASE_URL = "https://union-crax.xyz"
-// The user's explicit override, set from Settings. Empty unless the user picks one.
 const CUSTOM_API_BASE_URL_STORAGE_KEY = "uc_custom_api_base_url"
-// The reachable host picked by the splash probe (detectBestBaseUrl in main.cjs).
-// Refreshed on every launch. Kept separate from the user override so a stale
-// auto-detected value can never masquerade as a manual choice — and so the
-// splash result always wins over the hardcoded default.
 const DETECTED_API_BASE_URL_STORAGE_KEY = "uc_detected_api_base_url"
 const API_REACHABILITY_STORAGE_KEY = "uc_api_service_reachable"
 
@@ -29,10 +24,6 @@ function classifyApiPath(path: string): string {
   return "other"
 }
 
-// Endpoints that legitimately return 401 when the user isn't signed in.
-// Logging those as warnings spams the diagnostic feed without surfacing
-// anything actionable — the renderer already handles unauthed state via
-// useAuth/React Query.
 const EXPECTED_UNAUTHED_PREFIXES = [
   "/api/auth/me",
   "/api/account/",
@@ -45,10 +36,6 @@ function isExpectedUnauthed(status: number, path: string): boolean {
   return EXPECTED_UNAUTHED_PREFIXES.some((prefix) => path.startsWith(prefix))
 }
 
-// Endpoints where a 404 is a legitimate "this id isn't in the catalog"
-// answer and not an infrastructure failure. The renderer presents these as
-// friendly "not found" UIs already; logging them as warnings creates noise
-// every time someone follows a deleted/stale link.
 const EXPECTED_NOT_FOUND_PATTERNS: RegExp[] = [
   /^\/api\/games\/[^/]+$/,
   /^\/api\/account\/game-notes\?appid=/,
@@ -59,9 +46,6 @@ function isExpectedNotFound(status: number, path: string): boolean {
   return EXPECTED_NOT_FOUND_PATTERNS.some((pattern) => pattern.test(path))
 }
 
-// When the API is briefly down (Cloudflare 5xx, DNS hiccup) every page that
-// fans out fetches produces a fresh log line. This throttles to one log per
-// path per OUTAGE_LOG_WINDOW_MS so the diagnostic file stays readable.
 const OUTAGE_LOG_WINDOW_MS = 60_000
 const outageLogTimestamps = new Map<string, number>()
 
@@ -73,19 +57,11 @@ function logApiFailure(event: {
   statusText: string
   error?: string
 }) {
-  // Silently swallow expected 401s on auth-required endpoints. They fire on
-  // every page load for signed-out users and drown the log file.
   if (isExpectedUnauthed(event.status, event.path)) return
-  // Same treatment for 404s on per-id catalog/game-notes lookups — the
-  // renderer already handles these gracefully with a not-found UI.
   if (isExpectedNotFound(event.status, event.path)) return
   const baseUrl = getApiBaseUrl()
   const snapshot = getApiConnectivitySnapshot()
 
-  // During a known outage (serviceReachable=false from our heartbeat, or a
-  // network-level fetch failure with status=0), log the FIRST hit per path
-  // per minute and drop the rest. The full failure detail is still on the
-  // first line so debugging an outage doesn't lose anything.
   const isOutageHit = snapshot.serviceReachable === false || event.status === 0 || event.status === 502 || event.status === 503 || event.status === 504
   if (isOutageHit) {
     const key = `${event.method}:${event.path}`
@@ -93,7 +69,6 @@ function logApiFailure(event: {
     const last = outageLogTimestamps.get(key) || 0
     if (now - last < OUTAGE_LOG_WINDOW_MS) return
     outageLogTimestamps.set(key, now)
-    // Bound the map so a long session can't grow it without limit.
     if (outageLogTimestamps.size > 256) {
       const oldestKey = outageLogTimestamps.keys().next().value
       if (oldestKey) outageLogTimestamps.delete(oldestKey)
@@ -126,7 +101,6 @@ function readPersistedServiceReachability(): boolean {
     if (stored === "0") return false
     if (stored === "1") return true
   } catch {
-    // ignore storage errors
   }
   return true
 }
@@ -136,7 +110,6 @@ function persistServiceReachability(value: boolean): void {
   try {
     window.localStorage.setItem(API_REACHABILITY_STORAGE_KEY, value ? "1" : "0")
   } catch {
-    // ignore storage errors
   }
 }
 
@@ -161,12 +134,6 @@ export function resetApiReachability(): void {
   setServiceReachable(true)
 }
 
-/**
- * Actively re-probe the API and update the connectivity flag from the result.
- * Used by the offline UI's "Retry" button so a click gives a real answer
- * instead of optimistically flipping to online and bouncing back on the next
- * failed fetch. Resolves to the new reachability.
- */
 export async function recheckApiReachability(): Promise<boolean> {
   try {
     const response = await fetch(apiUrl("/api/health"), {
@@ -242,9 +209,6 @@ function readDetectedApiBaseUrl(): string {
   }
 }
 
-// Precedence: an explicit user override always wins; otherwise use the host the
-// splash probe found reachable this launch; fall back to the primary only when
-// neither is available.
 export function getApiBaseUrl(): string {
   return readCustomApiBaseUrl() || readDetectedApiBaseUrl() || DEFAULT_BASE_URL
 }
@@ -259,7 +223,6 @@ export function setApiBaseUrl(url: string): void {
       window.localStorage.removeItem(CUSTOM_API_BASE_URL_STORAGE_KEY)
     }
   } catch {
-    // ignore storage errors
   }
   resetApiReachability()
 }
@@ -285,16 +248,13 @@ export async function apiFetch(path: string, init?: RequestInit) {
     nextInit.credentials = "include"
   }
 
-  // Ensure proper content-type for JSON requests
   const headers = new Headers(nextInit.headers || {})
   if (nextInit.body && !headers.has("content-type")) {
-    // Detect if body is JSON
     if (typeof nextInit.body === "string" && nextInit.body.startsWith("{")) {
       headers.set("content-type", "application/json")
     }
   }
 
-  // Create new init with updated headers
   const finalInit: RequestInit = { ...nextInit, headers }
 
   const canUseAuthFetch = typeof window !== "undefined" && Boolean(window.ucAuth?.fetch)
@@ -324,18 +284,12 @@ export async function apiFetch(path: string, init?: RequestInit) {
         ? await Promise.race([window.ucAuth!.fetch(getApiBaseUrl(), path, serializedInit), abortRejection])
         : await window.ucAuth!.fetch(getApiBaseUrl(), path, serializedInit)
       setServiceReachable(!(result.status === 0 || result.statusText === "fetch_failed"))
-      // Textual responses arrive as a plain string (`bodyText`) and skip the
-      // base64 decode entirely; binary bodies still come base64-encoded.
       const responseBody: BodyInit =
         typeof result.bodyText === "string"
           ? result.bodyText
           : result.body
             ? base64ToUint8Array(result.body)
             : new Uint8Array()
-      // Response status must be in [200, 599]. A status of 0 means a network
-      // error (DNS failure, server unreachable, CORS block, etc.).  Map it to
-      // 503 so the Response object can be constructed and normal error handling
-      // runs instead of throwing an uncaught RangeError.
       const rawStatus = result.status || 0
       const safeStatus = rawStatus >= 200 && rawStatus <= 599 ? rawStatus : 503
       if (rawStatus === 0 || String(result.statusText || "").toLowerCase() === "fetch_failed") {
@@ -393,9 +347,6 @@ export async function apiFetch(path: string, init?: RequestInit) {
 
 function base64ToUint8Array(base64: string): Uint8Array<ArrayBuffer> {
   if (!base64) return new Uint8Array()
-  // Single-pass decode: engines optimize Uint8Array.from over the atob string
-  // far better than a manual per-char loop. (Uint8Array.fromBase64 would be
-  // faster still but is not available in all shipping webviews yet.)
   return Uint8Array.from(atob(base64), (c) => c.charCodeAt(0))
 }
 

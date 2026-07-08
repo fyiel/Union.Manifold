@@ -69,7 +69,6 @@ export function ArchiveInstallModal({ open, game, installMetadata, onInstalled, 
     size: installMetadata?.size ?? game?.size,
   }
 
-  // Reset when modal opens
   useEffect(() => {
     if (!open) return
     setStep("method")
@@ -88,12 +87,10 @@ export function ArchiveInstallModal({ open, game, installMetadata, onInstalled, 
     try {
       window.dispatchEvent(new Event("uc_game_installed"))
     } catch {
-      // ignore DOM event failures
     }
     onInstalled?.()
   }, [step, onInstalled])
 
-  // Subscribe to download updates during installation
   useEffect(() => {
     if (step !== "installing" || !downloadId) return
     const unsub = window.ucDownloads?.onUpdate?.((update) => {
@@ -125,7 +122,6 @@ export function ArchiveInstallModal({ open, game, installMetadata, onInstalled, 
     if (mode === "single") {
       setFiles([result.files[0]])
     } else {
-      // For multipart, add all selected files (dedup by path)
       setFiles((prev) => {
         const existing = new Set(prev.map((f) => f.path))
         const next = [...prev]
@@ -171,7 +167,6 @@ export function ArchiveInstallModal({ open, game, installMetadata, onInstalled, 
   const startInstall = useCallback(async () => {
     if (!window.ucDownloads?.installFromArchive || files.length === 0) return
 
-    // Generate downloadId client-side so we can subscribe to updates before extraction starts
     const id = `archive-install-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`
     const appid = resolvedMetadata.appid || "manual-install"
     const primaryFile = files[0]
@@ -244,7 +239,7 @@ export function ArchiveInstallModal({ open, game, installMetadata, onInstalled, 
       <div className="absolute inset-0 bg-[#09090b]/40 backdrop-blur-sm animate-in fade-in duration-300 ease-out" onClick={onClose} />
       <div className="relative w-full max-w-lg overflow-hidden rounded-2xl border border-white/[.07] bg-card/95 p-5 text-foreground shadow-2xl animate-in slide-in-from-top-4 duration-300 ease-out">
 
-        {/* ── Step 1: Choose Method ── */}
+        {}
         {step === "method" && (
           <div className="space-y-4">
             <div className="text-lg font-semibold">Install from archive</div>
@@ -288,7 +283,7 @@ export function ArchiveInstallModal({ open, game, installMetadata, onInstalled, 
           </div>
         )}
 
-        {/* ── Step 2: Pick Files ── */}
+        {}
         {step === "pick" && (
           <div className="space-y-4">
             <div className="text-lg font-semibold">
@@ -300,7 +295,7 @@ export function ArchiveInstallModal({ open, game, installMetadata, onInstalled, 
                 : "Select the .001 file (sibling parts will be auto-detected), or select all parts manually."}
             </p>
 
-            {/* Drop zone */}
+            {}
             <div
               className={`flex min-h-[120px] flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed transition-colors ${
                 dragOver
@@ -318,7 +313,7 @@ export function ArchiveInstallModal({ open, game, installMetadata, onInstalled, 
               </Button>
             </div>
 
-            {/* Selected files list */}
+            {}
             {files.length > 0 && (
               <div className="space-y-1">
                 <div className="text-xs font-medium text-muted-foreground">
@@ -355,7 +350,7 @@ export function ArchiveInstallModal({ open, game, installMetadata, onInstalled, 
           </div>
         )}
 
-        {/* ── Step 3: Confirm ── */}
+        {}
         {step === "confirm" && (
           <div className="space-y-4">
             <div className="text-lg font-semibold">Confirm installation</div>
@@ -399,7 +394,7 @@ export function ArchiveInstallModal({ open, game, installMetadata, onInstalled, 
           </div>
         )}
 
-        {/* ── Step 4: Installing ── */}
+        {}
         {step === "installing" && (
           <div className="space-y-4 py-2">
             <div className="text-lg font-semibold">Installing…</div>
@@ -407,7 +402,7 @@ export function ArchiveInstallModal({ open, game, installMetadata, onInstalled, 
               Extracting {resolvedName ? <span className="font-medium text-foreground">{resolvedName}</span> : "archive"}. Please do not close the app.
             </p>
 
-            {/* Progress bar */}
+            {}
             <div className="space-y-1.5">
               <div className="h-2.5 w-full overflow-hidden rounded-full bg-secondary/50">
                 <div
@@ -441,7 +436,7 @@ export function ArchiveInstallModal({ open, game, installMetadata, onInstalled, 
           </div>
         )}
 
-        {/* ── Step 5: Done ── */}
+        {}
         {step === "done" && (
           <div className="space-y-4">
             <div className="flex items-center gap-2 text-lg font-semibold">
@@ -458,7 +453,7 @@ export function ArchiveInstallModal({ open, game, installMetadata, onInstalled, 
           </div>
         )}
 
-        {/* ── Step 6: Error ── */}
+        {}
         {step === "error" && (
           <div className="space-y-4">
             <div className="flex items-center gap-2 text-lg font-semibold">
@@ -478,4 +473,3 @@ export function ArchiveInstallModal({ open, game, installMetadata, onInstalled, 
     </div>
   )
 }
-

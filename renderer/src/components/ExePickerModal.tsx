@@ -19,18 +19,14 @@ type ExePickerModalProps = {
 }
 
 export function ExePickerModal({ open, title, message, exes, gameName, baseFolder, currentExePath, actionLabel = "Launch", onSelect, onClose }: ExePickerModalProps) {
-  // --- All hooks MUST be called unconditionally (React Rules of Hooks) ---
   const [search, setSearch] = useState("")
   const [browsing, setBrowsing] = useState(false)
   const searchRef = useRef<HTMLInputElement>(null)
 
-  // Reset search when modal opens with new data
   useEffect(() => {
     if (open) setSearch("")
   }, [open, exes])
 
-  // Close on Escape — matches the Radix dialogs used elsewhere so keyboard
-  // behaviour is consistent across every launch modal.
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose() }
@@ -38,7 +34,6 @@ export function ExePickerModal({ open, title, message, exes, gameName, baseFolde
     return () => window.removeEventListener("keydown", onKey)
   }, [open, onClose])
 
-  // Deduplicate exes by normalised path (case-insensitive on Windows)
   const dedupedExes = useMemo(() => {
     const seen = new Set<string>()
     const out: GameExecutable[] = []
@@ -51,13 +46,11 @@ export function ExePickerModal({ open, title, message, exes, gameName, baseFolde
     return out
   }, [exes])
 
-  // Rank exes by relevance to game name
   const ranked = useMemo(() => {
     if (!gameName) return dedupedExes.map((exe) => ({ ...exe, score: 0, ignored: false, tags: [] as string[] }))
     return rankGameExecutables(dedupedExes, gameName, baseFolder)
   }, [dedupedExes, gameName, baseFolder])
 
-  // The top-scored exe is the recommendation (only meaningful with 2+ exes)
   const recommended = useMemo(() => {
     if (ranked.length < 2) return null
     const top = ranked[0]
@@ -65,7 +58,6 @@ export function ExePickerModal({ open, title, message, exes, gameName, baseFolde
     return top
   }, [ranked])
 
-  // Build the visible list: drop the recommended (shown separately) + filter
   const visible = useMemo(() => {
     const needle = search.trim().toLowerCase()
     return ranked.filter((exe) => {
@@ -101,13 +93,11 @@ export function ExePickerModal({ open, title, message, exes, gameName, baseFolde
     }
   }, [browsing, baseFolder, onSelect])
 
-  // --- Early return AFTER all hooks ---
   if (!open) return null
 
   const hasExes = ranked.length > 0
   const showSearch = ranked.length > 5
 
-  // A single executable row, shared by the recommended highlight and the list.
   const renderRow = (exe: typeof ranked[number], opts?: { recommended?: boolean }) => {
     const isCurrent = !!currentExePath && exe.path.toLowerCase() === currentExePath.toLowerCase()
     const relativePath = getRelativePath(exe.path)
@@ -160,13 +150,13 @@ export function ExePickerModal({ open, title, message, exes, gameName, baseFolde
         aria-modal="true"
         className="relative flex max-h-[85vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-white/10 bg-background/95 text-foreground shadow-[0_24px_80px_rgba(0,0,0,0.6)] backdrop-blur-2xl animate-in fade-in zoom-in-95 duration-200 ease-out"
       >
-        {/* Header */}
+        {}
         <div className="px-6 pt-6 pb-4">
           <h2 className="text-lg font-semibold leading-tight">{title}</h2>
           <p className="mt-1 text-sm text-muted-foreground">{message}</p>
         </div>
 
-        {/* Body */}
+        {}
         <div className="flex-1 space-y-3 overflow-y-auto px-6 pb-3">
           {recommended ? renderRow(recommended, { recommended: true }) : null}
 
@@ -197,7 +187,7 @@ export function ExePickerModal({ open, title, message, exes, gameName, baseFolde
           ) : null}
         </div>
 
-        {/* Footer */}
+        {}
         <div className="flex items-center justify-between gap-2 border-t border-white/10 px-6 py-4">
           <Button variant="outline" size="sm" disabled={browsing} onClick={handleBrowse}>
             <Folder className="mr-1.5 h-4 w-4" />

@@ -6,9 +6,6 @@ import { MONO, COVER_LINES, gbLabel, SmartImage, useGameImages } from "@/app/man
 
 const prefetched = new Set<string>()
 
-// The catalog card, a 3:4 cover (real art or striped placeholder), title,
-// genre + year, install size, and a badge per contributing source (direct
-// sources brighter). Used on Browse + Advanced Search.
 export const GameCard = memo(function GameCard({ game }: { game: UnifiedSourceGame }) {
   const candidates = useGameImages(game)
   const [imgOk, setImgOk] = useState(true)

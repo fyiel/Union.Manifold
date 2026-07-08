@@ -3,20 +3,13 @@ import { NavLink } from "react-router-dom"
 import { BRAND } from "@/lib/brand"
 import { listSources, loadDisabledSources, saveDisabledSources, setSourceEnabled } from "@/lib/sources"
 
-// The Union.Manifold sidebar, shared chrome on every page. Collapsible (228px to
-// 64px) via the body.uc-nav-collapsed contract in manifold.css. Collapse state is
-// persisted in localStorage so it survives re-renders and route changes.
-// Inline-styled to match the handoff comps 1:1.
-
 const NAV_KEY = "uc_nav_collapsed"
 
-// Apply the persisted collapse state to <body> (called on mount + toggle).
 function applyNavCollapsed() {
   let on = false
   try {
     on = localStorage.getItem(NAV_KEY) === "1"
   } catch {
-    /* ignore */
   }
   document.body.classList.toggle("uc-nav-collapsed", on)
 }
@@ -26,13 +19,11 @@ function toggleNavCollapsed() {
   try {
     on = localStorage.getItem(NAV_KEY) === "1"
   } catch {
-    /* ignore */
   }
   on = !on
   try {
     localStorage.setItem(NAV_KEY, on ? "1" : "0")
   } catch {
-    /* ignore */
   }
   applyNavCollapsed()
 }
@@ -46,7 +37,6 @@ const stroke = {
 }
 
 export function ManifoldGlyph({ size = 24, color = "var(--mf-accent-ink)" }: { size?: number; color?: string }) {
-  // Converging strokes that meet at a node, the "manifold" mark.
   return (
     <svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" style={{ display: "block" }}>
       <path d="M3 6h5c3 0 3.5 6 7 6" />
@@ -124,9 +114,6 @@ export function Sidebar() {
     void (async () => {
       const [list, disabled] = await Promise.all([listSources(), loadDisabledSources()])
       if (!alive) return
-      // The persisted disabled list is the source of truth here. The registry's
-      // in-memory enabled set can still read all-on if this mounts before App
-      // applies saved prefs at startup.
       setSources(list.map((s) => ({ ...s, enabled: !disabled.includes(s.id) })))
     })()
     return () => {
@@ -134,8 +121,6 @@ export function Sidebar() {
     }
   }, [])
 
-  // Reflect source toggles made elsewhere (Settings) in real time, both write
-  // the gv_source_disabled key so we just re-derive enabled from it.
   useEffect(() => {
     const off = window.ucSettings?.onChanged?.((d: { key: string; value: unknown }) => {
       if (d?.key !== "gv_source_disabled") return
@@ -145,8 +130,6 @@ export function Sidebar() {
     return () => { off?.() }
   }, [])
 
-  // Flip a source on/off, push it into the main registry, and persist the
-  // disabled list. Optimistic, the registry just filters browse/search.
   const toggleSource = (id: string) => {
     setSources((prev) => {
       const next = prev.map((s) => (s.id === id ? { ...s, enabled: !s.enabled } : s))
@@ -168,7 +151,7 @@ export function Sidebar() {
         background: "var(--mf-aside)",
       }}
     >
-      {/* logo lockup + collapse toggle (this row is also the window drag handle) */}
+      {}
       <div data-tauri-drag-region style={{ display: "flex", alignItems: "center", gap: 11, padding: "20px 16px 18px", WebkitAppRegion: "drag" } as CSSProperties}>
         <span style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 32, height: 32, borderRadius: 9, background: "var(--mf-accent)", flexShrink: 0 }}>
           <ManifoldGlyph size={20} />
@@ -188,7 +171,7 @@ export function Sidebar() {
         </button>
       </div>
 
-      {/* expand toggle (only visible while collapsed) */}
+      {}
       <button
         type="button"
         title="Expand sidebar"
@@ -201,7 +184,7 @@ export function Sidebar() {
 
       <div style={{ height: 1, background: "var(--mf-line)", margin: "0 16px 12px" }} />
 
-      {/* primary nav */}
+      {}
       <nav style={{ display: "flex", flexDirection: "column", gap: 2, padding: "0 12px" }}>
         {NAV.map((item) => (
           <NavLink
@@ -222,7 +205,7 @@ export function Sidebar() {
         ))}
       </nav>
 
-      {/* source roster */}
+      {}
       <div className="uc-navsection">
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "22px 24px 8px" }}>
           <span style={{ fontFamily: "var(--mf-mono)", fontSize: 9.5, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--mf-t6)" }}>Sources</span>
@@ -246,7 +229,7 @@ export function Sidebar() {
         </div>
       </div>
 
-      {/* settings pinned bottom */}
+      {}
       <div style={{ marginTop: "auto", padding: 12 }}>
         <NavLink
           to="/settings"

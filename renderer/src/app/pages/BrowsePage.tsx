@@ -5,11 +5,6 @@ import { getBrowseCache, setBrowseCache, setBrowseScroll, consumeDiskRestore } f
 import { GameCard } from "@/app/manifold/GameCard"
 import { MONO, SearchIcon, Spinner, CenterState } from "@/app/manifold/ui"
 
-// Browse, one search across every catalog, deduped into one grid, with endless
-// scrolling. Results are cached (module scope, see browse-cache) so navigating
-// away and back restores the exact view (including how far you'd scrolled)
-// without refetching.
-
 type SortMode = "relevance" | "a-z" | "size" | "sources"
 const SORT_CYCLE: SortMode[] = ["relevance", "a-z", "size", "sources"]
 type SrcStatus = "idle" | "searching" | "done" | "failed"
@@ -37,12 +32,10 @@ export function BrowsePage() {
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null)
   const sourcesRef = useRef<SourceInfo[]>([])
   const bootedRef = useRef(false)
-  const offsetRef = useRef(cached?.offset ?? 0) // next offset to fetch
+  const offsetRef = useRef(cached?.offset ?? 0)
   const scrollerRef = useRef<HTMLDivElement | null>(null)
   const restoreScroll = useRef(cached?.scrollTop ?? 0)
 
-  // Restore the prior scroll position when returning from a detail page (the
-  // cached games are already seeded above, so the content height is there).
   useEffect(() => {
     if (!restoreScroll.current) return
     const el = scrollerRef.current
@@ -51,7 +44,7 @@ export function BrowsePage() {
     requestAnimationFrame(() => { if (scrollerRef.current) scrollerRef.current.scrollTop = top })
   }, [])
   const loadingMoreRef = useRef(false)
-  const appendReqRef = useRef<number | null>(null) // reqId of an in-flight loadMore append: partials merge, not replace
+  const appendReqRef = useRef<number | null>(null)
   const gamesRef = useRef(games)
   useEffect(() => { gamesRef.current = games }, [games])
   const available = sourcesAvailable()
@@ -66,7 +59,6 @@ export function BrowsePage() {
     return () => { alive = false }
   }, [])
 
-  // Persist the live view to the module cache (incl. how far we've paged).
   useEffect(() => {
     setBrowseCache({ query, committed, games, counts: sourceCounts, sortMode, offset: offsetRef.current, total })
   }, [query, committed, games, sourceCounts, sortMode, total])
@@ -113,11 +105,6 @@ export function BrowsePage() {
         return next
       })
     }
-    // `games` deliberately stays out of the deps: the previous page for append
-    // merges comes from gamesRef (synced by the effect above, and already used
-    // by the partial-batch handler below). With [games] this callback minted a
-    // new identity per result batch, so the onSourcesChanged effect below
-    // unsubscribed/resubscribed against main on every batch.
   }, [])
 
   const loadMore = useCallback(async () => {
@@ -132,8 +119,6 @@ export function BrowsePage() {
     }
   }, [runQuery, committed])
 
-  // Fetch driver: wait for sources, restore from cache without refetching on the
-  // first run, then re-query (debounced) when the query changes.
   useEffect(() => {
     if (!available || !sources.length) return
     if (!bootedRef.current) {
@@ -150,7 +135,6 @@ export function BrowsePage() {
     if (debounce.current) clearTimeout(debounce.current)
     debounce.current = setTimeout(() => void runQuery(query), query.trim() === committed ? 0 : 300)
     return () => { if (debounce.current) clearTimeout(debounce.current) }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query, sources.length, available])
 
   useEffect(() => {
@@ -166,8 +150,6 @@ export function BrowsePage() {
   useEffect(() => {
     const off = window.ucSources?.onBrowsePartial?.((payload) => {
       if (!payload || payload.reqId !== reqId.current) return
-      // loadMore appends: merge partials into the existing grid instead of
-      // replacing it, or infinite-scroll would flash-collapse to the new page.
       const isAppend = appendReqRef.current === payload.reqId
       const merged = isAppend ? mergeUnique(gamesRef.current, payload.games) : payload.games
       rememberGames(payload.games)
@@ -228,7 +210,7 @@ export function BrowsePage() {
 
   return (
     <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column" }}>
-      {/* header */}
+      {}
       <header style={{ flexShrink: 0, padding: "26px 36px 0" }}>
         <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", marginBottom: 18 }}>
           <div>
@@ -288,7 +270,7 @@ export function BrowsePage() {
           </div>
         </div>
 
-        {/* source status strip */}
+        {}
         <div style={{ display: "flex", alignItems: "center", gap: 8, paddingBottom: 16, borderBottom: "1px solid var(--mf-line)" }}>
           {sources.map((s) => {
             const st: SrcStatus = status[s.id] || "idle"
@@ -337,7 +319,7 @@ export function BrowsePage() {
         </div>
       </header>
 
-      {/* grid scroller */}
+      {}
       <div ref={scrollerRef} className="mf-scroll" onScroll={onScroll} style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "22px 36px 40px" }}>
         {sourcesErrored && (
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16, fontFamily: MONO, fontSize: 11, color: "var(--mf-t4)" }}>
