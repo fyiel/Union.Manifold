@@ -1,36 +1,27 @@
 use std::sync::LazyLock;
 use std::time::Duration;
 
-use once_cell::sync::Lazy;
-use regex::Regex;
 use serde_json::Value;
-use url::Url;
 
 use crate::http::{self, FetchOpts};
 use crate::sources::cache::{Cached, KeyedCache};
 use crate::sources::hosts::{detect_host_type, is_resolvable};
-use crate::sources::parse::{collect_next_flight, find_object_by_key, find_steam_app_id};
+use crate::sources::parse::find_steam_app_id;
 use crate::sources::schema::{self, DownloadOption, SourceGame};
 use crate::sources::{Capabilities, QueryParams};
 
 const ID: &str = "gamebounty";
 const ORIGIN: &str = "https://gamebounty.world";
+const API: &str = "https://api.gamebounty.world";
 const SLUG_SUFFIX: &str = "-free-pc-download";
-const CATALOG_WINDOW: usize = 60;
+const PAGE_SIZE: usize = 100;
+const MAX_PAGES: usize = 80;
 
-static SLUG_CACHE: Lazy<Cached<Vec<String>>> =
-    Lazy::new(|| Cached::new(Duration::from_secs(60 * 60 * 6)));
+static CATALOG: LazyLock<Cached<Vec<Value>>> =
+    LazyLock::new(|| Cached::new(Duration::from_secs(60 * 30)));
 
-static DETAIL_CACHE: Lazy<KeyedCache<SourceGame>> =
-    Lazy::new(|| KeyedCache::new(Duration::from_secs(60 * 60 * 6)));
-
-// Browse-level cache, matching the other adapters (ankergames BROWSE 5m,
-// steamrip POSTS 600s): one entry per assembled listing so a Browse revisit
-// skips the 60-slug detail fan-out entirely.
-static BROWSE: LazyLock<KeyedCache<Vec<SourceGame>>> =
-    LazyLock::new(|| KeyedCache::new(Duration::from_secs(600)));
-
-static LOC_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"<loc>\s*([^<]+?)\s*</loc>").unwrap());
+static DETAIL_CACHE: LazyLock<KeyedCache<SourceGame>> =
+    LazyLock::new(|| KeyedCache::new(Duration::from_secs(60 * 60 * 6)));
 
 fn value_truthy(v: &Value) -> bool {
     match v {
@@ -81,21 +72,6 @@ fn value_to_f64(v: &Value) -> Option<f64> {
     None
 }
 
-fn truthy_string(v: &Value) -> Option<String> {
-    match v {
-        Value::String(s) if !s.is_empty() => Some(s.clone()),
-        Value::Number(n) => {
-            if n.as_f64().map(|f| f != 0.0 && !f.is_nan()).unwrap_or(false) {
-                Some(n.to_string())
-            } else {
-                None
-            }
-        }
-        Value::Bool(true) => Some("true".to_string()),
-        _ => None,
-    }
-}
-
 fn get_str(v: &Value, key: &str) -> Option<String> {
     v.get(key)
         .and_then(|x| x.as_str())
@@ -119,65 +95,42 @@ fn epoch_from_value(v: Option<&Value>) -> Option<i64> {
     None
 }
 
-static HTML_TAG_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"<[^>]*>").unwrap());
-
-fn strip_html(s: &str) -> String {
-    HTML_TAG_RE
-        .replace_all(s, " ")
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
-fn title_from_slug(slug: &str) -> String {
-    let base = slug.strip_suffix(SLUG_SUFFIX).unwrap_or(slug);
-    base.replace('-', " ")
-        .split_whitespace()
-        .map(|w| {
-            let mut chars = w.chars();
-            match chars.next() {
-                Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
-                None => String::new(),
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(" ")
-        .trim()
-        .to_string()
-}
-
 fn steam_image(appid: u64, kind: &str) -> String {
     format!("https://shared.steamstatic.com/store_item_assets/steam/apps/{appid}/{kind}")
 }
 
-async fn all_slugs() -> Option<Vec<String>> {
-    SLUG_CACHE
+async fn fetch_data(url: &str) -> Option<Value> {
+    let resp = http::fetch(url, &FetchOpts::default()).await.ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let json: Value = resp.json().await.ok()?;
+    if json.get("success").and_then(|v| v.as_bool()) == Some(false) {
+        return None;
+    }
+    json.get("data").cloned()
+}
+
+async fn catalog_snapshot() -> Option<Vec<Value>> {
+    CATALOG
         .get_or(|| async {
-            let text = http::get_text(&format!("{ORIGIN}/sitemap.xml"))
-                .await
-                .ok()?;
-            let mut slugs = Vec::new();
-            for caps in LOC_RE.captures_iter(&text) {
-                let raw = caps.get(1).map(|m| m.as_str().trim()).unwrap_or("");
-                if raw.is_empty() {
-                    continue;
-                }
-                if let Ok(u) = Url::parse(raw) {
-                    if u.host_str()
-                        .map(|h| h.ends_with("gamebounty.world"))
-                        .unwrap_or(false)
-                    {
-                        let path = u.path().trim_matches('/');
-                        if path.ends_with(SLUG_SUFFIX) {
-                            slugs.push(path.to_string());
-                        }
-                    }
+            let mut all: Vec<Value> = Vec::new();
+            for page in 1..=MAX_PAGES {
+                let url = format!("{API}/api/posts?sort=newest&limit={PAGE_SIZE}&page={page}");
+                let batch = match fetch_data(&url).await {
+                    Some(Value::Array(arr)) => arr,
+                    _ => break,
+                };
+                let got = batch.len();
+                all.extend(batch);
+                if got < PAGE_SIZE {
+                    break;
                 }
             }
-            if slugs.is_empty() {
+            if all.is_empty() {
                 None
             } else {
-                Some(slugs)
+                Some(all)
             }
         })
         .await
@@ -245,41 +198,31 @@ fn mirrors_to_options(container: Option<&Value>) -> Vec<DownloadOption> {
     options
 }
 
-fn parse_game_page(html: &str, slug: &str) -> Option<SourceGame> {
-    let flight = collect_next_flight(html);
-    // No "post" object means the page didn't render the game payload (a transient
-    // render/fetch failure). Return None so get_detail doesn't cache an empty
-    // slug-title for 6h.
-    let post = find_object_by_key(&flight, "post")?;
+fn post_to_game(post: &Value) -> Option<SourceGame> {
+    let slug = get_str(post, "slug")?;
+    let title = get_str(post, "title").unwrap_or_else(|| slug.replace('-', " "));
 
-    let appid = if post.get("appid").map(value_truthy).unwrap_or(false) {
-        post.get("appid").and_then(value_to_u64).filter(|n| *n > 0)
-    } else {
-        find_steam_app_id(html)
-    };
+    let appid = post
+        .get("appid")
+        .and_then(value_to_u64)
+        .filter(|n| *n > 0)
+        .or_else(|| get_str(post, "banner").as_deref().and_then(find_steam_app_id))
+        .or_else(|| get_str(post, "library_capsule").as_deref().and_then(find_steam_app_id));
 
-    let download_options = mirrors_to_options(post.get("container"));
-
-    let image = get_str(&post, "library_capsule")
-        .or_else(|| get_str(&post, "banner"))
+    let image = get_str(post, "library_capsule")
+        .or_else(|| get_str(post, "banner"))
         .or_else(|| appid.map(|id| steam_image(id, "library_600x900.jpg")));
-
-    let hero_image = get_str(&post, "library_hero")
+    let hero_image = get_str(post, "library_hero")
         .or_else(|| appid.map(|id| steam_image(id, "library_hero.jpg")));
 
-    let title = post
-        .get("title")
-        .and_then(|v| v.as_str())
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| title_from_slug(slug));
-
-    let description = get_str(&post, "mini_description").or_else(|| {
-        post.get("description")
-            .and_then(|d| d.as_str())
-            .map(strip_html)
-            .filter(|s| !s.is_empty())
-    });
+    let description = get_str(post, "mini_description")
+        .or_else(|| {
+            post.get("description")
+                .and_then(|d| d.as_str())
+                .map(http::strip_tags)
+        })
+        .map(|s| http::decode_entities(&s).trim().to_string())
+        .filter(|s| !s.is_empty());
 
     let genres = post
         .get("genres")
@@ -293,8 +236,8 @@ fn parse_game_page(html: &str, slug: &str) -> Option<SourceGame> {
         })
         .unwrap_or_default();
 
-    let developer = get_str(&post, "developer");
-    let release_date = get_str(&post, "release_date");
+    let developer = get_str(post, "developer");
+    let release_date = get_str(post, "release_date");
     let release_year = release_date.as_deref().and_then(schema::year_from);
 
     let added_at = epoch_from_value(post.get("created_at"));
@@ -314,10 +257,7 @@ fn parse_game_page(html: &str, slug: &str) -> Option<SourceGame> {
                 .filter(|n| *n != 0.0)
         });
 
-    let version = post
-        .get("version")
-        .and_then(truthy_string)
-        .or_else(|| post.get("build_id").and_then(truthy_string));
+    let version = get_str(post, "version").or_else(|| get_str(post, "build_id"));
 
     let cdata = post.get("container").and_then(|c| c.get("data"));
     let size_human = cdata.and_then(|d| get_str(d, "size_human"));
@@ -335,8 +275,8 @@ fn parse_game_page(html: &str, slug: &str) -> Option<SourceGame> {
 
     Some(SourceGame {
         source_id: ID.to_string(),
-        source_slug: slug.to_string(),
-        source_url: format!("{ORIGIN}/{slug}"),
+        source_slug: slug.clone(),
+        source_url: format!("{ORIGIN}/{slug}{SLUG_SUFFIX}"),
         steam_app_id: appid,
         dedup_key: schema::dedup_key_for(appid, &title),
         title,
@@ -354,7 +294,7 @@ fn parse_game_page(html: &str, slug: &str) -> Option<SourceGame> {
         size_bytes,
         size_text: size_human,
         nsfw,
-        download_options,
+        download_options: mirrors_to_options(post.get("container")),
     })
 }
 
@@ -375,86 +315,61 @@ pub fn capabilities() -> Capabilities {
 }
 
 pub async fn query(params: &QueryParams) -> Option<Vec<SourceGame>> {
-    let limit = params.limit;
+    let snapshot = catalog_snapshot().await?;
+    let mut games: Vec<SourceGame> = snapshot.iter().filter_map(post_to_game).collect();
     if let Some(text) = params.text.as_deref() {
-        let text = text.trim();
-        if !text.is_empty() {
-            // search() returns empty both for "no matches" and for a sitemap
-            // hard-fail; only cache non-empty results so a transient failure
-            // can't pin an empty listing for the whole TTL. (Re-running a
-            // genuinely empty search is a scan over the cached slug list.)
-            let key = format!("s|{}|{limit}", text.to_lowercase());
-            let cached = BROWSE
-                .get_or(&key, || async move {
-                    let out = search(text, limit).await;
-                    if out.is_empty() {
-                        None
-                    } else {
-                        Some(out)
-                    }
-                })
-                .await;
-            return Some(cached.unwrap_or_default());
+        let q = text.trim().to_lowercase();
+        if !q.is_empty() {
+            let terms: Vec<&str> = q.split_whitespace().collect();
+            games.retain(|g| {
+                let hay = g.title.to_lowercase();
+                terms.iter().all(|t| hay.contains(t))
+            });
         }
     }
-    let key = format!("c|{limit}");
-    BROWSE
-        .get_or(&key, || async move {
-            // None => the sitemap fetch hard-failed (no slugs, not even
-            // stale): don't cache, so the next browse retries (get_or serves
-            // a stale listing here if it has one, like the other adapters).
-            let slugs = match all_slugs().await {
-                Some(s) => s,
-                None => {
-                    crate::logging::write_line("warn", "gamebounty sitemap yielded no slugs");
-                    return None;
-                }
-            };
-            // Cap the per-fill catalog window well below POOL_SIZE: one page
-            // fetch per slug up to POOL_SIZE (300) is slow and fragile.
-            let end = limit.min(CATALOG_WINDOW).min(slugs.len());
-            let window: Vec<String> = slugs[..end].to_vec();
-            Some(http::map_limit(window, 8, |slug| async move { get_detail(&slug).await }).await)
-        })
-        .await
+    Some(games)
 }
 
 pub async fn search(q: &str, limit: usize) -> Vec<SourceGame> {
-    let q = q.to_lowercase();
-    let q = q.trim();
+    let q = q.trim().to_lowercase();
     if q.is_empty() {
         return Vec::new();
     }
-    let slugs = all_slugs().await.unwrap_or_default();
+    let snapshot = match catalog_snapshot().await {
+        Some(s) => s,
+        None => return Vec::new(),
+    };
     let terms: Vec<&str> = q.split_whitespace().collect();
-    let mut scored = Vec::new();
-    for slug in &slugs {
-        let hay = slug.replace(SLUG_SUFFIX, "").replace('-', " ");
-        if terms.iter().all(|t| hay.contains(t)) {
-            scored.push(slug.clone());
-        }
-    }
-    let top: Vec<String> = scored.into_iter().take(limit).collect();
-    http::map_limit(top, 8, |slug| async move { get_detail(&slug).await }).await
+    snapshot
+        .iter()
+        .filter(|post| {
+            let title = post
+                .get("title")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_lowercase();
+            !title.is_empty() && terms.iter().all(|t| title.contains(t))
+        })
+        .take(limit)
+        .filter_map(post_to_game)
+        .collect()
 }
 
 pub async fn get_detail(slug: &str) -> Option<SourceGame> {
-    let path = if slug.ends_with(SLUG_SUFFIX) {
-        slug.to_string()
-    } else {
-        format!("{slug}{SLUG_SUFFIX}")
-    };
-    let key = path.clone();
+    let slug = slug.trim();
+    let slug = slug.strip_suffix(SLUG_SUFFIX).unwrap_or(slug).to_string();
+    if slug.is_empty() {
+        return None;
+    }
+    let key = slug.clone();
     DETAIL_CACHE
         .get_or(&key, || async move {
-            let url = format!("{ORIGIN}/{path}");
-            let resp = http::fetch(&url, &FetchOpts::default()).await.ok()?;
-            if !resp.status().is_success() {
+            let url = format!("{API}/api/posts/{slug}");
+            let data = fetch_data(&url).await?;
+            if !data.is_object() {
                 return None;
             }
-            let text = resp.text().await.ok()?;
-            parse_game_page(&text, &path)
+            post_to_game(&data)
         })
         .await
 }
-
