@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, LazyLock, Mutex};
 use std::time::Duration;
 
 use futures::stream::{self, StreamExt};
@@ -82,23 +82,37 @@ pub struct FetchOpts {
     pub timeout: Option<Duration>,
 }
 
-static CLIENT: Lazy<Client> = Lazy::new(|| {
-    Client::builder()
-        .redirect(Policy::limited(10))
-        .default_headers(base_headers())
-        .timeout(Duration::from_secs(25))
-        .build()
-        .expect("http client")
-});
+static PROXY: parking_lot::RwLock<Option<String>> = parking_lot::RwLock::new(None);
 
-static CLIENT_NOREDIR: Lazy<Client> = Lazy::new(|| {
-    Client::builder()
-        .redirect(Policy::none())
+fn build_client(no_redirect: bool) -> Client {
+    let mut b = Client::builder()
         .default_headers(base_headers())
         .timeout(Duration::from_secs(25))
-        .build()
-        .expect("http client noredir")
-});
+        .redirect(if no_redirect { Policy::none() } else { Policy::limited(10) });
+    if let Some(p) = PROXY.read().clone() {
+        if let Ok(proxy) = reqwest::Proxy::all(&p) {
+            b = b.proxy(proxy);
+        }
+    }
+    b.build().expect("http client")
+}
+
+// Swappable so the proxy setting applies at runtime without a restart: fetch
+// clones the current Arc<Client> per request (cheap) and `set_proxy` rebuilds.
+static CLIENT: LazyLock<parking_lot::RwLock<Arc<Client>>> =
+    LazyLock::new(|| parking_lot::RwLock::new(Arc::new(build_client(false))));
+
+static CLIENT_NOREDIR: LazyLock<parking_lot::RwLock<Arc<Client>>> =
+    LazyLock::new(|| parking_lot::RwLock::new(Arc::new(build_client(true))));
+
+/// Route all outbound HTTP through `url` (or clear it with `None`) and rebuild
+/// the shared clients so it applies to every subsequent request. Backs the
+/// "tunnel connections through a proxy" setting.
+pub fn set_proxy(url: Option<String>) {
+    *PROXY.write() = url.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+    *CLIENT.write() = Arc::new(build_client(false));
+    *CLIENT_NOREDIR.write() = Arc::new(build_client(true));
+}
 
 fn should_retry(status: StatusCode) -> bool {
     status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error()
@@ -116,9 +130,9 @@ async fn backoff(attempt: u32, retry_after: Option<u64>) {
 
 pub async fn fetch(url: &str, opts: &FetchOpts) -> reqwest::Result<Response> {
     let client = if opts.manual_redirect {
-        &*CLIENT_NOREDIR
+        CLIENT_NOREDIR.read().clone()
     } else {
-        &*CLIENT
+        CLIENT.read().clone()
     };
     let max = opts.retries.unwrap_or(2);
     let host = url::Url::parse(url)

@@ -529,3 +529,14 @@ pub fn sources_capabilities(state: State<'_, AppState>, source_ids: Option<Vec<S
     let ids = state.sources.active_ids(&source_ids);
     json!({ "ok": true, "capabilities": filters::capability_report(&ids, &state.sources) })
 }
+
+#[tauri::command]
+pub async fn sources_refresh() -> Result<Value> {
+    // Only rexagames keeps a long-lived (7-day) on-disk catalogue; force it to
+    // refetch from source, then drop the query pools so the next browse rebuilds
+    // against the fresh catalogue instead of a cached (up to 10 min) one.
+    let ok = adapters::rexagames::refresh().await;
+    QUERY_POOL.clear();
+    CATALOG_POOL.clear();
+    Ok(json!({ "ok": ok }))
+}
