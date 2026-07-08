@@ -4,6 +4,14 @@ All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 The app shows its version as 1.0.0b (beta). 1.0.1 is the first packaged release.
 
+## 2.19.0
+
+### Added
+
+- Settings > Mods: the Slipgate resolver now carries an "across settings" marker
+  (arrow-left-right icon + hover tooltip) — one resolver powers both mod and
+  file-host downloads, set once and it applies everywhere
+
 ## 2.18.0
 
 ### Fixed
@@ -16,8 +24,6 @@ The app shows its version as 1.0.0b (beta). 1.0.1 is the first packaged release.
   recipes. vikingfile is gated by an embedded Cloudflare Turnstile widget that
   FlareSolverr cannot solve, so it stays browser-only for now (needs a
   Turnstile-solving service)
-- Settings > Mods: the Slipgate resolver now shows an "across settings" marker —
-  one resolver powers both mod and file-host downloads, set once
 - RexaGames browse cards showed the site's landscape header stretched into the
   portrait cover slot, so every tile looked zoomed. cards now resolve a Steam
   appid from the title and use Steam's portrait capsule; titles Steam does not
