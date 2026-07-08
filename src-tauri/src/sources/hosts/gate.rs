@@ -89,7 +89,7 @@ pub async fn resolve(url: &str) -> ResolveResult {
             ),
         );
     };
-    match slipgate::resolve(&cfg, g.recipe, json!({ "url": url }), json!([])).await {
+    match slipgate::resolve(&cfg, g.recipe, url, json!({}), json!([])).await {
         Ok(link) => ResolveResult {
             resolvable: true,
             url: Some(link.url),
