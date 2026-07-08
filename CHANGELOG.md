@@ -4,6 +4,26 @@ All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 The app shows its version as 1.0.0b (beta). 1.0.1 is the first packaged release.
 
+## 2.24.1
+
+### Fixed
+
+- buzzheavier download links opened in the browser instead of resolving
+  in-app. two causes: the resolver fetched the file page with an
+  `Accept: text/html` request but none of the `Sec-Fetch-*` / `sec-ch-ua`
+  headers a real chrome navigation sends, so buzzheavier's bot filter answered
+  403; and the cloudflare-challenge check matched the harmless
+  `challenge-platform` script cloudflare injects into every normal page, so a
+  page that had actually loaded with its download token was still reported as
+  challenged. the file page now goes out with a full chrome header set, and a
+  cloudflare challenge is only concluded when the page carries no download
+  token. verified end-to-end against a live buzzheavier file
+
+### Changed
+
+- steamrip requests append `Union.Manifold` to the User-Agent so the app
+  identifies itself to steamrip; every other host keeps the default User-Agent
+
 ## 2.24.0
 
 ### Added

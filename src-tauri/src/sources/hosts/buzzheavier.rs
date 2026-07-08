@@ -52,6 +52,24 @@ fn not_resolvable(url: &str, reason: Option<String>) -> ResolveResult {
     }
 }
 
+fn browser_headers() -> HashMap<String, String> {
+    [
+        ("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8"),
+        ("Accept-Language", "en-US,en;q=0.9"),
+        ("sec-ch-ua", "\"Chromium\";v=\"124\", \"Not:A-Brand\";v=\"24\", \"Google Chrome\";v=\"124\""),
+        ("sec-ch-ua-mobile", "?0"),
+        ("sec-ch-ua-platform", "\"Windows\""),
+        ("Sec-Fetch-Dest", "document"),
+        ("Sec-Fetch-Mode", "navigate"),
+        ("Sec-Fetch-Site", "none"),
+        ("Sec-Fetch-User", "?1"),
+        ("Upgrade-Insecure-Requests", "1"),
+    ]
+    .iter()
+    .map(|(k, v)| (k.to_string(), v.to_string()))
+    .collect()
+}
+
 async fn resolve_tokened_path(origin: &str, path: &str, referer: &str) -> Option<String> {
     let mut headers = HashMap::new();
     headers.insert("Referer".to_string(), referer.to_string());
@@ -91,15 +109,14 @@ pub async fn resolve(url: &str) -> ResolveResult {
     let mut file_name: Option<String> = None;
     let mut size_bytes: Option<u64> = None;
     let mut paths: Vec<String> = Vec::new();
+    let mut challenged = false;
 
     for attempt in 0..2 {
         if attempt > 0 {
             tokio::time::sleep(Duration::from_millis(500)).await;
         }
-        let mut headers = HashMap::new();
-        headers.insert("Accept".to_string(), "text/html".to_string());
         let opts = FetchOpts {
-            headers,
+            headers: browser_headers(),
             ..Default::default()
         };
         let resp = match http::fetch(url, &opts).await {
@@ -119,10 +136,6 @@ pub async fn resolve(url: &str) -> ResolveResult {
             continue;
         }
         let text = resp.text().await.unwrap_or_default();
-
-        if text.contains("Just a moment") || text.contains("challenge-platform") || text.contains("cf-browser-verification") {
-            return not_resolvable(url, Some("buzzheavier is behind a cloudflare check, opening in browser".to_string()));
-        }
 
         file_name = TITLE_RE
             .captures(&text)
@@ -147,10 +160,18 @@ pub async fn resolve(url: &str) -> ResolveResult {
         if !paths.is_empty() {
             break;
         }
+        challenged = text.contains("Just a moment")
+            || text.contains("cf-browser-verification")
+            || text.contains("cf_chl_opt");
     }
 
     if paths.is_empty() {
-        return not_resolvable(url, Some("no buzzheavier download token".to_string()));
+        let reason = if challenged {
+            "buzzheavier is behind a cloudflare check, opening in browser"
+        } else {
+            "no buzzheavier download token"
+        };
+        return not_resolvable(url, Some(reason.to_string()));
     }
 
     let mut headers = HashMap::new();
