@@ -4,6 +4,23 @@ All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 The app shows its version as 1.0.0b (beta). 1.0.1 is the first packaged release.
 
+## 2.23.0
+
+### Removed
+
+- AnkerGames removed as a source (cleanup). its Livewire adapter and the
+  dlproxy host resolver added only for it are gone; the removed code lives on a
+  local `legacy/ankergames` branch. no other source is affected
+
+### Changed
+
+- RexaGames is now catalogued from the hydralinks.cloud source list
+  (`sources/rexagames.json`) instead of scraping the Invision forum. browse and
+  search read a single cached JSON fetch, and each game's download links come
+  from that entry's `uris` — routed through the same file-host resolvers, with
+  a ZeiLink container still expanded to its mirrors. install size now comes from
+  the feed; per-genre browse and tags drop away with the forum
+
 ## 2.22.0
 
 GameBounty now runs on its official public API, with the site owner's approval.

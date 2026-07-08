@@ -139,7 +139,7 @@ export function SourceGamePage() {
 
   // Hydrate via registry.detail() unless this game is already fully resolved.
   // detail() is what surfaces OTHER sources (a browse card carries only the one
-  // source it came from, e.g. a SteamRIP Alan Wake 2 card has no AnkerGames
+  // source it came from, e.g. a SteamRIP Alan Wake 2 card has no GameBounty
   // mirror until detail() searches for it) and runs Steam enrichment, then
   // stamps `fullyResolved` so the cached copy is reused without re-hydrating.
   useEffect(() => {

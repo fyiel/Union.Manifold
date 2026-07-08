@@ -8,7 +8,6 @@ pub mod gate;
 mod installtest;
 #[cfg(test)]
 mod livetest;
-pub mod dlproxy;
 pub mod fuckingfast;
 pub mod gofile;
 pub mod mediafire;
@@ -31,9 +30,6 @@ pub fn detect_host_type(url: &str) -> String {
     }
     if buzzheavier::matches(url) {
         return "buzzheavier".to_string();
-    }
-    if dlproxy::matches(url) {
-        return "dlproxy".to_string();
     }
     if gofile::matches(url) {
         return "gofile".to_string();
@@ -75,7 +71,6 @@ pub fn detect_host_type(url: &str) -> String {
 pub fn is_resolvable(url: &str) -> bool {
     pixeldrain::matches(url)
         || buzzheavier::matches(url)
-        || dlproxy::matches(url)
         || gofile::matches(url)
         || datanodes::matches(url)
         || fuckingfast::matches(url)
@@ -99,9 +94,6 @@ pub async fn resolve_url(option: &DownloadOption) -> ResolveResult {
     }
     if buzzheavier::matches(url) {
         return buzzheavier::resolve(url).await;
-    }
-    if dlproxy::matches(url) {
-        return dlproxy::resolve(url).await;
     }
     if gofile::matches(url) {
         return gofile::resolve(url).await;

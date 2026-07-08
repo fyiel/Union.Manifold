@@ -1,13 +1,6 @@
 use once_cell::sync::Lazy;
 use regex::Regex;
 
-pub fn first_match(text: &str, re: &Regex) -> String {
-    re.captures(text)
-        .and_then(|c| c.get(1))
-        .map(|m| m.as_str().to_string())
-        .unwrap_or_default()
-}
-
 static APPID_RES: Lazy<Vec<Regex>> = Lazy::new(|| {
     [
         r"store\.steampowered\.com/app/(\d+)",
