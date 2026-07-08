@@ -4,6 +4,18 @@ All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 The app shows its version as 1.0.0b (beta). 1.0.1 is the first packaged release.
 
+## 2.19.3
+
+### Fixed
+
+- RexaGames (and any DataVaults link) now downloads in-app. DataVaults direct
+  links carry an IP-bound fingerprint, so resolving them on the self-hosted
+  Slipgate (a different IP) produced links that returned HTML when the app tried
+  to download them. DataVaults has no Cloudflare gate, so it now resolves
+  in-app: the app runs the two-step download form, solves the positional-digit
+  captcha, waits out the countdown and reads the direct link itself. verified
+  end-to-end — a RexaGames title downloads and extracts cleanly
+
 ## 2.19.2
 
 ### Fixed
