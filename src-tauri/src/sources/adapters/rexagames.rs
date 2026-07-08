@@ -245,6 +245,22 @@ async fn fetch_forum_page(forum_id: u32, genre: &str, page: usize) -> Vec<Source
         .unwrap_or_default()
 }
 
+/// Resolve a Steam appid from the (cleaned) title so browse cards get Steam's
+/// portrait capsule instead of the site's landscape header, which would
+/// zoom-crop in a portrait tile. Also lets these stubs dedup by appid against
+/// the other sources. `search_app_id` caches to disk with no TTL, so this is
+/// one Steam search per new title and free thereafter. Titles Steam does not
+/// carry (console-only, unreleased) keep the landscape header as a fallback.
+async fn attach_steam_art(mut g: SourceGame) -> SourceGame {
+    if let Some(id) = steam::search_app_id(&g.title).await {
+        g.steam_app_id = Some(id);
+        g.dedup_key = dedup_key_for(Some(id), &g.title);
+        g.image = Some(steam_image(id, "library_600x900.jpg"));
+        g.hero_image = Some(steam_image(id, "library_hero.jpg"));
+    }
+    g
+}
+
 pub async fn query(params: &QueryParams) -> Option<Vec<SourceGame>> {
     // Map requested genre tags to forums; unknown tags (or none) => all genres.
     let wanted: Vec<(u32, &str)> = {
@@ -284,7 +300,7 @@ pub async fn query(params: &QueryParams) -> Option<Vec<SourceGame>> {
             }
         }
     }
-    Some(pool)
+    Some(http::map_limit(pool, 8, |g| async move { Some(attach_steam_art(g).await) }).await)
 }
 
 pub async fn search(q: &str, limit: usize) -> Vec<SourceGame> {
@@ -458,7 +474,6 @@ pub async fn list_tags() -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn clean_title_strips_free_download_and_version() {
         let (t, v) = clean_title("Broforce Free Download (Build 12964083 + Online)");
