@@ -31,12 +31,9 @@ static TABLE: &[(&str, GateHost)] = &[
     ("1fichier.com", gh("1fichier", "wait timer + captcha")),
     ("akirabox.com", gh("akirabox", "js-gated link")),
     ("qiwi.gg", gh("qiwi", "js-gated link")),
-    ("filekeeper.net", gh("filekeeper", "js-gated link")),
-    ("fileq.net", gh("fileq", "browser-only page")),
+    ("fileq.net", gh("fileq", "Cloudflare Turnstile \u{2014} browser only")),
     ("mocha.my", gh("mocha", "browser-only page")),
     ("zerofs.link", gh("zerofs", "browser-only page")),
-    ("fileditchfiles.me", gh("fileditch", "browser-only page")),
-    ("fileditch.com", gh("fileditch", "browser-only page")),
 ];
 
 /// `host == domain` or `host` is a subdomain of `domain`. No allocation.
@@ -114,7 +111,10 @@ mod tests {
         assert_eq!(host_type("https://vik1ngfile.site/f/xyz"), Some("vikingfile"));
         assert_eq!(host_type("https://1fichier.com/?abc"), Some("1fichier"));
         assert_eq!(host_type("https://qiwi.gg/file/x"), Some("qiwi"));
-        assert_eq!(host_type("https://cdn.fileditch.com/x/y.7z"), Some("fileditch"));
+        assert_eq!(host_type("https://fileq.net/abc.html"), Some("fileq"));
+        // fileditch/filekeeper/datavaults are native now, not gate hosts.
+        assert_eq!(host_type("https://fileditchfiles.me/a/b/x.zip"), None);
+        assert_eq!(host_type("https://filekeeper.net/abc/x.zip"), None);
     }
 
     #[test]

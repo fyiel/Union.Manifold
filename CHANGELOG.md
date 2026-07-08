@@ -4,6 +4,18 @@ All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 The app shows its version as 1.0.0b (beta). 1.0.1 is the first packaged release.
 
+## 2.19.4
+
+### Added
+
+- two more RexaGames file hosts resolve in-app: FileDitch (lifts the signed CDN
+  link out of its landing page) and FileKeeper (runs its two-step download form
+  and follows the redirect to the direct link). both resolve client-side, like
+  DataVaults, so the links are valid for your own IP. verified end-to-end — a
+  RexaGames title downloads and extracts from each. FileQ stays browser-only: it
+  is gated by a Cloudflare Turnstile widget that can't be cleared without a
+  captcha solver
+
 ## 2.19.3
 
 ### Fixed
