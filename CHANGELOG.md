@@ -4,6 +4,22 @@ All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 The app shows its version as 1.0.0b (beta). 1.0.1 is the first packaged release.
 
+## 2.17.0
+
+RexaGames joins the source lineup.
+
+### Added
+
+- new source: RexaGames (https://rexagames.com). browse pulls from its
+  per-genre forums (Action, RPG, FPS, Horror, Racing, VR and more), search
+  uses the site's exact title match, and each game's ZeiLink download button
+  expands into one option per mirror (Datavaults, FileQ, FileKeeper,
+  Vikingfile, Fileditch and whatever else a release ships), deduped into the
+  unified library like every other source. toggle it under Settings >
+  Download Sources
+- RexaGames mirrors flow through the shared host resolver, so the ones with a
+  native or Slipgate resolver download in-app and the rest open in the browser
+
 ## 2.16.0
 
 Captcha- and browser-gated file hosts resolve in-app through Slipgate.
