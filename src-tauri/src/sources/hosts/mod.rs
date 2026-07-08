@@ -1,6 +1,8 @@
 pub mod buzzheavier;
 pub mod datanodes;
 pub mod datavaults;
+pub mod fileditch;
+pub mod filekeeper;
 pub mod gate;
 #[cfg(test)]
 mod installtest;
@@ -51,6 +53,12 @@ pub fn detect_host_type(url: &str) -> String {
     if datavaults::matches(url) {
         return "datavaults".to_string();
     }
+    if fileditch::matches(url) {
+        return "fileditch".to_string();
+    }
+    if filekeeper::matches(url) {
+        return "filekeeper".to_string();
+    }
     if let Some(t) = gate::host_type(url) {
         return t.to_string();
     }
@@ -74,6 +82,8 @@ pub fn is_resolvable(url: &str) -> bool {
         || mediafire::matches(url)
         || rootz::matches(url)
         || datavaults::matches(url)
+        || fileditch::matches(url)
+        || filekeeper::matches(url)
         || (gate::matches(url) && crate::slipgate::cfg().is_some())
 }
 
@@ -110,6 +120,12 @@ pub async fn resolve_url(option: &DownloadOption) -> ResolveResult {
     }
     if datavaults::matches(url) {
         return datavaults::resolve(url).await;
+    }
+    if fileditch::matches(url) {
+        return fileditch::resolve(url).await;
+    }
+    if filekeeper::matches(url) {
+        return filekeeper::resolve(url).await;
     }
     if gate::matches(url) {
         return gate::resolve(url).await;
