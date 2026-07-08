@@ -1,93 +1,91 @@
-//! RexaGames (https://rexagames.com) — an Invision Community forum whose game
-//! posts live as topics under per-genre forums. Browse pulls topic rows from
-//! the genre forums; search rides the forum's own title search; detail parses
-//! the post's og-meta block and expands the ZeiLink container behind the
-//! download button into one option per mirror.
+//! RexaGames (https://rexagames.com) — catalogued from the Hydra download-source
+//! JSON published at hydralinks.cloud, rather than scraping the Invision forum.
 //!
-//! ZeiLink is a Next.js link page whose public JSON API
-//! (`/api/public/container/<slug>`) lists every host + direct file url, so we
-//! skip scraping the JS page and read the mirrors straight from the API. Each
-//! mirror routes through the shared host dispatch (`hosts::resolve_url`) at
-//! download time, so no source-specific resolver is needed.
+//! The source JSON is the standard Hydra shape: a flat `downloads` list of
+//! `{ title, uris, uploadDate, fileSize }`. Titles arrive in the site's
+//! "<Name> Free Download (<version>)" form, so `clean_title` peels the name and
+//! version; browse and search both read straight from one cached fetch of that
+//! list. Each entry's `uris` are the download links — direct file-host URLs that
+//! route through the shared host dispatch (`hosts::resolve_url`), with a
+//! `zeilink.net/c/<slug>` container expanded into its live mirrors via the
+//! public ZeiLink API first. Detail is an in-memory lookup over the same cache,
+//! so a game page costs no extra network beyond the (disk-cached) Steam art
+//! lookup and any container expansion.
+//!
+//! NOTE: hydralinks.cloud sits behind a Cloudflare check that challenges
+//! datacenter IPs; the shared client (browser UA) fetches it fine from a normal
+//! residential IP, which is where the app runs.
 
 use std::collections::HashSet;
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
 use regex::Regex;
+use serde::Deserialize;
 use serde_json::Value;
 
 use crate::http;
-use crate::sources::cache::KeyedCache;
+use crate::sources::cache::Cached;
 use crate::sources::hosts;
-use crate::sources::parse::find_steam_app_id;
 use crate::sources::schema::{
-    dedup_key_for, parse_size_to_bytes, year_from, DownloadOption, SourceGame,
+    dedup_key_for, parse_size_to_bytes, to_epoch_ms, DownloadOption, SourceGame,
 };
 use crate::sources::steam;
 use crate::sources::{Capabilities, QueryParams};
 
 const ID: &str = "rexagames";
 const ORIGIN: &str = "https://rexagames.com";
+const SOURCE_JSON: &str = "https://hydralinks.cloud/sources/rexagames.json";
 const ZEILINK_API: &str = "https://zeilink.net/api/public/container";
-const SEARCH_CONCURRENCY: usize = 5;
+// Cap the browse pool so the central layer sorts/filters a bounded, fresh set
+// and we do at most this many (disk-cached) Steam art lookups per refresh.
 const POOL_TARGET: usize = 300;
+const ART_CONCURRENCY: usize = 8;
 
-// Genre forums (stable IPS node ids). Browsing with no genre filter fans out
-// across all of them; a single-genre filter fetches just that forum deeper.
-// The Adult forum (83) is included but its posts are flagged nsfw.
-static GENRES: &[(u32, &str)] = &[
-    (71, "Action"),
-    (72, "Adventure"),
-    (73, "Survival"),
-    (74, "RPG"),
-    (75, "FPS"),
-    (76, "Simulation"),
-    (77, "Strategy"),
-    (78, "Sport"),
-    (79, "Horror"),
-    (80, "Racing"),
-    (81, "Fighting"),
-    (82, "Puzzle"),
-    (84, "VR"),
-    (85, "Denuvo"),
-    (83, "Adult"),
-];
-
-static ROW_URL_TITLE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"href="(https://rexagames\.com/topic/\d+-[^"?]+/)"\s+class="ipsLinkPanel"[^>]*><span>(.*?)</span>"#).unwrap()
-});
-static ROW_COVER: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"data-tthumb-(?:large|small)=([^\s>]+)").unwrap());
-static ROW_DATE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"datetime='([^']+)'").unwrap());
-static SEARCH_ROW: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"(?s)<li class="ipsStreamItem.*?href="(https://rexagames\.com/topic/\d+-[^"?]+)/?\?do=findComment[^"]*"[^>]*data-linktype="link"[^>]*>(.*?)</a>"#).unwrap()
-});
-static TITLE_TAG: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?s)<title[^>]*>(.*?)</title>").unwrap());
-static OG_DESC: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"<meta property="og:description" content="([^"]*)""#).unwrap()
-});
-static OG_IMAGE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"<meta property="og:image" content="([^"]*)""#).unwrap());
-static ZEILINK_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"https?://zeilink\.net/c/([A-Za-z0-9]+)").unwrap());
-static BREADCRUMB_FORUM: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"/forum/(\d+)-[a-z0-9-]+/").unwrap());
 static PAREN_TAIL: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s*\([^()]*\)\s*$").unwrap());
-static FREE_DL: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)\s*free\s+download\s*").unwrap());
+static FREE_DL: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)\s*free\s+download\s*").unwrap());
 static VER_IN: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i)(?:v\.?\s*)?(build\s*\d+|\d[\w.]*)").unwrap());
-static P_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?is)<p[^>]*>(.*?)</p>").unwrap());
-static SKIP_TITLE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)^(how to|rules|read (?:this|before)|announcement|introducing|welcome|request|installer|\[)").unwrap()
-});
 static WS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s+").unwrap());
+static NONWORD: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[^a-z0-9]+").unwrap());
+static ZEILINK_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)^https?://(?:www\.)?zeilink\.net/c/([A-Za-z0-9]+)").unwrap()
+});
 
-static LISTING: LazyLock<KeyedCache<Vec<SourceGame>>> =
-    LazyLock::new(|| KeyedCache::new(Duration::from_secs(600)));
-static DETAIL: LazyLock<KeyedCache<SourceGame>> =
-    LazyLock::new(|| KeyedCache::new(Duration::from_secs(6 * 60 * 60)));
+/// A parsed catalogue entry: the cleaned game plus its raw download links.
+#[derive(Clone)]
+struct Entry {
+    slug: String,
+    title: String,
+    version: Option<String>,
+    size_text: Option<String>,
+    size_bytes: Option<u64>,
+    added_at: Option<i64>,
+    uris: Vec<String>,
+}
+
+#[derive(Deserialize)]
+struct RawDownload {
+    #[serde(default)]
+    title: String,
+    #[serde(default)]
+    uris: Vec<String>,
+    #[serde(default, rename = "uploadDate")]
+    upload_date: Option<String>,
+    #[serde(default, rename = "fileSize")]
+    file_size: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct RawSource {
+    #[serde(default)]
+    downloads: Vec<RawDownload>,
+}
+
+// The whole source list behind one fetch; detail/search/browse share it.
+static CATALOG: LazyLock<Cached<Arc<Vec<Entry>>>> =
+    LazyLock::new(|| Cached::new(Duration::from_secs(600)));
 
 pub fn capabilities() -> Capabilities {
     Capabilities {
@@ -95,19 +93,16 @@ pub fn capabilities() -> Capabilities {
         catalog: true,
         appid: false,
         bulk_browse: true,
-        tags: true,
+        // The source JSON carries no genres, so no tag facet for this source.
+        tags: false,
         release_date: false,
-        size: false,
-        sort: vec!["latest".to_string(), "updated".to_string(), "title".to_string()],
+        size: true,
+        sort: vec![
+            "latest".to_string(),
+            "updated".to_string(),
+            "title".to_string(),
+        ],
     }
-}
-
-fn genre_name(id: u32) -> Option<&'static str> {
-    GENRES.iter().find(|(g, _)| *g == id).map(|(_, n)| *n)
-}
-
-fn enc(s: &str) -> String {
-    percent_encoding::utf8_percent_encode(s, percent_encoding::NON_ALPHANUMERIC).to_string()
 }
 
 fn collapse(s: &str) -> String {
@@ -134,123 +129,103 @@ fn clean_title(raw: &str) -> (String, Option<String>) {
     (t, version)
 }
 
-/// One label's value from the flat og:description "Game Details" block, cut at
-/// the next known label so multi-word values (publishers, dates) stay intact.
-fn meta_field(desc: &str, label: &str) -> Option<String> {
-    const STOPS: &[&str] = &[
-        "Release Name:",
-        "Game Version:",
-        "Release Date:",
-        "Publisher:",
-        "Developer:",
-        "Based On:",
-        "Game Review",
-        "Direct Download",
-    ];
-    let start = desc.find(&format!("{label}:"))? + label.len() + 1;
-    let rest = &desc[start..];
-    let end = STOPS
-        .iter()
-        .filter_map(|s| rest.find(s).filter(|i| *i > 0))
-        .min()
-        .unwrap_or(rest.len());
-    let v = http::decode_entities(rest[..end].trim());
-    let v = v.trim().trim_end_matches(['.', ',', ' ']).to_string();
-    (!v.is_empty()).then_some(v)
-}
-
-fn blurb(article: &str) -> Option<String> {
-    let mut paras: Vec<String> = Vec::new();
-    for cap in P_RE.captures_iter(article) {
-        if paras.len() >= 3 {
-            break;
-        }
-        let text = http::strip_tags(&cap[1]);
-        if text.chars().count() > 40 {
-            paras.push(text);
-        }
-    }
-    let joined = paras.join("\n\n");
-    if joined.is_empty() {
-        return None;
-    }
-    if joined.chars().count() <= 800 {
-        return Some(joined);
-    }
-    let cut: String = joined.chars().take(800).collect();
-    Some(format!("{}\u{2026}", cut.trim_end()))
+/// URL-safe, stable per cleaned title. Used as the detail slug (the source JSON
+/// has no ids of its own); collisions get a numeric suffix so lookups stay 1:1.
+fn slugify(title: &str) -> String {
+    NONWORD
+        .replace_all(&title.to_lowercase(), "-")
+        .trim_matches('-')
+        .to_string()
 }
 
 fn steam_image(appid: u64, kind: &str) -> String {
     format!("https://shared.steamstatic.com/store_item_assets/steam/apps/{appid}/{kind}")
 }
 
-/// Topic path segment used as the detail slug, e.g.
-/// "10440-broforce-free-download-build-12964083-online".
-fn slug_from_url(url: &str) -> Option<String> {
-    url.split("/topic/").nth(1).map(|s| s.trim_end_matches('/').to_string())
-}
+/// Parse the source JSON body into deduped catalogue entries. Pure (no network)
+/// so it can be unit-tested against a fixture.
+fn parse_source(body: &str) -> Vec<Entry> {
+    let raw: RawSource = match serde_json::from_str(body) {
+        Ok(r) => r,
+        Err(_) => return Vec::new(),
+    };
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut out = Vec::new();
+    for d in raw.downloads {
+        let (title, version) = clean_title(&d.title);
+        if title.is_empty() {
+            continue;
+        }
+        // Only http(s) links are downloadable in-app; drop magnets / empties.
+        let uris: Vec<String> = d
+            .uris
+            .into_iter()
+            .map(|u| u.trim().to_string())
+            .filter(|u| u.starts_with("http"))
+            .collect();
+        if uris.is_empty() {
+            continue;
+        }
+        let base = slugify(&title);
+        if base.is_empty() {
+            continue;
+        }
+        let mut slug = base.clone();
+        let mut n = 1;
+        while seen.contains(&slug) {
+            n += 1;
+            slug = format!("{base}-{n}");
+        }
+        seen.insert(slug.clone());
 
-fn parse_listing(html: &str, genre: &str) -> Vec<SourceGame> {
-    let nsfw = genre == "Adult";
-    let mut games = Vec::new();
-    let mut seen = HashSet::new();
-    for chunk in html.split("data-ips-hook=\"topicRow\"").skip(1) {
-        let Some(cap) = ROW_URL_TITLE.captures(chunk) else { continue };
-        let url = cap[1].to_string();
-        let Some(slug) = slug_from_url(&url) else { continue };
-        if !seen.insert(slug.clone()) {
-            continue;
-        }
-        let (title, version) = clean_title(&cap[2]);
-        if title.is_empty() || SKIP_TITLE.is_match(&title) {
-            continue;
-        }
-        let cover = ROW_COVER
-            .captures(chunk)
-            .map(|c| http::decode_entities(&c[1]));
-        let added_at = ROW_DATE
-            .captures(chunk)
-            .and_then(|c| crate::sources::schema::to_epoch_ms(&c[1]));
-        games.push(SourceGame {
-            source_id: ID.to_string(),
-            source_slug: slug,
-            source_url: url,
-            steam_app_id: None,
-            dedup_key: dedup_key_for(None, &title),
+        let size_text = d.file_size.map(|s| collapse(&s)).filter(|s| !s.is_empty());
+        let size_bytes = size_text.as_deref().and_then(parse_size_to_bytes);
+        let added_at = d.upload_date.as_deref().and_then(to_epoch_ms);
+        out.push(Entry {
+            slug,
             title,
-            image: cover.clone(),
-            hero_image: cover,
-            genres: vec![genre.to_string()],
-            added_at,
-            updated_at: added_at,
             version,
-            nsfw,
-            ..Default::default()
+            size_text,
+            size_bytes,
+            added_at,
+            uris,
         });
     }
-    games
+    out
 }
 
-async fn fetch_forum_page(forum_id: u32, genre: &str, page: usize) -> Vec<SourceGame> {
-    let key = format!("{forum_id}:{page}");
-    let genre = genre.to_string();
-    LISTING
-        .get_or(&key, || async move {
-            let url = format!("{ORIGIN}/forum/{forum_id}-x/?sortby=start_date&sortdir=desc&page={page}");
-            let html = http::get_text(&url).await.ok()?;
-            Some(parse_listing(&html, &genre))
+async fn catalogue() -> Arc<Vec<Entry>> {
+    CATALOG
+        .get_or(|| async {
+            let body = http::get_text(SOURCE_JSON).await.ok()?;
+            Some(Arc::new(parse_source(&body)))
         })
         .await
         .unwrap_or_default()
 }
 
-/// Resolve a Steam appid from the (cleaned) title so browse cards get Steam's
-/// portrait capsule instead of the site's landscape header, which would
-/// zoom-crop in a portrait tile. Also lets these stubs dedup by appid against
-/// the other sources. `search_app_id` caches to disk with no TTL, so this is
-/// one Steam search per new title and free thereafter. Titles Steam does not
-/// carry (console-only, unreleased) keep the landscape header as a fallback.
+/// Lightweight browse/search stub from a catalogue entry. Steam art + appid are
+/// filled by `attach_steam_art`.
+fn entry_to_stub(e: &Entry) -> SourceGame {
+    SourceGame {
+        source_id: ID.to_string(),
+        source_slug: e.slug.clone(),
+        source_url: e.uris.first().cloned().unwrap_or_else(|| ORIGIN.to_string()),
+        dedup_key: dedup_key_for(None, &e.title),
+        title: e.title.clone(),
+        added_at: e.added_at,
+        updated_at: e.added_at,
+        version: e.version.clone(),
+        size_bytes: e.size_bytes,
+        size_text: e.size_text.clone(),
+        ..Default::default()
+    }
+}
+
+/// Resolve a Steam appid from the title so cards get Steam's portrait capsule
+/// (the source has no art of its own) and dedup by appid against other sources.
+/// `search_app_id` caches to disk with no TTL, so this is one lookup per new
+/// title and free thereafter.
 async fn attach_steam_art(mut g: SourceGame) -> SourceGame {
     if let Some(id) = steam::search_app_id(&g.title).await {
         g.steam_app_id = Some(id);
@@ -261,85 +236,31 @@ async fn attach_steam_art(mut g: SourceGame) -> SourceGame {
     g
 }
 
-pub async fn query(params: &QueryParams) -> Option<Vec<SourceGame>> {
-    // Map requested genre tags to forums; unknown tags (or none) => all genres.
-    let wanted: Vec<(u32, &str)> = {
-        let picked: Vec<_> = GENRES
-            .iter()
-            .filter(|(_, n)| params.tags.iter().any(|t| t.eq_ignore_ascii_case(n)))
-            .copied()
-            .collect();
-        if picked.is_empty() {
-            GENRES.to_vec()
-        } else {
-            picked
-        }
-    };
-    // Single genre: go deeper (4 pages). Many genres: one page each is plenty
-    // to fill the 300 pool after the central layer sorts/filters.
-    let pages = if wanted.len() == 1 { 4 } else { 1 };
-    let mut jobs = Vec::new();
-    for (fid, genre) in &wanted {
-        for page in 1..=pages {
-            jobs.push((*fid, genre.to_string(), page));
-        }
-    }
-    let batches = http::map_limit(jobs, 8, |(fid, genre, page)| async move {
-        Some(fetch_forum_page(fid, &genre, page).await)
-    })
-    .await;
-    let mut pool: Vec<SourceGame> = Vec::new();
-    let mut seen: HashSet<String> = HashSet::new();
-    'fill: for batch in batches {
-        for g in batch {
-            if seen.insert(g.source_slug.clone()) {
-                pool.push(g);
-            }
-            if pool.len() >= POOL_TARGET {
-                break 'fill;
-            }
-        }
-    }
-    Some(http::map_limit(pool, 8, |g| async move { Some(attach_steam_art(g).await) }).await)
-}
-
-pub async fn search(q: &str, limit: usize) -> Vec<SourceGame> {
-    let q = q.trim();
-    if q.is_empty() {
-        return Vec::new();
-    }
-    // Quoted phrase + title-only is the site's "exact" mode; bare terms pull in
-    // unrelated posts (per the source's own search hint).
-    let url = format!(
-        "{ORIGIN}/search/?q={}&type=forums_topic&search_in=titles&sortby=relevancy",
-        enc(&format!("\"{q}\""))
-    );
-    let html = match http::get_text(&url).await {
-        Ok(h) => h,
-        Err(_) => return Vec::new(),
-    };
-    let terms: Vec<String> = q.to_lowercase().split_whitespace().map(str::to_string).collect();
-    let mut slugs: Vec<String> = Vec::new();
-    let mut seen = HashSet::new();
-    for cap in SEARCH_ROW.captures_iter(&html) {
-        let title = clean_title(&http::strip_tags(&cap[2])).0.to_lowercase();
-        if !terms.iter().all(|t| title.contains(t.as_str())) {
+/// Turn a game's `uris` into download options. A ZeiLink container URL expands
+/// into its live mirrors via the public API; every other URL is a direct file
+/// host routed through the shared host dispatch. Resolvable hosts sort first so
+/// the UI surfaces the in-app ones.
+async fn options_from_uris(uris: &[String]) -> Vec<DownloadOption> {
+    let mut options = Vec::new();
+    for uri in uris {
+        if let Some(cap) = ZEILINK_RE.captures(uri) {
+            options.extend(zeilink_options(&cap[1]).await);
             continue;
         }
-        if let Some(slug) = slug_from_url(&cap[1]) {
-            if seen.insert(slug.clone()) {
-                slugs.push(slug);
-            }
-        }
-        if slugs.len() >= limit {
-            break;
-        }
+        let host_type = hosts::detect_host_type(uri);
+        options.push(DownloadOption {
+            label: host_type.clone(),
+            host_type,
+            url: Some(uri.clone()),
+            resolvable: hosts::is_resolvable(uri),
+            ..Default::default()
+        });
     }
-    http::map_limit(slugs, SEARCH_CONCURRENCY, |slug| async move { get_detail(&slug).await })
-        .await
+    options.sort_by(|a, b| (b.resolvable as u8).cmp(&(a.resolvable as u8)));
+    options
 }
 
-/// Read the ZeiLink container JSON and turn every active mirror into a
+/// Read a ZeiLink container's public JSON and turn every active mirror into a
 /// download option, resolvable-first so the UI surfaces the easy hosts.
 async fn zeilink_options(slug: &str) -> Vec<DownloadOption> {
     let json: Value = match http::get_json(&format!("{ZEILINK_API}/{slug}")).await {
@@ -355,13 +276,18 @@ async fn zeilink_options(slug: &str) -> Vec<DownloadOption> {
             if !link.get("isActive").and_then(|v| v.as_bool()).unwrap_or(true) {
                 continue;
             }
-            let Some(url) = link.get("url").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) else {
+            let Some(url) = link.get("url").and_then(|v| v.as_str()).filter(|s| !s.is_empty())
+            else {
                 continue;
             };
             let host_type = hosts::detect_host_type(url);
             let size_text = link.get("fileSize").and_then(|v| v.as_str()).map(str::to_string);
             options.push(DownloadOption {
-                label: if host_label.is_empty() { host_type.clone() } else { host_label.to_string() },
+                label: if host_label.is_empty() {
+                    host_type.clone()
+                } else {
+                    host_label.to_string()
+                },
                 host_type,
                 url: Some(url.to_string()),
                 file_name: link.get("fileName").and_then(|v| v.as_str()).map(str::to_string),
@@ -376,104 +302,61 @@ async fn zeilink_options(slug: &str) -> Vec<DownloadOption> {
     options
 }
 
-pub async fn get_detail(slug: &str) -> Option<SourceGame> {
-    let clean = slug.trim_matches('/').to_string();
-    let key = clean.clone();
-    DETAIL
-        .get_or(&key, || async move {
-            let url = format!("{ORIGIN}/topic/{clean}/");
-            let html = http::get_text(&url).await.ok()?;
-
-            let raw_title = TITLE_TAG
-                .captures(&html)
-                .map(|c| c[1].split(" - ").next().unwrap_or(&c[1]).to_string())
-                .unwrap_or_default();
-            let (fallback_title, version) = clean_title(&raw_title);
-            let desc_block = OG_DESC.captures(&html).map(|c| http::decode_entities(&c[1]));
-            let title = desc_block
-                .as_deref()
-                .and_then(|d| meta_field(d, "Release Name"))
-                .filter(|s| !s.is_empty())
-                .unwrap_or(fallback_title);
-            if title.is_empty() {
-                return None;
-            }
-
-            let developer = desc_block.as_deref().and_then(|d| meta_field(d, "Developer"));
-            let release_date = desc_block.as_deref().and_then(|d| meta_field(d, "Release Date"));
-            let release_year = release_date.as_deref().and_then(year_from);
-            let version = version.or_else(|| {
-                desc_block
-                    .as_deref()
-                    .and_then(|d| meta_field(d, "Game Version"))
-            });
-
-            let article = html
-                .find("<article")
-                .map(|i| &html[i..])
-                .unwrap_or(&html);
-            let description = blurb(article);
-
-            let mut appid = find_steam_app_id(&html);
-            if appid.is_none() {
-                appid = steam::search_app_id(&title).await;
-            }
-            let appid = appid.filter(|v| *v > 0);
-
-            let cover = OG_IMAGE.captures(&html).map(|c| http::decode_entities(&c[1]));
-            let image = appid
-                .map(|id| steam_image(id, "library_600x900.jpg"))
-                .or_else(|| cover.clone());
-            let hero_image = appid
-                .map(|id| steam_image(id, "library_hero.jpg"))
-                .or(cover);
-
-            let genre = BREADCRUMB_FORUM
-                .captures_iter(&html)
-                .filter_map(|c| c[1].parse::<u32>().ok())
-                .find_map(genre_name);
-            let nsfw = genre == Some("Adult");
-            let genres = genre.map(|g| vec![g.to_string()]).unwrap_or_default();
-
-            let download_options = match ZEILINK_RE.captures(&html) {
-                Some(c) => zeilink_options(&c[1]).await,
-                None => Vec::new(),
-            };
-            let size_bytes = download_options.iter().filter_map(|o| o.size_bytes).max();
-            let size_text = download_options.iter().find_map(|o| o.size_text.clone());
-
-            Some(SourceGame {
-                source_id: ID.to_string(),
-                source_slug: clean.clone(),
-                source_url: url,
-                steam_app_id: appid,
-                dedup_key: dedup_key_for(appid, &title),
-                title,
-                description,
-                image,
-                hero_image,
-                genres,
-                developer,
-                release_date,
-                release_year,
-                version,
-                size_bytes,
-                size_text,
-                nsfw,
-                download_options,
-                ..Default::default()
-            })
-        })
-        .await
+pub async fn query(_params: &QueryParams) -> Option<Vec<SourceGame>> {
+    let cat = catalogue().await;
+    if cat.is_empty() {
+        return Some(Vec::new());
+    }
+    // Newest first, capped — the central layer applies the user's real sort and
+    // filters over this pool.
+    let mut idx: Vec<usize> = (0..cat.len()).collect();
+    idx.sort_by(|&a, &b| cat[b].added_at.cmp(&cat[a].added_at));
+    idx.truncate(POOL_TARGET);
+    let stubs: Vec<SourceGame> = idx.iter().map(|&i| entry_to_stub(&cat[i])).collect();
+    Some(http::map_limit(stubs, ART_CONCURRENCY, |g| async move { Some(attach_steam_art(g).await) }).await)
 }
 
-pub async fn list_tags() -> Vec<String> {
-    GENRES.iter().map(|(_, n)| n.to_string()).collect()
+pub async fn search(q: &str, limit: usize) -> Vec<SourceGame> {
+    let ql = q.trim().to_lowercase();
+    if ql.is_empty() {
+        return Vec::new();
+    }
+    let terms: Vec<String> = ql.split_whitespace().map(str::to_string).collect();
+    let cat = catalogue().await;
+    let mut stubs = Vec::new();
+    for e in cat.iter() {
+        let title = e.title.to_lowercase();
+        if terms.iter().all(|t| title.contains(t.as_str())) {
+            stubs.push(entry_to_stub(e));
+            if stubs.len() >= limit {
+                break;
+            }
+        }
+    }
+    http::map_limit(stubs, ART_CONCURRENCY, |g| async move { Some(attach_steam_art(g).await) }).await
+}
+
+pub async fn get_detail(slug: &str) -> Option<SourceGame> {
+    let clean = slug.trim_matches('/');
+    let cat = catalogue().await;
+    let entry = cat.iter().find(|e| e.slug == clean)?;
+    let mut game = attach_steam_art(entry_to_stub(entry)).await;
+    let options = options_from_uris(&entry.uris).await;
+    game.size_bytes = game
+        .size_bytes
+        .or_else(|| options.iter().filter_map(|o| o.size_bytes).max());
+    game.size_text = game
+        .size_text
+        .clone()
+        .or_else(|| options.iter().find_map(|o| o.size_text.clone()));
+    game.download_options = options;
+    Some(game)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
     fn clean_title_strips_free_download_and_version() {
         let (t, v) = clean_title("Broforce Free Download (Build 12964083 + Online)");
@@ -486,20 +369,104 @@ mod tests {
         assert_eq!(t, "Don\u{2019}t Starve");
     }
 
+    const FEED: &str = r#"{
+  "name": "RexaGames",
+  "downloads": [
+    { "title": "Broforce Free Download (Build 12964083 + Online)", "uris": ["https://gofile.io/d/abc123"], "uploadDate": "2025-01-16T15:58:09+00:00", "fileSize": "1.2 GB" },
+    { "title": "Broforce Free Download (Build 20000000)", "uris": ["https://buzzheavier.com/xyz"], "uploadDate": "2025-02-01T00:00:00.000Z", "fileSize": "1.3 GB" },
+    { "title": "Arma Reforger Free Download (v1.7.0.41)", "uris": ["magnet:?xt=urn:btih:DEADBEEF", "https://datavaults.co/file/9"], "uploadDate": "2025-03-01T12:00:00Z", "fileSize": "20 GB" },
+    { "title": "Torrent Only Game", "uris": ["magnet:?xt=urn:btih:CAFE"], "uploadDate": "2024-01-01T00:00:00Z", "fileSize": "5 GB" },
+    { "title": "   ", "uris": ["https://example.com/x"], "uploadDate": "2024-01-01T00:00:00Z", "fileSize": "1 GB" }
+  ]
+}"#;
+
     #[test]
-    fn meta_field_cuts_at_next_label() {
-        let d = "Game DetailsRelease Name: BroforceGame Version: Build 12964083Release Date: 15 Oct, 2015Publisher: Devolver DigitalDeveloper: Free LivesBased On: CSF & Goldberg";
-        assert_eq!(meta_field(d, "Release Name").as_deref(), Some("Broforce"));
-        assert_eq!(meta_field(d, "Release Date").as_deref(), Some("15 Oct, 2015"));
-        assert_eq!(meta_field(d, "Publisher").as_deref(), Some("Devolver Digital"));
-        assert_eq!(meta_field(d, "Developer").as_deref(), Some("Free Lives"));
+    fn parse_source_drops_magnet_only_and_blank_titles() {
+        let entries = parse_source(FEED);
+        // Magnet-only "Torrent Only Game" and the blank-title row are both dropped.
+        assert_eq!(entries.len(), 3);
+        let titles: Vec<&str> = entries.iter().map(|e| e.title.as_str()).collect();
+        assert!(titles.contains(&"Broforce"));
+        assert!(titles.contains(&"Arma Reforger"));
+        assert!(!titles.contains(&"Torrent Only Game"));
     }
 
     #[test]
-    fn slug_from_url_extracts_topic_segment() {
-        assert_eq!(
-            slug_from_url("https://rexagames.com/topic/10440-broforce-free-download/").as_deref(),
-            Some("10440-broforce-free-download")
+    fn parse_source_suffixes_slug_collisions() {
+        let entries = parse_source(FEED);
+        // Both Broforce rows clean to the same name but survive with distinct slugs.
+        let slugs: Vec<&str> = entries
+            .iter()
+            .filter(|e| e.title == "Broforce")
+            .map(|e| e.slug.as_str())
+            .collect();
+        assert_eq!(slugs.len(), 2);
+        assert!(slugs.contains(&"broforce"));
+        assert!(slugs.contains(&"broforce-2"));
+    }
+
+    #[test]
+    fn parse_source_peels_version_from_title() {
+        let entries = parse_source(FEED);
+        let first_broforce = entries.iter().find(|e| e.slug == "broforce").unwrap();
+        assert_eq!(first_broforce.version.as_deref(), Some("Build 12964083"));
+        let arma = entries.iter().find(|e| e.title == "Arma Reforger").unwrap();
+        assert_eq!(arma.version.as_deref(), Some("1.7.0.41"));
+    }
+
+    #[test]
+    fn parse_source_keeps_only_http_uris() {
+        let entries = parse_source(FEED);
+        // The Arma row's magnet is filtered; only the direct http host remains.
+        let arma = entries.iter().find(|e| e.title == "Arma Reforger").unwrap();
+        assert_eq!(arma.uris, vec!["https://datavaults.co/file/9".to_string()]);
+    }
+
+    #[test]
+    fn parse_source_parses_size_and_date_forms() {
+        let entries = parse_source(FEED);
+        // Every surviving row yields positive bytes, retained size text, and a
+        // timestamp — the three rows cover +00:00, .000Z, and bare-Z date forms.
+        for e in &entries {
+            assert!(e.size_bytes.is_some_and(|b| b > 0), "size_bytes for {}", e.slug);
+            assert!(e.size_text.is_some(), "size_text for {}", e.slug);
+            assert!(e.added_at.is_some(), "added_at for {}", e.slug);
+        }
+        let first_broforce = entries.iter().find(|e| e.slug == "broforce").unwrap();
+        assert_eq!(first_broforce.size_text.as_deref(), Some("1.2 GB"));
+    }
+
+    #[test]
+    fn parse_source_returns_empty_on_bad_or_empty_json() {
+        assert!(parse_source("not json").is_empty());
+        assert!(parse_source("{}").is_empty());
+    }
+
+    #[test]
+    fn slugify_produces_clean_lowercase_slugs() {
+        let s = slugify("Don't Starve!!");
+        assert!(!s.starts_with('-') && !s.ends_with('-'), "no edge dashes: {s}");
+        assert_eq!(s, s.to_lowercase());
+        assert!(
+            s.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-'),
+            "slug charset: {s}"
         );
+        assert_eq!(slugify("Broforce"), "broforce");
+    }
+
+    #[tokio::test]
+    async fn options_from_uris_sorts_resolvable_first_without_network() {
+        let uris = vec![
+            "https://buzzheavier.com/xyz".to_string(),
+            "https://no-such-host.example/x".to_string(),
+        ];
+        let options = options_from_uris(&uris).await;
+        assert_eq!(options.len(), 2);
+        assert!(options.iter().all(|o| o.url.is_some()));
+        // buzzheavier is a known/resolvable host; the unknown host is not, and
+        // the resolvable option sorts ahead of it.
+        assert!(options[0].resolvable);
+        assert!(!options[1].resolvable);
+        assert_eq!(options[0].url.as_deref(), Some("https://buzzheavier.com/xyz"));
     }
 }
