@@ -169,7 +169,6 @@ pub const SOURCES: &[SourceMeta] = &[
     SourceMeta { id: "unioncrax", name: "UnionCrax", homepage: "https://union-crax.xyz" },
     SourceMeta { id: "gamebounty", name: "GameBounty", homepage: "https://gamebounty.world" },
     SourceMeta { id: "ankergames", name: "AnkerGames", homepage: "https://ankergames.net" },
-    SourceMeta { id: "astralgames", name: "AstralGames", homepage: "https://astralgames.net" },
     SourceMeta { id: "steamrip", name: "SteamRIP", homepage: "https://steamrip.com" },
     SourceMeta { id: "rexagames", name: "RexaGames", homepage: "https://rexagames.com" },
 ];
@@ -181,7 +180,6 @@ pub fn capabilities_for(id: &str) -> Capabilities {
         "ankergames" => adapters::ankergames::capabilities(),
         "steamrip" => adapters::steamrip::capabilities(),
         "rexagames" => adapters::rexagames::capabilities(),
-        "astralgames" => adapters::astralgames::capabilities(),
         _ => Capabilities::default(),
     }
 }
@@ -193,7 +191,6 @@ async fn adapter_query(id: &str, params: &QueryParams) -> Option<Vec<SourceGame>
         "ankergames" => adapters::ankergames::query(params).await,
         "steamrip" => adapters::steamrip::query(params).await,
         "rexagames" => adapters::rexagames::query(params).await,
-        "astralgames" => adapters::astralgames::query(params).await,
         _ => Some(Vec::new()),
     }
 }
@@ -205,7 +202,6 @@ async fn adapter_search(id: &str, q: &str, limit: usize) -> Vec<SourceGame> {
         "ankergames" => adapters::ankergames::search(q, limit).await,
         "steamrip" => adapters::steamrip::search(q, limit).await,
         "rexagames" => adapters::rexagames::search(q, limit).await,
-        "astralgames" => adapters::astralgames::search(q, limit).await,
         _ => Vec::new(),
     }
 }
@@ -217,7 +213,6 @@ async fn adapter_detail(id: &str, slug: &str) -> Option<SourceGame> {
         "ankergames" => adapters::ankergames::get_detail(slug).await,
         "steamrip" => adapters::steamrip::get_detail(slug).await,
         "rexagames" => adapters::rexagames::get_detail(slug).await,
-        "astralgames" => adapters::astralgames::get_detail(slug).await,
         _ => None,
     }
 }
@@ -228,7 +223,6 @@ async fn adapter_tags(id: &str) -> Vec<String> {
         "ankergames" => adapters::ankergames::list_tags().await,
         "steamrip" => adapters::steamrip::list_tags().await,
         "rexagames" => adapters::rexagames::list_tags().await,
-        "astralgames" => adapters::astralgames::list_tags().await,
         _ => Vec::new(),
     }
 }

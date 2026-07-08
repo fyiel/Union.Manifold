@@ -196,14 +196,13 @@ export async function sourceTags(): Promise<{ tags: string[]; bySource: Record<s
 // link drives the single big Download button and the rest become "other links".
 // The order is user-configurable (Settings, Download Sources), persisted in
 // ucSettings. This is the default. Sources not listed sort after.
-export const SOURCE_PRIORITY = ["unioncrax", "ankergames", "gamebounty", "astralgames", "steamrip", "rexagames"]
+export const SOURCE_PRIORITY = ["unioncrax", "ankergames", "gamebounty", "steamrip", "rexagames"]
 
 // Friendly display names for source ids.
 export const SOURCE_NAMES: Record<string, string> = {
   unioncrax: "UnionCrax",
   ankergames: "AnkerGames",
   gamebounty: "GameBounty",
-  astralgames: "AstralGames",
   steamrip: "SteamRIP",
   rexagames: "RexaGames",
 }
@@ -216,7 +215,6 @@ export const SOURCE_ABBR: Record<string, string> = {
   unioncrax: "UC",
   ankergames: "AG",
   gamebounty: "GB",
-  astralgames: "AS",
   steamrip: "SR",
   rexagames: "RX",
 }
@@ -236,7 +234,6 @@ export const SOURCE_DIRECT: Record<string, boolean> = {
   unioncrax: true,
   steamrip: true,
   gamebounty: true,
-  astralgames: true,
   rexagames: true,
   ankergames: false,
 }
