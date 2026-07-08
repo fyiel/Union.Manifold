@@ -11,6 +11,8 @@ use reqwest::{Client, Response, StatusCode};
 
 const UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
+static STEAMRIP_UA: LazyLock<String> = LazyLock::new(|| format!("{UA} Union.Manifold"));
+
 fn base_headers() -> HeaderMap {
     let mut h = HeaderMap::new();
     h.insert(reqwest::header::USER_AGENT, HeaderValue::from_static(UA));
@@ -138,6 +140,10 @@ pub async fn fetch(url: &str, opts: &FetchOpts) -> reqwest::Result<Response> {
     let host = url::Url::parse(url)
         .ok()
         .and_then(|u| u.host_str().map(|s| s.to_string()));
+    let is_steamrip = host
+        .as_deref()
+        .map(|h| h == "steamrip.com" || h.ends_with(".steamrip.com"))
+        .unwrap_or(false);
 
     let mut last_err: Option<reqwest::Error> = None;
     for attempt in 0..=max {
@@ -150,6 +156,11 @@ pub async fn fetch(url: &str, opts: &FetchOpts) -> reqwest::Result<Response> {
             if let (Ok(name), Ok(val)) = (HeaderName::from_bytes(k.as_bytes()), HeaderValue::from_str(v)) {
                 req = req.header(name, val);
             }
+        }
+        if is_steamrip
+            && !opts.headers.keys().any(|k| k.eq_ignore_ascii_case("user-agent"))
+        {
+            req = req.header(reqwest::header::USER_AGENT, STEAMRIP_UA.as_str());
         }
         if let (Some(jar), Some(host)) = (&opts.jar, &host) {
             if let Some(cookie) = jar.header_for(host) {
