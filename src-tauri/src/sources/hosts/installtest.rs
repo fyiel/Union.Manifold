@@ -56,6 +56,7 @@ async fn source_games(source: &str, query: Option<&str>, limit: usize) -> Vec<So
         "unioncrax" => adapters::unioncrax::query(&params).await.unwrap_or_default(),
         "gamebounty" => adapters::gamebounty::query(&params).await.unwrap_or_default(),
         "ankergames" => adapters::ankergames::query(&params).await.unwrap_or_default(),
+        "rexagames" => adapters::rexagames::query(&params).await.unwrap_or_default(),
         _ => adapters::steamrip::query(&params).await.unwrap_or_default(),
     }
 }
@@ -65,6 +66,7 @@ async fn detail_of(source: &str, slug: &str) -> Option<SourceGame> {
         "unioncrax" => adapters::unioncrax::get_detail(slug).await,
         "gamebounty" => adapters::gamebounty::get_detail(slug).await,
         "ankergames" => adapters::ankergames::get_detail(slug).await,
+        "rexagames" => adapters::rexagames::get_detail(slug).await,
         _ => adapters::steamrip::get_detail(slug).await,
     }
 }
