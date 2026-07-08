@@ -8,10 +8,9 @@ The app shows its version as 1.0.0b (beta). 1.0.1 is the first packaged release.
 
 ### Removed
 
-- AstralGames retired as a source (it shipped in 2.20.0): its search relied on a
-  per-request Next.js server action and its downloads were mostly browser-only
-  (FileQ), so it's dropped, along with the Mocha host resolver that was added
-  for it. the other sources, GameBounty included, are unchanged
+- AstralGames removed as a source at the request of the site's developers. the
+  adapter and the Mocha host resolver that was added for it are gone; the other
+  sources, GameBounty included, are unchanged
 
 ## 2.20.2
 
