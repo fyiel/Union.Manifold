@@ -950,13 +950,38 @@ pub fn download_active_status(state: State<'_, AppState>, appid: String) -> Valu
     state.downloads.active_status(&appid)
 }
 
+// Every enqueued download creates its installing folder up front, so a row whose
+// savePath's parent dir is gone is dead: it can't be resumed or installed and
+// just restores from downloads-state.json on every launch (an install_ready with
+// no real archive — e.g. an old few-byte DataVaults miss parked as "ready" — is
+// the classic case). Drop those; a row without a savePath is left for the
+// renderer to reconcile. Returns the number pruned.
+fn prune_dead_downloads(downloads: &mut Value) -> usize {
+    let Some(arr) = downloads.as_array_mut() else {
+        return 0;
+    };
+    let before = arr.len();
+    arr.retain(|d| match d.get("savePath").and_then(|p| p.as_str()).filter(|s| !s.is_empty()) {
+        Some(save) => std::path::Path::new(save).parent().map(|dir| dir.exists()).unwrap_or(true),
+        None => true,
+    });
+    before - arr.len()
+}
+
 #[tauri::command(async)]
 pub fn downloads_state_load(state: State<'_, AppState>) -> Value {
     let path = state.paths.downloads_state_file();
-    let downloads = std::fs::read_to_string(&path)
+    let mut downloads = std::fs::read_to_string(&path)
         .ok()
         .and_then(|t| serde_json::from_str::<Value>(&t).ok())
         .unwrap_or_else(|| json!([]));
+    let dropped = prune_dead_downloads(&mut downloads);
+    if dropped > 0 {
+        crate::logging::write_line(
+            "info",
+            &format!("downloads_state_load: pruned {dropped} dead download row(s) whose install folder is gone"),
+        );
+    }
     json!({ "ok": true, "downloads": downloads })
 }
 
@@ -1081,5 +1106,52 @@ mod tests {
         assert!(!safe_folder_name("NUL").eq_ignore_ascii_case("NUL"));
         // A longer name that merely starts with a reserved stem is left intact.
         assert_eq!(safe_folder_name("CONSOLE"), "CONSOLE");
+    }
+
+    #[test]
+    fn t_prune_dead_downloads_drops_only_rows_whose_parent_dir_is_gone() {
+        let tmp = tempfile::tempdir().unwrap();
+
+        // Live row: its install folder actually exists on disk, so it survives.
+        let live_dir = tmp.path().join("GameA");
+        std::fs::create_dir_all(&live_dir).unwrap();
+        let live_save = live_dir.join("file.zip");
+        let live_save = live_save.to_str().unwrap();
+
+        // Dead row: the parent "Gone" was never created, so its parent dir is
+        // missing and the row can never resume — it must be pruned.
+        let dead_save = tmp.path().join("Gone").join("file.zip");
+        let dead_save = dead_save.to_str().unwrap();
+
+        let mut downloads = json!([
+            { "appid": "steam-1", "savePath": live_save },
+            { "appid": "steam-2", "savePath": dead_save },
+            { "appid": "steam-3" },
+            { "appid": "steam-4", "savePath": "" },
+        ]);
+
+        let dropped = prune_dead_downloads(&mut downloads);
+        assert_eq!(dropped, 1, "only the row with a missing parent dir is pruned");
+
+        // Order is preserved and exactly the three live rows remain.
+        let kept: Vec<&str> = downloads
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|d| d["appid"].as_str().unwrap())
+            .collect();
+        assert_eq!(kept, ["steam-1", "steam-3", "steam-4"]);
+    }
+
+    #[test]
+    fn t_prune_dead_downloads_leaves_non_array_untouched() {
+        let mut obj = json!({ "downloads": "not-an-array" });
+        let before = obj.clone();
+        assert_eq!(prune_dead_downloads(&mut obj), 0);
+        assert_eq!(obj, before, "a non-array value is returned unchanged");
+
+        let mut null = json!(null);
+        assert_eq!(prune_dead_downloads(&mut null), 0);
+        assert_eq!(null, json!(null));
     }
 }

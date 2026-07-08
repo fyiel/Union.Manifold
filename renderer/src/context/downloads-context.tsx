@@ -165,6 +165,7 @@ type DownloadsActionsValue = {
   startGameDownload: (game: Game, preferredHost?: PreferredDownloadHost, config?: DownloadConfig) => Promise<void>
   cancelDownload: (downloadId: string) => Promise<void>
   cancelGroup: (appid: string) => Promise<void>
+  discardGroup: (appid: string) => Promise<void>
   pauseGroup: (appid: string) => Promise<void>
   pauseAll: () => Promise<void>
   resumeDownload: (downloadId: string) => Promise<void>
@@ -1556,6 +1557,22 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
     )
   }, [])
 
+  // Fully remove a group from the queue (the Completed section's remove
+  // control). Unlike cancelGroup — which preserves an install_ready archive so
+  // the user can still finish installing — this discards the download outright:
+  // it drops the rows (the debounced persist then rewrites downloads-state.json
+  // without them, so a stuck install_ready can't resurrect on the next launch)
+  // and cleans any leftover installing folder. deleteInstalling is a no-op on a
+  // fully installed game (the backend keeps "installed" dirs), so an installed
+  // title stays in the Library; this only clears its download-list entry.
+  const discardGroup = useCallback(async (appid: string) => {
+    if (!appid) return
+    const next = downloadsRef.current.filter((item) => item.appid !== appid)
+    downloadsRef.current = next
+    setDownloads(next)
+    try { await window.ucDownloads?.deleteInstalling?.(appid) } catch { /* ignore */ }
+  }, [])
+
   const pauseGroup = useCallback(
     async (appid: string) => {
       if (!appid) return
@@ -1993,6 +2010,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
       startGameDownload,
       cancelDownload,
       cancelGroup,
+      discardGroup,
       pauseGroup,
       pauseAll,
       resumeDownload,
@@ -2003,7 +2021,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
       clearByAppid,
       clearCompleted,
     }),
-    [startGameDownload, cancelDownload, cancelGroup, pauseGroup, pauseAll, resumeDownload, resumeGroup, resumeAll, upsertDownload, openPath, clearByAppid, clearCompleted]
+    [startGameDownload, cancelDownload, cancelGroup, discardGroup, pauseGroup, pauseAll, resumeDownload, resumeGroup, resumeAll, upsertDownload, openPath, clearByAppid, clearCompleted]
   )
 
   const dataValue = useMemo(() => ({ downloads }), [downloads])

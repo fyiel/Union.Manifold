@@ -4,6 +4,19 @@ All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 The app shows its version as 1.0.0b (beta). 1.0.1 is the first packaged release.
 
+## 2.20.1
+
+### Fixed
+
+- a download stuck in the "ready to install" state — e.g. an old DataVaults link
+  that returned only a few bytes before the 2.19.3 in-app resolver landed —
+  could never be removed: it had no real archive on disk, yet was restored from
+  downloads-state.json on every launch and the Downloads "Completed" section
+  offered only Install/Play. now the loader prunes any persisted download whose
+  install folder is gone (dead rows can't resurrect), so these clear themselves
+  on the next launch; the "Completed" section also gained a remove control for
+  discarding one by hand. a fully installed game's files are never touched
+
 ## 2.20.0
 
 AstralGames joins the source lineup.
