@@ -110,8 +110,9 @@ pub fn run() {
             logging::init(paths.log_file());
             let settings = Arc::new(SettingsStore::load(paths.settings_file()));
             slipgate::init(settings.clone());
+            crate::http::set_proxy(settings.get_string("proxyUrl"));
             let cacert = app.path().resource_dir().ok().map(|d| d.join("cacert.pem"));
-            let aria2 = Arc::new(Aria2Manager::new(cacert));
+            let aria2 = Arc::new(Aria2Manager::new(cacert, settings.get_string("proxyUrl")));
             let disabled_sources: Vec<String> = settings
                 .get("disabledSources")
                 .as_array()
@@ -205,6 +206,7 @@ pub fn run() {
             sources::sources_protondb,
             sources::sources_tags,
             sources::sources_capabilities,
+            sources::sources_refresh,
             downloads::download_start,
             downloads::download_pause,
             downloads::download_resume,

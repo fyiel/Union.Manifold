@@ -534,6 +534,7 @@ declare global {
       resolve: (sourceId: string, option: SourceDownloadOption) => Promise<{ ok: boolean; result: SourceResolveResult; error?: string }>
       steamArt: (appid: number, name?: string) => Promise<{ ok: boolean; art: { header: string; background: string; cover?: string } }>
       protondb: (appid: number) => Promise<{ ok: boolean; data: ProtonDbSummary | null }>
+      refresh: () => Promise<{ ok: boolean; error?: string }>
       steamMeta: (appid: number) => Promise<{ ok: boolean; meta: SteamMeta }>
       query: (params: SourceQueryParams, reqId?: number) => Promise<SourceQueryResult>
       onBrowsePartial: (cb: (payload: { reqId: number; games: UnifiedSourceGame[]; total: number; doneSources: string[] }) => void) => () => void

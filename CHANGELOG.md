@@ -4,6 +4,22 @@ All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 The app shows its version as 1.0.0b (beta). 1.0.1 is the first packaged release.
 
+## 2.24.0
+
+### Added
+
+- RexaGames survives Cloudflare's datacenter/VPN block. hydralinks.cloud (its
+  catalogue source) challenges flagged IPs with a gate no plain client clears,
+  so when the direct fetch is blocked the app now pulls the catalogue through a
+  configured Slipgate (0.5.0+), which clears it with a real browser over a
+  residential proxy. the catalogue is cached on disk for 7 days so that slow
+  path runs at most weekly, and Settings > Download Sources gains a "Refresh
+  catalogs now" button to force it sooner. verified end-to-end: the ~3k-title
+  RexaGames catalogue loads through Slipgate
+- Settings > Downloads gains a "Proxy (all connections)" field: route every
+  outbound connection — catalogues, host resolvers, images, mods and the aria2
+  download engine — through an HTTP/HTTPS proxy, applied live without a restart
+
 ## 2.23.1
 
 ### Fixed

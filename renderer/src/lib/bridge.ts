@@ -194,6 +194,7 @@ export function installBridge(): void {
     resolve: (sourceId: string, option: any) => call("sources_resolve", { sourceId, option }),
     steamArt: (appid: number, name?: string) => call("sources_steam_art", { appid, name }),
     protondb: (appid: number) => call("sources_protondb", { appid }),
+    refresh: () => call("sources_refresh"),
     steamMeta: (appid: number) => call("sources_steam_meta", { appid }),
     query: (params: any, reqId?: number) => call("sources_query", { params, reqId }),
     onBrowsePartial: (cb: Cb) => on("uc:browse-partial", cb),

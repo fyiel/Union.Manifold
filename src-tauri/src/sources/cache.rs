@@ -41,14 +41,14 @@ impl<T: Clone> Cached<T> {
 
 pub struct KeyedCache<T: Clone> {
     ttl: Duration,
-    cells: std::sync::Mutex<HashMap<String, Arc<Mutex<Option<(Instant, T)>>>>>,
+    cells: parking_lot::Mutex<HashMap<String, Arc<Mutex<Option<(Instant, T)>>>>>,
 }
 
 impl<T: Clone> KeyedCache<T> {
     pub fn new(ttl: Duration) -> Self {
         KeyedCache {
             ttl,
-            cells: std::sync::Mutex::new(HashMap::new()),
+            cells: parking_lot::Mutex::new(HashMap::new()),
         }
     }
 
@@ -58,7 +58,7 @@ impl<T: Clone> KeyedCache<T> {
         Fut: Future<Output = Option<T>>,
     {
         let cell = {
-            let mut map = self.cells.lock().unwrap();
+            let mut map = self.cells.lock();
             if !map.contains_key(key) {
                 let ttl = self.ttl;
                 map.retain(|_, c| match c.try_lock() {
@@ -87,7 +87,7 @@ impl<T: Clone> KeyedCache<T> {
 
     pub async fn peek(&self, key: &str) -> Option<T> {
         let cell = {
-            let map = self.cells.lock().unwrap();
+            let map = self.cells.lock();
             map.get(key).cloned()
         }?;
         let guard = cell.lock().await;
@@ -95,5 +95,11 @@ impl<T: Clone> KeyedCache<T> {
             Some((at, val)) if at.elapsed() < self.ttl => Some(val.clone()),
             _ => None,
         }
+    }
+
+    /// Drop every cached entry so the next access refetches. Used by the Sources
+    /// "refresh" action to make a forced catalogue update visible immediately.
+    pub fn clear(&self) {
+        self.cells.lock().clear();
     }
 }

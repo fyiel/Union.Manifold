@@ -18,6 +18,12 @@ fn path(name: &str) -> Option<PathBuf> {
     DIR.get().map(|d| d.join(name))
 }
 
+/// Absolute path to a named file in the metadata dir, or None before init.
+/// Lets a caller persist a raw blob (not just a keyed map) with its own TTL.
+pub fn file_path(name: &str) -> Option<PathBuf> {
+    path(name)
+}
+
 pub fn load<V: DeserializeOwned>(name: &str) -> HashMap<String, V> {
     path(name)
         .and_then(|p| std::fs::read(&p).ok())
