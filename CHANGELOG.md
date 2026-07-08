@@ -4,6 +4,18 @@ All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 The app shows its version as 1.0.0b (beta). 1.0.1 is the first packaged release.
 
+## 2.20.2
+
+### Fixed
+
+- in-app update on Arch/pacman froze forever at "installing update…
+  (authentication may be required)" when no graphical polkit agent was running:
+  pkexec fell back to a terminal password prompt on the inherited stdin that the
+  windowed app could neither show nor answer. the updater now runs pkexec with
+  stdin closed, so it uses the graphical polkit prompt when an agent is present
+  or fails fast with the exact manual command (`sudo pacman -U <file>`) when one
+  isn't — all behind a timeout so it can never wedge the app again
+
 ## 2.20.1
 
 ### Fixed
