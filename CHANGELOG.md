@@ -4,6 +4,17 @@ All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 The app shows its version as 1.0.0b (beta). 1.0.1 is the first packaged release.
 
+## 2.19.2
+
+### Fixed
+
+- Noita mods (both NexusMods and Steam Workshop) installed and deployed to the
+  wrong place — the app dropped them in the game root, but Noita only loads mods
+  from <game>/mods/<name>/, so nothing showed up in game. Noita mods now stage
+  into mods/<folder>/ (keeping the archive's own folder name, or the mod's name
+  for bare files) so they deploy where Noita reads them. an archive that already
+  ships a mods/ tree is left as-is
+
 ## 2.19.1
 
 ### Fixed
