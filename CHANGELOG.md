@@ -4,6 +4,19 @@ All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 The app shows its version as 1.0.0b (beta). 1.0.1 is the first packaged release.
 
+## 2.23.1
+
+### Fixed
+
+- rexagames could silently show no games and stay blank: when
+  hydralinks.cloud answered the source fetch with a Cloudflare challenge page
+  (it gates flagged/datacenter IPs), the adapter parsed that to an empty
+  catalogue and cached it for the full TTL, so even a later successful fetch
+  stayed empty for ten minutes. a fetch that yields no entries is now treated
+  as a failure — it is not cached, the source is flagged errored instead of
+  quietly empty, and the next browse retries while any previously loaded
+  catalogue is served in the meantime
+
 ## 2.23.0
 
 ### Removed
