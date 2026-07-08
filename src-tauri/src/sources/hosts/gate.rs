@@ -31,6 +31,8 @@ static TABLE: &[(&str, GateHost)] = &[
     ("1fichier.com", gh("1fichier", "wait timer + captcha")),
     ("akirabox.com", gh("akirabox", "js-gated link")),
     ("qiwi.gg", gh("qiwi", "js-gated link")),
+    ("datavaults.co", gh("datavaults", "captcha + wait timer")),
+    ("filekeeper.net", gh("filekeeper", "js-gated link")),
     ("fileq.net", gh("fileq", "browser-only page")),
     ("mocha.my", gh("mocha", "browser-only page")),
     ("zerofs.link", gh("zerofs", "browser-only page")),
