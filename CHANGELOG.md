@@ -8,12 +8,16 @@ The app shows its version as 1.0.0b (beta). 1.0.1 is the first packaged release.
 
 ### Fixed
 
-- datavaults, vikingfile and akirabox now download in-app instead of opening in
-  the browser. these hosts sit behind a captcha, Cloudflare Turnstile or a
-  Cloudflare challenge, so they resolve through your Slipgate instance (which
-  drives a real browser via FlareSolverr): the app was sending the hoster link
-  in the wrong request field, so Slipgate never got a page to resolve. requires
-  Slipgate 0.4.0+, which ships recipes for these three
+- datavaults and akirabox now download in-app instead of opening in the browser.
+  they sit behind a captcha/countdown and a Cloudflare challenge, so they resolve
+  through your Slipgate instance (which drives a real browser via FlareSolverr):
+  the app had been sending the hoster link in the wrong request field, so
+  Slipgate never got a page to resolve. requires Slipgate 0.4.1+, which ships the
+  recipes. vikingfile is gated by an embedded Cloudflare Turnstile widget that
+  FlareSolverr cannot solve, so it stays browser-only for now (needs a
+  Turnstile-solving service)
+- Settings > Mods: the Slipgate resolver now shows an "across settings" marker —
+  one resolver powers both mod and file-host downloads, set once
 - RexaGames browse cards showed the site's landscape header stretched into the
   portrait cover slot, so every tile looked zoomed. cards now resolve a Steam
   appid from the title and use Steam's portrait capsule; titles Steam does not

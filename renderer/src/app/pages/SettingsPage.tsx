@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
-import { Terminal, FolderOpen, Palette, Library as LibraryIcon, Plus, X, Pencil, Puzzle, Eye, EyeOff } from "lucide-react"
+import { Terminal, FolderOpen, Palette, Library as LibraryIcon, Plus, X, Pencil, Puzzle, Eye, EyeOff, ArrowLeftRight } from "lucide-react"
 import { PRESET_THEMES } from "@/lib/themes/presets"
 import type { ThemeDef } from "@/lib/themes/types"
 import { useActiveTheme } from "@/hooks/use-active-theme"
@@ -804,7 +804,16 @@ function ModsTab() {
       </div>
 
       <div style={{ padding: "16px 0", borderBottom: "1px solid color-mix(in srgb, var(--mf-t0) 5%, transparent)" }}>
-        <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--mf-t1)" }}>Slipgate resolver (self-hosted)</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--mf-t1)" }}>Slipgate resolver (self-hosted)</div>
+          <span
+            title="Shared across settings — one Slipgate resolver powers both Mods (free NexusMods) and file-host downloads (datavaults, vikingfile, akirabox, …). Set it once here and it applies everywhere."
+            style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "2px 8px", borderRadius: 999, border: "1px solid var(--mf-line-2)", background: "transparent", color: "var(--mf-t4)", cursor: "help", fontFamily: MONO, fontSize: 9.5, textTransform: "uppercase", letterSpacing: "0.08em", userSelect: "none" }}
+          >
+            <ArrowLeftRight size={11} strokeWidth={1.8} />
+            across settings
+          </span>
+        </div>
         <div style={{ fontFamily: MONO, fontSize: 11, color: "var(--mf-t4)", marginTop: 3, lineHeight: 1.5 }}>
           Point this at your own Slipgate instance to resolve captcha- and browser-gated downloads in-app: free NexusMods files plus file hosts like filecrypt, vikingfile, megadb, 1fichier, qiwi and akirabox. It clears the wall with a real browser and returns a direct link; Nexus downloads use your nexusmods_session cookie (below) to log in. Leave blank to open those links in the browser instead.
         </div>
