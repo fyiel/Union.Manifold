@@ -176,22 +176,28 @@ pub(crate) async fn run_workshop_download(
         "+quit",
     ];
     let text = run_steamcmd(&d, &exe, &args, DOWNLOAD_TIMEOUT).await?;
-    let content = d
+    // steamcmd normally writes under its own steamapps/workshop, but on a box
+    // with a real Steam client installed it redirects workshop content into the
+    // system Steam library (~/.local/share/Steam/steamapps/workshop) instead. It
+    // always prints the actual destination, so trust that path first, then fall
+    // back to the path we'd expect under our own steamcmd dir.
+    let computed = d
         .join("steamapps/workshop/content")
         .join(&appid_s)
         .join(&fid_s);
-    if content.is_dir() && text.contains("Success. Downloaded item") {
-        return Ok(content);
+    let downloaded = reported_content_dir(&text)
+        .filter(|p| dir_has_content(p))
+        .or_else(|| dir_has_content(&computed).then(|| computed.clone()));
+    if let Some(p) = downloaded {
+        // Files landed somewhere — that is the authoritative success signal,
+        // regardless of how this steamcmd build phrases the result line.
+        return Ok(p);
     }
     if text.contains("No subscription") || text.contains("Failure") || text.contains("Access Denied") {
         return Err(
             "This item requires a Steam account that owns this game — anonymous SteamCMD download was refused"
                 .to_string(),
         );
-    }
-    if content.is_dir() {
-        // Some steamcmd builds phrase success differently; trust the files.
-        return Ok(content);
     }
     let tail: Vec<&str> = text
         .lines()
@@ -201,4 +207,38 @@ pub(crate) async fn run_workshop_download(
         .collect();
     let tail: Vec<&str> = tail.into_iter().rev().collect();
     Err(format!("steamcmd download failed: {}", tail.join(" | ")))
+}
+
+/// steamcmd prints `Downloaded item <id> to "<path>" (<n> bytes)`; pull the
+/// quoted destination out so we read the files wherever steamcmd actually put
+/// them (its own dir, or a system Steam library it redirected into).
+fn reported_content_dir(text: &str) -> Option<PathBuf> {
+    let after = &text[text.find("Downloaded item")?..];
+    let open = after.find('"')? + 1;
+    let close = after[open..].find('"')? + open;
+    let path = after[open..close].trim();
+    (!path.is_empty()).then(|| PathBuf::from(path))
+}
+
+/// A downloaded item dir with at least one entry. Guards against treating an
+/// empty dir left by a prior failed run as success.
+fn dir_has_content(p: &Path) -> bool {
+    std::fs::read_dir(p).map(|mut it| it.next().is_some()).unwrap_or(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_reported_path_with_ansi() {
+        let line = "\u{1b}[0mDownloading item 3440115864 ...\u{1b}[0m | \u{1b}[0mSuccess. Downloaded item 3440115864 to \"/home/yop/.local/share/Steam/steamapps/workshop/content/881100/3440115864\" (709 bytes) \u{1b}[0mUnloading Steam API...";
+        assert_eq!(
+            reported_content_dir(line),
+            Some(PathBuf::from(
+                "/home/yop/.local/share/Steam/steamapps/workshop/content/881100/3440115864"
+            ))
+        );
+        assert_eq!(reported_content_dir("nothing to see"), None);
+    }
 }
