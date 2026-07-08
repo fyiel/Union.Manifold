@@ -209,6 +209,7 @@ export function SettingsPage() {
                     </div>
                   )}
                 </div>
+                <ProxyRow />
                 <Row title="Max parallel downloads" desc="How many downloads run at once, the rest wait in the queue">
                   <select className="uc-select" value={maxConcurrent} onChange={(e) => { const v = Number(e.target.value); setMaxConcurrent(v); try { void window.ucSettings?.set?.("maxConcurrentDownloads", v) } catch {  } }} style={{ height: 36, minWidth: 90, padding: "0 32px 0 13px", borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "var(--mf-panel)", color: "var(--mf-t1)", fontSize: 12.5, cursor: "pointer", WebkitAppearance: "none", appearance: "none" }}>
                     {[1, 2, 3, 4, 5, 6, 7, 8].map((n) => <option key={n} value={n}>{n}</option>)}
@@ -363,10 +364,31 @@ function LibraryTab() {
   )
 }
 
+function ProxyRow() {
+  const [url, setUrl] = useState("")
+  useEffect(() => {
+    let alive = true
+    void (async () => {
+      const v = await window.ucSettings?.get?.("proxyUrl")
+      if (alive && typeof v === "string") setUrl(v)
+    })()
+    return () => { alive = false }
+  }, [])
+  const persist = (v: string) => { try { void window.ucSettings?.set?.("proxyUrl", v.trim() || null) } catch {  } }
+  return (
+    <div style={{ padding: "16px 0", borderBottom: "1px solid color-mix(in srgb, var(--mf-t0) 5%, transparent)" }}>
+      <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--mf-t1)", marginBottom: 4 }}>Proxy (all connections)</div>
+      <div style={{ fontFamily: MONO, fontSize: 11, color: "var(--mf-t4)", marginBottom: 10 }}>Route all of Union.Manifold&apos;s traffic — catalogs, resolvers, images and downloads — through this proxy. Applied live; leave empty for a direct connection.</div>
+      <input value={url} onChange={(e) => setUrl(e.target.value)} onBlur={() => persist(url)} placeholder="http://user:pass@host:port" autoComplete="off" spellCheck={false} style={{ width: "100%", height: 38, padding: "0 13px", borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "var(--mf-panel)", color: "var(--mf-t1)", fontFamily: MONO, fontSize: 12 }} />
+    </div>
+  )
+}
+
 function SourcesTab() {
   const [sources, setSources] = useState<SourceInfo[]>([])
   const [enabled, setEnabled] = useState<Record<string, boolean>>({})
   const [caps, setCaps] = useState<Record<string, SourceCapabilityFlags>>({})
+  const [refreshing, setRefreshing] = useState(false)
 
   useEffect(() => {
     let alive = true
@@ -399,6 +421,12 @@ function SourcesTab() {
     await saveDisabledSources(disabled)
   }
 
+  const refresh = async () => {
+    setRefreshing(true)
+    try { await window.ucSources?.refresh?.() } catch {  }
+    setRefreshing(false)
+  }
+
   const detailFor = (id: string): string => {
     const c = caps[id]
     const bits = [
@@ -429,6 +457,12 @@ function SourcesTab() {
           )
         })}
       </div>
+      <button type="button" className="mf-ghost" disabled={refreshing} onClick={() => void refresh()} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginTop: 12, padding: "11px 14px", borderRadius: 10, border: "1px dashed var(--mf-line-2)", background: "transparent", color: "var(--mf-t3)", fontSize: 12.5, fontWeight: 600, cursor: refreshing ? "default" : "pointer", opacity: refreshing ? 0.6 : 1 }}>
+        {refreshing ? "Refreshing…" : "Refresh catalogs now"}
+      </button>
+      <p style={{ margin: "10px 0 0", fontFamily: MONO, fontSize: 10.5, lineHeight: 1.6, color: "var(--mf-t5)" }}>
+        Forces a fresh catalog pull. RexaGames is cached for 7 days; this refetches it now (via Slipgate if configured).
+      </p>
     </>
   )
 }

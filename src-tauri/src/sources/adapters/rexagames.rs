@@ -5,10 +5,12 @@ use std::time::Duration;
 use regex::Regex;
 use serde::Deserialize;
 use serde_json::Value;
+use tokio::sync::Mutex as AsyncMutex;
 
 use crate::http;
-use crate::sources::cache::Cached;
+use crate::slipgate;
 use crate::sources::hosts;
+use crate::sources::metacache;
 use crate::sources::schema::{
     dedup_key_for, parse_size_to_bytes, to_epoch_ms, DownloadOption, SourceGame,
 };
@@ -62,8 +64,13 @@ struct RawSource {
     downloads: Vec<RawDownload>,
 }
 
-static CATALOG: LazyLock<Cached<Arc<Vec<Entry>>>> =
-    LazyLock::new(|| Cached::new(Duration::from_secs(600)));
+const CATALOG_TTL_SECS: u64 = 7 * 24 * 60 * 60;
+const CACHE_FILE: &str = "rexagames-source.json";
+
+// Parsed catalogue kept in memory for the process; its 7-day lifetime and the
+// force-refresh are driven by the on-disk copy under the metadata dir.
+static MEM: LazyLock<AsyncMutex<Option<Arc<Vec<Entry>>>>> =
+    LazyLock::new(|| AsyncMutex::new(None));
 
 pub fn capabilities() -> Capabilities {
     Capabilities {
@@ -163,22 +170,98 @@ fn parse_source(body: &str) -> Vec<Entry> {
     out
 }
 
-async fn catalogue() -> Option<Arc<Vec<Entry>>> {
-    CATALOG
-        .get_or(|| async {
-            let body = http::get_text(SOURCE_JSON).await.ok()?;
-            let entries = parse_source(&body);
-            if entries.is_empty() {
-                crate::logging::write_line(
-                    "warn",
-                    "rexagames: source fetch yielded no entries (Cloudflare block or empty body)",
-                );
-                None
-            } else {
-                Some(Arc::new(entries))
+fn disk_age_secs(path: &std::path::Path) -> Option<u64> {
+    std::fs::metadata(path)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.elapsed().ok())
+        .map(|d| d.as_secs())
+}
+
+fn parse_from_disk(path: &std::path::Path) -> Option<Arc<Vec<Entry>>> {
+    let entries = parse_source(&std::fs::read_to_string(path).ok()?);
+    if entries.is_empty() {
+        None
+    } else {
+        Some(Arc::new(entries))
+    }
+}
+
+// Fetch the source JSON: directly first (fine on a clean IP), then through a
+// configured Slipgate (FlareSolverr + proxy) when Cloudflare blocks the plain
+// client from this IP. Only a body that parses to a non-empty catalogue counts.
+async fn fetch_source_body() -> Option<String> {
+    if let Ok(body) = http::get_text(SOURCE_JSON).await {
+        if !parse_source(&body).is_empty() {
+            return Some(body);
+        }
+    }
+    if let Some(cfg) = slipgate::cfg() {
+        match slipgate::fetch(&cfg, SOURCE_JSON, Duration::from_secs(150)).await {
+            Ok(body) if !parse_source(&body).is_empty() => return Some(body),
+            Ok(_) => {}
+            Err(e) => {
+                crate::logging::write_line("warn", &format!("rexagames: slipgate fetch failed: {e}"))
             }
-        })
-        .await
+        }
+    }
+    None
+}
+
+// Browse/search/detail all read the catalogue through here. It is cached on disk
+// for 7 days (the fetch is slow when it goes via Slipgate); `force` bypasses the
+// TTL for the Sources "refresh" action. A failed refetch serves the last good
+// copy — in memory, then on disk even if past its TTL — so a transient
+// Cloudflare block never blanks the source.
+async fn catalogue_opt(force: bool) -> Option<Arc<Vec<Entry>>> {
+    let mut mem = MEM.lock().await;
+    let path = metacache::file_path(CACHE_FILE);
+    let fresh = path
+        .as_ref()
+        .and_then(|p| disk_age_secs(p))
+        .map(|age| age < CATALOG_TTL_SECS)
+        .unwrap_or(false);
+
+    if !force && fresh {
+        if let Some(c) = mem.as_ref() {
+            return Some(c.clone());
+        }
+        if let Some(arc) = path.as_ref().and_then(|p| parse_from_disk(p)) {
+            *mem = Some(arc.clone());
+            return Some(arc);
+        }
+    }
+
+    if let Some(body) = fetch_source_body().await {
+        if let Some(p) = &path {
+            let tmp = p.with_extension("json.tmp");
+            if std::fs::write(&tmp, &body).is_ok() {
+                std::fs::rename(&tmp, p).ok();
+            }
+        }
+        let arc = Arc::new(parse_source(&body));
+        *mem = Some(arc.clone());
+        return Some(arc);
+    }
+
+    if let Some(c) = mem.as_ref() {
+        return Some(c.clone());
+    }
+    if let Some(arc) = path.as_ref().and_then(|p| parse_from_disk(p)) {
+        *mem = Some(arc.clone());
+        return Some(arc);
+    }
+    None
+}
+
+async fn catalogue() -> Option<Arc<Vec<Entry>>> {
+    catalogue_opt(false).await
+}
+
+/// Force a refetch from source, bypassing the 7-day disk cache. Backs the
+/// Sources settings "refresh" action.
+pub async fn refresh() -> bool {
+    catalogue_opt(true).await.is_some()
 }
 
 fn entry_to_stub(e: &Entry) -> SourceGame {

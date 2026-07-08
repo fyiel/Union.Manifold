@@ -74,6 +74,12 @@ pub fn setting_set(app: AppHandle, state: State<'_, AppState>, key: String, valu
         let kbps = value.as_u64().unwrap_or(0);
         tauri::async_runtime::spawn(async move { aria2.set_bandwidth_limit(kbps).await });
     }
+    if key == "proxyUrl" {
+        let url = value.as_str().map(|s| s.to_string());
+        crate::http::set_proxy(url.clone());
+        let aria2 = state.downloads.aria2();
+        tauri::async_runtime::spawn(async move { aria2.set_proxy(url).await });
+    }
     app.emit("uc:setting-changed", json!({ "key": key, "value": value }))
         .ok();
     json!({ "ok": true })

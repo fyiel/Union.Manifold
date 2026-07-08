@@ -12,6 +12,7 @@ pub struct Aria2Manager {
     ca_cert: Option<PathBuf>,
     port: AtomicU64,
     secret: String,
+    proxy: Mutex<Option<String>>,
     child: Mutex<Option<Child>>,
     ready: AtomicBool,
     starting: tokio::sync::Mutex<()>,
@@ -36,7 +37,7 @@ fn free_port() -> u16 {
 }
 
 impl Aria2Manager {
-    pub fn new(ca_cert: Option<PathBuf>) -> Self {
+    pub fn new(ca_cert: Option<PathBuf>, proxy: Option<String>) -> Self {
         let secret: String = {
             let bytes: [u8; 16] = rand::thread_rng().gen();
             hex::encode(bytes)
@@ -46,6 +47,7 @@ impl Aria2Manager {
             ca_cert,
             port: AtomicU64::new(0),
             secret,
+            proxy: Mutex::new(proxy.map(|s| s.trim().to_string()).filter(|s| !s.is_empty())),
             child: Mutex::new(None),
             ready: AtomicBool::new(false),
             starting: tokio::sync::Mutex::new(()),
@@ -118,6 +120,9 @@ impl Aria2Manager {
             format!("--stop-with-process={}", std::process::id()),
             format!("--max-overall-download-limit={}", limit_arg(limit_kbps)),
         ];
+        if let Some(p) = self.proxy.lock().clone() {
+            args.push(format!("--all-proxy={p}"));
+        }
         if let Some(ca) = &self.ca_cert {
             if ca.is_file() {
                 args.push("--check-certificate=true".to_string());
@@ -169,6 +174,22 @@ impl Aria2Manager {
         )
         .await
         .ok();
+    }
+
+    // Route downloads through the configured proxy. Applied on the next daemon
+    // launch (spawn reads self.proxy) and pushed live to a running daemon so a
+    // setting change takes effect without a restart.
+    pub async fn set_proxy(&self, url: Option<String>) {
+        let url = url.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+        *self.proxy.lock() = url.clone();
+        if self.is_ready() {
+            self.rpc(
+                "aria2.changeGlobalOption",
+                vec![json!({ "all-proxy": url.unwrap_or_default() })],
+            )
+            .await
+            .ok();
+        }
     }
 
     pub fn stop(&self) {
