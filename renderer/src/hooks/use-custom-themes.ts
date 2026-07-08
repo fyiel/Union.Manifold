@@ -5,15 +5,9 @@ import { validateTheme } from "@/lib/themes/validate"
 const LS_KEY = "uc_custom_themes"
 const EVENT_NAME = "uc_custom_themes_pref"
 
-/** Slot caps. UC+ supporters get a much larger personal theme collection. */
 export const MAX_CUSTOM_THEMES_FREE = 10
 export const MAX_CUSTOM_THEMES_UC_PLUS = 100
 
-/**
- * @deprecated Use {@link getMaxCustomThemes} or the `maxCustomThemes` value
- * returned from {@link useCustomThemes}. Kept as the UC+ cap (not the free cap)
- * so any UI still importing this constant doesn't under-cap UC+ members.
- */
 export const MAX_CUSTOM_THEMES = MAX_CUSTOM_THEMES_UC_PLUS
 
 export function getMaxCustomThemes(isUcPlus: boolean): number {

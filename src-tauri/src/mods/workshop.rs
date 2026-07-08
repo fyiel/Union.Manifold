@@ -1,7 +1,3 @@
-// Steam Workshop provider: browse by scraping the community site (regex per
-// repo style — no scraper crate), details via the keyless
-// GetPublishedFileDetails POST, downloads through the bootstrapped steamcmd.
-
 use std::collections::{HashMap, HashSet};
 use std::sync::LazyLock;
 
@@ -22,11 +18,6 @@ fn workshop_page_url(file_id: &str) -> String {
     format!("https://steamcommunity.com/sharedfiles/filedetails/?id={file_id}")
 }
 
-// ---------------------------------------------------------------------------
-// Detection
-
-/// Store categories probe: category id 30 = "Steam Workshop". None on
-/// transient failure (retry later), Some(false) on a definitive no.
 pub(crate) async fn detect_workshop_support(steam_appid: u64) -> Option<bool> {
     if steam_appid == 0 {
         return Some(false);
@@ -37,7 +28,7 @@ pub(crate) async fn detect_workshop_support(steam_appid: u64) -> Option<bool> {
     let v: Value = http::get_json(&url).await.ok()?;
     let entry = v.get(steam_appid.to_string())?;
     if !entry.get("success").and_then(|s| s.as_bool()).unwrap_or(false) {
-        return Some(false); // definitive: no store page, no workshop
+        return Some(false);
     }
     let has = entry
         .pointer("/data/categories")
@@ -51,9 +42,6 @@ pub(crate) async fn detect_workshop_support(steam_appid: u64) -> Option<bool> {
         .unwrap_or(false);
     Some(has)
 }
-
-// ---------------------------------------------------------------------------
-// Browse (HTML scrape)
 
 static ID_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"filedetails/\?id=(\d+)").unwrap());
@@ -69,8 +57,6 @@ static AUTHOR_RE: LazyLock<Regex> = LazyLock::new(|| {
 fn parse_browse(html: &str) -> Vec<Value> {
     let mut out = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
-    // `class="workshopItem"` (closing quote included) matches only the item
-    // container, never workshopItemTitle / workshopItemPreviewHolder.
     for segment in html.split(r#"class="workshopItem""#).skip(1) {
         let Some(id) = ID_RE.captures(segment).map(|c| c[1].to_string()) else {
             continue;
@@ -98,15 +84,9 @@ fn parse_browse(html: &str) -> Vec<Value> {
     out
 }
 
-// 2026 React/SSR layout: no semantic classes left. Each item is still
-// server-rendered as a filedetails anchor wrapping its preview <img>, whose
-// alt attribute carries the (entity-escaped) title. Author is not present in
-// the new item markup.
 static NEW_ITEM_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"filedetails/\?id=(\d+)"[^>]*>\s*<img[^>]+src="([^"]+)"[^>]*alt="([^"]*)""#).unwrap()
 });
-// The SSR loader data embeds an escaped JSON blob with the query's total:
-// \"workshopNumbers\":{\"total\":56856
 static NEW_TOTAL_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"\\"workshopNumbers\\":\{\\"total\\":(\d+)"#).unwrap()
 });
@@ -136,9 +116,6 @@ fn parse_browse_total(html: &str) -> Option<u64> {
         .and_then(|c| c[1].parse::<u64>().ok())
 }
 
-/// Map the renderer's sort key onto Steam's `browsesort` value. All five are
-/// verified to return HTTP 200 from the community browse endpoint. An unknown
-/// key falls back to trend, which is Steam's own default.
 fn browse_sort(sort: &str) -> &'static str {
     match sort {
         "mostrecent" => "mostrecent",
@@ -149,9 +126,6 @@ fn browse_sort(sort: &str) -> &'static str {
     }
 }
 
-/// Steam's `days` window only affects the trend sort, which ranks by recent
-/// popularity. all is -1 (all time), 7 stays 7, and 28 maps to Steam's 30-day
-/// bucket. Every non-trend sort returns None so the param is omitted.
 fn trend_days(browsesort: &str, period: &str) -> Option<i64> {
     if browsesort != "trend" {
         return None;
@@ -163,8 +137,6 @@ fn trend_days(browsesort: &str, period: &str) -> Option<i64> {
     })
 }
 
-/// Assemble the community browse URL. days is appended only when present (the
-/// trend sort), and the search text is percent-encoded.
 fn browse_url(steam_appid: u64, browsesort: &str, days: Option<i64>, page: u32, query: &str) -> String {
     let days_part = match days {
         Some(d) => format!("&days={d}"),
@@ -190,8 +162,6 @@ pub async fn workshop_browse(
         let page = page.max(1);
         let url = browse_url(steam_appid, browsesort, days, page, &query);
         let html = http::get_text(&url).await.map_err(|e| format!("workshop browse: {e}"))?;
-        // Old markup first (also keeps regional/older rollouts working);
-        // otherwise the React/SSR layout.
         let (items, has_more) = if html.contains(r#"class="workshopItem""#) {
             let items = parse_browse(&html);
             let has_more = items.len() >= PAGE_SIZE;
@@ -209,9 +179,6 @@ pub async fn workshop_browse(
     .await;
     Ok(fold(res))
 }
-
-// ---------------------------------------------------------------------------
-// Details (keyless Web API)
 
 pub(crate) async fn fetch_details(ids: &[String]) -> Result<Vec<Value>, String> {
     if ids.is_empty() {
@@ -251,12 +218,11 @@ pub(crate) async fn fetch_details(ids: &[String]) -> Result<Vec<Value>, String> 
         .iter()
         .filter_map(|d| {
             if d.get("result").and_then(|r| r.as_u64()).unwrap_or(0) != 1 {
-                return None; // hidden/removed/unknown item
+                return None;
             }
             let id = d
                 .get("publishedfileid")
                 .and_then(|v| v.as_str().map(String::from).or_else(|| v.as_u64().map(|n| n.to_string())))?;
-            // file_size arrives as a string in this API.
             let size = d
                 .get("file_size")
                 .and_then(|v| v.as_u64().or_else(|| v.as_str().and_then(|s| s.parse().ok())))
@@ -284,9 +250,6 @@ pub async fn workshop_details(ids: Vec<String>) -> Result<Value, String> {
     Ok(fold(res))
 }
 
-// ---------------------------------------------------------------------------
-// Install
-
 #[tauri::command]
 pub async fn workshop_install(
     app: AppHandle,
@@ -302,7 +265,6 @@ pub async fn workshop_install(
         if steam_appid == 0 {
             return Err("no Steam appid known for this game".to_string());
         }
-        // Remember the appid so future gets skip re-detection.
         {
             let mut cfg = load_config(&state.paths, &appid);
             if cfg.steam_appid != Some(steam_appid) {
@@ -319,8 +281,6 @@ pub async fn workshop_install(
 
 async fn run_workshop_install(app: AppHandle, appid: String, steam_appid: u64, fid: u64) {
     let mod_id = format!("workshop-{fid}");
-    // Details are best-effort: a failed lookup still installs, with a
-    // placeholder name.
     let detail = fetch_details(&[fid.to_string()])
         .await
         .ok()
@@ -347,7 +307,6 @@ async fn workshop_install_inner(
     let state = app.state::<AppState>();
     let mod_id = format!("workshop-{fid}");
 
-    // Covers the (possibly long) first-time steamcmd bootstrap too.
     emit_progress(app, appid, &mod_id, name, "downloading", None, None);
     let content = steamcmd::run_workshop_download(&state.paths, steam_appid, fid).await?;
 
@@ -376,7 +335,6 @@ async fn workshop_install_inner(
         page_url: workshop_page_url(&fid.to_string()),
     };
     finalize_install(app, &spec, &content, false).await?;
-    // The steamcmd copy is redundant once staged; reclaim the space.
     std::fs::remove_dir_all(&content).ok();
     emit_progress(app, appid, &mod_id, name, "done", Some(100), None);
     Ok(())
@@ -434,13 +392,10 @@ mod tests {
     fn browse_parse_survives_junk() {
         assert!(parse_browse("").is_empty());
         assert!(parse_browse("<html><body>no items here</body></html>").is_empty());
-        // An item chunk with no filedetails id is skipped, not mis-parsed.
         let junk = r#"<div class="workshopItem"><div class="workshopItemTitle">orphan</div></div>"#;
         assert!(parse_browse(junk).is_empty());
     }
 
-    // Post-2026 React/SSR layout: obfuscated classes, item = anchor + img,
-    // title only in the img alt, total in an escaped SSR JSON blob.
     const FIXTURE_NEW: &str = r##"
 <div class="jsbOFi7I2qw- Panel">
 <a href="https://steamcommunity.com/sharedfiles/filedetails/?id=3754840387" class="xQ1LsPqGEbw-"><img src="https://images.steamusercontent.com/ugc/18293799384924/?ima=fit&impolicy=Letterbox" alt="Misstall&#x27;s Medicine And Combat Drugs" loading="lazy" class=""/></a>
@@ -471,7 +426,6 @@ mod tests {
 
         assert_eq!(parse_browse_total(FIXTURE_NEW), Some(56856));
         assert_eq!(parse_browse_total("<html>no blob</html>"), None);
-        // Old parser yields nothing on the new markup: routing falls through.
         assert!(parse_browse(FIXTURE_NEW).is_empty());
     }
 
@@ -482,19 +436,15 @@ mod tests {
         assert_eq!(browse_sort("lastupdated"), "lastupdated");
         assert_eq!(browse_sort("subscribers"), "totaluniquesubscribers");
         assert_eq!(browse_sort("toprated"), "toprated");
-        // Unknown sorts fall back to Steam's default trend rather than erroring.
         assert_eq!(browse_sort("bogus"), "trend");
     }
 
     #[test]
     fn days_window_is_trend_only() {
-        // Trend honors the period: all is -1, 7 stays 7, 28 becomes Steam's 30.
         assert_eq!(trend_days("trend", "all"), Some(-1));
         assert_eq!(trend_days("trend", "7"), Some(7));
         assert_eq!(trend_days("trend", "28"), Some(30));
-        // Any unrecognized period on trend means all-time.
         assert_eq!(trend_days("trend", ""), Some(-1));
-        // Non-trend sorts never carry a days window.
         assert_eq!(trend_days("mostrecent", "7"), None);
         assert_eq!(trend_days("totaluniquesubscribers", "28"), None);
         assert_eq!(trend_days("lastupdated", "all"), None);
@@ -502,19 +452,16 @@ mod tests {
 
     #[test]
     fn builds_browse_url() {
-        // Trend with a 7-day window includes &days and url-encodes the query.
         let u = browse_url(294100, "trend", Some(7), 2, "cool mod");
         assert_eq!(
             u,
             "https://steamcommunity.com/workshop/browse/?appid=294100&browsesort=trend&section=readytouseitems&days=7&p=2&searchtext=cool%20mod"
         );
-        // A non-trend sort omits days entirely.
         let n = browse_url(294100, "mostrecent", None, 1, "");
         assert_eq!(
             n,
             "https://steamcommunity.com/workshop/browse/?appid=294100&browsesort=mostrecent&section=readytouseitems&p=1&searchtext="
         );
-        // Trend all-time carries days=-1.
         let a = browse_url(107410, "trend", Some(-1), 1, "");
         assert_eq!(
             a,

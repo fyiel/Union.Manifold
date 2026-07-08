@@ -13,20 +13,9 @@ const INSTALLED: &[&str] = &["installed"];
 const INSTALLING: &[&str] = &["installing", "queued", "paused", "downloaded", "extracting", "failed", "cancelled"];
 
 static SCAN_CACHE: Mutex<Option<(Instant, String, Vec<(PathBuf, Value)>)>> = Mutex::new(None);
-// Serializes the filesystem scan itself so concurrent cache misses (Library
-// activation racing the renderer's 3s reconcile tick) coalesce into a single
-// read_dir pass. SCAN_CACHE is only ever held for short copy-in/copy-out
-// windows; the gate is always acquired first, never while holding SCAN_CACHE.
 static SCAN_GATE: Mutex<()> = Mutex::new(());
-// 10s TTL: every in-app mutation invalidates explicitly (invalidate_scan), so
-// the TTL only bounds staleness from EXTERNAL manifest writes — the download
-// engine writes manifests directly (throttled to ~5s) without invalidating this
-// cache. 10s keeps installing-progress reads acceptably fresh while letting the
-// renderer's 3s reconcile tick hit the cache instead of rescanning every tick.
 const SCAN_TTL: Duration = Duration::from_millis(10_000);
 
-// The primary install dir plus any legacy library roots (games installed by the
-// old UnionCrax.Direct app). Read-through so old installs still show and launch.
 pub(crate) fn scan_roots(state: &AppState) -> Vec<PathBuf> {
     let mut roots = vec![state.download_root()];
     for p in legacy_roots(state) {
@@ -37,10 +26,6 @@ pub(crate) fn scan_roots(state: &AppState) -> Vec<PathBuf> {
     roots
 }
 
-// Legacy roots cost a stat() per configured path plus the home-dir probe on
-// every scan, but legacy install roots do not appear at runtime. Cache the
-// existence checks keyed by the legacyLibraryPaths setting: recompute only if
-// the setting changes, otherwise reuse for the lifetime of the process.
 static LEGACY_ROOTS: Mutex<Option<(Value, Vec<PathBuf>)>> = Mutex::new(None);
 
 fn legacy_roots(state: &AppState) -> Vec<PathBuf> {
@@ -93,10 +78,6 @@ fn load_all_cached(roots: &[PathBuf]) -> Vec<(PathBuf, Value)> {
     if let Some(data) = cached_scan(&key) {
         return data;
     }
-    // Coalesce concurrent misses: one caller scans while the rest block on the
-    // gate, then find the winner's fresh result on the re-check (double-checked
-    // locking). Without this, Library activation and the reconcile tick could
-    // run the full read_dir + parse pass twice in parallel.
     let _scan = SCAN_GATE.lock();
     if let Some(data) = cached_scan(&key) {
         return data;
@@ -127,16 +108,12 @@ fn load_all(roots: &[PathBuf]) -> Vec<(PathBuf, Value)> {
             if let Ok(text) = std::fs::read_to_string(&manifest_path) {
                 if let Ok(mut v) = serde_json::from_str::<Value>(&text) {
                     if let Some(obj) = v.as_object_mut() {
-                        // Legacy manifests carry no installStatus; a folder in an
-                        // installed/ root that has an appid is a completed install.
                         if !obj.contains_key("installStatus") && obj.contains_key("appid") {
                             obj.insert("installStatus".into(), json!("installed"));
                         }
                         obj.entry("installPath").or_insert(json!(dir.to_string_lossy()));
                         obj.insert("folder".into(), json!(dir.to_string_lossy()));
                     }
-                    // Dedup by appid across roots; the primary root is scanned first
-                    // so a re-installed game shadows its legacy copy.
                     if let Some(id) = v.get("appid").and_then(|a| a.as_str()) {
                         if !seen.insert(id.to_string()) {
                             continue;
@@ -178,8 +155,6 @@ pub(crate) fn find_dir(roots: &[PathBuf], appid: &str) -> Option<PathBuf> {
         .map(|(dir, _)| dir)
 }
 
-// Every appid present in any scan root regardless of status. Used by imports
-// to dedupe against both installed and installing entries.
 pub(crate) fn all_appids(roots: &[PathBuf]) -> Vec<String> {
     load_all_cached(roots)
         .into_iter()
@@ -187,9 +162,6 @@ pub(crate) fn all_appids(roots: &[PathBuf]) -> Vec<String> {
         .collect()
 }
 
-// The directory holding the actual game files. Normally the manifest folder
-// itself, but imported entries (imported-exe / steam) are stubs whose manifest
-// points at the real game dir via installPath.
 pub(crate) fn game_files_dir(roots: &[PathBuf], appid: &str) -> Option<PathBuf> {
     let (dir, v) = load_all_cached(roots)
         .into_iter()
@@ -337,9 +309,6 @@ mod tests {
         dir
     }
 
-    // The exact payload shape import_set_steam_appid persists (import.rs:111-114):
-    // top-level steamAppId plus a metadata patch. store_name: None mirrors an id
-    // with no store page (steam::app_name -> None) — the name key is absent.
     fn override_payload(id: u64, store_name: Option<&str>) -> Value {
         let mut metadata = json!({ "image": format!("https://cdn.test/{id}/capsule.jpg"), "steamAppId": id });
         if let Some(name) = store_name {
@@ -360,18 +329,15 @@ mod tests {
         let real = tmp.path().join("SteamLibrary/common/Portal 2");
         std::fs::create_dir_all(&real).unwrap();
 
-        // Imported stub: manifest folder != installPath → resolve to installPath.
         write_stub(&root, "portal-2", &json!({
             "appid": "steam-620",
             "installStatus": "installed",
             "installPath": real.to_string_lossy(),
         }));
-        // Normal install: installPath == manifest folder → unchanged.
         let normal = write_stub(&root, "some-game", &json!({
             "appid": "42",
             "installStatus": "installed",
         }));
-        // Stale installPath that no longer exists → fall back to manifest folder.
         let stale = write_stub(&root, "gone-game", &json!({
             "appid": "local-dead",
             "installStatus": "installed",
@@ -385,10 +351,6 @@ mod tests {
         assert_eq!(game_files_dir(&roots, "missing"), None);
     }
 
-    // Steam appid override (import_set_steam_appid → merge_into_manifest): the
-    // override must replace the FULL persisted identity — top-level steamAppId
-    // AND the stale enqueue-time metadata.steamAppId — while leaving every
-    // sibling field (original name, paths, status, type, appid) untouched.
     #[test]
     fn steam_override_merge_persists_identity_and_preserves_siblings() {
         let tmp = tempfile::tempdir().unwrap();
@@ -401,8 +363,6 @@ mod tests {
             "exePath": "/games/Card Corner/CardCorner.exe",
             "updatedAt": 1_000,
             "metadata": {
-                // Stale stamp from a wrong auto-match at enqueue time — the exact
-                // field that used to resurrect the old game after an override.
                 "steamAppId": 111,
                 "image": "https://cdn.test/111/capsule.jpg",
                 "name": "Card Corner (wrong)",
@@ -415,25 +375,20 @@ mod tests {
         assert!(merge_into_manifest(&roots, "local-0011223344556677", &override_payload(620, Some("Card Corner"))));
 
         let m = read_manifest(&dir);
-        // New identity, persisted as JSON numbers (as_u64 fails on a string).
         assert_eq!(m["steamAppId"].as_u64(), Some(620));
         assert_eq!(m["metadata"]["steamAppId"].as_u64(), Some(620));
         assert_eq!(m["metadata"]["name"], json!("Card Corner"));
         assert_eq!(m["metadata"]["image"], json!("https://cdn.test/620/capsule.jpg"));
-        // Fields the override must never touch.
         assert_eq!(m["appid"], json!("local-0011223344556677"));
         assert_eq!(m["name"], json!("CardCorner"));
         assert_eq!(m["installStatus"], json!("installed"));
         assert_eq!(m["installType"], json!("imported-exe"));
         assert_eq!(m["installPath"], json!("/games/Card Corner"));
         assert_eq!(m["exePath"], json!("/games/Card Corner/CardCorner.exe"));
-        // Deep merge, not replacement: unrelated metadata siblings survive.
         assert_eq!(m["metadata"]["genre"], json!("Puzzle"));
         assert!(m["updatedAt"].as_i64().unwrap() >= before);
     }
 
-    // ok:false contract: an unknown appid must reject the override and leave
-    // every manifest in the root byte-identical — no partial write anywhere.
     #[test]
     fn steam_override_unknown_appid_is_rejected_and_writes_nothing() {
         let tmp = tempfile::tempdir().unwrap();
@@ -456,9 +411,6 @@ mod tests {
         assert_eq!(std::fs::read(b.join(MANIFEST_NAME)).unwrap(), before_b);
     }
 
-    // Re-applying the SAME override (user re-saves the dialog) must be
-    // idempotent: ok:true again and identical logical fields, only updatedAt
-    // may differ.
     #[test]
     fn steam_override_reapplied_is_idempotent() {
         let tmp = tempfile::tempdir().unwrap();
@@ -476,7 +428,6 @@ mod tests {
         assert!(merge_into_manifest(&roots, "steam-1234", &payload));
         let mut second = read_manifest(&dir);
 
-        // Anchor the state so equality can't hold on two equally-wrong files.
         assert_eq!(second["steamAppId"].as_u64(), Some(620));
         assert_eq!(second["metadata"]["steamAppId"].as_u64(), Some(620));
         first.as_object_mut().unwrap().remove("updatedAt");
@@ -484,9 +435,6 @@ mod tests {
         assert_eq!(first, second);
     }
 
-    // No-store-page edge: app_name returns None, so the payload carries no
-    // metadata.name key — an existing (possibly hand-picked) name must survive
-    // while the id and image still switch over.
     #[test]
     fn steam_override_without_store_name_keeps_existing_metadata_name() {
         let tmp = tempfile::tempdir().unwrap();
@@ -510,9 +458,6 @@ mod tests {
         assert_eq!(m["metadata"]["name"], json!("Hand Picked Name"));
     }
 
-    // Legacy/minimal manifests (bare numeric UnionCrax id, no metadata object at
-    // all) must still take the override: the metadata patch lands wholesale
-    // instead of being dropped by the deep-merge branch.
     #[test]
     fn steam_override_creates_metadata_on_entry_without_one() {
         let tmp = tempfile::tempdir().unwrap();
@@ -532,9 +477,6 @@ mod tests {
         assert_eq!(m["name"], json!("Legacy Game"));
     }
 
-    // Durability: a later metadata-only merge (installed_update_metadata — e.g.
-    // a custom-cover import writing only `image`) must not resurrect the stale
-    // id or drop any part of the override.
     #[test]
     fn steam_override_survives_later_metadata_only_update() {
         let tmp = tempfile::tempdir().unwrap();
@@ -546,7 +488,6 @@ mod tests {
 
         let roots = vec![tmp.path().to_path_buf()];
         assert!(merge_into_manifest(&roots, "steam-4321", &override_payload(620, Some("Portal 2"))));
-        // What installed_update_metadata sends for a cover swap (library.rs:284-286).
         assert!(merge_into_manifest(&roots, "steam-4321", &json!({ "metadata": { "image": "uc-custom://abcd" } })));
 
         let m = read_manifest(&dir);

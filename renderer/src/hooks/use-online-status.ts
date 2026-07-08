@@ -45,10 +45,6 @@ export function useConnectivityStatus(): ConnectivityStatus {
   return useSyncExternalStore(subscribe, getConnectivitySnapshot, getConnectivityServerSnapshot)
 }
 
-/**
- * Returns `true` when user is online, `false` when offline.
- * Re-renders automatically when connectivity changes.
- */
 export function useOnlineStatus(): boolean {
   return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot)
 }

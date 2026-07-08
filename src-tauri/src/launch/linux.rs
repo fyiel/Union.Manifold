@@ -65,20 +65,8 @@ fn install_path_for(exe_path: &str) -> String {
     }
 }
 
-// Mod loaders and repack cracks ship a proxy DLL beside the game exe that Wine
-// would otherwise satisfy with its own builtin, so the shipped loader never runs
-// and the game boots unmodded. For BepInEx repacks (GTFO and other IL2CPP
-// titles) that is fatal rather than cosmetic: the offline-server crack is itself
-// a BepInEx plugin, so a loader that never initializes leaves the game hanging
-// forever on the loading screen waiting for a server it can no longer reach.
-// Force every known proxy/injector DLL physically present next to the exe to
-// load native first. `n,b` still falls back to Wine's builtin when the shipped
-// file fails, and games do not ship their own copy of these system DLLs beside
-// the exe, so applying this whenever such a file exists is safe.
 fn proxy_dll_overrides(exe_path: &str) -> Option<String> {
     let dir = std::path::Path::new(exe_path).parent()?;
-    // winhttp is BepInEx 6's Doorstop; winmm/version/dinput8 are the Ultimate
-    // ASI Loader and Online-Fix proxies; the rest are common injector stems.
     const PROXIES: &[&str] =
         &["winhttp", "winmm", "version", "dinput8", "dsound", "dbghelp", "wininet", "xinput1_3"];
     let found: Vec<String> = PROXIES
@@ -146,8 +134,6 @@ pub(crate) fn plan_launch(
     plan_launch_with(cfg, global_mode, global_proton, &GlobalLaunchOpts::default(), download_root, appid, exe_path)
 }
 
-// Wrap the planned command in gamemoderun / mangohud when enabled and installed,
-// innermost mangohud so the pattern matches the usual "gamemoderun mangohud %command%".
 fn apply_wrappers(mut plan: LaunchPlan, globals: &GlobalLaunchOpts) -> LaunchPlan {
     for tool in ["mangohud", "gamemoderun"] {
         let wanted = (tool == "mangohud" && globals.mangohud) || (tool == "gamemoderun" && globals.gamemode);
@@ -165,7 +151,6 @@ fn apply_wrappers(mut plan: LaunchPlan, globals: &GlobalLaunchOpts) -> LaunchPla
 }
 
 fn merge_global_env(envs: &mut Vec<(String, String)>, globals: &GlobalLaunchOpts) {
-    // Per-game env wins; the global list only fills the gaps.
     for (k, v) in &globals.extra_env {
         if !envs.iter().any(|(ek, _)| ek == k) {
             envs.push((k.clone(), v.clone()));
@@ -237,8 +222,6 @@ pub(crate) fn plan_launch_with(
     if use_umu {
         let umu = match umu {
             Some(u) => u,
-            // Only reachable when mode == "umu" (auto requires umu.is_some());
-            // fail loudly instead of silently dropping to bare wine.
             None => return Err("launch mode is 'umu' but umu-run is not installed".to_string()),
         };
         let gameid = cfg.get("umuGameId").and_then(|v| v.as_str()).unwrap_or("0").to_string();
@@ -265,8 +248,6 @@ pub(crate) fn plan_launch_with(
     if mode == "proton" || (mode == "auto" && proton_path.is_some()) {
         let proton = match &proton_path {
             Some(p) => p,
-            // Only reachable when mode == "proton" (auto requires a path); fail
-            // loudly instead of silently dropping to bare wine with no compat env.
             None => return Err("launch mode is 'proton' but no Proton path is configured".to_string()),
         };
         if let Some(steam) = steam_root() {
@@ -318,7 +299,6 @@ fn steam_root() -> Option<String> {
         ".steam/steam",
         ".local/share/Steam",
         ".steam/root",
-        // Flatpak Steam keeps its data under the sandbox home.
         ".var/app/com.valvesoftware.Steam/data/Steam",
     ] {
         let candidate = home.join(rel);
@@ -329,8 +309,6 @@ fn steam_root() -> Option<String> {
     None
 }
 
-// Steam libraries can live on secondary drives; libraryfolders.vdf lists them
-// all. Returns the main root plus every library path it declares.
 fn steam_library_dirs(steam_root: &str) -> Vec<String> {
     let mut dirs = vec![steam_root.to_string()];
     for rel in ["steamapps/libraryfolders.vdf", "config/libraryfolders.vdf"] {
@@ -369,8 +347,6 @@ pub fn linux_detect_proton() -> Value {
     let mut versions = Vec::new();
     if let Some(steam) = steam_root() {
         let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
-        // Official Proton builds live under steamapps/common of EVERY library
-        // folder, including secondary drives from libraryfolders.vdf.
         for lib in steam_library_dirs(&steam) {
             if let Ok(entries) = std::fs::read_dir(Path::new(&lib).join("steamapps/common")) {
                 for entry in entries.flatten() {
@@ -387,7 +363,6 @@ pub fn linux_detect_proton() -> Value {
                 }
             }
         }
-        // Community builds live only under the main root's compatibilitytools.d.
         if let Ok(entries) = std::fs::read_dir(Path::new(&steam).join("compatibilitytools.d")) {
             for entry in entries.flatten() {
                 let name = entry.file_name().to_string_lossy().to_string();
@@ -412,10 +387,6 @@ mod tests {
         std::fs::write(dir.join(name), []).unwrap();
     }
 
-    // GTFO's AnkerGames/SteamRiP repack ships BepInEx (winhttp Doorstop) and the
-    // Ultimate ASI Loader (winmm) beside the exe with no OnlineFix marker file.
-    // Both must be forced native or BepInEx never loads, its local DropServer
-    // plugin never loads, and the game hangs on the loading screen.
     #[test]
     fn bepinex_asi_repack_forces_winhttp_and_winmm_native() {
         let tmp = tempfile::tempdir().unwrap();
@@ -436,8 +407,6 @@ mod tests {
         assert!(proxy_dll_overrides(exe.to_str().unwrap()).is_none());
     }
 
-    // Only the proxy DLLs that actually exist are listed, so an unmodded game
-    // that happens to ship one loader gets exactly that one override.
     #[test]
     fn override_lists_only_present_dlls() {
         let tmp = tempfile::tempdir().unwrap();

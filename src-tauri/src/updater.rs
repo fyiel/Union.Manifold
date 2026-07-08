@@ -42,10 +42,6 @@ pub async fn check_for_updates(app: AppHandle) -> Value {
     }
 }
 
-// The updater plugin has no pacman installer: on an Arch install (our repackaged
-// deb) it would download the .deb, fail `pkexec dpkg -i`, and finally block
-// forever on a terminal `sudo` prompt the windowed app can't show. Detect that
-// install type and drive `pacman -U` ourselves instead.
 #[cfg(target_os = "linux")]
 fn is_pacman_install() -> bool {
     std::env::var_os("APPIMAGE").is_none() && std::path::Path::new("/usr/bin/pacman").exists()
@@ -80,7 +76,6 @@ async fn install_via_pacman(app: &AppHandle, new_version: &str) -> Result<(), St
     while let Some(chunk) = resp.chunk().await.map_err(|e| format!("download failed: {e}"))? {
         file.write_all(&chunk).map_err(|e| format!("write package: {e}"))?;
         received += chunk.len() as u64;
-        // Emit at most every 512 KiB so the event stream stays light.
         if received - last_emit >= 512 * 1024 {
             last_emit = received;
             emit_progress(app, "downloading", received, total);
@@ -90,14 +85,6 @@ async fn install_via_pacman(app: &AppHandle, new_version: &str) -> Result<(), St
     drop(file);
     emit_progress(app, "installing", received, total);
 
-    // pkexec drives the graphical polkit prompt over D-Bus. stdin is closed so
-    // that when NO authentication agent is registered (common on minimal
-    // desktops, or when launched from a shell) pkexec fails fast with exit 127
-    // instead of falling back to a terminal password prompt that blocks the
-    // updater forever — the windowed app can neither show nor answer it, which
-    // is exactly the "installing update… (authentication may be required)"
-    // freeze. kill_on_drop + a timeout are a hard backstop so a stuck prompt can
-    // never wedge the app; --noconfirm because the polkit prompt IS the confirm.
     let child = tokio::process::Command::new("pkexec")
         .arg("pacman")
         .arg("-U")
@@ -135,8 +122,6 @@ async fn install_via_pacman(app: &AppHandle, new_version: &str) -> Result<(), St
     }
     let detail: String = String::from_utf8_lossy(&out.stderr).trim().chars().take(300).collect();
     match out.status.code() {
-        // 126/127: polkit denied, the prompt was dismissed, or no polkit
-        // authentication agent is running to answer it.
         Some(126) | Some(127) => Err(format!(
             "authorization unavailable — is a polkit agent running? install manually: sudo pacman -U {}",
             pkg_path.display()
@@ -202,8 +187,6 @@ pub fn get_version(app: AppHandle) -> String {
     version(&app)
 }
 
-// Startup check behind the autoCheckUpdates setting. Surfaces a desktop
-// notification and an event the About tab picks up, never installs on its own.
 pub async fn notify_if_update_available(app: &AppHandle) {
     let updater = match app.updater() {
         Ok(u) => u,

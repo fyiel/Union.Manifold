@@ -13,14 +13,6 @@ import { GameMenu, LaunchOptionsDialog, EditDetailsDialog, LinuxConfigDialog, Ad
 
 const IS_LINUX = typeof navigator !== "undefined" && /linux/i.test(navigator.userAgent)
 
-// Library, installed games (local manifests via window.ucDownloads), with an
-// "installing" strip fed by the live download queue. Search, filter pills (All /
-// Favorites / Recently played / Updates), a sort cycle, grid/list views, and a
-// Play button per game. The old page's collections / batch-select / uninstall /
-// shortcuts / Linux config are intentionally not here (see the "missing screens"
-// handoff list). Playtime isn't tracked yet, so the playtime column reads as
-// size / last played instead.
-
 type LibGame = {
   appid: string
   name: string
@@ -32,19 +24,14 @@ type LibGame = {
   collections: string[]
   lastPlayedAt?: number
   steamAppId?: number
-  /** Ordered, proxied cover candidates; SmartImage walks them on 404. */
   covers?: string[]
   installType?: string
 }
 
 type LibraryGameMeta = { collections?: string[]; lastPlayedAt?: number }
-// Full resolved game info for a library entry, keyed by install appid and
-// stamped with cachedAt. Persisted so the card cover AND the detail page open
-// instantly across restarts without re-resolving. Entries older than the TTL
-// are treated as a miss and re-resolved.
 type CachedGame = { cachedAt: number; game: UnifiedSourceGame }
 const GAME_CACHE_KEY = "libraryGameCache"
-const GAME_CACHE_TTL_MS = 3 * 60 * 60 * 1000 // 3 hours
+const GAME_CACHE_TTL_MS = 3 * 60 * 60 * 1000
 
 type FilterKey = "All" | "Favorites" | "Recently played" | "Updates"
 const FILTERS: FilterKey[] = ["All", "Favorites", "Recently played", "Updates"]
@@ -67,9 +54,6 @@ function entryToLib(entry: any, meta: Record<string, LibraryGameMeta>): LibGame 
   const appid = String(entry?.appid || m.appid || "")
   if (!appid) return null
   const gm = meta[appid] || {}
-  // Our own installs derive their id from the dedup key, so steam-<digits> IS
-  // the Steam appid even when the manifest predates metadata stamping. It buys
-  // a CDN cover for the card and full art/meta on the detail page.
   const steamAppId =
     typeof entry?.steamAppId === "number" ? entry.steamAppId
     : typeof m.steamAppId === "number" ? m.steamAppId
@@ -77,11 +61,6 @@ function entryToLib(entry: any, meta: Record<string, LibraryGameMeta>): LibGame 
   const stored = m.image && m.image !== "./fallbacks/game-card-3x4.svg" ? m.image : undefined
   const custom = stored && String(stored).startsWith("uc-custom://") ? stored : undefined
   const steamCover = steamAppId ? steamCoverUrl(steamAppId) : undefined
-  // A custom cover always wins. For the rendered card we walk the full Steam art
-  // ladder (portrait -> hero -> header -> capsule) plus the stored scrape, so a
-  // demo or newer title whose library_600x900 404s still shows its header capsule
-  // instead of a blank tile. `image` stays the raw lead for the bg check, detail
-  // seeding, and edit-dialog reuse.
   const image = custom || steamCover || stored
   const covers = gameImageCandidates({ image: custom || stored, steamAppId }, { steamFirst: true })
   return {
@@ -101,21 +80,9 @@ function entryToLib(entry: any, meta: Record<string, LibraryGameMeta>): LibGame 
 }
 
 function InstallingStrip({ installingMeta, installedIds, filter, query }: { installingMeta: Array<{ appid: string; name: string; image?: string; status?: string }>; installedIds: Set<string>; filter: string; query: string }) {
-  // Live download state (real-time) drives the strip so a game shows the moment
-  // it starts downloading, not only once extraction begins. Merged with the
-  // backend installing snapshot for states the live queue may not hold (e.g. a
-  // "downloaded, awaiting extract" item restored after a restart).
-  // Frozen while the tab is hidden: equality claims "unchanged" so the ~5/s
-  // progress flushes never re-render the hidden Library tab. Flipping back to
-  // visible re-renders via the context change, and that render re-reads the
-  // store snapshot, so catch-up is free. The ref keeps even a stale equality
-  // closure reading the CURRENT visibility.
   const visible = useTabVisible()
   const visibleRef = useRef(visible)
   visibleRef.current = visible
-  // Progress is quantized in the selector itself (integer percent, speed to
-  // 0.1 MB/s) so byte-level ticks that wouldn't move the rendered strip
-  // compare equal and re-render nothing.
   const live = useDownloadsSelector(
     (downloads) => downloads.map((d) => ({
       appid: d.appid,
@@ -134,8 +101,6 @@ function InstallingStrip({ installingMeta, installedIds, filter, query }: { inst
     for (const p of live) {
       if (!p.appid) continue
       const cur = byId.get(p.appid)
-      // pct·total ≈ received bytes, so the most-advanced duplicate entry still
-      // wins without carrying raw byte counts through the selector.
       if (!cur || p.pct * p.total > cur.pct * cur.total) byId.set(p.appid, { name: p.name, pct: p.pct, total: p.total, status: String(p.status), speed: p.speed, extract: p.extract })
     }
     const metaById = new Map(installingMeta.map((g) => [g.appid, g]))
@@ -201,8 +166,6 @@ export function LibraryPage() {
   const [loading, setLoading] = useState(true)
   const gameCacheRef = useRef<Record<string, CachedGame>>({})
 
-  // Card action menu + dialog targets. menu carries the anchor rect so it can
-  // open beside the cog and flip when it would overflow.
   const [menu, setMenu] = useState<{ game: MenuGame; anchor: DOMRect } | null>(null)
   const [launchFor, setLaunchFor] = useState<{ appid: string; name: string } | null>(null)
   const [editFor, setEditFor] = useState<MenuGame | null>(null)
@@ -211,28 +174,26 @@ export function LibraryPage() {
 
   const [query, setQuery] = useState("")
   const [filter, setFilter] = useState<FilterKey>("All")
-  // View + sort survive restarts, remembering the last choice.
   const [sort, setSortState] = useState<SortMode>(() => {
-    try { const v = localStorage.getItem("uc_library_sort"); if (v === "recent" || v === "a-z" || v === "installed") return v } catch { /* ignore */ }
+    try { const v = localStorage.getItem("uc_library_sort"); if (v === "recent" || v === "a-z" || v === "installed") return v } catch {  }
     return "recent"
   })
   const [view, setViewState] = useState<"grid" | "list">(() => {
-    try { const v = localStorage.getItem("uc_library_view"); if (v === "grid" || v === "list") return v } catch { /* ignore */ }
+    try { const v = localStorage.getItem("uc_library_view"); if (v === "grid" || v === "list") return v } catch {  }
     return "grid"
   })
   const setSort = (v: SortMode | ((prev: SortMode) => SortMode)) => {
     setSortState((prev) => {
       const next = typeof v === "function" ? v(prev) : v
-      try { localStorage.setItem("uc_library_sort", next) } catch { /* ignore */ }
+      try { localStorage.setItem("uc_library_sort", next) } catch {  }
       return next
     })
   }
   const setView = (v: "grid" | "list") => {
     setViewState(v)
-    try { localStorage.setItem("uc_library_view", v) } catch { /* ignore */ }
+    try { localStorage.setItem("uc_library_view", v) } catch {  }
   }
 
-  // Load installed + installing manifests + library meta.
   useEffect(() => {
     let alive = true
     const load = async () => {
@@ -259,9 +220,6 @@ export function LibraryPage() {
           const g = entryToLib(e, m)
           if (!g || seen.has(g.appid)) continue
           seen.add(g.appid)
-          // A fresh cache entry seeds the in-memory remembered game (so detail
-          // opens instantly) and fills any card fields the manifest lacked. No
-          // blank flash, no re-running the search until the entry expires.
           const c = gc[g.appid]
           const fresh = c && c.game && now - (c.cachedAt || 0) < GAME_CACHE_TTL_MS ? c.game : null
           if (fresh) {
@@ -284,9 +242,6 @@ export function LibraryPage() {
       }
     }
     void load()
-    // Multi-part installs fire uc_game_installed once per part; a full load()
-    // costs 2 settings IPCs + both manifest lists + art hydration, so coalesce
-    // bursts to one trailing-edge reload.
     let reloadTimer: number | undefined
     const refresh = () => {
       window.clearTimeout(reloadTimer)
@@ -300,44 +255,24 @@ export function LibraryPage() {
     }
   }, [])
 
-  // Resolve and cache the FULL game info for every library entry whose cache is
-  // missing or older than the TTL. A fresh cache hit is skipped, we never
-  // re-resolve a game we still have. UnionCrax internal-id installs (and the
-  // ORIGINAL UC.Direct's numeric appids) resolve precisely by appid, while
-  // steam-<id> installs fall back to a cross-source title search inside
-  // resolveInstalledGame, title search stays a last resort. Bounded concurrency,
-  // result cached for both the card cover and an instant detail open.
   const enrichTried = useRef<Set<string>>(new Set())
   useEffect(() => {
     const now = Date.now()
     const targets = installed.filter((g) => {
-      // Imported exes with NO steamAppId aren't store games — a title search on
-      // an exe stem would attach a random catalog game. Skip only those; a
-      // local- import that has a steamAppId resolves correctly by that id.
       if (g.appid.startsWith("local-") && g.steamAppId == null) return false
       if (enrichTried.current.has(g.appid)) return false
       const c = gameCacheRef.current[g.appid]
       return !(c && c.game && now - (c.cachedAt || 0) < GAME_CACHE_TTL_MS)
     })
     if (!targets.length) return
-    // Mark up front so StrictMode's double-invoke (and any length change) can't
-    // double-fetch. We deliberately do NOT gate the result on an alive flag: the
-    // component instance survives StrictMode's setup/cleanup/setup so setInstalled
-    // lands, and after a real unmount it is a harmless no-op in React 19. A failed
-    // resolve un-marks the appid so a later load can retry it.
     targets.forEach((g) => enrichTried.current.add(g.appid))
     void (async () => {
       const CONC = 4
       for (let i = 0; i < targets.length; i += CONC) {
-        // Accumulate the batch's results and apply them in ONE setInstalled so
-        // N games cost ceil(N/4) list updates, not N full-list re-renders.
         const resolved = new Map<string, UnifiedSourceGame>()
         await Promise.all(targets.slice(i, i + CONC).map(async (g) => {
           try {
             const full = await resolveInstalledGame(g.appid, g.name, g.steamAppId)
-            // A Steam-id override landed while this resolve was in flight
-            // (onSaved clears the mark): committing now would resurrect the
-            // wrong match in the remembered + persisted caches. Drop it.
             if (!enrichTried.current.has(g.appid)) return
             if (!full) { enrichTried.current.delete(g.appid); return }
             rememberGames([full])
@@ -358,16 +293,12 @@ export function LibraryPage() {
               sizeBytes: x.sizeBytes ?? full.sizeBytes,
             }
           }))
-          // Persist after each batch so a resolved game survives restarts
-          // (within the TTL) for both the card and an instant detail open.
           void window.ucSettings?.set?.(GAME_CACHE_KEY, { ...gameCacheRef.current })
         }
       }
     })()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [installed.length])
 
-  // appid → catalog version, for the update badge/filter.
   const updates = useMemo(() => {
     const byId = new Map(catalog.map((g) => [g.appid, g.version || ""]))
     const set = new Set<string>()
@@ -405,27 +336,18 @@ export function LibraryPage() {
 
   const installedIds = useMemo(() => new Set(installed.map((g) => g.appid)), [installed])
 
-  // Row callbacks are useCallback-stable so the memoized LibCard/LibRow rows
-  // bail out of the re-renders the parent takes for keystrokes and enrichment
-  // ticks (a fresh closure per row per render would defeat React.memo).
   const play = useCallback((g: LibGame) => void requestLaunch({ appid: g.appid, name: g.name }), [requestLaunch])
   const onStop = useCallback((appid: string) => void stopGame(appid), [stopGame])
   const openDetail = useCallback((g: LibGame) => {
-    // Prefer the cached fully-resolved game (seeded from libraryGameCache on load
-    // or a just-finished enrichment) so detail opens with no refetch. Otherwise
-    // hand the route a minimal record it can hydrate from.
     const cached = getRememberedGame(g.appid)
     const game = cached?.fullyResolved
       ? cached
       : ({ dedupKey: g.appid, steamAppId: g.steamAppId ?? null, title: g.name, image: g.image, sizeBytes: g.sizeBytes, sizeText: g.sizeText, genres: [], sources: [] } as unknown as UnifiedSourceGame)
     if (!cached?.fullyResolved) rememberGames([game])
-    // installed:true seeds the detail page so the primary button is "Play" from
-    // the first frame (no Download flash) since the library only holds installs.
     navigate(`/g/${encodeURIComponent(g.appid)}`, { state: { game, installed: true } })
   }, [navigate])
 
   const openMenu = useCallback((g: LibGame, anchorEl: HTMLElement) => setMenu({ game: toMenuGame(g), anchor: anchorEl.getBoundingClientRect() }), [])
-  // Right-click path: anchors the menu at the pointer instead of an element.
   const openRowMenuAt = useCallback((g: LibGame, x: number, y: number) => setMenu({ game: toMenuGame(g), anchor: rectFromPoint(x, y) }), [])
 
   const isFavorite = (appid: string) => (meta[appid]?.collections || []).some((c) => c.toLowerCase() === "favorites")
@@ -456,7 +378,7 @@ export function LibraryPage() {
       }
       if (folder && window.ucDownloads?.findGameSubfolder) folder = (await window.ucDownloads.findGameSubfolder(folder)) || folder
       if (folder) await window.ucDownloads?.openPath?.(folder)
-    } catch { /* ignore */ }
+    } catch {  }
   }
 
   const setExecutable = async (g: LibGame) => {
@@ -464,25 +386,19 @@ export function LibraryPage() {
     await requestSetExecutable({ appid: g.appid, name: g.name }, { currentPath })
   }
 
-  // Re-resolve one game's metadata on demand, bypassing the cache TTL.
   const refreshMetadata = async (g: LibGame) => {
-    if (g.appid.startsWith("local-") && g.steamAppId == null) return // imported exe with no steam id: nothing to resolve
+    if (g.appid.startsWith("local-") && g.steamAppId == null) return
     enrichTried.current.add(g.appid)
     try {
       const full = await resolveInstalledGame(g.appid, g.name, g.steamAppId)
-      // Same stale-commit guard as the enrichment loop: an override during the
-      // resolve cleared the mark, and this result describes the OLD id.
       if (!enrichTried.current.has(g.appid)) return
       if (!full) return
       rememberGames([full])
       rememberGameAs(g.appid, full)
       gameCacheRef.current[g.appid] = { cachedAt: Date.now(), game: full }
       void window.ucSettings?.set?.(GAME_CACHE_KEY, { ...gameCacheRef.current })
-      // Name is identity, not metadata: only fill it when the manifest gave us
-      // nothing (same rule as the enrichment loop), so a search mismatch can't
-      // rename the entry and poison every later title-based resolution.
       setInstalled((prev) => prev.map((x) => x.appid !== g.appid ? x : { ...x, name: (!x.name || x.name === x.appid) ? (full.title || x.name) : x.name, image: full.image || x.image, sizeText: full.sizeText || x.sizeText, sizeBytes: full.sizeBytes ?? x.sizeBytes }))
-    } catch { /* ignore */ }
+    } catch {  }
   }
 
   const deleteGame = async (g: LibGame) => {
@@ -490,7 +406,7 @@ export function LibraryPage() {
     try {
       await window.ucDownloads?.deleteInstalled?.(g.appid)
       await window.ucDownloads?.deleteDesktopShortcut?.(g.name)
-    } catch { /* ignore */ }
+    } catch {  }
   }
 
   const subtitle = [
@@ -501,7 +417,7 @@ export function LibraryPage() {
 
   return (
     <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column" }}>
-      {/* header */}
+      {}
       <header style={{ flexShrink: 0, padding: "26px 36px 0" }}>
         <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", marginBottom: 20 }}>
           <div>
@@ -551,7 +467,7 @@ export function LibraryPage() {
         </div>
       </header>
 
-      {/* scroller */}
+      {}
       <div className="mf-scroll" style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "22px 36px 40px" }}>
         <InstallingStrip installingMeta={installingMeta} installedIds={installedIds} filter={filter} query={query} />
 
@@ -602,7 +518,6 @@ export function LibraryPage() {
             onToggleFavorite: () => toggleFavorite(menu.game.appid),
             onDelete: () => { const g = installed.find((x) => x.appid === menu.game.appid); if (g) void deleteGame(g) },
             onSetSteamId: () => { const g = installed.find((x) => x.appid === menu.game.appid); setSteamIdFor({ appid: menu.game.appid, name: menu.game.name, current: g?.steamAppId }) },
-            // Library only lists installed games, so the mods entry is always offered here.
             onMods: () => navigate(`/g/${encodeURIComponent(menu.game.appid)}/mods`, { state: { game: menu.game } }),
           }}
           onClose={() => setMenu(null)}
@@ -626,22 +541,12 @@ export function LibraryPage() {
           onClose={() => setSteamIdFor(null)}
           onSaved={async (id) => {
             const appid = steamIdFor.appid
-            // Drop every stale trace of the wrong auto-match: the remembered
-            // record (under BOTH its keys), the enrichment mark (which also
-            // tells an in-flight resolve for this appid to discard its result)
-            // and the persisted resolved-game cache.
             forgetRememberedGame(appid)
             enrichTried.current.delete(appid)
             delete gameCacheRef.current[appid]
             setInstalled((prev) => prev.map((x) => x.appid !== appid ? x : { ...x, steamAppId: id, image: steamCoverUrl(id) }))
-            // AWAIT the cache persist: the reload below re-reads GAME_CACHE_KEY
-            // from settings, and a fire-and-forget set losing that race would
-            // resurrect the wrong game we just evicted.
-            try { await window.ucSettings?.set?.(GAME_CACHE_KEY, { ...gameCacheRef.current }) } catch { /* ignore */ }
-            // Reload from manifests so the card picks up the backend-resolved
-            // real cover + official title (the optimistic steamCoverUrl guess
-            // 404s for some ids).
-            try { window.dispatchEvent(new Event("uc_game_installed")) } catch { /* ignore */ }
+            try { await window.ucSettings?.set?.(GAME_CACHE_KEY, { ...gameCacheRef.current }) } catch {  }
+            try { window.dispatchEvent(new Event("uc_game_installed")) } catch {  }
           }}
         />
       )}
@@ -649,10 +554,6 @@ export function LibraryPage() {
   )
 }
 
-// Build the menu/dialog payload, merging the LibGame with whatever the cached
-// fully-resolved game adds (developer, description, genres, hero) so Edit
-// details opens pre-filled. Module scope: reads only the remembered-game
-// cache, so the parent's menu callbacks can be useCallback([])-stable.
 function toMenuGame(g: LibGame): MenuGame {
   const full = getRememberedGame(g.appid)
   return {
@@ -665,15 +566,10 @@ function toMenuGame(g: LibGame): MenuGame {
     description: full?.description,
     genres: full?.genres,
     heroImage: full?.heroImage,
-    // Imported entries only hold a manifest stub, deleting never touches the
-    // game's real files, so the menu says "Remove from library" instead.
     imported: g.installType === "imported-exe" || g.installType === "steam",
   }
 }
 
-// Shared props for the memoized library rows. `hasUpdate` is a plain boolean
-// (not the updates Set) and every callback is useCallback-stable in the
-// parent, so React.memo bails out unless the game object itself changed.
 type LibRowProps = {
   game: LibGame
   hasUpdate: boolean
@@ -684,8 +580,6 @@ type LibRowProps = {
   onMenu: (g: LibGame, anchorEl: HTMLElement) => void
 }
 
-// One grid card, memoized (same pattern as GameCard) so keystrokes in the
-// filter and enrichment ticks only re-render rows whose game changed.
 const LibCard = memo(function LibCard({ game: g, hasUpdate, onOpen, onContextMenu, onPlay, onStop, onMenu }: LibRowProps) {
   return (
     <div onClick={() => onOpen(g)} onContextMenu={(e) => { e.preventDefault(); onContextMenu(g, e.clientX, e.clientY) }} className="mf-card" style={{ display: "flex", flexDirection: "column", border: "1px solid color-mix(in srgb, var(--mf-t0) 7%, transparent)", borderRadius: 10, overflow: "hidden", background: "var(--mf-panel)", cursor: "pointer", contentVisibility: "auto", containIntrinsicSize: "auto 300px" }}>
@@ -712,7 +606,6 @@ const LibCard = memo(function LibCard({ game: g, hasUpdate, onOpen, onContextMen
   )
 })
 
-// One list row, memoized for the same reason as LibCard.
 const LibRow = memo(function LibRow({ game: g, hasUpdate, onOpen, onContextMenu, onPlay, onStop, onMenu }: LibRowProps) {
   return (
     <div onClick={() => onOpen(g)} onContextMenu={(e) => { e.preventDefault(); onContextMenu(g, e.clientX, e.clientY) }} className="mf-listrow" style={{ display: "grid", gridTemplateColumns: "44px minmax(0,1fr) 150px 120px 140px", gap: 14, alignItems: "center", padding: "8px 14px", borderRadius: 8, cursor: "pointer", contentVisibility: "auto", containIntrinsicSize: "auto 64px" }}>
@@ -735,16 +628,12 @@ const LibRow = memo(function LibRow({ game: g, hasUpdate, onOpen, onContextMenu,
   )
 })
 
-// A zero-size rect at the cursor, so right-click opens the menu at the pointer.
 function rectFromPoint(x: number, y: number): DOMRect {
   return { x, y, left: x, top: y, right: x, bottom: y, width: 0, height: 0, toJSON() { return {} } } as DOMRect
 }
 
 const listHead = { fontFamily: MONO, fontSize: 9.5, letterSpacing: "0.14em", textTransform: "uppercase" as const, color: "var(--mf-t5)" }
 
-// Play/Stop button that reflects live running state. When the game is already
-// running it flips to "Stop" so a second click stops it instead of trying (and
-// failing) to relaunch it.
 function PlayButton({ appid, onPlay, onStop, full }: { appid: string; onPlay: () => void; onStop: () => void; full?: boolean }) {
   const running = useRunningGame(appid)
   return (

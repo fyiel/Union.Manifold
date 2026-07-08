@@ -96,8 +96,6 @@ async fn resolve_steam_app_id(internal_id: &str) -> Option<u64> {
     }
     let url = format!("{ORIGIN}/api/protondb/{}", urlencode(&key));
     let (ok, json) = request_json(&url, "GET", None).await;
-    // A transport error / non-2xx (ok == false) must not poison the persisted
-    // mapping; only cache a result when the request definitively succeeded.
     if !ok {
         return None;
     }
@@ -273,8 +271,6 @@ pub fn capabilities() -> Capabilities {
 }
 
 pub async fn query(params: &QueryParams) -> Option<Vec<SourceGame>> {
-    // None => the catalog fetch hard-failed (no data, not even stale); the
-    // caller flags the source as errored rather than reporting an empty result.
     let catalog = fetch_catalog().await?;
     let games: Vec<SourceGame> = catalog.iter().map(normalize).collect();
     let lowered = params.text.as_deref().unwrap_or("").to_lowercase();

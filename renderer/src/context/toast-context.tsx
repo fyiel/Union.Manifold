@@ -62,17 +62,12 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
         action = durationOrOptions.action
       }
       dispatch({ type: "ADD", toast: { id, message, type, duration, action } })
-      // Remove after duration + 800ms (500ms exit animation + buffer)
       setTimeout(() => dispatch({ type: "REMOVE", id }), duration + 800)
       return id
     },
     []
   )
 
-  // Window-event bridge — lets non-React code (libs / utilities like
-  // copyToClipboard) raise toasts without the consumer having to thread
-  // useToast() through call sites. Listen here so we route through the
-  // same toast() callback as the React API.
   useEffect(() => {
     if (typeof window === "undefined") return
     const onToast = (event: Event) => {

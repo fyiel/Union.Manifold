@@ -26,23 +26,15 @@ struct CachedPool {
     ordered: Vec<schema::UnifiedGame>,
     facets: filters::Facets,
     total: usize,
-    /// True when a source hard-failed while building this pool.
     errored: bool,
 }
 
 static QUERY_POOL: LazyLock<cache::KeyedCache<std::sync::Arc<CachedPool>>> =
     LazyLock::new(|| cache::KeyedCache::new(std::time::Duration::from_secs(90)));
 
-/// The default browse pool — empty query, no filters; the signature
-/// warm_catalog fills and the Browse tab lands on — lives far longer than
-/// ad-hoc searches: sources update rarely, and catalog rows stale by up to
-/// 10 minutes are fine because a game re-resolves on detail view. Keeping
-/// real searches in the 90s pool above preserves their freshness.
 static CATALOG_POOL: LazyLock<cache::KeyedCache<std::sync::Arc<CachedPool>>> =
     LazyLock::new(|| cache::KeyedCache::new(std::time::Duration::from_secs(600)));
 
-/// Pool choice is a pure function of the signature inputs, so a given sig
-/// always lands in the same cache.
 fn pool_for(params: &QueryParams) -> &'static cache::KeyedCache<std::sync::Arc<CachedPool>> {
     let unfiltered = params.text.as_deref().map(|t| t.trim().is_empty()).unwrap_or(true)
         && params.tags.is_empty()
@@ -387,14 +379,8 @@ async fn run_query_stream(
     while let Some((id, games)) = futs.next().await {
         done.push(id);
         match games {
-            // A source that completed with zero games leaves the pool
-            // unchanged: the full-pool clone + re-sort + emit below would
-            // produce a partial identical to the last one, so skip it. The
-            // command's final return still reports every completed source.
             Some(g) if g.is_empty() => continue,
             Some(mut g) => pool.append(&mut g),
-            // A hard failure must still rebuild so `errored` reaches the
-            // cached pool (and the frontend's sources_errored flag).
             None => errored = true,
         }
         let (ordered, facets, total) = filters::finalize_pool(pool.clone(), &p);
@@ -423,8 +409,6 @@ pub fn sources_list(state: State<'_, AppState>) -> Value {
     json!({ "ok": true, "sources": state.sources.list() })
 }
 
-// (async): runs off the main thread — set_enabled + the settings write below
-// hit the disk, same as the download/setting commands marked (async).
 #[tauri::command(async)]
 pub fn sources_set_enabled(state: State<'_, AppState>, id: String, enabled: bool) -> Value {
     state.sources.set_enabled(&id, enabled);

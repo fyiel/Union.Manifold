@@ -53,35 +53,21 @@ type DownloadUpdatePayload = {
   }
 }
 
-/** Per-game Linux/VR configuration stored as gameLinux:${appid} in settings */
 type GameLinuxConfig = {
-  /** Override launch mode for this game: 'auto' | 'native' | 'wine' | 'proton' | 'umu' | 'inherit' */
   launchMode?: 'auto' | 'native' | 'wine' | 'proton' | 'umu' | 'inherit'
-  /** umu-launcher GAMEID for protonfixes (e.g. 'umu-xxxx'); defaults to '0' (generic) */
   umuGameId?: string
-  /** Override Wine binary path for this game */
   winePath?: string
-  /** Override Proton script path for this game */
   protonPath?: string
-  /** Override WINEPREFIX for this game */
   winePrefix?: string
-  /** Override Proton prefix (STEAM_COMPAT_DATA_PATH) for this game */
   protonPrefix?: string
-  /** Per-game extra environment variables (newline-separated KEY=VALUE) */
   extraEnv?: string
-  /** Override VR support for this game: true=force on, false=force off, undefined=use global */
   vrEnabled?: boolean
-  /** Override XR_RUNTIME_JSON for this game */
   vrXrRuntimeJson?: string
-  /** SLSteam Steam App ID for this game */
   slsSteamAppId?: string
-  /** Whether SLSteam is enabled for this game */
   slsSteamEnabled?: boolean
 }
 
 declare global {
-  // ── Multi-source catalog (GameVault fork) ──
-  // A resolvable download for a game on a given source.
   type SourceDownloadOption = {
     label: string
     hostType: string
@@ -92,7 +78,6 @@ declare global {
     sizeText?: string
     resolvable: boolean
   }
-  // One source's record for a game (a unified game has one per contributing site).
   type SourceGame = {
     sourceId: string
     sourceSlug: string
@@ -106,7 +91,6 @@ declare global {
     genres?: string[]
     developer?: string
     releaseDate?: string
-    // sort/filter signals (null when the source doesn't expose them)
     releaseYear?: number | null
     addedAt?: number | null
     updatedAt?: number | null
@@ -117,7 +101,6 @@ declare global {
     nsfw?: boolean
     downloadOptions?: SourceDownloadOption[]
   }
-  // A deduped game merged across sources, sources lists every contributor.
   type UnifiedSourceGame = {
     dedupKey: string
     steamAppId: number | null
@@ -137,12 +120,8 @@ declare global {
     sizeText?: string
     nsfw?: boolean
     sources: SourceGame[]
-    // set by registry.detail() once this game has been cross-source surfaced
-    // (every source that has the title merged in) + Steam-enriched, so the
-    // detail page treats it as complete and serves it from cache without re-hydrating
     fullyResolved?: boolean
   }
-  // What a source can do, drives the filter/sort UI and "unsupported" notices.
   type SourceCapabilityFlags = {
     search?: boolean
     catalog?: boolean
@@ -161,7 +140,6 @@ declare global {
     enabled: boolean
   }
   type SourceSortKey = "popular" | "latest" | "updated" | "title" | "relevance"
-  // Parameters for the unified cross-source query.
   type SourceQueryParams = {
     text?: string
     tags?: string[]
@@ -175,8 +153,6 @@ declare global {
     offset?: number
     limit?: number
     sources?: string[]
-    // round-robin results across sources so no single prolific source dominates
-    // the first page, used for the default (text-less) Browse
     balanced?: boolean
   }
   type SourceFacets = {
@@ -185,7 +161,6 @@ declare global {
     size: { min: number | null; max: number | null }
   }
   type FeatureCoverage = "full" | "partial" | "none"
-  // Per-source + aggregate capability report for the active source set.
   type SourceCapabilityReport = {
     perSource: Array<{ id: string; name: string; enabled: boolean } & SourceCapabilityFlags>
     scope: string[]
@@ -202,7 +177,6 @@ declare global {
     error?: string
     sourcesErrored?: boolean
   }
-  // Result of resolving a download option to an aria2-ready target.
   type SourceResolveResult = {
     resolvable: boolean
     url?: string
@@ -238,7 +212,6 @@ declare global {
     requirements: { minimum: string; recommended: string }
   }
 
-  /** Pre-download storage reservation check result from window.ucStorage.precheck. */
   type StoragePrecheckResult = {
     ok: boolean
     requiredBytes: number
@@ -278,7 +251,6 @@ declare global {
     imported: boolean
   }
 
-  /** One installed mod in a game's mods.json manifest. */
   type ModEntry = {
     id: string
     provider: "nexus" | "workshop" | "thunderstore"
@@ -290,35 +262,27 @@ declare global {
     picture: string | null
     summary: string | null
     enabled: boolean
-    /** Deploy order; higher order wins file conflicts. */
     order: number
     installedAt: number
     sizeBytes: number
     pageUrl: string
   }
 
-  /** Full per-game mod state from mods_game_get. */
   type ModGameState = {
     ok: boolean
     error?: string
     nexusDomain?: string | null
-    /** True when nexusDomain came from auto title-matching (not a user override). */
     nexusDomainAuto?: boolean
     steamAppid?: number | null
     workshopSupported?: boolean
-    /** Thunderstore community identifier bound to this game (null when unmatched). */
     thunderstoreCommunity?: string | null
-    /** True when the Thunderstore community came from auto title-matching. */
     thunderstoreCommunityAuto?: boolean
-    /** True once a Thunderstore community is bound or detected for this game. */
     thunderstoreSupported?: boolean
     deployTarget?: string
-    /** Deploy journal is non-empty. */
     deployed?: boolean
     mods?: ModEntry[]
   }
 
-  /** One browse/search result shared by every mod provider. */
   type BrowseMod = {
     remoteId: string
     name: string
@@ -334,19 +298,16 @@ declare global {
     installed?: boolean
   }
 
-  /** One downloadable file of a Nexus mod. */
   type NexusModFile = {
     fileId: number
     name: string
     version?: string
     sizeBytes?: number
-    /** main | update | optional | misc */
     category?: string
     uploadedAt?: number
     description?: string
   }
 
-  /** One Steam Workshop browse result. */
   type WorkshopBrowseItem = {
     remoteId: string
     name: string
@@ -355,13 +316,11 @@ declare global {
     pageUrl?: string
   }
 
-  /** One Thunderstore community for the override picker. */
   type ThunderstoreCommunity = {
     identifier: string
     name: string
   }
 
-  /** One downloadable version of a Thunderstore package. */
   type ThunderstoreVersion = {
     version: string
     downloads?: number
@@ -376,13 +335,11 @@ declare global {
     modId: string
     name: string
     phase: "downloading" | "extracting" | "installing" | "done" | "error"
-    /** 0-100 or null when indeterminate. */
     progress: number | null
     error?: string
   }
 
   interface Window {
-    // frameless window controls, was declared in the now removed TopBar
     ucWindow?: {
       minimize: () => void
       maximize: () => void
@@ -400,7 +357,6 @@ declare global {
         partTotal?: number
         savePath?: string
         totalBytes?: number
-        /** Per-download request headers (e.g. a Referer a source's host needs). */
         headers?: Record<string, string>
       }) => Promise<{ ok: boolean; queued?: boolean; error?: string }>
       cancel: (downloadId: string) => Promise<{ ok: boolean; status?: DownloadUpdatePayload["status"]; preservedArchive?: boolean; error?: string; downloadId?: string; appid?: string | null }>
@@ -426,7 +382,6 @@ declare global {
       savePersistedState: (downloads: any[]) => Promise<{ ok: boolean; count?: number; error?: string }>
       loadCatalogState: () => Promise<{ ok: boolean; games: any[]; stats: Record<string, { downloads: number; views: number }>; updatedAt: number; gamesUpdatedAt: number; statsUpdatedAt: number; error?: string }>
       saveCatalogState: (payload: { games: any[]; stats: Record<string, { downloads: number; views: number }>; gamesUpdatedAt?: number; statsUpdatedAt?: number }) => Promise<{ ok: boolean; games?: number; stats?: number; updatedAt?: number; gamesUpdatedAt?: number; statsUpdatedAt?: number; error?: string }>
-      // Installed manifests written by the main process. Renderer can read/save installed metadata.
       listInstalled: () => Promise<any[]>
       getInstalled: (appid: string) => Promise<any | null>
       listInstalling: () => Promise<any[]>
@@ -547,10 +502,8 @@ declare global {
       detectProton: () => Promise<{ ok: boolean; versions: Array<{ label: string; path: string }>; autoApplied?: boolean; appliedVersion?: { label: string; path: string }; error?: string }>
       pickPrefixDir: () => Promise<{ ok: boolean; path?: string; cancelled?: boolean; error?: string }>
       pickBinary: () => Promise<{ ok: boolean; path?: string; cancelled?: boolean; error?: string }>
-      // Per-game Linux config
       getGameConfig: (appid: string) => Promise<{ ok: boolean; config: GameLinuxConfig; error?: string }>
       setGameConfig: (appid: string, config: GameLinuxConfig | null) => Promise<{ ok: boolean; error?: string }>
-      // SLSteam
     }
     ucStorage?: {
       precheck: (opts: { targetPath?: string; downloadBytes: number; declaredInstallBytes?: number }) => Promise<StoragePrecheckResult>
@@ -591,7 +544,6 @@ declare global {
       size: () => Promise<{ ok: boolean; bytes: number; error?: string }>
       clear: () => Promise<{ ok: boolean; freed: number; error?: string }>
     }
-    /** Per-game mod management (NexusMods + Steam Workshop + Thunderstore). */
     ucMods?: {
       gameGet?: (appid: string) => Promise<ModGameState>
       gameSet?: (appid: string, config: { nexusDomain?: string | null; deployTarget?: string; thunderstoreCommunity?: string | null }) => Promise<{ ok: boolean; error?: string }>

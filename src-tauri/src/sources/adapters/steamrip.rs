@@ -178,8 +178,6 @@ fn clean_title(rendered: &str) -> (String, String) {
         version = V_STRIP_RE.replace(&g1, "").to_string();
         t = t[..start].trim().to_string();
     }
-    // Scrape titles carry suffixes like "Free Download (Build 123 + Online)"
-    // that the end-anchored version regex can't parse; peel those off too.
     loop {
         let stripped = JUNK_PARENS_RE.replace(&t, "").trim().to_string();
         if stripped == t || stripped.is_empty() {
@@ -215,8 +213,6 @@ fn blurb(content: &str) -> String {
 }
 
 fn find_size(content: &str) -> Option<u64> {
-    // Only accept a size next to a "size" label; a bare "N GB" fallback grabs
-    // system-requirements text like "Memory: 8 GB RAM".
     parse_size_to_bytes(SIZE1_RE.captures(content)?.get(1)?.as_str())
 }
 
@@ -422,9 +418,6 @@ pub async fn query(params: &QueryParams) -> Option<Vec<SourceGame>> {
                 }
                 page += 1;
             }
-            // Some(vec) (even empty) is a definitive result we can cache; None
-            // only when the page-1 fetch hard-failed, so the caller flags the
-            // source as errored instead of caching a false-negative.
             if fetched_ok {
                 Some(games)
             } else {

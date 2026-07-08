@@ -11,15 +11,6 @@ import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 
-// Per-game mod manager: Installed (order/toggle/deploy), Nexus (browse/search/
-// install via API or nxm deep link), Workshop (browse/search/install via
-// steamcmd) and Thunderstore (r2modman-style BepInEx packs with automatic
-// dependency resolution). The three browse tabs share one endless-scroll feed
-// (see useEndlessBrowse) so every provider gets filters plus infinite loading
-// with identical mechanics. Backed 1:1 by window.ucMods; refreshes on the
-// mods:changed event and renders live mods:install-progress rows at the top of
-// the scroller.
-
 type Tab = "installed" | "nexus" | "workshop" | "thunderstore"
 
 const TABS: Array<{ id: Tab; label: string }> = [
@@ -29,8 +20,6 @@ const TABS: Array<{ id: Tab; label: string }> = [
   { id: "thunderstore", label: "Thunderstore" },
 ]
 
-// Sort keys are the raw argument values each backend expects (see the browse
-// filters + thunderstore contracts); labels are the human-facing wording.
 const NEXUS_SORTS = [
   { id: "downloads", label: "Most downloaded" },
   { id: "updated", label: "Recently updated" },
@@ -79,7 +68,6 @@ function fmtBytes(n?: number | null): string {
   return `${(n / 1024 ** i).toFixed(i ? 1 : 0)} ${u[i]}`
 }
 
-// Unix timestamps from both APIs are usually seconds; tolerate milliseconds.
 function fmtDate(ts?: number | null): string {
   if (!ts) return ""
   try { return new Date(ts > 1e12 ? ts : ts * 1000).toLocaleDateString() } catch { return "" }
@@ -95,7 +83,6 @@ function ArrowBtn({ dir, disabled, onClick }: { dir: "up" | "down"; disabled: bo
   )
 }
 
-// One browse/search result card, shared shape for all three providers.
 function BrowseCard({ picture, name, author, metaLine, installed, busy, onInstall }: {
   picture?: string | null
   name: string
@@ -141,12 +128,6 @@ type EndlessBrowse<T> = {
   sentinelRef: (el: HTMLDivElement | null) => void
 }
 
-// Shared endless-scroll feed for every browse tab. fetchPage receives a 0-based
-// page index; callers translate that into the provider's own pagination (Nexus
-// uses offset = page * 24, Workshop and Thunderstore use page + 1). The feed
-// resets and refetches from the top whenever resetKey changes (sort, period,
-// order, query, or the bound domain/appid/community), and de-dups appended
-// results by keyOf so overlapping pages never double up.
 function useEndlessBrowse<T>(config: {
   enabled: boolean
   resetKey: string
@@ -159,8 +140,6 @@ function useEndlessBrowse<T>(config: {
   const [hasMore, setHasMore] = useState(false)
   const [error, setError] = useState("")
 
-  // The config object is fresh every render; stash it so the stable callbacks
-  // below always read the latest fetchPage/keyOf without becoming reactive deps.
   const cfgRef = useRef(config)
   cfgRef.current = config
   const pageRef = useRef(0)
@@ -176,8 +155,6 @@ function useEndlessBrowse<T>(config: {
     busyRef.current = true
     setLoading(true)
     setError("")
-    // Snapshot the reset generation so a reset that fires mid-request discards
-    // this response instead of appending stale rows to the new feed.
     const gen = genRef.current
     const page = pageRef.current
     try {
@@ -204,8 +181,6 @@ function useEndlessBrowse<T>(config: {
     }
   }, [])
 
-  // Reset the feed and pull the first page whenever the query parameters change
-  // or the tab becomes enabled for the first time.
   useEffect(() => {
     genRef.current += 1
     pageRef.current = 0
@@ -215,9 +190,6 @@ function useEndlessBrowse<T>(config: {
     if (enabled) void fetchNext()
   }, [enabled, resetKey, fetchNext])
 
-  // Attach the IntersectionObserver via a callback ref so it re-binds when the
-  // sentinel remounts (for example after switching away from and back to a tab,
-  // which never changes the effect deps and so would otherwise leave it stale).
   const sentinelRef = useCallback((el: HTMLDivElement | null) => {
     observerRef.current?.disconnect()
     observerRef.current = null
@@ -232,10 +204,6 @@ function useEndlessBrowse<T>(config: {
 
   useEffect(() => () => observerRef.current?.disconnect(), [])
 
-  // The observer only fires on transitions, so a first page that never fills the
-  // viewport would stall waiting for a scroll that cannot happen. After each load
-  // settles we keep pulling while the sentinel is still within reach of the
-  // viewport. busyRef guards this against the observer firing concurrently.
   useEffect(() => {
     if (!enabled || !hasMore || loading || busyRef.current) return
     const el = sentinelElRef.current
@@ -248,8 +216,6 @@ function useEndlessBrowse<T>(config: {
   return { items, loading, error, hasMore, sentinelRef }
 }
 
-// Renders the grid, its loading/empty/error states, the scroll sentinel and the
-// subtle end-of-feed marker for any browse tab driven by useEndlessBrowse.
 function BrowseResults<T>({ browse, renderCard, emptyLabel, errorAction }: {
   browse: EndlessBrowse<T>
   renderCard: (item: T) => ReactNode
@@ -319,11 +285,8 @@ export function GameModsPage() {
 
   useEffect(() => { void reload() }, [reload])
 
-  // Any manifest/deploy mutation for this game (install finishing, nxm deep
-  // link, toggle from elsewhere) re-syncs the whole state.
   useEffect(() => window.ucMods?.onChanged?.((d) => { if (d?.appid === appid) void reload() }), [appid, reload])
 
-  // Live install progress rows + terminal toasts.
   const [progress, setProgress] = useState<Map<string, ModInstallProgress>>(new Map())
   useEffect(() => {
     const offProgress = window.ucMods?.onInstallProgress?.((p) => {
@@ -347,7 +310,6 @@ export function GameModsPage() {
   const installedIds = useMemo(() => new Set(mods.map((m) => m.id)), [mods])
   const enabledCount = useMemo(() => mods.filter((m) => m.enabled).length, [mods])
 
-  // ── header chips: nexus domain override + deploy target ──
   const [domainEdit, setDomainEdit] = useState(false)
   const [domainDraft, setDomainDraft] = useState("")
   const startDomainEdit = () => { setDomainDraft(gs?.nexusDomain || ""); setDomainEdit(true) }
@@ -377,7 +339,6 @@ export function GameModsPage() {
     void reload()
   }
 
-  // ── installed tab actions ──
   const toggleMod = async (mod: ModEntry, enabled: boolean) => {
     setGs((s) => (s ? { ...s, mods: (s.mods || []).map((m) => (m.id === mod.id ? { ...m, enabled } : m)) } : s))
     try {
@@ -392,8 +353,6 @@ export function GameModsPage() {
     if (j < 0 || j >= ids.length) return
     const [id] = ids.splice(index, 1)
     ids.splice(j, 0, id)
-    // Optimistic order so the row moves instantly; reorder() redeploys and the
-    // mods:changed refresh confirms it.
     setGs((s) => (s ? { ...s, mods: (s.mods || []).map((m) => ({ ...m, order: ids.indexOf(m.id) })) } : s))
     try {
       const r = await window.ucMods?.reorder?.(appid, ids)
@@ -442,20 +401,15 @@ export function GameModsPage() {
     } catch (err) { toast(String(err), "error") }
   }
 
-  // ── nexus tab ──
   const nexusDomain = gs?.nexusDomain || null
   const [nxSort, setNxSort] = useState<NexusSort>("downloads")
   const [nxOrder, setNxOrder] = useState<"asc" | "desc">("desc")
   const [nxPeriod, setNxPeriod] = useState<Period>("all")
   const [nxQuery, setNxQuery] = useState("")
   const [nxSubmitted, setNxSubmitted] = useState("")
-  // Feeds stay lazy: a tab only starts fetching once it has been opened, then
-  // keeps its results across tab switches (the reset key stays stable).
   const [nxActive, setNxActive] = useState(false)
   useEffect(() => { if (tab === "nexus") setNxActive(true) }, [tab])
 
-  // A submitted query routes through nexus_search (page + 1); otherwise the
-  // filtered browse (offset = page * 24). Both share this single feed.
   const nexusFetch = useCallback(async (page: number): Promise<BrowsePage<BrowseMod>> => {
     if (!nexusDomain) return { ok: false, error: "Nexus is not matched for this game" }
     const q = nxSubmitted.trim()
@@ -473,7 +427,6 @@ export function GameModsPage() {
     fetchPage: nexusFetch,
   })
 
-  // Nexus file picker → install (premium direct, free session-cookie, or nxm).
   const [filePick, setFilePick] = useState<BrowseMod | null>(null)
   const [files, setFiles] = useState<NexusModFile[] | null>(null)
   const [filesError, setFilesError] = useState("")
@@ -499,10 +452,6 @@ export function GameModsPage() {
       if (r.started) {
         toast(`Downloading ${mod.name}…`, "info")
       } else if (r.needsSession) {
-        // Free account, native site-session path. No sessionError means no
-        // cookie is configured yet (nudge toward Settings); a sessionError
-        // means one was present but got rejected (say why). The sanctioned
-        // nxm:// browser flow stays one click away via the toast action.
         const openPage = r.modPageUrl
           ? { label: "Open mod page", onClick: () => void window.ucSystem?.openExternal?.(r.modPageUrl!) }
           : undefined
@@ -511,9 +460,6 @@ export function GameModsPage() {
           : "Free in-app downloads need your Nexus session cookie (Settings → Mods, opt-in). Otherwise use “Mod Manager Download” on the mod page."
         toast(msg, r.sessionError ? "error" : "info", openPage ? { duration: 14000, action: openPage } : 14000)
       } else if (r.needsNxm) {
-        // Free account: either Slipgate is not set (fall back to the website nxm
-        // flow) or the configured Slipgate could not resolve it. Open the mod
-        // page; the nxm:// deep link routes back into the app.
         if (r.modPageUrl) void window.ucSystem?.openExternal?.(r.modPageUrl)
         const base = r.slipgateError
           ? `Slipgate could not resolve this: ${r.slipgateError}. Falling back: click “Mod Manager Download” on the Nexus page.`
@@ -525,7 +471,6 @@ export function GameModsPage() {
     } catch (err) { toast(String(err), "error", 7000) } finally { setInstallingFileId(null) }
   }
 
-  // ── workshop tab ──
   const steamAppid = gs?.steamAppid || null
   const workshopOk = Boolean(steamAppid && gs?.workshopSupported)
   const [wsSort, setWsSort] = useState<WorkshopSort>("trend")
@@ -560,7 +505,6 @@ export function GameModsPage() {
     } catch (err) { toast(String(err), "error", 8000) } finally { setWsBusy(null) }
   }
 
-  // ── thunderstore tab ──
   const tsCommunity = gs?.thunderstoreCommunity || null
   const tsSupported = Boolean(gs?.thunderstoreSupported && tsCommunity)
   const [tsSort, setTsSort] = useState<ThunderstoreSort>("downloads")
@@ -584,7 +528,6 @@ export function GameModsPage() {
     fetchPage: thunderstoreFetch,
   })
 
-  // Community override picker, shown when no community was auto-detected.
   const [tsCommunities, setTsCommunities] = useState<ThunderstoreCommunity[] | null>(null)
   const [tsCommLoading, setTsCommLoading] = useState(false)
   const [tsCommError, setTsCommError] = useState("")
@@ -600,7 +543,6 @@ export function GameModsPage() {
     } catch (err) { setTsCommunities([]); setTsCommError(String(err)) } finally { setTsCommLoading(false) }
   }, [])
 
-  // Fetch the community list once, the first time the tab opens without a match.
   useEffect(() => {
     if (tab === "thunderstore" && !tsSupported && tsCommunities === null && !tsCommLoading) void loadCommunities()
   }, [tab, tsSupported, tsCommunities, tsCommLoading, loadCommunities])
@@ -614,7 +556,6 @@ export function GameModsPage() {
     } catch (err) { toast(String(err), "error") } finally { setTsSaving(false); void reload() }
   }
 
-  // Thunderstore version picker → install (dependencies resolve automatically).
   const [tsVersionPick, setTsVersionPick] = useState<BrowseMod | null>(null)
   const [tsVersions, setTsVersions] = useState<ThunderstoreVersion[] | null>(null)
   const [tsVersionsError, setTsVersionsError] = useState("")
@@ -641,7 +582,6 @@ export function GameModsPage() {
     } catch (err) { toast(String(err), "error", 7000) } finally { setTsInstalling(null) }
   }
 
-  // ── render ──
   const deployTargetLabel = gs?.deployTarget ? gs.deployTarget : "game root"
 
   return (
@@ -665,7 +605,7 @@ export function GameModsPage() {
           </div>
         </div>
 
-        {/* detected sources + deploy config */}
+        {}
         {gs && (
           <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 9, marginTop: 14 }}>
             {domainEdit ? (
@@ -723,7 +663,7 @@ export function GameModsPage() {
           </div>
         )}
 
-        {/* tab rail */}
+        {}
         <div style={{ display: "flex", gap: 2, borderBottom: "1px solid var(--mf-line)", marginTop: 18 }}>
           {TABS.map((t) => {
             const active = tab === t.id
@@ -738,7 +678,7 @@ export function GameModsPage() {
       </header>
 
       <div className="mf-scroll" style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "18px 36px 48px" }}>
-        {/* live install progress */}
+        {}
         {activeProgress.map((p) => (
           <div key={p.modId} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", borderRadius: 10, border: "1px solid var(--mf-line-2)", background: "var(--mf-panel)", marginBottom: 12 }}>
             <Spinner size={13} />
@@ -764,7 +704,7 @@ export function GameModsPage() {
           </CenterState>
         ) : tab === "installed" ? (
           <>
-            {/* actions */}
+            {}
             <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 9, marginBottom: 16 }}>
               <button type="button" className="mf-ghost" style={GHOST_BTN} onClick={() => void openModsFolder()}>
                 <FolderOpen size={13} strokeWidth={1.7} />Open mods folder
@@ -929,7 +869,6 @@ export function GameModsPage() {
             </>
           )
         ) : (
-          /* thunderstore */
           !tsSupported ? (
             <CenterState>
               <Globe size={30} strokeWidth={1.4} color="var(--mf-t6)" />
@@ -998,7 +937,7 @@ export function GameModsPage() {
         )}
       </div>
 
-      {/* uninstall confirm */}
+      {}
       <Dialog open={Boolean(confirmRm)} onOpenChange={(open) => { if (!open && !removing) setConfirmRm(null) }}>
         <DialogContent>
           <DialogHeader>
@@ -1014,7 +953,7 @@ export function GameModsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* nexus file picker */}
+      {}
       <Dialog open={Boolean(filePick)} onOpenChange={(open) => { if (!open && installingFileId == null) setFilePick(null) }}>
         <DialogContent className="sm:max-w-[560px]">
           <DialogHeader>
@@ -1058,7 +997,7 @@ export function GameModsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* thunderstore version picker */}
+      {}
       <Dialog open={Boolean(tsVersionPick)} onOpenChange={(open) => { if (!open && tsInstalling == null) setTsVersionPick(null) }}>
         <DialogContent className="sm:max-w-[560px]">
           <DialogHeader>

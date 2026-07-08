@@ -160,9 +160,6 @@ const SUNSET_COLORS: ThemeColors = {
 }
 
 const OG_UC_COLORS: ThemeColors = {
-  // Purple-leaning palette — UC's original community vibe. Background sits
-  // just shy of black with a violet undercast, primary is a vivid magenta-
-  // leaning purple so buttons/CTAs read as "UC purple" without being neon.
   "background":              "oklch(0.08 0.035 295)",
   "foreground":              "oklch(0.97 0.01 290)",
   "card":                    "oklch(0.14 0.045 295)",

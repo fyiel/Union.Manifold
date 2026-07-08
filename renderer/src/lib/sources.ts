@@ -1,13 +1,7 @@
-// Renderer-side client for the multi-source catalog. Thin typed wrappers over
-// window.ucSources.* (the main-process source-adapter registry), plus helpers to
-// map a UnifiedSourceGame into the app's existing Game shape so current cards
-// render it, and to resolve a download option just-in-time and hand it to the
-// aria2 engine via window.ucDownloads.
-
 import type { Game } from "@/lib/types"
 import { sourceLogger } from "@/lib/logger"
 
-export type { } // ensure module scope
+export type { }
 
 const api = () => (typeof window !== "undefined" ? window.ucSources : undefined)
 
@@ -15,12 +9,6 @@ export function sourcesAvailable(): boolean {
   return Boolean(api())
 }
 
-// Sidebar, BrowsePage, AdvancedSearch/Settings and applySavedSourceSettings all
-// ask for the source list around startup; cache the promise module-wide (same
-// idea as fetchSteamArt's in-flight dedupe below) so they share one IPC.
-// Empty/failed reads are dropped so a later call retries, and the cache is
-// invalidated whenever the enabled set can change: setSourceEnabled here, plus
-// the sources-changed settings event (see onSourcesChanged).
 let _sourcesList: Promise<SourceInfo[]> | null = null
 
 export function listSources(): Promise<SourceInfo[]> {
@@ -39,7 +27,6 @@ export function listSources(): Promise<SourceInfo[]> {
 
 export async function setSourceEnabled(id: string, enabled: boolean): Promise<boolean> {
   const res = await api()?.setEnabled?.(id, enabled)
-  // The cached list's `enabled` flags are stale now; the next caller refetches.
   _sourcesList = null
   return Boolean(res?.ok)
 }
@@ -75,21 +62,11 @@ function normTitle(s: string): string {
   return (s || "").toLowerCase().replace(/[^a-z0-9]+/g, "")
 }
 
-// Resolve a fully-hydrated record for an installed game that shipped with only
-// an appid + title. Library installs use mixed appid schemes (UnionCrax
-// internal id, steam-<steamAppId>, steam-<sourceId>, or local-<hash> for
-// imported exes) so the appid alone isn't a reliable key. A caller-supplied
-// steamAppId (from the manifest — set by auto-match, override, or steam import)
-// is authoritative: it drives the SAME art the card thumbnail uses, so the
-// preview and the detail page never resolve to two different games.
 export async function resolveInstalledGame(appid: string, title: string, knownSteamAppId?: number | null): Promise<UnifiedSourceGame | null> {
-  // Bare numeric appid is a UnionCrax internal id, resolve it directly — but
-  // only when no explicit steamAppId overrides it.
   if (!knownSteamAppId && /^\d+$/.test(appid)) {
     const full = await getSourceDetail([{ sourceId: "unioncrax", sourceSlug: appid }])
     if (full) return full
   }
-  // Explicit steamAppId wins; otherwise steam-<digits> encodes it in the appid.
   const steamAppId = knownSteamAppId ?? (() => {
     const m = /^steam-(\d+)$/.exec(appid)
     return m ? Number(m[1]) : null
@@ -97,10 +74,6 @@ export async function resolveInstalledGame(appid: string, title: string, knownSt
   const q = (title || "").trim()
   const hits = q ? await searchSources(q, 12) : []
   const want = normTitle(q)
-  // With a known steamAppId, ONLY a hit that positively matches it is trusted —
-  // never a same-named hit (a title collision like "Card Corner" would
-  // otherwise be stamped with the right id and masquerade as the game). No id
-  // → the exact-title hit, then the first result.
   const pick = steamAppId
     ? hits.find((h) => h.steamAppId === steamAppId)
     : (hits.find((h) => normTitle(h.title) === want) || hits[0])
@@ -111,9 +84,6 @@ export async function resolveInstalledGame(appid: string, title: string, knownSt
     if (steamAppId && resolved.steamAppId !== steamAppId) return { ...resolved, steamAppId }
     return resolved
   }
-  // No source knows the title (fresh releases fall through search). Build a
-  // steam-backed record so the card and detail page still get art + metadata,
-  // both keyed off the same steamAppId.
   if (steamAppId) {
     return {
       dedupKey: appid,
@@ -140,12 +110,6 @@ const EMPTY_QUERY_RESULT: SourceQueryResult = {
   capabilities: { perSource: [], scope: [], coverage: {}, supports: {} },
 }
 
-// Unified query across sources. Title text, tag filter (single/many, and/or),
-// release-year and install-size ranges, and sort (popular | latest | updated |
-// title | relevance), paginated. Returns the page plus facets (tag counts,
-// year/size ranges) and a capability report. Read `capabilities.coverage` /
-// `capabilities.supports` to announce when a filter or sort isn't supported by
-// every active source.
 export async function querySources(params: SourceQueryParams, reqId?: number): Promise<SourceQueryResult> {
   const res = await api()?.query?.(params, reqId)
   if (!res?.ok) {
@@ -155,17 +119,11 @@ export async function querySources(params: SourceQueryParams, reqId?: number): P
   return res
 }
 
-// The capability matrix for the active (optionally restricted) source set.
 export async function sourceCapabilities(sourceIds?: string[]): Promise<SourceCapabilityReport | null> {
   const res = await api()?.capabilities?.(sourceIds)
   return res?.ok ? res.capabilities : null
 }
 
-// Authoritative Steam art (header/background) by appid, a last-resort cover
-// fallback for titles whose predictable library_*.jpg URLs 404. The in-flight
-// promise is cached per appid so concurrent cards only ask main once, but an
-// empty result (transient failure or genuinely no art) is dropped so a later
-// attempt can retry instead of staying blank for the rest of the session.
 const _steamArt = new Map<number, Promise<string[]>>()
 export function fetchSteamArt(appid?: number | null, name?: string): Promise<string[]> {
   if (!appid) return Promise.resolve([])
@@ -175,8 +133,6 @@ export function fetchSteamArt(appid?: number | null, name?: string): Promise<str
     try {
       const res = await api()?.steamArt?.(appid, name)
       const art = res?.art
-      // `cover` is the base game's portrait capsule for a demo/playtest appid,
-      // whose own appid has no store art; header/background back it up.
       return art ? [art.cover, art.header, art.background].filter((u): u is string => Boolean(u)) : []
     } catch { return [] }
   })()
@@ -185,20 +141,13 @@ export function fetchSteamArt(appid?: number | null, name?: string): Promise<str
   return p
 }
 
-// Every available tag/genre across sources, plus the per-source breakdown.
 export async function sourceTags(): Promise<{ tags: string[]; bySource: Record<string, string[]> }> {
   const res = await api()?.tags?.()
   return res?.ok ? { tags: res.tags, bySource: res.bySource } : { tags: [], bySource: {} }
 }
 
-// ── Source preference ordering ──
-// When a title is provided by several backends, the most-preferred source's
-// link drives the single big Download button and the rest become "other links".
-// The order is user-configurable (Settings, Download Sources), persisted in
-// ucSettings. This is the default. Sources not listed sort after.
 export const SOURCE_PRIORITY = ["unioncrax", "gamebounty", "steamrip", "rexagames"]
 
-// Friendly display names for source ids.
 export const SOURCE_NAMES: Record<string, string> = {
   unioncrax: "UnionCrax",
   gamebounty: "GameBounty",
@@ -209,7 +158,6 @@ export function sourceName(id: string): string {
   return SOURCE_NAMES[id] || id
 }
 
-// Two-letter source badges (UC/GB/SR/RX) used on cards + status chips.
 export const SOURCE_ABBR: Record<string, string> = {
   unioncrax: "UC",
   gamebounty: "GB",
@@ -220,14 +168,10 @@ export function sourceAbbr(id: string): string {
   return SOURCE_ABBR[id] || id.slice(0, 2).toUpperCase()
 }
 
-// Does a source's contribution to a unified game carry an in-app-resolvable
-// download? Drives the "direct" vs "browser" styling on badges.
 export function sourceIsDirect(source: SourceGame): boolean {
   return (source.downloadOptions || []).some((o) => o.resolvable)
 }
 
-// General-purpose "this source resolves in-app" hint for source rows/filters
-// (vs per-game `sourceIsDirect`).
 export const SOURCE_DIRECT: Record<string, boolean> = {
   unioncrax: true,
   steamrip: true,
@@ -241,54 +185,48 @@ export function sourceDirect(id: string): boolean {
 const SOURCE_PRIORITY_KEY = "gv_source_priority"
 const SOURCE_DISABLED_KEY = "gv_source_disabled"
 
-// The user's saved source priority (preferred first), falls back to default.
 export async function loadSourcePriority(): Promise<string[]> {
   try {
     const saved = await window.ucSettings?.get?.(SOURCE_PRIORITY_KEY)
     if (Array.isArray(saved) && saved.length) {
-      // Append any new/unsaved sources at the end so they're never lost.
       const extras = SOURCE_PRIORITY.filter((id) => !saved.includes(id))
       return [...saved.filter((id: unknown): id is string => typeof id === "string"), ...extras]
     }
-  } catch { /* ignore */ }
+  } catch {  }
   return [...SOURCE_PRIORITY]
 }
 
 export async function saveSourcePriority(ids: string[]): Promise<void> {
-  try { await window.ucSettings?.set?.(SOURCE_PRIORITY_KEY, ids) } catch { /* ignore */ }
+  try { await window.ucSettings?.set?.(SOURCE_PRIORITY_KEY, ids) } catch {  }
 }
 
 export async function loadDisabledSources(): Promise<string[]> {
   try {
     const saved = await window.ucSettings?.get?.(SOURCE_DISABLED_KEY)
     if (Array.isArray(saved)) return saved.filter((id: unknown): id is string => typeof id === "string")
-  } catch { /* ignore */ }
+  } catch {  }
   return []
 }
 
 export async function saveDisabledSources(ids: string[]): Promise<void> {
-  try { await window.ucSettings?.set?.(SOURCE_DISABLED_KEY, ids) } catch { /* ignore */ }
+  try { await window.ucSettings?.set?.(SOURCE_DISABLED_KEY, ids) } catch {  }
 }
 
 export function onSourcesChanged(cb: () => void): () => void {
   if (!window.ucSettings?.onChanged) return () => { }
   return window.ucSettings.onChanged((d) => {
     if (d?.key === SOURCE_DISABLED_KEY) {
-      // The enabled set changed (possibly from another window): drop the
-      // cached list before subscribers re-query it.
       _sourcesList = null
       cb()
     }
   })
 }
 
-// Push the persisted enable/disable state into the main registry. Call once at
-// startup (the registry's enabled set is in-memory and resets each launch).
 export async function applySavedSourceSettings(): Promise<void> {
   try {
     const [disabled, all] = await Promise.all([loadDisabledSources(), listSources()])
     await Promise.all(all.map((s) => setSourceEnabled(s.id, !disabled.includes(s.id))))
-  } catch { /* ignore */ }
+  } catch {  }
 }
 
 export function sourceRank(sourceId: string, priority: string[] = SOURCE_PRIORITY): number {
@@ -296,7 +234,6 @@ export function sourceRank(sourceId: string, priority: string[] = SOURCE_PRIORIT
   return i === -1 ? priority.length : i
 }
 
-// Stable-sort a unified game's sources by the given priority (preferred first).
 export function orderSourcesByPreference<T extends { sourceId: string }>(
   sources: T[],
   priority: string[] = SOURCE_PRIORITY
@@ -309,8 +246,6 @@ export function orderSourcesByPreference<T extends { sourceId: string }>(
 
 export type DownloadEntry = { source: SourceGame; option: SourceDownloadOption }
 
-// Flatten a unified game's sources (already priority-ordered) into download
-// entries, resolvable options first within each source.
 export function collectDownloadEntries(orderedSources: SourceGame[]): DownloadEntry[] {
   const entries: DownloadEntry[] = []
   for (const source of orderedSources) {
@@ -322,22 +257,13 @@ export function collectDownloadEntries(orderedSources: SourceGame[]): DownloadEn
   return entries
 }
 
-// The primary download, first in-app-resolvable entry by priority, else the
-// first entry overall (which will open in the browser).
 export function pickPrimaryDownload(entries: DownloadEntry[]): DownloadEntry | null {
   return entries.find((e) => e.option.resolvable) || entries[0] || null
 }
 
-// ── In-session game cache ──
-// Browse/search results are remembered by dedupKey so the detail route can
-// rehydrate a game (and its source stubs) without re-querying every source,
-// and without depending solely on router navigation state.
 const REMEMBERED_MAX = 500
 const _remembered = new Map<string, UnifiedSourceGame>()
 
-// Bounded LRU so a long browsing session can't grow this map without limit.
-// Map preserves insertion order: re-inserting a key moves it to the newest
-// slot, and once over the cap we evict the oldest (least-recently-touched) key.
 function rememberSet(key: string, game: UnifiedSourceGame): void {
   if (_remembered.has(key)) _remembered.delete(key)
   _remembered.set(key, game)
@@ -353,38 +279,26 @@ export function rememberGames(games: UnifiedSourceGame[]): void {
 
 export function getRememberedGame(dedupKey: string): UnifiedSourceGame | undefined {
   const g = _remembered.get(dedupKey)
-  if (g !== undefined) { _remembered.delete(dedupKey); _remembered.set(dedupKey, g) } // bump to newest
+  if (g !== undefined) { _remembered.delete(dedupKey); _remembered.set(dedupKey, g) }
   return g
 }
 
-// Remember a game under an extra key (e.g. an installed manifest's appid, which
-// may differ from the game's real dedupKey) so a later detail open hits cache.
 export function rememberGameAs(key: string, game: UnifiedSourceGame): void {
   if (key) rememberSet(key, game)
 }
 
-// Drop a stale remembered record (e.g. after a manual Steam appid override
-// replaced what the wrong auto-match cached) so detail re-resolves fresh. The
-// same record is stored under TWO keys (its dedupKey via rememberGames and the
-// manifest appid via rememberGameAs); follow the record to its dedupKey so the
-// stale match can't be rehydrated through the other key.
 export function forgetRememberedGame(key: string): void {
   const g = _remembered.get(key)
   _remembered.delete(key)
   if (g?.dedupKey && g.dedupKey !== key) _remembered.delete(g.dedupKey)
 }
 
-// ── Download art cache ──
-// Downloads carry no image of their own, so when we enqueue one we stash the
-// game's cover (keyed by the same appid the download manager uses) for the
-// Downloads page to show. Persisted to settings so a download restored after a
-// relaunch still shows its thumbnail instead of going blank.
 const DOWNLOAD_ART_KEY = "downloadArt"
 const _downloadArt = new Map<string, { image?: string; title?: string }>()
 let _downloadArtHydrated = false
 
 function persistDownloadArt(): void {
-  try { void window.ucSettings?.set?.(DOWNLOAD_ART_KEY, Object.fromEntries(_downloadArt)) } catch { /* ignore */ }
+  try { void window.ucSettings?.set?.(DOWNLOAD_ART_KEY, Object.fromEntries(_downloadArt)) } catch {  }
 }
 
 export function recordDownloadArt(appid: string, image?: string, title?: string): void {
@@ -396,8 +310,6 @@ export function getDownloadArt(appid: string): { image?: string; title?: string 
   return _downloadArt.get(appid)
 }
 
-// Load the persisted art map into memory once (call on the Downloads page mount).
-// Existing in-memory entries win so a freshly-recorded cover isn't clobbered.
 export async function hydrateDownloadArt(): Promise<void> {
   if (_downloadArtHydrated) return
   _downloadArtHydrated = true
@@ -408,23 +320,16 @@ export async function hydrateDownloadArt(): Promise<void> {
         if (!_downloadArt.has(appid) && v && typeof v === "object") _downloadArt.set(appid, v)
       }
     }
-  } catch { /* ignore */ }
+  } catch {  }
 }
-// The appid the download manager keys a game's downloads under (matches the
-// value `startSourceDownload` enqueues with). Lets the detail page watch a
-// game's live download status.
 export function downloadAppidFor(seed: string): string {
   return safeId(seed)
 }
 
-// ── Mapping to the app's Game shape ──
-
-// A stable, route-safe id for a unified game (its dedup key).
 export function unifiedId(game: UnifiedSourceGame): string {
   return game.dedupKey
 }
 
-// Map a unified source game into the renderer's Game so existing UI renders it.
 export function unifiedToGame(game: UnifiedSourceGame): Game {
   return {
     appid: game.dedupKey,
@@ -439,14 +344,11 @@ export function unifiedToGame(game: UnifiedSourceGame): Game {
     sizeBytes: game.sizeBytes,
     version: game.version || "",
     developer: game.developer || "Unknown",
-    // comma-joined source ids, handy for badges ("gamebounty+steamrip")
     source: game.sources.map((s) => s.sourceId).join("+") || "sources",
     store: "",
     dlc: [],
   } as Game
 }
-
-// ── Download wiring ──
 
 export type StartResult =
   | { ok: true; queued: true }
@@ -456,10 +358,6 @@ function safeId(seed: string): string {
   return String(seed || "game").replace(/[^A-Za-z0-9_-]/g, "-").slice(0, 48)
 }
 
-// Resolve a download option for a unified game on a given source and enqueue it
-// with the aria2 engine. Multi-part hosts (e.g. a pixeldrain list) enqueue each
-// file as a part. Unresolvable hosts return { ok:false, openUrl } so the UI can
-// offer "open in browser".
 export async function startSourceDownload(
   game: UnifiedSourceGame,
   sourceId: string,
@@ -488,10 +386,6 @@ export async function startSourceDownload(
     return { ok: false, openUrl: resolved.openUrl || option.pageUrl, reason: "no file url" }
   }
 
-  // Stamp the game's metadata into the install manifest BEFORE the engine's
-  // first write. Without this the library has nothing offline (no cover, size
-  // or version) and every card depends on a live cross-source search working.
-  // The engine merges manifests, so this survives its status/snapshot writes.
   try {
     await window.ucDownloads?.saveInstalledMetadata?.(appid, {
       name: game.title,
@@ -505,7 +399,7 @@ export async function startSourceDownload(
       genres: game.genres?.length ? game.genres : undefined,
       developer: game.developer || undefined,
     })
-  } catch { /* metadata is best effort, the download must still start */ }
+  } catch {  }
 
   const partTotal = files.length
   let anyQueued = false

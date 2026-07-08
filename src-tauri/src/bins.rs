@@ -12,9 +12,6 @@ pub fn resolve_sidecar(name: &str) -> Option<PathBuf> {
             if direct.is_file() {
                 return Some(direct);
             }
-            // arch package layout: exe in /usr/bin, sidecars tucked into
-            // /usr/lib/Union.Manifold so they never collide with the system
-            // aria2/p7zip packages
             let libdir = dir.join("../lib/Union.Manifold").join(&exe);
             if libdir.is_file() {
                 return Some(libdir);

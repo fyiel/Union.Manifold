@@ -52,9 +52,6 @@ export function useActiveTheme(): {
   const [activeThemeId, setActiveThemeIdState] = useState<string>(() => readInitialThemeId())
   const [customThemes, setCustomThemes] = useState<ThemeDef[]>(() => readThemesFromStorage(CUSTOM_LS_KEY))
   const [installedThemes, setInstalledThemes] = useState<ThemeDef[]>(() => readThemesFromStorage(INSTALLED_LS_KEY))
-  // Live draft streamed from the separate theme-editor window. Never persisted;
-  // takes priority over the resolved active theme while non-null, and is cleared
-  // (auto-reverting to `activeTheme`) when the editor ends the preview.
   const [previewTheme, setPreviewTheme] = useState<ThemeDef | null>(null)
 
   const activeTheme = useMemo(
@@ -66,7 +63,6 @@ export function useActiveTheme(): {
     applyTheme(previewTheme ?? activeTheme)
   }, [previewTheme, activeTheme])
 
-  // Subscribe to the editor window's live preview relay (main process → here).
   useEffect(() => {
     const editor = window.ucThemeEditor
     if (!editor?.onPreview) return

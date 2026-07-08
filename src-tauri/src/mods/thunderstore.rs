@@ -1,14 +1,3 @@
-// Thunderstore provider: keyless and browser-free, mirroring r2modman's model.
-//
-// The nice paginated frontend endpoint is behind a Cloudflare JS challenge, so
-// browse/search/sort run LOCALLY over the community package dump
-// (`/c/{community}/api/v1/package/`) which is keyless and, thanks to the shared
-// http.rs client's gzip/brotli support, arrives as a modest wire payload even
-// when the decoded JSON is large. The dump is cached to disk with a short TTL
-// and compacted in memory. Install resolves the download url deterministically
-// (`/package/download/{owner}/{name}/{version}/`, keyless) and pulls dependency
-// metadata from the keyless experimental package endpoint.
-
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock};
@@ -31,24 +20,10 @@ use super::{
 };
 
 const SITE: &str = "https://thunderstore.io";
-// Browse pages hold 24 cards to match the other provider tabs' endless-scroll
-// page size.
 const PAGE_SIZE: usize = 24;
-// The community dump changes slowly; three hours keeps browsing snappy without
-// serving stale listings for long.
 const CACHE_TTL_SECS: i64 = 3 * 60 * 60;
 const CACHE_TTL: Duration = Duration::from_secs(CACHE_TTL_SECS as u64);
-// The well-known BepInEx destination folders. A package that ships one of these
-// at its top level is remapped under `BepInEx/<sub>/` instead of being nested
-// as a plugin.
 const BEPINEX_SUBDIRS: &[&str] = &["plugins", "config", "patchers", "core"];
-
-// ---------------------------------------------------------------------------
-// Compact model
-//
-// The disk cache and in-memory model keep every version per package (the dump
-// carries them and the versions listing plus pinned-version installs need
-// them) but drop the large, unused fields the raw dump repeats per version.
 
 #[derive(Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
@@ -70,13 +45,9 @@ struct TsPackage {
     package_url: String,
     updated_at: i64,
     created_at: i64,
-    // Thunderstore reports rating_score as a signed integer (it can be -1 when
-    // ratings are disabled), so keep it signed and clamp negatives on display.
     rating: i64,
     deprecated: bool,
-    // Icon of the latest version, kept once at the package level for browsing.
     icon: String,
-    // Index into `versions` of the newest release.
     latest: usize,
     versions: Vec<TsVersion>,
 }
@@ -92,9 +63,6 @@ pub(crate) struct Community {
     pub identifier: String,
     pub name: String,
 }
-
-// ---------------------------------------------------------------------------
-// Raw dump shapes (deserialize only; unknown keys ignored)
 
 #[derive(Deserialize)]
 struct RawPkg {
@@ -136,18 +104,12 @@ struct RawVer {
     date_created: String,
 }
 
-// ---------------------------------------------------------------------------
-// Parsing helpers
-
 fn iso_to_unix(s: &str) -> i64 {
     chrono::DateTime::parse_from_rfc3339(s)
         .map(|d| d.timestamp())
         .unwrap_or(0)
 }
 
-/// A comparable key for a Thunderstore semantic version. Each dot-separated
-/// component is read up to its first non-digit so a stray suffix never poisons
-/// the ordering; missing components compare as absent (shorter is older).
 fn version_key(v: &str) -> Vec<u64> {
     v.split('.')
         .map(|p| {
@@ -161,8 +123,6 @@ fn version_key(v: &str) -> Vec<u64> {
         .collect()
 }
 
-/// A package id is `owner-name`; neither part contains a hyphen on Thunderstore
-/// so a single split is exact.
 fn parse_full_name(s: &str) -> Option<(String, String)> {
     let (owner, name) = s.split_once('-')?;
     if owner.is_empty() || name.is_empty() {
@@ -171,9 +131,6 @@ fn parse_full_name(s: &str) -> Option<(String, String)> {
     Some((owner.to_string(), name.to_string()))
 }
 
-/// A dependency string is `owner-name-version`. The version (digits and dots,
-/// never a hyphen) is everything after the last hyphen, and the remaining
-/// `owner-name` splits on its single hyphen.
 fn parse_dependency(s: &str) -> Option<(String, String, String)> {
     let (full, version) = s.rsplit_once('-')?;
     let (owner, name) = parse_full_name(full)?;
@@ -187,8 +144,6 @@ fn compact(raw: RawPkg) -> Option<TsPackage> {
     if raw.versions.is_empty() {
         return None;
     }
-    // Pick the highest semantic version as the latest; the dump usually lists
-    // versions newest-first but comparing keys is order-independent.
     let mut latest = 0usize;
     let mut best = version_key(&raw.versions[0].version_number);
     for (i, v) in raw.versions.iter().enumerate().skip(1) {
@@ -230,15 +185,8 @@ fn latest_of(p: &TsPackage) -> Option<&TsVersion> {
     p.versions.get(p.latest).or_else(|| p.versions.first())
 }
 
-// ---------------------------------------------------------------------------
-// Community package cache (disk + in-memory, with per-community fetch dedup)
-
-// Fresh packages keyed by community, so repeated browse pages never reparse the
-// large dump.
 static PKG_MEM: LazyLock<parking_lot::Mutex<HashMap<String, (Instant, Arc<Vec<TsPackage>>)>>> =
     LazyLock::new(|| parking_lot::Mutex::new(HashMap::new()));
-// One fetch at a time per community so a burst of browse calls collapses into a
-// single dump download.
 static PKG_LOCKS: LazyLock<parking_lot::Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>> =
     LazyLock::new(|| parking_lot::Mutex::new(HashMap::new()));
 
@@ -290,8 +238,6 @@ fn save_disk(paths: &AppPaths, community: &str, pkgs: &[TsPackage]) {
 async fn fetch_dump(community: &str) -> Result<Vec<TsPackage>, String> {
     let url = format!("{SITE}/c/{community}/api/v1/package/");
     let opts = http::FetchOpts {
-        // The dump is large; the client-wide 25s timeout only fits small API
-        // calls, so give the body read generous headroom.
         timeout: Some(Duration::from_secs(5 * 60)),
         ..Default::default()
     };
@@ -322,7 +268,6 @@ async fn load_packages(paths: &AppPaths, community: &str) -> Result<Arc<Vec<TsPa
     }
     let lock = pkg_lock(community);
     let _g = lock.lock().await;
-    // Another task may have populated the cache while we waited on the lock.
     if let Some(p) = mem_get(community) {
         return Ok(p);
     }
@@ -335,9 +280,6 @@ async fn load_packages(paths: &AppPaths, community: &str) -> Result<Arc<Vec<TsPa
     mem_put(community, arc.clone());
     Ok(arc)
 }
-
-// ---------------------------------------------------------------------------
-// Communities (cursor-paginated), cached for the override picker and detection
 
 static COMMUNITIES: LazyLock<Cached<Arc<Vec<Community>>>> =
     LazyLock::new(|| Cached::new(Duration::from_secs(6 * 60 * 60)));
@@ -371,7 +313,6 @@ async fn fetch_communities() -> Result<Vec<Community>, String> {
             Some(next) => {
                 url = next.to_string();
                 guard += 1;
-                // A defensive ceiling so a malformed cursor never loops forever.
                 if guard > 500 {
                     break;
                 }
@@ -392,9 +333,6 @@ async fn communities() -> Result<Arc<Vec<Community>>, String> {
         .ok_or_else(|| "Thunderstore communities are currently unavailable".to_string())
 }
 
-/// Exact normalized-title match against the communities list, the same policy
-/// as nexus `match_domain` and steam `search_app_id`: a fuzzy first pick would
-/// persist the wrong community.
 fn find_community(list: &[Community], title: &str) -> Option<Community> {
     let norm = normalize_title(title);
     if norm.is_empty() {
@@ -410,16 +348,11 @@ pub(crate) async fn match_community(title: &str) -> Result<Option<Community>, St
     Ok(find_community(&list, title))
 }
 
-// ---------------------------------------------------------------------------
-// Browse (local filter + sort + paginate)
-
 fn sort_key(p: &TsPackage, sort: &str) -> i64 {
     match sort {
         "updated" => p.updated_at,
         "published" => p.created_at,
         "rating" => p.rating,
-        // Default and explicit "downloads" both sort by the latest release's
-        // download count.
         _ => latest_of(p).map(|v| v.downloads as i64).unwrap_or(0),
     }
 }
@@ -478,8 +411,6 @@ fn filter_sort_page(
             true
         })
         .collect();
-    // Descending by the chosen key, with full_name as a stable tie-break so
-    // pagination is deterministic across calls.
     filtered.sort_by(|a, b| {
         sort_key(b, sort)
             .cmp(&sort_key(a, sort))
@@ -491,9 +422,6 @@ fn filter_sort_page(
     let has_more = start + mods.len() < total;
     (mods, has_more)
 }
-
-// ---------------------------------------------------------------------------
-// Package detail (keyless experimental endpoint, latest only)
 
 async fn fetch_detail(owner: &str, name: &str) -> Result<Value, String> {
     let url = format!("{SITE}/api/experimental/package/{owner}/{name}/");
@@ -528,8 +456,6 @@ async fn versions_for(
     community: &str,
     full_name: &str,
 ) -> Result<Vec<Value>, String> {
-    // The community dump carries every version, so prefer it when the package
-    // lives in this community.
     if let Ok(pkgs) = load_packages(paths, community).await {
         if let Some(p) = pkgs.iter().find(|p| p.full_name.eq_ignore_ascii_case(full_name)) {
             let mut versions: Vec<&TsVersion> = p.versions.iter().collect();
@@ -537,8 +463,6 @@ async fn versions_for(
             return Ok(versions.into_iter().map(version_json).collect());
         }
     }
-    // Fallback for a package that is not in this community's dump: the keyless
-    // detail endpoint only exposes the latest version.
     let (owner, name) = parse_full_name(full_name).ok_or_else(|| format!("bad package id {full_name}"))?;
     let detail = fetch_detail(&owner, &name).await?;
     let latest = detail.get("latest").ok_or("Thunderstore package has no versions")?;
@@ -552,11 +476,6 @@ async fn versions_for(
     })])
 }
 
-// ---------------------------------------------------------------------------
-// BepInEx layout transform
-
-/// Thunderstore ships these metadata files at the root of every package zip
-/// beside the real payload; they must be ignored when reading the archive shape.
 fn is_ts_meta(name: &str) -> bool {
     matches!(
         name.to_lowercase().as_str(),
@@ -564,12 +483,6 @@ fn is_ts_meta(name: &str) -> bool {
     )
 }
 
-/// Locate the effective package root. A BepInExPack zip wraps everything in a
-/// single folder (for example `BepInExPack_GTFO/`) that holds a `BepInEx/` tree
-/// next to the doorstop loader, and that folder sits BESIDE Thunderstore's
-/// metadata files. Ignore the metadata when checking for a sole wrapper folder,
-/// otherwise the pack fails to unwrap and its whole tree gets double-nested
-/// under `BepInEx/plugins/<full_name>/`.
 fn bepinex_root(src: &Path) -> PathBuf {
     if src.join("BepInEx").is_dir() {
         return src.to_path_buf();
@@ -589,19 +502,12 @@ fn bepinex_root(src: &Path) -> PathBuf {
     src.to_path_buf()
 }
 
-/// Transform an extracted Thunderstore package into the on-disk layout that
-/// deploys to the game root. Covers the common BepInEx conventions; r2modman's
-/// per-package custom install rules (installers.json / modExclusions) are not
-/// replicated.
 fn apply_bepinex_layout(src: &Path, dst: &Path, full_name: &str) -> Result<(), String> {
     std::fs::create_dir_all(dst).map_err(|e| format!("stage dir: {e}"))?;
     let root = bepinex_root(src);
-    // A package that already carries a BepInEx/ tree deploys verbatim.
     if root.join("BepInEx").is_dir() {
         return copy_dir_recursive(&root, dst);
     }
-    // Otherwise nest loose files under BepInEx/plugins/<full_name>/ and remap
-    // any well-known BepInEx subdir to its canonical home.
     let plugin_dir = dst.join("BepInEx").join("plugins").join(full_name);
     for entry in std::fs::read_dir(&root).map_err(|e| format!("stage read: {e}"))?.flatten() {
         let path = entry.path();
@@ -619,9 +525,6 @@ fn apply_bepinex_layout(src: &Path, dst: &Path, full_name: &str) -> Result<(), S
     Ok(())
 }
 
-// ---------------------------------------------------------------------------
-// Dependency resolution + install
-
 struct ResolvedMod {
     full_name: String,
     version: String,
@@ -637,8 +540,6 @@ fn download_url(owner: &str, name: &str, version: &str) -> String {
     format!("{SITE}/package/download/{owner}/{name}/{version}/")
 }
 
-/// Resolve one package (from the community dump when present, else the keyless
-/// detail endpoint) into an install record plus its raw dependency strings.
 async fn resolve_node(
     paths: &AppPaths,
     community: &str,
@@ -702,9 +603,6 @@ async fn resolve_node(
     ))
 }
 
-/// Breadth-first walk of the transitive dependency graph. The `seen` set is
-/// keyed by owner-name (case-insensitive) so a package installs once even when
-/// several dependents pin different versions, and cycles terminate.
 async fn resolve_install(
     paths: &AppPaths,
     community: &str,
@@ -735,8 +633,6 @@ async fn resolve_install(
     Ok(out)
 }
 
-/// Download, extract, transform, and deploy every resolved package. Progress is
-/// keyed on the root package's mod id so the whole batch reports as one job.
 async fn install_batch(
     app: &AppHandle,
     appid: &str,
@@ -810,9 +706,6 @@ async fn run_install(app: AppHandle, appid: String, root_full_name: String, reso
     }
 }
 
-// ---------------------------------------------------------------------------
-// Commands
-
 #[tauri::command]
 pub async fn thunderstore_communities() -> Result<Value, String> {
     let res = async {
@@ -883,8 +776,6 @@ pub async fn thunderstore_install(
     Ok(fold(res))
 }
 
-// ---------------------------------------------------------------------------
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -911,7 +802,6 @@ mod tests {
             parse_dependency("bbepis-BepInExPack-5.4.2121"),
             Some(("bbepis".to_string(), "BepInExPack".to_string(), "5.4.2121".to_string()))
         );
-        // No hyphen at all, or missing a component, is not a valid id.
         assert_eq!(parse_full_name("nohyphen"), None);
         assert_eq!(parse_dependency("owner-name"), None);
         assert_eq!(parse_dependency("nohyphen"), None);
@@ -929,8 +819,6 @@ mod tests {
         let tmp = tempdir().unwrap();
         let src = tmp.path().join("src");
         let dst = tmp.path().join("dst");
-        // A plain plugin package: a loose dll, a manifest, plus a top-level
-        // config/ and patchers/ that must map under BepInEx/.
         write_file(&src.join("MyMod.dll"), "dll");
         write_file(&src.join("manifest.json"), "{}");
         write_file(&src.join("config/my.cfg"), "cfg");
@@ -942,7 +830,6 @@ mod tests {
         assert_eq!(std::fs::read_to_string(dst.join("BepInEx/plugins/team-MyMod/manifest.json")).unwrap(), "{}");
         assert_eq!(std::fs::read_to_string(dst.join("BepInEx/config/my.cfg")).unwrap(), "cfg");
         assert_eq!(std::fs::read_to_string(dst.join("BepInEx/patchers/patch.dll")).unwrap(), "patch");
-        // Loose files never leak to the stage root in the nesting branch.
         assert!(!dst.join("MyMod.dll").exists());
     }
 
@@ -951,7 +838,6 @@ mod tests {
         let tmp = tempdir().unwrap();
         let src = tmp.path().join("src");
         let dst = tmp.path().join("dst");
-        // A package that already ships a BepInEx/ dir deploys as-is.
         write_file(&src.join("BepInEx/plugins/Plug.dll"), "plug");
         write_file(&src.join("manifest.json"), "{}");
 
@@ -959,7 +845,6 @@ mod tests {
 
         assert_eq!(std::fs::read_to_string(dst.join("BepInEx/plugins/Plug.dll")).unwrap(), "plug");
         assert_eq!(std::fs::read_to_string(dst.join("manifest.json")).unwrap(), "{}");
-        // It is NOT re-nested under plugins/<full_name>/.
         assert!(!dst.join("BepInEx/plugins/team-Plug").exists());
     }
 
@@ -968,8 +853,6 @@ mod tests {
         let tmp = tempdir().unwrap();
         let src = tmp.path().join("src");
         let dst = tmp.path().join("dst");
-        // The BepInExPack layout wraps everything in one folder that holds a
-        // BepInEx/ tree next to the doorstop loader files.
         write_file(&src.join("BepInExPack/BepInEx/core/loader.dll"), "core");
         write_file(&src.join("BepInExPack/winhttp.dll"), "doorstop");
 
@@ -977,7 +860,6 @@ mod tests {
 
         assert_eq!(std::fs::read_to_string(dst.join("BepInEx/core/loader.dll")).unwrap(), "core");
         assert_eq!(std::fs::read_to_string(dst.join("winhttp.dll")).unwrap(), "doorstop");
-        // The wrapper folder itself must not survive into the stage.
         assert!(!dst.join("BepInExPack").exists());
     }
 
@@ -986,9 +868,6 @@ mod tests {
         let tmp = tempdir().unwrap();
         let src = tmp.path().join("src");
         let dst = tmp.path().join("dst");
-        // GTFO's BepInExPack ships the wrapper folder BESIDE Thunderstore's
-        // metadata files, which previously defeated the single-folder unwrap and
-        // double-nested the whole tree under BepInEx/plugins/<full_name>/.
         write_file(&src.join("BepInExPack_GTFO/BepInEx/core/0Harmony.dll"), "core");
         write_file(&src.join("BepInExPack_GTFO/winhttp.dll"), "doorstop");
         write_file(&src.join("BepInExPack_GTFO/doorstop_config.ini"), "cfg");
@@ -1000,7 +879,6 @@ mod tests {
 
         assert_eq!(std::fs::read_to_string(dst.join("BepInEx/core/0Harmony.dll")).unwrap(), "core");
         assert_eq!(std::fs::read_to_string(dst.join("winhttp.dll")).unwrap(), "doorstop");
-        // No double-nesting: the old bug produced BepInEx/plugins/<full>/BepInExPack_GTFO/.
         assert!(!dst.join("BepInEx/plugins/BepInEx-BepInExPack_GTFO").exists());
         assert!(!dst.join("BepInExPack_GTFO").exists());
     }
@@ -1062,7 +940,6 @@ mod tests {
         let (mods, has_more) = filter_sort_page(&pkgs, "downloads", "all", 0, "", NOW);
         assert_eq!(ids(&mods), vec!["team-Beta", "team-Alpha", "team-Gamma"]);
         assert!(!has_more);
-        // The deprecated package never appears.
         assert!(!ids(&mods).iter().any(|id| id == "bad-Gone"));
     }
 
@@ -1086,8 +963,6 @@ mod tests {
     #[test]
     fn browse_period_filters_by_update_recency() {
         let pkgs = fixture();
-        // Only Alpha (1d) and Gamma (3d) fall inside the 7 day window; Beta is
-        // 40 days old, and ordering follows the download sort.
         let (mods, _) = filter_sort_page(&pkgs, "downloads", "7", 0, "", NOW);
         assert_eq!(ids(&mods), vec!["team-Alpha", "team-Gamma"]);
     }
@@ -1096,7 +971,6 @@ mod tests {
     fn browse_query_matches_name_owner_and_description() {
         let pkgs = fixture();
         assert_eq!(ids(&filter_sort_page(&pkgs, "downloads", "all", 0, "widget", NOW).0), vec!["team-Gamma"]);
-        // Case-insensitive owner match returns every non-deprecated team pkg.
         assert_eq!(
             ids(&filter_sort_page(&pkgs, "downloads", "all", 0, "TEAM", NOW).0),
             vec!["team-Beta", "team-Alpha", "team-Gamma"]
@@ -1122,10 +996,8 @@ mod tests {
             Community { identifier: "lethal-company".to_string(), name: "Lethal Company".to_string() },
             Community { identifier: "riskofrain2".to_string(), name: "Risk of Rain 2".to_string() },
         ];
-        // Trademark and case differences normalize away to an exact match.
         assert_eq!(find_community(&list, "LETHAL COMPANY\u{2122}").unwrap().identifier, "lethal-company");
         assert_eq!(find_community(&list, "Risk of Rain 2").unwrap().identifier, "riskofrain2");
-        // A game with no community stays unmatched rather than fuzzy-picking.
         assert!(find_community(&list, "Some Other Game").is_none());
     }
 
@@ -1165,7 +1037,6 @@ mod tests {
         assert_eq!(p.latest, 1);
         assert_eq!(latest_of(&p).unwrap().version, "1.2.0");
         assert_eq!(p.icon, "new.png");
-        // Both versions survive for listing and pinned installs.
         assert_eq!(p.versions.len(), 2);
     }
 }

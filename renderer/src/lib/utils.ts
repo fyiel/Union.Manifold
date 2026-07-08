@@ -68,7 +68,6 @@ export function getSimilarSuggestions(
   return suggestions
 }
 
-// Online badge is now driven by the explicit co-op flag (set via admin)
 export function hasOnlineMode(hasCoOp?: boolean): boolean {
   return Boolean(hasCoOp)
 }
@@ -107,13 +106,11 @@ function isUcFilesHostname(host: string): boolean {
   return normalized.startsWith("files") && normalized.endsWith(".union-crax.xyz")
 }
 
-/** True for app-server URLs that may require proxying (not the public CDN). */
 function isUcFilesAppUrl(host: string): boolean {
   const normalized = normalizeHostname(host)
   if (normalized === "ucfiles" || normalized === "uc.files" || normalized === "files.union-crax.xyz") {
     return true
   }
-  // cdn.union-crax.xyz is a public Backblaze CDN – no proxying needed
   return normalized.startsWith("files") && normalized.endsWith(".union-crax.xyz")
 }
 
@@ -136,18 +133,9 @@ function normalizeRemoteMediaUrl(url: string): string {
 }
 
 function shouldProxyUcFilesMedia(): boolean {
-  // Always proxy files.union-crax.xyz URLs through the API server.
-  // The Electron renderer has no session cookies for files.union-crax.xyz,
-  // so direct fetches of private paths fail even when using the main API URL.
   return true
 }
 
-// Public image CDNs that the launcher should route through the active mirror's
-// /api/image-proxy endpoint instead of hitting directly. When the user is on a
-// mirror because their network blocks union-crax.xyz, those same blocks usually
-// also cover cdn.union-crax.xyz, so direct image fetches fail even though the
-// API base is reachable. Keep this in sync with the website's
-// lib/utils.ts PUBLIC_IMAGE_HOST_SUFFIXES and the route's allowlist.
 const PUBLIC_IMAGE_HOST_SUFFIXES = [
   "cdn.union-crax.xyz",
   "images.igdb.com",
@@ -161,10 +149,6 @@ const PUBLIC_IMAGE_HOST_SUFFIXES = [
   "discordapp.com",
   "discordapp.net",
   "discord.com",
-  // Google account avatars (OAuth sign-in). Without this, googleusercontent
-  // URLs were returned raw and hot-linked from the renderer, which fails where
-  // direct third-party fetches are blocked — routing them through the mirror's
-  // /api/image-proxy (which already allowlists googleusercontent) fixes it.
   "googleusercontent.com",
   "githubusercontent.com",
   "scdn.co",
@@ -177,25 +161,8 @@ function isPublicImageHost(host: string): boolean {
   )
 }
 
-// Renderer-served prefixes inside the packaged Vite dist. Anything starting
-// with `/` and matching one of these is a relative URL handled by the
-// `ucd://renderer/...` protocol, not a filesystem path.
 const RENDERER_DIST_PREFIXES = ["/assets/", "/fallbacks/", "/icons/", "/images/", "/fonts/", "/static/"]
 
-// Build a `uc-local://` URL from an absolute filesystem path. The renderer
-// can't load `file://` directly (cross-origin from ucd://renderer and from
-// localhost in dev), so the main process exposes the installing/installed
-// folders through this scheme.
-//
-// We pack the whole filesystem path into the `?p=` query parameter rather
-// than the URL path. This sidesteps two Chromium pitfalls:
-//   1. With a triple-slash like `uc-local:///C:/foo`, the URL parser hoists
-//      `C:` into the host, lowercases it, and strips the colon.
-//   2. Even with `uc-local:///C%3A/foo` (per-segment encoded), some net
-//      stacks normalize the pathname before the protocol handler sees it.
-// A fixed hostname (`app`) plus a query string is exactly the structure
-// Electron's docs use in their examples, and `URLSearchParams` decodes it
-// reliably across all platforms.
 function toUcLocalUrl(absolutePath: string): string {
   const normalized = absolutePath.replace(/\\/g, "/")
   return convertFileSrc(normalized)
@@ -209,10 +176,6 @@ const UC_ASSET_BASE =
 export function proxyMediaUrl(mediaUrl: string): string {
   if (!mediaUrl) return mediaUrl
 
-  // data/blob URLs, already-built uc-local:// URLs and already-built asset
-  // protocol URLs pass through. The Windows asset base is plain
-  // http://uc-asset.localhost, so without the explicit check a second pass
-  // would classify an already-proxied URL as remote and wrap it again.
   if (
     mediaUrl.startsWith("data:") ||
     mediaUrl.startsWith("blob:") ||
@@ -221,20 +184,13 @@ export function proxyMediaUrl(mediaUrl: string): string {
   ) {
     return mediaUrl
   }
-  // App-managed custom images (picked in Edit details): resolve to the
-  // uc-asset protocol with the platform-correct base at render time, so the
-  // stored URL stays portable across Linux/Windows scheme handling.
   if (mediaUrl.startsWith("uc-custom://")) {
     return `${UC_ASSET_BASE}/img?c=${encodeURIComponent(mediaUrl.slice("uc-custom://".length))}`
   }
-  // Existing file:// URLs get rewritten to uc-local:// (the renderer can't
-  // load file:// across origins; uc-local proxies through the main process).
   if (mediaUrl.startsWith("file://")) {
     try {
       const u = new URL(mediaUrl)
       let p = decodeURIComponent(u.pathname || "")
-      // Drop the leading slash before a Windows drive letter so toUcLocalUrl
-      // produces `uc-local:///C:/...` (single leading slash, drive-letter path).
       if (/^\/[A-Za-z]:/.test(p)) p = p.slice(1)
       return toUcLocalUrl(p)
     } catch {
@@ -242,23 +198,15 @@ export function proxyMediaUrl(mediaUrl: string): string {
     }
   }
 
-  // Absolute paths starting with `/` are ambiguous between Linux/macOS file
-  // paths (e.g. /home/user/.../image.jpg) and renderer-served assets
-  // (/fallbacks/...). Renderer paths use a small set of known prefixes;
-  // everything else is treated as a filesystem path and proxied via
-  // uc-local:// so it doesn't get resolved against the `ucd://renderer/` base.
   if (mediaUrl.startsWith("/")) {
     if (mediaUrl.startsWith("//")) {
-      // Protocol-relative URL — leave for the loader to resolve.
       return mediaUrl
     }
     const isRendererAsset = RENDERER_DIST_PREFIXES.some((prefix) => mediaUrl.startsWith(prefix))
     if (isRendererAsset) return mediaUrl
-    // Linux/macOS absolute filesystem path.
     return toUcLocalUrl(mediaUrl)
   }
 
-  // Windows absolute paths (C:\ or UNC \\server\share) — proxy via uc-local://.
   try {
     if (/^[A-Za-z]:\\/.test(mediaUrl) || mediaUrl.startsWith('\\')) {
       return toUcLocalUrl(mediaUrl)
@@ -269,22 +217,12 @@ export function proxyMediaUrl(mediaUrl: string): string {
   if (normalizedRemoteUrl.startsWith("http://") || normalizedRemoteUrl.startsWith("https://")) {
     try {
       const parsed = new URL(normalizedRemoteUrl)
-      // Guard against stale DB URLs with invalid placeholder hostnames.
       if (!parsed.hostname || parsed.hostname === "undefined" || parsed.hostname === "null") {
         return ""
       }
-      // Private UC.Files app URLs use the authenticated bridge proxy.
-      // `raw=1` makes it STREAM the bytes server-side instead of 302-redirecting
-      // back to files/cdn.union-crax.xyz, which an Electron <img> can't follow
-      // (no cf_clearance cookie so Cloudflare blocks it). Streaming is what makes
-      // these load on a network that blocks the CDN directly.
       if (isUcFilesAppUrl(parsed.hostname) && shouldProxyUcFilesMedia()) {
         return apiUrl(`/api/ucfiles/media?url=${encodeURIComponent(normalizedRemoteUrl)}&raw=1`)
       }
-      // Public image CDNs go through the mirror's /api/image-proxy (also with
-      // raw=1 to stream, not redirect) so the launcher inherits whatever network
-      // reachability the active API base has, e.g. images still load when the
-      // user's network blocks cdn.union-crax.xyz / images.igdb.com directly.
       if (isPublicImageHost(parsed.hostname)) {
         return apiUrl(`/api/image-proxy?url=${encodeURIComponent(normalizedRemoteUrl)}&raw=1`)
       }
@@ -297,14 +235,6 @@ export function proxyMediaUrl(mediaUrl: string): string {
 
 export function proxyImageUrl(imageUrl: string): string {
   const u = proxyMediaUrl(imageUrl)
-  // Route every remote image through the infinite on-disk asset cache
-  // (uc-asset:// → main fetches once, stores forever, serves from disk after).
-  // Local (uc-local://) / renderer-served / empty URLs pass through untouched.
-  // Already served by the asset protocol (a uc-custom:// cover resolved by
-  // proxyMediaUrl above). On Windows that base is http://uc-asset.localhost,
-  // which the remote check below would match — wrapping it again made the
-  // backend fetch its own protocol URL over the network and 502 (blank custom
-  // covers on Windows).
   if (u.startsWith(`${UC_ASSET_BASE}/`)) return u
   if (u.startsWith("http://") || u.startsWith("https://")) {
     return `${UC_ASSET_BASE}/img?u=${encodeURIComponent(u)}`
@@ -336,16 +266,13 @@ export function isHelperExecutableName(name: string) {
 }
 
 export function filterGameExecutables(exes: GameExecutable[]) {
-  // Remove obvious junk: redistributables, crash handlers, uninstallers, helpers
   const junkPatterns = [
     /^vc_?redist/i, /^dxsetup/i, /^dxwebsetup/i, /^dotnet/i,
     /^unins\d{3}/i, /^uninstall/i,
     /^crashreport/i, /^bugreport/i, /^senddump/i,
     /^ue4prereqsetup/i, /^UE4-preq/i,
     /^(?:directx|oalinst|physx)/i,
-    // Unity engine helpers
     /^UnityCrashHandler/i, /^UnityBugReporter/i,
-    // Common non-game executables
     /^notification_helper/i, /^nacl_helper/i,
     /^(?:7z|winrar|WinRAR)\.exe$/i,
     /^(?:CEF|cef)Helper/i,
@@ -360,20 +287,13 @@ export function filterGameExecutables(exes: GameExecutable[]) {
 
   return exes.filter((exe) => {
     const lower = exe.name.toLowerCase()
-    // Filter known junk patterns
     if (junkPatterns.some((p) => p.test(lower))) return false
-    // Filter exes inside redist/support subdirectories or engine internals
     const pathLower = (exe.path || "").toLowerCase()
     if (/[\\/](?:_?redist|__support|_commonredist|directx|vcredist|__installer|bundledtools|easyanticheat)[\\/]/i.test(pathLower)) return false
     return true
   })
 }
 
-/** Returns the sole real game executable when the folder is unambiguous —
- *  exactly one candidate after de-duping by path + junk filtering. Returns
- *  null when there are zero or 2+ candidates. Used to auto-launch without a
- *  prompt only when there's genuinely nothing to choose between; anything
- *  ambiguous falls through to the executable picker. */
 export function getUnambiguousExecutable(exes: GameExecutable[]): GameExecutable | null {
   const seen = new Set<string>()
   const unique: GameExecutable[] = []
@@ -402,13 +322,6 @@ export function getExecutableRelativePath(fullPath: string, baseFolder?: string 
   return fullPath
 }
 
-/** Resolve the executable staff selected in the website admin panel against
- *  the files actually present on disk. `adminRelPath` is relative to the
- *  install folder (e.g. "bin/Game.exe"). Returns the matching discovered exe,
- *  or null when there's no admin choice or it isn't present (caller then falls
- *  back to heuristic detection). Matching is case-insensitive and slash-agnostic:
- *  first an exact relative-path match, then a unique basename match, then a
- *  suffix match. */
 export function matchAdminExecutable(
   exes: GameExecutable[],
   adminRelPath: string | null | undefined,
@@ -422,11 +335,9 @@ export function matchAdminExecutable(
   const relOf = (exe: GameExecutable) =>
     getExecutableRelativePath(exe.path, baseFolder).toLowerCase().replace(/\//g, "\\")
 
-  // 1) exact relative-path match
   const exact = exes.find((exe) => relOf(exe) === wanted)
   if (exact) return exact
 
-  // 2) basename match — admin path may omit the release's top-level subfolder
   const byName = exes.filter((exe) => exe.name.toLowerCase() === wantedBase)
   if (byName.length === 1) return byName[0]
   const suffix = byName.find((exe) => relOf(exe).endsWith(wanted))
@@ -508,7 +419,6 @@ export function rankGameExecutables(exes: GameExecutable[], gameName: string, ba
 }
 
 export function pickGameExecutable(exes: GameExecutable[], gameName: string, gameSource?: string, baseFolder?: string | null) {
-  // Deduplicate by normalised path first
   const seen = new Set<string>()
   const unique: GameExecutable[] = []
   for (const exe of exes) {
@@ -521,12 +431,10 @@ export function pickGameExecutable(exes: GameExecutable[], gameName: string, gam
   const candidates = filterGameExecutables(unique)
   if (!candidates.length) return { pick: null, confident: false }
 
-  // If there's only 1 real candidate, assume it's the correct one
   if (candidates.length === 1) {
     return { pick: candidates[0], confident: true }
   }
 
-  // Check if source contains uc-online or similar patterns
   const isUcOnlineSource = gameSource?.toLowerCase().includes("uc-online") ||
                            gameSource?.toLowerCase().includes("uconline") ||
                            gameSource?.toLowerCase().includes("uc online")
@@ -641,4 +549,3 @@ export function formatVersion(version: string | undefined | null): string {
   }
   return `v${trimmed}`
 }
-
