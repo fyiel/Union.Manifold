@@ -14,6 +14,7 @@ pub mod gofile;
 pub mod mediafire;
 pub mod pixeldrain;
 pub mod rootz;
+pub mod mocha;
 
 use crate::sources::schema::DownloadOption;
 use crate::sources::ResolveResult;
@@ -59,6 +60,9 @@ pub fn detect_host_type(url: &str) -> String {
     if filekeeper::matches(url) {
         return "filekeeper".to_string();
     }
+    if mocha::matches(url) {
+        return "mocha".to_string();
+    }
     if let Some(t) = gate::host_type(url) {
         return t.to_string();
     }
@@ -84,6 +88,7 @@ pub fn is_resolvable(url: &str) -> bool {
         || datavaults::matches(url)
         || fileditch::matches(url)
         || filekeeper::matches(url)
+        || mocha::matches(url)
         || (gate::matches(url) && crate::slipgate::cfg().is_some())
 }
 
@@ -126,6 +131,9 @@ pub async fn resolve_url(option: &DownloadOption) -> ResolveResult {
     }
     if filekeeper::matches(url) {
         return filekeeper::resolve(url).await;
+    }
+    if mocha::matches(url) {
+        return mocha::resolve(url).await;
     }
     if gate::matches(url) {
         return gate::resolve(url).await;

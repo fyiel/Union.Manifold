@@ -4,6 +4,21 @@ All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 The app shows its version as 1.0.0b (beta). 1.0.1 is the first packaged release.
 
+## 2.20.0
+
+AstralGames joins the source lineup.
+
+### Added
+
+- new source: AstralGames (https://astralgames.net). browse walks its listing
+  pages and search runs the site's own catalog search, both with real Steam art
+  and the site's full genre tags; each game's Pearcrypt download container
+  expands into one option per live mirror. toggle it in Settings → Download Sources
+- new host resolver: Mocha (mocha.my), the CDN most AstralGames downloads sit
+  on, resolves in-app to its signed direct link — verified end-to-end that the
+  resolved link serves the archive bytes rather than an HTML gate. AstralGames
+  mirrors on FileQ stay browser-only (Cloudflare Turnstile), as they do elsewhere
+
 ## 2.19.4
 
 ### Added
