@@ -58,7 +58,13 @@ async fn install_via_pacman(app: &AppHandle, new_version: &str) -> Result<(), St
     let url = format!(
         "https://github.com/fyiel/Union.Manifold/releases/download/v{new_version}/union-manifold-{new_version}-1-x86_64.pkg.tar.zst"
     );
-    let mut resp = crate::http::fetch(&url, &crate::http::FetchOpts::default())
+    let mut resp = crate::http::fetch(
+        &url,
+        &crate::http::FetchOpts {
+            timeout: Some(std::time::Duration::from_secs(300)),
+            ..Default::default()
+        },
+    )
         .await
         .map_err(|e| format!("download failed: {e}"))?;
     if !resp.status().is_success() {
@@ -84,25 +90,60 @@ async fn install_via_pacman(app: &AppHandle, new_version: &str) -> Result<(), St
     drop(file);
     emit_progress(app, "installing", received, total);
 
-    // pkexec pops the graphical polkit prompt; --noconfirm because the prompt
-    // IS the confirmation. Exit 126/127 = user dismissed / no auth agent.
-    let status = tokio::process::Command::new("pkexec")
+    // pkexec drives the graphical polkit prompt over D-Bus. stdin is closed so
+    // that when NO authentication agent is registered (common on minimal
+    // desktops, or when launched from a shell) pkexec fails fast with exit 127
+    // instead of falling back to a terminal password prompt that blocks the
+    // updater forever — the windowed app can neither show nor answer it, which
+    // is exactly the "installing update… (authentication may be required)"
+    // freeze. kill_on_drop + a timeout are a hard backstop so a stuck prompt can
+    // never wedge the app; --noconfirm because the polkit prompt IS the confirm.
+    let child = tokio::process::Command::new("pkexec")
         .arg("pacman")
         .arg("-U")
         .arg("--noconfirm")
         .arg(&pkg_path)
-        .status()
-        .await
-        .map_err(|e| format!("pkexec not available: {e}. install manually: sudo pacman -U {}", pkg_path.display()))?;
-    if status.success() {
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .map_err(|e| {
+            format!("pkexec not available: {e}. install manually: sudo pacman -U {}", pkg_path.display())
+        })?;
+
+    let out = match tokio::time::timeout(
+        std::time::Duration::from_secs(300),
+        child.wait_with_output(),
+    )
+    .await
+    {
+        Ok(Ok(out)) => out,
+        Ok(Err(e)) => {
+            return Err(format!("pkexec failed: {e}. install manually: sudo pacman -U {}", pkg_path.display()));
+        }
+        Err(_) => {
+            return Err(format!(
+                "update timed out waiting for authorization. install manually: sudo pacman -U {}",
+                pkg_path.display()
+            ));
+        }
+    };
+    if out.status.success() {
         std::fs::remove_file(&pkg_path).ok();
         return Ok(());
     }
-    match status.code() {
-        Some(126) | Some(127) => Err("authentication cancelled".into()),
-        _ => Err(format!(
-            "pacman failed (exit {:?}). install manually: sudo pacman -U {}",
-            status.code(),
+    let detail: String = String::from_utf8_lossy(&out.stderr).trim().chars().take(300).collect();
+    match out.status.code() {
+        // 126/127: polkit denied, the prompt was dismissed, or no polkit
+        // authentication agent is running to answer it.
+        Some(126) | Some(127) => Err(format!(
+            "authorization unavailable — is a polkit agent running? install manually: sudo pacman -U {}",
+            pkg_path.display()
+        )),
+        code => Err(format!(
+            "pacman failed (exit {code:?}){}. install manually: sudo pacman -U {}",
+            if detail.is_empty() { String::new() } else { format!(": {detail}") },
             pkg_path.display()
         )),
     }
