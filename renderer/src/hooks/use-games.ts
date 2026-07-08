@@ -48,10 +48,6 @@ export function useGamesData() {
         })
       }
 
-      // Gate the full-catalog refetch on staleness, not just connectivity.
-      // Without the TTL check the entire /api/games list was re-downloaded and
-      // re-normalized on every mount and every offline→online flip, ignoring
-      // CATALOG_TTL_MS entirely. Mirrors LauncherPage's staleness gate.
       const shouldRefreshGames = connectivity.isOnline
         ? (!hydrated.games.length || isCatalogGamesStale())
         : false
@@ -123,10 +119,6 @@ export function useGamesData() {
       }
     }
 
-    // Defer the hydrate/refetch off the mount commit so the first switch to
-    // Library paints the memory-cache seed instantly and refreshes a beat
-    // later. requestIdleCallback is missing in WebKit (macOS) and older
-    // WebKitGTK (Linux) webviews, so fall back to a short timeout there.
     let idleHandle: number | null = null
     let timerHandle: number | null = null
     if (typeof requestIdleCallback === "function") {

@@ -24,8 +24,6 @@ const TRIPLES = {
   'darwin-arm64': 'aarch64-apple-darwin',
 }
 
-// sha256 pins cover the default versions above; overriding a version via env
-// drops the pin, and stage() then requires SIDECAR_ALLOW_UNVERIFIED=1.
 const ARIA2_SHA = ARIA2_VERSION === '1.37.0' ? {
   'win32-x64': '5e97ad1a2adafeeaa0ffce1bcbfd0e3e31cc054ad1c73797615a77e20a4f9e32',
   'linux-x64': 'e0a09b12ef67f35f8a8e4fdddbec851d235b7c31da549d0578bff459032b499a',
@@ -113,7 +111,6 @@ async function sevenZipCmd() {
     if (hasCmd(c)) return (sevenZip = c)
   }
   if (process.platform === 'win32') {
-    // fresh download every run so a stale or planted %TEMP%\7zr.exe is never executed
     const zr = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'sc-7zr-')), '7zr.exe')
     log(`bootstrapping ${SEVENZR_URL}`)
     await download(SEVENZR_URL, zr)
@@ -125,7 +122,6 @@ async function sevenZipCmd() {
 async function extract(archive, dir) {
   if (archive.endsWith('.zip')) {
     if (process.platform === 'win32') {
-      // windows 10+ ships bsdtar, which extracts zip and never round-trips through a shell string
       execFileSync('tar', ['-xf', archive, '-C', dir], { stdio: 'inherit' })
     } else {
       execFileSync('unzip', ['-o', archive, '-d', dir], { stdio: 'inherit' })
@@ -171,9 +167,6 @@ function findFile(dir, name, sub) {
 async function stage(spec, outName, triple, isWin) {
   const dest = path.join(binDir, `${outName}-${triple}${isWin ? '.exe' : ''}`)
   const stamp = `${dest}.src`
-  // the staged filename is fixed (Tauri resolves externalBin by triple), so
-  // record the source url in a stamp and refetch when it changes, e.g. a bumped
-  // ARIA2_VERSION/SEVENZIP_VERSION rewrites the url
   if (fs.existsSync(dest) && fs.existsSync(stamp) && fs.readFileSync(stamp, 'utf8') === spec.url) {
     return log(`present ${path.basename(dest)}`)
   }
@@ -237,9 +230,6 @@ async function main() {
   } catch (e) {
     failures.push(`cacert: ${e.message}`)
   }
-  // a requested target that fails to stage must fail the run, otherwise CI's
-  // "Fetch sidecars" goes green with zero binaries and tauri-action later dies
-  // with an opaque "external binary not found"
   if (failures.length) {
     for (const f of failures) log(`FAILED ${f}`)
     throw new Error(`${failures.length} sidecar target(s) failed to stage`)

@@ -1,8 +1,4 @@
 #!/usr/bin/env bash
-# Union.Manifold installer/updater for Linux.
-#   curl -fsSL https://raw.githubusercontent.com/fyiel/Union.Manifold/main/install.sh | bash
-# Detects the package manager and installs the matching artifact from the
-# latest release. Running it again updates an existing install.
 set -euo pipefail
 
 REPO="fyiel/Union.Manifold"

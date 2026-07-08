@@ -11,27 +11,6 @@ import { useDownloadsActions, useDownloadsSelector } from "@/context/downloads-c
 import { useToast } from "@/context/toast-context"
 import { DownloadCheckModal } from "@/components/DownloadCheckModal"
 
-/**
- * App-wide "start a download from anywhere" flow.
- *
- * Historically the only place that ran the pre-download availability check +
- * host selector was the GameDetailPage, so every other surface (right-click
- * menus, collection / library install buttons) had to navigate to that page
- * with `?download=1` just to kick off a download — slow, and it yanked the
- * user away from what they were doing when all they wanted was a quick
- * "add to queue".
- *
- * This provider lifts that flow to the app root. `requestDownload(game)` reads
- * the same `downloadCheckMode` setting GameDetailPage uses and either:
- *   • "skip"  → queues immediately (true one-click "add to queue"), or
- *   • "auto"  → opens the check modal but auto-confirms when everything's green
- *               (the modal only paints if something needs attention), or
- *   • "always"→ always shows the check modal.
- *
- * The DownloadCheckModal is mounted once here so it can appear over any page.
- * GameDetailPage keeps its own copy of this flow because it layers on extra
- * concerns (installed-manifest checks, version conflicts, force re-download).
- */
 type DownloadFlowValue = {
   requestDownload: (game: Game) => Promise<void>
 }
@@ -54,8 +33,6 @@ const CLOSED: FlowState = {
   autoConfirm: false,
 }
 
-// Non-terminal states that mean "a download/install for this game is already
-// in flight" — kept in sync with use-universal-game-menu's active check.
 const ACTIVE_STATUSES = [
   "queued", "downloading", "paused", "extracting", "installing", "verifying", "retrying", "install_ready",
 ]
@@ -65,8 +42,6 @@ export function DownloadFlowProvider({ children }: { children: React.ReactNode }
   const { toast } = useToast()
   const [state, setState] = useState<FlowState>(CLOSED)
 
-  // Active appids, derived with content-equality so progress ticks during a
-  // download don't re-render this root-level provider.
   const activeAppids = useDownloadsSelector(
     (downloads) =>
       Array.from(
@@ -84,14 +59,11 @@ export function DownloadFlowProvider({ children }: { children: React.ReactNode }
       const appid = game?.appid
       if (!appid) return
 
-      // Already downloading / queued — don't start a second job or pop a modal.
       if (activeAppids.includes(appid)) {
         toast(`“${game.name}” is already in your downloads`, "info", 4000)
         return
       }
 
-      // Mirror GameDetailPage.openHostSelector's mode resolution, including the
-      // legacy `skipLinkCheck` boolean fallback.
       let mode = (await window.ucSettings?.get?.("downloadCheckMode")) as
         | "always" | "auto" | "skip" | undefined
       if (!mode) {
@@ -102,10 +74,9 @@ export function DownloadFlowProvider({ children }: { children: React.ReactNode }
       let preferred: PreferredDownloadHost = "ucfiles"
       try {
         preferred = await getPreferredDownloadHost()
-      } catch { /* keep default */ }
+      } catch {  }
 
       if (mode === "skip") {
-        // Quick path — queue immediately, no popup.
         try {
           await startGameDownload(game, preferred)
           toast(`Added “${game.name}” to the download queue`, "info", 4000)
@@ -115,9 +86,6 @@ export function DownloadFlowProvider({ children }: { children: React.ReactNode }
         return
       }
 
-      // "auto" / "always" — run the availability check + host selector. Enrich
-      // the game with full detail first so the modal's storage / system-
-      // requirement panels match what the game page would show.
       let full: Game = game
       try {
         const res = await apiFetch(`/api/games/${encodeURIComponent(appid)}`)
@@ -125,14 +93,12 @@ export function DownloadFlowProvider({ children }: { children: React.ReactNode }
           const detail = await res.json().catch(() => null)
           if (detail && typeof detail === "object") full = { ...game, ...detail }
         }
-      } catch { /* fall back to the list payload */ }
+      } catch {  }
 
       let token: string | null = null
       try {
         token = await requestDownloadToken(appid)
       } catch {
-        // No token → the modal falls back to a plain host picker (skips the
-        // link check) rather than failing outright.
         token = null
       }
 
@@ -176,11 +142,6 @@ export function DownloadFlowProvider({ children }: { children: React.ReactNode }
   )
 }
 
-/**
- * Access the app-wide download flow. Returns a no-op fallback when used outside
- * the provider (e.g. detached windows) so consumers never crash — they just
- * won't be able to start a download there.
- */
 export function useDownloadFlow(): DownloadFlowValue {
   const ctx = useContext(DownloadFlowContext)
   if (ctx) return ctx

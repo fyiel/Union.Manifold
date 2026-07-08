@@ -28,9 +28,6 @@ fn systemd_run_available() -> bool {
 }
 
 fn install_dir_for(state: &AppState, appid: &str) -> Option<PathBuf> {
-    // Scan the primary install dir AND any legacy roots so old UnionCrax.Direct
-    // installs resolve their folder and launch. Imported entries resolve to the
-    // real game dir (manifest installPath), not their manifest stub.
     crate::library::game_files_dir(&crate::library::scan_roots(state), appid)
 }
 
@@ -114,9 +111,6 @@ pub fn game_exe_preflight(state: State<'_, AppState>, appid: String, exe_path: S
 }
 
 fn spawn_and_track(app: &AppHandle, appid: &str, command: &str, args: &[String], cwd: &Path, envs: &[(String, String)], exe_path: &str, game_name: Option<String>) -> Result<u32, String> {
-    // Proton's pressure-vessel reparents the game away from our child, so a
-    // plain pid kill leaves the game alive. On Linux wrap the launch in a
-    // transient systemd user scope; stopping the scope reaps the whole tree.
     #[cfg_attr(not(target_os = "linux"), allow(unused_mut))]
     let mut scope: Option<String> = None;
     #[cfg(target_os = "linux")]
@@ -150,16 +144,8 @@ fn spawn_and_track(app: &AppHandle, appid: &str, command: &str, args: &[String],
     };
     #[cfg(windows)]
     {
-        // We are a GUI-subsystem process with no console, so CreateProcess would
-        // allocate and show a fresh console window for any console-subsystem game
-        // or launcher stub it starts. CREATE_NO_WINDOW suppresses that and is
-        // documented as ignored for GUI applications, so real games are unaffected
-        // (unlike SW_HIDE-style hiding, which GUI games honor — the old Electron
-        // "game starts hidden with audio only" bug).
         use std::os::windows::process::CommandExt;
         cmd.creation_flags(0x08000000);
-        // Don't hand the game our stdio either: a console child writing into an
-        // inherited handle nobody drains can stall on a full pipe buffer.
         cmd.stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null());
@@ -173,9 +159,6 @@ fn spawn_and_track(app: &AppHandle, appid: &str, command: &str, args: &[String],
     for (k, v) in envs {
         cmd.env(k, v);
     }
-    // Reserve the slot BEFORE spawning, atomically with the spawn, so two
-    // concurrent launches for the same appid can't both spawn and orphan the
-    // first process handle. This `entry` is the single gate.
     use std::collections::hash_map::Entry;
     let child = {
         let mut running = RUNNING.lock();
@@ -222,9 +205,6 @@ fn spawn_and_track(app: &AppHandle, appid: &str, command: &str, args: &[String],
         }
     });
     if let Err(e) = reaper {
-        // Thread creation only fails under resource exhaustion. The game is
-        // already running; free the slot (nothing will ever reap it) and log
-        // instead of panicking — with panic=abort that would kill the app.
         RUNNING.lock().remove(appid);
         crate::logging::write_line("error", &format!("game reaper thread spawn failed for {appid}: {e}"));
     }
@@ -243,10 +223,6 @@ pub fn game_exe_launch(state: State<'_, AppState>, app: AppHandle, appid: String
     };
     match spawn_and_track(&app, &appid, &plan.command, &plan.args, &cwd, &plan.envs, &exe_path, game_name) {
         Ok(pid) => {
-            // Opt-in "close for maximum performance": the game is already
-            // detached (its own systemd scope / process group), so exiting the
-            // launcher never takes it down. Delay briefly so this command's
-            // response reaches the UI and the process settles before we quit.
             if state.settings.get("closeOnGameLaunch").as_bool().unwrap_or(false) {
                 let app2 = app.clone();
                 tauri::async_runtime::spawn(async move {
@@ -272,9 +248,6 @@ pub fn game_exe_quit(appid: String) -> Value {
     let handle = RUNNING.lock().get(&appid).cloned();
     if let Some(handle) = handle {
         kill_handle(&handle);
-        // The reaper thread in spawn_and_track owns removal from RUNNING and
-        // the presence-changed emit, so state only flips once the tree is
-        // actually gone.
         return json!({ "ok": true, "stopped": true });
     }
     json!({ "ok": true, "stopped": false })
@@ -287,9 +260,6 @@ fn kill_handle(handle: &RunHandle) {
             .args(["--user", "kill", "--signal=SIGTERM", &scope])
             .status()
             .ok();
-        // Builder::spawn instead of thread::spawn: the latter panics on thread
-        // creation failure, and with panic=abort that would kill the whole app
-        // just to skip an escalation-to-SIGKILL nicety.
         std::thread::Builder::new()
             .name("game-kill-escalate".into())
             .spawn(move || {
@@ -304,8 +274,6 @@ fn kill_handle(handle: &RunHandle) {
     }
     #[cfg(windows)]
     {
-        // CREATE_NO_WINDOW: taskkill is a console app; without the flag a
-        // console window flashes over the launcher every time a game is quit.
         use std::os::windows::process::CommandExt;
         std::process::Command::new("taskkill")
             .args(["/PID", &handle.pid.to_string(), "/T", "/F"])
@@ -315,7 +283,6 @@ fn kill_handle(handle: &RunHandle) {
     }
     #[cfg(unix)]
     {
-        // Spawned with process_group(0), so signal the whole group.
         let group = format!("-{}", handle.pid);
         std::process::Command::new("kill")
             .args(["-TERM", "--", &group])
@@ -338,9 +305,6 @@ fn kill_handle(handle: &RunHandle) {
 mod tests {
     use super::*;
 
-    // Spawn a survivor the way spawn_and_track does (scope on systemd, process
-    // group otherwise) and prove kill_handle reaps it even though the direct
-    // child double-forked away, which is the pressure-vessel reparent shape.
     #[test]
     fn kill_handle_reaps_detached_tree() {
         if !systemd_run_available() {

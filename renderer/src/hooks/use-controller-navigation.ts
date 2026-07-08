@@ -1,19 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { playHaptic, setHapticsEnabled, setHapticsIntensity } from '../lib/haptics'
 
-/**
- * Drives the launcher UI from a gamepad: D-pad / left stick move focus between
- * interactive elements, A activates, B goes back, the right stick / triggers
- * scroll. Built on the W3C Gamepad API so it works without the native GCPad
- * DLL (and gives us `vibrationActuator` haptics for free).
- *
- * Focus is plain DOM focus, so it layers on top of the existing keyboard
- * accessibility of the app — every <button>/<a>/<input> is already reachable.
- * We add a `data-uc-gamepad` flag on <html> while a pad is steering so the
- * focus ring (see globals.css) only shows for controller users, not mouse
- * users.
- */
-
 interface ControllerNavOptions {
   enabled: boolean
   hapticsEnabled: boolean
@@ -21,7 +8,6 @@ interface ControllerNavOptions {
   intensity?: number
 }
 
-// Standard gamepad button indices (W3C "standard" mapping).
 const BTN = {
   A: 0,
   B: 1,
@@ -58,7 +44,6 @@ function isVisible(el: HTMLElement): boolean {
   if (el.hasAttribute('disabled') || el.getAttribute('aria-hidden') === 'true') return false
   const rect = el.getBoundingClientRect()
   if (rect.width <= 1 || rect.height <= 1) return false
-  // Off-screen (allow a little overscan so partially-scrolled items count).
   if (rect.bottom < -40 || rect.top > window.innerHeight + 40) return false
   if (rect.right < -40 || rect.left > window.innerWidth + 40) return false
   const style = window.getComputedStyle(el)
@@ -78,12 +63,6 @@ function rectOf(el: HTMLElement): Rect {
   return { cx: r.left + r.width / 2, cy: r.top + r.height / 2, left: r.left, right: r.right, top: r.top, bottom: r.bottom }
 }
 
-/**
- * Pick the best element to move to from `current` in `dir`, using a directional
- * scoring function: candidates must lie predominantly in the requested
- * direction; among those we minimise (primary-axis distance + perpendicular
- * misalignment penalty).
- */
 function findCandidate(current: HTMLElement, dir: Direction, candidates: HTMLElement[]): HTMLElement | null {
   const from = rectOf(current)
   let best: HTMLElement | null = null
@@ -93,7 +72,7 @@ function findCandidate(current: HTMLElement, dir: Direction, candidates: HTMLEle
     if (el === current) continue
     const to = rectOf(el)
 
-    let primary: number    // distance along the travel axis (must be > 0)
+    let primary: number
     let perpendicular: number
 
     switch (dir) {
@@ -120,8 +99,6 @@ function findCandidate(current: HTMLElement, dir: Direction, candidates: HTMLEle
     }
 
     if (primary <= 0) continue
-    // Penalise perpendicular drift heavily so navigation feels like a grid,
-    // not a free-for-all to the nearest element in any vaguely-correct way.
     const score = primary + perpendicular * 2
     if (score < bestScore) {
       bestScore = score
@@ -134,7 +111,6 @@ function findCandidate(current: HTMLElement, dir: Direction, candidates: HTMLEle
 export function useControllerNavigation(options: ControllerNavOptions) {
   const { enabled, hapticsEnabled, deadzone, intensity = 1 } = options
 
-  // Refs so the rAF loop always sees fresh values without re-subscribing.
   const optsRef = useRef(options)
   optsRef.current = options
 
@@ -149,16 +125,15 @@ export function useControllerNavigation(options: ControllerNavOptions) {
 
     let raf = 0
     let active = true
-    let looping = false   // rAF loop currently scheduled (a pad is known)
-    let fallbackTimer = 0 // slow poll handle while no pad is known
-    let noPadFrames = 0   // consecutive rAF frames that saw no connected pad
+    let looping = false
+    let fallbackTimer = 0
+    let noPadFrames = 0
 
-    // Per-button edge tracking + directional auto-repeat timers.
     const prevButtons: Record<number, boolean> = {}
     const dirHeldSince: Record<Direction, number> = { up: 0, down: 0, left: 0, right: 0 }
     const dirNextRepeat: Record<Direction, number> = { up: 0, down: 0, left: 0, right: 0 }
-    const REPEAT_DELAY = 380   // ms before a held direction starts repeating
-    const REPEAT_RATE = 110    // ms between repeats while held
+    const REPEAT_DELAY = 380
+    const REPEAT_RATE = 110
 
     function markGamepadActive() {
       const root = document.documentElement
@@ -168,7 +143,6 @@ export function useControllerNavigation(options: ControllerNavOptions) {
     function ensureFocus(): HTMLElement | null {
       const activeEl = document.activeElement as HTMLElement | null
       if (activeEl && activeEl !== document.body && isVisible(activeEl)) return activeEl
-      // Nothing useful focused — grab the first visible focusable element.
       const list = collectFocusable()
       const first = list[0] ?? null
       if (first) {
@@ -184,8 +158,6 @@ export function useControllerNavigation(options: ControllerNavOptions) {
       const hadFocus = !!activeEl && activeEl !== document.body && isVisible(activeEl)
       const current = ensureFocus()
       if (!current) return
-      // First press with nothing focused just lands focus on the first element
-      // rather than immediately skipping past it.
       if (!hadFocus) { playHaptic('nav'); return }
       const candidates = collectFocusable()
       const next = findCandidate(current, dir, candidates)
@@ -194,8 +166,6 @@ export function useControllerNavigation(options: ControllerNavOptions) {
         next.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' })
         playHaptic('nav')
       } else {
-        // Couldn't move that way — try scrolling the nearest scroll container so
-        // long pages still traverse, then give a gentle boundary tick.
         const scrolled = scrollInDirection(dir)
         playHaptic(scrolled ? 'nav' : 'boundary')
       }
@@ -219,7 +189,6 @@ export function useControllerNavigation(options: ControllerNavOptions) {
       const target = el ?? ensureFocus()
       if (!target) return
       const tag = target.tagName
-      // Text inputs: focusing is the meaningful action; clicking would do nothing.
       if (tag === 'INPUT' || tag === 'TEXTAREA') {
         target.focus()
         playHaptic('select')
@@ -231,9 +200,6 @@ export function useControllerNavigation(options: ControllerNavOptions) {
 
     function goBack() {
       markGamepadActive()
-      // If a dialog / popover / menu is open, B should dismiss it (Escape)
-      // rather than navigate the router. Radix surfaces all mark themselves
-      // with role + an open data-state.
       const openSurface = document.querySelector(
         '[role="dialog"][data-state="open"], [role="menu"][data-state="open"], [data-radix-popper-content-wrapper]'
       )
@@ -244,14 +210,12 @@ export function useControllerNavigation(options: ControllerNavOptions) {
         playHaptic('back')
         return
       }
-      // Otherwise prefer the app's explicit back affordance if present…
       const backEl = document.querySelector<HTMLElement>('[data-uc-back]:not([disabled])')
       if (backEl && isVisible(backEl)) {
         backEl.click()
         playHaptic('back')
         return
       }
-      // …falling back to Escape for any other dismissible UI.
       const escTarget = (document.activeElement as HTMLElement | null) ?? document.body
       escTarget.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true }))
       playHaptic('back')
@@ -264,7 +228,6 @@ export function useControllerNavigation(options: ControllerNavOptions) {
         return
       }
       if (dirHeldSince[dir] === 0) {
-        // First press — act immediately, schedule the repeat.
         dirHeldSince[dir] = now
         dirNextRepeat[dir] = now + REPEAT_DELAY
         move(dir)
@@ -278,7 +241,6 @@ export function useControllerNavigation(options: ControllerNavOptions) {
       if (!active || !looping) return
       const now = performance.now()
       const pads = navigator.getGamepads?.() || []
-      // Use the first connected standard pad as the driver.
       const pad = Array.from(pads).find((p): p is Gamepad => !!p && p.connected) || null
 
       if (pad) {
@@ -295,9 +257,6 @@ export function useControllerNavigation(options: ControllerNavOptions) {
           return cur && !was
         }
 
-        // Directional input = D-pad OR left stick past the deadzone. For the
-        // stick, only the dominant axis counts so a slightly-off push doesn't
-        // fire two directions at once (the D-pad may still go diagonal).
         const horizDominant = Math.abs(lx) >= Math.abs(ly)
         const stickUp = !horizDominant && ly < -dz
         const stickDown = !horizDominant && ly > dz
@@ -309,22 +268,17 @@ export function useControllerNavigation(options: ControllerNavOptions) {
         handleDirection('left', btn(BTN.DPAD_LEFT) || stickLeft, now)
         handleDirection('right', btn(BTN.DPAD_RIGHT) || stickRight, now)
 
-        // Action buttons (edge-triggered).
         if (edge(BTN.A)) activate(document.activeElement as HTMLElement | null)
         if (edge(BTN.B)) goBack()
-        // Track the rest so prevButtons stays current (prevents phantom edges).
         edge(BTN.X); edge(BTN.Y); edge(BTN.LB); edge(BTN.RB)
         edge(BTN.LT); edge(BTN.RT); edge(BTN.BACK); edge(BTN.START)
 
-        // Right stick = free scroll of the active scroll container.
         const ry = pad.axes[3] ?? 0
         if (Math.abs(ry) > dz) {
           const container = findScrollContainer(document.activeElement as HTMLElement | null)
           if (container) container.scrollTop += ry * 18
         }
       } else if (++noPadFrames >= 600) {
-        // ~10s of visible frames without a pad — a webview missed the
-        // disconnect event. Drop back to the slow poll instead of spinning.
         stopLoop()
         return
       }
@@ -332,11 +286,6 @@ export function useControllerNavigation(options: ControllerNavOptions) {
       raf = requestAnimationFrame(loop)
     }
 
-    // A 60fps rAF loop with zero pads is pure waste, so it only runs while a
-    // pad is known. Pads announce via gamepadconnected/gamepaddisconnected,
-    // but some webviews only surface a pad in getGamepads() (and fire the
-    // connect event) after a button press — so while none is known, a slow
-    // poll watches getGamepads() and promotes to the rAF loop when one shows.
     const padPresent = () => Array.from(navigator.getGamepads?.() || []).some((p) => !!p && p.connected)
 
     function startLoop() {
@@ -371,11 +320,9 @@ export function useControllerNavigation(options: ControllerNavOptions) {
     window.addEventListener('gamepadconnected', onPadConnected)
     window.addEventListener('gamepaddisconnected', onPadDisconnected)
 
-    // A pad plugged in before mount may already be visible without any event.
     if (padPresent()) startLoop()
     else startFallback()
 
-    // Switching to mouse/keyboard clears the gamepad focus-ring styling.
     const clearGamepadFlag = () => document.documentElement.removeAttribute('data-uc-gamepad')
     window.addEventListener('mousemove', clearGamepadFlag, { passive: true })
     window.addEventListener('mousedown', clearGamepadFlag, { passive: true })
@@ -393,7 +340,6 @@ export function useControllerNavigation(options: ControllerNavOptions) {
   }, [enabled, deadzone])
 }
 
-/** Walk up from `el` to the nearest scrollable ancestor (or the document). */
 function findScrollContainer(el: HTMLElement | null): HTMLElement | null {
   let node: HTMLElement | null = el
   while (node && node !== document.body) {
@@ -404,7 +350,6 @@ function findScrollContainer(el: HTMLElement | null): HTMLElement | null {
     }
     node = node.parentElement
   }
-  // Fall back to the main scroll region or the documentElement.
   const main = document.querySelector<HTMLElement>('main, [data-uc-scroll]')
   if (main && main.scrollHeight > main.clientHeight + 4) return main
   return document.scrollingElement as HTMLElement | null

@@ -4,16 +4,10 @@ import { useDownloadsActions, useDownloadsSelector } from "@/context/downloads-c
 const SETTING_KEY = "pauseDownloadsWhilePlaying"
 const ACTIVE = ["downloading", "extracting", "installing", "verifying", "retrying", "queued"]
 
-// When "pause downloads while playing" is on, pause everything the moment a game
-// starts and resume on exit. We only resume if we were the ones who paused, so a
-// download the user paused by hand stays paused. Mounted once in ForkLayout so it
-// applies wherever a game launches. Restored from the upstream hook, adapted to
-// the fork's group level pauseAll/resumeAll.
 export function usePauseDownloadsWhilePlaying() {
   const { pauseAll, resumeAll } = useDownloadsActions()
   const enabledRef = useRef(false)
   const autoPausedRef = useRef(false)
-  // keep the latest downloads off a ref so the presence listener stays stable
   const hasActive = useDownloadsSelector((dls) => dls.some((x) => ACTIVE.includes(x.status)), (a, b) => a === b)
   const hasActiveRef = useRef(hasActive)
   hasActiveRef.current = hasActive
@@ -24,7 +18,7 @@ export function usePauseDownloadsWhilePlaying() {
       try {
         const v = await window.ucSettings?.get?.(SETTING_KEY)
         if (!cancelled) enabledRef.current = Boolean(v)
-      } catch { /* ignore */ }
+      } catch {  }
     })()
     const off = window.ucSettings?.onChanged?.((d) => {
       if (!d) return

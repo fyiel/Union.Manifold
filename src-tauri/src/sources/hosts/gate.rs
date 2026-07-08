@@ -1,13 +1,3 @@
-//! Slipgate-backed file hosts: links behind captchas, wait timers, or
-//! js-only download pages that a plain HTTP resolver cannot clear. Each
-//! domain maps to a Slipgate recipe name; the instance drives a real browser
-//! and returns a direct url. Without a configured Slipgate these hosts stay
-//! browser-only, with a reason pointing the user at Settings.
-//!
-//! mega.nz is deliberately absent: it serves AES-encrypted bytes, so a
-//! direct url is useless without the client-side decryption the official
-//! apps do — no resolver can help (see hosts::resolve_url).
-
 use serde_json::json;
 
 use crate::slipgate;
@@ -15,7 +5,6 @@ use crate::sources::ResolveResult;
 
 pub struct GateHost {
     pub recipe: &'static str,
-    /// What blocks a native resolver; shown when Slipgate is not configured.
     wall: &'static str,
 }
 
@@ -36,7 +25,6 @@ static TABLE: &[(&str, GateHost)] = &[
     ("zerofs.link", gh("zerofs", "browser-only page")),
 ];
 
-/// `host == domain` or `host` is a subdomain of `domain`. No allocation.
 fn domain_match(host: &str, domain: &str) -> bool {
     host == domain
         || (host.len() > domain.len()
@@ -57,8 +45,6 @@ pub fn matches(url: &str) -> bool {
     entry_for(url).is_some()
 }
 
-/// Recipe name for `detect_host_type` (canonical name even for mirror
-/// domains like vik1ngfile.site).
 pub fn host_type(url: &str) -> Option<&'static str> {
     entry_for(url).map(|g| g.recipe)
 }
@@ -92,7 +78,6 @@ pub async fn resolve(url: &str) -> ResolveResult {
             file_name: link.file_name,
             size_bytes: link.size_bytes,
             headers: (!link.headers.is_empty()).then_some(link.headers),
-            // Browser-minted urls are signed/session-bound; re-resolve on retry.
             ephemeral: true,
             ..Default::default()
         },
@@ -112,7 +97,6 @@ mod tests {
         assert_eq!(host_type("https://1fichier.com/?abc"), Some("1fichier"));
         assert_eq!(host_type("https://qiwi.gg/file/x"), Some("qiwi"));
         assert_eq!(host_type("https://fileq.net/abc.html"), Some("fileq"));
-        // fileditch/filekeeper/datavaults are native now, not gate hosts.
         assert_eq!(host_type("https://fileditchfiles.me/a/b/x.zip"), None);
         assert_eq!(host_type("https://filekeeper.net/abc/x.zip"), None);
     }

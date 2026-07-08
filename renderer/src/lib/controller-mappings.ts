@@ -1,14 +1,3 @@
-/**
- * Controller Input Mapping System
- * 
- * Uses gcpad_remap to translate native controller inputs into standardized 
- * Xbox 360-style outputs for maximum game compatibility, seeing as how most
- * games have better compatibility with controllers if it's that one.
- * 
- * Thanks Windows, super appreciative of that.
- */
-
-// Standard Xbox 360 Controller Button/Input IDs
 export enum Xbox360Button {
   A = 'a',
   B = 'b',
@@ -35,30 +24,23 @@ export enum Xbox360Axis {
   RIGHT_TRIGGER = 'rt',
 }
 
-// Native controller button definitions (for mapping source inputs)
 export enum NativeButton {
-  // Face buttons
   A = 'native_a',
   B = 'native_b',
   X = 'native_x',
   Y = 'native_y',
-  // Shoulder buttons
   LB = 'native_lb',
   RB = 'native_rb',
   LT = 'native_lt',
   RT = 'native_rt',
-  // Stick buttons
   LS = 'native_ls',
   RS = 'native_rs',
-  // Menu buttons
   BACK = 'native_back',
   START = 'native_start',
-  // D-Pad
   DPAD_UP = 'native_dpad_up',
   DPAD_DOWN = 'native_dpad_down',
   DPAD_LEFT = 'native_dpad_left',
   DPAD_RIGHT = 'native_dpad_right',
-  // Special
   GUIDE = 'native_guide',
   TOUCHPAD = 'native_touchpad',
   SHARE = 'native_share',
@@ -73,7 +55,6 @@ export enum NativeAxis {
   RIGHT_TRIGGER = 'native_rt_axis',
 }
 
-// Keyboard key definitions
 export interface KeyboardKey {
   key: string
   code: string
@@ -85,7 +66,6 @@ export interface KeyboardKey {
   }
 }
 
-// Mouse input definitions
 export interface MouseInput {
   type: 'move' | 'click' | 'right_click' | 'middle_click' | 'scroll'
   button?: 'left' | 'right' | 'middle'
@@ -94,14 +74,12 @@ export interface MouseInput {
   deltaY?: number
 }
 
-// Combined output action (can be keyboard, mouse, or virtual Xbox input)
 export type InputAction = 
   | { type: 'keyboard'; key: KeyboardKey }
   | { type: 'mouse'; input: MouseInput }
   | { type: 'xbox360'; button?: Xbox360Button; axis?: Xbox360Axis; value?: number }
   | { type: 'none' }
 
-// Input mapping: native controller input -> Xbox 360 output
 export interface ControllerMapping {
   id: string
   name: string
@@ -117,26 +95,22 @@ export interface ControllerMapping {
   }
 }
 
-// Key binding: controller input -> keyboard/mouse output
 export interface KeyBinding {
   id: string
   name: string
   profileName: string
   enabled: boolean
-  // Button mappings
   buttonMappings: {
     [key in NativeButton]?: InputAction
   } & {
     [key in NativeAxis]?: InputAction & { sensitivity?: number }
   }
-  // Stick to mouse mapping options
   stickToMouse?: {
     leftStick: boolean
     rightStick: boolean
     mouseSpeed: number
     mouseAcceleration: boolean
   }
-  // Trigger to mouse scroll
   triggerToScroll?: {
     leftTrigger: boolean
     rightTrigger: boolean
@@ -144,30 +118,26 @@ export interface KeyBinding {
   }
 }
 
-// Controller profile (collection of settings for a specific game/app)
 export interface ControllerProfile {
   id: string
   name: string
-  appid?: string // Optional game association
+  appid?: string
   createdAt: number
   updatedAt: number
   mappingEnabled: boolean
   controllerMapping: ControllerMapping
   keyBindingEnabled: boolean
   keyBinding: KeyBinding
-  // General settings
   deadzone: number
   triggerDeadzone: number
   vibrationEnabled: boolean
   vibrationIntensity: number
 }
 
-// Complete controller settings
 export interface ControllerSettings {
-  // Basic settings
   enabled: boolean
   controllerType: 'xbox' | 'playstation' | 'generic' | 'dualsense' | 'xboxone' | 'xboxseries'
-  controllerSlot: number | null  // User-selected slot, null = auto-detect
+  controllerSlot: number | null
   vibrationEnabled: boolean
   deadzone: number
   triggerDeadzone: number
@@ -175,31 +145,23 @@ export interface ControllerSettings {
   
   inputTranslation: {
     enabled: boolean
-    // Auto-detect controller type and apply appropriate mapping
     autoDetect: boolean
-    // Manual mapping override
     mappingPreset: 'auto' | 'generic' | 'xbox' | 'playstation' | 'dualsense' | 'dualshock4' | 'xboxone' | 'xboxseries'
-    // Custom mapping (if not using preset)
     customMapping?: ControllerMapping
   }
   
   keyBinding: {
     enabled: boolean
-    // Active profile ID
     activeProfileId: string | null
-    // All profiles
     profiles: ControllerProfile[]
-    // Default profile (used when no game-specific profile exists)
     defaultProfileId: string | null
   }
   
-  // In-overlay settings
   overlayEnabled: boolean
   overlayHotkey: string
   overlayPosition: 'left' | 'right'
 }
 
-// Default Xbox 360-style button labels for UI
 export const Xbox360ButtonLabels: Record<Xbox360Button, string> = {
   [Xbox360Button.A]: 'A',
   [Xbox360Button.B]: 'B',
@@ -217,34 +179,26 @@ export const Xbox360ButtonLabels: Record<Xbox360Button, string> = {
   [Xbox360Button.DPAD_RIGHT]: 'D-Pad Right',
 }
 
-// Native button labels for UI
 export const NativeButtonLabels: Record<NativeButton | NativeAxis, string> = {
-  // Face buttons
   [NativeButton.A]: 'Button A',
   [NativeButton.B]: 'Button B',
   [NativeButton.X]: 'Button X',
   [NativeButton.Y]: 'Button Y',
-  // Shoulders
   [NativeButton.LB]: 'Left Bumper',
   [NativeButton.RB]: 'Right Bumper',
   [NativeButton.LT]: 'Left Trigger',
   [NativeButton.RT]: 'Right Trigger',
-  // Sticks
   [NativeButton.LS]: 'Left Stick Click',
   [NativeButton.RS]: 'Right Stick Click',
-  // Menu
   [NativeButton.BACK]: 'Back',
   [NativeButton.START]: 'Start',
-  // D-Pad
   [NativeButton.DPAD_UP]: 'D-Pad Up',
   [NativeButton.DPAD_DOWN]: 'D-Pad Down',
   [NativeButton.DPAD_LEFT]: 'D-Pad Left',
   [NativeButton.DPAD_RIGHT]: 'D-Pad Right',
-  // Special
   [NativeButton.GUIDE]: 'Guide',
   [NativeButton.TOUCHPAD]: 'Touchpad',
   [NativeButton.SHARE]: 'Share',
-  // Axes
   [NativeAxis.LEFT_X]: 'Left Stick X',
   [NativeAxis.LEFT_Y]: 'Left Stick Y',
   [NativeAxis.RIGHT_X]: 'Right Stick X',
@@ -253,7 +207,6 @@ export const NativeButtonLabels: Record<NativeButton | NativeAxis, string> = {
   [NativeAxis.RIGHT_TRIGGER]: 'Right Trigger',
 }
 
-// Controller type presets for auto-detection
 export const ControllerPresets: Record<string, Partial<ControllerMapping>> = {
   generic: {
     id: 'generic',
@@ -306,7 +259,7 @@ export const ControllerPresets: Record<string, Partial<ControllerMapping>> = {
       [NativeButton.Y]: Xbox360Button.Y,
       [NativeButton.LB]: Xbox360Button.LB,
       [NativeButton.RB]: Xbox360Button.RB,
-      [NativeButton.LT]: Xbox360Button.LB, // Map to LB for games that don't use triggers as buttons
+      [NativeButton.LT]: Xbox360Button.LB,
       [NativeButton.RT]: Xbox360Button.RB,
       [NativeButton.LS]: Xbox360Button.LS,
       [NativeButton.RS]: Xbox360Button.RS,
@@ -376,7 +329,6 @@ export const ControllerPresets: Record<string, Partial<ControllerMapping>> = {
   },
 }
 
-// Default key binding profile
 export function createDefaultKeyBinding(): KeyBinding {
   return {
     id: 'default',
@@ -398,7 +350,6 @@ export function createDefaultKeyBinding(): KeyBinding {
   }
 }
 
-// Default controller profile
 export function createDefaultProfile(name: string = 'Default'): ControllerProfile {
   const now = Date.now()
   return {
@@ -417,7 +368,6 @@ export function createDefaultProfile(name: string = 'Default'): ControllerProfil
   }
 }
 
-// Default controller settings
 export function createDefaultControllerSettings(): ControllerSettings {
   const defaultProfile = createDefaultProfile('Default')
   return {
@@ -445,11 +395,9 @@ export function createDefaultControllerSettings(): ControllerSettings {
   }
 }
 
-// Helper to detect controller type from gamepad info
 export function detectControllerType(gamepad: { id: string; axes: number[]; buttons: { pressed: boolean }[] }): string {
   const id = gamepad.id.toLowerCase()
   
-  // Xbox controllers
   if (id.includes('xbox series')) {
     return 'xboxseries'
   } else if (id.includes('xbox one')) {
@@ -460,7 +408,6 @@ export function detectControllerType(gamepad: { id: string; axes: number[]; butt
     return 'xbox'
   }
   
-  // Sony controllers
   if (id.includes('sony') || id.includes('playstation') || id.includes('dualsense') || id.includes('dualshock') || id.includes('ps5') || id.includes('ps4')) {
     if (id.includes('dualsense') || id.includes('ps5')) {
       return 'dualsense'
@@ -470,11 +417,9 @@ export function detectControllerType(gamepad: { id: string; axes: number[]; butt
     return 'playstation'
   }
   
-  // Nintendo controllers
   if (id.includes('nintendo') || id.includes('switch') || id.includes('joy-con') || id.includes('pro controller')) {
     return 'switch'
   }
   
-  // Generic
   return 'generic'
 }

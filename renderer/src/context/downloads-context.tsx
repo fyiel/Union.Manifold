@@ -81,10 +81,6 @@ export type DownloadItem = {
   warning?: string | null
   skippedFiles?: string[]
   spaceCheck?: DownloadSpaceCheck | null
-  /** Explicit position in the download queue. Items that share an appid carry
-   *  the same value so a whole game moves as one unit; ties break on partIndex.
-   *  Items without it fall back to startedAt ordering (e.g. a newly-queued game
-   *  appends to the end). */
   queueOrder?: number
 }
 
@@ -188,11 +184,6 @@ const DownloadsStoreContext = createContext<DownloadsStore | null>(null)
 const LEGACY_STORAGE_KEY = "uc_direct_downloads"
 const PAUSABLE_STATUSES: DownloadStatus[] = ["downloading", "retrying", "extracting", "installing", "verifying"]
 
-/** Ordering for queued items. Honours an explicit `queueOrder` first, falling
- *  back to enqueue time so a fresh download lands at the end. Items sharing a
- *  queueOrder (same game, multiple parts) keep their natural part order. Used by
- *  the auto-start sequencer and the renderer's "Up Next" list so both sort
- *  identically. */
 function compareQueuePosition(
   a: { queueOrder?: number; startedAt: number; partIndex?: number },
   b: { queueOrder?: number; startedAt: number; partIndex?: number }
@@ -367,10 +358,6 @@ function createSyntheticDownloadFromInstallingManifest(
           : "failed"
   const metadata = manifest?.metadata || {}
 
-  // Pull resume metadata stored by the main process on shutdown. When this
-  // exists we can rebuild a DownloadItem the user can actually resume — url,
-  // savePath, and byte counters are all needed for resumeDownload's Level 3
-  // re-resolve + createInterruptedDownload path.
   const snapshot = manifest?.downloadSnapshot && typeof manifest.downloadSnapshot === "object"
     ? manifest.downloadSnapshot
     : null
@@ -445,9 +432,6 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
   const preparingRef = useRef(new Set<string>())
   const sequenceLocksRef = useRef(new Set<string>())
   const reconcileLocksRef = useRef(new Set<string>())
-  // Prevents concurrent resumeDownload calls for the same download item.
-  // Rapid pause/resume clicks can otherwise send two resume flows in parallel
-  // which leads to Level 3 (resumeWithFreshUrl) racing against startNextQueuedPart.
   const resumeLocksRef = useRef(new Set<string>())
   const pendingProgressRef = useRef<Map<string, DownloadUpdate>>(new Map())
   const progressFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -515,22 +499,12 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
     }
   }, [])
 
-  // Persist the current (non-synthetic) snapshot immediately. Shared by the
-  // debounce timer and the teardown/close flush so a download whose state
-  // changed inside the last debounce window is written before the process
-  // exits — otherwise a queued-at-shutdown game gets rebuilt from a stale
-  // manifest as "Failed" on the next launch.
   const flushPersist = useCallback(() => {
     if (typeof window === "undefined" || !persistenceReady) return
     if (persistTimerRef.current) {
       clearTimeout(persistTimerRef.current)
       persistTimerRef.current = null
     }
-    // Drop synthetic-from-manifest entries. They have `host: "local"` and
-    // either no url/savePath or a placeholder id, so round-tripping them
-    // through LevelDB just creates a stale shadow that outranks the real
-    // manifest snapshot on the next launch. The reconcile pass rebuilds them
-    // on every start anyway.
     const snapshot = downloadsRef.current.filter((item) => {
       if (item.host !== "local") return true
       if (item.url && item.savePath) return true
@@ -566,8 +540,6 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
     }
   }, [downloads, persistenceReady, flushPersist])
 
-  // Force a persist flush on teardown and on an app close/quit request so the
-  // debounced snapshot can't be lost when the window goes away.
   useEffect(() => {
     if (typeof window === "undefined") return
     const onBeforeUnload = () => flushPersist()
@@ -594,12 +566,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
           if (item.appid !== appid) return item
           if (["completed", "extracted"].includes(item.status)) return item
 
-          // Force-complete items whose appid has an installed manifest on disk.
-          // For extracting/installing items this means extraction finished successfully.
-          // For paused/downloading items at 100% bytes, the download + extraction already
-          // completed but the renderer missed the status update.
           if (["extracting", "installing"].includes(item.status)) {
-            // Extraction was in progress and installed manifest now exists → done.
             mutated = true
             return {
               ...item,
@@ -631,9 +598,6 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         if (mutated) {
           downloadsRef.current = next
           setDownloads(next)
-          // Extraction/completion finished (possibly while the window was
-          // hidden) — announce it so the Library refreshes, matching the
-          // event onUpdate emits on a live completion.
           if (typeof window !== "undefined") {
             window.dispatchEvent(new CustomEvent("uc_game_installed", { detail: { appid } }))
           }
@@ -642,7 +606,6 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
           await window.ucDownloads.deleteInstalling?.(appid)
         } catch { }
       } catch {
-        // ignore
       } finally {
         reconcileLocksRef.current.delete(appid)
       }
@@ -650,10 +613,6 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
     []
   )
 
-  // Immediately after mount, reconcile items that were extracting/installing when the page
-  // reloaded.  The main process continues extraction independently - if it already finished,
-  // transitioning to "completed" here prevents a false "paused" state that leads to
-  // unnecessary re-downloads when the user clicks Resume.
   const mountReconcileRanRef = useRef(false)
   useEffect(() => {
     if (!persistenceReady) return
@@ -668,22 +627,16 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
     const appids = [...new Set(needsReconcile.map((item) => item.appid))]
     void (async () => {
       for (const appid of appids) {
-        // First check if the game is already fully installed
         await reconcileInstalledState(appid)
 
-        // If items are still extracting after reconcile (no installed manifest yet),
-        // query the main process to see if extraction is actively running.
         const stillExtracting = downloadsRef.current.some(
           (item) => item.appid === appid && ["extracting", "installing"].includes(item.status)
         )
         if (!stillExtracting) continue
 
-        // Ask the main process if this appid has an active extraction
         try {
           const status = await window.ucDownloads?.getActiveStatus?.(appid)
           if (status?.extracting || status?.downloading) {
-            // Main process is still working - keep the extracting status, the normal
-            // onUpdate listener will receive progress/completion events.
             downloadLogger.info(`Post-mount: ${appid} still extracting/downloading in main process`)
             continue
           }
@@ -711,9 +664,6 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
           }
         } catch { }
 
-        // Main process is NOT extracting and game is NOT installed.
-        // The extraction likely failed silently or the installing folder was cleaned up.
-        // Mark as paused so the user can retry.
         setDownloads((prev) =>
           prev.map((item) =>
             item.appid === appid && ["extracting", "installing"].includes(item.status)
@@ -761,13 +711,6 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
                     manifest = { ...manifest, installStatus: "paused", installError: manifest.installError || "App closed. Resume to continue downloading." }
                   } catch {}
                 } else if (["installing", "extracting"].includes(rawStatus)) {
-                  // Note: the download phase records 'installing' too (no
-                  // dedicated 'downloading' manifest status), so the main
-                  // process's listInstalling already rewrites that to 'paused'
-                  // when there is a partial archive on disk. Trust whatever
-                  // installStatus came back here — if it's still 'installing'
-                  // or 'extracting' after that pass, the install really did
-                  // fail and we surface it as such.
                   try {
                     await window.ucDownloads?.setInstallingStatus?.(appid, "failed", "Installation was interrupted when the app closed.")
                     manifest = { ...manifest, installStatus: "failed", installError: "Installation was interrupted when the app closed." }
@@ -782,11 +725,6 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         if (cancelled) return
 
         const prev = downloadsRef.current
-        // Merge by appid: if a manifest item is fresher (has url/savePath
-        // that the existing item lacks, or supersedes a "local" placeholder),
-        // promote those fields onto the existing item. This is how a stale
-        // LevelDB row with host="local" and no url gets healed by the fresh
-        // downloadSnapshot the main process wrote on shutdown.
         const byAppid = new Map<string, DownloadItem>()
         for (const item of prev) {
           if (item.appid) byAppid.set(item.appid, item)
@@ -800,8 +738,6 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
             byAppid.set(item.appid, item)
             continue
           }
-          // Prefer the manifest's freshly-written url/savePath/host/byte
-          // counters over any stale placeholders on the existing row.
           const shouldPromoteUrl = Boolean(item.url) && !existing.url
           const shouldPromoteSavePath = Boolean(item.savePath) && !existing.savePath
           const shouldPromoteHost = item.host && item.host !== "local" && existing.host === "local"
@@ -835,7 +771,6 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         downloadsRef.current = next
         setDownloads(next)
       } catch {
-        // ignore hydration failures
       }
     })()
 
@@ -844,9 +779,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
     }
   }, [persistenceReady])
 
-  // Installed metadata is stored by the main process as a file inside the installed folder.
-
-  const resolveWithTimeout = useCallback(async (host: string, targetUrl: string) => {
+const resolveWithTimeout = useCallback(async (host: string, targetUrl: string) => {
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), 12000)
     try {
@@ -862,10 +795,6 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
   const resolveFreshResumeSource = useCallback(
     async (target: DownloadItem) => {
       if (!target.appid) return null
-      // A "local" host means this item came from a manifest synthetic that
-      // had no downloadSnapshot recorded (older build, or LevelDB persist
-      // never flushed). We can still rehydrate it from /api/downloads/:appid
-      // since UC.Files is the only host the app actually downloads from.
       const isSupported = SUPPORTED_DOWNLOAD_HOSTS.includes(target.host as PreferredDownloadHost)
       const isPlaceholderHost = target.host === "local" || !target.host
       if (!isSupported && !isPlaceholderHost) return null
@@ -930,7 +859,6 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
                   sizeMap.set(entry.id, size)
                 }
               } catch {
-                // best effort only
               }
             })
           )
@@ -954,19 +882,11 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
       )
       if (hasActive) return
 
-      // Only the LEGACY renderer-resolved path is driven from here. Fork
-      // downloads (started via `window.ucDownloads.start` with an already-direct
-      // URL) are owned by the aria2 engine in main, which queues and starts them
-      // itself. Their synthetic items carry host "local". Re-resolving those
-      // here would fail with "Local link could not be resolved" and wrongly mark
-      // every queued-behind download as failed, so skip them.
       const queued = downloadsRef.current
         .filter((item) => item.status === "queued" && item.host && item.host !== "local")
         .sort(compareQueuePosition)
       if (!queued.length) return
       const next = queued[0]
-      // Don't start a queued item if a different appid has paused downloads.
-      // This prevents a new game from auto-starting while the user has paused another one.
       const pausedAppids = new Set(downloadsRef.current.filter((i) => i.status === "paused").map((i) => i.appid))
       if (pausedAppids.size > 0 && !pausedAppids.has(next.appid)) return
 
@@ -1049,7 +969,6 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!window.ucDownloads?.onUpdate) return
     const unsubscribe = window.ucDownloads.onUpdate((update: DownloadUpdate) => {
-      // Batch pure "downloading" progress events to cap re-renders at ~5fps during active downloads
       const existingItem = downloadsRef.current.find((item) => item.id === update.downloadId)
       if (existingItem?.status === "downloading" && update.status === "downloading") {
         pendingProgressRef.current.set(update.downloadId, update)
@@ -1080,10 +999,6 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         }
         return
       }
-      // This update is NOT a pure downloading→downloading progress tick (it's a
-      // status change / first byte / terminal). Any byte-update still queued in
-      // the batch for this id is now stale — drop it so the next 200ms flush
-      // can't clobber the newer state we're about to apply.
       pendingProgressRef.current.delete(update.downloadId)
       setDownloads((prev) => {
         const idx = prev.findIndex((item) => item.id === update.downloadId)
@@ -1096,19 +1011,13 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         }
         const existing = prev[idx]
 
-        // Terminal states: once an item reaches one of these, don't let it regress
-        // to "downloading" or "queued". However, we MUST allow state transitions
-        // that the main process explicitly sends (e.g. extracting → extracted → completed).
         const terminalStates = ["completed", "extract_failed", "failed", "cancelled"]
         const isTerminal = terminalStates.includes(existing.status)
         const nextStatus = update.status || existing.status
 
-        // Only truly block if item is in a hard-terminal state (completed/failed/cancelled)
-        // AND the incoming status is a step backwards (downloading/queued/paused)
         const regressiveStates = ["downloading", "queued", "paused"]
         const finalStatus = isTerminal && regressiveStates.includes(nextStatus) ? existing.status : nextStatus
 
-        // When entering a terminal or idle state, always zero out speed
         const isEnteringTerminal = terminalStates.includes(finalStatus) || finalStatus === "extracted"
 
         const next: DownloadItem = {
@@ -1158,14 +1067,9 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         queueMicrotask(() => {
           void startNextQueuedPart()
         })
-        // Dispatch event so launcher page knows to refresh installed list
         if (typeof window !== "undefined") {
           window.dispatchEvent(new CustomEvent("uc_game_installed", { detail: { appid: update.appid } }))
 
-          // A few archives carry entries this 7-Zip build can't decode (most
-          // commonly ARM64 plugin DLLs in Unity games, useless on x86_64). The
-          // game still installs and runs fine — surface a non-blocking note so
-          // the skip isn't silent, via the toast-context window bridge.
           const skipped = (update as { skippedFiles?: unknown }).skippedFiles
           if (Array.isArray(skipped) && skipped.length > 0) {
             const count = skipped.length
@@ -1178,16 +1082,11 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
             }))
           }
         }
-        // Record an install event in the account's cloud history (no-op when
-        // unauthenticated — failures are swallowed by the helper).
         if (update.appid) {
           void reportPlayEvent(update.appid as string, "install")
         }
       }
 
-      // Only reconcile installed state AFTER extraction/install is fully done.
-      // Do NOT reconcile while extracting/installing - the installed manifest may already
-      // exist on disk before extraction finishes, which causes premature "completed" status.
       if (update.appid && (update.status === "completed" || update.status === "extracted")) {
         queueMicrotask(() => {
           void reconcileInstalledState(update.appid)
@@ -1196,10 +1095,6 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
     })
     return () => {
       if (typeof unsubscribe === "function") unsubscribe()
-      // The batched-progress flush timer is module-lifetime on the provider; if
-      // it's pending when this effect tears down (or the provider unmounts), it
-      // would fire setDownloads after teardown. Clear it and drop any queued
-      // progress so nothing flushes post-unmount.
       if (progressFlushTimerRef.current) {
         clearTimeout(progressFlushTimerRef.current)
         progressFlushTimerRef.current = null
@@ -1214,9 +1109,6 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
       const normalized = normalizeArchivePromptPayload(payload)
       if (!normalized) return
 
-      // Respect "don't ask again" — if the user previously opted in to
-      // auto-delete, skip the prompt and delete in the background. Re-enable
-      // by flipping `autoDeleteArchives` back to false in Settings.
       try {
         const autoDelete = await window.ucSettings?.get?.('autoDeleteArchives')
         if (autoDelete === true) {
@@ -1227,7 +1119,6 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
           return
         }
       } catch {
-        // Fall through to showing the prompt on any setting lookup failure.
       }
 
       const signature = archivePromptIdentityKey(normalized)
@@ -1247,8 +1138,6 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
     const hasQueued = downloads.some((item) => item.status === "queued")
     if (!hasQueued) return
 
-    // Don't auto-start ANY queued item when the user has paused downloads.
-    // A paused download anywhere means the user wants everything held.
     const hasPausedDownload = downloads.some(
       (item) => item.status === "paused"
     )
@@ -1261,9 +1150,6 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (typeof window === "undefined") return
-    // Reconcile the given statuses now: one installed_get IPC per distinct appid,
-    // none at all when nothing matches. Shared by the 3s poll and the
-    // focus/visible resync below.
     const reconcile = (statuses: DownloadStatus[]) => {
       const candidates = downloadsRef.current.filter((item) => statuses.includes(item.status))
       if (!candidates.length) return
@@ -1272,22 +1158,10 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         void reconcileInstalledState(appid)
       }
     }
-    // Reconcile frequently - catches stuck extracting/installing items when the main
-    // process finishes but the status update was missed (e.g. window was hidden).
-    // "paused" is deliberately NOT polled anymore: it cost one installed_get IPC per
-    // paused appid every 3s for the whole session. Paused items are still resynced by
-    // the onUpdate completion path (which reconciles every item of a completed appid)
-    // and by the focus/visible resync below — including once at launch, when the
-    // window first gains focus.
     const interval = setInterval(() => {
-      // Hidden window: nobody is watching; the focus/visible resync catches up
-      // the moment the window returns.
       if (document.hidden) return
       reconcile(["extracting", "installing"])
     }, 3000)
-    // One-shot, event-driven resync when the window comes back. This is where
-    // paused items (e.g. paused-at-100% whose extraction finished while the
-    // window was away) still get reconciled — without polling them.
     const onReturn = () => {
       if (document.hidden) return
       reconcile(["extracting", "installing", "paused"])
@@ -1301,9 +1175,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
     }
   }, [reconcileInstalledState])
 
-  // The main process writes installed manifests; renderer can call `window.ucDownloads.listInstalled()` when needed.
-
-  const startGameDownload = useCallback(async (game: Game, preferredHostOverride?: PreferredDownloadHost, config?: DownloadConfig) => {
+const startGameDownload = useCallback(async (game: Game, preferredHostOverride?: PreferredDownloadHost, config?: DownloadConfig) => {
     if (preparingRef.current.has(game.appid)) {
       downloadLogger.warn(`startGameDownload skipped: already preparing ${game.appid}`)
       return
@@ -1331,13 +1203,10 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
           }
         }
       } catch {
-        // Keep using the list payload when detail fetch fails.
       }
 
-      // save initial metadata to installing folder so it's available offline even before completion
       try {
         if (window.ucDownloads?.saveInstalledMetadata) {
-          // pass the full game object as metadata, with downloadedVersion from config
           const metadataWithVersion = {
             ...metadataForInstall,
             downloadedVersion: metadataForInstall.version || game.version || undefined,
@@ -1345,13 +1214,11 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
           await window.ucDownloads.saveInstalledMetadata(game.appid, metadataWithVersion)
         }
       } catch (err) {
-        // ignore IPC failures
       }
 
       const downloadToken = await requestDownloadToken(game.appid)
       addDownloadedGameToHistory(game.appid)
 
-      // Always fetch the current download links
       const linksResult = await fetchDownloadLinks(game.appid, downloadToken)
 
       const preferredHost =
@@ -1363,7 +1230,6 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
       let selectedHost = preferredHost
 
       if (linksResult.redirectUrl) {
-        // Accept redirect URLs (may be signed Rootz URLs)
         const redirectUrl = linksResult.redirectUrl
         links = [{ url: redirectUrl, part: null }]
         if (isUCFilesUrl(redirectUrl)) {
@@ -1374,12 +1240,10 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
       } else {
         const selected = selectHost(linksResult.hosts, preferredHost)
 
-        // If no links found at all
         if (!selected.links.length) {
           throw new Error(`No download links available for "${preferredHost}". This title may not be available on your selected host.`)
         }
 
-        // If preferred host wasn't available, warn user (but use the fallback)
         if (selected.host !== preferredHost) {
           downloadLogger.warn(`Preferred host "${preferredHost}" not available, using "${selected.host}" instead`)
         }
@@ -1401,7 +1265,6 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
           `${baseName}${links.length > 1 ? `-part${entry.part ?? index + 1}` : ""}`
         )
         const downloadId = `${game.appid}-${batchId}-${index}`
-        // Prefer the explicit part number from the API, then fall back to filename parsing
         const partIndex = entry.part ?? parsePartIndexFromFilename(filenameFallback)
         return { sourceUrl: entry.url, filenameFallback, downloadId, index, partIndex }
       })
@@ -1439,8 +1302,6 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
       downloadsRef.current = next
       setDownloads(next)
 
-      // Clear any stale failed/cancelled manifest state when a fresh queue starts.
-      // The Library page reads install manifests, so this must be updated immediately.
       try {
         await window.ucDownloads?.setInstallingStatus?.(game.appid, "queued", null)
       } catch { }
@@ -1466,12 +1327,6 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
     }
     const becameInstallReady = cancelResult?.status === "install_ready"
 
-    // When the user cancels the last live part of a game (and we aren't keeping
-    // a finished archive via install_ready), don't leave a "Cancelled" ghost
-    // behind — purge the on-disk installing folder (partial files, cached
-    // screenshots and the manifest) and drop the rows. Otherwise the game keeps
-    // showing under the Library's "Downloading" shelf and its files stay on
-    // disk forever, which is exactly the lingering-cancelled-download bug.
     if (appid && !becameInstallReady) {
       const KEEPABLE_STATUSES = [
         "downloading", "queued", "paused", "extracting", "installing",
@@ -1481,7 +1336,6 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         (d) => d.appid === appid && d.id !== downloadId && KEEPABLE_STATUSES.includes(String(d.status))
       )
       if (!otherLivePart) {
-        // Drop the rows first so the UI updates instantly, then clean the disk.
         const next = downloadsRef.current.filter((item) => item.appid !== appid)
         downloadsRef.current = next
         setDownloads(next)
@@ -1509,7 +1363,6 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
 
   const cancelGroup = useCallback(async (appid: string) => {
     if (!appid) return
-    // cancel all downloads with matching appid
     const toCancel = downloadsRef.current.filter((d) => d.appid === appid).map((d) => d.id)
     const cancelResults = new Map<string, Awaited<ReturnType<NonNullable<typeof window.ucDownloads>['cancel']>>>()
     for (const id of toCancel) {
@@ -1521,19 +1374,10 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
       } catch (e) { }
     }
 
-    // If any part produced a keepable archive (install_ready) the user can
-    // still finish installing, so preserve the group. Otherwise the download
-    // was discarded outright — delete the on-disk installing folder (partials,
-    // cached screenshots, manifest) and drop the rows so the game stops
-    // lingering in the Library "Downloading" shelf and its files don't pile up
-    // on disk.
     const keepArchive =
       Array.from(cancelResults.values()).some((r) => r?.status === "install_ready") ||
-      // Don't nuke a download that already finished into an installable archive
-      // (completed/extracted) — only discard work that was still in flight.
       downloadsRef.current.some((d) => d.appid === appid && ["completed", "extracted", "install_ready"].includes(String(d.status)))
     if (!keepArchive) {
-      // Drop the rows first so the UI updates instantly, then clean the disk.
       const next = downloadsRef.current.filter((item) => item.appid !== appid)
       downloadsRef.current = next
       setDownloads(next)
@@ -1557,20 +1401,12 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
     )
   }, [])
 
-  // Fully remove a group from the queue (the Completed section's remove
-  // control). Unlike cancelGroup — which preserves an install_ready archive so
-  // the user can still finish installing — this discards the download outright:
-  // it drops the rows (the debounced persist then rewrites downloads-state.json
-  // without them, so a stuck install_ready can't resurrect on the next launch)
-  // and cleans any leftover installing folder. deleteInstalling is a no-op on a
-  // fully installed game (the backend keeps "installed" dirs), so an installed
-  // title stays in the Library; this only clears its download-list entry.
   const discardGroup = useCallback(async (appid: string) => {
     if (!appid) return
     const next = downloadsRef.current.filter((item) => item.appid !== appid)
     downloadsRef.current = next
     setDownloads(next)
-    try { await window.ucDownloads?.deleteInstalling?.(appid) } catch { /* ignore */ }
+    try { await window.ucDownloads?.deleteInstalling?.(appid) } catch {  }
   }, [])
 
   const pauseGroup = useCallback(
@@ -1586,7 +1422,6 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
             await window.ucDownloads.pause(item.id)
           }
         } catch {
-          // best effort
         }
       }
 
@@ -1607,7 +1442,6 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
 
   const resumeDownload = useCallback(
     async (downloadId: string) => {
-      // Block concurrent resume calls for the same item.
       if (resumeLocksRef.current.has(downloadId)) {
         downloadLogger.info("Resume skipped: already in progress", { data: { downloadId } })
         return
@@ -1619,9 +1453,6 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
 
       downloadLogger.info("Resume attempt", { data: { downloadId, host: target.host, status: target.status, hasResumeData: Boolean(target.resumeData?.offset) } })
 
-      // Guard: Before attempting any resume, check if the game is already installed or
-      // extraction is still running in the main process.  This prevents re-downloading
-      // a file that was already fully downloaded and extracted.
       if (target.appid && window.ucDownloads) {
         try {
           const installed = await window.ucDownloads.getInstalled?.(target.appid)
@@ -1654,7 +1485,6 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
 
       let ok = false
 
-      // Level 1: Try Electron's in-memory DownloadItem.resume()
       if (window.ucDownloads?.resume) {
         try {
           const res = await window.ucDownloads.resume(downloadId)
@@ -1665,13 +1495,9 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         }
       }
 
-      // Level 2: Re-resolve URL and re-enqueue through the aria2 engine.
-      // The engine handles on-disk partial detection and resume via --continue.
       if (!ok && window.ucDownloads?.start) {
         if (target.appid) sequenceLocksRef.current.add(target.appid)
         try {
-          // Set to "downloading" so onUpdate callbacks from the main process are not blocked
-          // by terminal state protection. Preserve receivedBytes to avoid clearing the UI progress.
           setDownloads((prev) =>
             prev.map((item) =>
               item.id === downloadId
@@ -1687,8 +1513,6 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
             )
           )
 
-          // Re-resolve using the original (pre-resolve) URL to get a fresh download URL.
-          // CDN URLs (e.g. FileQ signed links) expire, so we need a fresh one.
           const freshSource = await resolveFreshResumeSource(target)
           const resolveUrl = freshSource?.sourceUrl || target.originalUrl || target.url
           downloadLogger.info("Resume Level 2 (re-resolve)", {
@@ -1698,8 +1522,6 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
           downloadLogger.info("Resume Level 2 resolved", { data: { resolvedUrl: resolved?.url, resolvedOk: resolved?.resolved } })
           const freshUrl = resolved?.resolved ? resolved.url : target.url
 
-          // Try resuming from the partial file on disk using the fresh URL.
-          // This sends a Range request so we don't re-download bytes we already have.
           let resumedFromDisk = false
           if (window.ucDownloads.resumeWithFreshUrl && target.savePath) {
             try {
@@ -1724,7 +1546,6 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
             }
           }
 
-          // Fallback: if no partial file exists or resumeWithFreshUrl failed, start fresh
           if (!resumedFromDisk) {
             const res = await window.ucDownloads.start({
               downloadId,
@@ -1747,9 +1568,6 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
                   ...item,
                   originalUrl: freshSource?.sourceUrl || item.originalUrl || resolveUrl,
                   url: freshUrl,
-                  // Promote the placeholder "local" host to the real host we
-                  // just re-resolved against; otherwise the next persist run
-                  // would still get filtered out as a synthetic.
                   host: freshSource?.host || (item.host && item.host !== "local" ? item.host : "ucfiles"),
                   status: "downloading",
                   totalBytes: resolved?.size || item.totalBytes,
@@ -1790,17 +1608,12 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         ["downloading", "extracting", "installing", "verifying", "retrying"].includes(item.status)
       )
       if (hasActive) return
-      // Prefer resuming the part that actually has downloaded bytes, not just pre-fetched totalBytes
       const pausedWithProgress = current
         .filter((item) => item.status === "paused")
         .sort((a, b) => (b.receivedBytes || 0) - (a.receivedBytes || 0))
         .find((item) => item.receivedBytes > 0 || item.totalBytes > 0)
       if (pausedWithProgress) {
-        // Resume the part with progress first. Do NOT re-queue siblings yet -
-        // wait until the resumed download is actually running to avoid the
-        // auto-start effect picking them up during the async resolve gap.
         await resumeDownload(pausedWithProgress.id)
-        // Now that the resumed download is active (or failed), re-queue remaining paused siblings
         setDownloads((prev) => {
           const next = prev.map((item) => {
             if (item.appid !== appid) return item
@@ -1813,9 +1626,6 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
           downloadsRef.current = next
           return next
         })
-        // Failed siblings can't ride the renderer queue (startNextQueuedPart
-        // skips engine-owned "local" hosts), so retry them directly; the main
-        // engine's own queue caps concurrency.
         const failedSiblings = current.filter(
           (item) => item.id !== pausedWithProgress.id && (item.status === "failed" || item.status === "extract_failed")
         )
@@ -1825,13 +1635,6 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         return
       }
 
-      // Failed parts can never be restarted through the renderer queue: fork
-      // (engine-owned) items carry host "local", which startNextQueuedPart
-      // deliberately skips, so flipping them to "queued" strands them forever.
-      // Drive each one through resumeDownload instead — Level 1 asks the main
-      // engine to re-enqueue it (fresh aria2 add_uri resuming the on-disk
-      // partial), Level 2 re-resolves a fresh URL when the engine no longer
-      // knows the id (e.g. after an app restart).
       const failed = current
         .filter((item) => item.status === "failed" || item.status === "extract_failed")
         .sort((a, b) => (a.partIndex || 0) - (b.partIndex || 0))
@@ -1839,7 +1642,6 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         for (const item of failed) {
           await resumeDownload(item.id)
         }
-        // Re-queue any zero-progress paused siblings behind the retried parts.
         setDownloads((prev) => {
           const next = prev.map((item) => {
             if (item.appid === appid && item.status === "paused" && item.receivedBytes === 0) {
@@ -1871,11 +1673,6 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
   )
 
   const pauseAll = useCallback(async () => {
-    // Only pause groups that are actually downloading/active. Groups that are
-    // purely queued (a different game waiting its turn) are left as "queued" —
-    // they must never flip to "paused", and the auto-start guard already holds
-    // them back while any game is paused. Flipping them here was what made a
-    // queued game show "Paused" and let Resume reactivate the wrong download.
     const appids = [...new Set(
       downloadsRef.current
         .filter((item) => PAUSABLE_STATUSES.includes(item.status))
@@ -1931,7 +1728,6 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
           !["completed", "extracted", "extract_failed", "failed", "cancelled"].includes(item.status)
       )
     )
-    // Call startNextQueuedPart to start the next part after clearing completed
     queueMicrotask(() => {
       void startNextQueuedPart()
     })
@@ -1980,8 +1776,6 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
       if (!result?.ok) {
         throw new Error(result?.error || "Failed to delete archive files")
       }
-      // Persist "don't ask again" only after a successful delete so we never
-      // silently swallow archive cleanup that the user couldn't see.
       if (archiveDontAskAgain) {
         try { await window.ucSettings?.set?.('autoDeleteArchives', true) } catch {}
         setArchiveDontAskAgain(false)

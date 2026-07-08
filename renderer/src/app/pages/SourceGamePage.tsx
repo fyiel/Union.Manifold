@@ -21,19 +21,12 @@ import { useDownloadsSelector } from "@/context/downloads-context"
 import { useGameLaunch } from "@/context/game-launch-context"
 import { MONO, COVER_LINES, gbLabel, Spinner, SmartImage, gameImageCandidates } from "@/app/manifold/ui"
 
-// Live-download status → button label for the primary action.
 const LIVE_LABEL: Record<string, string> = {
   downloading: "Downloading", queued: "Queued", extracting: "Extracting", installing: "Installing",
   verifying: "Verifying", retrying: "Retrying", paused: "Paused", install_ready: "Ready to install",
   completed: "Installed", extracted: "Installed",
 }
 const LIVE_ORDER = ["downloading", "extracting", "installing", "verifying", "retrying", "paused", "install_ready", "queued", "completed", "extracted", "failed"]
-
-// Game Detail, the unified record for one deduped title. Hero, cover, metadata,
-// external links (Steam / SteamDB / ProtonDB, only when we resolved a Steam
-// appid), a primary Download button for the preferred source, and a collapsible
-// list of every other mirror across every contributing source. Download wiring
-// still runs the same resolve-to-aria2 path as before.
 
 type OptState = "idle" | "working" | "queued" | "opened" | "error"
 
@@ -43,8 +36,6 @@ const PROTON_TIER_COLORS: Record<string, string> = {
   platinum: "#b9c7d6", gold: "#e2c15a", silver: "var(--mf-t3)", bronze: "#c08457", borked: "#d0625f",
 }
 
-// Requirements come from Rust as plain text now, but stale metadata caches may
-// still hold Steam store HTML, so strip markup here too before rendering.
 const reqText = (html: string) =>
   html
     .replace(/^\s*<strong>[^<]*<\/strong>\s*(<br\s*\/?>)?\s*/i, "")
@@ -83,10 +74,6 @@ export function SourceGamePage() {
   const navigate = useNavigate()
   const { requestLaunch } = useGameLaunch()
 
-  // Prefer the cached, fully-resolved copy over a nav stub. Browse/Library cards
-  // navigate with a single-source { game } (no cross-source mirrors); once we've
-  // hydrated a game, its complete copy (every source + Steam-enriched) is in the
-  // remembered cache, so use it and a revisit is an instant cache hit not a refetch.
   const navState = location.state as { game?: UnifiedSourceGame; installed?: boolean } | null
   const passed = navState?.game || null
   const remembered = getRememberedGame(dedupKey) || null
@@ -98,16 +85,11 @@ export function SourceGamePage() {
   const [optMsg, setOptMsg] = useState<Record<string, string>>({})
   const [sourcesOpen, setSourcesOpen] = useState(false)
   const [copied, setCopied] = useState(false)
-  // Image fallback flags live up here (not next to the hero JSX) so they sit
-  // above the early return below, keeping hook order stable on every render.
   const [heroFailed, setHeroFailed] = useState(false)
   const [coverFailed, setCoverFailed] = useState(false)
-  // User-configured source priority (Settings → Download Sources); drives which
-  // source the single big Download button prefers.
   const [priority, setPriority] = useState<string[]>(SOURCE_PRIORITY)
   useEffect(() => { void loadSourcePriority().then(setPriority) }, [])
 
-  // Live download status for this game (keyed by the appid the manager uses).
   const dlAppid = downloadAppidFor(dedupKey)
   const liveStatus = useDownloadsSelector(
     (downloads): string | null => {
@@ -119,11 +101,6 @@ export function SourceGamePage() {
     (a, b) => a === b,
   )
 
-  // Already installed? Block re-downloading; offer Play instead. The download
-  // manager installs under the same appid the manager keys on (downloadAppidFor).
-  // Seed from nav state when the Library opened us (it only lists installed
-  // games), so the primary button shows "Play" immediately with no Download flash
-  // before the async listInstalled check confirms it.
   const [installed, setInstalled] = useState(Boolean(navState?.installed))
   useEffect(() => {
     let alive = true
@@ -132,25 +109,16 @@ export function SourceGamePage() {
         const list = (await window.ucDownloads?.listInstalledGlobal?.()) || (await window.ucDownloads?.listInstalled?.()) || []
         if (!alive) return
         setInstalled((list as any[]).some((e) => String(e?.appid || e?.metadata?.appid || "") === dlAppid))
-      } catch { /* ignore */ }
+      } catch {  }
     })()
     return () => { alive = false }
   }, [dlAppid])
 
-  // Hydrate via registry.detail() unless this game is already fully resolved.
-  // detail() is what surfaces OTHER sources (a browse card carries only the one
-  // source it came from, e.g. a SteamRIP Alan Wake 2 card has no GameBounty
-  // mirror until detail() searches for it) and runs Steam enrichment, then
-  // stamps `fullyResolved` so the cached copy is reused without re-hydrating.
   useEffect(() => {
     if (game?.fullyResolved) return
     const stubs = (game?.sources || initial?.sources || []).map((s) => ({ sourceId: s.sourceId, sourceSlug: s.sourceSlug }))
     let alive = true
     setLoading(true)
-    // With source stubs we resolve them directly. Library games carry none, so
-    // resolveInstalledGame keys off the appid AND the authoritative steamAppId
-    // (from the manifest / route state) so the detail page resolves the SAME
-    // game the card thumbnail shows — never a same-named different title.
     const title = game?.title || initial?.title || ""
     const knownSteam = game?.steamAppId ?? initial?.steamAppId ?? null
     const work = stubs.length ? getSourceDetail(stubs) : resolveInstalledGame(dedupKey, title, knownSteam)
@@ -159,12 +127,11 @@ export function SourceGamePage() {
       if (full) {
         setGame(full)
         rememberGames([full])
-        rememberGameAs(dedupKey, full) // cache under the manifest appid → instant re-open
+        rememberGameAs(dedupKey, full)
       }
       setLoading(false)
     }).catch(() => { if (alive) setLoading(false) })
     return () => { alive = false }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dedupKey])
 
   const [protonData, setProtonData] = useState<ProtonDbSummary | null>(null)
@@ -216,7 +183,7 @@ export function SourceGamePage() {
   const copyPrimary = async () => {
     const url = primary?.option.url || primary?.option.pageUrl
     if (!url) return
-    try { await navigator.clipboard.writeText(url); setCopied(true); setTimeout(() => setCopied(false), 1400) } catch { /* ignore */ }
+    try { await navigator.clipboard.writeText(url); setCopied(true); setTimeout(() => setCopied(false), 1400) } catch {  }
   }
 
   const openSourcePage = (url?: string) => { if (url) void window.ucSystem?.openExternal?.(url) }
@@ -230,9 +197,6 @@ export function SourceGamePage() {
     )
   }
 
-  // Hero prefers the wide hero art but falls back through every cover. The
-  // pulled-up box uses the cover-first order. Both walk candidates so an
-  // unreachable source image yields to a loadable one.
   const heroCandidates = game ? gameImageCandidates({ image: game.heroImage, heroImage: game.image, steamAppId: game.steamAppId, sources: game.sources }) : []
   const coverCandidates = game ? gameImageCandidates(game, { steamFirst: true }) : []
   const year = game?.releaseYear || game?.releaseDate?.match(/\d{4}/)?.[0]
@@ -247,7 +211,7 @@ export function SourceGamePage() {
 
   return (
     <div className="mf-scroll" style={{ flex: 1, minWidth: 0, minHeight: 0, overflowY: "auto", overflowX: "hidden" }}>
-      {/* hero */}
+      {}
       <div style={{ position: "relative", height: 300, overflow: "hidden" }}>
         <div style={{ position: "absolute", inset: 0, background: heroFailed || !heroCandidates.length ? HERO_LINES : "#0f0f0f" }}>
           {!heroFailed && heroCandidates.length > 0 && (
@@ -260,7 +224,7 @@ export function SourceGamePage() {
         </button>
       </div>
 
-      {/* title block, pulled up over the hero */}
+      {}
       <div style={{ position: "relative", maxWidth: 980, margin: "0 auto", padding: "0 40px" }}>
         <div style={{ display: "flex", alignItems: "flex-end", gap: 22, marginTop: -118 }}>
           <div style={{ width: 152, height: 202, flexShrink: 0, borderRadius: 10, background: coverFailed || !coverCandidates.length ? COVER_LINES : "#0f0f0f", border: "1px solid var(--mf-line-2)", boxShadow: "0 20px 50px rgba(0,0,0,0.55)", display: "flex", alignItems: "flex-end", padding: 12, overflow: "hidden", position: "relative" }}>
@@ -313,7 +277,7 @@ export function SourceGamePage() {
           </div>
         </div>
 
-        {/* primary actions */}
+        {}
         <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 26 }}>
           {loading ? (
             <div style={{ display: "flex", alignItems: "center", gap: 9, fontFamily: MONO, fontSize: 13, color: "var(--mf-t4)" }}>
@@ -351,7 +315,7 @@ export function SourceGamePage() {
         </div>
         {optMsg[pk] && <p style={{ margin: "10px 0 0", fontFamily: MONO, fontSize: 11, color: "var(--mf-t4)" }}>{optMsg[pk]}</p>}
 
-        {/* description */}
+        {}
         {game?.description && (
           <p style={{ margin: "30px 0 0", fontSize: 14, lineHeight: 1.72, color: "var(--mf-t3)", maxWidth: 680, whiteSpace: "pre-line", overflowWrap: "anywhere" }}>{game.description}</p>
         )}
@@ -384,7 +348,7 @@ export function SourceGamePage() {
           </div>
         )}
 
-        {/* download sources (collapsible) */}
+        {}
         {ordered.length > 0 && (
           <div style={{ marginTop: 24, paddingBottom: 56 }}>
             <button type="button" onClick={() => setSourcesOpen((v) => !v)} className="mf-ghost" style={{ display: "flex", alignItems: "center", gap: 11, width: "100%", padding: "13px 16px", borderRadius: 10, border: "1px solid var(--mf-line)", background: "var(--mf-panel-2)", color: "var(--mf-t2)", cursor: "pointer", textAlign: "left" }}>
@@ -456,7 +420,6 @@ function ExtLink({ title, onClick, children }: { title: string; onClick: () => v
   )
 }
 
-// Monochrome brand glyphs for the "View on" links, crisp at any size and on-theme.
 function SteamIcon() {
   return <svg viewBox="0 0 16 16" width="17" height="17" fill="currentColor"><path d="M8 1a7 7 0 0 0-6.96 6.2l3.4 1.4a2 2 0 0 1 1.16-.43l1.74-2.53v-.04a2.74 2.74 0 1 1 2.74 2.74h-.06l-2.49 1.78a2 2 0 0 1-3.95.48L.42 9.66A7 7 0 1 0 8 1zm-2.1 9.66.79.33a1.51 1.51 0 1 0 .6-2.06l.82.34a1.11 1.11 0 1 1-.86 2.04l-1.35-.65zm4.8-3.06a1.83 1.83 0 1 0 0-3.66 1.83 1.83 0 0 0 0 3.66zm0-.57a1.26 1.26 0 1 1 0-2.52 1.26 1.26 0 0 1 0 2.52z" /></svg>
 }
@@ -467,8 +430,6 @@ function ProtonDbIcon() {
   return <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth={1.3}><circle cx="8" cy="8" r="1.5" fill="currentColor" stroke="none" /><ellipse cx="8" cy="8" rx="6.2" ry="2.6" /><ellipse cx="8" cy="8" rx="6.2" ry="2.6" transform="rotate(60 8 8)" /><ellipse cx="8" cy="8" rx="6.2" ry="2.6" transform="rotate(120 8 8)" /></svg>
 }
 
-// Shown once a download for this game exists, reflects its live status and
-// jumps to the Downloads page on click.
 function LiveButton({ status, onClick }: { status: string; onClick: () => void }) {
   const failed = status === "failed" || status === "extract_failed"
   const done = status === "completed" || status === "extracted"

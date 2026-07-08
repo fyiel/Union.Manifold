@@ -51,16 +51,11 @@ function TabHost({ path }: { path: string }) {
   )
 }
 
-// Union.Manifold shell, a collapsible sidebar plus a single full-height main
-// column (each page owns its own header + scroller, per the handoff comps). The
-// window is frameless, so a thin drag strip spans the top and the min/max/close
-// cluster floats in the top-right corner.
 export function ForkLayout() {
   const location = useLocation()
   const navigate = useNavigate()
   const scrollRef = useRef<HTMLDivElement | null>(null)
 
-  // pause downloads while a game runs when the setting is on
   usePauseDownloadsWhilePlaying()
 
   useEffect(() => {
@@ -73,9 +68,6 @@ export function ForkLayout() {
     return () => clearTimeout(t)
   }, [])
 
-  // Startup page setting: land on the Library instead of Browse when chosen.
-  // Runs once per app boot; only rewrites the initial "/" so deep links and
-  // later navigation are never touched.
   const startupRouted = useRef(false)
   useEffect(() => {
     if (startupRouted.current) return
@@ -83,25 +75,18 @@ export function ForkLayout() {
     void (async () => {
       try {
         const sp = await window.ucSettings?.get?.("startPage")
-        // On a fresh boot the hash can still be empty ("") — HashRouter only
-        // normalizes it to "#/" after its first render. Treat empty as "/".
         const route = window.location.hash.replace(/^#/, "").split("?")[0] || "/"
         if (sp === "library" && route === "/") {
           navigate("/library", { replace: true })
         }
-      } catch { /* ignore */ }
+      } catch {  }
     })()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Pages that don't manage their own scroller get reset to top on navigation.
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: 0, behavior: "auto" })
   }, [location.pathname])
 
-  // Tray menu + website deep links navigate through the main process (it sends
-  // uc:navigation-action). The fork detail route is /g/:key, so rewrite the
-  // tray's legacy /game/<id> path onto it.
   useEffect(() => {
     const off = window.ucApp?.onNavigationAction?.((data) => {
       if (!data) return
@@ -117,10 +102,10 @@ export function ForkLayout() {
       <Sidebar />
 
       <div style={{ position: "relative", flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
-        {/* top drag strip (frameless window) */}
+        {}
         <div data-tauri-drag-region style={{ position: "absolute", top: 0, left: 0, right: 0, height: 28, zIndex: 5, ...drag }} aria-hidden />
 
-        {/* window controls */}
+        {}
         <div style={{ position: "absolute", top: 6, right: 10, display: "flex", gap: 2, zIndex: 20, ...noDrag }}>
           <WindowButton onClick={() => window.ucWindow?.minimize()} label="Minimize"><Minus className="h-3.5 w-3.5" /></WindowButton>
           <WindowButton onClick={() => window.ucWindow?.maximize()} label="Maximize"><Square className="h-3 w-3" /></WindowButton>

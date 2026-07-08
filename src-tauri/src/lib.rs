@@ -46,12 +46,6 @@ fn emit_deep_link(app: &tauri::AppHandle, arg: &str) {
     }
 }
 
-/// With `panic = "abort"` in release, any panic on any thread kills the whole
-/// process with nothing in our log — user reports become "the app closed
-/// itself". Log the panic (message + location + thread) through the buffered
-/// log before the abort so a crash is diagnosable from a bug report. Writes
-/// before logging::init (early startup) are dropped by write_line, same as
-/// every other pre-init log line.
 fn install_panic_hook() {
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
@@ -156,9 +150,6 @@ pub fn run() {
             {
                 use tauri_plugin_deep_link::DeepLinkExt;
                 app.deep_link().register_all().ok();
-                // nxm:// links arrive here on macOS (no argv) and at cold
-                // start; runtime deliveries on Linux/Windows can hit both this
-                // and the single-instance argv scan — handle_nxm dedups.
                 let nxm_handle = handle.clone();
                 app.deep_link().on_open_url(move |event| {
                     for url in event.urls() {
@@ -329,8 +320,6 @@ pub fn run() {
         .expect("error building union.manifold")
         .run(|app, event| {
             if let tauri::RunEvent::Exit = event {
-                // Persist metacache inserts still inside the write-behind
-                // debounce window so a quick browse-then-quit loses nothing.
                 sources::metacache::flush_all();
                 if let Some(state) = app.try_state::<AppState>() {
                     state.downloads.aria2().stop();

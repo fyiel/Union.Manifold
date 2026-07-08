@@ -7,10 +7,6 @@ export type FontEntry = {
   kind: "sans" | "mono"
 }
 
-/* Each stack leads with `var(--font-<key>)` (resolves on the web where
-   next/font sets it), then the literal CDN-loaded family name, then a
-   distinctive system fallback so picks remain visually distinguishable
-   even if Google Fonts didn't load (Electron offline, CSP, etc). */
 const SANS_FONTS: FontEntry[] = [
   { key: "inter",          label: "Inter",          stack: 'var(--font-inter), "Inter", "Segoe UI", ui-sans-serif, sans-serif',           kind: "sans" },
   { key: "geist",          label: "Geist",          stack: 'var(--font-geist), "Geist", "Segoe UI", ui-sans-serif, sans-serif',            kind: "sans" },

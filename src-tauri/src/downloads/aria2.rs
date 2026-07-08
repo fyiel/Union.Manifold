@@ -62,8 +62,6 @@ impl Aria2Manager {
     }
 
     pub async fn ensure_started(&self, limit_kbps: u64) -> bool {
-        // Don't trust the ready latch forever: if we think we're up, confirm the
-        // daemon still answers. If it died, drop the stale child and relaunch.
         if self.is_ready() {
             if self.rpc("aria2.getVersion", vec![]).await.is_ok() {
                 return true;
@@ -85,7 +83,6 @@ impl Aria2Manager {
                 return false;
             }
         };
-        // A picked free port can be taken before aria2 binds it; retry on a fresh port.
         for _ in 0..3 {
             if self.spawn_and_probe(&binary, limit_kbps).await {
                 return true;

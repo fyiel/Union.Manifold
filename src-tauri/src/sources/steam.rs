@@ -15,10 +15,6 @@ static DETAILS_CACHE: LazyLock<metacache::WriteBehind<Option<StoreDetails>>> =
 
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub struct StoreDetails {
-    // Official store title. Added without #[serde(default)] on purpose: a
-    // cached steam-details.json predating the field fails to parse wholesale,
-    // resets, and refills with names — a serde default would instead pin ""
-    // forever for already-cached appids (write-behind entries never refresh).
     pub name: String,
     pub description: String,
     pub genres: Vec<String>,
@@ -31,8 +27,6 @@ pub struct StoreDetails {
     pub req_recommended: String,
 }
 
-// Steam pc_requirements arrive as raw store HTML. Flatten to plain text while
-// keeping line structure so the renderer never has to inject markup.
 fn req_text(html: &str) -> String {
     static BREAKS: LazyLock<regex::Regex> =
         LazyLock::new(|| regex::Regex::new(r"(?i)<br\s*/?>|</li>|</p>").unwrap());
@@ -57,9 +51,6 @@ pub async fn get_store_details(appid: u64) -> Option<StoreDetails> {
         Ok(v) => v,
         Err(_) => return None,
     };
-    // A well-formed appdetails response always carries the appid key (with a
-    // `success` flag). A missing key means an unexpected/5xx body: bail WITHOUT
-    // caching so a transient blip can't poison the details mapping.
     let entry = json.get(appid.to_string());
     if entry.is_none() {
         return None;
@@ -142,8 +133,6 @@ pub async fn get_store_details(appid: u64) -> Option<StoreDetails> {
             req_recommended: req_text(&str_of(reqs.and_then(|r| r.get("recommended")))),
         }
     });
-    // Write-behind: the details map grows to megabytes, so the insert only
-    // mutates memory; the debounced metacache flush persists the file.
     DETAILS_CACHE.insert(appid.to_string(), out.clone());
     out
 }
@@ -164,11 +153,7 @@ pub async fn search_app_id(title: &str) -> Option<u64> {
     let mut definitive = false;
     if let Ok(json) = http::get_json::<Value>(&url).await {
         if let Some(items) = json.get("items").and_then(|v| v.as_array()) {
-            // A parseable response with an items array is a definitive answer
-            // (an empty list means "no such app"), so it is safe to cache.
             definitive = true;
-            // Require an exact normalized-title match; a fuzzy first-item pick
-            // assigns wrong art/ProtonDB, wrong merges, and gets persisted.
             appid = items
                 .iter()
                 .find(|it| {
@@ -182,16 +167,12 @@ pub async fn search_app_id(title: &str) -> Option<u64> {
                 .filter(|id| *id > 0);
         }
     }
-    // Only persist a negative result on a definitive not-found; a transport or
-    // 5xx blip must not poison the title->appid mapping (it has no TTL).
     if definitive {
         APPID_CACHE.insert(norm, appid);
     }
     appid
 }
 
-// A demo or playtest appid carries no store art of its own, so map its title
-// back to the base game whose art we actually want.
 fn base_title(name: &str) -> Option<String> {
     let trimmed = name.trim();
     let lower = trimmed.to_lowercase();
@@ -210,14 +191,10 @@ pub async fn steam_art(appid: u64, name: Option<&str>) -> Value {
     if let Some(d) = get_store_details(appid).await {
         return json!({ "header": d.header_image, "background": d.background });
     }
-    // Steam's appdetails returns success=false for demo/playtest appids, so this
-    // appid has no art. Fall back to the base game's art, resolved by title.
     if let Some(base) = name.and_then(base_title) {
         if let Some(base_id) = search_app_id(&base).await {
             if base_id != appid {
                 if let Some(d) = get_store_details(base_id).await {
-                    // Offer the base game's portrait capsule first so a card shows
-                    // a real cover, with the store header behind it as a fallback.
                     return json!({
                         "cover": capsule_url(base_id),
                         "header": d.header_image,
@@ -230,10 +207,6 @@ pub async fn steam_art(appid: u64, name: Option<&str>) -> Value {
     json!({ "header": "", "background": "" })
 }
 
-// The predictable vertical capsule exists for most games but 404s for many
-// newer/indie titles whose art moved to hashed store_item_assets URLs (e.g.
-// appid 3694480). Probe it; on a miss fall back to the store API's real header
-// image, then to the guess as a last resort.
 pub fn capsule_url(appid: u64) -> String {
     format!("https://cdn.cloudflare.steamstatic.com/steam/apps/{appid}/library_600x900.jpg")
 }
@@ -258,8 +231,6 @@ pub async fn resolve_cover(appid: u64) -> String {
     capsule
 }
 
-// The game's official store title, None when the store has no page for the id
-// (or the lookup failed). Cached through get_store_details like everything else.
 pub async fn app_name(appid: u64) -> Option<String> {
     get_store_details(appid).await.map(|d| d.name).filter(|n| !n.is_empty())
 }

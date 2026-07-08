@@ -11,11 +11,6 @@ import {
   type LinuxDetectionOption, type LinuxGameConfig, type LinuxPresetId,
 } from "@/lib/linux-presets"
 
-// The Library card action menu + its three dialogs (Launch options, Edit details,
-// Linux/VR config), Manifold-native and wired to the real IPC. Overwrites the old
-// upstream modals for the fork. Every glyph is a lucide icon.
-
-// the inset field "well" used across every dialog input
 const WELL: CSSProperties = {
   border: "1px solid color-mix(in srgb, var(--mf-t0) 16%, transparent)",
   background: "#0e0e0e",
@@ -35,7 +30,6 @@ export type MenuGame = {
   description?: string
   genres?: string[]
   heroImage?: string
-  /** Manifest stub import (exe / steam): deleting removes only the library entry. */
   imported?: boolean
 }
 
@@ -50,17 +44,12 @@ type MenuHandlers = {
   onRefreshMetadata: () => void
   onToggleFavorite: () => void
   onDelete: () => void
-  /** Imported entries only: override the Steam appid driving art/metadata. */
   onSetSteamId?: () => void
-  /** Installed games only: opens the per-game mod manager (Nexus / Workshop). */
   onMods?: () => void
 }
 
 const MENU_WIDTH = 250
 
-// Card action menu. Opens to the right of the cog (left edges aligned), flips to
-// right-aligned if it would overflow the viewport, clamped to a 10px margin, with
-// the entrance growing from the matching corner.
 export function GameMenu({ game, anchor, handlers, onClose }: { game: MenuGame; anchor: DOMRect; handlers: MenuHandlers; onClose: () => void }) {
   const panelRef = useRef<HTMLDivElement | null>(null)
   const [pos, setPos] = useState<{ left: number; top: number; origin: string } | null>(null)
@@ -129,7 +118,6 @@ function MenuRow({ icon: Icon, label, onClick, danger, iconColor }: { icon: type
   )
 }
 
-// shared dialog shell, fade backdrop + scale-in panel, click-outside + Esc to close
 function DialogShell({ width, onClose, children }: { width: number; onClose: () => void; children: ReactNode }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose() }
@@ -150,12 +138,6 @@ const FIELD_LABEL: CSSProperties = { fontFamily: MONO, fontSize: 10, fontWeight:
 const PRIMARY_BTN: CSSProperties = { height: 38, padding: "0 18px", borderRadius: 8, border: "none", background: "var(--primary)", color: "var(--primary-foreground)", fontSize: 13, fontWeight: 600, cursor: "pointer" }
 const CANCEL_BTN: CSSProperties = { height: 38, padding: "0 16px", borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "transparent", color: "var(--mf-t1)", fontSize: 13, fontWeight: 600, cursor: "pointer" }
 
-// ── Launch options ──
-// Persists per-game CLI args under ucSettings "gameLaunchArgs" (a map keyed by
-// appid), matching what the launcher reads. Community options + publish were
-// dropped per the overhaul.
-// Quick options append to (or seed) the args field. Force Vulkan flips DXVK off
-// and asks the engine for the native Vulkan renderer, handy when DX is flaky.
 const OFFICIAL_LAUNCH_OPTIONS = [
   { label: "Force Vulkan", args: "-vulkan" },
   { label: "Borderless windowed", args: "--windowed -noborder" },
@@ -173,7 +155,7 @@ export function LaunchOptionsDialog({ appid, gameName, onClose }: { appid: strin
       try {
         const map = await window.ucSettings?.get?.("gameLaunchArgs")
         if (alive && map && typeof map === "object") setArgs(String((map as Record<string, string>)[appid] || ""))
-      } catch { /* ignore */ }
+      } catch {  }
     })()
     return () => { alive = false }
   }, [appid])
@@ -187,7 +169,7 @@ export function LaunchOptionsDialog({ appid, gameName, onClose }: { appid: strin
       if (trimmed) next[appid] = trimmed
       else delete next[appid]
       await window.ucSettings?.set?.("gameLaunchArgs", next)
-    } catch { /* ignore */ }
+    } catch {  }
     setSaving(false)
     onClose()
   }
@@ -238,9 +220,6 @@ export function LaunchOptionsDialog({ appid, gameName, onClose }: { appid: strin
   )
 }
 
-// ── Edit details ──
-// Every field uses the inset-well treatment. Saves via the existing
-// updateInstalledMetadata IPC. Image dropzones pick a local file via pickImage.
 export function EditDetailsDialog({ game, onClose, onSaved }: { game: MenuGame; onClose: () => void; onSaved: (updates: Record<string, unknown>) => void }) {
   const [name, setName] = useState(game.name || "")
   const [developer, setDeveloper] = useState(game.developer || "")
@@ -257,11 +236,9 @@ export function EditDetailsDialog({ game, onClose, onSaved }: { game: MenuGame; 
     try {
       const path = await window.ucDownloads?.pickImage?.()
       if (!path) return
-      // Copy into app-managed storage; a raw filesystem path in metadata
-      // renders blank and dies when the source file moves.
       const res = await window.ucDownloads?.importCustomImage?.(path)
       set(res?.ok && res.url ? res.url : path)
-    } catch { /* ignore */ }
+    } catch {  }
   }
 
   const save = async () => {
@@ -345,10 +322,6 @@ function ImageWell({ label, value, aspect, onPick, onClear }: { label: string; v
   )
 }
 
-// ── Linux / VR config ──
-// Reachable from the card menu. Detected runners are grouped by source (Steam
-// Proton vs Community GE) with a "Newest" tag on the top version per group, fed
-// by detectProton()'s `source` field. Writes config through setGameConfig.
 const PRESET_LABELS: Record<LinuxPresetId, string> = { auto: "Auto detect", "proton-recommended": "Proton setup", "wine-recommended": "Wine setup", native: "Native only" }
 const PRESET_ORDER: LinuxPresetId[] = ["auto", "proton-recommended", "wine-recommended", "native"]
 const LAUNCH_MODE_LABELS: Record<string, string> = { inherit: "Inherit from global", auto: "Auto detect", native: "Native", wine: "Wine", proton: "Proton (Steam)", umu: "umu-launcher" }
@@ -370,7 +343,7 @@ export function LinuxConfigDialog({ appid, gameName, onClose }: { appid: string;
         if (!alive) return
         if (cfg?.ok) setConfig((cfg.config as LinuxGameConfig) || {})
         if (protonDetect?.ok && Array.isArray(protonDetect.versions)) setProton(protonDetect.versions as LinuxDetectionOption[])
-      } catch { /* ignore */ }
+      } catch {  }
       if (alive) setLoading(false)
     })()
     return () => { alive = false }
@@ -392,7 +365,6 @@ export function LinuxConfigDialog({ appid, gameName, onClose }: { appid: string;
     if (r?.ok && r.path) update({ protonPrefix: r.path })
   }
 
-  // group detected proton by source, newest first inside each (detect already sorts)
   const groups = useMemo(() => {
     const steam = proton.filter((p) => p.source !== "community")
     const community = proton.filter((p) => p.source === "community")
@@ -515,18 +487,10 @@ function PathField({ label, hint, value, placeholder, onBrowse }: { label: strin
   )
 }
 
-// ── Add games (import) ──
-// Reached from the Library header. Two paths into the library without a
-// download: pick an arbitrary executable on disk, or bulk-import installed
-// games from the local Steam client (scanned via libraryfolders.vdf). Both
-// only write a manifest stub — the game files stay where they are.
 export function AddGamesDialog({ onClose }: { onClose: () => void }) {
   const [exeBusy, setExeBusy] = useState(false)
   const [exeAdded, setExeAdded] = useState<string | null>(null)
   const [exeError, setExeError] = useState<string | null>(null)
-  // Shown after every exe import: when the store search missed (enter an id)
-  // AND when it matched (confirm/correct it) — exe-derived names are ambiguous
-  // enough that the auto-match can land on a different game entirely.
   const [steamIdFor, setSteamIdFor] = useState<{ appid: string; name: string; matched: number | null } | null>(null)
   const [steamIdInput, setSteamIdInput] = useState("")
   const [steamIdSaving, setSteamIdSaving] = useState(false)
@@ -560,7 +524,7 @@ export function AddGamesDialog({ onClose }: { onClose: () => void }) {
   }, [])
 
   const notifyLibrary = () => {
-    try { window.dispatchEvent(new Event("uc_game_installed")) } catch { /* ignore */ }
+    try { window.dispatchEvent(new Event("uc_game_installed")) } catch {  }
   }
 
   const pickExe = async () => {
@@ -571,7 +535,6 @@ export function AddGamesDialog({ onClose }: { onClose: () => void }) {
     try {
       const res = await window.ucDownloads?.importExe?.(picked.path)
       if (res?.ok && res.appid) {
-        // Seed the saved exe so Play launches this file directly, no picker.
         if (res.exePath) await window.ucSettings?.set?.(`gameExe:${res.appid}`, res.exePath)
         setExeAdded(res.existed ? "already in library" : res.name || picked.path)
         if (!res.existed) {
@@ -734,10 +697,6 @@ export function AddGamesDialog({ onClose }: { onClose: () => void }) {
   )
 }
 
-// ── Set Steam App ID ──
-// Manual appid override for imported games: fixes both a missed auto-match and
-// a WRONG auto-match (the "Card Corner found a different game" case). Saving
-// rewrites the manifest's steamAppId + cover; the caller invalidates caches.
 export function SteamIdDialog({ appid, gameName, current, onClose, onSaved }: { appid: string; gameName: string; current?: number; onClose: () => void; onSaved: (steamAppId: number) => void }) {
   const [value, setValue] = useState(current ? String(current) : "")
   const [saving, setSaving] = useState(false)

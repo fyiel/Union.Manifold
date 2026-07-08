@@ -7,14 +7,6 @@ import { getDownloadArt, getRememberedGame, hydrateDownloadArt } from "@/lib/sou
 import { proxyImageUrl } from "@/lib/utils"
 import { MONO, COVER_LINES, gbLabel, CenterState } from "@/app/manifold/ui"
 
-// Downloads, the live aria2 queue grouped by game. One primary active card, an
-// "also running" list, an "up next" queue, completed (install / play), and
-// failed (retry). Reuses the real download-manager actions (pauseGroup /
-// resumeGroup / cancelGroup / clearCompleted) and installDownloadedArchive.
-// Known gaps vs the rich old page (see the "missing screens" handoff list):
-// queue drag-reorder, the insufficient-space drive-switch prompt, and
-// retry-with-host-reselection (retry here just resumes the group).
-
 const ACTIVE: DownloadItem["status"][] = ["downloading", "extracting", "installing", "verifying", "retrying", "paused"]
 const PAUSABLE: DownloadItem["status"][] = ["downloading", "extracting", "installing", "verifying", "retrying"]
 const DONE: DownloadItem["status"][] = ["completed", "extracted"]
@@ -24,7 +16,6 @@ type Group = { appid: string; name: string; items: DownloadItem[] }
 const has = (items: DownloadItem[], ...st: string[]) => items.some((i) => st.includes(i.status))
 const every = (items: DownloadItem[], ...st: string[]) => items.every((i) => st.includes(i.status))
 
-// Most-significant status for a group, in display-priority order.
 function repStatus(items: DownloadItem[]): DownloadItem["status"] {
   for (const s of ["downloading", "extracting", "installing", "verifying", "retrying", "paused", "install_ready", "queued", "completed", "extracted", "failed", "extract_failed"] as const) {
     if (has(items, s)) return s
@@ -63,13 +54,6 @@ function fmtEta(sec: number | null) {
 
 export function DownloadsPage() {
   const { pauseGroup, resumeGroup, cancelGroup, discardGroup, pauseAll, resumeAll, clearCompleted, clearByAppid } = useDownloadsActions()
-  // Freeze-and-catch-up: progress flushes tick ~5/s even while this tab sits
-  // under display:none (paint stops, reconciliation doesn't). While hidden the
-  // equality fn reports every store update as "equal", so useSyncExternalStore
-  // keeps the old snapshot and the page never re-renders. Flipping back to
-  // visible re-renders via the TabVisible context change; that render updates
-  // the ref first (hook order) and re-reads the live snapshot, so the page
-  // catches up instantly with nothing missed.
   const visible = useTabVisible()
   const visibleRef = useRef(visible)
   visibleRef.current = visible
@@ -81,8 +65,6 @@ export function DownloadsPage() {
   const { toast } = useToast()
   const [copied, setCopied] = useState<string | null>(null)
   const [installing, setInstalling] = useState<Set<string>>(new Set())
-  // Load persisted thumbnails so downloads restored after a relaunch (whose art
-  // was never recorded this session) still show a cover instead of going blank.
   const [, setArtTick] = useState(0)
   useEffect(() => { void hydrateDownloadArt().then(() => setArtTick((t) => t + 1)) }, [])
 
@@ -98,7 +80,6 @@ export function DownloadsPage() {
     return [...m.entries()].map(([appid, items]) => ({ appid, name: items[0]?.gameName || appid, items }))
   }, [downloads])
 
-  // Bucket each group. Active wins over everything; then queued, ready, failed, done.
   const { active, queued, completed, failed } = useMemo(() => {
     const active: Group[] = [], queued: Group[] = [], completed: Group[] = [], failed: Group[] = []
     for (const g of groups) {
@@ -107,7 +88,6 @@ export function DownloadsPage() {
       else if (has(g.items, "install_ready") || every(g.items, ...DONE)) completed.push(g)
       else if (has(g.items, "failed", "extract_failed")) failed.push(g)
     }
-    // Most-active group first.
     const rank = (g: Group) => PAUSABLE.indexOf(repStatus(g.items) as any)
     active.sort((a, b) => {
       const ra = rank(a), rb = rank(b)
@@ -126,7 +106,7 @@ export function DownloadsPage() {
   const copyLink = async (g: Group) => {
     const url = g.items[0]?.originalUrl || g.items[0]?.url
     if (!url) return
-    try { await navigator.clipboard.writeText(url); setCopied(g.appid); setTimeout(() => setCopied((c) => (c === g.appid ? null : c)), 1600) } catch { /* ignore */ }
+    try { await navigator.clipboard.writeText(url); setCopied(g.appid); setTimeout(() => setCopied((c) => (c === g.appid ? null : c)), 1600) } catch {  }
   }
   const togglePause = (g: Group) => { if (has(g.items, ...PAUSABLE)) void pauseGroup(g.appid); else void resumeGroup(g.appid) }
   const install = async (appid: string) => {
@@ -147,7 +127,7 @@ export function DownloadsPage() {
 
   return (
     <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column" }}>
-      {/* header */}
+      {}
       <header style={{ flexShrink: 0, padding: "26px 36px 18px", borderBottom: "1px solid var(--mf-line)" }}>
         <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between" }}>
           <div>
@@ -170,7 +150,7 @@ export function DownloadsPage() {
         </div>
       </header>
 
-      {/* scroller */}
+      {}
       <div className="mf-scroll" style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "24px 36px 44px" }}>
         {empty ? (
           <CenterState>
@@ -179,7 +159,7 @@ export function DownloadsPage() {
           </CenterState>
         ) : (
           <>
-            {/* primary active */}
+            {}
             {primary && (() => {
               const a = aggregate(primary.items)
               const isCopied = copied === primary.appid
@@ -217,7 +197,7 @@ export function DownloadsPage() {
               )
             })()}
 
-            {/* also running */}
+            {}
             {running.length > 0 && (
               <Section title="Also running">
                 {running.map((g) => {
@@ -249,7 +229,7 @@ export function DownloadsPage() {
               </Section>
             )}
 
-            {/* up next */}
+            {}
             {queued.length > 0 && (
               <Section title={`Up next · ${queued.length}`}>
                 {queued.map((g, i) => {
@@ -267,7 +247,7 @@ export function DownloadsPage() {
               </Section>
             )}
 
-            {/* completed */}
+            {}
             {completed.length > 0 && (
               <Section title="Completed">
                 {completed.map((g) => {
@@ -297,7 +277,7 @@ export function DownloadsPage() {
               </Section>
             )}
 
-            {/* failed */}
+            {}
             {failed.length > 0 && (
               <Section title="Failed">
                 {failed.map((g) => {
@@ -327,10 +307,7 @@ export function DownloadsPage() {
   )
 }
 
-// Cover for a queued/active game, the art we stashed when enqueuing, else the
-// striped placeholder.
 function Cover({ appid, w, h, r, border }: { appid: string; w: number; h: number; r: number; border?: boolean }) {
-  // Recorded enqueue art first, then any in-session resolved game for this appid.
   const img = getDownloadArt(appid)?.image || getRememberedGame(appid)?.image
   return (
     <div style={{ width: w, height: h, borderRadius: r, flexShrink: 0, overflow: "hidden", background: img ? "#0f0f0f" : COVER_LINES, border: border ? "1px solid var(--mf-line)" : undefined }}>

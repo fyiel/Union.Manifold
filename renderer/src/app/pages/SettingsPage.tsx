@@ -18,13 +18,6 @@ import type { LinuxDetectionOption } from "@/lib/linux-presets"
 
 const IS_LINUX = typeof navigator !== "undefined" && /linux/i.test(navigator.userAgent)
 
-// Settings, General / Downloads / Sources / Linux / About. Every control is wired
-// to a setting the app actually reads, close behavior and the source registry by
-// the main process, the bandwidth cap by the aria2 engine (live), delete-archive
-// by the downloads context, the proton runner by the linux launch path. Controls
-// with no backend (notifications, concurrency, auto-extract) were removed rather
-// than shipped as no-ops.
-
 type Section = "general" | "appearance" | "downloads" | "library" | "sources" | "mods" | "linux" | "about"
 const SECTIONS: Array<{ id: Section; label: string; sub: string }> = [
   { id: "general", label: "General", sub: "app behavior, startup, notifications, and close behavior" },
@@ -33,23 +26,17 @@ const SECTIONS: Array<{ id: Section; label: string; sub: string }> = [
   { id: "library", label: "Library", sub: "extra folders scanned for installed games" },
   { id: "sources", label: "Sources", sub: "which catalog sources are active" },
   { id: "mods", label: "Mods", sub: "NexusMods account and the Steam Workshop downloader" },
-  // Linux runner config only matters on Linux, filtered out of the rail elsewhere.
   ...(IS_LINUX ? [{ id: "linux" as const, label: "Linux", sub: "global Proton / Wine runner and launch options" }] : []),
   { id: "about", label: "About", sub: "version, stats, and links" },
 ]
 
 export function SettingsPage() {
   const [section, setSection] = useState<Section>("general")
-  // Every control here is wired to a setting the app actually reads. closeBehavior
-  // is read by the main process on window close (and Hyprland killactive). The
-  // bandwidth cap and autoDeleteArchives are read by the download engine/context.
   const [closeBehavior, setCloseBehavior] = useState<"hide" | "quit">("hide")
   const [bwOn, setBwOn] = useState(false)
   const [bwMbps, setBwMbps] = useState(25)
   const [autoDelete, setAutoDelete] = useState(false)
   const [installPath, setInstallPath] = useState("")
-  // the real upstream settings, each consumed somewhere (main process or a kept
-  // renderer context), preventSleep defaults on like upstream
   const [shortcut, setShortcut] = useState(false)
   const [pauseWhilePlaying, setPauseWhilePlaying] = useState(false)
   const [launchAtLogin, setLaunchAtLogin] = useState(false)
@@ -104,9 +91,8 @@ export function SettingsPage() {
         if (sp === "library") setStartPage("library")
         setLaunchAtLogin(Boolean(auto?.enabled))
         setCloseOnLaunch(col === true)
-      } catch { /* ignore */ }
+      } catch {  }
     })()
-    // reflect changes made elsewhere (e.g. the archive prompt flips autoDeleteArchives)
     const off = window.ucSettings?.onChanged?.((d) => {
       if (!d || !alive) return
       if (d.key === "autoDeleteArchives") setAutoDelete(d.value === true)
@@ -116,22 +102,19 @@ export function SettingsPage() {
     return () => { alive = false; off?.() }
   }, [])
 
-  // toggle a boolean setting and persist it
   const setBool = (key: string, value: boolean, apply: (v: boolean) => void) => {
     apply(value)
-    try { void window.ucSettings?.set?.(key, value) } catch { /* ignore */ }
+    try { void window.ucSettings?.set?.(key, value) } catch {  }
   }
 
   const changeCloseBehavior = (v: "hide" | "quit") => {
     setCloseBehavior(v)
-    try { void window.ucSettings?.set?.("closeBehavior", v) } catch { /* ignore */ }
+    try { void window.ucSettings?.set?.("closeBehavior", v) } catch {  }
   }
 
-  // Bandwidth cap is stored as downloadBandwidthLimitKBps (0 = unlimited). The
-  // main process applies it to the aria2 engine immediately on set.
   const persistBw = (on: boolean, mbps: number) => {
     const kbps = on ? Math.max(1, mbps) * 1024 : 0
-    try { void window.ucSettings?.set?.("downloadBandwidthLimitKBps", kbps) } catch { /* ignore */ }
+    try { void window.ucSettings?.set?.("downloadBandwidthLimitKBps", kbps) } catch {  }
   }
   const toggleBw = () => { const on = !bwOn; setBwOn(on); persistBw(on, bwMbps) }
   const changeBw = (mbps: number) => { setBwMbps(mbps); persistBw(bwOn, mbps) }
@@ -139,16 +122,14 @@ export function SettingsPage() {
   const toggleAutoDelete = () => {
     const v = !autoDelete
     setAutoDelete(v)
-    try { void window.ucSettings?.set?.("autoDeleteArchives", v) } catch { /* ignore */ }
+    try { void window.ucSettings?.set?.("autoDeleteArchives", v) } catch {  }
   }
 
-  // Native folder picker. pickDownloadPath persists the backend download root and
-  // returns the chosen path, which we mirror into the display.
   const pickInstallPath = async () => {
     try {
       const r = await window.ucDownloads?.pickDownloadPath?.()
       if (r?.ok && r.path) setInstallPath(r.path)
-    } catch { /* ignore */ }
+    } catch {  }
   }
 
   const sub = SECTIONS.find((s) => s.id === section)?.sub || ""
@@ -161,7 +142,7 @@ export function SettingsPage() {
       </header>
 
       <div style={{ flex: 1, minHeight: 0, display: "flex" }}>
-        {/* section rail */}
+        {}
         <nav style={{ width: 196, flexShrink: 0, borderRight: "1px solid var(--mf-line)", padding: "20px 12px", display: "flex", flexDirection: "column", gap: 2 }}>
           {SECTIONS.map((s) => {
             const active = section === s.id
@@ -173,7 +154,7 @@ export function SettingsPage() {
           })}
         </nav>
 
-        {/* content */}
+        {}
         <div className="mf-scroll" style={{ flex: 1, minWidth: 0, overflowY: "auto", padding: "28px 40px 56px" }}>
           <div style={{ maxWidth: 620 }}>
             {section === "general" && (
@@ -229,17 +210,17 @@ export function SettingsPage() {
                   )}
                 </div>
                 <Row title="Max parallel downloads" desc="How many downloads run at once, the rest wait in the queue">
-                  <select className="uc-select" value={maxConcurrent} onChange={(e) => { const v = Number(e.target.value); setMaxConcurrent(v); try { void window.ucSettings?.set?.("maxConcurrentDownloads", v) } catch { /* ignore */ } }} style={{ height: 36, minWidth: 90, padding: "0 32px 0 13px", borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "var(--mf-panel)", color: "var(--mf-t1)", fontSize: 12.5, cursor: "pointer", WebkitAppearance: "none", appearance: "none" }}>
+                  <select className="uc-select" value={maxConcurrent} onChange={(e) => { const v = Number(e.target.value); setMaxConcurrent(v); try { void window.ucSettings?.set?.("maxConcurrentDownloads", v) } catch {  } }} style={{ height: 36, minWidth: 90, padding: "0 32px 0 13px", borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "var(--mf-panel)", color: "var(--mf-t1)", fontSize: 12.5, cursor: "pointer", WebkitAppearance: "none", appearance: "none" }}>
                     {[1, 2, 3, 4, 5, 6, 7, 8].map((n) => <option key={n} value={n}>{n}</option>)}
                   </select>
                 </Row>
                 <Row title="Connections per download" desc="Parallel connections aria2 opens to the mirror, applies to newly started downloads">
-                  <select className="uc-select" value={connsPerDl} onChange={(e) => { const v = Number(e.target.value); setConnsPerDl(v); try { void window.ucSettings?.set?.("aria2ConnectionsPerDownload", v) } catch { /* ignore */ } }} style={{ height: 36, minWidth: 90, padding: "0 32px 0 13px", borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "var(--mf-panel)", color: "var(--mf-t1)", fontSize: 12.5, cursor: "pointer", WebkitAppearance: "none", appearance: "none" }}>
+                  <select className="uc-select" value={connsPerDl} onChange={(e) => { const v = Number(e.target.value); setConnsPerDl(v); try { void window.ucSettings?.set?.("aria2ConnectionsPerDownload", v) } catch {  } }} style={{ height: 36, minWidth: 90, padding: "0 32px 0 13px", borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "var(--mf-panel)", color: "var(--mf-t1)", fontSize: 12.5, cursor: "pointer", WebkitAppearance: "none", appearance: "none" }}>
                     {[1, 2, 4, 8, 16].map((n) => <option key={n} value={n}>{n}</option>)}
                   </select>
                 </Row>
                 <Row title="Free space safety margin" desc="Extra headroom the pre-download disk check demands on top of the estimated install size">
-                  <select className="uc-select" value={diskMargin} onChange={(e) => { const v = Number(e.target.value); setDiskMargin(v); try { void window.ucSettings?.set?.("diskSpaceMarginGiB", v) } catch { /* ignore */ } }} style={{ height: 36, minWidth: 110, padding: "0 32px 0 13px", borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "var(--mf-panel)", color: "var(--mf-t1)", fontSize: 12.5, cursor: "pointer", WebkitAppearance: "none", appearance: "none" }}>
+                  <select className="uc-select" value={diskMargin} onChange={(e) => { const v = Number(e.target.value); setDiskMargin(v); try { void window.ucSettings?.set?.("diskSpaceMarginGiB", v) } catch {  } }} style={{ height: 36, minWidth: 110, padding: "0 32px 0 13px", borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "var(--mf-panel)", color: "var(--mf-t1)", fontSize: 12.5, cursor: "pointer", WebkitAppearance: "none", appearance: "none" }}>
                     {[0, 1, 2, 4, 8, 16].map((n) => <option key={n} value={n}>{n} GiB</option>)}
                   </select>
                 </Row>
@@ -265,7 +246,6 @@ export function SettingsPage() {
   )
 }
 
-// ── Appearance tab, preset picker + custom themes + theme editor entry ──
 function ThemeSwatch({ theme, active, onSelect }: { theme: ThemeDef; active: boolean; onSelect: () => void }) {
   const c = theme.colors
   return (
@@ -336,9 +316,6 @@ function AppearanceTab() {
   )
 }
 
-// ── Library tab, extra scan roots ──
-// Backed by the same legacyLibraryPaths key the scanner already reads, so every
-// entry shows its games in the library and can launch immediately.
 function LibraryTab() {
   const [roots, setRoots] = useState<string[]>([])
 
@@ -353,14 +330,14 @@ function LibraryTab() {
 
   const persist = (next: string[]) => {
     setRoots(next)
-    try { void window.ucSettings?.set?.("legacyLibraryPaths", next) } catch { /* ignore */ }
+    try { void window.ucSettings?.set?.("legacyLibraryPaths", next) } catch {  }
   }
 
   const addRoot = async () => {
     try {
       const r = await window.ucDialogs?.pickFolder?.()
       if (r?.ok && r.path && !roots.includes(r.path)) persist([...roots, r.path])
-    } catch { /* ignore */ }
+    } catch {  }
   }
 
   return (
@@ -386,7 +363,6 @@ function LibraryTab() {
   )
 }
 
-// ── Sources tab, the one wired to real behavior ──
 function SourcesTab() {
   const [sources, setSources] = useState<SourceInfo[]>([])
   const [enabled, setEnabled] = useState<Record<string, boolean>>({})
@@ -406,8 +382,6 @@ function SourcesTab() {
     return () => { alive = false }
   }, [])
 
-  // Stay in lockstep with the sidebar's source toggles (both persist the same
-  // gv_source_disabled key), so flipping a source either place updates both live.
   useEffect(() => {
     const off = window.ucSettings?.onChanged?.((d) => {
       if (d?.key !== "gv_source_disabled") return
@@ -459,9 +433,6 @@ function SourcesTab() {
   )
 }
 
-// ── Linux tab, global Proton/Wine runner + launch options ──
-// Reads/writes the same top-level settings.json keys the main process consumes
-// at launch (linuxLaunchMode / linuxProtonPath / linuxProtonPrefix / linuxExtraEnv).
 const LINUX_SELECT: React.CSSProperties = { height: 36, minWidth: 180, padding: "0 32px 0 13px", borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "var(--mf-panel)", color: "var(--mf-t1)", fontSize: 12.5, cursor: "pointer", WebkitAppearance: "none", appearance: "none" }
 
 function LinuxSettingsTab() {
@@ -500,8 +471,8 @@ function LinuxSettingsTab() {
     return () => { alive = false }
   }, [])
 
-  const persist = (key: string, value: string) => { try { void window.ucSettings?.set?.(key, value) } catch { /* ignore */ } }
-  const persist2 = (key: string, value: boolean) => { try { void window.ucSettings?.set?.(key, value) } catch { /* ignore */ } }
+  const persist = (key: string, value: string) => { try { void window.ucSettings?.set?.(key, value) } catch {  } }
+  const persist2 = (key: string, value: boolean) => { try { void window.ucSettings?.set?.(key, value) } catch {  } }
   const pickPrefix = async () => {
     const r = await window.ucLinux?.pickPrefixDir?.()
     if (r?.ok && r.path) { setProtonPrefix(r.path); persist("linuxProtonPrefix", r.path) }
@@ -576,9 +547,6 @@ function LinuxSettingsTab() {
   )
 }
 
-// ── About tab (fork version + update check) ──
-// The fork resets to version 1, but it's a derivative so we credit the upstream
-// release it forked from.
 const FORK_VERSION = "1.0.0b"
 const BASED_ON = "UnionCrax.Direct v2.7.3"
 
@@ -592,8 +560,6 @@ function AboutTab() {
     void window.ucUpdater?.getVersion?.().then((v) => { if (v) setVersion(v) }).catch(() => { })
   }, [])
 
-  // The main-process startup update check emits uc:update-available; reflect it
-  // in the About tab so a detected update shows without a manual re-check.
   useEffect(() => {
     const off = window.ucUpdater?.onUpdateAvailable?.((data) => {
       setInstallable(true)
@@ -619,8 +585,6 @@ function AboutTab() {
   const install = async () => {
     setChecking(true)
     setUpdMsg("downloading update…")
-    // Live phase/percent feed while the backend downloads and installs; the
-    // pacman path pops a polkit auth prompt during "installing".
     const offProgress = window.ucUpdater?.onUpdateProgress?.((p) => {
       if (p.phase === "installing") setUpdMsg("installing update… (authentication may be required)")
       else if (p.total) setUpdMsg(`downloading update… ${Math.min(100, Math.round((p.received / p.total) * 100))}%`)
@@ -658,11 +622,6 @@ function AboutTab() {
   )
 }
 
-// ── Mods tab — NexusMods account + Workshop downloader ──
-// nexusApiKey is the settings key the Rust nexus client reads for every API
-// call; nexusSessionCookie is the opt-in website session that arms native free
-// downloads (see the ToS warning below). nxm:// deep links and Workshop
-// installs need no further setup.
 function ModsTab() {
   const [apiKey, setApiKey] = useState("")
   const [reveal, setReveal] = useState(false)
@@ -700,49 +659,41 @@ function ModsTab() {
         if (typeof sgu === "string") setSlipgateUrl(sgu)
         if (typeof sgk === "string") setSlipgateKey(sgk)
         setSteamcmd(ws?.ok && ws.steamcmd ? ws.steamcmd : "absent")
-      } catch { /* ignore */ }
+      } catch {  }
     })()
     return () => { alive = false }
   }, [])
 
-  // Persist on blur; an emptied field removes the key from the store.
   const persistKey = async (value: string) => {
     try {
       await window.ucSettings?.set?.("nexusApiKey", value.trim() || null)
       setSaved(true)
       window.setTimeout(() => setSaved(false), 1600)
-    } catch { /* ignore */ }
+    } catch {  }
   }
 
-  // Persist the opt-in Nexus website session cookie; emptying it disables the
-  // native free-download path and falls back to the nxm:// browser flow.
   const persistSession = async (value: string) => {
     try {
       await window.ucSettings?.set?.("nexusSessionCookie", value.trim() || null)
       setSessionSaved(true)
       window.setTimeout(() => setSessionSaved(false), 1600)
-    } catch { /* ignore */ }
+    } catch {  }
   }
 
-  // The browser User-Agent paired with the session cookies. cf_clearance is
-  // bound to the exact User-Agent that solved the Cloudflare challenge, so this
-  // must match the browser the cookies came from or every attempt is rejected.
   const persistUa = async (value: string) => {
     try {
       await window.ucSettings?.set?.("nexusUserAgent", value.trim() || null)
       setUaSaved(true)
       window.setTimeout(() => setUaSaved(false), 1600)
-    } catch { /* ignore */ }
+    } catch {  }
   }
 
   const persistSlipgateUrl = async (value: string) => {
-    try { await window.ucSettings?.set?.("slipgateUrl", value.trim() || null) } catch { /* ignore */ }
+    try { await window.ucSettings?.set?.("slipgateUrl", value.trim() || null) } catch {  }
   }
   const persistSlipgateKey = async (value: string) => {
-    try { await window.ucSettings?.set?.("slipgateKey", value.trim() || null) } catch { /* ignore */ }
+    try { await window.ucSettings?.set?.("slipgateKey", value.trim() || null) } catch {  }
   }
-  // Save both, then probe /health so the user sees the instance is reachable and
-  // whether its FlareSolverr backend is up.
   const testSlipgate = async () => {
     setSlipgateTesting(true); setSlipgateStatus(null)
     try {
@@ -756,8 +707,6 @@ function ModsTab() {
   const validate = async () => {
     setValidating(true); setValError(""); setAccount(null)
     try {
-      // AWAIT the persist: nexus_validate reads the key from the settings
-      // store, so a fire-and-forget set could race it with the old value.
       await window.ucSettings?.set?.("nexusApiKey", apiKey.trim() || null)
       const r = await window.ucMods?.nexusValidate?.()
       if (r?.ok && r.user) setAccount({ name: r.user.name, premium: r.user.premium })
@@ -895,7 +844,6 @@ function ModsTab() {
   )
 }
 
-// ── shared bits ──
 function Toggle({ on, onToggle }: { on: boolean; onToggle: () => void }) {
   return (
     <button type="button" onClick={onToggle} style={{ position: "relative", width: 40, height: 23, borderRadius: 99, border: "none", cursor: "pointer", background: on ? "var(--mf-t1)" : "color-mix(in srgb, var(--mf-t0) 13%, transparent)", transition: "background .15s", flexShrink: 0 }}>
@@ -927,7 +875,6 @@ function fmtBytes(n: number): string {
   return `${(n / 1024 ** i).toFixed(i ? 1 : 0)} ${u[i]}`
 }
 
-// Clears the infinite on-disk thumbnail/art cache (uc-asset://).
 function ClearAssetsRow() {
   const [bytes, setBytes] = useState<number | null>(null)
   const [busy, setBusy] = useState(false)

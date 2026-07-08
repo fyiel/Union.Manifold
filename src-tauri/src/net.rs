@@ -42,10 +42,6 @@ async fn do_fetch(
                 .iter()
                 .filter_map(|(k, v)| v.to_str().ok().map(|val| [k.as_str().to_string(), val.to_string()]))
                 .collect();
-            // Textual payloads skip the base64 round-trip: the renderer used to
-            // atob + per-char copy multi-MB JSON bodies on the main thread. Only
-            // valid UTF-8 is sent as `bodyText` so bytes always round-trip
-            // exactly; anything else keeps the base64 `body` fallback.
             let textual = prefer_text
                 || resp
                     .headers()
@@ -104,7 +100,6 @@ pub async fn auth_fetch(base_url: String, path: String, init: Option<Value>) -> 
         })
         .unwrap_or_default();
     let body = init.get("body").and_then(|v| v.as_str()).map(|s| s.as_bytes().to_vec());
-    // Callers may force text mode for content types the auto-detection misses.
     let prefer_text = init.get("preferText").and_then(|v| v.as_bool()).unwrap_or(false);
     do_fetch(&join(&base_url, &path), &method, headers, body, prefer_text).await
 }

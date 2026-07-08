@@ -1,16 +1,3 @@
-//! FileKeeper native resolver.
-//!
-//! FileKeeper wraps an XFileSharing-style free flow behind a Vue page. The file
-//! URL (`filekeeper.net/<code>/<name>`) 302-redirects to `/download`, stashing
-//! the file id in a `file_code` cookie; `/download` then runs a two-step form
-//! (`op=download1` → wait a short countdown → `op=download2`) that 302s to the
-//! direct CDN link (a `dlproxy.uk` tunnel). No captcha on the common path.
-//!
-//! Resolved client-side (the direct link is session/IP-bound) and with manual
-//! redirect handling, because the app's HTTP client does not carry cookies
-//! across an auto-followed redirect — we need the `file_code` cookie on the
-//! `/download` request.
-
 use std::collections::HashMap;
 use std::sync::LazyLock;
 use std::time::Duration;
@@ -75,9 +62,6 @@ fn form_post(jar: &Jar, referer: &str, pairs: &[(&str, &str)], manual_redirect: 
 pub async fn resolve(url: &str) -> ResolveResult {
     let jar = Jar::new();
 
-    // 1) Hit the file URL with redirects OFF so we capture the file_code cookie
-    // and the /download location (the client would otherwise drop the cookie
-    // when auto-following).
     let first = match http::fetch(
         url,
         &FetchOpts {
@@ -100,7 +84,6 @@ pub async fn resolve(url: &str) -> ResolveResult {
         .map(|u| u.to_string())
         .unwrap_or_else(|| url.to_string());
 
-    // 2) Load the /download page (carries data-code + countdown).
     let page = match http::fetch(
         &dl_url,
         &FetchOpts {
@@ -128,7 +111,6 @@ pub async fn resolve(url: &str) -> ResolveResult {
         .unwrap_or(MIN_WAIT)
         .clamp(MIN_WAIT, MAX_WAIT);
 
-    // 3) download1 advances the XFS session; then honor the countdown.
     let _ = http::fetch(
         &dl_url,
         &form_post(
@@ -146,7 +128,6 @@ pub async fn resolve(url: &str) -> ResolveResult {
         .unwrap_or_default();
     tokio::time::sleep(Duration::from_secs(wait)).await;
 
-    // 4) download2 -> 302 to the direct CDN link.
     let resp = match http::fetch(
         &dl_url,
         &form_post(

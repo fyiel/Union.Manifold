@@ -28,7 +28,6 @@ export type CloudCollection = {
   id: string
   name: string
   appids: string[]
-  /** Parallel to appids — addedBy[i] is the discord_id (or null) of the user who added that game. */
   addedBy: Array<string | null>
   shareToken: string | null
   isPublic: boolean
@@ -100,7 +99,6 @@ function normalize(raw: RawCollection): CloudCollection {
       username: c.username,
       displayName: c.displayName,
       avatarUrl: c.avatarUrl,
-      // Preview entries don't include perms; defaults are fine for display.
       canAdd: true,
       canRemove: false,
       canRename: false,
@@ -109,12 +107,6 @@ function normalize(raw: RawCollection): CloudCollection {
   }
 }
 
-/**
- * Returns:
- *  - { authed: true, collections } when the call succeeds
- *  - { authed: false } when the user is not signed in (401)
- *  - throws on network/server errors
- */
 export async function listCloudCollections(): Promise<
   { authed: true; collections: CloudCollection[] } | { authed: false }
 > {
@@ -200,8 +192,6 @@ export async function unshareCloudCollection(id: string): Promise<void> {
   }
 }
 
-// ---- Contributor management ----
-
 export async function listCloudContributors(id: string): Promise<CloudContributor[]> {
   const res = await apiFetch(`/api/account/collections/${encodeURIComponent(id)}/contributors`)
   const data = await res.json().catch(() => null)
@@ -266,30 +256,18 @@ export async function searchCloudUsers(q: string): Promise<CloudUserSearchResult
   return Array.isArray(data?.users) ? data.users : []
 }
 
-/**
- * Build the public share URL pointed at the website. Used by the Share dialog
- * for "Copy link" — keeps the URL portable across devices.
- */
 export function shareUrlFor(token: string): string {
-  // Production: hard-code the canonical share URL on union-crax.xyz so the link
-  // always works regardless of which API base the launcher is talking to.
-  // Falls back to whatever base we're hitting only when api base looks like
-  // the prod website (otherwise we'd hand out a link to a dev backend).
   const base = (() => {
     try {
       const apiBase = getApiBaseUrl()
       const url = new URL(apiBase)
       if (/(^|\.)union-crax\.xyz$/i.test(url.hostname)) return "https://union-crax.xyz"
-    } catch { /* swallow */ }
+    } catch {  }
     return "https://union-crax.xyz"
   })()
   return `${base}/collection/${encodeURIComponent(token)}`
 }
 
-/**
- * Lightweight play history reporter. Best-effort: failures are silent so we
- * never block a launch.
- */
 export async function reportPlayEvent(appid: string, type: "play" | "install"): Promise<void> {
   try {
     await apiFetch("/api/account/play-history", {
@@ -298,15 +276,9 @@ export async function reportPlayEvent(appid: string, type: "play" | "install"): 
       body: JSON.stringify({ appid, type }),
     })
   } catch {
-    /* silent */
   }
 }
 
-/**
- * Remove a single appid from the cloud play history (the "Not on this PC"
- * carousel on the launcher). Used when the user no longer wants to see a
- * previously-installed game in their cloud library.
- */
 export async function removePlayHistoryEntry(appid: string): Promise<boolean> {
   try {
     const res = await apiFetch("/api/account/play-history", {

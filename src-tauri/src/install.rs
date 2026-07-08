@@ -307,11 +307,7 @@ fn mark_install_failed(dir: &Path, error: &str) {
     crate::library::invalidate_scan();
 }
 
-// A single `7z x` on .tar.gz/.tar.xz/.tar.bz2 only strips the outer layer, leaving an
-// intermediate `.tar`. Unwrap a lone leftover `.tar` (never the source archive itself).
 async fn extract_leftover_tar(out_dir: &Path, source: &Path) -> Result<()> {
-    // A plain `.tar` is already fully extracted in one pass; only compressed tars leave
-    // a leftover, so never re-extract/delete when the source itself is a `.tar`.
     if source.extension().map(|x| x.eq_ignore_ascii_case("tar")).unwrap_or(false) {
         return Ok(());
     }
@@ -342,8 +338,6 @@ pub async fn auto_install(app: AppHandle, appid: String, download_id: String, ga
         crate::notify::send_if(&app, "notifyInstallDone", true, "Ready to play", &format!("{display_name} finished installing"));
         return;
     }
-    // Disk precheck: refuse an extraction that would run the volume out of space and
-    // surface it through the existing "failed" download status (no new event/modal).
     let margin_gib = app
         .state::<AppState>()
         .settings
@@ -356,8 +350,6 @@ pub async fn auto_install(app: AppHandle, appid: String, download_id: String, ga
         .filter_map(|p| std::fs::metadata(p).ok())
         .map(|m| m.len())
         .sum();
-    // The archive is already on disk here, its bytes don't need to be free
-    // again — only the unpacked output does.
     let required = crate::storage::estimate_extract(download_bytes, 0, margin_gib);
     let free = crate::storage::free_bytes(&installing_dir);
     if download_bytes > 0 && free < required {
@@ -533,9 +525,6 @@ pub fn find_installing(root: &Path, appid: &str) -> Option<(PathBuf, Value)> {
 
 #[tauri::command(async)]
 pub fn delete_archive_files(state: State<'_, AppState>, payload: Value) -> Value {
-    // Every legitimate caller passes paths from the archive-delete prompt, which
-    // always live under the download root; refuse anything outside it so this
-    // command can never be turned into an arbitrary file deleter.
     let root = match state.download_root().canonicalize() {
         Ok(r) => r,
         Err(_) => return json!({ "ok": false, "error": "download root unavailable" }),
@@ -559,15 +548,8 @@ pub fn delete_archive_files(state: State<'_, AppState>, payload: Value) -> Value
 mod tests {
     use super::*;
 
-    // `part_base` detects the shared base of a multi-part archive. Regression:
-    // it must never panic when byte-slicing multibyte/non-ASCII names, and it
-    // must only treat ".part" followed by a digit (or a 3-digit numeric
-    // extension) as a real multi-part marker.
-
-    #[test]
+#[test]
     fn t_part_base_multibyte_never_panics() {
-        // Non-ASCII stem with a 2-char extension: falls through to None without
-        // panicking on a non-char-boundary byte slice.
         assert_eq!(part_base("café.7z"), None);
         assert_eq!(part_base("游戏.7z"), None);
     }
@@ -581,11 +563,8 @@ mod tests {
 
     #[test]
     fn t_part_base_multibyte_slices_on_char_boundary() {
-        // ".partN" after multibyte chars returns the base via name[..i]; both
-        // that slice and name[i+5..] must land on UTF-8 char boundaries.
         assert_eq!(part_base("café.part1.rar"), Some("café"));
         assert_eq!(part_base("游戏.part01.7z"), Some("游戏"));
-        // 3-digit numeric extension on a multibyte stem.
         assert_eq!(part_base("café.001"), Some("café"));
     }
 
@@ -600,7 +579,6 @@ mod tests {
     fn t_part_base_rejects_plain_and_non_digit_part() {
         assert_eq!(part_base("game.zip"), None);
         assert_eq!(part_base("readme.txt"), None);
-        // ".part" not followed by a digit is not a multi-part marker.
         assert_eq!(part_base("game.partial.zip"), None);
     }
 }

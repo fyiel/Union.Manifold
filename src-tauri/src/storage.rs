@@ -25,11 +25,6 @@ pub(crate) fn free_bytes(path: &Path) -> u64 {
     fs4::available_space(&target).unwrap_or(0)
 }
 
-// Game archives ship already-compressed assets, so the unpacked size runs
-// ~1.0-1.3x the archive (Dying Light: The Beast: 71 GB zip -> 85 GB). 1.4x
-// covers that with headroom; the old 2x flagged installs that fit comfortably
-// (a 71 GB archive demanded ~220 GB free). A source-declared install size
-// still wins when it's larger.
 pub(crate) fn estimate_extract(download_bytes: u64, declared: u64, margin_gib: u64) -> u64 {
     let base = declared.max(download_bytes.saturating_mul(7) / 5);
     base + (margin_gib * GIB).max(base / 20)
@@ -112,8 +107,6 @@ mod tests {
 
     #[test]
     fn estimate_extract_stays_realistic_for_game_archives() {
-        // Dying Light: The Beast — 71 GB zip unpacks to 85 GB. The estimate
-        // must cover the real unpacked size without demanding multiples of it.
         let archive = 71_000_000_000u64;
         let unpacked = 85_000_000_000u64;
         let est = estimate_extract(archive, 0, 2);

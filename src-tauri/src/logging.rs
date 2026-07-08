@@ -29,11 +29,6 @@ fn redact(text: &str) -> String {
 }
 
 pub fn write_line(level: &str, message: &str) {
-    // Clone the path out and do the stamping/redaction/IO outside the lock:
-    // nothing that can panic (REDACT's lazy regex init, formatting, file IO)
-    // runs while LOG_PATH is held, so the panic hook — which calls back into
-    // write_line — can never re-enter a lock its own thread already holds and
-    // hang the abort. O_APPEND keeps concurrent one-shot line writes whole.
     let path = match LOG_PATH.lock().clone() {
         Some(p) => p,
         None => return,
@@ -51,4 +46,3 @@ pub fn log(level: String, message: String, data: Option<Value>) {
     let extra = data.map(|d| format!(" {d}")).unwrap_or_default();
     write_line(&level, &format!("{message}{extra}"));
 }
-
