@@ -62,7 +62,7 @@ function fmtEta(sec: number | null) {
 }
 
 export function DownloadsPage() {
-  const { pauseGroup, resumeGroup, cancelGroup, pauseAll, resumeAll, clearCompleted, clearByAppid } = useDownloadsActions()
+  const { pauseGroup, resumeGroup, cancelGroup, discardGroup, pauseAll, resumeAll, clearCompleted, clearByAppid } = useDownloadsActions()
   // Freeze-and-catch-up: progress flushes tick ~5/s even while this tab sits
   // under display:none (paint stops, reconciliation doesn't). While hidden the
   // equality fn reports every store update as "equal", so useSyncExternalStore
@@ -290,6 +290,7 @@ export function DownloadsPage() {
                           <PlayIcon />Play
                         </button>
                       )}
+                      <button type="button" title="remove" onClick={() => void discardGroup(g.appid)} className="mf-iconcircle" style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 32, height: 32, borderRadius: 7, border: "1px solid var(--mf-line-2)", background: "transparent", color: "var(--mf-t4)", cursor: "pointer", flexShrink: 0 }}><XIcon size={13} /></button>
                     </div>
                   )
                 })}
