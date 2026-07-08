@@ -375,7 +375,7 @@ async fn slipgate_resolve(
         "game_id": game_id.to_string(),
     });
     let cookies = json!([{ "name": "nexusmods_session", "value": session }]);
-    crate::slipgate::resolve(cfg, "nexusmods", params, cookies).await.map(|link| link.url)
+    crate::slipgate::resolve(cfg, "nexusmods", "", params, cookies).await.map(|link| link.url)
 }
 
 /// Probe a Slipgate instance for the Settings connection test.

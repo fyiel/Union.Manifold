@@ -88,10 +88,11 @@ pub struct ResolvedLink {
 pub async fn resolve(
     cfg: &Cfg,
     host: &str,
+    page_url: &str,
     params: Value,
     cookies: Value,
 ) -> Result<ResolvedLink, String> {
-    let body = json!({ "host": host, "params": params, "cookies": cookies });
+    let body = json!({ "host": host, "page_url": page_url, "params": params, "cookies": cookies });
     let v = post(cfg, "/resolve", body, Duration::from_secs(180)).await?;
     if !v.get("ok").and_then(|x| x.as_bool()).unwrap_or(false) {
         return Err(v
@@ -111,7 +112,7 @@ pub async fn resolve(
         .and_then(|x| x.as_str())
         .filter(|s| !s.is_empty())
         .map(String::from);
-    let size_bytes = v.get("size_bytes").and_then(|x| x.as_u64());
+    let size_bytes = v.get("size_bytes").and_then(|x| x.as_u64()).filter(|n| *n > 0);
     let headers = v
         .get("headers")
         .and_then(|x| x.as_object())
