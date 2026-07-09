@@ -1,7 +1,7 @@
 import { useEffect, useState, type CSSProperties, type ReactNode } from "react"
 import { NavLink } from "react-router-dom"
 import { BRAND } from "@/lib/brand"
-import { listSources, loadDisabledSources, saveDisabledSources, setSourceEnabled } from "@/lib/sources"
+import { listSources, loadDisabledSources, saveDisabledSources, setSourceEnabled, onSourcesChanged } from "@/lib/sources"
 
 const NAV_KEY = "uc_nav_collapsed"
 
@@ -114,7 +114,7 @@ export function Sidebar() {
     void (async () => {
       const [list, disabled] = await Promise.all([listSources(), loadDisabledSources()])
       if (!alive) return
-      setSources(list.map((s) => ({ ...s, enabled: !disabled.includes(s.id) })))
+      setSources(list.filter((s) => s.available !== false).map((s) => ({ ...s, enabled: !disabled.includes(s.id) })))
     })()
     return () => {
       alive = false
@@ -122,12 +122,12 @@ export function Sidebar() {
   }, [])
 
   useEffect(() => {
-    const off = window.ucSettings?.onChanged?.((d: { key: string; value: unknown }) => {
-      if (d?.key !== "gv_source_disabled") return
-      const disabled = Array.isArray(d.value) ? d.value.filter((x: unknown): x is string => typeof x === "string") : []
-      setSources((prev) => prev.map((s) => ({ ...s, enabled: !disabled.includes(s.id) })))
+    return onSourcesChanged(() => {
+      void (async () => {
+        const [list, disabled] = await Promise.all([listSources(), loadDisabledSources()])
+        setSources(list.filter((s) => s.available !== false).map((s) => ({ ...s, enabled: !disabled.includes(s.id) })))
+      })()
     })
-    return () => { off?.() }
   }, [])
 
   const toggleSource = (id: string) => {
