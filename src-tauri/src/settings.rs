@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::sync::{Arc, OnceLock};
 
 use parking_lot::Mutex;
 use serde_json::{json, Map, Value};
@@ -6,6 +7,19 @@ use tauri::{AppHandle, Emitter, State};
 
 use crate::error::Result;
 use crate::state::AppState;
+
+static SETTINGS_GLOBAL: OnceLock<Arc<SettingsStore>> = OnceLock::new();
+
+pub fn init(store: Arc<SettingsStore>) {
+    SETTINGS_GLOBAL.set(store).ok();
+}
+
+pub fn hide_torrent_sources() -> bool {
+    SETTINGS_GLOBAL
+        .get()
+        .map(|s| s.get("hideTorrentSources").as_bool().unwrap_or(false))
+        .unwrap_or(false)
+}
 
 pub struct SettingsStore {
     path: PathBuf,

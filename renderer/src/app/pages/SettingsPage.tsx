@@ -396,6 +396,7 @@ function SourcesTab() {
   const [slipgateKey, setSlipgateKey] = useState("")
   const [slipgateTesting, setSlipgateTesting] = useState(false)
   const [slipgateStatus, setSlipgateStatus] = useState<{ ok: boolean; msg: string } | null>(null)
+  const [hideTorrent, setHideTorrent] = useState(false)
 
   const loadSources = async () => {
     const [list, disabled, report] = await Promise.all([listSources(), loadDisabledSources(), sourceCapabilities()])
@@ -409,13 +410,15 @@ function SourcesTab() {
   useEffect(() => {
     let alive = true
     void (async () => {
-      const [sgu, sgk] = await Promise.all([
+      const [sgu, sgk, sgt] = await Promise.all([
         window.ucSettings?.get?.("slipgateUrl"),
         window.ucSettings?.get?.("slipgateKey"),
+        window.ucSettings?.get?.("hideTorrentSources"),
       ])
       if (!alive) return
       if (typeof sgu === "string") setSlipgateUrl(sgu)
       if (typeof sgk === "string") setSlipgateKey(sgk)
+      if (typeof sgt === "boolean") setHideTorrent(sgt)
       await loadSources()
     })()
     return () => { alive = false }
@@ -431,6 +434,13 @@ function SourcesTab() {
     await setSourceEnabled(id, next)
     const disabled = sources.filter((s) => (s.id === id ? !next : !{ ...enabled, [id]: next }[s.id])).map((s) => s.id)
     await saveDisabledSources(disabled)
+  }
+
+  const toggleHideTorrent = async () => {
+    const next = !hideTorrent
+    setHideTorrent(next)
+    try { await window.ucSettings?.set?.("hideTorrentSources", next) } catch {  }
+    await loadSources()
   }
 
   const refresh = async () => {
@@ -523,24 +533,39 @@ function SourcesTab() {
         ) : null}
       </div>
 
+      <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 16px", border: "1px solid var(--mf-line)", borderRadius: 11, background: "var(--mf-panel-2)", marginBottom: 18 }}>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--mf-t1)" }}>Hide torrent-only sources</div>
+          <div style={{ fontFamily: MONO, fontSize: 10.5, color: "var(--mf-t5)", marginTop: 3, lineHeight: 1.5 }}>GOG, EMPRESS and KaOsKrew only surface magnet/torrent links. Hide them from Browse, search and the sidebar.</div>
+        </div>
+        <Toggle on={hideTorrent} onToggle={() => void toggleHideTorrent()} />
+      </div>
+
       <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
         {sources.map((s) => {
           const on = Boolean(enabled[s.id])
-          const gated = s.requiresSlipgate && !s.available
+          const torrentHidden = hideTorrent && s.torrentOnly
+          const gated = s.requiresSlipgate && !s.available && !torrentHidden
+          const off = gated || torrentHidden
           return (
-            <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 16px", border: "1px solid var(--mf-line)", borderRadius: 11, background: "var(--mf-panel-2)", opacity: gated ? 0.65 : 1 }}>
-              <span style={{ width: 8, height: 8, borderRadius: 99, background: !gated && on ? "var(--mf-t2)" : "var(--mf-t6)", flexShrink: 0 }} />
+            <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 16px", border: "1px solid var(--mf-line)", borderRadius: 11, background: "var(--mf-panel-2)", opacity: off ? 0.65 : 1 }}>
+              <span style={{ width: 8, height: 8, borderRadius: 99, background: !off && on ? "var(--mf-t2)" : "var(--mf-t6)", flexShrink: 0 }} />
               <div style={{ minWidth: 0, flex: 1 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13.5, fontWeight: 600, color: "var(--mf-t0)" }}>
                   {s.name}
+                  {s.torrentOnly ? (
+                    <span style={{ padding: "2px 8px", borderRadius: 999, border: "1px solid var(--mf-line-2)", fontFamily: MONO, fontSize: 9, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--mf-t4)" }}>torrent-only</span>
+                  ) : null}
                   {s.requiresSlipgate ? (
                     <span style={{ padding: "2px 8px", borderRadius: 999, border: "1px solid var(--mf-line-2)", fontFamily: MONO, fontSize: 9, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--mf-t4)" }}>dependent on Slipgate</span>
                   ) : null}
                 </div>
-                <div style={{ fontFamily: MONO, fontSize: 10.5, color: "var(--mf-t5)", marginTop: 2 }}>{gated ? "configure Slipgate above to enable" : on ? detailFor(s.id) : "disabled · hidden from browse"}</div>
+                <div style={{ fontFamily: MONO, fontSize: 10.5, color: "var(--mf-t5)", marginTop: 2 }}>{torrentHidden ? "hidden · torrent-only disabled" : gated ? "configure Slipgate above to enable" : on ? detailFor(s.id) : "disabled · hidden from browse"}</div>
               </div>
               {gated ? (
                 <span style={{ fontFamily: MONO, fontSize: 10, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--mf-t5)" }}>locked</span>
+              ) : torrentHidden ? (
+                <span style={{ fontFamily: MONO, fontSize: 10, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--mf-t5)" }}>off</span>
               ) : (
                 <Toggle on={on} onToggle={() => void toggle(s.id)} />
               )}
