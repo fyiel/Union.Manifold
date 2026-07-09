@@ -3,6 +3,19 @@
 All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 
+## 3.0.1
+
+### Fixed
+
+- GoFile links opened in the browser instead of resolving in-app. GoFile now
+  gates its content API behind a per-request website token — a SHA-256 the site
+  computes from the guest account token, the User-Agent and a rolling time
+  window — so the old resolver (which needed a token the app never set) always
+  fell back to the browser. the app now mints an anonymous guest session and
+  computes that website token itself, so GoFile mirrors download through the
+  in-app pipeline; a folder link resolves every file it holds, not just the
+  first, so multi-part archives download whole
+
 ## 3.0.0
 
 ### Added
