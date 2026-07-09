@@ -3,6 +3,15 @@
 All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 
+## 3.0.2
+
+### Changed
+
+- GoFile is now the last-resort file host in the in-app download order. its guest
+  API rate-limits aggressively, so the download button and its auto-fallback try
+  every other resolvable host first and only reach for GoFile when nothing else
+  resolves
+
 ## 3.0.1
 
 ### Fixed
