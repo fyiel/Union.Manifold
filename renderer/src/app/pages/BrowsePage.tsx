@@ -53,8 +53,9 @@ export function BrowsePage() {
     let alive = true
     void listSources().then((s) => {
       if (!alive) return
-      sourcesRef.current = s
-      setSources(s)
+      const avail = s.filter((x) => x.available !== false)
+      sourcesRef.current = avail
+      setSources(avail)
     })
     return () => { alive = false }
   }, [])
@@ -140,8 +141,9 @@ export function BrowsePage() {
   useEffect(() => {
     return onSourcesChanged(() => {
       void listSources().then((s) => {
-        sourcesRef.current = s
-        setSources(s)
+        const avail = s.filter((x) => x.available !== false)
+        sourcesRef.current = avail
+        setSources(avail)
         void runQuery(committed)
       })
     })

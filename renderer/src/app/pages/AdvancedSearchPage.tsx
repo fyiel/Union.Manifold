@@ -61,8 +61,9 @@ export function AdvancedSearchPage() {
     let alive = true
     void listSources().then((s) => {
       if (!alive) return
-      setSources(s)
-      setEnabled((prev) => (Object.keys(prev).length ? prev : Object.fromEntries(s.map((x) => [x.id, true]))))
+      const avail = s.filter((x) => x.available !== false)
+      setSources(avail)
+      setEnabled((prev) => (Object.keys(prev).length ? prev : Object.fromEntries(avail.map((x) => [x.id, true]))))
     })
     void sourceCapabilities().then((c) => { if (alive) setCaps(c) })
     return () => { alive = false }
