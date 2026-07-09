@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
-import { Terminal, FolderOpen, Palette, Library as LibraryIcon, Plus, X, Pencil, Puzzle, Eye, EyeOff, ArrowLeftRight } from "lucide-react"
+import { Terminal, FolderOpen, Palette, Library as LibraryIcon, Plus, X, Pencil, Puzzle, Eye, EyeOff } from "lucide-react"
 import { PRESET_THEMES } from "@/lib/themes/presets"
 import type { ThemeDef } from "@/lib/themes/types"
 import { useActiveTheme } from "@/hooks/use-active-theme"
@@ -11,6 +11,7 @@ import {
   setSourceEnabled,
   sourceCapabilities,
   sourceDirect,
+  onSourcesChanged,
 } from "@/lib/sources"
 import { BRAND } from "@/lib/brand"
 import { MONO } from "@/app/manifold/ui"
@@ -235,7 +236,7 @@ export function SettingsPage() {
 
             {section === "sources" && <SourcesTab />}
 
-            {section === "mods" && <ModsTab />}
+            {section === "mods" && <ModsTab onJumpToSources={() => setSection("sources")} />}
 
             {section === "linux" && <LinuxSettingsTab />}
 
@@ -389,28 +390,39 @@ function SourcesTab() {
   const [enabled, setEnabled] = useState<Record<string, boolean>>({})
   const [caps, setCaps] = useState<Record<string, SourceCapabilityFlags>>({})
   const [refreshing, setRefreshing] = useState(false)
+  const [refreshRows, setRefreshRows] = useState<Array<{ id: string; name: string; state: "pending" | "fetching" | "done" | "failed"; games?: number; ms?: number }> | null>(null)
+  const [refreshEta, setRefreshEta] = useState(0)
+  const [slipgateUrl, setSlipgateUrl] = useState("")
+  const [slipgateKey, setSlipgateKey] = useState("")
+  const [slipgateTesting, setSlipgateTesting] = useState(false)
+  const [slipgateStatus, setSlipgateStatus] = useState<{ ok: boolean; msg: string } | null>(null)
+
+  const loadSources = async () => {
+    const [list, disabled, report] = await Promise.all([listSources(), loadDisabledSources(), sourceCapabilities()])
+    setSources(list)
+    setEnabled(Object.fromEntries(list.map((s) => [s.id, !disabled.includes(s.id)])))
+    const capMap: Record<string, SourceCapabilityFlags> = {}
+    for (const p of report?.perSource || []) capMap[p.id] = p
+    setCaps(capMap)
+  }
 
   useEffect(() => {
     let alive = true
     void (async () => {
-      const [list, disabled, report] = await Promise.all([listSources(), loadDisabledSources(), sourceCapabilities()])
+      const [sgu, sgk] = await Promise.all([
+        window.ucSettings?.get?.("slipgateUrl"),
+        window.ucSettings?.get?.("slipgateKey"),
+      ])
       if (!alive) return
-      setSources(list)
-      setEnabled(Object.fromEntries(list.map((s) => [s.id, !disabled.includes(s.id)])))
-      const capMap: Record<string, SourceCapabilityFlags> = {}
-      for (const p of report?.perSource || []) capMap[p.id] = p
-      setCaps(capMap)
+      if (typeof sgu === "string") setSlipgateUrl(sgu)
+      if (typeof sgk === "string") setSlipgateKey(sgk)
+      await loadSources()
     })()
     return () => { alive = false }
   }, [])
 
   useEffect(() => {
-    const off = window.ucSettings?.onChanged?.((d) => {
-      if (d?.key !== "gv_source_disabled") return
-      const disabled = Array.isArray(d.value) ? d.value.filter((x: unknown): x is string => typeof x === "string") : []
-      setEnabled((prev) => Object.fromEntries(Object.keys(prev).map((id) => [id, !disabled.includes(id)])))
-    })
-    return () => { off?.() }
+    return onSourcesChanged(() => { void loadSources() })
   }, [])
 
   const toggle = async (id: string) => {
@@ -423,8 +435,26 @@ function SourcesTab() {
 
   const refresh = async () => {
     setRefreshing(true)
+    setRefreshRows([])
+    setRefreshEta(0)
+    const off = window.ucSources?.onRefreshProgress?.((p) => {
+      if (p.state === "start") {
+        setRefreshRows((p.sources || []).map((s) => ({ id: s.id, name: s.name, state: "pending" as const })))
+      } else if (p.state === "fetching") {
+        setRefreshEta(p.etaMs || 0)
+        setRefreshRows((rows) => (rows || []).map((r) => (r.id === p.id ? { ...r, state: "fetching" } : r)))
+      } else if (p.state === "done" || p.state === "failed") {
+        const st = p.state
+        const games = p.games ?? undefined
+        setRefreshRows((rows) => (rows || []).map((r) => (r.id === p.id ? { ...r, state: st, games, ms: p.ms } : r)))
+      }
+    })
     try { await window.ucSources?.refresh?.() } catch {  }
+    off?.()
+    setRefreshEta(0)
+    await loadSources()
     setRefreshing(false)
+    window.setTimeout(() => setRefreshRows(null), 5000)
   }
 
   const detailFor = (id: string): string => {
@@ -437,31 +467,110 @@ function SourcesTab() {
     return bits.join(" · ")
   }
 
+  const persistSlipgateUrl = async (value: string) => {
+    try { await window.ucSettings?.set?.("slipgateUrl", value.trim() || null) } catch {  }
+  }
+  const persistSlipgateKey = async (value: string) => {
+    try { await window.ucSettings?.set?.("slipgateKey", value.trim() || null) } catch {  }
+  }
+  const testSlipgate = async () => {
+    setSlipgateTesting(true); setSlipgateStatus(null)
+    try {
+      await Promise.all([persistSlipgateUrl(slipgateUrl), persistSlipgateKey(slipgateKey)])
+      const r = await window.ucMods?.slipgateCheck?.(slipgateUrl.trim(), slipgateKey.trim())
+      if (r?.ok) setSlipgateStatus({ ok: true, msg: `reachable (v${r.version || "?"}), FlareSolverr ${r.flaresolverrOk ? "up" : "DOWN"}` })
+      else setSlipgateStatus({ ok: false, msg: r?.error || "unreachable" })
+    } catch (err) { setSlipgateStatus({ ok: false, msg: String(err) }) } finally { setSlipgateTesting(false) }
+  }
+
   return (
     <>
-      <p style={{ margin: "0 0 18px", fontFamily: MONO, fontSize: 11.5, lineHeight: 1.6, color: "var(--mf-t4)" }}>
+      <p style={{ margin: "0 0 16px", fontFamily: MONO, fontSize: 11.5, lineHeight: 1.6, color: "var(--mf-t4)" }}>
         Enable the catalog sources you trust. Disabled sources are hidden from Browse and search.
       </p>
+
+      <div style={{ padding: "14px 16px", border: "1px solid var(--mf-line)", borderRadius: 11, background: "var(--mf-panel-2)", marginBottom: 18 }}>
+        <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--mf-t1)" }}>Slipgate resolver (self-hosted)</div>
+        <div style={{ fontFamily: MONO, fontSize: 11, color: "var(--mf-t4)", marginTop: 4, lineHeight: 1.5 }}>
+          Point this at your own Slipgate instance to unlock the sources marked “dependent on Slipgate” below and the SteamRIP catalog overhaul, and to resolve captcha- and browser-gated file hosts and free NexusMods files in-app. It clears Cloudflare with a real browser over a residential proxy. Leave blank to keep the built-in scraping and open gated links in the browser.
+        </div>
+        <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
+          <input
+            value={slipgateUrl}
+            onChange={(e) => setSlipgateUrl(e.target.value)}
+            onBlur={() => void persistSlipgateUrl(slipgateUrl)}
+            placeholder="https://slipgate.example.com"
+            autoComplete="off"
+            spellCheck={false}
+            style={{ flex: 1, height: 38, padding: "0 13px", borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "var(--mf-panel)", color: "var(--mf-t1)", fontFamily: MONO, fontSize: 12, outline: "none" }}
+          />
+          <button type="button" className="mf-ghost" disabled={slipgateTesting || !slipgateUrl.trim()} onClick={() => void testSlipgate()} style={{ display: "flex", alignItems: "center", gap: 7, padding: "0 15px", height: 38, borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "transparent", color: !slipgateUrl.trim() ? "var(--mf-t4)" : "var(--mf-t1)", fontSize: 12, fontWeight: 600, cursor: slipgateTesting || !slipgateUrl.trim() ? "default" : "pointer", opacity: slipgateTesting ? 0.6 : 1, flexShrink: 0 }}>
+            {slipgateTesting ? "Testing…" : "Test"}
+          </button>
+        </div>
+        <input
+          type="password"
+          value={slipgateKey}
+          onChange={(e) => setSlipgateKey(e.target.value)}
+          onBlur={() => void persistSlipgateKey(slipgateKey)}
+          placeholder="X-Slipgate-Key (optional, if your instance requires one)"
+          autoComplete="off"
+          spellCheck={false}
+          style={{ width: "100%", height: 38, padding: "0 13px", marginTop: 10, borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "var(--mf-panel)", color: "var(--mf-t1)", fontFamily: MONO, fontSize: 12, outline: "none", boxSizing: "border-box" }}
+        />
+        {slipgateStatus ? (
+          <div style={{ marginTop: 10, fontFamily: MONO, fontSize: 11.5, color: slipgateStatus.ok ? "var(--mf-t2)" : "var(--mf-danger)" }}>Slipgate {slipgateStatus.msg}</div>
+        ) : null}
+      </div>
+
       <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
         {sources.map((s) => {
           const on = Boolean(enabled[s.id])
+          const gated = s.requiresSlipgate && !s.available
           return (
-            <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 16px", border: "1px solid var(--mf-line)", borderRadius: 11, background: "var(--mf-panel-2)" }}>
-              <span style={{ width: 8, height: 8, borderRadius: 99, background: on ? "var(--mf-t2)" : "var(--mf-t6)", flexShrink: 0 }} />
+            <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 16px", border: "1px solid var(--mf-line)", borderRadius: 11, background: "var(--mf-panel-2)", opacity: gated ? 0.65 : 1 }}>
+              <span style={{ width: 8, height: 8, borderRadius: 99, background: !gated && on ? "var(--mf-t2)" : "var(--mf-t6)", flexShrink: 0 }} />
               <div style={{ minWidth: 0, flex: 1 }}>
-                <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--mf-t0)" }}>{s.name}</div>
-                <div style={{ fontFamily: MONO, fontSize: 10.5, color: "var(--mf-t5)", marginTop: 2 }}>{on ? detailFor(s.id) : "disabled · hidden from browse"}</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13.5, fontWeight: 600, color: "var(--mf-t0)" }}>
+                  {s.name}
+                  {s.requiresSlipgate ? (
+                    <span style={{ padding: "2px 8px", borderRadius: 999, border: "1px solid var(--mf-line-2)", fontFamily: MONO, fontSize: 9, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--mf-t4)" }}>dependent on Slipgate</span>
+                  ) : null}
+                </div>
+                <div style={{ fontFamily: MONO, fontSize: 10.5, color: "var(--mf-t5)", marginTop: 2 }}>{gated ? "configure Slipgate above to enable" : on ? detailFor(s.id) : "disabled · hidden from browse"}</div>
               </div>
-              <Toggle on={on} onToggle={() => void toggle(s.id)} />
+              {gated ? (
+                <span style={{ fontFamily: MONO, fontSize: 10, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--mf-t5)" }}>locked</span>
+              ) : (
+                <Toggle on={on} onToggle={() => void toggle(s.id)} />
+              )}
             </div>
           )
         })}
       </div>
       <button type="button" className="mf-ghost" disabled={refreshing} onClick={() => void refresh()} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginTop: 12, padding: "11px 14px", borderRadius: 10, border: "1px dashed var(--mf-line-2)", background: "transparent", color: "var(--mf-t3)", fontSize: 12.5, fontWeight: 600, cursor: refreshing ? "default" : "pointer", opacity: refreshing ? 0.6 : 1 }}>
-        {refreshing ? "Refreshing…" : "Refresh catalogs now"}
+        {refreshing ? `Refreshing… ${(refreshRows || []).filter((r) => r.state === "done" || r.state === "failed").length}/${(refreshRows || []).length}` : "Refresh catalogs now"}
       </button>
+      {refreshRows && refreshRows.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 10, padding: "12px 14px", border: "1px solid var(--mf-line)", borderRadius: 10, background: "var(--mf-panel-2)" }}>
+          {refreshing && refreshEta > 0 && (
+            <div style={{ fontFamily: MONO, fontSize: 10.5, color: "var(--mf-t4)" }}>~{Math.ceil(refreshEta / 1000)}s remaining</div>
+          )}
+          {refreshRows.map((r) => {
+            const color = r.state === "done" ? "var(--mf-t2)" : r.state === "failed" ? "var(--mf-danger)" : r.state === "fetching" ? "var(--mf-t1)" : "var(--mf-t6)"
+            const status = r.state === "pending" ? "waiting" : r.state === "fetching" ? "downloading…" : r.state === "failed" ? "failed" : `${r.games ?? 0} games · ${((r.ms ?? 0) / 1000).toFixed(1)}s`
+            return (
+              <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 10, fontFamily: MONO, fontSize: 11 }}>
+                <span style={{ width: 7, height: 7, borderRadius: 99, background: color, flexShrink: 0 }} />
+                <span style={{ flex: 1, color: "var(--mf-t2)" }}>{r.name}</span>
+                <span style={{ color: r.state === "fetching" ? "var(--mf-t2)" : "var(--mf-t5)" }}>{status}</span>
+              </div>
+            )
+          })}
+        </div>
+      )}
       <p style={{ margin: "10px 0 0", fontFamily: MONO, fontSize: 10.5, lineHeight: 1.6, color: "var(--mf-t5)" }}>
-        Forces a fresh catalog pull. RexaGames is cached for 7 days; this refetches it now (via Slipgate if configured).
+        Forces a fresh catalog pull. Hydralinks-backed sources are cached for 7 days; this refetches them now (via Slipgate where required).
       </p>
     </>
   )
@@ -656,7 +765,7 @@ function AboutTab() {
   )
 }
 
-function ModsTab() {
+function ModsTab({ onJumpToSources }: { onJumpToSources: () => void }) {
   const [apiKey, setApiKey] = useState("")
   const [reveal, setReveal] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -669,29 +778,21 @@ function ModsTab() {
   const [sessionSaved, setSessionSaved] = useState(false)
   const [sessionUa, setSessionUa] = useState("")
   const [uaSaved, setUaSaved] = useState(false)
-  const [slipgateUrl, setSlipgateUrl] = useState("")
-  const [slipgateKey, setSlipgateKey] = useState("")
-  const [slipgateTesting, setSlipgateTesting] = useState(false)
-  const [slipgateStatus, setSlipgateStatus] = useState<{ ok: boolean; msg: string } | null>(null)
 
   useEffect(() => {
     let alive = true
     void (async () => {
       try {
-        const [k, sc, ua, sgu, sgk, ws] = await Promise.all([
+        const [k, sc, ua, ws] = await Promise.all([
           window.ucSettings?.get?.("nexusApiKey"),
           window.ucSettings?.get?.("nexusSessionCookie"),
           window.ucSettings?.get?.("nexusUserAgent"),
-          window.ucSettings?.get?.("slipgateUrl"),
-          window.ucSettings?.get?.("slipgateKey"),
           window.ucMods?.workshopStatus?.(),
         ])
         if (!alive) return
         if (typeof k === "string") setApiKey(k)
         if (typeof sc === "string") setSessionCookie(sc)
         if (typeof ua === "string") setSessionUa(ua)
-        if (typeof sgu === "string") setSlipgateUrl(sgu)
-        if (typeof sgk === "string") setSlipgateKey(sgk)
         setSteamcmd(ws?.ok && ws.steamcmd ? ws.steamcmd : "absent")
       } catch {  }
     })()
@@ -720,22 +821,6 @@ function ModsTab() {
       setUaSaved(true)
       window.setTimeout(() => setUaSaved(false), 1600)
     } catch {  }
-  }
-
-  const persistSlipgateUrl = async (value: string) => {
-    try { await window.ucSettings?.set?.("slipgateUrl", value.trim() || null) } catch {  }
-  }
-  const persistSlipgateKey = async (value: string) => {
-    try { await window.ucSettings?.set?.("slipgateKey", value.trim() || null) } catch {  }
-  }
-  const testSlipgate = async () => {
-    setSlipgateTesting(true); setSlipgateStatus(null)
-    try {
-      await Promise.all([persistSlipgateUrl(slipgateUrl), persistSlipgateKey(slipgateKey)])
-      const r = await window.ucMods?.slipgateCheck?.(slipgateUrl.trim(), slipgateKey.trim())
-      if (r?.ok) setSlipgateStatus({ ok: true, msg: `reachable (v${r.version || "?"}), FlareSolverr ${r.flaresolverrOk ? "up" : "DOWN"}` })
-      else setSlipgateStatus({ ok: false, msg: r?.error || "unreachable" })
-    } catch (err) { setSlipgateStatus({ ok: false, msg: String(err) }) } finally { setSlipgateTesting(false) }
   }
 
   const validate = async () => {
@@ -788,54 +873,19 @@ function ModsTab() {
 
       <div style={{ padding: "16px 0", borderBottom: "1px solid color-mix(in srgb, var(--mf-t0) 5%, transparent)" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--mf-t1)" }}>Slipgate resolver (self-hosted)</div>
-          <span
-            title="Shared across settings — one Slipgate resolver powers both Mods (free NexusMods) and file-host downloads (datavaults, vikingfile, akirabox, …). Set it once here and it applies everywhere."
-            style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "2px 8px", borderRadius: 999, border: "1px solid var(--mf-line-2)", background: "transparent", color: "var(--mf-t4)", cursor: "help", fontFamily: MONO, fontSize: 9.5, textTransform: "uppercase", letterSpacing: "0.08em", userSelect: "none" }}
-          >
-            <ArrowLeftRight size={11} strokeWidth={1.8} />
-            across settings
-          </span>
-        </div>
-        <div style={{ fontFamily: MONO, fontSize: 11, color: "var(--mf-t4)", marginTop: 3, lineHeight: 1.5 }}>
-          Point this at your own Slipgate instance to resolve captcha- and browser-gated downloads in-app: free NexusMods files plus file hosts like filecrypt, vikingfile, megadb, 1fichier, qiwi and akirabox. It clears the wall with a real browser and returns a direct link; Nexus downloads use your nexusmods_session cookie (below) to log in. Leave blank to open those links in the browser instead.
-        </div>
-        <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
-          <input
-            value={slipgateUrl}
-            onChange={(e) => setSlipgateUrl(e.target.value)}
-            onBlur={() => void persistSlipgateUrl(slipgateUrl)}
-            placeholder="https://slipgate.example.com"
-            autoComplete="off"
-            spellCheck={false}
-            style={{ flex: 1, height: 38, padding: "0 13px", borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "var(--mf-panel)", color: "var(--mf-t1)", fontFamily: MONO, fontSize: 12, outline: "none" }}
-          />
-          <button type="button" className="mf-ghost" disabled={slipgateTesting || !slipgateUrl.trim()} onClick={() => void testSlipgate()} style={{ display: "flex", alignItems: "center", gap: 7, padding: "0 15px", height: 38, borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "transparent", color: !slipgateUrl.trim() ? "var(--mf-t4)" : "var(--mf-t1)", fontSize: 12, fontWeight: 600, cursor: slipgateTesting || !slipgateUrl.trim() ? "default" : "pointer", opacity: slipgateTesting ? 0.6 : 1, flexShrink: 0 }}>
-            {slipgateTesting ? "Testing…" : "Test"}
-          </button>
-        </div>
-        <input
-          type="password"
-          value={slipgateKey}
-          onChange={(e) => setSlipgateKey(e.target.value)}
-          onBlur={() => void persistSlipgateKey(slipgateKey)}
-          placeholder="X-Slipgate-Key (optional, if your instance requires one)"
-          autoComplete="off"
-          spellCheck={false}
-          style={{ width: "100%", height: 38, padding: "0 13px", marginTop: 10, borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "var(--mf-panel)", color: "var(--mf-t1)", fontFamily: MONO, fontSize: 12, outline: "none", boxSizing: "border-box" }}
-        />
-        {slipgateStatus ? (
-          <div style={{ marginTop: 10, fontFamily: MONO, fontSize: 11.5, color: slipgateStatus.ok ? "var(--mf-t2)" : "var(--mf-danger)" }}>Slipgate {slipgateStatus.msg}</div>
-        ) : null}
-      </div>
-
-      <div style={{ padding: "16px 0", borderBottom: "1px solid color-mix(in srgb, var(--mf-t0) 5%, transparent)" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--mf-t1)" }}>Free in-app downloads (advanced, opt-in)</div>
           <span style={{ padding: "2px 8px", borderRadius: 999, border: "1px solid var(--mf-danger)", color: "var(--mf-danger)", fontFamily: MONO, fontSize: 9, textTransform: "uppercase", letterSpacing: "0.08em" }}>ToS risk</span>
         </div>
         <div style={{ fontFamily: MONO, fontSize: 11, color: "var(--mf-danger)", marginTop: 6, lineHeight: 1.5 }}>
           Replaying your nexusmods.com session to auto-generate free download links is against NexusMods' Terms of Service and can get your account banned. Leave this blank to keep using the sanctioned nxm:// "Mod Manager Download" flow. Premium accounts never need it.
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 10 }}>
+          <button type="button" className="mf-ghost" onClick={onJumpToSources} style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 13px", height: 34, borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "transparent", color: "var(--mf-t1)", fontSize: 12, fontWeight: 600, cursor: "pointer", flexShrink: 0 }}>
+            Configure Slipgate →
+          </button>
+          <span style={{ fontFamily: MONO, fontSize: 10.5, color: "var(--mf-t4)", lineHeight: 1.4 }}>
+            free NexusMods downloads clear Cloudflare through your Slipgate resolver — set it under Settings → Sources
+          </span>
         </div>
         <div style={{ fontFamily: MONO, fontSize: 10.5, color: "var(--mf-t4)", marginTop: 8, lineHeight: 1.5 }}>
           To enable: in your browser open devtools (F12) on nexusmods.com → Application → Cookies → https://www.nexusmods.com, copy the nexusmods_session value and paste it here as name=value (or paste the whole Cookie header). If downloads fail with a Cloudflare error, also include cf_clearance.{sessionSaved ? " (saved)" : ""}
