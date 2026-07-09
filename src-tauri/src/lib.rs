@@ -131,6 +131,10 @@ pub fn run() {
             tauri::async_runtime::spawn(async move {
                 sources::warm_catalog(&sources_warm).await;
             });
+            let hydra_handle = handle.clone();
+            tauri::async_runtime::spawn(async move {
+                sources::warm_hydralinks(hydra_handle).await;
+            });
             build_tray(app)?;
             {
                 let state: tauri::State<AppState> = app.state();
