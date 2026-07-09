@@ -151,6 +151,7 @@ pub struct SourceInfo {
     pub enabled: bool,
     pub requires_slipgate: bool,
     pub available: bool,
+    pub torrent_only: bool,
 }
 
 pub struct SourceMeta {
@@ -158,17 +159,18 @@ pub struct SourceMeta {
     pub name: &'static str,
     pub homepage: &'static str,
     pub requires_slipgate: bool,
+    pub torrent_only: bool,
 }
 
 pub const SOURCES: &[SourceMeta] = &[
-    SourceMeta { id: "unioncrax", name: "UnionCrax", homepage: "https://union-crax.xyz", requires_slipgate: false },
-    SourceMeta { id: "gamebounty", name: "GameBounty", homepage: "https://gamebounty.world", requires_slipgate: false },
-    SourceMeta { id: "steamrip", name: "SteamRIP", homepage: "https://steamrip.com", requires_slipgate: false },
-    SourceMeta { id: "rexagames", name: "RexaGames", homepage: "https://rexagames.com", requires_slipgate: true },
-    SourceMeta { id: "onlinefix", name: "Online-Fix", homepage: "https://online-fix.me", requires_slipgate: true },
-    SourceMeta { id: "gog", name: "GOG", homepage: "https://gog-games.to", requires_slipgate: true },
-    SourceMeta { id: "empress", name: "EMPRESS", homepage: "https://hydralinks.cloud", requires_slipgate: true },
-    SourceMeta { id: "kaoskrew", name: "KaOsKrew", homepage: "https://kaoskrew.org", requires_slipgate: true },
+    SourceMeta { id: "unioncrax", name: "UnionCrax", homepage: "https://union-crax.xyz", requires_slipgate: false, torrent_only: false },
+    SourceMeta { id: "gamebounty", name: "GameBounty", homepage: "https://gamebounty.world", requires_slipgate: false, torrent_only: false },
+    SourceMeta { id: "steamrip", name: "SteamRIP", homepage: "https://steamrip.com", requires_slipgate: false, torrent_only: false },
+    SourceMeta { id: "rexagames", name: "RexaGames", homepage: "https://rexagames.com", requires_slipgate: true, torrent_only: false },
+    SourceMeta { id: "onlinefix", name: "Online-Fix", homepage: "https://online-fix.me", requires_slipgate: true, torrent_only: false },
+    SourceMeta { id: "gog", name: "GOG", homepage: "https://gog-games.to", requires_slipgate: true, torrent_only: true },
+    SourceMeta { id: "empress", name: "EMPRESS", homepage: "https://hydralinks.cloud", requires_slipgate: true, torrent_only: true },
+    SourceMeta { id: "kaoskrew", name: "KaOsKrew", homepage: "https://kaoskrew.org", requires_slipgate: true, torrent_only: true },
 ];
 
 pub fn capabilities_for(id: &str) -> Capabilities {
@@ -276,9 +278,11 @@ impl Registry {
 
     pub fn active_ids(&self, requested: &Option<Vec<String>>) -> Vec<String> {
         let slipgate = crate::slipgate::cfg().is_some();
+        let hide_torrent = crate::settings::hide_torrent_sources();
         SOURCES
             .iter()
             .filter(|s| slipgate || !s.requires_slipgate || adapters::hydralinks::is_reachable(s.id))
+            .filter(|s| !hide_torrent || !s.torrent_only)
             .map(|s| s.id.to_string())
             .filter(|id| self.is_enabled(id))
             .filter(|id| requested.as_ref().map(|r| r.contains(id)).unwrap_or(true))
@@ -287,6 +291,7 @@ impl Registry {
 
     pub fn list(&self) -> Vec<SourceInfo> {
         let slipgate = crate::slipgate::cfg().is_some();
+        let hide_torrent = crate::settings::hide_torrent_sources();
         SOURCES
             .iter()
             .map(|s| SourceInfo {
@@ -296,7 +301,8 @@ impl Registry {
                 capabilities: capabilities_for(s.id),
                 enabled: self.is_enabled(s.id),
                 requires_slipgate: s.requires_slipgate,
-                available: slipgate || !s.requires_slipgate || adapters::hydralinks::is_reachable(s.id),
+                available: (slipgate || !s.requires_slipgate || adapters::hydralinks::is_reachable(s.id)) && !(hide_torrent && s.torrent_only),
+                torrent_only: s.torrent_only,
             })
             .collect()
     }

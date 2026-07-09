@@ -196,6 +196,10 @@ pub(crate) async fn run_libarchive(bin: &str, archive: &Path, out_dir: &Path) ->
 }
 
 pub(crate) async fn run_7z(archive: &Path, out_dir: &Path, on_progress: impl Fn(u8)) -> Result<()> {
+    run_7z_pw(archive, out_dir, None, on_progress).await
+}
+
+pub(crate) async fn run_7z_pw(archive: &Path, out_dir: &Path, password: Option<&str>, on_progress: impl Fn(u8)) -> Result<()> {
     use tokio::io::AsyncReadExt;
     let bin = crate::bins::resolve_sidecar("7z")
         .ok_or_else(|| crate::error::AppError::msg("7z binary not found, run pnpm fetch-sidecars"))?;
@@ -210,6 +214,9 @@ pub(crate) async fn run_7z(archive: &Path, out_dir: &Path, on_progress: impl Fn(
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
+    if let Some(pw) = password {
+        cmd.arg(format!("-p{pw}"));
+    }
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -263,6 +270,40 @@ pub(crate) async fn run_7z(archive: &Path, out_dir: &Path, on_progress: impl Fn(
     }
     on_progress(100);
     Ok(())
+}
+
+pub(crate) async fn run_7z_list(archive: &Path, password: Option<&str>) -> Result<Vec<String>> {
+    let bin = crate::bins::resolve_sidecar("7z")
+        .ok_or_else(|| crate::error::AppError::msg("7z binary not found, run pnpm fetch-sidecars"))?;
+    let mut cmd = tokio::process::Command::new(&bin);
+    cmd.arg("l")
+        .arg("-slt")
+        .arg(archive)
+        .arg("-y")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null());
+    if let Some(pw) = password {
+        cmd.arg(format!("-p{pw}"));
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000);
+    }
+    let out = cmd
+        .output()
+        .await
+        .map_err(|e| crate::error::AppError::msg(format!("7z list: {e}")))?;
+    if !out.status.success() {
+        return Err(crate::error::AppError::msg("7z list failed"));
+    }
+    let text = String::from_utf8_lossy(&out.stdout);
+    Ok(text
+        .lines()
+        .filter_map(|l| l.strip_prefix("Path = "))
+        .map(|s| s.to_string())
+        .collect())
 }
 
 async fn finalize_installed(dir: &Path, appid: &str, game_name: &Option<String>, install_path: &Path, metadata: Option<&Value>) {

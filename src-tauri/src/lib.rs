@@ -14,6 +14,7 @@ mod mods;
 mod net;
 mod notify;
 mod paths;
+mod repair;
 mod settings;
 mod shortcuts;
 mod slipgate;
@@ -110,6 +111,7 @@ pub fn run() {
             logging::init(paths.log_file());
             let settings = Arc::new(SettingsStore::load(paths.settings_file()));
             slipgate::init(settings.clone());
+            crate::settings::init(settings.clone());
             crate::http::set_proxy(settings.get_string("proxyUrl"));
             let cacert = app.path().resource_dir().ok().map(|d| d.join("cacert.pem"));
             let aria2 = Arc::new(Aria2Manager::new(cacert, settings.get_string("proxyUrl")));
@@ -225,6 +227,7 @@ pub fn run() {
             install::install_from_archive,
             install::install_downloaded_archive,
             install::delete_archive_files,
+            repair::onlinefix_repair,
             library::installed_list,
             library::installed_get,
             library::installing_list,

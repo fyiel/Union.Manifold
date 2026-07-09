@@ -3,6 +3,29 @@
 All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 
+## 2.26.0
+
+### Added
+
+- "Get Online-Fix repair" in the Library game menu (the cog): for any installed
+  title it finds the game on online-fix.me, downloads the matching Fix Repair
+  archive and extracts it straight into the game folder, with live progress
+- Online-Fix game pages are now scraped live: the hydralinks catalogue finds the
+  game, then online-fix.me is searched by exact title and the game page is
+  fetched to surface its direct Online-Fix mirror links (Hosters, Drive, Server)
+  as download options, with the magnet entries kept as extra mirrors. falls back
+  to the magnet entries if the page cannot be reached
+- a "Hide torrent-only sources" toggle under Settings > Sources. GOG, EMPRESS
+  and KaOsKrew only surface magnet/torrent links; turning this on hides them from
+  Browse, search and the sidebar. off by default
+
+### Fixed
+
+- NexusMods mod browsing now finds recently-released games. the games index is
+  refreshed when a game is not matched instead of trusting a stale cache, and a
+  failed auto-match no longer sticks, so titles added to NexusMods after the last
+  index fetch (e.g. Dying Light: The Beast) resolve automatically
+
 ## 2.25.0
 
 ### Added

@@ -1,8 +1,9 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { Play, Square, Settings, ArrowUpDown, LayoutGrid, List, Inbox, Plus } from "lucide-react"
+import { Play, Square, Settings, ArrowUpDown, LayoutGrid, List, Inbox, Plus, Wrench } from "lucide-react"
 import { useGamesData } from "@/hooks/use-games"
 import { useGameLaunch } from "@/context/game-launch-context"
+import { useToast } from "@/context/toast-context"
 import { useRunningGame } from "@/hooks/use-running-games"
 import { useDownloadsSelector } from "@/context/downloads-context"
 import { useTabVisible } from "@/context/tab-visibility"
@@ -158,6 +159,7 @@ export function LibraryPage() {
   const { games: catalog } = useGamesData()
   const { requestLaunch, requestSetExecutable, stopGame } = useGameLaunch()
   const navigate = useNavigate()
+  const { toast } = useToast()
   const [steamIdFor, setSteamIdFor] = useState<{ appid: string; name: string; current?: number } | null>(null)
 
   const [installed, setInstalled] = useState<LibGame[]>([])
@@ -171,6 +173,7 @@ export function LibraryPage() {
   const [editFor, setEditFor] = useState<MenuGame | null>(null)
   const [linuxFor, setLinuxFor] = useState<{ appid: string; name: string } | null>(null)
   const [addOpen, setAddOpen] = useState(false)
+  const [repair, setRepair] = useState<{ appid: string; name: string; phase: RepairProgress["phase"]; percent: number } | null>(null)
 
   const [query, setQuery] = useState("")
   const [filter, setFilter] = useState<FilterKey>("All")
@@ -409,6 +412,28 @@ export function LibraryPage() {
     } catch {  }
   }
 
+  useEffect(() => {
+    const off = window.ucSources?.onRepairProgress?.((p) => {
+      if (!p) return
+      if (p.phase === "done") {
+        setRepair((r) => (r && r.appid === p.appid ? { ...r, phase: "done", percent: 100 } : r))
+        toast("Online-Fix repair applied", "success")
+        window.setTimeout(() => setRepair((r) => (r && r.appid === p.appid ? null : r)), 1600)
+      } else if (p.phase === "failed") {
+        toast(`Repair failed: ${p.error || "unknown error"}`, "error", 7000)
+        setRepair((r) => (r && r.appid === p.appid ? null : r))
+      } else {
+        setRepair((r) => (r && r.appid === p.appid ? { ...r, phase: p.phase, percent: p.percent ?? 0 } : r))
+      }
+    })
+    return () => { off?.() }
+  }, [toast])
+
+  const grabRepair = (g: LibGame) => {
+    setRepair({ appid: g.appid, name: g.name, phase: "resolving", percent: 0 })
+    void window.ucSources?.onlinefixRepair?.(g.appid, g.name)
+  }
+
   const subtitle = [
     `${installed.length} installed`,
     totalBytes > 0 ? `${gbLabel(totalBytes)} on disk` : null,
@@ -501,6 +526,20 @@ export function LibraryPage() {
           </>
         )}
       </div>
+      {repair && (
+        <div style={{ position: "fixed", right: 22, bottom: 22, zIndex: 90, width: 300, padding: "13px 15px", borderRadius: 11, border: "1px solid var(--mf-line-2)", background: "rgba(20,20,20,0.98)", boxShadow: "0 16px 40px rgba(0,0,0,0.5)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, fontWeight: 600, color: "var(--mf-t0)" }}>
+            <Wrench size={13} strokeWidth={1.7} />
+            <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{repair.name}</span>
+          </div>
+          <div style={{ fontFamily: MONO, fontSize: 10.5, color: "var(--mf-t4)", marginTop: 4 }}>
+            {repair.phase === "resolving" ? "finding repair…" : repair.phase === "downloading" ? `downloading ${repair.percent}%` : repair.phase === "extracting" ? `extracting ${repair.percent}%` : "done"}
+          </div>
+          <div style={{ height: 4, marginTop: 8, borderRadius: 99, background: "var(--mf-line)", overflow: "hidden" }}>
+            <div style={{ height: "100%", width: `${repair.phase === "resolving" ? 6 : repair.percent}%`, background: "var(--mf-t2)", transition: "width .2s ease" }} />
+          </div>
+        </div>
+      )}
 
       {menu && (
         <GameMenu
@@ -519,6 +558,7 @@ export function LibraryPage() {
             onDelete: () => { const g = installed.find((x) => x.appid === menu.game.appid); if (g) void deleteGame(g) },
             onSetSteamId: () => { const g = installed.find((x) => x.appid === menu.game.appid); setSteamIdFor({ appid: menu.game.appid, name: menu.game.name, current: g?.steamAppId }) },
             onMods: () => navigate(`/g/${encodeURIComponent(menu.game.appid)}/mods`, { state: { game: menu.game } }),
+            onGrabRepair: () => { const g = installed.find((x) => x.appid === menu.game.appid); if (g) void grabRepair(g) },
           }}
           onClose={() => setMenu(null)}
         />

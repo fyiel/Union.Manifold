@@ -228,7 +228,7 @@ export function onSourcesChanged(cb: () => void): () => void {
   const offs: Array<() => void> = []
   if (window.ucSettings?.onChanged) {
     offs.push(window.ucSettings.onChanged((d) => {
-      if (d?.key === SOURCE_DISABLED_KEY || d?.key === "slipgateUrl" || d?.key === "slipgateKey") {
+      if (d?.key === SOURCE_DISABLED_KEY || d?.key === "slipgateUrl" || d?.key === "slipgateKey" || d?.key === "hideTorrentSources") {
         _sourcesList = null
         cb()
       }
