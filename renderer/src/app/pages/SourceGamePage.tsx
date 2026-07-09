@@ -15,6 +15,7 @@ import {
   sourceName,
   sourceDirect,
   startSourceDownload,
+  startBestDownload,
   type DownloadEntry,
 } from "@/lib/sources"
 import { useDownloadsSelector } from "@/context/downloads-context"
@@ -209,6 +210,28 @@ export function SourceGamePage() {
   const pst: OptState = optState[pk] || "idle"
   const updatedAny = relTime(game?.updatedAt)
 
+  const handlePrimaryDownload = async () => {
+    if (!game || installed || liveStatus || !primary) return
+    setOptState((s) => ({ ...s, [pk]: "working" }))
+    setOptMsg((m) => ({ ...m, [pk]: "" }))
+    try {
+      const res = await startBestDownload(game, entries)
+      if (res.ok) {
+        setOptState((s) => ({ ...s, [pk]: "queued" }))
+      } else if (res.openUrl) {
+        await window.ucSystem?.openExternal?.(res.openUrl)
+        setOptState((s) => ({ ...s, [pk]: "opened" }))
+        setOptMsg((m) => ({ ...m, [pk]: res.reason || "opened in browser" }))
+      } else {
+        setOptState((s) => ({ ...s, [pk]: "error" }))
+        setOptMsg((m) => ({ ...m, [pk]: res.reason || "could not start" }))
+      }
+    } catch (err) {
+      setOptState((s) => ({ ...s, [pk]: "error" }))
+      setOptMsg((m) => ({ ...m, [pk]: String(err) }))
+    }
+  }
+
   return (
     <div className="mf-scroll" style={{ flex: 1, minWidth: 0, minHeight: 0, overflowY: "auto", overflowX: "hidden" }}>
       {}
@@ -296,7 +319,7 @@ export function SourceGamePage() {
               resolvable={primary.option.resolvable}
               sourceLabel={sourceName(primary.source.sourceId)}
               sizeText={primary.option.sizeText}
-              onClick={() => void handleDownload(primary.source.sourceId, primary.option, pk)}
+              onClick={() => void handlePrimaryDownload()}
             />
           ) : (
             <span style={{ fontFamily: MONO, fontSize: 13, color: "var(--mf-t4)" }}>no download links found.</span>
