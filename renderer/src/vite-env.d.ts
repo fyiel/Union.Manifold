@@ -138,6 +138,8 @@ declare global {
     homepage: string
     capabilities: SourceCapabilityFlags
     enabled: boolean
+    requiresSlipgate: boolean
+    available: boolean
   }
   type SourceSortKey = "popular" | "latest" | "updated" | "title" | "relevance"
   type SourceQueryParams = {
@@ -535,6 +537,8 @@ declare global {
       steamArt: (appid: number, name?: string) => Promise<{ ok: boolean; art: { header: string; background: string; cover?: string } }>
       protondb: (appid: number) => Promise<{ ok: boolean; data: ProtonDbSummary | null }>
       refresh: () => Promise<{ ok: boolean; error?: string }>
+      onRefreshProgress: (cb: (p: { state: "start" | "fetching" | "done" | "failed" | "complete"; id?: string; name?: string; index?: number; total: number; games?: number | null; ms?: number; etaMs?: number; sources?: Array<{ id: string; name: string }> }) => void) => () => void
+      onSourcesUpdated: (cb: (p: unknown) => void) => () => void
       steamMeta: (appid: number) => Promise<{ ok: boolean; meta: SteamMeta }>
       query: (params: SourceQueryParams, reqId?: number) => Promise<SourceQueryResult>
       onBrowsePartial: (cb: (payload: { reqId: number; games: UnifiedSourceGame[]; total: number; doneSources: string[] }) => void) => () => void
