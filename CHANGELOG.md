@@ -3,92 +3,69 @@
 All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 
-## 2.26.0
+## 3.0.0
 
 ### Added
 
+- four new game sources behind a shared hydralinks.cloud catalogue engine —
+  Online-Fix, GOG, EMPRESS and KaOsKrew. they auto-enable when hydralinks answers
+  your connection directly; otherwise they need a Slipgate resolver and stay
+  hidden from the sidebar and Browse, marked "dependent on Slipgate" under
+  Settings > Sources. GOG, EMPRESS and KaOsKrew are magnet/torrent catalogues
+  whose entries surface as "torrent (magnet)" mirrors for your torrent client
+- Online-Fix is now a real direct-download source: its detail pages are scraped
+  live (the hydralinks catalogue finds the game, then online-fix.me is searched
+  by exact title and the game page is fetched) to surface the actual Online-Fix
+  mirror links — Hosters, Drive and Server — with the magnet entries kept as
+  extra mirrors, falling back to the magnets when the page can't be reached
 - "Get Online-Fix repair" in the Library game menu (the cog): for any installed
   title it finds the game on online-fix.me, downloads the matching Fix Repair
-  archive and extracts it straight into the game folder, with live progress
-- Online-Fix game pages are now scraped live: the hydralinks catalogue finds the
-  game, then online-fix.me is searched by exact title and the game page is
-  fetched to surface its direct Online-Fix mirror links (Hosters, Drive, Server)
-  as download options, with the magnet entries kept as extra mirrors. falls back
-  to the magnet entries if the page cannot be reached
-- a "Hide torrent-only sources" toggle under Settings > Sources. GOG, EMPRESS
-  and KaOsKrew only surface magnet/torrent links; turning this on hides them from
-  Browse, search and the sidebar. off by default
-
-### Fixed
-
-- NexusMods mod browsing now finds recently-released games. the games index is
-  refreshed when a game is not matched instead of trusting a stale cache, and a
-  failed auto-match no longer sticks, so titles added to NexusMods after the last
-  index fetch (e.g. Dying Light: The Beast) resolve automatically
-
-## 2.25.0
-
-### Added
-
-- four new game sources pulled from hydralinks.cloud: Online-Fix, GOG, EMPRESS
-  and KaOsKrew. hydralinks is behind Cloudflare, so unless it is reachable
-  directly from your connection they need a configured Slipgate resolver; until
-  one is available they are hidden from the sidebar and Browse, and listed under
-  Settings > Sources marked "dependent on Slipgate". these catalogues are mostly
-  magnet/torrent links, which now show up as "torrent (magnet)" mirrors that open
-  in your torrent client — in-app torrent downloading is not wired up yet
+  archive (clearing the site's Referer/cookie auth and the archive password) and
+  extracts it straight into the game's folder, with live download/extract progress
+- a "Hide torrent-only sources" toggle under Settings > Sources — hides GOG,
+  EMPRESS and KaOsKrew (magnet-only) from Browse, search and the sidebar. off by
+  default
+- a live progress panel for "Refresh catalogs now" (Settings > Sources): pulls
+  the Slipgate catalogues up to four at a time with per-source status (waiting /
+  downloading / games loaded / failed) and a running count
 
 ### Changed
 
-- SteamRIP gains a catalogue overhaul: with a Slipgate resolver configured its
-  catalogue, search and detail come from hydralinks.cloud/sources/steamrip.json
-  through Slipgate; without Slipgate it keeps the existing wp-json scraping, so
-  SteamRIP still works either way
+- SteamRIP and RexaGames now run on the new hydralinks engine: with a Slipgate
+  resolver configured their catalogue, search and detail come from
+  hydralinks.cloud through Slipgate; SteamRIP falls back to its existing wp-json
+  scraping without Slipgate, so it keeps working either way
+- the download button on a title tries every file host that can resolve in-app
+  before falling back to the browser, ordered friendliest host first: direct-api
+  hosts (pixeldrain, gofile, datanodes, fileditch), then clean scrapers
+  (mediafire, rootz), then cloudflare-prone ones (fuckingfast, buzzheavier), then
+  slow captcha/countdown hosts (filekeeper, datavaults), and slipgate-gated hosts
+  last — instead of resolving only the single primary mirror and opening the
+  browser the moment it failed. the primary button also labels the friendliest host
 - the Slipgate resolver setting moved from Settings > Mods to Settings > Sources,
-  where it now also unlocks the Slipgate-dependent sources above; it is still the
-  same shared resolver used for gated file hosts and free NexusMods files, and Mods links across to it
-- RexaGames is now also dependent on Slipgate — its catalogue comes from the same
-  Cloudflare-gated hydralinks.cloud, so it is hidden until Slipgate is configured
-  and marked "dependent on Slipgate" alongside the new sources
+  where it unlocks the Slipgate-dependent sources and still resolves gated file
+  hosts and free NexusMods files; Mods links across to it
 - hydralinks-backed sources are probed with a direct fetch on startup and
-  auto-enable when hydralinks answers directly (no Slipgate needed); otherwise
-  they stay gated behind Slipgate. when Slipgate is configured catalogue fetches
-  go through it first (skipping the direct request Cloudflare always blocks), log
-  why a source came back empty, and refuse to overwrite a good cache with a
-  truncated response
-- "Refresh catalogs now" (Settings > Sources) pulls the Slipgate catalogues up to
-  four at a time with live per-source status (waiting / downloading / games loaded
-  / failed) and a running count — roughly halving refresh time versus the old
-  one-at-a-time pull, without overloading Slipgate/FlareSolverr
-- the download button on a title now tries every file host that can resolve
-  in-app before falling back to the browser, ordered friendliest host first:
-  direct-api hosts (pixeldrain, gofile, datanodes, fileditch), then clean
-  scrapers (mediafire, rootz), then cloudflare-prone ones (fuckingfast,
-  buzzheavier), then slow captcha/countdown hosts (filekeeper, datavaults), and
-  slipgate-gated hosts last. before, it resolved only the single primary mirror
-  and opened the browser the moment that one link failed, even when another
-  host could have downloaded in-app. the primary button now also labels the
-  friendliest available host
-
-## 2.24.1
+  auto-enable when hydralinks answers directly; when Slipgate is configured,
+  catalogue fetches go through it first (skipping the always-blocked direct
+  request), run up to four at a time, log why a source came back empty, and refuse
+  to overwrite a good cache with a truncated response
+- steamrip requests append "Union.Manifold" to the User-Agent so the app
+  identifies itself; every other host keeps the default User-Agent
 
 ### Fixed
 
-- buzzheavier download links opened in the browser instead of resolving
-  in-app. two causes: the resolver fetched the file page with an
-  `Accept: text/html` request but none of the `Sec-Fetch-*` / `sec-ch-ua`
-  headers a real chrome navigation sends, so buzzheavier's bot filter answered
-  403; and the cloudflare-challenge check matched the harmless
-  `challenge-platform` script cloudflare injects into every normal page, so a
-  page that had actually loaded with its download token was still reported as
-  challenged. the file page now goes out with a full chrome header set, and a
-  cloudflare challenge is only concluded when the page carries no download
-  token. verified end-to-end against a live buzzheavier file
-
-### Changed
-
-- steamrip requests append `Union.Manifold` to the User-Agent so the app
-  identifies itself to steamrip; every other host keeps the default User-Agent
+- NexusMods mod browsing came back empty for two reasons, both fixed: newly
+  released games (e.g. Dying Light: The Beast) were never matched because the
+  games index was cached forever — it now refreshes on a miss and a failed
+  auto-match no longer sticks; and the endless-browse list dropped every result
+  under React StrictMode because its dedup mutated shared state inside a state
+  updater — the updater is now pure, so Nexus, Workshop and Thunderstore browse
+  all render
+- BuzzHeavier download links opened in the browser instead of resolving in-app:
+  the file page now goes out with a full Chrome navigation header set (fixing the
+  403 from its bot filter) and a Cloudflare challenge is only concluded when the
+  page carries no download token, verified end-to-end against a live file
 
 ## 2.24.0
 
