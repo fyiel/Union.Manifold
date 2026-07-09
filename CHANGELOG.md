@@ -2,7 +2,50 @@
 
 All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
-The app shows its version as 1.0.0b (beta). 1.0.1 is the first packaged release.
+
+## 2.25.0
+
+### Added
+
+- four new game sources pulled from hydralinks.cloud: Online-Fix, GOG, EMPRESS
+  and KaOsKrew. hydralinks is behind Cloudflare, so unless it is reachable
+  directly from your connection they need a configured Slipgate resolver; until
+  one is available they are hidden from the sidebar and Browse, and listed under
+  Settings > Sources marked "dependent on Slipgate". these catalogues are mostly
+  magnet/torrent links, which now show up as "torrent (magnet)" mirrors that open
+  in your torrent client — in-app torrent downloading is not wired up yet
+
+### Changed
+
+- SteamRIP gains a catalogue overhaul: with a Slipgate resolver configured its
+  catalogue, search and detail come from hydralinks.cloud/sources/steamrip.json
+  through Slipgate; without Slipgate it keeps the existing wp-json scraping, so
+  SteamRIP still works either way
+- the Slipgate resolver setting moved from Settings > Mods to Settings > Sources,
+  where it now also unlocks the Slipgate-dependent sources above; it is still the
+  same shared resolver used for gated file hosts and free NexusMods files, and Mods links across to it
+- RexaGames is now also dependent on Slipgate — its catalogue comes from the same
+  Cloudflare-gated hydralinks.cloud, so it is hidden until Slipgate is configured
+  and marked "dependent on Slipgate" alongside the new sources
+- hydralinks-backed sources are probed with a direct fetch on startup and
+  auto-enable when hydralinks answers directly (no Slipgate needed); otherwise
+  they stay gated behind Slipgate. when Slipgate is configured catalogue fetches
+  go through it first (skipping the direct request Cloudflare always blocks), log
+  why a source came back empty, and refuse to overwrite a good cache with a
+  truncated response
+- "Refresh catalogs now" (Settings > Sources) pulls the Slipgate catalogues up to
+  four at a time with live per-source status (waiting / downloading / games loaded
+  / failed) and a running count — roughly halving refresh time versus the old
+  one-at-a-time pull, without overloading Slipgate/FlareSolverr
+- the download button on a title now tries every file host that can resolve
+  in-app before falling back to the browser, ordered friendliest host first:
+  direct-api hosts (pixeldrain, gofile, datanodes, fileditch), then clean
+  scrapers (mediafire, rootz), then cloudflare-prone ones (fuckingfast,
+  buzzheavier), then slow captcha/countdown hosts (filekeeper, datavaults), and
+  slipgate-gated hosts last. before, it resolved only the single primary mirror
+  and opened the browser the moment that one link failed, even when another
+  host could have downloaded in-app. the primary button now also labels the
+  friendliest available host
 
 ## 2.24.1
 
