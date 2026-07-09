@@ -724,7 +724,7 @@ pub async fn mods_game_get(state: State<'_, AppState>, appid: String) -> Result<
             dirty = true;
         }
     }
-    if cfg.nexus_domain.is_none() && !cfg.nexus_checked {
+    if cfg.nexus_domain.is_none() {
         if let Some(key) = state
             .settings
             .get_string("nexusApiKey")
@@ -732,10 +732,10 @@ pub async fn mods_game_get(state: State<'_, AppState>, appid: String) -> Result<
             .filter(|k| !k.is_empty())
         {
             if let Some(title) = game_title(&state, &appid) {
-                if let Ok(found) = nexus::match_domain(&key, &title).await {
+                if let Ok(Some(found)) = nexus::match_domain(&key, &title).await {
                     cfg.nexus_checked = true;
-                    cfg.nexus_domain_auto = found.is_some();
-                    cfg.nexus_domain = found;
+                    cfg.nexus_domain_auto = true;
+                    cfg.nexus_domain = Some(found);
                     dirty = true;
                 }
             }

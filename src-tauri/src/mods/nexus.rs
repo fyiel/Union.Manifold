@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::LazyLock;
 use std::time::{Duration, Instant};
 
@@ -55,12 +56,7 @@ pub(crate) struct NexusGame {
 static GAMES_CACHE: LazyLock<metacache::WriteBehind<Vec<NexusGame>>> =
     LazyLock::new(|| metacache::WriteBehind::load("nexus-games.json"));
 
-async fn games_list(key: &str) -> Result<Vec<NexusGame>, String> {
-    if let Some(list) = GAMES_CACHE.get("all") {
-        if !list.is_empty() {
-            return Ok(list);
-        }
-    }
+async fn fetch_games(key: &str) -> Result<Vec<NexusGame>, String> {
     let v = api_json(key, &format!("{API}/v1/games.json")).await?;
     let list: Vec<NexusGame> = v
         .as_array()
@@ -83,16 +79,36 @@ async fn games_list(key: &str) -> Result<Vec<NexusGame>, String> {
     Ok(list)
 }
 
+async fn games_list(key: &str) -> Result<Vec<NexusGame>, String> {
+    if let Some(list) = GAMES_CACHE.get("all") {
+        if !list.is_empty() {
+            return Ok(list);
+        }
+    }
+    fetch_games(key).await
+}
+
+static GAMES_REFRESHED: AtomicBool = AtomicBool::new(false);
+
 pub(crate) async fn match_domain(key: &str, title: &str) -> Result<Option<String>, String> {
     let norm = normalize_title(title);
     if norm.is_empty() {
         return Ok(None);
     }
-    let list = games_list(key).await?;
-    Ok(list
-        .iter()
-        .find(|g| normalize_title(&g.name) == norm)
-        .map(|g| g.domain.clone()))
+    let matched = |list: &[NexusGame]| {
+        list.iter()
+            .find(|g| normalize_title(&g.name) == norm)
+            .map(|g| g.domain.clone())
+    };
+    if let Some(domain) = matched(&games_list(key).await?) {
+        return Ok(Some(domain));
+    }
+    if !GAMES_REFRESHED.swap(true, Ordering::AcqRel) {
+        if let Ok(fresh) = fetch_games(key).await {
+            return Ok(matched(&fresh));
+        }
+    }
+    Ok(None)
 }
 
 fn mod_page_url(domain: &str, mod_id: u64) -> String {
@@ -529,6 +545,7 @@ pub async fn nexus_browse(
             .iter()
             .filter_map(|n| browse_mod_from_graphql(n, &domain))
             .collect();
+        crate::logging::write_line("info", &format!("nexus browse {domain}: {} mapped / {total} total (offset {offset})", mods.len()));
         let has_more = (offset as u64) + (nodes.len() as u64) < total;
         Ok(json!({
             "ok": true,
