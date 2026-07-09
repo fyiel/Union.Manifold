@@ -143,7 +143,6 @@ function useEndlessBrowse<T>(config: {
   const cfgRef = useRef(config)
   cfgRef.current = config
   const pageRef = useRef(0)
-  const seenRef = useRef<Set<string>>(new Set())
   const genRef = useRef(0)
   const busyRef = useRef(false)
   const sentinelElRef = useRef<HTMLDivElement | null>(null)
@@ -163,11 +162,12 @@ function useEndlessBrowse<T>(config: {
       if (!r || !r.ok) { setError(r?.error || "browse failed"); setHasMore(false); return }
       pageRef.current = page + 1
       setItems((prev) => {
+        const have = new Set(prev.map((p) => cfg.keyOf(p)))
         const next = prev.slice()
         for (const it of r.items || []) {
           const k = cfg.keyOf(it)
-          if (seenRef.current.has(k)) continue
-          seenRef.current.add(k)
+          if (have.has(k)) continue
+          have.add(k)
           next.push(it)
         }
         return next
@@ -184,7 +184,6 @@ function useEndlessBrowse<T>(config: {
   useEffect(() => {
     genRef.current += 1
     pageRef.current = 0
-    seenRef.current = new Set()
     busyRef.current = false
     setItems([]); setHasMore(false); setError(""); setLoading(false)
     if (enabled) void fetchNext()
