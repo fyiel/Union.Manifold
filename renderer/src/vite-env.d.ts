@@ -140,6 +140,13 @@ declare global {
     enabled: boolean
     requiresSlipgate: boolean
     available: boolean
+    torrentOnly: boolean
+  }
+  type RepairProgress = {
+    appid: string
+    phase: "resolving" | "downloading" | "extracting" | "done" | "failed"
+    percent?: number | null
+    error?: string | null
   }
   type SourceSortKey = "popular" | "latest" | "updated" | "title" | "relevance"
   type SourceQueryParams = {
@@ -544,6 +551,8 @@ declare global {
       onBrowsePartial: (cb: (payload: { reqId: number; games: UnifiedSourceGame[]; total: number; doneSources: string[] }) => void) => () => void
       capabilities: (sourceIds?: string[]) => Promise<{ ok: boolean; capabilities: SourceCapabilityReport; error?: string }>
       tags: () => Promise<{ ok: boolean; tags: string[]; bySource: Record<string, string[]>; error?: string }>
+      onlinefixRepair: (appid: string, title: string) => Promise<{ ok: boolean; error?: string }>
+      onRepairProgress: (cb: (p: RepairProgress) => void) => () => void
     }
     ucAssets?: {
       size: () => Promise<{ ok: boolean; bytes: number; error?: string }>
