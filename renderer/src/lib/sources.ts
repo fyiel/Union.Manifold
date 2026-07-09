@@ -268,7 +268,6 @@ export type DownloadEntry = { source: SourceGame; option: SourceDownloadOption }
 
 const HOST_FRIENDLINESS: Record<string, number> = {
   pixeldrain: 0,
-  gofile: 0,
   datanodes: 0,
   fileditch: 0,
   mediafire: 1,
@@ -286,6 +285,7 @@ const HOST_FRIENDLINESS: Record<string, number> = {
   fileq: 5,
   mocha: 5,
   zerofs: 5,
+  gofile: 6,
 }
 
 export function hostFriendliness(hostType: string): number {
