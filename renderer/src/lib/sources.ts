@@ -146,13 +146,17 @@ export async function sourceTags(): Promise<{ tags: string[]; bySource: Record<s
   return res?.ok ? { tags: res.tags, bySource: res.bySource } : { tags: [], bySource: {} }
 }
 
-export const SOURCE_PRIORITY = ["unioncrax", "gamebounty", "steamrip", "rexagames"]
+export const SOURCE_PRIORITY = ["unioncrax", "gamebounty", "steamrip", "rexagames", "onlinefix", "gog", "empress", "kaoskrew"]
 
 export const SOURCE_NAMES: Record<string, string> = {
   unioncrax: "UnionCrax",
   gamebounty: "GameBounty",
   steamrip: "SteamRIP",
   rexagames: "RexaGames",
+  onlinefix: "Online-Fix",
+  gog: "GOG",
+  empress: "EMPRESS",
+  kaoskrew: "KaOsKrew",
 }
 export function sourceName(id: string): string {
   return SOURCE_NAMES[id] || id
@@ -163,6 +167,10 @@ export const SOURCE_ABBR: Record<string, string> = {
   gamebounty: "GB",
   steamrip: "SR",
   rexagames: "RX",
+  onlinefix: "OF",
+  gog: "GOG",
+  empress: "EMP",
+  kaoskrew: "KK",
 }
 export function sourceAbbr(id: string): string {
   return SOURCE_ABBR[id] || id.slice(0, 2).toUpperCase()
@@ -177,6 +185,10 @@ export const SOURCE_DIRECT: Record<string, boolean> = {
   steamrip: true,
   gamebounty: true,
   rexagames: true,
+  onlinefix: true,
+  gog: true,
+  empress: true,
+  kaoskrew: true,
 }
 export function sourceDirect(id: string): boolean {
   return SOURCE_DIRECT[id] !== false
@@ -213,13 +225,21 @@ export async function saveDisabledSources(ids: string[]): Promise<void> {
 }
 
 export function onSourcesChanged(cb: () => void): () => void {
-  if (!window.ucSettings?.onChanged) return () => { }
-  return window.ucSettings.onChanged((d) => {
-    if (d?.key === SOURCE_DISABLED_KEY) {
-      _sourcesList = null
-      cb()
-    }
+  const offs: Array<() => void> = []
+  if (window.ucSettings?.onChanged) {
+    offs.push(window.ucSettings.onChanged((d) => {
+      if (d?.key === SOURCE_DISABLED_KEY || d?.key === "slipgateUrl" || d?.key === "slipgateKey") {
+        _sourcesList = null
+        cb()
+      }
+    }))
+  }
+  const offUpdated = window.ucSources?.onSourcesUpdated?.(() => {
+    _sourcesList = null
+    cb()
   })
+  if (offUpdated) offs.push(offUpdated)
+  return () => { for (const o of offs) o() }
 }
 
 export async function applySavedSourceSettings(): Promise<void> {
@@ -246,6 +266,33 @@ export function orderSourcesByPreference<T extends { sourceId: string }>(
 
 export type DownloadEntry = { source: SourceGame; option: SourceDownloadOption }
 
+const HOST_FRIENDLINESS: Record<string, number> = {
+  pixeldrain: 0,
+  gofile: 0,
+  datanodes: 0,
+  fileditch: 0,
+  mediafire: 1,
+  rootz: 1,
+  fuckingfast: 2,
+  buzzheavier: 2,
+  filekeeper: 3,
+  datavaults: 3,
+  megadb: 5,
+  filecrypt: 5,
+  vikingfile: 5,
+  "1fichier": 5,
+  akirabox: 5,
+  qiwi: 5,
+  fileq: 5,
+  mocha: 5,
+  zerofs: 5,
+}
+
+export function hostFriendliness(hostType: string): number {
+  const r = HOST_FRIENDLINESS[hostType]
+  return r === undefined ? 4 : r
+}
+
 export function collectDownloadEntries(orderedSources: SourceGame[]): DownloadEntry[] {
   const entries: DownloadEntry[] = []
   for (const source of orderedSources) {
@@ -258,7 +305,13 @@ export function collectDownloadEntries(orderedSources: SourceGame[]): DownloadEn
 }
 
 export function pickPrimaryDownload(entries: DownloadEntry[]): DownloadEntry | null {
-  return entries.find((e) => e.option.resolvable) || entries[0] || null
+  const resolvable = entries.filter((e) => e.option.resolvable)
+  if (resolvable.length) {
+    return resolvable.reduce((best, e) =>
+      hostFriendliness(e.option.hostType) < hostFriendliness(best.option.hostType) ? e : best
+    )
+  }
+  return entries[0] || null
 }
 
 const REMEMBERED_MAX = 500
@@ -424,4 +477,27 @@ export async function startSourceDownload(
     }
   }
   return anyQueued ? { ok: true, queued: true } : { ok: false, reason: "enqueue failed" }
+}
+
+export async function startBestDownload(
+  game: UnifiedSourceGame,
+  entries: DownloadEntry[]
+): Promise<StartResult> {
+  const candidates = entries
+    .filter((e) => e.option.resolvable)
+    .sort((a, b) => hostFriendliness(a.option.hostType) - hostFriendliness(b.option.hostType))
+  let fallbackUrl: string | undefined
+  let tried = 0
+  for (const { source, option } of candidates) {
+    tried++
+    const res = await startSourceDownload(game, source.sourceId, option)
+    if (res.ok) return res
+    if (!fallbackUrl) fallbackUrl = res.openUrl
+  }
+  const first = entries[0]?.option
+  const openUrl = fallbackUrl || first?.pageUrl || first?.url
+  const reason = tried
+    ? `${tried} in-app source${tried === 1 ? "" : "s"} failed, opening in browser`
+    : "no in-app source, opening in browser"
+  return { ok: false, openUrl, reason }
 }
