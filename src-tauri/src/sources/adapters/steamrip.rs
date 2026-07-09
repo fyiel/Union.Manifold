@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
+use std::sync::LazyLock;
 
 use once_cell::sync::Lazy;
 use regex::Regex;
@@ -14,12 +15,18 @@ use crate::sources::schema::{
 };
 use crate::sources::steam;
 use crate::sources::{Capabilities, QueryParams};
+use crate::slipgate;
+use super::hydralinks::HydraSource;
 
 const ID: &str = "steamrip";
 const ORIGIN: &str = "https://steamrip.com";
 const API: &str = "https://steamrip.com/wp-json/wp/v2";
 const FIELDS: &str = "id,slug,link,title,content,date,modified,categories";
 const SR_SEARCH_CONCURRENCY: usize = 6;
+
+static HYDRA: LazyLock<HydraSource> = LazyLock::new(|| {
+    HydraSource::new(ID, ORIGIN, "https://hydralinks.cloud/sources/steamrip.json")
+});
 
 static VERSION_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"(?i)\(\s*(?:v\.?\s*)?([\w.\-]+(?:\s*build\s*\d+)?)\s*\)\s*$").unwrap());
@@ -370,6 +377,9 @@ fn enc(s: &str) -> String {
 }
 
 pub async fn query(params: &QueryParams) -> Option<Vec<SourceGame>> {
+    if slipgate::cfg().is_some() {
+        return HYDRA.query().await;
+    }
     let cats = load_category_map().await;
     let per_page = params.limit.min(100);
     let text = params.text.as_deref().unwrap_or("").trim();
@@ -428,6 +438,9 @@ pub async fn query(params: &QueryParams) -> Option<Vec<SourceGame>> {
 }
 
 pub async fn search(q: &str, limit: usize) -> Vec<SourceGame> {
+    if slipgate::cfg().is_some() {
+        return HYDRA.search(q, limit).await;
+    }
     let lowered = q.to_lowercase();
     let q = lowered.trim();
     if q.is_empty() {
@@ -476,6 +489,9 @@ pub async fn search(q: &str, limit: usize) -> Vec<SourceGame> {
 }
 
 pub async fn get_detail(slug: &str) -> Option<SourceGame> {
+    if slipgate::cfg().is_some() {
+        return HYDRA.get_detail(slug).await;
+    }
     let clean = slug.trim_matches('/').to_string();
     let key = clean.clone();
     DETAIL_CACHE
@@ -502,6 +518,14 @@ pub async fn get_detail(slug: &str) -> Option<SourceGame> {
             Some(build_game(post, appid, &cats))
         })
         .await
+}
+
+pub async fn refresh() -> Option<usize> {
+    if slipgate::cfg().is_some() {
+        HYDRA.refresh().await
+    } else {
+        None
+    }
 }
 
 pub async fn list_tags() -> Vec<String> {
