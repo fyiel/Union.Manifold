@@ -1,6 +1,6 @@
 [package]
 name = "union-manifold"
-version = "2.24.1"
+version = "2.25.0"
 description = "Union.Manifold, a multi source game launcher"
 authors = ["fyiel"]
 license = "MIT"
