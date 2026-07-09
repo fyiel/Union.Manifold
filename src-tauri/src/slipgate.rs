@@ -61,10 +61,6 @@ pub async fn post(cfg: &Cfg, path: &str, body: Value, timeout: Duration) -> Resu
     serde_json::from_str(&text).map_err(|e| format!("Slipgate bad response: {e}"))
 }
 
-/// Fetch a URL through Slipgate's browser (and proxy) via the `/fetch` endpoint
-/// and return its body. For a Cloudflare-gated static resource — such as a
-/// source-catalogue JSON — that a plain client can't retrieve from a challenged
-/// IP: a clean/residential proxy on the Slipgate side does the reaching.
 pub async fn fetch(cfg: &Cfg, url: &str, timeout: Duration) -> Result<String, String> {
     let resp = post(cfg, "/fetch", json!({ "url": url }), timeout).await?;
     if !resp.get("ok").and_then(|v| v.as_bool()).unwrap_or(false) {
