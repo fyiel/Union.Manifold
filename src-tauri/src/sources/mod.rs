@@ -149,19 +149,26 @@ pub struct SourceInfo {
     pub homepage: String,
     pub capabilities: Capabilities,
     pub enabled: bool,
+    pub requires_slipgate: bool,
+    pub available: bool,
 }
 
 pub struct SourceMeta {
     pub id: &'static str,
     pub name: &'static str,
     pub homepage: &'static str,
+    pub requires_slipgate: bool,
 }
 
 pub const SOURCES: &[SourceMeta] = &[
-    SourceMeta { id: "unioncrax", name: "UnionCrax", homepage: "https://union-crax.xyz" },
-    SourceMeta { id: "gamebounty", name: "GameBounty", homepage: "https://gamebounty.world" },
-    SourceMeta { id: "steamrip", name: "SteamRIP", homepage: "https://steamrip.com" },
-    SourceMeta { id: "rexagames", name: "RexaGames", homepage: "https://rexagames.com" },
+    SourceMeta { id: "unioncrax", name: "UnionCrax", homepage: "https://union-crax.xyz", requires_slipgate: false },
+    SourceMeta { id: "gamebounty", name: "GameBounty", homepage: "https://gamebounty.world", requires_slipgate: false },
+    SourceMeta { id: "steamrip", name: "SteamRIP", homepage: "https://steamrip.com", requires_slipgate: false },
+    SourceMeta { id: "rexagames", name: "RexaGames", homepage: "https://rexagames.com", requires_slipgate: true },
+    SourceMeta { id: "onlinefix", name: "Online-Fix", homepage: "https://online-fix.me", requires_slipgate: true },
+    SourceMeta { id: "gog", name: "GOG", homepage: "https://gog-games.to", requires_slipgate: true },
+    SourceMeta { id: "empress", name: "EMPRESS", homepage: "https://hydralinks.cloud", requires_slipgate: true },
+    SourceMeta { id: "kaoskrew", name: "KaOsKrew", homepage: "https://kaoskrew.org", requires_slipgate: true },
 ];
 
 pub fn capabilities_for(id: &str) -> Capabilities {
@@ -170,6 +177,10 @@ pub fn capabilities_for(id: &str) -> Capabilities {
         "gamebounty" => adapters::gamebounty::capabilities(),
         "steamrip" => adapters::steamrip::capabilities(),
         "rexagames" => adapters::rexagames::capabilities(),
+        "onlinefix" => adapters::onlinefix::capabilities(),
+        "gog" => adapters::gog::capabilities(),
+        "empress" => adapters::empress::capabilities(),
+        "kaoskrew" => adapters::kaoskrew::capabilities(),
         _ => Capabilities::default(),
     }
 }
@@ -180,6 +191,10 @@ async fn adapter_query(id: &str, params: &QueryParams) -> Option<Vec<SourceGame>
         "gamebounty" => adapters::gamebounty::query(params).await,
         "steamrip" => adapters::steamrip::query(params).await,
         "rexagames" => adapters::rexagames::query(params).await,
+        "onlinefix" => adapters::onlinefix::query(params).await,
+        "gog" => adapters::gog::query(params).await,
+        "empress" => adapters::empress::query(params).await,
+        "kaoskrew" => adapters::kaoskrew::query(params).await,
         _ => Some(Vec::new()),
     }
 }
@@ -190,6 +205,10 @@ async fn adapter_search(id: &str, q: &str, limit: usize) -> Vec<SourceGame> {
         "gamebounty" => adapters::gamebounty::search(q, limit).await,
         "steamrip" => adapters::steamrip::search(q, limit).await,
         "rexagames" => adapters::rexagames::search(q, limit).await,
+        "onlinefix" => adapters::onlinefix::search(q, limit).await,
+        "gog" => adapters::gog::search(q, limit).await,
+        "empress" => adapters::empress::search(q, limit).await,
+        "kaoskrew" => adapters::kaoskrew::search(q, limit).await,
         _ => Vec::new(),
     }
 }
@@ -200,6 +219,10 @@ async fn adapter_detail(id: &str, slug: &str) -> Option<SourceGame> {
         "gamebounty" => adapters::gamebounty::get_detail(slug).await,
         "steamrip" => adapters::steamrip::get_detail(slug).await,
         "rexagames" => adapters::rexagames::get_detail(slug).await,
+        "onlinefix" => adapters::onlinefix::get_detail(slug).await,
+        "gog" => adapters::gog::get_detail(slug).await,
+        "empress" => adapters::empress::get_detail(slug).await,
+        "kaoskrew" => adapters::kaoskrew::get_detail(slug).await,
         _ => None,
     }
 }
@@ -252,8 +275,10 @@ impl Registry {
     }
 
     pub fn active_ids(&self, requested: &Option<Vec<String>>) -> Vec<String> {
+        let slipgate = crate::slipgate::cfg().is_some();
         SOURCES
             .iter()
+            .filter(|s| slipgate || !s.requires_slipgate || adapters::hydralinks::is_reachable(s.id))
             .map(|s| s.id.to_string())
             .filter(|id| self.is_enabled(id))
             .filter(|id| requested.as_ref().map(|r| r.contains(id)).unwrap_or(true))
@@ -261,6 +286,7 @@ impl Registry {
     }
 
     pub fn list(&self) -> Vec<SourceInfo> {
+        let slipgate = crate::slipgate::cfg().is_some();
         SOURCES
             .iter()
             .map(|s| SourceInfo {
@@ -269,6 +295,8 @@ impl Registry {
                 homepage: s.homepage.to_string(),
                 capabilities: capabilities_for(s.id),
                 enabled: self.is_enabled(s.id),
+                requires_slipgate: s.requires_slipgate,
+                available: slipgate || !s.requires_slipgate || adapters::hydralinks::is_reachable(s.id),
             })
             .collect()
     }
@@ -404,6 +432,17 @@ pub async fn warm_catalog(reg: &Registry) {
     let _ = run_query(reg, params).await;
 }
 
+pub async fn warm_hydralinks(app: AppHandle) {
+    let _ = tokio::join!(
+        adapters::rexagames::prime(),
+        adapters::onlinefix::prime(),
+        adapters::gog::prime(),
+        adapters::empress::prime(),
+        adapters::kaoskrew::prime(),
+    );
+    app.emit("uc:sources-updated", json!({})).ok();
+}
+
 #[tauri::command]
 pub fn sources_list(state: State<'_, AppState>) -> Value {
     json!({ "ok": true, "sources": state.sources.list() })
@@ -531,12 +570,78 @@ pub fn sources_capabilities(state: State<'_, AppState>, source_ids: Option<Vec<S
 }
 
 #[tauri::command]
-pub async fn sources_refresh() -> Result<Value> {
-    // Only rexagames keeps a long-lived (7-day) on-disk catalogue; force it to
-    // refetch from source, then drop the query pools so the next browse rebuilds
-    // against the fresh catalogue instead of a cached (up to 10 min) one.
-    let ok = adapters::rexagames::refresh().await;
+pub async fn sources_refresh(app: AppHandle) -> Result<Value> {
+    const HYDRA_SOURCES: &[(&str, &str)] = &[
+        ("steamrip", "SteamRIP"),
+        ("rexagames", "RexaGames"),
+        ("onlinefix", "Online-Fix"),
+        ("gog", "GOG"),
+        ("empress", "EMPRESS"),
+        ("kaoskrew", "KaOsKrew"),
+    ];
+    let slip = crate::slipgate::cfg().is_some();
+    let targets: Vec<(&str, &str)> = HYDRA_SOURCES
+        .iter()
+        .copied()
+        .filter(|(id, _)| slip || adapters::hydralinks::is_reachable(id))
+        .collect();
+    let total = targets.len();
+    let src_list: Vec<Value> = targets
+        .iter()
+        .map(|(id, name)| json!({ "id": id, "name": name }))
+        .collect();
+    app.emit(
+        "uc:sources-refresh",
+        json!({ "state": "start", "total": total as u64, "sources": src_list }),
+    )
+    .ok();
+    use futures::stream::StreamExt;
+    let jobs: Vec<(usize, String, String)> = targets
+        .into_iter()
+        .enumerate()
+        .map(|(i, (id, name))| (i, id.to_string(), name.to_string()))
+        .collect();
+    let results: Vec<bool> = futures::stream::iter(jobs)
+        .map(|(i, id, name)| {
+            let app = app.clone();
+            async move {
+                app.emit(
+                    "uc:sources-refresh",
+                    json!({ "state": "fetching", "id": id, "name": name, "index": i as u64, "total": total as u64 }),
+                )
+                .ok();
+                let t0 = std::time::Instant::now();
+                let count = refresh_source(&id).await;
+                let ms = t0.elapsed().as_millis() as u64;
+                let state = if count.is_some() { "done" } else { "failed" };
+                let games = count.map(|n| json!(n as u64)).unwrap_or(Value::Null);
+                app.emit(
+                    "uc:sources-refresh",
+                    json!({ "state": state, "id": id, "name": name, "index": i as u64, "total": total as u64, "games": games, "ms": ms }),
+                )
+                .ok();
+                count.is_some()
+            }
+        })
+        .buffer_unordered(4)
+        .collect()
+        .await;
+    let any = results.iter().any(|&ok| ok);
     QUERY_POOL.clear();
     CATALOG_POOL.clear();
-    Ok(json!({ "ok": ok }))
+    app.emit("uc:sources-refresh", json!({ "state": "complete", "total": total as u64 }))
+        .ok();
+    Ok(json!({ "ok": any || total == 0 }))
+}
+
+async fn refresh_source(id: &str) -> Option<usize> {
+    match id {
+        "steamrip" => adapters::steamrip::refresh().await,
+        "rexagames" => adapters::rexagames::refresh().await,
+        "onlinefix" => adapters::onlinefix::refresh().await,
+        "gog" => adapters::gog::refresh().await,
+        "empress" => adapters::empress::refresh().await,
+        "kaoskrew" => adapters::kaoskrew::refresh().await,
+        _ => None,
+    }
 }
