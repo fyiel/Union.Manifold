@@ -3,6 +3,19 @@
 All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 
+## 3.0.3
+
+### Fixed
+
+- NexusMods (and Steam Workshop) mods for BepInEx games (e.g. The Farmer Was
+  Replaced) extracted to the game root instead of BepInEx/plugins/, so BepInEx
+  never loaded them. only Thunderstore ran the BepInEx layout transform; Nexus
+  and Workshop dumped the archive verbatim into the game folder. the transform
+  now runs for every provider when the target is a BepInEx game — the game
+  folder already holds a BepInEx/ tree, or the mod ships its own — so loose
+  plugin files land in BepInEx/plugins/<mod>/ while the BepInEx framework/pack
+  itself still deploys to the game root
+
 ## 3.0.2
 
 ### Changed
