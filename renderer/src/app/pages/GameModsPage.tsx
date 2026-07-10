@@ -327,8 +327,8 @@ export function GameModsPage() {
     if (gs && !targetSeeded.current) { targetSeeded.current = true; setTargetDraft(gs.deployTarget || "") }
   }, [gs])
   const targetDirty = gs != null && targetDraft.trim() !== (gs.deployTarget || "")
-  const saveTarget = async () => {
-    const v = targetDraft.trim()
+  const saveTarget = async (value?: string) => {
+    const v = (value ?? targetDraft).trim()
     setTargetDraft(v)
     try {
       const r = await window.ucMods?.gameSet?.(appid, { deployTarget: v })
@@ -336,6 +336,13 @@ export function GameModsPage() {
       else toast("deploy target saved", "success")
     } catch (err) { toast(String(err), "error") }
     void reload()
+  }
+  const pickTarget = async () => {
+    try {
+      const r = await window.ucMods?.deployTargetPick?.(appid)
+      if (!r || !r.ok) { if (r?.error) toast(r.error, "error"); return }
+      await saveTarget(r.target || "")
+    } catch (err) { toast(String(err), "error") }
   }
 
   const toggleMod = async (mod: ModEntry, enabled: boolean) => {
@@ -655,6 +662,7 @@ export function GameModsPage() {
                 placeholder="game root"
                 style={{ ...CHIP_INPUT, width: 130 }}
               />
+              <button type="button" title="Pick a folder inside the game directory" onClick={() => void pickTarget()} style={{ display: "flex", background: "none", border: "none", padding: 0, color: "var(--mf-t4)", cursor: "pointer" }}><FolderOpen size={12} strokeWidth={2} /></button>
               {targetDirty ? (
                 <button type="button" title="Save deploy target (undeploys from the old target first)" onClick={() => void saveTarget()} style={{ display: "flex", background: "none", border: "none", padding: 0, color: "var(--mf-t2)", cursor: "pointer" }}><Check size={12} strokeWidth={2} /></button>
               ) : null}

@@ -561,6 +561,7 @@ declare global {
     ucMods?: {
       gameGet?: (appid: string) => Promise<ModGameState>
       gameSet?: (appid: string, config: { nexusDomain?: string | null; deployTarget?: string; thunderstoreCommunity?: string | null }) => Promise<{ ok: boolean; error?: string }>
+      deployTargetPick?: (appid: string) => Promise<{ ok: boolean; target?: string; error?: string }>
       toggle?: (appid: string, modId: string, enabled: boolean) => Promise<{ ok: boolean; error?: string }>
       reorder?: (appid: string, orderedIds: string[]) => Promise<{ ok: boolean; error?: string }>
       uninstall?: (appid: string, modId: string) => Promise<{ ok: boolean; error?: string }>
