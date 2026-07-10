@@ -2,7 +2,7 @@ use serde_json::{json, Value};
 use tauri::AppHandle;
 use tauri_plugin_dialog::DialogExt;
 
-async fn pick_folder(app: AppHandle) -> Option<String> {
+pub(crate) async fn pick_folder(app: AppHandle) -> Option<String> {
     let (tx, rx) = tokio::sync::oneshot::channel();
     app.dialog().file().pick_folder(move |path| {
         tx.send(path.map(|p| p.to_string())).ok();

@@ -229,6 +229,7 @@ export function installBridge(): void {
   w.ucMods = {
     gameGet: (appid: string) => call("mods_game_get", { appid }),
     gameSet: (appid: string, config: { nexusDomain?: string | null; deployTarget?: string; thunderstoreCommunity?: string | null }) => call("mods_game_set", { appid, config }),
+    deployTargetPick: (appid: string) => call("mods_deploy_target_pick", { appid }),
     toggle: (appid: string, modId: string, enabled: boolean) => call("mods_toggle", { appid, modId, enabled }),
     reorder: (appid: string, orderedIds: string[]) => call("mods_reorder", { appid, orderedIds }),
     uninstall: (appid: string, modId: string) => call("mods_uninstall", { appid, modId }),

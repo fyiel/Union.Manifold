@@ -276,6 +276,7 @@ pub fn run() {
             net::auth_fetch,
             mods::mods_game_get,
             mods::mods_game_set,
+            mods::mods_deploy_target_pick,
             mods::mods_toggle,
             mods::mods_reorder,
             mods::mods_uninstall,

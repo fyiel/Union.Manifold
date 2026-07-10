@@ -396,8 +396,19 @@ fn redeploy(state: &AppState, appid: &str, cfg: &GameMods) -> Result<usize, Stri
     deploy_to(&dir, &target, cfg)
 }
 
-fn wants_mods_subfolder(steam_appid: Option<u64>) -> bool {
-    matches!(steam_appid, Some(881100))
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum ModLayout {
+    Raw,
+    BepInEx,
+    ModsFolder,
+}
+
+fn game_layout(steam_appid: Option<u64>) -> Option<ModLayout> {
+    match steam_appid {
+        Some(2060160) => Some(ModLayout::BepInEx),
+        Some(881100) => Some(ModLayout::ModsFolder),
+        _ => None,
+    }
 }
 
 fn wrap_in_mods_folder(staged: &Path, fallback_name: &str) -> Result<(), String> {
@@ -610,6 +621,47 @@ pub(crate) fn apply_bepinex_layout(src: &Path, dst: &Path, full_name: &str) -> R
     Ok(())
 }
 
+const MEANINGFUL_DIRS: &[&str] = &[
+    "bepinex", "data", "mods", "plugins", "patchers", "config", "core", "scripts", "content",
+];
+
+pub(crate) fn strip_wrapper_dir(staged: &Path) -> Result<(), String> {
+    let entries: Vec<PathBuf> = std::fs::read_dir(staged)
+        .map_err(|e| format!("stage read: {e}"))?
+        .flatten()
+        .map(|e| e.path())
+        .collect();
+    if entries.len() != 1 || !entries[0].is_dir() {
+        return Ok(());
+    }
+    let wrapper = &entries[0];
+    let name = wrapper.file_name().unwrap_or_default().to_string_lossy().to_lowercase();
+    if MEANINGFUL_DIRS.contains(&name.as_str()) {
+        return Ok(());
+    }
+    let inner: Vec<PathBuf> = std::fs::read_dir(wrapper)
+        .map_err(|e| format!("stage read: {e}"))?
+        .flatten()
+        .map(|e| e.path())
+        .collect();
+    if inner.is_empty() {
+        return Ok(());
+    }
+    for path in inner {
+        let to = staged.join(path.file_name().unwrap_or_default());
+        if std::fs::rename(&path, &to).is_ok() {
+            continue;
+        }
+        if path.is_dir() {
+            copy_dir_recursive(&path, &to)?;
+        } else {
+            std::fs::copy(&path, &to).map_err(|e| format!("unwrap: {e}"))?;
+        }
+    }
+    std::fs::remove_dir_all(wrapper).ok();
+    Ok(())
+}
+
 fn game_uses_bepinex(target: &Path) -> bool {
     target.join("BepInEx").is_dir()
 }
@@ -680,12 +732,17 @@ pub(crate) async fn finalize_install(
         std::fs::create_dir_all(parent).map_err(|e| format!("staging dir: {e}"))?;
     }
     let mut cfg = load_config(&state.paths, &spec.appid);
-    let bepinex = deploy_target_dir(&state, &spec.appid, &cfg)
+    let detected_bepinex = deploy_target_dir(&state, &spec.appid, &cfg)
         .map(|t| game_uses_bepinex(&t))
         .unwrap_or(false)
         || staged_is_bepinex(staged_src);
+    let layout = match game_layout(detect_steam_appid(&state, &spec.appid).await) {
+        Some(l) => l,
+        None if detected_bepinex => ModLayout::BepInEx,
+        None => ModLayout::Raw,
+    };
 
-    if bepinex {
+    if layout == ModLayout::BepInEx {
         apply_bepinex_layout(staged_src, &final_dir, &bepinex_plugin_name(spec))?;
         if move_src {
             std::fs::remove_dir_all(staged_src).ok();
@@ -698,8 +755,9 @@ pub(crate) async fn finalize_install(
                 std::fs::remove_dir_all(staged_src).ok();
             }
         }
-        if wants_mods_subfolder(detect_steam_appid(&state, &spec.appid).await) {
-            wrap_in_mods_folder(&final_dir, &spec.name)?;
+        match layout {
+            ModLayout::ModsFolder => wrap_in_mods_folder(&final_dir, &spec.name)?,
+            _ => strip_wrapper_dir(&final_dir)?,
         }
     }
 
@@ -857,6 +915,36 @@ pub async fn mods_game_get(state: State<'_, AppState>, appid: String) -> Result<
         "deployed": deployed,
         "mods": serde_json::to_value(&cfg.mods).unwrap_or_else(|_| json!([])),
     }))
+}
+
+pub(crate) fn relativize_target(base: &Path, picked: &Path) -> Result<String, String> {
+    let b = base.canonicalize().unwrap_or_else(|_| base.to_path_buf());
+    let p = picked.canonicalize().unwrap_or_else(|_| picked.to_path_buf());
+    let rel = p
+        .strip_prefix(&b)
+        .map_err(|_| "folder must be inside the game directory".to_string())?;
+    Ok(rel
+        .components()
+        .map(|c| c.as_os_str().to_string_lossy().to_string())
+        .collect::<Vec<_>>()
+        .join("/"))
+}
+
+#[tauri::command]
+pub async fn mods_deploy_target_pick(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    appid: String,
+) -> Result<Value, String> {
+    let roots = library::scan_roots(&state);
+    let base = library::game_files_dir(&roots, &appid)
+        .ok_or_else(|| format!("game {appid} not found in library"))?;
+    let Some(picked) = crate::dialogs::pick_folder(app).await else {
+        return Ok(json!({ "ok": false }));
+    };
+    Ok(fold(
+        relativize_target(&base, Path::new(&picked)).map(|target| json!({ "ok": true, "target": target })),
+    ))
 }
 
 #[tauri::command]
