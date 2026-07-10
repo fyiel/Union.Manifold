@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
 
@@ -15,7 +15,7 @@ use crate::sources::schema::normalize_title;
 use crate::state::AppState;
 
 use super::{
-    copy_dir_recursive, download_to_file, emit_progress, finalize_install, fold, game_mods_dir,
+    apply_bepinex_layout, download_to_file, emit_progress, finalize_install, fold, game_mods_dir,
     now_secs, InstallSpec,
 };
 
@@ -23,7 +23,6 @@ const SITE: &str = "https://thunderstore.io";
 const PAGE_SIZE: usize = 24;
 const CACHE_TTL_SECS: i64 = 3 * 60 * 60;
 const CACHE_TTL: Duration = Duration::from_secs(CACHE_TTL_SECS as u64);
-const BEPINEX_SUBDIRS: &[&str] = &["plugins", "config", "patchers", "core"];
 
 #[derive(Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
@@ -476,55 +475,6 @@ async fn versions_for(
     })])
 }
 
-fn is_ts_meta(name: &str) -> bool {
-    matches!(
-        name.to_lowercase().as_str(),
-        "manifest.json" | "icon.png" | "readme.md" | "changelog.md" | "license" | "license.md" | "license.txt"
-    )
-}
-
-fn bepinex_root(src: &Path) -> PathBuf {
-    if src.join("BepInEx").is_dir() {
-        return src.to_path_buf();
-    }
-    let payload: Vec<PathBuf> = std::fs::read_dir(src)
-        .ok()
-        .map(|rd| {
-            rd.flatten()
-                .map(|e| e.path())
-                .filter(|p| !p.file_name().map(|n| is_ts_meta(&n.to_string_lossy())).unwrap_or(false))
-                .collect()
-        })
-        .unwrap_or_default();
-    if payload.len() == 1 && payload[0].is_dir() && payload[0].join("BepInEx").is_dir() {
-        return payload[0].clone();
-    }
-    src.to_path_buf()
-}
-
-fn apply_bepinex_layout(src: &Path, dst: &Path, full_name: &str) -> Result<(), String> {
-    std::fs::create_dir_all(dst).map_err(|e| format!("stage dir: {e}"))?;
-    let root = bepinex_root(src);
-    if root.join("BepInEx").is_dir() {
-        return copy_dir_recursive(&root, dst);
-    }
-    let plugin_dir = dst.join("BepInEx").join("plugins").join(full_name);
-    for entry in std::fs::read_dir(&root).map_err(|e| format!("stage read: {e}"))?.flatten() {
-        let path = entry.path();
-        let fname = entry.file_name().to_string_lossy().to_string();
-        let lname = fname.to_lowercase();
-        if path.is_dir() && BEPINEX_SUBDIRS.contains(&lname.as_str()) {
-            copy_dir_recursive(&path, &dst.join("BepInEx").join(&lname))?;
-        } else if path.is_dir() {
-            copy_dir_recursive(&path, &plugin_dir.join(&fname))?;
-        } else if path.is_file() {
-            std::fs::create_dir_all(&plugin_dir).map_err(|e| format!("stage dir: {e}"))?;
-            std::fs::copy(&path, plugin_dir.join(&fname)).map_err(|e| format!("stage file: {e}"))?;
-        }
-    }
-    Ok(())
-}
-
 struct ResolvedMod {
     full_name: String,
     version: String,
@@ -780,6 +730,7 @@ pub async fn thunderstore_install(
 mod tests {
     use super::*;
     use tempfile::tempdir;
+    use std::path::Path;
 
     fn write_file(p: &Path, content: &str) {
         if let Some(parent) = p.parent() {

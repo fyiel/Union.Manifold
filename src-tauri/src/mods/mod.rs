@@ -559,6 +559,74 @@ pub(crate) fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
     Ok(())
 }
 
+const BEPINEX_SUBDIRS: &[&str] = &["plugins", "config", "patchers", "core"];
+
+fn is_ts_meta(name: &str) -> bool {
+    matches!(
+        name.to_lowercase().as_str(),
+        "manifest.json" | "icon.png" | "readme.md" | "changelog.md" | "license" | "license.md" | "license.txt"
+    )
+}
+
+fn bepinex_root(src: &Path) -> PathBuf {
+    if src.join("BepInEx").is_dir() {
+        return src.to_path_buf();
+    }
+    let payload: Vec<PathBuf> = std::fs::read_dir(src)
+        .ok()
+        .map(|rd| {
+            rd.flatten()
+                .map(|e| e.path())
+                .filter(|p| !p.file_name().map(|n| is_ts_meta(&n.to_string_lossy())).unwrap_or(false))
+                .collect()
+        })
+        .unwrap_or_default();
+    if payload.len() == 1 && payload[0].is_dir() && payload[0].join("BepInEx").is_dir() {
+        return payload[0].clone();
+    }
+    src.to_path_buf()
+}
+
+pub(crate) fn apply_bepinex_layout(src: &Path, dst: &Path, full_name: &str) -> Result<(), String> {
+    std::fs::create_dir_all(dst).map_err(|e| format!("stage dir: {e}"))?;
+    let root = bepinex_root(src);
+    if root.join("BepInEx").is_dir() {
+        return copy_dir_recursive(&root, dst);
+    }
+    let plugin_dir = dst.join("BepInEx").join("plugins").join(full_name);
+    for entry in std::fs::read_dir(&root).map_err(|e| format!("stage read: {e}"))?.flatten() {
+        let path = entry.path();
+        let fname = entry.file_name().to_string_lossy().to_string();
+        let lname = fname.to_lowercase();
+        if path.is_dir() && BEPINEX_SUBDIRS.contains(&lname.as_str()) {
+            copy_dir_recursive(&path, &dst.join("BepInEx").join(&lname))?;
+        } else if path.is_dir() {
+            copy_dir_recursive(&path, &plugin_dir.join(&fname))?;
+        } else if path.is_file() {
+            std::fs::create_dir_all(&plugin_dir).map_err(|e| format!("stage dir: {e}"))?;
+            std::fs::copy(&path, plugin_dir.join(&fname)).map_err(|e| format!("stage file: {e}"))?;
+        }
+    }
+    Ok(())
+}
+
+fn game_uses_bepinex(target: &Path) -> bool {
+    target.join("BepInEx").is_dir()
+}
+
+fn staged_is_bepinex(src: &Path) -> bool {
+    bepinex_root(src).join("BepInEx").is_dir()
+}
+
+fn bepinex_plugin_name(spec: &InstallSpec) -> String {
+    let name = safe_folder_name(&spec.name);
+    if name == "unknown" {
+        spec.mod_id()
+    } else {
+        name
+    }
+}
+
 fn upsert_mod(cfg: &mut GameMods, spec: &InstallSpec, size: u64) {
     let mod_id = spec.mod_id();
     if let Some(m) = cfg.mods.iter_mut().find(|m| m.id == mod_id) {
@@ -611,19 +679,31 @@ pub(crate) async fn finalize_install(
     if let Some(parent) = final_dir.parent() {
         std::fs::create_dir_all(parent).map_err(|e| format!("staging dir: {e}"))?;
     }
-    if move_src && std::fs::rename(staged_src, &final_dir).is_ok() {
-    } else {
-        copy_dir_recursive(staged_src, &final_dir)?;
+    let mut cfg = load_config(&state.paths, &spec.appid);
+    let bepinex = deploy_target_dir(&state, &spec.appid, &cfg)
+        .map(|t| game_uses_bepinex(&t))
+        .unwrap_or(false)
+        || staged_is_bepinex(staged_src);
+
+    if bepinex {
+        apply_bepinex_layout(staged_src, &final_dir, &bepinex_plugin_name(spec))?;
         if move_src {
             std::fs::remove_dir_all(staged_src).ok();
         }
+    } else {
+        if move_src && std::fs::rename(staged_src, &final_dir).is_ok() {
+        } else {
+            copy_dir_recursive(staged_src, &final_dir)?;
+            if move_src {
+                std::fs::remove_dir_all(staged_src).ok();
+            }
+        }
+        if wants_mods_subfolder(detect_steam_appid(&state, &spec.appid).await) {
+            wrap_in_mods_folder(&final_dir, &spec.name)?;
+        }
     }
-    if wants_mods_subfolder(detect_steam_appid(&state, &spec.appid).await) {
-        wrap_in_mods_folder(&final_dir, &spec.name)?;
-    }
-    let size = crate::install::dir_size(&final_dir);
 
-    let mut cfg = load_config(&state.paths, &spec.appid);
+    let size = crate::install::dir_size(&final_dir);
     upsert_mod(&mut cfg, spec, size);
     save_config(&state.paths, &spec.appid, &cfg);
     let n = redeploy(&state, &spec.appid, &cfg)?;
