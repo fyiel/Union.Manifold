@@ -3,6 +3,27 @@
 All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 
+## 3.1.0
+
+### Added
+
+- per-game mod layout rules, so a game known to use a mod loader gets the right
+  layout even before that loader is on disk. The Farmer Was Replaced (2060160)
+  is now always treated as BepInEx — previously a nexus plugin installed before
+  BepInEx itself had nothing to detect and landed in the game root. the Noita
+  mods/ wrap moved into the same table
+- a folder picker for the mod deploy target, so the destination no longer has to
+  be typed by hand. the picked folder must sit inside the game directory, since
+  the target is stored as a path relative to it
+
+### Fixed
+
+- mod archives wrapped in a single junk top-level folder (e.g. "MyMod 1.2/")
+  deployed that folder into the game directory verbatim, so nothing loaded. the
+  wrapper is now unwrapped during staging. folders whose name is meaningful to a
+  game or loader (data, bepinex, mods, plugins, patchers, config, core, scripts,
+  content) are left alone
+
 ## 3.0.3
 
 ### Fixed
