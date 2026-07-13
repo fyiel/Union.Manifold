@@ -780,8 +780,8 @@ function LinuxSettingsTab() {
     if (r?.ok && r.path) { setProtonPrefix(r.path); persist("linuxProtonPrefix", r.path) }
   }
 
-  const steam = proton.filter((p) => p.source !== "community")
-  const community = proton.filter((p) => p.source === "community")
+  const steam = proton.filter((p) => !p.source || p.source === "steam")
+  const protonplus = proton.filter((p) => p.source === "protonplus" || p.source === "community")
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
@@ -795,11 +795,11 @@ function LinuxSettingsTab() {
         </select>
       </Row>
 
-      <Row title="Proton version" desc={proton.length ? `${proton.length} runner${proton.length === 1 ? "" : "s"} detected (Steam + compatibilitytools.d)` : "no Proton runners detected"}>
+      <Row title="Proton version" desc={proton.length ? `${proton.length} runner${proton.length === 1 ? "" : "s"} detected (Steam + ProtonPlus)` : "no Proton runners detected"}>
         <select className="uc-select" value={protonPath} onChange={(e) => { setProtonPath(e.target.value); persist("linuxProtonPath", e.target.value) }} style={LINUX_SELECT}>
           <option value="">System default</option>
           {steam.length ? <optgroup label="Steam Proton">{steam.map((p) => <option key={p.path} value={p.path}>{p.label}</option>)}</optgroup> : null}
-          {community.length ? <optgroup label="Community · GE">{community.map((p) => <option key={p.path} value={p.path}>{p.label}</option>)}</optgroup> : null}
+          {protonplus.length ? <optgroup label="ProtonPlus">{protonplus.map((p) => <option key={p.path} value={p.path}>{p.label}{p.newest ? " — newest" : ""}</option>)}</optgroup> : null}
         </select>
       </Row>
 

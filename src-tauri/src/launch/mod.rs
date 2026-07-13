@@ -1,4 +1,5 @@
 pub mod linux;
+mod steam_api;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -23,7 +24,10 @@ static RUNNING: Lazy<Mutex<HashMap<String, RunHandle>>> = Lazy::new(|| Mutex::ne
 fn systemd_run_available() -> bool {
     std::env::var("PATH")
         .ok()
-        .map(|path| path.split(':').any(|d| Path::new(d).join("systemd-run").is_file()))
+        .map(|path| {
+            path.split(':')
+                .any(|d| Path::new(d).join("systemd-run").is_file())
+        })
         .unwrap_or(false)
 }
 
@@ -68,7 +72,10 @@ fn mod_engine_launch_args(profile: &Path, exe_path: &str) -> Vec<String> {
 }
 
 fn is_executable_candidate(path: &Path) -> bool {
-    let name = path.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
     if cfg!(windows) {
         return name.ends_with(".exe");
     }
@@ -81,7 +88,10 @@ fn is_executable_candidate(path: &Path) -> bool {
         if let Ok(meta) = std::fs::metadata(path) {
             if meta.is_file() && meta.permissions().mode() & 0o111 != 0 {
                 let has_ext = name.rsplit_once('.').is_some();
-                return !has_ext || name.ends_with(".sh") || name.ends_with(".x86_64") || name.ends_with(".bin");
+                return !has_ext
+                    || name.ends_with(".sh")
+                    || name.ends_with(".x86_64")
+                    || name.ends_with(".bin");
             }
         }
     }
@@ -95,7 +105,11 @@ pub fn game_exe_list(state: State<'_, AppState>, appid: String) -> Value {
         None => return json!({ "ok": false, "exes": [], "error": "not installed" }),
     };
     let mut exes = Vec::new();
-    for entry in walkdir::WalkDir::new(&dir).max_depth(6).into_iter().flatten() {
+    for entry in walkdir::WalkDir::new(&dir)
+        .max_depth(6)
+        .into_iter()
+        .flatten()
+    {
         let path = entry.path();
         if is_executable_candidate(path) {
             let depth = entry.depth();
@@ -112,7 +126,10 @@ pub fn game_exe_list(state: State<'_, AppState>, appid: String) -> Value {
         let da = a.get("depth").and_then(|v| v.as_u64()).unwrap_or(0);
         let db = b.get("depth").and_then(|v| v.as_u64()).unwrap_or(0);
         da.cmp(&db).then_with(|| {
-            a.get("name").and_then(|v| v.as_str()).unwrap_or("").cmp(b.get("name").and_then(|v| v.as_str()).unwrap_or(""))
+            a.get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .cmp(b.get("name").and_then(|v| v.as_str()).unwrap_or(""))
         })
     });
     json!({ "ok": true, "folder": dir.to_string_lossy(), "exes": exes })
@@ -122,7 +139,12 @@ pub fn game_exe_list(state: State<'_, AppState>, appid: String) -> Value {
 pub fn game_subfolder_find(folder: String) -> Value {
     let path = Path::new(&folder);
     let entries: Vec<PathBuf> = std::fs::read_dir(path)
-        .map(|rd| rd.flatten().map(|e| e.path()).filter(|p| p.is_dir()).collect())
+        .map(|rd| {
+            rd.flatten()
+                .map(|e| e.path())
+                .filter(|p| p.is_dir())
+                .collect()
+        })
         .unwrap_or_default();
     if entries.len() == 1 {
         return json!(entries[0].to_string_lossy());
@@ -135,7 +157,9 @@ pub fn game_exe_preflight(state: State<'_, AppState>, appid: String, exe_path: S
     let mut checks = Vec::new();
     let exists = Path::new(&exe_path).is_file();
     if !exists {
-        checks.push(json!({ "level": "error", "code": "exe-not-found", "message": "executable not found" }));
+        checks.push(
+            json!({ "level": "error", "code": "exe-not-found", "message": "executable not found" }),
+        );
     }
     let profile = crate::mods::active_mod_engine_profile(&state, &appid);
     let (loader_ready, resolved) = if let Some(profile) = profile {
@@ -154,7 +178,10 @@ pub fn game_exe_preflight(state: State<'_, AppState>, appid: String, exe_path: S
                 "code": "mod-engine-3-not-found",
                 "message": "Mod Engine 3 mods are enabled, but the me3 executable is not on PATH",
             }));
-            (false, linux::build_launch_command(&state, &appid, &exe_path))
+            (
+                false,
+                linux::build_launch_command(&state, &appid, &exe_path),
+            )
         }
     } else {
         (true, linux::build_launch_command(&state, &appid, &exe_path))
@@ -185,7 +212,10 @@ fn spawn_and_track(
         let unit = format!(
             "uc-game-{}-{}",
             std::process::id(),
-            appid.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect::<String>()
+            appid
+                .chars()
+                .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+                .collect::<String>()
         );
         let mut c = std::process::Command::new("systemd-run");
         c.arg("--user")
@@ -233,7 +263,10 @@ fn spawn_and_track(
             Entry::Occupied(_) => return Err("already running".to_string()),
             Entry::Vacant(slot) => {
                 let child = cmd.spawn().map_err(|e| e.to_string())?;
-                slot.insert(RunHandle { pid: child.id(), scope });
+                slot.insert(RunHandle {
+                    pid: child.id(),
+                    scope,
+                });
                 child
             }
         }
@@ -252,55 +285,87 @@ fn spawn_and_track(
     let appid2 = appid.to_string();
     let exe2 = exe_path.to_string();
     let name2 = game_name.clone();
-    let reaper = std::thread::Builder::new().name(format!("game-reaper-{appid}")).spawn(move || {
-        let mut child = child;
-        let _ = child.wait();
-        app2.state::<AppState>().achievements.finish_watch(&app2, &appid2);
-        let elapsed = now_ms() - started_at;
-        RUNNING.lock().remove(&appid2);
-        app2.emit(
-            "uc:presence-changed",
-            json!({ "reason": "game-exited", "appid": appid2 }),
-        )
-        .ok();
-        if elapsed >= 10_000 {
-            let name = name2.unwrap_or_else(|| appid2.clone());
-            crate::notify::send_if(&app2, "notifyGameExit", false, "Game exited", &format!("{name} closed"));
-        }
-        if elapsed < 10_000 {
+    let reaper = std::thread::Builder::new()
+        .name(format!("game-reaper-{appid}"))
+        .spawn(move || {
+            let mut child = child;
+            let _ = child.wait();
+            app2.state::<AppState>()
+                .achievements
+                .finish_watch(&app2, &appid2);
+            let elapsed = now_ms() - started_at;
+            RUNNING.lock().remove(&appid2);
             app2.emit(
-                "uc:game-quick-exit",
-                json!({ "appid": appid2, "exePath": exe2, "elapsed": elapsed }),
+                "uc:presence-changed",
+                json!({ "reason": "game-exited", "appid": appid2 }),
             )
             .ok();
-        }
-    });
+            if elapsed >= 10_000 {
+                let name = name2.unwrap_or_else(|| appid2.clone());
+                crate::notify::send_if(
+                    &app2,
+                    "notifyGameExit",
+                    false,
+                    "Game exited",
+                    &format!("{name} closed"),
+                );
+            }
+            if elapsed < 10_000 {
+                app2.emit(
+                    "uc:game-quick-exit",
+                    json!({ "appid": appid2, "exePath": exe2, "elapsed": elapsed }),
+                )
+                .ok();
+            }
+        });
     if let Err(e) = reaper {
         RUNNING.lock().remove(appid);
-        crate::logging::write_line("error", &format!("game reaper thread spawn failed for {appid}: {e}"));
+        crate::logging::write_line(
+            "error",
+            &format!("game reaper thread spawn failed for {appid}: {e}"),
+        );
     }
     Ok(pid)
 }
 
 #[tauri::command(async)]
-pub fn game_exe_launch(state: State<'_, AppState>, app: AppHandle, appid: String, exe_path: String, game_name: Option<String>, _show_game_name: Option<bool>) -> Value {
+pub async fn game_exe_launch(
+    app: AppHandle,
+    appid: String,
+    exe_path: String,
+    game_name: Option<String>,
+    _show_game_name: Option<bool>,
+) -> Result<Value, String> {
     if !Path::new(&exe_path).is_file() {
-        return json!({ "ok": false, "error": "executable not found" });
+        return Ok(json!({ "ok": false, "error": "executable not found" }));
     }
-    let cwd = Path::new(&exe_path).parent().map(PathBuf::from).unwrap_or_else(|| state.download_root());
+    let cache_root = app.state::<AppState>().paths.data_dir.clone();
+    if let Err(error) = steam_api::repair_if_needed(&cache_root, Path::new(&exe_path)).await {
+        return Ok(json!({ "ok": false, "error": error }));
+    }
+    let state = app.state::<AppState>();
+    let cwd = Path::new(&exe_path)
+        .parent()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| state.download_root());
     let plan = match linux::resolve_launch(&state, &appid, &exe_path) {
         Ok(p) => p,
-        Err(e) => return json!({ "ok": false, "error": e }),
+        Err(e) => return Ok(json!({ "ok": false, "error": e })),
     };
-    let achievement_context =
-        crate::achievements::launch_context(&state, &appid, &exe_path, game_name.as_deref(), &plan.envs);
+    let achievement_context = crate::achievements::launch_context(
+        &state,
+        &appid,
+        &exe_path,
+        game_name.as_deref(),
+        &plan.envs,
+    );
     let (command, args, envs, launch_mode) =
         if let Some(profile) = crate::mods::active_mod_engine_profile(&state, &appid) {
             let Some(command) = mod_engine_executable() else {
-                return json!({
+                return Ok(json!({
                     "ok": false,
                     "error": "Mod Engine 3 mods are enabled, but the me3 executable is not on PATH",
-                });
+                }));
             };
             (
                 command,
@@ -311,40 +376,47 @@ pub fn game_exe_launch(state: State<'_, AppState>, app: AppHandle, appid: String
         } else {
             (plan.command, plan.args, plan.envs, "direct")
         };
-    match spawn_and_track(
-        &app,
-        &appid,
-        &command,
-        &args,
-        &cwd,
-        &envs,
-        &exe_path,
-        game_name,
-        achievement_context,
-    ) {
-        Ok(pid) => {
-            if state.settings.get("closeOnGameLaunch").as_bool().unwrap_or(false) {
-                let app2 = app.clone();
-                let keep_running = state
+    Ok(
+        match spawn_and_track(
+            &app,
+            &appid,
+            &command,
+            &args,
+            &cwd,
+            &envs,
+            &exe_path,
+            game_name,
+            achievement_context,
+        ) {
+            Ok(pid) => {
+                if state
                     .settings
-                    .get("achievementNotifications")
+                    .get("closeOnGameLaunch")
                     .as_bool()
-                    .unwrap_or(true);
-                tauri::async_runtime::spawn(async move {
-                    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
-                    if keep_running {
-                        if let Some(main) = app2.get_webview_window("main") {
-                            main.hide().ok();
+                    .unwrap_or(false)
+                {
+                    let app2 = app.clone();
+                    let keep_running = state
+                        .settings
+                        .get("achievementNotifications")
+                        .as_bool()
+                        .unwrap_or(true);
+                    tauri::async_runtime::spawn(async move {
+                        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                        if keep_running {
+                            if let Some(main) = app2.get_webview_window("main") {
+                                main.hide().ok();
+                            }
+                        } else {
+                            app2.exit(0);
                         }
-                    } else {
-                        app2.exit(0);
-                    }
-                });
+                    });
+                }
+                json!({ "ok": true, "pid": pid, "launchMode": launch_mode })
             }
-            json!({ "ok": true, "pid": pid, "launchMode": launch_mode })
-        }
-        Err(e) => json!({ "ok": false, "error": e }),
-    }
+            Err(e) => json!({ "ok": false, "error": e }),
+        },
+    )
 }
 
 #[tauri::command(async)]
@@ -425,11 +497,24 @@ mod tests {
         let unit = format!("uc-game-test-{}", std::process::id());
         let scope = format!("{unit}.scope");
         let mut child = std::process::Command::new("systemd-run")
-            .args(["--user", "--scope", "--collect", "--quiet", &format!("--unit={unit}"), "--", "sh", "-c", "sleep 300 & sleep 300"])
+            .args([
+                "--user",
+                "--scope",
+                "--collect",
+                "--quiet",
+                &format!("--unit={unit}"),
+                "--",
+                "sh",
+                "-c",
+                "sleep 300 & sleep 300",
+            ])
             .spawn()
             .expect("spawn scope");
         std::thread::sleep(std::time::Duration::from_millis(600));
-        kill_handle(&RunHandle { pid: child.id(), scope: Some(scope.clone()) });
+        kill_handle(&RunHandle {
+            pid: child.id(),
+            scope: Some(scope.clone()),
+        });
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(8);
         loop {
             let alive = std::process::Command::new("systemctl")
@@ -440,7 +525,10 @@ mod tests {
             if !alive {
                 break;
             }
-            assert!(std::time::Instant::now() < deadline, "scope survived kill_handle");
+            assert!(
+                std::time::Instant::now() < deadline,
+                "scope survived kill_handle"
+            );
             std::thread::sleep(std::time::Duration::from_millis(300));
         }
         let _ = child.wait();
