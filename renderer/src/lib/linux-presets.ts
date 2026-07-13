@@ -4,7 +4,8 @@ export type LinuxPerGameLaunchMode = LinuxLaunchMode | 'inherit'
 export type LinuxDetectionOption = {
   label: string
   path: string
-  source?: 'steam' | 'community'
+  source?: 'steam' | 'protonplus' | 'community'
+  newest?: boolean
 }
 
 export type LinuxGlobalSettings = {

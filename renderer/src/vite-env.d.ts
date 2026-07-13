@@ -565,7 +565,7 @@ declare global {
       pickFolder: () => Promise<{ ok: boolean; path?: string }>
     }
     ucLinux?: {
-      detectProton: () => Promise<{ ok: boolean; versions: Array<{ label: string; path: string }>; autoApplied?: boolean; appliedVersion?: { label: string; path: string }; error?: string }>
+      detectProton: () => Promise<{ ok: boolean; versions: Array<{ label: string; path: string; source?: 'steam' | 'protonplus' | 'community'; newest?: boolean }>; autoApplied?: boolean; appliedVersion?: { label: string; path: string }; error?: string }>
       pickPrefixDir: () => Promise<{ ok: boolean; path?: string; cancelled?: boolean; error?: string }>
       pickBinary: () => Promise<{ ok: boolean; path?: string; cancelled?: boolean; error?: string }>
       getGameConfig: (appid: string) => Promise<{ ok: boolean; config: GameLinuxConfig; error?: string }>
