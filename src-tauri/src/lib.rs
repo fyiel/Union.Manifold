@@ -1,3 +1,4 @@
+mod achievements;
 mod assets;
 mod bins;
 mod dialogs;
@@ -30,6 +31,7 @@ use std::sync::Arc;
 
 use tauri::{Emitter, Manager};
 
+use achievements::AchievementService;
 use downloads::aria2::Aria2Manager;
 use downloads::DownloadEngine;
 use paths::{default_download_root, AppPaths};
@@ -125,6 +127,7 @@ pub fn run() {
             let sources_warm = sources.clone();
             let default_root = default_download_root(&paths.data_dir);
             let downloads = DownloadEngine::new(handle.clone(), settings.clone(), default_root, aria2);
+            let achievements = AchievementService::new(paths.data_dir.join("achievements.json"));
             let managed_paths = paths.clone();
             let managed_settings = settings.clone();
             app.manage(AppState {
@@ -132,6 +135,7 @@ pub fn run() {
                 settings,
                 sources,
                 downloads,
+                achievements,
             });
             let managed_handle = handle.clone();
             tauri::async_runtime::spawn(async move {
@@ -207,6 +211,9 @@ pub fn run() {
             import::steam_library_import,
             system::download_open,
             system::download_show,
+            achievements::achievements_list,
+            achievements::achievements_toast_hide,
+            achievements::achievements_test_notification,
             sources::sources_list,
             sources::sources_set_enabled,
             sources::sources_query,
@@ -345,6 +352,7 @@ pub fn run() {
             if let tauri::RunEvent::Exit = event {
                 sources::metacache::flush_all();
                 if let Some(state) = app.try_state::<AppState>() {
+                    achievements::stop_all(&state);
                     state.downloads.aria2().stop();
                 }
             }

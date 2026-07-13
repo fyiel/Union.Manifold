@@ -148,6 +148,14 @@ fn get_by(roots: &[PathBuf], appid: &str, statuses: &[&str]) -> Option<Value> {
         .map(|(_, v)| v)
 }
 
+pub(crate) fn installed_manifests(state: &AppState) -> Vec<Value> {
+    list_by(&scan_roots(state), INSTALLED)
+}
+
+pub(crate) fn installed_manifest(state: &AppState, appid: &str) -> Option<Value> {
+    get_by(&scan_roots(state), appid, INSTALLED)
+}
+
 pub(crate) fn find_dir(roots: &[PathBuf], appid: &str) -> Option<PathBuf> {
     load_all_cached(roots)
         .into_iter()
