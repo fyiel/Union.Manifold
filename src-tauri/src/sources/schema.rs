@@ -379,3 +379,7 @@ mod tests {
         assert_eq!(first.len(), 4);
     }
 }
+
+#[cfg(test)]
+#[path = "../../../.dev/rust/schema_tests.rs"]
+mod dev_schema_tests;
