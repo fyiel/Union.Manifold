@@ -185,6 +185,15 @@ export function installBridge(): void {
     onNotificationActivated: noop,
   }
 
+  w.ucAchievements = {
+    list: () => call("achievements_list"),
+    testNotification: () => call("achievements_test_notification"),
+    hideToast: () => call("achievements_toast_hide"),
+    onUnlocked: (cb: Cb) => on("uc:achievement-unlocked", cb),
+    onUpdated: (cb: Cb) => on("uc:achievements-updated", cb),
+    onToast: (cb: Cb) => on("uc:achievement-toast", cb),
+  }
+
   w.ucSources = {
     list: () => call("sources_list"),
     setEnabled: (id: string, enabled: boolean) => call("sources_set_enabled", { id, enabled }),

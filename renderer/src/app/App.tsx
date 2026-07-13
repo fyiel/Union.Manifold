@@ -14,6 +14,7 @@ import { AlertTriangle } from "@/components/icons"
 
 const SourceGamePage = lazy(() => import("@/app/pages/SourceGamePage").then((m) => ({ default: m.SourceGamePage })))
 const GameModsPage = lazy(() => import("@/app/pages/GameModsPage").then((m) => ({ default: m.GameModsPage })))
+const AchievementToastWindow = lazy(() => import("@/app/pages/AchievementToastWindow"))
 
 const ThemeEditorWindow = lazy(() => import("@/app/pages/settings/ThemeEditorWindow"))
 
@@ -165,6 +166,7 @@ export default function App() {
           <Suspense fallback={<RouteFallback />}>
             <Routes>
               <Route path="/theme-editor" element={<ThemeEditorWindow />} />
+              <Route path="/achievement-toast" element={<AchievementToastWindow />} />
 
               {}
               <Route element={<AppWithDownloads />}>
