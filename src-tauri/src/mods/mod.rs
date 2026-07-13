@@ -416,6 +416,7 @@ pub(crate) enum ModLayout {
     Raw,
     RequiresInstaller,
     BepInEx,
+    MelonLoader,
     ModsFolder,
 }
 
@@ -426,6 +427,9 @@ fn game_layout(steam_appid: Option<u64>) -> Option<ModLayout> {
         _ => None,
     }
 }
+
+const RESIDENT_EVIL_REQUIEM_STEAM_APPID: u64 = 3_764_200;
+const EVERYTHING_IS_CRAB_STEAM_APPID: u64 = 3_526_710;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct DeploymentPlan {
@@ -476,6 +480,17 @@ fn has_root_dir(root: &Path, names: &[&str]) -> bool {
                 && names
                     .iter()
                     .any(|name| entry.file_name().to_string_lossy().eq_ignore_ascii_case(name))
+        })
+}
+
+fn has_root_file(root: &Path, name: &str) -> bool {
+    std::fs::read_dir(root)
+        .ok()
+        .into_iter()
+        .flatten()
+        .flatten()
+        .any(|entry| {
+            entry.path().is_file() && entry.file_name().to_string_lossy().eq_ignore_ascii_case(name)
         })
 }
 
@@ -566,8 +581,30 @@ fn infer_deployment_plan(target: &Path, staged: &Path, steam_appid: Option<u64>)
     if has_root_dir(&root, &["BepInEx"]) {
         return deployment_plan(ModLayout::BepInEx, "", "the archive contains a BepInEx tree", "high");
     }
-    if has_root_dir(&root, &["Data", "Mods", "MelonLoader", "Content"]) {
-        return deployment_plan(ModLayout::Raw, "", "the archive already contains a game-relative folder tree", "high");
+    if has_root_dir(
+        &root,
+        &["Data", "Mods", "MelonLoader", "Content", "reframework", "natives", "pak_mods"],
+    ) {
+        return deployment_plan(
+            ModLayout::Raw,
+            "",
+            "the archive already contains a game-relative folder tree",
+            "high",
+        );
+    }
+
+    let uses_reframework =
+        steam_appid == Some(RESIDENT_EVIL_REQUIEM_STEAM_APPID) || target.join("reframework").is_dir();
+    if uses_reframework
+        && has_extension(&root, &["lua"], 3)
+        && !has_extension(&root, &["dll", "exe", "pak", "utoc", "ucas"], 3)
+    {
+        return deployment_plan(
+            ModLayout::Raw,
+            "reframework/autorun",
+            "the game uses REFramework and the archive contains an unwrapped Lua autorun script",
+            "high",
+        );
     }
 
     let has_dll = has_extension(&root, &["dll"], 3);
@@ -579,11 +616,22 @@ fn infer_deployment_plan(target: &Path, staged: &Path, steam_appid: Option<u64>)
             "high",
         );
     }
-    if target.join("MelonLoader").is_dir() && has_dll {
+    let uses_melonloader =
+        steam_appid == Some(EVERYTHING_IS_CRAB_STEAM_APPID) || target.join("MelonLoader").is_dir();
+    if uses_melonloader && has_dll {
+        let packaged_folder = has_root_file(&root, "manifest.json");
         return deployment_plan(
-            ModLayout::Raw,
+            if packaged_folder {
+                ModLayout::MelonLoader
+            } else {
+                ModLayout::Raw
+            },
             "Mods",
-            "the game uses MelonLoader and the archive contains a mod DLL",
+            if packaged_folder {
+                "the game uses MelonLoader and the archive contains a manifest-backed mod folder"
+            } else {
+                "the game uses MelonLoader and the archive contains a mod DLL"
+            },
             "high",
         );
     }
@@ -840,7 +888,8 @@ pub(crate) fn apply_bepinex_layout(src: &Path, dst: &Path, full_name: &str) -> R
 }
 
 const MEANINGFUL_DIRS: &[&str] = &[
-    "bepinex", "data", "mods", "plugins", "patchers", "config", "core", "scripts", "content",
+    "bepinex", "data", "mods", "natives", "pak_mods", "plugins", "patchers", "config", "core",
+    "reframework", "scripts", "content",
 ];
 
 pub(crate) fn strip_wrapper_dir(staged: &Path) -> Result<(), String> {
@@ -878,6 +927,17 @@ pub(crate) fn strip_wrapper_dir(staged: &Path) -> Result<(), String> {
     }
     std::fs::remove_dir_all(wrapper).ok();
     Ok(())
+}
+
+fn apply_staging_layout(staged: &Path, layout: ModLayout, fallback_name: &str) -> Result<(), String> {
+    match layout {
+        ModLayout::Raw => strip_wrapper_dir(staged),
+        ModLayout::MelonLoader => Ok(()),
+        ModLayout::ModsFolder => wrap_in_mods_folder(staged, fallback_name),
+        ModLayout::BepInEx | ModLayout::RequiresInstaller => {
+            Err("loader-specific staging layout reached the raw archive path".to_string())
+        }
+    }
 }
 
 
@@ -976,10 +1036,7 @@ pub(crate) async fn finalize_install(
                 std::fs::remove_dir_all(staged_src).ok();
             }
         }
-        match plan.layout {
-            ModLayout::ModsFolder => wrap_in_mods_folder(&final_dir, &spec.name)?,
-            _ => strip_wrapper_dir(&final_dir)?,
-        }
+        apply_staging_layout(&final_dir, plan.layout, &spec.name)?;
     }
 
     let size = crate::install::dir_size(&final_dir);
@@ -1070,7 +1127,7 @@ async fn flatten_tar(dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
-const DEPLOYMENT_PLAN_VERSION: u32 = 1;
+const DEPLOYMENT_PLAN_VERSION: u32 = 2;
 
 fn refresh_deployment_plans(state: &AppState, appid: &str, cfg: &mut GameMods) -> bool {
     let Ok(target) = deploy_target_dir(state, appid, cfg) else {

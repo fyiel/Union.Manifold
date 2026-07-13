@@ -242,3 +242,138 @@ fn deployed_wrapper_fix_end_to_end_junk_folder_no_longer_reaches_game_dir() {
     assert!(target.join("mod.xml").is_file());
     assert!(!target.join("SomeMod v1.3").exists());
 }
+
+#[test]
+fn requiem_lua_archive_deploys_to_reframework_autorun() {
+    let tmp = tempdir().unwrap();
+    let dir = tmp.path().join("mods");
+    let target = tmp.path().join("game");
+    let staged = dir.join("staging").join("nexus-322");
+    write_file(&staged.join("more_ammo.lua"), "return true");
+
+    let plan = infer_deployment_plan(&target, &staged, Some(RESIDENT_EVIL_REQUIEM_STEAM_APPID));
+    assert_eq!(plan.layout, ModLayout::Raw);
+    assert_eq!(plan.deploy_prefix, "reframework/autorun");
+    assert_eq!(plan.confidence, "high");
+    apply_staging_layout(&staged, plan.layout, "More Ammo").unwrap();
+
+    let cfg = GameMods {
+        mods: vec![ModEntry {
+            id: "nexus-322".to_string(),
+            enabled: true,
+            deploy_prefix: plan.deploy_prefix,
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    deploy_to(&dir, &target, &cfg).unwrap();
+
+    assert!(target.join("reframework/autorun/more_ammo.lua").is_file());
+    assert!(!target.join("more_ammo.lua").exists());
+}
+
+#[test]
+fn wrapped_reframework_tree_keeps_its_game_relative_root() {
+    let tmp = tempdir().unwrap();
+    let dir = tmp.path().join("mods");
+    let target = tmp.path().join("game");
+    let staged = dir.join("staging").join("nexus-322");
+    write_file(
+        &staged.join("reframework/autorun/more_ammo.lua"),
+        "return true",
+    );
+
+    let plan = infer_deployment_plan(&target, &staged, Some(RESIDENT_EVIL_REQUIEM_STEAM_APPID));
+    assert_eq!(plan.layout, ModLayout::Raw);
+    assert!(plan.deploy_prefix.is_empty());
+    apply_staging_layout(&staged, plan.layout, "More Ammo").unwrap();
+    assert!(staged.join("reframework/autorun/more_ammo.lua").is_file());
+
+    let cfg = GameMods {
+        mods: vec![ModEntry {
+            id: "nexus-322".to_string(),
+            enabled: true,
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    deploy_to(&dir, &target, &cfg).unwrap();
+
+    assert!(target.join("reframework/autorun/more_ammo.lua").is_file());
+    assert!(!target.join("autorun/more_ammo.lua").exists());
+}
+
+#[test]
+fn melonloader_manifest_folder_is_preserved_inside_mods() {
+    let tmp = tempdir().unwrap();
+    let dir = tmp.path().join("mods");
+    let target = tmp.path().join("game");
+    std::fs::create_dir_all(target.join("MelonLoader")).unwrap();
+    let staged = dir.join("staging").join("nexus-9");
+    write_file(&staged.join("AutoAttack/manifest.json"), "{}");
+    write_file(&staged.join("AutoAttack/AutoAttack.dll"), "assembly");
+
+    let plan = infer_deployment_plan(&target, &staged, None);
+    assert_eq!(plan.layout, ModLayout::MelonLoader);
+    assert_eq!(plan.deploy_prefix, "Mods");
+    assert_eq!(plan.confidence, "high");
+    apply_staging_layout(&staged, plan.layout, "AutoAttack").unwrap();
+
+    let cfg = GameMods {
+        mods: vec![ModEntry {
+            id: "nexus-9".to_string(),
+            enabled: true,
+            deploy_prefix: plan.deploy_prefix,
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    deploy_to(&dir, &target, &cfg).unwrap();
+
+    assert!(target.join("Mods/AutoAttack/manifest.json").is_file());
+    assert!(target.join("Mods/AutoAttack/AutoAttack.dll").is_file());
+    assert!(!target.join("Mods/AutoAttack.dll").exists());
+}
+
+#[test]
+fn everything_is_crab_routes_melonloader_package_before_loader_first_run() {
+    let tmp = tempdir().unwrap();
+    let target = tmp.path().join("game");
+    let staged = tmp.path().join("archive");
+    write_file(&staged.join("AutoAttack/manifest.json"), "{}");
+    write_file(&staged.join("AutoAttack/AutoAttack.dll"), "assembly");
+
+    let plan = infer_deployment_plan(&target, &staged, Some(EVERYTHING_IS_CRAB_STEAM_APPID));
+
+    assert_eq!(plan.layout, ModLayout::MelonLoader);
+    assert_eq!(plan.deploy_prefix, "Mods");
+    assert_eq!(plan.confidence, "high");
+}
+
+#[test]
+fn fluffy_style_natives_tree_is_not_treated_as_a_wrapper() {
+    let tmp = tempdir().unwrap();
+    let dir = tmp.path().join("mods");
+    let target = tmp.path().join("game");
+    let staged = dir.join("staging").join("nexus-1");
+    write_file(&staged.join("natives/stm/example.user.2"), "asset");
+
+    let plan = infer_deployment_plan(&target, &staged, Some(RESIDENT_EVIL_REQUIEM_STEAM_APPID));
+    assert_eq!(plan.layout, ModLayout::Raw);
+    assert!(plan.deploy_prefix.is_empty());
+    assert_eq!(plan.confidence, "high");
+    apply_staging_layout(&staged, plan.layout, "Loose Files").unwrap();
+
+    let cfg = GameMods {
+        mods: vec![ModEntry {
+            id: "nexus-1".to_string(),
+            enabled: true,
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    deploy_to(&dir, &target, &cfg).unwrap();
+
+    assert!(target.join("natives/stm/example.user.2").is_file());
+    assert!(!target.join("stm/example.user.2").exists());
+}
