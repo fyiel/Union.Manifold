@@ -36,6 +36,45 @@ fn free_port() -> u16 {
         .unwrap_or_else(|| rand::thread_rng().gen_range(20000..60000))
 }
 
+pub fn resolve_ca_cert(resource_dir: Option<PathBuf>) -> Option<PathBuf> {
+    let resource_dir = resource_dir?;
+    [resource_dir.join("cacert.pem"), resource_dir.join("resources").join("cacert.pem")]
+        .into_iter()
+        .find(|path| path.is_file())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_ca_cert;
+
+    #[test]
+    fn resolves_ca_bundle_from_packaged_resources_directory() {
+        let root = tempfile::tempdir().unwrap();
+        let resources = root.path().join("resources");
+        std::fs::create_dir(&resources).unwrap();
+        let expected = resources.join("cacert.pem");
+        std::fs::write(&expected, "certificate").unwrap();
+
+        assert_eq!(resolve_ca_cert(Some(root.path().to_path_buf())), Some(expected));
+    }
+
+    #[test]
+    fn prefers_flat_ca_bundle_and_ignores_missing_layouts() {
+        assert_eq!(resolve_ca_cert(None), None);
+
+        let root = tempfile::tempdir().unwrap();
+        assert_eq!(resolve_ca_cert(Some(root.path().to_path_buf())), None);
+
+        let nested = root.path().join("resources");
+        std::fs::create_dir(&nested).unwrap();
+        std::fs::write(nested.join("cacert.pem"), "nested").unwrap();
+        let direct = root.path().join("cacert.pem");
+        std::fs::write(&direct, "direct").unwrap();
+
+        assert_eq!(resolve_ca_cert(Some(root.path().to_path_buf())), Some(direct));
+    }
+}
+
 impl Aria2Manager {
     pub fn new(ca_cert: Option<PathBuf>, proxy: Option<String>) -> Self {
         let secret: String = {

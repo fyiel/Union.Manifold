@@ -3,6 +3,13 @@
 All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 
+## 3.2.1
+
+### Fixed
+
+- packaged builds resolve `cacert.pem` from both flat and nested resource
+  layouts, so aria2 keeps TLS certificate validation across bundle targets
+
 ## 3.2.0
 
 ### Added
