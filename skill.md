@@ -156,6 +156,9 @@ adapters usually don't filter, they just populate fields. Results are cached
 - **Mods**: NexusMods (API key; an OPT-IN website-session-cookie mode that the app
   itself warns breaks NexusMods ToS), Steam Workshop (anonymous SteamCMD, bootstrapped
   into `data_dir/steamcmd`), Thunderstore. Stored under `data_dir/mods/<appid>/`.
+  The deployment planner recognizes REFramework Lua autorun scripts, preserves
+  Fluffy-style `reframework`/`natives`/`pak_mods` trees and retains
+  manifest-backed MelonLoader package folders under `Mods`.
 - **In-app updater** (`updater.rs`): Tauri updater plugin for most targets, but the
   **Arch/pacman path is custom** (`is_pacman_install()` = no `$APPIMAGE` +
   `/usr/bin/pacman`): it downloads the versioned `.pkg.tar.zst` from the release
