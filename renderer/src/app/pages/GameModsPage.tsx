@@ -307,7 +307,9 @@ export function GameModsPage() {
 
   const mods = useMemo(() => [...(gs?.mods || [])].sort((a, b) => a.order - b.order), [gs])
   const installedIds = useMemo(() => new Set(mods.map((m) => m.id)), [mods])
-  const enabledCount = useMemo(() => mods.filter((m) => m.enabled).length, [mods])
+  const enabledCount = useMemo(() => mods.filter((m) => m.enabled && !m.deployBlocked).length, [mods])
+  const uncertainMods = useMemo(() => mods.filter((m) => m.deployConfidence === "low" && !m.deployBlocked), [mods])
+  const blockedMods = useMemo(() => mods.filter((m) => m.deployBlocked), [mods])
 
   const [domainEdit, setDomainEdit] = useState(false)
   const [domainDraft, setDomainDraft] = useState("")
@@ -588,7 +590,7 @@ export function GameModsPage() {
     } catch (err) { toast(String(err), "error", 7000) } finally { setTsInstalling(null) }
   }
 
-  const deployTargetLabel = gs?.deployTarget ? gs.deployTarget : "game root"
+  const deployTargetLabel = gs?.deployTarget ? gs.deployTarget : "automatic per mod"
 
   return (
     <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column" }}>
@@ -653,13 +655,13 @@ export function GameModsPage() {
               {gs.deployed ? "deployed" : "not deployed"}
             </span>
 
-            <span style={CHIP} title="Subfolder inside the game files dir where enabled mods are copied. Leave empty to deploy into the game root.">
-              <span style={{ color: "var(--mf-t5)" }}>deploy to:</span>
+            <span style={CHIP} title="Optional manual base folder for every mod. Leave empty to infer each mod's destination from the game and archive layout.">
+              <span style={{ color: "var(--mf-t5)" }}>target override:</span>
               <input
                 value={targetDraft}
                 onChange={(e) => setTargetDraft(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter" && targetDirty) void saveTarget() }}
-                placeholder="game root"
+                placeholder="auto per mod"
                 style={{ ...CHIP_INPUT, width: 130 }}
               />
               <button type="button" title="Pick a folder inside the game directory" onClick={() => void pickTarget()} style={{ display: "flex", background: "none", border: "none", padding: 0, color: "var(--mf-t4)", cursor: "pointer" }}><FolderOpen size={12} strokeWidth={2} /></button>
@@ -727,6 +729,24 @@ export function GameModsPage() {
               </span>
             </div>
 
+            {blockedMods.length > 0 ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", marginBottom: 14, borderRadius: 9, border: "1px solid color-mix(in srgb, var(--mf-danger) 35%, transparent)", background: "color-mix(in srgb, var(--mf-danger) 6%, transparent)", color: "var(--mf-t3)" }}>
+                <Puzzle size={14} strokeWidth={1.7} style={{ color: "var(--mf-danger)", flexShrink: 0 }} />
+                <span style={{ fontFamily: MONO, fontSize: 10.5, lineHeight: 1.5 }}>
+                  {blockedMods.length} {blockedMods.length === 1 ? "mod requires" : "mods require"} an interactive installer and cannot be deployed safely. Install through a FOMOD-capable manager.
+                </span>
+              </div>
+            ) : null}
+
+            {uncertainMods.length > 0 ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", marginBottom: 14, borderRadius: 9, border: "1px solid color-mix(in srgb, var(--mf-danger) 35%, transparent)", background: "color-mix(in srgb, var(--mf-danger) 6%, transparent)", color: "var(--mf-t3)" }}>
+                <FolderOpen size={14} strokeWidth={1.7} style={{ color: "var(--mf-danger)", flexShrink: 0 }} />
+                <span style={{ fontFamily: MONO, fontSize: 10.5, lineHeight: 1.5 }}>
+                  {uncertainMods.length} {uncertainMods.length === 1 ? "mod has" : "mods have"} no recognized deployment layout and use the game root. If a mod does not load, use the folder control above to choose a target.
+                </span>
+              </div>
+            ) : null}
+
             {mods.length === 0 ? (
               <CenterState>
                 <Package size={30} strokeWidth={1.4} color="var(--mf-t6)" />
@@ -740,12 +760,15 @@ export function GameModsPage() {
                       <ArrowBtn dir="up" disabled={i === 0} onClick={() => void moveMod(i, -1)} />
                       <ArrowBtn dir="down" disabled={i === mods.length - 1} onClick={() => void moveMod(i, 1)} />
                     </div>
-                    <Switch checked={m.enabled} onCheckedChange={(v) => void toggleMod(m, v)} aria-label={`${m.enabled ? "Disable" : "Enable"} ${m.name}`} />
+                    <Switch checked={m.enabled && !m.deployBlocked} disabled={m.deployBlocked} onCheckedChange={(v) => void toggleMod(m, v)} aria-label={`${m.enabled ? "Disable" : "Enable"} ${m.name}`} />
                     <div style={{ width: 34, height: 34, borderRadius: 6, flexShrink: 0, border: "1px solid var(--mf-line-2)", background: m.picture ? `center/cover no-repeat url("${proxyImageUrl(m.picture)}")` : COVER_LINES }} />
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 9, minWidth: 0 }}>
                         <span title={m.name} style={{ fontSize: 13, fontWeight: 600, color: m.enabled ? "var(--mf-t1)" : "var(--mf-t4)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{m.name}</span>
                         <span style={{ padding: "2px 8px", borderRadius: 999, border: "1px solid var(--mf-line-2)", fontFamily: MONO, fontSize: 9, textTransform: "uppercase", letterSpacing: "0.09em", color: "var(--mf-t3)", flexShrink: 0 }}>{m.provider}</span>
+                        <span title={m.deployReason || "No automatic deployment decision recorded"} style={{ padding: "2px 8px", borderRadius: 999, border: `1px solid ${m.deployConfidence === "low" || m.deployBlocked ? "color-mix(in srgb, var(--mf-danger) 45%, transparent)" : "var(--mf-line-2)"}`, fontFamily: MONO, fontSize: 9, letterSpacing: "0.04em", color: m.deployConfidence === "low" || m.deployBlocked ? "var(--mf-danger)" : "var(--mf-t4)", flexShrink: 0 }}>
+                          {m.deployBlocked ? "installer required" : m.deployConfidence === "low" ? "check target" : `${m.deployConfidence === "manual" ? "manual" : "auto"}: ${m.deployPrefix || "game root"}`}
+                        </span>
                       </div>
                       <div style={{ marginTop: 3, fontFamily: MONO, fontSize: 10, color: "var(--mf-t5)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                         {[m.version ? `v${m.version}` : "", m.author, fmtBytes(m.sizeBytes), fmtDate(m.installedAt)].filter(Boolean).join(" · ")}
