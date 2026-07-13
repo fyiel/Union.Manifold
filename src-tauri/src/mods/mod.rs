@@ -237,8 +237,12 @@ fn directory_has_files(path: &Path) -> bool {
         .any(|entry| entry.file_type().is_file())
 }
 
-fn write_mod_engine_profile(game_dir: &Path, cfg: &GameMods) -> Result<Option<PathBuf>, String> {
-    let Some((game, _)) = mod_engine_game(cfg.steam_appid) else {
+fn write_mod_engine_profile(
+    game_dir: &Path,
+    target: &Path,
+    cfg: &GameMods,
+) -> Result<Option<PathBuf>, String> {
+    let Some((game, _)) = mod_engine_game_for(Some(target), cfg.steam_appid) else {
         return Ok(None);
     };
     let staging_root = game_dir.join("staging");
@@ -335,7 +339,7 @@ pub(crate) fn deploy_to(game_dir: &Path, target: &Path, cfg: &GameMods) -> Resul
             }
         }
     }
-    if let Some(profile) = write_mod_engine_profile(game_dir, cfg)? {
+    if let Some(profile) = write_mod_engine_profile(game_dir, target, cfg)? {
         desired.insert(
             MOD_ENGINE_PROFILE.to_string(),
             (profile, "union-manifold-mod-engine-3".to_string()),
@@ -602,6 +606,42 @@ fn root_has_file_matching(target: &Path, predicate: impl Fn(&str) -> bool) -> bo
         .any(|entry| entry.path().is_file() && predicate(&entry.file_name().to_string_lossy().to_lowercase()))
 }
 
+fn mod_engine_target_game(target: &Path) -> Option<(&'static str, &'static str)> {
+    [
+        ("darksoulsiii.exe", ("darksouls3", "Dark Souls III")),
+        ("sekiro.exe", ("sekiro", "Sekiro: Shadows Die Twice")),
+        ("eldenring.exe", ("eldenring", "Elden Ring")),
+        ("armoredcore6.exe", ("armoredcore6", "Armored Core VI: Fires of Rubicon")),
+        ("nightreign.exe", ("nightreign", "Elden Ring Nightreign")),
+    ]
+    .into_iter()
+    .find_map(|(executable, game)| {
+        root_has_file_matching(target, |name| name.eq_ignore_ascii_case(executable)).then_some(game)
+    })
+}
+
+fn mod_engine_game_for(
+    target: Option<&Path>,
+    steam_appid: Option<u64>,
+) -> Option<(&'static str, &'static str)> {
+    mod_engine_game(steam_appid).or_else(|| target.and_then(mod_engine_target_game))
+}
+
+fn lenny_target_game(target: &Path) -> Option<&'static str> {
+    [
+        ("gta5.exe", "Grand Theft Auto V (Legacy)"),
+        ("rdr2.exe", "Red Dead Redemption 2"),
+    ]
+    .into_iter()
+    .find_map(|(executable, title)| {
+        root_has_file_matching(target, |name| name.eq_ignore_ascii_case(executable)).then_some(title)
+    })
+}
+
+fn lenny_game_for(target: Option<&Path>, steam_appid: Option<u64>) -> Option<&'static str> {
+    lenny_game(steam_appid).or_else(|| target.and_then(lenny_target_game))
+}
+
 fn is_unity_target(target: &Path) -> bool {
     let has_runtime = root_has_file_matching(target, |name| {
         name == "unityplayer.dll" || name == "gameassembly.dll"
@@ -630,8 +670,8 @@ fn is_fluffy_target(target: &Path) -> bool {
 }
 
 fn loader_compatibility(target: Option<&Path>, steam_appid: Option<u64>) -> Vec<LoaderCompatibility> {
-    let me3 = mod_engine_game(steam_appid);
-    let lenny = lenny_game(steam_appid);
+    let me3 = mod_engine_game_for(target, steam_appid);
+    let lenny = lenny_game_for(target, steam_appid);
     let unity_files = target.map(is_unity_target).unwrap_or(false);
     let melon = steam_appid == Some(EVERYTHING_IS_CRAB_STEAM_APPID) || unity_files;
     let fluffy_title = fluffy_game(steam_appid);
@@ -836,7 +876,7 @@ fn infer_deployment_plan(target: &Path, staged: &Path, steam_appid: Option<u64>)
             "high",
         );
     }
-    if let Some((_, title)) = mod_engine_game(steam_appid) {
+    if let Some((_, title)) = mod_engine_game_for(Some(target), steam_appid) {
         return deployment_plan(
             ModLayout::ModEngine3,
             MOD_ENGINE_DEPLOY_ROOT,
@@ -844,7 +884,7 @@ fn infer_deployment_plan(target: &Path, staged: &Path, steam_appid: Option<u64>)
             "high",
         );
     }
-    if let Some(title) = lenny_game(steam_appid) {
+    if let Some(title) = lenny_game_for(Some(target), steam_appid) {
         if has_root_file(&root, "install.xml") || has_root_dir(&root, &["replace", "stream"]) {
             return deployment_plan(
                 ModLayout::Lenny,
@@ -1568,6 +1608,7 @@ fn refresh_deployment_plans(state: &AppState, appid: &str, cfg: &mut GameMods) -
     let staging = game_mods_dir(&state.paths, appid).join("staging");
     let mut changed = cfg.deployment_plan_version != DEPLOYMENT_PLAN_VERSION;
     let migrating = cfg.deployment_plan_version != DEPLOYMENT_PLAN_VERSION;
+    let mut migration_failed = false;
     for installed in &mut cfg.mods {
         let staged = staging.join(&installed.id);
         if !staged.is_dir() {
@@ -1580,6 +1621,7 @@ fn refresh_deployment_plans(state: &AppState, appid: &str, cfg: &mut GameMods) -
                     "warn",
                     &format!("mod deployment layout migration failed for {appid}/{}: {error}", installed.id),
                 );
+                migration_failed = true;
                 continue;
             }
         }
@@ -1603,6 +1645,9 @@ fn refresh_deployment_plans(state: &AppState, appid: &str, cfg: &mut GameMods) -
             installed.deploy_blocked = blocked;
             changed = true;
         }
+    }
+    if migration_failed {
+        return true;
     }
     cfg.deployment_plan_version = DEPLOYMENT_PLAN_VERSION;
     changed

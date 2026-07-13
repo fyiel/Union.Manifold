@@ -429,6 +429,27 @@ fn loader_registry_detects_unity_and_re_engine_files() {
             .unwrap()
             .compatible
     );
+
+    let elden_ring = tmp.path().join("elden-ring");
+    write_file(&elden_ring.join("eldenring.exe"), "game");
+    let mod_engine_loaders = loader_compatibility(Some(&elden_ring), None);
+    assert!(
+        mod_engine_loaders
+            .iter()
+            .find(|loader| loader.id == "mod-engine-3")
+            .unwrap()
+            .compatible
+    );
+
+    let red_dead = tmp.path().join("red-dead");
+    write_file(&red_dead.join("RDR2.exe"), "game");
+    let lenny_loaders = loader_compatibility(Some(&red_dead), None);
+    let lenny = lenny_loaders
+        .iter()
+        .find(|loader| loader.id == "lennys-mod-loader")
+        .unwrap();
+    assert!(lenny.compatible);
+    assert!(lenny.reason.contains("Red Dead Redemption 2"));
 }
 
 #[test]
@@ -436,18 +457,18 @@ fn mod_engine_package_deploys_with_generated_profile() {
     let tmp = tempdir().unwrap();
     let dir = tmp.path().join("mods");
     let target = tmp.path().join("game");
+    write_file(&target.join("eldenring.exe"), "game");
     let staged = dir.join("staging/nexus-77");
     write_file(&staged.join("Archive/mod/parts/example.dcx"), "asset");
     write_file(&staged.join("Archive/natives/example.dll"), "native");
     write_file(&staged.join("Archive/modengine2_launcher.exe"), "bootstrap");
 
-    let plan = infer_deployment_plan(&target, &staged, Some(1_245_620));
+    let plan = infer_deployment_plan(&target, &staged, None);
     assert_eq!(plan.layout, ModLayout::ModEngine3);
     assert_eq!(plan.deploy_prefix, MOD_ENGINE_DEPLOY_ROOT);
     apply_staging_layout(&staged, plan.layout, "Example", "nexus-77").unwrap();
 
     let cfg = GameMods {
-        steam_appid: Some(1_245_620),
         mods: vec![ModEntry {
             id: "nexus-77".to_string(),
             enabled: true,
@@ -478,7 +499,7 @@ fn mod_engine_package_deploys_with_generated_profile() {
     assert!(profile.contains(".union-manifold-me3/nexus-77/mod"));
     assert!(profile.contains(".union-manifold-me3/nexus-77/natives/example.dll"));
 
-    let disabled = GameMods { steam_appid: Some(1_245_620), ..Default::default() };
+    let disabled = GameMods::default();
     deploy_to(&dir, &target, &disabled).unwrap();
     assert!(!target.join(MOD_ENGINE_PROFILE).exists());
     assert!(!target.join(MOD_ENGINE_DEPLOY_ROOT).exists());
