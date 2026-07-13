@@ -25,3 +25,7 @@ pub fn find_steam_app_id(text: &str) -> Option<u64> {
     }
     None
 }
+
+#[cfg(test)]
+#[path = "../../../.dev/rust/parse_tests.rs"]
+mod dev_parse_tests;
