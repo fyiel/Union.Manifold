@@ -3,6 +3,15 @@
 All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 
+## 3.4.1
+
+### Fixed
+
+- Mod Engine 3 and Lenny's Mod Loader compatibility is detected from installed
+  game executables when a Steam AppID is unavailable
+- failed loader-layout migrations remain pending and retry instead of being
+  marked complete
+
 ## 3.4.0
 
 ### Added
