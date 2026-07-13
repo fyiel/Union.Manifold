@@ -367,14 +367,11 @@ export function LinuxConfigDialog({ appid, gameName, onClose }: { appid: string;
     if (r?.ok && r.path) update({ protonPrefix: r.path })
   }
 
-  const groups = useMemo(() => {
-    const steam = proton.filter((p) => p.source !== "community")
-    const community = proton.filter((p) => p.source === "community")
-    return [
-      { key: "steam", label: "Steam Proton", items: steam },
-      { key: "community", label: "Community · GE", items: community },
-    ].filter((g) => g.items.length)
-  }, [proton])
+  const runners = useMemo(() => ({
+    steam: proton.filter((p) => !p.source || p.source === "steam"),
+    protonplus: proton.filter((p) => p.source === "protonplus" || p.source === "community"),
+  }), [proton])
+  const selectedSteamPath = runners.steam.some((runner) => runner.path === config.protonPath) ? config.protonPath : ""
 
   const presetActive = (config.launchMode || "inherit")
   const activePreset: LinuxPresetId | null = presetActive === "native" ? "native" : presetActive === "wine" ? "wine-recommended" : presetActive === "proton" ? "proton-recommended" : presetActive === "auto" ? "auto" : null
@@ -387,7 +384,7 @@ export function LinuxConfigDialog({ appid, gameName, onClose }: { appid: string;
           <Terminal size={15} strokeWidth={1.8} color="var(--mf-t2)" />Linux / VR config
           <span style={{ marginLeft: "auto", border: "1px solid var(--mf-line)", background: "color-mix(in srgb, var(--mf-t0) 4%, transparent)", padding: "2px 8px", borderRadius: 99, fontFamily: MONO, fontSize: 9, fontWeight: 600, letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--mf-t4)" }}>{gameName}</span>
         </div>
-        <div style={{ fontSize: 12.5, lineHeight: 1.5, color: "var(--mf-t4)" }}>How this game launches on Linux. Runners are picked up from Steam and <span style={{ fontFamily: MONO, fontSize: 11.5, color: "var(--mf-t3)" }}>compatibilitytools.d</span>.</div>
+        <div style={{ fontSize: 12.5, lineHeight: 1.5, color: "var(--mf-t4)" }}>How this game launches on Linux. Runners are picked up from Steam and ProtonPlus-managed folders.</div>
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -429,27 +426,47 @@ export function LinuxConfigDialog({ appid, gameName, onClose }: { appid: string;
             <span style={{ width: 6, height: 6, borderRadius: 99, background: proton.length ? "#7da87d" : "var(--mf-t6)" }} />{loading ? "scanning…" : `${proton.length} found`}
           </span>
         </div>
-        {groups.length === 0 && !loading ? <div style={{ fontFamily: MONO, fontSize: 11, color: "var(--mf-t5)" }}>no Proton runners detected</div> : null}
-        {groups.map((g) => (
-          <div key={g.key} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            <span style={{ fontFamily: MONO, fontSize: 9, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--mf-t6)", paddingLeft: 2 }}>{g.label}</span>
-            {g.items.map((p, i) => {
-              const on = config.protonPath === p.path
+        {proton.length === 0 && !loading ? <div style={{ fontFamily: MONO, fontSize: 11, color: "var(--mf-t5)" }}>no Proton runners detected</div> : null}
+        {runners.protonplus.length ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <span style={{ fontFamily: MONO, fontSize: 9, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--mf-t6)", paddingLeft: 2 }}>ProtonPlus</span>
+            {runners.protonplus.map((runner) => {
+              const on = config.protonPath === runner.path
               return (
-                <button key={p.path} type="button" onClick={() => update({ launchMode: "proton", protonPath: p.path })} style={{ display: "flex", alignItems: "center", gap: 11, textAlign: "left", border: `1px solid ${on ? "var(--mf-line-2)" : "var(--mf-line)"}`, background: on ? "color-mix(in srgb, var(--mf-t0) 6%, transparent)" : "color-mix(in srgb, var(--mf-t0) 2%, transparent)", borderRadius: 10, padding: "9px 12px", cursor: "pointer" }}>
+                <button key={runner.path} type="button" onClick={() => update({ launchMode: "proton", protonPath: runner.path })} style={{ display: "flex", alignItems: "center", gap: 11, textAlign: "left", border: `1px solid ${on ? "var(--mf-line-2)" : "var(--mf-line)"}`, background: on ? "color-mix(in srgb, var(--mf-t0) 6%, transparent)" : "color-mix(in srgb, var(--mf-t0) 2%, transparent)", borderRadius: 10, padding: "9px 12px", cursor: "pointer" }}>
                   <span style={{ width: 15, flexShrink: 0, display: "inline-flex" }}>{on ? <Check size={15} strokeWidth={2.4} color="var(--mf-t0)" /> : null}</span>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-                      <span style={{ fontSize: 13, fontWeight: on ? 600 : 500, color: on ? "var(--mf-t0)" : "var(--mf-t2)" }}>{p.label}</span>
-                      {i === 0 ? <span style={{ borderRadius: 99, border: "1px solid var(--mf-line)", padding: "1px 7px", fontFamily: MONO, fontSize: 8.5, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--mf-t4)" }}>Newest</span> : null}
+                      <span style={{ fontSize: 13, fontWeight: on ? 600 : 500, color: on ? "var(--mf-t0)" : "var(--mf-t2)" }}>{runner.label}</span>
+                      {runner.newest ? <span style={{ borderRadius: 99, border: "1px solid var(--mf-line)", padding: "1px 7px", fontFamily: MONO, fontSize: 8.5, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--mf-t4)" }}>Newest</span> : null}
                     </div>
-                    <div style={{ fontFamily: MONO, fontSize: 10, color: "var(--mf-t5)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.path}</div>
+                    <div style={{ fontFamily: MONO, fontSize: 10, color: "var(--mf-t5)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{runner.path}</div>
                   </div>
                 </button>
               )
             })}
           </div>
-        ))}
+        ) : null}
+        {runners.steam.length ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <span style={{ fontFamily: MONO, fontSize: 9, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--mf-t6)", paddingLeft: 2 }}>Steam Proton</span>
+            <div style={{ position: "relative" }}>
+              <select
+                className="uc-select"
+                aria-label="Steam Proton version"
+                value={selectedSteamPath}
+                onChange={(event) => {
+                  if (event.target.value) update({ launchMode: "proton", protonPath: event.target.value })
+                }}
+                style={{ ...WELL, width: "100%", height: 40, padding: "0 36px 0 12px", color: selectedSteamPath ? "var(--mf-t1)" : "var(--mf-t4)", fontSize: 12.5, cursor: "pointer", WebkitAppearance: "none", appearance: "none" }}
+              >
+                <option value="">Choose from {runners.steam.length} Steam version{runners.steam.length === 1 ? "" : "s"}</option>
+                {runners.steam.map((runner) => <option key={runner.path} value={runner.path}>{runner.label}</option>)}
+              </select>
+              <ChevronDown aria-hidden="true" size={14} color="var(--mf-t5)" style={{ position: "absolute", right: 12, top: 13, pointerEvents: "none" }} />
+            </div>
+          </div>
+        ) : null}
       </div>
 
       <PathField label="Proton script" hint="overrides global" value={config.protonPath || ""} onBrowse={() => void pickProtonScript()} />
