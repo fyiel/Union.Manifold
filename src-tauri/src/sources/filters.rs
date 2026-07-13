@@ -323,3 +323,7 @@ mod tests {
         assert_eq!(titles(&desc), asc_reversed);
     }
 }
+
+#[cfg(test)]
+#[path = "../../../.dev/rust/filters_tests.rs"]
+mod dev_filters_tests;
