@@ -308,6 +308,13 @@ declare global {
     deployBlocked: boolean
   }
 
+  type ModLoaderCompatibility = {
+    id: "mod-engine-3" | "lennys-mod-loader" | "melonloader" | "fluffy" | string
+    name: string
+    compatible: boolean
+    reason: string
+  }
+
   type ModGameState = {
     ok: boolean
     error?: string
@@ -320,6 +327,7 @@ declare global {
     thunderstoreSupported?: boolean
     deployTarget?: string
     deployed?: boolean
+    loaderCompatibility?: ModLoaderCompatibility[]
     mods?: ModEntry[]
   }
 

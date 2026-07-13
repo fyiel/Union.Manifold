@@ -255,7 +255,7 @@ fn requiem_lua_archive_deploys_to_reframework_autorun() {
     assert_eq!(plan.layout, ModLayout::Raw);
     assert_eq!(plan.deploy_prefix, "reframework/autorun");
     assert_eq!(plan.confidence, "high");
-    apply_staging_layout(&staged, plan.layout, "More Ammo").unwrap();
+    apply_staging_layout(&staged, plan.layout, "More Ammo", "nexus-322").unwrap();
 
     let cfg = GameMods {
         mods: vec![ModEntry {
@@ -286,7 +286,7 @@ fn wrapped_reframework_tree_keeps_its_game_relative_root() {
     let plan = infer_deployment_plan(&target, &staged, Some(RESIDENT_EVIL_REQUIEM_STEAM_APPID));
     assert_eq!(plan.layout, ModLayout::Raw);
     assert!(plan.deploy_prefix.is_empty());
-    apply_staging_layout(&staged, plan.layout, "More Ammo").unwrap();
+    apply_staging_layout(&staged, plan.layout, "More Ammo", "nexus-322").unwrap();
     assert!(staged.join("reframework/autorun/more_ammo.lua").is_file());
 
     let cfg = GameMods {
@@ -317,7 +317,7 @@ fn melonloader_manifest_folder_is_preserved_inside_mods() {
     assert_eq!(plan.layout, ModLayout::MelonLoader);
     assert_eq!(plan.deploy_prefix, "Mods");
     assert_eq!(plan.confidence, "high");
-    apply_staging_layout(&staged, plan.layout, "AutoAttack").unwrap();
+    apply_staging_layout(&staged, plan.layout, "AutoAttack", "nexus-9").unwrap();
 
     let cfg = GameMods {
         mods: vec![ModEntry {
@@ -362,7 +362,7 @@ fn fluffy_style_natives_tree_is_not_treated_as_a_wrapper() {
     assert_eq!(plan.layout, ModLayout::Raw);
     assert!(plan.deploy_prefix.is_empty());
     assert_eq!(plan.confidence, "high");
-    apply_staging_layout(&staged, plan.layout, "Loose Files").unwrap();
+    apply_staging_layout(&staged, plan.layout, "Loose Files", "nexus-1").unwrap();
 
     let cfg = GameMods {
         mods: vec![ModEntry {
@@ -376,4 +376,181 @@ fn fluffy_style_natives_tree_is_not_treated_as_a_wrapper() {
 
     assert!(target.join("natives/stm/example.user.2").is_file());
     assert!(!target.join("stm/example.user.2").exists());
+}
+
+#[test]
+fn loader_registry_matches_official_title_ids() {
+    let me3 = loader_compatibility(None, Some(1_245_620));
+    assert!(
+        me3.iter()
+            .find(|loader| loader.id == "mod-engine-3")
+            .unwrap()
+            .compatible
+    );
+    assert!(
+        !me3
+            .iter()
+            .find(|loader| loader.id == "lennys-mod-loader")
+            .unwrap()
+            .compatible
+    );
+
+    let lenny = loader_compatibility(None, Some(1_174_180));
+    let loader = lenny
+        .iter()
+        .find(|loader| loader.id == "lennys-mod-loader")
+        .unwrap();
+    assert!(loader.compatible);
+    assert!(loader.reason.contains("Red Dead Redemption 2"));
+}
+
+#[test]
+fn loader_registry_detects_unity_and_re_engine_files() {
+    let tmp = tempdir().unwrap();
+    let unity = tmp.path().join("unity");
+    write_file(&unity.join("UnityPlayer.dll"), "runtime");
+    write_file(&unity.join("Example_Data/globalgamemanagers"), "data");
+    let unity_loaders = loader_compatibility(Some(&unity), None);
+    assert!(
+        unity_loaders
+            .iter()
+            .find(|loader| loader.id == "melonloader")
+            .unwrap()
+            .compatible
+    );
+
+    let re_engine = tmp.path().join("re-engine");
+    write_file(&re_engine.join("re_chunk_000.pak"), "pak");
+    let fluffy_loaders = loader_compatibility(Some(&re_engine), None);
+    assert!(
+        fluffy_loaders
+            .iter()
+            .find(|loader| loader.id == "fluffy")
+            .unwrap()
+            .compatible
+    );
+}
+
+#[test]
+fn mod_engine_package_deploys_with_generated_profile() {
+    let tmp = tempdir().unwrap();
+    let dir = tmp.path().join("mods");
+    let target = tmp.path().join("game");
+    let staged = dir.join("staging/nexus-77");
+    write_file(&staged.join("Archive/mod/parts/example.dcx"), "asset");
+    write_file(&staged.join("Archive/natives/example.dll"), "native");
+    write_file(&staged.join("Archive/modengine2_launcher.exe"), "bootstrap");
+
+    let plan = infer_deployment_plan(&target, &staged, Some(1_245_620));
+    assert_eq!(plan.layout, ModLayout::ModEngine3);
+    assert_eq!(plan.deploy_prefix, MOD_ENGINE_DEPLOY_ROOT);
+    apply_staging_layout(&staged, plan.layout, "Example", "nexus-77").unwrap();
+
+    let cfg = GameMods {
+        steam_appid: Some(1_245_620),
+        mods: vec![ModEntry {
+            id: "nexus-77".to_string(),
+            enabled: true,
+            deploy_prefix: plan.deploy_prefix,
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    deploy_to(&dir, &target, &cfg).unwrap();
+
+    assert!(
+        target
+            .join(".union-manifold-me3/nexus-77/mod/parts/example.dcx")
+            .is_file()
+    );
+    assert!(
+        target
+            .join(".union-manifold-me3/nexus-77/natives/example.dll")
+            .is_file()
+    );
+    assert!(
+        !target
+            .join(".union-manifold-me3/nexus-77/mod/modengine2_launcher.exe")
+            .exists()
+    );
+    let profile = std::fs::read_to_string(target.join(MOD_ENGINE_PROFILE)).unwrap();
+    assert!(profile.contains("game = \"eldenring\""));
+    assert!(profile.contains(".union-manifold-me3/nexus-77/mod"));
+    assert!(profile.contains(".union-manifold-me3/nexus-77/natives/example.dll"));
+
+    let disabled = GameMods { steam_appid: Some(1_245_620), ..Default::default() };
+    deploy_to(&dir, &target, &disabled).unwrap();
+    assert!(!target.join(MOD_ENGINE_PROFILE).exists());
+    assert!(!target.join(MOD_ENGINE_DEPLOY_ROOT).exists());
+}
+
+#[test]
+fn lenny_package_keeps_its_mod_folder_under_lml() {
+    let tmp = tempdir().unwrap();
+    let dir = tmp.path().join("mods");
+    let target = tmp.path().join("game");
+    let staged = dir.join("staging/nexus-12");
+    write_file(&staged.join("Example LML/install.xml"), "<install />");
+    write_file(&staged.join("Example LML/stream/model.ymt"), "asset");
+
+    let plan = infer_deployment_plan(&target, &staged, Some(1_174_180));
+    assert_eq!(plan.layout, ModLayout::Lenny);
+    assert_eq!(plan.deploy_prefix, "lml");
+    apply_staging_layout(&staged, plan.layout, "Example LML", "nexus-12").unwrap();
+
+    let cfg = GameMods {
+        mods: vec![ModEntry {
+            id: "nexus-12".to_string(),
+            enabled: true,
+            deploy_prefix: plan.deploy_prefix,
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    deploy_to(&dir, &target, &cfg).unwrap();
+    assert!(target.join("lml/Example LML/install.xml").is_file());
+    assert!(target.join("lml/Example LML/stream/model.ymt").is_file());
+}
+
+#[test]
+fn unwrapped_lenny_package_gets_a_stable_mod_folder() {
+    let tmp = tempdir().unwrap();
+    let staged = tmp.path().join("archive");
+    write_file(&staged.join("install.xml"), "<install />");
+    write_file(&staged.join("replace/example.dat"), "asset");
+
+    apply_lenny_layout(&staged, "My Mod").unwrap();
+
+    assert!(staged.join("My Mod/install.xml").is_file());
+    assert!(staged.join("My Mod/replace/example.dat").is_file());
+}
+
+#[test]
+fn fluffy_package_drops_manager_metadata_before_deploy() {
+    let tmp = tempdir().unwrap();
+    let dir = tmp.path().join("mods");
+    let target = tmp.path().join("game");
+    write_file(&target.join("re_chunk_000.pak"), "game");
+    let staged = dir.join("staging/nexus-44");
+    write_file(&staged.join("Fluffy Mod/modinfo.ini"), "name=Example");
+    write_file(&staged.join("Fluffy Mod/screenshot.png"), "preview");
+    write_file(&staged.join("Fluffy Mod/natives/stm/example.user.2"), "asset");
+
+    let plan = infer_deployment_plan(&target, &staged, None);
+    assert_eq!(plan.layout, ModLayout::Fluffy);
+    apply_staging_layout(&staged, plan.layout, "Fluffy Mod", "nexus-44").unwrap();
+    assert!(!staged.join("modinfo.ini").exists());
+    assert!(!staged.join("screenshot.png").exists());
+
+    let cfg = GameMods {
+        mods: vec![ModEntry {
+            id: "nexus-44".to_string(),
+            enabled: true,
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    deploy_to(&dir, &target, &cfg).unwrap();
+    assert!(target.join("natives/stm/example.user.2").is_file());
+    assert!(!target.join("modinfo.ini").exists());
 }
