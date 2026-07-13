@@ -676,3 +676,7 @@ mod tests {
         assert!(!hidden_by_torrent_filter(steamrip));
     }
 }
+
+#[cfg(test)]
+#[path = "../../../.dev/rust/live_tests.rs"]
+mod dev_live_tests;
