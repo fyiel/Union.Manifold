@@ -1,0 +1,220 @@
+import { beforeEach, describe, expect, it, vi } from "vitest"
+import {
+  collectDownloadEntries,
+  forgetRememberedGame,
+  getRememberedGame,
+  hostFriendliness,
+  orderSourcesByPreference,
+  pickPrimaryDownload,
+  rememberGames,
+  sourceAbbr,
+  sourceDirect,
+  sourceName,
+  sourceRank,
+  startBestDownload,
+  unifiedToGame,
+  type DownloadEntry,
+} from "@/lib/sources"
+
+function opt(hostType: string, resolvable: boolean, url = `https://${hostType}.example/f`): SourceDownloadOption {
+  return { label: hostType, hostType, url, resolvable }
+}
+
+function src(sourceId: string, options: SourceDownloadOption[]): SourceGame {
+  return {
+    sourceId,
+    sourceSlug: "slug",
+    sourceUrl: "https://example.com",
+    dedupKey: "k",
+    title: "Game",
+    genres: [],
+    downloadOptions: options,
+  } as SourceGame
+}
+
+function unified(over: Partial<UnifiedSourceGame> = {}): UnifiedSourceGame {
+  return {
+    dedupKey: "steam:620",
+    title: "Portal 2",
+    genres: ["Puzzle"],
+    sources: [],
+    ...over,
+  } as UnifiedSourceGame
+}
+
+describe("host friendliness ordering", () => {
+  it("ranks pixeldrain friendliest and gofile last resort", () => {
+    expect(hostFriendliness("pixeldrain")).toBe(0)
+    expect(hostFriendliness("gofile")).toBeGreaterThan(hostFriendliness("pixeldrain"))
+    expect(hostFriendliness("gofile")).toBeGreaterThan(hostFriendliness("buzzheavier"))
+    expect(hostFriendliness("gofile")).toBeGreaterThan(hostFriendliness("megadb"))
+  })
+
+  it("unknown hosts sit between natives and gated hosts", () => {
+    const unknown = hostFriendliness("randomhost")
+    expect(unknown).toBeGreaterThan(hostFriendliness("pixeldrain"))
+    expect(unknown).toBeLessThan(hostFriendliness("megadb"))
+  })
+})
+
+describe("pickPrimaryDownload", () => {
+  it("prefers the friendliest resolvable host over source order", () => {
+    const entries: DownloadEntry[] = [
+      { source: src("a", []), option: opt("gofile", true) },
+      { source: src("b", []), option: opt("pixeldrain", true) },
+      { source: src("c", []), option: opt("megadb", true) },
+    ]
+    expect(pickPrimaryDownload(entries)?.option.hostType).toBe("pixeldrain")
+  })
+
+  it("falls back to the first entry when nothing resolves in-app", () => {
+    const entries: DownloadEntry[] = [
+      { source: src("a", []), option: opt("mega", false) },
+      { source: src("b", []), option: opt("other", false) },
+    ]
+    expect(pickPrimaryDownload(entries)?.option.hostType).toBe("mega")
+    expect(pickPrimaryDownload([])).toBeNull()
+  })
+})
+
+describe("collectDownloadEntries", () => {
+  it("keeps source order but floats resolvable options first within a source", () => {
+    const a = src("steamrip", [opt("mega", false), opt("pixeldrain", true)])
+    const b = src("gamebounty", [opt("gofile", true)])
+    const entries = collectDownloadEntries([a, b])
+    expect(entries.map((e) => e.option.hostType)).toEqual(["pixeldrain", "mega", "gofile"])
+  })
+})
+
+describe("source ordering helpers", () => {
+  it("orders by priority list and keeps insertion order for ties", () => {
+    const list = [
+      { sourceId: "kaoskrew" },
+      { sourceId: "unioncrax" },
+      { sourceId: "notreal-1" },
+      { sourceId: "notreal-2" },
+      { sourceId: "steamrip" },
+    ]
+    const ordered = orderSourcesByPreference(list).map((s) => s.sourceId)
+    expect(ordered).toEqual(["unioncrax", "steamrip", "kaoskrew", "notreal-1", "notreal-2"])
+  })
+
+  it("unknown sources rank after every known source", () => {
+    expect(sourceRank("nonsense")).toBeGreaterThan(sourceRank("kaoskrew"))
+  })
+
+  it("name and abbr helpers fall back gracefully", () => {
+    expect(sourceName("steamrip")).toBe("SteamRIP")
+    expect(sourceName("mystery")).toBe("mystery")
+    expect(sourceAbbr("steamrip")).toBe("SR")
+    expect(sourceAbbr("mystery")).toBe("MY")
+    expect(sourceDirect("steamrip")).toBe(true)
+    expect(sourceDirect("unheard-of")).toBe(true)
+  })
+})
+
+describe("unifiedToGame", () => {
+  it("maps the unified record into the legacy Game shape", () => {
+    const g = unifiedToGame(
+      unified({
+        steamAppId: 620,
+        description: "d",
+        sizeText: "20 GB",
+        sizeBytes: 21474836480,
+        developer: "Valve",
+        sources: [src("steamrip", []), src("gamebounty", [])],
+      })
+    )
+    expect(g.appid).toBe("steam:620")
+    expect(g.name).toBe("Portal 2")
+    expect(g.size).toBe("20 GB")
+    expect(g.developer).toBe("Valve")
+    expect(g.source).toBe("steamrip+gamebounty")
+    expect(g.image).toBe("./fallbacks/game-card-3x4.svg")
+  })
+})
+
+describe("remembered games cache", () => {
+  it("remembers, retrieves and forgets by dedup key", () => {
+    const g = unified({ dedupKey: "title:some game" })
+    rememberGames([g])
+    expect(getRememberedGame("title:some game")?.title).toBe("Portal 2")
+    forgetRememberedGame("title:some game")
+    expect(getRememberedGame("title:some game")).toBeUndefined()
+  })
+})
+
+describe("startBestDownload fallback chain", () => {
+  beforeEach(() => {
+    ;(window as any).ucSources = undefined
+    ;(window as any).ucDownloads = undefined
+    ;(window as any).ucSettings = undefined
+  })
+
+  it("tries friendlier hosts first and queues the first that resolves", async () => {
+    const resolve = vi.fn(async (_sourceId: string, option: SourceDownloadOption) => {
+      if (option.hostType === "pixeldrain") return { ok: true, result: { resolvable: false, openUrl: option.url, reason: "down" } }
+      return { ok: true, result: { resolvable: true, url: "https://direct.example/file.zip", fileName: "file.zip" } }
+    })
+    const start = vi.fn(async () => ({ ok: true }))
+    ;(window as any).ucSources = { resolve }
+    ;(window as any).ucDownloads = { start, saveInstalledMetadata: vi.fn(async () => ({ ok: true })) }
+    ;(window as any).ucSettings = { set: vi.fn(async () => ({ ok: true })) }
+
+    const entries: DownloadEntry[] = [
+      { source: src("a", []), option: opt("gofile", true) },
+      { source: src("b", []), option: opt("pixeldrain", true) },
+    ]
+    const res = await startBestDownload(unified(), entries)
+    expect(res.ok).toBe(true)
+    expect(resolve.mock.calls[0][1].hostType).toBe("pixeldrain")
+    expect(resolve.mock.calls[1][1].hostType).toBe("gofile")
+    expect(start).toHaveBeenCalledTimes(1)
+    expect(start.mock.calls[0][0].url).toBe("https://direct.example/file.zip")
+  })
+
+  it("reports a browser fallback url when every source fails", async () => {
+    const resolve = vi.fn(async (_s: string, option: SourceDownloadOption) => ({
+      ok: true,
+      result: { resolvable: false, openUrl: option.url, reason: "nope" },
+    }))
+    ;(window as any).ucSources = { resolve }
+
+    const entries: DownloadEntry[] = [
+      { source: src("a", []), option: opt("pixeldrain", true) },
+      { source: src("b", []), option: opt("mega", false, "https://mega.nz/f") },
+    ]
+    const res = await startBestDownload(unified(), entries)
+    expect(res.ok).toBe(false)
+    if (!res.ok) {
+      expect(res.openUrl).toBe("https://pixeldrain.example/f")
+      expect(res.reason).toContain("1 in-app source")
+    }
+    expect(resolve).toHaveBeenCalledTimes(1)
+  })
+
+  it("downloads every part of a multi-file resolution", async () => {
+    const resolve = vi.fn(async () => ({
+      ok: true,
+      result: {
+        resolvable: true,
+        files: [
+          { url: "https://d.example/part1.rar" },
+          { url: "https://d.example/part2.rar" },
+        ],
+      },
+    }))
+    const start = vi.fn(async () => ({ ok: true }))
+    ;(window as any).ucSources = { resolve }
+    ;(window as any).ucDownloads = { start, saveInstalledMetadata: vi.fn(async () => ({ ok: true })) }
+    ;(window as any).ucSettings = { set: vi.fn(async () => ({ ok: true })) }
+
+    const entries: DownloadEntry[] = [{ source: src("a", []), option: opt("gofile", true) }]
+    const res = await startBestDownload(unified(), entries)
+    expect(res.ok).toBe(true)
+    expect(start).toHaveBeenCalledTimes(2)
+    expect(start.mock.calls[0][0].partIndex).toBe(1)
+    expect(start.mock.calls[0][0].partTotal).toBe(2)
+    expect(start.mock.calls[1][0].partIndex).toBe(2)
+  })
+})
