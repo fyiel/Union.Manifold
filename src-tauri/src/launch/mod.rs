@@ -31,6 +31,42 @@ fn install_dir_for(state: &AppState, appid: &str) -> Option<PathBuf> {
     crate::library::game_files_dir(&crate::library::scan_roots(state), appid)
 }
 
+fn executable_on_path(name: &str) -> Option<String> {
+    if let Some(path) = std::env::var_os("PATH") {
+        for dir in std::env::split_paths(&path) {
+            let candidate = dir.join(name);
+            if candidate.is_file() {
+                return Some(candidate.to_string_lossy().to_string());
+            }
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let candidate = home.join(".local/bin").join(name);
+        if candidate.is_file() {
+            return Some(candidate.to_string_lossy().to_string());
+        }
+    }
+    None
+}
+
+fn mod_engine_executable() -> Option<String> {
+    if cfg!(windows) {
+        executable_on_path("me3.exe").or_else(|| executable_on_path("me3"))
+    } else {
+        executable_on_path("me3")
+    }
+}
+
+fn mod_engine_launch_args(profile: &Path, exe_path: &str) -> Vec<String> {
+    vec![
+        "launch".to_string(),
+        "-p".to_string(),
+        profile.to_string_lossy().to_string(),
+        "--exe-path".to_string(),
+        exe_path.to_string(),
+    ]
+}
+
 fn is_executable_candidate(path: &Path) -> bool {
     let name = path.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
     if cfg!(windows) {
@@ -101,10 +137,31 @@ pub fn game_exe_preflight(state: State<'_, AppState>, appid: String, exe_path: S
     if !exists {
         checks.push(json!({ "level": "error", "code": "exe-not-found", "message": "executable not found" }));
     }
-    let resolved = linux::build_launch_command(&state, &appid, &exe_path);
+    let profile = crate::mods::active_mod_engine_profile(&state, &appid);
+    let (loader_ready, resolved) = if let Some(profile) = profile {
+        if let Some(command) = mod_engine_executable() {
+            (
+                true,
+                json!({
+                    "command": command,
+                    "args": mod_engine_launch_args(&profile, &exe_path),
+                    "loader": "mod-engine-3",
+                }),
+            )
+        } else {
+            checks.push(json!({
+                "level": "error",
+                "code": "mod-engine-3-not-found",
+                "message": "Mod Engine 3 mods are enabled, but the me3 executable is not on PATH",
+            }));
+            (false, linux::build_launch_command(&state, &appid, &exe_path))
+        }
+    } else {
+        (true, linux::build_launch_command(&state, &appid, &exe_path))
+    };
     json!({
         "ok": true,
-        "canLaunch": exists,
+        "canLaunch": exists && loader_ready,
         "checks": checks,
         "resolved": resolved,
     })
@@ -237,13 +294,30 @@ pub fn game_exe_launch(state: State<'_, AppState>, app: AppHandle, appid: String
     };
     let achievement_context =
         crate::achievements::launch_context(&state, &appid, &exe_path, game_name.as_deref(), &plan.envs);
+    let (command, args, envs, launch_mode) =
+        if let Some(profile) = crate::mods::active_mod_engine_profile(&state, &appid) {
+            let Some(command) = mod_engine_executable() else {
+                return json!({
+                    "ok": false,
+                    "error": "Mod Engine 3 mods are enabled, but the me3 executable is not on PATH",
+                });
+            };
+            (
+                command,
+                mod_engine_launch_args(&profile, &exe_path),
+                Vec::new(),
+                "mod-engine-3",
+            )
+        } else {
+            (plan.command, plan.args, plan.envs, "direct")
+        };
     match spawn_and_track(
         &app,
         &appid,
-        &plan.command,
-        &plan.args,
+        &command,
+        &args,
         &cwd,
-        &plan.envs,
+        &envs,
         &exe_path,
         game_name,
         achievement_context,
@@ -267,7 +341,7 @@ pub fn game_exe_launch(state: State<'_, AppState>, app: AppHandle, appid: String
                     }
                 });
             }
-            json!({ "ok": true, "pid": pid })
+            json!({ "ok": true, "pid": pid, "launchMode": launch_mode })
         }
         Err(e) => json!({ "ok": false, "error": e }),
     }
@@ -370,5 +444,23 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(300));
         }
         let _ = child.wait();
+    }
+
+    #[test]
+    fn mod_engine_launch_uses_profile_and_game_executable() {
+        let args = mod_engine_launch_args(
+            Path::new("/tmp/profile with spaces.me3"),
+            "/games/Elden Ring/Game/eldenring.exe",
+        );
+        assert_eq!(
+            args,
+            vec![
+                "launch",
+                "-p",
+                "/tmp/profile with spaces.me3",
+                "--exe-path",
+                "/games/Elden Ring/Game/eldenring.exe",
+            ]
+        );
     }
 }

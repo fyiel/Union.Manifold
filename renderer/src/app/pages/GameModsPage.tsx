@@ -308,6 +308,10 @@ export function GameModsPage() {
   const mods = useMemo(() => [...(gs?.mods || [])].sort((a, b) => a.order - b.order), [gs])
   const installedIds = useMemo(() => new Set(mods.map((m) => m.id)), [mods])
   const enabledCount = useMemo(() => mods.filter((m) => m.enabled && !m.deployBlocked).length, [mods])
+  const compatibleLoaders = useMemo(
+    () => (gs?.loaderCompatibility || []).filter((loader) => loader.compatible),
+    [gs],
+  )
   const uncertainMods = useMemo(() => mods.filter((m) => m.deployConfidence === "low" && !m.deployBlocked), [mods])
   const blockedMods = useMemo(() => mods.filter((m) => m.deployBlocked), [mods])
 
@@ -648,6 +652,16 @@ export function GameModsPage() {
               <span style={{ color: "var(--mf-t5)" }}>thunderstore:</span>
               <span style={{ color: tsCommunity ? "var(--mf-t2)" : "var(--mf-t5)" }}>{tsCommunity || "not matched"}</span>
               {tsCommunity && gs.thunderstoreCommunityAuto ? <span style={{ color: "var(--mf-t6)" }}>auto</span> : null}
+            </span>
+
+            <span
+              style={CHIP}
+              title={(gs.loaderCompatibility || []).map((loader) => `${loader.name}: ${loader.reason}`).join("\n")}
+            >
+              <span style={{ color: "var(--mf-t5)" }}>loaders:</span>
+              <span style={{ color: compatibleLoaders.length ? "var(--mf-t2)" : "var(--mf-t5)" }}>
+                {compatibleLoaders.length ? compatibleLoaders.map((loader) => loader.name).join(" · ") : "none detected"}
+              </span>
             </span>
 
             <span style={CHIP} title="Whether enabled mod files are currently copied into the game folder">

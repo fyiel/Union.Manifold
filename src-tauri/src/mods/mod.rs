@@ -229,6 +229,84 @@ pub(crate) fn join_target(base: &Path, target: &str) -> Result<PathBuf, String> 
     Ok(out)
 }
 
+fn directory_has_files(path: &Path) -> bool {
+    walkdir::WalkDir::new(path)
+        .min_depth(1)
+        .into_iter()
+        .flatten()
+        .any(|entry| entry.file_type().is_file())
+}
+
+fn write_mod_engine_profile(game_dir: &Path, cfg: &GameMods) -> Result<Option<PathBuf>, String> {
+    let Some((game, _)) = mod_engine_game(cfg.steam_appid) else {
+        return Ok(None);
+    };
+    let staging_root = game_dir.join("staging");
+    let mut mods: Vec<&ModEntry> = cfg
+        .mods
+        .iter()
+        .filter(|entry| {
+            entry.enabled && !entry.deploy_blocked && entry.deploy_prefix == MOD_ENGINE_DEPLOY_ROOT
+        })
+        .collect();
+    mods.sort_by_key(|entry| entry.order);
+
+    let mut profile = format!(
+        "profileVersion = \"v1\"\n\n[[supports]]\ngame = {}\n",
+        serde_json::to_string(game).unwrap_or_else(|_| "\"unknown\"".to_string())
+    );
+    let mut has_payload = false;
+    for entry in mods {
+        let folder = safe_folder_name(&entry.id);
+        let staged = staging_root.join(&entry.id).join(&folder);
+        let mod_dir = staged.join("mod");
+        if directory_has_files(&mod_dir) {
+            let id = serde_json::to_string(&folder).unwrap_or_else(|_| "\"mod\"".to_string());
+            let path = serde_json::to_string(&format!("{MOD_ENGINE_DEPLOY_ROOT}/{folder}/mod"))
+                .unwrap_or_else(|_| "\"\"".to_string());
+            profile.push_str(&format!("\n[[packages]]\nid = {id}\npath = {path}\n"));
+            has_payload = true;
+        }
+
+        let natives_dir = staged.join("natives");
+        let mut natives: Vec<String> = walkdir::WalkDir::new(&natives_dir)
+            .min_depth(1)
+            .into_iter()
+            .flatten()
+            .filter(|native| {
+                native.file_type().is_file()
+                    && native
+                        .path()
+                        .extension()
+                        .and_then(|extension| extension.to_str())
+                        .map(|extension| extension.eq_ignore_ascii_case("dll"))
+                        .unwrap_or(false)
+            })
+            .filter_map(|native| rel_string(&natives_dir, native.path()))
+            .collect();
+        natives.sort();
+        for native in natives {
+            let path = serde_json::to_string(&format!(
+                "{MOD_ENGINE_DEPLOY_ROOT}/{folder}/natives/{native}"
+            ))
+            .unwrap_or_else(|_| "\"\"".to_string());
+            profile.push_str(&format!("\n[[natives]]\npath = {path}\n"));
+            has_payload = true;
+        }
+    }
+
+    let generated = game_dir.join("generated").join(MOD_ENGINE_PROFILE);
+    if !has_payload {
+        std::fs::remove_file(&generated).ok();
+        return Ok(None);
+    }
+    if let Some(parent) = generated.parent() {
+        std::fs::create_dir_all(parent).map_err(|error| format!("Mod Engine profile dir: {error}"))?;
+    }
+    std::fs::write(&generated, profile).map_err(|error| format!("Mod Engine profile: {error}"))?;
+    Ok(Some(generated))
+}
+
 pub(crate) fn deploy_to(game_dir: &Path, target: &Path, cfg: &GameMods) -> Result<usize, String> {
     let staging_root = game_dir.join("staging");
     let backup_root = game_dir.join("backup");
@@ -256,6 +334,12 @@ pub(crate) fn deploy_to(game_dir: &Path, target: &Path, cfg: &GameMods) -> Resul
                 desired.insert(prefixed, (entry.path().to_path_buf(), m.id.clone()));
             }
         }
+    }
+    if let Some(profile) = write_mod_engine_profile(game_dir, cfg)? {
+        desired.insert(
+            MOD_ENGINE_PROFILE.to_string(),
+            (profile, "union-manifold-mod-engine-3".to_string()),
+        );
     }
 
     if !desired.is_empty() {
@@ -411,12 +495,26 @@ fn redeploy(state: &AppState, appid: &str, cfg: &GameMods) -> Result<usize, Stri
     deploy_to(&dir, &target, cfg)
 }
 
+pub(crate) fn active_mod_engine_profile(state: &AppState, appid: &str) -> Option<PathBuf> {
+    let cfg = load_config(&state.paths, appid);
+    if !cfg.mods.iter().any(|entry| {
+        entry.enabled && !entry.deploy_blocked && entry.deploy_prefix == MOD_ENGINE_DEPLOY_ROOT
+    }) {
+        return None;
+    }
+    let profile = deploy_target_dir(state, appid, &cfg).ok()?.join(MOD_ENGINE_PROFILE);
+    profile.is_file().then_some(profile)
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum ModLayout {
     Raw,
     RequiresInstaller,
     BepInEx,
+    ModEngine3,
+    Lenny,
     MelonLoader,
+    Fluffy,
     ModsFolder,
 }
 
@@ -428,8 +526,160 @@ fn game_layout(steam_appid: Option<u64>) -> Option<ModLayout> {
     }
 }
 
+const MOD_ENGINE_PROFILE: &str = ".union-manifold.me3";
+const MOD_ENGINE_DEPLOY_ROOT: &str = ".union-manifold-me3";
 const RESIDENT_EVIL_REQUIEM_STEAM_APPID: u64 = 3_764_200;
 const EVERYTHING_IS_CRAB_STEAM_APPID: u64 = 3_526_710;
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LoaderCompatibility {
+    id: &'static str,
+    name: &'static str,
+    compatible: bool,
+    reason: String,
+}
+
+fn mod_engine_game(steam_appid: Option<u64>) -> Option<(&'static str, &'static str)> {
+    match steam_appid {
+        Some(374320) => Some(("darksouls3", "Dark Souls III")),
+        Some(814380) => Some(("sekiro", "Sekiro: Shadows Die Twice")),
+        Some(1245620) => Some(("eldenring", "Elden Ring")),
+        Some(1888160) => Some(("armoredcore6", "Armored Core VI: Fires of Rubicon")),
+        Some(2622380) => Some(("nightreign", "Elden Ring Nightreign")),
+        _ => None,
+    }
+}
+
+fn lenny_game(steam_appid: Option<u64>) -> Option<&'static str> {
+    match steam_appid {
+        Some(271590) => Some("Grand Theft Auto V (Legacy)"),
+        Some(1174180) => Some("Red Dead Redemption 2"),
+        _ => None,
+    }
+}
+
+fn fluffy_game(steam_appid: Option<u64>) -> Option<&'static str> {
+    match steam_appid {
+        Some(21690) => Some("Resident Evil 5"),
+        Some(221040) => Some("Resident Evil 6"),
+        Some(222480) => Some("Resident Evil Revelations"),
+        Some(254700) => Some("Resident Evil 4"),
+        Some(287290) => Some("Resident Evil Revelations 2"),
+        Some(304240) => Some("Resident Evil"),
+        Some(310950) => Some("Street Fighter V"),
+        Some(329050) => Some("Devil May Cry 4 Special Edition"),
+        Some(339340) => Some("Resident Evil 0"),
+        Some(389730) => Some("Tekken 7"),
+        Some(418370) => Some("Resident Evil 7"),
+        Some(544750) => Some("Soulcalibur VI"),
+        Some(582010) => Some("Monster Hunter: World"),
+        Some(601150) => Some("Devil May Cry 5"),
+        Some(692850) => Some("Bloodstained: Ritual of the Night"),
+        Some(883710) => Some("Resident Evil 2"),
+        Some(952060) => Some("Resident Evil 3"),
+        Some(1196590) => Some("Resident Evil Village"),
+        Some(1286320) => Some("Exoprimal"),
+        Some(1364780) => Some("Street Fighter 6"),
+        Some(1446780) => Some("Monster Hunter Rise"),
+        Some(1778820) => Some("Tekken 8"),
+        Some(2050650) => Some("Resident Evil 4"),
+        Some(2054970) => Some("Dragon's Dogma 2"),
+        Some(2246340) => Some("Monster Hunter Wilds"),
+        Some(2510710) => Some("Kunitsu-Gami: Path of the Goddess"),
+        Some(2527390) => Some("Dead Rising Deluxe Remaster"),
+        Some(RESIDENT_EVIL_REQUIEM_STEAM_APPID) => Some("Resident Evil Requiem"),
+        _ => None,
+    }
+}
+
+fn root_has_file_matching(target: &Path, predicate: impl Fn(&str) -> bool) -> bool {
+    std::fs::read_dir(target)
+        .ok()
+        .into_iter()
+        .flatten()
+        .flatten()
+        .any(|entry| entry.path().is_file() && predicate(&entry.file_name().to_string_lossy().to_lowercase()))
+}
+
+fn is_unity_target(target: &Path) -> bool {
+    let has_runtime = root_has_file_matching(target, |name| {
+        name == "unityplayer.dll" || name == "gameassembly.dll"
+    });
+    let has_data = std::fs::read_dir(target)
+        .ok()
+        .into_iter()
+        .flatten()
+        .flatten()
+        .any(|entry| {
+            entry.path().is_dir()
+                && entry
+                    .file_name()
+                    .to_string_lossy()
+                    .to_lowercase()
+                    .ends_with("_data")
+        });
+    has_runtime && has_data
+}
+
+fn is_fluffy_target(target: &Path) -> bool {
+    has_root_dir(target, &["nativePC"])
+        || root_has_file_matching(target, |name| {
+            name.starts_with("re_chunk_") && (name.ends_with(".pak") || name.contains(".pak.patch_"))
+        })
+}
+
+fn loader_compatibility(target: Option<&Path>, steam_appid: Option<u64>) -> Vec<LoaderCompatibility> {
+    let me3 = mod_engine_game(steam_appid);
+    let lenny = lenny_game(steam_appid);
+    let unity_files = target.map(is_unity_target).unwrap_or(false);
+    let melon = steam_appid == Some(EVERYTHING_IS_CRAB_STEAM_APPID) || unity_files;
+    let fluffy_title = fluffy_game(steam_appid);
+    let fluffy_files = target.map(is_fluffy_target).unwrap_or(false);
+
+    vec![
+        LoaderCompatibility {
+            id: "mod-engine-3",
+            name: "Mod Engine 3",
+            compatible: me3.is_some(),
+            reason: me3
+                .map(|(_, title)| format!("officially supported for {title}"))
+                .unwrap_or_else(|| "this Steam title is not in Mod Engine 3's supported game list".to_string()),
+        },
+        LoaderCompatibility {
+            id: "lennys-mod-loader",
+            name: "Lenny's Mod Loader",
+            compatible: lenny.is_some(),
+            reason: lenny
+                .map(|title| format!("supported for {title}"))
+                .unwrap_or_else(|| "this Steam title is not supported by Lenny's Mod Loader".to_string()),
+        },
+        LoaderCompatibility {
+            id: "melonloader",
+            name: "MelonLoader",
+            compatible: melon,
+            reason: if steam_appid == Some(EVERYTHING_IS_CRAB_STEAM_APPID) {
+                "known MelonLoader title".to_string()
+            } else if unity_files {
+                "detected Unity runtime and game data".to_string()
+            } else {
+                "no Windows Unity runtime was detected".to_string()
+            },
+        },
+        LoaderCompatibility {
+            id: "fluffy",
+            name: "Fluffy Mod Manager",
+            compatible: fluffy_title.is_some() || fluffy_files,
+            reason: if let Some(title) = fluffy_title {
+                format!("supported Fluffy title: {title}")
+            } else if fluffy_files {
+                "detected a supported RE Engine or MT Framework game layout".to_string()
+            } else {
+                "no supported title or game layout was detected".to_string()
+            },
+        },
+    ]
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct DeploymentPlan {
@@ -575,15 +825,51 @@ fn infer_deployment_plan(target: &Path, staged: &Path, steam_appid: Option<u64>)
             "low",
         );
     }
-    if let Some(layout) = game_layout(steam_appid) {
-        return deployment_plan(layout, "", "matched the game-specific mod layout", "high");
-    }
     if has_root_dir(&root, &["BepInEx"]) {
         return deployment_plan(ModLayout::BepInEx, "", "the archive contains a BepInEx tree", "high");
     }
+    if has_root_dir(&root, &["lml"]) {
+        return deployment_plan(
+            ModLayout::Raw,
+            "",
+            "the archive already contains a game-relative Lenny's Mod Loader tree",
+            "high",
+        );
+    }
+    if let Some((_, title)) = mod_engine_game(steam_appid) {
+        return deployment_plan(
+            ModLayout::ModEngine3,
+            MOD_ENGINE_DEPLOY_ROOT,
+            &format!("the title is supported by Mod Engine 3 ({title})"),
+            "high",
+        );
+    }
+    if let Some(title) = lenny_game(steam_appid) {
+        if has_root_file(&root, "install.xml") || has_root_dir(&root, &["replace", "stream"]) {
+            return deployment_plan(
+                ModLayout::Lenny,
+                "lml",
+                &format!("the archive is a Lenny's Mod Loader package for {title}"),
+                "high",
+            );
+        }
+    }
+    if let Some(layout) = game_layout(steam_appid) {
+        return deployment_plan(layout, "", "matched the game-specific mod layout", "high");
+    }
+    if has_root_file(&root, "modinfo.ini") && (fluffy_game(steam_appid).is_some() || is_fluffy_target(target)) {
+        return deployment_plan(
+            ModLayout::Fluffy,
+            "",
+            "the archive contains Fluffy metadata and the game has a supported title or layout",
+            "high",
+        );
+    }
     if has_root_dir(
         &root,
-        &["Data", "Mods", "MelonLoader", "Content", "reframework", "natives", "pak_mods"],
+        &[
+            "Data", "Mods", "MelonLoader", "Content", "reframework", "natives", "pak_mods", "nativePC",
+        ],
     ) {
         return deployment_plan(
             ModLayout::Raw,
@@ -616,8 +902,9 @@ fn infer_deployment_plan(target: &Path, staged: &Path, steam_appid: Option<u64>)
             "high",
         );
     }
-    let uses_melonloader =
-        steam_appid == Some(EVERYTHING_IS_CRAB_STEAM_APPID) || target.join("MelonLoader").is_dir();
+    let uses_melonloader = steam_appid == Some(EVERYTHING_IS_CRAB_STEAM_APPID)
+        || target.join("MelonLoader").is_dir()
+        || is_unity_target(target);
     if uses_melonloader && has_dll {
         let packaged_folder = has_root_file(&root, "manifest.json");
         return deployment_plan(
@@ -652,6 +939,14 @@ fn infer_deployment_plan(target: &Path, staged: &Path, steam_appid: Option<u64>)
                 "high",
             );
         }
+    }
+    if is_fluffy_target(target) && has_extension(&root, &["pak"], 3) {
+        return deployment_plan(
+            ModLayout::Fluffy,
+            "",
+            "the archive contains a PAK mod and the game has a supported Fluffy layout",
+            "high",
+        );
     }
     if target.join("Mods").is_dir()
         && (has_extension(&root, &["lua"], 3)
@@ -888,8 +1183,8 @@ pub(crate) fn apply_bepinex_layout(src: &Path, dst: &Path, full_name: &str) -> R
 }
 
 const MEANINGFUL_DIRS: &[&str] = &[
-    "bepinex", "data", "mods", "natives", "pak_mods", "plugins", "patchers", "config", "core",
-    "reframework", "scripts", "content",
+    "bepinex", "data", "lml", "mod", "mods", "natives", "nativepc", "pak_mods", "plugins", "patchers",
+    "config", "core", "replace", "reframework", "scripts", "stream", "content", "userlibs", "userdata",
 ];
 
 pub(crate) fn strip_wrapper_dir(staged: &Path) -> Result<(), String> {
@@ -929,10 +1224,144 @@ pub(crate) fn strip_wrapper_dir(staged: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn apply_staging_layout(staged: &Path, layout: ModLayout, fallback_name: &str) -> Result<(), String> {
+fn move_tree(src: &Path, dst: &Path, context: &str) -> Result<(), String> {
+    if let Some(parent) = dst.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("{context}: {e}"))?;
+    }
+    if std::fs::rename(src, dst).is_ok() {
+        return Ok(());
+    }
+    if src.is_dir() {
+        copy_dir_recursive(src, dst)?;
+        std::fs::remove_dir_all(src).ok();
+    } else {
+        std::fs::copy(src, dst).map_err(|e| format!("{context}: {e}"))?;
+        std::fs::remove_file(src).ok();
+    }
+    Ok(())
+}
+
+fn apply_lenny_layout(staged: &Path, fallback_name: &str) -> Result<(), String> {
+    let root = classification_root(staged);
+    if root != staged && has_root_file(&root, "install.xml") {
+        return Ok(());
+    }
+    if !has_root_file(staged, "install.xml") {
+        return strip_wrapper_dir(staged);
+    }
+
+    let entries: Vec<PathBuf> = std::fs::read_dir(staged)
+        .map_err(|e| format!("Lenny stage read: {e}"))?
+        .flatten()
+        .map(|entry| entry.path())
+        .collect();
+    let mut folder = safe_folder_name(fallback_name);
+    if folder.is_empty() || folder == "unknown" {
+        folder = "mod".to_string();
+    }
+    let mut destination = staged.join(&folder);
+    if entries.iter().any(|entry| entry == &destination) {
+        destination = staged.join(format!("{folder}-mod"));
+    }
+    std::fs::create_dir_all(&destination).map_err(|e| format!("Lenny package folder: {e}"))?;
+    for entry in entries {
+        let name = entry.file_name().unwrap_or_default().to_os_string();
+        move_tree(&entry, &destination.join(name), "Lenny package move")?;
+    }
+    Ok(())
+}
+
+fn apply_fluffy_layout(staged: &Path) -> Result<(), String> {
+    strip_wrapper_dir(staged)?;
+    for name in ["modinfo.ini", "screenshot.jpg", "screenshot.png"] {
+        let path = std::fs::read_dir(staged)
+            .ok()
+            .into_iter()
+            .flatten()
+            .flatten()
+            .find(|entry| entry.file_name().to_string_lossy().eq_ignore_ascii_case(name))
+            .map(|entry| entry.path());
+        if let Some(path) = path.filter(|path| path.is_file()) {
+            std::fs::remove_file(path).map_err(|e| format!("Fluffy metadata cleanup: {e}"))?;
+        }
+    }
+    Ok(())
+}
+
+fn is_mod_engine_bootstrap(name: &str) -> bool {
+    name == MOD_ENGINE_PROFILE
+        || name.ends_with(".me3")
+        || name.starts_with("modengine2")
+        || (name.starts_with("launchmod") && (name.ends_with(".bat") || name.ends_with(".cmd")))
+        || (name.starts_with("config_") && name.ends_with(".toml"))
+}
+
+fn apply_mod_engine_layout(staged: &Path, mod_id: &str) -> Result<(), String> {
+    let root = classification_root(staged);
+    let has_dll = has_extension(&root, &["dll"], 3);
+    let has_asset_payload = has_root_dir(
+        &root,
+        &[
+            "mod", "parts", "chr", "map", "event", "msg", "param", "sfx", "menu", "sound", "asset",
+            "action",
+        ],
+    ) || has_root_file(&root, "regulation.bin")
+        || has_extension(&root, &["dcx", "bnd", "bhd", "bdt"], 3);
+    let native_only = has_dll && !has_asset_payload;
+    let folder = safe_folder_name(mod_id);
+    let temporary = staged.with_file_name(format!(".{folder}-me3-layout"));
+    if temporary.exists() {
+        std::fs::remove_dir_all(&temporary).map_err(|e| format!("Mod Engine temporary cleanup: {e}"))?;
+    }
+    let package = temporary.join(&folder);
+    std::fs::create_dir_all(&package).map_err(|e| format!("Mod Engine stage: {e}"))?;
+
+    let entries: Vec<PathBuf> = std::fs::read_dir(&root)
+        .map_err(|e| format!("Mod Engine stage read: {e}"))?
+        .flatten()
+        .map(|entry| entry.path())
+        .collect();
+    for entry in entries {
+        let name = entry.file_name().unwrap_or_default().to_string_lossy().to_string();
+        let lower = name.to_lowercase();
+        if entry.is_file() && (is_ts_meta(&lower) || is_mod_engine_bootstrap(&lower)) {
+            continue;
+        }
+        let destination = if entry.is_dir() && lower == "mod" {
+            package.join("mod")
+        } else if entry.is_dir() && lower == "natives" {
+            package.join("natives")
+        } else if native_only
+            || (entry.is_file()
+                && entry
+                    .extension()
+                    .and_then(|extension| extension.to_str())
+                    .map(|extension| extension.eq_ignore_ascii_case("dll"))
+                    .unwrap_or(false))
+        {
+            package.join("natives").join(&name)
+        } else {
+            package.join("mod").join(&name)
+        };
+        move_tree(&entry, &destination, "Mod Engine package move")?;
+    }
+
+    std::fs::remove_dir_all(staged).map_err(|e| format!("Mod Engine stage replace: {e}"))?;
+    std::fs::rename(&temporary, staged).map_err(|e| format!("Mod Engine stage replace: {e}"))
+}
+
+fn apply_staging_layout(
+    staged: &Path,
+    layout: ModLayout,
+    fallback_name: &str,
+    mod_id: &str,
+) -> Result<(), String> {
     match layout {
         ModLayout::Raw => strip_wrapper_dir(staged),
+        ModLayout::ModEngine3 => apply_mod_engine_layout(staged, mod_id),
+        ModLayout::Lenny => apply_lenny_layout(staged, fallback_name),
         ModLayout::MelonLoader => Ok(()),
+        ModLayout::Fluffy => apply_fluffy_layout(staged),
         ModLayout::ModsFolder => wrap_in_mods_folder(staged, fallback_name),
         ModLayout::BepInEx | ModLayout::RequiresInstaller => {
             Err("loader-specific staging layout reached the raw archive path".to_string())
@@ -1015,7 +1444,9 @@ pub(crate) async fn finalize_install(
     let steam_appid = detect_steam_appid(&state, &spec.appid).await;
     let mut plan = infer_deployment_plan(&target, staged_src, steam_appid);
     if !cfg.deploy_target.is_empty() {
-        plan.deploy_prefix.clear();
+        if !matches!(plan.layout, ModLayout::ModEngine3 | ModLayout::Lenny) {
+            plan.deploy_prefix.clear();
+        }
         plan.reason = format!("using the manual deploy target {}; {}", cfg.deploy_target, plan.reason);
         plan.confidence = "manual";
     }
@@ -1036,7 +1467,7 @@ pub(crate) async fn finalize_install(
                 std::fs::remove_dir_all(staged_src).ok();
             }
         }
-        apply_staging_layout(&final_dir, plan.layout, &spec.name)?;
+        apply_staging_layout(&final_dir, plan.layout, &spec.name, &mod_id)?;
     }
 
     let size = crate::install::dir_size(&final_dir);
@@ -1127,7 +1558,7 @@ async fn flatten_tar(dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
-const DEPLOYMENT_PLAN_VERSION: u32 = 2;
+const DEPLOYMENT_PLAN_VERSION: u32 = 3;
 
 fn refresh_deployment_plans(state: &AppState, appid: &str, cfg: &mut GameMods) -> bool {
     let Ok(target) = deploy_target_dir(state, appid, cfg) else {
@@ -1136,14 +1567,26 @@ fn refresh_deployment_plans(state: &AppState, appid: &str, cfg: &mut GameMods) -
     let manual_target = cfg.deploy_target.clone();
     let staging = game_mods_dir(&state.paths, appid).join("staging");
     let mut changed = cfg.deployment_plan_version != DEPLOYMENT_PLAN_VERSION;
+    let migrating = cfg.deployment_plan_version != DEPLOYMENT_PLAN_VERSION;
     for installed in &mut cfg.mods {
         let staged = staging.join(&installed.id);
         if !staged.is_dir() {
             continue;
         }
         let mut plan = infer_deployment_plan(&target, &staged, cfg.steam_appid);
+        if migrating && matches!(plan.layout, ModLayout::ModEngine3 | ModLayout::Lenny | ModLayout::Fluffy) {
+            if let Err(error) = apply_staging_layout(&staged, plan.layout, &installed.name, &installed.id) {
+                crate::logging::write_line(
+                    "warn",
+                    &format!("mod deployment layout migration failed for {appid}/{}: {error}", installed.id),
+                );
+                continue;
+            }
+        }
         if !manual_target.is_empty() {
-            plan.deploy_prefix.clear();
+            if !matches!(plan.layout, ModLayout::ModEngine3 | ModLayout::Lenny) {
+                plan.deploy_prefix.clear();
+            }
             plan.reason = format!("using the manual deploy target {}; {}", manual_target, plan.reason);
             plan.confidence = "manual";
         }
@@ -1232,6 +1675,8 @@ pub async fn mods_game_get(state: State<'_, AppState>, appid: String) -> Result<
         }
     }
     let deployed = !load_journal(&game_mods_dir(&state.paths, &appid)).files.is_empty();
+    let compatibility_target = deploy_target_dir(&state, &appid, &cfg).ok();
+    let loaders = loader_compatibility(compatibility_target.as_deref(), cfg.steam_appid);
     Ok(json!({
         "ok": true,
         "nexusDomain": cfg.nexus_domain,
@@ -1243,6 +1688,7 @@ pub async fn mods_game_get(state: State<'_, AppState>, appid: String) -> Result<
         "thunderstoreSupported": cfg.thunderstore_community.is_some(),
         "deployTarget": cfg.deploy_target,
         "deployed": deployed,
+        "loaderCompatibility": loaders,
         "mods": serde_json::to_value(&cfg.mods).unwrap_or_else(|_| json!([])),
     }))
 }
