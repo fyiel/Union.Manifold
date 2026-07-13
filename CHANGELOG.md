@@ -3,6 +3,17 @@
 All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 
+## 3.3.0
+
+### Added
+
+- automatic REFramework Lua deployment routes Resident Evil Requiem scripts to
+  `reframework/autorun` and preserves game-relative `reframework`, `natives` and
+  `pak_mods` trees used by Nexus and Fluffy-style archives
+- manifest-backed MelonLoader packages retain their top-level mod folder under
+  `Mods`, including Everything is Crab packages installed before the loader's
+  first run, so assemblies keep their manifests and companion assets
+
 ## 3.2.1
 
 ### Fixed
