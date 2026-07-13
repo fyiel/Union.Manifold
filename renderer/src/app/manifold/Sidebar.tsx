@@ -61,6 +61,12 @@ const ICONS: Record<string, ReactNode> = {
       <rect x="2.5" y="9" width="11" height="4" rx="1" />
     </svg>
   ),
+  achievements: (
+    <svg viewBox="0 0 16 16" width="16" height="16" {...stroke}>
+      <path d="M5 3h6v2.5c0 2.2-1.2 3.8-3 3.8s-3-1.6-3-3.8V3Z" />
+      <path d="M5 4H2.8v1.2c0 1.5.9 2.4 2.5 2.4M11 4h2.2v1.2c0 1.5-.9 2.4-2.5 2.4M8 9.3V12M5.5 13h5" />
+    </svg>
+  ),
   downloads: (
     <svg viewBox="0 0 16 16" width="16" height="16" {...stroke}>
       <line x1="8" y1="2.5" x2="8" y2="9.5" />
@@ -81,6 +87,7 @@ const ICONS: Record<string, ReactNode> = {
 const NAV = [
   { to: "/", label: "Browse", icon: "browse", end: true },
   { to: "/library", label: "Library", icon: "library", end: false },
+  { to: "/achievements", label: "Achievements", icon: "achievements", end: false },
   { to: "/downloads", label: "Downloads", icon: "downloads", end: false },
 ] as const
 

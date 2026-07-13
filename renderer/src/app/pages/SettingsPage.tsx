@@ -50,12 +50,14 @@ export function SettingsPage() {
   const [diskMargin, setDiskMargin] = useState(2)
   const [startPage, setStartPage] = useState<"browse" | "library">("browse")
   const [closeOnLaunch, setCloseOnLaunch] = useState(false)
+  const [achievementNotifications, setAchievementNotifications] = useState(true)
+  const [achievementSystemNotifications, setAchievementSystemNotifications] = useState(true)
 
   useEffect(() => {
     let alive = true
     void (async () => {
       try {
-        const [cb, kbps, del, path, sc, pause, mini, upd, nid, nge, maxC, conns, margin, sp, auto, col] = await Promise.all([
+        const [cb, kbps, del, path, sc, pause, mini, upd, nid, nge, maxC, conns, margin, sp, auto, col, achievementPopups, achievementFallbacks] = await Promise.all([
           window.ucSettings?.get?.("closeBehavior"),
           window.ucSettings?.get?.("downloadBandwidthLimitKBps"),
           window.ucSettings?.get?.("autoDeleteArchives"),
@@ -72,6 +74,8 @@ export function SettingsPage() {
           window.ucSettings?.get?.("startPage"),
           window.ucAutostart?.get?.(),
           window.ucSettings?.get?.("closeOnGameLaunch"),
+          window.ucSettings?.get?.("achievementNotifications"),
+          window.ucSettings?.get?.("achievementSystemNotifications"),
         ])
         if (!alive) return
         if (cb === "hide" || cb === "quit") setCloseBehavior(cb)
@@ -92,6 +96,8 @@ export function SettingsPage() {
         if (sp === "library") setStartPage("library")
         setLaunchAtLogin(Boolean(auto?.enabled))
         setCloseOnLaunch(col === true)
+        setAchievementNotifications(achievementPopups !== false)
+        setAchievementSystemNotifications(achievementFallbacks !== false)
       } catch {  }
     })()
     const off = window.ucSettings?.onChanged?.((d) => {
@@ -99,6 +105,8 @@ export function SettingsPage() {
       if (d.key === "autoDeleteArchives") setAutoDelete(d.value === true)
       if (d.key === "alwaysCreateDesktopShortcut") setShortcut(d.value === true)
       if (d.key === "pauseDownloadsWhilePlaying") setPauseWhilePlaying(d.value === true)
+      if (d.key === "achievementNotifications") setAchievementNotifications(d.value !== false)
+      if (d.key === "achievementSystemNotifications") setAchievementSystemNotifications(d.value !== false)
     })
     return () => { alive = false; off?.() }
   }, [])
@@ -177,7 +185,9 @@ export function SettingsPage() {
                 <ToggleRow title="Check for updates on startup" desc="Look for a new version shortly after launch and notify when one is ready" on={autoCheckUpdates} onToggle={() => setBool("autoCheckUpdates", !autoCheckUpdates, setAutoCheckUpdates)} />
                 <ToggleRow title="Notify when a game is ready" desc="Desktop notification when a download finishes installing" on={notifyInstallDone} onToggle={() => setBool("notifyInstallDone", !notifyInstallDone, setNotifyInstallDone)} />
                 <ToggleRow title="Notify when a game exits" desc="Desktop notification when a running game closes" on={notifyGameExit} onToggle={() => setBool("notifyGameExit", !notifyGameExit, setNotifyGameExit)} />
-                <ToggleRow title="Close the app when a game launches" desc="Quit Union.Manifold a few seconds after a game starts, to free memory and CPU. The game keeps running." on={closeOnLaunch} onToggle={() => setBool("closeOnGameLaunch", !closeOnLaunch, setCloseOnLaunch)} />
+                <ToggleRow title="Show achievement popups in-game" desc="Display a Steam-style Manifold popup when a local achievement unlocks" on={achievementNotifications} onToggle={() => setBool("achievementNotifications", !achievementNotifications, setAchievementNotifications)} />
+                <ToggleRow title="Achievement notification fallback" desc="Also send an operating-system notification when an achievement unlocks" on={achievementSystemNotifications} onToggle={() => setBool("achievementSystemNotifications", !achievementSystemNotifications, setAchievementSystemNotifications)} />
+                <ToggleRow title="Hide or close the app when a game launches" desc="Hide Manifold while popups are enabled; otherwise quit a few seconds after the game starts" on={closeOnLaunch} onToggle={() => setBool("closeOnGameLaunch", !closeOnLaunch, setCloseOnLaunch)} />
                 <ClearAssetsRow />
               </div>
             )}
