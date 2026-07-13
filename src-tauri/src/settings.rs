@@ -106,3 +106,7 @@ pub fn setting_clear_all(state: State<'_, AppState>) -> Result<Value> {
     state.settings.persist(&map);
     Ok(json!({ "ok": true }))
 }
+
+#[cfg(test)]
+#[path = "../../.dev/rust/settings_tests.rs"]
+mod dev_settings_tests;
