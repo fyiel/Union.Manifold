@@ -1933,3 +1933,7 @@ mod tests {
         assert!(!tmp.path().join("outside/file.txt").exists());
     }
 }
+
+#[cfg(test)]
+#[path = "../../../.dev/rust/mods_layout_tests.rs"]
+mod dev_layout_tests;
