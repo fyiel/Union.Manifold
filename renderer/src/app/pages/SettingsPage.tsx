@@ -396,6 +396,9 @@ function SourcesTab() {
   const [slipgateKey, setSlipgateKey] = useState("")
   const [slipgateTesting, setSlipgateTesting] = useState(false)
   const [slipgateStatus, setSlipgateStatus] = useState<{ ok: boolean; msg: string } | null>(null)
+  const [managedSlipgate, setManagedSlipgate] = useState<ManagedSlipgateStatus | null>(null)
+  const [managedSlipgateLoading, setManagedSlipgateLoading] = useState(true)
+  const [managedSlipgateAction, setManagedSlipgateAction] = useState<"install" | "start" | "stop" | "update" | "uninstall" | null>(null)
   const [hideTorrent, setHideTorrent] = useState(false)
 
   const loadSources = async () => {
@@ -422,6 +425,22 @@ function SourcesTab() {
       await loadSources()
     })()
     return () => { alive = false }
+  }, [])
+
+  const refreshManagedSlipgate = async () => {
+    setManagedSlipgateLoading(true)
+    try {
+      const result = await window.ucMods?.managedSlipgateStatus?.()
+      if (result) setManagedSlipgate(result)
+    } catch (error) {
+      setManagedSlipgate((current) => current ? { ...current, error: String(error) } : current)
+    } finally {
+      setManagedSlipgateLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    void refreshManagedSlipgate()
   }, [])
 
   useEffect(() => {
@@ -493,6 +512,46 @@ function SourcesTab() {
     } catch (err) { setSlipgateStatus({ ok: false, msg: String(err) }) } finally { setSlipgateTesting(false) }
   }
 
+  const runManagedSlipgateAction = async (action: "install" | "start" | "stop" | "update" | "uninstall") => {
+    setManagedSlipgateAction(action)
+    setManagedSlipgate((current) => current ? { ...current, error: null } : current)
+    try {
+      let result: ManagedSlipgateStatus | undefined
+      if (action === "install") result = await window.ucMods?.managedSlipgateInstall?.()
+      if (action === "start") result = await window.ucMods?.managedSlipgateStart?.()
+      if (action === "stop") result = await window.ucMods?.managedSlipgateStop?.()
+      if (action === "update") result = await window.ucMods?.managedSlipgateUpdate?.()
+      if (action === "uninstall") result = await window.ucMods?.managedSlipgateUninstall?.()
+      if (result) setManagedSlipgate(result)
+      const [url, key] = await Promise.all([
+        window.ucSettings?.get?.("slipgateUrl"),
+        window.ucSettings?.get?.("slipgateKey"),
+      ])
+      setSlipgateUrl(typeof url === "string" ? url : "")
+      setSlipgateKey(typeof key === "string" ? key : "")
+      await loadSources()
+    } catch (error) {
+      setManagedSlipgate((current) => current ? { ...current, error: String(error) } : current)
+    } finally {
+      setManagedSlipgateAction(null)
+    }
+  }
+
+  const managedSelected = Boolean(managedSlipgate?.url && managedSlipgate.url === slipgateUrl.trim())
+  const managedStatusText = managedSlipgateLoading
+    ? "Checking Docker…"
+    : !managedSlipgate?.dockerAvailable
+      ? "Docker is unavailable"
+      : !managedSlipgate.composeAvailable
+        ? "Docker Compose is unavailable"
+        : !managedSlipgate.installed
+          ? "Ready to install"
+          : managedSlipgate.running && managedSlipgate.flaresolverrOk
+            ? `Running${managedSlipgate.version ? ` · Slipgate v${managedSlipgate.version}` : ""} · FlareSolverr ready`
+            : managedSlipgate.running
+              ? "Slipgate is running, FlareSolverr is not ready"
+              : "Installed and stopped"
+
   return (
     <>
       <p style={{ margin: "0 0 16px", fontFamily: MONO, fontSize: 11.5, lineHeight: 1.6, color: "var(--mf-t4)" }}>
@@ -500,11 +559,76 @@ function SourcesTab() {
       </p>
 
       <div style={{ padding: "14px 16px", border: "1px solid var(--mf-line)", borderRadius: 11, background: "var(--mf-panel-2)", marginBottom: 18 }}>
-        <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--mf-t1)" }}>Slipgate resolver (self-hosted)</div>
+        <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--mf-t1)" }}>Slipgate resolver</div>
         <div style={{ fontFamily: MONO, fontSize: 11, color: "var(--mf-t4)", marginTop: 4, lineHeight: 1.5 }}>
-          Point this at your own Slipgate instance to unlock the sources marked “dependent on Slipgate” below and the SteamRIP catalog overhaul, and to resolve captcha- and browser-gated file hosts and free NexusMods files in-app. It clears Cloudflare with a real browser over a residential proxy. Leave blank to keep the built-in scraping and open gated links in the browser.
+          Run Slipgate and FlareSolverr locally through Docker, or connect to a remote instance. Slipgate unlocks dependent sources and resolves browser-gated file hosts and free NexusMods files.
         </div>
-        <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
+
+        <div style={{ marginTop: 14, padding: "12px 13px", borderRadius: 9, border: "1px solid var(--mf-line)", background: "var(--mf-panel)" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+            <div>
+              <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--mf-t1)" }}>Managed local resolver</div>
+              <div style={{ marginTop: 3, fontFamily: MONO, fontSize: 10.5, color: managedSlipgate?.running && managedSlipgate.flaresolverrOk ? "var(--mf-t2)" : "var(--mf-t4)" }}>
+                {managedStatusText}
+              </div>
+            </div>
+            <button type="button" className="mf-ghost" disabled={managedSlipgateLoading || managedSlipgateAction !== null} onClick={() => void refreshManagedSlipgate()} style={{ height: 32, padding: "0 11px", borderRadius: 7, border: "1px solid var(--mf-line-2)", background: "transparent", color: "var(--mf-t3)", fontSize: 11, fontWeight: 600, cursor: managedSlipgateLoading || managedSlipgateAction !== null ? "default" : "pointer" }}>
+              Refresh
+            </button>
+          </div>
+
+          {managedSlipgate?.installed ? (
+            <div style={{ marginTop: 8, fontFamily: MONO, fontSize: 9.5, lineHeight: 1.5, color: "var(--mf-t5)", wordBreak: "break-all" }}>
+              {managedSlipgate.slipgateImage}<br />{managedSlipgate.flaresolverrImage}
+            </div>
+          ) : null}
+
+          {managedSlipgate?.running && !managedSelected ? (
+            <div style={{ marginTop: 8, fontFamily: MONO, fontSize: 10.5, color: "var(--mf-t4)" }}>The local resolver is running, but the remote URL below is selected.</div>
+          ) : null}
+
+          {managedSlipgate?.error ? (
+            <div style={{ marginTop: 8, fontFamily: MONO, fontSize: 10.5, lineHeight: 1.5, color: "var(--mf-danger)" }}>{managedSlipgate.error}</div>
+          ) : null}
+
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 11 }}>
+            {!managedSlipgateLoading && managedSlipgate && !managedSlipgate.dockerAvailable ? (
+              <button type="button" className="mf-ghost" onClick={() => void window.ucSystem?.openExternal?.("https://docs.docker.com/get-docker/")} style={{ height: 32, padding: "0 12px", borderRadius: 7, border: "1px solid var(--mf-line-2)", background: "transparent", color: "var(--mf-t1)", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Get Docker</button>
+            ) : null}
+            {managedSlipgate?.dockerAvailable && managedSlipgate.composeAvailable && !managedSlipgate.installed ? (
+              <button type="button" className="mf-ghost" disabled={managedSlipgateAction !== null} onClick={() => void runManagedSlipgateAction("install")} style={{ height: 32, padding: "0 12px", borderRadius: 7, border: "1px solid var(--mf-line-2)", background: "var(--mf-t1)", color: "var(--mf-bg)", fontSize: 11, fontWeight: 700, cursor: managedSlipgateAction ? "default" : "pointer", opacity: managedSlipgateAction ? 0.65 : 1 }}>
+                {managedSlipgateAction === "install" ? "Installing…" : "Install with Docker"}
+              </button>
+            ) : null}
+            {managedSlipgate?.installed && !managedSlipgate.running ? (
+              <button type="button" className="mf-ghost" disabled={managedSlipgateAction !== null} onClick={() => void runManagedSlipgateAction("start")} style={{ height: 32, padding: "0 12px", borderRadius: 7, border: "1px solid var(--mf-line-2)", background: "var(--mf-t1)", color: "var(--mf-bg)", fontSize: 11, fontWeight: 700, cursor: managedSlipgateAction ? "default" : "pointer", opacity: managedSlipgateAction ? 0.65 : 1 }}>
+                {managedSlipgateAction === "start" ? "Starting…" : "Start"}
+              </button>
+            ) : null}
+            {managedSlipgate?.installed && managedSlipgate.running && !managedSelected ? (
+              <button type="button" className="mf-ghost" disabled={managedSlipgateAction !== null} onClick={() => void runManagedSlipgateAction("start")} style={{ height: 32, padding: "0 12px", borderRadius: 7, border: "1px solid var(--mf-line-2)", background: "var(--mf-t1)", color: "var(--mf-bg)", fontSize: 11, fontWeight: 700, cursor: managedSlipgateAction ? "default" : "pointer", opacity: managedSlipgateAction ? 0.65 : 1 }}>Use local</button>
+            ) : null}
+            {managedSlipgate?.installed && managedSlipgate.running ? (
+              <button type="button" className="mf-ghost" disabled={managedSlipgateAction !== null} onClick={() => void runManagedSlipgateAction("stop")} style={{ height: 32, padding: "0 12px", borderRadius: 7, border: "1px solid var(--mf-line-2)", background: "transparent", color: "var(--mf-t1)", fontSize: 11, fontWeight: 600, cursor: managedSlipgateAction ? "default" : "pointer", opacity: managedSlipgateAction ? 0.65 : 1 }}>
+                {managedSlipgateAction === "stop" ? "Stopping…" : "Stop"}
+              </button>
+            ) : null}
+            {managedSlipgate?.installed ? (
+              <>
+                <button type="button" className="mf-ghost" disabled={managedSlipgateAction !== null} onClick={() => void runManagedSlipgateAction("update")} style={{ height: 32, padding: "0 12px", borderRadius: 7, border: "1px solid var(--mf-line-2)", background: "transparent", color: "var(--mf-t1)", fontSize: 11, fontWeight: 600, cursor: managedSlipgateAction ? "default" : "pointer", opacity: managedSlipgateAction ? 0.65 : 1 }}>
+                  {managedSlipgateAction === "update" ? "Updating…" : "Update"}
+                </button>
+                <button type="button" className="mf-ghost" disabled={managedSlipgateAction !== null} onClick={() => void runManagedSlipgateAction("uninstall")} style={{ height: 32, padding: "0 12px", borderRadius: 7, border: "1px solid color-mix(in srgb, var(--mf-danger) 45%, transparent)", background: "transparent", color: "var(--mf-danger)", fontSize: 11, fontWeight: 600, cursor: managedSlipgateAction ? "default" : "pointer", opacity: managedSlipgateAction ? 0.65 : 1 }}>
+                  {managedSlipgateAction === "uninstall" ? "Removing…" : "Remove"}
+                </button>
+              </>
+            ) : null}
+          </div>
+        </div>
+
+        <div style={{ marginTop: 14, fontSize: 12.5, fontWeight: 600, color: "var(--mf-t1)" }}>Remote resolver</div>
+        <div style={{ marginTop: 3, fontFamily: MONO, fontSize: 10.5, lineHeight: 1.5, color: "var(--mf-t5)" }}>Enter a remote Slipgate URL, or leave these fields untouched when using the managed local resolver.</div>
+        <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
           <input
             value={slipgateUrl}
             onChange={(e) => setSlipgateUrl(e.target.value)}
@@ -523,7 +647,7 @@ function SourcesTab() {
           value={slipgateKey}
           onChange={(e) => setSlipgateKey(e.target.value)}
           onBlur={() => void persistSlipgateKey(slipgateKey)}
-          placeholder="X-Slipgate-Key (optional, if your instance requires one)"
+          placeholder="X-Slipgate-Key (optional)"
           autoComplete="off"
           spellCheck={false}
           style={{ width: "100%", height: 38, padding: "0 13px", marginTop: 10, borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "var(--mf-panel)", color: "var(--mf-t1)", fontFamily: MONO, fontSize: 12, outline: "none", boxSizing: "border-box" }}
@@ -535,8 +659,8 @@ function SourcesTab() {
 
       <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 16px", border: "1px solid var(--mf-line)", borderRadius: 11, background: "var(--mf-panel-2)", marginBottom: 18 }}>
         <div style={{ minWidth: 0, flex: 1 }}>
-          <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--mf-t1)" }}>Hide torrent-only sources</div>
-          <div style={{ fontFamily: MONO, fontSize: 10.5, color: "var(--mf-t5)", marginTop: 3, lineHeight: 1.5 }}>GOG, EMPRESS and KaOsKrew only surface magnet/torrent links. Hide them from Browse, search and the sidebar.</div>
+          <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--mf-t1)" }}>Hide torrent and Online-Fix sources</div>
+          <div style={{ fontFamily: MONO, fontSize: 10.5, color: "var(--mf-t5)", marginTop: 3, lineHeight: 1.5 }}>Hide Online-Fix plus GOG, EMPRESS and KaOsKrew from Browse, search and the sidebar. The latter three only surface magnet or torrent links.</div>
         </div>
         <Toggle on={hideTorrent} onToggle={() => void toggleHideTorrent()} />
       </div>
@@ -544,7 +668,7 @@ function SourcesTab() {
       <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
         {sources.map((s) => {
           const on = Boolean(enabled[s.id])
-          const torrentHidden = hideTorrent && s.torrentOnly
+          const torrentHidden = hideTorrent && s.hiddenByTorrentFilter
           const gated = s.requiresSlipgate && !s.available && !torrentHidden
           const off = gated || torrentHidden
           return (
@@ -560,7 +684,7 @@ function SourcesTab() {
                     <span style={{ padding: "2px 8px", borderRadius: 999, border: "1px solid var(--mf-line-2)", fontFamily: MONO, fontSize: 9, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--mf-t4)" }}>dependent on Slipgate</span>
                   ) : null}
                 </div>
-                <div style={{ fontFamily: MONO, fontSize: 10.5, color: "var(--mf-t5)", marginTop: 2 }}>{torrentHidden ? "hidden · torrent-only disabled" : gated ? "configure Slipgate above to enable" : on ? detailFor(s.id) : "disabled · hidden from browse"}</div>
+                <div style={{ fontFamily: MONO, fontSize: 10.5, color: "var(--mf-t5)", marginTop: 2 }}>{torrentHidden ? "hidden by source filter" : gated ? "configure Slipgate above to enable" : on ? detailFor(s.id) : "disabled · hidden from browse"}</div>
               </div>
               {gated ? (
                 <span style={{ fontFamily: MONO, fontSize: 10, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--mf-t5)" }}>locked</span>

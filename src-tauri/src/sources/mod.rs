@@ -152,6 +152,7 @@ pub struct SourceInfo {
     pub requires_slipgate: bool,
     pub available: bool,
     pub torrent_only: bool,
+    pub hidden_by_torrent_filter: bool,
 }
 
 pub struct SourceMeta {
@@ -172,6 +173,10 @@ pub const SOURCES: &[SourceMeta] = &[
     SourceMeta { id: "empress", name: "EMPRESS", homepage: "https://hydralinks.cloud", requires_slipgate: true, torrent_only: true },
     SourceMeta { id: "kaoskrew", name: "KaOsKrew", homepage: "https://kaoskrew.org", requires_slipgate: true, torrent_only: true },
 ];
+
+fn hidden_by_torrent_filter(source: &SourceMeta) -> bool {
+    source.torrent_only || source.id == "onlinefix"
+}
 
 pub fn capabilities_for(id: &str) -> Capabilities {
     match id {
@@ -282,7 +287,7 @@ impl Registry {
         SOURCES
             .iter()
             .filter(|s| slipgate || !s.requires_slipgate || adapters::hydralinks::is_reachable(s.id))
-            .filter(|s| !hide_torrent || !s.torrent_only)
+            .filter(|s| !hide_torrent || !hidden_by_torrent_filter(s))
             .map(|s| s.id.to_string())
             .filter(|id| self.is_enabled(id))
             .filter(|id| requested.as_ref().map(|r| r.contains(id)).unwrap_or(true))
@@ -301,8 +306,10 @@ impl Registry {
                 capabilities: capabilities_for(s.id),
                 enabled: self.is_enabled(s.id),
                 requires_slipgate: s.requires_slipgate,
-                available: (slipgate || !s.requires_slipgate || adapters::hydralinks::is_reachable(s.id)) && !(hide_torrent && s.torrent_only),
+                available: (slipgate || !s.requires_slipgate || adapters::hydralinks::is_reachable(s.id))
+                    && !(hide_torrent && hidden_by_torrent_filter(s)),
                 torrent_only: s.torrent_only,
+                hidden_by_torrent_filter: hidden_by_torrent_filter(s),
             })
             .collect()
     }
@@ -649,5 +656,23 @@ async fn refresh_source(id: &str) -> Option<usize> {
         "empress" => adapters::empress::refresh().await,
         "kaoskrew" => adapters::kaoskrew::refresh().await,
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn torrent_filter_groups_onlinefix_without_relabeling_it() {
+        let onlinefix = SOURCES.iter().find(|source| source.id == "onlinefix").unwrap();
+        let gog = SOURCES.iter().find(|source| source.id == "gog").unwrap();
+        let steamrip = SOURCES.iter().find(|source| source.id == "steamrip").unwrap();
+
+        assert!(hidden_by_torrent_filter(onlinefix));
+        assert!(!onlinefix.torrent_only);
+        assert!(hidden_by_torrent_filter(gog));
+        assert!(gog.torrent_only);
+        assert!(!hidden_by_torrent_filter(steamrip));
     }
 }
