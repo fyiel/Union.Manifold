@@ -116,7 +116,7 @@ pub fn run() {
             slipgate::init(settings.clone());
             crate::settings::init(settings.clone());
             crate::http::set_proxy(settings.get_string("proxyUrl"));
-            let cacert = app.path().resource_dir().ok().map(|d| d.join("cacert.pem"));
+            let cacert = crate::downloads::aria2::resolve_ca_cert(app.path().resource_dir().ok());
             let aria2 = Arc::new(Aria2Manager::new(cacert, settings.get_string("proxyUrl")));
             let disabled_sources: Vec<String> = settings
                 .get("disabledSources")
