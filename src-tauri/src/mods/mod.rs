@@ -35,6 +35,10 @@ pub struct ModEntry {
     pub installed_at: i64,
     pub size_bytes: u64,
     pub page_url: String,
+    pub deploy_prefix: String,
+    pub deploy_reason: String,
+    pub deploy_confidence: String,
+    pub deploy_blocked: bool,
 }
 
 #[derive(Clone, Default, Serialize, Deserialize)]
@@ -50,6 +54,7 @@ pub struct GameMods {
     pub thunderstore_community_auto: bool,
     pub thunderstore_checked: bool,
     pub deploy_target: String,
+    pub deployment_plan_version: u32,
     pub mods: Vec<ModEntry>,
 }
 
@@ -228,17 +233,27 @@ pub(crate) fn deploy_to(game_dir: &Path, target: &Path, cfg: &GameMods) -> Resul
     let staging_root = game_dir.join("staging");
     let backup_root = game_dir.join("backup");
 
-    let mut enabled: Vec<&ModEntry> = cfg.mods.iter().filter(|m| m.enabled).collect();
+    let mut enabled: Vec<&ModEntry> = cfg.mods.iter().filter(|m| m.enabled && !m.deploy_blocked).collect();
     enabled.sort_by_key(|m| m.order);
     let mut desired: HashMap<String, (PathBuf, String)> = HashMap::new();
     for m in enabled {
+        let prefix = join_target(Path::new(""), &m.deploy_prefix)?
+            .components()
+            .map(|component| component.as_os_str().to_string_lossy().to_string())
+            .collect::<Vec<_>>()
+            .join("/");
         let sdir = staging_root.join(&m.id);
         for entry in walkdir::WalkDir::new(&sdir).into_iter().flatten() {
             if !entry.file_type().is_file() {
                 continue;
             }
             if let Some(rel) = rel_string(&sdir, entry.path()) {
-                desired.insert(rel, (entry.path().to_path_buf(), m.id.clone()));
+                let prefixed = if prefix.is_empty() {
+                    rel
+                } else {
+                    format!("{prefix}/{rel}")
+                };
+                desired.insert(prefixed, (entry.path().to_path_buf(), m.id.clone()));
             }
         }
     }
@@ -399,6 +414,7 @@ fn redeploy(state: &AppState, appid: &str, cfg: &GameMods) -> Result<usize, Stri
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum ModLayout {
     Raw,
+    RequiresInstaller,
     BepInEx,
     ModsFolder,
 }
@@ -409,6 +425,208 @@ fn game_layout(steam_appid: Option<u64>) -> Option<ModLayout> {
         Some(881100) => Some(ModLayout::ModsFolder),
         _ => None,
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct DeploymentPlan {
+    layout: ModLayout,
+    deploy_prefix: String,
+    reason: String,
+    confidence: &'static str,
+}
+
+fn deployment_plan(layout: ModLayout, prefix: &str, reason: &str, confidence: &'static str) -> DeploymentPlan {
+    DeploymentPlan {
+        layout,
+        deploy_prefix: prefix.to_string(),
+        reason: reason.to_string(),
+        confidence,
+    }
+}
+
+fn classification_root(staged: &Path) -> PathBuf {
+    let entries: Vec<PathBuf> = std::fs::read_dir(staged)
+        .ok()
+        .map(|rd| {
+            rd.flatten()
+                .map(|e| e.path())
+                .filter(|p| !p.file_name().map(|n| is_ts_meta(&n.to_string_lossy())).unwrap_or(false))
+                .collect()
+        })
+        .unwrap_or_default();
+    if entries.len() != 1 || !entries[0].is_dir() {
+        return staged.to_path_buf();
+    }
+    let name = entries[0].file_name().unwrap_or_default().to_string_lossy().to_lowercase();
+    if MEANINGFUL_DIRS.contains(&name.as_str()) {
+        staged.to_path_buf()
+    } else {
+        entries[0].clone()
+    }
+}
+
+fn has_root_dir(root: &Path, names: &[&str]) -> bool {
+    std::fs::read_dir(root)
+        .ok()
+        .into_iter()
+        .flatten()
+        .flatten()
+        .any(|entry| {
+            entry.path().is_dir()
+                && names
+                    .iter()
+                    .any(|name| entry.file_name().to_string_lossy().eq_ignore_ascii_case(name))
+        })
+}
+
+fn has_extension(root: &Path, extensions: &[&str], max_depth: usize) -> bool {
+    walkdir::WalkDir::new(root)
+        .max_depth(max_depth)
+        .into_iter()
+        .flatten()
+        .any(|entry| {
+            entry.file_type().is_file()
+                && entry
+                    .path()
+                    .extension()
+                    .and_then(|ext| ext.to_str())
+                    .map(|ext| extensions.iter().any(|wanted| ext.eq_ignore_ascii_case(wanted)))
+                    .unwrap_or(false)
+        })
+}
+
+fn contains_fomod(root: &Path) -> bool {
+    walkdir::WalkDir::new(root)
+        .max_depth(4)
+        .into_iter()
+        .flatten()
+        .any(|entry| {
+            entry.file_type().is_file()
+                && entry
+                    .path()
+                    .to_string_lossy()
+                    .replace('\\', "/")
+                    .to_lowercase()
+                    .ends_with("fomod/moduleconfig.xml")
+        })
+}
+
+fn is_bethesda_game(target: &Path, steam_appid: Option<u64>) -> bool {
+    if matches!(
+        steam_appid,
+        Some(22320 | 22330 | 22370 | 22380 | 72850 | 377160 | 489830 | 1716740)
+    ) {
+        return true;
+    }
+    let data = target.join("Data");
+    data.is_dir() && has_extension(&data, &["esm", "esl"], 2)
+}
+
+fn is_bethesda_payload(root: &Path) -> bool {
+    has_root_dir(root, &["meshes", "textures", "scripts", "sound", "interface", "strings", "skse"])
+        || has_extension(root, &["esp", "esm", "esl", "bsa"], 3)
+}
+
+fn unreal_paks_target(target: &Path) -> Option<String> {
+    let mut matches: Vec<String> = walkdir::WalkDir::new(target)
+        .min_depth(2)
+        .max_depth(4)
+        .into_iter()
+        .flatten()
+        .filter(|entry| entry.file_type().is_dir() && entry.file_name().to_string_lossy().eq_ignore_ascii_case("Paks"))
+        .filter_map(|entry| {
+            let parent = entry.path().parent()?;
+            if !parent.file_name()?.to_string_lossy().eq_ignore_ascii_case("Content") {
+                return None;
+            }
+            let rel = rel_string(target, entry.path())?;
+            if rel.split('/').any(|part| part.eq_ignore_ascii_case("Engine")) {
+                return None;
+            }
+            Some(format!("{rel}/~mods"))
+        })
+        .collect();
+    matches.sort_by_key(|path| path.matches('/').count());
+    matches.into_iter().next()
+}
+
+fn infer_deployment_plan(target: &Path, staged: &Path, steam_appid: Option<u64>) -> DeploymentPlan {
+    let root = classification_root(staged);
+    if contains_fomod(&root) {
+        return deployment_plan(
+            ModLayout::RequiresInstaller,
+            "",
+            "the archive uses an interactive FOMOD installer",
+            "low",
+        );
+    }
+    if let Some(layout) = game_layout(steam_appid) {
+        return deployment_plan(layout, "", "matched the game-specific mod layout", "high");
+    }
+    if has_root_dir(&root, &["BepInEx"]) {
+        return deployment_plan(ModLayout::BepInEx, "", "the archive contains a BepInEx tree", "high");
+    }
+    if has_root_dir(&root, &["Data", "Mods", "MelonLoader", "Content"]) {
+        return deployment_plan(ModLayout::Raw, "", "the archive already contains a game-relative folder tree", "high");
+    }
+
+    let has_dll = has_extension(&root, &["dll"], 3);
+    if target.join("BepInEx").is_dir() && has_dll {
+        return deployment_plan(
+            ModLayout::BepInEx,
+            "",
+            "the game uses BepInEx and the archive contains plugin files",
+            "high",
+        );
+    }
+    if target.join("MelonLoader").is_dir() && has_dll {
+        return deployment_plan(
+            ModLayout::Raw,
+            "Mods",
+            "the game uses MelonLoader and the archive contains a mod DLL",
+            "high",
+        );
+    }
+    if is_bethesda_game(target, steam_appid) && is_bethesda_payload(&root) {
+        return deployment_plan(
+            ModLayout::Raw,
+            "Data",
+            "the archive contains Bethesda data files without a Data wrapper",
+            "high",
+        );
+    }
+    if has_extension(&root, &["pak", "utoc", "ucas"], 3) {
+        if let Some(prefix) = unreal_paks_target(target) {
+            return deployment_plan(
+                ModLayout::Raw,
+                &prefix,
+                "the archive contains Unreal package files and the game has a Content/Paks directory",
+                "high",
+            );
+        }
+    }
+    if target.join("Mods").is_dir()
+        && (has_extension(&root, &["lua"], 3)
+            || walkdir::WalkDir::new(&root)
+                .max_depth(3)
+                .into_iter()
+                .flatten()
+                .any(|entry| entry.file_name().to_string_lossy().eq_ignore_ascii_case("mod.xml")))
+    {
+        return deployment_plan(
+            ModLayout::ModsFolder,
+            "",
+            "the game has a Mods directory and the archive contains a structured script mod",
+            "medium",
+        );
+    }
+
+    deployment_plan(
+        ModLayout::Raw,
+        "",
+        "no known loader or archive layout was detected, so paths are relative to the game root",
+        "low",
+    )
 }
 
 fn wrap_in_mods_folder(staged: &Path, fallback_name: &str) -> Result<(), String> {
@@ -662,13 +880,6 @@ pub(crate) fn strip_wrapper_dir(staged: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn game_uses_bepinex(target: &Path) -> bool {
-    target.join("BepInEx").is_dir()
-}
-
-fn staged_is_bepinex(src: &Path) -> bool {
-    bepinex_root(src).join("BepInEx").is_dir()
-}
 
 fn bepinex_plugin_name(spec: &InstallSpec) -> String {
     let name = safe_folder_name(&spec.name);
@@ -679,7 +890,7 @@ fn bepinex_plugin_name(spec: &InstallSpec) -> String {
     }
 }
 
-fn upsert_mod(cfg: &mut GameMods, spec: &InstallSpec, size: u64) {
+fn upsert_mod(cfg: &mut GameMods, spec: &InstallSpec, size: u64, plan: &DeploymentPlan) {
     let mod_id = spec.mod_id();
     if let Some(m) = cfg.mods.iter_mut().find(|m| m.id == mod_id) {
         m.file_id = spec.file_id;
@@ -691,6 +902,10 @@ fn upsert_mod(cfg: &mut GameMods, spec: &InstallSpec, size: u64) {
         m.installed_at = now_secs();
         m.size_bytes = size;
         m.page_url = spec.page_url.clone();
+        m.deploy_prefix = plan.deploy_prefix.clone();
+        m.deploy_reason = plan.reason.clone();
+        m.deploy_confidence = plan.confidence.to_string();
+        m.deploy_blocked = false;
     } else {
         let order = cfg.mods.iter().map(|m| m.order + 1).max().unwrap_or(0);
         cfg.mods.push(ModEntry {
@@ -708,6 +923,10 @@ fn upsert_mod(cfg: &mut GameMods, spec: &InstallSpec, size: u64) {
             installed_at: now_secs(),
             size_bytes: size,
             page_url: spec.page_url.clone(),
+            deploy_prefix: plan.deploy_prefix.clone(),
+            deploy_reason: plan.reason.clone(),
+            deploy_confidence: plan.confidence.to_string(),
+            deploy_blocked: false,
         });
     }
 }
@@ -732,17 +951,19 @@ pub(crate) async fn finalize_install(
         std::fs::create_dir_all(parent).map_err(|e| format!("staging dir: {e}"))?;
     }
     let mut cfg = load_config(&state.paths, &spec.appid);
-    let detected_bepinex = deploy_target_dir(&state, &spec.appid, &cfg)
-        .map(|t| game_uses_bepinex(&t))
-        .unwrap_or(false)
-        || staged_is_bepinex(staged_src);
-    let layout = match game_layout(detect_steam_appid(&state, &spec.appid).await) {
-        Some(l) => l,
-        None if detected_bepinex => ModLayout::BepInEx,
-        None => ModLayout::Raw,
-    };
+    let target = deploy_target_dir(&state, &spec.appid, &cfg)?;
+    let steam_appid = detect_steam_appid(&state, &spec.appid).await;
+    let mut plan = infer_deployment_plan(&target, staged_src, steam_appid);
+    if !cfg.deploy_target.is_empty() {
+        plan.deploy_prefix.clear();
+        plan.reason = format!("using the manual deploy target {}; {}", cfg.deploy_target, plan.reason);
+        plan.confidence = "manual";
+    }
 
-    if layout == ModLayout::BepInEx {
+    if plan.layout == ModLayout::RequiresInstaller {
+        return Err("this mod uses an interactive FOMOD installer, which Union.Manifold cannot safely choose options for yet".to_string());
+    }
+    if plan.layout == ModLayout::BepInEx {
         apply_bepinex_layout(staged_src, &final_dir, &bepinex_plugin_name(spec))?;
         if move_src {
             std::fs::remove_dir_all(staged_src).ok();
@@ -755,14 +976,15 @@ pub(crate) async fn finalize_install(
                 std::fs::remove_dir_all(staged_src).ok();
             }
         }
-        match layout {
+        match plan.layout {
             ModLayout::ModsFolder => wrap_in_mods_folder(&final_dir, &spec.name)?,
             _ => strip_wrapper_dir(&final_dir)?,
         }
     }
 
     let size = crate::install::dir_size(&final_dir);
-    upsert_mod(&mut cfg, spec, size);
+    upsert_mod(&mut cfg, spec, size, &plan);
+    cfg.deployment_plan_version = DEPLOYMENT_PLAN_VERSION;
     save_config(&state.paths, &spec.appid, &cfg);
     let n = redeploy(&state, &spec.appid, &cfg)?;
     emit_changed(app, &spec.appid);
@@ -848,6 +1070,44 @@ async fn flatten_tar(dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
+const DEPLOYMENT_PLAN_VERSION: u32 = 1;
+
+fn refresh_deployment_plans(state: &AppState, appid: &str, cfg: &mut GameMods) -> bool {
+    let Ok(target) = deploy_target_dir(state, appid, cfg) else {
+        return false;
+    };
+    let manual_target = cfg.deploy_target.clone();
+    let staging = game_mods_dir(&state.paths, appid).join("staging");
+    let mut changed = cfg.deployment_plan_version != DEPLOYMENT_PLAN_VERSION;
+    for installed in &mut cfg.mods {
+        let staged = staging.join(&installed.id);
+        if !staged.is_dir() {
+            continue;
+        }
+        let mut plan = infer_deployment_plan(&target, &staged, cfg.steam_appid);
+        if !manual_target.is_empty() {
+            plan.deploy_prefix.clear();
+            plan.reason = format!("using the manual deploy target {}; {}", manual_target, plan.reason);
+            plan.confidence = "manual";
+        }
+        let blocked = plan.layout == ModLayout::RequiresInstaller;
+        let confidence = plan.confidence.to_string();
+        if installed.deploy_prefix != plan.deploy_prefix
+            || installed.deploy_reason != plan.reason
+            || installed.deploy_confidence != confidence
+            || installed.deploy_blocked != blocked
+        {
+            installed.deploy_prefix = plan.deploy_prefix;
+            installed.deploy_reason = plan.reason;
+            installed.deploy_confidence = confidence;
+            installed.deploy_blocked = blocked;
+            changed = true;
+        }
+    }
+    cfg.deployment_plan_version = DEPLOYMENT_PLAN_VERSION;
+    changed
+}
+
 #[tauri::command]
 pub async fn mods_game_get(state: State<'_, AppState>, appid: String) -> Result<Value, String> {
     let lock = game_lock(&appid);
@@ -897,9 +1157,22 @@ pub async fn mods_game_get(state: State<'_, AppState>, appid: String) -> Result<
             }
         }
     }
+    let plan_dirty = if cfg.deployment_plan_version < DEPLOYMENT_PLAN_VERSION
+        || cfg.mods.iter().any(|installed| installed.deploy_reason.is_empty())
+    {
+        refresh_deployment_plans(&state, &appid, &mut cfg)
+    } else {
+        false
+    };
+    dirty |= plan_dirty;
 
     if dirty || !existed {
         save_config(&state.paths, &appid, &cfg);
+    }
+    if plan_dirty {
+        if let Err(error) = redeploy(&state, &appid, &cfg) {
+            crate::logging::write_line("warn", &format!("mod deployment plan migration failed for {appid}: {error}"));
+        }
     }
     let deployed = !load_journal(&game_mods_dir(&state.paths, &appid)).files.is_empty();
     Ok(json!({
@@ -997,6 +1270,7 @@ pub async fn mods_game_set(
                     undeploy_from(&dir, &old)?;
                 }
                 cfg.deploy_target = new_target;
+                refresh_deployment_plans(&state, &appid, &mut cfg);
                 let target = deploy_target_dir(&state, &appid, &cfg)?;
                 deploy_to(&dir, &target, &cfg)?;
             }
@@ -1503,5 +1777,159 @@ mod tests {
         wrap_in_mods_folder(&staged, "whatever").unwrap();
         assert!(staged.join("mods/Existing/mod.xml").is_file());
         assert!(!staged.join("mods/mods").exists());
+    }
+
+    #[test]
+    fn deploy_prefixes_are_applied_per_mod() {
+        let tmp = tempdir().unwrap();
+        let dir = tmp.path().join("m");
+        let target = tmp.path().join("game");
+        std::fs::create_dir_all(&target).unwrap();
+        let mut data = mk_mod(&dir, "nexus-data", 0, &[("textures/a.dds", "a")]);
+        data.deploy_prefix = "Data".to_string();
+        let mut melon = mk_mod(&dir, "nexus-melon", 1, &[("plugin.dll", "b")]);
+        melon.deploy_prefix = "Mods".to_string();
+        let cfg = GameMods { mods: vec![data, melon], ..Default::default() };
+
+        deploy_to(&dir, &target, &cfg).unwrap();
+
+        assert_eq!(read(&target.join("Data/textures/a.dds")), "a");
+        assert_eq!(read(&target.join("Mods/plugin.dll")), "b");
+        let journal = load_journal(&dir);
+        assert!(journal.files.contains_key("Data/textures/a.dds"));
+        assert!(journal.files.contains_key("Mods/plugin.dll"));
+    }
+
+    #[test]
+    fn infers_bepinex_from_archive_tree() {
+        let tmp = tempdir().unwrap();
+        let target = tmp.path().join("game");
+        let staged = tmp.path().join("archive");
+        write_file(&staged.join("Release/BepInEx/plugins/example.dll"), "x");
+
+        let plan = infer_deployment_plan(&target, &staged, None);
+
+        assert_eq!(plan.layout, ModLayout::BepInEx);
+        assert_eq!(plan.deploy_prefix, "");
+        assert_eq!(plan.confidence, "high");
+    }
+
+    #[test]
+    fn infers_bethesda_data_for_unwrapped_payload() {
+        let tmp = tempdir().unwrap();
+        let target = tmp.path().join("game");
+        let staged = tmp.path().join("archive");
+        std::fs::create_dir_all(target.join("Data")).unwrap();
+        write_file(&staged.join("textures/armor/example.dds"), "x");
+        write_file(&staged.join("Example.esp"), "x");
+
+        let plan = infer_deployment_plan(&target, &staged, Some(489830));
+
+        assert_eq!(plan.layout, ModLayout::Raw);
+        assert_eq!(plan.deploy_prefix, "Data");
+        assert_eq!(plan.confidence, "high");
+    }
+
+    #[test]
+    fn keeps_existing_data_wrapper_relative_to_game_root() {
+        let tmp = tempdir().unwrap();
+        let target = tmp.path().join("game");
+        let staged = tmp.path().join("archive");
+        std::fs::create_dir_all(target.join("Data")).unwrap();
+        write_file(&staged.join("Data/textures/example.dds"), "x");
+
+        let plan = infer_deployment_plan(&target, &staged, Some(489830));
+
+        assert_eq!(plan.layout, ModLayout::Raw);
+        assert_eq!(plan.deploy_prefix, "");
+    }
+
+    #[test]
+    fn infers_melonloader_mods_folder_for_loose_dll() {
+        let tmp = tempdir().unwrap();
+        let target = tmp.path().join("game");
+        let staged = tmp.path().join("archive");
+        std::fs::create_dir_all(target.join("MelonLoader")).unwrap();
+        write_file(&staged.join("ExampleMod.dll"), "x");
+
+        let plan = infer_deployment_plan(&target, &staged, None);
+
+        assert_eq!(plan.layout, ModLayout::Raw);
+        assert_eq!(plan.deploy_prefix, "Mods");
+        assert_eq!(plan.confidence, "high");
+    }
+
+    #[test]
+    fn infers_unreal_paks_folder_for_loose_package() {
+        let tmp = tempdir().unwrap();
+        let target = tmp.path().join("game");
+        let staged = tmp.path().join("archive");
+        std::fs::create_dir_all(target.join("Project/Content/Paks")).unwrap();
+        write_file(&staged.join("ExampleMod.pak"), "x");
+
+        let plan = infer_deployment_plan(&target, &staged, None);
+
+        assert_eq!(plan.layout, ModLayout::Raw);
+        assert_eq!(plan.deploy_prefix, "Project/Content/Paks/~mods");
+        assert_eq!(plan.confidence, "high");
+    }
+
+    #[test]
+    fn unknown_archive_falls_back_to_game_root_with_low_confidence() {
+        let tmp = tempdir().unwrap();
+        let target = tmp.path().join("game");
+        let staged = tmp.path().join("archive");
+        write_file(&staged.join("unknown.bin"), "x");
+
+        let plan = infer_deployment_plan(&target, &staged, None);
+
+        assert_eq!(plan.layout, ModLayout::Raw);
+        assert_eq!(plan.deploy_prefix, "");
+        assert_eq!(plan.confidence, "low");
+    }
+
+    #[test]
+    fn detects_fomod_before_game_specific_layouts() {
+        let tmp = tempdir().unwrap();
+        let target = tmp.path().join("game");
+        let staged = tmp.path().join("archive");
+        write_file(&staged.join("Package/fomod/ModuleConfig.xml"), "<config />");
+        write_file(&staged.join("Package/Data/example.esp"), "x");
+
+        let plan = infer_deployment_plan(&target, &staged, Some(489830));
+
+        assert_eq!(plan.layout, ModLayout::RequiresInstaller);
+        assert_eq!(plan.confidence, "low");
+    }
+
+    #[test]
+    fn blocking_an_existing_mod_removes_its_deployed_files() {
+        let tmp = tempdir().unwrap();
+        let dir = tmp.path().join("m");
+        let target = tmp.path().join("game");
+        write_file(&target.join("file.txt"), "original");
+        let installed = mk_mod(&dir, "nexus-1", 0, &[("file.txt", "modded")]);
+        let mut cfg = GameMods { mods: vec![installed], ..Default::default() };
+
+        deploy_to(&dir, &target, &cfg).unwrap();
+        assert_eq!(read(&target.join("file.txt")), "modded");
+
+        cfg.mods[0].deploy_blocked = true;
+        deploy_to(&dir, &target, &cfg).unwrap();
+        assert_eq!(read(&target.join("file.txt")), "original");
+        assert!(load_journal(&dir).files.is_empty());
+    }
+
+    #[test]
+    fn deploy_rejects_escaping_persisted_prefix() {
+        let tmp = tempdir().unwrap();
+        let dir = tmp.path().join("m");
+        let target = tmp.path().join("game");
+        let mut installed = mk_mod(&dir, "nexus-1", 0, &[("file.txt", "x")]);
+        installed.deploy_prefix = "../outside".to_string();
+        let cfg = GameMods { mods: vec![installed], ..Default::default() };
+
+        assert!(deploy_to(&dir, &target, &cfg).is_err());
+        assert!(!tmp.path().join("outside/file.txt").exists());
     }
 }

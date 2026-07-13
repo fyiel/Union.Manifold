@@ -141,6 +141,7 @@ declare global {
     requiresSlipgate: boolean
     available: boolean
     torrentOnly: boolean
+    hiddenByTorrentFilter: boolean
   }
   type RepairProgress = {
     appid: string
@@ -275,6 +276,10 @@ declare global {
     installedAt: number
     sizeBytes: number
     pageUrl: string
+    deployPrefix: string
+    deployReason: string
+    deployConfidence: "high" | "medium" | "low" | "manual" | string
+    deployBlocked: boolean
   }
 
   type ModGameState = {
@@ -346,6 +351,24 @@ declare global {
     phase: "downloading" | "extracting" | "installing" | "done" | "error"
     progress: number | null
     error?: string
+  }
+
+  type ManagedSlipgateStatus = {
+    ok: boolean
+    dockerAvailable: boolean
+    composeAvailable: boolean
+    dockerVersion?: string
+    composeVersion?: string
+    installed: boolean
+    running: boolean
+    healthy: boolean
+    url?: string | null
+    version?: string
+    flaresolverrOk: boolean
+    recipes?: string[]
+    slipgateImage: string
+    flaresolverrImage: string
+    error?: string | null
   }
 
   interface Window {
@@ -574,6 +597,12 @@ declare global {
       nexusModFiles?: (domain: string, modId: string) => Promise<{ ok: boolean; files?: NexusModFile[]; error?: string }>
       nexusInstall?: (appid: string, domain: string, modId: string, fileId: number) => Promise<{ ok: boolean; started?: boolean; needsNxm?: boolean; needsSession?: boolean; sessionError?: string; slipgateError?: string; modPageUrl?: string; error?: string }>
       slipgateCheck?: (url: string, key: string) => Promise<{ ok: boolean; version?: string; flaresolverrOk?: boolean; recipes?: string[]; error?: string }>
+      managedSlipgateStatus?: () => Promise<ManagedSlipgateStatus>
+      managedSlipgateInstall?: () => Promise<ManagedSlipgateStatus>
+      managedSlipgateStart?: () => Promise<ManagedSlipgateStatus>
+      managedSlipgateStop?: () => Promise<ManagedSlipgateStatus>
+      managedSlipgateUpdate?: () => Promise<ManagedSlipgateStatus>
+      managedSlipgateUninstall?: () => Promise<ManagedSlipgateStatus>
       workshopBrowse?: (steamAppid: number, sort: string, period: string, page: number, query: string) => Promise<{ ok: boolean; items?: WorkshopBrowseItem[]; hasMore?: boolean; error?: string }>
       workshopDetails?: (ids: string[]) => Promise<{ ok: boolean; items?: Array<{ remoteId: string; name: string; description?: string; sizeBytes?: number; updatedAt?: number; previewUrl?: string; subscriptions?: number }>; error?: string }>
       workshopInstall?: (appid: string, steamAppid: number, publishedFileId: string) => Promise<{ ok: boolean; started?: boolean; error?: string }>

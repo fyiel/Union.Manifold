@@ -19,6 +19,12 @@ pnpm dev
 ```
 `pnpm fetch-sidecars` grabs the aria2c and 7z binaries the app shells out to. `pnpm build` produces a packaged app.
 
+### local Slipgate resolver
+Slipgate-dependent sources can run locally without changing the app installer size. Install Docker Desktop or Docker Engine with Compose, then open Settings, Sources and choose **Install with Docker**. Union.Manifold builds Slipgate from its pinned public release commit, pulls the pinned FlareSolverr image, binds the resolver to loopback with a generated key and manages start, stop, update and removal. A remote Slipgate URL remains supported.
+
+### automatic mod deployment
+Nexus, Workshop and Thunderstore installs share a per-mod deployment planner. It recognizes game-relative archive trees, BepInEx, MelonLoader, Bethesda Data folders, Unreal Engine Paks and structured Mods folders. Each installed mod shows its inferred destination and confidence. Unknown layouts use the game root and are marked **check target**; the folder control remains available as a game-wide manual override. Interactive FOMOD archives are rejected instead of deploying every optional file.
+
 ### install / update on linux
 ```
 curl -fsSL https://raw.githubusercontent.com/fyiel/Union.Manifold/main/install.sh | bash

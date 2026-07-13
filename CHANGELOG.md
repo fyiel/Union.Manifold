@@ -7,6 +7,18 @@ All notable changes to Union.Manifold. This project is a fork of
 
 ### Added
 
+- managed local Slipgate setup in Sources settings. Union.Manifold now builds
+  Slipgate from its pinned public release commit, pulls the pinned FlareSolverr
+  image, generates the API key, restores the service on launch and exposes
+  start, stop, update and removal controls while keeping remote URLs supported
+- per-mod deployment planning for Nexus, Workshop and Thunderstore installs.
+  archive and game signals now identify BepInEx, MelonLoader, Bethesda Data,
+  Unreal Paks, existing game-relative trees and structured Mods layouts. each
+  mod stores its inferred prefix, reason and confidence; old staged mods are
+  migrated and redeployed, low-confidence layouts are called out in the UI and
+  the folder picker remains a manual override. interactive FOMOD archives now
+  fail safely instead of copying every installer option into the game
+
 - per-game mod layout rules, so a game known to use a mod loader gets the right
   layout even before that loader is on disk. The Farmer Was Replaced (2060160)
   is now always treated as BepInEx — previously a nexus plugin installed before
@@ -16,8 +28,18 @@ All notable changes to Union.Manifold. This project is a fork of
   be typed by hand. the picked folder must sit inside the game directory, since
   the target is stored as a path relative to it
 
+### Changed
+
+- the Sources setting that hides torrent-only providers now also hides
+  Online-Fix. Online-Fix remains correctly labeled as a direct source rather
+  than torrent-only
+
 ### Fixed
 
+- managed Slipgate installation no longer pulls the private
+  `ghcr.io/fyiel/slipgate` package and fails with an unauthorized registry
+  response. Slipgate now builds from the exact public v0.5.1 commit while
+  FlareSolverr continues to use its public versioned image
 - mod archives wrapped in a single junk top-level folder (e.g. "MyMod 1.2/")
   deployed that folder into the game directory verbatim, so nothing loaded. the
   wrapper is now unwrapped during staging. folders whose name is meaningful to a

@@ -18,6 +18,7 @@ mod repair;
 mod settings;
 mod shortcuts;
 mod slipgate;
+mod slipgate_managed;
 mod sources;
 mod state;
 mod storage;
@@ -124,11 +125,17 @@ pub fn run() {
             let sources_warm = sources.clone();
             let default_root = default_download_root(&paths.data_dir);
             let downloads = DownloadEngine::new(handle.clone(), settings.clone(), default_root, aria2);
+            let managed_paths = paths.clone();
+            let managed_settings = settings.clone();
             app.manage(AppState {
                 paths,
                 settings,
                 sources,
                 downloads,
+            });
+            let managed_handle = handle.clone();
+            tauri::async_runtime::spawn(async move {
+                slipgate_managed::autostart(managed_handle, managed_paths, managed_settings).await;
             });
             tauri::async_runtime::spawn(async move {
                 sources::warm_catalog(&sources_warm).await;
@@ -289,6 +296,12 @@ pub fn run() {
             mods::nexus::nexus_mod_files,
             mods::nexus::nexus_install,
             mods::nexus::slipgate_check,
+            slipgate_managed::managed_slipgate_status,
+            slipgate_managed::managed_slipgate_install,
+            slipgate_managed::managed_slipgate_start,
+            slipgate_managed::managed_slipgate_stop,
+            slipgate_managed::managed_slipgate_update,
+            slipgate_managed::managed_slipgate_uninstall,
             mods::workshop::workshop_browse,
             mods::workshop::workshop_details,
             mods::workshop::workshop_install,
