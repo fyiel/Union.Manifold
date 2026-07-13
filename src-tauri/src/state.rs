@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use crate::achievements::AchievementService;
 use crate::downloads::DownloadEngine;
 use crate::paths::AppPaths;
 use crate::settings::SettingsStore;
@@ -10,6 +11,7 @@ pub struct AppState {
     pub settings: Arc<SettingsStore>,
     pub sources: Arc<Registry>,
     pub downloads: Arc<DownloadEngine>,
+    pub achievements: Arc<AchievementService>,
 }
 
 impl AppState {
