@@ -103,3 +103,7 @@ impl<T: Clone> KeyedCache<T> {
         self.cells.lock().clear();
     }
 }
+
+#[cfg(test)]
+#[path = "../../../.dev/rust/cache_tests.rs"]
+mod dev_cache_tests;
