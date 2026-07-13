@@ -143,6 +143,32 @@ declare global {
     torrentOnly: boolean
     hiddenByTorrentFilter: boolean
   }
+  type LocalAchievement = {
+    apiName: string
+    displayName: string
+    description: string
+    hidden: boolean
+    icon?: string | null
+    iconLocked?: string | null
+    unlocked: boolean
+    unlockedAt?: number | null
+  }
+  type LocalAchievementGame = {
+    appid: string
+    steamAppId?: number | null
+    title: string
+    image?: string | null
+    provider: string
+    catalogComplete: boolean
+    updatedAt: number
+    achievements: LocalAchievement[]
+  }
+  type LocalAchievementUnlock = {
+    appid: string
+    steamAppId?: number | null
+    gameTitle: string
+    achievement: LocalAchievement
+  }
   type RepairProgress = {
     appid: string
     phase: "resolving" | "downloading" | "extracting" | "done" | "failed"
@@ -556,6 +582,14 @@ declare global {
       runSteamGame?: (steamAppid: number) => Promise<{ ok: boolean; error?: string }>
       getNotifications: () => Promise<{ ok: boolean; notifications: SystemNotification[] }>
       onNotificationActivated: (callback: (data: { id: string }) => void) => () => void
+    }
+    ucAchievements?: {
+      list: () => Promise<{ ok: boolean; games: LocalAchievementGame[]; error?: string }>
+      testNotification: () => Promise<{ ok: boolean; error?: string }>
+      hideToast: () => Promise<{ ok: boolean }>
+      onUnlocked: (callback: (data: LocalAchievementUnlock) => void) => () => void
+      onUpdated: (callback: (data: { reason?: string }) => void) => () => void
+      onToast: (callback: (data: LocalAchievementUnlock) => void) => () => void
     }
     ucSources?: {
       list: () => Promise<{ ok: boolean; sources: SourceInfo[]; error?: string }>

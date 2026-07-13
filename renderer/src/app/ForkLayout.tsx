@@ -8,12 +8,14 @@ import { cn } from "@/lib/utils"
 
 const importAdvanced = () => import("@/app/pages/AdvancedSearchPage")
 const importLibrary = () => import("@/app/pages/LibraryPage")
+const importAchievements = () => import("@/app/pages/AchievementsPage")
 const importDownloads = () => import("@/app/pages/DownloadsPage")
 const importSettings = () => import("@/app/pages/SettingsPage")
 const importDetail = () => import("@/app/pages/SourceGamePage")
 
 const AdvancedSearchPage = lazy(() => importAdvanced().then((m) => ({ default: m.AdvancedSearchPage })))
 const LibraryPage = lazy(() => importLibrary().then((m) => ({ default: m.LibraryPage })))
+const AchievementsPage = lazy(() => importAchievements().then((m) => ({ default: m.AchievementsPage })))
 const DownloadsPage = lazy(() => importDownloads().then((m) => ({ default: m.DownloadsPage })))
 const SettingsPage = lazy(() => importSettings().then((m) => ({ default: m.SettingsPage })))
 const BrowsePage = lazy(() => import("@/app/pages/BrowsePage").then((m) => ({ default: m.BrowsePage })))
@@ -21,6 +23,7 @@ const BrowsePage = lazy(() => import("@/app/pages/BrowsePage").then((m) => ({ de
 function prefetchRoutes() {
   void importAdvanced()
   void importLibrary()
+  void importAchievements()
   void importDownloads()
   void importSettings()
   void importDetail()
@@ -33,6 +36,7 @@ const TABS: Record<string, ReactNode> = {
   "/": <BrowsePage />,
   "/advanced": <AdvancedSearchPage />,
   "/library": <LibraryPage />,
+  "/achievements": <AchievementsPage />,
   "/downloads": <DownloadsPage />,
   "/settings": <SettingsPage />,
 }

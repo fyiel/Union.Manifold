@@ -3,6 +3,22 @@
 All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 
+## 3.2.0
+
+### Added
+
+- local Steam-compatible achievement discovery for installed games, durable
+  on-device unlock history, a searchable per-game Achievements page and a
+  dedicated Steam-style in-game notification window with an optional system
+  notification fallback. Goldberg/GSE, CODEX, SmartSteamEmu, CreamAPI and
+  common INI/JSON state layouts are recognized
+
+### Changed
+
+- closing Manifold on game launch now hides it and keeps the backend alive when
+  achievement popups are enabled; disabling popups retains the previous full
+  quit behavior
+
 ## 3.1.1
 
 ### Added
