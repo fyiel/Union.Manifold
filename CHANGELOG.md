@@ -3,6 +3,17 @@
 All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 
+## 3.4.0
+
+### Added
+
+- title-aware compatibility detection for Mod Engine 3, Lenny's Mod Loader,
+  MelonLoader and Fluffy Mod Manager, surfaced on each game's Mods page
+- managed Mod Engine 3 package isolation, generated `.me3` profiles and launch
+  handoff to the official `me3` executable for all five supported titles
+- Lenny `install.xml`, `replace` and `stream` package deployment for Grand Theft
+  Auto V Legacy and Red Dead Redemption 2, plus Unity and Fluffy layout routing
+
 ## 3.3.0
 
 ### Added
