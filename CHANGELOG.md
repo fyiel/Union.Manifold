@@ -3,6 +3,24 @@
 All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 
+## 3.4.2
+
+### Changed
+
+- Linux runner discovery now includes ProtonPlus-managed Steam, Heroic, Lutris
+  and Bottles locations, sorts custom versions naturally and marks only the
+  newest ProtonPlus runner. Steam's built-in Proton versions are collapsed into
+  a dropdown in the per-game picker
+
+### Fixed
+
+- umu-launcher resolves user-local installs, receives a Proton directory instead
+  of its `proton` script and uses the configured or per-game compatibility
+  prefix as `WINEPREFIX`
+- the known Mewgenics package with a stale GBE `steam_api64.dll` is repaired
+  before launch using a checksum-pinned compatible library while preserving the
+  original DLL as a backup
+
 ## 3.4.1
 
 ### Fixed
