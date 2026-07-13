@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 use serde_json::{json, Value};
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::downloads::now_ms;
 use crate::state::AppState;
@@ -110,7 +110,17 @@ pub fn game_exe_preflight(state: State<'_, AppState>, appid: String, exe_path: S
     })
 }
 
-fn spawn_and_track(app: &AppHandle, appid: &str, command: &str, args: &[String], cwd: &Path, envs: &[(String, String)], exe_path: &str, game_name: Option<String>) -> Result<u32, String> {
+fn spawn_and_track(
+    app: &AppHandle,
+    appid: &str,
+    command: &str,
+    args: &[String],
+    cwd: &Path,
+    envs: &[(String, String)],
+    exe_path: &str,
+    game_name: Option<String>,
+    achievement_context: crate::achievements::GameContext,
+) -> Result<u32, String> {
     #[cfg_attr(not(target_os = "linux"), allow(unused_mut))]
     let mut scope: Option<String> = None;
     #[cfg(target_os = "linux")]
@@ -178,6 +188,9 @@ fn spawn_and_track(app: &AppHandle, appid: &str, command: &str, args: &[String],
         json!({ "reason": "game-started", "appid": appid, "gameName": game_name }),
     )
     .ok();
+    app.state::<AppState>()
+        .achievements
+        .start_watch(app.clone(), achievement_context);
     let app2 = app.clone();
     let appid2 = appid.to_string();
     let exe2 = exe_path.to_string();
@@ -185,6 +198,7 @@ fn spawn_and_track(app: &AppHandle, appid: &str, command: &str, args: &[String],
     let reaper = std::thread::Builder::new().name(format!("game-reaper-{appid}")).spawn(move || {
         let mut child = child;
         let _ = child.wait();
+        app2.state::<AppState>().achievements.finish_watch(&app2, &appid2);
         let elapsed = now_ms() - started_at;
         RUNNING.lock().remove(&appid2);
         app2.emit(
@@ -221,13 +235,36 @@ pub fn game_exe_launch(state: State<'_, AppState>, app: AppHandle, appid: String
         Ok(p) => p,
         Err(e) => return json!({ "ok": false, "error": e }),
     };
-    match spawn_and_track(&app, &appid, &plan.command, &plan.args, &cwd, &plan.envs, &exe_path, game_name) {
+    let achievement_context =
+        crate::achievements::launch_context(&state, &appid, &exe_path, game_name.as_deref(), &plan.envs);
+    match spawn_and_track(
+        &app,
+        &appid,
+        &plan.command,
+        &plan.args,
+        &cwd,
+        &plan.envs,
+        &exe_path,
+        game_name,
+        achievement_context,
+    ) {
         Ok(pid) => {
             if state.settings.get("closeOnGameLaunch").as_bool().unwrap_or(false) {
                 let app2 = app.clone();
+                let keep_running = state
+                    .settings
+                    .get("achievementNotifications")
+                    .as_bool()
+                    .unwrap_or(true);
                 tauri::async_runtime::spawn(async move {
                     tokio::time::sleep(std::time::Duration::from_secs(3)).await;
-                    app2.exit(0);
+                    if keep_running {
+                        if let Some(main) = app2.get_webview_window("main") {
+                            main.hide().ok();
+                        }
+                    } else {
+                        app2.exit(0);
+                    }
                 });
             }
             json!({ "ok": true, "pid": pid })

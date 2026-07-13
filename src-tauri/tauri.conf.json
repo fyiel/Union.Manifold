@@ -23,6 +23,24 @@
         "center": true,
         "dragDropEnabled": true,
         "backgroundColor": "#151515"
+      },
+      {
+        "label": "achievement-toast",
+        "title": "Achievement unlocked",
+        "url": "index.html#/achievement-toast",
+        "width": 420,
+        "height": 112,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "resizable": false,
+        "maximizable": false,
+        "minimizable": false,
+        "closable": false,
+        "visible": false,
+        "focus": false,
+        "shadow": false
       }
     ],
     "security": {
