@@ -146,3 +146,7 @@ pub async fn health(base: &str, key: &str) -> Result<Value, String> {
         "recipes": v.get("recipes").cloned().unwrap_or_else(|| json!([])),
     }))
 }
+
+#[cfg(test)]
+#[path = "../../.dev/rust/slipgate_tests.rs"]
+mod dev_slipgate_tests;
