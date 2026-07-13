@@ -497,3 +497,7 @@ mod tests {
         assert_eq!(m["metadata"]["image"], json!("uc-custom://abcd"));
     }
 }
+
+#[cfg(test)]
+#[path = "../../.dev/rust/library_tests.rs"]
+mod dev_library_tests;
