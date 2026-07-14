@@ -54,7 +54,7 @@ pub(crate) struct GameContext {
     image: Option<String>,
     install_dir: PathBuf,
     exe_path: Option<PathBuf>,
-    envs: Vec<(String, String)>,
+    prefixes: Vec<PathBuf>,
 }
 
 #[derive(Default, Deserialize, Serialize)]
@@ -131,7 +131,7 @@ impl AchievementService {
         let mut changed = false;
         for context in contexts {
             if let Some(scanned) = scan_game(&context) {
-                changed |= self.apply_scan(app, scanned, false);
+                changed |= self.apply_scan(app, scanned, false, false);
             }
         }
         if changed {
@@ -165,7 +165,7 @@ impl AchievementService {
                     .map(|scan| scan.state_loaded)
                     .unwrap_or(false);
                 if let Some(scanned) = scanned {
-                    service.apply_scan(&app, scanned, !first);
+                    service.apply_scan(&app, scanned, !first, true);
                 }
                 first = false;
                 if state_loaded {
@@ -198,7 +198,7 @@ impl AchievementService {
         if let Some(entry) = entry {
             entry.stop.store(true, Ordering::Relaxed);
             if let Some(scanned) = scan_game(&entry.context) {
-                self.apply_scan(app, scanned, true);
+                self.apply_scan(app, scanned, true, true);
             }
         }
     }
@@ -211,7 +211,13 @@ impl AchievementService {
         watches.clear();
     }
 
-    fn apply_scan(&self, app: &AppHandle, scanned: ScannedGame, notify: bool) -> bool {
+    fn apply_scan(
+        &self,
+        app: &AppHandle,
+        scanned: ScannedGame,
+        notify: bool,
+        emit_update: bool,
+    ) -> bool {
         let ScannedGame {
             game: scanned_game,
             state_loaded,
@@ -257,8 +263,10 @@ impl AchievementService {
         }
         if changed {
             self.persist();
-            app.emit("uc:achievements-updated", json!({ "reason": "state" }))
-                .ok();
+            if emit_update {
+                app.emit("uc:achievements-updated", json!({ "reason": "state" }))
+                    .ok();
+            }
         }
         if !unlocks.is_empty() {
             if let Some(game) = self
@@ -327,6 +335,13 @@ fn merge_game(
                 .cloned(),
         );
     }
+    if !state_loaded
+        && !next.catalog_complete
+        && previous.provider != "Awaiting local data"
+    {
+        next.provider = previous.provider.clone();
+        next.catalog_complete = previous.catalog_complete;
+    }
     next.achievements
         .sort_by(|a, b| a.api_name.cmp(&b.api_name));
     next
@@ -367,7 +382,6 @@ fn present_toast(app: &AppHandle, payload: &AchievementUnlock) {
         return;
     };
     position_toast(&window);
-    window.set_ignore_cursor_events(true).ok();
     if window.show().is_err() {
         crate::notify::send(
             app,
@@ -379,6 +393,7 @@ fn present_toast(app: &AppHandle, payload: &AchievementUnlock) {
         );
         return;
     }
+    window.set_ignore_cursor_events(true).ok();
     window.emit("uc:achievement-toast", payload).ok();
 }
 
@@ -426,8 +441,9 @@ fn scan_discovery(context: &GameContext, discovery: &Discovery) -> Option<Scanne
             break;
         }
     }
-    if definitions.is_empty() && !state_loaded {
-        return None;
+    let catalog_complete = !definitions.is_empty();
+    if !catalog_complete && !state_loaded {
+        provider = "Awaiting local data".to_string();
     }
     let mut achievements = Vec::with_capacity(definitions.len().max(state.len()));
     let mut matched = HashSet::new();
@@ -469,7 +485,7 @@ fn scan_discovery(context: &GameContext, discovery: &Discovery) -> Option<Scanne
             title: context.title.clone(),
             image: context.image.clone(),
             provider,
-            catalog_complete: discovery.definitions.is_some(),
+            catalog_complete,
             updated_at: 0,
             achievements,
         },
@@ -550,6 +566,16 @@ fn find_definitions(context: &GameContext) -> Option<PathBuf> {
     if let Some(path) = direct.into_iter().find(|path| path.is_file()) {
         return Some(path);
     }
+    if let Some(steam_app_id) = context.steam_app_id {
+        let filename = format!("UserGameStatsSchema_{steam_app_id}.bin");
+        if let Some(path) = crate::import::steam_roots()
+            .into_iter()
+            .map(|root| root.join("appcache/stats").join(&filename))
+            .find(|path| path.is_file())
+        {
+            return Some(path);
+        }
+    }
     walkdir::WalkDir::new(&context.install_dir)
         .max_depth(6)
         .follow_links(false)
@@ -617,60 +643,62 @@ fn add_global_states(context: &GameContext, saves_folder: &str, states: &mut Vec
         roaming_roots.push(PathBuf::from(home).join(".local/share"));
     }
     for root in roaming_roots {
-        for folder in [
-            saves_folder,
-            "GSE Saves",
-            "Goldberg SteamEmu Saves",
-            "SmartSteamEmu",
-            "CreamAPI",
-        ] {
-            push_state_names(states, &root.join(folder).join(&appid));
-        }
-        push_state_names(states, &root.join("Steam/CODEX").join(&appid));
-        push_state_names(states, &root.join("EMPRESS").join(&appid));
+        add_roaming_states(states, &root, saves_folder, &appid);
     }
     if let Ok(public) = std::env::var("PUBLIC") {
-        let public = PathBuf::from(public);
-        push_state_names(states, &public.join("Documents/Steam/CODEX").join(&appid));
-        push_state_names(states, &public.join("Documents/EMPRESS").join(&appid));
+        add_document_states(states, &PathBuf::from(public).join("Documents"), &appid);
     }
-    let mut prefixes = Vec::new();
-    for (key, value) in &context.envs {
-        if key == "WINEPREFIX" {
-            prefixes.push(PathBuf::from(value));
-        } else if key == "STEAM_COMPAT_DATA_PATH" {
-            prefixes.push(PathBuf::from(value).join("pfx"));
-        }
-    }
-    for prefix in prefixes {
+    for prefix in &context.prefixes {
         let users = prefix.join("drive_c/users");
         if let Ok(entries) = std::fs::read_dir(&users) {
             for entry in entries.flatten().filter(|entry| entry.path().is_dir()) {
-                let roaming = entry.path().join("AppData/Roaming");
-                for folder in [
+                let user = entry.path();
+                add_roaming_states(
+                    states,
+                    &user.join("AppData/Roaming"),
                     saves_folder,
-                    "GSE Saves",
-                    "Goldberg SteamEmu Saves",
-                    "SmartSteamEmu",
-                    "CreamAPI",
-                ] {
-                    push_state_names(states, &roaming.join(folder).join(&appid));
-                }
-                push_state_names(states, &roaming.join("Steam/CODEX").join(&appid));
+                    &appid,
+                );
+                add_document_states(states, &user.join("Documents"), &appid);
             }
         }
-        push_state_names(
-            states,
-            &prefix
-                .join("drive_c/users/Public/Documents/Steam/CODEX")
-                .join(&appid),
-        );
-        push_state_names(
-            states,
-            &prefix
-                .join("drive_c/users/Public/Documents/EMPRESS")
-                .join(&appid),
-        );
+    }
+}
+
+fn add_roaming_states(
+    states: &mut Vec<PathBuf>,
+    roaming: &Path,
+    saves_folder: &str,
+    appid: &str,
+) {
+    for folder in [
+        saves_folder,
+        "GSE Saves",
+        "Goldberg SteamEmu Saves",
+        "SmartSteamEmu",
+        "CreamAPI",
+    ] {
+        push_nested_state_names(states, &roaming.join(folder).join(appid));
+    }
+    for folder in ["Steam/CODEX", "Steam/RUNE", "EMPRESS"] {
+        push_state_names(states, &roaming.join(folder).join(appid));
+    }
+    push_nested_state_names(states, &roaming.join("OnlineFix").join(appid));
+}
+
+fn add_document_states(states: &mut Vec<PathBuf>, documents: &Path, appid: &str) {
+    for folder in ["Steam/CODEX", "Steam/RUNE", "EMPRESS"] {
+        push_state_names(states, &documents.join(folder).join(appid));
+    }
+    push_nested_state_names(states, &documents.join("OnlineFix").join(appid));
+}
+
+fn push_nested_state_names(states: &mut Vec<PathBuf>, root: &Path) {
+    push_state_names(states, root);
+    if let Ok(entries) = std::fs::read_dir(root) {
+        for entry in entries.flatten().filter(|entry| entry.path().is_dir()) {
+            push_state_names(states, &entry.path());
+        }
     }
 }
 
@@ -702,10 +730,29 @@ fn is_state_filename(name: &str) -> bool {
 
 fn dedupe_paths(paths: &mut Vec<PathBuf>) {
     let mut seen = HashSet::new();
-    paths.retain(|path| seen.insert(path.to_string_lossy().to_lowercase()));
+    paths.retain(|path| {
+        let path = path.to_string_lossy();
+        let key = if cfg!(windows) {
+            path.to_lowercase()
+        } else {
+            path.into_owned()
+        };
+        seen.insert(key)
+    });
 }
 
 fn parse_definitions(path: &Path) -> Option<Vec<AchievementDefinition>> {
+    if path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("bin"))
+    {
+        return parse_steam_definitions(path);
+    }
+    parse_json_definitions(path)
+}
+
+fn parse_json_definitions(path: &Path) -> Option<Vec<AchievementDefinition>> {
     let value: Value = serde_json::from_slice(&std::fs::read(path).ok()?).ok()?;
     let root = path.parent()?;
     let mut definitions = Vec::new();
@@ -735,6 +782,125 @@ fn parse_definitions(path: &Path) -> Option<Vec<AchievementDefinition>> {
         _ => return None,
     }
     (!definitions.is_empty()).then_some(definitions)
+}
+
+struct BinaryKeyValues<'a> {
+    bytes: &'a [u8],
+    offset: usize,
+}
+
+impl BinaryKeyValues<'_> {
+    fn object(&mut self) -> Option<Map<String, Value>> {
+        let mut object = Map::new();
+        loop {
+            let kind = *self.bytes.get(self.offset)?;
+            self.offset += 1;
+            if kind == 8 {
+                return Some(object);
+            }
+            let key = self.string()?;
+            let value = match kind {
+                0 => Value::Object(self.object()?),
+                1 => Value::String(self.string()?),
+                2 => {
+                    let end = self.offset.checked_add(4)?;
+                    let bytes: [u8; 4] = self.bytes.get(self.offset..end)?.try_into().ok()?;
+                    self.offset = end;
+                    Value::Number(i32::from_le_bytes(bytes).into())
+                }
+                _ => return None,
+            };
+            object.insert(key, value);
+        }
+    }
+
+    fn string(&mut self) -> Option<String> {
+        let remaining = self.bytes.get(self.offset..)?;
+        let length = remaining.iter().position(|byte| *byte == 0)?;
+        let end = self.offset.checked_add(length)?;
+        let value = String::from_utf8_lossy(self.bytes.get(self.offset..end)?).into_owned();
+        self.offset = end.checked_add(1)?;
+        Some(value)
+    }
+}
+
+fn parse_steam_definitions(path: &Path) -> Option<Vec<AchievementDefinition>> {
+    let steam_app_id = path
+        .file_stem()?
+        .to_str()?
+        .strip_prefix("UserGameStatsSchema_")?
+        .parse::<u64>()
+        .ok()?;
+    let bytes = std::fs::read(path).ok()?;
+    let mut parser = BinaryKeyValues {
+        bytes: &bytes,
+        offset: 0,
+    };
+    let root = parser.object()?;
+    if parser.offset != bytes.len() {
+        return None;
+    }
+    let mut definitions = Vec::new();
+    let mut seen = HashSet::new();
+    for app in root.values().filter_map(Value::as_object) {
+        let Some(stats) = value_ci(app, &["stats"]).and_then(Value::as_object) else {
+            continue;
+        };
+        for group in stats.values().filter_map(Value::as_object) {
+            if !string_value_ci(group, &["type"])
+                .is_some_and(|value| value.eq_ignore_ascii_case("ACHIEVEMENTS"))
+            {
+                continue;
+            }
+            let Some(bits) = value_ci(group, &["bits"]).and_then(Value::as_object) else {
+                continue;
+            };
+            for bit in bits.values().filter_map(Value::as_object) {
+                let Some(api_name) = string_value_ci(bit, &["name"])
+                    .filter(|value| !value.is_empty())
+                else {
+                    continue;
+                };
+                if !seen.insert(api_name.to_lowercase()) {
+                    continue;
+                }
+                let Some(display) = value_ci(bit, &["display"]).and_then(Value::as_object) else {
+                    continue;
+                };
+                let display_name = localized_value_ci(display, &["name"])
+                    .filter(|value| !value.is_empty())
+                    .unwrap_or_else(|| humanize_api_name(&api_name));
+                let description =
+                    localized_value_ci(display, &["description", "desc"]).unwrap_or_default();
+                let hidden = value_ci(display, &["hidden"]).is_some_and(truthy);
+                let icon = string_value_ci(display, &["icon"])
+                    .and_then(|value| steam_icon_url(steam_app_id, &value));
+                let icon_locked = string_value_ci(display, &["icon_gray", "icongray"])
+                    .and_then(|value| steam_icon_url(steam_app_id, &value));
+                definitions.push(AchievementDefinition {
+                    api_name,
+                    display_name,
+                    description,
+                    hidden,
+                    icon,
+                    icon_locked,
+                });
+            }
+        }
+    }
+    (!definitions.is_empty()).then_some(definitions)
+}
+
+fn steam_icon_url(steam_app_id: u64, value: &str) -> Option<String> {
+    if value.is_empty() {
+        return None;
+    }
+    if value.starts_with("http://") || value.starts_with("https://") {
+        return Some(value.to_string());
+    }
+    Some(format!(
+        "https://cdn.cloudflare.steamstatic.com/steamcommunity/public/images/apps/{steam_app_id}/{value}"
+    ))
 }
 
 fn definition_from_value(
@@ -988,10 +1154,16 @@ fn provider_for(path: &Path) -> String {
         "Goldberg local".to_string()
     } else if lower.contains("codex") {
         "CODEX local".to_string()
+    } else if lower.contains("rune") {
+        "RUNE local".to_string()
+    } else if lower.contains("onlinefix") {
+        "OnlineFix local".to_string()
     } else if lower.contains("smartsteamemu") {
         "SmartSteamEmu local".to_string()
     } else if lower.contains("empress") {
         "EMPRESS local".to_string()
+    } else if lower.contains("usergamestatsschema_") {
+        "Steam cache".to_string()
     } else if lower.contains("steam_settings") {
         "Steam settings".to_string()
     } else {
@@ -1214,6 +1386,51 @@ fn manifest_image(manifest: &Value) -> Option<String> {
         .map(String::from)
 }
 
+fn push_compatibility_prefix(prefixes: &mut Vec<PathBuf>, value: &str, append_pfx: bool) {
+    if value.is_empty() {
+        return;
+    }
+    let mut path = PathBuf::from(value);
+    let already_pfx = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.eq_ignore_ascii_case("pfx"));
+    if append_pfx && !already_pfx {
+        path.push("pfx");
+    }
+    prefixes.push(path);
+}
+
+fn compatibility_prefixes(
+    state: &AppState,
+    appid: &str,
+    envs: &[(String, String)],
+) -> Vec<PathBuf> {
+    let mut prefixes: Vec<PathBuf> = crate::library::scan_roots(state)
+        .into_iter()
+        .map(|root| root.join("compatdata").join(appid).join("pfx"))
+        .collect();
+    let config = state.settings.get(&format!("gameLinux:{appid}"));
+    if let Some(value) = config.get("winePrefix").and_then(Value::as_str) {
+        push_compatibility_prefix(&mut prefixes, value, false);
+    }
+    if let Some(value) = config.get("protonPrefix").and_then(Value::as_str) {
+        push_compatibility_prefix(&mut prefixes, value, true);
+    }
+    if let Some(value) = state.settings.get_string("linuxProtonPrefix") {
+        push_compatibility_prefix(&mut prefixes, &value, true);
+    }
+    for (key, value) in envs {
+        if key.eq_ignore_ascii_case("WINEPREFIX") {
+            push_compatibility_prefix(&mut prefixes, value, false);
+        } else if key.eq_ignore_ascii_case("STEAM_COMPAT_DATA_PATH") {
+            push_compatibility_prefix(&mut prefixes, value, true);
+        }
+    }
+    dedupe_paths(&mut prefixes);
+    prefixes
+}
+
 fn context_from_manifest(state: &AppState, manifest: &Value) -> Option<GameContext> {
     let appid = manifest.get("appid")?.as_str()?.to_string();
     let install_dir = manifest
@@ -1241,6 +1458,7 @@ fn context_from_manifest(state: &AppState, manifest: &Value) -> Option<GameConte
         .filter(|value| !value.is_empty())
         .unwrap_or(&appid)
         .to_string();
+    let prefixes = compatibility_prefixes(state, &appid, &[]);
     Some(GameContext {
         appid,
         steam_app_id,
@@ -1248,7 +1466,7 @@ fn context_from_manifest(state: &AppState, manifest: &Value) -> Option<GameConte
         image: manifest_image(manifest),
         install_dir,
         exe_path,
-        envs: Vec::new(),
+        prefixes,
     })
 }
 
@@ -1286,6 +1504,7 @@ pub(crate) fn launch_context(
                 .map(String::from)
         })
         .unwrap_or_else(|| appid.to_string());
+    let prefixes = compatibility_prefixes(state, appid, envs);
     GameContext {
         appid: appid.to_string(),
         steam_app_id,
@@ -1293,7 +1512,7 @@ pub(crate) fn launch_context(
         image: manifest_image(&manifest),
         install_dir,
         exe_path: Some(PathBuf::from(exe_path)),
-        envs: envs.to_vec(),
+        prefixes,
     }
 }
 
