@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import type { ReactNode } from "react"
 import { Check, ChevronDown, RefreshCw, Search, Sparkles, Trophy } from "lucide-react"
 import { COVER_LINES, MONO, SmartImage, gameImageCandidates } from "@/app/manifold/ui"
+import { proxyImageUrl } from "@/lib/utils"
 
 const FILTERS = ["all", "progress", "complete"] as const
 type Filter = (typeof FILTERS)[number]
@@ -208,6 +209,7 @@ function ProgressRing({ percent }: { percent: number }) {
 
 function GameRecord({ game, expanded, onToggle }: { game: LocalAchievementGame; expanded: boolean; onToggle: () => void }) {
   const progress = completion(game)
+  const awaitingData = progress.total === 0 && !game.catalogComplete
   const candidates = gameImageCandidates({ image: game.image || undefined, steamAppId: game.steamAppId }, { steamFirst: true })
   return (
     <article style={{ border: "1px solid var(--mf-line)", borderRadius: 12, overflow: "hidden", background: "var(--mf-panel)" }}>
@@ -218,10 +220,10 @@ function GameRecord({ game, expanded, onToggle }: { game: LocalAchievementGame; 
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
             <span style={{ fontSize: 14.5, fontWeight: 650, color: "var(--mf-t1)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{game.title}</span>
-            {!game.catalogComplete && <span style={{ padding: "2px 6px", borderRadius: 4, border: "1px solid var(--mf-line-2)", fontFamily: MONO, fontSize: 8.5, color: "var(--mf-t5)", textTransform: "uppercase", letterSpacing: "0.07em" }}>unlocks only</span>}
+            {!game.catalogComplete && <span style={{ padding: "2px 6px", borderRadius: 4, border: "1px solid var(--mf-line-2)", fontFamily: MONO, fontSize: 8.5, color: "var(--mf-t5)", textTransform: "uppercase", letterSpacing: "0.07em" }}>{awaitingData ? "awaiting data" : "unlocks only"}</span>}
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 6, fontFamily: MONO, fontSize: 9.5, color: "var(--mf-t5)" }}>
-            <span>{progress.unlocked} / {progress.total} unlocked</span>
+            <span>{awaitingData ? "No achievement data yet" : `${progress.unlocked} / ${progress.total} unlocked`}</span>
             <span style={{ opacity: 0.45 }}>·</span>
             <span>{game.provider}</span>
           </div>
@@ -238,7 +240,7 @@ function GameRecord({ game, expanded, onToggle }: { game: LocalAchievementGame; 
         <div style={{ padding: "3px 12px 14px", borderTop: "1px solid var(--mf-line)" }}>
           {!game.catalogComplete && (
             <div style={{ padding: "10px 4px 11px", fontFamily: MONO, fontSize: 9.5, lineHeight: 1.5, color: "var(--mf-t5)" }}>
-              This game exposes unlock state but no local achievement catalog. Only achievements already observed can be shown.
+              {awaitingData ? "No local achievement catalog or unlock state has been found yet. Manifold will update this record when the game writes one." : "This game exposes unlock state but no local achievement catalog. Only achievements already observed can be shown."}
             </div>
           )}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(270px, 1fr))", gap: 8, paddingTop: game.catalogComplete ? 11 : 0 }}>
@@ -258,7 +260,7 @@ function AchievementCard({ achievement }: { achievement: LocalAchievement }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 12, minHeight: 76, padding: 10, borderRadius: 9, border: "1px solid var(--mf-line)", background: achievement.unlocked ? "color-mix(in srgb, var(--mf-t0) 3.5%, var(--mf-panel-2))" : "var(--mf-panel-2)", opacity: achievement.unlocked ? 1 : 0.68 }}>
       <div style={{ position: "relative", width: 50, height: 50, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 7, overflow: "hidden", background: COVER_LINES, border: "1px solid var(--mf-line-2)" }}>
-        {icon ? <SmartImage candidates={[icon]} alt="" lazy style={{ width: "100%", height: "100%", objectFit: "cover", display: "block", filter: achievement.unlocked ? "none" : "grayscale(1)" }} /> : <Trophy size={18} strokeWidth={1.35} color="var(--mf-t5)" />}
+        {icon ? <SmartImage candidates={[proxyImageUrl(icon)]} alt="" lazy style={{ width: "100%", height: "100%", objectFit: "cover", display: "block", filter: achievement.unlocked ? "none" : "grayscale(1)" }} /> : <Trophy size={18} strokeWidth={1.35} color="var(--mf-t5)" />}
         {achievement.unlocked && <span style={{ position: "absolute", right: 3, bottom: 3, display: "flex", alignItems: "center", justifyContent: "center", width: 15, height: 15, borderRadius: 99, background: "var(--mf-t0)", color: "var(--mf-bg)" }}><Check size={9} strokeWidth={2.5} /></span>}
       </div>
       <div style={{ minWidth: 0 }}>
