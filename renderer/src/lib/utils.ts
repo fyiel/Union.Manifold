@@ -1,6 +1,5 @@
 import { type ClassValue, clsx } from "clsx"
 import { twMerge } from "tailwind-merge"
-import { convertFileSrc } from "@tauri-apps/api/core"
 import { apiUrl, getApiBaseUrl } from "@/lib/api"
 
 export function cn(...inputs: ClassValue[]) {
@@ -163,15 +162,15 @@ function isPublicImageHost(host: string): boolean {
 
 const RENDERER_DIST_PREFIXES = ["/assets/", "/fallbacks/", "/icons/", "/images/", "/fonts/", "/static/"]
 
-function toUcLocalUrl(absolutePath: string): string {
-  const normalized = absolutePath.replace(/\\/g, "/")
-  return convertFileSrc(normalized)
-}
-
 const UC_ASSET_BASE =
   typeof navigator !== "undefined" && navigator.userAgent.includes("Windows")
     ? "http://uc-asset.localhost"
     : "uc-asset://localhost"
+
+function toUcLocalUrl(absolutePath: string): string {
+  const normalized = absolutePath.replace(/\\/g, "/")
+  return `${UC_ASSET_BASE}/img?p=${encodeURIComponent(normalized)}`
+}
 
 export function proxyMediaUrl(mediaUrl: string): string {
   if (!mediaUrl) return mediaUrl

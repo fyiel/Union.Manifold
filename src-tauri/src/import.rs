@@ -128,7 +128,7 @@ fn vdf_pairs(text: &str) -> impl Iterator<Item = (String, String)> + '_ {
     })
 }
 
-fn steam_roots() -> Vec<PathBuf> {
+pub(crate) fn steam_roots() -> Vec<PathBuf> {
     let mut roots = Vec::new();
     #[cfg(windows)]
     {

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react"
 import { Check, Trophy } from "lucide-react"
 import { MONO, SmartImage } from "@/app/manifold/ui"
+import { proxyImageUrl } from "@/lib/utils"
 
 export default function AchievementToastWindow() {
   const [payload, setPayload] = useState<LocalAchievementUnlock | null>(null)
@@ -66,7 +67,7 @@ export default function AchievementToastWindow() {
       >
         <div style={{ position: "relative", width: 72, height: 72, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", borderRadius: 6, border: "1px solid rgba(255,255,255,0.14)", background: "repeating-linear-gradient(135deg, rgba(255,255,255,0.04) 0 1px, transparent 1px 10px), #111416" }}>
           {icon
-            ? <SmartImage candidates={[icon]} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+            ? <SmartImage candidates={[proxyImageUrl(icon)]} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
             : <Trophy size={27} strokeWidth={1.35} color="rgba(255,255,255,0.5)" />}
           <span style={{ position: "absolute", right: 4, bottom: 4, display: "flex", alignItems: "center", justifyContent: "center", width: 18, height: 18, borderRadius: 99, background: "#66c0f4", color: "#101416", boxShadow: "0 2px 8px rgba(0,0,0,0.45)" }}>
             <Check size={11} strokeWidth={2.8} />

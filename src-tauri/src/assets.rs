@@ -121,6 +121,25 @@ pub async fn respond(app: AppHandle, uri: String) -> (u16, Vec<u8>, String) {
             }
         };
     }
+    if let Some(local) = query_param(&uri, "p") {
+        let path = PathBuf::from(local);
+        if !path.is_absolute() {
+            return (400, b"bad path".to_vec(), "text/plain".to_string());
+        }
+        return match tokio::fs::read(&path).await {
+            Ok(bytes) => {
+                let ct = content_type_of(&bytes);
+                (200, bytes, ct.to_string())
+            }
+            Err(error) => {
+                log_failure(
+                    &format!("local image read failed ({error})"),
+                    &path.to_string_lossy(),
+                );
+                (404, b"not found".to_vec(), "text/plain".to_string())
+            }
+        };
+    }
     let remote = match query_param(&uri, "u") {
         Some(u) if !u.is_empty() => u,
         _ => return (400, b"missing u".to_vec(), "text/plain".to_string()),
