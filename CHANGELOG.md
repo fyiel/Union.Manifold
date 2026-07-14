@@ -3,6 +3,22 @@
 All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 
+## 3.4.3
+
+### Fixed
+
+- achievement thumbnails now load local catalog images through Manifold's image
+  protocol and cached Steam catalog icons from Steam's public image CDN;
+  verified end-to-end with both local and Steam-backed achievement grids
+- the achievement library now includes every installed game without
+  title-specific rules, enriches records from packaged catalogs, Steam's local
+  schema cache, RUNE and OnlineFix data when available, and keeps a pending
+  record until local data appears; verified end-to-end across the complete
+  current and legacy library
+- the Linux test popup now shows its hidden window before enabling click-through
+  input, preventing Tao's hidden-window panic; verified end-to-end from a
+  previously hidden notification window
+
 ## 3.4.2
 
 ### Changed
