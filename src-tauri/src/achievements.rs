@@ -426,6 +426,7 @@ fn scan_discovery(context: &GameContext, discovery: &Discovery) -> Option<Scanne
         .definitions
         .as_deref()
         .and_then(parse_definitions)
+        .or_else(|| bundled_definitions(context.steam_app_id))
         .unwrap_or_default();
     let mut state = HashMap::new();
     let mut state_loaded = false;
@@ -530,7 +531,13 @@ fn discover(context: &GameContext) -> Discovery {
     let provider = definitions
         .as_ref()
         .map(|path| provider_for(path))
-        .unwrap_or_else(|| "Local Steam".to_string());
+        .unwrap_or_else(|| {
+            if has_bundled_definitions(context.steam_app_id) {
+                "Steam catalog".to_string()
+            } else {
+                "Local Steam".to_string()
+            }
+        });
     Discovery {
         definitions,
         states,
@@ -754,7 +761,13 @@ fn parse_definitions(path: &Path) -> Option<Vec<AchievementDefinition>> {
 
 fn parse_json_definitions(path: &Path) -> Option<Vec<AchievementDefinition>> {
     let value: Value = serde_json::from_slice(&std::fs::read(path).ok()?).ok()?;
-    let root = path.parent()?;
+    parse_json_definition_value(value, path.parent()?)
+}
+
+fn parse_json_definition_value(
+    value: Value,
+    root: &Path,
+) -> Option<Vec<AchievementDefinition>> {
     let mut definitions = Vec::new();
     match value {
         Value::Array(items) => {
@@ -782,6 +795,18 @@ fn parse_json_definitions(path: &Path) -> Option<Vec<AchievementDefinition>> {
         _ => return None,
     }
     (!definitions.is_empty()).then_some(definitions)
+}
+
+fn has_bundled_definitions(steam_app_id: Option<u64>) -> bool {
+    matches!(steam_app_id, Some(686060))
+}
+
+fn bundled_definitions(steam_app_id: Option<u64>) -> Option<Vec<AchievementDefinition>> {
+    let value = match steam_app_id {
+        Some(686060) => include_str!("../resources/achievements/686060.json"),
+        _ => return None,
+    };
+    parse_json_definition_value(serde_json::from_str(value).ok()?, Path::new(""))
 }
 
 struct BinaryKeyValues<'a> {
@@ -923,7 +948,10 @@ fn definition_from_value(
     let hidden = value_ci(object, &["hidden"]).is_some_and(truthy);
     let icon = string_value_ci(object, &["icon", "icon_unlocked"])
         .and_then(|value| resolve_icon(root, &value));
-    let icon_locked = string_value_ci(object, &["icongray", "icon_gray", "icon_locked"])
+    let icon_locked = string_value_ci(
+        object,
+        &["icongray", "icon_gray", "icon_locked", "iconLocked"],
+    )
         .and_then(|value| resolve_icon(root, &value));
     Some(AchievementDefinition {
         api_name,
@@ -1644,6 +1672,45 @@ mod tests {
         let ini_state = parse_state(&ini_state_path).unwrap();
         assert!(ini_state["ach_win"].unlocked);
         assert_eq!(ini_state["ach_win"].unlocked_at, Some(1_710_000_001_000));
+    }
+
+    #[test]
+    fn scans_mewgenics_with_bundled_catalog_and_local_unlock_state() {
+        let temp = tempfile::tempdir().unwrap();
+        let state = temp.path().join("achievements.ini");
+        std::fs::write(&state, "[Achievements]\nmap_unlock_sewers=true\n").unwrap();
+        let context = GameContext {
+            appid: "steam-686060".to_string(),
+            steam_app_id: Some(686060),
+            title: "Mewgenics".to_string(),
+            image: None,
+            install_dir: temp.path().to_path_buf(),
+            exe_path: None,
+            prefixes: Vec::new(),
+        };
+        let scanned = scan_discovery(
+            &context,
+            &Discovery {
+                definitions: None,
+                states: vec![state],
+                provider: "Steam catalog".to_string(),
+            },
+        )
+        .unwrap();
+
+        assert!(scanned.game.catalog_complete);
+        assert_eq!(scanned.game.achievements.len(), 281);
+        let sewers = scanned
+            .game
+            .achievements
+            .iter()
+            .find(|achievement| achievement.api_name == "map_unlock_sewers")
+            .unwrap();
+        assert_eq!(sewers.display_name, "The Sewers");
+        assert_eq!(sewers.description, "Complete the Alley.");
+        assert!(sewers.icon.is_some());
+        assert!(sewers.icon_locked.is_some());
+        assert!(sewers.unlocked);
     }
 
     #[test]
