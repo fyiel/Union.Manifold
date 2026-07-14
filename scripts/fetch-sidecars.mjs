@@ -35,7 +35,7 @@ const ARIA2_SHA = ARIA2_VERSION === '1.37.0' ? {
 const SEVENZIP_SHA = SEVENZIP_VERSION === '2301' ? {
   'linux-x64': '23babcab045b78016e443f862363e4ab63c77d75bc715c0b3463f6134cbcf318',
   'linux-arm64': '34e938fc4ba8ca6a835239733d9c1542ad8442cc037f43ca143a119bdf322b63',
-  'win32-x64': 'db3a1cbe57a26fac81b65c6a2d23feaecdeede3e4c1fe8fb93a7b91d72d1094c',
+  'win32-x64': '26cb6e9f56333682122fafe79dbcdfd51e9f47cc7217dccd29ac6fc33b5598cd',
   'darwin-x64': '343eae9ccbbd8f68320adaaa3c87e0244cf39fad0fbec6b9d2cd3e5b0f8a5fbf',
   'darwin-arm64': '343eae9ccbbd8f68320adaaa3c87e0244cf39fad0fbec6b9d2cd3e5b0f8a5fbf',
 } : {}
@@ -51,7 +51,7 @@ const ARIA2 = {
 const SEVENZIP = {
   'linux-x64': { url: `https://www.7-zip.org/a/7z${SEVENZIP_VERSION}-linux-x64.tar.xz`, src: '7zzs', sha256: SEVENZIP_SHA['linux-x64'] },
   'linux-arm64': { url: `https://www.7-zip.org/a/7z${SEVENZIP_VERSION}-linux-arm64.tar.xz`, src: '7zzs', sha256: SEVENZIP_SHA['linux-arm64'] },
-  'win32-x64': { url: `https://www.7-zip.org/a/7z${SEVENZIP_VERSION}-extra.7z`, src: '7za.exe', srcSub: 'x64', sha256: SEVENZIP_SHA['win32-x64'] },
+  'win32-x64': { url: `https://www.7-zip.org/a/7z${SEVENZIP_VERSION}-x64.exe`, src: '7z.exe', resources: ['7z.dll'], sha256: SEVENZIP_SHA['win32-x64'] },
   'darwin-x64': { url: `https://www.7-zip.org/a/7z${SEVENZIP_VERSION}-mac.tar.xz`, src: '7zz', sha256: SEVENZIP_SHA['darwin-x64'] },
   'darwin-arm64': { url: `https://www.7-zip.org/a/7z${SEVENZIP_VERSION}-mac.tar.xz`, src: '7zz', sha256: SEVENZIP_SHA['darwin-arm64'] },
 }
@@ -128,7 +128,7 @@ async function extract(archive, dir) {
     }
   } else if (/\.tar\.(xz|gz|bz2)$/.test(archive)) {
     execFileSync('tar', ['-xf', archive, '-C', dir], { stdio: 'inherit' })
-  } else if (archive.endsWith('.7z')) {
+  } else if (archive.endsWith('.7z') || archive.endsWith('.exe')) {
     const zip = await sevenZipCmd()
     execFileSync(zip, ['x', '-y', `-o${dir}`, archive], { stdio: 'inherit' })
   } else {
@@ -167,7 +167,8 @@ function findFile(dir, name, sub) {
 async function stage(spec, outName, triple, isWin) {
   const dest = path.join(binDir, `${outName}-${triple}${isWin ? '.exe' : ''}`)
   const stamp = `${dest}.src`
-  if (fs.existsSync(dest) && fs.existsSync(stamp) && fs.readFileSync(stamp, 'utf8') === spec.url) {
+  const resourcesPresent = (spec.resources ?? []).every((name) => fs.existsSync(path.join(resDir, name)))
+  if (fs.existsSync(dest) && resourcesPresent && fs.existsSync(stamp) && fs.readFileSync(stamp, 'utf8') === spec.url) {
     return log(`present ${path.basename(dest)}`)
   }
   const tmp = path.join(os.tmpdir(), `sc-${Date.now()}-${path.basename(spec.url)}`)
@@ -182,6 +183,12 @@ async function stage(spec, outName, triple, isWin) {
     fs.mkdirSync(binDir, { recursive: true })
     fs.copyFileSync(bin, dest)
     if (!isWin) fs.chmodSync(dest, 0o755)
+    for (const name of spec.resources ?? []) {
+      const resource = findFile(work, name)
+      if (!resource) throw new Error(`${name} not found`)
+      fs.mkdirSync(resDir, { recursive: true })
+      fs.copyFileSync(resource, path.join(resDir, name))
+    }
     fs.writeFileSync(stamp, spec.url)
     log(`installed ${path.basename(dest)}`)
   } finally {
