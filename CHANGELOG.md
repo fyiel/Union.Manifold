@@ -3,6 +3,21 @@
 All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 
+## 3.4.5
+
+### Fixed
+
+- Windows packages now bundle the full 7-Zip console runtime and RAR decoder,
+  allowing Mewgenics and other RAR downloads to extract in-app
+
+## 3.4.4
+
+### Fixed
+
+- Mewgenics now shows its complete 281-achievement Steam catalog, including
+  names, descriptions, hidden status and locked/unlocked artwork, while merging
+  locally recorded unlock progress
+
 ## 3.4.3
 
 ### Fixed
