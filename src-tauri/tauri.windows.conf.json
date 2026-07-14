@@ -1,0 +1,7 @@
+{
+  "bundle": {
+    "resources": {
+      "resources/7z.dll": "7z.dll"
+    }
+  }
+}
