@@ -310,6 +310,57 @@ fn write_mod_engine_profile(
     std::fs::write(&generated, profile).map_err(|error| format!("Mod Engine profile: {error}"))?;
     Ok(Some(generated))
 }
+fn mewgenics_mod_version(dir: &Path) -> Option<String> {
+    ["description.json", "info.json", "modinfo.json"]
+        .into_iter()
+        .find_map(|name| {
+            std::fs::read_to_string(dir.join(name))
+                .ok()
+                .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+                .and_then(|metadata| metadata.get("version")?.as_str().map(str::to_string))
+        })
+}
+
+fn mewgenics_paths_for_entry(staging_root: &Path, entry: &ModEntry) -> Vec<PathBuf> {
+    let staged = staging_root.join(&entry.id);
+    if !staged.is_dir() {
+        return Vec::new();
+    }
+    if has_root_dir(&staged, &["data"]) {
+        return vec![staged];
+    }
+
+    let mut children: Vec<PathBuf> = std::fs::read_dir(&staged)
+        .ok()
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|child| child.path())
+        .filter(|child| child.is_dir() && has_root_dir(child, &["data"]))
+        .collect();
+    children.sort_by_key(|child| {
+        child
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_lowercase()
+    });
+    if children.len() <= 1 {
+        return children.into_iter().next().map_or_else(|| vec![staged], |child| vec![child]);
+    }
+
+    let matching_version: Vec<PathBuf> = children
+        .iter()
+        .filter(|child| mewgenics_mod_version(child).as_deref() == Some(entry.version.as_str()))
+        .cloned()
+        .collect();
+    if matching_version.len() == 1 {
+        matching_version
+    } else {
+        children
+    }
+}
+
 fn enabled_mewgenics_mod_paths(game_dir: &Path, cfg: &GameMods) -> Vec<PathBuf> {
     if cfg.steam_appid != Some(MEWGENICS_STEAM_APPID) {
         return Vec::new();
@@ -323,8 +374,7 @@ fn enabled_mewgenics_mod_paths(game_dir: &Path, cfg: &GameMods) -> Vec<PathBuf> 
     enabled.sort_by_key(|entry| entry.order);
     enabled
         .into_iter()
-        .map(|entry| staging_root.join(&entry.id))
-        .filter(|path| path.is_dir())
+        .flat_map(|entry| mewgenics_paths_for_entry(&staging_root, entry))
         .collect()
 }
 
@@ -2077,6 +2127,34 @@ mod tests {
 
         undeploy_from(&dir, &target).unwrap();
         assert!(!dir.join(MEWGENICS_DEPLOY_MARKER).exists());
+    }
+
+    #[test]
+    fn mewgenics_selects_the_matching_mod_from_a_mewtator_folder_bundle() {
+        let tmp = tempdir().unwrap();
+        let dir = tmp.path().join("m");
+        let mut bundled = mk_mod(
+            &dir,
+            "nexus-8",
+            0,
+            &[
+                ("Old Variant/data/ai.gon.patch", "old"),
+                ("Current Variant/data/ai.gon.patch", "current"),
+                ("Old Variant/description.json", r#"{"version":"0.0.1"}"#),
+                ("Current Variant/description.json", r#"{"version":"0.0.2"}"#),
+            ],
+        );
+        bundled.version = "0.0.2".to_string();
+        let cfg = GameMods {
+            steam_appid: Some(MEWGENICS_STEAM_APPID),
+            mods: vec![bundled],
+            ..Default::default()
+        };
+
+        assert_eq!(
+            enabled_mewgenics_mod_paths(&dir, &cfg),
+            vec![dir.join("staging/nexus-8/Current Variant")]
+        );
     }
 
     #[test]
