@@ -3,15 +3,20 @@
 All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 
+## 3.4.6
+
+### Fixed
+
+- Mewgenics mods now remain isolated in staging and are passed to the game in
+  configured load order through its native `-modpaths` launch argument; stale
+  game-root copies from earlier installs are removed during migration
+
 ## 3.4.5
 
 ### Fixed
 
 - Windows packages now bundle the full 7-Zip console runtime and RAR decoder,
   allowing Mewgenics and other RAR downloads to extract in-app
-- Mewgenics mods now remain isolated in staging and are passed to the game in
-  configured load order through its native `-modpaths` launch argument; stale
-  game-root copies from earlier installs are removed during migration
 
 ## 3.4.4
 
