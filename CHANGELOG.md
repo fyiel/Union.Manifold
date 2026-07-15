@@ -3,6 +3,14 @@
 All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 
+## 3.4.8
+
+### Fixed
+
+- versioned multi-folder mod archives are now normalized before game and loader
+  classification, so manifest-backed bundles deploy their matching payload for
+  every supported game
+
 ## 3.4.7
 
 ### Fixed
