@@ -310,15 +310,37 @@ fn write_mod_engine_profile(
     std::fs::write(&generated, profile).map_err(|error| format!("Mod Engine profile: {error}"))?;
     Ok(Some(generated))
 }
+fn enabled_mewgenics_mod_paths(game_dir: &Path, cfg: &GameMods) -> Vec<PathBuf> {
+    if cfg.steam_appid != Some(MEWGENICS_STEAM_APPID) {
+        return Vec::new();
+    }
+    let staging_root = game_dir.join("staging");
+    let mut enabled: Vec<&ModEntry> = cfg
+        .mods
+        .iter()
+        .filter(|entry| entry.enabled && !entry.deploy_blocked)
+        .collect();
+    enabled.sort_by_key(|entry| entry.order);
+    enabled
+        .into_iter()
+        .map(|entry| staging_root.join(&entry.id))
+        .filter(|path| path.is_dir())
+        .collect()
+}
+
 
 pub(crate) fn deploy_to(game_dir: &Path, target: &Path, cfg: &GameMods) -> Result<usize, String> {
     let staging_root = game_dir.join("staging");
     let backup_root = game_dir.join("backup");
+    let mewgenics_paths = enabled_mewgenics_mod_paths(game_dir, cfg);
 
     let mut enabled: Vec<&ModEntry> = cfg.mods.iter().filter(|m| m.enabled && !m.deploy_blocked).collect();
     enabled.sort_by_key(|m| m.order);
     let mut desired: HashMap<String, (PathBuf, String)> = HashMap::new();
     for m in enabled {
+        if cfg.steam_appid == Some(MEWGENICS_STEAM_APPID) {
+            continue;
+        }
         let prefix = join_target(Path::new(""), &m.deploy_prefix)?
             .components()
             .map(|component| component.as_os_str().to_string_lossy().to_string())
@@ -414,7 +436,18 @@ pub(crate) fn deploy_to(game_dir: &Path, target: &Path, cfg: &GameMods) -> Resul
     }
 
     save_journal(game_dir, &journal)?;
-    Ok(journal.files.len())
+    let marker = game_dir.join(MEWGENICS_DEPLOY_MARKER);
+    if cfg.steam_appid == Some(MEWGENICS_STEAM_APPID) {
+        if mewgenics_paths.is_empty() {
+            std::fs::remove_file(marker).ok();
+        } else {
+            std::fs::write(marker, b"enabled\n").map_err(|e| format!("Mewgenics deploy marker: {e}"))?;
+        }
+        Ok(mewgenics_paths.len())
+    } else {
+        std::fs::remove_file(marker).ok();
+        Ok(journal.files.len())
+    }
 }
 
 pub(crate) fn undeploy_from(game_dir: &Path, target: &Path) -> Result<(), String> {
@@ -435,7 +468,9 @@ pub(crate) fn undeploy_from(game_dir: &Path, target: &Path) -> Result<(), String
         }
         remove_empty_parents(&dst, target);
     }
-    save_journal(game_dir, &Journal::default())
+    save_journal(game_dir, &Journal::default())?;
+    std::fs::remove_file(game_dir.join(MEWGENICS_DEPLOY_MARKER)).ok();
+    Ok(())
 }
 
 fn is_game_dir(dir: &Path) -> bool {
@@ -510,6 +545,14 @@ pub(crate) fn active_mod_engine_profile(state: &AppState, appid: &str) -> Option
     profile.is_file().then_some(profile)
 }
 
+pub(crate) fn active_mewgenics_mod_paths(state: &AppState, appid: &str) -> Vec<PathBuf> {
+    let dir = game_mods_dir(&state.paths, appid);
+    if !dir.join(MEWGENICS_DEPLOY_MARKER).is_file() {
+        return Vec::new();
+    }
+    enabled_mewgenics_mod_paths(&dir, &load_config(&state.paths, appid))
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum ModLayout {
     Raw,
@@ -534,6 +577,8 @@ const MOD_ENGINE_PROFILE: &str = ".union-manifold.me3";
 const MOD_ENGINE_DEPLOY_ROOT: &str = ".union-manifold-me3";
 const RESIDENT_EVIL_REQUIEM_STEAM_APPID: u64 = 3_764_200;
 const EVERYTHING_IS_CRAB_STEAM_APPID: u64 = 3_526_710;
+const MEWGENICS_STEAM_APPID: u64 = 686_060;
+const MEWGENICS_DEPLOY_MARKER: &str = ".mewgenics-modpaths";
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -863,6 +908,14 @@ fn infer_deployment_plan(target: &Path, staged: &Path, steam_appid: Option<u64>)
             "",
             "the archive uses an interactive FOMOD installer",
             "low",
+        );
+    }
+    if steam_appid == Some(MEWGENICS_STEAM_APPID) {
+        return deployment_plan(
+            ModLayout::Raw,
+            "",
+            "Mewgenics loads this staged mod folder through -modpaths at launch",
+            "high",
         );
     }
     if has_root_dir(&root, &["BepInEx"]) {
@@ -1598,7 +1651,7 @@ async fn flatten_tar(dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
-const DEPLOYMENT_PLAN_VERSION: u32 = 3;
+const DEPLOYMENT_PLAN_VERSION: u32 = 4;
 
 fn refresh_deployment_plans(state: &AppState, appid: &str, cfg: &mut GameMods) -> bool {
     let Ok(target) = deploy_target_dir(state, appid, cfg) else {
@@ -1719,7 +1772,10 @@ pub async fn mods_game_get(state: State<'_, AppState>, appid: String) -> Result<
             crate::logging::write_line("warn", &format!("mod deployment plan migration failed for {appid}: {error}"));
         }
     }
-    let deployed = !load_journal(&game_mods_dir(&state.paths, &appid)).files.is_empty();
+    let deployed = !load_journal(&game_mods_dir(&state.paths, &appid)).files.is_empty()
+        || game_mods_dir(&state.paths, &appid)
+            .join(MEWGENICS_DEPLOY_MARKER)
+            .is_file();
     let compatibility_target = deploy_target_dir(&state, &appid, &cfg).ok();
     let loaders = loader_compatibility(compatibility_target.as_deref(), cfg.steam_appid);
     Ok(json!({
@@ -1992,6 +2048,35 @@ mod tests {
         assert_eq!(read(&target.join("a-only.txt")), "a");
         let journal = load_journal(&dir);
         assert_eq!(journal.files.get("data/conflict.txt").unwrap().mod_id, "nexus-2");
+    }
+
+    #[test]
+    fn mewgenics_activates_staged_paths_instead_of_copying_mod_files() {
+        let tmp = tempdir().unwrap();
+        let dir = tmp.path().join("m");
+        let target = tmp.path().join("game");
+        let a = mk_mod(&dir, "nexus-1", 1, &[("data/a.gon.patch", "a")]);
+        let b = mk_mod(&dir, "nexus-2", 0, &[("data/b.gon.merge", "b")]);
+        let mut cfg = GameMods {
+            mods: vec![a, b],
+            ..Default::default()
+        };
+
+        deploy_to(&dir, &target, &cfg).unwrap();
+        assert!(target.join("data/a.gon.patch").is_file());
+
+        cfg.steam_appid = Some(MEWGENICS_STEAM_APPID);
+        assert_eq!(deploy_to(&dir, &target, &cfg).unwrap(), 2);
+        assert!(!target.join("data").exists());
+        assert!(load_journal(&dir).files.is_empty());
+        assert!(dir.join(MEWGENICS_DEPLOY_MARKER).is_file());
+        assert_eq!(
+            enabled_mewgenics_mod_paths(&dir, &cfg),
+            vec![dir.join("staging/nexus-2"), dir.join("staging/nexus-1")]
+        );
+
+        undeploy_from(&dir, &target).unwrap();
+        assert!(!dir.join(MEWGENICS_DEPLOY_MARKER).exists());
     }
 
     #[test]
