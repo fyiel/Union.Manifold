@@ -342,6 +342,50 @@ fn versioned_archive_root(staged: &Path, version: &str) -> Option<PathBuf> {
     (manifest_children > 1).then_some(selected).flatten()
 }
 
+fn child_dir(parent: &Path, name: &str) -> Option<PathBuf> {
+    std::fs::read_dir(parent)
+        .ok()?
+        .flatten()
+        .find(|entry| {
+            entry.path().is_dir()
+                && entry.file_name().to_string_lossy().eq_ignore_ascii_case(name)
+        })
+        .map(|entry| entry.path())
+}
+
+fn normalize_mewgenics_localization_append(staged: &Path) -> Result<bool, String> {
+    let Some(data) = child_dir(staged, "data") else {
+        return Ok(false);
+    };
+    let Some(text) = child_dir(&data, "text") else {
+        return Ok(false);
+    };
+    let combined = text.join("combined.csv.append");
+    if combined.exists() {
+        return Ok(false);
+    }
+    let mut legacy: Vec<PathBuf> = std::fs::read_dir(&text)
+        .map_err(|error| format!("Mewgenics localization directory: {error}"))?
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.is_file()
+                && path
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_ascii_lowercase()
+                    .ends_with(".csv.append")
+        })
+        .collect();
+    if legacy.len() != 1 {
+        return Ok(false);
+    }
+    std::fs::rename(legacy.pop().unwrap(), &combined)
+        .map_err(|error| format!("Mewgenics localization migration: {error}"))?;
+    Ok(true)
+}
+
 fn launch_payload_paths_for_entry(staging_root: &Path, entry: &ModEntry) -> Vec<PathBuf> {
     let staged = staging_root.join(&entry.id);
     if !staged.is_dir() {
@@ -1630,6 +1674,10 @@ pub(crate) async fn finalize_install(
         apply_staging_layout(&final_dir, plan.layout, &spec.name, &mod_id)?;
     }
 
+    if steam_appid == Some(MEWGENICS_STEAM_APPID) {
+        normalize_mewgenics_localization_append(&final_dir)?;
+    }
+
     let size = crate::install::dir_size(&final_dir);
     upsert_mod(&mut cfg, spec, size, &plan);
     cfg.deployment_plan_version = DEPLOYMENT_PLAN_VERSION;
@@ -1718,7 +1766,7 @@ async fn flatten_tar(dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
-const DEPLOYMENT_PLAN_VERSION: u32 = 4;
+const DEPLOYMENT_PLAN_VERSION: u32 = 5;
 
 fn refresh_deployment_plans(state: &AppState, appid: &str, cfg: &mut GameMods) -> bool {
     let Ok(target) = deploy_target_dir(state, appid, cfg) else {
@@ -1733,6 +1781,19 @@ fn refresh_deployment_plans(state: &AppState, appid: &str, cfg: &mut GameMods) -
         let staged = staging.join(&installed.id);
         if !staged.is_dir() {
             continue;
+        }
+        if migrating && cfg.steam_appid == Some(MEWGENICS_STEAM_APPID) {
+            match normalize_mewgenics_localization_append(&staged) {
+                Ok(migrated) => changed |= migrated,
+                Err(error) => {
+                    crate::logging::write_line(
+                        "warn",
+                        &format!("Mewgenics localization migration failed for {appid}/{}: {error}", installed.id),
+                    );
+                    migration_failed = true;
+                    continue;
+                }
+            }
         }
         let mut plan = infer_deployment_plan(&target, &staged, cfg.steam_appid);
         if migrating && matches!(plan.layout, ModLayout::ModEngine3 | ModLayout::Lenny | ModLayout::Fluffy) {
@@ -2144,6 +2205,24 @@ mod tests {
 
         undeploy_from(&dir, &target).unwrap();
         assert!(!dir.join(MEWGENICS_DEPLOY_MARKER).exists());
+    }
+
+    #[test]
+    fn mewgenics_migrates_legacy_split_localization_appends() {
+        let tmp = tempdir().unwrap();
+        let staged = tmp.path().join("nexus-44");
+        write_file(
+            &staged.join("Data/text/items.csv.append"),
+            "KEY,en\nARMOR_LEATHERHAT_DESC,Part of the Leather Set Bonus",
+        );
+
+        assert!(normalize_mewgenics_localization_append(&staged).unwrap());
+        assert!(!staged.join("Data/text/items.csv.append").exists());
+        assert_eq!(
+            read(&staged.join("Data/text/combined.csv.append")),
+            "KEY,en\nARMOR_LEATHERHAT_DESC,Part of the Leather Set Bonus"
+        );
+        assert!(!normalize_mewgenics_localization_append(&staged).unwrap());
     }
 
     #[test]

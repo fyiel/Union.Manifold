@@ -3,6 +3,13 @@
 All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 
+## 3.4.9
+
+### Fixed
+
+- legacy Mewgenics split localization appends now target `combined.csv`, restoring
+  Show Set Bonuses after the game's localization files were consolidated
+
 ## 3.4.8
 
 ### Fixed
