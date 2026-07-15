@@ -310,7 +310,7 @@ fn write_mod_engine_profile(
     std::fs::write(&generated, profile).map_err(|error| format!("Mod Engine profile: {error}"))?;
     Ok(Some(generated))
 }
-fn mewgenics_mod_version(dir: &Path) -> Option<String> {
+fn mod_manifest_version(dir: &Path) -> Option<String> {
     ["description.json", "info.json", "modinfo.json"]
         .into_iter()
         .find_map(|name| {
@@ -321,13 +321,37 @@ fn mewgenics_mod_version(dir: &Path) -> Option<String> {
         })
 }
 
-fn mewgenics_paths_for_entry(staging_root: &Path, entry: &ModEntry) -> Vec<PathBuf> {
+fn versioned_archive_root(staged: &Path, version: &str) -> Option<PathBuf> {
+    if version.is_empty() {
+        return None;
+    }
+    let mut manifest_children = 0;
+    let mut selected = None;
+    for path in std::fs::read_dir(staged).ok()?.flatten().map(|entry| entry.path()).filter(|path| path.is_dir()) {
+        let Some(child_version) = mod_manifest_version(&path) else {
+            continue;
+        };
+        manifest_children += 1;
+        if child_version == version {
+            if selected.is_some() {
+                return None;
+            }
+            selected = Some(path);
+        }
+    }
+    (manifest_children > 1).then_some(selected).flatten()
+}
+
+fn launch_payload_paths_for_entry(staging_root: &Path, entry: &ModEntry) -> Vec<PathBuf> {
     let staged = staging_root.join(&entry.id);
     if !staged.is_dir() {
         return Vec::new();
     }
     if has_root_dir(&staged, &["data"]) {
         return vec![staged];
+    }
+    if let Some(selected) = versioned_archive_root(&staged, &entry.version) {
+        return vec![selected];
     }
 
     let mut children: Vec<PathBuf> = std::fs::read_dir(&staged)
@@ -345,17 +369,8 @@ fn mewgenics_paths_for_entry(staging_root: &Path, entry: &ModEntry) -> Vec<PathB
             .to_string_lossy()
             .to_lowercase()
     });
-    if children.len() <= 1 {
-        return children.into_iter().next().map_or_else(|| vec![staged], |child| vec![child]);
-    }
-
-    let matching_version: Vec<PathBuf> = children
-        .iter()
-        .filter(|child| mewgenics_mod_version(child).as_deref() == Some(entry.version.as_str()))
-        .cloned()
-        .collect();
-    if matching_version.len() == 1 {
-        matching_version
+    if children.is_empty() {
+        vec![staged]
     } else {
         children
     }
@@ -374,7 +389,7 @@ fn enabled_mewgenics_mod_paths(game_dir: &Path, cfg: &GameMods) -> Vec<PathBuf> 
     enabled.sort_by_key(|entry| entry.order);
     enabled
         .into_iter()
-        .flat_map(|entry| mewgenics_paths_for_entry(&staging_root, entry))
+        .flat_map(|entry| launch_payload_paths_for_entry(&staging_root, entry))
         .collect()
 }
 
@@ -1582,6 +1597,8 @@ pub(crate) async fn finalize_install(
     if let Some(parent) = final_dir.parent() {
         std::fs::create_dir_all(parent).map_err(|e| format!("staging dir: {e}"))?;
     }
+    let selected_src = versioned_archive_root(staged_src, &spec.version);
+    let staged_src = selected_src.as_deref().unwrap_or(staged_src);
     let mut cfg = load_config(&state.paths, &spec.appid);
     let target = deploy_target_dir(&state, &spec.appid, &cfg)?;
     let steam_appid = detect_steam_appid(&state, &spec.appid).await;
@@ -2151,6 +2168,10 @@ mod tests {
             ..Default::default()
         };
 
+        assert_eq!(
+            versioned_archive_root(&dir.join("staging/nexus-8"), "0.0.2"),
+            Some(dir.join("staging/nexus-8/Current Variant"))
+        );
         assert_eq!(
             enabled_mewgenics_mod_paths(&dir, &cfg),
             vec![dir.join("staging/nexus-8/Current Variant")]
