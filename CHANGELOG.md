@@ -3,6 +3,13 @@
 All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 
+## 3.4.7
+
+### Fixed
+
+- multi-folder Mewtator archives now pass the version-matching inner mod folder
+  to Mewgenics instead of the inert archive wrapper
+
 ## 3.4.6
 
 ### Fixed
