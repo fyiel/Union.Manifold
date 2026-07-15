@@ -71,6 +71,24 @@ fn mod_engine_launch_args(profile: &Path, exe_path: &str) -> Vec<String> {
     ]
 }
 
+fn mewgenics_launch_args(exe_path: &str, mod_paths: Vec<PathBuf>) -> Vec<String> {
+    if mod_paths.is_empty() {
+        return Vec::new();
+    }
+    let windows_paths = !cfg!(windows) && exe_path.to_ascii_lowercase().ends_with(".exe");
+    let mut args = Vec::with_capacity(mod_paths.len() + 1);
+    args.push("-modpaths".to_string());
+    args.extend(mod_paths.into_iter().map(|path| {
+        let path = path.to_string_lossy();
+        if windows_paths {
+            format!("Z:{}", path.replace('\\', "/"))
+        } else {
+            path.into_owned()
+        }
+    }));
+    args
+}
+
 fn is_executable_candidate(path: &Path) -> bool {
     let name = path
         .file_name()
@@ -348,10 +366,14 @@ pub async fn game_exe_launch(
         .parent()
         .map(PathBuf::from)
         .unwrap_or_else(|| state.download_root());
-    let plan = match linux::resolve_launch(&state, &appid, &exe_path) {
+    let mut plan = match linux::resolve_launch(&state, &appid, &exe_path) {
         Ok(p) => p,
         Err(e) => return Ok(json!({ "ok": false, "error": e })),
     };
+    plan.args.extend(mewgenics_launch_args(
+        &exe_path,
+        crate::mods::active_mewgenics_mod_paths(&state, &appid),
+    ));
     let achievement_context = crate::achievements::launch_context(
         &state,
         &appid,
@@ -548,6 +570,25 @@ mod tests {
                 "/tmp/profile with spaces.me3",
                 "--exe-path",
                 "/games/Elden Ring/Game/eldenring.exe",
+            ]
+        );
+    }
+
+    #[test]
+    fn mewgenics_launch_uses_proton_paths_in_mod_order() {
+        let args = mewgenics_launch_args(
+            "/games/Mewgenics/Mewgenics.exe",
+            vec![
+                PathBuf::from("/data/mods/nexus-2"),
+                PathBuf::from("/data/mods/nexus-1"),
+            ],
+        );
+        assert_eq!(
+            args,
+            vec![
+                "-modpaths",
+                "Z:/data/mods/nexus-2",
+                "Z:/data/mods/nexus-1",
             ]
         );
     }

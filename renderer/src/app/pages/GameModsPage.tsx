@@ -308,6 +308,7 @@ export function GameModsPage() {
   const mods = useMemo(() => [...(gs?.mods || [])].sort((a, b) => a.order - b.order), [gs])
   const installedIds = useMemo(() => new Set(mods.map((m) => m.id)), [mods])
   const enabledCount = useMemo(() => mods.filter((m) => m.enabled && !m.deployBlocked).length, [mods])
+  const launchManaged = gs?.steamAppid === 686060
   const compatibleLoaders = useMemo(
     () => (gs?.loaderCompatibility || []).filter((loader) => loader.compatible),
     [gs],
@@ -393,7 +394,9 @@ export function GameModsPage() {
     setDeployBusy("deploy")
     try {
       const r = await window.ucMods?.deploy?.(appid)
-      if (r?.ok) toast(`deployed ${r.fileCount ?? 0} file${(r.fileCount ?? 0) === 1 ? "" : "s"}`, "success")
+      if (r?.ok) toast(launchManaged
+        ? `activated ${r.fileCount ?? 0} mod${(r.fileCount ?? 0) === 1 ? "" : "s"} for launch`
+        : `deployed ${r.fileCount ?? 0} file${(r.fileCount ?? 0) === 1 ? "" : "s"}`, "success")
       else toast(r?.error || "deploy failed", "error", 6000)
     } catch (err) { toast(String(err), "error", 6000) } finally { setDeployBusy(null); void reload() }
   }
@@ -401,7 +404,7 @@ export function GameModsPage() {
     setDeployBusy("undeploy")
     try {
       const r = await window.ucMods?.undeploy?.(appid)
-      if (r?.ok) toast("all mod files removed from the game folder", "success")
+      if (r?.ok) toast(launchManaged ? "mods deactivated for launch" : "all mod files removed from the game folder", "success")
       else toast(r?.error || "undeploy failed", "error", 6000)
     } catch (err) { toast(String(err), "error", 6000) } finally { setDeployBusy(null); void reload() }
   }
@@ -664,9 +667,9 @@ export function GameModsPage() {
               </span>
             </span>
 
-            <span style={CHIP} title="Whether enabled mod files are currently copied into the game folder">
+            <span style={CHIP} title={launchManaged ? "Whether enabled mod folders will be passed to Mewgenics at launch" : "Whether enabled mod files are currently copied into the game folder"}>
               <span style={{ width: 6, height: 6, borderRadius: 99, background: gs.deployed ? "var(--mf-t1)" : "color-mix(in srgb, var(--mf-t0) 18%, transparent)", flexShrink: 0 }} />
-              {gs.deployed ? "deployed" : "not deployed"}
+              {gs.deployed ? (launchManaged ? "active on launch" : "deployed") : (launchManaged ? "inactive on launch" : "not deployed")}
             </span>
 
             <span style={CHIP} title="Optional manual base folder for every mod. Leave empty to infer each mod's destination from the game and archive layout.">
@@ -733,13 +736,15 @@ export function GameModsPage() {
                 <FolderOpen size={13} strokeWidth={1.7} />Open mods folder
               </button>
               <button type="button" className="mf-ghost" style={{ ...GHOST_BTN, opacity: deployBusy || mods.length === 0 ? 0.55 : 1 }} disabled={Boolean(deployBusy) || mods.length === 0} onClick={() => void runDeploy()}>
-                {deployBusy === "deploy" ? <Spinner size={13} /> : <Rocket size={13} strokeWidth={1.7} />}Deploy
+                {deployBusy === "deploy" ? <Spinner size={13} /> : <Rocket size={13} strokeWidth={1.7} />}{launchManaged ? "Activate" : "Deploy"}
               </button>
               <button type="button" className="mf-ghost" style={{ ...GHOST_BTN, opacity: deployBusy || !gs.deployed ? 0.55 : 1 }} disabled={Boolean(deployBusy) || !gs.deployed} onClick={() => void runUndeploy()}>
-                {deployBusy === "undeploy" ? <Spinner size={13} /> : <Undo2 size={13} strokeWidth={1.7} />}Undeploy
+                {deployBusy === "undeploy" ? <Spinner size={13} /> : <Undo2 size={13} strokeWidth={1.7} />}{launchManaged ? "Deactivate" : "Undeploy"}
               </button>
               <span style={{ fontFamily: MONO, fontSize: 10.5, color: "var(--mf-t5)" }}>
-                {gs.deployed ? `deployed to ${deployTargetLabel}` : "changes deploy automatically on install / toggle / reorder"}
+                {launchManaged
+                  ? (gs.deployed ? "enabled mod folders load in this order at game launch" : "mods will not be passed to the game")
+                  : (gs.deployed ? `deployed to ${deployTargetLabel}` : "changes deploy automatically on install / toggle / reorder")}
               </span>
             </div>
 
@@ -781,7 +786,7 @@ export function GameModsPage() {
                         <span title={m.name} style={{ fontSize: 13, fontWeight: 600, color: m.enabled ? "var(--mf-t1)" : "var(--mf-t4)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{m.name}</span>
                         <span style={{ padding: "2px 8px", borderRadius: 999, border: "1px solid var(--mf-line-2)", fontFamily: MONO, fontSize: 9, textTransform: "uppercase", letterSpacing: "0.09em", color: "var(--mf-t3)", flexShrink: 0 }}>{m.provider}</span>
                         <span title={m.deployReason || "No automatic deployment decision recorded"} style={{ padding: "2px 8px", borderRadius: 999, border: `1px solid ${m.deployConfidence === "low" || m.deployBlocked ? "color-mix(in srgb, var(--mf-danger) 45%, transparent)" : "var(--mf-line-2)"}`, fontFamily: MONO, fontSize: 9, letterSpacing: "0.04em", color: m.deployConfidence === "low" || m.deployBlocked ? "var(--mf-danger)" : "var(--mf-t4)", flexShrink: 0 }}>
-                          {m.deployBlocked ? "installer required" : m.deployConfidence === "low" ? "check target" : `${m.deployConfidence === "manual" ? "manual" : "auto"}: ${m.deployPrefix || "game root"}`}
+                          {m.deployBlocked ? "installer required" : m.deployConfidence === "low" ? "check target" : launchManaged ? "auto: launch path" : `${m.deployConfidence === "manual" ? "manual" : "auto"}: ${m.deployPrefix || "game root"}`}
                         </span>
                       </div>
                       <div style={{ marginTop: 3, fontFamily: MONO, fontSize: 10, color: "var(--mf-t5)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>

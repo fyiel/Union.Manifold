@@ -25,6 +25,21 @@ fn game_layout_leaves_unknown_games_to_detection() {
 }
 
 #[test]
+fn mewgenics_uses_launch_time_modpaths() {
+    let tmp = tempdir().unwrap();
+    let target = tmp.path().join("game");
+    let staged = tmp.path().join("stage");
+    write_file(&target.join("Mewgenics.exe"), "exe");
+    write_file(&staged.join("data/items.gon.patch"), "patch");
+
+    let plan = infer_deployment_plan(&target, &staged, Some(MEWGENICS_STEAM_APPID));
+    assert_eq!(plan.layout, ModLayout::Raw);
+    assert!(plan.deploy_prefix.is_empty());
+    assert_eq!(plan.confidence, "high");
+    assert!(plan.reason.contains("-modpaths"));
+}
+
+#[test]
 fn strip_wrapper_unwraps_junk_versioned_folder() {
     let tmp = tempdir().unwrap();
     let staged = tmp.path().join("s");
