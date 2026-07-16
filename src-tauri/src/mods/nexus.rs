@@ -799,9 +799,7 @@ async fn handle_nxm_inner(app: &AppHandle, url: &str) {
         crate::logging::write_line("warn", &format!("unparseable nxm url: {url}"));
         return;
     };
-    if let Some(main) = app.get_webview_window("main") {
-        main.set_focus().ok();
-    }
+    crate::show_main_window(app);
     let state = app.state::<AppState>();
     let matches = games_for_domain(&state.paths, &link.domain);
     if matches.len() != 1 {

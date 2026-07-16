@@ -203,6 +203,64 @@ pub fn resolve_launch(state: &AppState, appid: &str, exe_path: &str) -> Result<L
     )
 }
 
+pub(crate) fn resolve_auxiliary(
+    state: &AppState,
+    appid: &str,
+    game_exe: &str,
+    auxiliary_exe: &str,
+    auxiliary_args: &[String],
+) -> Result<LaunchPlan, String> {
+    let cfg = config_for(state, appid);
+    let global_mode = state
+        .settings
+        .get_string("linuxLaunchMode")
+        .or_else(|| state.settings.get_string("linuxDefaultLaunchMode"));
+    let global_proton = state
+        .settings
+        .get_string("linuxProtonPath")
+        .filter(|value| !value.is_empty());
+    let globals = GlobalLaunchOpts {
+        extra_env: state
+            .settings
+            .get_string("linuxExtraEnv")
+            .map(|value| parse_env_lines(&value))
+            .unwrap_or_default(),
+        dll_overrides: state
+            .settings
+            .get_string("linuxDllOverrides")
+            .filter(|value| !value.trim().is_empty()),
+        proton_prefix: state
+            .settings
+            .get_string("linuxProtonPrefix")
+            .filter(|value| !value.is_empty()),
+        ..Default::default()
+    };
+    let mut plan = plan_launch_with(
+        &cfg,
+        global_mode,
+        global_proton,
+        &globals,
+        &state.download_root(),
+        appid,
+        game_exe,
+    )?;
+    if plan.args.first().map(String::as_str) == Some("waitforexitandrun") {
+        plan.args = vec!["run".to_string(), auxiliary_exe.to_string()];
+        plan.args.extend_from_slice(auxiliary_args);
+        return Ok(plan);
+    }
+    if Path::new(&plan.command)
+        .file_name()
+        .map(|name| name.to_string_lossy() == "umu-run")
+        .unwrap_or(false)
+    {
+        plan.args = vec![auxiliary_exe.to_string()];
+        plan.args.extend_from_slice(auxiliary_args);
+        return Ok(plan);
+    }
+    Err("Wand on Linux requires this game to use Proton or umu".to_string())
+}
+
 #[allow(dead_code)]
 pub(crate) fn plan_launch(
     cfg: &Value,

@@ -185,6 +185,12 @@ export function installBridge(): void {
     onNotificationActivated: noop,
   }
 
+  w.ucWand = {
+    status: () => call("wand_status"),
+    lookup: (title: string, steamAppid?: number) => call("wand_lookup", { title, steamAppid }),
+    launch: (appid: string, title: string, steamAppid?: number) => call("wand_launch", { appid, title, steamAppid }),
+  }
+
   w.ucAchievements = {
     list: () => call("achievements_list"),
     testNotification: () => call("achievements_test_notification"),

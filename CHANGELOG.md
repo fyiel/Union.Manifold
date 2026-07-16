@@ -3,9 +3,18 @@
 All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 
-## 3.4.9
+## 3.4.10
+
+### Added
+
+- Library and game-detail actions now match installed titles against Wand's live
+  catalog; Windows uses Wand directly, while Linux runs Wand beside the game in
+  its configured Proton or umu prefix
 
 ### Fixed
+
+- launching Union.Manifold again now restores hidden or minimized windows instead
+  of leaving the existing tray instance invisible
 
 - legacy Mewgenics split localization appends now target `combined.csv`, restoring
   Show Set Bonuses after the game's localization files were consolidated

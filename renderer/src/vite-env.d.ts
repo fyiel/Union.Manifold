@@ -405,6 +405,26 @@ declare global {
     error?: string | null
   }
 
+  type WandGameMatch = {
+    titleId: string
+    gameId: string
+    name: string
+    slug: string
+    platformId: string
+    cheatCount: number
+    pageUrl: string
+  }
+
+  type WandLookupResult = {
+    ok: boolean
+    windows: boolean
+    installed: boolean
+    supported: boolean
+    game?: WandGameMatch | null
+    downloadUrl?: string
+    error?: string
+  }
+
   interface Window {
     ucWindow?: {
       minimize: () => void
@@ -590,6 +610,11 @@ declare global {
       runSteamGame?: (steamAppid: number) => Promise<{ ok: boolean; error?: string }>
       getNotifications: () => Promise<{ ok: boolean; notifications: SystemNotification[] }>
       onNotificationActivated: (callback: (data: { id: string }) => void) => () => void
+    }
+    ucWand?: {
+      status: () => Promise<{ ok: boolean; windows: boolean; installed: boolean; downloadUrl: string }>
+      lookup: (title: string, steamAppid?: number) => Promise<WandLookupResult>
+      launch: (appid: string, title: string, steamAppid?: number) => Promise<{ ok: boolean; game?: WandGameMatch; needsInstall?: boolean; downloadUrl?: string; launchGame?: boolean; runtime?: "proton"; experimental?: boolean; error?: string }>
     }
     ucAchievements?: {
       list: () => Promise<{ ok: boolean; games: LocalAchievementGame[]; error?: string }>
