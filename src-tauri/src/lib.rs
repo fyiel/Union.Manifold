@@ -25,6 +25,7 @@ mod state;
 mod storage;
 mod system;
 mod updater;
+mod wand;
 mod window_cmds;
 
 use std::sync::Arc;
@@ -39,13 +40,21 @@ use settings::SettingsStore;
 use sources::Registry;
 use state::AppState;
 
+fn show_main_window(app: &tauri::AppHandle) {
+    if let Some(main) = app.get_webview_window("main") {
+        main.show().ok();
+        main.unminimize().ok();
+        main.set_focus().ok();
+    }
+}
+
 fn emit_deep_link(app: &tauri::AppHandle, arg: &str) {
     let path = arg
         .split_once("://")
         .map(|(_, rest)| format!("/{}", rest.trim_start_matches('/')))
         .unwrap_or_else(|| arg.to_string());
+    show_main_window(app);
     if let Some(main) = app.get_webview_window("main") {
-        main.set_focus().ok();
         main.emit("uc:navigation-action", serde_json::json!({ "path": path })).ok();
     }
 }
@@ -82,8 +91,8 @@ pub fn run() {
                 } else {
                     emit_deep_link(app, arg);
                 }
-            } else if let Some(main) = app.get_webview_window("main") {
-                main.set_focus().ok();
+            } else {
+                show_main_window(app);
             }
         }))
         .plugin(tauri_plugin_dialog::init())
@@ -151,10 +160,13 @@ pub fn run() {
             build_tray(app)?;
             {
                 let state: tauri::State<AppState> = app.state();
-                if state.settings.get("startMinimized").as_bool().unwrap_or(false) {
+                let start_minimized = state.settings.get("startMinimized").as_bool().unwrap_or(false);
+                if start_minimized {
                     if let Some(main) = app.get_webview_window("main") {
                         main.hide().ok();
                     }
+                } else {
+                    show_main_window(&handle);
                 }
                 if state.settings.get("autoCheckUpdates").as_bool().unwrap_or(true) {
                     let handle2 = handle.clone();
@@ -218,6 +230,9 @@ pub fn run() {
             sources::sources_set_enabled,
             sources::sources_query,
             sources::sources_search,
+            wand::wand_status,
+            wand::wand_lookup,
+            wand::wand_launch,
             sources::sources_catalog,
             sources::sources_detail,
             sources::sources_resolve,
@@ -372,20 +387,14 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
         .tooltip("Union.Manifold")
         .on_menu_event(|app, event| match event.id().as_ref() {
             "show" => {
-                if let Some(w) = app.get_webview_window("main") {
-                    w.show().ok();
-                    w.set_focus().ok();
-                }
+                show_main_window(app);
             }
             "quit" => app.exit(0),
             _ => {}
         })
         .on_tray_icon_event(|tray, event| {
             if let tauri::tray::TrayIconEvent::Click { .. } = event {
-                if let Some(w) = tray.app_handle().get_webview_window("main") {
-                    w.show().ok();
-                    w.set_focus().ok();
-                }
+                show_main_window(tray.app_handle());
             }
         });
     if let Some(icon) = app.default_window_icon().cloned() {
