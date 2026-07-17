@@ -42,6 +42,7 @@ it("starts a trainer and sends native control values", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Start trainer" }))
   await waitFor(() => expect(launch).toHaveBeenCalledWith("example", "Example Game", 123))
   expect(onLaunch).toHaveBeenCalledOnce()
+  expect(onLaunch.mock.invocationCallOrder[0]).toBeLessThan(launch.mock.invocationCallOrder[0])
 
   act(() => onRuntime?.({ appid: "example", status: "active" }))
   await waitFor(() => expect((toggle as HTMLButtonElement).disabled).toBe(false))

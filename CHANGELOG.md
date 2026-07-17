@@ -19,6 +19,9 @@ All notable changes to Union.Manifold. This project is a fork of
   client and includes the installation context required by its authorization
   flow
 
+- Linux Wand hosts now join a running UMU/Proton prefix instead of blocking the
+  game launch while both processes wait for each other
+
 - launching Union.Manifold again now restores hidden or minimized windows instead
   of leaving the existing tray instance invisible
 
