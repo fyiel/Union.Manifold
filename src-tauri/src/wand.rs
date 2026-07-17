@@ -31,7 +31,7 @@ const RELEASES_URL: &str = "https://storage-cdn.wemod.com/app/releases/stable/RE
 const RELEASES_BASE_URL: &str = "https://storage-cdn.wemod.com/app/releases/stable";
 const API_URL: &str = "https://api.wemod.com";
 const OAUTH_URL: &str = "https://wand.com/oauth/authorize";
-const OAUTH_REDIRECT: &str = "wand://oauth";
+const OAUTH_REDIRECT: &str = "wemod://oauth";
 const CATALOG_TTL: Duration = Duration::from_secs(6 * 60 * 60);
 
 type WandCatalogCache = Option<(Instant, Arc<WandCatalog>)>;
@@ -341,6 +341,49 @@ async fn ensure_runtime(data_dir: &Path) -> Result<PathBuf> {
     Ok(runtime)
 }
 
+fn installation_id(state: &AppState) -> String {
+    if let Some(id) = state
+        .settings
+        .get("wandInstallationId")
+        .as_str()
+        .filter(|id| id.len() == 36)
+    {
+        return id.to_string();
+    }
+    let mut bytes = [0u8; 16];
+    rand::thread_rng().fill_bytes(&mut bytes);
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    let value = hex::encode(bytes);
+    let id = format!(
+        "{}-{}-{}-{}-{}",
+        &value[..8],
+        &value[8..12],
+        &value[12..16],
+        &value[16..20],
+        &value[20..],
+    );
+    state
+        .settings
+        .set("wandInstallationId", Value::String(id.clone()));
+    id
+}
+
+fn oauth_url(challenge: &str, state: &str, installation_id: &str) -> Result<url::Url> {
+    let mut url = url::Url::parse(OAUTH_URL)
+        .map_err(|error| AppError::msg(format!("build Wand login URL: {error}")))?;
+    url.query_pairs_mut()
+        .append_pair("response_type", "code")
+        .append_pair("client_id", "infinity")
+        .append_pair("redirect_uri", OAUTH_REDIRECT)
+        .append_pair("code_challenge", challenge)
+        .append_pair("code_challenge_method", "S256")
+        .append_pair("state", state)
+        .append_pair("provider", "google")
+        .append_pair("installation_id", installation_id);
+    Ok(url)
+}
+
 fn stored_auth(state: &AppState) -> Option<WandAuth> {
     serde_json::from_value(state.settings.get("wandAuth")).ok()
 }
@@ -492,25 +535,16 @@ pub fn wand_status(state: State<'_, AppState>) -> Value {
 }
 
 #[tauri::command]
-pub async fn wand_auth_begin(app: AppHandle) -> Result<Value> {
+pub async fn wand_auth_begin(app: AppHandle, state: State<'_, AppState>) -> Result<Value> {
     let mut verifier_bytes = [0u8; 32];
     let mut state_bytes = [0u8; 24];
     rand::thread_rng().fill_bytes(&mut verifier_bytes);
     rand::thread_rng().fill_bytes(&mut state_bytes);
     let verifier = URL_SAFE_NO_PAD.encode(verifier_bytes);
-    let state = URL_SAFE_NO_PAD.encode(state_bytes);
+    let oauth_state = URL_SAFE_NO_PAD.encode(state_bytes);
     let challenge = URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes()));
-    let mut url = url::Url::parse(OAUTH_URL)
-        .map_err(|error| AppError::msg(format!("build Wand login URL: {error}")))?;
-    url.query_pairs_mut()
-        .append_pair("response_type", "code")
-        .append_pair("client_id", "infinity")
-        .append_pair("redirect_uri", OAUTH_REDIRECT)
-        .append_pair("code_challenge", &challenge)
-        .append_pair("code_challenge_method", "S256")
-        .append_pair("state", &state)
-        .append_pair("provider", "google");
-    *OAUTH_PENDING.lock().await = Some(OAuthPending { state, verifier });
+    let url = oauth_url(&challenge, &oauth_state, &installation_id(&state))?;
+    *OAUTH_PENDING.lock().await = Some(OAuthPending { state: oauth_state, verifier });
     if let Err(error) = app.opener().open_url(url.as_str(), None::<&str>) {
         OAUTH_PENDING.lock().await.take();
         return Err(AppError::msg(format!("open Wand login: {error}")));
@@ -1147,6 +1181,17 @@ mod tests {
                 ),
             ]),
         }
+    }
+
+    #[test]
+    fn oauth_uses_the_official_callback_and_installation_context() {
+        let url = oauth_url("challenge", "state", "installation").unwrap();
+        let query: HashMap<_, _> = url.query_pairs().into_owned().collect();
+        assert_eq!(query.get("redirect_uri").map(String::as_str), Some("wemod://oauth"));
+        assert_eq!(
+            query.get("installation_id").map(String::as_str),
+            Some("installation")
+        );
     }
 
     #[test]

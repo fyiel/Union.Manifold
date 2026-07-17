@@ -44,6 +44,14 @@ export function WandTrainerModal({ appid, title, steamAppid, onClose, onLaunch }
       setError(event.error || "Wand login failed")
     }
   }), [load])
+  useEffect(() => {
+    if (!connecting) return
+    const timeout = window.setTimeout(() => {
+      setConnecting(false)
+      setError("Wand did not return to Manifold. Try signing in again.")
+    }, 60_000)
+    return () => window.clearTimeout(timeout)
+  }, [connecting])
   useEffect(() => window.ucWand?.onRuntime((event) => {
     if (event.appid !== appid) return
     if (event.status === "active") {
