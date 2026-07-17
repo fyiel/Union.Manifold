@@ -79,7 +79,7 @@
   },
   "plugins": {
     "deep-link": {
-      "desktop": { "schemes": ["unionmanifold", "nxm", "wand"] }
+      "desktop": { "schemes": ["unionmanifold", "nxm", "wemod"] }
     },
     "updater": {
       "endpoints": [

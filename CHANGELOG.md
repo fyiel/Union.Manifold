@@ -15,6 +15,10 @@ All notable changes to Union.Manifold. This project is a fork of
 
 ### Fixed
 
+- Wand browser sign-in now returns through the callback used by the official
+  client and includes the installation context required by its authorization
+  flow
+
 - launching Union.Manifold again now restores hidden or minimized windows instead
   of leaving the existing tray instance invisible
 

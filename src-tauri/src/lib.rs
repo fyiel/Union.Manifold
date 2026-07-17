@@ -88,7 +88,7 @@ pub fn run() {
             if let Some(arg) = argv.iter().find(|a| a.contains("://")) {
                 if arg.starts_with("nxm://") {
                     mods::nexus::handle_nxm(app, arg);
-                } else if arg.starts_with("wand://oauth") {
+                } else if arg.starts_with("wemod://oauth") {
                     show_main_window(app);
                     wand::handle_deep_link(app, arg);
                 } else {
@@ -189,7 +189,7 @@ pub fn run() {
                         let s = url.to_string();
                         if s.starts_with("nxm://") {
                             mods::nexus::handle_nxm(&nxm_handle, &s);
-                        } else if s.starts_with("wand://oauth") {
+                        } else if s.starts_with("wemod://oauth") {
                             show_main_window(&nxm_handle);
                             wand::handle_deep_link(&nxm_handle, &s);
                         }
