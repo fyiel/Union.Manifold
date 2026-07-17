@@ -116,7 +116,7 @@ jobs:
         if: matrix.os == 'ubuntu-22.04'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf g++-mingw-w64
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -139,6 +139,10 @@ jobs:
 
       - name: Fetch sidecars
         run: pnpm fetch-sidecars ${{ matrix.sidecars }}
+
+      - name: Build trainer host
+        if: matrix.os == 'ubuntu-22.04'
+        run: pnpm build:trainer-host
 
       - uses: tauri-apps/tauri-action@v0
         env:

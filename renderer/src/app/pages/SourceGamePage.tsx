@@ -21,10 +21,9 @@ import {
 } from "@/lib/sources"
 import { useDownloadsSelector } from "@/context/downloads-context"
 import { useGameLaunch } from "@/context/game-launch-context"
-import { useToast } from "@/context/toast-context"
 import { MONO, COVER_LINES, gbLabel, Spinner, SmartImage, gameImageCandidates } from "@/app/manifold/ui"
+import { WandTrainerModal } from "@/components/WandTrainerModal"
 
-const IS_LINUX = typeof navigator !== "undefined" && /linux/i.test(navigator.userAgent)
 
 const LIVE_LABEL: Record<string, string> = {
   downloading: "Downloading", queued: "Queued", extracting: "Extracting", installing: "Installing",
@@ -78,7 +77,6 @@ export function SourceGamePage() {
   const location = useLocation()
   const navigate = useNavigate()
   const { requestLaunch } = useGameLaunch()
-  const { toast } = useToast()
 
   const navState = location.state as { game?: UnifiedSourceGame; installed?: boolean } | null
   const passed = navState?.game || null
@@ -159,7 +157,7 @@ export function SourceGamePage() {
   }, [game?.steamAppId])
 
   const [wand, setWand] = useState<WandLookupResult | null>(null)
-  const [wandBusy, setWandBusy] = useState(false)
+  const [wandOpen, setWandOpen] = useState(false)
   useEffect(() => {
     setWand(null)
     if (!game?.title) return
@@ -249,29 +247,6 @@ export function SourceGamePage() {
     }
   }
 
-  const handleWandLaunch = async () => {
-    if (!game || !wand?.game || wandBusy) return
-    if (!wand.installed && !IS_LINUX) {
-      await window.ucSystem?.openExternal?.(wand.downloadUrl || "https://wand.com/download")
-      return
-    }
-    setWandBusy(true)
-    try {
-      const result = await window.ucWand?.launch(dlAppid, game.title, game.steamAppId ?? undefined)
-      if (result?.ok) {
-        if (result.launchGame) await requestLaunch({ appid: dlAppid, name: game.title })
-        toast(`Starting ${result.game?.name || game.title} with Wand`, "success")
-      } else if (result?.needsInstall) {
-        await window.ucSystem?.openExternal?.(result.downloadUrl || "https://wand.com/download")
-      } else {
-        toast(result?.error || "Wand could not launch this game", "error")
-      }
-    } catch (error) {
-      toast(String(error), "error")
-    } finally {
-      setWandBusy(false)
-    }
-  }
 
   return (
     <div className="mf-scroll" style={{ flex: 1, minWidth: 0, minHeight: 0, overflowY: "auto", overflowX: "hidden" }}>
@@ -373,9 +348,9 @@ export function SourceGamePage() {
             </button>
           )}
           {installed && wand?.supported && wand.game && (
-            <button type="button" disabled={wandBusy} onClick={() => void handleWandLaunch()} className="mf-ghost" title={`Open ${wand.game.name} in Wand`} style={{ display: "flex", alignItems: "center", gap: 8, height: 44, padding: "0 15px", borderRadius: 9, border: "1px solid var(--mf-line-2)", background: "transparent", color: "var(--mf-t2)", fontSize: 12, fontWeight: 600, cursor: wandBusy ? "default" : "pointer", opacity: wandBusy ? 0.65 : 1 }}>
+            <button type="button" onClick={() => setWandOpen(true)} className="mf-ghost" title={`Open ${wand.game.name} trainer controls`} style={{ display: "flex", alignItems: "center", gap: 8, height: 44, padding: "0 15px", borderRadius: 9, border: "1px solid var(--mf-line-2)", background: "transparent", color: "var(--mf-t2)", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
               <WandSparkles size={15} strokeWidth={1.7} />
-              {wandBusy ? "Preparing Wand…" : wand.installed || IS_LINUX ? "Play with Wand" : "Install Wand"}
+              Trainer
               <span style={{ fontFamily: MONO, fontSize: 10, fontWeight: 400, color: "var(--mf-t5)" }}>{wand.game.cheatCount} assists</span>
             </button>
           )}
@@ -479,6 +454,15 @@ export function SourceGamePage() {
           </div>
         )}
       </div>
+      {wandOpen && game && (
+        <WandTrainerModal
+          appid={dlAppid}
+          title={game.title}
+          steamAppid={game.steamAppId ?? undefined}
+          onClose={() => setWandOpen(false)}
+          onLaunch={() => requestLaunch({ appid: dlAppid, name: game.title })}
+        />
+      )}
     </div>
   )
 }

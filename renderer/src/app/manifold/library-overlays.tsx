@@ -96,7 +96,7 @@ export function GameMenu({ game, anchor, handlers, onClose }: { game: MenuGame; 
 
         <MenuRow icon={FolderOpen} label="Open files" onClick={run(handlers.onOpenFiles)} />
         {handlers.onMods ? <MenuRow icon={Puzzle} label="Mods" onClick={run(handlers.onMods)} /> : null}
-        {handlers.onWand ? <MenuRow icon={WandSparkles} label="Play with Wand" onClick={run(handlers.onWand)} /> : null}
+        {handlers.onWand ? <MenuRow icon={WandSparkles} label="Trainer controls" onClick={run(handlers.onWand)} /> : null}
         {handlers.onGrabRepair ? <MenuRow icon={Wrench} label="Get Online-Fix repair" onClick={run(handlers.onGrabRepair)} /> : null}
         <MenuRow icon={Settings} label="Set executable" onClick={run(handlers.onSetExecutable)} />
         {game.imported && handlers.onSetSteamId ? <MenuRow icon={Hash} label="Set Steam App ID" onClick={run(handlers.onSetSteamId)} /> : null}

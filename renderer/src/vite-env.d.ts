@@ -415,14 +415,25 @@ declare global {
     pageUrl: string
   }
 
+  type WandControl = {
+    uuid: string
+    target: string
+    name: string
+    category: string
+    kind: string
+  }
+
   type WandLookupResult = {
     ok: boolean
-    windows: boolean
-    installed: boolean
     supported: boolean
     game?: WandGameMatch | null
-    downloadUrl?: string
     error?: string
+  }
+
+  type WandTrainerResult = WandLookupResult & {
+    authenticated?: boolean
+    needsAuth?: boolean
+    controls?: WandControl[]
   }
 
   interface Window {
@@ -612,9 +623,16 @@ declare global {
       onNotificationActivated: (callback: (data: { id: string }) => void) => () => void
     }
     ucWand?: {
-      status: () => Promise<{ ok: boolean; windows: boolean; installed: boolean; downloadUrl: string }>
+      status: () => Promise<{ ok: boolean; supported: boolean; authenticated: boolean }>
       lookup: (title: string, steamAppid?: number) => Promise<WandLookupResult>
-      launch: (appid: string, title: string, steamAppid?: number) => Promise<{ ok: boolean; game?: WandGameMatch; needsInstall?: boolean; downloadUrl?: string; launchGame?: boolean; runtime?: "proton"; experimental?: boolean; error?: string }>
+      connect: () => Promise<{ ok: boolean; error?: string }>
+      disconnect: () => Promise<{ ok: boolean }>
+      trainer: (title: string, steamAppid?: number) => Promise<WandTrainerResult>
+      launch: (appid: string, title: string, steamAppid?: number) => Promise<{ ok: boolean; game?: WandGameMatch; needsAuth?: boolean; runtime?: "native" | "proton"; error?: string }>
+      control: (appid: string, name: string, value: number) => Promise<{ ok: boolean; error?: string }>
+      stop: (appid: string) => Promise<{ ok: boolean }>
+      onRuntime: (callback: (data: { appid: string; status: "active" | "value" | "error" | "stopped" | "log"; name?: string; value?: number; message?: string }) => void) => () => void
+      onAuthChanged: (callback: (data: { ok: boolean; error?: string }) => void) => () => void
     }
     ucAchievements?: {
       list: () => Promise<{ ok: boolean; games: LocalAchievementGame[]; error?: string }>

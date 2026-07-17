@@ -188,7 +188,14 @@ export function installBridge(): void {
   w.ucWand = {
     status: () => call("wand_status"),
     lookup: (title: string, steamAppid?: number) => call("wand_lookup", { title, steamAppid }),
+    connect: () => call("wand_auth_begin"),
+    disconnect: () => call("wand_disconnect"),
+    trainer: (title: string, steamAppid?: number) => call("wand_trainer", { title, steamAppid }),
     launch: (appid: string, title: string, steamAppid?: number) => call("wand_launch", { appid, title, steamAppid }),
+    control: (appid: string, name: string, value: number) => call("wand_control", { appid, name, value }),
+    stop: (appid: string) => call("wand_stop", { appid }),
+    onRuntime: (cb: Cb) => on("uc:wand-runtime", cb),
+    onAuthChanged: (cb: Cb) => on("uc:wand-auth-changed", cb),
   }
 
   w.ucAchievements = {
