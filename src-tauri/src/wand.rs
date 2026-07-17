@@ -32,6 +32,8 @@ const RELEASES_BASE_URL: &str = "https://storage-cdn.wemod.com/app/releases/stab
 const API_URL: &str = "https://api.wemod.com";
 const OAUTH_URL: &str = "https://wand.com/oauth/authorize";
 const OAUTH_REDIRECT: &str = "wemod://oauth";
+const AUTH_USER_AGENT: &str =
+    concat!("Union.Manifold/", env!("CARGO_PKG_VERSION"), " Wand/0.0.0");
 const CATALOG_TTL: Duration = Duration::from_secs(6 * 60 * 60);
 
 type WandCatalogCache = Option<(Instant, Arc<WandCatalog>)>;
@@ -409,10 +411,13 @@ async fn request_access_token(params: &[(&str, String)]) -> Result<WandAuth> {
         &format!("{API_URL}/auth/token"),
         &crate::http::FetchOpts {
             method: Some("POST".to_string()),
-            headers: HashMap::from([(
-                "Content-Type".to_string(),
-                "application/x-www-form-urlencoded".to_string(),
-            )]),
+            headers: HashMap::from([
+                (
+                    "Content-Type".to_string(),
+                    "application/x-www-form-urlencoded".to_string(),
+                ),
+                ("User-Agent".to_string(), AUTH_USER_AGENT.to_string()),
+            ]),
             body: Some(body),
             retries: Some(0),
             timeout: Some(Duration::from_secs(30)),
@@ -1192,6 +1197,20 @@ mod tests {
             query.get("installation_id").map(String::as_str),
             Some("installation")
         );
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn token_exchange_is_accepted_as_a_desktop_client() {
+        let error = request_access_token(&[
+            ("grant_type", "authorization_code".to_string()),
+            ("code", "invalid".to_string()),
+            ("redirect_uri", OAUTH_REDIRECT.to_string()),
+            ("code_verifier", "invalid".to_string()),
+        ])
+        .await
+        .unwrap_err();
+        assert!(error.to_string().contains("Cannot decrypt the authorization code"));
     }
 
     #[test]
