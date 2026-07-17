@@ -88,6 +88,9 @@ pub fn run() {
             if let Some(arg) = argv.iter().find(|a| a.contains("://")) {
                 if arg.starts_with("nxm://") {
                     mods::nexus::handle_nxm(app, arg);
+                } else if arg.starts_with("wand://oauth") {
+                    show_main_window(app);
+                    wand::handle_deep_link(app, arg);
                 } else {
                     emit_deep_link(app, arg);
                 }
@@ -186,6 +189,9 @@ pub fn run() {
                         let s = url.to_string();
                         if s.starts_with("nxm://") {
                             mods::nexus::handle_nxm(&nxm_handle, &s);
+                        } else if s.starts_with("wand://oauth") {
+                            show_main_window(&nxm_handle);
+                            wand::handle_deep_link(&nxm_handle, &s);
                         }
                     }
                 });
@@ -233,6 +239,11 @@ pub fn run() {
             wand::wand_status,
             wand::wand_lookup,
             wand::wand_launch,
+            wand::wand_auth_begin,
+            wand::wand_disconnect,
+            wand::wand_trainer,
+            wand::wand_control,
+            wand::wand_stop,
             sources::sources_catalog,
             sources::sources_detail,
             sources::sources_resolve,

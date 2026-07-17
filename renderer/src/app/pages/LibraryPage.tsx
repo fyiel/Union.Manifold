@@ -11,6 +11,7 @@ import { hasInstalledVersionUpdate, proxyImageUrl } from "@/lib/utils"
 import { rememberGames, rememberGameAs, getRememberedGame, resolveInstalledGame, getDownloadArt, hydrateDownloadArt, steamCoverUrl, forgetRememberedGame } from "@/lib/sources"
 import { MONO, COVER_LINES, gbLabel, SearchIcon, CenterState, SmartImage, gameImageCandidates } from "@/app/manifold/ui"
 import { GameMenu, LaunchOptionsDialog, EditDetailsDialog, LinuxConfigDialog, AddGamesDialog, SteamIdDialog, type MenuGame } from "@/app/manifold/library-overlays"
+import { WandTrainerModal } from "@/components/WandTrainerModal"
 
 const IS_LINUX = typeof navigator !== "undefined" && /linux/i.test(navigator.userAgent)
 const IS_WINDOWS = typeof navigator !== "undefined" && /windows/i.test(navigator.userAgent)
@@ -173,6 +174,7 @@ export function LibraryPage() {
   const [launchFor, setLaunchFor] = useState<{ appid: string; name: string } | null>(null)
   const [editFor, setEditFor] = useState<MenuGame | null>(null)
   const [linuxFor, setLinuxFor] = useState<{ appid: string; name: string } | null>(null)
+  const [wandFor, setWandFor] = useState<LibGame | null>(null)
   const [addOpen, setAddOpen] = useState(false)
   const [repair, setRepair] = useState<{ appid: string; name: string; phase: RepairProgress["phase"]; percent: number } | null>(null)
 
@@ -342,28 +344,6 @@ export function LibraryPage() {
 
   const play = useCallback((g: LibGame) => void requestLaunch({ appid: g.appid, name: g.name }), [requestLaunch])
   const onStop = useCallback((appid: string) => void stopGame(appid), [stopGame])
-  const launchWithWand = useCallback(async (game: LibGame) => {
-    try {
-      if (IS_LINUX) toast("Preparing Wand in this game’s Proton prefix…", "info")
-      const result = await window.ucWand?.launch(game.appid, game.name, game.steamAppId)
-      if (result?.ok) {
-        if (result.launchGame) await requestLaunch({ appid: game.appid, name: game.name })
-        toast(`Starting ${result.game?.name || game.name} with Wand`, "success")
-      } else if (result?.needsInstall) {
-        toast("Install Wand to use its game assists", "info", {
-          duration: 6000,
-          action: {
-            label: "Install",
-            onClick: () => void window.ucSystem?.openExternal?.(result.downloadUrl || "https://wand.com/download"),
-          },
-        })
-      } else {
-        toast(result?.error || "This game is not supported by Wand", "error")
-      }
-    } catch (error) {
-      toast(String(error), "error")
-    }
-  }, [requestLaunch, toast])
   const openDetail = useCallback((g: LibGame) => {
     const cached = getRememberedGame(g.appid)
     const game = cached?.fullyResolved
@@ -581,7 +561,7 @@ export function LibraryPage() {
             onDelete: () => { const g = installed.find((x) => x.appid === menu.game.appid); if (g) void deleteGame(g) },
             onSetSteamId: () => { const g = installed.find((x) => x.appid === menu.game.appid); setSteamIdFor({ appid: menu.game.appid, name: menu.game.name, current: g?.steamAppId }) },
             onMods: () => navigate(`/g/${encodeURIComponent(menu.game.appid)}/mods`, { state: { game: menu.game } }),
-            onWand: IS_WINDOWS || IS_LINUX ? () => { const g = installed.find((x) => x.appid === menu.game.appid); if (g) void launchWithWand(g) } : undefined,
+            onWand: IS_WINDOWS || IS_LINUX ? () => { const game = installed.find((item) => item.appid === menu.game.appid); if (game) setWandFor(game) } : undefined,
             onGrabRepair: () => { const g = installed.find((x) => x.appid === menu.game.appid); if (g) void grabRepair(g) },
           }}
           onClose={() => setMenu(null)}
@@ -612,6 +592,15 @@ export function LibraryPage() {
             try { await window.ucSettings?.set?.(GAME_CACHE_KEY, { ...gameCacheRef.current }) } catch {  }
             try { window.dispatchEvent(new Event("uc_game_installed")) } catch {  }
           }}
+        />
+      )}
+      {wandFor && (
+        <WandTrainerModal
+          appid={wandFor.appid}
+          title={wandFor.name}
+          steamAppid={wandFor.steamAppId}
+          onClose={() => setWandFor(null)}
+          onLaunch={() => requestLaunch({ appid: wandFor.appid, name: wandFor.name })}
         />
       )}
     </div>

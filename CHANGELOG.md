@@ -7,9 +7,11 @@ All notable changes to Union.Manifold. This project is a fork of
 
 ### Added
 
-- Library and game-detail actions now match installed titles against Wand's live
-  catalog; Windows uses Wand directly, while Linux runs Wand beside the game in
-  its configured Proton or umu prefix
+- Installed games can now open Wand trainers directly inside Manifold, with
+  native toggle, action, and numeric controls instead of a separate Wand window
+- A bundled Windows host attaches trainers to launched games; Linux runs the
+  same host inside the game's configured Proton prefix, with no Wand client
+  installation required
 
 ### Fixed
 

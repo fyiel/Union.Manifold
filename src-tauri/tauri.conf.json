@@ -64,7 +64,7 @@
       "icons/icon.ico"
     ],
     "externalBin": ["binaries/aria2c", "binaries/7z"],
-    "resources": ["resources/cacert.pem"],
+    "resources": ["resources/cacert.pem", "resources/trainer-host-x64.exe", "resources/trainer-host-x86.exe"],
     "linux": {
       "appimage": {
         "bundleMediaFramework": false
@@ -79,9 +79,7 @@
   },
   "plugins": {
     "deep-link": {
-      "desktop": {
-        "schemes": ["unionmanifold", "nxm"]
-      }
+      "desktop": { "schemes": ["unionmanifold", "nxm", "wand"] }
     },
     "updater": {
       "endpoints": [
