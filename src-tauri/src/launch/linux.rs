@@ -104,6 +104,14 @@ fn proton_root_for_umu(proton: &str) -> String {
     proton.to_string()
 }
 
+fn umu_game_id(cfg: &Value, appid: &str) -> Option<String> {
+    cfg.get("umuGameId")
+        .and_then(|value| value.as_str())
+        .filter(|value| !value.is_empty())
+        .map(String::from)
+        .or_else(|| steam_appid(appid).map(|id| format!("umu-{id}")))
+}
+
 fn proton_compat_prefix(compat_data: &str) -> String {
     let path = Path::new(compat_data);
     if path
@@ -235,15 +243,26 @@ pub(crate) fn resolve_auxiliary(
             .filter(|value| !value.is_empty()),
         ..Default::default()
     };
-    let mut plan = plan_launch_with(
-        &cfg,
-        global_mode,
-        global_proton,
-        &globals,
-        &state.download_root(),
-        appid,
-        game_exe,
-    )?;
+    retarget_auxiliary(
+        plan_launch_with(
+            &cfg,
+            global_mode,
+            global_proton,
+            &globals,
+            &state.download_root(),
+            appid,
+            game_exe,
+        )?,
+        auxiliary_exe,
+        auxiliary_args,
+    )
+}
+
+fn retarget_auxiliary(
+    mut plan: LaunchPlan,
+    auxiliary_exe: &str,
+    auxiliary_args: &[String],
+) -> Result<LaunchPlan, String> {
     if plan.args.first().map(String::as_str) == Some("waitforexitandrun") {
         plan.args = vec!["run".to_string(), auxiliary_exe.to_string()];
         plan.args.extend_from_slice(auxiliary_args);
@@ -256,6 +275,10 @@ pub(crate) fn resolve_auxiliary(
     {
         plan.args = vec![auxiliary_exe.to_string()];
         plan.args.extend_from_slice(auxiliary_args);
+        plan.envs
+            .push(("PROTON_VERB".to_string(), "run".to_string()));
+        plan.envs
+            .push(("UMU_CONTAINER_NSENTER".to_string(), "1".to_string()));
         return Ok(plan);
     }
     Err("Wand on Linux requires this game to use Proton or umu".to_string())
@@ -378,12 +401,8 @@ pub(crate) fn plan_launch_with(
             Some(u) => u,
             None => return Err("launch mode is 'umu' but umu-run is not installed".to_string()),
         };
-        if let Some(gameid) = cfg
-            .get("umuGameId")
-            .and_then(|v| v.as_str())
-            .filter(|s| !s.is_empty())
-        {
-            envs.push(("GAMEID".to_string(), gameid.to_string()));
+        if let Some(gameid) = umu_game_id(cfg, appid) {
+            envs.push(("GAMEID".to_string(), gameid));
         }
         if let Some(proton) = &proton_path {
             envs.push(("PROTONPATH".to_string(), proton_root_for_umu(proton)));
@@ -807,6 +826,42 @@ mod tests {
             vec!["GE-Proton10-12"]
         );
     }
+    #[test]
+    fn auxiliary_umu_launch_joins_a_running_prefix() {
+        let plan = retarget_auxiliary(
+            LaunchPlan {
+                command: "/usr/bin/umu-run".into(),
+                args: vec!["game.exe".into()],
+                envs: vec![],
+            },
+            "trainer-host.exe",
+            &["--target".into(), "game.exe".into()],
+        )
+        .unwrap();
+
+        assert_eq!(plan.args, ["trainer-host.exe", "--target", "game.exe"]);
+        assert!(plan.envs.contains(&("PROTON_VERB".into(), "run".into())));
+        assert!(plan
+            .envs
+            .contains(&("UMU_CONTAINER_NSENTER".into(), "1".into())));
+    }
+
+    #[test]
+    fn umu_uses_the_steam_id_when_no_game_id_is_configured() {
+        assert_eq!(
+            umu_game_id(&serde_json::json!({}), "steam-686060").as_deref(),
+            Some("umu-686060")
+        );
+        assert_eq!(
+            umu_game_id(
+                &serde_json::json!({ "umuGameId": "umu-custom" }),
+                "steam-686060"
+            )
+            .as_deref(),
+            Some("umu-custom")
+        );
+    }
+
     #[test]
     fn umu_uses_proton_directory_and_wine_prefix() {
         assert_eq!(

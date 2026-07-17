@@ -104,9 +104,9 @@ export function WandTrainerModal({ appid, title, steamAppid, onClose, onLaunch }
     setStarting(true)
     setError("")
     try {
+      await onLaunch()
       const response = await window.ucWand?.launch(appid, title, steamAppid)
       if (!response?.ok) throw new Error(response?.error || "Could not start the Wand trainer")
-      await onLaunch()
     } catch (cause) {
       void window.ucWand?.stop(appid)
       setStarting(false)
