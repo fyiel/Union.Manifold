@@ -187,7 +187,7 @@ export function SettingsPage() {
                 <ToggleRow title="Notify when a game exits" desc="Desktop notification when a running game closes" on={notifyGameExit} onToggle={() => setBool("notifyGameExit", !notifyGameExit, setNotifyGameExit)} />
                 <ToggleRow title="Show achievement popups in-game" desc="Display a Steam-style Manifold popup when a local achievement unlocks" on={achievementNotifications} onToggle={() => setBool("achievementNotifications", !achievementNotifications, setAchievementNotifications)} />
                 <ToggleRow title="Achievement notification fallback" desc="Also send an operating-system notification when an achievement unlocks" on={achievementSystemNotifications} onToggle={() => setBool("achievementSystemNotifications", !achievementSystemNotifications, setAchievementSystemNotifications)} />
-                <ToggleRow title="Hide or close the app when a game launches" desc="Hide Manifold while popups are enabled; otherwise quit a few seconds after the game starts" on={closeOnLaunch} onToggle={() => setBool("closeOnGameLaunch", !closeOnLaunch, setCloseOnLaunch)} />
+                <ToggleRow title="Quit Manifold when a game launches" desc="Fully exit a few seconds after the game starts; achievement popups will be unavailable for that session" on={closeOnLaunch} onToggle={() => setBool("closeOnGameLaunch", !closeOnLaunch, setCloseOnLaunch)} />
                 <ClearAssetsRow />
               </div>
             )}

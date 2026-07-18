@@ -3,6 +3,13 @@
 All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 
+## 3.4.12
+
+### Fixed
+
+- Quit-on-game-launch now always exits Manifold, even when achievement popups
+  are enabled, instead of leaving an inaccessible background process
+
 ## 3.4.11
 
 ### Added

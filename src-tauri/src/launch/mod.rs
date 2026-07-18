@@ -20,6 +20,10 @@ struct RunHandle {
 
 static RUNNING: Lazy<Mutex<HashMap<String, RunHandle>>> = Lazy::new(|| Mutex::new(HashMap::new()));
 
+fn close_on_launch_enabled(settings: &crate::settings::SettingsStore) -> bool {
+    settings.get("closeOnGameLaunch").as_bool().unwrap_or(false)
+}
+
 #[cfg(target_os = "linux")]
 fn systemd_run_available() -> bool {
     std::env::var("PATH")
@@ -411,27 +415,11 @@ pub async fn game_exe_launch(
             achievement_context,
         ) {
             Ok(pid) => {
-                if state
-                    .settings
-                    .get("closeOnGameLaunch")
-                    .as_bool()
-                    .unwrap_or(false)
-                {
+                if close_on_launch_enabled(&state.settings) {
                     let app2 = app.clone();
-                    let keep_running = state
-                        .settings
-                        .get("achievementNotifications")
-                        .as_bool()
-                        .unwrap_or(true);
                     tauri::async_runtime::spawn(async move {
                         tokio::time::sleep(std::time::Duration::from_secs(3)).await;
-                        if keep_running {
-                            if let Some(main) = app2.get_webview_window("main") {
-                                main.hide().ok();
-                            }
-                        } else {
-                            app2.exit(0);
-                        }
+                        app2.exit(0);
                     });
                 }
                 json!({ "ok": true, "pid": pid, "launchMode": launch_mode })
@@ -509,6 +497,17 @@ fn kill_handle(handle: &RunHandle) {
 #[cfg(all(test, target_os = "linux"))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn close_on_launch_exits_even_with_achievement_popups() {
+        let tmp = tempfile::tempdir().unwrap();
+        let settings = crate::settings::SettingsStore::load(tmp.path().join("settings.json"));
+        settings.set("closeOnGameLaunch", json!(true));
+        settings.set("achievementNotifications", json!(true));
+        assert!(close_on_launch_enabled(&settings));
+        settings.set("achievementNotifications", json!(false));
+        assert!(close_on_launch_enabled(&settings));
+    }
 
     #[test]
     fn kill_handle_reaps_detached_tree() {
