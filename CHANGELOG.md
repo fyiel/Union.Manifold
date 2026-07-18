@@ -37,6 +37,8 @@ All notable changes to Union.Manifold. This project is a fork of
   compatibility prefix instead of deadlocking while both processes wait
 - macOS builds no longer reference the Windows/Linux-only trainer command after
   returning the platform-not-supported result
+- Linux release builds now select MinGW's POSIX thread runtime and target the
+  Windows APIs required by the bundled trainer hosts
 
 ## 3.4.10
 
