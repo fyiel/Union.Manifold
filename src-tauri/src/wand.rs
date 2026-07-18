@@ -900,28 +900,34 @@ async fn start_host(
         host_args.push(variable.clone());
     }
 
-    #[cfg(target_os = "windows")]
     let mut command = {
-        let mut command = tokio::process::Command::new(&host);
-        command.args(&host_args);
-        command
+        #[cfg(target_os = "windows")]
+        {
+            let mut command = tokio::process::Command::new(&host);
+            command.args(&host_args);
+            command
+        }
+        #[cfg(target_os = "linux")]
+        {
+            let plan = crate::launch::linux::resolve_auxiliary(
+                state,
+                appid,
+                game_executable,
+                &host.to_string_lossy(),
+                &host_args,
+            )
+            .map_err(AppError::msg)?;
+            let mut command = tokio::process::Command::new(plan.command);
+            command.args(plan.args).envs(plan.envs);
+            command
+        }
+        #[cfg(not(any(target_os = "windows", target_os = "linux")))]
+        {
+            return Err(AppError::msg(
+                "Wand trainers are not supported on this platform",
+            ));
+        }
     };
-    #[cfg(target_os = "linux")]
-    let mut command = {
-        let plan = crate::launch::linux::resolve_auxiliary(
-            state,
-            appid,
-            game_executable,
-            &host.to_string_lossy(),
-            &host_args,
-        )
-        .map_err(AppError::msg)?;
-        let mut command = tokio::process::Command::new(plan.command);
-        command.args(plan.args).envs(plan.envs);
-        command
-    };
-    #[cfg(not(any(target_os = "windows", target_os = "linux")))]
-    return Err(AppError::msg("Wand trainers are not supported on this platform"));
 
     command
         .current_dir(trainerlib.parent().unwrap_or(Path::new(".")))
