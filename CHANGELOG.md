@@ -3,24 +3,50 @@
 All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 
+## 3.4.11
+
+### Added
+
+- Installed games can now open Wand trainers directly inside Manifold instead
+  of launching a separate Wand window
+- Trainer blueprints are rendered as native, categorized controls supporting
+  toggles, actions and numeric values, with live status, value and log events
+- Bundled x64 and x86 Windows trainer hosts attach the selected trainer to the
+  launched game and relay controls through a private authenticated IPC channel
+- Linux runs the same host inside the game's configured Proton or UMU prefix,
+  while Windows attaches directly; neither platform requires a Wand client
+  installation
+- Wand account sign-in, disconnect, game matching, trainer selection, runtime
+  download and integrity verification are handled inside Manifold
+
+### Changed
+
+- Manifold now caches only the Wand trainer runtime assets required for native
+  sessions instead of installing or launching the full Wand desktop client
+- Starting a trainer launches the game first and then joins its active runtime,
+  allowing Linux hosts to attach without blocking Proton or UMU startup
+- Release packages and CI now build and bundle both trainer-host architectures
+
+### Fixed
+
+- Wand browser sign-in now returns through the official `wemod://oauth`
+  callback and includes the installation context required by authorization
+- Wand token exchange identifies Manifold as a compatible desktop client,
+  allowing the service's client validation and Turnstile checks to complete
+- Linux trainer hosts re-enter the running UMU container and share the game's
+  compatibility prefix instead of deadlocking while both processes wait
+- macOS builds no longer reference the Windows/Linux-only trainer command after
+  returning the platform-not-supported result
+
 ## 3.4.10
 
 ### Added
 
-- Installed games can now open Wand trainers directly inside Manifold, with
-  native toggle, action, and numeric controls instead of a separate Wand window
-- A bundled Windows host attaches trainers to launched games; Linux runs the
-  same host inside the game's configured Proton prefix, with no Wand client
-  installation required
+- Library and game-detail actions now match installed titles against Wand's live
+  catalog; Windows uses Wand directly, while Linux runs Wand beside the game in
+  its configured Proton or umu prefix
 
 ### Fixed
-
-- Wand browser sign-in now returns through the callback used by the official
-  client and includes the installation context required by its authorization
-  flow
-
-- Linux Wand hosts now join a running UMU/Proton prefix instead of blocking the
-  game launch while both processes wait for each other
 
 - launching Union.Manifold again now restores hidden or minimized windows instead
   of leaving the existing tray instance invisible
