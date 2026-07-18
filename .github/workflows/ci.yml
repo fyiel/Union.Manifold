@@ -55,6 +55,10 @@ jobs:
       - name: Fetch sidecars
         run: pnpm fetch-sidecars ${{ matrix.sidecars }}
 
+      - name: Build trainer host
+        if: matrix.os == 'ubuntu-22.04'
+        run: pnpm build:trainer-host
+
       - name: Build renderer
         run: pnpm build:renderer
 
