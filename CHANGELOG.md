@@ -3,12 +3,18 @@
 All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 
-## 3.4.12
+## 3.4.13
+
+### Added
+
+- A Downloads setting can hide the first-launch prompt to add a desktop icon
 
 ### Fixed
 
 - Quit-on-game-launch now always exits Manifold, even when achievement popups
   are enabled, instead of leaving an inaccessible background process
+- Closing the main window with “Quit entirely” now exits the background process
+  instead of leaving Manifold inaccessible
 
 ## 3.4.11
 
