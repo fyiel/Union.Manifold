@@ -40,6 +40,10 @@ use settings::SettingsStore;
 use sources::Registry;
 use state::AppState;
 
+fn should_exit_main_window(downloading: usize, extracting: usize) -> bool {
+    downloading == 0 && extracting == 0
+}
+
 fn show_main_window(app: &tauri::AppHandle) {
     if let Some(main) = app.get_webview_window("main") {
         main.show().ok();
@@ -355,9 +359,11 @@ pub fn run() {
                     window.hide().ok();
                     return;
                 }
+                api.prevent_close();
                 let (downloading, extracting) = state.downloads.busy_appids();
-                if downloading > 0 || !extracting.is_empty() {
-                    api.prevent_close();
+                if should_exit_main_window(downloading, extracting.len()) {
+                    window.app_handle().exit(0);
+                } else {
                     window
                         .emit(
                             "uc:app-close-requested",
@@ -413,4 +419,16 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
     }
     builder.build(app)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_exit_main_window;
+
+    #[test]
+    fn quit_close_exits_without_active_downloads() {
+        assert!(should_exit_main_window(0, 0));
+        assert!(!should_exit_main_window(1, 0));
+        assert!(!should_exit_main_window(0, 1));
+    }
 }

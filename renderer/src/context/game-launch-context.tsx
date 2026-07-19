@@ -67,6 +67,9 @@ export function GameLaunchProvider({ children }: { children: React.ReactNode }) 
   const getAlwaysCreateShortcut = async (): Promise<boolean> => {
     try { return Boolean(await window.ucSettings?.get?.("alwaysCreateDesktopShortcut")) } catch { return false }
   }
+  const getHideDesktopShortcutPrompt = async (): Promise<boolean> => {
+    try { return Boolean(await window.ucSettings?.get?.("hideDesktopShortcutPrompt")) } catch { return false }
+  }
   const setAlwaysCreateShortcut = async (value: boolean) => {
     try { await window.ucSettings?.set?.("alwaysCreateDesktopShortcut", value) } catch {  }
   }
@@ -178,13 +181,16 @@ export function GameLaunchProvider({ children }: { children: React.ReactNode }) 
       const passed = await runLaunchPreflight(g, path)
       if (!passed) return
     }
-    const alreadyAsked = await getShortcutAsked(g.appid)
-    const alwaysCreate = await getAlwaysCreateShortcut()
+    const [alreadyAsked, alwaysCreate, hideShortcutPrompt] = await Promise.all([
+      getShortcutAsked(g.appid),
+      getAlwaysCreateShortcut(),
+      getHideDesktopShortcutPrompt(),
+    ])
     if (alwaysCreate && !alreadyAsked) {
       await createDesktopShortcut(g, path)
       await setShortcutAsked(g.appid)
       await launchGame(g, path)
-    } else if (!alreadyAsked && !alwaysCreate) {
+    } else if (!alreadyAsked && !alwaysCreate && !hideShortcutPrompt) {
       setGame(g)
       setPendingPath(path)
       setShortcutAlwaysCreate(false)

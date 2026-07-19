@@ -39,6 +39,7 @@ export function SettingsPage() {
   const [autoDelete, setAutoDelete] = useState(false)
   const [installPath, setInstallPath] = useState("")
   const [shortcut, setShortcut] = useState(false)
+  const [hideShortcutPrompt, setHideShortcutPrompt] = useState(false)
   const [pauseWhilePlaying, setPauseWhilePlaying] = useState(false)
   const [launchAtLogin, setLaunchAtLogin] = useState(false)
   const [startMinimized, setStartMinimized] = useState(false)
@@ -57,12 +58,13 @@ export function SettingsPage() {
     let alive = true
     void (async () => {
       try {
-        const [cb, kbps, del, path, sc, pause, mini, upd, nid, nge, maxC, conns, margin, sp, auto, col, achievementPopups, achievementFallbacks] = await Promise.all([
+        const [cb, kbps, del, path, sc, hideSc, pause, mini, upd, nid, nge, maxC, conns, margin, sp, auto, col, achievementPopups, achievementFallbacks] = await Promise.all([
           window.ucSettings?.get?.("closeBehavior"),
           window.ucSettings?.get?.("downloadBandwidthLimitKBps"),
           window.ucSettings?.get?.("autoDeleteArchives"),
           window.ucDownloads?.getDownloadPath?.(),
           window.ucSettings?.get?.("alwaysCreateDesktopShortcut"),
+          window.ucSettings?.get?.("hideDesktopShortcutPrompt"),
           window.ucSettings?.get?.("pauseDownloadsWhilePlaying"),
           window.ucSettings?.get?.("startMinimized"),
           window.ucSettings?.get?.("autoCheckUpdates"),
@@ -85,6 +87,7 @@ export function SettingsPage() {
         const p = typeof path === "string" ? path : (path && typeof path === "object" ? (path as { path?: string }).path : "")
         if (p) setInstallPath(p)
         setShortcut(sc === true)
+        setHideShortcutPrompt(hideSc === true)
         setPauseWhilePlaying(pause === true)
         setStartMinimized(mini === true)
         setAutoCheckUpdates(upd !== false)
@@ -104,6 +107,7 @@ export function SettingsPage() {
       if (!d || !alive) return
       if (d.key === "autoDeleteArchives") setAutoDelete(d.value === true)
       if (d.key === "alwaysCreateDesktopShortcut") setShortcut(d.value === true)
+      if (d.key === "hideDesktopShortcutPrompt") setHideShortcutPrompt(d.value === true)
       if (d.key === "pauseDownloadsWhilePlaying") setPauseWhilePlaying(d.value === true)
       if (d.key === "achievementNotifications") setAchievementNotifications(d.value !== false)
       if (d.key === "achievementSystemNotifications") setAchievementSystemNotifications(d.value !== false)
@@ -238,6 +242,7 @@ export function SettingsPage() {
                 </Row>
                 <ToggleRow title="Pause downloads while playing" desc="Pause active downloads when a game launches, resume on exit" on={pauseWhilePlaying} onToggle={() => setBool("pauseDownloadsWhilePlaying", !pauseWhilePlaying, setPauseWhilePlaying)} />
                 <ToggleRow title="Always create desktop shortcut" desc="Add a desktop shortcut for each game after it installs" on={shortcut} onToggle={() => setBool("alwaysCreateDesktopShortcut", !shortcut, setShortcut)} />
+                <ToggleRow title="Hide desktop shortcut prompt" desc="Launch immediately without asking to add an icon to the desktop" on={hideShortcutPrompt} onToggle={() => setBool("hideDesktopShortcutPrompt", !hideShortcutPrompt, setHideShortcutPrompt)} />
                 <ToggleRow title="Delete archive after extract" desc="Reclaim disk space once unpacking succeeds" on={autoDelete} onToggle={toggleAutoDelete} last />
               </div>
             )}
