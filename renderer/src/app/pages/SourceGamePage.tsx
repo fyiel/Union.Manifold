@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import { useLocation, useNavigate, useParams } from "react-router-dom"
-import { WandSparkles } from "lucide-react"
+import { Bookmark, BookmarkCheck, WandSparkles } from "lucide-react"
 import {
   SOURCE_PRIORITY,
   collectDownloadEntries,
@@ -19,6 +19,7 @@ import {
   startBestDownload,
   type DownloadEntry,
 } from "@/lib/sources"
+import { isPlayLater, onPlayLaterChanged, togglePlayLater } from "@/lib/play-later"
 import { useDownloadsSelector } from "@/context/downloads-context"
 import { useGameLaunch } from "@/context/game-launch-context"
 import { MONO, COVER_LINES, gbLabel, Spinner, SmartImage, gameImageCandidates } from "@/app/manifold/ui"
@@ -106,6 +107,12 @@ export function SourceGamePage() {
   )
 
   const [installed, setInstalled] = useState(Boolean(navState?.installed))
+  const [savedForLater, setSavedForLater] = useState(() => isPlayLater(dedupKey))
+  useEffect(() => {
+    const sync = () => setSavedForLater(isPlayLater(dedupKey))
+    sync()
+    return onPlayLaterChanged(sync)
+  }, [dedupKey])
   useEffect(() => {
     let alive = true
     void (async () => {
@@ -345,6 +352,12 @@ export function SourceGamePage() {
               {copied
                 ? <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round"><polyline points="3 8.5 6.5 12 13 4" /></svg>
                 : <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round"><rect x="5" y="5" width="9" height="9" rx="1.5" /><path d="M11 5V3.5A1.5 1.5 0 0 0 9.5 2H3.5A1.5 1.5 0 0 0 2 3.5v6A1.5 1.5 0 0 0 3.5 11H5" /></svg>}
+            </button>
+          )}
+          {!installed && game && (
+            <button type="button" onClick={() => setSavedForLater(togglePlayLater(game))} className="mf-ghost" title={savedForLater ? "Remove from Play later" : "Save to Play later"} style={{ display: "flex", alignItems: "center", gap: 8, height: 44, padding: "0 15px", borderRadius: 9, border: "1px solid var(--mf-line-2)", background: savedForLater ? "color-mix(in srgb, var(--mf-t0) 7%, transparent)" : "transparent", color: "var(--mf-t2)", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+              {savedForLater ? <BookmarkCheck size={15} strokeWidth={1.7} /> : <Bookmark size={15} strokeWidth={1.7} />}
+              {savedForLater ? "Saved for later" : "Play later"}
             </button>
           )}
           {installed && wand?.supported && wand.game && (

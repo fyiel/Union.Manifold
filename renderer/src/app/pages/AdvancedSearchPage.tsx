@@ -15,7 +15,7 @@ import { MONO, SearchIcon, Spinner, CenterState } from "@/app/manifold/ui"
 
 type AdvSort = "relevance" | "a-z" | "size" | "sources"
 const SORT_CYCLE: AdvSort[] = ["relevance", "a-z", "size", "sources"]
-const SIZE_MIN = 0, SIZE_MAX = 130, YEAR_MIN = 2010, YEAR_MAX = 2025
+const SIZE_MIN = 0, SIZE_MAX = 130, YEAR_MIN = 2010, YEAR_MAX = 2026
 const ADV_PAGE = 60
 
 function capKeyForSort(sort: AdvSort): "title" | "size" | null {
@@ -110,7 +110,7 @@ export function AdvancedSearchPage() {
           offsetRef.current = ADV_PAGE
           if (!genresLocked.current && res.facets.tags.length) {
             genresLocked.current = true
-            setGenreOptions(res.facets.tags.slice(0, 14).map((t) => t.tag))
+            setGenreOptions(res.facets.tags.map((t) => t.tag))
           }
           setLoading(false)
         })

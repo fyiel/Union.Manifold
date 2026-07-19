@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils"
 
 const importAdvanced = () => import("@/app/pages/AdvancedSearchPage")
 const importLibrary = () => import("@/app/pages/LibraryPage")
+const importPlayLater = () => import("@/app/pages/PlayLaterPage")
 const importAchievements = () => import("@/app/pages/AchievementsPage")
 const importDownloads = () => import("@/app/pages/DownloadsPage")
 const importSettings = () => import("@/app/pages/SettingsPage")
@@ -15,6 +16,7 @@ const importDetail = () => import("@/app/pages/SourceGamePage")
 
 const AdvancedSearchPage = lazy(() => importAdvanced().then((m) => ({ default: m.AdvancedSearchPage })))
 const LibraryPage = lazy(() => importLibrary().then((m) => ({ default: m.LibraryPage })))
+const PlayLaterPage = lazy(() => importPlayLater().then((m) => ({ default: m.PlayLaterPage })))
 const AchievementsPage = lazy(() => importAchievements().then((m) => ({ default: m.AchievementsPage })))
 const DownloadsPage = lazy(() => importDownloads().then((m) => ({ default: m.DownloadsPage })))
 const SettingsPage = lazy(() => importSettings().then((m) => ({ default: m.SettingsPage })))
@@ -23,6 +25,7 @@ const BrowsePage = lazy(() => import("@/app/pages/BrowsePage").then((m) => ({ de
 function prefetchRoutes() {
   void importAdvanced()
   void importLibrary()
+  void importPlayLater()
   void importAchievements()
   void importDownloads()
   void importSettings()
@@ -36,6 +39,7 @@ const TABS: Record<string, ReactNode> = {
   "/": <BrowsePage />,
   "/advanced": <AdvancedSearchPage />,
   "/library": <LibraryPage />,
+  "/play-later": <PlayLaterPage />,
   "/achievements": <AchievementsPage />,
   "/downloads": <DownloadsPage />,
   "/settings": <SettingsPage />,
