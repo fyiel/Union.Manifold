@@ -45,6 +45,13 @@ fn multipart(fields: &[(&str, &str)], boundary: &str) -> Vec<u8> {
     body.extend_from_slice(format!("--{boundary}--\r\n").as_bytes());
     body
 }
+fn direct_url(encoded: &str) -> Option<String> {
+    let decoded = percent_encoding::percent_decode_str(encoded)
+        .decode_utf8()
+        .ok()?;
+    let parsed = url::Url::parse(&decoded).ok()?;
+    matches!(parsed.scheme(), "http" | "https").then(|| parsed.to_string())
+}
 
 pub async fn resolve(url: &str) -> ResolveResult {
     let code = match file_code(url) {
@@ -88,7 +95,10 @@ pub async fn resolve(url: &str) -> ResolveResult {
         Err(_) => return not_resolvable(url, "datanodes request failed"),
     };
     if !resp.status().is_success() {
-        return not_resolvable(url, &format!("datanodes returned {}", resp.status().as_u16()));
+        return not_resolvable(
+            url,
+            &format!("datanodes returned {}", resp.status().as_u16()),
+        );
     }
     let json = match resp.json::<serde_json::Value>().await {
         Ok(j) => j,
@@ -98,12 +108,7 @@ pub async fn resolve(url: &str) -> ResolveResult {
     let direct = json
         .get("url")
         .and_then(|v| v.as_str())
-        .map(|s| {
-            percent_encoding::percent_decode_str(s)
-                .decode_utf8_lossy()
-                .to_string()
-        })
-        .filter(|s| !s.is_empty());
+        .and_then(direct_url);
 
     match direct {
         Some(direct) => ResolveResult {
