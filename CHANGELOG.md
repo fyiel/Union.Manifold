@@ -3,6 +3,14 @@
 All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 
+## 3.4.14
+
+### Fixed
+
+- GameBounty downloads now keep DataNodes filenames URL-safe, solve FileDitch's
+  current `.st` proof-of-work gate and obfuscated signed links, and reuse GoFile
+  guest sessions instead of exhausting its account rate limit
+
 ## 3.4.13
 
 ### Added

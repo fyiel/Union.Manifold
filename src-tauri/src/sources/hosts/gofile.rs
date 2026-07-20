@@ -1,9 +1,11 @@
 use crate::http::{self, FetchOpts};
+use crate::sources::cache::Cached;
 use crate::sources::{ResolveResult, ResolvedFile};
 use once_cell::sync::Lazy;
 use regex::Regex;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
+use std::time::Duration;
 
 static HOST_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?i)(^|\.)gofile\.io$").unwrap());
 static ID_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?:/d/|/)([A-Za-z0-9]{4,})").unwrap());
@@ -12,6 +14,9 @@ const UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (
 const BROWSER_LANG: &str = "en-US";
 const WT_SALT: &str = "9844d94d963d30";
 const WT_WINDOW_SECS: u64 = 14400;
+
+static GUEST_TOKEN: Lazy<Cached<String>> =
+    Lazy::new(|| Cached::new(Duration::from_secs(12 * 60 * 60)));
 
 pub fn matches(url: &str) -> bool {
     url::Url::parse(url)
@@ -57,21 +62,24 @@ fn website_token(token: &str, window: u64) -> String {
     wt_hash(UA, BROWSER_LANG, token, window)
 }
 
-async fn guest_token() -> Option<String> {
+async fn request_guest_token() -> Option<String> {
     let opts = FetchOpts {
         method: Some("POST".to_string()),
         headers: HashMap::from([("User-Agent".to_string(), UA.to_string())]),
         ..Default::default()
     };
-    let resp = http::fetch("https://api.gofile.io/accounts", &opts).await.ok()?;
+    let resp = http::fetch("https://api.gofile.io/accounts", &opts)
+        .await
+        .ok()?;
     if !resp.status().is_success() {
         return None;
     }
     let json = resp.json::<serde_json::Value>().await.ok()?;
-    json.get("data")?
-        .get("token")?
-        .as_str()
-        .map(str::to_string)
+    json.get("data")?.get("token")?.as_str().map(str::to_string)
+}
+
+async fn guest_token() -> Option<String> {
+    GUEST_TOKEN.get_or(request_guest_token).await
 }
 
 fn resolved_file(node: &serde_json::Value) -> Option<ResolvedFile> {
@@ -81,7 +89,10 @@ fn resolved_file(node: &serde_json::Value) -> Option<ResolvedFile> {
     let link = node.get("link").and_then(|v| v.as_str())?;
     Some(ResolvedFile {
         url: link.to_string(),
-        file_name: node.get("name").and_then(|v| v.as_str()).map(str::to_string),
+        file_name: node
+            .get("name")
+            .and_then(|v| v.as_str())
+            .map(str::to_string),
         size_bytes: node.get("size").and_then(|v| v.as_u64()),
     })
 }
@@ -139,7 +150,10 @@ pub async fn resolve(url: &str) -> ResolveResult {
 
     let files = collect_files(&json);
     if files.is_empty() {
-        return not_resolvable(url, "gofile link has no downloadable files, opening the page");
+        return not_resolvable(
+            url,
+            "gofile link has no downloadable files, opening the page",
+        );
     }
     let dl_headers = HashMap::from([
         ("Cookie".to_string(), format!("accountToken={token}")),
@@ -179,8 +193,14 @@ mod tests {
 
     #[test]
     fn content_id_parses_folder_and_file_links() {
-        assert_eq!(content_id("https://gofile.io/d/dc1V9W").as_deref(), Some("dc1V9W"));
-        assert_eq!(content_id("https://gofile.io/dc1V9W").as_deref(), Some("dc1V9W"));
+        assert_eq!(
+            content_id("https://gofile.io/d/dc1V9W").as_deref(),
+            Some("dc1V9W")
+        );
+        assert_eq!(
+            content_id("https://gofile.io/dc1V9W").as_deref(),
+            Some("dc1V9W")
+        );
         assert_eq!(content_id("https://gofile.io/").as_deref(), None);
     }
 
