@@ -362,7 +362,8 @@ pub async fn game_exe_launch(
         return Ok(json!({ "ok": false, "error": "executable not found" }));
     }
     let cache_root = app.state::<AppState>().paths.data_dir.clone();
-    if let Err(error) = steam_api::repair_if_needed(&cache_root, Path::new(&exe_path)).await {
+    if let Err(error) = steam_api::repair_if_needed(&cache_root, &appid, Path::new(&exe_path)).await
+    {
         return Ok(json!({ "ok": false, "error": error }));
     }
     let state = app.state::<AppState>();
@@ -584,11 +585,7 @@ mod tests {
         );
         assert_eq!(
             args,
-            vec![
-                "-modpaths",
-                "Z:/data/mods/nexus-2",
-                "Z:/data/mods/nexus-1",
-            ]
+            vec!["-modpaths", "Z:/data/mods/nexus-2", "Z:/data/mods/nexus-1",]
         );
     }
 }

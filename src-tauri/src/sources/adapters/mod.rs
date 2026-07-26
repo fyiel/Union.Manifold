@@ -4,6 +4,6 @@ pub mod gog;
 pub mod hydralinks;
 pub mod kaoskrew;
 pub mod onlinefix;
-pub mod rexagames;
 pub mod steamrip;
 pub mod unioncrax;
+pub mod zeigames;

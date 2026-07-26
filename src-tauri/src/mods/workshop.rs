@@ -27,7 +27,11 @@ pub(crate) async fn detect_workshop_support(steam_appid: u64) -> Option<bool> {
     );
     let v: Value = http::get_json(&url).await.ok()?;
     let entry = v.get(steam_appid.to_string())?;
-    if !entry.get("success").and_then(|s| s.as_bool()).unwrap_or(false) {
+    if !entry
+        .get("success")
+        .and_then(|s| s.as_bool())
+        .unwrap_or(false)
+    {
         return Some(false);
     }
     let has = entry
@@ -43,15 +47,15 @@ pub(crate) async fn detect_workshop_support(steam_appid: u64) -> Option<bool> {
     Some(has)
 }
 
-static ID_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"filedetails/\?id=(\d+)").unwrap());
+static ID_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"filedetails/\?id=(\d+)").unwrap());
 static TITLE_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"class="workshopItemTitle[^"]*"[^>]*>([^<]*)<"#).unwrap());
-static IMG_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"<img[^>]+src="([^"]+)""#).unwrap());
+static IMG_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"<img[^>]+src="([^"]+)""#).unwrap());
 static AUTHOR_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"class="workshopItemAuthorName[^"]*"[^>]*>\s*(?:by)?(?:&nbsp;|\s)*(?:<a[^>]*>)?([^<]+)"#)
-        .unwrap()
+    Regex::new(
+        r#"class="workshopItemAuthorName[^"]*"[^>]*>\s*(?:by)?(?:&nbsp;|\s)*(?:<a[^>]*>)?([^<]+)"#,
+    )
+    .unwrap()
 });
 
 fn parse_browse(html: &str) -> Vec<Value> {
@@ -85,11 +89,11 @@ fn parse_browse(html: &str) -> Vec<Value> {
 }
 
 static NEW_ITEM_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"filedetails/\?id=(\d+)"[^>]*>\s*<img[^>]+src="([^"]+)"[^>]*alt="([^"]*)""#).unwrap()
+    Regex::new(r#"filedetails/\?id=(\d+)"[^>]*>\s*<img[^>]+src="([^"]+)"[^>]*alt="([^"]*)""#)
+        .unwrap()
 });
-static NEW_TOTAL_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"\\"workshopNumbers\\":\{\\"total\\":(\d+)"#).unwrap()
-});
+static NEW_TOTAL_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"\\"workshopNumbers\\":\{\\"total\\":(\d+)"#).unwrap());
 
 fn parse_browse_new(html: &str) -> Vec<Value> {
     let mut out = Vec::new();
@@ -137,7 +141,13 @@ fn trend_days(browsesort: &str, period: &str) -> Option<i64> {
     })
 }
 
-fn browse_url(steam_appid: u64, browsesort: &str, days: Option<i64>, page: u32, query: &str) -> String {
+fn browse_url(
+    steam_appid: u64,
+    browsesort: &str,
+    days: Option<i64>,
+    page: u32,
+    query: &str,
+) -> String {
     let days_part = match days {
         Some(d) => format!("&days={d}"),
         None => String::new(),
@@ -161,7 +171,9 @@ pub async fn workshop_browse(
         let days = trend_days(browsesort, &period);
         let page = page.max(1);
         let url = browse_url(steam_appid, browsesort, days, page, &query);
-        let html = http::get_text(&url).await.map_err(|e| format!("workshop browse: {e}"))?;
+        let html = http::get_text(&url)
+            .await
+            .map_err(|e| format!("workshop browse: {e}"))?;
         let (items, has_more) = if html.contains(r#"class="workshopItem""#) {
             let items = parse_browse(&html);
             let has_more = items.len() >= PAGE_SIZE;
@@ -208,7 +220,10 @@ pub(crate) async fn fetch_details(ids: &[String]) -> Result<Vec<Value>, String> 
     if !resp.status().is_success() {
         return Err(format!("workshop details: HTTP {}", resp.status()));
     }
-    let v: Value = resp.json().await.map_err(|e| format!("workshop details parse: {e}"))?;
+    let v: Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("workshop details parse: {e}"))?;
     let details = v
         .pointer("/response/publishedfiledetails")
         .and_then(|d| d.as_array())
@@ -220,12 +235,17 @@ pub(crate) async fn fetch_details(ids: &[String]) -> Result<Vec<Value>, String> 
             if d.get("result").and_then(|r| r.as_u64()).unwrap_or(0) != 1 {
                 return None;
             }
-            let id = d
-                .get("publishedfileid")
-                .and_then(|v| v.as_str().map(String::from).or_else(|| v.as_u64().map(|n| n.to_string())))?;
+            let id = d.get("publishedfileid").and_then(|v| {
+                v.as_str()
+                    .map(String::from)
+                    .or_else(|| v.as_u64().map(|n| n.to_string()))
+            })?;
             let size = d
                 .get("file_size")
-                .and_then(|v| v.as_u64().or_else(|| v.as_str().and_then(|s| s.parse().ok())))
+                .and_then(|v| {
+                    v.as_u64()
+                        .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+                })
                 .unwrap_or(0);
             Some(json!({
                 "remoteId": id,
@@ -272,7 +292,12 @@ pub async fn workshop_install(
                 save_config(&state.paths, &appid, &cfg);
             }
         }
-        tauri::async_runtime::spawn(run_workshop_install(app.clone(), appid.clone(), steam_appid, fid));
+        tauri::async_runtime::spawn(run_workshop_install(
+            app.clone(),
+            appid.clone(),
+            steam_appid,
+            fid,
+        ));
         Ok(json!({ "ok": true, "started": true }))
     }
     .await;
@@ -291,7 +316,9 @@ async fn run_workshop_install(app: AppHandle, appid: String, steam_appid: u64, f
         .filter(|n| !n.is_empty())
         .unwrap_or_else(|| format!("Workshop item {fid}"));
 
-    if let Err(e) = workshop_install_inner(&app, &appid, steam_appid, fid, &name, detail.as_ref()).await {
+    if let Err(e) =
+        workshop_install_inner(&app, &appid, steam_appid, fid, &name, detail.as_ref()).await
+    {
         emit_progress(&app, &appid, &mod_id, &name, "error", None, Some(&e));
     }
 }
@@ -407,7 +434,10 @@ mod tests {
 
     #[test]
     fn parses_new_layout_items() {
-        assert!(!FIXTURE_NEW.contains(r#"class="workshopItem""#), "fixture must not trip the old-layout detector");
+        assert!(
+            !FIXTURE_NEW.contains(r#"class="workshopItem""#),
+            "fixture must not trip the old-layout detector"
+        );
         let items = parse_browse_new(FIXTURE_NEW);
         assert_eq!(items.len(), 2);
         assert_eq!(items[0]["remoteId"], "3754840387");

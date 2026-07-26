@@ -18,7 +18,9 @@ fn base_headers() -> HeaderMap {
     h.insert(reqwest::header::USER_AGENT, HeaderValue::from_static(UA));
     h.insert(
         reqwest::header::ACCEPT,
-        HeaderValue::from_static("text/html,application/xhtml+xml,application/json,application/xml;q=0.9,*/*;q=0.8"),
+        HeaderValue::from_static(
+            "text/html,application/xhtml+xml,application/json,application/xml;q=0.9,*/*;q=0.8",
+        ),
     );
     h.insert(
         reqwest::header::ACCEPT_LANGUAGE,
@@ -90,7 +92,11 @@ fn build_client(no_redirect: bool) -> Client {
     let mut b = Client::builder()
         .default_headers(base_headers())
         .timeout(Duration::from_secs(25))
-        .redirect(if no_redirect { Policy::none() } else { Policy::limited(10) });
+        .redirect(if no_redirect {
+            Policy::none()
+        } else {
+            Policy::limited(10)
+        });
     if let Some(p) = PROXY.read().clone() {
         if let Ok(proxy) = reqwest::Proxy::all(&p) {
             b = b.proxy(proxy);
@@ -147,18 +153,23 @@ pub async fn fetch(url: &str, opts: &FetchOpts) -> reqwest::Result<Response> {
 
     let mut last_err: Option<reqwest::Error> = None;
     for attempt in 0..=max {
-        let method = reqwest::Method::from_bytes(
-            opts.method.as_deref().unwrap_or("GET").as_bytes(),
-        )
-        .unwrap_or(reqwest::Method::GET);
+        let method =
+            reqwest::Method::from_bytes(opts.method.as_deref().unwrap_or("GET").as_bytes())
+                .unwrap_or(reqwest::Method::GET);
         let mut req = client.request(method, url);
         for (k, v) in &opts.headers {
-            if let (Ok(name), Ok(val)) = (HeaderName::from_bytes(k.as_bytes()), HeaderValue::from_str(v)) {
+            if let (Ok(name), Ok(val)) = (
+                HeaderName::from_bytes(k.as_bytes()),
+                HeaderValue::from_str(v),
+            ) {
                 req = req.header(name, val);
             }
         }
         if is_steamrip
-            && !opts.headers.keys().any(|k| k.eq_ignore_ascii_case("user-agent"))
+            && !opts
+                .headers
+                .keys()
+                .any(|k| k.eq_ignore_ascii_case("user-agent"))
         {
             req = req.header(reqwest::header::USER_AGENT, STEAMRIP_UA.as_str());
         }
@@ -234,11 +245,12 @@ pub fn decode_entities(s: &str) -> String {
             let ent = &cap[0];
             let inner = &ent[1..ent.len() - 1];
             if let Some(num) = inner.strip_prefix('#') {
-                let code = if let Some(hex) = num.strip_prefix('x').or_else(|| num.strip_prefix('X')) {
-                    u32::from_str_radix(hex, 16).ok()
-                } else {
-                    num.parse::<u32>().ok()
-                };
+                let code =
+                    if let Some(hex) = num.strip_prefix('x').or_else(|| num.strip_prefix('X')) {
+                        u32::from_str_radix(hex, 16).ok()
+                    } else {
+                        num.parse::<u32>().ok()
+                    };
                 return code
                     .and_then(char::from_u32)
                     .map(String::from)
@@ -297,7 +309,10 @@ mod tests {
 
     #[test]
     fn t_decode_entities_mixed_string() {
-        assert_eq!(decode_entities("Tom &amp; Jerry &lt;3&gt;"), "Tom & Jerry <3>");
+        assert_eq!(
+            decode_entities("Tom &amp; Jerry &lt;3&gt;"),
+            "Tom & Jerry <3>"
+        );
     }
 
     #[test]

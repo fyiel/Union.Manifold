@@ -50,20 +50,28 @@ async fn extract_archive(archive: &Path, out: &Path) -> Result<(), String> {
                 .map_err(|e| e.to_string());
         }
         let tmp = out.join(".untar");
-        crate::install::run_7z(archive, &tmp, |_| {}).await.map_err(|e| e.to_string())?;
+        crate::install::run_7z(archive, &tmp, |_| {})
+            .await
+            .map_err(|e| e.to_string())?;
         let tar = std::fs::read_dir(&tmp)
             .map_err(|e| format!("untar dir: {e}"))?
             .flatten()
             .map(|e| e.path())
             .find(|p| {
-                p.extension().map(|e| e.eq_ignore_ascii_case("tar")).unwrap_or(false)
+                p.extension()
+                    .map(|e| e.eq_ignore_ascii_case("tar"))
+                    .unwrap_or(false)
             })
             .ok_or("no .tar inside the steamcmd tarball")?;
-        crate::install::run_7z(&tar, out, |_| {}).await.map_err(|e| e.to_string())?;
+        crate::install::run_7z(&tar, out, |_| {})
+            .await
+            .map_err(|e| e.to_string())?;
         std::fs::remove_dir_all(&tmp).ok();
         Ok(())
     } else {
-        crate::install::run_7z(archive, out, |_| {}).await.map_err(|e| e.to_string())
+        crate::install::run_7z(archive, out, |_| {})
+            .await
+            .map_err(|e| e.to_string())
     }
 }
 
@@ -173,7 +181,10 @@ pub(crate) async fn run_workshop_download(
     if let Some(p) = downloaded {
         return Ok(p);
     }
-    if text.contains("No subscription") || text.contains("Failure") || text.contains("Access Denied") {
+    if text.contains("No subscription")
+        || text.contains("Failure")
+        || text.contains("Access Denied")
+    {
         return Err(
             "This item requires a Steam account that owns this game — anonymous SteamCMD download was refused"
                 .to_string(),
@@ -198,7 +209,9 @@ fn reported_content_dir(text: &str) -> Option<PathBuf> {
 }
 
 fn dir_has_content(p: &Path) -> bool {
-    std::fs::read_dir(p).map(|mut it| it.next().is_some()).unwrap_or(false)
+    std::fs::read_dir(p)
+        .map(|mut it| it.next().is_some())
+        .unwrap_or(false)
 }
 
 #[cfg(test)]

@@ -22,7 +22,10 @@ pub struct Cfg {
 pub fn cfg() -> Option<Cfg> {
     let (url, key) = match SETTINGS.get() {
         Some(s) => (s.get_string("slipgateUrl"), s.get_string("slipgateKey")),
-        None => (std::env::var("SLIPGATE_URL").ok(), std::env::var("SLIPGATE_KEY").ok()),
+        None => (
+            std::env::var("SLIPGATE_URL").ok(),
+            std::env::var("SLIPGATE_KEY").ok(),
+        ),
     };
     let base = url
         .map(|s| s.trim().trim_end_matches('/').to_string())
@@ -64,7 +67,10 @@ pub async fn post(cfg: &Cfg, path: &str, body: Value, timeout: Duration) -> Resu
 pub async fn fetch(cfg: &Cfg, url: &str, timeout: Duration) -> Result<String, String> {
     let resp = post(cfg, "/fetch", json!({ "url": url }), timeout).await?;
     if !resp.get("ok").and_then(|v| v.as_bool()).unwrap_or(false) {
-        let err = resp.get("error").and_then(|v| v.as_str()).unwrap_or("unknown error");
+        let err = resp
+            .get("error")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown error");
         return Err(format!("Slipgate fetch: {err}"));
     }
     resp.get("body")
@@ -108,7 +114,10 @@ pub async fn resolve(
         .and_then(|x| x.as_str())
         .filter(|s| !s.is_empty())
         .map(String::from);
-    let size_bytes = v.get("size_bytes").and_then(|x| x.as_u64()).filter(|n| *n > 0);
+    let size_bytes = v
+        .get("size_bytes")
+        .and_then(|x| x.as_u64())
+        .filter(|n| *n > 0);
     let headers = v
         .get("headers")
         .and_then(|x| x.as_object())
@@ -118,7 +127,12 @@ pub async fn resolve(
                 .collect()
         })
         .unwrap_or_default();
-    Ok(ResolvedLink { url, file_name, size_bytes, headers })
+    Ok(ResolvedLink {
+        url,
+        file_name,
+        size_bytes,
+        headers,
+    })
 }
 
 pub async fn health(base: &str, key: &str) -> Result<Value, String> {
@@ -129,7 +143,11 @@ pub async fn health(base: &str, key: &str) -> Result<Value, String> {
     }
     let resp = http::fetch(
         &format!("{base}/health"),
-        &http::FetchOpts { headers, timeout: Some(Duration::from_secs(15)), ..Default::default() },
+        &http::FetchOpts {
+            headers,
+            timeout: Some(Duration::from_secs(15)),
+            ..Default::default()
+        },
     )
     .await
     .map_err(|e| format!("unreachable: {e}"))?;

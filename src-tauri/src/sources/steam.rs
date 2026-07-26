@@ -79,12 +79,20 @@ pub async fn get_store_details(appid: u64) -> Option<StoreDetails> {
                 .and_then(|v| v.as_array())
                 .map(|arr| {
                     arr.iter()
-                        .filter_map(|g| g.get("description").and_then(|v| v.as_str()).map(String::from))
+                        .filter_map(|g| {
+                            g.get("description")
+                                .and_then(|v| v.as_str())
+                                .map(String::from)
+                        })
                         .collect()
                 })
                 .unwrap_or_default(),
             release_year: super::schema::year_from(date),
-            header_image: d.get("header_image").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+            header_image: d
+                .get("header_image")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
             background: d
                 .get("background_raw")
                 .or_else(|| d.get("background"))
@@ -111,7 +119,10 @@ pub async fn get_store_details(appid: u64) -> Option<StoreDetails> {
                 .map(|arr| {
                     arr.iter()
                         .map(|m| {
-                            let nested = m.get("mp4").and_then(|v| v.get("max").or_else(|| v.get("480"))).and_then(|v| v.as_str());
+                            let nested = m
+                                .get("mp4")
+                                .and_then(|v| v.get("max").or_else(|| v.get("480")))
+                                .and_then(|v| v.as_str());
                             let hls = m.get("hls_h264").and_then(|v| v.as_str());
                             let dash = m.get("dash_h264").and_then(|v| v.as_str());
                             let mp4 = nested.or(hls).or(dash).unwrap_or("").to_string();
@@ -178,7 +189,9 @@ fn base_title(name: &str) -> Option<String> {
     let lower = trimmed.to_lowercase();
     for suffix in [" (demo)", " - demo", " playtest", " demo"] {
         if lower.ends_with(suffix) {
-            let base = trimmed[..trimmed.len() - suffix.len()].trim_end_matches([' ', '-', ':', '(']).trim();
+            let base = trimmed[..trimmed.len() - suffix.len()]
+                .trim_end_matches([' ', '-', ':', '('])
+                .trim();
             if !base.is_empty() {
                 return Some(base.to_string());
             }
@@ -232,7 +245,10 @@ pub async fn resolve_cover(appid: u64) -> String {
 }
 
 pub async fn app_name(appid: u64) -> Option<String> {
-    get_store_details(appid).await.map(|d| d.name).filter(|n| !n.is_empty())
+    get_store_details(appid)
+        .await
+        .map(|d| d.name)
+        .filter(|n| !n.is_empty())
 }
 
 pub async fn steam_meta(appid: u64) -> Value {
@@ -259,7 +275,13 @@ pub async fn enrich(game: &mut UnifiedGame) {
         Some(d) => d,
         None => return,
     };
-    if game.description.as_ref().map(|d| d.len() < 24).unwrap_or(true) && !details.description.is_empty() {
+    if game
+        .description
+        .as_ref()
+        .map(|d| d.len() < 24)
+        .unwrap_or(true)
+        && !details.description.is_empty()
+    {
         game.description = Some(details.description);
     }
     if game.genres.is_empty() {
@@ -284,8 +306,14 @@ mod tests {
     #[test]
     fn base_title_strips_demo_and_playtest_suffixes() {
         assert_eq!(base_title("Tower Lab Demo").as_deref(), Some("Tower Lab"));
-        assert_eq!(base_title("Humanize Robotics Demo").as_deref(), Some("Humanize Robotics"));
-        assert_eq!(base_title("Cozy Game Restoration Demo").as_deref(), Some("Cozy Game Restoration"));
+        assert_eq!(
+            base_title("Humanize Robotics Demo").as_deref(),
+            Some("Humanize Robotics")
+        );
+        assert_eq!(
+            base_title("Cozy Game Restoration Demo").as_deref(),
+            Some("Cozy Game Restoration")
+        );
         assert_eq!(base_title("Foo Playtest").as_deref(), Some("Foo"));
         assert_eq!(base_title("Bar (Demo)").as_deref(), Some("Bar"));
         assert_eq!(base_title("Baz - Demo").as_deref(), Some("Baz"));

@@ -150,7 +150,11 @@ static GAME_LOCKS: LazyLock<parking_lot::Mutex<HashMap<String, Arc<tokio::sync::
     LazyLock::new(|| parking_lot::Mutex::new(HashMap::new()));
 
 pub(crate) fn game_lock(appid: &str) -> Arc<tokio::sync::Mutex<()>> {
-    GAME_LOCKS.lock().entry(appid.to_string()).or_default().clone()
+    GAME_LOCKS
+        .lock()
+        .entry(appid.to_string())
+        .or_default()
+        .clone()
 }
 
 pub(crate) fn emit_changed(app: &AppHandle, appid: &str) {
@@ -193,7 +197,10 @@ fn rel_string(base: &Path, p: &Path) -> Option<String> {
 
 fn rel_to_path(base: &Path, rel: &str) -> PathBuf {
     let mut out = base.to_path_buf();
-    for comp in rel.split('/').filter(|c| !c.is_empty() && *c != "." && *c != "..") {
+    for comp in rel
+        .split('/')
+        .filter(|c| !c.is_empty() && *c != "." && *c != "..")
+    {
         out.push(comp);
     }
     out
@@ -305,7 +312,8 @@ fn write_mod_engine_profile(
         return Ok(None);
     }
     if let Some(parent) = generated.parent() {
-        std::fs::create_dir_all(parent).map_err(|error| format!("Mod Engine profile dir: {error}"))?;
+        std::fs::create_dir_all(parent)
+            .map_err(|error| format!("Mod Engine profile dir: {error}"))?;
     }
     std::fs::write(&generated, profile).map_err(|error| format!("Mod Engine profile: {error}"))?;
     Ok(Some(generated))
@@ -327,7 +335,12 @@ fn versioned_archive_root(staged: &Path, version: &str) -> Option<PathBuf> {
     }
     let mut manifest_children = 0;
     let mut selected = None;
-    for path in std::fs::read_dir(staged).ok()?.flatten().map(|entry| entry.path()).filter(|path| path.is_dir()) {
+    for path in std::fs::read_dir(staged)
+        .ok()?
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.is_dir())
+    {
         let Some(child_version) = mod_manifest_version(&path) else {
             continue;
         };
@@ -348,7 +361,10 @@ fn child_dir(parent: &Path, name: &str) -> Option<PathBuf> {
         .flatten()
         .find(|entry| {
             entry.path().is_dir()
-                && entry.file_name().to_string_lossy().eq_ignore_ascii_case(name)
+                && entry
+                    .file_name()
+                    .to_string_lossy()
+                    .eq_ignore_ascii_case(name)
         })
         .map(|entry| entry.path())
 }
@@ -437,13 +453,16 @@ fn enabled_mewgenics_mod_paths(game_dir: &Path, cfg: &GameMods) -> Vec<PathBuf> 
         .collect()
 }
 
-
 pub(crate) fn deploy_to(game_dir: &Path, target: &Path, cfg: &GameMods) -> Result<usize, String> {
     let staging_root = game_dir.join("staging");
     let backup_root = game_dir.join("backup");
     let mewgenics_paths = enabled_mewgenics_mod_paths(game_dir, cfg);
 
-    let mut enabled: Vec<&ModEntry> = cfg.mods.iter().filter(|m| m.enabled && !m.deploy_blocked).collect();
+    let mut enabled: Vec<&ModEntry> = cfg
+        .mods
+        .iter()
+        .filter(|m| m.enabled && !m.deploy_blocked)
+        .collect();
     enabled.sort_by_key(|m| m.order);
     let mut desired: HashMap<String, (PathBuf, String)> = HashMap::new();
     for m in enabled {
@@ -521,10 +540,12 @@ pub(crate) fn deploy_to(game_dir: &Path, target: &Path, cfg: &GameMods) -> Resul
                     let bpath = rel_to_path(&backup_root, rel);
                     if !bpath.is_file() {
                         if let Some(parent) = bpath.parent() {
-                            std::fs::create_dir_all(parent).map_err(|e| format!("backup {rel}: {e}"))?;
+                            std::fs::create_dir_all(parent)
+                                .map_err(|e| format!("backup {rel}: {e}"))?;
                         }
                         if std::fs::rename(&dst, &bpath).is_err() {
-                            std::fs::copy(&dst, &bpath).map_err(|e| format!("backup {rel}: {e}"))?;
+                            std::fs::copy(&dst, &bpath)
+                                .map_err(|e| format!("backup {rel}: {e}"))?;
                             std::fs::remove_file(&dst).ok();
                         }
                     }
@@ -550,7 +571,8 @@ pub(crate) fn deploy_to(game_dir: &Path, target: &Path, cfg: &GameMods) -> Resul
         if mewgenics_paths.is_empty() {
             std::fs::remove_file(marker).ok();
         } else {
-            std::fs::write(marker, b"enabled\n").map_err(|e| format!("Mewgenics deploy marker: {e}"))?;
+            std::fs::write(marker, b"enabled\n")
+                .map_err(|e| format!("Mewgenics deploy marker: {e}"))?;
         }
         Ok(mewgenics_paths.len())
     } else {
@@ -593,10 +615,16 @@ fn is_game_dir(dir: &Path) -> bool {
             return true;
         }
         if path.is_file() {
-            if name == "gameassembly.dll" || name == "unityplayer.dll" || name == "doorstop_config.ini" {
+            if name == "gameassembly.dll"
+                || name == "unityplayer.dll"
+                || name == "doorstop_config.ini"
+            {
                 return true;
             }
-            if name.ends_with(".exe") && !name.contains("unitycrashhandler") && !name.contains("unins") {
+            if name.ends_with(".exe")
+                && !name.contains("unitycrashhandler")
+                && !name.contains("unins")
+            {
                 return true;
             }
         }
@@ -613,7 +641,11 @@ fn resolve_game_root(base: &Path) -> PathBuf {
         let Ok(rd) = std::fs::read_dir(&cur) else {
             break;
         };
-        let subdirs: Vec<PathBuf> = rd.flatten().map(|e| e.path()).filter(|p| p.is_dir()).collect();
+        let subdirs: Vec<PathBuf> = rd
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.is_dir())
+            .collect();
         if let Some(hit) = subdirs.iter().find(|d| is_game_dir(d)) {
             return hit.clone();
         }
@@ -650,7 +682,9 @@ pub(crate) fn active_mod_engine_profile(state: &AppState, appid: &str) -> Option
     }) {
         return None;
     }
-    let profile = deploy_target_dir(state, appid, &cfg).ok()?.join(MOD_ENGINE_PROFILE);
+    let profile = deploy_target_dir(state, appid, &cfg)
+        .ok()?
+        .join(MOD_ENGINE_PROFILE);
     profile.is_file().then_some(profile)
 }
 
@@ -757,7 +791,9 @@ fn root_has_file_matching(target: &Path, predicate: impl Fn(&str) -> bool) -> bo
         .into_iter()
         .flatten()
         .flatten()
-        .any(|entry| entry.path().is_file() && predicate(&entry.file_name().to_string_lossy().to_lowercase()))
+        .any(|entry| {
+            entry.path().is_file() && predicate(&entry.file_name().to_string_lossy().to_lowercase())
+        })
 }
 
 fn mod_engine_target_game(target: &Path) -> Option<(&'static str, &'static str)> {
@@ -765,7 +801,10 @@ fn mod_engine_target_game(target: &Path) -> Option<(&'static str, &'static str)>
         ("darksoulsiii.exe", ("darksouls3", "Dark Souls III")),
         ("sekiro.exe", ("sekiro", "Sekiro: Shadows Die Twice")),
         ("eldenring.exe", ("eldenring", "Elden Ring")),
-        ("armoredcore6.exe", ("armoredcore6", "Armored Core VI: Fires of Rubicon")),
+        (
+            "armoredcore6.exe",
+            ("armoredcore6", "Armored Core VI: Fires of Rubicon"),
+        ),
         ("nightreign.exe", ("nightreign", "Elden Ring Nightreign")),
     ]
     .into_iter()
@@ -788,7 +827,8 @@ fn lenny_target_game(target: &Path) -> Option<&'static str> {
     ]
     .into_iter()
     .find_map(|(executable, title)| {
-        root_has_file_matching(target, |name| name.eq_ignore_ascii_case(executable)).then_some(title)
+        root_has_file_matching(target, |name| name.eq_ignore_ascii_case(executable))
+            .then_some(title)
     })
 }
 
@@ -819,11 +859,15 @@ fn is_unity_target(target: &Path) -> bool {
 fn is_fluffy_target(target: &Path) -> bool {
     has_root_dir(target, &["nativePC"])
         || root_has_file_matching(target, |name| {
-            name.starts_with("re_chunk_") && (name.ends_with(".pak") || name.contains(".pak.patch_"))
+            name.starts_with("re_chunk_")
+                && (name.ends_with(".pak") || name.contains(".pak.patch_"))
         })
 }
 
-fn loader_compatibility(target: Option<&Path>, steam_appid: Option<u64>) -> Vec<LoaderCompatibility> {
+fn loader_compatibility(
+    target: Option<&Path>,
+    steam_appid: Option<u64>,
+) -> Vec<LoaderCompatibility> {
     let me3 = mod_engine_game_for(target, steam_appid);
     let lenny = lenny_game_for(target, steam_appid);
     let unity_files = target.map(is_unity_target).unwrap_or(false);
@@ -838,7 +882,9 @@ fn loader_compatibility(target: Option<&Path>, steam_appid: Option<u64>) -> Vec<
             compatible: me3.is_some(),
             reason: me3
                 .map(|(_, title)| format!("officially supported for {title}"))
-                .unwrap_or_else(|| "this Steam title is not in Mod Engine 3's supported game list".to_string()),
+                .unwrap_or_else(|| {
+                    "this Steam title is not in Mod Engine 3's supported game list".to_string()
+                }),
         },
         LoaderCompatibility {
             id: "lennys-mod-loader",
@@ -846,7 +892,9 @@ fn loader_compatibility(target: Option<&Path>, steam_appid: Option<u64>) -> Vec<
             compatible: lenny.is_some(),
             reason: lenny
                 .map(|title| format!("supported for {title}"))
-                .unwrap_or_else(|| "this Steam title is not supported by Lenny's Mod Loader".to_string()),
+                .unwrap_or_else(|| {
+                    "this Steam title is not supported by Lenny's Mod Loader".to_string()
+                }),
         },
         LoaderCompatibility {
             id: "melonloader",
@@ -883,7 +931,12 @@ struct DeploymentPlan {
     confidence: &'static str,
 }
 
-fn deployment_plan(layout: ModLayout, prefix: &str, reason: &str, confidence: &'static str) -> DeploymentPlan {
+fn deployment_plan(
+    layout: ModLayout,
+    prefix: &str,
+    reason: &str,
+    confidence: &'static str,
+) -> DeploymentPlan {
     DeploymentPlan {
         layout,
         deploy_prefix: prefix.to_string(),
@@ -898,14 +951,22 @@ fn classification_root(staged: &Path) -> PathBuf {
         .map(|rd| {
             rd.flatten()
                 .map(|e| e.path())
-                .filter(|p| !p.file_name().map(|n| is_ts_meta(&n.to_string_lossy())).unwrap_or(false))
+                .filter(|p| {
+                    !p.file_name()
+                        .map(|n| is_ts_meta(&n.to_string_lossy()))
+                        .unwrap_or(false)
+                })
                 .collect()
         })
         .unwrap_or_default();
     if entries.len() != 1 || !entries[0].is_dir() {
         return staged.to_path_buf();
     }
-    let name = entries[0].file_name().unwrap_or_default().to_string_lossy().to_lowercase();
+    let name = entries[0]
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_lowercase();
     if MEANINGFUL_DIRS.contains(&name.as_str()) {
         staged.to_path_buf()
     } else {
@@ -921,9 +982,12 @@ fn has_root_dir(root: &Path, names: &[&str]) -> bool {
         .flatten()
         .any(|entry| {
             entry.path().is_dir()
-                && names
-                    .iter()
-                    .any(|name| entry.file_name().to_string_lossy().eq_ignore_ascii_case(name))
+                && names.iter().any(|name| {
+                    entry
+                        .file_name()
+                        .to_string_lossy()
+                        .eq_ignore_ascii_case(name)
+                })
         })
 }
 
@@ -934,7 +998,11 @@ fn has_root_file(root: &Path, name: &str) -> bool {
         .flatten()
         .flatten()
         .any(|entry| {
-            entry.path().is_file() && entry.file_name().to_string_lossy().eq_ignore_ascii_case(name)
+            entry.path().is_file()
+                && entry
+                    .file_name()
+                    .to_string_lossy()
+                    .eq_ignore_ascii_case(name)
         })
 }
 
@@ -949,7 +1017,11 @@ fn has_extension(root: &Path, extensions: &[&str], max_depth: usize) -> bool {
                     .path()
                     .extension()
                     .and_then(|ext| ext.to_str())
-                    .map(|ext| extensions.iter().any(|wanted| ext.eq_ignore_ascii_case(wanted)))
+                    .map(|ext| {
+                        extensions
+                            .iter()
+                            .any(|wanted| ext.eq_ignore_ascii_case(wanted))
+                    })
                     .unwrap_or(false)
         })
 }
@@ -982,8 +1054,18 @@ fn is_bethesda_game(target: &Path, steam_appid: Option<u64>) -> bool {
 }
 
 fn is_bethesda_payload(root: &Path) -> bool {
-    has_root_dir(root, &["meshes", "textures", "scripts", "sound", "interface", "strings", "skse"])
-        || has_extension(root, &["esp", "esm", "esl", "bsa"], 3)
+    has_root_dir(
+        root,
+        &[
+            "meshes",
+            "textures",
+            "scripts",
+            "sound",
+            "interface",
+            "strings",
+            "skse",
+        ],
+    ) || has_extension(root, &["esp", "esm", "esl", "bsa"], 3)
 }
 
 fn unreal_paks_target(target: &Path) -> Option<String> {
@@ -992,14 +1074,27 @@ fn unreal_paks_target(target: &Path) -> Option<String> {
         .max_depth(4)
         .into_iter()
         .flatten()
-        .filter(|entry| entry.file_type().is_dir() && entry.file_name().to_string_lossy().eq_ignore_ascii_case("Paks"))
+        .filter(|entry| {
+            entry.file_type().is_dir()
+                && entry
+                    .file_name()
+                    .to_string_lossy()
+                    .eq_ignore_ascii_case("Paks")
+        })
         .filter_map(|entry| {
             let parent = entry.path().parent()?;
-            if !parent.file_name()?.to_string_lossy().eq_ignore_ascii_case("Content") {
+            if !parent
+                .file_name()?
+                .to_string_lossy()
+                .eq_ignore_ascii_case("Content")
+            {
                 return None;
             }
             let rel = rel_string(target, entry.path())?;
-            if rel.split('/').any(|part| part.eq_ignore_ascii_case("Engine")) {
+            if rel
+                .split('/')
+                .any(|part| part.eq_ignore_ascii_case("Engine"))
+            {
                 return None;
             }
             Some(format!("{rel}/~mods"))
@@ -1028,7 +1123,12 @@ fn infer_deployment_plan(target: &Path, staged: &Path, steam_appid: Option<u64>)
         );
     }
     if has_root_dir(&root, &["BepInEx"]) {
-        return deployment_plan(ModLayout::BepInEx, "", "the archive contains a BepInEx tree", "high");
+        return deployment_plan(
+            ModLayout::BepInEx,
+            "",
+            "the archive contains a BepInEx tree",
+            "high",
+        );
     }
     if has_root_dir(&root, &["lml"]) {
         return deployment_plan(
@@ -1059,7 +1159,9 @@ fn infer_deployment_plan(target: &Path, staged: &Path, steam_appid: Option<u64>)
     if let Some(layout) = game_layout(steam_appid) {
         return deployment_plan(layout, "", "matched the game-specific mod layout", "high");
     }
-    if has_root_file(&root, "modinfo.ini") && (fluffy_game(steam_appid).is_some() || is_fluffy_target(target)) {
+    if has_root_file(&root, "modinfo.ini")
+        && (fluffy_game(steam_appid).is_some() || is_fluffy_target(target))
+    {
         return deployment_plan(
             ModLayout::Fluffy,
             "",
@@ -1070,7 +1172,14 @@ fn infer_deployment_plan(target: &Path, staged: &Path, steam_appid: Option<u64>)
     if has_root_dir(
         &root,
         &[
-            "Data", "Mods", "MelonLoader", "Content", "reframework", "natives", "pak_mods", "nativePC",
+            "Data",
+            "Mods",
+            "MelonLoader",
+            "Content",
+            "reframework",
+            "natives",
+            "pak_mods",
+            "nativePC",
         ],
     ) {
         return deployment_plan(
@@ -1081,8 +1190,8 @@ fn infer_deployment_plan(target: &Path, staged: &Path, steam_appid: Option<u64>)
         );
     }
 
-    let uses_reframework =
-        steam_appid == Some(RESIDENT_EVIL_REQUIEM_STEAM_APPID) || target.join("reframework").is_dir();
+    let uses_reframework = steam_appid == Some(RESIDENT_EVIL_REQUIEM_STEAM_APPID)
+        || target.join("reframework").is_dir();
     if uses_reframework
         && has_extension(&root, &["lua"], 3)
         && !has_extension(&root, &["dll", "exe", "pak", "utoc", "ucas"], 3)
@@ -1156,7 +1265,12 @@ fn infer_deployment_plan(target: &Path, staged: &Path, steam_appid: Option<u64>)
                 .max_depth(3)
                 .into_iter()
                 .flatten()
-                .any(|entry| entry.file_name().to_string_lossy().eq_ignore_ascii_case("mod.xml")))
+                .any(|entry| {
+                    entry
+                        .file_name()
+                        .to_string_lossy()
+                        .eq_ignore_ascii_case("mod.xml")
+                }))
     {
         return deployment_plan(
             ModLayout::ModsFolder,
@@ -1181,7 +1295,10 @@ fn wrap_in_mods_folder(staged: &Path, fallback_name: &str) -> Result<(), String>
         .map(|e| e.path())
         .collect();
     let has_mods_dir = entries.iter().any(|p| {
-        p.is_dir() && p.file_name().map(|n| n.eq_ignore_ascii_case("mods")).unwrap_or(false)
+        p.is_dir()
+            && p.file_name()
+                .map(|n| n.eq_ignore_ascii_case("mods"))
+                .unwrap_or(false)
     });
     if entries.is_empty() || has_mods_dir {
         return Ok(());
@@ -1232,7 +1349,10 @@ fn game_title(state: &AppState, appid: &str) -> Option<String> {
 }
 
 async fn detect_steam_appid(state: &AppState, appid: &str) -> Option<u64> {
-    if let Some(id) = appid.strip_prefix("steam-").and_then(|s| s.parse::<u64>().ok()) {
+    if let Some(id) = appid
+        .strip_prefix("steam-")
+        .and_then(|s| s.parse::<u64>().ok())
+    {
         return Some(id);
     }
     let roots = library::scan_roots(state);
@@ -1273,7 +1393,9 @@ pub(crate) async fn download_to_file(
         timeout: Some(Duration::from_secs(2 * 60 * 60)),
         ..Default::default()
     };
-    let resp = http::fetch(url, &opts).await.map_err(|e| format!("download: {e}"))?;
+    let resp = http::fetch(url, &opts)
+        .await
+        .map_err(|e| format!("download: {e}"))?;
     if !resp.status().is_success() {
         return Err(format!("download failed: HTTP {}", resp.status()));
     }
@@ -1338,7 +1460,13 @@ const BEPINEX_SUBDIRS: &[&str] = &["plugins", "config", "patchers", "core"];
 fn is_ts_meta(name: &str) -> bool {
     matches!(
         name.to_lowercase().as_str(),
-        "manifest.json" | "icon.png" | "readme.md" | "changelog.md" | "license" | "license.md" | "license.txt"
+        "manifest.json"
+            | "icon.png"
+            | "readme.md"
+            | "changelog.md"
+            | "license"
+            | "license.md"
+            | "license.txt"
     )
 }
 
@@ -1351,7 +1479,11 @@ fn bepinex_root(src: &Path) -> PathBuf {
         .map(|rd| {
             rd.flatten()
                 .map(|e| e.path())
-                .filter(|p| !p.file_name().map(|n| is_ts_meta(&n.to_string_lossy())).unwrap_or(false))
+                .filter(|p| {
+                    !p.file_name()
+                        .map(|n| is_ts_meta(&n.to_string_lossy()))
+                        .unwrap_or(false)
+                })
                 .collect()
         })
         .unwrap_or_default();
@@ -1368,7 +1500,10 @@ pub(crate) fn apply_bepinex_layout(src: &Path, dst: &Path, full_name: &str) -> R
         return copy_dir_recursive(&root, dst);
     }
     let plugin_dir = dst.join("BepInEx").join("plugins").join(full_name);
-    for entry in std::fs::read_dir(&root).map_err(|e| format!("stage read: {e}"))?.flatten() {
+    for entry in std::fs::read_dir(&root)
+        .map_err(|e| format!("stage read: {e}"))?
+        .flatten()
+    {
         let path = entry.path();
         let fname = entry.file_name().to_string_lossy().to_string();
         let lname = fname.to_lowercase();
@@ -1378,15 +1513,33 @@ pub(crate) fn apply_bepinex_layout(src: &Path, dst: &Path, full_name: &str) -> R
             copy_dir_recursive(&path, &plugin_dir.join(&fname))?;
         } else if path.is_file() {
             std::fs::create_dir_all(&plugin_dir).map_err(|e| format!("stage dir: {e}"))?;
-            std::fs::copy(&path, plugin_dir.join(&fname)).map_err(|e| format!("stage file: {e}"))?;
+            std::fs::copy(&path, plugin_dir.join(&fname))
+                .map_err(|e| format!("stage file: {e}"))?;
         }
     }
     Ok(())
 }
 
 const MEANINGFUL_DIRS: &[&str] = &[
-    "bepinex", "data", "lml", "mod", "mods", "natives", "nativepc", "pak_mods", "plugins", "patchers",
-    "config", "core", "replace", "reframework", "scripts", "stream", "content", "userlibs", "userdata",
+    "bepinex",
+    "data",
+    "lml",
+    "mod",
+    "mods",
+    "natives",
+    "nativepc",
+    "pak_mods",
+    "plugins",
+    "patchers",
+    "config",
+    "core",
+    "replace",
+    "reframework",
+    "scripts",
+    "stream",
+    "content",
+    "userlibs",
+    "userdata",
 ];
 
 pub(crate) fn strip_wrapper_dir(staged: &Path) -> Result<(), String> {
@@ -1399,7 +1552,11 @@ pub(crate) fn strip_wrapper_dir(staged: &Path) -> Result<(), String> {
         return Ok(());
     }
     let wrapper = &entries[0];
-    let name = wrapper.file_name().unwrap_or_default().to_string_lossy().to_lowercase();
+    let name = wrapper
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_lowercase();
     if MEANINGFUL_DIRS.contains(&name.as_str()) {
         return Ok(());
     }
@@ -1481,7 +1638,12 @@ fn apply_fluffy_layout(staged: &Path) -> Result<(), String> {
             .into_iter()
             .flatten()
             .flatten()
-            .find(|entry| entry.file_name().to_string_lossy().eq_ignore_ascii_case(name))
+            .find(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .eq_ignore_ascii_case(name)
+            })
             .map(|entry| entry.path());
         if let Some(path) = path.filter(|path| path.is_file()) {
             std::fs::remove_file(path).map_err(|e| format!("Fluffy metadata cleanup: {e}"))?;
@@ -1513,7 +1675,8 @@ fn apply_mod_engine_layout(staged: &Path, mod_id: &str) -> Result<(), String> {
     let folder = safe_folder_name(mod_id);
     let temporary = staged.with_file_name(format!(".{folder}-me3-layout"));
     if temporary.exists() {
-        std::fs::remove_dir_all(&temporary).map_err(|e| format!("Mod Engine temporary cleanup: {e}"))?;
+        std::fs::remove_dir_all(&temporary)
+            .map_err(|e| format!("Mod Engine temporary cleanup: {e}"))?;
     }
     let package = temporary.join(&folder);
     std::fs::create_dir_all(&package).map_err(|e| format!("Mod Engine stage: {e}"))?;
@@ -1524,7 +1687,11 @@ fn apply_mod_engine_layout(staged: &Path, mod_id: &str) -> Result<(), String> {
         .map(|entry| entry.path())
         .collect();
     for entry in entries {
-        let name = entry.file_name().unwrap_or_default().to_string_lossy().to_string();
+        let name = entry
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
         let lower = name.to_lowercase();
         if entry.is_file() && (is_ts_meta(&lower) || is_mod_engine_bootstrap(&lower)) {
             continue;
@@ -1570,7 +1737,6 @@ fn apply_staging_layout(
         }
     }
 }
-
 
 fn bepinex_plugin_name(spec: &InstallSpec) -> String {
     let name = safe_folder_name(&spec.name);
@@ -1651,7 +1817,10 @@ pub(crate) async fn finalize_install(
         if !matches!(plan.layout, ModLayout::ModEngine3 | ModLayout::Lenny) {
             plan.deploy_prefix.clear();
         }
-        plan.reason = format!("using the manual deploy target {}; {}", cfg.deploy_target, plan.reason);
+        plan.reason = format!(
+            "using the manual deploy target {}; {}",
+            cfg.deploy_target, plan.reason
+        );
         plan.confidence = "manual";
     }
 
@@ -1695,7 +1864,15 @@ pub(crate) async fn run_archive_install(
 ) {
     let mod_id = spec.mod_id();
     if let Err(e) = archive_install_inner(&app, &spec, &url, headers).await {
-        emit_progress(&app, &spec.appid, &mod_id, &spec.name, "error", None, Some(&e));
+        emit_progress(
+            &app,
+            &spec.appid,
+            &mod_id,
+            &spec.name,
+            "error",
+            None,
+            Some(&e),
+        );
     }
 }
 
@@ -1711,21 +1888,53 @@ async fn archive_install_inner(
     let tmp_dir = dir.join(".tmp");
     std::fs::create_dir_all(&tmp_dir).map_err(|e| format!("tmp dir: {e}"))?;
 
-    emit_progress(app, &spec.appid, &mod_id, &spec.name, "downloading", Some(0), None);
+    emit_progress(
+        app,
+        &spec.appid,
+        &mod_id,
+        &spec.name,
+        "downloading",
+        Some(0),
+        None,
+    );
     let fname = filename_from_url(url).unwrap_or_else(|| format!("{mod_id}.archive"));
     let archive = tmp_dir.join(format!("{mod_id}-{fname}"));
     download_to_file(url, &archive, headers, |p| {
-        emit_progress(app, &spec.appid, &mod_id, &spec.name, "downloading", p, None);
+        emit_progress(
+            app,
+            &spec.appid,
+            &mod_id,
+            &spec.name,
+            "downloading",
+            p,
+            None,
+        );
     })
     .await?;
 
-    emit_progress(app, &spec.appid, &mod_id, &spec.name, "extracting", None, None);
+    emit_progress(
+        app,
+        &spec.appid,
+        &mod_id,
+        &spec.name,
+        "extracting",
+        None,
+        None,
+    );
     let extract_dir = tmp_dir.join(format!("{mod_id}-extract"));
     if extract_dir.exists() {
         std::fs::remove_dir_all(&extract_dir).ok();
     }
     let res = crate::install::run_7z(&archive, &extract_dir, |p| {
-        emit_progress(app, &spec.appid, &mod_id, &spec.name, "extracting", Some(p), None);
+        emit_progress(
+            app,
+            &spec.appid,
+            &mod_id,
+            &spec.name,
+            "extracting",
+            Some(p),
+            None,
+        );
     })
     .await
     .map_err(|e| e.to_string());
@@ -1733,11 +1942,27 @@ async fn archive_install_inner(
     res?;
     flatten_tar(&extract_dir).await?;
 
-    emit_progress(app, &spec.appid, &mod_id, &spec.name, "installing", None, None);
+    emit_progress(
+        app,
+        &spec.appid,
+        &mod_id,
+        &spec.name,
+        "installing",
+        None,
+        None,
+    );
     let out = finalize_install(app, spec, &extract_dir, true).await;
     std::fs::remove_dir_all(&extract_dir).ok();
     out?;
-    emit_progress(app, &spec.appid, &mod_id, &spec.name, "done", Some(100), None);
+    emit_progress(
+        app,
+        &spec.appid,
+        &mod_id,
+        &spec.name,
+        "done",
+        Some(100),
+        None,
+    );
     Ok(())
 }
 
@@ -1788,7 +2013,10 @@ fn refresh_deployment_plans(state: &AppState, appid: &str, cfg: &mut GameMods) -
                 Err(error) => {
                     crate::logging::write_line(
                         "warn",
-                        &format!("Mewgenics localization migration failed for {appid}/{}: {error}", installed.id),
+                        &format!(
+                            "Mewgenics localization migration failed for {appid}/{}: {error}",
+                            installed.id
+                        ),
                     );
                     migration_failed = true;
                     continue;
@@ -1796,11 +2024,21 @@ fn refresh_deployment_plans(state: &AppState, appid: &str, cfg: &mut GameMods) -
             }
         }
         let mut plan = infer_deployment_plan(&target, &staged, cfg.steam_appid);
-        if migrating && matches!(plan.layout, ModLayout::ModEngine3 | ModLayout::Lenny | ModLayout::Fluffy) {
-            if let Err(error) = apply_staging_layout(&staged, plan.layout, &installed.name, &installed.id) {
+        if migrating
+            && matches!(
+                plan.layout,
+                ModLayout::ModEngine3 | ModLayout::Lenny | ModLayout::Fluffy
+            )
+        {
+            if let Err(error) =
+                apply_staging_layout(&staged, plan.layout, &installed.name, &installed.id)
+            {
                 crate::logging::write_line(
                     "warn",
-                    &format!("mod deployment layout migration failed for {appid}/{}: {error}", installed.id),
+                    &format!(
+                        "mod deployment layout migration failed for {appid}/{}: {error}",
+                        installed.id
+                    ),
                 );
                 migration_failed = true;
                 continue;
@@ -1810,7 +2048,10 @@ fn refresh_deployment_plans(state: &AppState, appid: &str, cfg: &mut GameMods) -
             if !matches!(plan.layout, ModLayout::ModEngine3 | ModLayout::Lenny) {
                 plan.deploy_prefix.clear();
             }
-            plan.reason = format!("using the manual deploy target {}; {}", manual_target, plan.reason);
+            plan.reason = format!(
+                "using the manual deploy target {}; {}",
+                manual_target, plan.reason
+            );
             plan.confidence = "manual";
         }
         let blocked = plan.layout == ModLayout::RequiresInstaller;
@@ -1884,7 +2125,10 @@ pub async fn mods_game_get(state: State<'_, AppState>, appid: String) -> Result<
         }
     }
     let plan_dirty = if cfg.deployment_plan_version < DEPLOYMENT_PLAN_VERSION
-        || cfg.mods.iter().any(|installed| installed.deploy_reason.is_empty())
+        || cfg
+            .mods
+            .iter()
+            .any(|installed| installed.deploy_reason.is_empty())
     {
         refresh_deployment_plans(&state, &appid, &mut cfg)
     } else {
@@ -1897,10 +2141,15 @@ pub async fn mods_game_get(state: State<'_, AppState>, appid: String) -> Result<
     }
     if plan_dirty {
         if let Err(error) = redeploy(&state, &appid, &cfg) {
-            crate::logging::write_line("warn", &format!("mod deployment plan migration failed for {appid}: {error}"));
+            crate::logging::write_line(
+                "warn",
+                &format!("mod deployment plan migration failed for {appid}: {error}"),
+            );
         }
     }
-    let deployed = !load_journal(&game_mods_dir(&state.paths, &appid)).files.is_empty()
+    let deployed = !load_journal(&game_mods_dir(&state.paths, &appid))
+        .files
+        .is_empty()
         || game_mods_dir(&state.paths, &appid)
             .join(MEWGENICS_DEPLOY_MARKER)
             .is_file();
@@ -1924,7 +2173,9 @@ pub async fn mods_game_get(state: State<'_, AppState>, appid: String) -> Result<
 
 pub(crate) fn relativize_target(base: &Path, picked: &Path) -> Result<String, String> {
     let b = base.canonicalize().unwrap_or_else(|_| base.to_path_buf());
-    let p = picked.canonicalize().unwrap_or_else(|_| picked.to_path_buf());
+    let p = picked
+        .canonicalize()
+        .unwrap_or_else(|_| picked.to_path_buf());
     let rel = p
         .strip_prefix(&b)
         .map_err(|_| "folder must be inside the game directory".to_string())?;
@@ -1948,7 +2199,8 @@ pub async fn mods_deploy_target_pick(
         return Ok(json!({ "ok": false }));
     };
     Ok(fold(
-        relativize_target(&base, Path::new(&picked)).map(|target| json!({ "ok": true, "target": target })),
+        relativize_target(&base, Path::new(&picked))
+            .map(|target| json!({ "ok": true, "target": target })),
     ))
 }
 
@@ -2147,7 +2399,10 @@ mod tests {
 
     fn mk_mod(game_dir: &Path, id: &str, order: u32, files: &[(&str, &str)]) -> ModEntry {
         for (rel, content) in files {
-            write_file(&rel_to_path(&game_dir.join("staging").join(id), rel), content);
+            write_file(
+                &rel_to_path(&game_dir.join("staging").join(id), rel),
+                content,
+            );
         }
         ModEntry {
             id: id.to_string(),
@@ -2166,16 +2421,27 @@ mod tests {
         let dir = tmp.path().join("m");
         let target = tmp.path().join("game");
         std::fs::create_dir_all(&target).unwrap();
-        let a = mk_mod(&dir, "nexus-1", 0, &[("data/conflict.txt", "from-a"), ("a-only.txt", "a")]);
+        let a = mk_mod(
+            &dir,
+            "nexus-1",
+            0,
+            &[("data/conflict.txt", "from-a"), ("a-only.txt", "a")],
+        );
         let b = mk_mod(&dir, "nexus-2", 1, &[("data/conflict.txt", "from-b")]);
-        let cfg = GameMods { mods: vec![a, b], ..Default::default() };
+        let cfg = GameMods {
+            mods: vec![a, b],
+            ..Default::default()
+        };
 
         let n = deploy_to(&dir, &target, &cfg).unwrap();
         assert_eq!(n, 2);
         assert_eq!(read(&target.join("data/conflict.txt")), "from-b");
         assert_eq!(read(&target.join("a-only.txt")), "a");
         let journal = load_journal(&dir);
-        assert_eq!(journal.files.get("data/conflict.txt").unwrap().mod_id, "nexus-2");
+        assert_eq!(
+            journal.files.get("data/conflict.txt").unwrap().mod_id,
+            "nexus-2"
+        );
     }
 
     #[test]
@@ -2264,7 +2530,10 @@ mod tests {
         let target = tmp.path().join("game");
         write_file(&target.join("data/original.txt"), "original");
         let a = mk_mod(&dir, "nexus-1", 0, &[("data/original.txt", "modded")]);
-        let mut cfg = GameMods { mods: vec![a], ..Default::default() };
+        let mut cfg = GameMods {
+            mods: vec![a],
+            ..Default::default()
+        };
 
         deploy_to(&dir, &target, &cfg).unwrap();
         assert_eq!(read(&target.join("data/original.txt")), "modded");
@@ -2284,15 +2553,26 @@ mod tests {
         let target = tmp.path().join("game");
         write_file(&target.join("keep.txt"), "keep");
         write_file(&target.join("overwritten.txt"), "original");
-        let a = mk_mod(&dir, "nexus-1", 0, &[("overwritten.txt", "modded"), ("added/new.txt", "new")]);
-        let cfg = GameMods { mods: vec![a], ..Default::default() };
+        let a = mk_mod(
+            &dir,
+            "nexus-1",
+            0,
+            &[("overwritten.txt", "modded"), ("added/new.txt", "new")],
+        );
+        let cfg = GameMods {
+            mods: vec![a],
+            ..Default::default()
+        };
 
         deploy_to(&dir, &target, &cfg).unwrap();
         undeploy_from(&dir, &target).unwrap();
 
         assert_eq!(read(&target.join("keep.txt")), "keep");
         assert_eq!(read(&target.join("overwritten.txt")), "original");
-        assert!(!target.join("added").exists(), "mod-created dirs cleaned up");
+        assert!(
+            !target.join("added").exists(),
+            "mod-created dirs cleaned up"
+        );
         assert!(load_journal(&dir).files.is_empty());
     }
 
@@ -2337,7 +2617,10 @@ mod tests {
         std::fs::create_dir_all(&target).unwrap();
         let a = mk_mod(&dir, "nexus-1", 0, &[("f.txt", "from-a")]);
         let b = mk_mod(&dir, "nexus-2", 1, &[("f.txt", "from-b")]);
-        let mut cfg = GameMods { mods: vec![a, b], ..Default::default() };
+        let mut cfg = GameMods {
+            mods: vec![a, b],
+            ..Default::default()
+        };
 
         deploy_to(&dir, &target, &cfg).unwrap();
         assert_eq!(read(&target.join("f.txt")), "from-b");
@@ -2346,7 +2629,10 @@ mod tests {
         cfg.mods[1].order = 0;
         deploy_to(&dir, &target, &cfg).unwrap();
         assert_eq!(read(&target.join("f.txt")), "from-a");
-        assert_eq!(load_journal(&dir).files.get("f.txt").unwrap().mod_id, "nexus-1");
+        assert_eq!(
+            load_journal(&dir).files.get("f.txt").unwrap().mod_id,
+            "nexus-1"
+        );
     }
 
     #[test]
@@ -2355,8 +2641,16 @@ mod tests {
         let dir = tmp.path().join("m");
         let target = tmp.path().join("game");
         write_file(&target.join("orig.txt"), "original");
-        let a = mk_mod(&dir, "nexus-1", 0, &[("orig.txt", "modded"), ("extra.txt", "x")]);
-        let cfg = GameMods { mods: vec![a], ..Default::default() };
+        let a = mk_mod(
+            &dir,
+            "nexus-1",
+            0,
+            &[("orig.txt", "modded"), ("extra.txt", "x")],
+        );
+        let cfg = GameMods {
+            mods: vec![a],
+            ..Default::default()
+        };
 
         let n1 = deploy_to(&dir, &target, &cfg).unwrap();
         let j1 = std::fs::read(journal_path(&dir)).unwrap();
@@ -2375,8 +2669,14 @@ mod tests {
         assert!(join_target(base, "../evil").is_err());
         assert!(join_target(base, "sub/../../evil").is_err());
         assert_eq!(join_target(base, "").unwrap(), PathBuf::from("/base"));
-        assert_eq!(join_target(base, "Data/Mods").unwrap(), PathBuf::from("/base/Data/Mods"));
-        assert_eq!(join_target(base, "Data\\Mods").unwrap(), PathBuf::from("/base/Data/Mods"));
+        assert_eq!(
+            join_target(base, "Data/Mods").unwrap(),
+            PathBuf::from("/base/Data/Mods")
+        );
+        assert_eq!(
+            join_target(base, "Data\\Mods").unwrap(),
+            PathBuf::from("/base/Data/Mods")
+        );
     }
 
     #[test]
@@ -2390,18 +2690,31 @@ mod tests {
             &dir,
             "nexus-1",
             0,
-            &[("a/b/c/deep.txt", "deep"), ("x/y/orig.txt", "modded"), ("top.txt", "top")],
+            &[
+                ("a/b/c/deep.txt", "deep"),
+                ("x/y/orig.txt", "modded"),
+                ("top.txt", "top"),
+            ],
         );
-        let cfg = GameMods { mods: vec![a], ..Default::default() };
+        let cfg = GameMods {
+            mods: vec![a],
+            ..Default::default()
+        };
 
         deploy_to(&dir, &target, &cfg).unwrap();
         undeploy_from(&dir, &target).unwrap();
 
-        assert!(!target.join("a/b").exists(), "mod-created nested dirs pruned");
+        assert!(
+            !target.join("a/b").exists(),
+            "mod-created nested dirs pruned"
+        );
         assert!(!target.join("top.txt").exists());
         assert_eq!(read(&target.join("a/keep.txt")), "keep");
         assert_eq!(read(&target.join("x/y/orig.txt")), "original");
-        assert!(!dir.join("backup/x").exists(), "backup subdirs pruned after restore");
+        assert!(
+            !dir.join("backup/x").exists(),
+            "backup subdirs pruned after restore"
+        );
     }
 
     #[test]
@@ -2411,8 +2724,16 @@ mod tests {
         let target = tmp.path().join("game");
         write_file(&target.join("b-only.txt"), "original");
         let a = mk_mod(&dir, "nexus-1", 0, &[("shared.txt", "from-a")]);
-        let b = mk_mod(&dir, "nexus-2", 1, &[("shared.txt", "from-b"), ("b-only.txt", "modded")]);
-        let mut cfg = GameMods { mods: vec![a, b], ..Default::default() };
+        let b = mk_mod(
+            &dir,
+            "nexus-2",
+            1,
+            &[("shared.txt", "from-b"), ("b-only.txt", "modded")],
+        );
+        let mut cfg = GameMods {
+            mods: vec![a, b],
+            ..Default::default()
+        };
 
         deploy_to(&dir, &target, &cfg).unwrap();
         assert_eq!(read(&target.join("shared.txt")), "from-b");
@@ -2422,7 +2743,10 @@ mod tests {
 
         assert_eq!(n, 1);
         assert_eq!(read(&target.join("shared.txt")), "from-a");
-        assert_eq!(load_journal(&dir).files.get("shared.txt").unwrap().mod_id, "nexus-1");
+        assert_eq!(
+            load_journal(&dir).files.get("shared.txt").unwrap().mod_id,
+            "nexus-1"
+        );
         assert_eq!(read(&target.join("b-only.txt")), "original");
         assert!(!dir.join("backup/b-only.txt").exists());
     }
@@ -2436,16 +2760,27 @@ mod tests {
         let a = mk_mod(&dir, "nexus-1", 0, &[("f.txt", "from-a")]);
         let b = mk_mod(&dir, "nexus-2", 1, &[("f.txt", "from-b")]);
 
-        let cfg_a = GameMods { mods: vec![a.clone()], ..Default::default() };
+        let cfg_a = GameMods {
+            mods: vec![a.clone()],
+            ..Default::default()
+        };
         deploy_to(&dir, &target, &cfg_a).unwrap();
         assert_eq!(read(&dir.join("backup/f.txt")), "original");
 
-        let cfg_ab = GameMods { mods: vec![a, b], ..Default::default() };
+        let cfg_ab = GameMods {
+            mods: vec![a, b],
+            ..Default::default()
+        };
         deploy_to(&dir, &target, &cfg_ab).unwrap();
         assert_eq!(read(&target.join("f.txt")), "from-b");
         assert_eq!(read(&dir.join("backup/f.txt")), "original");
         assert_eq!(
-            load_journal(&dir).files.get("f.txt").unwrap().backup.as_deref(),
+            load_journal(&dir)
+                .files
+                .get("f.txt")
+                .unwrap()
+                .backup
+                .as_deref(),
             Some("f.txt")
         );
 
@@ -2461,7 +2796,10 @@ mod tests {
         write_file(&game.join("f.txt"), "root-original");
         write_file(&game.join("Data/f.txt"), "data-original");
         let a = mk_mod(&dir, "nexus-1", 0, &[("f.txt", "modded")]);
-        let cfg = GameMods { mods: vec![a], ..Default::default() };
+        let cfg = GameMods {
+            mods: vec![a],
+            ..Default::default()
+        };
 
         deploy_to(&dir, &game, &cfg).unwrap();
         assert_eq!(read(&game.join("f.txt")), "modded");
@@ -2485,10 +2823,23 @@ mod tests {
         let dir = tmp.path().join("m");
         let target = tmp.path().join("game");
         std::fs::create_dir_all(&target).unwrap();
-        let a = mk_mod(&dir, "nexus-1", 0, &[("conflict.txt", "from-a"), ("a.txt", "a")]);
-        let mut b = mk_mod(&dir, "nexus-2", 1, &[("conflict.txt", "from-b"), ("b.txt", "b")]);
+        let a = mk_mod(
+            &dir,
+            "nexus-1",
+            0,
+            &[("conflict.txt", "from-a"), ("a.txt", "a")],
+        );
+        let mut b = mk_mod(
+            &dir,
+            "nexus-2",
+            1,
+            &[("conflict.txt", "from-b"), ("b.txt", "b")],
+        );
         b.enabled = false;
-        let mut cfg = GameMods { mods: vec![a, b], ..Default::default() };
+        let mut cfg = GameMods {
+            mods: vec![a, b],
+            ..Default::default()
+        };
 
         let n = deploy_to(&dir, &target, &cfg).unwrap();
         assert_eq!(n, 2);
@@ -2512,8 +2863,16 @@ mod tests {
         let dir = tmp.path().join("m");
         let target = tmp.path().join("game");
         write_file(&target.join("drift.txt"), "original");
-        let a = mk_mod(&dir, "nexus-1", 0, &[("drift.txt", "modded"), ("stay.txt", "stay")]);
-        let cfg = GameMods { mods: vec![a], ..Default::default() };
+        let a = mk_mod(
+            &dir,
+            "nexus-1",
+            0,
+            &[("drift.txt", "modded"), ("stay.txt", "stay")],
+        );
+        let cfg = GameMods {
+            mods: vec![a],
+            ..Default::default()
+        };
 
         deploy_to(&dir, &target, &cfg).unwrap();
 
@@ -2538,7 +2897,10 @@ mod tests {
         let target = tmp.path().join("game");
         write_file(&target.join("f.txt"), "original");
         let a = mk_mod(&dir, "nexus-1", 0, &[("f.txt", "modded")]);
-        let cfg = GameMods { mods: vec![a], ..Default::default() };
+        let cfg = GameMods {
+            mods: vec![a],
+            ..Default::default()
+        };
 
         deploy_to(&dir, &target, &cfg).unwrap();
         std::fs::write(journal_path(&dir), "{ not json !!!").unwrap();
@@ -2550,7 +2912,12 @@ mod tests {
         deploy_to(&dir, &target, &cfg).unwrap();
         assert_eq!(read(&dir.join("backup/f.txt")), "original");
         assert_eq!(
-            load_journal(&dir).files.get("f.txt").unwrap().backup.as_deref(),
+            load_journal(&dir)
+                .files
+                .get("f.txt")
+                .unwrap()
+                .backup
+                .as_deref(),
             Some("f.txt")
         );
 
@@ -2577,7 +2944,11 @@ mod tests {
         wrap_in_mods_folder(&staged, "My Noita Mod").unwrap();
         let folder = safe_folder_name("My Noita Mod");
         assert!(staged.join("mods").join(&folder).join("mod.xml").is_file());
-        assert!(staged.join("mods").join(&folder).join("files/a.lua").is_file());
+        assert!(staged
+            .join("mods")
+            .join(&folder)
+            .join("files/a.lua")
+            .is_file());
     }
 
     #[test]
@@ -2600,7 +2971,10 @@ mod tests {
         data.deploy_prefix = "Data".to_string();
         let mut melon = mk_mod(&dir, "nexus-melon", 1, &[("plugin.dll", "b")]);
         melon.deploy_prefix = "Mods".to_string();
-        let cfg = GameMods { mods: vec![data, melon], ..Default::default() };
+        let cfg = GameMods {
+            mods: vec![data, melon],
+            ..Default::default()
+        };
 
         deploy_to(&dir, &target, &cfg).unwrap();
 
@@ -2720,7 +3094,10 @@ mod tests {
         let target = tmp.path().join("game");
         write_file(&target.join("file.txt"), "original");
         let installed = mk_mod(&dir, "nexus-1", 0, &[("file.txt", "modded")]);
-        let mut cfg = GameMods { mods: vec![installed], ..Default::default() };
+        let mut cfg = GameMods {
+            mods: vec![installed],
+            ..Default::default()
+        };
 
         deploy_to(&dir, &target, &cfg).unwrap();
         assert_eq!(read(&target.join("file.txt")), "modded");
@@ -2738,7 +3115,10 @@ mod tests {
         let target = tmp.path().join("game");
         let mut installed = mk_mod(&dir, "nexus-1", 0, &[("file.txt", "x")]);
         installed.deploy_prefix = "../outside".to_string();
-        let cfg = GameMods { mods: vec![installed], ..Default::default() };
+        let cfg = GameMods {
+            mods: vec![installed],
+            ..Default::default()
+        };
 
         assert!(deploy_to(&dir, &target, &cfg).is_err());
         assert!(!tmp.path().join("outside/file.txt").exists());

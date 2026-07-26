@@ -33,17 +33,26 @@ async fn api_json(key: &str, url: &str) -> Result<Value, String> {
     let mut headers = HashMap::new();
     headers.insert("apikey".to_string(), key.to_string());
     headers.insert("Accept".to_string(), "application/json".to_string());
-    let opts = http::FetchOpts { headers, ..Default::default() };
-    let resp = http::fetch(url, &opts).await.map_err(|e| format!("nexus api: {e}"))?;
+    let opts = http::FetchOpts {
+        headers,
+        ..Default::default()
+    };
+    let resp = http::fetch(url, &opts)
+        .await
+        .map_err(|e| format!("nexus api: {e}"))?;
     let status = resp.status();
     match status.as_u16() {
         429 => return Err("NexusMods rate limit reached — wait a bit and try again".to_string()),
-        401 | 403 => return Err("NexusMods rejected the API key — check it in Settings".to_string()),
+        401 | 403 => {
+            return Err("NexusMods rejected the API key — check it in Settings".to_string())
+        }
         404 => return Err("not found on NexusMods".to_string()),
         _ if !status.is_success() => return Err(format!("nexus api: HTTP {status}")),
         _ => {}
     }
-    resp.json::<Value>().await.map_err(|e| format!("nexus api parse: {e}"))
+    resp.json::<Value>()
+        .await
+        .map_err(|e| format!("nexus api parse: {e}"))
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -226,7 +235,10 @@ fn browse_variables(
         );
     }
     let mut sort_entry = serde_json::Map::new();
-    sort_entry.insert(sort_field(sort).to_string(), json!({ "direction": direction }));
+    sort_entry.insert(
+        sort_field(sort).to_string(),
+        json!({ "direction": direction }),
+    );
     json!({
         "count": BROWSE_COUNT,
         "offset": offset,
@@ -274,7 +286,10 @@ async fn fetch_spec(
                 a
             }
         },
-        picture: v.get("picture_url").and_then(|x| x.as_str()).map(String::from),
+        picture: v
+            .get("picture_url")
+            .and_then(|x| x.as_str())
+            .map(String::from),
         summary: v.get("summary").and_then(|x| x.as_str()).map(String::from),
         page_url: mod_page_url(domain, mod_id),
     })
@@ -295,7 +310,10 @@ async fn game_id_for_domain(key: &str, domain: &str) -> Result<Option<u64>, Stri
 
 fn nexus_session_value(state: &AppState) -> Option<String> {
     let cookie = session_cookie(state)?;
-    parse_cookie_string(&cookie).into_iter().find(|(n, _)| n == "nexusmods_session").map(|(_, v)| v)
+    parse_cookie_string(&cookie)
+        .into_iter()
+        .find(|(n, _)| n == "nexusmods_session")
+        .map(|(_, v)| v)
 }
 
 async fn slipgate_resolve(
@@ -318,7 +336,9 @@ async fn slipgate_resolve(
         "game_id": game_id.to_string(),
     });
     let cookies = json!([{ "name": "nexusmods_session", "value": session }]);
-    crate::slipgate::resolve(cfg, "nexusmods", "", params, cookies).await.map(|link| link.url)
+    crate::slipgate::resolve(cfg, "nexusmods", "", params, cookies)
+        .await
+        .map(|link| link.url)
 }
 
 #[tauri::command]
@@ -341,8 +361,7 @@ fn parse_cookie_string(raw: &str) -> Vec<(String, String)> {
             }
             let (name, value) = part.split_once('=')?;
             let (name, value) = (name.trim(), value.trim());
-            (!name.is_empty() && !value.is_empty())
-                .then(|| (name.to_string(), value.to_string()))
+            (!name.is_empty() && !value.is_empty()).then(|| (name.to_string(), value.to_string()))
         })
         .collect()
 }
@@ -413,7 +432,10 @@ async fn native_free_download(
     let page = http::fetch(
         &referer,
         &http::FetchOpts {
-            headers: with_ua(HashMap::from([("Accept".to_string(), "text/html".to_string())])),
+            headers: with_ua(HashMap::from([(
+                "Accept".to_string(),
+                "text/html".to_string(),
+            )])),
             jar: Some(jar.clone()),
             ..Default::default()
         },
@@ -524,7 +546,10 @@ pub async fn nexus_browse(
         if !status.is_success() {
             return Err(format!("nexus browse: HTTP {status}"));
         }
-        let v: Value = resp.json().await.map_err(|e| format!("nexus browse parse: {e}"))?;
+        let v: Value = resp
+            .json()
+            .await
+            .map_err(|e| format!("nexus browse parse: {e}"))?;
         if v.pointer("/data/mods").is_none() {
             let msg = v
                 .pointer("/errors/0/message")
@@ -545,7 +570,13 @@ pub async fn nexus_browse(
             .iter()
             .filter_map(|n| browse_mod_from_graphql(n, &domain))
             .collect();
-        crate::logging::write_line("info", &format!("nexus browse {domain}: {} mapped / {total} total (offset {offset})", mods.len()));
+        crate::logging::write_line(
+            "info",
+            &format!(
+                "nexus browse {domain}: {} mapped / {total} total (offset {offset})",
+                mods.len()
+            ),
+        );
         let has_more = (offset as u64) + (nodes.len() as u64) < total;
         Ok(json!({
             "ok": true,
@@ -599,7 +630,10 @@ pub async fn nexus_search(domain: String, query: String, page: u32) -> Result<Va
         if !status.is_success() {
             return Err(format!("nexus search: HTTP {status}"));
         }
-        let v: Value = resp.json().await.map_err(|e| format!("nexus search parse: {e}"))?;
+        let v: Value = resp
+            .json()
+            .await
+            .map_err(|e| format!("nexus search parse: {e}"))?;
         if v.pointer("/data/mods").is_none() {
             let msg = v
                 .pointer("/errors/0/message")
@@ -671,13 +705,21 @@ pub async fn nexus_install(
         let mid: u64 = mod_id.parse().map_err(|_| format!("bad mod id {mod_id}"))?;
         let key = api_key(&state)?;
         let user = api_json(&key, &format!("{API}/v1/users/validate.json")).await?;
-        let premium = user.get("is_premium").and_then(|v| v.as_bool()).unwrap_or(false);
+        let premium = user
+            .get("is_premium")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
         if !premium {
             if let Some(sg) = crate::slipgate::cfg() {
                 match slipgate_resolve(&state, &sg, &key, &domain, mid, file_id).await {
                     Ok(dl_url) => {
                         let spec = fetch_spec(&key, &appid, &domain, mid, Some(file_id)).await?;
-                        tauri::async_runtime::spawn(run_archive_install(app.clone(), spec, dl_url, HashMap::new()));
+                        tauri::async_runtime::spawn(run_archive_install(
+                            app.clone(),
+                            spec,
+                            dl_url,
+                            HashMap::new(),
+                        ));
                         return Ok(json!({ "ok": true, "started": true }));
                     }
                     Err(e) => {
@@ -753,7 +795,13 @@ pub(crate) fn parse_nxm(url: &str) -> Option<NxmLink> {
             _ => {}
         }
     }
-    Some(NxmLink { domain, mod_id, file_id, key, expires })
+    Some(NxmLink {
+        domain,
+        mod_id,
+        file_id,
+        key,
+        expires,
+    })
 }
 
 fn games_for_domain(paths: &crate::paths::AppPaths, domain: &str) -> Vec<String> {
@@ -828,8 +876,9 @@ async fn handle_nxm_inner(app: &AppHandle, url: &str) {
             ),
         )
         .await?;
-        let dl_url =
-            first_link(&dl).ok_or("no download link — the nxm link may have expired, click Mod Manager Download again")?;
+        let dl_url = first_link(&dl).ok_or(
+            "no download link — the nxm link may have expired, click Mod Manager Download again",
+        )?;
         run_archive_install(app.clone(), spec, dl_url, HashMap::new()).await;
         Ok(())
     }
@@ -856,10 +905,13 @@ mod tests {
         assert_eq!(p[0], ("nexusmods_session".to_string(), "abc".to_string()));
         assert_eq!(p[1], ("cf_clearance".to_string(), "xyz".to_string()));
         let p2 = parse_cookie_string("\n nexusmods_session = def \n\n cf_clearance=123\n");
-        assert_eq!(p2, vec![
-            ("nexusmods_session".to_string(), "def".to_string()),
-            ("cf_clearance".to_string(), "123".to_string()),
-        ]);
+        assert_eq!(
+            p2,
+            vec![
+                ("nexusmods_session".to_string(), "def".to_string()),
+                ("cf_clearance".to_string(), "123".to_string()),
+            ]
+        );
         assert_eq!(
             parse_cookie_string("nexusmods_session=solo"),
             vec![("nexusmods_session".to_string(), "solo".to_string())]
@@ -889,16 +941,24 @@ mod tests {
 
     #[test]
     fn detects_cloudflare_challenge() {
-        assert!(is_cloudflare_challenge(403, "<title>Just a moment...</title>"));
-        assert!(is_cloudflare_challenge(503, r#"<div id="challenge-platform"></div>"#));
+        assert!(is_cloudflare_challenge(
+            403,
+            "<title>Just a moment...</title>"
+        ));
+        assert!(is_cloudflare_challenge(
+            503,
+            r#"<div id="challenge-platform"></div>"#
+        ));
         assert!(!is_cloudflare_challenge(403, r#"{"error":"forbidden"}"#));
         assert!(!is_cloudflare_challenge(200, "Just a moment while we load"));
     }
 
     #[test]
     fn parses_full_nxm_url() {
-        let l = parse_nxm("nxm://cyberpunk2077/mods/3020/files/45678?key=abc123&expires=1710000000&user_id=42")
-            .unwrap();
+        let l = parse_nxm(
+            "nxm://cyberpunk2077/mods/3020/files/45678?key=abc123&expires=1710000000&user_id=42",
+        )
+        .unwrap();
         assert_eq!(l.domain, "cyberpunk2077");
         assert_eq!(l.mod_id, 3020);
         assert_eq!(l.file_id, 45678);
@@ -976,11 +1036,20 @@ mod tests {
         assert_eq!(m["endorsements"], 12345);
         assert_eq!(m["picture"], "https://staticdelivery.nexusmods.com/mod.jpg");
         assert_eq!(m["version"], "4.3.5a");
-        assert_eq!(m["updatedAt"], 1767323045, "ISO-8601 normalized to unix secs");
-        assert_eq!(m["pageUrl"], "https://www.nexusmods.com/skyrimspecialedition/mods/266");
+        assert_eq!(
+            m["updatedAt"], 1767323045,
+            "ISO-8601 normalized to unix secs"
+        );
+        assert_eq!(
+            m["pageUrl"],
+            "https://www.nexusmods.com/skyrimspecialedition/mods/266"
+        );
         assert_eq!(mods[1]["author"], "someone");
         assert_eq!(mods[1]["updatedAt"], Value::Null);
-        assert_eq!(mods[1]["pageUrl"], "https://www.nexusmods.com/skyrimspecialedition/mods/42");
+        assert_eq!(
+            mods[1]["pageUrl"],
+            "https://www.nexusmods.com/skyrimspecialedition/mods/42"
+        );
         assert!(has_more, "2 of 319 shown");
 
         let empty = json!({ "data": { "mods": { "totalCount": 1, "nodes": [] } } });
@@ -1009,15 +1078,32 @@ mod tests {
 
     #[test]
     fn browse_variables_encode_sort_order_and_paging() {
-        let v = browse_variables("skyrimspecialedition", "endorsements", "asc", "all", 24, 1_720_000_000);
+        let v = browse_variables(
+            "skyrimspecialedition",
+            "endorsements",
+            "asc",
+            "all",
+            24,
+            1_720_000_000,
+        );
         assert_eq!(v["count"], 24);
         assert_eq!(v["offset"], 24);
-        assert_eq!(v["filter"]["gameDomainName"]["value"], "skyrimspecialedition");
+        assert_eq!(
+            v["filter"]["gameDomainName"]["value"],
+            "skyrimspecialedition"
+        );
         assert_eq!(v["filter"]["gameDomainName"]["op"], "EQUALS");
         assert_eq!(v["sort"][0]["endorsements"]["direction"], "ASC");
         assert!(v["filter"].get("updatedAt").is_none());
 
-        let d = browse_variables("cyberpunk2077", "downloads", "desc", "all", 0, 1_720_000_000);
+        let d = browse_variables(
+            "cyberpunk2077",
+            "downloads",
+            "desc",
+            "all",
+            0,
+            1_720_000_000,
+        );
         assert_eq!(d["sort"][0]["downloads"]["direction"], "DESC");
         let p = browse_variables("cyberpunk2077", "published", "", "all", 0, 1_720_000_000);
         assert_eq!(p["sort"][0]["createdAt"]["direction"], "DESC");
@@ -1047,11 +1133,17 @@ mod tests {
         let now = 1_720_000_000_i64;
         let v7 = browse_variables("d", "updated", "desc", "7", 0, now);
         assert_eq!(v7["filter"]["updatedAt"]["op"], "GT");
-        assert_eq!(v7["filter"]["updatedAt"]["value"], (now - 7 * 86_400).to_string());
+        assert_eq!(
+            v7["filter"]["updatedAt"]["value"],
+            (now - 7 * 86_400).to_string()
+        );
         assert!(v7["filter"]["updatedAt"]["value"].is_string());
 
         let v28 = browse_variables("d", "updated", "desc", "28", 0, now);
-        assert_eq!(v28["filter"]["updatedAt"]["value"], (now - 28 * 86_400).to_string());
+        assert_eq!(
+            v28["filter"]["updatedAt"]["value"],
+            (now - 28 * 86_400).to_string()
+        );
 
         let vall = browse_variables("d", "updated", "desc", "all", 0, now);
         assert!(vall["filter"].get("updatedAt").is_none());
@@ -1063,7 +1155,10 @@ mod tests {
             to_unix_secs(Some(&json!("2026-01-02T03:04:05+00:00"))),
             json!(1767323045_i64)
         );
-        assert_eq!(to_unix_secs(Some(&json!(1_700_000_000_u64))), json!(1_700_000_000_u64));
+        assert_eq!(
+            to_unix_secs(Some(&json!(1_700_000_000_u64))),
+            json!(1_700_000_000_u64)
+        );
         assert_eq!(to_unix_secs(Some(&Value::Null)), Value::Null);
         assert_eq!(to_unix_secs(Some(&json!("not-a-date"))), Value::Null);
     }
@@ -1081,7 +1176,10 @@ mod tests {
         let m = browse_mod_from_graphql(&node, "fallback").unwrap();
         assert_eq!(m["remoteId"], "100");
         assert_eq!(m["sizeBytes"], 987654321_u64);
-        assert_eq!(m["pageUrl"], "https://www.nexusmods.com/stardewvalley/mods/100");
+        assert_eq!(
+            m["pageUrl"],
+            "https://www.nexusmods.com/stardewvalley/mods/100"
+        );
         let no_size = json!({ "modId": 7, "name": "x", "game": { "domainName": "" } });
         let ms = browse_mod_from_graphql(&no_size, "dom").unwrap();
         assert_eq!(ms["sizeBytes"], Value::Null);

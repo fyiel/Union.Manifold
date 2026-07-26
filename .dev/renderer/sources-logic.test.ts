@@ -7,6 +7,8 @@ import {
   orderSourcesByPreference,
   pickPrimaryDownload,
   rememberGames,
+  loadDisabledSources,
+  loadSourcePriority,
   sourceAbbr,
   sourceDirect,
   sourceName,
@@ -110,6 +112,25 @@ describe("source ordering helpers", () => {
     expect(sourceAbbr("mystery")).toBe("MY")
     expect(sourceDirect("steamrip")).toBe(true)
     expect(sourceDirect("unheard-of")).toBe(true)
+  })
+})
+
+describe("source settings migration", () => {
+  it("replaces retired RexaGames ids without losing saved order or disabled state", async () => {
+    const get = vi.fn(async (key: string) => (
+      key === "gv_source_priority"
+        ? ["steamrip", "rexagames", "unioncrax"]
+        : ["rexagames"]
+    ))
+    window.ucSettings = {
+      get,
+      set: vi.fn(async () => ({ ok: true })),
+      clearAll: vi.fn(async () => ({ ok: true })),
+      onChanged: vi.fn(() => () => {}),
+    }
+
+    expect((await loadSourcePriority()).slice(0, 3)).toEqual(["steamrip", "zeigames", "unioncrax"])
+    expect(await loadDisabledSources()).toEqual(["zeigames"])
   })
 })
 

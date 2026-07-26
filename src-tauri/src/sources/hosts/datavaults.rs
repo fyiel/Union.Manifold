@@ -7,16 +7,22 @@ use regex::Regex;
 use crate::http::{self, FetchOpts, Jar};
 use crate::sources::ResolveResult;
 
-static HOST_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)(^|\.)datavaults\.co$").unwrap());
-static RAND_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"name="rand"\s+value="([^"]+)""#).unwrap());
-static SECONDS_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"id="seconds"[^>]*>\s*(\d+)"#).unwrap());
-static CAPTCHA_SPAN_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"padding-left:\s*(\d+)px;[^>]*>\s*(&#\d+;|\d)\s*</span>").unwrap());
+static HOST_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)(^|\.)datavaults\.co$").unwrap());
+static RAND_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"name="rand"\s+value="([^"]+)""#).unwrap());
+static SECONDS_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"id="seconds"[^>]*>\s*(\d+)"#).unwrap());
+static CAPTCHA_SPAN_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"padding-left:\s*(\d+)px;[^>]*>\s*(&#\d+;|\d)\s*</span>").unwrap()
+});
 static BLOCKED_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i)Wrong captcha|Skip countdown|have to wait|expired").unwrap());
 static DIRECT_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"(?i)https?://[^\s"'<>]+?/d/[^\s"'<>]+?\.(?:zip|rar|7z|exe|bin|iso)(?:\?[^\s"'<>]*)?"#)
-        .unwrap()
+    Regex::new(
+        r#"(?i)https?://[^\s"'<>]+?/d/[^\s"'<>]+?\.(?:zip|rar|7z|exe|bin|iso)(?:\?[^\s"'<>]*)?"#,
+    )
+    .unwrap()
 });
 
 const MIN_WAIT: u64 = 3;
@@ -54,7 +60,10 @@ fn form(pairs: &[(&str, &str)]) -> Vec<u8> {
 
 fn post_opts(jar: &Jar, referer: &str, body: Vec<u8>, manual_redirect: bool) -> FetchOpts {
     let mut headers = std::collections::HashMap::new();
-    headers.insert("Content-Type".to_string(), "application/x-www-form-urlencoded".to_string());
+    headers.insert(
+        "Content-Type".to_string(),
+        "application/x-www-form-urlencoded".to_string(),
+    );
     headers.insert("Referer".to_string(), referer.to_string());
     FetchOpts {
         method: Some("POST".to_string()),
@@ -70,10 +79,18 @@ fn post_opts(jar: &Jar, referer: &str, body: Vec<u8>, manual_redirect: bool) -> 
 fn solve_captcha(html: &str) -> String {
     let mut spans: Vec<(u32, String)> = CAPTCHA_SPAN_RE
         .captures_iter(html)
-        .filter_map(|c| Some((c.get(1)?.as_str().parse().ok()?, c.get(2)?.as_str().to_string())))
+        .filter_map(|c| {
+            Some((
+                c.get(1)?.as_str().parse().ok()?,
+                c.get(2)?.as_str().to_string(),
+            ))
+        })
         .collect();
     spans.sort_by_key(|(px, _)| *px);
-    spans.iter().map(|(_, g)| http::decode_entities(g)).collect()
+    spans
+        .iter()
+        .map(|(_, g)| http::decode_entities(g))
+        .collect()
 }
 
 fn wait_secs(html: &str) -> u64 {
@@ -89,7 +106,10 @@ pub async fn resolve(url: &str) -> ResolveResult {
         Ok(u) => u,
         Err(_) => return not_resolvable(url, "bad datavaults url"),
     };
-    let segs: Vec<&str> = parsed.path_segments().map(|s| s.collect()).unwrap_or_default();
+    let segs: Vec<&str> = parsed
+        .path_segments()
+        .map(|s| s.collect())
+        .unwrap_or_default();
     let segs: Vec<&str> = segs.into_iter().filter(|s| !s.is_empty()).collect();
     if segs.len() < 2 {
         return not_resolvable(url, "datavaults link has no file id");
@@ -100,7 +120,11 @@ pub async fn resolve(url: &str) -> ResolveResult {
     let jar = Jar::new();
     let _ = http::fetch(
         url,
-        &FetchOpts { jar: Some(jar.clone()), timeout: Some(Duration::from_secs(30)), ..Default::default() },
+        &FetchOpts {
+            jar: Some(jar.clone()),
+            timeout: Some(Duration::from_secs(30)),
+            ..Default::default()
+        },
     )
     .await;
 

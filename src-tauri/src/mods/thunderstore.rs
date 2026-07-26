@@ -197,11 +197,17 @@ fn mem_get(community: &str) -> Option<Arc<Vec<TsPackage>>> {
 }
 
 fn mem_put(community: &str, pkgs: Arc<Vec<TsPackage>>) {
-    PKG_MEM.lock().insert(community.to_string(), (Instant::now(), pkgs));
+    PKG_MEM
+        .lock()
+        .insert(community.to_string(), (Instant::now(), pkgs));
 }
 
 fn pkg_lock(community: &str) -> Arc<tokio::sync::Mutex<()>> {
-    PKG_LOCKS.lock().entry(community.to_string()).or_default().clone()
+    PKG_LOCKS
+        .lock()
+        .entry(community.to_string())
+        .or_default()
+        .clone()
 }
 
 fn cache_file(paths: &AppPaths, community: &str) -> PathBuf {
@@ -417,7 +423,12 @@ fn filter_sort_page(
     });
     let total = filtered.len();
     let start = (page as usize).saturating_mul(PAGE_SIZE);
-    let mods: Vec<Value> = filtered.iter().skip(start).take(PAGE_SIZE).map(|p| browse_mod(p)).collect();
+    let mods: Vec<Value> = filtered
+        .iter()
+        .skip(start)
+        .take(PAGE_SIZE)
+        .map(|p| browse_mod(p))
+        .collect();
     let has_more = start + mods.len() < total;
     (mods, has_more)
 }
@@ -456,15 +467,21 @@ async fn versions_for(
     full_name: &str,
 ) -> Result<Vec<Value>, String> {
     if let Ok(pkgs) = load_packages(paths, community).await {
-        if let Some(p) = pkgs.iter().find(|p| p.full_name.eq_ignore_ascii_case(full_name)) {
+        if let Some(p) = pkgs
+            .iter()
+            .find(|p| p.full_name.eq_ignore_ascii_case(full_name))
+        {
             let mut versions: Vec<&TsVersion> = p.versions.iter().collect();
             versions.sort_by(|a, b| version_key(&b.version).cmp(&version_key(&a.version)));
             return Ok(versions.into_iter().map(version_json).collect());
         }
     }
-    let (owner, name) = parse_full_name(full_name).ok_or_else(|| format!("bad package id {full_name}"))?;
+    let (owner, name) =
+        parse_full_name(full_name).ok_or_else(|| format!("bad package id {full_name}"))?;
     let detail = fetch_detail(&owner, &name).await?;
-    let latest = detail.get("latest").ok_or("Thunderstore package has no versions")?;
+    let latest = detail
+        .get("latest")
+        .ok_or("Thunderstore package has no versions")?;
     Ok(vec![json!({
         "version": latest.get("version_number").and_then(|x| x.as_str()).unwrap_or(""),
         "downloads": latest.get("downloads").and_then(|x| x.as_u64()).unwrap_or(0),
@@ -500,7 +517,10 @@ async fn resolve_node(
     let full = format!("{owner}-{name}");
     let want_latest = ver.is_empty() || ver.eq_ignore_ascii_case("latest");
     if let Ok(pkgs) = load_packages(paths, community).await {
-        if let Some(p) = pkgs.iter().find(|p| p.full_name.eq_ignore_ascii_case(&full)) {
+        if let Some(p) = pkgs
+            .iter()
+            .find(|p| p.full_name.eq_ignore_ascii_case(&full))
+        {
             let v = if want_latest {
                 p.versions.get(p.latest)
             } else {
@@ -524,9 +544,15 @@ async fn resolve_node(
         }
     }
     let detail = fetch_detail(owner, name).await?;
-    let latest = detail.get("latest").ok_or_else(|| format!("{owner}-{name} has no versions"))?;
+    let latest = detail
+        .get("latest")
+        .ok_or_else(|| format!("{owner}-{name} has no versions"))?;
     let install_version = if want_latest {
-        latest.get("version_number").and_then(|x| x.as_str()).unwrap_or("").to_string()
+        latest
+            .get("version_number")
+            .and_then(|x| x.as_str())
+            .unwrap_or("")
+            .to_string()
     } else {
         ver.to_string()
     };
@@ -536,18 +562,41 @@ async fn resolve_node(
     let deps: Vec<String> = latest
         .get("dependencies")
         .and_then(|x| x.as_array())
-        .map(|a| a.iter().filter_map(|d| d.as_str().map(String::from)).collect())
+        .map(|a| {
+            a.iter()
+                .filter_map(|d| d.as_str().map(String::from))
+                .collect()
+        })
         .unwrap_or_default();
     Ok((
         ResolvedMod {
             full_name: full,
             version: install_version.clone(),
             download_url: download_url(owner, name, &install_version),
-            display_name: detail.get("name").and_then(|x| x.as_str()).unwrap_or(name).to_string(),
-            author: detail.get("owner").and_then(|x| x.as_str()).unwrap_or(owner).to_string(),
-            picture: latest.get("icon").and_then(|x| x.as_str()).filter(|s| !s.is_empty()).map(String::from),
-            summary: latest.get("description").and_then(|x| x.as_str()).map(String::from),
-            page_url: detail.get("package_url").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+            display_name: detail
+                .get("name")
+                .and_then(|x| x.as_str())
+                .unwrap_or(name)
+                .to_string(),
+            author: detail
+                .get("owner")
+                .and_then(|x| x.as_str())
+                .unwrap_or(owner)
+                .to_string(),
+            picture: latest
+                .get("icon")
+                .and_then(|x| x.as_str())
+                .filter(|s| !s.is_empty())
+                .map(String::from),
+            summary: latest
+                .get("description")
+                .and_then(|x| x.as_str())
+                .map(String::from),
+            page_url: detail
+                .get("package_url")
+                .and_then(|x| x.as_str())
+                .unwrap_or("")
+                .to_string(),
         },
         deps,
     ))
@@ -559,7 +608,8 @@ async fn resolve_install(
     full_name: &str,
     version: &str,
 ) -> Result<Vec<ResolvedMod>, String> {
-    let (owner, name) = parse_full_name(full_name).ok_or_else(|| format!("bad package id {full_name}"))?;
+    let (owner, name) =
+        parse_full_name(full_name).ok_or_else(|| format!("bad package id {full_name}"))?;
     let mut seen: HashSet<String> = HashSet::new();
     let mut out: Vec<ResolvedMod> = Vec::new();
     let mut queue: VecDeque<(String, String, String)> = VecDeque::new();
@@ -598,11 +648,27 @@ async fn install_batch(
     for (i, r) in resolved.iter().enumerate() {
         let mod_id = format!("thunderstore-{}", r.full_name);
         let base = ((i * 100) / n) as u8;
-        emit_progress(app, appid, root_mod_id, root_name, "downloading", Some(base), None);
+        emit_progress(
+            app,
+            appid,
+            root_mod_id,
+            root_name,
+            "downloading",
+            Some(base),
+            None,
+        );
         let archive = tmp_dir.join(format!("{mod_id}.zip"));
         download_to_file(&r.download_url, &archive, HashMap::new(), |p| {
             let overall = p.map(|v| ((i * 100 + v as usize) / n) as u8);
-            emit_progress(app, appid, root_mod_id, root_name, "downloading", overall, None);
+            emit_progress(
+                app,
+                appid,
+                root_mod_id,
+                root_name,
+                "downloading",
+                overall,
+                None,
+            );
         })
         .await
         .map_err(|e| format!("download {}: {e}", r.full_name))?;
@@ -645,14 +711,27 @@ async fn install_batch(
     Ok(())
 }
 
-async fn run_install(app: AppHandle, appid: String, root_full_name: String, resolved: Vec<ResolvedMod>) {
+async fn run_install(
+    app: AppHandle,
+    appid: String,
+    root_full_name: String,
+    resolved: Vec<ResolvedMod>,
+) {
     let root_mod_id = format!("thunderstore-{root_full_name}");
     let root_name = resolved
         .first()
         .map(|r| r.display_name.clone())
         .unwrap_or_else(|| root_full_name.clone());
     if let Err(e) = install_batch(&app, &appid, &root_mod_id, &root_name, &resolved).await {
-        emit_progress(&app, &appid, &root_mod_id, &root_name, "error", None, Some(&e));
+        emit_progress(
+            &app,
+            &appid,
+            &root_mod_id,
+            &root_name,
+            "error",
+            None,
+            Some(&e),
+        );
     }
 }
 
@@ -719,7 +798,12 @@ pub async fn thunderstore_install(
         if resolved.is_empty() {
             return Err("nothing to install".to_string());
         }
-        tauri::async_runtime::spawn(run_install(app.clone(), appid.clone(), full_name.clone(), resolved));
+        tauri::async_runtime::spawn(run_install(
+            app.clone(),
+            appid.clone(),
+            full_name.clone(),
+            resolved,
+        ));
         Ok(json!({ "ok": true, "started": true }))
     }
     .await;
@@ -729,8 +813,8 @@ pub async fn thunderstore_install(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::tempdir;
     use std::path::Path;
+    use tempfile::tempdir;
 
     fn write_file(p: &Path, content: &str) {
         if let Some(parent) = p.parent() {
@@ -747,11 +831,19 @@ mod tests {
         );
         assert_eq!(
             parse_dependency("RiskofThunder-BepInEx_GUI-3.0.1"),
-            Some(("RiskofThunder".to_string(), "BepInEx_GUI".to_string(), "3.0.1".to_string()))
+            Some((
+                "RiskofThunder".to_string(),
+                "BepInEx_GUI".to_string(),
+                "3.0.1".to_string()
+            ))
         );
         assert_eq!(
             parse_dependency("bbepis-BepInExPack-5.4.2121"),
-            Some(("bbepis".to_string(), "BepInExPack".to_string(), "5.4.2121".to_string()))
+            Some((
+                "bbepis".to_string(),
+                "BepInExPack".to_string(),
+                "5.4.2121".to_string()
+            ))
         );
         assert_eq!(parse_full_name("nohyphen"), None);
         assert_eq!(parse_dependency("owner-name"), None);
@@ -777,10 +869,22 @@ mod tests {
 
         apply_bepinex_layout(&src, &dst, "team-MyMod").unwrap();
 
-        assert_eq!(std::fs::read_to_string(dst.join("BepInEx/plugins/team-MyMod/MyMod.dll")).unwrap(), "dll");
-        assert_eq!(std::fs::read_to_string(dst.join("BepInEx/plugins/team-MyMod/manifest.json")).unwrap(), "{}");
-        assert_eq!(std::fs::read_to_string(dst.join("BepInEx/config/my.cfg")).unwrap(), "cfg");
-        assert_eq!(std::fs::read_to_string(dst.join("BepInEx/patchers/patch.dll")).unwrap(), "patch");
+        assert_eq!(
+            std::fs::read_to_string(dst.join("BepInEx/plugins/team-MyMod/MyMod.dll")).unwrap(),
+            "dll"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dst.join("BepInEx/plugins/team-MyMod/manifest.json")).unwrap(),
+            "{}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dst.join("BepInEx/config/my.cfg")).unwrap(),
+            "cfg"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dst.join("BepInEx/patchers/patch.dll")).unwrap(),
+            "patch"
+        );
         assert!(!dst.join("MyMod.dll").exists());
     }
 
@@ -794,8 +898,14 @@ mod tests {
 
         apply_bepinex_layout(&src, &dst, "team-Plug").unwrap();
 
-        assert_eq!(std::fs::read_to_string(dst.join("BepInEx/plugins/Plug.dll")).unwrap(), "plug");
-        assert_eq!(std::fs::read_to_string(dst.join("manifest.json")).unwrap(), "{}");
+        assert_eq!(
+            std::fs::read_to_string(dst.join("BepInEx/plugins/Plug.dll")).unwrap(),
+            "plug"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dst.join("manifest.json")).unwrap(),
+            "{}"
+        );
         assert!(!dst.join("BepInEx/plugins/team-Plug").exists());
     }
 
@@ -809,8 +919,14 @@ mod tests {
 
         apply_bepinex_layout(&src, &dst, "bbepis-BepInExPack").unwrap();
 
-        assert_eq!(std::fs::read_to_string(dst.join("BepInEx/core/loader.dll")).unwrap(), "core");
-        assert_eq!(std::fs::read_to_string(dst.join("winhttp.dll")).unwrap(), "doorstop");
+        assert_eq!(
+            std::fs::read_to_string(dst.join("BepInEx/core/loader.dll")).unwrap(),
+            "core"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dst.join("winhttp.dll")).unwrap(),
+            "doorstop"
+        );
         assert!(!dst.join("BepInExPack").exists());
     }
 
@@ -819,7 +935,10 @@ mod tests {
         let tmp = tempdir().unwrap();
         let src = tmp.path().join("src");
         let dst = tmp.path().join("dst");
-        write_file(&src.join("BepInExPack_GTFO/BepInEx/core/0Harmony.dll"), "core");
+        write_file(
+            &src.join("BepInExPack_GTFO/BepInEx/core/0Harmony.dll"),
+            "core",
+        );
         write_file(&src.join("BepInExPack_GTFO/winhttp.dll"), "doorstop");
         write_file(&src.join("BepInExPack_GTFO/doorstop_config.ini"), "cfg");
         write_file(&src.join("manifest.json"), "{}");
@@ -828,9 +947,17 @@ mod tests {
 
         apply_bepinex_layout(&src, &dst, "BepInEx-BepInExPack_GTFO").unwrap();
 
-        assert_eq!(std::fs::read_to_string(dst.join("BepInEx/core/0Harmony.dll")).unwrap(), "core");
-        assert_eq!(std::fs::read_to_string(dst.join("winhttp.dll")).unwrap(), "doorstop");
-        assert!(!dst.join("BepInEx/plugins/BepInEx-BepInExPack_GTFO").exists());
+        assert_eq!(
+            std::fs::read_to_string(dst.join("BepInEx/core/0Harmony.dll")).unwrap(),
+            "core"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dst.join("winhttp.dll")).unwrap(),
+            "doorstop"
+        );
+        assert!(!dst
+            .join("BepInEx/plugins/BepInEx-BepInExPack_GTFO")
+            .exists());
         assert!(!dst.join("BepInExPack_GTFO").exists());
     }
 
@@ -872,10 +999,50 @@ mod tests {
 
     fn fixture() -> Vec<TsPackage> {
         vec![
-            mk_pkg("team-Alpha", "Alpha", "team", NOW - DAY, NOW - 100 * DAY, 5, false, "alpha helper", 50),
-            mk_pkg("team-Beta", "Beta", "team", NOW - 40 * DAY, NOW - 10 * DAY, 1, false, "beta tool", 100),
-            mk_pkg("bad-Gone", "Gone", "bad", NOW - DAY, NOW - DAY, 999, true, "deprecated", 9_999),
-            mk_pkg("team-Gamma", "Gamma", "team", NOW - 3 * DAY, NOW - 2 * DAY, 9, false, "gamma widget", 10),
+            mk_pkg(
+                "team-Alpha",
+                "Alpha",
+                "team",
+                NOW - DAY,
+                NOW - 100 * DAY,
+                5,
+                false,
+                "alpha helper",
+                50,
+            ),
+            mk_pkg(
+                "team-Beta",
+                "Beta",
+                "team",
+                NOW - 40 * DAY,
+                NOW - 10 * DAY,
+                1,
+                false,
+                "beta tool",
+                100,
+            ),
+            mk_pkg(
+                "bad-Gone",
+                "Gone",
+                "bad",
+                NOW - DAY,
+                NOW - DAY,
+                999,
+                true,
+                "deprecated",
+                9_999,
+            ),
+            mk_pkg(
+                "team-Gamma",
+                "Gamma",
+                "team",
+                NOW - 3 * DAY,
+                NOW - 2 * DAY,
+                9,
+                false,
+                "gamma widget",
+                10,
+            ),
         ]
     }
 
@@ -921,7 +1088,10 @@ mod tests {
     #[test]
     fn browse_query_matches_name_owner_and_description() {
         let pkgs = fixture();
-        assert_eq!(ids(&filter_sort_page(&pkgs, "downloads", "all", 0, "widget", NOW).0), vec!["team-Gamma"]);
+        assert_eq!(
+            ids(&filter_sort_page(&pkgs, "downloads", "all", 0, "widget", NOW).0),
+            vec!["team-Gamma"]
+        );
         assert_eq!(
             ids(&filter_sort_page(&pkgs, "downloads", "all", 0, "TEAM", NOW).0),
             vec!["team-Beta", "team-Alpha", "team-Gamma"]
@@ -931,7 +1101,19 @@ mod tests {
     #[test]
     fn browse_paginates_in_pages_of_24() {
         let pkgs: Vec<TsPackage> = (0..30)
-            .map(|i| mk_pkg(&format!("team-M{i:02}"), &format!("M{i:02}"), "team", NOW, NOW, 0, false, "", i))
+            .map(|i| {
+                mk_pkg(
+                    &format!("team-M{i:02}"),
+                    &format!("M{i:02}"),
+                    "team",
+                    NOW,
+                    NOW,
+                    0,
+                    false,
+                    "",
+                    i,
+                )
+            })
             .collect();
         let (p0, more0) = filter_sort_page(&pkgs, "downloads", "all", 0, "", NOW);
         assert_eq!(p0.len(), 24);
@@ -944,11 +1126,25 @@ mod tests {
     #[test]
     fn community_match_is_normalized_and_exact() {
         let list = vec![
-            Community { identifier: "lethal-company".to_string(), name: "Lethal Company".to_string() },
-            Community { identifier: "riskofrain2".to_string(), name: "Risk of Rain 2".to_string() },
+            Community {
+                identifier: "lethal-company".to_string(),
+                name: "Lethal Company".to_string(),
+            },
+            Community {
+                identifier: "riskofrain2".to_string(),
+                name: "Risk of Rain 2".to_string(),
+            },
         ];
-        assert_eq!(find_community(&list, "LETHAL COMPANY\u{2122}").unwrap().identifier, "lethal-company");
-        assert_eq!(find_community(&list, "Risk of Rain 2").unwrap().identifier, "riskofrain2");
+        assert_eq!(
+            find_community(&list, "LETHAL COMPANY\u{2122}")
+                .unwrap()
+                .identifier,
+            "lethal-company"
+        );
+        assert_eq!(
+            find_community(&list, "Risk of Rain 2").unwrap().identifier,
+            "riskofrain2"
+        );
         assert!(find_community(&list, "Some Other Game").is_none());
     }
 

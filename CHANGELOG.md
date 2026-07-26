@@ -5,11 +5,26 @@ All notable changes to Union.Manifold. This project is a fork of
 
 ## 3.4.14
 
+### Added
+
+- Bundled achievement names, descriptions and icons for 21 additional installed
+  games with published Steam achievements, without requiring Steam cache files
+- Browse cover cards can now open their artwork in a responsive full-screen
+  preview with click, close-button and Escape dismissal
+- ZeiGames replaces RexaGames in the source lineup, with live forum search,
+  topic metadata and ZeiLink mirror extraction
+
 ### Fixed
 
 - GameBounty downloads now keep DataNodes filenames URL-safe, solve FileDitch's
   current `.st` proof-of-work gate and obfuscated signed links, and reuse GoFile
   guest sessions instead of exhausting its account rate limit
+- Recognized GBE installs now receive their bundled achievement catalog during
+  Steam API compatibility checks, allowing `SetAchievement` and `StoreStats`
+  to persist unlocks
+- OnlineFix per-achievement timestamps are now preserved in local progress
+- SteamRIP catalog requests now try its complete WordPress feed before the
+  smaller Hydralinks fallback, including when Slipgate is configured
 
 ## 3.4.13
 

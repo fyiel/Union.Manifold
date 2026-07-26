@@ -9,7 +9,11 @@ fn join(base_url: &str, path: &str) -> String {
     if path.starts_with("http://") || path.starts_with("https://") {
         return path.to_string();
     }
-    format!("{}/{}", base_url.trim_end_matches('/'), path.trim_start_matches('/'))
+    format!(
+        "{}/{}",
+        base_url.trim_end_matches('/'),
+        path.trim_start_matches('/')
+    )
 }
 
 fn reason(status: u16) -> String {
@@ -40,7 +44,11 @@ async fn do_fetch(
             let header_pairs: Vec<[String; 2]> = resp
                 .headers()
                 .iter()
-                .filter_map(|(k, v)| v.to_str().ok().map(|val| [k.as_str().to_string(), val.to_string()]))
+                .filter_map(|(k, v)| {
+                    v.to_str()
+                        .ok()
+                        .map(|val| [k.as_str().to_string(), val.to_string()])
+                })
                 .collect();
             let textual = prefer_text
                 || resp
@@ -48,8 +56,15 @@ async fn do_fetch(
                     .get(reqwest::header::CONTENT_TYPE)
                     .and_then(|v| v.to_str().ok())
                     .map(|ct| {
-                        let mime = ct.split(';').next().unwrap_or("").trim().to_ascii_lowercase();
-                        mime.starts_with("text/") || mime == "application/json" || mime.ends_with("+json")
+                        let mime = ct
+                            .split(';')
+                            .next()
+                            .unwrap_or("")
+                            .trim()
+                            .to_ascii_lowercase();
+                        mime.starts_with("text/")
+                            || mime == "application/json"
+                            || mime.ends_with("+json")
                     })
                     .unwrap_or(false);
             let bytes = resp.bytes().await.map(|b| b.to_vec()).unwrap_or_default();
@@ -64,7 +79,9 @@ async fn do_fetch(
                     Ok(text) => ("bodyText", Value::String(text)),
                     Err(err) => (
                         "body",
-                        Value::String(base64::engine::general_purpose::STANDARD.encode(err.into_bytes())),
+                        Value::String(
+                            base64::engine::general_purpose::STANDARD.encode(err.into_bytes()),
+                        ),
                     ),
                 }
             } else {
@@ -89,7 +106,11 @@ async fn do_fetch(
 #[tauri::command]
 pub async fn auth_fetch(base_url: String, path: String, init: Option<Value>) -> Value {
     let init = init.unwrap_or_else(|| json!({}));
-    let method = init.get("method").and_then(|v| v.as_str()).unwrap_or("GET").to_string();
+    let method = init
+        .get("method")
+        .and_then(|v| v.as_str())
+        .unwrap_or("GET")
+        .to_string();
     let headers: HashMap<String, String> = init
         .get("headers")
         .and_then(|h| h.as_object())
@@ -99,7 +120,13 @@ pub async fn auth_fetch(base_url: String, path: String, init: Option<Value>) -> 
                 .collect()
         })
         .unwrap_or_default();
-    let body = init.get("body").and_then(|v| v.as_str()).map(|s| s.as_bytes().to_vec());
-    let prefer_text = init.get("preferText").and_then(|v| v.as_bool()).unwrap_or(false);
+    let body = init
+        .get("body")
+        .and_then(|v| v.as_str())
+        .map(|s| s.as_bytes().to_vec());
+    let prefer_text = init
+        .get("preferText")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
     do_fetch(&join(&base_url, &path), &method, headers, body, prefer_text).await
 }

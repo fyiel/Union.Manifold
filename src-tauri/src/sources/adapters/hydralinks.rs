@@ -36,9 +36,8 @@ static VER_IN: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i)(?:v\.?\s*)?(build\s*\d+|\d[\w.]*)").unwrap());
 static WS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s+").unwrap());
 static NONWORD: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[^a-z0-9]+").unwrap());
-static ZEILINK_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)^https?://(?:www\.)?zeilink\.net/c/([A-Za-z0-9]+)").unwrap()
-});
+static ZEILINK_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)^https?://(?:www\.)?zeilink\.net/c/([A-Za-z0-9]+)").unwrap());
 
 #[derive(Clone)]
 struct Entry {
@@ -235,15 +234,25 @@ async fn zeilink_options(slug: &str) -> Vec<DownloadOption> {
         let host_label = host.get("name").and_then(|v| v.as_str()).unwrap_or("");
         let links = host.get("links").and_then(|l| l.as_array());
         for link in links.into_iter().flatten() {
-            if !link.get("isActive").and_then(|v| v.as_bool()).unwrap_or(true) {
+            if !link
+                .get("isActive")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true)
+            {
                 continue;
             }
-            let Some(url) = link.get("url").and_then(|v| v.as_str()).filter(|s| !s.is_empty())
+            let Some(url) = link
+                .get("url")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
             else {
                 continue;
             };
             let host_type = hosts::detect_host_type(url);
-            let size_text = link.get("fileSize").and_then(|v| v.as_str()).map(str::to_string);
+            let size_text = link
+                .get("fileSize")
+                .and_then(|v| v.as_str())
+                .map(str::to_string);
             options.push(DownloadOption {
                 label: if host_label.is_empty() {
                     host_type.clone()
@@ -252,7 +261,10 @@ async fn zeilink_options(slug: &str) -> Vec<DownloadOption> {
                 },
                 host_type,
                 url: Some(url.to_string()),
-                file_name: link.get("fileName").and_then(|v| v.as_str()).map(str::to_string),
+                file_name: link
+                    .get("fileName")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string),
                 size_bytes: size_text.as_deref().and_then(parse_size_to_bytes),
                 size_text,
                 resolvable: hosts::is_resolvable(url),
@@ -291,7 +303,11 @@ impl HydraSource {
                 Ok(body) if !parse_source(&body).is_empty() => return Some(body),
                 Ok(body) => crate::logging::write_line(
                     "warn",
-                    &format!("{}: slipgate returned {} bytes, 0 catalogue entries", self.id, body.len()),
+                    &format!(
+                        "{}: slipgate returned {} bytes, 0 catalogue entries",
+                        self.id,
+                        body.len()
+                    ),
                 ),
                 Err(e) => crate::logging::write_line(
                     "warn",
@@ -342,7 +358,12 @@ impl HydraSource {
             if prev >= 50 && parsed.len() * 2 < prev {
                 crate::logging::write_line(
                     "warn",
-                    &format!("{}: fetched {} entries but cache holds {}, keeping cache", self.id, parsed.len(), prev),
+                    &format!(
+                        "{}: fetched {} entries but cache holds {}, keeping cache",
+                        self.id,
+                        parsed.len(),
+                        prev
+                    ),
                 );
             } else {
                 if let Some(p) = &path {
@@ -400,7 +421,11 @@ impl HydraSource {
         SourceGame {
             source_id: self.id.to_string(),
             source_slug: e.slug.clone(),
-            source_url: e.uris.first().cloned().unwrap_or_else(|| self.origin.to_string()),
+            source_url: e
+                .uris
+                .first()
+                .cloned()
+                .unwrap_or_else(|| self.origin.to_string()),
             dedup_key: dedup_key_for(None, &e.title),
             title: e.title.clone(),
             added_at: e.added_at,
@@ -418,7 +443,12 @@ impl HydraSource {
         idx.sort_by(|&a, &b| cat[b].added_at.cmp(&cat[a].added_at));
         idx.truncate(POOL_TARGET);
         let stubs: Vec<SourceGame> = idx.iter().map(|&i| self.entry_to_stub(&cat[i])).collect();
-        Some(http::map_limit(stubs, ART_CONCURRENCY, |g| async move { Some(attach_steam_art(g).await) }).await)
+        Some(
+            http::map_limit(stubs, ART_CONCURRENCY, |g| async move {
+                Some(attach_steam_art(g).await)
+            })
+            .await,
+        )
     }
 
     pub async fn search(&self, q: &str, limit: usize) -> Vec<SourceGame> {
@@ -441,7 +471,10 @@ impl HydraSource {
                 }
             }
         }
-        http::map_limit(stubs, ART_CONCURRENCY, |g| async move { Some(attach_steam_art(g).await) }).await
+        http::map_limit(stubs, ART_CONCURRENCY, |g| async move {
+            Some(attach_steam_art(g).await)
+        })
+        .await
     }
 
     pub async fn get_detail(&self, slug: &str) -> Option<SourceGame> {
@@ -538,7 +571,11 @@ mod tests {
     fn parse_source_parses_size_and_date_forms() {
         let entries = parse_source(FEED);
         for e in &entries {
-            assert!(e.size_bytes.is_some_and(|b| b > 0), "size_bytes for {}", e.slug);
+            assert!(
+                e.size_bytes.is_some_and(|b| b > 0),
+                "size_bytes for {}",
+                e.slug
+            );
             assert!(e.size_text.is_some(), "size_text for {}", e.slug);
             assert!(e.added_at.is_some(), "added_at for {}", e.slug);
         }
@@ -555,10 +592,14 @@ mod tests {
     #[test]
     fn slugify_produces_clean_lowercase_slugs() {
         let s = slugify("Don't Starve!!");
-        assert!(!s.starts_with('-') && !s.ends_with('-'), "no edge dashes: {s}");
+        assert!(
+            !s.starts_with('-') && !s.ends_with('-'),
+            "no edge dashes: {s}"
+        );
         assert_eq!(s, s.to_lowercase());
         assert!(
-            s.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-'),
+            s.chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-'),
             "slug charset: {s}"
         );
         assert_eq!(slugify("Broforce"), "broforce");
@@ -575,6 +616,9 @@ mod tests {
         assert!(options.iter().all(|o| o.url.is_some()));
         assert!(options[0].resolvable);
         assert!(!options[1].resolvable);
-        assert_eq!(options[0].url.as_deref(), Some("https://buzzheavier.com/xyz"));
+        assert_eq!(
+            options[0].url.as_deref(),
+            Some("https://buzzheavier.com/xyz")
+        );
     }
 }

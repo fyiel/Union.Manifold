@@ -6,7 +6,13 @@ fn version(app: &AppHandle) -> String {
     app.package_info().version.to_string()
 }
 
-fn status(app: &AppHandle, state: &str, available: bool, new_version: Option<String>, error: Option<String>) -> Value {
+fn status(
+    app: &AppHandle,
+    state: &str,
+    available: bool,
+    new_version: Option<String>,
+    error: Option<String>,
+) -> Value {
     json!({
         "enabled": true,
         "state": state,
@@ -21,11 +27,14 @@ fn status(app: &AppHandle, state: &str, available: bool, new_version: Option<Str
 }
 
 fn emit_progress(app: &AppHandle, phase: &str, received: u64, total: Option<u64>) {
-    app.emit("uc:update-progress", json!({
-        "phase": phase,
-        "received": received,
-        "total": total,
-    }))
+    app.emit(
+        "uc:update-progress",
+        json!({
+            "phase": phase,
+            "received": received,
+            "total": total,
+        }),
+    )
     .ok();
 }
 
@@ -61,8 +70,8 @@ async fn install_via_pacman(app: &AppHandle, new_version: &str) -> Result<(), St
             ..Default::default()
         },
     )
-        .await
-        .map_err(|e| format!("download failed: {e}"))?;
+    .await
+    .map_err(|e| format!("download failed: {e}"))?;
     if !resp.status().is_success() {
         return Err(format!("download failed: http {}", resp.status()));
     }
@@ -73,8 +82,13 @@ async fn install_via_pacman(app: &AppHandle, new_version: &str) -> Result<(), St
     let mut file = std::fs::File::create(&pkg_path).map_err(|e| format!("write package: {e}"))?;
     let mut received: u64 = 0;
     let mut last_emit: u64 = 0;
-    while let Some(chunk) = resp.chunk().await.map_err(|e| format!("download failed: {e}"))? {
-        file.write_all(&chunk).map_err(|e| format!("write package: {e}"))?;
+    while let Some(chunk) = resp
+        .chunk()
+        .await
+        .map_err(|e| format!("download failed: {e}"))?
+    {
+        file.write_all(&chunk)
+            .map_err(|e| format!("write package: {e}"))?;
         received += chunk.len() as u64;
         if received - last_emit >= 512 * 1024 {
             last_emit = received;
@@ -96,7 +110,10 @@ async fn install_via_pacman(app: &AppHandle, new_version: &str) -> Result<(), St
         .kill_on_drop(true)
         .spawn()
         .map_err(|e| {
-            format!("pkexec not available: {e}. install manually: sudo pacman -U {}", pkg_path.display())
+            format!(
+                "pkexec not available: {e}. install manually: sudo pacman -U {}",
+                pkg_path.display()
+            )
         })?;
 
     let out = match tokio::time::timeout(
@@ -107,7 +124,10 @@ async fn install_via_pacman(app: &AppHandle, new_version: &str) -> Result<(), St
     {
         Ok(Ok(out)) => out,
         Ok(Err(e)) => {
-            return Err(format!("pkexec failed: {e}. install manually: sudo pacman -U {}", pkg_path.display()));
+            return Err(format!(
+                "pkexec failed: {e}. install manually: sudo pacman -U {}",
+                pkg_path.display()
+            ));
         }
         Err(_) => {
             return Err(format!(
@@ -120,7 +140,11 @@ async fn install_via_pacman(app: &AppHandle, new_version: &str) -> Result<(), St
         std::fs::remove_file(&pkg_path).ok();
         return Ok(());
     }
-    let detail: String = String::from_utf8_lossy(&out.stderr).trim().chars().take(300).collect();
+    let detail: String = String::from_utf8_lossy(&out.stderr)
+        .trim()
+        .chars()
+        .take(300)
+        .collect();
     match out.status.code() {
         Some(126) | Some(127) => Err(format!(
             "authorization unavailable — is a polkit agent running? install manually: sudo pacman -U {}",
@@ -193,11 +217,15 @@ pub async fn notify_if_update_available(app: &AppHandle) {
         Err(_) => return,
     };
     if let Ok(Some(update)) = updater.check().await {
-        app.emit("uc:update-available", json!({ "version": update.version })).ok();
+        app.emit("uc:update-available", json!({ "version": update.version }))
+            .ok();
         crate::notify::send(
             app,
             "Update available",
-            &format!("Union.Manifold {} is ready to install from Settings", update.version),
+            &format!(
+                "Union.Manifold {} is ready to install from Settings",
+                update.version
+            ),
         );
     }
 }

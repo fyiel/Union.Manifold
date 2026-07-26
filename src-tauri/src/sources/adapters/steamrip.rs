@@ -1,12 +1,14 @@
 use std::collections::{HashMap, HashSet};
-use std::time::Duration;
 use std::sync::LazyLock;
+use std::time::Duration;
 
 use once_cell::sync::Lazy;
 use regex::Regex;
 use serde_json::Value;
 
+use super::hydralinks::HydraSource;
 use crate::http;
+use crate::slipgate;
 use crate::sources::cache::{Cached, KeyedCache};
 use crate::sources::hosts;
 use crate::sources::parse::find_steam_app_id;
@@ -15,8 +17,6 @@ use crate::sources::schema::{
 };
 use crate::sources::steam;
 use crate::sources::{Capabilities, QueryParams};
-use crate::slipgate;
-use super::hydralinks::HydraSource;
 
 const ID: &str = "steamrip";
 const ORIGIN: &str = "https://steamrip.com";
@@ -28,8 +28,24 @@ static HYDRA: LazyLock<HydraSource> = LazyLock::new(|| {
     HydraSource::new(ID, ORIGIN, "https://hydralinks.cloud/sources/steamrip.json")
 });
 
-static VERSION_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"(?i)\(\s*(?:v\.?\s*)?([\w.\-]+(?:\s*build\s*\d+)?)\s*\)\s*$").unwrap());
+async fn fetch_json(url: &str) -> Result<Value, String> {
+    match http::get_json(url).await {
+        Ok(json) => Ok(json),
+        Err(direct_error) => {
+            let Some(cfg) = slipgate::cfg() else {
+                return Err(direct_error.to_string());
+            };
+            let body = slipgate::fetch(&cfg, url, Duration::from_secs(60))
+                .await
+                .map_err(|proxy_error| format!("{direct_error}; {proxy_error}"))?;
+            serde_json::from_str(&body).map_err(|error| format!("invalid JSON: {error}"))
+        }
+    }
+}
+
+static VERSION_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"(?i)\(\s*(?:v\.?\s*)?([\w.\-]+(?:\s*build\s*\d+)?)\s*\)\s*$").unwrap()
+});
 static JUNK_PARENS_RE: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"(?i)\s*\(\s*(?:v\.?\s*)?[^()]*(?:build\s*\d+|v?\d+(?:\.\d+)+|\+\s*(?:online|multiplayer|co-?op)|all\s+dlc|update\s*\d*)[^()]*\)\s*$").unwrap()
 });
@@ -51,7 +67,8 @@ static FILE_HOSTS_RE: Lazy<Regex> = Lazy::new(|| {
     )
     .unwrap()
 });
-static BUTTON_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?i)shortc-button|btn|download").unwrap());
+static BUTTON_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"(?i)shortc-button|btn|download").unwrap());
 static DOWNLOAD_TEXT_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?i)download").unwrap());
 static EXCLUDE_HOST_RE: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"(?i)steamrip\.com$|steampowered|steamstatic|youtu|discord|reddit|t\.me|patreon")
@@ -62,8 +79,9 @@ static SHARD_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"<loc>\s*([^<]*wp-sitemap-posts-post-\d+\.xml)\s*</loc>").unwrap());
 static SITEMAP_SLUG_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"<loc>\s*https?://[^/]+/([^</]+)/?\s*</loc>").unwrap());
-static STATIC_SKIP_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"(?i)^(?:about|contact|privacy|terms|dmca|faq|how-to|request)").unwrap());
+static STATIC_SKIP_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"(?i)^(?:about|contact|privacy|terms|dmca|faq|how-to|request)").unwrap()
+});
 
 #[derive(Clone, Default)]
 struct Cats {
@@ -88,14 +106,18 @@ pub fn capabilities() -> Capabilities {
         tags: true,
         release_date: false,
         size: false,
-        sort: vec!["latest".to_string(), "updated".to_string(), "title".to_string()],
+        sort: vec![
+            "latest".to_string(),
+            "updated".to_string(),
+            "title".to_string(),
+        ],
     }
 }
 
 async fn load_category_map() -> Cats {
     CATS.get_or(|| async {
         let url = format!("{API}/categories?per_page=100&_fields=id,name,count");
-        let json: Value = http::get_json(&url).await.ok()?;
+        let json: Value = fetch_json(&url).await.ok()?;
         let mut cats = Cats::default();
         if let Some(arr) = json.as_array() {
             for c in arr {
@@ -213,7 +235,9 @@ fn blurb(content: &str) -> String {
     }
     let cut: String = joined.chars().take(800).collect();
     let trimmed = match cut.rfind(char::is_whitespace) {
-        Some(i) if i > 400 => cut[..i].trim_end_matches(|c: char| c.is_whitespace() || ",;:.-".contains(c)).to_string(),
+        Some(i) if i > 400 => cut[..i]
+            .trim_end_matches(|c: char| c.is_whitespace() || ",;:.-".contains(c))
+            .to_string(),
         _ => cut,
     };
     format!("{trimmed}\u{2026}")
@@ -377,9 +401,6 @@ fn enc(s: &str) -> String {
 }
 
 pub async fn query(params: &QueryParams) -> Option<Vec<SourceGame>> {
-    if slipgate::cfg().is_some() {
-        return HYDRA.query().await;
-    }
     let cats = load_category_map().await;
     let per_page = params.limit.min(100);
     let text = params.text.as_deref().unwrap_or("").trim();
@@ -407,7 +428,7 @@ pub async fn query(params: &QueryParams) -> Option<Vec<SourceGame>> {
             let mut page = 1;
             while games.len() < limit && page <= 10 {
                 let paged = format!("{url}&page={page}");
-                let json: Value = match http::get_json(&paged).await {
+                let json: Value = match fetch_json(&paged).await {
                     Ok(v) => v,
                     Err(e) => {
                         if page == 1 {
@@ -438,9 +459,6 @@ pub async fn query(params: &QueryParams) -> Option<Vec<SourceGame>> {
 }
 
 pub async fn search(q: &str, limit: usize) -> Vec<SourceGame> {
-    if slipgate::cfg().is_some() {
-        return HYDRA.search(q, limit).await;
-    }
     let lowered = q.to_lowercase();
     let q = lowered.trim();
     if q.is_empty() {
@@ -468,7 +486,7 @@ pub async fn search(q: &str, limit: usize) -> Vec<SourceGame> {
         enc(q),
         limit
     );
-    let json: Value = match http::get_json(&url).await {
+    let json: Value = match fetch_json(&url).await {
         Ok(v) => v,
         Err(_) => return Vec::new(),
     };
@@ -489,16 +507,13 @@ pub async fn search(q: &str, limit: usize) -> Vec<SourceGame> {
 }
 
 pub async fn get_detail(slug: &str) -> Option<SourceGame> {
-    if slipgate::cfg().is_some() {
-        return HYDRA.get_detail(slug).await;
-    }
     let clean = slug.trim_matches('/').to_string();
     let key = clean.clone();
     DETAIL_CACHE
         .get_or(&key, || async move {
             let cats = load_category_map().await;
             let url = format!("{API}/posts?slug={}&_fields={FIELDS}", enc(&clean));
-            let json: Value = http::get_json(&url).await.ok()?;
+            let json: Value = fetch_json(&url).await.ok()?;
             let post = json.as_array().and_then(|a| a.first())?;
             let content = post
                 .get("content")
@@ -541,7 +556,9 @@ mod tests {
 
     #[test]
     fn clean_title_strips_entities_and_junk() {
-        let (t, _) = clean_title("Don&#8217;t Panic! It is Just Turbulence Free Download (Build 23252247 + Online)");
+        let (t, _) = clean_title(
+            "Don&#8217;t Panic! It is Just Turbulence Free Download (Build 23252247 + Online)",
+        );
         assert_eq!(t, "Don\u{2019}t Panic! It is Just Turbulence");
         let (t, v) = clean_title("Elden Ring Free Download (v1.12)");
         assert_eq!(t, "Elden Ring");

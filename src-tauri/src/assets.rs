@@ -12,12 +12,15 @@ use tokio::sync::Mutex as AsyncMutex;
 
 use crate::state::AppState;
 
-static NEG_CACHE: LazyLock<Mutex<HashMap<String, Instant>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+static NEG_CACHE: LazyLock<Mutex<HashMap<String, Instant>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 const NEG_TTL: Duration = Duration::from_secs(60);
 
-static MEM_CACHE: LazyLock<Mutex<HashMap<String, (Arc<Vec<u8>>, &'static str)>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+static MEM_CACHE: LazyLock<Mutex<HashMap<String, (Arc<Vec<u8>>, &'static str)>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 const MEM_MAX: usize = 512;
-static INFLIGHT: LazyLock<Mutex<HashMap<String, Arc<AsyncMutex<()>>>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+static INFLIGHT: LazyLock<Mutex<HashMap<String, Arc<AsyncMutex<()>>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 fn mem_get(key: &str) -> Option<(Vec<u8>, &'static str)> {
     let map = MEM_CACHE.lock();
@@ -60,7 +63,10 @@ fn content_type_of(bytes: &[u8]) -> &'static str {
         "image/gif"
     } else if bytes.len() > 12 && &bytes[0..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
         "image/webp"
-    } else if bytes.len() >= 12 && &bytes[4..8] == b"ftyp" && matches!(&bytes[8..12], b"avif" | b"avis") {
+    } else if bytes.len() >= 12
+        && &bytes[4..8] == b"ftyp"
+        && matches!(&bytes[8..12], b"avif" | b"avis")
+    {
         "image/avif"
     } else if bytes.starts_with(&[0x00, 0x00, 0x01, 0x00]) {
         "image/x-icon"
@@ -75,7 +81,10 @@ fn content_type_of(bytes: &[u8]) -> &'static str {
 
 fn looks_like_svg(bytes: &[u8]) -> bool {
     let body = bytes.strip_prefix(b"\xef\xbb\xbf").unwrap_or(bytes);
-    let start = body.iter().position(|b| !b.is_ascii_whitespace()).unwrap_or(body.len());
+    let start = body
+        .iter()
+        .position(|b| !b.is_ascii_whitespace())
+        .unwrap_or(body.len());
     body[start..].starts_with(b"<svg") || body[start..].starts_with(b"<?xml")
 }
 
@@ -87,7 +96,10 @@ fn log_failure(what: &str, url: &str) {
     if n < FAIL_LOG_MAX {
         crate::logging::write_line("warn", &format!("asset: {what}: {url}"));
         if n + 1 == FAIL_LOG_MAX {
-            crate::logging::write_line("warn", "asset: more fetch failures; suppressing further logs");
+            crate::logging::write_line(
+                "warn",
+                "asset: more fetch failures; suppressing further logs",
+            );
         }
     }
 }
@@ -97,7 +109,11 @@ fn query_param(uri: &str, key: &str) -> Option<String> {
     for pair in q.split('&') {
         if let Some((k, v)) = pair.split_once('=') {
             if k == key {
-                return Some(percent_encoding::percent_decode_str(v).decode_utf8_lossy().to_string());
+                return Some(
+                    percent_encoding::percent_decode_str(v)
+                        .decode_utf8_lossy()
+                        .to_string(),
+                );
             }
         }
     }
@@ -109,7 +125,12 @@ pub async fn respond(app: AppHandle, uri: String) -> (u16, Vec<u8>, String) {
         if name.is_empty() || name.contains("..") || name.contains(['/', '\\', ':']) {
             return (400, b"bad name".to_vec(), "text/plain".to_string());
         }
-        let path = app.state::<AppState>().paths.data_dir.join("custom-images").join(&name);
+        let path = app
+            .state::<AppState>()
+            .paths
+            .data_dir
+            .join("custom-images")
+            .join(&name);
         return match tokio::fs::read(&path).await {
             Ok(bytes) => {
                 let ct = content_type_of(&bytes);
@@ -160,7 +181,10 @@ pub async fn respond(app: AppHandle, uri: String) -> (u16, Vec<u8>, String) {
     }
     let gate = {
         let mut inflight = INFLIGHT.lock();
-        inflight.entry(key.clone()).or_insert_with(|| Arc::new(AsyncMutex::new(()))).clone()
+        inflight
+            .entry(key.clone())
+            .or_insert_with(|| Arc::new(AsyncMutex::new(())))
+            .clone()
     };
     let _held = gate.lock().await;
     if let Some((bytes, ct)) = mem_get(&key) {
@@ -255,20 +279,44 @@ mod tests {
 
     #[test]
     fn sniffs_common_image_signatures() {
-        assert_eq!(content_type_of(&[0x89, b'P', b'N', b'G', 0x0d, 0x0a]), "image/png");
-        assert_eq!(content_type_of(&[0xff, 0xd8, 0xff, 0xe0, 0x00]), "image/jpeg");
+        assert_eq!(
+            content_type_of(&[0x89, b'P', b'N', b'G', 0x0d, 0x0a]),
+            "image/png"
+        );
+        assert_eq!(
+            content_type_of(&[0xff, 0xd8, 0xff, 0xe0, 0x00]),
+            "image/jpeg"
+        );
         assert_eq!(content_type_of(b"GIF89a"), "image/gif");
-        assert_eq!(content_type_of(b"RIFF\x12\x34\x56\x78WEBPVP8 "), "image/webp");
-        assert_eq!(content_type_of(b"\x00\x00\x00\x1cftypavifmif1"), "image/avif");
-        assert_eq!(content_type_of(b"\x00\x00\x00\x1cftypavismif1"), "image/avif");
-        assert_eq!(content_type_of(&[0x00, 0x00, 0x01, 0x00, 0x01, 0x00]), "image/x-icon");
+        assert_eq!(
+            content_type_of(b"RIFF\x12\x34\x56\x78WEBPVP8 "),
+            "image/webp"
+        );
+        assert_eq!(
+            content_type_of(b"\x00\x00\x00\x1cftypavifmif1"),
+            "image/avif"
+        );
+        assert_eq!(
+            content_type_of(b"\x00\x00\x00\x1cftypavismif1"),
+            "image/avif"
+        );
+        assert_eq!(
+            content_type_of(&[0x00, 0x00, 0x01, 0x00, 0x01, 0x00]),
+            "image/x-icon"
+        );
         assert_eq!(content_type_of(b"BM\x36\x28\x00\x00"), "image/bmp");
     }
 
     #[test]
     fn sniffs_svg_despite_bom_and_whitespace() {
-        assert_eq!(content_type_of(b"<svg xmlns=\"http://www.w3.org/2000/svg\"/>"), "image/svg+xml");
-        assert_eq!(content_type_of(b"<?xml version=\"1.0\"?><svg/>"), "image/svg+xml");
+        assert_eq!(
+            content_type_of(b"<svg xmlns=\"http://www.w3.org/2000/svg\"/>"),
+            "image/svg+xml"
+        );
+        assert_eq!(
+            content_type_of(b"<?xml version=\"1.0\"?><svg/>"),
+            "image/svg+xml"
+        );
         assert_eq!(content_type_of(b"\xef\xbb\xbf\n  <svg/>"), "image/svg+xml");
     }
 
@@ -281,24 +329,40 @@ mod tests {
     #[test]
     fn query_param_reads_linux_and_windows_uri_shapes() {
         let linux = "uc-asset://localhost/img?u=https%3A%2F%2Fcdn.example%2Fa.jpg";
-        assert_eq!(query_param(linux, "u").as_deref(), Some("https://cdn.example/a.jpg"));
+        assert_eq!(
+            query_param(linux, "u").as_deref(),
+            Some("https://cdn.example/a.jpg")
+        );
         let win = "http://uc-asset.localhost/img?u=https%3A%2F%2Fcdn.example%2Fa.jpg";
-        assert_eq!(query_param(win, "u").as_deref(), Some("https://cdn.example/a.jpg"));
+        assert_eq!(
+            query_param(win, "u").as_deref(),
+            Some("https://cdn.example/a.jpg")
+        );
         assert_eq!(query_param(win, "c"), None);
     }
 
     #[test]
     fn query_param_custom_name_empty_and_missing() {
         let uri = "http://uc-asset.localhost/img?c=abcdef0123456789abcdef01.png";
-        assert_eq!(query_param(uri, "c").as_deref(), Some("abcdef0123456789abcdef01.png"));
+        assert_eq!(
+            query_param(uri, "c").as_deref(),
+            Some("abcdef0123456789abcdef01.png")
+        );
         assert_eq!(query_param("uc-asset://localhost/img", "u"), None);
-        assert_eq!(query_param("uc-asset://localhost/img?u=", "u").as_deref(), Some(""));
+        assert_eq!(
+            query_param("uc-asset://localhost/img?u=", "u").as_deref(),
+            Some("")
+        );
     }
 
     #[test]
     fn query_param_keeps_encoded_inner_query_opaque() {
-        let uri = "http://uc-asset.localhost/img?u=http%3A%2F%2Fuc-asset.localhost%2Fimg%3Fc%3Dx.png";
+        let uri =
+            "http://uc-asset.localhost/img?u=http%3A%2F%2Fuc-asset.localhost%2Fimg%3Fc%3Dx.png";
         assert_eq!(query_param(uri, "c"), None);
-        assert_eq!(query_param(uri, "u").as_deref(), Some("http://uc-asset.localhost/img?c=x.png"));
+        assert_eq!(
+            query_param(uri, "u").as_deref(),
+            Some("http://uc-asset.localhost/img?c=x.png")
+        );
     }
 }

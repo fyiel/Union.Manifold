@@ -3,13 +3,13 @@ pub mod datanodes;
 pub mod datavaults;
 pub mod fileditch;
 pub mod filekeeper;
+pub mod fuckingfast;
 pub mod gate;
+pub mod gofile;
 #[cfg(test)]
 mod installtest;
 #[cfg(test)]
 mod livetest;
-pub mod fuckingfast;
-pub mod gofile;
 pub mod mediafire;
 pub mod pixeldrain;
 pub mod rootz;

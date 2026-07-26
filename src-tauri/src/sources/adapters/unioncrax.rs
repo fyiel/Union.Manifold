@@ -9,7 +9,9 @@ use serde_json::{json, Value};
 use crate::http::{self, FetchOpts};
 use crate::sources::cache::{Cached, KeyedCache};
 use crate::sources::metacache;
-use crate::sources::schema::{dedup_key_for, parse_size_to_bytes, to_epoch_ms, year_from, DownloadOption, SourceGame};
+use crate::sources::schema::{
+    dedup_key_for, parse_size_to_bytes, to_epoch_ms, year_from, DownloadOption, SourceGame,
+};
 use crate::sources::{Capabilities, QueryParams, ResolveResult, ResolvedFile};
 
 const ID: &str = "unioncrax";
@@ -20,7 +22,8 @@ static DETAIL_CACHE: Lazy<KeyedCache<SourceGame>> =
     Lazy::new(|| KeyedCache::new(Duration::from_secs(60 * 60 * 6)));
 static STEAM_APPID: Lazy<Mutex<HashMap<String, Option<u64>>>> =
     Lazy::new(|| Mutex::new(metacache::load("unioncrax-appids.json")));
-static STORE_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"store\.steampowered\.com/app/(\d+)").unwrap());
+static STORE_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"store\.steampowered\.com/app/(\d+)").unwrap());
 
 fn urlencode(s: &str) -> String {
     percent_encoding::utf8_percent_encode(s, percent_encoding::NON_ALPHANUMERIC).to_string()
@@ -122,9 +125,15 @@ async fn resolve_steam_app_id(internal_id: &str) -> Option<u64> {
 
 fn coerce_genres(value: Option<&Value>) -> Vec<String> {
     match value {
-        Some(Value::Array(arr)) => arr.iter().filter_map(|v| v.as_str().map(String::from)).collect(),
+        Some(Value::Array(arr)) => arr
+            .iter()
+            .filter_map(|v| v.as_str().map(String::from))
+            .collect(),
         Some(Value::String(s)) => match serde_json::from_str::<Value>(s) {
-            Ok(Value::Array(arr)) => arr.iter().filter_map(|v| v.as_str().map(String::from)).collect(),
+            Ok(Value::Array(arr)) => arr
+                .iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect(),
             Ok(_) => Vec::new(),
             Err(_) => {
                 if s.is_empty() {
@@ -141,20 +150,37 @@ fn coerce_genres(value: Option<&Value>) -> Vec<String> {
 fn normalize(uc: &Value) -> SourceGame {
     let internal_id = truthy_string(uc.get("appid"));
 
-    let steam_app_id = steam_app_id_from_store(uc.get("store"))
-        .or_else(|| STEAM_APPID.lock().unwrap().get(&internal_id).copied().flatten());
+    let steam_app_id = steam_app_id_from_store(uc.get("store")).or_else(|| {
+        STEAM_APPID
+            .lock()
+            .unwrap()
+            .get(&internal_id)
+            .copied()
+            .flatten()
+    });
 
     let name = uc.get("name").and_then(|v| v.as_str()).unwrap_or("");
-    let title = if name.is_empty() { internal_id.clone() } else { name.to_string() };
+    let title = if name.is_empty() {
+        internal_id.clone()
+    } else {
+        name.to_string()
+    };
     let title = title.trim().to_string();
 
-    let image = uc.get("image").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let image = uc
+        .get("image")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
     let hero_image = {
         let a = uc.get("hero_image").and_then(|v| v.as_str()).unwrap_or("");
         if !a.is_empty() {
             a.to_string()
         } else {
-            uc.get("hero_image_override").and_then(|v| v.as_str()).unwrap_or("").to_string()
+            uc.get("hero_image_override")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string()
         }
     };
 
@@ -163,9 +189,21 @@ fn normalize(uc: &Value) -> SourceGame {
         _ => String::new(),
     };
 
-    let developer = uc.get("developer").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let release_date = uc.get("release_date").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let version = uc.get("version").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let developer = uc
+        .get("developer")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let release_date = uc
+        .get("release_date")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let version = uc
+        .get("version")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
 
     let size_text = match uc.get("size") {
         Some(Value::String(s)) => s.clone(),
@@ -266,7 +304,11 @@ pub fn capabilities() -> Capabilities {
         tags: true,
         release_date: true,
         size: true,
-        sort: vec!["latest".to_string(), "updated".to_string(), "title".to_string()],
+        sort: vec![
+            "latest".to_string(),
+            "updated".to_string(),
+            "title".to_string(),
+        ],
     }
 }
 
@@ -317,12 +359,20 @@ pub async fn search(q: &str, limit: usize) -> Vec<SourceGame> {
         }
     }
 
-    let terms: Vec<String> = q.to_lowercase().split_whitespace().map(String::from).collect();
+    let terms: Vec<String> = q
+        .to_lowercase()
+        .split_whitespace()
+        .map(String::from)
+        .collect();
     let catalog = fetch_catalog().await.unwrap_or_default();
     catalog
         .iter()
         .filter(|g| {
-            let hay = g.get("name").and_then(|v| v.as_str()).unwrap_or("").to_lowercase();
+            let hay = g
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_lowercase();
             terms.iter().all(|t| hay.contains(t))
         })
         .take(limit)
@@ -453,28 +503,38 @@ pub async fn resolve_download(option: &DownloadOption) -> ResolveResult {
             return None;
         }
         let body = serde_json::to_vec(&json!({ "downloadUrl": url })).unwrap_or_default();
-        let (ok, json) = request_json(&format!("{ORIGIN}/api/ucfiles/resolve"), "POST", Some(body)).await;
+        let (ok, json) =
+            request_json(&format!("{ORIGIN}/api/ucfiles/resolve"), "POST", Some(body)).await;
         let success = json
             .as_ref()
             .and_then(|j| j.get("success"))
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
         let data = json.as_ref().and_then(|j| j.get("data"));
-        let data_url = data.and_then(|d| d.get("url")).and_then(|v| v.as_str()).map(String::from);
+        let data_url = data
+            .and_then(|d| d.get("url"))
+            .and_then(|v| v.as_str())
+            .map(String::from);
         if !ok || !success || data_url.is_none() {
             return None;
         }
         let data = data.unwrap();
         Some(ResolvedFile {
             url: data_url.unwrap(),
-            file_name: data.get("filename").and_then(|v| v.as_str()).map(String::from),
+            file_name: data
+                .get("filename")
+                .and_then(|v| v.as_str())
+                .map(String::from),
             size_bytes: data.get("size").and_then(json_num).filter(|n| *n != 0),
         })
     })
     .await;
 
     if files.len() != expected {
-        crate::logging::write_line("warn", &format!("ucfiles resolved {}/{} parts", files.len(), expected));
+        crate::logging::write_line(
+            "warn",
+            &format!("ucfiles resolved {}/{} parts", files.len(), expected),
+        );
         return ResolveResult {
             resolvable: false,
             open_url: Some(page_url),

@@ -35,7 +35,11 @@ fn num(v: Option<&Value>) -> Option<u64> {
     let n = v
         .as_u64()
         .or_else(|| v.as_f64().map(|f| f as u64))
-        .or_else(|| v.as_str().and_then(|s| s.parse::<f64>().ok()).map(|f| f as u64))?;
+        .or_else(|| {
+            v.as_str()
+                .and_then(|s| s.parse::<f64>().ok())
+                .map(|f| f as u64)
+        })?;
     if n == 0 {
         None
     } else {

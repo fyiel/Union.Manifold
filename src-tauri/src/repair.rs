@@ -48,7 +48,10 @@ async fn download_to(app: &AppHandle, appid: &str, url: &str, dest: &Path) -> Re
         .await
         .map_err(|e| AppError::msg(format!("repair download: {e}")))?;
     if !resp.status().is_success() {
-        return Err(AppError::msg(format!("repair download HTTP {}", resp.status())));
+        return Err(AppError::msg(format!(
+            "repair download HTTP {}",
+            resp.status()
+        )));
     }
     let total = resp.content_length().unwrap_or(0);
     let mut file = tokio::fs::File::create(dest)
@@ -159,12 +162,24 @@ pub async fn onlinefix_repair(
 ) -> Result<Value> {
     let roots = crate::library::scan_roots(&state);
     let Some(install_dir) = crate::library::game_files_dir(&roots, &appid) else {
-        emit(&app, &appid, "failed", None, Some("game not found in library"));
+        emit(
+            &app,
+            &appid,
+            "failed",
+            None,
+            Some("game not found in library"),
+        );
         return Ok(json!({ "ok": false, "error": "game not found in library" }));
     };
     emit(&app, &appid, "resolving", None, None);
     let Some(url) = crate::sources::adapters::onlinefix::repair_url(&title).await else {
-        emit(&app, &appid, "failed", None, Some("no Online-Fix repair found"));
+        emit(
+            &app,
+            &appid,
+            "failed",
+            None,
+            Some("no Online-Fix repair found"),
+        );
         return Ok(json!({ "ok": false, "error": "no Online-Fix repair found for this title" }));
     };
     emit(&app, &appid, "downloading", Some(0), None);
@@ -184,7 +199,8 @@ pub async fn onlinefix_repair(
         .flatten();
     let Some(target) = target else {
         std::fs::remove_file(&tmp).ok();
-        let msg = "couldn't locate this game's Online-Fix files to repair — is it an Online-Fix install?";
+        let msg =
+            "couldn't locate this game's Online-Fix files to repair — is it an Online-Fix install?";
         emit(&app, &appid, "failed", None, Some(msg));
         return Ok(json!({ "ok": false, "error": msg }));
     };

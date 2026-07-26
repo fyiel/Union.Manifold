@@ -20,7 +20,10 @@ static TABLE: &[(&str, GateHost)] = &[
     ("1fichier.com", gh("1fichier", "wait timer + captcha")),
     ("akirabox.com", gh("akirabox", "js-gated link")),
     ("qiwi.gg", gh("qiwi", "js-gated link")),
-    ("fileq.net", gh("fileq", "Cloudflare Turnstile \u{2014} browser only")),
+    (
+        "fileq.net",
+        gh("fileq", "Cloudflare Turnstile \u{2014} browser only"),
+    ),
     ("mocha.my", gh("mocha", "browser-only page")),
     ("zerofs.link", gh("zerofs", "browser-only page")),
 ];
@@ -92,8 +95,14 @@ mod tests {
     #[test]
     fn maps_domains_and_subdomains() {
         assert_eq!(host_type("https://megadb.net/abc123"), Some("megadb"));
-        assert_eq!(host_type("https://www.filecrypt.cc/Container/X.html"), Some("filecrypt"));
-        assert_eq!(host_type("https://vik1ngfile.site/f/xyz"), Some("vikingfile"));
+        assert_eq!(
+            host_type("https://www.filecrypt.cc/Container/X.html"),
+            Some("filecrypt")
+        );
+        assert_eq!(
+            host_type("https://vik1ngfile.site/f/xyz"),
+            Some("vikingfile")
+        );
         assert_eq!(host_type("https://1fichier.com/?abc"), Some("1fichier"));
         assert_eq!(host_type("https://qiwi.gg/file/x"), Some("qiwi"));
         assert_eq!(host_type("https://fileq.net/abc.html"), Some("fileq"));

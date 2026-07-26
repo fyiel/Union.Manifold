@@ -48,8 +48,14 @@ pub fn storage_precheck(state: State<'_, AppState>, opts: Value) -> Value {
         .and_then(|v| v.as_str())
         .map(PathBuf::from)
         .unwrap_or_else(|| state.download_root());
-    let download_bytes = opts.get("downloadBytes").and_then(|v| v.as_u64()).unwrap_or(0);
-    let declared = opts.get("declaredInstallBytes").and_then(|v| v.as_u64()).unwrap_or(0);
+    let download_bytes = opts
+        .get("downloadBytes")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    let declared = opts
+        .get("declaredInstallBytes")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
     let margin_gib = state
         .settings
         .get("diskSpaceMarginGiB")
@@ -80,7 +86,9 @@ pub fn storage_precheck(state: State<'_, AppState>, opts: Value) -> Value {
 
 #[tauri::command(async)]
 pub fn storage_summary(state: State<'_, AppState>, target_path: Option<String>) -> Value {
-    let target = target_path.map(PathBuf::from).unwrap_or_else(|| state.download_root());
+    let target = target_path
+        .map(PathBuf::from)
+        .unwrap_or_else(|| state.download_root());
     let free = free_bytes(&target);
     json!({
         "ok": true,
@@ -110,8 +118,14 @@ mod tests {
         let archive = 71_000_000_000u64;
         let unpacked = 85_000_000_000u64;
         let est = estimate_extract(archive, 0, 2);
-        assert!(est >= unpacked, "estimate {est} must cover the real unpacked size");
-        assert!(est <= 120_000_000_000, "estimate {est} demands way too much space");
+        assert!(
+            est >= unpacked,
+            "estimate {est} must cover the real unpacked size"
+        );
+        assert!(
+            est <= 120_000_000_000,
+            "estimate {est} demands way too much space"
+        );
     }
 
     #[test]

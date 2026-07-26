@@ -206,8 +206,16 @@ fn post_to_game(post: &Value) -> Option<SourceGame> {
         .get("appid")
         .and_then(value_to_u64)
         .filter(|n| *n > 0)
-        .or_else(|| get_str(post, "banner").as_deref().and_then(find_steam_app_id))
-        .or_else(|| get_str(post, "library_capsule").as_deref().and_then(find_steam_app_id));
+        .or_else(|| {
+            get_str(post, "banner")
+                .as_deref()
+                .and_then(find_steam_app_id)
+        })
+        .or_else(|| {
+            get_str(post, "library_capsule")
+                .as_deref()
+                .and_then(find_steam_app_id)
+        });
 
     let image = get_str(post, "library_capsule")
         .or_else(|| get_str(post, "banner"))

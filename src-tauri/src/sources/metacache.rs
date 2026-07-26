@@ -42,7 +42,10 @@ pub fn save<V: Serialize>(name: &str, map: &HashMap<String, V>) {
     }
 }
 
-pub async fn save_async<V: Serialize + Send + 'static>(name: &'static str, map: HashMap<String, V>) {
+pub async fn save_async<V: Serialize + Send + 'static>(
+    name: &'static str,
+    map: HashMap<String, V>,
+) {
     let _ = tokio::task::spawn_blocking(move || save(name, &map)).await;
 }
 

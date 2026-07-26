@@ -49,11 +49,7 @@ impl SettingsStore {
     }
 
     pub fn get(&self, key: &str) -> Value {
-        self.inner
-            .lock()
-            .get(key)
-            .cloned()
-            .unwrap_or(Value::Null)
+        self.inner.lock().get(key).cloned().unwrap_or(Value::Null)
     }
 
     pub fn set(&self, key: &str, value: Value) {
@@ -72,7 +68,6 @@ impl SettingsStore {
     pub fn get_string(&self, key: &str) -> Option<String> {
         self.get(key).as_str().map(|s| s.to_string())
     }
-
 }
 
 #[tauri::command(async)]

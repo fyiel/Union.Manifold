@@ -403,8 +403,7 @@ fn loader_registry_matches_official_title_ids() {
             .compatible
     );
     assert!(
-        !me3
-            .iter()
+        !me3.iter()
             .find(|loader| loader.id == "lennys-mod-loader")
             .unwrap()
             .compatible
@@ -494,21 +493,15 @@ fn mod_engine_package_deploys_with_generated_profile() {
     };
     deploy_to(&dir, &target, &cfg).unwrap();
 
-    assert!(
-        target
-            .join(".union-manifold-me3/nexus-77/mod/parts/example.dcx")
-            .is_file()
-    );
-    assert!(
-        target
-            .join(".union-manifold-me3/nexus-77/natives/example.dll")
-            .is_file()
-    );
-    assert!(
-        !target
-            .join(".union-manifold-me3/nexus-77/mod/modengine2_launcher.exe")
-            .exists()
-    );
+    assert!(target
+        .join(".union-manifold-me3/nexus-77/mod/parts/example.dcx")
+        .is_file());
+    assert!(target
+        .join(".union-manifold-me3/nexus-77/natives/example.dll")
+        .is_file());
+    assert!(!target
+        .join(".union-manifold-me3/nexus-77/mod/modengine2_launcher.exe")
+        .exists());
     let profile = std::fs::read_to_string(target.join(MOD_ENGINE_PROFILE)).unwrap();
     assert!(profile.contains("game = \"eldenring\""));
     assert!(profile.contains(".union-manifold-me3/nexus-77/mod"));
@@ -570,7 +563,10 @@ fn fluffy_package_drops_manager_metadata_before_deploy() {
     let staged = dir.join("staging/nexus-44");
     write_file(&staged.join("Fluffy Mod/modinfo.ini"), "name=Example");
     write_file(&staged.join("Fluffy Mod/screenshot.png"), "preview");
-    write_file(&staged.join("Fluffy Mod/natives/stm/example.user.2"), "asset");
+    write_file(
+        &staged.join("Fluffy Mod/natives/stm/example.user.2"),
+        "asset",
+    );
 
     let plan = infer_deployment_plan(&target, &staged, None);
     assert_eq!(plan.layout, ModLayout::Fluffy);
