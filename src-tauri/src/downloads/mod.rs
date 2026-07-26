@@ -35,10 +35,14 @@ pub fn safe_folder_name(name: &str) -> String {
         return "unknown".to_string();
     }
     const RESERVED: &[&str] = &[
-        "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7",
-        "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+        "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
+        "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
     ];
-    let stem = trimmed.split('.').next().unwrap_or(trimmed).to_ascii_uppercase();
+    let stem = trimmed
+        .split('.')
+        .next()
+        .unwrap_or(trimmed)
+        .to_ascii_uppercase();
     if RESERVED.contains(&stem.as_str()) {
         return format!("_{trimmed}");
     }
@@ -46,7 +50,10 @@ pub fn safe_folder_name(name: &str) -> String {
 }
 
 fn sanitize_filename(name: &str) -> String {
-    let base = name.rsplit(|c| c == '/' || c == '\\').next().unwrap_or(name);
+    let base = name
+        .rsplit(|c| c == '/' || c == '\\')
+        .next()
+        .unwrap_or(name);
     let cleaned: String = base
         .chars()
         .map(|c| match c {
@@ -138,7 +145,12 @@ pub struct DownloadEngine {
 }
 
 impl DownloadEngine {
-    pub fn new(app: AppHandle, settings: Arc<crate::settings::SettingsStore>, default_root: PathBuf, aria2: Arc<Aria2Manager>) -> Arc<Self> {
+    pub fn new(
+        app: AppHandle,
+        settings: Arc<crate::settings::SettingsStore>,
+        default_root: PathBuf,
+        aria2: Arc<Aria2Manager>,
+    ) -> Arc<Self> {
         let engine = Arc::new(DownloadEngine {
             app,
             settings,
@@ -180,7 +192,13 @@ impl DownloadEngine {
         dir
     }
 
-    fn resolve_filename(&self, dir: &Path, filename: &Option<String>, url: &str, appid: &str) -> String {
+    fn resolve_filename(
+        &self,
+        dir: &Path,
+        filename: &Option<String>,
+        url: &str,
+        appid: &str,
+    ) -> String {
         if let Some(f) = filename {
             let t = f.trim();
             if !t.is_empty() {
@@ -190,7 +208,11 @@ impl DownloadEngine {
         let manifest = dir.join(MANIFEST_NAME);
         if let Ok(text) = std::fs::read_to_string(&manifest) {
             if let Ok(v) = serde_json::from_str::<Value>(&text) {
-                if let Some(name) = v.get("downloadSnapshot").and_then(|s| s.get("filename")).and_then(|f| f.as_str()) {
+                if let Some(name) = v
+                    .get("downloadSnapshot")
+                    .and_then(|s| s.get("filename"))
+                    .and_then(|f| f.as_str())
+                {
                     if !name.is_empty() {
                         return name.to_string();
                     }
@@ -199,10 +221,16 @@ impl DownloadEngine {
         }
         if let Ok(parsed) = url::Url::parse(url) {
             if let Some(last) = parsed.path_segments().and_then(|s| s.last()) {
-                let decoded = percent_encoding::percent_decode_str(last).decode_utf8_lossy().to_string();
+                let decoded = percent_encoding::percent_decode_str(last)
+                    .decode_utf8_lossy()
+                    .to_string();
                 let has_ext = decoded
                     .rsplit_once('.')
-                    .map(|(stem, ext)| !stem.is_empty() && (1..=6).contains(&ext.len()) && ext.chars().all(|c| c.is_ascii_alphanumeric()))
+                    .map(|(stem, ext)| {
+                        !stem.is_empty()
+                            && (1..=6).contains(&ext.len())
+                            && ext.chars().all(|c| c.is_ascii_alphanumeric())
+                    })
                     .unwrap_or(false);
                 if has_ext {
                     return decoded;
@@ -213,13 +241,26 @@ impl DownloadEngine {
     }
 
     pub fn enqueue(self: &Arc<Self>, req: DownloadRequest) -> Result<String> {
-        let DownloadRequest { appid, id, game_name, url, filename, total_bytes, headers, part_index, part_total } = req;
+        let DownloadRequest {
+            appid,
+            id,
+            game_name,
+            url,
+            filename,
+            total_bytes,
+            headers,
+            part_index,
+            part_total,
+        } = req;
         if appid.is_empty() {
             return Err(AppError::msg("appid required"));
         }
         let mut st = self.state.lock();
         if let Some(existing) = st.by_id.get(&id) {
-            if !matches!(existing.status.as_str(), "failed" | "cancelled" | "completed") {
+            if !matches!(
+                existing.status.as_str(),
+                "failed" | "cancelled" | "completed"
+            ) {
                 return Ok(id);
             }
             st.queue.retain(|x| x != &id);
@@ -395,13 +436,19 @@ impl DownloadEngine {
             }
         });
         self.maybe_start_next();
-        let status = if archive_complete { "install_ready" } else { "cancelled" };
+        let status = if archive_complete {
+            "install_ready"
+        } else {
+            "cancelled"
+        };
         json!({ "ok": true, "status": status, "downloadId": id, "appid": appid })
     }
 
     pub fn busy_appids(&self) -> (usize, Vec<String>) {
         let extracting: Vec<String> = self.extracting.lock().iter().cloned().collect();
-        let downloading = self.state.lock()
+        let downloading = self
+            .state
+            .lock()
             .by_id
             .values()
             .filter(|d| d.status == "downloading")
@@ -427,7 +474,8 @@ impl DownloadEngine {
     }
 
     pub fn appid_active(&self, appid: &str) -> bool {
-        self.state.lock()
+        self.state
+            .lock()
             .by_id
             .values()
             .any(|d| d.appid == appid && (d.status == "downloading" || d.status == "queued"))
@@ -461,7 +509,11 @@ impl DownloadEngine {
                 while let Some(id) = st.queue.first().cloned() {
                     st.queue.remove(0);
                     match st.by_id.get(&id) {
-                        Some(dl) if dl.status == "queued" || dl.status == "paused" || dl.status == "failed" => {
+                        Some(dl)
+                            if dl.status == "queued"
+                                || dl.status == "paused"
+                                || dl.status == "failed" =>
+                        {
                             chosen = Some(id);
                             break;
                         }
@@ -488,7 +540,9 @@ impl DownloadEngine {
             Some(d) => d,
             None => return,
         };
-        let offset = std::fs::metadata(&dl.save_path).map(|m| m.len()).unwrap_or(0);
+        let offset = std::fs::metadata(&dl.save_path)
+            .map(|m| m.len())
+            .unwrap_or(0);
         let control_present = PathBuf::from(format!("{}.aria2", dl.save_path.display())).exists();
         if offset > 0 && dl.total_bytes > 0 && offset >= dl.total_bytes && !control_present {
             dl.received_bytes = offset;
@@ -513,9 +567,16 @@ impl DownloadEngine {
         self.commit(&dl);
         self.emit(&dl);
 
-        let limit_kbps = self.settings.get("downloadBandwidthLimitKBps").as_u64().unwrap_or(0);
+        let limit_kbps = self
+            .settings
+            .get("downloadBandwidthLimitKBps")
+            .as_u64()
+            .unwrap_or(0);
         if !self.aria2.ensure_started(limit_kbps).await {
-            self.fail(&id, "aria2 downloader unavailable, run pnpm fetch-sidecars to bundle it");
+            self.fail(
+                &id,
+                "aria2 downloader unavailable, run pnpm fetch-sidecars to bundle it",
+            );
             return;
         }
         let conns = self
@@ -596,7 +657,10 @@ impl DownloadEngine {
             write_manifest(&dl);
             let lower = error.to_lowercase();
             if lower.contains("certificate") || lower.contains("ssl") || lower.contains("tls") {
-                let host = url::Url::parse(&dl.url).ok().and_then(|u| u.host_str().map(String::from)).unwrap_or_default();
+                let host = url::Url::parse(&dl.url)
+                    .ok()
+                    .and_then(|u| u.host_str().map(String::from))
+                    .unwrap_or_default();
                 self.app
                     .emit(
                         "uc:download-blocked",
@@ -616,7 +680,9 @@ impl DownloadEngine {
             let st = self.state.lock();
             st.by_id
                 .values()
-                .filter(|d| d.status != "completed" && d.status != "failed" && d.status != "cancelled")
+                .filter(|d| {
+                    d.status != "completed" && d.status != "failed" && d.status != "cancelled"
+                })
                 .filter_map(|d| d.gid.clone().map(|g| (d.id.clone(), g)))
                 .collect()
         };
@@ -651,13 +717,29 @@ impl DownloadEngine {
                 }
             };
             let s = status.get("status").and_then(|v| v.as_str()).unwrap_or("");
-            let completed = status.get("completedLength").and_then(|v| v.as_str()).and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
-            let total = status.get("totalLength").and_then(|v| v.as_str()).and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
-            let speed = status.get("downloadSpeed").and_then(|v| v.as_str()).and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
+            let completed = status
+                .get("completedLength")
+                .and_then(|v| v.as_str())
+                .and_then(|s| s.parse::<u64>().ok())
+                .unwrap_or(0);
+            let total = status
+                .get("totalLength")
+                .and_then(|v| v.as_str())
+                .and_then(|s| s.parse::<u64>().ok())
+                .unwrap_or(0);
+            let speed = status
+                .get("downloadSpeed")
+                .and_then(|v| v.as_str())
+                .and_then(|s| s.parse::<u64>().ok())
+                .unwrap_or(0);
             match s {
                 "complete" => self.finish_complete(&id).await,
                 "error" => {
-                    let msg = status.get("errorMessage").and_then(|v| v.as_str()).unwrap_or("aria2 error").to_string();
+                    let msg = status
+                        .get("errorMessage")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("aria2 error")
+                        .to_string();
                     self.finish_error(&id, &msg);
                 }
                 "removed" => {
@@ -672,11 +754,16 @@ impl DownloadEngine {
                         let mut st = self.state.lock();
                         match st.by_id.get_mut(&id) {
                             Some(dl) if !(dl.status == "paused" && s != "paused") => {
-                                let status = if s == "paused" { "paused" } else { "downloading" };
+                                let status = if s == "paused" {
+                                    "paused"
+                                } else {
+                                    "downloading"
+                                };
                                 let speed = if s == "paused" { 0 } else { speed };
                                 if dl.status == status
                                     && dl.received_bytes == completed
-                                    && dl.speed_bps / SPEED_EMIT_QUANTUM == speed / SPEED_EMIT_QUANTUM
+                                    && dl.speed_bps / SPEED_EMIT_QUANTUM
+                                        == speed / SPEED_EMIT_QUANTUM
                                 {
                                     None
                                 } else {
@@ -690,9 +777,14 @@ impl DownloadEngine {
                                     dl.status = status.to_string();
                                     dl.speed_bps = speed;
                                     let remaining = total.saturating_sub(completed);
-                                    dl.eta_seconds = if speed > 0 && remaining > 0 { Some(remaining / speed) } else { None };
+                                    dl.eta_seconds = if speed > 0 && remaining > 0 {
+                                        Some(remaining / speed)
+                                    } else {
+                                        None
+                                    };
                                     let write = status_changed
-                                        || dl.last_manifest_write.elapsed() >= MANIFEST_CHECKPOINT_INTERVAL;
+                                        || dl.last_manifest_write.elapsed()
+                                            >= MANIFEST_CHECKPOINT_INTERVAL;
                                     if write {
                                         dl.last_manifest_write = Instant::now();
                                     }
@@ -766,7 +858,9 @@ impl DownloadEngine {
                     done >= total
                 }
                 _ => !st.by_id.values().any(|d| {
-                    d.appid == dl.appid && d.id != dl.id && !matches!(d.status.as_str(), "completed" | "cancelled")
+                    d.appid == dl.appid
+                        && d.id != dl.id
+                        && !matches!(d.status.as_str(), "completed" | "cancelled")
                 }),
             }
         };
@@ -801,7 +895,10 @@ fn write_manifest(dl: &Download) {
         manifest.insert("appid".into(), json!(dl.appid));
     }
     if !manifest.contains_key("name") {
-        manifest.insert("name".into(), json!(dl.game_name.clone().unwrap_or_else(|| dl.appid.clone())));
+        manifest.insert(
+            "name".into(),
+            json!(dl.game_name.clone().unwrap_or_else(|| dl.appid.clone())),
+        );
     }
     let install_status = match dl.status.as_str() {
         "completed" => "downloaded",
@@ -853,7 +950,10 @@ pub fn write_json_atomic(path: &Path, value: &Value) -> std::io::Result<()> {
 
 pub fn write_manifest_atomic(path: &Path, manifest: &Value) {
     if let Err(e) = write_json_atomic(path, manifest) {
-        crate::logging::write_line("warn", &format!("manifest write failed {}: {e}", path.display()));
+        crate::logging::write_line(
+            "warn",
+            &format!("manifest write failed {}: {e}", path.display()),
+        );
     }
 }
 
@@ -872,12 +972,33 @@ fn to_headers(v: Option<Value>) -> Option<HashMap<String, String>> {
 #[tauri::command(async)]
 pub fn download_start(state: State<'_, AppState>, payload: Value) -> Value {
     let req = DownloadRequest {
-        appid: payload.get("appid").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-        id: payload.get("downloadId").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-        url: payload.get("url").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-        filename: payload.get("filename").and_then(|v| v.as_str()).map(String::from),
-        game_name: payload.get("gameName").and_then(|v| v.as_str()).map(String::from),
-        total_bytes: payload.get("totalBytes").and_then(|v| v.as_u64()).unwrap_or(0),
+        appid: payload
+            .get("appid")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string(),
+        id: payload
+            .get("downloadId")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string(),
+        url: payload
+            .get("url")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string(),
+        filename: payload
+            .get("filename")
+            .and_then(|v| v.as_str())
+            .map(String::from),
+        game_name: payload
+            .get("gameName")
+            .and_then(|v| v.as_str())
+            .map(String::from),
+        total_bytes: payload
+            .get("totalBytes")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0),
         headers: to_headers(payload.get("headers").cloned()),
         part_index: payload.get("partIndex").and_then(|v| v.as_u64()),
         part_total: payload.get("partTotal").and_then(|v| v.as_u64()),
@@ -916,9 +1037,18 @@ fn prune_dead_downloads(downloads: &mut Value) -> usize {
         return 0;
     };
     let before = arr.len();
-    arr.retain(|d| match d.get("savePath").and_then(|p| p.as_str()).filter(|s| !s.is_empty()) {
-        Some(save) => std::path::Path::new(save).parent().map(|dir| dir.exists()).unwrap_or(true),
-        None => true,
+    arr.retain(|d| {
+        match d
+            .get("savePath")
+            .and_then(|p| p.as_str())
+            .filter(|s| !s.is_empty())
+        {
+            Some(save) => std::path::Path::new(save)
+                .parent()
+                .map(|dir| dir.exists())
+                .unwrap_or(true),
+            None => true,
+        }
     });
     before - arr.len()
 }
@@ -972,7 +1102,11 @@ pub fn catalog_state_save(state: State<'_, AppState>, payload: Value) -> Value {
     if let Some(obj) = stored.as_object_mut() {
         obj.insert("updatedAt".into(), json!(now_ms()));
     }
-    let games = payload.get("games").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0);
+    let games = payload
+        .get("games")
+        .and_then(|v| v.as_array())
+        .map(|a| a.len())
+        .unwrap_or(0);
     match write_json_atomic(&path, &stored) {
         Ok(_) => json!({ "ok": true, "games": games, "updatedAt": now_ms() }),
         Err(e) => json!({ "ok": false, "error": e.to_string() }),
@@ -1077,7 +1211,10 @@ mod tests {
         ]);
 
         let dropped = prune_dead_downloads(&mut downloads);
-        assert_eq!(dropped, 1, "only the row with a missing parent dir is pruned");
+        assert_eq!(
+            dropped, 1,
+            "only the row with a missing parent dir is pruned"
+        );
 
         let kept: Vec<&str> = downloads
             .as_array()

@@ -17,9 +17,7 @@ use sha1::{Digest, Sha1};
 use sha2::Sha256;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_opener::OpenerExt;
-use tokio::io::{
-    AsyncBufReadExt, AsyncReadExt, AsyncSeekExt, AsyncWriteExt, BufReader,
-};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncSeekExt, AsyncWriteExt, BufReader};
 use tokio::net::{tcp::OwnedWriteHalf, TcpListener};
 use tokio::sync::{Mutex, RwLock};
 
@@ -32,8 +30,7 @@ const RELEASES_BASE_URL: &str = "https://storage-cdn.wemod.com/app/releases/stab
 const API_URL: &str = "https://api.wemod.com";
 const OAUTH_URL: &str = "https://wand.com/oauth/authorize";
 const OAUTH_REDIRECT: &str = "wemod://oauth";
-const AUTH_USER_AGENT: &str =
-    concat!("Union.Manifold/", env!("CARGO_PKG_VERSION"), " Wand/0.0.0");
+const AUTH_USER_AGENT: &str = concat!("Union.Manifold/", env!("CARGO_PKG_VERSION"), " Wand/0.0.0");
 const CATALOG_TTL: Duration = Duration::from_secs(6 * 60 * 60);
 
 type WandCatalogCache = Option<(Instant, Arc<WandCatalog>)>;
@@ -246,10 +243,8 @@ fn latest_runtime_release(releases: &str) -> Option<WandRelease> {
 fn trainerlib_dir(runtime: &Path) -> Option<PathBuf> {
     [
         runtime.join("trainerlib"),
-        runtime
-            .join("lib/net45/resources/app.asar.unpacked/static/unpacked/trainerlib"),
-        runtime
-            .join("lib/net45/resources/wand.asar.unpacked/static/unpacked/trainerlib"),
+        runtime.join("lib/net45/resources/app.asar.unpacked/static/unpacked/trainerlib"),
+        runtime.join("lib/net45/resources/wand.asar.unpacked/static/unpacked/trainerlib"),
     ]
     .into_iter()
     .find(|path| {
@@ -516,8 +511,7 @@ pub fn handle_deep_link(app: &AppHandle, uri: &str) {
         .await;
         match result {
             Ok(()) => {
-                app.emit("uc:wand-auth-changed", json!({ "ok": true }))
-                    .ok();
+                app.emit("uc:wand-auth-changed", json!({ "ok": true })).ok();
             }
             Err(error) => {
                 app.emit(
@@ -549,7 +543,10 @@ pub async fn wand_auth_begin(app: AppHandle, state: State<'_, AppState>) -> Resu
     let oauth_state = URL_SAFE_NO_PAD.encode(state_bytes);
     let challenge = URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes()));
     let url = oauth_url(&challenge, &oauth_state, &installation_id(&state))?;
-    *OAUTH_PENDING.lock().await = Some(OAuthPending { state: oauth_state, verifier });
+    *OAUTH_PENDING.lock().await = Some(OAuthPending {
+        state: oauth_state,
+        verifier,
+    });
     if let Err(error) = app.opener().open_url(url.as_str(), None::<&str>) {
         OAUTH_PENDING.lock().await.take();
         return Err(AppError::msg(format!("open Wand login: {error}")));
@@ -691,10 +688,7 @@ async fn fetch_trainer(matched: &WandMatch, auth: &WandAuth) -> Result<Value> {
                     "Authorization".to_string(),
                     format!("Bearer {}", auth.access_token),
                 ),
-                (
-                    "X-Super-Properties".to_string(),
-                    STANDARD.encode("{}"),
-                ),
+                ("X-Super-Properties".to_string(), STANDARD.encode("{}")),
             ]),
             retries: Some(0),
             timeout: Some(Duration::from_secs(30)),
@@ -793,7 +787,9 @@ async fn download_trainer(data_dir: &Path, loader: &WandLoader) -> Result<PathBu
     drop(file);
     if hex::encode(hasher.finalize()) != loader.binary_hash {
         let _ = tokio::fs::remove_file(&temporary).await;
-        return Err(AppError::msg("Downloaded Wand trainer failed integrity verification"));
+        return Err(AppError::msg(
+            "Downloaded Wand trainer failed integrity verification",
+        ));
     }
     tokio::fs::rename(&temporary, &path)
         .await
@@ -808,10 +804,8 @@ async fn trainer_arch(path: &Path) -> Result<&'static str> {
     file.seek(std::io::SeekFrom::Start(0x3c)).await?;
     let mut offset = [0u8; 4];
     file.read_exact(&mut offset).await?;
-    file.seek(std::io::SeekFrom::Start(
-        u32::from_le_bytes(offset) as u64,
-    ))
-    .await?;
+    file.seek(std::io::SeekFrom::Start(u32::from_le_bytes(offset) as u64))
+        .await?;
     let mut header = [0u8; 6];
     file.read_exact(&mut header).await?;
     if &header[..4] != b"PE\0\0" {
@@ -820,7 +814,9 @@ async fn trainer_arch(path: &Path) -> Result<&'static str> {
     match u16::from_le_bytes([header[4], header[5]]) {
         0x8664 => Ok("x64"),
         0x014c => Ok("x86"),
-        _ => Err(AppError::msg("Wand trainer uses an unsupported architecture")),
+        _ => Err(AppError::msg(
+            "Wand trainer uses an unsupported architecture",
+        )),
     }
 }
 
@@ -947,8 +943,7 @@ async fn start_host(
         host_args.push(variable.clone());
     }
 
-    let mut command =
-        trainer_host_command(state, appid, game_executable, &host, &host_args)?;
+    let mut command = trainer_host_command(state, appid, game_executable, &host, &host_args)?;
 
     command
         .current_dir(trainerlib.parent().unwrap_or(Path::new(".")))
@@ -1055,7 +1050,10 @@ async fn start_host(
                 .ok();
         }
         let mut sessions = SESSIONS.lock().await;
-        if sessions.get(&session_appid).is_some_and(|session| session.id == id) {
+        if sessions
+            .get(&session_appid)
+            .is_some_and(|session| session.id == id)
+        {
             sessions.remove(&session_appid);
         }
         drop(sessions);
@@ -1219,7 +1217,10 @@ mod tests {
     fn oauth_uses_the_official_callback_and_installation_context() {
         let url = oauth_url("challenge", "state", "installation").unwrap();
         let query: HashMap<_, _> = url.query_pairs().into_owned().collect();
-        assert_eq!(query.get("redirect_uri").map(String::as_str), Some("wemod://oauth"));
+        assert_eq!(
+            query.get("redirect_uri").map(String::as_str),
+            Some("wemod://oauth")
+        );
         assert_eq!(
             query.get("installation_id").map(String::as_str),
             Some("installation")
@@ -1237,7 +1238,9 @@ mod tests {
         ])
         .await
         .unwrap_err();
-        assert!(error.to_string().contains("Cannot decrypt the authorization code"));
+        assert!(error
+            .to_string()
+            .contains("Cannot decrypt the authorization code"));
     }
 
     #[test]

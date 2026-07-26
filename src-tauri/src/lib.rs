@@ -59,7 +59,8 @@ fn emit_deep_link(app: &tauri::AppHandle, arg: &str) {
         .unwrap_or_else(|| arg.to_string());
     show_main_window(app);
     if let Some(main) = app.get_webview_window("main") {
-        main.emit("uc:navigation-action", serde_json::json!({ "path": path })).ok();
+        main.emit("uc:navigation-action", serde_json::json!({ "path": path }))
+            .ok();
     }
 }
 
@@ -79,7 +80,10 @@ fn install_panic_hook() {
         let thread = std::thread::current();
         logging::write_line(
             "fatal",
-            &format!("panic on thread '{}' at {location}: {msg}", thread.name().unwrap_or("<unnamed>")),
+            &format!(
+                "panic on thread '{}' at {location}: {msg}",
+                thread.name().unwrap_or("<unnamed>")
+            ),
         );
         default_hook(info);
     }));
@@ -107,7 +111,10 @@ pub fn run() {
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, None))
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
         .register_asynchronous_uri_scheme_protocol("uc-asset", |ctx, request, responder| {
             let app = ctx.app_handle().clone();
             let uri = request.uri().to_string();
@@ -137,12 +144,24 @@ pub fn run() {
             let disabled_sources: Vec<String> = settings
                 .get("disabledSources")
                 .as_array()
-                .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .map(|id| {
+                            if id == "rexagames" {
+                                "zeigames".to_string()
+                            } else {
+                                id
+                            }
+                        })
+                        .collect()
+                })
                 .unwrap_or_default();
             let sources = Arc::new(Registry::new(&disabled_sources));
             let sources_warm = sources.clone();
             let default_root = default_download_root(&paths.data_dir);
-            let downloads = DownloadEngine::new(handle.clone(), settings.clone(), default_root, aria2);
+            let downloads =
+                DownloadEngine::new(handle.clone(), settings.clone(), default_root, aria2);
             let achievements = AchievementService::new(paths.data_dir.join("achievements.json"));
             let managed_paths = paths.clone();
             let managed_settings = settings.clone();
@@ -167,7 +186,11 @@ pub fn run() {
             build_tray(app)?;
             {
                 let state: tauri::State<AppState> = app.state();
-                let start_minimized = state.settings.get("startMinimized").as_bool().unwrap_or(false);
+                let start_minimized = state
+                    .settings
+                    .get("startMinimized")
+                    .as_bool()
+                    .unwrap_or(false);
                 if start_minimized {
                     if let Some(main) = app.get_webview_window("main") {
                         main.hide().ok();
@@ -175,7 +198,12 @@ pub fn run() {
                 } else {
                     show_main_window(&handle);
                 }
-                if state.settings.get("autoCheckUpdates").as_bool().unwrap_or(true) {
+                if state
+                    .settings
+                    .get("autoCheckUpdates")
+                    .as_bool()
+                    .unwrap_or(true)
+                {
                     let handle2 = handle.clone();
                     tauri::async_runtime::spawn(async move {
                         tokio::time::sleep(std::time::Duration::from_secs(20)).await;

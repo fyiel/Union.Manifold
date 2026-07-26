@@ -19,14 +19,33 @@ fn stable_local_id(path: &str) -> String {
 }
 
 fn prettify_stem(path: &Path) -> String {
-    let stem = path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
-    let cleaned: String = stem.chars().map(|c| if c == '_' || c == '.' || c == '-' { ' ' } else { c }).collect();
+    let stem = path
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let cleaned: String = stem
+        .chars()
+        .map(|c| {
+            if c == '_' || c == '.' || c == '-' {
+                ' '
+            } else {
+                c
+            }
+        })
+        .collect();
     let trimmed = cleaned.split_whitespace().collect::<Vec<_>>().join(" ");
-    if trimmed.is_empty() { stem } else { trimmed }
+    if trimmed.is_empty() {
+        stem
+    } else {
+        trimmed
+    }
 }
 
 fn write_import_manifest(state: &AppState, manifest: &Value) -> Result<(), String> {
-    let name = manifest.get("name").and_then(|v| v.as_str()).unwrap_or("game");
+    let name = manifest
+        .get("name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("game");
     let dir = state.download_root().join(safe_folder_name(name));
     std::fs::create_dir_all(&dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
     write_manifest_atomic(&dir.join(MANIFEST_NAME), manifest);
@@ -35,7 +54,11 @@ fn write_import_manifest(state: &AppState, manifest: &Value) -> Result<(), Strin
 }
 
 #[tauri::command]
-pub async fn import_exe(state: State<'_, AppState>, exe_path: String, name: Option<String>) -> Result<Value, String> {
+pub async fn import_exe(
+    state: State<'_, AppState>,
+    exe_path: String,
+    name: Option<String>,
+) -> Result<Value, String> {
     let exe = Path::new(&exe_path);
     if !exe.is_file() {
         return Ok(json!({ "ok": false, "error": "executable not found" }));
@@ -50,7 +73,10 @@ pub async fn import_exe(state: State<'_, AppState>, exe_path: String, name: Opti
         .filter(|n| !n.is_empty())
         .unwrap_or_else(|| prettify_stem(exe));
     let size = std::fs::metadata(exe).map(|m| m.len()).unwrap_or(0);
-    let install_dir = exe.parent().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
+    let install_dir = exe
+        .parent()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_default();
     let steam_app_id = crate::sources::steam::search_app_id(&name).await;
     let mut manifest = json!({
         "appid": appid,
@@ -67,23 +93,33 @@ pub async fn import_exe(state: State<'_, AppState>, exe_path: String, name: Opti
         manifest["metadata"]["image"] = json!(crate::sources::steam::resolve_cover(id).await);
     }
     Ok(match write_import_manifest(&state, &manifest) {
-        Ok(()) => json!({ "ok": true, "appid": appid, "name": name, "exePath": exe_path, "steamAppId": steam_app_id }),
+        Ok(()) => {
+            json!({ "ok": true, "appid": appid, "name": name, "exePath": exe_path, "steamAppId": steam_app_id })
+        }
         Err(e) => json!({ "ok": false, "error": e }),
     })
 }
 
 #[tauri::command]
-pub async fn import_set_steam_appid(state: State<'_, AppState>, appid: String, steam_appid: u64) -> Result<Value, String> {
+pub async fn import_set_steam_appid(
+    state: State<'_, AppState>,
+    appid: String,
+    steam_appid: u64,
+) -> Result<Value, String> {
     let cover = crate::sources::steam::resolve_cover(steam_appid).await;
     let mut metadata = json!({ "image": cover, "steamAppId": steam_appid });
     if let Some(name) = crate::sources::steam::app_name(steam_appid).await {
         metadata["name"] = json!(name);
     }
     let roots = library::scan_roots(&state);
-    let ok = library::merge_into_manifest(&roots, &appid, &json!({
-        "steamAppId": steam_appid,
-        "metadata": metadata,
-    }));
+    let ok = library::merge_into_manifest(
+        &roots,
+        &appid,
+        &json!({
+            "steamAppId": steam_appid,
+            "metadata": metadata,
+        }),
+    );
     Ok(json!({ "ok": ok }))
 }
 
@@ -165,7 +201,10 @@ fn steam_library_dirs() -> Vec<PathBuf> {
             }
         };
         push(steamapps.clone());
-        for vdf in [steamapps.join("libraryfolders.vdf"), root.join("config/libraryfolders.vdf")] {
+        for vdf in [
+            steamapps.join("libraryfolders.vdf"),
+            root.join("config/libraryfolders.vdf"),
+        ] {
             if let Ok(text) = std::fs::read_to_string(vdf) {
                 for (key, value) in vdf_pairs(&text) {
                     if key == "path" {
@@ -235,8 +274,16 @@ pub fn steam_library_scan(state: State<'_, AppState>) -> Value {
         }
     }
     apps.sort_by(|a, b| {
-        a.get("name").and_then(|v| v.as_str()).unwrap_or("").to_lowercase()
-            .cmp(&b.get("name").and_then(|v| v.as_str()).unwrap_or("").to_lowercase())
+        a.get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_lowercase()
+            .cmp(
+                &b.get("name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_lowercase(),
+            )
     });
     json!({ "ok": true, "steamFound": !steam_roots().is_empty(), "found": !apps.is_empty(), "apps": apps })
 }
@@ -253,7 +300,10 @@ pub struct SteamImportApp {
 }
 
 #[tauri::command]
-pub async fn steam_library_import(state: State<'_, AppState>, apps: Vec<SteamImportApp>) -> Result<Value, String> {
+pub async fn steam_library_import(
+    state: State<'_, AppState>,
+    apps: Vec<SteamImportApp>,
+) -> Result<Value, String> {
     let roots = library::scan_roots(&state);
     let existing: HashSet<String> = library::all_appids(&roots).into_iter().collect();
     let mut imported = 0u32;
@@ -302,8 +352,14 @@ mod tests {
     #[test]
     fn vdf_pairs_reads_library_paths() {
         let text = "\"libraryfolders\"\n{\n\t\"0\"\n\t{\n\t\t\"path\"\t\t\"/home/me/.local/share/Steam\"\n\t}\n\t\"1\"\n\t{\n\t\t\"path\"\t\t\"/mnt/games/SteamLibrary\"\n\t}\n}\n";
-        let paths: Vec<String> = vdf_pairs(text).filter(|(k, _)| k == "path").map(|(_, v)| v).collect();
-        assert_eq!(paths, vec!["/home/me/.local/share/Steam", "/mnt/games/SteamLibrary"]);
+        let paths: Vec<String> = vdf_pairs(text)
+            .filter(|(k, _)| k == "path")
+            .map(|(_, v)| v)
+            .collect();
+        assert_eq!(
+            paths,
+            vec!["/home/me/.local/share/Steam", "/mnt/games/SteamLibrary"]
+        );
     }
 
     #[test]
@@ -316,6 +372,9 @@ mod tests {
 
     #[test]
     fn prettify_stem_cleans_separators() {
-        assert_eq!(prettify_stem(Path::new("/g/My_Cool.Game-v1.exe")), "My Cool Game v1");
+        assert_eq!(
+            prettify_stem(Path::new("/g/My_Cool.Game-v1.exe")),
+            "My Cool Game v1"
+        );
     }
 }

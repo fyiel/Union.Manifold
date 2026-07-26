@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use parking_lot::Mutex;
@@ -335,10 +335,7 @@ fn merge_game(
                 .cloned(),
         );
     }
-    if !state_loaded
-        && !next.catalog_complete
-        && previous.provider != "Awaiting local data"
-    {
+    if !state_loaded && !next.catalog_complete && previous.provider != "Awaiting local data" {
         next.provider = previous.provider.clone();
         next.catalog_complete = previous.catalog_complete;
     }
@@ -660,24 +657,14 @@ fn add_global_states(context: &GameContext, saves_folder: &str, states: &mut Vec
         if let Ok(entries) = std::fs::read_dir(&users) {
             for entry in entries.flatten().filter(|entry| entry.path().is_dir()) {
                 let user = entry.path();
-                add_roaming_states(
-                    states,
-                    &user.join("AppData/Roaming"),
-                    saves_folder,
-                    &appid,
-                );
+                add_roaming_states(states, &user.join("AppData/Roaming"), saves_folder, &appid);
                 add_document_states(states, &user.join("Documents"), &appid);
             }
         }
     }
 }
 
-fn add_roaming_states(
-    states: &mut Vec<PathBuf>,
-    roaming: &Path,
-    saves_folder: &str,
-    appid: &str,
-) {
+fn add_roaming_states(states: &mut Vec<PathBuf>, roaming: &Path, saves_folder: &str, appid: &str) {
     for folder in [
         saves_folder,
         "GSE Saves",
@@ -764,10 +751,7 @@ fn parse_json_definitions(path: &Path) -> Option<Vec<AchievementDefinition>> {
     parse_json_definition_value(value, path.parent()?)
 }
 
-fn parse_json_definition_value(
-    value: Value,
-    root: &Path,
-) -> Option<Vec<AchievementDefinition>> {
+fn parse_json_definition_value(value: Value, root: &Path) -> Option<Vec<AchievementDefinition>> {
     let mut definitions = Vec::new();
     match value {
         Value::Array(items) => {
@@ -797,16 +781,30 @@ fn parse_json_definition_value(
     (!definitions.is_empty()).then_some(definitions)
 }
 
+static BUNDLED_DEFINITIONS: LazyLock<HashMap<u64, Vec<AchievementDefinition>>> =
+    LazyLock::new(|| {
+        let Ok(Value::Object(catalogs)) =
+            serde_json::from_str::<Value>(include_str!("../resources/achievements/installed.json"))
+        else {
+            return HashMap::new();
+        };
+        catalogs
+            .into_iter()
+            .filter_map(|(appid, value)| {
+                Some((
+                    appid.parse().ok()?,
+                    parse_json_definition_value(value, Path::new(""))?,
+                ))
+            })
+            .collect()
+    });
+
 fn has_bundled_definitions(steam_app_id: Option<u64>) -> bool {
-    matches!(steam_app_id, Some(686060))
+    steam_app_id.is_some_and(|appid| BUNDLED_DEFINITIONS.contains_key(&appid))
 }
 
 fn bundled_definitions(steam_app_id: Option<u64>) -> Option<Vec<AchievementDefinition>> {
-    let value = match steam_app_id {
-        Some(686060) => include_str!("../resources/achievements/686060.json"),
-        _ => return None,
-    };
-    parse_json_definition_value(serde_json::from_str(value).ok()?, Path::new(""))
+    BUNDLED_DEFINITIONS.get(&steam_app_id?).cloned()
 }
 
 struct BinaryKeyValues<'a> {
@@ -881,8 +879,8 @@ fn parse_steam_definitions(path: &Path) -> Option<Vec<AchievementDefinition>> {
                 continue;
             };
             for bit in bits.values().filter_map(Value::as_object) {
-                let Some(api_name) = string_value_ci(bit, &["name"])
-                    .filter(|value| !value.is_empty())
+                let Some(api_name) =
+                    string_value_ci(bit, &["name"]).filter(|value| !value.is_empty())
                 else {
                     continue;
                 };
@@ -952,7 +950,7 @@ fn definition_from_value(
         object,
         &["icongray", "icon_gray", "icon_locked", "iconLocked"],
     )
-        .and_then(|value| resolve_icon(root, &value));
+    .and_then(|value| resolve_icon(root, &value));
     Some(AchievementDefinition {
         api_name,
         display_name,
@@ -1143,7 +1141,13 @@ fn parse_ini_state(text: &str) -> HashMap<String, UnlockState> {
             || matches!((progress, maximum), (Some(current), Some(maximum)) if maximum > 0.0 && current >= maximum);
         let unlocked_at = map_value_any_ci(
             values,
-            &["UnlockTime", "unlocktime", "HaveAchievedTime", "Time"],
+            &[
+                "UnlockTime",
+                "unlocktime",
+                "HaveAchievedTime",
+                "Time",
+                "timestamp",
+            ],
         )
         .and_then(timestamp_text);
         state.insert(
@@ -1675,29 +1679,38 @@ mod tests {
     }
 
     #[test]
-    fn scans_mewgenics_with_bundled_catalog_and_local_unlock_state() {
+    fn scans_mewgenics_with_bundled_catalog_and_gbe_unlock_state() {
         let temp = tempfile::tempdir().unwrap();
-        let state = temp.path().join("achievements.ini");
-        std::fs::write(&state, "[Achievements]\nmap_unlock_sewers=true\n").unwrap();
+        let install_dir = temp.path().join("game");
+        let prefix = temp.path().join("pfx");
+        let state = prefix
+            .join("drive_c/users/steamuser/AppData/Roaming/GSE Saves/686060/achievements.json");
+        std::fs::create_dir_all(state.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(&install_dir).unwrap();
+        std::fs::write(
+            &state,
+            serde_json::to_vec(&json!({
+                "map_unlock_sewers": {
+                    "earned": true,
+                    "earned_time": 1_710_000_000
+                }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
         let context = GameContext {
             appid: "steam-686060".to_string(),
             steam_app_id: Some(686060),
             title: "Mewgenics".to_string(),
             image: None,
-            install_dir: temp.path().to_path_buf(),
+            install_dir,
             exe_path: None,
-            prefixes: Vec::new(),
+            prefixes: vec![prefix],
         };
-        let scanned = scan_discovery(
-            &context,
-            &Discovery {
-                definitions: None,
-                states: vec![state],
-                provider: "Steam catalog".to_string(),
-            },
-        )
-        .unwrap();
+        let scanned = scan_game(&context).unwrap();
 
+        assert!(scanned.state_loaded);
+        assert_eq!(scanned.game.provider, "GSE local");
         assert!(scanned.game.catalog_complete);
         assert_eq!(scanned.game.achievements.len(), 281);
         let sewers = scanned
@@ -1711,6 +1724,90 @@ mod tests {
         assert!(sewers.icon.is_some());
         assert!(sewers.icon_locked.is_some());
         assert!(sewers.unlocked);
+        assert_eq!(sewers.unlocked_at, Some(1_710_000_000_000));
+    }
+
+    #[test]
+    fn bundled_catalogs_cover_supported_installed_games() {
+        let expected_counts = [
+            (240720, 3),
+            (242050, 60),
+            (246840, 10),
+            (493520, 57),
+            (526870, 44),
+            (686060, 281),
+            (714010, 100),
+            (881100, 14),
+            (941460, 28),
+            (1245620, 42),
+            (1554260, 53),
+            (1703340, 11),
+            (1939970, 26),
+            (2060160, 59),
+            (3008130, 42),
+            (3195790, 62),
+            (3228590, 58),
+            (3319120, 11),
+            (3495730, 22),
+            (3564740, 61),
+            (3946810, 13),
+            (4173750, 30),
+        ];
+
+        for (appid, count) in expected_counts {
+            let definitions = bundled_definitions(Some(appid)).unwrap();
+            assert_eq!(definitions.len(), count, "catalog {appid}");
+            assert!(definitions.iter().all(|definition| {
+                !definition.api_name.is_empty()
+                    && !definition.display_name.is_empty()
+                    && definition.icon.is_some()
+                    && definition.icon_locked.is_some()
+            }));
+        }
+
+        let dying_light = bundled_definitions(Some(3008130)).unwrap();
+        let apex_predator = dying_light
+            .iter()
+            .find(|definition| definition.api_name.eq_ignore_ascii_case("ACH_18"))
+            .unwrap();
+        assert_eq!(apex_predator.display_name, "Apex Predator");
+        assert_eq!(apex_predator.description, "Kill a Volatile");
+    }
+
+    #[test]
+    fn scans_onlinefix_state_with_bundled_catalog() {
+        let temp = tempfile::tempdir().unwrap();
+        let install_dir = temp.path().join("game");
+        let prefix = temp.path().join("pfx");
+        let state =
+            prefix.join("drive_c/users/Public/Documents/OnlineFix/3008130/Stats/Achievements.ini");
+        std::fs::create_dir_all(state.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(&install_dir).unwrap();
+        std::fs::write(&state, "[ACH_18]\nachieved=true\ntimestamp=1710000000\n").unwrap();
+        let context = GameContext {
+            appid: "steam-3008130".to_string(),
+            steam_app_id: Some(3008130),
+            title: "Dying Light: The Beast".to_string(),
+            image: None,
+            install_dir,
+            exe_path: None,
+            prefixes: vec![prefix],
+        };
+        let scanned = scan_game(&context).unwrap();
+
+        assert!(scanned.state_loaded);
+        assert_eq!(scanned.game.provider, "OnlineFix local");
+        assert!(scanned.game.catalog_complete);
+        assert_eq!(scanned.game.achievements.len(), 42);
+        let achievement = scanned
+            .game
+            .achievements
+            .iter()
+            .find(|achievement| achievement.api_name.eq_ignore_ascii_case("ACH_18"))
+            .unwrap();
+        assert_eq!(achievement.display_name, "Apex Predator");
+        assert!(achievement.unlocked);
+        assert_eq!(achievement.unlocked_at, Some(1_710_000_000_000));
     }
 
     #[test]

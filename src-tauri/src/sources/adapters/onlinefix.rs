@@ -26,7 +26,8 @@ static DETAIL_CACHE: LazyLock<KeyedCache<SourceGame>> =
     LazyLock::new(|| KeyedCache::new(DETAIL_TTL));
 
 static RESULT_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"(?i)href="(https://online-fix\.me/(?:[a-z0-9_-]+/)*\d+-[a-z0-9-]+\.html)""#).unwrap()
+    Regex::new(r#"(?i)href="(https://online-fix\.me/(?:[a-z0-9_-]+/)*\d+-[a-z0-9-]+\.html)""#)
+        .unwrap()
 });
 static ANCHOR_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"(?is)<a\b[^>]*href="([^"]+)"[^>]*>(.*?)</a>"#).unwrap());
@@ -68,7 +69,10 @@ pub async fn get_detail(slug: &str) -> Option<SourceGame> {
             if let Some(scraped) = scrape_downloads(&game.title).await {
                 let mut opts = scraped;
                 for m in std::mem::take(&mut game.download_options) {
-                    if !opts.iter().any(|o| o.url == m.url && o.page_url == m.page_url) {
+                    if !opts
+                        .iter()
+                        .any(|o| o.url == m.url && o.page_url == m.page_url)
+                    {
                         opts.push(m);
                     }
                 }
@@ -291,7 +295,10 @@ mod tests {
         let torrent = classify("https://example.com/game.torrent");
         assert_eq!(torrent.host_type, "torrent");
         assert_eq!(torrent.label, "torrent (file)");
-        assert_eq!(torrent.url.as_deref(), Some("https://example.com/game.torrent"));
+        assert_eq!(
+            torrent.url.as_deref(),
+            Some("https://example.com/game.torrent")
+        );
         assert!(!torrent.resolvable);
 
         let hosters = classify("https://hosters.online-fix.me:2053/Game");
@@ -322,7 +329,10 @@ mod tests {
 
     #[test]
     fn squash_strips_punctuation_and_lowercases() {
-        assert_eq!(squash("Dead or Alive 6: Last Round!"), "deadoralive6lastround");
+        assert_eq!(
+            squash("Dead or Alive 6: Last Round!"),
+            "deadoralive6lastround"
+        );
         assert_eq!(squash("Marvel's Spider-Man"), "marvelsspiderman");
     }
 }

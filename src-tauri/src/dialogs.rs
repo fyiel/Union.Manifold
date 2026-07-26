@@ -29,7 +29,8 @@ async fn pick_files(app: AppHandle, exts: &[&str]) -> Vec<String> {
         builder = builder.add_filter("files", exts);
     }
     builder.pick_files(move |paths| {
-        tx.send(paths.map(|list| list.into_iter().map(|p| p.to_string()).collect::<Vec<_>>())).ok();
+        tx.send(paths.map(|list| list.into_iter().map(|p| p.to_string()).collect::<Vec<_>>()))
+            .ok();
     });
     rx.await.ok().flatten().unwrap_or_default()
 }
@@ -60,7 +61,11 @@ pub async fn pick_image(app: AppHandle) -> Value {
 
 #[tauri::command]
 pub async fn browse_for_game_exe(app: AppHandle, _default_path: Option<String>) -> Value {
-    let exts: &[&str] = if cfg!(windows) { &["exe"] } else { &["exe", "sh", "x86_64", "bin"] };
+    let exts: &[&str] = if cfg!(windows) {
+        &["exe"]
+    } else {
+        &["exe", "sh", "x86_64", "bin"]
+    };
     match pick_file(app, exts).await {
         Some(p) => json!({ "ok": true, "path": p }),
         None => json!({ "ok": false }),

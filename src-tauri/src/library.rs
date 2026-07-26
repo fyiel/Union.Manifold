@@ -10,7 +10,15 @@ use crate::downloads::{now_ms, MANIFEST_NAME};
 use crate::state::AppState;
 
 const INSTALLED: &[&str] = &["installed"];
-const INSTALLING: &[&str] = &["installing", "queued", "paused", "downloaded", "extracting", "failed", "cancelled"];
+const INSTALLING: &[&str] = &[
+    "installing",
+    "queued",
+    "paused",
+    "downloaded",
+    "extracting",
+    "failed",
+    "cancelled",
+];
 
 static SCAN_CACHE: Mutex<Option<(Instant, String, Vec<(PathBuf, Value)>)>> = Mutex::new(None);
 static SCAN_GATE: Mutex<()> = Mutex::new(());
@@ -68,7 +76,9 @@ fn roots_key(roots: &[PathBuf]) -> String {
 fn cached_scan(key: &str) -> Option<Vec<(PathBuf, Value)>> {
     let guard = SCAN_CACHE.lock();
     match guard.as_ref() {
-        Some((at, cached_key, data)) if cached_key == key && at.elapsed() < SCAN_TTL => Some(data.clone()),
+        Some((at, cached_key, data)) if cached_key == key && at.elapsed() < SCAN_TTL => {
+            Some(data.clone())
+        }
         _ => None,
     }
 }
@@ -111,7 +121,8 @@ fn load_all(roots: &[PathBuf]) -> Vec<(PathBuf, Value)> {
                         if !obj.contains_key("installStatus") && obj.contains_key("appid") {
                             obj.insert("installStatus".into(), json!("installed"));
                         }
-                        obj.entry("installPath").or_insert(json!(dir.to_string_lossy()));
+                        obj.entry("installPath")
+                            .or_insert(json!(dir.to_string_lossy()));
                         obj.insert("folder".into(), json!(dir.to_string_lossy()));
                     }
                     if let Some(id) = v.get("appid").and_then(|a| a.as_str()) {
@@ -128,7 +139,10 @@ fn load_all(roots: &[PathBuf]) -> Vec<(PathBuf, Value)> {
 }
 
 fn status_of(v: &Value) -> String {
-    v.get("installStatus").and_then(|s| s.as_str()).unwrap_or("").to_string()
+    v.get("installStatus")
+        .and_then(|s| s.as_str())
+        .unwrap_or("")
+        .to_string()
 }
 
 fn list_by(roots: &[PathBuf], statuses: &[&str]) -> Vec<Value> {
@@ -143,7 +157,8 @@ fn get_by(roots: &[PathBuf], appid: &str, statuses: &[&str]) -> Option<Value> {
     load_all_cached(roots)
         .into_iter()
         .find(|(_, v)| {
-            v.get("appid").and_then(|a| a.as_str()) == Some(appid) && statuses.contains(&status_of(v).as_str())
+            v.get("appid").and_then(|a| a.as_str()) == Some(appid)
+                && statuses.contains(&status_of(v).as_str())
         })
         .map(|(_, v)| v)
 }
@@ -195,7 +210,10 @@ pub(crate) fn merge_into_manifest(roots: &[PathBuf], appid: &str, updates: &Valu
             for (k, v) in obj {
                 if v.is_null() {
                     manifest.remove(k);
-                } else if k == "metadata" && manifest.get(k).map(|m| m.is_object()).unwrap_or(false) && v.is_object() {
+                } else if k == "metadata"
+                    && manifest.get(k).map(|m| m.is_object()).unwrap_or(false)
+                    && v.is_object()
+                {
                     let old = manifest.get_mut(k).and_then(|m| m.as_object_mut()).unwrap();
                     for (nk, nv) in v.as_object().unwrap() {
                         if nv.is_null() {
@@ -243,8 +261,14 @@ pub fn installed_save(state: State<'_, AppState>, appid: String, metadata: Value
     if merge_into_manifest(&roots, &appid, &json!({ "metadata": metadata })) {
         return json!({ "ok": true });
     }
-    let name = metadata.get("name").and_then(|v| v.as_str()).unwrap_or(&appid).to_string();
-    let dir = state.download_root().join(crate::downloads::safe_folder_name(&name));
+    let name = metadata
+        .get("name")
+        .and_then(|v| v.as_str())
+        .unwrap_or(&appid)
+        .to_string();
+    let dir = state
+        .download_root()
+        .join(crate::downloads::safe_folder_name(&name));
     std::fs::create_dir_all(&dir).ok();
     crate::downloads::write_manifest_atomic(
         &dir.join(MANIFEST_NAME),
@@ -261,12 +285,21 @@ pub fn installed_save(state: State<'_, AppState>, appid: String, metadata: Value
 }
 
 #[tauri::command(async)]
-pub fn installed_update_metadata(state: State<'_, AppState>, appid: String, updates: Value) -> Value {
+pub fn installed_update_metadata(
+    state: State<'_, AppState>,
+    appid: String,
+    updates: Value,
+) -> Value {
     json!({ "ok": merge_into_manifest(&scan_roots(&state), &appid, &json!({ "metadata": updates })) })
 }
 
 #[tauri::command(async)]
-pub fn installing_status_set(state: State<'_, AppState>, appid: String, status: String, error: Option<String>) -> Value {
+pub fn installing_status_set(
+    state: State<'_, AppState>,
+    appid: String,
+    status: String,
+    error: Option<String>,
+) -> Value {
     let updates = json!({ "installStatus": status, "installError": error });
     json!({ "ok": merge_into_manifest(&scan_roots(&state), &appid, &updates) })
 }
@@ -313,12 +346,17 @@ mod tests {
     fn write_stub(root: &std::path::Path, folder: &str, manifest: &Value) -> PathBuf {
         let dir = root.join(folder);
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join(MANIFEST_NAME), serde_json::to_string(manifest).unwrap()).unwrap();
+        std::fs::write(
+            dir.join(MANIFEST_NAME),
+            serde_json::to_string(manifest).unwrap(),
+        )
+        .unwrap();
         dir
     }
 
     fn override_payload(id: u64, store_name: Option<&str>) -> Value {
-        let mut metadata = json!({ "image": format!("https://cdn.test/{id}/capsule.jpg"), "steamAppId": id });
+        let mut metadata =
+            json!({ "image": format!("https://cdn.test/{id}/capsule.jpg"), "steamAppId": id });
         if let Some(name) = store_name {
             metadata["name"] = json!(name);
         }
@@ -337,20 +375,32 @@ mod tests {
         let real = tmp.path().join("SteamLibrary/common/Portal 2");
         std::fs::create_dir_all(&real).unwrap();
 
-        write_stub(&root, "portal-2", &json!({
-            "appid": "steam-620",
-            "installStatus": "installed",
-            "installPath": real.to_string_lossy(),
-        }));
-        let normal = write_stub(&root, "some-game", &json!({
-            "appid": "42",
-            "installStatus": "installed",
-        }));
-        let stale = write_stub(&root, "gone-game", &json!({
-            "appid": "local-dead",
-            "installStatus": "installed",
-            "installPath": tmp.path().join("nowhere").to_string_lossy(),
-        }));
+        write_stub(
+            &root,
+            "portal-2",
+            &json!({
+                "appid": "steam-620",
+                "installStatus": "installed",
+                "installPath": real.to_string_lossy(),
+            }),
+        );
+        let normal = write_stub(
+            &root,
+            "some-game",
+            &json!({
+                "appid": "42",
+                "installStatus": "installed",
+            }),
+        );
+        let stale = write_stub(
+            &root,
+            "gone-game",
+            &json!({
+                "appid": "local-dead",
+                "installStatus": "installed",
+                "installPath": tmp.path().join("nowhere").to_string_lossy(),
+            }),
+        );
 
         let roots = vec![root];
         assert_eq!(game_files_dir(&roots, "steam-620"), Some(real));
@@ -362,31 +412,42 @@ mod tests {
     #[test]
     fn steam_override_merge_persists_identity_and_preserves_siblings() {
         let tmp = tempfile::tempdir().unwrap();
-        let dir = write_stub(tmp.path(), "card-corner", &json!({
-            "appid": "local-0011223344556677",
-            "name": "CardCorner",
-            "installStatus": "installed",
-            "installType": "imported-exe",
-            "installPath": "/games/Card Corner",
-            "exePath": "/games/Card Corner/CardCorner.exe",
-            "updatedAt": 1_000,
-            "metadata": {
-                "steamAppId": 111,
-                "image": "https://cdn.test/111/capsule.jpg",
-                "name": "Card Corner (wrong)",
-                "genre": "Puzzle",
-            },
-        }));
+        let dir = write_stub(
+            tmp.path(),
+            "card-corner",
+            &json!({
+                "appid": "local-0011223344556677",
+                "name": "CardCorner",
+                "installStatus": "installed",
+                "installType": "imported-exe",
+                "installPath": "/games/Card Corner",
+                "exePath": "/games/Card Corner/CardCorner.exe",
+                "updatedAt": 1_000,
+                "metadata": {
+                    "steamAppId": 111,
+                    "image": "https://cdn.test/111/capsule.jpg",
+                    "name": "Card Corner (wrong)",
+                    "genre": "Puzzle",
+                },
+            }),
+        );
 
         let roots = vec![tmp.path().to_path_buf()];
         let before = now_ms();
-        assert!(merge_into_manifest(&roots, "local-0011223344556677", &override_payload(620, Some("Card Corner"))));
+        assert!(merge_into_manifest(
+            &roots,
+            "local-0011223344556677",
+            &override_payload(620, Some("Card Corner"))
+        ));
 
         let m = read_manifest(&dir);
         assert_eq!(m["steamAppId"].as_u64(), Some(620));
         assert_eq!(m["metadata"]["steamAppId"].as_u64(), Some(620));
         assert_eq!(m["metadata"]["name"], json!("Card Corner"));
-        assert_eq!(m["metadata"]["image"], json!("https://cdn.test/620/capsule.jpg"));
+        assert_eq!(
+            m["metadata"]["image"],
+            json!("https://cdn.test/620/capsule.jpg")
+        );
         assert_eq!(m["appid"], json!("local-0011223344556677"));
         assert_eq!(m["name"], json!("CardCorner"));
         assert_eq!(m["installStatus"], json!("installed"));
@@ -400,20 +461,32 @@ mod tests {
     #[test]
     fn steam_override_unknown_appid_is_rejected_and_writes_nothing() {
         let tmp = tempfile::tempdir().unwrap();
-        let a = write_stub(tmp.path(), "game-a", &json!({
-            "appid": "steam-620",
-            "installStatus": "installed",
-            "metadata": { "steamAppId": 620 },
-        }));
-        let b = write_stub(tmp.path(), "game-b", &json!({
-            "appid": "42",
-            "installStatus": "installed",
-        }));
+        let a = write_stub(
+            tmp.path(),
+            "game-a",
+            &json!({
+                "appid": "steam-620",
+                "installStatus": "installed",
+                "metadata": { "steamAppId": 620 },
+            }),
+        );
+        let b = write_stub(
+            tmp.path(),
+            "game-b",
+            &json!({
+                "appid": "42",
+                "installStatus": "installed",
+            }),
+        );
         let before_a = std::fs::read(a.join(MANIFEST_NAME)).unwrap();
         let before_b = std::fs::read(b.join(MANIFEST_NAME)).unwrap();
 
         let roots = vec![tmp.path().to_path_buf()];
-        assert!(!merge_into_manifest(&roots, "steam-999", &override_payload(999, Some("Nope"))));
+        assert!(!merge_into_manifest(
+            &roots,
+            "steam-999",
+            &override_payload(999, Some("Nope"))
+        ));
 
         assert_eq!(std::fs::read(a.join(MANIFEST_NAME)).unwrap(), before_a);
         assert_eq!(std::fs::read(b.join(MANIFEST_NAME)).unwrap(), before_b);
@@ -422,12 +495,16 @@ mod tests {
     #[test]
     fn steam_override_reapplied_is_idempotent() {
         let tmp = tempfile::tempdir().unwrap();
-        let dir = write_stub(tmp.path(), "portal-2", &json!({
-            "appid": "steam-1234",
-            "name": "Portal 2 Repack",
-            "installStatus": "installed",
-            "metadata": { "steamAppId": 1234, "name": "Some Other Game" },
-        }));
+        let dir = write_stub(
+            tmp.path(),
+            "portal-2",
+            &json!({
+                "appid": "steam-1234",
+                "name": "Portal 2 Repack",
+                "installStatus": "installed",
+                "metadata": { "steamAppId": 1234, "name": "Some Other Game" },
+            }),
+        );
 
         let roots = vec![tmp.path().to_path_buf()];
         let payload = override_payload(620, Some("Portal 2"));
@@ -446,37 +523,56 @@ mod tests {
     #[test]
     fn steam_override_without_store_name_keeps_existing_metadata_name() {
         let tmp = tempfile::tempdir().unwrap();
-        let dir = write_stub(tmp.path(), "obscure-game", &json!({
-            "appid": "local-ffffeeeeddddcccc",
-            "installStatus": "installed",
-            "metadata": {
-                "steamAppId": 111,
-                "name": "Hand Picked Name",
-                "image": "https://cdn.test/111/capsule.jpg",
-            },
-        }));
+        let dir = write_stub(
+            tmp.path(),
+            "obscure-game",
+            &json!({
+                "appid": "local-ffffeeeeddddcccc",
+                "installStatus": "installed",
+                "metadata": {
+                    "steamAppId": 111,
+                    "name": "Hand Picked Name",
+                    "image": "https://cdn.test/111/capsule.jpg",
+                },
+            }),
+        );
 
         let roots = vec![tmp.path().to_path_buf()];
-        assert!(merge_into_manifest(&roots, "local-ffffeeeeddddcccc", &override_payload(3_489_700, None)));
+        assert!(merge_into_manifest(
+            &roots,
+            "local-ffffeeeeddddcccc",
+            &override_payload(3_489_700, None)
+        ));
 
         let m = read_manifest(&dir);
         assert_eq!(m["steamAppId"].as_u64(), Some(3_489_700));
         assert_eq!(m["metadata"]["steamAppId"].as_u64(), Some(3_489_700));
-        assert_eq!(m["metadata"]["image"], json!("https://cdn.test/3489700/capsule.jpg"));
+        assert_eq!(
+            m["metadata"]["image"],
+            json!("https://cdn.test/3489700/capsule.jpg")
+        );
         assert_eq!(m["metadata"]["name"], json!("Hand Picked Name"));
     }
 
     #[test]
     fn steam_override_creates_metadata_on_entry_without_one() {
         let tmp = tempfile::tempdir().unwrap();
-        let dir = write_stub(tmp.path(), "legacy-game", &json!({
-            "appid": "777",
-            "name": "Legacy Game",
-            "installStatus": "installed",
-        }));
+        let dir = write_stub(
+            tmp.path(),
+            "legacy-game",
+            &json!({
+                "appid": "777",
+                "name": "Legacy Game",
+                "installStatus": "installed",
+            }),
+        );
 
         let roots = vec![tmp.path().to_path_buf()];
-        assert!(merge_into_manifest(&roots, "777", &override_payload(620, Some("Portal 2"))));
+        assert!(merge_into_manifest(
+            &roots,
+            "777",
+            &override_payload(620, Some("Portal 2"))
+        ));
 
         let m = read_manifest(&dir);
         assert_eq!(m["steamAppId"].as_u64(), Some(620));
@@ -488,15 +584,27 @@ mod tests {
     #[test]
     fn steam_override_survives_later_metadata_only_update() {
         let tmp = tempfile::tempdir().unwrap();
-        let dir = write_stub(tmp.path(), "kept-game", &json!({
-            "appid": "steam-4321",
-            "installStatus": "installed",
-            "metadata": { "steamAppId": 111, "image": "https://cdn.test/111/capsule.jpg" },
-        }));
+        let dir = write_stub(
+            tmp.path(),
+            "kept-game",
+            &json!({
+                "appid": "steam-4321",
+                "installStatus": "installed",
+                "metadata": { "steamAppId": 111, "image": "https://cdn.test/111/capsule.jpg" },
+            }),
+        );
 
         let roots = vec![tmp.path().to_path_buf()];
-        assert!(merge_into_manifest(&roots, "steam-4321", &override_payload(620, Some("Portal 2"))));
-        assert!(merge_into_manifest(&roots, "steam-4321", &json!({ "metadata": { "image": "uc-custom://abcd" } })));
+        assert!(merge_into_manifest(
+            &roots,
+            "steam-4321",
+            &override_payload(620, Some("Portal 2"))
+        ));
+        assert!(merge_into_manifest(
+            &roots,
+            "steam-4321",
+            &json!({ "metadata": { "image": "uc-custom://abcd" } })
+        ));
 
         let m = read_manifest(&dir);
         assert_eq!(m["steamAppId"].as_u64(), Some(620));

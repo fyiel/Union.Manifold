@@ -94,9 +94,23 @@ pub struct UnifiedGame {
 }
 
 static EDITION_NOISE: &[&str] = &[
-    "deluxe", "goty", "repack", "preinstalled", "pre-installed", "edition", "definitive",
-    "ultimate", "complete", "remastered", "enhanced", "collectors", "collector", "gold",
-    "premium", "standard", "digital",
+    "deluxe",
+    "goty",
+    "repack",
+    "preinstalled",
+    "pre-installed",
+    "edition",
+    "definitive",
+    "ultimate",
+    "complete",
+    "remastered",
+    "enhanced",
+    "collectors",
+    "collector",
+    "gold",
+    "premium",
+    "standard",
+    "digital",
 ];
 
 static COMBINING: Lazy<regex::Regex> =
@@ -167,7 +181,9 @@ pub fn to_epoch_ms(s: &str) -> Option<i64> {
         "%B %d, %Y",
     ] {
         if let Ok(d) = chrono::NaiveDate::parse_from_str(s, fmt) {
-            return d.and_hms_opt(0, 0, 0).map(|dt| dt.and_utc().timestamp_millis());
+            return d
+                .and_hms_opt(0, 0, 0)
+                .map(|dt| dt.and_utc().timestamp_millis());
         }
         if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(s, fmt) {
             return Some(dt.and_utc().timestamp_millis());

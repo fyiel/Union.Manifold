@@ -1,10 +1,12 @@
 use std::path::{Path, PathBuf};
 
 use futures::StreamExt;
+use serde_json::Value;
 use sha2::{Digest, Sha256};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 const REQUIRED_EXPORT: &[u8] = b"SteamInternal_SteamAPI_Init";
+const GBE_MARKER: &[u8] = b"gbe_fork";
 const BROKEN_GBE_SHA256: &str = "0cfe547ea82071953cf99daffa3bd11bb468eec0e400961e7e33e4dc36674ea8";
 const GBE_RELEASE: &str = "release-2026_05_30";
 const GBE_ARCHIVE_URL: &str =
@@ -19,6 +21,7 @@ static REPAIR_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 struct FileInspection {
     sha256: String,
     contains_required_export: bool,
+    contains_gbe_marker: bool,
 }
 
 fn prefix_table(needle: &[u8]) -> Vec<usize> {
@@ -76,9 +79,12 @@ async fn inspect_file(path: &Path) -> Result<FileInspection, String> {
     let mut file = tokio::fs::File::open(path)
         .await
         .map_err(|error| format!("read {}: {error}", path.display()))?;
-    let table = prefix_table(REQUIRED_EXPORT);
-    let mut matched = 0;
-    let mut found = false;
+    let export_table = prefix_table(REQUIRED_EXPORT);
+    let gbe_table = prefix_table(GBE_MARKER);
+    let mut export_matched = 0;
+    let mut gbe_matched = 0;
+    let mut export_found = false;
+    let mut gbe_found = false;
     let mut hasher = Sha256::new();
     let mut buffer = vec![0; READ_CHUNK];
     loop {
@@ -91,13 +97,17 @@ async fn inspect_file(path: &Path) -> Result<FileInspection, String> {
         }
         let chunk = &buffer[..read];
         hasher.update(chunk);
-        if !found && scan_chunk(chunk, REQUIRED_EXPORT, &table, &mut matched) {
-            found = true;
+        if !export_found && scan_chunk(chunk, REQUIRED_EXPORT, &export_table, &mut export_matched) {
+            export_found = true;
+        }
+        if !gbe_found && scan_chunk(chunk, GBE_MARKER, &gbe_table, &mut gbe_matched) {
+            gbe_found = true;
         }
     }
     Ok(FileInspection {
         sha256: hex::encode(hasher.finalize()),
-        contains_required_export: found,
+        contains_required_export: export_found,
+        contains_gbe_marker: gbe_found,
     })
 }
 
@@ -211,6 +221,67 @@ fn sibling_path(path: &Path, name: &str) -> Result<PathBuf, String> {
         .ok_or_else(|| format!("{} has no parent directory", path.display()))
 }
 
+fn gbe_achievement_catalog(appid: &str) -> Result<Option<Vec<u8>>, String> {
+    let key = appid.strip_prefix("steam-").unwrap_or(appid);
+    let value: Value =
+        serde_json::from_str(include_str!("../../resources/achievements/installed.json"))
+            .map_err(|error| format!("parse bundled achievement catalogs: {error}"))?;
+    let Some(mut achievements) = value.get(key).and_then(Value::as_array).cloned() else {
+        return Ok(None);
+    };
+    for achievement in achievements.iter_mut().filter_map(Value::as_object_mut) {
+        if let Some(icon_locked) = achievement.remove("iconLocked") {
+            achievement.insert("icongray".to_string(), icon_locked);
+        }
+        if let Some(hidden) = achievement.get("hidden").and_then(Value::as_bool) {
+            achievement.insert(
+                "hidden".to_string(),
+                Value::String(if hidden { "1" } else { "0" }.to_string()),
+            );
+        }
+    }
+    serde_json::to_vec_pretty(&achievements)
+        .map(Some)
+        .map_err(|error| format!("serialize bundled achievement catalog: {error}"))
+}
+
+async fn install_known_achievement_catalog(appid: &str, steam_api: &Path) -> Result<bool, String> {
+    let settings = sibling_path(steam_api, "steam_settings")?;
+    let target = settings.join("achievements.json");
+    if target.is_file() {
+        return Ok(false);
+    }
+    let Some(catalog) = gbe_achievement_catalog(appid)? else {
+        return Ok(false);
+    };
+    tokio::fs::create_dir_all(&settings)
+        .await
+        .map_err(|error| format!("create Steam achievement settings: {error}"))?;
+    let staged = settings.join("achievements.json.manifold-new");
+    tokio::fs::write(&staged, catalog)
+        .await
+        .map_err(|error| format!("stage Steam achievement catalog: {error}"))?;
+    tokio::fs::rename(&staged, &target)
+        .await
+        .map_err(|error| format!("install Steam achievement catalog: {error}"))?;
+    crate::logging::write_line(
+        "info",
+        &format!("installed Steam achievement catalog for {appid}"),
+    );
+    Ok(true)
+}
+
+async fn install_gbe_achievement_catalog_if_known(
+    appid: &str,
+    steam_api: &Path,
+    inspection: &FileInspection,
+) -> Result<bool, String> {
+    if !inspection.contains_gbe_marker && inspection.sha256 != GBE_DLL_SHA256 {
+        return Ok(false);
+    }
+    install_known_achievement_catalog(appid, steam_api).await
+}
+
 async fn install_replacement(
     current: &Path,
     replacement: &Path,
@@ -241,7 +312,11 @@ async fn install_replacement(
     Ok(())
 }
 
-pub async fn repair_if_needed(cache_root: &Path, executable: &Path) -> Result<bool, String> {
+pub async fn repair_if_needed(
+    cache_root: &Path,
+    appid: &str,
+    executable: &Path,
+) -> Result<bool, String> {
     if !executable
         .extension()
         .map(|extension| extension.to_string_lossy().eq_ignore_ascii_case("exe"))
@@ -259,7 +334,7 @@ pub async fn repair_if_needed(cache_root: &Path, executable: &Path) -> Result<bo
 
     let inspection = inspect_file(&steam_api).await?;
     if inspection.contains_required_export {
-        return Ok(false);
+        return install_gbe_achievement_catalog_if_known(appid, &steam_api, &inspection).await;
     }
     if inspection.sha256 != BROKEN_GBE_SHA256 {
         return Err(format!(
@@ -271,7 +346,7 @@ pub async fn repair_if_needed(cache_root: &Path, executable: &Path) -> Result<bo
     let _guard = REPAIR_LOCK.lock().await;
     let inspection = inspect_file(&steam_api).await?;
     if inspection.contains_required_export {
-        return Ok(false);
+        return install_gbe_achievement_catalog_if_known(appid, &steam_api, &inspection).await;
     }
     if inspection.sha256 != BROKEN_GBE_SHA256 {
         return Err(
@@ -285,6 +360,7 @@ pub async fn repair_if_needed(cache_root: &Path, executable: &Path) -> Result<bo
         )
     })?;
     install_replacement(&steam_api, &replacement, GBE_DLL_SHA256).await?;
+    install_known_achievement_catalog(appid, &steam_api).await?;
     crate::logging::write_line(
         "info",
         &format!(
@@ -305,10 +381,13 @@ mod tests {
         let path = temp.path().join("steam_api64.dll");
         let mut bytes = vec![b'x'; READ_CHUNK - 3];
         bytes.extend_from_slice(REQUIRED_EXPORT);
+        bytes.resize(READ_CHUNK * 2 - 2, b'x');
+        bytes.extend_from_slice(GBE_MARKER);
         tokio::fs::write(&path, &bytes).await.unwrap();
 
         let inspection = inspect_file(&path).await.unwrap();
         assert!(inspection.contains_required_export);
+        assert!(inspection.contains_gbe_marker);
         assert_eq!(inspection.sha256, hex::encode(Sha256::digest(&bytes)));
     }
 
@@ -333,6 +412,85 @@ mod tests {
                 .await
                 .unwrap(),
             b"old library"
+        );
+    }
+
+    #[tokio::test]
+    async fn catalog_is_only_installed_for_recognized_gbe() {
+        let temp = tempfile::tempdir().unwrap();
+        let gbe = temp.path().join("gbe");
+        let official = temp.path().join("official");
+        tokio::fs::create_dir_all(&gbe).await.unwrap();
+        tokio::fs::create_dir_all(&official).await.unwrap();
+        for dir in [&gbe, &official] {
+            tokio::fs::write(dir.join("game.exe"), REQUIRED_EXPORT)
+                .await
+                .unwrap();
+        }
+        let mut gbe_dll = REQUIRED_EXPORT.to_vec();
+        gbe_dll.extend_from_slice(GBE_MARKER);
+        tokio::fs::write(gbe.join("steam_api64.dll"), gbe_dll)
+            .await
+            .unwrap();
+        tokio::fs::write(official.join("steam_api64.dll"), REQUIRED_EXPORT)
+            .await
+            .unwrap();
+
+        assert!(
+            repair_if_needed(temp.path(), "steam-1703340", &gbe.join("game.exe"))
+                .await
+                .unwrap()
+        );
+        let catalog: Value = serde_json::from_slice(
+            &tokio::fs::read(gbe.join("steam_settings/achievements.json"))
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(catalog.as_array().unwrap().len(), 11);
+
+        assert!(
+            !repair_if_needed(temp.path(), "steam-1703340", &official.join("game.exe"))
+                .await
+                .unwrap()
+        );
+        assert!(!official.join("steam_settings/achievements.json").exists());
+    }
+
+    #[tokio::test]
+    async fn known_catalog_uses_gbe_schema_and_preserves_existing_settings() {
+        let temp = tempfile::tempdir().unwrap();
+        let steam_api = temp.path().join("steam_api64.dll");
+
+        assert!(
+            install_known_achievement_catalog("steam-686060", &steam_api)
+                .await
+                .unwrap()
+        );
+        let catalog_path = temp.path().join("steam_settings/achievements.json");
+        let catalog: Value =
+            serde_json::from_slice(&tokio::fs::read(&catalog_path).await.unwrap()).unwrap();
+        let achievements = catalog.as_array().unwrap();
+        assert_eq!(achievements.len(), 281);
+        let sewers = achievements
+            .iter()
+            .find(|achievement| achievement["name"] == "map_unlock_sewers")
+            .unwrap();
+        assert_eq!(sewers["hidden"], "0");
+        assert!(sewers.get("icongray").is_some());
+        assert!(sewers.get("iconLocked").is_none());
+
+        tokio::fs::write(&catalog_path, b"custom catalog")
+            .await
+            .unwrap();
+        assert!(
+            !install_known_achievement_catalog("steam-686060", &steam_api)
+                .await
+                .unwrap()
+        );
+        assert_eq!(
+            tokio::fs::read(&catalog_path).await.unwrap(),
+            b"custom catalog"
         );
     }
 }

@@ -36,7 +36,11 @@ static CATALOG_POOL: LazyLock<cache::KeyedCache<std::sync::Arc<CachedPool>>> =
     LazyLock::new(|| cache::KeyedCache::new(std::time::Duration::from_secs(600)));
 
 fn pool_for(params: &QueryParams) -> &'static cache::KeyedCache<std::sync::Arc<CachedPool>> {
-    let unfiltered = params.text.as_deref().map(|t| t.trim().is_empty()).unwrap_or(true)
+    let unfiltered = params
+        .text
+        .as_deref()
+        .map(|t| t.trim().is_empty())
+        .unwrap_or(true)
         && params.tags.is_empty()
         && params.min_year.is_none()
         && params.max_year.is_none()
@@ -164,14 +168,62 @@ pub struct SourceMeta {
 }
 
 pub const SOURCES: &[SourceMeta] = &[
-    SourceMeta { id: "unioncrax", name: "UnionCrax", homepage: "https://union-crax.xyz", requires_slipgate: false, torrent_only: false },
-    SourceMeta { id: "gamebounty", name: "GameBounty", homepage: "https://gamebounty.world", requires_slipgate: false, torrent_only: false },
-    SourceMeta { id: "steamrip", name: "SteamRIP", homepage: "https://steamrip.com", requires_slipgate: false, torrent_only: false },
-    SourceMeta { id: "rexagames", name: "RexaGames", homepage: "https://rexagames.com", requires_slipgate: true, torrent_only: false },
-    SourceMeta { id: "onlinefix", name: "Online-Fix", homepage: "https://online-fix.me", requires_slipgate: true, torrent_only: false },
-    SourceMeta { id: "gog", name: "GOG", homepage: "https://gog-games.to", requires_slipgate: true, torrent_only: true },
-    SourceMeta { id: "empress", name: "EMPRESS", homepage: "https://hydralinks.cloud", requires_slipgate: true, torrent_only: true },
-    SourceMeta { id: "kaoskrew", name: "KaOsKrew", homepage: "https://kaoskrew.org", requires_slipgate: true, torrent_only: true },
+    SourceMeta {
+        id: "unioncrax",
+        name: "UnionCrax",
+        homepage: "https://union-crax.xyz",
+        requires_slipgate: false,
+        torrent_only: false,
+    },
+    SourceMeta {
+        id: "gamebounty",
+        name: "GameBounty",
+        homepage: "https://gamebounty.world",
+        requires_slipgate: false,
+        torrent_only: false,
+    },
+    SourceMeta {
+        id: "steamrip",
+        name: "SteamRIP",
+        homepage: "https://steamrip.com",
+        requires_slipgate: false,
+        torrent_only: false,
+    },
+    SourceMeta {
+        id: "zeigames",
+        name: "ZeiGames",
+        homepage: "https://zeigames.com",
+        requires_slipgate: false,
+        torrent_only: false,
+    },
+    SourceMeta {
+        id: "onlinefix",
+        name: "Online-Fix",
+        homepage: "https://online-fix.me",
+        requires_slipgate: true,
+        torrent_only: false,
+    },
+    SourceMeta {
+        id: "gog",
+        name: "GOG",
+        homepage: "https://gog-games.to",
+        requires_slipgate: true,
+        torrent_only: true,
+    },
+    SourceMeta {
+        id: "empress",
+        name: "EMPRESS",
+        homepage: "https://hydralinks.cloud",
+        requires_slipgate: true,
+        torrent_only: true,
+    },
+    SourceMeta {
+        id: "kaoskrew",
+        name: "KaOsKrew",
+        homepage: "https://kaoskrew.org",
+        requires_slipgate: true,
+        torrent_only: true,
+    },
 ];
 
 fn hidden_by_torrent_filter(source: &SourceMeta) -> bool {
@@ -183,7 +235,7 @@ pub fn capabilities_for(id: &str) -> Capabilities {
         "unioncrax" => adapters::unioncrax::capabilities(),
         "gamebounty" => adapters::gamebounty::capabilities(),
         "steamrip" => adapters::steamrip::capabilities(),
-        "rexagames" => adapters::rexagames::capabilities(),
+        "zeigames" => adapters::zeigames::capabilities(),
         "onlinefix" => adapters::onlinefix::capabilities(),
         "gog" => adapters::gog::capabilities(),
         "empress" => adapters::empress::capabilities(),
@@ -197,7 +249,7 @@ async fn adapter_query(id: &str, params: &QueryParams) -> Option<Vec<SourceGame>
         "unioncrax" => adapters::unioncrax::query(params).await,
         "gamebounty" => adapters::gamebounty::query(params).await,
         "steamrip" => adapters::steamrip::query(params).await,
-        "rexagames" => adapters::rexagames::query(params).await,
+        "zeigames" => adapters::zeigames::query(params).await,
         "onlinefix" => adapters::onlinefix::query(params).await,
         "gog" => adapters::gog::query(params).await,
         "empress" => adapters::empress::query(params).await,
@@ -211,7 +263,7 @@ async fn adapter_search(id: &str, q: &str, limit: usize) -> Vec<SourceGame> {
         "unioncrax" => adapters::unioncrax::search(q, limit).await,
         "gamebounty" => adapters::gamebounty::search(q, limit).await,
         "steamrip" => adapters::steamrip::search(q, limit).await,
-        "rexagames" => adapters::rexagames::search(q, limit).await,
+        "zeigames" => adapters::zeigames::search(q, limit).await,
         "onlinefix" => adapters::onlinefix::search(q, limit).await,
         "gog" => adapters::gog::search(q, limit).await,
         "empress" => adapters::empress::search(q, limit).await,
@@ -225,7 +277,7 @@ async fn adapter_detail(id: &str, slug: &str) -> Option<SourceGame> {
         "unioncrax" => adapters::unioncrax::get_detail(slug).await,
         "gamebounty" => adapters::gamebounty::get_detail(slug).await,
         "steamrip" => adapters::steamrip::get_detail(slug).await,
-        "rexagames" => adapters::rexagames::get_detail(slug).await,
+        "zeigames" => adapters::zeigames::get_detail(slug).await,
         "onlinefix" => adapters::onlinefix::get_detail(slug).await,
         "gog" => adapters::gog::get_detail(slug).await,
         "empress" => adapters::empress::get_detail(slug).await,
@@ -238,14 +290,12 @@ async fn adapter_tags(id: &str) -> Vec<String> {
     match id {
         "unioncrax" => adapters::unioncrax::list_tags().await,
         "steamrip" => adapters::steamrip::list_tags().await,
+        "zeigames" => adapters::zeigames::list_tags().await,
         _ => Vec::new(),
     }
 }
 
-async fn adapter_resolve(
-    id: &str,
-    option: &schema::DownloadOption,
-) -> ResolveResult {
+async fn adapter_resolve(id: &str, option: &schema::DownloadOption) -> ResolveResult {
     match id {
         "unioncrax" => adapters::unioncrax::resolve_download(option).await,
         _ => hosts::resolve_url(option).await,
@@ -286,7 +336,9 @@ impl Registry {
         let hide_torrent = crate::settings::hide_torrent_sources();
         SOURCES
             .iter()
-            .filter(|s| slipgate || !s.requires_slipgate || adapters::hydralinks::is_reachable(s.id))
+            .filter(|s| {
+                slipgate || !s.requires_slipgate || adapters::hydralinks::is_reachable(s.id)
+            })
             .filter(|s| !hide_torrent || !hidden_by_torrent_filter(s))
             .map(|s| s.id.to_string())
             .filter(|id| self.is_enabled(id))
@@ -306,7 +358,9 @@ impl Registry {
                 capabilities: capabilities_for(s.id),
                 enabled: self.is_enabled(s.id),
                 requires_slipgate: s.requires_slipgate,
-                available: (slipgate || !s.requires_slipgate || adapters::hydralinks::is_reachable(s.id))
+                available: (slipgate
+                    || !s.requires_slipgate
+                    || adapters::hydralinks::is_reachable(s.id))
                     && !(hide_torrent && hidden_by_torrent_filter(s)),
                 torrent_only: s.torrent_only,
                 hidden_by_torrent_filter: hidden_by_torrent_filter(s),
@@ -325,11 +379,12 @@ async fn run_query(reg: &Registry, params: QueryParams) -> filters::QueryResult 
             let mut p = params_fetch;
             p.limit = POOL_SIZE;
             p.offset = 0;
-            let per_source = crate::http::map_limit(ids_fetch.clone(), ids_fetch.len().max(1), |id| {
-                let p = p.clone();
-                async move { Some(adapter_query(&id, &p).await) }
-            })
-            .await;
+            let per_source =
+                crate::http::map_limit(ids_fetch.clone(), ids_fetch.len().max(1), |id| {
+                    let p = p.clone();
+                    async move { Some(adapter_query(&id, &p).await) }
+                })
+                .await;
             let mut pool: Vec<SourceGame> = Vec::new();
             let mut errored = false;
             for v in per_source {
@@ -339,7 +394,12 @@ async fn run_query(reg: &Registry, params: QueryParams) -> filters::QueryResult 
                 }
             }
             let (ordered, facets, total) = filters::finalize_pool(pool, &p);
-            Some(std::sync::Arc::new(CachedPool { ordered, facets, total, errored }))
+            Some(std::sync::Arc::new(CachedPool {
+                ordered,
+                facets,
+                total,
+                errored,
+            }))
         })
         .await;
     match cached {
@@ -350,8 +410,14 @@ async fn run_query(reg: &Registry, params: QueryParams) -> filters::QueryResult 
             total: 0,
             facets: filters::Facets {
                 tags: Vec::new(),
-                years: filters::MinMax { min: None, max: None },
-                size: filters::MinMax { min: None, max: None },
+                years: filters::MinMax {
+                    min: None,
+                    max: None,
+                },
+                size: filters::MinMax {
+                    min: None,
+                    max: None,
+                },
             },
             applied: params.clone(),
             capabilities: filters::capability_report(&ids, reg),
@@ -361,9 +427,19 @@ async fn run_query(reg: &Registry, params: QueryParams) -> filters::QueryResult 
     }
 }
 
-fn page_from(cp: &CachedPool, params: &QueryParams, ids: &[String], reg: &Registry) -> filters::QueryResult {
-    let page: Vec<schema::UnifiedGame> =
-        cp.ordered.iter().skip(params.offset).take(params.limit).cloned().collect();
+fn page_from(
+    cp: &CachedPool,
+    params: &QueryParams,
+    ids: &[String],
+    reg: &Registry,
+) -> filters::QueryResult {
+    let page: Vec<schema::UnifiedGame> = cp
+        .ordered
+        .iter()
+        .skip(params.offset)
+        .take(params.limit)
+        .cloned()
+        .collect();
     filters::QueryResult {
         ok: true,
         games: page,
@@ -381,8 +457,14 @@ fn empty_pool() -> std::sync::Arc<CachedPool> {
         ordered: Vec::new(),
         facets: filters::Facets {
             tags: Vec::new(),
-            years: filters::MinMax { min: None, max: None },
-            size: filters::MinMax { min: None, max: None },
+            years: filters::MinMax {
+                min: None,
+                max: None,
+            },
+            size: filters::MinMax {
+                min: None,
+                max: None,
+            },
         },
         total: 0,
         errored: false,
@@ -425,29 +507,43 @@ async fn run_query_stream(
             None => errored = true,
         }
         let (ordered, facets, total) = filters::finalize_pool(pool.clone(), &p);
-        let page: Vec<schema::UnifiedGame> =
-            ordered.iter().skip(params.offset).take(params.limit).cloned().collect();
+        let page: Vec<schema::UnifiedGame> = ordered
+            .iter()
+            .skip(params.offset)
+            .take(params.limit)
+            .cloned()
+            .collect();
         app.emit(
             "uc:browse-partial",
             json!({ "reqId": req_id, "games": page, "total": total, "doneSources": done }),
         )
         .ok();
-        latest = Some(std::sync::Arc::new(CachedPool { ordered, facets, total, errored }));
+        latest = Some(std::sync::Arc::new(CachedPool {
+            ordered,
+            facets,
+            total,
+            errored,
+        }));
     }
     let cp = latest.unwrap_or_else(empty_pool);
     let stored = cp.clone();
-    pool_cache.get_or(&sig, || async move { Some(stored) }).await;
+    pool_cache
+        .get_or(&sig, || async move { Some(stored) })
+        .await;
     page_from(&cp, &params, &ids, reg)
 }
 
 pub async fn warm_catalog(reg: &Registry) {
-    let params = QueryParams { balanced: true, limit: 48, ..Default::default() };
+    let params = QueryParams {
+        balanced: true,
+        limit: 48,
+        ..Default::default()
+    };
     let _ = run_query(reg, params).await;
 }
 
 pub async fn warm_hydralinks(app: AppHandle) {
     let _ = tokio::join!(
-        adapters::rexagames::prime(),
         adapters::onlinefix::prime(),
         adapters::gog::prime(),
         adapters::empress::prime(),
@@ -489,7 +585,11 @@ pub async fn sources_query(
 }
 
 #[tauri::command]
-pub async fn sources_search(state: State<'_, AppState>, query: String, limit: Option<usize>) -> Result<Value> {
+pub async fn sources_search(
+    state: State<'_, AppState>,
+    query: String,
+    limit: Option<usize>,
+) -> Result<Value> {
     let limit = limit.unwrap_or(40);
     let ids = state.sources.active_ids(&None);
     let mut pool = Vec::new();
@@ -506,7 +606,11 @@ pub async fn sources_search(state: State<'_, AppState>, query: String, limit: Op
 }
 
 #[tauri::command]
-pub async fn sources_catalog(state: State<'_, AppState>, offset: Option<usize>, limit: Option<usize>) -> Result<Value> {
+pub async fn sources_catalog(
+    state: State<'_, AppState>,
+    offset: Option<usize>,
+    limit: Option<usize>,
+) -> Result<Value> {
     let params = QueryParams {
         offset: offset.unwrap_or(0),
         limit: limit.unwrap_or(36),
@@ -522,7 +626,10 @@ pub async fn sources_detail(_state: State<'_, AppState>, sources: Vec<Value>) ->
     let mut records: Vec<SourceGame> = Vec::new();
     for stub in &sources {
         let sid = stub.get("sourceId").and_then(|v| v.as_str()).unwrap_or("");
-        let slug = stub.get("sourceSlug").and_then(|v| v.as_str()).unwrap_or("");
+        let slug = stub
+            .get("sourceSlug")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
         if let Some(g) = adapter_detail(sid, slug).await {
             records.push(g);
         }
@@ -538,7 +645,11 @@ pub async fn sources_detail(_state: State<'_, AppState>, sources: Vec<Value>) ->
 }
 
 #[tauri::command]
-pub async fn sources_resolve(_state: State<'_, AppState>, source_id: String, option: schema::DownloadOption) -> Result<Value> {
+pub async fn sources_resolve(
+    _state: State<'_, AppState>,
+    source_id: String,
+    option: schema::DownloadOption,
+) -> Result<Value> {
     let result = adapter_resolve(&source_id, &option).await;
     Ok(json!({ "ok": true, "result": result }))
 }
@@ -586,7 +697,6 @@ pub fn sources_capabilities(state: State<'_, AppState>, source_ids: Option<Vec<S
 pub async fn sources_refresh(app: AppHandle) -> Result<Value> {
     const HYDRA_SOURCES: &[(&str, &str)] = &[
         ("steamrip", "SteamRIP"),
-        ("rexagames", "RexaGames"),
         ("onlinefix", "Online-Fix"),
         ("gog", "GOG"),
         ("empress", "EMPRESS"),
@@ -642,15 +752,17 @@ pub async fn sources_refresh(app: AppHandle) -> Result<Value> {
     let any = results.iter().any(|&ok| ok);
     QUERY_POOL.clear();
     CATALOG_POOL.clear();
-    app.emit("uc:sources-refresh", json!({ "state": "complete", "total": total as u64 }))
-        .ok();
+    app.emit(
+        "uc:sources-refresh",
+        json!({ "state": "complete", "total": total as u64 }),
+    )
+    .ok();
     Ok(json!({ "ok": any || total == 0 }))
 }
 
 async fn refresh_source(id: &str) -> Option<usize> {
     match id {
         "steamrip" => adapters::steamrip::refresh().await,
-        "rexagames" => adapters::rexagames::refresh().await,
         "onlinefix" => adapters::onlinefix::refresh().await,
         "gog" => adapters::gog::refresh().await,
         "empress" => adapters::empress::refresh().await,
@@ -665,9 +777,15 @@ mod tests {
 
     #[test]
     fn torrent_filter_groups_onlinefix_without_relabeling_it() {
-        let onlinefix = SOURCES.iter().find(|source| source.id == "onlinefix").unwrap();
+        let onlinefix = SOURCES
+            .iter()
+            .find(|source| source.id == "onlinefix")
+            .unwrap();
         let gog = SOURCES.iter().find(|source| source.id == "gog").unwrap();
-        let steamrip = SOURCES.iter().find(|source| source.id == "steamrip").unwrap();
+        let steamrip = SOURCES
+            .iter()
+            .find(|source| source.id == "steamrip")
+            .unwrap();
 
         assert!(hidden_by_torrent_filter(onlinefix));
         assert!(!onlinefix.torrent_only);

@@ -125,8 +125,16 @@ fn sort_games(games: &mut [UnifiedGame], p: &QueryParams) {
                 games.reverse();
             }
         }
-        "latest" => games.sort_by(|a, b| b.added_at.unwrap_or(i64::MIN).cmp(&a.added_at.unwrap_or(i64::MIN))),
-        "updated" => games.sort_by(|a, b| b.updated_at.unwrap_or(i64::MIN).cmp(&a.updated_at.unwrap_or(i64::MIN))),
+        "latest" => games.sort_by(|a, b| {
+            b.added_at
+                .unwrap_or(i64::MIN)
+                .cmp(&a.added_at.unwrap_or(i64::MIN))
+        }),
+        "updated" => games.sort_by(|a, b| {
+            b.updated_at
+                .unwrap_or(i64::MIN)
+                .cmp(&a.updated_at.unwrap_or(i64::MIN))
+        }),
         "popular" => games.sort_by(|a, b| {
             let pa = a.popularity.unwrap_or(f64::MIN);
             let pb = b.popularity.unwrap_or(f64::MIN);
@@ -201,8 +209,14 @@ fn build_facets(games: &[UnifiedGame]) -> Facets {
     tags.sort_by(|a, b| b.count.cmp(&a.count).then(a.tag.cmp(&b.tag)));
     Facets {
         tags,
-        years: MinMax { min: year_min, max: year_max },
-        size: MinMax { min: size_min, max: size_max },
+        years: MinMax {
+            min: year_min,
+            max: year_max,
+        },
+        size: MinMax {
+            min: size_min,
+            max: size_max,
+        },
     }
 }
 
@@ -224,11 +238,17 @@ pub fn capability_report(ids: &[String], reg: &Registry) -> CapabilityReport {
             ("size", caps.size),
         ] {
             if on {
-                supports.entry(feat.to_string()).or_default().push(id.clone());
+                supports
+                    .entry(feat.to_string())
+                    .or_default()
+                    .push(id.clone());
             }
         }
         for s in &caps.sort {
-            supports.entry(format!("sort:{s}")).or_default().push(id.clone());
+            supports
+                .entry(format!("sort:{s}"))
+                .or_default()
+                .push(id.clone());
         }
         per_source.push(PerSource {
             id: id.clone(),
@@ -258,9 +278,15 @@ pub fn capability_report(ids: &[String], reg: &Registry) -> CapabilityReport {
     }
 }
 
-pub fn finalize_pool(pool: Vec<SourceGame>, params: &QueryParams) -> (Vec<UnifiedGame>, Facets, usize) {
+pub fn finalize_pool(
+    pool: Vec<SourceGame>,
+    params: &QueryParams,
+) -> (Vec<UnifiedGame>, Facets, usize) {
     let merged = merge_games(pool);
-    let mut filtered: Vec<UnifiedGame> = merged.into_iter().filter(|g| matches_filters(g, params)).collect();
+    let mut filtered: Vec<UnifiedGame> = merged
+        .into_iter()
+        .filter(|g| matches_filters(g, params))
+        .collect();
     sort_games(&mut filtered, params);
     let facets = build_facets(&filtered);
     let total = filtered.len();
@@ -277,7 +303,10 @@ mod tests {
     use super::*;
 
     fn ug(title: &str) -> UnifiedGame {
-        UnifiedGame { title: title.to_string(), ..Default::default() }
+        UnifiedGame {
+            title: title.to_string(),
+            ..Default::default()
+        }
     }
 
     fn titles(games: &[UnifiedGame]) -> Vec<String> {

@@ -5,7 +5,11 @@ fn desktop_dir() -> Option<std::path::PathBuf> {
 }
 
 #[tauri::command(async)]
-pub fn create_desktop_shortcut(game_name: String, _appid: String, exe_path: Option<String>) -> Value {
+pub fn create_desktop_shortcut(
+    game_name: String,
+    _appid: String,
+    exe_path: Option<String>,
+) -> Value {
     let desktop = match desktop_dir() {
         Some(d) => d,
         None => return json!({ "ok": false, "error": "no desktop dir" }),
@@ -22,7 +26,10 @@ pub fn create_desktop_shortcut(game_name: String, _appid: String, exe_path: Opti
         if file.exists() {
             return json!({ "ok": true, "existed": true });
         }
-        let cwd = std::path::Path::new(&exe).parent().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
+        let cwd = std::path::Path::new(&exe)
+            .parent()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_default();
         let content = format!(
             "[Desktop Entry]\nType=Application\nName={game_name}\nExec=\"{exe}\"\nPath={cwd}\nTerminal=false\nCategories=Game;\n"
         );
@@ -58,7 +65,9 @@ pub fn create_desktop_shortcut(game_name: String, _appid: String, exe_path: Opti
             .output()
         {
             Ok(o) if o.status.success() => json!({ "ok": true }),
-            Ok(o) => json!({ "ok": false, "error": String::from_utf8_lossy(&o.stderr).to_string() }),
+            Ok(o) => {
+                json!({ "ok": false, "error": String::from_utf8_lossy(&o.stderr).to_string() })
+            }
             Err(e) => json!({ "ok": false, "error": e.to_string() }),
         }
     }

@@ -38,9 +38,12 @@ fn free_port() -> u16 {
 
 pub fn resolve_ca_cert(resource_dir: Option<PathBuf>) -> Option<PathBuf> {
     let resource_dir = resource_dir?;
-    [resource_dir.join("cacert.pem"), resource_dir.join("resources").join("cacert.pem")]
-        .into_iter()
-        .find(|path| path.is_file())
+    [
+        resource_dir.join("cacert.pem"),
+        resource_dir.join("resources").join("cacert.pem"),
+    ]
+    .into_iter()
+    .find(|path| path.is_file())
 }
 
 #[cfg(test)]
@@ -55,7 +58,10 @@ mod tests {
         let expected = resources.join("cacert.pem");
         std::fs::write(&expected, "certificate").unwrap();
 
-        assert_eq!(resolve_ca_cert(Some(root.path().to_path_buf())), Some(expected));
+        assert_eq!(
+            resolve_ca_cert(Some(root.path().to_path_buf())),
+            Some(expected)
+        );
     }
 
     #[test]
@@ -71,7 +77,10 @@ mod tests {
         let direct = root.path().join("cacert.pem");
         std::fs::write(&direct, "direct").unwrap();
 
-        assert_eq!(resolve_ca_cert(Some(root.path().to_path_buf())), Some(direct));
+        assert_eq!(
+            resolve_ca_cert(Some(root.path().to_path_buf())),
+            Some(direct)
+        );
     }
 }
 
@@ -86,7 +95,11 @@ impl Aria2Manager {
             ca_cert,
             port: AtomicU64::new(0),
             secret,
-            proxy: Mutex::new(proxy.map(|s| s.trim().to_string()).filter(|s| !s.is_empty())),
+            proxy: Mutex::new(
+                proxy
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty()),
+            ),
             child: Mutex::new(None),
             ready: AtomicBool::new(false),
             starting: tokio::sync::Mutex::new(()),
@@ -196,7 +209,10 @@ impl Aria2Manager {
             }
             tokio::time::sleep(std::time::Duration::from_millis(150)).await;
         }
-        crate::logging::write_line("warn", &format!("aria2 daemon did not become ready on port {port}"));
+        crate::logging::write_line(
+            "warn",
+            &format!("aria2 daemon did not become ready on port {port}"),
+        );
         if let Some(mut child) = self.child.lock().take() {
             child.start_kill().ok();
         }
@@ -246,7 +262,8 @@ impl Aria2Manager {
         let id = self.rpc_id.fetch_add(1, Ordering::SeqCst);
         let mut full = vec![json!(format!("token:{}", self.secret))];
         full.extend(params);
-        let body = json!({ "jsonrpc": "2.0", "id": format!("uc-{id}"), "method": method, "params": full });
+        let body =
+            json!({ "jsonrpc": "2.0", "id": format!("uc-{id}"), "method": method, "params": full });
         let resp = self
             .http
             .post(format!("http://127.0.0.1:{port}/jsonrpc"))
@@ -260,14 +277,19 @@ impl Aria2Manager {
             .map_err(|e| crate::error::AppError::msg(format!("aria2 rpc parse: {e}")))?;
         if let Some(err) = parsed.get("error") {
             return Err(crate::error::AppError::msg(
-                err.get("message").and_then(|m| m.as_str()).unwrap_or("aria2 rpc error").to_string(),
+                err.get("message")
+                    .and_then(|m| m.as_str())
+                    .unwrap_or("aria2 rpc error")
+                    .to_string(),
             ));
         }
         Ok(parsed.get("result").cloned().unwrap_or(Value::Null))
     }
 
     pub async fn add_uri(&self, uri: &str, options: Value) -> crate::error::Result<String> {
-        let result = self.rpc("aria2.addUri", vec![json!([uri]), options]).await?;
+        let result = self
+            .rpc("aria2.addUri", vec![json!([uri]), options])
+            .await?;
         result
             .as_str()
             .map(|s| s.to_string())
@@ -287,7 +309,9 @@ impl Aria2Manager {
     }
 
     pub async fn remove_download_result(&self, gid: &str) {
-        self.rpc("aria2.removeDownloadResult", vec![json!(gid)]).await.ok();
+        self.rpc("aria2.removeDownloadResult", vec![json!(gid)])
+            .await
+            .ok();
     }
 
     pub async fn tell_status(&self, gid: &str) -> crate::error::Result<Value> {

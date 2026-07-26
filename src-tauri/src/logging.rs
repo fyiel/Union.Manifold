@@ -8,9 +8,18 @@ use serde_json::Value;
 static LOG_PATH: Lazy<Mutex<Option<PathBuf>>> = Lazy::new(|| Mutex::new(None));
 static REDACT: Lazy<Vec<(Regex, &'static str)>> = Lazy::new(|| {
     vec![
-        (Regex::new(r#"(?i)(token|secret|password|cookie|authorization)"?\s*[:=]\s*"?[^\s",}]+"#).unwrap(), "$1=[redacted]"),
+        (
+            Regex::new(
+                r#"(?i)(token|secret|password|cookie|authorization)"?\s*[:=]\s*"?[^\s",}]+"#,
+            )
+            .unwrap(),
+            "$1=[redacted]",
+        ),
         (Regex::new(r"/home/[^/\s]+").unwrap(), "/home/[user]"),
-        (Regex::new(r"C:\\Users\\[^\\\s]+").unwrap(), r"C:\Users\[user]"),
+        (
+            Regex::new(r"C:\\Users\\[^\\\s]+").unwrap(),
+            r"C:\Users\[user]",
+        ),
     ]
 });
 
@@ -36,7 +45,11 @@ pub fn write_line(level: &str, message: &str) {
     let stamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
     let line = format!("[{stamp}] [{}] {}\n", level.to_uppercase(), redact(message));
     use std::io::Write;
-    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    {
         f.write_all(line.as_bytes()).ok();
     }
 }

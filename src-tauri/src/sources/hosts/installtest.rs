@@ -53,9 +53,13 @@ async fn source_games(source: &str, query: Option<&str>, limit: usize) -> Vec<So
         ..Default::default()
     };
     match source {
-        "unioncrax" => adapters::unioncrax::query(&params).await.unwrap_or_default(),
-        "gamebounty" => adapters::gamebounty::query(&params).await.unwrap_or_default(),
-        "rexagames" => adapters::rexagames::query(&params).await.unwrap_or_default(),
+        "unioncrax" => adapters::unioncrax::query(&params)
+            .await
+            .unwrap_or_default(),
+        "gamebounty" => adapters::gamebounty::query(&params)
+            .await
+            .unwrap_or_default(),
+        "zeigames" => adapters::zeigames::query(&params).await.unwrap_or_default(),
         _ => adapters::steamrip::query(&params).await.unwrap_or_default(),
     }
 }
@@ -64,7 +68,7 @@ async fn detail_of(source: &str, slug: &str) -> Option<SourceGame> {
     match source {
         "unioncrax" => adapters::unioncrax::get_detail(slug).await,
         "gamebounty" => adapters::gamebounty::get_detail(slug).await,
-        "rexagames" => adapters::rexagames::get_detail(slug).await,
+        "zeigames" => adapters::zeigames::get_detail(slug).await,
         _ => adapters::steamrip::get_detail(slug).await,
     }
 }
@@ -187,16 +191,43 @@ fn kill_by_compat(compat: &Path) {
         "for p in /proc/[0-9]*; do grep -qa 'STEAM_COMPAT_DATA_PATH={}' \"$p/environ\" 2>/dev/null && kill -9 \"${{p##*/}}\" 2>/dev/null; done",
         compat.display()
     );
-    let _ = std::process::Command::new("bash").arg("-c").arg(script).status();
+    let _ = std::process::Command::new("bash")
+        .arg("-c")
+        .arg(script)
+        .status();
 }
 
 #[cfg(target_os = "linux")]
 fn pick_exe(dir: &Path) -> Option<PathBuf> {
     const SKIP: &[&str] = &[
-        "unins", "vcredist", "vc_redist", "dxsetup", "dxwebsetup", "dotnet", "ndp",
-        "crashhandler", "notification_helper", "python", "redist", "directx", "oalinst",
-        "setup", "cleanup", "touchup", "config", "launcher_installer", "handler", "activation",
-        "physx", "systemsoftware", "msiexec", "dotnetfx", "xnafx", "prereq", "install", "eula",
+        "unins",
+        "vcredist",
+        "vc_redist",
+        "dxsetup",
+        "dxwebsetup",
+        "dotnet",
+        "ndp",
+        "crashhandler",
+        "notification_helper",
+        "python",
+        "redist",
+        "directx",
+        "oalinst",
+        "setup",
+        "cleanup",
+        "touchup",
+        "config",
+        "launcher_installer",
+        "handler",
+        "activation",
+        "physx",
+        "systemsoftware",
+        "msiexec",
+        "dotnetfx",
+        "xnafx",
+        "prereq",
+        "install",
+        "eula",
     ];
     let mut best: Option<(u64, PathBuf)> = None;
     for e in walkdir::WalkDir::new(dir).into_iter().flatten() {
@@ -247,7 +278,10 @@ fn launch_game(install_dir: &Path, out: &Path, appid: &str, secs: u64) -> (bool,
         Err(e) => return (false, format!("launch plan failed: {e}")),
     };
     if !plan.command.contains("proton") {
-        return (false, format!("launch plan did not choose proton (cmd={})", plan.command));
+        return (
+            false,
+            format!("launch plan did not choose proton (cmd={})", plan.command),
+        );
     }
     let exe_dir = exe.parent().unwrap_or(install_dir);
     let log_path = out.join("__launch.log");
@@ -261,9 +295,16 @@ fn launch_game(install_dir: &Path, out: &Path, appid: &str, secs: u64) -> (bool,
     };
     let has_systemd = std::env::var("PATH")
         .ok()
-        .map(|path| path.split(':').any(|d| Path::new(d).join("systemd-run").is_file()))
+        .map(|path| {
+            path.split(':')
+                .any(|d| Path::new(d).join("systemd-run").is_file())
+        })
         .unwrap_or(false);
-    let unit = format!("um-launch-{}-{}", std::process::id(), sanitize(appid).replace(' ', "-"));
+    let unit = format!(
+        "um-launch-{}-{}",
+        std::process::id(),
+        sanitize(appid).replace(' ', "-")
+    );
     let mut cmd = if has_systemd {
         let mut c = std::process::Command::new("systemd-run");
         c.arg("--user")
@@ -301,12 +342,18 @@ fn launch_game(install_dir: &Path, out: &Path, appid: &str, secs: u64) -> (bool,
             Ok(Some(status)) => {
                 let code = status.code();
                 let pfx = out.join("compatdata").join(appid).join("pfx").is_dir();
-                break (pfx && code == Some(0), format!("exited early code={code:?} prefixBuilt={pfx}"));
+                break (
+                    pfx && code == Some(0),
+                    format!("exited early code={code:?} prefixBuilt={pfx}"),
+                );
             }
             Ok(None) => {
                 if Instant::now() >= deadline {
                     let pfx = out.join("compatdata").join(appid).join("pfx").is_dir();
-                    break (true, format!("still running after {secs}s prefixBuilt={pfx}"));
+                    break (
+                        true,
+                        format!("still running after {secs}s prefixBuilt={pfx}"),
+                    );
                 }
                 std::thread::sleep(Duration::from_millis(500));
             }
@@ -324,13 +371,22 @@ fn launch_game(install_dir: &Path, out: &Path, appid: &str, secs: u64) -> (bool,
             .status();
     } else {
         let gid = format!("-{pid}");
-        let _ = std::process::Command::new("kill").arg("-TERM").arg(&gid).status();
+        let _ = std::process::Command::new("kill")
+            .arg("-TERM")
+            .arg(&gid)
+            .status();
         kill_by_compat(&compat);
         std::thread::sleep(Duration::from_millis(1500));
-        let _ = std::process::Command::new("kill").arg("-KILL").arg(&gid).status();
+        let _ = std::process::Command::new("kill")
+            .arg("-KILL")
+            .arg(&gid)
+            .status();
     }
     kill_by_compat(&compat);
-    let _ = std::process::Command::new("kill").arg("-KILL").arg(pid.to_string()).status();
+    let _ = std::process::Command::new("kill")
+        .arg("-KILL")
+        .arg(pid.to_string())
+        .status();
     let _ = child.wait();
     let tail = std::fs::read_to_string(&log_path)
         .ok()
@@ -345,7 +401,10 @@ fn launch_game(install_dir: &Path, out: &Path, appid: &str, secs: u64) -> (bool,
                 .join(" | ")
         })
         .unwrap_or_default();
-    let exe_name = exe.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+    let exe_name = exe
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
     (launched, format!("exe={exe_name} {note} log[{tail}]"))
 }
 
@@ -359,7 +418,9 @@ async fn install_one_game() {
     let out = PathBuf::from(env("UM_OUT").unwrap_or_else(|| "/tmp/um_install".to_string()));
     let keep = env("UM_KEEP").is_some();
     let do_launch = env("UM_LAUNCH").is_some();
-    let launch_secs: u64 = env("UM_LAUNCH_SECS").and_then(|s| s.parse().ok()).unwrap_or(30);
+    let launch_secs: u64 = env("UM_LAUNCH_SECS")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(30);
     let skip: usize = env("UM_SKIP").and_then(|s| s.parse().ok()).unwrap_or(0);
     let max_bytes = (max_gb * 1_000_000_000.0) as u64;
 
@@ -421,7 +482,11 @@ async fn install_one_game() {
         let mut targets: Vec<(String, Option<HashMap<String, String>>, String)> = Vec::new();
         if let Some(files) = &r.files {
             for (i, f) in files.iter().enumerate() {
-                targets.push((f.url.clone(), r.headers.clone(), name_for(&f.url, &f.file_name, i)));
+                targets.push((
+                    f.url.clone(),
+                    r.headers.clone(),
+                    name_for(&f.url, &f.file_name, i),
+                ));
             }
         } else if let Some(u) = &r.url {
             targets.push((u.clone(), r.headers.clone(), name_for(u, &r.file_name, 0)));
@@ -513,7 +578,8 @@ async fn install_one_game() {
                     eprintln!("   launching under proton (appid={launch_appid}, {launch_secs}s window)...");
                     let (ok, info) = launch_game(&install_dir, &out, &launch_appid, launch_secs);
                     eprintln!("   LAUNCH {} {}", if ok { "OK" } else { "FAIL" }, info);
-                    launch_report = format!(" launch={} ({})", if ok { "OK" } else { "FAIL" }, info);
+                    launch_report =
+                        format!(" launch={} ({})", if ok { "OK" } else { "FAIL" }, info);
                 }
                 eprintln!(
                     "\nRESULT PASS source={source} host={} game=\"{}\" dlBytes={dl_bytes} extractBytes={bytes} files={files}{launch_report}",

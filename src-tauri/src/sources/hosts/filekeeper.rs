@@ -7,10 +7,12 @@ use regex::Regex;
 use crate::http::{self, FetchOpts, Jar};
 use crate::sources::ResolveResult;
 
-static HOST_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)(^|\.)filekeeper\.net$").unwrap());
+static HOST_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)(^|\.)filekeeper\.net$").unwrap());
 static CODE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"data-code="([^"]*)""#).unwrap());
 static RAND_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"data-rand="([^"]*)""#).unwrap());
-static COUNTDOWN_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"data-countdown="(\d+)""#).unwrap());
+static COUNTDOWN_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"data-countdown="(\d+)""#).unwrap());
 static CAPTCHA_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"data-has-captcha="true""#).unwrap());
 
@@ -40,7 +42,10 @@ fn enc(s: &str) -> String {
 
 fn form_post(jar: &Jar, referer: &str, pairs: &[(&str, &str)], manual_redirect: bool) -> FetchOpts {
     let mut headers = HashMap::new();
-    headers.insert("Content-Type".to_string(), "application/x-www-form-urlencoded".to_string());
+    headers.insert(
+        "Content-Type".to_string(),
+        "application/x-www-form-urlencoded".to_string(),
+    );
     headers.insert("Referer".to_string(), referer.to_string());
     let body = pairs
         .iter()
@@ -99,9 +104,16 @@ pub async fn resolve(url: &str) -> ResolveResult {
         Err(_) => return not_resolvable(url, "filekeeper download page failed"),
     };
     if CAPTCHA_RE.is_match(&page) {
-        return not_resolvable(url, "filekeeper item requires a captcha \u{2014} browser only");
+        return not_resolvable(
+            url,
+            "filekeeper item requires a captcha \u{2014} browser only",
+        );
     }
-    let code = match CODE_RE.captures(&page).and_then(|c| c.get(1)).map(|m| m.as_str().to_string()) {
+    let code = match CODE_RE
+        .captures(&page)
+        .and_then(|c| c.get(1))
+        .map(|m| m.as_str().to_string())
+    {
         Some(c) if !c.is_empty() => c,
         _ => return not_resolvable(url, "filekeeper file code not found"),
     };
@@ -116,7 +128,12 @@ pub async fn resolve(url: &str) -> ResolveResult {
         &form_post(
             &jar,
             &dl_url,
-            &[("op", "download1"), ("id", &code), ("method_free", "Free download"), ("down_direct", "1")],
+            &[
+                ("op", "download1"),
+                ("id", &code),
+                ("method_free", "Free download"),
+                ("down_direct", "1"),
+            ],
             false,
         ),
     )
@@ -156,7 +173,11 @@ pub async fn resolve(url: &str) -> ResolveResult {
             .and_then(|v| v.to_str().ok())
             .filter(|s| s.starts_with("http"))
         {
-            let file_name = url.rsplit('/').next().filter(|s| !s.is_empty()).map(str::to_string);
+            let file_name = url
+                .rsplit('/')
+                .next()
+                .filter(|s| !s.is_empty())
+                .map(str::to_string);
             return ResolveResult {
                 resolvable: true,
                 url: Some(loc.to_string()),
@@ -183,8 +204,19 @@ mod tests {
     #[test]
     fn parses_download_page_attrs() {
         let page = r#"<div id="download-countdown" data-countdown="5" data-code="5bhrgi7pwnpl" data-rand="" data-has-captcha="false"></div>"#;
-        assert_eq!(CODE_RE.captures(page).unwrap().get(1).unwrap().as_str(), "5bhrgi7pwnpl");
-        assert_eq!(COUNTDOWN_RE.captures(page).unwrap().get(1).unwrap().as_str(), "5");
+        assert_eq!(
+            CODE_RE.captures(page).unwrap().get(1).unwrap().as_str(),
+            "5bhrgi7pwnpl"
+        );
+        assert_eq!(
+            COUNTDOWN_RE
+                .captures(page)
+                .unwrap()
+                .get(1)
+                .unwrap()
+                .as_str(),
+            "5"
+        );
         assert!(!CAPTCHA_RE.is_match(page));
     }
 }

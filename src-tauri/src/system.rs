@@ -66,7 +66,10 @@ pub fn system_launch_steam(app: AppHandle) -> Value {
 
 #[tauri::command(async)]
 pub fn steam_game_run(app: AppHandle, steam_appid: u64) -> Value {
-    match app.opener().open_url(format!("steam://rungameid/{steam_appid}"), None::<&str>) {
+    match app
+        .opener()
+        .open_url(format!("steam://rungameid/{steam_appid}"), None::<&str>)
+    {
         Ok(_) => json!({ "ok": true }),
         Err(e) => json!({ "ok": false, "error": e.to_string() }),
     }

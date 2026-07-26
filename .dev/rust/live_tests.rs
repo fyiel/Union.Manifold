@@ -14,6 +14,38 @@ async fn live_steam_search_finds_the_farmer_was_replaced() {
 
 #[tokio::test]
 #[ignore]
+async fn live_steamrip_query_finds_ballionaire() {
+    let games = adapters::steamrip::query(&QueryParams {
+        text: Some("Ballionaire".to_string()),
+        limit: 50,
+        ..Default::default()
+    })
+    .await
+    .expect("SteamRIP catalog");
+    assert!(games.iter().any(|game| game.title == "Ballionaire"));
+}
+
+#[tokio::test]
+#[ignore]
+async fn live_zeigames_query_returns_current_downloads() {
+    let games = adapters::zeigames::query(&QueryParams {
+        text: Some("Katamari Damacy REROLL".to_string()),
+        limit: 3,
+        ..Default::default()
+    })
+    .await
+    .expect("ZeiGames search");
+    let game = games
+        .iter()
+        .find(|game| game.title == "Katamari Damacy REROLL")
+        .expect("current ZeiGames topic");
+    assert_eq!(game.source_id, "zeigames");
+    assert!(game.source_url.starts_with("https://zeigames.com/topic/"));
+    assert!(!game.download_options.is_empty());
+}
+
+#[tokio::test]
+#[ignore]
 async fn live_steam_store_details_for_portal_2() {
     let d = steam::get_store_details(620).await.expect("store details");
     assert!(d.name.to_lowercase().contains("portal"));

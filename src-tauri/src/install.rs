@@ -12,7 +12,10 @@ const ARCHIVE_EXTS: &[&str] = &[
 ];
 
 fn is_archive(path: &Path) -> bool {
-    let name = path.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
     ARCHIVE_EXTS.iter().any(|e| name.ends_with(e))
         || name.contains(".part1.")
         || name.contains(".part01.")
@@ -40,7 +43,10 @@ fn is_first_part(name: &str) -> bool {
 }
 
 pub(crate) fn extract_entry_point(dir: &Path, fallback: &Path) -> PathBuf {
-    let name = fallback.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
+    let name = fallback
+        .file_name()
+        .map(|n| n.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
     if is_first_part(&name) {
         return fallback.to_path_buf();
     }
@@ -56,7 +62,12 @@ pub(crate) fn extract_entry_point(dir: &Path, fallback: &Path) -> PathBuf {
 
 fn part_base(name: &str) -> Option<&str> {
     if let Some(i) = name.find(".part") {
-        if name[i + 5..].chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false) {
+        if name[i + 5..]
+            .chars()
+            .next()
+            .map(|c| c.is_ascii_digit())
+            .unwrap_or(false)
+        {
             return Some(&name[..i]);
         }
     }
@@ -69,7 +80,10 @@ fn part_base(name: &str) -> Option<&str> {
 }
 
 fn archive_files(dir: &Path, save_path: &Path) -> Vec<PathBuf> {
-    let name = save_path.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
+    let name = save_path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
     let base = match part_base(&name) {
         Some(b) => b.to_string(),
         None => return vec![save_path.to_path_buf()],
@@ -80,7 +94,10 @@ fn archive_files(dir: &Path, save_path: &Path) -> Vec<PathBuf> {
         .flatten()
         .map(|e| e.path())
         .filter(|p| {
-            let n = p.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
+            let n = p
+                .file_name()
+                .map(|n| n.to_string_lossy().to_lowercase())
+                .unwrap_or_default();
             p.is_file() && part_base(&n) == Some(base.as_str())
         })
         .collect();
@@ -91,7 +108,12 @@ fn archive_files(dir: &Path, save_path: &Path) -> Vec<PathBuf> {
     found
 }
 
-fn progress_emitter<'a>(app: &'a AppHandle, download_id: &'a str, appid: &'a str, game_name: &'a Option<String>) -> impl Fn(u8) + 'a {
+fn progress_emitter<'a>(
+    app: &'a AppHandle,
+    download_id: &'a str,
+    appid: &'a str,
+    game_name: &'a Option<String>,
+) -> impl Fn(u8) + 'a {
     move |p| {
         app.emit(
             "uc:download-update",
@@ -107,7 +129,14 @@ fn progress_emitter<'a>(app: &'a AppHandle, download_id: &'a str, appid: &'a str
     }
 }
 
-fn emit_status(app: &AppHandle, download_id: &str, appid: &str, game_name: &Option<String>, status: &str, error: Option<&str>) {
+fn emit_status(
+    app: &AppHandle,
+    download_id: &str,
+    appid: &str,
+    game_name: &Option<String>,
+    status: &str,
+    error: Option<&str>,
+) {
     app.emit(
         "uc:download-update",
         json!({
@@ -154,7 +183,11 @@ pub(crate) fn which_extractor() -> Option<String> {
     let path = std::env::var("PATH").ok()?;
     let sep = if cfg!(windows) { ';' } else { ':' };
     for name in ["bsdtar", "tar"] {
-        let file = if cfg!(windows) { format!("{name}.exe") } else { name.to_string() };
+        let file = if cfg!(windows) {
+            format!("{name}.exe")
+        } else {
+            name.to_string()
+        };
         for dir in path.split(sep) {
             let p = std::path::Path::new(dir).join(&file);
             if p.is_file() {
@@ -199,10 +232,16 @@ pub(crate) async fn run_7z(archive: &Path, out_dir: &Path, on_progress: impl Fn(
     run_7z_pw(archive, out_dir, None, on_progress).await
 }
 
-pub(crate) async fn run_7z_pw(archive: &Path, out_dir: &Path, password: Option<&str>, on_progress: impl Fn(u8)) -> Result<()> {
+pub(crate) async fn run_7z_pw(
+    archive: &Path,
+    out_dir: &Path,
+    password: Option<&str>,
+    on_progress: impl Fn(u8),
+) -> Result<()> {
     use tokio::io::AsyncReadExt;
-    let bin = crate::bins::resolve_sidecar("7z")
-        .ok_or_else(|| crate::error::AppError::msg("7z binary not found, run pnpm fetch-sidecars"))?;
+    let bin = crate::bins::resolve_sidecar("7z").ok_or_else(|| {
+        crate::error::AppError::msg("7z binary not found, run pnpm fetch-sidecars")
+    })?;
     std::fs::create_dir_all(out_dir).ok();
     let mut cmd = tokio::process::Command::new(&bin);
     cmd.arg("x")
@@ -222,7 +261,9 @@ pub(crate) async fn run_7z_pw(archive: &Path, out_dir: &Path, password: Option<&
         use std::os::windows::process::CommandExt;
         cmd.creation_flags(0x08000000);
     }
-    let mut child = cmd.spawn().map_err(|e| crate::error::AppError::msg(format!("7z spawn: {e}")))?;
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| crate::error::AppError::msg(format!("7z spawn: {e}")))?;
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
     let progress = async {
@@ -250,7 +291,10 @@ pub(crate) async fn run_7z_pw(archive: &Path, out_dir: &Path, password: Option<&
         err_text
     };
     let (_, err_text) = tokio::join!(progress, drain_err);
-    let status = child.wait().await.map_err(|e| crate::error::AppError::msg(format!("7z wait: {e}")))?;
+    let status = child
+        .wait()
+        .await
+        .map_err(|e| crate::error::AppError::msg(format!("7z wait: {e}")))?;
     if !status.success() {
         if let Some(bin) = which_extractor() {
             crate::logging::write_line(
@@ -266,15 +310,19 @@ pub(crate) async fn run_7z_pw(archive: &Path, out_dir: &Path, password: Option<&
                 return Ok(());
             }
         }
-        return Err(crate::error::AppError::msg(format!("extraction failed: {}", err_text.trim())));
+        return Err(crate::error::AppError::msg(format!(
+            "extraction failed: {}",
+            err_text.trim()
+        )));
     }
     on_progress(100);
     Ok(())
 }
 
 pub(crate) async fn run_7z_list(archive: &Path, password: Option<&str>) -> Result<Vec<String>> {
-    let bin = crate::bins::resolve_sidecar("7z")
-        .ok_or_else(|| crate::error::AppError::msg("7z binary not found, run pnpm fetch-sidecars"))?;
+    let bin = crate::bins::resolve_sidecar("7z").ok_or_else(|| {
+        crate::error::AppError::msg("7z binary not found, run pnpm fetch-sidecars")
+    })?;
     let mut cmd = tokio::process::Command::new(&bin);
     cmd.arg("l")
         .arg("-slt")
@@ -306,7 +354,13 @@ pub(crate) async fn run_7z_list(archive: &Path, password: Option<&str>) -> Resul
         .collect())
 }
 
-async fn finalize_installed(dir: &Path, appid: &str, game_name: &Option<String>, install_path: &Path, metadata: Option<&Value>) {
+async fn finalize_installed(
+    dir: &Path,
+    appid: &str,
+    game_name: &Option<String>,
+    install_path: &Path,
+    metadata: Option<&Value>,
+) {
     let manifest_path = dir.join(MANIFEST_NAME);
     let mut manifest = std::fs::read_to_string(&manifest_path)
         .ok()
@@ -314,12 +368,17 @@ async fn finalize_installed(dir: &Path, appid: &str, game_name: &Option<String>,
         .and_then(|v| v.as_object().cloned())
         .unwrap_or_default();
     manifest.insert("appid".into(), json!(appid));
-    manifest.insert("name".into(), json!(game_name.clone().unwrap_or_else(|| appid.to_string())));
+    manifest.insert(
+        "name".into(),
+        json!(game_name.clone().unwrap_or_else(|| appid.to_string())),
+    );
     manifest.insert("installStatus".into(), json!("installed"));
     manifest.insert("installPath".into(), json!(install_path.to_string_lossy()));
     let size = {
         let p = install_path.to_path_buf();
-        tokio::task::spawn_blocking(move || dir_size(&p)).await.unwrap_or(0)
+        tokio::task::spawn_blocking(move || dir_size(&p))
+            .await
+            .unwrap_or(0)
     };
     manifest.insert("sizeBytes".into(), json!(size));
     manifest.insert("installedAt".into(), json!(now_ms()));
@@ -349,7 +408,11 @@ fn mark_install_failed(dir: &Path, error: &str) {
 }
 
 async fn extract_leftover_tar(out_dir: &Path, source: &Path) -> Result<()> {
-    if source.extension().map(|x| x.eq_ignore_ascii_case("tar")).unwrap_or(false) {
+    if source
+        .extension()
+        .map(|x| x.eq_ignore_ascii_case("tar"))
+        .unwrap_or(false)
+    {
         return Ok(());
     }
     let tars: Vec<PathBuf> = std::fs::read_dir(out_dir)
@@ -360,7 +423,9 @@ async fn extract_leftover_tar(out_dir: &Path, source: &Path) -> Result<()> {
         .filter(|p| {
             p.is_file()
                 && p != source
-                && p.extension().map(|x| x.eq_ignore_ascii_case("tar")).unwrap_or(false)
+                && p.extension()
+                    .map(|x| x.eq_ignore_ascii_case("tar"))
+                    .unwrap_or(false)
         })
         .collect();
     if let [tar] = tars.as_slice() {
@@ -370,13 +435,26 @@ async fn extract_leftover_tar(out_dir: &Path, source: &Path) -> Result<()> {
     Ok(())
 }
 
-pub async fn auto_install(app: AppHandle, appid: String, download_id: String, game_name: Option<String>, save_path: PathBuf, installing_dir: PathBuf) {
+pub async fn auto_install(
+    app: AppHandle,
+    appid: String,
+    download_id: String,
+    game_name: Option<String>,
+    save_path: PathBuf,
+    installing_dir: PathBuf,
+) {
     let archive = extract_entry_point(&installing_dir, &save_path);
     let display_name = game_name.clone().unwrap_or_else(|| appid.clone());
     if !is_archive(&archive) && !sniff_archive(&archive) {
         finalize_installed(&installing_dir, &appid, &game_name, &installing_dir, None).await;
         emit_status(&app, &download_id, &appid, &game_name, "extracted", None);
-        crate::notify::send_if(&app, "notifyInstallDone", true, "Ready to play", &format!("{display_name} finished installing"));
+        crate::notify::send_if(
+            &app,
+            "notifyInstallDone",
+            true,
+            "Ready to play",
+            &format!("{display_name} finished installing"),
+        );
         return;
     }
     let margin_gib = app
@@ -406,7 +484,12 @@ pub async fn auto_install(app: AppHandle, appid: String, download_id: String, ga
     let engine = app.state::<AppState>().downloads.clone();
     emit_status(&app, &download_id, &appid, &game_name, "extracting", None);
     engine.set_extracting(&appid, true);
-    let mut result = run_7z(&archive, &installing_dir, progress_emitter(&app, &download_id, &appid, &game_name)).await;
+    let mut result = run_7z(
+        &archive,
+        &installing_dir,
+        progress_emitter(&app, &download_id, &appid, &game_name),
+    )
+    .await;
     if result.is_ok() {
         result = extract_leftover_tar(&installing_dir, &archive).await;
     }
@@ -415,9 +498,19 @@ pub async fn auto_install(app: AppHandle, appid: String, download_id: String, ga
         Ok(_) => {
             finalize_installed(&installing_dir, &appid, &game_name, &installing_dir, None).await;
             emit_status(&app, &download_id, &appid, &game_name, "extracted", None);
-            crate::notify::send_if(&app, "notifyInstallDone", true, "Ready to play", &format!("{display_name} finished installing"));
+            crate::notify::send_if(
+                &app,
+                "notifyInstallDone",
+                true,
+                "Ready to play",
+                &format!("{display_name} finished installing"),
+            );
             let parts = archive_files(&installing_dir, &save_path);
-            let size: u64 = parts.iter().filter_map(|p| std::fs::metadata(p).ok()).map(|m| m.len()).sum();
+            let size: u64 = parts
+                .iter()
+                .filter_map(|p| std::fs::metadata(p).ok())
+                .map(|m| m.len())
+                .sum();
             app.emit(
                 "uc:archive-delete-prompt",
                 json!({
@@ -431,16 +524,40 @@ pub async fn auto_install(app: AppHandle, appid: String, download_id: String, ga
         }
         Err(e) => {
             mark_install_failed(&installing_dir, &e.to_string());
-            emit_status(&app, &download_id, &appid, &game_name, "extract_failed", Some(&e.to_string()));
-            crate::notify::send_if(&app, "notifyInstallDone", true, "Install failed", &format!("{display_name} could not be extracted"));
+            emit_status(
+                &app,
+                &download_id,
+                &appid,
+                &game_name,
+                "extract_failed",
+                Some(&e.to_string()),
+            );
+            crate::notify::send_if(
+                &app,
+                "notifyInstallDone",
+                true,
+                "Install failed",
+                &format!("{display_name} could not be extracted"),
+            );
         }
     }
 }
 
 #[tauri::command]
-pub async fn install_from_archive(state: State<'_, AppState>, app: AppHandle, payload: Value) -> Result<Value> {
-    let appid = payload.get("appid").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let game_name = payload.get("gameName").and_then(|v| v.as_str()).map(String::from);
+pub async fn install_from_archive(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    payload: Value,
+) -> Result<Value> {
+    let appid = payload
+        .get("appid")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let game_name = payload
+        .get("gameName")
+        .and_then(|v| v.as_str())
+        .map(String::from);
     let download_id = payload
         .get("downloadId")
         .and_then(|v| v.as_str())
@@ -449,7 +566,11 @@ pub async fn install_from_archive(state: State<'_, AppState>, app: AppHandle, pa
     let archive_paths: Vec<PathBuf> = payload
         .get("archivePaths")
         .and_then(|v| v.as_array())
-        .map(|a| a.iter().filter_map(|p| p.as_str().map(PathBuf::from)).collect())
+        .map(|a| {
+            a.iter()
+                .filter_map(|p| p.as_str().map(PathBuf::from))
+                .collect()
+        })
         .unwrap_or_default();
     let metadata = payload.get("metadata").cloned();
     if archive_paths.is_empty() {
@@ -468,7 +589,12 @@ pub async fn install_from_archive(state: State<'_, AppState>, app: AppHandle, pa
         let primary = archive_paths[0].clone();
         emit_status(&app, &download_id, &appid, &game_name, "extracting", None);
         state.downloads.set_extracting(&appid, true);
-        let mut result = run_7z(&primary, &dir, progress_emitter(&app, &download_id, &appid, &game_name)).await;
+        let mut result = run_7z(
+            &primary,
+            &dir,
+            progress_emitter(&app, &download_id, &appid, &game_name),
+        )
+        .await;
         if result.is_ok() {
             result = extract_leftover_tar(&dir, &primary).await;
         }
@@ -479,8 +605,17 @@ pub async fn install_from_archive(state: State<'_, AppState>, app: AppHandle, pa
                 emit_status(&app, &download_id, &appid, &game_name, "extracted", None);
             }
             Err(e) => {
-                emit_status(&app, &download_id, &appid, &game_name, "extract_failed", Some(&e.to_string()));
-                return Ok(json!({ "ok": false, "error": e.to_string(), "downloadId": download_id }));
+                emit_status(
+                    &app,
+                    &download_id,
+                    &appid,
+                    &game_name,
+                    "extract_failed",
+                    Some(&e.to_string()),
+                );
+                return Ok(
+                    json!({ "ok": false, "error": e.to_string(), "downloadId": download_id }),
+                );
             }
         }
         Ok(json!({ "ok": true, "downloadId": download_id, "extracted": 1 }))
@@ -491,7 +626,11 @@ pub async fn install_from_archive(state: State<'_, AppState>, app: AppHandle, pa
 }
 
 #[tauri::command]
-pub async fn install_downloaded_archive(state: State<'_, AppState>, app: AppHandle, appid: String) -> Result<Value> {
+pub async fn install_downloaded_archive(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    appid: String,
+) -> Result<Value> {
     let (dir, save_path, game_name, download_id) = {
         let found = find_installing(&state.download_root(), &appid);
         match found {
@@ -505,7 +644,10 @@ pub async fn install_downloaded_archive(state: State<'_, AppState>, app: AppHand
                     .and_then(|v| v.as_str())
                     .map(PathBuf::from)
                     .unwrap_or_else(|| dir.clone());
-                let name = manifest.get("name").and_then(|v| v.as_str()).map(String::from);
+                let name = manifest
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .map(String::from);
                 let id = snap
                     .and_then(|s| s.get("downloadId"))
                     .and_then(|v| v.as_str())
@@ -526,7 +668,12 @@ pub async fn install_downloaded_archive(state: State<'_, AppState>, app: AppHand
         emit_status(&app, &download_id, &appid, &game_name, "extracting", None);
         state.downloads.set_extracting(&appid, true);
         let entry = extract_entry_point(&dir, &save_path);
-        let mut result = run_7z(&entry, &dir, progress_emitter(&app, &download_id, &appid, &game_name)).await;
+        let mut result = run_7z(
+            &entry,
+            &dir,
+            progress_emitter(&app, &download_id, &appid, &game_name),
+        )
+        .await;
         if result.is_ok() {
             result = extract_leftover_tar(&dir, &entry).await;
         }
@@ -538,7 +685,14 @@ pub async fn install_downloaded_archive(state: State<'_, AppState>, app: AppHand
                 Ok(json!({ "ok": true, "downloadId": download_id, "extracted": 1 }))
             }
             Err(e) => {
-                emit_status(&app, &download_id, &appid, &game_name, "extract_failed", Some(&e.to_string()));
+                emit_status(
+                    &app,
+                    &download_id,
+                    &appid,
+                    &game_name,
+                    "extract_failed",
+                    Some(&e.to_string()),
+                );
                 Ok(json!({ "ok": false, "error": e.to_string(), "downloadId": download_id }))
             }
         }
@@ -570,11 +724,17 @@ pub fn delete_archive_files(state: State<'_, AppState>, payload: Value) -> Value
         Ok(r) => r,
         Err(_) => return json!({ "ok": false, "error": "download root unavailable" }),
     };
-    let paths = payload.get("archivePaths").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+    let paths = payload
+        .get("archivePaths")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
     let mut deleted = 0;
     for p in paths {
         let Some(s) = p.as_str() else { continue };
-        let Ok(real) = Path::new(s).canonicalize() else { continue };
+        let Ok(real) = Path::new(s).canonicalize() else {
+            continue;
+        };
         if !real.starts_with(&root) || !real.is_file() {
             continue;
         }
@@ -589,7 +749,7 @@ pub fn delete_archive_files(state: State<'_, AppState>, payload: Value) -> Value
 mod tests {
     use super::*;
 
-#[test]
+    #[test]
     fn t_part_base_multibyte_never_panics() {
         assert_eq!(part_base("café.7z"), None);
         assert_eq!(part_base("游戏.7z"), None);

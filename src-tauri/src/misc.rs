@@ -8,12 +8,16 @@ pub async fn theme_editor_open(app: AppHandle, seed: Value) -> bool {
         existing.emit("uc:theme-editor-seed", seed.clone()).ok();
         return true;
     }
-    let built = WebviewWindowBuilder::new(&app, "theme-editor", WebviewUrl::App("index.html#/theme-editor".into()))
-        .title("Theme Editor")
-        .inner_size(1100.0, 780.0)
-        .min_inner_size(900.0, 640.0)
-        .decorations(false)
-        .build();
+    let built = WebviewWindowBuilder::new(
+        &app,
+        "theme-editor",
+        WebviewUrl::App("index.html#/theme-editor".into()),
+    )
+    .title("Theme Editor")
+    .inner_size(1100.0, 780.0)
+    .min_inner_size(900.0, 640.0)
+    .decorations(false)
+    .build();
     match built {
         Ok(window) => {
             let seed = seed.clone();
@@ -80,4 +84,3 @@ pub fn autostart_set(app: AppHandle, enabled: bool) -> Value {
 pub fn system_notifications() -> Value {
     json!({ "ok": true, "notifications": [] })
 }
-

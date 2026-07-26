@@ -1,14 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Link } from "react-router-dom"
+import { X } from "lucide-react"
 import { querySources, rememberGames, sourcesAvailable, listSources, onSourcesChanged } from "@/lib/sources"
 import { getBrowseCache, setBrowseCache, setBrowseScroll, consumeDiskRestore } from "@/lib/browse-cache"
 import { GameCard } from "@/app/manifold/GameCard"
-import { MONO, SearchIcon, Spinner, CenterState } from "@/app/manifold/ui"
+import { MONO, SearchIcon, SmartImage, Spinner, CenterState } from "@/app/manifold/ui"
 
 type SortMode = "relevance" | "a-z" | "size" | "sources"
 const SORT_CYCLE: SortMode[] = ["relevance", "a-z", "size", "sources"]
 type SrcStatus = "idle" | "searching" | "done" | "failed"
 const PAGE = 48
+type ZoomedCover = { game: UnifiedSourceGame; candidates: string[] }
 
 function mergeUnique(prev: UnifiedSourceGame[], next: UnifiedSourceGame[]): UnifiedSourceGame[] {
   const seen = new Set(prev.map((g) => g.dedupKey))
@@ -27,6 +29,7 @@ export function BrowsePage() {
   const [sourceCounts, setSourceCounts] = useState<Record<string, number>>(() => cached?.counts ?? {})
   const [loadingMore, setLoadingMore] = useState(false)
   const [sourcesErrored, setSourcesErrored] = useState(false)
+  const [zoomedCover, setZoomedCover] = useState<ZoomedCover | null>(null)
 
   const reqId = useRef(0)
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -63,6 +66,19 @@ export function BrowsePage() {
   useEffect(() => {
     setBrowseCache({ query, committed, games, counts: sourceCounts, sortMode, offset: offsetRef.current, total })
   }, [query, committed, games, sourceCounts, sortMode, total])
+
+  useEffect(() => {
+    if (!zoomedCover) return
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setZoomedCover(null)
+    }
+    window.addEventListener("keydown", closeOnEscape)
+    return () => window.removeEventListener("keydown", closeOnEscape)
+  }, [zoomedCover])
+
+  const openCover = useCallback((game: UnifiedSourceGame, candidates: string[]) => {
+    setZoomedCover({ game, candidates })
+  }, [])
 
   const runQuery = useCallback(async (text: string, append = false) => {
     const q = text.trim()
@@ -336,7 +352,7 @@ export function BrowsePage() {
           <>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(168px, 1fr))", gap: 18, alignContent: "start" }}>
               {sorted.map((g) => (
-                <GameCard key={g.dedupKey} game={g} />
+                <GameCard key={g.dedupKey} game={g} onZoom={openCover} />
               ))}
             </div>
             {(loadingMore || hasMore) && (
@@ -359,6 +375,45 @@ export function BrowsePage() {
         ) : (
           <EmptyState text="nothing here yet" />
         )}
+      </div>
+      {zoomedCover && (
+        <BrowseCoverLightbox cover={zoomedCover} onClose={() => setZoomedCover(null)} />
+      )}
+    </div>
+  )
+}
+
+function BrowseCoverLightbox({ cover, onClose }: { cover: ZoomedCover; onClose: () => void }) {
+  const { game, candidates } = cover
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="browse-cover-title"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose()
+      }}
+      style={{ position: "fixed", inset: 0, zIndex: 1000, display: "grid", placeItems: "center", padding: "clamp(16px, 4vw, 48px)", background: "rgba(5,5,5,0.9)", backdropFilter: "blur(12px)", cursor: "zoom-out" }}
+    >
+      <SmartImage
+        candidates={candidates}
+        steamAppId={game.steamAppId}
+        alt={`${game.title} cover art`}
+        style={{ display: "block", width: "auto", height: "auto", maxWidth: "calc(100vw - 64px)", maxHeight: "calc(100vh - 132px)", objectFit: "contain", borderRadius: 8, boxShadow: "0 24px 80px rgba(0,0,0,0.55)", cursor: "default" }}
+      />
+      <button
+        type="button"
+        autoFocus
+        aria-label="Close cover preview"
+        title="Close"
+        onClick={onClose}
+        style={{ position: "fixed", top: 22, right: 22, display: "flex", alignItems: "center", justifyContent: "center", width: 36, height: 36, padding: 0, borderRadius: 9, border: "1px solid rgba(255,255,255,0.18)", background: "rgba(16,16,16,0.78)", color: "rgba(255,255,255,0.9)", cursor: "pointer", backdropFilter: "blur(8px)" }}
+      >
+        <X size={17} strokeWidth={1.7} />
+      </button>
+      <div style={{ position: "fixed", left: 24, right: 24, bottom: 20, display: "flex", flexDirection: "column", alignItems: "center", gap: 4, pointerEvents: "none", textAlign: "center" }}>
+        <span id="browse-cover-title" style={{ maxWidth: 720, fontSize: 13, fontWeight: 600, color: "rgba(255,255,255,0.92)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{game.title}</span>
+        <span style={{ fontFamily: MONO, fontSize: 10, color: "rgba(255,255,255,0.48)", letterSpacing: "0.04em", textTransform: "uppercase" }}>cover preview · Esc to close</span>
       </div>
     </div>
   )

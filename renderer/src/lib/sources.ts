@@ -146,13 +146,13 @@ export async function sourceTags(): Promise<{ tags: string[]; bySource: Record<s
   return res?.ok ? { tags: res.tags, bySource: res.bySource } : { tags: [], bySource: {} }
 }
 
-export const SOURCE_PRIORITY = ["unioncrax", "gamebounty", "steamrip", "rexagames", "onlinefix", "gog", "empress", "kaoskrew"]
+export const SOURCE_PRIORITY = ["unioncrax", "gamebounty", "steamrip", "zeigames", "onlinefix", "gog", "empress", "kaoskrew"]
 
 export const SOURCE_NAMES: Record<string, string> = {
   unioncrax: "UnionCrax",
   gamebounty: "GameBounty",
   steamrip: "SteamRIP",
-  rexagames: "RexaGames",
+  zeigames: "ZeiGames",
   onlinefix: "Online-Fix",
   gog: "GOG",
   empress: "EMPRESS",
@@ -166,7 +166,7 @@ export const SOURCE_ABBR: Record<string, string> = {
   unioncrax: "UC",
   gamebounty: "GB",
   steamrip: "SR",
-  rexagames: "RX",
+  zeigames: "ZG",
   onlinefix: "OF",
   gog: "GOG",
   empress: "EMP",
@@ -184,7 +184,7 @@ export const SOURCE_DIRECT: Record<string, boolean> = {
   unioncrax: true,
   steamrip: true,
   gamebounty: true,
-  rexagames: true,
+  zeigames: true,
   onlinefix: true,
   gog: true,
   empress: true,
@@ -197,12 +197,22 @@ export function sourceDirect(id: string): boolean {
 const SOURCE_PRIORITY_KEY = "gv_source_priority"
 const SOURCE_DISABLED_KEY = "gv_source_disabled"
 
+function migrateSourceIds(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  const ids = value
+    .filter((id: unknown): id is string => typeof id === "string")
+    .map((id) => id === "rexagames" ? "zeigames" : id)
+    .filter((id) => SOURCE_PRIORITY.includes(id))
+  return [...new Set(ids)]
+}
+
 export async function loadSourcePriority(): Promise<string[]> {
   try {
     const saved = await window.ucSettings?.get?.(SOURCE_PRIORITY_KEY)
-    if (Array.isArray(saved) && saved.length) {
-      const extras = SOURCE_PRIORITY.filter((id) => !saved.includes(id))
-      return [...saved.filter((id: unknown): id is string => typeof id === "string"), ...extras]
+    const migrated = migrateSourceIds(saved)
+    if (migrated.length) {
+      const extras = SOURCE_PRIORITY.filter((id) => !migrated.includes(id))
+      return [...migrated, ...extras]
     }
   } catch {  }
   return [...SOURCE_PRIORITY]
@@ -214,8 +224,7 @@ export async function saveSourcePriority(ids: string[]): Promise<void> {
 
 export async function loadDisabledSources(): Promise<string[]> {
   try {
-    const saved = await window.ucSettings?.get?.(SOURCE_DISABLED_KEY)
-    if (Array.isArray(saved)) return saved.filter((id: unknown): id is string => typeof id === "string")
+    return migrateSourceIds(await window.ucSettings?.get?.(SOURCE_DISABLED_KEY))
   } catch {  }
   return []
 }

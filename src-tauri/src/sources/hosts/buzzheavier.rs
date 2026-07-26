@@ -11,8 +11,7 @@ static HOSTS_RE: Lazy<Regex> =
 static TS_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?i)^ts\.").unwrap());
 static ID_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^/([A-Za-z0-9]{4,})").unwrap());
 static TITLE_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?i)<title>([^<]+)</title>").unwrap());
-static SIZE_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"(?i)[\d.]+\s*(?:TB|GB|MB|KB)\b").unwrap());
+static SIZE_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?i)[\d.]+\s*(?:TB|GB|MB|KB)\b").unwrap());
 static HXGET_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r#"hx-get="(/[A-Za-z0-9]+/download\?t=[^"]+)""#).unwrap());
 static ALT_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"[?&]alt=true").unwrap());

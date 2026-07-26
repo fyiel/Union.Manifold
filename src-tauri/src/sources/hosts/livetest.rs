@@ -68,7 +68,10 @@ async fn collect_options() -> Vec<DownloadOption> {
     for g in adapters::steamrip::query(&params).await.unwrap_or_default() {
         opts.extend(g.download_options);
     }
-    for g in adapters::gamebounty::query(&params).await.unwrap_or_default() {
+    for g in adapters::gamebounty::query(&params)
+        .await
+        .unwrap_or_default()
+    {
         opts.extend(g.download_options);
     }
     opts
@@ -112,11 +115,13 @@ async fn host_resolvers_live() {
                     match verify_direct(direct, &r.headers).await {
                         Ok(info) => {
                             ok += 1;
-                            eprintln!("[{host}] OK   {src}\n           -> {direct}\n           {info}");
+                            eprintln!(
+                                "[{host}] OK   {src}\n           -> {direct}\n           {info}"
+                            );
                         }
-                        Err(e) => eprintln!(
-                            "[{host}] BAD  {src}\n           -> {direct}\n           {e}"
-                        ),
+                        Err(e) => {
+                            eprintln!("[{host}] BAD  {src}\n           -> {direct}\n           {e}")
+                        }
                     }
                 } else if r.files.as_ref().map(|f| !f.is_empty()).unwrap_or(false) {
                     ok += 1;
@@ -161,7 +166,10 @@ async fn catalog_coverage() {
     for g in adapters::steamrip::query(&params).await.unwrap_or_default() {
         games.push(("steamrip", g));
     }
-    for g in adapters::gamebounty::query(&params).await.unwrap_or_default() {
+    for g in adapters::gamebounty::query(&params)
+        .await
+        .unwrap_or_default()
+    {
         games.push(("gamebounty", g));
     }
 
@@ -185,8 +193,11 @@ async fn catalog_coverage() {
                 *orphan_hosts.entry(o.host_type.clone()).or_default() += 1;
             }
             if orphan_titles.len() < 25 {
-                let hosts: Vec<&str> =
-                    g.download_options.iter().map(|o| o.host_type.as_str()).collect();
+                let hosts: Vec<&str> = g
+                    .download_options
+                    .iter()
+                    .map(|o| o.host_type.as_str())
+                    .collect();
                 orphan_titles.push(format!("[{src}] {} -> {:?}", g.title, hosts));
             }
         }
