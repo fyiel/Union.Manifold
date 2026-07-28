@@ -73,8 +73,8 @@ export function installBridge(): void {
     findGameSubfolder: (folder: string) => call("game_subfolder_find", { folder }),
     preflightGameLaunch: (appid: string, exePath: string) =>
       call("game_exe_preflight", { appid, exePath }),
-    launchGameExecutable: (appid: string, exePath: string, gameName?: string, showGameName?: boolean) =>
-      call("game_exe_launch", { appid, exePath, gameName, showGameName }),
+    launchGameExecutable: (appid: string, exePath: string, gameName?: string, showGameName?: boolean, runAsAdmin?: boolean) =>
+      call("game_exe_launch", { appid, exePath, gameName, showGameName, runAsAdmin }),
     listRunningGameAppids: () => call("game_exe_running_list"),
     quitGameExecutable: (appid: string) => call("game_exe_quit", { appid }),
     deleteInstalled: (appid: string) => call("installed_delete", { appid }),

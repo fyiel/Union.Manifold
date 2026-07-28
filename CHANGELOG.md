@@ -3,6 +3,19 @@
 All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 
+## 3.4.16
+
+### Added
+
+- Windows games that request administrator access now get an explicit Manifold
+  confirmation followed by the standard UAC prompt, while retaining process
+  monitoring, achievements and stop controls
+
+### Fixed
+
+- launch failures now show the real operating-system error instead of always
+  blaming the selected executable, and declined UAC prompts can be retried
+
 ## 3.4.15
 
 ### Fixed
