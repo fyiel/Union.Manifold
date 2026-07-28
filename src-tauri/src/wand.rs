@@ -869,6 +869,22 @@ fn trainer_host_path(app: &AppHandle, arch: &str) -> Result<PathBuf> {
         .ok_or_else(|| AppError::msg(format!("{name} is missing; run pnpm build:trainer-host")))
 }
 
+#[cfg(target_os = "linux")]
+async fn stage_trainer_host(data_dir: &Path, source: &Path, arch: &str) -> Result<PathBuf> {
+    let directory = data_dir.join("wand").join("hosts");
+    tokio::fs::create_dir_all(&directory)
+        .await
+        .map_err(|error| AppError::msg(format!("create Wand host cache: {error}")))?;
+    let staged = directory.join(format!(
+        "trainer-host-{arch}-{}.exe",
+        env!("CARGO_PKG_VERSION")
+    ));
+    tokio::fs::copy(source, &staged)
+        .await
+        .map_err(|error| AppError::msg(format!("stage Wand trainer host: {error}")))?;
+    Ok(staged)
+}
+
 fn decode_host_text(value: &str) -> String {
     hex::decode(value)
         .ok()
@@ -947,6 +963,8 @@ async fn start_host(
         .filter(|name| !name.is_empty())
         .ok_or_else(|| AppError::msg("Game executable has no filename"))?;
     let host = trainer_host_path(app, arch)?;
+    #[cfg(target_os = "linux")]
+    let host = stage_trainer_host(&state.paths.data_dir, &host, arch).await?;
     let listener = TcpListener::bind(("127.0.0.1", 0))
         .await
         .map_err(|error| AppError::msg(format!("open trainer host channel: {error}")))?;
@@ -984,20 +1002,37 @@ async fn start_host(
         .current_dir(trainerlib.parent().unwrap_or(Path::new(".")))
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .kill_on_drop(false);
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;
         command.creation_flags(0x08000000);
     }
-    let child = command
+    let mut child = command
         .spawn()
         .map_err(|error| AppError::msg(format!("start trainer host: {error}")))?;
-    let (stream, _) = tokio::time::timeout(Duration::from_secs(60), listener.accept())
-        .await
-        .map_err(|_| AppError::msg("Trainer host did not connect"))?
-        .map_err(|error| AppError::msg(format!("accept trainer host connection: {error}")))?;
+    if let Some(stderr) = child.stderr.take() {
+        tauri::async_runtime::spawn(async move {
+            let mut lines = BufReader::new(stderr).lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                crate::logging::write_line("info", &format!("Wand host: {line}"));
+            }
+        });
+    }
+    let (stream, _) = tokio::time::timeout(Duration::from_secs(60), async {
+        tokio::select! {
+            accepted = listener.accept() => accepted
+                .map_err(|error| AppError::msg(format!("accept trainer host connection: {error}"))),
+            status = child.wait() => {
+                let status = status
+                    .map_err(|error| AppError::msg(format!("wait for trainer host: {error}")))?;
+                Err(AppError::msg(format!("Trainer host exited before connecting ({status})")))
+            }
+        }
+    })
+    .await
+    .map_err(|_| AppError::msg("Trainer host did not connect"))??;
     let (reader, writer) = stream.into_split();
     let mut lines = BufReader::new(reader).lines();
     let hello = tokio::time::timeout(Duration::from_secs(5), lines.next_line())
@@ -1402,5 +1437,22 @@ CCCC Wand-12.39.0-full.nupkg 30
             ),
             Some(expected)
         );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn trainer_host_is_staged_where_umu_can_mount_it() {
+        let temp = tempfile::tempdir().unwrap();
+        let packaged = temp.path().join("usr/lib/trainer-host-x64.exe");
+        std::fs::create_dir_all(packaged.parent().unwrap()).unwrap();
+        std::fs::write(&packaged, "host").unwrap();
+        let data_dir = temp.path().join("home/data");
+
+        let staged = stage_trainer_host(&data_dir, &packaged, "x64")
+            .await
+            .unwrap();
+
+        assert!(staged.starts_with(&data_dir));
+        assert_eq!(std::fs::read(staged).unwrap(), b"host");
     }
 }
