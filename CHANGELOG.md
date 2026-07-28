@@ -3,6 +3,13 @@
 All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 
+## 3.4.17
+
+### Fixed
+
+- Linux now stages the Wand trainer host where UMU can mount it, while all
+  platforms report and log host startup failures instead of hanging
+
 ## 3.4.16
 
 ### Added
