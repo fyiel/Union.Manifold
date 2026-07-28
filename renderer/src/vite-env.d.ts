@@ -495,7 +495,14 @@ declare global {
         checks: Array<{ level: 'error' | 'warning' | 'info'; code: string; message: string }>
         resolved?: { command: string; args: string[]; cwd: string } | null
       }>
-      launchGameExecutable: (appid: string, exePath: string, gameName?: string, showGameName?: boolean) => Promise<{ ok: boolean; error?: string; pid?: number }>
+      launchGameExecutable: (appid: string, exePath: string, gameName?: string, showGameName?: boolean, runAsAdmin?: boolean) => Promise<{
+        ok: boolean
+        error?: string
+        pid?: number
+        elevated?: boolean
+        requiresElevation?: boolean
+        elevationCancelled?: boolean
+      }>
       listRunningGameAppids: () => Promise<{ ok: boolean; appids: string[] }>
       quitGameExecutable: (appid: string) => Promise<{ ok: boolean; stopped?: boolean }>
       deleteInstalled: (appid: string) => Promise<{ ok: boolean }>

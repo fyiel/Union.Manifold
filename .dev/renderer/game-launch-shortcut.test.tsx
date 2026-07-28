@@ -5,6 +5,14 @@ vi.mock("@/components/ExePickerModal", () => ({ ExePickerModal: () => null }))
 vi.mock("@/components/DesktopShortcutModal", () => ({
   DesktopShortcutModal: ({ open }: { open: boolean }) => open ? <div data-testid="shortcut-prompt" /> : null,
 }))
+vi.mock("@/components/ElevationPromptModal", () => ({
+  ElevationPromptModal: ({ open, error, onConfirm }: { open: boolean; error?: string | null; onConfirm: () => void }) => open ? (
+    <div>
+      <button onClick={onConfirm}>Launch as administrator</button>
+      {error ? <div role="alert">{error}</div> : null}
+    </div>
+  ) : null,
+}))
 vi.mock("@/components/GameLaunchFailedModal", () => ({ GameLaunchFailedModal: () => null }))
 vi.mock("@/components/GameLaunchPreflightModal", () => ({ GameLaunchPreflightModal: () => null }))
 vi.mock("@/lib/cloud-collections", () => ({ reportPlayEvent: vi.fn() }))
@@ -21,10 +29,12 @@ function LaunchButton() {
 }
 
 describe("desktop shortcut prompt setting", () => {
-  const launchGameExecutable = vi.fn(async () => ({ ok: true }))
+  const launchGameExecutable = vi.fn(async (..._args: any[]): Promise<any> => ({ ok: true }))
 
   beforeEach(() => {
     vi.clearAllMocks()
+    launchGameExecutable.mockReset()
+    launchGameExecutable.mockResolvedValue({ ok: true })
     Object.defineProperty(window, "ucSettings", {
       configurable: true,
       value: {
@@ -51,7 +61,32 @@ describe("desktop shortcut prompt setting", () => {
       "C:/Games/Portal/Portal.exe",
       "Portal",
       true,
+      undefined,
     ))
     expect(screen.queryByTestId("shortcut-prompt")).toBeNull()
+  })
+
+  it("asks before retrying an elevation-required executable as administrator", async () => {
+    launchGameExecutable
+      .mockResolvedValueOnce({ ok: false, requiresElevation: true, error: "This executable requests administrator access" })
+      .mockResolvedValueOnce({ ok: false, elevationCancelled: true, error: "Administrator permission was declined" })
+      .mockResolvedValueOnce({ ok: true, elevated: true })
+
+    render(<GameLaunchProvider><LaunchButton /></GameLaunchProvider>)
+    fireEvent.click(screen.getByRole("button", { name: "Play" }))
+
+    const elevate = await screen.findByRole("button", { name: "Launch as administrator" })
+    fireEvent.click(elevate)
+    expect((await screen.findByRole("alert")).textContent).toContain("Administrator permission was declined")
+
+    fireEvent.click(elevate)
+    await waitFor(() => expect(launchGameExecutable).toHaveBeenLastCalledWith(
+      "game-1",
+      "C:/Games/Portal/Portal.exe",
+      "Portal",
+      true,
+      true,
+    ))
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Launch as administrator" })).toBeNull())
   })
 })

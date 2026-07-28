@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react"
 import { ExePickerModal } from "@/components/ExePickerModal"
 import { DesktopShortcutModal } from "@/components/DesktopShortcutModal"
+import { ElevationPromptModal } from "@/components/ElevationPromptModal"
 import { GameLaunchFailedModal } from "@/components/GameLaunchFailedModal"
 import { GameLaunchPreflightModal, type LaunchPreflightResult } from "@/components/GameLaunchPreflightModal"
 import { getUnambiguousExecutable, hasOnlineMode, matchAdminExecutable, type GameExecutable } from "@/lib/utils"
@@ -47,6 +48,10 @@ export function GameLaunchProvider({ children }: { children: React.ReactNode }) 
   const [preflightResult, setPreflightResult] = useState<LaunchPreflightResult | null>(null)
 
   const [failedOpen, setFailedOpen] = useState(false)
+  const [failureReason, setFailureReason] = useState<string | null>(null)
+  const [elevationOpen, setElevationOpen] = useState(false)
+  const [elevationBusy, setElevationBusy] = useState(false)
+  const [elevationError, setElevationError] = useState<string | null>(null)
 
   const justLaunchedRef = useRef<number>(0)
   const quickExitUnsubRef = useRef<(() => void) | null>(null)
@@ -110,6 +115,8 @@ export function GameLaunchProvider({ children }: { children: React.ReactNode }) 
       setPickerOpen(false)
       setShortcutOpen(false)
       setPreflightOpen(false)
+      setElevationOpen(false)
+      setFailureReason(null)
       setFailedOpen(true)
     }
 
@@ -134,33 +141,72 @@ export function GameLaunchProvider({ children }: { children: React.ReactNode }) 
 
   useEffect(() => () => disarmQuickExit(), [disarmQuickExit])
 
-  const launchGame = useCallback(async (g: LaunchableGame, path: string) => {
+  const launchGame = useCallback(async (g: LaunchableGame, path: string, options?: { runAsAdmin?: boolean }) => {
     if (!window.ucDownloads?.launchGameExecutable) return
-    const showGameName = (await window.ucSettings?.get?.("rpcShowGameName")) ?? true
-    const res = await window.ucDownloads.launchGameExecutable(g.appid, path, g.name, showGameName)
-    if (res && res.ok) {
-      void reportPlayEvent(g.appid, "play")
-      await setSavedExe(g.appid, path)
-      setRunningOptimistic(g.appid, true)
-      setPickerOpen(false)
-      setShortcutOpen(false)
-      setPreflightOpen(false)
-      setFailedOpen(false)
-      setPendingPath(null)
-      armQuickExit(g)
-    } else if (typeof res?.error === "string" && res.error.toLowerCase().includes("already running")) {
-      setRunningOptimistic(g.appid, true)
-      setPickerOpen(false)
-      setShortcutOpen(false)
-      setPreflightOpen(false)
-      setFailedOpen(false)
-      setPendingPath(null)
-    } else {
+    try {
+      const showGameName = (await window.ucSettings?.get?.("rpcShowGameName")) ?? true
+      const res = await window.ucDownloads.launchGameExecutable(
+        g.appid,
+        path,
+        g.name,
+        showGameName,
+        options?.runAsAdmin,
+      )
+      if (res && res.ok) {
+        void reportPlayEvent(g.appid, "play")
+        await setSavedExe(g.appid, path)
+        setRunningOptimistic(g.appid, true)
+        setPickerOpen(false)
+        setShortcutOpen(false)
+        setPreflightOpen(false)
+        setElevationOpen(false)
+        setElevationError(null)
+        setFailedOpen(false)
+        setFailureReason(null)
+        setPendingPath(null)
+        armQuickExit(g)
+        return
+      }
+      if (typeof res?.error === "string" && res.error.toLowerCase().includes("already running")) {
+        setRunningOptimistic(g.appid, true)
+        setPickerOpen(false)
+        setShortcutOpen(false)
+        setPreflightOpen(false)
+        setElevationOpen(false)
+        setFailedOpen(false)
+        setFailureReason(null)
+        setPendingPath(null)
+        return
+      }
+      if (res?.requiresElevation && !options?.runAsAdmin) {
+        setGame(g)
+        setPendingPath(path)
+        setPickerOpen(false)
+        setShortcutOpen(false)
+        setPreflightOpen(false)
+        setFailedOpen(false)
+        setFailureReason(null)
+        setElevationError(null)
+        setElevationOpen(true)
+        return
+      }
+      if (res?.elevationCancelled && options?.runAsAdmin) {
+        setElevationError("Administrator permission was declined. You can try again or cancel.")
+        return
+      }
       setRunningOptimistic(g.appid, false)
       setGame(g)
       setPickerOpen(false)
       setShortcutOpen(false)
       setPreflightOpen(false)
+      setElevationOpen(false)
+      setFailureReason(res?.error || "Windows could not start the selected executable.")
+      setFailedOpen(true)
+    } catch (error) {
+      setRunningOptimistic(g.appid, false)
+      setGame(g)
+      setElevationOpen(false)
+      setFailureReason(error instanceof Error ? error.message : String(error))
       setFailedOpen(true)
     }
   }, [armQuickExit])
@@ -220,6 +266,9 @@ export function GameLaunchProvider({ children }: { children: React.ReactNode }) 
     if (!g) return
     setPreflightOpen(false)
     setFailedOpen(false)
+    setFailureReason(null)
+    setElevationOpen(false)
+    setElevationError(null)
     try {
       const result = await listExecutables(g.appid)
       openLaunchPicker(g, result?.exes || [], result?.folder || null)
@@ -233,6 +282,8 @@ export function GameLaunchProvider({ children }: { children: React.ReactNode }) 
     if (isRunningGameSync(g.appid)) return
     if (!window.ucDownloads?.listGameExecutables || !window.ucDownloads?.launchGameExecutable) return
     disarmQuickExit()
+    setFailureReason(null)
+    setElevationError(null)
     if (g.appid.startsWith("steam-")) {
       const manifest: { installType?: string; steamAppId?: number } | null =
         (await window.ucDownloads?.getInstalledGlobal?.(g.appid)) ?? null
@@ -338,6 +389,26 @@ export function GameLaunchProvider({ children }: { children: React.ReactNode }) 
     await handleLaunchWithShortcutCheck(g, path)
   }, [game, pickerMode, handleLaunchWithShortcutCheck])
 
+  const cancelElevation = useCallback(() => {
+    if (elevationBusy) return
+    setElevationOpen(false)
+    setElevationError(null)
+    setPendingPath(null)
+  }, [elevationBusy])
+
+  const confirmElevation = useCallback(async () => {
+    const g = game
+    const path = pendingPath
+    if (!g || !path || elevationBusy) return
+    setElevationBusy(true)
+    setElevationError(null)
+    try {
+      await launchGame(g, path, { runAsAdmin: true })
+    } finally {
+      setElevationBusy(false)
+    }
+  }, [elevationBusy, game, launchGame, pendingPath])
+
   const value = useMemo<GameLaunchValue>(
     () => ({ requestLaunch, stopGame, requestSetExecutable }),
     [requestLaunch, stopGame, requestSetExecutable],
@@ -414,11 +485,25 @@ export function GameLaunchProvider({ children }: { children: React.ReactNode }) 
         }
       />
 
+      <ElevationPromptModal
+        open={elevationOpen}
+        gameName={game?.name || ""}
+        executablePath={pendingPath || ""}
+        busy={elevationBusy}
+        error={elevationError}
+        onCancel={cancelElevation}
+        onConfirm={() => void confirmElevation()}
+      />
+
       <GameLaunchFailedModal
         open={failedOpen}
         gameName={game?.name || ""}
+        reason={failureReason}
         hasOnlineSupport={hasOnlineMode(game?.hasCoOp)}
-        onClose={() => setFailedOpen(false)}
+        onClose={() => {
+          setFailedOpen(false)
+          setFailureReason(null)
+        }}
         onPickExecutable={() => void reopenLaunchPicker(game)}
       />
     </GameLaunchContext.Provider>

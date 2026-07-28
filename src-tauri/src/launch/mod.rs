@@ -16,6 +16,8 @@ use crate::state::AppState;
 struct RunHandle {
     pid: u32,
     scope: Option<String>,
+    #[cfg(windows)]
+    process_handle: Option<std::sync::Arc<std::os::windows::io::OwnedHandle>>,
 }
 
 static RUNNING: Lazy<Mutex<HashMap<String, RunHandle>>> = Lazy::new(|| Mutex::new(HashMap::new()));
@@ -91,6 +93,51 @@ fn mewgenics_launch_args(exe_path: &str, mod_paths: Vec<PathBuf>) -> Vec<String>
         }
     }));
     args
+}
+
+fn is_elevation_required(error: &std::io::Error) -> bool {
+    error.raw_os_error() == Some(740)
+}
+
+fn is_elevation_cancelled(error: &std::io::Error) -> bool {
+    error.raw_os_error() == Some(1223)
+}
+
+#[cfg(any(windows, test))]
+fn quote_windows_arg(arg: &str) -> String {
+    let mut quoted = String::from("\"");
+    let mut backslashes = 0;
+    for ch in arg.chars() {
+        if ch == '\\' {
+            backslashes += 1;
+            continue;
+        }
+        if ch == '"' {
+            for _ in 0..(backslashes * 2 + 1) {
+                quoted.push('\\');
+            }
+            quoted.push('"');
+        } else {
+            for _ in 0..backslashes {
+                quoted.push('\\');
+            }
+            quoted.push(ch);
+        }
+        backslashes = 0;
+    }
+    for _ in 0..(backslashes * 2) {
+        quoted.push('\\');
+    }
+    quoted.push('"');
+    quoted
+}
+
+#[cfg(any(windows, test))]
+fn windows_parameters(args: &[String]) -> String {
+    args.iter()
+        .map(|arg| quote_windows_arg(arg))
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn is_executable_candidate(path: &Path) -> bool {
@@ -216,6 +263,41 @@ pub fn game_exe_preflight(state: State<'_, AppState>, appid: String, exe_path: S
     })
 }
 
+fn finish_tracked_game(
+    app: &AppHandle,
+    appid: &str,
+    exe_path: &str,
+    game_name: Option<&str>,
+    started_at: i64,
+) {
+    app.state::<AppState>()
+        .achievements
+        .finish_watch(app, appid);
+    let elapsed = now_ms() - started_at;
+    RUNNING.lock().remove(appid);
+    app.emit(
+        "uc:presence-changed",
+        json!({ "reason": "game-exited", "appid": appid }),
+    )
+    .ok();
+    if elapsed >= 10_000 {
+        crate::notify::send_if(
+            app,
+            "notifyGameExit",
+            false,
+            "Game exited",
+            &format!("{} closed", game_name.unwrap_or(appid)),
+        );
+    }
+    if elapsed < 10_000 {
+        app.emit(
+            "uc:game-quick-exit",
+            json!({ "appid": appid, "exePath": exe_path, "elapsed": elapsed }),
+        )
+        .ok();
+    }
+}
+
 fn spawn_and_track(
     app: &AppHandle,
     appid: &str,
@@ -226,7 +308,7 @@ fn spawn_and_track(
     exe_path: &str,
     game_name: Option<String>,
     achievement_context: crate::achievements::GameContext,
-) -> Result<u32, String> {
+) -> std::io::Result<u32> {
     #[cfg_attr(not(target_os = "linux"), allow(unused_mut))]
     let mut scope: Option<String> = None;
     #[cfg(target_os = "linux")]
@@ -282,12 +364,19 @@ fn spawn_and_track(
     let child = {
         let mut running = RUNNING.lock();
         match running.entry(appid.to_string()) {
-            Entry::Occupied(_) => return Err("already running".to_string()),
+            Entry::Occupied(_) => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::AlreadyExists,
+                    "already running",
+                ))
+            }
             Entry::Vacant(slot) => {
-                let child = cmd.spawn().map_err(|e| e.to_string())?;
+                let child = cmd.spawn()?;
                 slot.insert(RunHandle {
                     pid: child.id(),
                     scope,
+                    #[cfg(windows)]
+                    process_handle: None,
                 });
                 child
             }
@@ -312,39 +401,122 @@ fn spawn_and_track(
         .spawn(move || {
             let mut child = child;
             let _ = child.wait();
-            app2.state::<AppState>()
-                .achievements
-                .finish_watch(&app2, &appid2);
-            let elapsed = now_ms() - started_at;
-            RUNNING.lock().remove(&appid2);
-            app2.emit(
-                "uc:presence-changed",
-                json!({ "reason": "game-exited", "appid": appid2 }),
-            )
-            .ok();
-            if elapsed >= 10_000 {
-                let name = name2.unwrap_or_else(|| appid2.clone());
-                crate::notify::send_if(
-                    &app2,
-                    "notifyGameExit",
-                    false,
-                    "Game exited",
-                    &format!("{name} closed"),
-                );
-            }
-            if elapsed < 10_000 {
-                app2.emit(
-                    "uc:game-quick-exit",
-                    json!({ "appid": appid2, "exePath": exe2, "elapsed": elapsed }),
-                )
-                .ok();
-            }
+            finish_tracked_game(&app2, &appid2, &exe2, name2.as_deref(), started_at);
         });
     if let Err(e) = reaper {
         RUNNING.lock().remove(appid);
         crate::logging::write_line(
             "error",
             &format!("game reaper thread spawn failed for {appid}: {e}"),
+        );
+    }
+    Ok(pid)
+}
+
+#[cfg(windows)]
+fn spawn_elevated_and_track(
+    app: &AppHandle,
+    appid: &str,
+    command: &str,
+    args: &[String],
+    cwd: &Path,
+    exe_path: &str,
+    game_name: Option<String>,
+    achievement_context: crate::achievements::GameContext,
+) -> std::io::Result<u32> {
+    use std::ffi::OsStr;
+    use std::os::windows::ffi::OsStrExt;
+    use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle, RawHandle};
+    use windows_sys::Win32::System::Threading::{GetProcessId, WaitForSingleObject, INFINITE};
+    use windows_sys::Win32::UI::Shell::{
+        ShellExecuteExW, SEE_MASK_NOASYNC, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW,
+    };
+
+    fn wide(value: &OsStr) -> std::io::Result<Vec<u16>> {
+        let encoded: Vec<u16> = value.encode_wide().collect();
+        if encoded.contains(&0) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "launch value contains a null character",
+            ));
+        }
+        Ok(encoded.into_iter().chain(std::iter::once(0)).collect())
+    }
+
+    let verb = wide(OsStr::new("runas"))?;
+    let file = wide(OsStr::new(command))?;
+    let parameters_text = windows_parameters(args);
+    let parameters = wide(OsStr::new(&parameters_text))?;
+    let directory = wide(cwd.as_os_str())?;
+    let mut info: SHELLEXECUTEINFOW = unsafe { std::mem::zeroed() };
+    info.cbSize = std::mem::size_of::<SHELLEXECUTEINFOW>() as u32;
+    info.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NOASYNC;
+    info.lpVerb = verb.as_ptr();
+    info.lpFile = file.as_ptr();
+    info.lpParameters = parameters.as_ptr();
+    info.lpDirectory = directory.as_ptr();
+    info.nShow = 1;
+
+    let mut running = RUNNING.lock();
+    if running.contains_key(appid) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            "already running",
+        ));
+    }
+    if unsafe { ShellExecuteExW(&mut info) } == 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    if info.hProcess.is_null() {
+        return Err(std::io::Error::other(
+            "Windows started the game without returning a process handle",
+        ));
+    }
+    let process_handle =
+        std::sync::Arc::new(unsafe { OwnedHandle::from_raw_handle(info.hProcess as RawHandle) });
+    let pid = unsafe {
+        GetProcessId(process_handle.as_raw_handle() as windows_sys::Win32::Foundation::HANDLE)
+    };
+    if pid == 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    running.insert(
+        appid.to_string(),
+        RunHandle {
+            pid,
+            scope: None,
+            process_handle: Some(process_handle.clone()),
+        },
+    );
+    drop(running);
+
+    let started_at = now_ms();
+    app.emit(
+        "uc:presence-changed",
+        json!({ "reason": "game-started", "appid": appid, "gameName": game_name }),
+    )
+    .ok();
+    app.state::<AppState>()
+        .achievements
+        .start_watch(app.clone(), achievement_context);
+    let app2 = app.clone();
+    let appid2 = appid.to_string();
+    let exe2 = exe_path.to_string();
+    let name2 = game_name.clone();
+    let reaper = std::thread::Builder::new()
+        .name(format!("game-reaper-{appid}"))
+        .spawn(move || {
+            let handle = process_handle.as_raw_handle() as windows_sys::Win32::Foundation::HANDLE;
+            unsafe {
+                WaitForSingleObject(handle, INFINITE);
+            }
+            finish_tracked_game(&app2, &appid2, &exe2, name2.as_deref(), started_at);
+        });
+    if let Err(error) = reaper {
+        RUNNING.lock().remove(appid);
+        crate::logging::write_line(
+            "error",
+            &format!("elevated game reaper thread spawn failed for {appid}: {error}"),
         );
     }
     Ok(pid)
@@ -357,6 +529,7 @@ pub async fn game_exe_launch(
     exe_path: String,
     game_name: Option<String>,
     _show_game_name: Option<bool>,
+    run_as_admin: Option<bool>,
 ) -> Result<Value, String> {
     if !Path::new(&exe_path).is_file() {
         return Ok(json!({ "ok": false, "error": "executable not found" }));
@@ -403,8 +576,30 @@ pub async fn game_exe_launch(
         } else {
             (plan.command, plan.args, plan.envs, "direct")
         };
-    Ok(
-        match spawn_and_track(
+    let elevated = run_as_admin.unwrap_or(false);
+    let started = if elevated {
+        #[cfg(windows)]
+        {
+            spawn_elevated_and_track(
+                &app,
+                &appid,
+                &command,
+                &args,
+                &cwd,
+                &exe_path,
+                game_name,
+                achievement_context,
+            )
+        }
+        #[cfg(not(windows))]
+        {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "administrator launch is only available on Windows",
+            ))
+        }
+    } else {
+        spawn_and_track(
             &app,
             &appid,
             &command,
@@ -414,20 +609,35 @@ pub async fn game_exe_launch(
             &exe_path,
             game_name,
             achievement_context,
-        ) {
-            Ok(pid) => {
-                if close_on_launch_enabled(&state.settings) {
-                    let app2 = app.clone();
-                    tauri::async_runtime::spawn(async move {
-                        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
-                        app2.exit(0);
-                    });
-                }
-                json!({ "ok": true, "pid": pid, "launchMode": launch_mode })
+        )
+    };
+    Ok(match started {
+        Ok(pid) => {
+            if close_on_launch_enabled(&state.settings) {
+                let app2 = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                    app2.exit(0);
+                });
             }
-            Err(e) => json!({ "ok": false, "error": e }),
-        },
-    )
+            json!({ "ok": true, "pid": pid, "launchMode": launch_mode, "elevated": elevated })
+        }
+        Err(error) if !elevated && is_elevation_required(&error) => {
+            json!({
+                "ok": false,
+                "requiresElevation": true,
+                "error": "This executable requests administrator access",
+            })
+        }
+        Err(error) if elevated && is_elevation_cancelled(&error) => {
+            json!({
+                "ok": false,
+                "elevationCancelled": true,
+                "error": "Administrator permission was declined",
+            })
+        }
+        Err(error) => json!({ "ok": false, "error": error.to_string() }),
+    })
 }
 
 #[tauri::command(async)]
@@ -468,7 +678,20 @@ fn kill_handle(handle: &RunHandle) {
     }
     #[cfg(windows)]
     {
+        use std::os::windows::io::AsRawHandle;
         use std::os::windows::process::CommandExt;
+        use windows_sys::Win32::System::Threading::TerminateProcess;
+        if let Some(process_handle) = &handle.process_handle {
+            let terminated = unsafe {
+                TerminateProcess(
+                    process_handle.as_raw_handle() as windows_sys::Win32::Foundation::HANDLE,
+                    1,
+                )
+            };
+            if terminated != 0 {
+                return;
+            }
+        }
         std::process::Command::new("taskkill")
             .args(["/PID", &handle.pid.to_string(), "/T", "/F"])
             .creation_flags(0x08000000)
@@ -492,6 +715,37 @@ fn kill_handle(handle: &RunHandle) {
                     .ok();
             })
             .ok();
+    }
+}
+
+#[cfg(test)]
+mod portable_tests {
+    use super::{is_elevation_cancelled, is_elevation_required, windows_parameters};
+
+    #[test]
+    fn windows_launch_errors_are_classified() {
+        assert!(is_elevation_required(&std::io::Error::from_raw_os_error(
+            740
+        )));
+        assert!(is_elevation_cancelled(&std::io::Error::from_raw_os_error(
+            1223
+        )));
+        assert!(!is_elevation_required(&std::io::Error::from_raw_os_error(
+            2
+        )));
+    }
+
+    #[test]
+    fn elevated_parameters_preserve_spaces_quotes_and_trailing_slashes() {
+        assert_eq!(
+            windows_parameters(&[
+                "plain".into(),
+                "two words".into(),
+                r#"say "hello""#.into(),
+                r#"C:\Games\"#.into(),
+            ]),
+            r#""plain" "two words" "say \"hello\"" "C:\Games\\""#
+        );
     }
 }
 

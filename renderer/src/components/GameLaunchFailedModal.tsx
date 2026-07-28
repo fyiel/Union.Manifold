@@ -13,6 +13,7 @@ import { useState } from "react"
 type GameLaunchFailedModalProps = {
   open: boolean
   gameName: string
+  reason?: string | null
   onClose: () => void
   onPickExecutable?: () => void
   hasOnlineSupport?: boolean
@@ -21,6 +22,7 @@ type GameLaunchFailedModalProps = {
 export function GameLaunchFailedModal({
   open,
   gameName,
+  reason,
   onClose,
   onPickExecutable,
   hasOnlineSupport = false,
@@ -50,15 +52,20 @@ export function GameLaunchFailedModal({
             Game couldn't start
           </DialogTitle>
           <DialogDescription>
-            Looks like {gameName} couldn't start correctly. This is almost
-            always because UC.D picked the wrong .exe to launch (e.g. an
-            installer, redistributable, or launcher stub instead of the game
-            itself).
+            {reason
+              ? `Manifold couldn't start ${gameName}.`
+              : `${gameName} exited shortly after launch.`}
           </DialogDescription>
         </DialogHeader>
 
+        {reason && (
+          <div role="alert" className="rounded-xl border border-red-500/25 bg-red-500/[.07] px-3 py-2.5 text-sm text-red-100">
+            {reason}
+          </div>
+        )}
+
         {}
-        {hasOnlineSupport && (
+        {!reason && hasOnlineSupport && (
           <div className="flex items-start gap-2 rounded-xl border border-sky-500/25 bg-sky-500/[.06] px-3 py-2.5 text-xs text-sky-100">
             <Wifi className="mt-0.5 h-3.5 w-3.5 shrink-0 text-sky-300" />
             <div className="space-y-2">
@@ -81,25 +88,27 @@ export function GameLaunchFailedModal({
         )}
 
         {}
-        <div className="flex items-start gap-2 rounded-xl border border-amber-500/25 bg-amber-500/[.06] px-3 py-2.5 text-xs text-amber-100">
-          <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-300" />
-          <p className="leading-relaxed">
-            UC.D launches the executable our team set for this game when one is
-            configured. It looks like that isn't set for this release yet (or
-            this version uses a different file) — please pick the executable
-            manually before relaunching.
-          </p>
-        </div>
+        {!reason && (
+          <div className="flex items-start gap-2 rounded-xl border border-amber-500/25 bg-amber-500/[.06] px-3 py-2.5 text-xs text-amber-100">
+            <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-300" />
+            <p className="leading-relaxed">
+              A wrong executable is one common cause. Pick the main game executable
+              and try again, or check whether the game needs another launcher running.
+            </p>
+          </div>
+        )}
 
-        <div className="rounded-xl border border-white/[.07] bg-white/[.03] px-3 py-2.5 text-xs text-foreground/80 leading-relaxed">
-          <p className="font-semibold text-foreground mb-1">How to pick the right exe</p>
-          <ol className="list-decimal pl-4 space-y-1">
-            <li>Click <span className="font-medium text-foreground">Pick executable</span> below (or the gear icon next to Play).</li>
-            <li>Choose the file that looks like the game's main launcher —
-              usually the largest .exe in the game folder, often named after the game.</li>
-            <li>Avoid anything starting with <code className="text-amber-200">unins</code>, <code className="text-amber-200">setup</code>, <code className="text-amber-200">vc_redist</code>, <code className="text-amber-200">dxsetup</code>, or anything in a <code className="text-amber-200">_CommonRedist</code> folder.</li>
-          </ol>
-        </div>
+        {!reason && (
+          <div className="rounded-xl border border-white/[.07] bg-white/[.03] px-3 py-2.5 text-xs text-foreground/80 leading-relaxed">
+            <p className="font-semibold text-foreground mb-1">How to pick the right exe</p>
+            <ol className="list-decimal pl-4 space-y-1">
+              <li>Click <span className="font-medium text-foreground">Pick executable</span> below (or the gear icon next to Play).</li>
+              <li>Choose the file that looks like the game's main launcher —
+                usually the largest .exe in the game folder, often named after the game.</li>
+              <li>Avoid anything starting with <code className="text-amber-200">unins</code>, <code className="text-amber-200">setup</code>, <code className="text-amber-200">vc_redist</code>, <code className="text-amber-200">dxsetup</code>, or anything in a <code className="text-amber-200">_CommonRedist</code> folder.</li>
+            </ol>
+          </div>
+        )}
 
         <DialogFooter className="gap-2">
           <Button variant="ghost" size="sm" onClick={onClose}>
