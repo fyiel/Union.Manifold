@@ -137,6 +137,7 @@ struct WandLoader {
     trainer_id: String,
     binary_url: String,
     binary_hash: String,
+    flags: u32,
     variables: Vec<String>,
 }
 
@@ -640,6 +641,11 @@ fn parse_loader(response: &Value) -> Result<WandLoader> {
         .filter(|hash| hash.len() == 64 && hash.bytes().all(|byte| byte.is_ascii_hexdigit()))
         .ok_or_else(|| AppError::msg("Wand trainer has an invalid binary hash"))?
         .to_ascii_lowercase();
+    let flags = trainer
+        .pointer("/blueprint/config/activate/flags")
+        .and_then(Value::as_u64)
+        .and_then(|value| u32::try_from(value).ok())
+        .unwrap_or_default();
     let mut variables = Vec::new();
     if let Some(cheats) = trainer
         .pointer("/blueprint/cheats")
@@ -670,6 +676,7 @@ fn parse_loader(response: &Value) -> Result<WandLoader> {
         trainer_id,
         binary_url,
         binary_hash,
+        flags,
         variables,
     })
 }
@@ -820,20 +827,45 @@ async fn trainer_arch(path: &Path) -> Result<&'static str> {
     }
 }
 
+async fn game_version(path: &Path) -> Result<u32> {
+    let mut file = tokio::fs::File::open(path)
+        .await
+        .map_err(|error| AppError::msg(format!("open game executable: {error}")))?;
+    file.seek(std::io::SeekFrom::Start(0x3c)).await?;
+    let mut offset = [0u8; 4];
+    file.read_exact(&mut offset).await?;
+    file.seek(std::io::SeekFrom::Start(u32::from_le_bytes(offset) as u64))
+        .await?;
+    let mut header = [0u8; 12];
+    file.read_exact(&mut header).await?;
+    if &header[..4] != b"PE\0\0" {
+        return Err(AppError::msg("Game executable is not a Windows PE file"));
+    }
+    Ok(u32::from_le_bytes([
+        header[8], header[9], header[10], header[11],
+    ]))
+}
+
+fn resolve_trainer_host(resource_dir: Option<PathBuf>, source: PathBuf) -> Option<PathBuf> {
+    let name = source.file_name()?.to_owned();
+    resource_dir
+        .into_iter()
+        .flat_map(|directory| {
+            [
+                directory.join(&name),
+                directory.join("resources").join(&name),
+            ]
+        })
+        .chain([source])
+        .find(|path| path.is_file())
+}
+
 fn trainer_host_path(app: &AppHandle, arch: &str) -> Result<PathBuf> {
     let name = format!("trainer-host-{arch}.exe");
-    let packaged = app
-        .path()
-        .resource_dir()
-        .ok()
-        .map(|directory| directory.join(&name));
     let source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("resources")
         .join(&name);
-    packaged
-        .into_iter()
-        .chain([source])
-        .find(|path| path.is_file())
+    resolve_trainer_host(app.path().resource_dir().ok(), source)
         .ok_or_else(|| AppError::msg(format!("{name} is missing; run pnpm build:trainer-host")))
 }
 
@@ -907,6 +939,7 @@ async fn start_host(
     trainerlib: &Path,
     loader: &WandLoader,
     arch: &str,
+    version: u32,
 ) -> Result<()> {
     let target = Path::new(game_executable)
         .file_name()
@@ -932,7 +965,9 @@ async fn start_host(
         "--trainerlib".to_string(),
         trainerlib.to_string_lossy().into_owned(),
         "--game-version".to_string(),
-        "0".to_string(),
+        version.to_string(),
+        "--flags".to_string(),
+        loader.flags.to_string(),
         "--connect".to_string(),
         port.to_string(),
         "--token".to_string(),
@@ -959,7 +994,7 @@ async fn start_host(
     let child = command
         .spawn()
         .map_err(|error| AppError::msg(format!("start trainer host: {error}")))?;
-    let (stream, _) = tokio::time::timeout(Duration::from_secs(20), listener.accept())
+    let (stream, _) = tokio::time::timeout(Duration::from_secs(60), listener.accept())
         .await
         .map_err(|_| AppError::msg("Trainer host did not connect"))?
         .map_err(|error| AppError::msg(format!("accept trainer host connection: {error}")))?;
@@ -1127,6 +1162,7 @@ pub async fn wand_launch(
     let loader = parse_loader(&response)?;
     let trainer = download_trainer(&state.paths.data_dir, &loader).await?;
     let arch = trainer_arch(&trainer).await?;
+    let version = game_version(Path::new(&game_executable)).await?;
     let runtime = ensure_runtime(&state.paths.data_dir).await?;
     let trainerlib = runtime.join(format!("TrainerLib_{arch}.dll"));
     if !trainerlib.is_file() {
@@ -1141,6 +1177,7 @@ pub async fn wand_launch(
         &trainerlib,
         &loader,
         arch,
+        version,
     )
     .await?;
     Ok(json!({
@@ -1317,6 +1354,9 @@ CCCC Wand-12.39.0-full.nupkg 30
                     "binaryHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
                 },
                 "blueprint": {
+                    "config": {
+                        "activate": { "flags": 16 }
+                    },
                     "cheats": [
                         { "target": "health" },
                         { "target": "health" },
@@ -1330,6 +1370,37 @@ CCCC Wand-12.39.0-full.nupkg 30
         assert_eq!(
             loader.variables,
             vec!["health", "coins", "wm_event_player-died"]
+        );
+        assert_eq!(loader.flags, 16);
+    }
+
+    #[tokio::test]
+    async fn game_version_is_the_pe_timestamp_wand_expects() {
+        let temp = tempfile::tempdir().unwrap();
+        let executable = temp.path().join("game.exe");
+        let mut bytes = vec![0u8; 0x8c];
+        bytes[0x3c..0x40].copy_from_slice(&0x80u32.to_le_bytes());
+        bytes[0x80..0x84].copy_from_slice(b"PE\0\0");
+        bytes[0x88..0x8c].copy_from_slice(&1_774_983_219u32.to_le_bytes());
+        std::fs::write(&executable, bytes).unwrap();
+
+        assert_eq!(game_version(&executable).await.unwrap(), 1_774_983_219);
+    }
+
+    #[test]
+    fn trainer_host_resolves_from_packaged_resources_directory() {
+        let root = tempfile::tempdir().unwrap();
+        let resources = root.path().join("resources");
+        std::fs::create_dir(&resources).unwrap();
+        let expected = resources.join("trainer-host-x64.exe");
+        std::fs::write(&expected, "host").unwrap();
+
+        assert_eq!(
+            resolve_trainer_host(
+                Some(root.path().to_path_buf()),
+                root.path().join("missing/trainer-host-x64.exe"),
+            ),
+            Some(expected)
         );
     }
 }

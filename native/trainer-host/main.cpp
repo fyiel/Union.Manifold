@@ -24,6 +24,7 @@ namespace {
 std::mutex output_mutex;
 std::atomic<bool> stopping{false};
 SOCKET control_socket = INVALID_SOCKET;
+constexpr uint32_t USE_EXTERNAL_HOST = 16;
 
 void emit(const std::string& line) {
     std::lock_guard<std::mutex> lock(output_mutex);
@@ -208,37 +209,38 @@ bool run_trainer(HANDLE process, DWORD target_pid, uintptr_t trainerlib_base,
                  uintptr_t run_rva, const std::wstring& trainer_dll,
                  const std::wstring& message_pipe, const std::wstring& log_pipe,
                  uint32_t game_version, uint32_t flags,
-                 const std::vector<std::string>& variables) {
+                 const std::vector<std::string>& variables,
+                 void*& remote_args, HANDLE& trainer_thread) {
     std::vector<uint8_t> args(1552 + variables.size() * 32, 0);
     write_utf16(args, 0, 512, log_pipe);
     write_utf16(args, 512, 256, message_pipe);
     write_u32(args, 768, flags);
     write_utf16(args, 1024, 512, trainer_dll);
-    write_u32(args, 1540, target_pid);
-    write_u32(args, 1544, game_version);
-    write_u32(args, 1548, static_cast<uint32_t>(variables.size()));
+    write_u32(args, 1536, target_pid);
+    write_u32(args, 1540, game_version);
+    write_u32(args, 1544, static_cast<uint32_t>(variables.size()));
     for (size_t i = 0; i < variables.size(); ++i) {
-        std::memcpy(args.data() + 1552 + i * 32, variables[i].data(),
+        std::memcpy(args.data() + 1548 + i * 32, variables[i].data(),
                     std::min<size_t>(31, variables[i].size()));
     }
 
-    void* remote_args = VirtualAllocEx(process, nullptr, args.size(), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+    remote_args =
+        VirtualAllocEx(process, nullptr, args.size(), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
     if (!remote_args) return false;
     SIZE_T written = 0;
     bool ok = WriteProcessMemory(process, remote_args, args.data(), args.size(), &written) &&
               written == args.size();
-    HANDLE thread = nullptr;
     if (ok) {
-        thread = CreateRemoteThread(process, nullptr, 0,
-                                    reinterpret_cast<LPTHREAD_START_ROUTINE>(trainerlib_base + run_rva),
-                                    remote_args, 0, nullptr);
-        ok = thread != nullptr;
+        trainer_thread =
+            CreateRemoteThread(process, nullptr, 0,
+                               reinterpret_cast<LPTHREAD_START_ROUTINE>(trainerlib_base + run_rva),
+                               remote_args, 0, nullptr);
+        ok = trainer_thread != nullptr;
     }
-    if (thread) {
-        ok = WaitForSingleObject(thread, 30000) == WAIT_OBJECT_0 && ok;
-        CloseHandle(thread);
+    if (!ok) {
+        VirtualFreeEx(process, remote_args, 0, MEM_RELEASE);
+        remote_args = nullptr;
     }
-    VirtualFreeEx(process, remote_args, 0, MEM_RELEASE);
     return ok;
 }
 
@@ -424,9 +426,11 @@ int main(int argc, char** argv) {
     }
     emit("PROCESS\t" + std::to_string(pid));
 
+    const DWORD injection_pid =
+        options.flags & USE_EXTERNAL_HOST ? GetCurrentProcessId() : pid;
     HANDLE process = OpenProcess(PROCESS_CREATE_THREAD | PROCESS_QUERY_INFORMATION |
                                      PROCESS_VM_OPERATION | PROCESS_VM_WRITE | PROCESS_VM_READ,
-                                 FALSE, pid);
+                                 FALSE, injection_pid);
     if (!process) {
         emit("ERROR\t" + hex_encode(win32_error("OpenProcess")));
         return 4;
@@ -451,9 +455,13 @@ int main(int argc, char** argv) {
     std::thread log_thread(log_reader, log);
     uintptr_t trainerlib_base = 0;
     uintptr_t run_rva = export_rva(options.trainerlib, "Run");
-    if (!run_rva || !inject_library(process, pid, options.trainerlib, trainerlib_base) ||
+    void* remote_args = nullptr;
+    HANDLE trainer_thread = nullptr;
+    if (!run_rva ||
+        !inject_library(process, injection_pid, options.trainerlib, trainerlib_base) ||
         !run_trainer(process, pid, trainerlib_base, run_rva, options.trainer, output_name,
-                     log_name, options.game_version, options.flags, options.variables)) {
+                     log_name, options.game_version, options.flags, options.variables,
+                     remote_args, trainer_thread)) {
         emit("ERROR\t" + hex_encode(win32_error("TrainerLib injection")));
         stopping = true;
         CancelIoEx(log, nullptr);
@@ -511,6 +519,12 @@ int main(int argc, char** argv) {
     CloseHandle(input);
     CloseHandle(output);
     CloseHandle(log);
+    if (trainer_thread) {
+        if (WaitForSingleObject(trainer_thread, 5000) == WAIT_OBJECT_0 && remote_args) {
+            VirtualFreeEx(process, remote_args, 0, MEM_RELEASE);
+        }
+        CloseHandle(trainer_thread);
+    }
     CloseHandle(process);
     stop_control();
     if (control_socket != INVALID_SOCKET) closesocket(control_socket);
