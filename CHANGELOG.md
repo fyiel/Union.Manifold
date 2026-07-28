@@ -3,6 +3,13 @@
 All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 
+## 3.4.15
+
+### Fixed
+
+- Wand trainers now find their packaged host, pass the correct game version and
+  activation flags, and complete the TrainerLib handshake on Windows and Linux
+
 ## 3.4.14
 
 ### Added
