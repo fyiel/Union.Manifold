@@ -214,6 +214,26 @@ describe("startBestDownload fallback chain", () => {
     expect(resolve).toHaveBeenCalledTimes(1)
   })
 
+  it("does not open a browser fallback after verification is cancelled", async () => {
+    const resolve = vi.fn(async () => ({
+      ok: true,
+      result: { resolvable: false, cancelled: true, reason: "download verification cancelled" },
+    }))
+    ;(window as any).ucSources = { resolve }
+
+    const entries: DownloadEntry[] = [
+      { source: src("a", []), option: opt("fileq", true) },
+      { source: src("b", []), option: opt("datavaults", true) },
+    ]
+    const res = await startBestDownload(unified(), entries)
+    expect(res).toEqual({
+      ok: false,
+      cancelled: true,
+      reason: "download verification cancelled",
+    })
+    expect(resolve).toHaveBeenCalledTimes(1)
+  })
+
   it("downloads every part of a multi-file resolution", async () => {
     const resolve = vi.fn(async () => ({
       ok: true,

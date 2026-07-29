@@ -414,7 +414,7 @@ export function unifiedToGame(game: UnifiedSourceGame): Game {
 
 export type StartResult =
   | { ok: true; queued: true }
-  | { ok: false; openUrl?: string; reason?: string }
+  | { ok: false; openUrl?: string; reason?: string; cancelled?: boolean }
 
 function safeId(seed: string): string {
   return String(seed || "game").replace(/[^A-Za-z0-9_-]/g, "-").slice(0, 48)
@@ -431,6 +431,7 @@ export async function startSourceDownload(
     return { ok: false, reason: resolveRes?.error || "resolve failed" }
   }
   if (!resolved.resolvable) {
+    if (resolved.cancelled) return { ok: false, cancelled: true, reason: resolved.reason }
     return { ok: false, openUrl: resolved.openUrl || option.pageUrl || option.url, reason: resolved.reason }
   }
 
@@ -501,6 +502,7 @@ export async function startBestDownload(
     tried++
     const res = await startSourceDownload(game, source.sourceId, option)
     if (res.ok) return res
+    if (res.cancelled) return res
     if (!fallbackUrl) fallbackUrl = res.openUrl
   }
   const first = entries[0]?.option

@@ -9,6 +9,8 @@ All notable changes to Union.Manifold. This project is a fork of
 
 - Linux now stages the Wand trainer host where UMU can mount it, while all
   platforms report and log host startup failures instead of hanging
+- GameBounty FileQ and DataVaults mirrors now open an in-app verification window,
+  capture the resulting download, and queue it without falling back to a browser
 
 ## 3.4.16
 

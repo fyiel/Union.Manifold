@@ -8,6 +8,7 @@ pub mod gate;
 pub mod gofile;
 #[cfg(test)]
 mod installtest;
+pub mod interactive;
 #[cfg(test)]
 mod livetest;
 pub mod mediafire;
@@ -80,6 +81,7 @@ pub fn is_resolvable(url: &str) -> bool {
         || fileditch::matches(url)
         || filekeeper::matches(url)
         || (gate::matches(url) && crate::slipgate::cfg().is_some())
+        || interactive::matches(url)
 }
 
 pub async fn resolve_url(option: &DownloadOption) -> ResolveResult {
