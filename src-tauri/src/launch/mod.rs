@@ -548,6 +548,10 @@ pub async fn game_exe_launch(
         Ok(p) => p,
         Err(e) => return Ok(json!({ "ok": false, "error": e })),
     };
+    #[cfg(target_os = "linux")]
+    if let Err(error) = linux::prepare_onlinefix_runtime(&mut plan, Path::new(&exe_path)) {
+        return Ok(json!({ "ok": false, "error": error }));
+    }
     plan.args.extend(mewgenics_launch_args(
         &exe_path,
         crate::mods::active_mewgenics_mod_paths(&state, &appid),
