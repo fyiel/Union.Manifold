@@ -9,6 +9,9 @@ All notable changes to Union.Manifold. This project is a fork of
 
 - GameBounty FileQ and DataVaults mirrors now open an in-app verification window,
   capture the resulting download, and queue it without falling back to a browser
+- OnlineFix games launched through Wine, Proton or UMU now stage the required
+  local Steam overlay runtime in the active prefix and report missing Steam
+  files before launch
 
 ## 3.4.17
 

@@ -137,16 +137,165 @@ fn proxy_dll_overrides(exe_path: &str) -> Option<String> {
         "wininet",
         "xinput1_3",
     ];
+    let entries: HashSet<String> = std::fs::read_dir(dir)
+        .ok()?
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.file_name().to_string_lossy().to_ascii_lowercase())
+        .collect();
     let found: Vec<String> = PROXIES
         .iter()
-        .filter(|p| dir.join(format!("{p}.dll")).is_file())
-        .map(|p| format!("{p}=n,b"))
+        .filter(|proxy| entries.contains(&format!("{proxy}.dll")))
+        .map(|proxy| format!("{proxy}=n,b"))
         .collect();
     if found.is_empty() {
         None
     } else {
         Some(found.join(";"))
     }
+}
+
+#[cfg(target_os = "linux")]
+fn launch_env<'a>(plan: &'a LaunchPlan, key: &str) -> Option<&'a str> {
+    plan.envs
+        .iter()
+        .rev()
+        .find(|(name, _)| name == key)
+        .map(|(_, value)| value.as_str())
+}
+
+#[cfg(target_os = "linux")]
+fn set_launch_env(plan: &mut LaunchPlan, key: &str, value: String) {
+    if let Some((_, current)) = plan.envs.iter_mut().rev().find(|(name, _)| name == key) {
+        *current = value;
+    } else {
+        plan.envs.push((key.to_string(), value));
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn onlinefix_prefix(plan: &LaunchPlan) -> Option<PathBuf> {
+    launch_env(plan, "WINEPREFIX")
+        .map(PathBuf::from)
+        .or_else(|| {
+            launch_env(plan, "STEAM_COMPAT_DATA_PATH").map(|path| Path::new(path).join("pfx"))
+        })
+        .or_else(|| dirs::home_dir().map(|home| home.join(".wine")))
+}
+
+#[cfg(target_os = "linux")]
+fn usable_file(path: &Path) -> bool {
+    path.metadata()
+        .map(|metadata| metadata.len() > 0)
+        .unwrap_or(false)
+}
+
+#[cfg(target_os = "linux")]
+fn link_runtime_file(source: &Path, destination: &Path) -> Result<(), String> {
+    if destination.is_file() {
+        return Ok(());
+    }
+    if let Ok(metadata) = std::fs::symlink_metadata(destination) {
+        if metadata.file_type().is_symlink() {
+            std::fs::remove_file(destination).map_err(|error| {
+                format!(
+                    "OnlineFix could not replace broken link {}: {error}",
+                    destination.display()
+                )
+            })?;
+        } else {
+            return Err(format!(
+                "OnlineFix needs {}, but that path is occupied",
+                destination.display()
+            ));
+        }
+    }
+    std::os::unix::fs::symlink(source, destination).map_err(|error| {
+        format!(
+            "OnlineFix could not link {} to {}: {error}",
+            source.display(),
+            destination.display()
+        )
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn prepare_onlinefix_runtime_from(
+    plan: &mut LaunchPlan,
+    exe_path: &Path,
+    steam_roots: &[PathBuf],
+) -> Result<(), String> {
+    let game_dir = match exe_path.parent() {
+        Some(path) => path,
+        None => return Ok(()),
+    };
+    let marker = ["OnlineFix.ini", "OnlineFix64.dll", "OnlineFix32.dll"]
+        .iter()
+        .any(|name| game_dir.join(name).is_file());
+    if !marker {
+        return Ok(());
+    }
+
+    let runtime = if game_dir.join("SteamOverlay64.dll").is_file() {
+        Some(("steamclient64.dll", "GameOverlayRenderer64.dll"))
+    } else if game_dir.join("SteamOverlay.dll").is_file() {
+        Some(("steamclient.dll", "GameOverlayRenderer.dll"))
+    } else {
+        None
+    };
+    let Some((client_name, renderer_name)) = runtime else {
+        return Ok(());
+    };
+    let steam_root = steam_roots
+        .iter()
+        .find(|root| {
+            usable_file(&root.join(client_name)) && usable_file(&root.join(renderer_name))
+        })
+        .ok_or_else(|| {
+            let searched = if steam_roots.is_empty() {
+                "no Steam installation was found".to_string()
+            } else {
+                steam_roots
+                    .iter()
+                    .map(|root| root.display().to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            };
+            format!(
+                "OnlineFix needs {client_name} and {renderer_name} from one local Steam installation. Searched: {searched}. Install or repair Steam, then launch again."
+            )
+        })?
+        .clone();
+    let prefix = onlinefix_prefix(plan)
+        .ok_or_else(|| "OnlineFix could not determine the active Wine/Proton prefix".to_string())?;
+    let destination = prefix.join("drive_c/Program Files (x86)/Steam");
+    std::fs::create_dir_all(&destination).map_err(|error| {
+        format!(
+            "OnlineFix could not prepare the active prefix at {}: {error}",
+            destination.display()
+        )
+    })?;
+    link_runtime_file(
+        &steam_root.join(client_name),
+        &destination.join(client_name),
+    )?;
+    link_runtime_file(
+        &steam_root.join(renderer_name),
+        &destination.join(renderer_name),
+    )?;
+    set_launch_env(
+        plan,
+        "STEAM_COMPAT_CLIENT_INSTALL_PATH",
+        steam_root.to_string_lossy().to_string(),
+    );
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) fn prepare_onlinefix_runtime(
+    plan: &mut LaunchPlan,
+    exe_path: &Path,
+) -> Result<(), String> {
+    prepare_onlinefix_runtime_from(plan, exe_path, &crate::import::steam_roots())
 }
 
 #[derive(Default)]
@@ -785,6 +934,82 @@ mod tests {
             proxy_dll_overrides(exe.to_str().unwrap()).unwrap(),
             "version=n,b"
         );
+    }
+
+    #[test]
+    fn proxy_dll_detection_is_case_insensitive_like_wine() {
+        let tmp = tempfile::tempdir().unwrap();
+        touch(tmp.path(), "Game.exe");
+        touch(tmp.path(), "WINMM.DLL");
+        let exe = tmp.path().join("Game.exe");
+        assert_eq!(
+            proxy_dll_overrides(exe.to_str().unwrap()).as_deref(),
+            Some("winmm=n,b")
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn onlinefix_stages_the_local_steam_runtime_into_the_active_prefix() {
+        let tmp = tempfile::tempdir().unwrap();
+        let game = tmp.path().join("game");
+        let steam = tmp.path().join("steam");
+        let prefix = tmp.path().join("prefix");
+        std::fs::create_dir_all(&game).unwrap();
+        std::fs::create_dir_all(&steam).unwrap();
+        std::fs::write(game.join("Game.exe"), b"exe").unwrap();
+        std::fs::write(game.join("OnlineFix.ini"), b"marker").unwrap();
+        std::fs::write(game.join("SteamOverlay64.dll"), b"loader").unwrap();
+        std::fs::write(steam.join("steamclient64.dll"), b"client").unwrap();
+        std::fs::write(steam.join("GameOverlayRenderer64.dll"), b"renderer").unwrap();
+        let mut plan = LaunchPlan {
+            command: "umu-run".into(),
+            args: vec![],
+            envs: vec![("WINEPREFIX".into(), prefix.to_string_lossy().to_string())],
+        };
+
+        prepare_onlinefix_runtime_from(&mut plan, &game.join("Game.exe"), &[steam.clone()])
+            .unwrap();
+
+        let destination = prefix.join("drive_c/Program Files (x86)/Steam");
+        assert_eq!(
+            std::fs::read_link(destination.join("steamclient64.dll")).unwrap(),
+            steam.join("steamclient64.dll")
+        );
+        assert_eq!(
+            std::fs::read_link(destination.join("GameOverlayRenderer64.dll")).unwrap(),
+            steam.join("GameOverlayRenderer64.dll")
+        );
+        assert_eq!(
+            launch_env(&plan, "STEAM_COMPAT_CLIENT_INSTALL_PATH"),
+            steam.to_str()
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn onlinefix_reports_the_exact_missing_local_runtime() {
+        let tmp = tempfile::tempdir().unwrap();
+        let game = tmp.path().join("game");
+        let steam = tmp.path().join("steam");
+        std::fs::create_dir_all(&game).unwrap();
+        std::fs::create_dir_all(&steam).unwrap();
+        std::fs::write(game.join("Game.exe"), b"exe").unwrap();
+        std::fs::write(game.join("OnlineFix64.dll"), b"marker").unwrap();
+        std::fs::write(game.join("SteamOverlay64.dll"), b"loader").unwrap();
+        let mut plan = LaunchPlan {
+            command: "wine".into(),
+            args: vec![],
+            envs: vec![],
+        };
+
+        let error =
+            prepare_onlinefix_runtime_from(&mut plan, &game.join("Game.exe"), &[steam.clone()])
+                .unwrap_err();
+
+        assert!(error.contains("steamclient64.dll"), "{error}");
+        assert!(error.contains("GameOverlayRenderer64.dll"), "{error}");
+        assert!(error.contains(&steam.display().to_string()), "{error}");
     }
 
     #[test]
