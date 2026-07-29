@@ -221,6 +221,7 @@ declare global {
     sizeBytes?: number
     headers?: Record<string, string>
     ephemeral?: boolean
+    cancelled?: boolean
     openUrl?: string
     reason?: string
   }

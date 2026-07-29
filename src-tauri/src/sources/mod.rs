@@ -129,6 +129,8 @@ pub struct ResolveResult {
     pub headers: Option<std::collections::HashMap<String, String>>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub ephemeral: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub cancelled: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub open_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -646,11 +648,24 @@ pub async fn sources_detail(_state: State<'_, AppState>, sources: Vec<Value>) ->
 
 #[tauri::command]
 pub async fn sources_resolve(
+    app: AppHandle,
     _state: State<'_, AppState>,
     source_id: String,
     option: schema::DownloadOption,
 ) -> Result<Value> {
-    let result = adapter_resolve(&source_id, &option).await;
+    let interactive_url = option
+        .url
+        .as_deref()
+        .or(option.page_url.as_deref())
+        .filter(|url| hosts::interactive::matches(url))
+        .map(str::to_string);
+    let file_name = option.file_name.clone();
+    let mut result = adapter_resolve(&source_id, &option).await;
+    if !result.resolvable {
+        if let Some(url) = interactive_url {
+            result = hosts::interactive::resolve(&app, &url, file_name).await;
+        }
+    }
     Ok(json!({ "ok": true, "result": result }))
 }
 

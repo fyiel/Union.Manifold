@@ -101,6 +101,10 @@ fn wait_secs(html: &str) -> u64 {
     parsed.clamp(MIN_WAIT, MAX_WAIT)
 }
 
+fn needs_interactive_captcha(html: &str) -> bool {
+    html.contains("g-recaptcha") || html.contains("cf-turnstile")
+}
+
 pub async fn resolve(url: &str) -> ResolveResult {
     let parsed = match url::Url::parse(url) {
         Ok(u) => u,
@@ -140,6 +144,10 @@ pub async fn resolve(url: &str) -> ResolveResult {
         Ok(r) => r.text().await.unwrap_or_default(),
         Err(_) => return not_resolvable(url, "datavaults download1 failed"),
     };
+    if needs_interactive_captcha(&page2) {
+        return not_resolvable(url, "datavaults requires interactive verification");
+    }
+
     let rand = match RAND_RE.captures(&page2).and_then(|c| c.get(1)) {
         Some(m) => m.as_str().to_string(),
         None => {
@@ -220,6 +228,19 @@ mod tests {
             r#"<span style="padding-left:30px;">&#50;</span>"#,
         );
         assert_eq!(solve_captcha(html), "1234");
+    }
+
+    #[test]
+    fn detects_interactive_captcha() {
+        assert!(needs_interactive_captcha(
+            r#"<div class="g-recaptcha"></div>"#
+        ));
+        assert!(needs_interactive_captcha(
+            r#"<div class="cf-turnstile"></div>"#
+        ));
+        assert!(!needs_interactive_captcha(
+            r#"<span style="padding-left:10px">1</span>"#
+        ));
     }
 
     #[test]

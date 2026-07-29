@@ -9,7 +9,7 @@ use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use reqwest::redirect::Policy;
 use reqwest::{Client, Response, StatusCode};
 
-const UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+pub(crate) const UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
 static STEAMRIP_UA: LazyLock<String> = LazyLock::new(|| format!("{UA} Union.Manifold"));
 
