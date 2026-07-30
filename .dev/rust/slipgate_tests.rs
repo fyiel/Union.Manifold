@@ -1,13 +1,13 @@
 use super::*;
 
 #[tokio::test]
-async fn gated_hosts_flip_from_browser_only_to_resolvable_with_slipgate_env() {
+async fn gated_hosts_use_interactive_fallback_and_prefer_slipgate_when_configured() {
     std::env::remove_var("SLIPGATE_URL");
     std::env::remove_var("SLIPGATE_KEY");
     assert!(cfg().is_none());
 
     let gated = "https://1fichier.com/?abcdef";
-    assert!(!crate::sources::hosts::is_resolvable(gated));
+    assert!(crate::sources::hosts::is_resolvable(gated));
     let res = crate::sources::hosts::gate::resolve(gated).await;
     assert!(!res.resolvable);
     assert_eq!(res.open_url.as_deref(), Some(gated));
@@ -40,7 +40,7 @@ async fn gated_hosts_flip_from_browser_only_to_resolvable_with_slipgate_env() {
     std::env::remove_var("SLIPGATE_URL");
     std::env::remove_var("SLIPGATE_KEY");
     assert!(cfg().is_none());
-    assert!(!crate::sources::hosts::is_resolvable(gated));
+    assert!(crate::sources::hosts::is_resolvable(gated));
 }
 
 #[test]
