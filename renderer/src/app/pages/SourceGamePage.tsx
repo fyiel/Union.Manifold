@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import { useLocation, useNavigate, useParams } from "react-router-dom"
-import { Bookmark, BookmarkCheck, TriangleAlert } from "lucide-react"
+import { Bookmark, BookmarkCheck, Maximize2, TriangleAlert, X } from "lucide-react"
 import {
   SOURCE_PRIORITY,
   collectDownloadEntries,
@@ -92,8 +92,17 @@ export function SourceGamePage() {
   const [copied, setCopied] = useState(false)
   const [heroFailed, setHeroFailed] = useState(false)
   const [coverFailed, setCoverFailed] = useState(false)
+  const [zoomedScreenshot, setZoomedScreenshot] = useState<string | null>(null)
   const [priority, setPriority] = useState<string[]>(SOURCE_PRIORITY)
   useEffect(() => { void loadSourcePriority().then(setPriority) }, [])
+  useEffect(() => {
+    if (!zoomedScreenshot) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setZoomedScreenshot(null)
+    }
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [zoomedScreenshot])
 
   const dlAppid = downloadAppidFor(dedupKey)
   const liveStatus = useDownloadsSelector(
@@ -382,8 +391,11 @@ export function SourceGamePage() {
 
         {steamMeta && steamMeta.screenshots.length > 0 && (
           <div className="mf-scroll" style={{ display: "flex", gap: 10, marginTop: 26, overflowX: "auto", paddingBottom: 8 }}>
-            {steamMeta.screenshots.slice(0, 12).map((src) => (
-              <img key={src} src={src} alt="" loading="lazy" style={{ height: 150, width: "auto", flexShrink: 0, borderRadius: 8, border: "1px solid var(--mf-line-2)", objectFit: "cover" }} />
+            {steamMeta.screenshots.slice(0, 12).map((src, index) => (
+              <button key={src} type="button" aria-label={`Open screenshot ${index + 1}`} title="Open screenshot" onClick={() => setZoomedScreenshot(src)} style={{ position: "relative", height: 150, width: "auto", flexShrink: 0, padding: 0, borderRadius: 8, border: "1px solid var(--mf-line-2)", overflow: "hidden", background: "var(--mf-panel-2)", cursor: "zoom-in" }}>
+                <img src={src} alt={`${game?.title || "Game"} screenshot ${index + 1}`} loading="lazy" style={{ display: "block", height: "100%", width: "auto", objectFit: "cover" }} />
+                <span aria-hidden="true" style={{ position: "absolute", top: 7, right: 7, display: "grid", placeItems: "center", width: 25, height: 25, borderRadius: 7, background: "rgba(8,8,8,0.72)", color: "rgba(255,255,255,0.82)", backdropFilter: "blur(6px)" }}><Maximize2 size={12} strokeWidth={1.8} /></span>
+              </button>
             ))}
           </div>
         )}
@@ -468,6 +480,10 @@ export function SourceGamePage() {
           </div>
         )}
       </div>
+      {zoomedScreenshot && (
+        <ScreenshotLightbox src={zoomedScreenshot} title={game?.title || "Game"} onClose={() => setZoomedScreenshot(null)} />
+      )}
+      
       {wandOpen && game && (
         <WandTrainerModal
           appid={dlAppid}
@@ -477,6 +493,29 @@ export function SourceGamePage() {
           onLaunch={() => requestLaunch({ appid: dlAppid, name: game.title })}
         />
       )}
+    </div>
+  )
+}
+
+function ScreenshotLightbox({ src, title, onClose }: { src: string; title: string; onClose: () => void }) {
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="screenshot-preview-title"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose()
+      }}
+      style={{ position: "fixed", inset: 0, zIndex: 1000, display: "grid", placeItems: "center", padding: "clamp(16px, 4vw, 48px)", background: "rgba(5,5,5,0.9)", backdropFilter: "blur(12px)", cursor: "zoom-out" }}
+    >
+      <img src={src} alt={`${title} screenshot`} style={{ display: "block", width: "auto", height: "auto", maxWidth: "calc(100vw - 64px)", maxHeight: "calc(100vh - 118px)", objectFit: "contain", borderRadius: 8, boxShadow: "0 24px 80px rgba(0,0,0,0.55)", cursor: "default" }} />
+      <button type="button" autoFocus aria-label="Close screenshot preview" title="Close" onClick={onClose} style={{ position: "fixed", top: 22, right: 22, display: "flex", alignItems: "center", justifyContent: "center", width: 36, height: 36, padding: 0, borderRadius: 9, border: "1px solid rgba(255,255,255,0.18)", background: "rgba(16,16,16,0.78)", color: "rgba(255,255,255,0.9)", cursor: "pointer", backdropFilter: "blur(8px)" }}>
+        <X size={17} strokeWidth={1.7} />
+      </button>
+      <div style={{ position: "fixed", left: 24, right: 24, bottom: 20, display: "flex", flexDirection: "column", alignItems: "center", gap: 4, pointerEvents: "none", textAlign: "center" }}>
+        <span id="screenshot-preview-title" style={{ maxWidth: 720, fontSize: 13, fontWeight: 600, color: "rgba(255,255,255,0.92)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{title}</span>
+        <span style={{ fontFamily: MONO, fontSize: 10, color: "rgba(255,255,255,0.48)", letterSpacing: "0.04em", textTransform: "uppercase" }}>screenshot preview · Esc to close</span>
+      </div>
     </div>
   )
 }
