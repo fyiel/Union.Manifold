@@ -16,7 +16,7 @@ const VERIFY_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 pub fn matches(url: &str) -> bool {
     super::datanodes::matches(url)
         || super::datavaults::matches(url)
-        || super::gate::host_type(url) == Some("fileq")
+        || super::gate::matches(url)
 }
 
 pub async fn resolve(app: &AppHandle, page_url: &str, file_name: Option<String>) -> ResolveResult {
@@ -137,6 +137,9 @@ mod tests {
     fn recognizes_interactive_hosts() {
         assert!(matches("https://datanodes.to/abc123"));
         assert!(matches("https://datavaults.co/abc/game.rar"));
+        assert!(matches("https://akirabox.com/abc/file"));
+        assert!(matches("https://vikingfile.com/f/abc"));
+        assert!(matches("https://megadb.net/abc"));
         assert!(matches("https://fileq.net/vault/abc/game.rar"));
         assert!(!matches("https://gofile.io/d/abc"));
     }
