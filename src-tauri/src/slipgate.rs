@@ -87,6 +87,50 @@ pub struct ResolvedLink {
     pub headers: HashMap<String, String>,
 }
 
+fn resolved_headers(value: &Value) -> HashMap<String, String> {
+    let mut headers: HashMap<String, String> = value
+        .get("headers")
+        .and_then(Value::as_object)
+        .map(|entries| {
+            entries
+                .iter()
+                .filter_map(|(key, value)| {
+                    value.as_str().map(|value| (key.clone(), value.to_string()))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    if !headers.keys().any(|key| key.eq_ignore_ascii_case("user-agent")) {
+        if let Some(user_agent) = value
+            .get("user_agent")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+        {
+            headers.insert("User-Agent".to_string(), user_agent.to_string());
+        }
+    }
+    if !headers.keys().any(|key| key.eq_ignore_ascii_case("cookie")) {
+        let cookies = value
+            .get("cookies")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|cookie| {
+                Some(format!(
+                    "{}={}",
+                    cookie.get("name")?.as_str()?,
+                    cookie.get("value")?.as_str()?
+                ))
+            })
+            .collect::<Vec<_>>()
+            .join("; ");
+        if !cookies.is_empty() {
+            headers.insert("Cookie".to_string(), cookies);
+        }
+    }
+    headers
+}
+
 pub async fn resolve(
     cfg: &Cfg,
     host: &str,
@@ -118,15 +162,7 @@ pub async fn resolve(
         .get("size_bytes")
         .and_then(|x| x.as_u64())
         .filter(|n| *n > 0);
-    let headers = v
-        .get("headers")
-        .and_then(|x| x.as_object())
-        .map(|m| {
-            m.iter()
-                .filter_map(|(k, val)| val.as_str().map(|s| (k.clone(), s.to_string())))
-                .collect()
-        })
-        .unwrap_or_default();
+    let headers = resolved_headers(&v);
     Ok(ResolvedLink {
         url,
         file_name,
