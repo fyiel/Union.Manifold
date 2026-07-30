@@ -97,13 +97,13 @@ export default function ThemeEditorWindow() {
   }
 
   return (
-    <div className="min-h-screen bg-background text-foreground flex flex-col">
+    <div className="h-screen min-h-0 overflow-hidden bg-background text-foreground flex flex-col">
       <header className="flex items-center gap-3 px-6 py-4 border-b border-white/[.07] shrink-0">
         <Palette className="h-5 w-5 text-foreground/80" />
         <h1 className="text-base font-medium tracking-tight">Theme editor</h1>
         <span className="text-xs text-muted-foreground ml-1">Edits preview live in the main window.</span>
       </header>
-      <div className="flex-1 min-h-0 flex flex-col">
+      <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
         <ThemeEditorBody
           initial={seed.theme}
           onChange={handleChange}
