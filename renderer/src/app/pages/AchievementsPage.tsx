@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import type { ReactNode } from "react"
-import { Check, ChevronDown, RefreshCw, Search, Sparkles, Trophy } from "lucide-react"
+import { Check, ChevronDown, RefreshCw, Search, Sparkles, TriangleAlert, Trophy } from "lucide-react"
 import { COVER_LINES, MONO, SmartImage, gameImageCandidates } from "@/app/manifold/ui"
 import { proxyImageUrl } from "@/lib/utils"
 
@@ -116,6 +116,11 @@ export function AchievementsPage() {
             <Sparkles size={13} strokeWidth={1.7} />{testing ? "Showing…" : "Test popup"}
           </button>
         </header>
+
+        <div role="status" style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 20, padding: "10px 13px", borderRadius: 9, border: "1px solid rgba(239,68,68,0.28)", background: "rgba(239,68,68,0.08)", color: "#f87171" }}>
+          <TriangleAlert size={15} strokeWidth={1.8} style={{ flexShrink: 0 }} />
+          <span style={{ fontFamily: MONO, fontSize: 10.5, lineHeight: 1.5 }}>Experimental: some games may miss unlocks or show stale progress.</span>
+        </div>
 
         <section style={{ display: "grid", gridTemplateColumns: "minmax(230px, 1.65fr) repeat(3, minmax(120px, 1fr))", border: "1px solid var(--mf-line)", borderRadius: 12, overflow: "hidden", background: "var(--mf-panel)", marginBottom: 20 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 16, padding: "18px 20px", borderRight: "1px solid var(--mf-line)" }}>
