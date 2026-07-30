@@ -156,6 +156,16 @@ jobs:
           prerelease: false
           args: --target ${{ matrix.target }}
 
+      - name: Upload stable RPM package
+        if: matrix.sidecars == 'linux-x64'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          rpms=(src-tauri/target/${{ matrix.target }}/release/bundle/rpm/*.rpm)
+          test -f "${rpms[0]}"
+          cp "${rpms[0]}" union-manifold-x86_64.rpm
+          gh release upload "${{ needs.check.outputs.tag }}" union-manifold-x86_64.rpm --clobber
+
       - name: Build and upload pacman package
         if: matrix.sidecars == 'linux-x64'
         env:

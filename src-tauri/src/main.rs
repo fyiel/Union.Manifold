@@ -8,10 +8,12 @@ fn main() {
         {
             std::env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1");
         }
+        let appimage = std::env::var_os("APPIMAGE").is_some();
         let nvidia_ish = std::path::Path::new("/sys/module/nvidia").exists()
             || std::env::var("GBM_BACKEND").is_ok_and(|v| v.contains("nvidia"))
             || std::env::var("__GLX_VENDOR_LIBRARY_NAME").is_ok_and(|v| v.contains("nvidia"));
-        if nvidia_ish && std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
+        if (appimage || nvidia_ish) && std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none()
+        {
             std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
         }
     }
