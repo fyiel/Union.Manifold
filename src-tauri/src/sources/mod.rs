@@ -333,19 +333,19 @@ impl Registry {
         }
     }
 
-fn source_available_with(
-    source: &SourceMeta,
-    slipgate: bool,
-    hide_torrent: bool,
-    onlinefix_refreshed: bool,
-) -> bool {
-    let reachable = if source.id == "onlinefix" {
-        slipgate && onlinefix_refreshed
-    } else {
-        slipgate || !source.requires_slipgate || adapters::hydralinks::is_reachable(source.id)
-    };
-    reachable && !(hide_torrent && hidden_by_torrent_filter(source))
-}
+    fn source_available_with(
+        source: &SourceMeta,
+        slipgate: bool,
+        hide_torrent: bool,
+        onlinefix_refreshed: bool,
+    ) -> bool {
+        let reachable = if source.id == "onlinefix" {
+            slipgate && onlinefix_refreshed
+        } else {
+            slipgate || !source.requires_slipgate || adapters::hydralinks::is_reachable(source.id)
+        };
+        reachable && !(hide_torrent && hidden_by_torrent_filter(source))
+    }
 
     fn source_available(source: &SourceMeta, slipgate: bool, hide_torrent: bool) -> bool {
         Self::source_available_with(
@@ -833,10 +833,18 @@ mod tests {
             .find(|source| source.id == "onlinefix")
             .unwrap();
 
-        assert!(!Registry::source_available_with(onlinefix, false, false, false));
-        assert!(!Registry::source_available_with(onlinefix, true, false, false));
-        assert!(!Registry::source_available_with(onlinefix, false, false, true));
-        assert!(Registry::source_available_with(onlinefix, true, false, true));
+        assert!(!Registry::source_available_with(
+            onlinefix, false, false, false
+        ));
+        assert!(!Registry::source_available_with(
+            onlinefix, true, false, false
+        ));
+        assert!(!Registry::source_available_with(
+            onlinefix, false, false, true
+        ));
+        assert!(Registry::source_available_with(
+            onlinefix, true, false, true
+        ));
     }
 }
 

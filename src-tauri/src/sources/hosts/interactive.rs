@@ -14,9 +14,7 @@ static WINDOW_ID: AtomicU64 = AtomicU64::new(0);
 const VERIFY_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 
 pub fn matches(url: &str) -> bool {
-    super::datanodes::matches(url)
-        || super::datavaults::matches(url)
-        || super::gate::matches(url)
+    super::datanodes::matches(url) || super::datavaults::matches(url) || super::gate::matches(url)
 }
 
 pub async fn resolve(app: &AppHandle, page_url: &str, file_name: Option<String>) -> ResolveResult {

@@ -146,15 +146,17 @@ async fn live_every_source_returns_current_games() {
     let mut representatives = Vec::new();
     let mut host_types = std::collections::BTreeSet::new();
     for source in SOURCES {
-        let games = tokio::time::timeout(
-            Duration::from_secs(120),
-            adapter_query(source.id, &params),
-        )
-        .await
-        .unwrap_or_else(|_| panic!("{} catalog timed out", source.name))
-        .unwrap_or_else(|| panic!("{} catalog unavailable", source.name));
+        let games =
+            tokio::time::timeout(Duration::from_secs(120), adapter_query(source.id, &params))
+                .await
+                .unwrap_or_else(|_| panic!("{} catalog timed out", source.name))
+                .unwrap_or_else(|| panic!("{} catalog unavailable", source.name));
         eprintln!("{}: {} current games", source.name, games.len());
-        assert!(!games.is_empty(), "{} returned no current games", source.name);
+        assert!(
+            !games.is_empty(),
+            "{} returned no current games",
+            source.name
+        );
         let mut source_representatives = 0;
         for game in games.iter().take(8) {
             let detail = tokio::time::timeout(
@@ -233,12 +235,10 @@ async fn live_every_source_returns_current_games() {
             eprintln!("{host}: in-app verification window");
             continue;
         }
-        let result = tokio::time::timeout(
-            Duration::from_secs(240),
-            adapter_resolve(source_id, option),
-        )
-        .await
-        .unwrap_or_else(|_| panic!("{host} resolution timed out"));
+        let result =
+            tokio::time::timeout(Duration::from_secs(240), adapter_resolve(source_id, option))
+                .await
+                .unwrap_or_else(|_| panic!("{host} resolution timed out"));
         if result.resolvable {
             verify_direct_file(host, &result).await;
         } else {
@@ -248,17 +248,26 @@ async fn live_every_source_returns_current_games() {
             );
             eprintln!(
                 "{host}: browser fallback ({})",
-                result.reason.as_deref().unwrap_or("not directly resolvable")
+                result
+                    .reason
+                    .as_deref()
+                    .unwrap_or("not directly resolvable")
             );
         }
     }
-    eprintln!("observed hosts: {}", host_types.into_iter().collect::<Vec<_>>().join(", "));
+    eprintln!(
+        "observed hosts: {}",
+        host_types.into_iter().collect::<Vec<_>>().join(", ")
+    );
     assert!(
         representatives.len() >= 10,
         "expected ten representative games with download options, got {}",
         representatives.len()
     );
-    assert!(total >= 10, "expected at least ten current games, got {total}");
+    assert!(
+        total >= 10,
+        "expected at least ten current games, got {total}"
+    );
 }
 
 #[tokio::test]

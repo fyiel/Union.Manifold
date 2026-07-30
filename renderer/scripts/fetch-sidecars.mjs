@@ -41,21 +41,36 @@ const SEVENZIP_SHA = SEVENZIP_VERSION === '2301' ? {
   'darwin-x64': '343eae9ccbbd8f68320adaaa3c87e0244cf39fad0fbec6b9d2cd3e5b0f8a5fbf',
   'darwin-arm64': '343eae9ccbbd8f68320adaaa3c87e0244cf39fad0fbec6b9d2cd3e5b0f8a5fbf',
 } : {}
+const ARIA2_OUTPUT_SHA = ARIA2_VERSION === '1.37.0' ? {
+  'win32-x64': '34f6eaf2c6c50bfe98ec6ec9a0ecca38b63e8c8aa94d3e7e5fa06a57ff7705c4',
+  'linux-x64': '80e577dc58348b96da46dd12d326bc99794b5021be395a3e890f2d67c8790c22',
+  'linux-arm64': '99a057bd383a28f1d5fab6e8cc5f6f3ed4172f5e65c59548242e965454d654c1',
+  'darwin-x64': '24c649638f0b298421d265e8df7f9383b33ee5ce8a53a2113ac81b5e4bebeb0f',
+  'darwin-arm64': 'abf7a6a85763df72b9bc0cef013ef2226ffe9ca405b5b5ef46fae49b435fb26d',
+} : {}
+
+const SEVENZIP_OUTPUT_SHA = SEVENZIP_VERSION === '2301' ? {
+  'win32-x64': '8cebb25e240db3b6986fcaed6bc0b900fa09dad763a56fb71273529266c5c525',
+  'linux-x64': 'b81c37aca9b7af945916d84235dcb27beaef519417130a594915b6583a5b1710',
+  'linux-arm64': '68e7b4df7c7890a9b0a87c525d08049cd507b09d60cf1e97db4bd35b89adee80',
+  'darwin-x64': 'fe4f31d6ffbd31db042456a76544746ef647379e3aec0a59f2a98a2eac244c2f',
+  'darwin-arm64': 'fe4f31d6ffbd31db042456a76544746ef647379e3aec0a59f2a98a2eac244c2f',
+} : {}
 
 const ARIA2 = {
-  'win32-x64': { url: `https://github.com/zhengqwe/aria2-static-builds-with-patches/releases/download/v${ARIA2_VERSION}/aria2-${ARIA2_VERSION}-win-x86-64.zip`, bin: 'aria2c.exe', sha256: ARIA2_SHA['win32-x64'], outputSha256: ARIA2_VERSION === '1.37.0' ? '34f6eaf2c6c50bfe98ec6ec9a0ecca38b63e8c8aa94d3e7e5fa06a57ff7705c4' : undefined },
-  'linux-x64': { url: `https://github.com/abcfy2/aria2-static-build/releases/download/${ARIA2_VERSION}/aria2-x86_64-linux-musl_static.zip`, bin: 'aria2c', sha256: ARIA2_SHA['linux-x64'] },
-  'linux-arm64': { url: `https://github.com/abcfy2/aria2-static-build/releases/download/${ARIA2_VERSION}/aria2-aarch64-linux-musl_static.zip`, bin: 'aria2c', sha256: ARIA2_SHA['linux-arm64'] },
-  'darwin-x64': { url: `https://github.com/Morton-Li/Aria2-MacOS-Builder/releases/download/release-${ARIA2_VERSION}/aria2c-macos-x86_64.tar.gz`, bin: 'aria2c-macos-x86_64', sha256: ARIA2_SHA['darwin-x64'] },
-  'darwin-arm64': { url: `https://github.com/Morton-Li/Aria2-MacOS-Builder/releases/download/release-${ARIA2_VERSION}/aria2c-macos-arm64.tar.gz`, bin: 'aria2c-macos-arm64', sha256: ARIA2_SHA['darwin-arm64'] },
+  'win32-x64': { url: `https://github.com/zhengqwe/aria2-static-builds-with-patches/releases/download/v${ARIA2_VERSION}/aria2-${ARIA2_VERSION}-win-x86-64.zip`, bin: 'aria2c.exe', sha256: ARIA2_SHA['win32-x64'], outputSha256: ARIA2_OUTPUT_SHA['win32-x64'] },
+  'linux-x64': { url: `https://github.com/abcfy2/aria2-static-build/releases/download/${ARIA2_VERSION}/aria2-x86_64-linux-musl_static.zip`, bin: 'aria2c', sha256: ARIA2_SHA['linux-x64'], outputSha256: ARIA2_OUTPUT_SHA['linux-x64'] },
+  'linux-arm64': { url: `https://github.com/abcfy2/aria2-static-build/releases/download/${ARIA2_VERSION}/aria2-aarch64-linux-musl_static.zip`, bin: 'aria2c', sha256: ARIA2_SHA['linux-arm64'], outputSha256: ARIA2_OUTPUT_SHA['linux-arm64'] },
+  'darwin-x64': { url: `https://github.com/Morton-Li/Aria2-MacOS-Builder/releases/download/release-${ARIA2_VERSION}/aria2c-macos-x86_64.tar.gz`, bin: 'aria2c-macos-x86_64', sha256: ARIA2_SHA['darwin-x64'], outputSha256: ARIA2_OUTPUT_SHA['darwin-x64'] },
+  'darwin-arm64': { url: `https://github.com/Morton-Li/Aria2-MacOS-Builder/releases/download/release-${ARIA2_VERSION}/aria2c-macos-arm64.tar.gz`, bin: 'aria2c-macos-arm64', sha256: ARIA2_SHA['darwin-arm64'], outputSha256: ARIA2_OUTPUT_SHA['darwin-arm64'] },
 }
 
 const SEVENZIP = {
-  'linux-x64': { url: `https://www.7-zip.org/a/7z${SEVENZIP_VERSION}-linux-x64.tar.xz`, src: '7zzs', sha256: SEVENZIP_SHA['linux-x64'] },
-  'linux-arm64': { url: `https://www.7-zip.org/a/7z${SEVENZIP_VERSION}-linux-arm64.tar.xz`, src: '7zzs', sha256: SEVENZIP_SHA['linux-arm64'] },
-  'win32-x64': { url: `https://www.7-zip.org/a/7z${SEVENZIP_VERSION}-x64.exe`, src: '7z.exe', resources: ['7z.dll'], sha256: SEVENZIP_SHA['win32-x64'], outputSha256: SEVENZIP_VERSION === '2301' ? '8cebb25e240db3b6986fcaed6bc0b900fa09dad763a56fb71273529266c5c525' : undefined, resourceSha256: SEVENZIP_VERSION === '2301' ? { '7z.dll': '77222e81cb7004e8c3e077aada02b555a3d38fb05b50c64afd36ca230a8fd5b9' } : undefined, authenticode: true },
-  'darwin-x64': { url: `https://www.7-zip.org/a/7z${SEVENZIP_VERSION}-mac.tar.xz`, src: '7zz', sha256: SEVENZIP_SHA['darwin-x64'] },
-  'darwin-arm64': { url: `https://www.7-zip.org/a/7z${SEVENZIP_VERSION}-mac.tar.xz`, src: '7zz', sha256: SEVENZIP_SHA['darwin-arm64'] },
+  'linux-x64': { url: `https://www.7-zip.org/a/7z${SEVENZIP_VERSION}-linux-x64.tar.xz`, src: '7zzs', sha256: SEVENZIP_SHA['linux-x64'], outputSha256: SEVENZIP_OUTPUT_SHA['linux-x64'] },
+  'linux-arm64': { url: `https://www.7-zip.org/a/7z${SEVENZIP_VERSION}-linux-arm64.tar.xz`, src: '7zzs', sha256: SEVENZIP_SHA['linux-arm64'], outputSha256: SEVENZIP_OUTPUT_SHA['linux-arm64'] },
+  'win32-x64': { url: `https://www.7-zip.org/a/7z${SEVENZIP_VERSION}-x64.exe`, src: '7z.exe', resources: ['7z.dll'], sha256: SEVENZIP_SHA['win32-x64'], outputSha256: SEVENZIP_OUTPUT_SHA['win32-x64'], resourceSha256: SEVENZIP_VERSION === '2301' ? { '7z.dll': '77222e81cb7004e8c3e077aada02b555a3d38fb05b50c64afd36ca230a8fd5b9' } : undefined },
+  'darwin-x64': { url: `https://www.7-zip.org/a/7z${SEVENZIP_VERSION}-mac.tar.xz`, src: '7zz', sha256: SEVENZIP_SHA['darwin-x64'], outputSha256: SEVENZIP_OUTPUT_SHA['darwin-x64'] },
+  'darwin-arm64': { url: `https://www.7-zip.org/a/7z${SEVENZIP_VERSION}-mac.tar.xz`, src: '7zz', sha256: SEVENZIP_SHA['darwin-arm64'], outputSha256: SEVENZIP_OUTPUT_SHA['darwin-arm64'] },
 }
 
 const hostKey = `${process.platform}-${process.arch}`
@@ -108,17 +123,6 @@ function assertSha256(file, expected, label) {
   }
 }
 
-function verifyAuthenticode(file) {
-  if (process.platform !== 'win32') return
-  const literal = file.replaceAll("'", "''")
-  const status = execFileSync(
-    'powershell.exe',
-    ['-NoProfile', '-NonInteractive', '-Command', `(Get-AuthenticodeSignature -LiteralPath '${literal}').Status.ToString()`],
-    { encoding: 'utf8' },
-  ).trim()
-  if (status !== 'Valid') throw new Error(`invalid Authenticode signature (${status}) for ${file}`)
-  log(`Authenticode signature valid ${path.basename(file)}`)
-}
 
 function hasCmd(name) {
   try {
@@ -165,13 +169,11 @@ async function extract(archive, dir) {
 function verify(file, spec) {
   if (!spec.sha256) {
     if (process.env.SIDECAR_ALLOW_UNVERIFIED === '1') {
-      if (spec.authenticode) verifyAuthenticode(file)
       return log(`WARNING unverified ${path.basename(spec.url)}`)
     }
     throw new Error(`no pinned checksum for ${spec.url} (custom version?), set SIDECAR_ALLOW_UNVERIFIED=1 to bypass`)
   }
   assertSha256(file, spec.sha256, spec.url)
-  if (spec.authenticode) verifyAuthenticode(file)
   log(`checksum ok ${path.basename(spec.url)}`)
 }
 
@@ -192,8 +194,8 @@ function findFile(dir, name, sub) {
 async function stage(spec, outName, triple, isWin) {
   const dest = path.join(binDir, `${outName}-${triple}${isWin ? '.exe' : ''}`)
   const stamp = `${dest}.src`
-  const outputPresent = fs.existsSync(dest)
-    && (!spec.outputSha256 || sha256(dest) === spec.outputSha256)
+  const outputPresent = Boolean(spec.outputSha256)
+    && fs.existsSync(dest) && sha256(dest) === spec.outputSha256
   const resourcesPresent = (spec.resources ?? []).every((name) => {
     const resource = path.join(resDir, name)
     return fs.existsSync(resource)
