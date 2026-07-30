@@ -73,9 +73,11 @@ jobs:
               echo "releasing $tag"
             fi
           fi
-          echo "release=$release" >> "$GITHUB_OUTPUT"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          {
+            echo "release=$release"
+            echo "version=$version"
+            echo "tag=$tag"
+          } >> "$GITHUB_OUTPUT"
 
   build:
     needs: check
@@ -174,7 +176,8 @@ jobs:
           # detached pgp signatures so pacman -U can install straight from the url
           # (users trust the key once via union-manifold-signing-key.asc)
           if [ -n "$GPG_SIGNING_KEY" ]; then
-            export GNUPGHOME=$(mktemp -d)
+            GNUPGHOME=$(mktemp -d)
+            export GNUPGHOME
             printf '%s' "$GPG_SIGNING_KEY" | gpg --batch --import
             gpg --batch --yes --detach-sign "union-manifold-${{ needs.check.outputs.version }}-1-x86_64.pkg.tar.zst"
             gpg --batch --yes --detach-sign union-manifold-x86_64.pkg.tar.zst
