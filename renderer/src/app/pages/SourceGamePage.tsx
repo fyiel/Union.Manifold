@@ -23,6 +23,7 @@ import { isPlayLater, onPlayLaterChanged, togglePlayLater } from "@/lib/play-lat
 import { useDownloadsSelector } from "@/context/downloads-context"
 import { useGameLaunch } from "@/context/game-launch-context"
 import { MONO, COVER_LINES, gbLabel, Spinner, SmartImage, gameImageCandidates } from "@/app/manifold/ui"
+import { getInstalledVersionLabel, hasInstalledVersionUpdate } from "@/lib/utils"
 import { WandTrainerModal } from "@/components/WandTrainerModal"
 
 
@@ -116,6 +117,7 @@ export function SourceGamePage() {
   )
 
   const [installed, setInstalled] = useState(Boolean(navState?.installed))
+  const [installedVersion, setInstalledVersion] = useState<string | null>(null)
   const [savedForLater, setSavedForLater] = useState(() => isPlayLater(dedupKey))
   useEffect(() => {
     const sync = () => setSavedForLater(isPlayLater(dedupKey))
@@ -128,7 +130,11 @@ export function SourceGamePage() {
       try {
         const list = (await window.ucDownloads?.listInstalledGlobal?.()) || (await window.ucDownloads?.listInstalled?.()) || []
         if (!alive) return
-        setInstalled((list as any[]).some((e) => String(e?.appid || e?.metadata?.appid || "") === dlAppid))
+        const found = (list as Array<{ appid?: unknown; metadata?: { appid?: unknown } }>).find(
+          (entry) => String(entry.appid || entry.metadata?.appid || "") === dlAppid,
+        )
+        setInstalled(Boolean(found))
+        setInstalledVersion(getInstalledVersionLabel(found))
       } catch {  }
     })()
     return () => { alive = false }
@@ -189,9 +195,11 @@ export function SourceGamePage() {
   const primary = useMemo(() => pickPrimaryDownload(entries), [entries])
   const mirrors = entries.length
   const sourceCount = game?.sources?.length || 0
+  const updateAvailable = installed && hasInstalledVersionUpdate(game?.version, [installedVersion])
+  const downloadBusy = Boolean(liveStatus && liveStatus !== "completed" && liveStatus !== "extracted")
 
   const handleDownload = async (sourceId: string, option: SourceDownloadOption, optKey: string) => {
-    if (!game || installed || liveStatus) return
+    if (!game || (installed && !updateAvailable) || downloadBusy) return
     setOptState((s) => ({ ...s, [optKey]: "working" }))
     setOptMsg((m) => ({ ...m, [optKey]: "" }))
     try {
@@ -242,7 +250,7 @@ export function SourceGamePage() {
   const updatedAny = relTime(game?.updatedAt)
 
   const handlePrimaryDownload = async () => {
-    if (!game || installed || liveStatus || !primary) return
+    if (!game || (installed && !updateAvailable) || downloadBusy || !primary) return
     setOptState((s) => ({ ...s, [pk]: "working" }))
     setOptMsg((m) => ({ ...m, [pk]: "" }))
     try {
@@ -339,10 +347,22 @@ export function SourceGamePage() {
               <Spinner size={16} /> loading links…
             </div>
           ) : installed ? (
-            <button type="button" onClick={() => void requestLaunch({ appid: dlAppid, name: game!.title })} className="mf-ghost" style={{ display: "flex", alignItems: "center", gap: 9, padding: "12px 22px", borderRadius: 9, border: "none", background: "var(--mf-accent)", color: "var(--mf-accent-ink)", fontSize: 14, fontWeight: 600, cursor: "pointer" }}>
-              <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M5 3.5v9l8-4.5z" /></svg>Play
-              <span style={{ fontFamily: MONO, fontSize: 11, fontWeight: 400, color: "rgba(17,17,17,0.6)" }}>installed</span>
-            </button>
+            <>
+              <button type="button" onClick={() => void requestLaunch({ appid: dlAppid, name: game!.title })} className="mf-ghost" style={{ display: "flex", alignItems: "center", gap: 9, padding: "12px 22px", borderRadius: 9, border: "none", background: "var(--mf-accent)", color: "var(--mf-accent-ink)", fontSize: 14, fontWeight: 600, cursor: "pointer" }}>
+                <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M5 3.5v9l8-4.5z" /></svg>Play
+                <span style={{ fontFamily: MONO, fontSize: 11, fontWeight: 400, color: "rgba(17,17,17,0.6)" }}>installed</span>
+              </button>
+              {updateAvailable && primary && (
+                <PrimaryButton
+                  state={pst}
+                  resolvable={primary.option.resolvable}
+                  sourceLabel={sourceName(primary.source.sourceId)}
+                  sizeText={primary.option.sizeText}
+                  label="Update"
+                  onClick={() => void handlePrimaryDownload()}
+                />
+              )}
+            </>
           ) : liveStatus ? (
             <LiveButton status={liveStatus} onClick={() => navigate("/downloads")} />
           ) : primary ? (
@@ -553,13 +573,13 @@ function LiveButton({ status, onClick }: { status: string; onClick: () => void }
   )
 }
 
-function PrimaryButton({ state, resolvable, sourceLabel, sizeText, onClick }: { state: OptState; resolvable: boolean; sourceLabel: string; sizeText?: string; onClick: () => void }) {
+function PrimaryButton({ state, resolvable, sourceLabel, sizeText, label, onClick }: { state: OptState; resolvable: boolean; sourceLabel: string; sizeText?: string; label?: string; onClick: () => void }) {
   const queued = state === "queued"
   const error = state === "error"
   const opened = state === "opened"
   const working = state === "working"
   const filled = !queued && !error
-  const label = queued ? "Queued" : opened ? "Opened in browser" : error ? "Failed" : resolvable ? "Download" : "Open download page"
+  const actionLabel = queued ? "Queued" : opened ? "Opened in browser" : error ? "Failed" : label || (resolvable ? "Download" : "Open download page")
   return (
     <button
       type="button"
@@ -578,7 +598,7 @@ function PrimaryButton({ state, resolvable, sourceLabel, sizeText, onClick }: { 
         : queued ? <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round"><polyline points="3 8.5 6.5 12 13 4" /></svg>
         : resolvable ? <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round"><line x1="8" y1="2.5" x2="8" y2="10" /><polyline points="4.5 7 8 10.5 11.5 7" /><line x1="3" y1="13.5" x2="13" y2="13.5" /></svg>
         : <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round"><path d="M6 3.5H4a1.5 1.5 0 0 0-1.5 1.5v6A1.5 1.5 0 0 0 4 12.5h6a1.5 1.5 0 0 0 1.5-1.5V9" /><polyline points="9 2.5 13 2.5 13 6.5" /><line x1="7" y1="9" x2="13" y2="2.5" /></svg>}
-      {label}
+      {actionLabel}
       <span style={{ fontFamily: MONO, fontSize: 11, fontWeight: 400, color: filled ? "rgba(17,17,17,0.6)" : "var(--mf-t5)" }}>
         via {sourceLabel}{sizeText ? ` · ${sizeText}` : ""}{!resolvable ? " · browser" : ""}
       </span>
