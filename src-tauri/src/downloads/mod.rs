@@ -595,7 +595,7 @@ impl DownloadEngine {
         if !self.aria2.ensure_started(limit_kbps).await {
             self.fail(
                 &id,
-                "aria2 downloader unavailable, run pnpm fetch-sidecars to bundle it",
+                "aria2 downloader unavailable, run bun run fetch-sidecars to bundle it",
             );
             return;
         }

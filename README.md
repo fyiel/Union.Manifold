@@ -12,13 +12,13 @@ What changed from the original:
 The desktop shell is now Tauri and Rust instead of Electron, so the whole backend is one lean Rust crate under `src-tauri`. The React front end is the same, it just talks to Rust over the Tauri bridge now.
 
 ### running it
-You need Rust, Node and pnpm, plus the usual Tauri Linux deps (webkit2gtk 4.1, librsvg, libappindicator).
+You need Rust and Bun, plus the usual Tauri Linux deps (webkit2gtk 4.1, librsvg, libappindicator).
 ```
-pnpm install
-pnpm fetch-sidecars
-pnpm dev
+bun install
+bun run fetch-sidecars
+bun run dev
 ```
-`pnpm fetch-sidecars` grabs the aria2c and 7z binaries the app shells out to. `pnpm build` produces a packaged app.
+`bun run fetch-sidecars` grabs the aria2c and 7z binaries the app shells out to. `bun run build` produces a packaged app.
 
 ### local Slipgate resolver
 Slipgate-dependent sources can run locally without changing the app installer size. Install Docker Desktop or Docker Engine with Compose, then open Settings, Sources and choose **Install with Docker**. Union.Manifold builds Slipgate from its pinned public release commit, pulls the pinned FlareSolverr image, binds the resolver to loopback with a generated key and manages start, stop, update and removal. A remote Slipgate URL remains supported.

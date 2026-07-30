@@ -4,9 +4,9 @@
   "version": "3.4.19",
   "identifier": "fyi.pumg.unionmanifold",
   "build": {
-    "beforeDevCommand": "pnpm dev:renderer",
+    "beforeDevCommand": "bun run dev:renderer",
     "devUrl": "http://localhost:5173",
-    "beforeBuildCommand": "pnpm build:renderer",
+    "beforeBuildCommand": "bun run build:renderer",
     "frontendDist": "../renderer/dist"
   },
   "app": {

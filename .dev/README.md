@@ -27,7 +27,7 @@ cd src-tauri && cargo test -- --ignored
 Renderer:
 
 ```
-pnpm test:renderer
+bun run test:renderer
 ```
 
 ## Why the Rust tests need `#[path]` hooks

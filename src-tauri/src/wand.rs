@@ -867,7 +867,7 @@ fn trainer_host_path(app: &AppHandle, arch: &str) -> Result<PathBuf> {
         .join("resources")
         .join(&name);
     resolve_trainer_host(app.path().resource_dir().ok(), source)
-        .ok_or_else(|| AppError::msg(format!("{name} is missing; run pnpm build:trainer-host")))
+        .ok_or_else(|| AppError::msg(format!("{name} is missing; run bun run build:trainer-host")))
 }
 
 #[cfg(target_os = "linux")]

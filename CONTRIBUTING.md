@@ -4,8 +4,7 @@ Thanks for your interest in contributing! This guide covers setting up the devel
 
 ## Prerequisites
 
-- Node.js 22 or higher
-- pnpm 11 (pinned via `packageManager` in `package.json`, `corepack enable` handles it)
+- Bun 1.3.14 (pinned via `packageManager` in `package.json`)
 - Rust (stable toolchain)
 - Tauri Linux deps on Linux: `webkit2gtk-4.1`, `librsvg`, `libappindicator`
 
@@ -19,8 +18,8 @@ cd Union.Manifold
 
 ### 2. Install dependencies and sidecars
 ```bash
-pnpm install
-pnpm fetch-sidecars   # downloads the aria2c and 7z binaries the app shells out to
+bun install
+bun run fetch-sidecars   # downloads the aria2c and 7z binaries the app shells out to
 ```
 
 Sidecar downloads are pinned to SHA-256 checksums. If you override `ARIA2_VERSION` or `SEVENZIP_VERSION`, set `SIDECAR_ALLOW_UNVERIFIED=1` or add new pins in `renderer/scripts/fetch-sidecars.mjs`.
@@ -29,19 +28,19 @@ Sidecar downloads are pinned to SHA-256 checksums. If you override `ARIA2_VERSIO
 
 ### Start the app in dev mode
 ```bash
-pnpm dev
+bun run dev
 ```
 
 This starts the Vite renderer on `http://localhost:5173` and a Tauri window connected to it.
 
 ### Build the application
 ```bash
-pnpm build
+bun run build
 ```
 
 ### Other useful commands
 ```bash
-pnpm typecheck            # TypeScript check for the renderer
+bun run typecheck        # TypeScript check for the renderer
 cargo check --locked      # from src-tauri/, checks the Rust backend
 cargo test                # from src-tauri/, runs backend unit tests
 ```
