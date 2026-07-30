@@ -43,7 +43,7 @@ const SEVENZIP_SHA = SEVENZIP_VERSION === '2301' ? {
 } : {}
 
 const ARIA2 = {
-  'win32-x64': { url: `https://github.com/zhengqwe/aria2-static-builds-with-patches/releases/download/v${ARIA2_VERSION}/aria2-${ARIA2_VERSION}-win-x86-64.zip`, bin: 'aria2c.exe', sha256: ARIA2_SHA['win32-x64'], outputSha256: '34f6eaf2c6c50bfe98ec6ec9a0ecca38b63e8c8aa94d3e7e5fa06a57ff7705c4' },
+  'win32-x64': { url: `https://github.com/zhengqwe/aria2-static-builds-with-patches/releases/download/v${ARIA2_VERSION}/aria2-${ARIA2_VERSION}-win-x86-64.zip`, bin: 'aria2c.exe', sha256: ARIA2_SHA['win32-x64'], outputSha256: ARIA2_VERSION === '1.37.0' ? '34f6eaf2c6c50bfe98ec6ec9a0ecca38b63e8c8aa94d3e7e5fa06a57ff7705c4' : undefined },
   'linux-x64': { url: `https://github.com/abcfy2/aria2-static-build/releases/download/${ARIA2_VERSION}/aria2-x86_64-linux-musl_static.zip`, bin: 'aria2c', sha256: ARIA2_SHA['linux-x64'] },
   'linux-arm64': { url: `https://github.com/abcfy2/aria2-static-build/releases/download/${ARIA2_VERSION}/aria2-aarch64-linux-musl_static.zip`, bin: 'aria2c', sha256: ARIA2_SHA['linux-arm64'] },
   'darwin-x64': { url: `https://github.com/Morton-Li/Aria2-MacOS-Builder/releases/download/release-${ARIA2_VERSION}/aria2c-macos-x86_64.tar.gz`, bin: 'aria2c-macos-x86_64', sha256: ARIA2_SHA['darwin-x64'] },
@@ -53,7 +53,7 @@ const ARIA2 = {
 const SEVENZIP = {
   'linux-x64': { url: `https://www.7-zip.org/a/7z${SEVENZIP_VERSION}-linux-x64.tar.xz`, src: '7zzs', sha256: SEVENZIP_SHA['linux-x64'] },
   'linux-arm64': { url: `https://www.7-zip.org/a/7z${SEVENZIP_VERSION}-linux-arm64.tar.xz`, src: '7zzs', sha256: SEVENZIP_SHA['linux-arm64'] },
-  'win32-x64': { url: `https://www.7-zip.org/a/7z${SEVENZIP_VERSION}-x64.exe`, src: '7z.exe', resources: ['7z.dll'], sha256: SEVENZIP_SHA['win32-x64'], outputSha256: '8cebb25e240db3b6986fcaed6bc0b900fa09dad763a56fb71273529266c5c525', resourceSha256: { '7z.dll': '77222e81cb7004e8c3e077aada02b555a3d38fb05b50c64afd36ca230a8fd5b9' }, authenticode: true },
+  'win32-x64': { url: `https://www.7-zip.org/a/7z${SEVENZIP_VERSION}-x64.exe`, src: '7z.exe', resources: ['7z.dll'], sha256: SEVENZIP_SHA['win32-x64'], outputSha256: SEVENZIP_VERSION === '2301' ? '8cebb25e240db3b6986fcaed6bc0b900fa09dad763a56fb71273529266c5c525' : undefined, resourceSha256: SEVENZIP_VERSION === '2301' ? { '7z.dll': '77222e81cb7004e8c3e077aada02b555a3d38fb05b50c64afd36ca230a8fd5b9' } : undefined, authenticode: true },
   'darwin-x64': { url: `https://www.7-zip.org/a/7z${SEVENZIP_VERSION}-mac.tar.xz`, src: '7zz', sha256: SEVENZIP_SHA['darwin-x64'] },
   'darwin-arm64': { url: `https://www.7-zip.org/a/7z${SEVENZIP_VERSION}-mac.tar.xz`, src: '7zz', sha256: SEVENZIP_SHA['darwin-arm64'] },
 }
@@ -164,8 +164,9 @@ async function extract(archive, dir) {
 
 function verify(file, spec) {
   if (!spec.sha256) {
-    if (process.env.SIDECAR_ALLOW_UNVERIFIED) {
-      return log(`WARNING no pinned checksum for ${spec.url}, continuing unverified`)
+    if (process.env.SIDECAR_ALLOW_UNVERIFIED === '1') {
+      if (spec.authenticode) verifyAuthenticode(file)
+      return log(`WARNING unverified ${path.basename(spec.url)}`)
     }
     throw new Error(`no pinned checksum for ${spec.url} (custom version?), set SIDECAR_ALLOW_UNVERIFIED=1 to bypass`)
   }
