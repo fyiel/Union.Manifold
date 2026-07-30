@@ -3,7 +3,7 @@ import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
-const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
+const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 const source = path.join(root, 'native', 'trainer-host', 'main.cpp')
 const output = path.join(root, 'src-tauri', 'resources')
 

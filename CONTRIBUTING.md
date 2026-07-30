@@ -23,7 +23,7 @@ pnpm install
 pnpm fetch-sidecars   # downloads the aria2c and 7z binaries the app shells out to
 ```
 
-Sidecar downloads are pinned to SHA-256 checksums. If you override `ARIA2_VERSION` or `SEVENZIP_VERSION`, set `SIDECAR_ALLOW_UNVERIFIED=1` or add new pins in `scripts/fetch-sidecars.mjs`.
+Sidecar downloads are pinned to SHA-256 checksums. If you override `ARIA2_VERSION` or `SEVENZIP_VERSION`, set `SIDECAR_ALLOW_UNVERIFIED=1` or add new pins in `renderer/scripts/fetch-sidecars.mjs`.
 
 ## Development
 
