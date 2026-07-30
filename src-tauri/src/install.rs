@@ -393,6 +393,114 @@ async fn finalize_installed(
     crate::library::invalidate_scan();
 }
 
+fn commit_staged_update(staging_dir: &Path, target_dir: &Path) -> Result<()> {
+    let staged_path = staging_dir.join(MANIFEST_NAME);
+    let staged = std::fs::read_to_string(&staged_path)
+        .ok()
+        .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+        .and_then(|value| value.as_object().cloned())
+        .ok_or_else(|| crate::error::AppError::msg("staged install manifest is missing"))?;
+    let target_path = target_dir.join(MANIFEST_NAME);
+    let mut manifest = std::fs::read_to_string(&target_path)
+        .ok()
+        .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+        .and_then(|value| value.as_object().cloned())
+        .unwrap_or_default();
+
+    for (key, value) in staged {
+        if key == "metadata" && value.is_object() {
+            if !manifest.get(&key).map(Value::is_object).unwrap_or(false) {
+                manifest.insert(key.clone(), json!({}));
+            }
+            let metadata = manifest
+                .get_mut(&key)
+                .and_then(Value::as_object_mut)
+                .unwrap();
+            for (metadata_key, metadata_value) in value.as_object().unwrap() {
+                metadata.insert(metadata_key.clone(), metadata_value.clone());
+            }
+        } else {
+            manifest.insert(key, value);
+        }
+    }
+    manifest.insert("installPath".into(), json!(target_dir.to_string_lossy()));
+    if let Some(snapshot) = manifest
+        .get_mut("downloadSnapshot")
+        .and_then(Value::as_object_mut)
+    {
+        let save_path = snapshot
+            .get("savePath")
+            .and_then(Value::as_str)
+            .map(PathBuf::from);
+        if let Some(relative) = save_path
+            .as_deref()
+            .and_then(|path| path.strip_prefix(staging_dir).ok())
+        {
+            snapshot.insert(
+                "savePath".into(),
+                json!(target_dir.join(relative).to_string_lossy()),
+            );
+        }
+    }
+    crate::downloads::write_json_atomic(&staged_path, &Value::Object(manifest))
+        .map_err(|error| crate::error::AppError::msg(format!("write staged manifest: {error}")))?;
+
+    let parent = staging_dir
+        .parent()
+        .ok_or_else(|| crate::error::AppError::msg("staging directory has no parent"))?;
+    let backup = parent.join(format!(
+        ".backup-{}-{}-{}",
+        safe_folder_name(
+            target_dir
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("game")
+        ),
+        std::process::id(),
+        now_ms(),
+    ));
+    let had_target = target_dir.exists();
+    if had_target {
+        std::fs::rename(target_dir, &backup).map_err(|error| {
+            crate::error::AppError::msg(format!("stage installed update: {error}"))
+        })?;
+    }
+    if let Err(error) = std::fs::rename(staging_dir, target_dir) {
+        if had_target {
+            let restore = std::fs::rename(&backup, target_dir);
+            return Err(crate::error::AppError::msg(match restore {
+                Ok(_) => format!("commit installed update: {error}"),
+                Err(restore_error) => format!(
+                    "commit installed update: {error}; restore previous install: {restore_error}"
+                ),
+            }));
+        }
+        return Err(crate::error::AppError::msg(format!(
+            "commit installed update: {error}"
+        )));
+    }
+    if had_target {
+        std::fs::remove_dir_all(&backup).ok();
+    }
+    crate::library::invalidate_scan();
+    Ok(())
+}
+
+async fn finalize_download_install(
+    staging_dir: &Path,
+    appid: &str,
+    game_name: &Option<String>,
+    replace_dir: Option<&Path>,
+) -> Result<PathBuf> {
+    finalize_installed(staging_dir, appid, game_name, staging_dir, None).await;
+    if let Some(target_dir) = replace_dir {
+        commit_staged_update(staging_dir, target_dir)?;
+        Ok(target_dir.to_path_buf())
+    } else {
+        Ok(staging_dir.to_path_buf())
+    }
+}
+
 fn mark_install_failed(dir: &Path, error: &str) {
     let manifest_path = dir.join(MANIFEST_NAME);
     if let Ok(text) = std::fs::read_to_string(&manifest_path) {
@@ -442,11 +550,27 @@ pub async fn auto_install(
     game_name: Option<String>,
     save_path: PathBuf,
     installing_dir: PathBuf,
+    replace_dir: Option<PathBuf>,
 ) {
     let archive = extract_entry_point(&installing_dir, &save_path);
     let display_name = game_name.clone().unwrap_or_else(|| appid.clone());
     if !is_archive(&archive) && !sniff_archive(&archive) {
-        finalize_installed(&installing_dir, &appid, &game_name, &installing_dir, None).await;
+        if let Err(error) =
+            finalize_download_install(&installing_dir, &appid, &game_name, replace_dir.as_deref())
+                .await
+        {
+            let message = error.to_string();
+            mark_install_failed(&installing_dir, &message);
+            emit_status(
+                &app,
+                &download_id,
+                &appid,
+                &game_name,
+                "extract_failed",
+                Some(&message),
+            );
+            return;
+        }
         emit_status(&app, &download_id, &appid, &game_name, "extracted", None);
         crate::notify::send_if(
             &app,
@@ -496,7 +620,29 @@ pub async fn auto_install(
     engine.set_extracting(&appid, false);
     match result {
         Ok(_) => {
-            finalize_installed(&installing_dir, &appid, &game_name, &installing_dir, None).await;
+            let installed_dir = match finalize_download_install(
+                &installing_dir,
+                &appid,
+                &game_name,
+                replace_dir.as_deref(),
+            )
+            .await
+            {
+                Ok(dir) => dir,
+                Err(error) => {
+                    let message = error.to_string();
+                    mark_install_failed(&installing_dir, &message);
+                    emit_status(
+                        &app,
+                        &download_id,
+                        &appid,
+                        &game_name,
+                        "extract_failed",
+                        Some(&message),
+                    );
+                    return;
+                }
+            };
             emit_status(&app, &download_id, &appid, &game_name, "extracted", None);
             crate::notify::send_if(
                 &app,
@@ -505,7 +651,11 @@ pub async fn auto_install(
                 "Ready to play",
                 &format!("{display_name} finished installing"),
             );
-            let parts = archive_files(&installing_dir, &save_path);
+            let installed_save_path = save_path
+                .strip_prefix(&installing_dir)
+                .map(|relative| installed_dir.join(relative))
+                .unwrap_or_else(|_| save_path.clone());
+            let parts = archive_files(&installed_dir, &installed_save_path);
             let size: u64 = parts
                 .iter()
                 .filter_map(|p| std::fs::metadata(p).ok())
@@ -748,6 +898,78 @@ pub fn delete_archive_files(state: State<'_, AppState>, payload: Value) -> Value
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn staged_update_replaces_files_and_merges_latest_installed_metadata() {
+        let temp = tempfile::tempdir().unwrap();
+        let target = temp.path().join("Game");
+        let staging = temp.path().join(".updates").join("game");
+        std::fs::create_dir_all(&target).unwrap();
+        std::fs::create_dir_all(&staging).unwrap();
+        std::fs::write(target.join("old.bin"), b"old").unwrap();
+        std::fs::write(staging.join("new.bin"), b"new").unwrap();
+        crate::downloads::write_json_atomic(
+            &target.join(MANIFEST_NAME),
+            &json!({
+                "appid": "game",
+                "installStatus": "installed",
+                "metadata": {
+                    "downloadedVersion": "1.0",
+                    "libraryGameMeta": { "lastPlayedAt": 42 }
+                }
+            }),
+        )
+        .unwrap();
+        crate::downloads::write_json_atomic(
+            &staging.join(MANIFEST_NAME),
+            &json!({
+                "appid": "game",
+                "installStatus": "installed",
+                "metadata": {
+                    "downloadedVersion": "2.0",
+                    "version": "2.0"
+                }
+            }),
+        )
+        .unwrap();
+
+        commit_staged_update(&staging, &target).unwrap();
+
+        assert!(!target.join("old.bin").exists());
+        assert_eq!(std::fs::read(target.join("new.bin")).unwrap(), b"new");
+        let manifest: Value =
+            serde_json::from_str(&std::fs::read_to_string(target.join(MANIFEST_NAME)).unwrap())
+                .unwrap();
+        assert_eq!(manifest["metadata"]["downloadedVersion"], json!("2.0"));
+        assert_eq!(
+            manifest["metadata"]["libraryGameMeta"]["lastPlayedAt"],
+            json!(42)
+        );
+        assert_eq!(manifest["installPath"], json!(target.to_string_lossy()));
+    }
+
+    #[test]
+    fn failed_staged_update_commit_restores_previous_install() {
+        let temp = tempfile::tempdir().unwrap();
+        let target = temp.path().join("Game");
+        let staging = target.join("stage");
+        std::fs::create_dir_all(&staging).unwrap();
+        std::fs::write(target.join("old.bin"), b"old").unwrap();
+        crate::downloads::write_json_atomic(
+            &target.join(MANIFEST_NAME),
+            &json!({ "appid": "game", "installStatus": "installed" }),
+        )
+        .unwrap();
+        crate::downloads::write_json_atomic(
+            &staging.join(MANIFEST_NAME),
+            &json!({ "appid": "game", "installStatus": "installed" }),
+        )
+        .unwrap();
+
+        assert!(commit_staged_update(&staging, &target).is_err());
+        assert_eq!(std::fs::read(target.join("old.bin")).unwrap(), b"old");
+        assert!(target.join(MANIFEST_NAME).is_file());
+    }
 
     #[test]
     fn t_part_base_multibyte_never_panics() {

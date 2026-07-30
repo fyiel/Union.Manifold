@@ -33,6 +33,58 @@ fn steam_compatibility_fixes_enabled(settings: &crate::settings::SettingsStore) 
         .unwrap_or(true)
 }
 
+#[cfg(any(windows, test))]
+fn split_windows_launch_args(raw: &str) -> Vec<String> {
+    let mut args = Vec::new();
+    let mut chars = raw.chars().peekable();
+
+    loop {
+        while matches!(chars.peek(), Some(' ' | '\t')) {
+            chars.next();
+        }
+        if chars.peek().is_none() {
+            break;
+        }
+
+        let mut arg = String::new();
+        let mut in_quotes = false;
+        while let Some(&ch) = chars.peek() {
+            if !in_quotes && matches!(ch, ' ' | '\t') {
+                break;
+            }
+            if ch != '\\' && ch != '"' {
+                arg.push(ch);
+                chars.next();
+                continue;
+            }
+
+            let mut backslashes = 0;
+            while chars.peek() == Some(&'\\') {
+                chars.next();
+                backslashes += 1;
+            }
+            if chars.peek() != Some(&'"') {
+                arg.extend(std::iter::repeat_n('\\', backslashes));
+                continue;
+            }
+
+            arg.extend(std::iter::repeat_n('\\', backslashes / 2));
+            chars.next();
+            if backslashes % 2 == 1 {
+                arg.push('"');
+            } else if in_quotes && chars.peek() == Some(&'"') {
+                chars.next();
+                arg.push('"');
+            } else {
+                in_quotes = !in_quotes;
+            }
+        }
+        args.push(arg);
+    }
+
+    args
+}
+
 fn configured_launch_args(
     settings: &crate::settings::SettingsStore,
     appid: &str,
@@ -46,6 +98,9 @@ fn configured_launch_args(
     if raw.is_empty() {
         return Ok(Vec::new());
     }
+    #[cfg(windows)]
+    return Ok(split_windows_launch_args(raw));
+    #[cfg(not(windows))]
     shlex::split(raw).ok_or_else(|| "launch options contain an unclosed quote".to_string())
 }
 
@@ -286,6 +341,18 @@ pub fn game_exe_preflight(state: State<'_, AppState>, appid: String, exe_path: S
     })
 }
 
+pub(crate) fn exit_after_game_if_requested(app: AppHandle) {
+    if !close_on_launch_enabled(&app.state::<AppState>().settings) {
+        return;
+    }
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        if RUNNING.lock().is_empty() && !crate::system::steam_tracking() {
+            app.exit(0);
+        }
+    });
+}
+
 fn finish_tracked_game(
     app: &AppHandle,
     appid: &str,
@@ -297,10 +364,16 @@ fn finish_tracked_game(
         .achievements
         .finish_watch(app, appid);
     let elapsed = now_ms() - started_at;
+    crate::settings::merge_library_game_meta(
+        app,
+        appid,
+        serde_json::Map::new(),
+        elapsed.max(0) as u64,
+    );
     RUNNING.lock().remove(appid);
     app.emit(
         "uc:presence-changed",
-        json!({ "reason": "game-exited", "appid": appid }),
+        json!({ "reason": "game-exited", "appid": appid, "activityRecorded": true }),
     )
     .ok();
     if elapsed >= 10_000 {
@@ -319,6 +392,7 @@ fn finish_tracked_game(
         )
         .ok();
     }
+    exit_after_game_if_requested(app.clone());
 }
 
 fn spawn_and_track(
@@ -407,9 +481,15 @@ fn spawn_and_track(
     };
     let pid = child.id();
     let started_at = now_ms();
+    crate::settings::merge_library_game_meta(
+        app,
+        appid,
+        serde_json::Map::from_iter([("lastPlayedAt".to_string(), json!(started_at))]),
+        0,
+    );
     app.emit(
         "uc:presence-changed",
-        json!({ "reason": "game-started", "appid": appid, "gameName": game_name }),
+        json!({ "reason": "game-started", "appid": appid, "gameName": game_name, "startedAt": started_at, "activityRecorded": true }),
     )
     .ok();
     app.state::<AppState>()
@@ -514,9 +594,15 @@ fn spawn_elevated_and_track(
     drop(running);
 
     let started_at = now_ms();
+    crate::settings::merge_library_game_meta(
+        app,
+        appid,
+        serde_json::Map::from_iter([("lastPlayedAt".to_string(), json!(started_at))]),
+        0,
+    );
     app.emit(
         "uc:presence-changed",
-        json!({ "reason": "game-started", "appid": appid, "gameName": game_name }),
+        json!({ "reason": "game-started", "appid": appid, "gameName": game_name, "startedAt": started_at, "activityRecorded": true }),
     )
     .ok();
     app.state::<AppState>()
@@ -650,7 +736,7 @@ pub async fn game_exe_launch(
                 let app2 = app.clone();
                 tauri::async_runtime::spawn(async move {
                     tokio::time::sleep(std::time::Duration::from_secs(3)).await;
-                    app2.exit(0);
+                    crate::hide_app_ui(&app2);
                 });
             }
             json!({ "ok": true, "pid": pid, "launchMode": launch_mode, "elevated": elevated })
@@ -675,8 +761,8 @@ pub async fn game_exe_launch(
 
 #[tauri::command(async)]
 pub fn game_exe_running_list() -> Value {
-    let running = RUNNING.lock();
-    let appids: Vec<String> = running.keys().cloned().collect();
+    let mut appids: Vec<String> = RUNNING.lock().keys().cloned().collect();
+    appids.extend(crate::system::steam_running_appids());
     json!({ "ok": true, "appids": appids })
 }
 
@@ -886,12 +972,21 @@ mod tests {
     }
 
     #[test]
-    fn configured_launch_args_preserve_quoted_values() {
+    fn windows_launch_args_preserve_backslashes_and_apostrophes() {
+        assert_eq!(
+            split_windows_launch_args(r#"--profile C:\Games\Saves --name "D'Angelo Saves""#),
+            vec!["--profile", r"C:\Games\Saves", "--name", "D'Angelo Saves"]
+        );
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn configured_launch_args_use_posix_quoting_off_windows() {
         let temp = tempfile::tempdir().unwrap();
         let settings = crate::settings::SettingsStore::load(temp.path().join("settings.json"));
         settings.set(
             "gameLaunchArgs",
-            json!({ "local-game": "--profile \"My Saves\" -dx11" }),
+            json!({ "local-game": "--profile 'My Saves' -dx11" }),
         );
         assert_eq!(
             configured_launch_args(&settings, "local-game").unwrap(),

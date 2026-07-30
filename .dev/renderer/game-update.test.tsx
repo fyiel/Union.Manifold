@@ -20,12 +20,17 @@ describe("installed game updates", () => {
   })
 
   it("queues the current catalog build over an older installation", async () => {
+    let installedVersion = "1.0"
+    const listInstalledGlobal = vi.fn(async () => [
+      { appid: "update-game", metadata: { downloadedVersion: installedVersion } },
+    ])
+    const saveInstalledMetadata = vi.fn(async () => ({ ok: true }))
     const start = vi.fn(async () => ({ ok: true }))
     Object.defineProperty(window, "ucDownloads", {
       configurable: true,
       value: {
-        listInstalledGlobal: vi.fn(async () => [{ appid: "update-game", metadata: { version: "1.0" } }]),
-        saveInstalledMetadata: vi.fn(async () => ({ ok: true })),
+        listInstalledGlobal,
+        saveInstalledMetadata,
         start,
       },
     })
@@ -54,6 +59,7 @@ describe("installed game updates", () => {
         sourceUrl: "https://example.com/update-game",
         dedupKey: "update-game",
         title: "Update Game",
+        version: "2.0",
         genres: [],
         downloadOptions: [{ label: "ZIP", hostType: "pixeldrain", url: "https://example.com/file", resolvable: true }],
       }],
@@ -69,6 +75,15 @@ describe("installed game updates", () => {
     await waitFor(() => expect(start).toHaveBeenCalledWith(expect.objectContaining({
       appid: "update-game",
       url: "https://cdn.example/game-2.zip",
+      update: true,
+      installMetadata: expect.objectContaining({ downloadedVersion: "2.0" }),
     })))
+    expect(saveInstalledMetadata).not.toHaveBeenCalled()
+
+    installedVersion = "2.0"
+    window.dispatchEvent(new CustomEvent("uc_game_installed", {
+      detail: { appid: "update-game" },
+    }))
+    await screen.findByRole("button", { name: /^Play/ })
   })
 })

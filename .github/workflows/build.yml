@@ -116,7 +116,7 @@ jobs:
         if: matrix.os == 'ubuntu-22.04'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf g++-mingw-w64
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf g++-mingw-w64 rpm
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -149,6 +149,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # linuxdeploy's bundled strip can reject newer distro ELF sections.
+          NO_STRIP: '1'
         with:
           tagName: ${{ needs.check.outputs.tag }}
           releaseName: 'Union.Manifold ${{ needs.check.outputs.tag }}'

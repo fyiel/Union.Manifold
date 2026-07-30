@@ -267,6 +267,7 @@ export function LibraryPage() {
       window.clearTimeout(reloadTimer)
       reloadTimer = window.setTimeout(() => { void load() }, 300)
     }
+    const offSourcesUpdated = window.ucSources?.onSourcesUpdated?.(refresh)
     window.addEventListener("uc_game_installed", refresh)
     window.addEventListener("uc:library-activity", refresh)
     return () => {
@@ -274,6 +275,7 @@ export function LibraryPage() {
       window.clearTimeout(reloadTimer)
       window.removeEventListener("uc_game_installed", refresh)
       window.removeEventListener("uc:library-activity", refresh)
+      offSourcesUpdated?.()
     }
   }, [])
 
@@ -374,14 +376,13 @@ export function LibraryPage() {
 
   const isFavorite = (appid: string) => (meta[appid]?.collections || []).some((c) => c.toLowerCase() === "favorites")
 
-  const toggleFavorite = (appid: string) => {
+  const toggleFavorite = async (appid: string) => {
     const fav = isFavorite(appid)
-    const cur = meta[appid] || {}
-    const cols = (cur.collections || []).filter((c) => c.toLowerCase() !== "favorites")
+    const cols = (meta[appid]?.collections || []).filter((c) => c.toLowerCase() !== "favorites")
     if (!fav) cols.push("Favorites")
-    const next = { ...meta, [appid]: { ...cur, collections: cols } }
-    setMeta(next)
-    void window.ucSettings?.set?.("libraryGameMeta", next)
+    const result = await window.ucSettings?.mergeLibraryGameMeta?.(appid, { collections: cols })
+    if (!result?.ok) return
+    setMeta((current) => ({ ...current, [appid]: result.entry as LibraryGameMeta }))
     setInstalled((prev) => prev.map((g) => g.appid !== appid ? g : { ...g, collections: fav ? g.collections.filter((c) => c.toLowerCase() !== "favorites") : [...g.collections, "Favorites"] }))
   }
 

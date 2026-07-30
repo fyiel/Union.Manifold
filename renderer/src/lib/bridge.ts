@@ -123,6 +123,8 @@ export function installBridge(): void {
   w.ucSettings = {
     get: (key: string) => call("setting_get", { key }),
     set: (key: string, value: any) => call("setting_set", { key, value }),
+    mergeLibraryGameMeta: (appid: string, patch: Record<string, unknown>, playTimeDeltaMs?: number) =>
+      call("setting_merge_library_game_meta", { appid, patch, playTimeDeltaMs }),
     clearAll: () => call("setting_clear_all"),
     onChanged: (cb: Cb) => on("uc:setting-changed", cb),
   }
@@ -180,7 +182,8 @@ export function installBridge(): void {
   w.ucSystem = {
     openExternal: (target: string) => call("system_open_external", { target }),
     launchSteam: () => call("system_launch_steam"),
-    runSteamGame: (steamAppid: number) => call("steam_game_run", { steamAppid }),
+    runSteamGame: (appid: string, steamAppid: number, installPath: string) =>
+      call("steam_game_run", { appid, steamAppid, installPath }),
     getNotifications: () => call("system_notifications"),
     onNotificationActivated: noop,
   }

@@ -44,7 +44,21 @@ fn should_exit_main_window(downloading: usize, extracting: usize) -> bool {
     downloading == 0 && extracting == 0
 }
 
+const MAIN_TRAY_ID: &str = "main-tray";
+
+pub(crate) fn hide_app_ui(app: &tauri::AppHandle) {
+    if let Some(main) = app.get_webview_window("main") {
+        main.hide().ok();
+    }
+    if let Some(tray) = app.tray_by_id(MAIN_TRAY_ID) {
+        tray.set_visible(false).ok();
+    }
+}
+
 fn show_main_window(app: &tauri::AppHandle) {
+    if let Some(tray) = app.tray_by_id(MAIN_TRAY_ID) {
+        tray.set_visible(true).ok();
+    }
     if let Some(main) = app.get_webview_window("main") {
         main.show().ok();
         main.unminimize().ok();
@@ -244,6 +258,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             settings::setting_get,
             settings::setting_set,
+            settings::setting_merge_library_game_meta,
             settings::setting_clear_all,
             logging::log,
             window_cmds::window_minimize,
@@ -427,7 +442,7 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
     let quit = MenuItemBuilder::with_id("quit", "Quit").build(app)?;
     let menu = MenuBuilder::new(app).items(&[&show, &quit]).build()?;
 
-    let mut builder = TrayIconBuilder::new()
+    let mut builder = TrayIconBuilder::with_id(MAIN_TRAY_ID)
         .menu(&menu)
         .tooltip("Union.Manifold")
         .on_menu_event(|app, event| match event.id().as_ref() {

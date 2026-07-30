@@ -126,18 +126,26 @@ export function SourceGamePage() {
   }, [dedupKey])
   useEffect(() => {
     let alive = true
-    void (async () => {
+    let request = 0
+    const sync = async () => {
+      const currentRequest = ++request
       try {
         const list = (await window.ucDownloads?.listInstalledGlobal?.()) || (await window.ucDownloads?.listInstalled?.()) || []
-        if (!alive) return
-        const found = (list as Array<{ appid?: unknown; metadata?: { appid?: unknown } }>).find(
-          (entry) => String(entry.appid || entry.metadata?.appid || "") === dlAppid,
+        if (!alive || currentRequest !== request) return
+        const found = list.find(
+          (entry) => String(entry?.appid || entry?.metadata?.appid || "") === dlAppid,
         )
         setInstalled(Boolean(found))
         setInstalledVersion(getInstalledVersionLabel(found))
       } catch {  }
-    })()
-    return () => { alive = false }
+    }
+    const onInstalled = () => void sync()
+    void sync()
+    window.addEventListener("uc_game_installed", onInstalled)
+    return () => {
+      alive = false
+      window.removeEventListener("uc_game_installed", onInstalled)
+    }
   }, [dlAppid])
 
   useEffect(() => {
@@ -203,7 +211,7 @@ export function SourceGamePage() {
     setOptState((s) => ({ ...s, [optKey]: "working" }))
     setOptMsg((m) => ({ ...m, [optKey]: "" }))
     try {
-      const res = await startSourceDownload(game, sourceId, option)
+      const res = await startSourceDownload(game, sourceId, option, installed)
       if (res.ok) {
         setOptState((s) => ({ ...s, [optKey]: "queued" }))
       } else if (res.openUrl) {
@@ -254,7 +262,7 @@ export function SourceGamePage() {
     setOptState((s) => ({ ...s, [pk]: "working" }))
     setOptMsg((m) => ({ ...m, [pk]: "" }))
     try {
-      const res = await startBestDownload(game, entries)
+      const res = await startBestDownload(game, entries, installed)
       if (res.ok) {
         setOptState((s) => ({ ...s, [pk]: "queued" }))
       } else if (res.openUrl) {

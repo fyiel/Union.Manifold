@@ -10,25 +10,15 @@ let activityWrites: Promise<void> = Promise.resolve()
 
 type GameActivity = Record<string, unknown> & { lastPlayedAt?: number; playTimeMs?: number }
 
-function updateGameActivity(
+function mergeGameActivity(
   appid: string,
-  update: (current: GameActivity) => GameActivity,
+  patch: Partial<GameActivity>,
+  playTimeDeltaMs?: number,
 ): Promise<void> {
   const write = activityWrites.then(async () => {
-    const settings = window.ucSettings
-    if (!settings?.get || !settings.set) return
-    const stored = await settings.get("libraryGameMeta")
-    const metadata = stored && typeof stored === "object" && !Array.isArray(stored)
-      ? { ...(stored as Record<string, GameActivity>) }
-      : {}
-    const storedEntry = metadata[appid]
-    const current: GameActivity = storedEntry && typeof storedEntry === "object" && !Array.isArray(storedEntry)
-      ? storedEntry
-      : {}
-    const entry = update(current)
-    metadata[appid] = entry
-    await settings.set("libraryGameMeta", metadata)
-    window.dispatchEvent(new CustomEvent("uc:library-activity", { detail: { appid, entry } }))
+    const result = await window.ucSettings?.mergeLibraryGameMeta?.(appid, patch, playTimeDeltaMs)
+    if (!result?.ok) return
+    window.dispatchEvent(new CustomEvent("uc:library-activity", { detail: { appid, entry: result.entry } }))
   })
   activityWrites = write.catch(() => undefined)
   return write
@@ -36,15 +26,11 @@ function updateGameActivity(
 
 export function recordGameLaunch(appid: string, startedAt: number = Date.now()): Promise<void> {
   if (!appid) return Promise.resolve()
-  return updateGameActivity(appid, (current) => ({ ...current, lastPlayedAt: startedAt }))
+  return mergeGameActivity(appid, { lastPlayedAt: startedAt })
 }
 
 function recordGameExit(appid: string, startedAt: number, endedAt: number): Promise<void> {
-  const elapsed = Math.max(0, endedAt - startedAt)
-  return updateGameActivity(appid, (current) => ({
-    ...current,
-    playTimeMs: (typeof current.playTimeMs === "number" ? current.playTimeMs : 0) + elapsed,
-  }))
+  return mergeGameActivity(appid, {}, Math.max(0, endedAt - startedAt))
 }
 
 function notify() {
@@ -104,6 +90,17 @@ function ensurePresenceSubscription() {
   presenceWired = true
   window.ucPresence?.onChanged?.((detail) => {
     if (!detail || !detail.appid) return
+    const activityRecorded = detail.activityRecorded === true
+    if (activityRecorded && detail.reason === "game-started") {
+      sessionStartTimes.set(
+        detail.appid,
+        typeof detail.startedAt === "number" ? detail.startedAt : Date.now(),
+      )
+      window.dispatchEvent(new CustomEvent("uc:library-activity", { detail: { appid: detail.appid } }))
+    } else if (activityRecorded && detail.reason === "game-exited") {
+      sessionStartTimes.delete(detail.appid)
+      window.dispatchEvent(new CustomEvent("uc:library-activity", { detail: { appid: detail.appid } }))
+    }
     if (detail.reason === "game-started") {
       if (cache.has(detail.appid)) return
       const next = new Set(cache)
@@ -174,7 +171,9 @@ export function refreshRunningGames() {
 }
 
 export function setRunningOptimistic(appid: string, running: boolean) {
+  ensurePresenceSubscription()
   if (!appid) return
+  if (!running) sessionStartTimes.delete(appid)
   if (running === cache.has(appid)) return
   const next = new Set(cache)
   if (running) next.add(appid)
@@ -183,6 +182,7 @@ export function setRunningOptimistic(appid: string, running: boolean) {
 }
 
 export function isRunningGameSync(appid: string): boolean {
+  ensurePresenceSubscription()
   return cache.has(appid)
 }
 

@@ -160,8 +160,8 @@ pub async fn onlinefix_repair(
     appid: String,
     title: String,
 ) -> Result<Value> {
-    if crate::slipgate::cfg().is_none() || !crate::sources::adapters::onlinefix::is_refreshed() {
-        let message = "Online-Fix requires a running Slipgate and a successful source refresh";
+    if !crate::sources::adapters::onlinefix::is_ready() {
+        let message = "Online-Fix requires a healthy Slipgate and a successful live source refresh";
         emit(&app, &appid, "failed", None, Some(message));
         return Ok(json!({ "ok": false, "error": message }));
     }

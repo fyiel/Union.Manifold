@@ -80,6 +80,9 @@ pub struct DownloadRequest {
     pub headers: Option<HashMap<String, String>>,
     pub part_index: Option<u64>,
     pub part_total: Option<u64>,
+    pub update: bool,
+    pub install_metadata: Option<Value>,
+    pub preserve_existing: bool,
 }
 
 #[derive(Clone)]
@@ -92,6 +95,8 @@ struct Download {
     filename: String,
     save_path: PathBuf,
     installing_dir: PathBuf,
+    replace_dir: Option<PathBuf>,
+    install_metadata: Option<Value>,
     total_bytes: u64,
     received_bytes: u64,
     speed_bps: u64,
@@ -118,6 +123,8 @@ impl Download {
             "savePath": self.save_path.to_string_lossy(),
             "appid": self.appid,
             "gameName": self.game_name,
+            "update": self.replace_dir.is_some(),
+            "installMetadata": self.install_metadata,
             "url": self.url,
             "error": self.error,
             "partIndex": self.part_index,
@@ -185,13 +192,6 @@ impl DownloadEngine {
             .unwrap_or_else(|| self.default_root.clone())
     }
 
-    fn installing_dir(&self, game_name: &Option<String>, appid: &str) -> PathBuf {
-        let folder = safe_folder_name(game_name.as_deref().unwrap_or(appid));
-        let dir = self.root().join(folder);
-        std::fs::create_dir_all(&dir).ok();
-        dir
-    }
-
     fn resolve_filename(
         &self,
         dir: &Path,
@@ -251,6 +251,9 @@ impl DownloadEngine {
             headers,
             part_index,
             part_total,
+            update,
+            install_metadata,
+            preserve_existing,
         } = req;
         if appid.is_empty() {
             return Err(AppError::msg("appid required"));
@@ -265,7 +268,22 @@ impl DownloadEngine {
             }
             st.queue.retain(|x| x != &id);
         }
-        let dir = self.installing_dir(&game_name, &appid);
+        let root = self.root();
+        let default_dir = root.join(safe_folder_name(game_name.as_deref().unwrap_or(&appid)));
+        let replace_dir = update.then(|| {
+            crate::install::find_installing(&root, &appid)
+                .map(|(dir, _)| dir)
+                .unwrap_or(default_dir.clone())
+        });
+        let dir = if update {
+            root.join(".updates").join(safe_folder_name(&appid))
+        } else {
+            default_dir
+        };
+        if update && !preserve_existing && part_index.unwrap_or(1) == 1 {
+            std::fs::remove_dir_all(&dir).ok();
+        }
+        std::fs::create_dir_all(&dir).ok();
         let fname = sanitize_filename(&self.resolve_filename(&dir, &filename, &url, &appid));
         let save_path = dir.join(&fname);
         let mut dl = Download {
@@ -277,6 +295,8 @@ impl DownloadEngine {
             filename: fname,
             save_path,
             installing_dir: dir,
+            replace_dir,
+            install_metadata,
             total_bytes,
             received_bytes: 0,
             speed_bps: 0,
@@ -878,6 +898,7 @@ impl DownloadEngine {
             dl.game_name,
             dl.save_path,
             dl.installing_dir,
+            dl.replace_dir,
         )
         .await;
         self.install_unlock(&appid);
@@ -899,6 +920,9 @@ fn write_manifest(dl: &Download) {
             "name".into(),
             json!(dl.game_name.clone().unwrap_or_else(|| dl.appid.clone())),
         );
+    }
+    if let Some(metadata) = &dl.install_metadata {
+        manifest.insert("metadata".into(), metadata.clone());
     }
     let install_status = match dl.status.as_str() {
         "completed" => "downloaded",
@@ -1002,6 +1026,12 @@ pub fn download_start(state: State<'_, AppState>, payload: Value) -> Value {
         headers: to_headers(payload.get("headers").cloned()),
         part_index: payload.get("partIndex").and_then(|v| v.as_u64()),
         part_total: payload.get("partTotal").and_then(|v| v.as_u64()),
+        update: payload
+            .get("update")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+        install_metadata: payload.get("installMetadata").cloned(),
+        preserve_existing: payload.get("savePath").and_then(|v| v.as_str()).is_some(),
     };
     if req.url.is_empty() || req.id.is_empty() {
         return json!({ "ok": false, "error": "url and downloadId required" });

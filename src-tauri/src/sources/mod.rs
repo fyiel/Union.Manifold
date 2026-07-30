@@ -337,10 +337,10 @@ impl Registry {
         source: &SourceMeta,
         slipgate: bool,
         hide_torrent: bool,
-        onlinefix_refreshed: bool,
+        onlinefix_ready: bool,
     ) -> bool {
         let reachable = if source.id == "onlinefix" {
-            slipgate && onlinefix_refreshed
+            slipgate && onlinefix_ready
         } else {
             slipgate || !source.requires_slipgate || adapters::hydralinks::is_reachable(source.id)
         };
@@ -352,7 +352,7 @@ impl Registry {
             source,
             slipgate,
             hide_torrent,
-            adapters::onlinefix::is_refreshed(),
+            adapters::onlinefix::is_ready(),
         )
     }
 
@@ -789,6 +789,7 @@ pub async fn sources_refresh(app: AppHandle) -> Result<Value> {
         json!({ "state": "complete", "total": total as u64 }),
     )
     .ok();
+    app.emit("uc:sources-updated", json!({})).ok();
     Ok(json!({ "ok": any || total == 0 }))
 }
 
@@ -827,7 +828,7 @@ mod tests {
     }
 
     #[test]
-    fn onlinefix_requires_slipgate_and_a_refresh() {
+    fn onlinefix_requires_slipgate_and_live_readiness() {
         let onlinefix = SOURCES
             .iter()
             .find(|source| source.id == "onlinefix")

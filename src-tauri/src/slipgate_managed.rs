@@ -269,6 +269,8 @@ async fn up(
     settings: &SettingsStore,
     pull: bool,
 ) -> Result<Value, String> {
+    crate::sources::adapters::onlinefix::invalidate();
+    app.emit("uc:sources-updated", json!({})).ok();
     let mut config =
         load_config(paths).ok_or_else(|| "Managed Slipgate is not installed".to_string())?;
     if pull {
@@ -285,7 +287,10 @@ async fn up(
     .await?;
     refresh_port(paths, &mut config).await?;
     sync_settings(app, settings, &config);
-    wait_for_health(&config).await
+    let status = wait_for_health(&config).await?;
+    crate::sources::adapters::onlinefix::refresh().await;
+    app.emit("uc:sources-updated", json!({})).ok();
+    Ok(status)
 }
 
 async fn status_value(paths: &AppPaths) -> Value {
@@ -389,6 +394,8 @@ pub async fn managed_slipgate_stop(
         load_config(&state.paths).ok_or_else(|| "Managed Slipgate is not installed".to_string())?;
     run_docker(&compose_args(&state.paths, &["stop"]), COMMAND_TIMEOUT).await?;
     clear_settings(&app, &state.settings, &config);
+    crate::sources::adapters::onlinefix::invalidate();
+    app.emit("uc:sources-updated", json!({})).ok();
     Ok(status_value(&state.paths).await)
 }
 
@@ -424,6 +431,8 @@ pub async fn managed_slipgate_uninstall(
         .await?;
     }
     clear_settings(&app, &state.settings, &config);
+    crate::sources::adapters::onlinefix::invalidate();
+    app.emit("uc:sources-updated", json!({})).ok();
     std::fs::remove_dir_all(managed_dir(&state.paths))
         .map_err(|e| format!("remove managed resolver: {e}"))?;
     Ok(status_value(&state.paths).await)

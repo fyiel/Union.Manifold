@@ -31,6 +31,8 @@ type DownloadUpdatePayload = {
   skippedFiles?: string[]
   partIndex?: number
   partTotal?: number
+  update?: boolean
+  installMetadata?: Record<string, unknown>
   spaceCheck?: {
     archiveBytes: number
     estimatedExtractBytes: number
@@ -456,6 +458,8 @@ declare global {
         savePath?: string
         totalBytes?: number
         headers?: Record<string, string>
+        update?: boolean
+        installMetadata?: Record<string, unknown>
       }) => Promise<{ ok: boolean; queued?: boolean; error?: string }>
       cancel: (downloadId: string) => Promise<{ ok: boolean; status?: DownloadUpdatePayload["status"]; preservedArchive?: boolean; error?: string; downloadId?: string; appid?: string | null }>
       pause: (downloadId: string) => Promise<{ ok: boolean }>
@@ -470,6 +474,8 @@ declare global {
         partTotal?: number
         savePath?: string
         totalBytes?: number
+        update?: boolean
+        installMetadata?: Record<string, unknown>
       }) => Promise<{ ok: boolean; actualOffset?: number; error?: string }>
       showInFolder: (path: string) => Promise<{ ok: boolean }>
       openPath: (path: string) => Promise<{ ok: boolean }>
@@ -549,6 +555,7 @@ declare global {
     ucSettings?: {
       get: (key: string) => Promise<any>
       set: (key: string, value: any) => Promise<{ ok: boolean }>
+      mergeLibraryGameMeta: (appid: string, patch: Record<string, unknown>, playTimeDeltaMs?: number) => Promise<{ ok: boolean; entry: Record<string, unknown> }>
       clearAll: () => Promise<{ ok: boolean; shortcutsRemoved?: number }>
       onChanged: (callback: (data: { key: string; value: any }) => void) => () => void
     }
@@ -621,12 +628,12 @@ declare global {
         appVersion?: string,
         opts?: { currentAppid?: string | null; currentGameName?: string | null }
       ) => Promise<{ ok: boolean; status?: number; error?: string }>
-      onChanged?: (handler: (detail: { reason?: string; appid?: string | null; gameName?: string | null }) => void) => () => void
+      onChanged?: (handler: (detail: { reason?: string; appid?: string | null; gameName?: string | null; startedAt?: number; activityRecorded?: boolean }) => void) => () => void
     }
     ucSystem?: {
       openExternal?: (target: string) => Promise<{ ok: boolean; error?: string }>
       launchSteam?: () => Promise<{ ok: boolean; method?: string; error?: string }>
-      runSteamGame?: (steamAppid: number) => Promise<{ ok: boolean; error?: string }>
+      runSteamGame?: (appid: string, steamAppid: number, installPath: string) => Promise<{ ok: boolean; error?: string }>
       getNotifications: () => Promise<{ ok: boolean; notifications: SystemNotification[] }>
       onNotificationActivated: (callback: (data: { id: string }) => void) => () => void
     }

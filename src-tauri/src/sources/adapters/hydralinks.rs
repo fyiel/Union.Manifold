@@ -392,14 +392,12 @@ impl HydraSource {
         self.catalogue_opt(false).await
     }
 
-    pub async fn prime_direct(&self) -> bool {
-        let Ok(body) = http::get_text(self.source_json).await else {
-            return false;
-        };
+    async fn store_live_body(&self, body: String) -> Option<usize> {
         let parsed = parse_source(&body);
         if parsed.is_empty() {
-            return false;
+            return None;
         }
+        let count = parsed.len();
         if let Some(p) = metacache::file_path(&self.cache_file()) {
             let tmp = p.with_extension("json.tmp");
             if std::fs::write(&tmp, &body).is_ok() {
@@ -410,7 +408,20 @@ impl HydraSource {
         if let Ok(mut set) = REACHABLE.write() {
             set.insert(self.id);
         }
-        true
+        Some(count)
+    }
+
+    pub async fn refresh_live(&self) -> Option<usize> {
+        self.store_live_body(self.fetch_source_body().await?).await
+    }
+
+    pub async fn refresh_direct(&self) -> Option<usize> {
+        self.store_live_body(http::get_text(self.source_json).await.ok()?)
+            .await
+    }
+
+    pub async fn prime_direct(&self) -> bool {
+        self.refresh_direct().await.is_some()
     }
 
     pub async fn refresh(&self) -> Option<usize> {
