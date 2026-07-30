@@ -3,7 +3,7 @@ set -euo pipefail
 
 version="${1:?usage: build-arch-pkg.sh <version> [target-triple]}"
 triple="${2:-x86_64-unknown-linux-gnu}"
-root="$(cd "$(dirname "$0")/.." && pwd)"
+root="$(cd "$(dirname "$0")/../.." && pwd)"
 
 deb=$(find "$root/src-tauri/target/$triple/release/bundle/deb" -maxdepth 1 -name "*_${version}_*.deb" 2>/dev/null | head -1)
 [ -n "$deb" ] || { echo "no ${version} deb found for $triple, run tauri build first" >&2; exit 1; }

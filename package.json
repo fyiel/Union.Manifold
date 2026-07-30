@@ -21,9 +21,9 @@
     "build:renderer": "vite build --config renderer/vite.config.ts",
     "typecheck": "tsc --noEmit -p renderer/tsconfig.json",
     "test:renderer": "vitest run --config .dev/renderer/vitest.config.ts",
-    "build:trainer-host": "node ./scripts/build-trainer-host.mjs",
-    "fetch-sidecars": "node ./scripts/fetch-sidecars.mjs",
-    "fetch-sidecars:all": "node ./scripts/fetch-sidecars.mjs --all",
+    "build:trainer-host": "node ./renderer/scripts/build-trainer-host.mjs",
+    "fetch-sidecars": "node ./renderer/scripts/fetch-sidecars.mjs",
+    "fetch-sidecars:all": "node ./renderer/scripts/fetch-sidecars.mjs --all",
     "tauri": "tauri"
   },
   "dependencies": {

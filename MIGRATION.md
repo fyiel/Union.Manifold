@@ -40,4 +40,4 @@ optional chained so the UI degrades instead of breaking.
 - `src-tauri/` Rust backend and Tauri config.
 - `renderer/src/lib/bridge.ts` installs `window.uc*` over Tauri `invoke` and `listen`, so
   the rest of the renderer keeps calling the same API.
-- `scripts/fetch-sidecars.mjs` downloads `aria2c` and `7z` into `src-tauri/binaries`.
+- `renderer/scripts/fetch-sidecars.mjs` downloads `aria2c` and `7z` into `src-tauri/binaries`.
