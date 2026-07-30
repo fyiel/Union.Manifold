@@ -100,7 +100,10 @@ fn resolved_headers(value: &Value) -> HashMap<String, String> {
                 .collect()
         })
         .unwrap_or_default();
-    if !headers.keys().any(|key| key.eq_ignore_ascii_case("user-agent")) {
+    if !headers
+        .keys()
+        .any(|key| key.eq_ignore_ascii_case("user-agent"))
+    {
         if let Some(user_agent) = value
             .get("user_agent")
             .and_then(Value::as_str)

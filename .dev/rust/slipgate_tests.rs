@@ -53,8 +53,14 @@ fn resolved_download_replays_solver_session() {
             { "name": "session", "value": "ready" }
         ]
     }));
-    assert_eq!(headers.get("Referer").map(String::as_str), Some("https://host.example/file"));
-    assert_eq!(headers.get("User-Agent").map(String::as_str), Some("solver-browser"));
+    assert_eq!(
+        headers.get("Referer").map(String::as_str),
+        Some("https://host.example/file")
+    );
+    assert_eq!(
+        headers.get("User-Agent").map(String::as_str),
+        Some("solver-browser")
+    );
     assert_eq!(
         headers.get("Cookie").map(String::as_str),
         Some("cf_clearance=clear; session=ready")
