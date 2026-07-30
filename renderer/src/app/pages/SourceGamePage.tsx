@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import { useLocation, useNavigate, useParams } from "react-router-dom"
-import { Bookmark, BookmarkCheck, WandSparkles } from "lucide-react"
+import { Bookmark, BookmarkCheck, TriangleAlert } from "lucide-react"
 import {
   SOURCE_PRIORITY,
   collectDownloadEntries,
@@ -361,9 +361,10 @@ export function SourceGamePage() {
             </button>
           )}
           {installed && wand?.supported && wand.game && (
-            <button type="button" onClick={() => setWandOpen(true)} className="mf-ghost" title={`Open ${wand.game.name} trainer controls`} style={{ display: "flex", alignItems: "center", gap: 8, height: 44, padding: "0 15px", borderRadius: 9, border: "1px solid var(--mf-line-2)", background: "transparent", color: "var(--mf-t2)", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
-              <WandSparkles size={15} strokeWidth={1.7} />
+            <button type="button" onClick={() => setWandOpen(true)} className="mf-ghost" title={`Open experimental ${wand.game.name} trainer controls`} style={{ display: "flex", alignItems: "center", gap: 8, height: 44, padding: "0 15px", borderRadius: 9, border: "1px solid var(--mf-line-2)", background: "transparent", color: "var(--mf-t2)", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+              <TriangleAlert size={15} strokeWidth={1.7} color="#eab308" />
               Trainer
+              <span style={{ fontFamily: MONO, fontSize: 10, fontWeight: 400, color: "#ca8a04" }}>experimental</span>
               <span style={{ fontFamily: MONO, fontSize: 10, fontWeight: 400, color: "var(--mf-t5)" }}>{wand.game.cheatCount} assists</span>
             </button>
           )}

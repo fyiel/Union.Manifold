@@ -2,7 +2,7 @@ import { createPortal } from "react-dom"
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react"
 import {
   Play, Settings, FolderOpen, Terminal, SquareTerminal, Pencil, Puzzle, RefreshCw, Heart, Trash2,
-  X, Check, ChevronDown, Hash, Image as ImageIcon, Wrench, WandSparkles,
+  X, Check, ChevronDown, Hash, Image as ImageIcon, Wrench, TriangleAlert,
 } from "lucide-react"
 import { MONO } from "@/app/manifold/ui"
 import { proxyImageUrl } from "@/lib/utils"
@@ -96,7 +96,7 @@ export function GameMenu({ game, anchor, handlers, onClose }: { game: MenuGame; 
 
         <MenuRow icon={FolderOpen} label="Open files" onClick={run(handlers.onOpenFiles)} />
         {handlers.onMods ? <MenuRow icon={Puzzle} label="Mods" onClick={run(handlers.onMods)} /> : null}
-        {handlers.onWand ? <MenuRow icon={WandSparkles} label="Trainer controls" onClick={run(handlers.onWand)} /> : null}
+        {handlers.onWand ? <MenuRow icon={TriangleAlert} iconColor="#eab308" label="Trainer controls (experimental)" onClick={run(handlers.onWand)} /> : null}
         {handlers.onGrabRepair ? <MenuRow icon={Wrench} label="Get Online-Fix repair" onClick={run(handlers.onGrabRepair)} /> : null}
         <MenuRow icon={Settings} label="Set executable" onClick={run(handlers.onSetExecutable)} />
         {game.imported && handlers.onSetSteamId ? <MenuRow icon={Hash} label="Set Steam App ID" onClick={run(handlers.onSetSteamId)} /> : null}
