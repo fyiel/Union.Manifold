@@ -14,7 +14,9 @@ static WINDOW_ID: AtomicU64 = AtomicU64::new(0);
 const VERIFY_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 
 pub fn matches(url: &str) -> bool {
-    super::datavaults::matches(url) || super::gate::host_type(url) == Some("fileq")
+    super::datanodes::matches(url)
+        || super::datavaults::matches(url)
+        || super::gate::host_type(url) == Some("fileq")
 }
 
 pub async fn resolve(app: &AppHandle, page_url: &str, file_name: Option<String>) -> ResolveResult {
@@ -133,6 +135,7 @@ mod tests {
 
     #[test]
     fn recognizes_interactive_hosts() {
+        assert!(matches("https://datanodes.to/abc123"));
         assert!(matches("https://datavaults.co/abc/game.rar"));
         assert!(matches("https://fileq.net/vault/abc/game.rar"));
         assert!(!matches("https://gofile.io/d/abc"));
