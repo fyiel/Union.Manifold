@@ -42,3 +42,21 @@ async fn gated_hosts_flip_from_browser_only_to_resolvable_with_slipgate_env() {
     assert!(cfg().is_none());
     assert!(!crate::sources::hosts::is_resolvable(gated));
 }
+
+#[test]
+fn resolved_download_replays_solver_session() {
+    let headers = resolved_headers(&json!({
+        "headers": { "Referer": "https://host.example/file" },
+        "user_agent": "solver-browser",
+        "cookies": [
+            { "name": "cf_clearance", "value": "clear" },
+            { "name": "session", "value": "ready" }
+        ]
+    }));
+    assert_eq!(headers.get("Referer").map(String::as_str), Some("https://host.example/file"));
+    assert_eq!(headers.get("User-Agent").map(String::as_str), Some("solver-browser"));
+    assert_eq!(
+        headers.get("Cookie").map(String::as_str),
+        Some("cf_clearance=clear; session=ready")
+    );
+}
