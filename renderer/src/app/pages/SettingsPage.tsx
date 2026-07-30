@@ -751,11 +751,12 @@ function LinuxSettingsTab() {
   const [gamemode, setGamemode] = useState(false)
   const [mangohud, setMangohud] = useState(false)
   const [dllOverrides, setDllOverrides] = useState("")
+  const [steamFixes, setSteamFixes] = useState(true)
 
   useEffect(() => {
     let alive = true
     void (async () => {
-      const [lm, pp, ppfx, env, detect, gm, mh, dll] = await Promise.all([
+      const [lm, pp, ppfx, env, detect, gm, mh, dll, fixes] = await Promise.all([
         window.ucSettings?.get?.("linuxLaunchMode"),
         window.ucSettings?.get?.("linuxProtonPath"),
         window.ucSettings?.get?.("linuxProtonPrefix"),
@@ -764,6 +765,7 @@ function LinuxSettingsTab() {
         window.ucSettings?.get?.("linuxGamemode"),
         window.ucSettings?.get?.("linuxMangohud"),
         window.ucSettings?.get?.("linuxDllOverrides"),
+        window.ucSettings?.get?.("linuxSteamCompatibilityFixes"),
       ])
       if (!alive) return
       if (typeof lm === "string") setLaunchMode(lm)
@@ -774,6 +776,7 @@ function LinuxSettingsTab() {
       setGamemode(gm === true)
       setMangohud(mh === true)
       if (typeof dll === "string") setDllOverrides(dll)
+      setSteamFixes(fixes !== false)
     })()
     return () => { alive = false }
   }, [])
@@ -824,6 +827,9 @@ function LinuxSettingsTab() {
       </Row>
       <Row title="MangoHud" desc="Show the MangoHud performance overlay in game, skipped when not installed">
         <Toggle on={mangohud} onToggle={() => { const v = !mangohud; setMangohud(v); persist2("linuxMangohud", v) }} />
+      </Row>
+      <Row title="Steam compatibility fixes" desc="Repair known Steam API DLL issues and add local achievement files before Proton or Wine launches">
+        <Toggle on={steamFixes} onToggle={() => { const v = !steamFixes; setSteamFixes(v); persist2("linuxSteamCompatibilityFixes", v) }} />
       </Row>
 
       <div style={{ padding: "16px 0", borderBottom: "1px solid color-mix(in srgb, var(--mf-t0) 5%, transparent)" }}>
