@@ -6,6 +6,46 @@ let hydrating: Promise<void> | null = null
 const listeners = new Set<() => void>()
 
 const sessionStartTimes = new Map<string, number>()
+let activityWrites: Promise<void> = Promise.resolve()
+
+type GameActivity = Record<string, unknown> & { lastPlayedAt?: number; playTimeMs?: number }
+
+function updateGameActivity(
+  appid: string,
+  update: (current: GameActivity) => GameActivity,
+): Promise<void> {
+  const write = activityWrites.then(async () => {
+    const settings = window.ucSettings
+    if (!settings?.get || !settings.set) return
+    const stored = await settings.get("libraryGameMeta")
+    const metadata = stored && typeof stored === "object" && !Array.isArray(stored)
+      ? { ...(stored as Record<string, GameActivity>) }
+      : {}
+    const storedEntry = metadata[appid]
+    const current: GameActivity = storedEntry && typeof storedEntry === "object" && !Array.isArray(storedEntry)
+      ? storedEntry
+      : {}
+    const entry = update(current)
+    metadata[appid] = entry
+    await settings.set("libraryGameMeta", metadata)
+    window.dispatchEvent(new CustomEvent("uc:library-activity", { detail: { appid, entry } }))
+  })
+  activityWrites = write.catch(() => undefined)
+  return write
+}
+
+export function recordGameLaunch(appid: string, startedAt: number = Date.now()): Promise<void> {
+  if (!appid) return Promise.resolve()
+  return updateGameActivity(appid, (current) => ({ ...current, lastPlayedAt: startedAt }))
+}
+
+function recordGameExit(appid: string, startedAt: number, endedAt: number): Promise<void> {
+  const elapsed = Math.max(0, endedAt - startedAt)
+  return updateGameActivity(appid, (current) => ({
+    ...current,
+    playTimeMs: (typeof current.playTimeMs === "number" ? current.playTimeMs : 0) + elapsed,
+  }))
+}
 
 function notify() {
   for (const listener of listeners) {
@@ -16,11 +56,15 @@ function notify() {
 function setCache(next: Set<string>) {
   for (const appid of next) {
     if (!cache.has(appid) && !sessionStartTimes.has(appid)) {
-      sessionStartTimes.set(appid, Date.now())
+      const startedAt = Date.now()
+      sessionStartTimes.set(appid, startedAt)
+      void recordGameLaunch(appid, startedAt)
     }
   }
   for (const appid of cache) {
     if (!next.has(appid)) {
+      const startedAt = sessionStartTimes.get(appid)
+      if (startedAt !== undefined) void recordGameExit(appid, startedAt, Date.now())
       sessionStartTimes.delete(appid)
     }
   }

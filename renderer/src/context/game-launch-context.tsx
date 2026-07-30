@@ -6,7 +6,7 @@ import { GameLaunchFailedModal } from "@/components/GameLaunchFailedModal"
 import { GameLaunchPreflightModal, type LaunchPreflightResult } from "@/components/GameLaunchPreflightModal"
 import { getUnambiguousExecutable, hasOnlineMode, matchAdminExecutable, type GameExecutable } from "@/lib/utils"
 import { reportPlayEvent } from "@/lib/cloud-collections"
-import { setRunningOptimistic, isRunningGameSync } from "@/hooks/use-running-games"
+import { recordGameLaunch, setRunningOptimistic, isRunningGameSync } from "@/hooks/use-running-games"
 import { gameLogger } from "@/lib/logger"
 
 export type LaunchableGame = {
@@ -306,7 +306,10 @@ export function GameLaunchProvider({ children }: { children: React.ReactNode }) 
           && typeof manifest.steamAppId === "number"
         ) {
           const res = await window.ucSystem?.runSteamGame?.(manifest.steamAppId)
-          if (res?.ok) void reportPlayEvent(g.appid, "play")
+          if (res?.ok) {
+            void reportPlayEvent(g.appid, "play")
+            void recordGameLaunch(g.appid)
+          }
           return
         }
       }
