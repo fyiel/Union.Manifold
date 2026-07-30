@@ -177,6 +177,7 @@ export function LibraryPage() {
   const [wandFor, setWandFor] = useState<LibGame | null>(null)
   const [addOpen, setAddOpen] = useState(false)
   const [repair, setRepair] = useState<{ appid: string; name: string; phase: RepairProgress["phase"]; percent: number } | null>(null)
+  const [onlineFixReady, setOnlineFixReady] = useState(false)
 
   const [query, setQuery] = useState("")
   const [filter, setFilter] = useState<FilterKey>("All")
@@ -205,15 +206,17 @@ export function LibraryPage() {
     const load = async () => {
       try {
         await hydrateDownloadArt()
-        const [value, gcValue] = await Promise.all([
+        const [value, gcValue, sourcesValue] = await Promise.all([
           window.ucSettings?.get?.("libraryGameMeta"),
           window.ucSettings?.get?.(GAME_CACHE_KEY),
+          window.ucSources?.list?.(),
         ])
         const m = value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, LibraryGameMeta>) : {}
         const gc = gcValue && typeof gcValue === "object" && !Array.isArray(gcValue) ? (gcValue as Record<string, CachedGame>) : {}
         gameCacheRef.current = gc
         if (!alive) return
         setMeta(m)
+        setOnlineFixReady(Boolean(sourcesValue?.sources?.some((source) => source.id === "onlinefix" && source.available)))
         const [installedList, installingList] = await Promise.all([
           window.ucDownloads?.listInstalledGlobal?.() || window.ucDownloads?.listInstalled?.() || [],
           window.ucDownloads?.listInstallingGlobal?.() || window.ucDownloads?.listInstalling?.() || [],
@@ -562,7 +565,7 @@ export function LibraryPage() {
             onSetSteamId: () => { const g = installed.find((x) => x.appid === menu.game.appid); setSteamIdFor({ appid: menu.game.appid, name: menu.game.name, current: g?.steamAppId }) },
             onMods: () => navigate(`/g/${encodeURIComponent(menu.game.appid)}/mods`, { state: { game: menu.game } }),
             onWand: IS_WINDOWS || IS_LINUX ? () => { const game = installed.find((item) => item.appid === menu.game.appid); if (game) setWandFor(game) } : undefined,
-            onGrabRepair: () => { const g = installed.find((x) => x.appid === menu.game.appid); if (g) void grabRepair(g) },
+            onGrabRepair: onlineFixReady ? () => { const g = installed.find((x) => x.appid === menu.game.appid); if (g) void grabRepair(g) } : undefined,
           }}
           onClose={() => setMenu(null)}
         />

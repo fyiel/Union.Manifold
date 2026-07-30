@@ -333,15 +333,35 @@ impl Registry {
         }
     }
 
+fn source_available_with(
+    source: &SourceMeta,
+    slipgate: bool,
+    hide_torrent: bool,
+    onlinefix_refreshed: bool,
+) -> bool {
+    let reachable = if source.id == "onlinefix" {
+        slipgate && onlinefix_refreshed
+    } else {
+        slipgate || !source.requires_slipgate || adapters::hydralinks::is_reachable(source.id)
+    };
+    reachable && !(hide_torrent && hidden_by_torrent_filter(source))
+}
+
+    fn source_available(source: &SourceMeta, slipgate: bool, hide_torrent: bool) -> bool {
+        Self::source_available_with(
+            source,
+            slipgate,
+            hide_torrent,
+            adapters::onlinefix::is_refreshed(),
+        )
+    }
+
     pub fn active_ids(&self, requested: &Option<Vec<String>>) -> Vec<String> {
         let slipgate = crate::slipgate::cfg().is_some();
         let hide_torrent = crate::settings::hide_torrent_sources();
         SOURCES
             .iter()
-            .filter(|s| {
-                slipgate || !s.requires_slipgate || adapters::hydralinks::is_reachable(s.id)
-            })
-            .filter(|s| !hide_torrent || !hidden_by_torrent_filter(s))
+            .filter(|s| Self::source_available(s, slipgate, hide_torrent))
             .map(|s| s.id.to_string())
             .filter(|id| self.is_enabled(id))
             .filter(|id| requested.as_ref().map(|r| r.contains(id)).unwrap_or(true))
@@ -360,10 +380,7 @@ impl Registry {
                 capabilities: capabilities_for(s.id),
                 enabled: self.is_enabled(s.id),
                 requires_slipgate: s.requires_slipgate,
-                available: (slipgate
-                    || !s.requires_slipgate
-                    || adapters::hydralinks::is_reachable(s.id))
-                    && !(hide_torrent && hidden_by_torrent_filter(s)),
+                available: Self::source_available(s, slipgate, hide_torrent),
                 torrent_only: s.torrent_only,
                 hidden_by_torrent_filter: hidden_by_torrent_filter(s),
             })
@@ -807,6 +824,19 @@ mod tests {
         assert!(hidden_by_torrent_filter(gog));
         assert!(gog.torrent_only);
         assert!(!hidden_by_torrent_filter(steamrip));
+    }
+
+    #[test]
+    fn onlinefix_requires_slipgate_and_a_refresh() {
+        let onlinefix = SOURCES
+            .iter()
+            .find(|source| source.id == "onlinefix")
+            .unwrap();
+
+        assert!(!Registry::source_available_with(onlinefix, false, false, false));
+        assert!(!Registry::source_available_with(onlinefix, true, false, false));
+        assert!(!Registry::source_available_with(onlinefix, false, false, true));
+        assert!(Registry::source_available_with(onlinefix, true, false, true));
     }
 }
 
