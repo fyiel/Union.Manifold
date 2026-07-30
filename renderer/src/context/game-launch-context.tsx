@@ -284,17 +284,32 @@ export function GameLaunchProvider({ children }: { children: React.ReactNode }) 
     disarmQuickExit()
     setFailureReason(null)
     setElevationError(null)
-    if (g.appid.startsWith("steam-")) {
-      const manifest: { installType?: string; steamAppId?: number } | null =
-        (await window.ucDownloads?.getInstalledGlobal?.(g.appid)) ?? null
-      if (manifest?.installType === "steam" && typeof manifest.steamAppId === "number") {
-        const res = await window.ucSystem?.runSteamGame?.(manifest.steamAppId)
-        if (res?.ok) void reportPlayEvent(g.appid, "play")
-        return
-      }
-    }
     try {
       const savedExe = await getSavedExe(g.appid)
+      if (g.appid.startsWith("steam-")) {
+        const [manifest, launchArgs, linuxConfig] = await Promise.all([
+          window.ucDownloads?.getInstalledGlobal?.(g.appid),
+          window.ucSettings?.get?.("gameLaunchArgs"),
+          window.ucSettings?.get?.(`gameLinux:${g.appid}`),
+        ])
+        const configuredArgs = launchArgs && typeof launchArgs === "object"
+          ? String((launchArgs as Record<string, string>)[g.appid] || "").trim()
+          : ""
+        const configuredLinux = linuxConfig && typeof linuxConfig === "object"
+          ? Object.keys(linuxConfig as Record<string, unknown>).length > 0
+          : false
+        if (
+          !savedExe
+          && !configuredArgs
+          && !configuredLinux
+          && manifest?.installType === "steam"
+          && typeof manifest.steamAppId === "number"
+        ) {
+          const res = await window.ucSystem?.runSteamGame?.(manifest.steamAppId)
+          if (res?.ok) void reportPlayEvent(g.appid, "play")
+          return
+        }
+      }
       if (savedExe) {
         const pre = await window.ucDownloads?.preflightGameLaunch?.(g.appid, savedExe)
         const exeMissing = pre?.ok && pre.checks?.some((c) => c.code === "exe-not-found")

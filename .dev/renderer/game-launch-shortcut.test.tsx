@@ -28,8 +28,13 @@ function LaunchButton() {
   return <button onClick={() => void requestLaunch({ appid: "game-1", name: "Portal" })}>Play</button>
 }
 
+function SteamLaunchButton() {
+  const { requestLaunch } = useGameLaunch()
+  return <button onClick={() => void requestLaunch({ appid: "steam-620", name: "Portal 2" })}>Play Steam import</button>
+}
+
 describe("desktop shortcut prompt setting", () => {
-  const launchGameExecutable = vi.fn(async (..._args: any[]): Promise<any> => ({ ok: true }))
+  const launchGameExecutable = vi.fn(async (..._args: [string, string, string?, boolean?, boolean?]) => ({ ok: true }))
 
   beforeEach(() => {
     vi.clearAllMocks()
@@ -88,5 +93,64 @@ describe("desktop shortcut prompt setting", () => {
       true,
     ))
     await waitFor(() => expect(screen.queryByRole("button", { name: "Launch as administrator" })).toBeNull())
+  })
+})
+
+describe("Steam import launch settings", () => {
+  const launchGameExecutable = vi.fn(async (..._args: [string, string, string?, boolean?, boolean?]) => ({ ok: true }))
+  const runSteamGame = vi.fn(async () => ({ ok: true }))
+  let launchArgs: Record<string, string>
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    launchArgs = {}
+    Object.defineProperty(window, "ucSettings", {
+      configurable: true,
+      value: {
+        get: vi.fn(async (key: string) => {
+          if (key === "gameLaunchArgs") return launchArgs
+          if (key === "gameLinux:steam-620") return {}
+          if (key === "hideDesktopShortcutPrompt" || key === "rpcShowGameName") return true
+          return null
+        }),
+        set: vi.fn(async () => ({ ok: true })),
+      },
+    })
+    Object.defineProperty(window, "ucDownloads", {
+      configurable: true,
+      value: {
+        getInstalledGlobal: vi.fn(async () => ({ installType: "steam", steamAppId: 620 })),
+        listGameExecutables: vi.fn(async () => ({ ok: true, folder: "/games/Portal 2", exes: [{ name: "portal2.exe", path: "/games/Portal 2/portal2.exe" }] })),
+        preflightGameLaunch: vi.fn(async () => ({ ok: true, canLaunch: true, checks: [] })),
+        launchGameExecutable,
+      },
+    })
+    Object.defineProperty(window, "ucSystem", {
+      configurable: true,
+      value: { runSteamGame },
+    })
+  })
+
+  it("uses Steam when no Manifold launch settings exist", async () => {
+    render(<GameLaunchProvider><SteamLaunchButton /></GameLaunchProvider>)
+    fireEvent.click(screen.getByRole("button", { name: "Play Steam import" }))
+
+    await waitFor(() => expect(runSteamGame).toHaveBeenCalledWith(620))
+    expect(launchGameExecutable).not.toHaveBeenCalled()
+  })
+
+  it("uses the configured executable when launch options exist", async () => {
+    launchArgs = { "steam-620": "-dx11" }
+    render(<GameLaunchProvider><SteamLaunchButton /></GameLaunchProvider>)
+    fireEvent.click(screen.getByRole("button", { name: "Play Steam import" }))
+
+    await waitFor(() => expect(launchGameExecutable).toHaveBeenCalledWith(
+      "steam-620",
+      "/games/Portal 2/portal2.exe",
+      "Portal 2",
+      true,
+      undefined,
+    ))
+    expect(runSteamGame).not.toHaveBeenCalled()
   })
 })
