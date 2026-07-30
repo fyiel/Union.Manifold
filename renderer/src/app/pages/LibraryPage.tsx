@@ -26,12 +26,13 @@ type LibGame = {
   installedAt?: number
   collections: string[]
   lastPlayedAt?: number
+  playTimeMs?: number
   steamAppId?: number
   covers?: string[]
   installType?: string
 }
 
-type LibraryGameMeta = { collections?: string[]; lastPlayedAt?: number }
+type LibraryGameMeta = { collections?: string[]; lastPlayedAt?: number; playTimeMs?: number }
 type CachedGame = { cachedAt: number; game: UnifiedSourceGame }
 const GAME_CACHE_KEY = "libraryGameCache"
 const GAME_CACHE_TTL_MS = 3 * 60 * 60 * 1000
@@ -50,6 +51,15 @@ function lastPlayedLabel(ms?: number): string {
   if (days === 1) return "yesterday"
   if (days < 30) return `${days}d ago`
   return `${Math.floor(days / 30)}mo ago`
+}
+
+function playTimeLabel(ms?: number): string {
+  if (!ms || ms < 60_000) return "<1m played"
+  const minutes = Math.floor(ms / 60_000)
+  if (minutes < 60) return `${minutes}m played`
+  const hours = Math.floor(minutes / 60)
+  const remainder = minutes % 60
+  return remainder ? `${hours}h ${remainder}m played` : `${hours}h played`
 }
 
 function entryToLib(entry: any, meta: Record<string, LibraryGameMeta>): LibGame | null {
@@ -77,6 +87,7 @@ function entryToLib(entry: any, meta: Record<string, LibraryGameMeta>): LibGame 
     installedAt: typeof entry?.installedAt === "number" ? entry.installedAt : typeof m.installedAt === "number" ? m.installedAt : undefined,
     collections: Array.isArray(gm.collections) ? gm.collections : [],
     lastPlayedAt: typeof gm.lastPlayedAt === "number" ? gm.lastPlayedAt : undefined,
+    playTimeMs: typeof gm.playTimeMs === "number" ? gm.playTimeMs : undefined,
     steamAppId,
     installType: typeof entry?.installType === "string" ? entry.installType : undefined,
   }
@@ -257,10 +268,12 @@ export function LibraryPage() {
       reloadTimer = window.setTimeout(() => { void load() }, 300)
     }
     window.addEventListener("uc_game_installed", refresh)
+    window.addEventListener("uc:library-activity", refresh)
     return () => {
       alive = false
       window.clearTimeout(reloadTimer)
       window.removeEventListener("uc_game_installed", refresh)
+      window.removeEventListener("uc:library-activity", refresh)
     }
   }, [])
 
@@ -521,7 +534,7 @@ export function LibraryPage() {
               <span />
               <span style={listHead}>Title</span>
               <span style={listHead}>Size</span>
-              <span style={listHead}>Last played</span>
+              <span style={listHead}>Activity</span>
               <span />
             </div>
             <div style={{ display: "flex", flexDirection: "column", paddingTop: 4 }}>
@@ -650,7 +663,10 @@ const LibCard = memo(function LibCard({ game: g, hasUpdate, onOpen, onContextMen
       <div style={{ padding: "11px 12px 12px", display: "flex", flexDirection: "column", gap: 9 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
           <span style={{ fontSize: 13, fontWeight: 600, color: "var(--mf-t1)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{g.name}</span>
-          <span style={{ fontFamily: MONO, fontSize: 10, color: "var(--mf-t5)", whiteSpace: "nowrap", flexShrink: 0 }}>{lastPlayedLabel(g.lastPlayedAt)}</span>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2, flexShrink: 0 }}>
+            <span style={{ fontFamily: MONO, fontSize: 10, color: "var(--mf-t5)", whiteSpace: "nowrap" }}>{lastPlayedLabel(g.lastPlayedAt)}</span>
+            {g.playTimeMs ? <span style={{ fontFamily: MONO, fontSize: 9, color: "var(--mf-t6)", whiteSpace: "nowrap" }}>{playTimeLabel(g.playTimeMs)}</span> : null}
+          </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <PlayButton appid={g.appid} full onPlay={() => onPlay(g)} onStop={() => onStop(g.appid)} />
@@ -674,7 +690,10 @@ const LibRow = memo(function LibRow({ game: g, hasUpdate, onOpen, onContextMenu,
         {hasUpdate && <span style={{ padding: "2px 7px", borderRadius: 99, border: "1px solid var(--mf-line-2)", fontFamily: MONO, fontSize: 8.5, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--mf-t3)", flexShrink: 0 }}>update</span>}
       </div>
       <span style={{ fontFamily: MONO, fontSize: 11, color: "var(--mf-t3)" }}>{g.sizeText || gbLabel(g.sizeBytes) || "—"}</span>
-      <span style={{ fontFamily: MONO, fontSize: 11, color: "var(--mf-t3)" }}>{lastPlayedLabel(g.lastPlayedAt)}</span>
+      <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+        <span style={{ fontFamily: MONO, fontSize: 11, color: "var(--mf-t3)" }}>{lastPlayedLabel(g.lastPlayedAt)}</span>
+        {g.playTimeMs ? <span style={{ fontFamily: MONO, fontSize: 9.5, color: "var(--mf-t5)" }}>{playTimeLabel(g.playTimeMs)}</span> : null}
+      </div>
       <div style={{ display: "flex", alignItems: "center", gap: 8, justifySelf: "end" }}>
         <PlayButton appid={g.appid} onPlay={() => onPlay(g)} onStop={() => onStop(g.appid)} />
         <button type="button" title="More" onClick={(e) => { e.stopPropagation(); onMenu(g, e.currentTarget) }} className="mf-ghost" style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 32, height: 32, flexShrink: 0, borderRadius: 7, border: "1px solid var(--mf-line-2)", background: "transparent", color: "var(--mf-t3)", cursor: "pointer" }}>
