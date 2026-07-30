@@ -513,6 +513,9 @@ export function AddGamesDialog({ onClose }: { onClose: () => void }) {
   const [exeBusy, setExeBusy] = useState(false)
   const [exeAdded, setExeAdded] = useState<string | null>(null)
   const [exeError, setExeError] = useState<string | null>(null)
+  const [archiveBusy, setArchiveBusy] = useState(false)
+  const [archiveAdded, setArchiveAdded] = useState<string | null>(null)
+  const [archiveError, setArchiveError] = useState<string | null>(null)
   const [steamIdFor, setSteamIdFor] = useState<{ appid: string; name: string; matched: number | null } | null>(null)
   const [steamIdInput, setSteamIdInput] = useState("")
   const [steamIdSaving, setSteamIdSaving] = useState(false)
@@ -570,6 +573,31 @@ export function AddGamesDialog({ onClose }: { onClose: () => void }) {
       }
     } finally {
       setExeBusy(false)
+    }
+  }
+
+  const pickArchive = async () => {
+    setArchiveError(null)
+    const picked = await window.ucDownloads?.pickArchiveFiles?.()
+    if (!picked?.ok || !picked.files?.length) return
+    const gameName = picked.files[0].name
+      .replace(/(\.part\d+)?\.(zip|rar|7z|tar|gz|bz2|xz|\d{3})$/i, "")
+      .trim() || "Imported game"
+    setArchiveBusy(true)
+    try {
+      const res = await window.ucDownloads?.installFromArchive?.({
+        appid: `local-archive-${Date.now().toString(36)}`,
+        gameName,
+        archivePaths: picked.files.map((file) => file.path),
+      })
+      if (res?.ok) {
+        setArchiveAdded(gameName)
+        notifyLibrary()
+      } else {
+        setArchiveError(res?.error || "archive install failed")
+      }
+    } finally {
+      setArchiveBusy(false)
     }
   }
 
@@ -655,6 +683,21 @@ export function AddGamesDialog({ onClose }: { onClose: () => void }) {
             </div>
           </div>
         )}
+      </div>
+
+      <div style={{ height: 1, background: "var(--mf-line)" }} />
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        <span style={FIELD_LABEL}>Downloaded archive</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <button type="button" onClick={() => void pickArchive()} disabled={archiveBusy} style={{ ...CANCEL_BTN, display: "flex", alignItems: "center", gap: 8, opacity: archiveBusy ? 0.6 : 1 }}>
+            {archiveBusy ? <RefreshCw size={15} className="uc-spin" /> : <FolderOpen size={15} />}
+            {archiveBusy ? "Extracting…" : "Install from archive…"}
+          </button>
+          {archiveAdded && <span style={{ display: "flex", alignItems: "center", gap: 6, fontFamily: MONO, fontSize: 11, color: "var(--mf-t3)" }}><Check size={13} /> {archiveAdded} added</span>}
+          {archiveError && <span style={{ fontFamily: MONO, fontSize: 11, color: "#e5484d" }}>{archiveError}</span>}
+        </div>
+        <span style={{ fontFamily: MONO, fontSize: 10.5, color: "var(--mf-t5)" }}>Extracts a downloaded ZIP, RAR, or 7z into your library.</span>
       </div>
 
       <div style={{ height: 1, background: "var(--mf-line)" }} />
