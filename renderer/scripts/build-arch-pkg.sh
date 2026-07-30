@@ -16,11 +16,6 @@ else
   (cd "$work" && ar x "$deb" && mkdir pkg && tar -xf data.tar.* -C pkg)
 fi
 
-mkdir -p "$work/pkg/usr/lib/Union.Manifold"
-for bin in 7z aria2c; do
-  [ -f "$work/pkg/usr/bin/$bin" ] && mv "$work/pkg/usr/bin/$bin" "$work/pkg/usr/lib/Union.Manifold/$bin"
-done
-
 size=$(du -sb "$work/pkg" | cut -f1)
 cat > "$work/pkg/.PKGINFO" <<EOF
 pkgname = union-manifold

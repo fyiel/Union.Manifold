@@ -265,14 +265,14 @@ async function main() {
     const isWin = key.startsWith('win32')
     if (ARIA2[key]) {
       try {
-        await stage(ARIA2[key], 'aria2c', triple, isWin)
+        await stage(ARIA2[key], 'union-manifold-aria2c', triple, isWin)
       } catch (e) {
         failures.push(`aria2 ${key}: ${e.message}`)
       }
     }
     if (SEVENZIP[key]) {
       try {
-        await stage(SEVENZIP[key], '7z', triple, isWin)
+        await stage(SEVENZIP[key], 'union-manifold-7z', triple, isWin)
       } catch (e) {
         failures.push(`7z ${key}: ${e.message}`)
       }
