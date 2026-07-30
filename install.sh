@@ -15,6 +15,10 @@ if command -v pacman >/dev/null 2>&1; then
   say "arch detected — installing pacman package"
   curl -fL --progress-bar -o "$tmp/union-manifold.pkg.tar.zst" "$BASE/union-manifold-x86_64.pkg.tar.zst"
   $SUDO pacman -U --noconfirm "$tmp/union-manifold.pkg.tar.zst"
+elif command -v dnf >/dev/null 2>&1; then
+  say "fedora detected — installing rpm"
+  curl -fL --progress-bar -o "$tmp/union-manifold.rpm" "$BASE/union-manifold-x86_64.rpm"
+  $SUDO dnf install -y "$tmp/union-manifold.rpm"
 elif command -v dpkg >/dev/null 2>&1; then
   say "debian/ubuntu detected — installing deb"
   ver=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" | grep -om1 '"tag_name": *"v[^"]*"' | grep -o '[0-9][0-9.]*')

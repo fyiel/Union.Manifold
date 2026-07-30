@@ -47,7 +47,7 @@ compositor.
 ```
 curl -fsSL https://raw.githubusercontent.com/fyiel/Union.Manifold/main/install.sh | bash
 ```
-Picks the right artifact for your distro (pacman package on Arch, deb on Debian/Ubuntu, AppImage anywhere else). Run it again to update. Prefer manual? Everything's on [releases](https://github.com/fyiel/Union.Manifold/releases).
+Picks the right artifact for your distro (pacman package on Arch, RPM on Fedora, deb on Debian/Ubuntu, AppImage anywhere else). Run it again to update. Prefer manual? Everything's on [releases](https://github.com/fyiel/Union.Manifold/releases).
 
 ### credit
 Built on [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3. Huge thanks to the original team, none of this exists without their work.

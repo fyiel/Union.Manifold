@@ -5,6 +5,11 @@ All notable changes to Union.Manifold. This project is a fork of
 
 ## 3.4.18
 
+### Added
+
+- Fedora-family release builds now include an RPM package, and the Linux
+  installer selects it automatically when `dnf` is available
+
 ### Fixed
 
 - GameBounty FileQ and DataVaults mirrors now open an in-app verification window,
@@ -12,6 +17,8 @@ All notable changes to Union.Manifold. This project is a fork of
 - OnlineFix games launched through Wine, Proton or UMU now stage the required
   local Steam overlay runtime in the active prefix and report missing Steam
   files before launch
+- Linux AppImages now disable WebKitGTK's DMA-BUF renderer, preventing the
+  blank gray window seen on affected Fedora graphics stacks
 
 ## 3.4.17
 
