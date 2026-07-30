@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::LazyLock;
 use std::time::Duration;
 
@@ -24,6 +25,7 @@ static SRC: LazyLock<HydraSource> = LazyLock::new(|| {
 
 static DETAIL_CACHE: LazyLock<KeyedCache<SourceGame>> =
     LazyLock::new(|| KeyedCache::new(DETAIL_TTL));
+static REFRESHED: AtomicBool = AtomicBool::new(false);
 
 static RESULT_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"(?i)href="(https://online-fix\.me/(?:[a-z0-9_-]+/)*\d+-[a-z0-9-]+\.html)""#)
@@ -52,12 +54,20 @@ pub async fn search(q: &str, limit: usize) -> Vec<SourceGame> {
     SRC.search(q, limit).await
 }
 
+pub fn is_refreshed() -> bool {
+    REFRESHED.load(Ordering::Acquire)
+}
+
 pub async fn refresh() -> Option<usize> {
-    SRC.refresh().await
+    let result = SRC.refresh().await;
+    REFRESHED.store(result.is_some(), Ordering::Release);
+    result
 }
 
 pub async fn prime() -> bool {
-    SRC.prime_direct().await
+    let ready = SRC.prime_direct().await;
+    REFRESHED.store(ready, Ordering::Release);
+    ready
 }
 
 pub async fn get_detail(slug: &str) -> Option<SourceGame> {
