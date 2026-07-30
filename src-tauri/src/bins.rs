@@ -2,19 +2,15 @@ use std::path::PathBuf;
 
 pub fn resolve_sidecar(name: &str) -> Option<PathBuf> {
     let exe = if cfg!(windows) {
-        format!("{name}.exe")
+        format!("union-manifold-{name}.exe")
     } else {
-        name.to_string()
+        format!("union-manifold-{name}")
     };
     if let Ok(cur) = std::env::current_exe() {
         if let Some(dir) = cur.parent() {
-            let direct = dir.join(&exe);
-            if direct.is_file() {
-                return Some(direct);
-            }
-            let libdir = dir.join("../lib/Union.Manifold").join(&exe);
-            if libdir.is_file() {
-                return Some(libdir);
+            let candidate = dir.join(&exe);
+            if candidate.is_file() {
+                return Some(candidate);
             }
         }
     }
@@ -27,12 +23,12 @@ pub fn resolve_sidecar(name: &str) -> Option<PathBuf> {
             }
         }
     }
+    let prefix = format!("union-manifold-{name}-");
     let bindir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("binaries");
     if let Ok(entries) = std::fs::read_dir(&bindir) {
         for entry in entries.flatten() {
             let fname = entry.file_name();
-            let fname = fname.to_string_lossy();
-            if fname.starts_with(name) && entry.path().is_file() {
+            if fname.to_string_lossy().starts_with(&prefix) && entry.path().is_file() {
                 return Some(entry.path());
             }
         }

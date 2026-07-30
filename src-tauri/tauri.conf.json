@@ -63,7 +63,7 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "externalBin": ["binaries/aria2c", "binaries/7z"],
+    "externalBin": ["binaries/union-manifold-aria2c", "binaries/union-manifold-7z"],
     "resources": ["resources/cacert.pem", "resources/trainer-host-x64.exe", "resources/trainer-host-x86.exe"],
     "linux": {
       "appimage": {
