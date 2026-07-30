@@ -75,15 +75,23 @@ pub async fn resolve(url: &str) -> ResolveResult {
         );
     };
     match slipgate::resolve(&cfg, g.recipe, url, json!({}), json!([])).await {
-        Ok(link) => ResolveResult {
-            resolvable: true,
-            url: Some(link.url),
-            file_name: link.file_name,
-            size_bytes: link.size_bytes,
-            headers: (!link.headers.is_empty()).then_some(link.headers),
-            ephemeral: true,
-            ..Default::default()
-        },
+        Ok(link)
+            if link.url.trim_end_matches('/') != url.trim_end_matches('/') =>
+        {
+            ResolveResult {
+                resolvable: true,
+                url: Some(link.url),
+                file_name: link.file_name,
+                size_bytes: link.size_bytes,
+                headers: (!link.headers.is_empty()).then_some(link.headers),
+                ephemeral: true,
+                ..Default::default()
+            }
+        }
+        Ok(_) => not_resolvable(
+            url,
+            format!("{} returned the host page instead of a direct download", g.recipe),
+        ),
         Err(e) => not_resolvable(url, format!("Slipgate: {e}")),
     }
 }
