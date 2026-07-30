@@ -26,6 +26,13 @@ fn close_on_launch_enabled(settings: &crate::settings::SettingsStore) -> bool {
     settings.get("closeOnGameLaunch").as_bool().unwrap_or(false)
 }
 
+fn steam_compatibility_fixes_enabled(settings: &crate::settings::SettingsStore) -> bool {
+    settings
+        .get("linuxSteamCompatibilityFixes")
+        .as_bool()
+        .unwrap_or(true)
+}
+
 #[cfg(target_os = "linux")]
 fn systemd_run_available() -> bool {
     std::env::var("PATH")
@@ -534,12 +541,14 @@ pub async fn game_exe_launch(
     if !Path::new(&exe_path).is_file() {
         return Ok(json!({ "ok": false, "error": "executable not found" }));
     }
-    let cache_root = app.state::<AppState>().paths.data_dir.clone();
-    if let Err(error) = steam_api::repair_if_needed(&cache_root, &appid, Path::new(&exe_path)).await
-    {
-        return Ok(json!({ "ok": false, "error": error }));
-    }
     let state = app.state::<AppState>();
+    if steam_compatibility_fixes_enabled(&state.settings) {
+        if let Err(error) =
+            steam_api::repair_if_needed(&state.paths.data_dir, &appid, Path::new(&exe_path)).await
+        {
+            return Ok(json!({ "ok": false, "error": error }));
+        }
+    }
     let cwd = Path::new(&exe_path)
         .parent()
         .map(PathBuf::from)
@@ -845,5 +854,14 @@ mod tests {
             args,
             vec!["-modpaths", "Z:/data/mods/nexus-2", "Z:/data/mods/nexus-1",]
         );
+    }
+
+    #[test]
+    fn steam_compatibility_fixes_default_on_and_can_be_disabled() {
+        let temp = tempfile::tempdir().unwrap();
+        let settings = crate::settings::SettingsStore::load(temp.path().join("settings.json"));
+        assert!(steam_compatibility_fixes_enabled(&settings));
+        settings.set("linuxSteamCompatibilityFixes", Value::Bool(false));
+        assert!(!steam_compatibility_fixes_enabled(&settings));
     }
 }
