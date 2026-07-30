@@ -141,7 +141,7 @@ export function WandTrainerModal({ appid, title, steamAppid, onClose, onLaunch }
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open) close() }}>
-      <DialogContent className="sm:max-w-2xl max-h-[82vh] overflow-hidden p-0 gap-0">
+      <DialogContent className="sm:max-w-2xl max-h-[82vh] flex flex-col overflow-hidden p-0 gap-0">
         <DialogHeader className="border-b border-white/[.07] px-6 py-5 pr-14">
           <div className="flex items-start gap-3">
             <div className="mt-0.5 rounded-lg border border-white/10 bg-white/[.05] p-2 text-white">
