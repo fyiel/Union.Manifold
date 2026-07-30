@@ -19,7 +19,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_opener::OpenerExt;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncSeekExt, AsyncWriteExt, BufReader};
 use tokio::net::{tcp::OwnedWriteHalf, TcpListener};
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::{oneshot, Mutex, RwLock};
 
 use crate::error::{AppError, Result};
 use crate::state::AppState;
@@ -126,10 +126,11 @@ struct WandControl {
     kind: String,
 }
 
-#[derive(Clone)]
 struct WandSession {
     id: u64,
     writer: Arc<Mutex<OwnedWriteHalf>>,
+    stop: oneshot::Sender<()>,
+    process: tauri::async_runtime::JoinHandle<()>,
 }
 
 #[derive(Debug)]
@@ -893,9 +894,13 @@ fn decode_host_text(value: &str) -> String {
 }
 
 async fn stop_session(appid: &str) {
-    let session = SESSIONS.lock().await.remove(appid);
-    if let Some(session) = session {
-        let _ = session.writer.lock().await.write_all(b"STOP\n").await;
+    if let Some(session) = SESSIONS.lock().await.remove(appid) {
+        let mut writer = session.writer.lock().await;
+        let _ = writer.write_all(b"STOP\n").await;
+        let _ = writer.shutdown().await;
+        drop(writer);
+        let _ = session.stop.send(());
+        let _ = session.process.await;
     }
 }
 
@@ -965,6 +970,7 @@ async fn start_host(
     let host = trainer_host_path(app, arch)?;
     #[cfg(target_os = "linux")]
     let host = stage_trainer_host(&state.paths.data_dir, &host, arch).await?;
+    stop_session(appid).await;
     let listener = TcpListener::bind(("127.0.0.1", 0))
         .await
         .map_err(|error| AppError::msg(format!("open trainer host channel: {error}")))?;
@@ -1003,7 +1009,7 @@ async fn start_host(
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
-        .kill_on_drop(false);
+        .kill_on_drop(true);
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;
@@ -1042,15 +1048,31 @@ async fn start_host(
     if hello.as_deref() != Some(&format!("HELLO\t{token}")) {
         return Err(AppError::msg("Trainer host handshake was invalid"));
     }
-    drop(child);
+    let (stop, stopped) = oneshot::channel();
+    let process = tauri::async_runtime::spawn(async move {
+        tokio::select! {
+            status = child.wait() => {
+                if let Err(error) = status {
+                    crate::logging::write_line("warn", &format!("wait for Wand host: {error}"));
+                }
+            }
+            _ = stopped => {
+                if tokio::time::timeout(Duration::from_secs(5), child.wait()).await.is_err() {
+                    let _ = child.kill().await;
+                    let _ = child.wait().await;
+                }
+            }
+        }
+    });
     let writer = Arc::new(Mutex::new(writer));
     let id = NEXT_SESSION_ID.fetch_add(1, Ordering::Relaxed);
-    stop_session(appid).await;
     SESSIONS.lock().await.insert(
         appid.to_string(),
         WandSession {
             id,
             writer: writer.clone(),
+            stop,
+            process,
         },
     );
 
