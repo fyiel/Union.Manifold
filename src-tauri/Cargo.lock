@@ -5060,6 +5060,7 @@ dependencies = [
  "serde_json",
  "sha1",
  "sha2",
+ "shlex",
  "tauri",
  "tauri-build",
  "tauri-plugin-autostart",

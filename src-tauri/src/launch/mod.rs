@@ -33,6 +33,22 @@ fn steam_compatibility_fixes_enabled(settings: &crate::settings::SettingsStore) 
         .unwrap_or(true)
 }
 
+fn configured_launch_args(
+    settings: &crate::settings::SettingsStore,
+    appid: &str,
+) -> Result<Vec<String>, String> {
+    let launch_args = settings.get("gameLaunchArgs");
+    let raw = launch_args
+        .get(appid)
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim();
+    if raw.is_empty() {
+        return Ok(Vec::new());
+    }
+    shlex::split(raw).ok_or_else(|| "launch options contain an unclosed quote".to_string())
+}
+
 #[cfg(target_os = "linux")]
 fn systemd_run_available() -> bool {
     std::env::var("PATH")
@@ -557,6 +573,10 @@ pub async fn game_exe_launch(
         Ok(p) => p,
         Err(e) => return Ok(json!({ "ok": false, "error": e })),
     };
+    match configured_launch_args(&state.settings, &appid) {
+        Ok(args) => plan.args.extend(args),
+        Err(error) => return Ok(json!({ "ok": false, "error": error })),
+    }
     #[cfg(target_os = "linux")]
     if let Err(error) = linux::prepare_onlinefix_runtime(&mut plan, Path::new(&exe_path)) {
         return Ok(json!({ "ok": false, "error": error }));
@@ -863,5 +883,22 @@ mod tests {
         assert!(steam_compatibility_fixes_enabled(&settings));
         settings.set("linuxSteamCompatibilityFixes", Value::Bool(false));
         assert!(!steam_compatibility_fixes_enabled(&settings));
+    }
+
+    #[test]
+    fn configured_launch_args_preserve_quoted_values() {
+        let temp = tempfile::tempdir().unwrap();
+        let settings = crate::settings::SettingsStore::load(temp.path().join("settings.json"));
+        settings.set(
+            "gameLaunchArgs",
+            json!({ "local-game": "--profile \"My Saves\" -dx11" }),
+        );
+        assert_eq!(
+            configured_launch_args(&settings, "local-game").unwrap(),
+            vec!["--profile", "My Saves", "-dx11"]
+        );
+        assert!(configured_launch_args(&settings, "other-game")
+            .unwrap()
+            .is_empty());
     }
 }
