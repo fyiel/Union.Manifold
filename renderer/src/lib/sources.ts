@@ -423,7 +423,8 @@ function safeId(seed: string): string {
 export async function startSourceDownload(
   game: UnifiedSourceGame,
   sourceId: string,
-  option: SourceDownloadOption
+  option: SourceDownloadOption,
+  update = false
 ): Promise<StartResult> {
   const resolveRes = await api()?.resolve?.(sourceId, option)
   const resolved = resolveRes?.result
@@ -437,6 +438,14 @@ export async function startSourceDownload(
 
   const appid = safeId(game.dedupKey)
   const gameName = game.title
+  if (!update) {
+    try {
+      update = Boolean(
+        (await window.ucDownloads?.getInstalledGlobal?.(appid)) ||
+        (await window.ucDownloads?.getInstalled?.(appid)),
+      )
+    } catch {  }
+  }
   recordDownloadArt(appid, game.image, game.title)
   const headers = resolved.headers
   const files = resolved.files?.length
@@ -449,20 +458,27 @@ export async function startSourceDownload(
     return { ok: false, openUrl: resolved.openUrl || option.pageUrl, reason: "no file url" }
   }
 
-  try {
-    await window.ucDownloads?.saveInstalledMetadata?.(appid, {
-      name: game.title,
-      image: game.image || (game.steamAppId ? steamCoverUrl(game.steamAppId) : undefined),
-      heroImage: game.heroImage || undefined,
-      steamAppId: game.steamAppId ?? undefined,
-      sizeBytes: game.sizeBytes,
-      size: game.sizeText || undefined,
-      version: game.version || undefined,
-      description: game.description || undefined,
-      genres: game.genres?.length ? game.genres : undefined,
-      developer: game.developer || undefined,
-    })
-  } catch {  }
+  const source = game.sources.find((entry) => entry.sourceId === sourceId)
+  const sourceVersion = source?.version?.trim() || undefined
+  const metadata = {
+    name: game.title,
+    image: game.image || (game.steamAppId ? steamCoverUrl(game.steamAppId) : undefined),
+    heroImage: game.heroImage || undefined,
+    steamAppId: game.steamAppId ?? undefined,
+    sizeBytes: game.sizeBytes,
+    size: game.sizeText || undefined,
+    version: update ? sourceVersion : game.version || undefined,
+    downloadedVersion: update ? sourceVersion : undefined,
+    description: game.description || undefined,
+    genres: game.genres?.length ? game.genres : undefined,
+    developer: game.developer || undefined,
+  }
+
+  if (!update) {
+    try {
+      await window.ucDownloads?.saveInstalledMetadata?.(appid, metadata)
+    } catch {  }
+  }
 
   const partTotal = files.length
   let anyQueued = false
@@ -480,6 +496,8 @@ export async function startSourceDownload(
         headers,
         partIndex: partTotal > 1 ? i + 1 : undefined,
         partTotal: partTotal > 1 ? partTotal : undefined,
+        update,
+        installMetadata: update ? metadata : undefined,
       })
       anyQueued = anyQueued || Boolean(res?.ok)
     } catch (err) {
@@ -491,7 +509,8 @@ export async function startSourceDownload(
 
 export async function startBestDownload(
   game: UnifiedSourceGame,
-  entries: DownloadEntry[]
+  entries: DownloadEntry[],
+  update = false
 ): Promise<StartResult> {
   const candidates = entries
     .filter((e) => e.option.resolvable)
@@ -500,7 +519,7 @@ export async function startBestDownload(
   let tried = 0
   for (const { source, option } of candidates) {
     tried++
-    const res = await startSourceDownload(game, source.sourceId, option)
+    const res = await startSourceDownload(game, source.sourceId, option, update)
     if (res.ok) return res
     if (res.cancelled) return res
     if (!fallbackUrl) fallbackUrl = res.openUrl

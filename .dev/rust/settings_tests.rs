@@ -67,3 +67,37 @@ fn no_stray_tmp_file_remains_after_set() {
     store.set("k", json!("v"));
     assert!(!tmp.path().join("settings.json.tmp").exists());
 }
+
+#[test]
+fn concurrent_library_activity_and_favorite_merges_preserve_both() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("settings.json");
+    let store = Arc::new(SettingsStore::load(path.clone()));
+    std::thread::scope(|scope| {
+        let favorite_store = store.clone();
+        scope.spawn(move || {
+            favorite_store.merge_library_game_meta(
+                "game-1",
+                serde_json::Map::from_iter([("collections".to_string(), json!(["Favorites"]))]),
+                0,
+            );
+        });
+        let activity_store = store.clone();
+        scope.spawn(move || {
+            activity_store.merge_library_game_meta(
+                "game-1",
+                serde_json::Map::from_iter([("lastPlayedAt".to_string(), json!(1_000))]),
+                90_000,
+            );
+        });
+    });
+
+    let entry = store.get("libraryGameMeta")["game-1"].clone();
+    assert_eq!(entry["collections"], json!(["Favorites"]));
+    assert_eq!(entry["lastPlayedAt"], json!(1_000));
+    assert_eq!(entry["playTimeMs"], json!(90_000));
+    assert_eq!(
+        SettingsStore::load(path).get("libraryGameMeta")["game-1"],
+        entry
+    );
+}

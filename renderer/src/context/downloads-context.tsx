@@ -58,6 +58,8 @@ export type DownloadItem = {
   filename: string
   partIndex?: number
   partTotal?: number
+  update?: boolean
+  installMetadata?: Record<string, unknown>
   status: DownloadStatus
   receivedBytes: number
   totalBytes: number
@@ -102,6 +104,8 @@ type DownloadUpdate = {
   skippedFiles?: string[]
   partIndex?: number
   partTotal?: number
+  update?: boolean
+  installMetadata?: Record<string, unknown>
   resumeData?: DownloadItem["resumeData"]
   spaceCheck?: DownloadSpaceCheck | null
 }
@@ -328,6 +332,8 @@ function createSyntheticDownloadFromUpdate(update: DownloadUpdate): DownloadItem
     skippedFiles: Array.isArray(update.skippedFiles) ? update.skippedFiles : undefined,
     partIndex: update.partIndex,
     partTotal: update.partTotal,
+    update: update.update,
+    installMetadata: update.installMetadata,
     resumeData: update.resumeData,
     spaceCheck: update.spaceCheck ?? null,
   }
@@ -555,6 +561,11 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
   const reconcileInstalledState = useCallback(
     async (appid?: string | null) => {
       if (!appid || !window.ucDownloads?.getInstalled) return
+      if (downloadsRef.current.some((item) =>
+        item.appid === appid &&
+        item.update &&
+        !["extracted", "extract_failed", "failed", "cancelled"].includes(item.status)
+      )) return
       if (reconcileLocksRef.current.has(appid)) return
       reconcileLocksRef.current.add(appid)
       try {
@@ -903,7 +914,7 @@ const resolveWithTimeout = useCallback(async (host: string, targetUrl: string) =
                 : item
             )
           )
-          if (next.appid) {
+          if (next.appid && !next.update) {
             await window.ucDownloads?.setInstallingStatus?.(next.appid, "failed", `${hostLabel} link could not be resolved.`)
           }
           return
@@ -931,7 +942,7 @@ const resolveWithTimeout = useCallback(async (host: string, targetUrl: string) =
               item.id === next.id ? { ...item, status: "failed", error: "Downloads unavailable" } : item
             )
           )
-          if (next.appid) {
+          if (next.appid && !next.update) {
             await window.ucDownloads?.setInstallingStatus?.(next.appid, "failed", "Downloads unavailable")
           }
           return
@@ -945,6 +956,8 @@ const resolveWithTimeout = useCallback(async (host: string, targetUrl: string) =
           gameName: next.gameName,
           partIndex: next.partIndex,
           partTotal: next.partTotal,
+          update: next.update,
+          installMetadata: next.installMetadata,
         })
         if (res && typeof res === "object" && "ok" in res && !res.ok) {
           throw new Error((res as { error?: string }).error || "Failed to start download")
@@ -956,7 +969,7 @@ const resolveWithTimeout = useCallback(async (host: string, targetUrl: string) =
             item.id === next.id ? { ...item, status: "failed", error: message } : item
           )
         )
-        if (next.appid) {
+        if (next.appid && !next.update) {
           await window.ucDownloads?.setInstallingStatus?.(next.appid, "failed", message)
         }
       } finally {
@@ -970,6 +983,8 @@ const resolveWithTimeout = useCallback(async (host: string, targetUrl: string) =
     if (!window.ucDownloads?.onUpdate) return
     const unsubscribe = window.ucDownloads.onUpdate((update: DownloadUpdate) => {
       const existingItem = downloadsRef.current.find((item) => item.id === update.downloadId)
+      const updateInstall = update.update ?? existingItem?.update ?? false
+      const installFinished = update.status === "extracted" || (update.status === "completed" && !updateInstall)
       if (existingItem?.status === "downloading" && update.status === "downloading") {
         pendingProgressRef.current.set(update.downloadId, update)
         if (!progressFlushTimerRef.current) {
@@ -1011,7 +1026,7 @@ const resolveWithTimeout = useCallback(async (host: string, targetUrl: string) =
         }
         const existing = prev[idx]
 
-        const terminalStates = ["completed", "extract_failed", "failed", "cancelled"]
+        const terminalStates = ["completed", "extracted", "extract_failed", "failed", "cancelled"]
         const isTerminal = terminalStates.includes(existing.status)
         const nextStatus = update.status || existing.status
 
@@ -1041,6 +1056,8 @@ const resolveWithTimeout = useCallback(async (host: string, targetUrl: string) =
           skippedFiles: update.skippedFiles !== undefined ? update.skippedFiles : existing.skippedFiles,
           partIndex: update.partIndex ?? existing.partIndex,
           partTotal: update.partTotal ?? existing.partTotal,
+          update: update.update ?? existing.update,
+          installMetadata: update.installMetadata ?? existing.installMetadata,
           resumeData: update.resumeData ?? existing.resumeData,
           spaceCheck:
             update.spaceCheck !== undefined
@@ -1067,27 +1084,29 @@ const resolveWithTimeout = useCallback(async (host: string, targetUrl: string) =
         queueMicrotask(() => {
           void startNextQueuedPart()
         })
-        if (typeof window !== "undefined") {
-          window.dispatchEvent(new CustomEvent("uc_game_installed", { detail: { appid: update.appid } }))
+        if (installFinished) {
+          if (typeof window !== "undefined") {
+            window.dispatchEvent(new CustomEvent("uc_game_installed", { detail: { appid: update.appid } }))
 
-          const skipped = (update as { skippedFiles?: unknown }).skippedFiles
-          if (Array.isArray(skipped) && skipped.length > 0) {
-            const count = skipped.length
-            window.dispatchEvent(new CustomEvent("uc_toast", {
-              detail: {
-                message: `Installed. ${count} incompatible ${count === 1 ? "file" : "files"} skipped (not needed on this platform).`,
-                type: "info",
-                duration: 7000,
-              },
-            }))
+            const skipped = update.skippedFiles
+            if (Array.isArray(skipped) && skipped.length > 0) {
+              const count = skipped.length
+              window.dispatchEvent(new CustomEvent("uc_toast", {
+                detail: {
+                  message: `Installed. ${count} incompatible ${count === 1 ? "file" : "files"} skipped (not needed on this platform).`,
+                  type: "info",
+                  duration: 7000,
+                },
+              }))
+            }
           }
-        }
-        if (update.appid) {
-          void reportPlayEvent(update.appid as string, "install")
+          if (update.appid) {
+            void reportPlayEvent(update.appid, "install")
+          }
         }
       }
 
-      if (update.appid && (update.status === "completed" || update.status === "extracted")) {
+      if (update.appid && installFinished) {
         queueMicrotask(() => {
           void reconcileInstalledState(update.appid)
         })
@@ -1535,6 +1554,8 @@ const startGameDownload = useCallback(async (game: Game, preferredHostOverride?:
                 partTotal: target.partTotal,
                 savePath: target.savePath,
                 totalBytes: resolved?.size || target.totalBytes,
+                update: target.update,
+                installMetadata: target.installMetadata,
               })
               downloadLogger.info("Resume Level 2 resumeWithFreshUrl result", { data: resumeRes })
               if (resumeRes && typeof resumeRes === "object" && resumeRes.ok) {
@@ -1556,6 +1577,8 @@ const startGameDownload = useCallback(async (game: Game, preferredHostOverride?:
               partIndex: target.partIndex,
               partTotal: target.partTotal,
               savePath: target.savePath,
+              update: target.update,
+              installMetadata: target.installMetadata,
             } as Parameters<typeof window.ucDownloads.start>[0])
             downloadLogger.info("Resume Level 2 start result", { data: res })
             ok = true
@@ -1589,7 +1612,7 @@ const startGameDownload = useCallback(async (game: Game, preferredHostOverride?:
             item.id === downloadId ? { ...item, status: "failed", error: "Resume failed. Please try again." } : item
           )
         )
-        if (target.appid) {
+        if (target.appid && !target.update) {
           await window.ucDownloads?.setInstallingStatus?.(target.appid, "failed", "Resume failed. Please try again.")
         }
       }

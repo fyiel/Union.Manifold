@@ -60,7 +60,7 @@
 /* ---- collapsible sidebar contract (shared across every page) ----
    Collapse state lives in localStorage["uc_nav_collapsed"] and is applied as
    `body.uc-nav-collapsed` so toggling never depends on a React re-render. */
-.uc-aside { width: 228px; transition: width 0.32s cubic-bezier(0.4, 0, 0.2, 1); overflow: hidden; }
+.uc-aside { width: 228px; transition: width 0.32s cubic-bezier(0.4, 0, 0.2, 1); overflow: clip; }
 body.uc-nav-collapsed .uc-aside { width: 64px; }
 .uc-navlabel { white-space: nowrap; transition: opacity 0.2s ease; }
 /* collapsed: labels take NO space (width 0, not just faded) so the icon sits

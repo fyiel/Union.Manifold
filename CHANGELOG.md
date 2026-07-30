@@ -12,7 +12,8 @@ All notable changes to Union.Manifold. This project is a fork of
 
 ### Fixed
 
-- Linux AppImages now disable WebKitGTK's DMA-BUF renderer, preventing the
+- Linux AppImages now launch their bundled WebKitGTK subprocesses instead of
+  mismatched host binaries and disable unstable renderer paths, preventing the
   blank gray window seen on affected Fedora graphics stacks
 
 ## 3.4.18

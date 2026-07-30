@@ -100,15 +100,21 @@ describe("Steam import launch settings", () => {
   const launchGameExecutable = vi.fn(async (..._args: [string, string, string?, boolean?, boolean?]) => ({ ok: true }))
   const runSteamGame = vi.fn(async () => ({ ok: true }))
   let launchArgs: Record<string, string>
+  let closeOnLaunch: boolean
+  let steamFixes: boolean | null
 
   beforeEach(() => {
     vi.clearAllMocks()
     launchArgs = {}
+    closeOnLaunch = false
+    steamFixes = false
     Object.defineProperty(window, "ucSettings", {
       configurable: true,
       value: {
         get: vi.fn(async (key: string) => {
           if (key === "gameLaunchArgs") return launchArgs
+          if (key === "closeOnGameLaunch") return closeOnLaunch
+          if (key === "linuxSteamCompatibilityFixes") return steamFixes
           if (key === "gameLinux:steam-620") return {}
           if (key === "hideDesktopShortcutPrompt" || key === "rpcShowGameName") return true
           return null
@@ -135,8 +141,32 @@ describe("Steam import launch settings", () => {
     render(<GameLaunchProvider><SteamLaunchButton /></GameLaunchProvider>)
     fireEvent.click(screen.getByRole("button", { name: "Play Steam import" }))
 
-    await waitFor(() => expect(runSteamGame).toHaveBeenCalledWith(620))
+    await waitFor(() => expect(runSteamGame).toHaveBeenCalledWith("steam-620", 620, ""))
     expect(launchGameExecutable).not.toHaveBeenCalled()
+  })
+
+  it("uses the configured executable when close-on-launch needs lifecycle tracking", async () => {
+    closeOnLaunch = true
+    render(<GameLaunchProvider><SteamLaunchButton /></GameLaunchProvider>)
+    fireEvent.click(screen.getByRole("button", { name: "Play Steam import" }))
+
+    await waitFor(() => expect(launchGameExecutable).toHaveBeenCalledWith(
+      "steam-620",
+      "/games/Portal 2/portal2.exe",
+      "Portal 2",
+      true,
+      undefined,
+    ))
+    expect(runSteamGame).not.toHaveBeenCalled()
+  })
+
+  it("uses the configured executable while default Steam compatibility fixes are active", async () => {
+    steamFixes = null
+    render(<GameLaunchProvider><SteamLaunchButton /></GameLaunchProvider>)
+    fireEvent.click(screen.getByRole("button", { name: "Play Steam import" }))
+
+    await waitFor(() => expect(launchGameExecutable).toHaveBeenCalled())
+    expect(runSteamGame).not.toHaveBeenCalled()
   })
 
   it("uses the configured executable when launch options exist", async () => {

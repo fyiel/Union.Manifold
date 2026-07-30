@@ -1,5 +1,4 @@
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::LazyLock;
 use std::time::Duration;
 
@@ -11,6 +10,7 @@ use crate::sources::cache::KeyedCache;
 use crate::sources::hosts;
 use crate::sources::schema::{DownloadOption, SourceGame};
 use crate::sources::{Capabilities, QueryParams};
+use parking_lot::RwLock;
 
 const ORIGIN: &str = "https://online-fix.me";
 const DETAIL_TTL: Duration = Duration::from_secs(6 * 60 * 60);
@@ -25,7 +25,10 @@ static SRC: LazyLock<HydraSource> = LazyLock::new(|| {
 
 static DETAIL_CACHE: LazyLock<KeyedCache<SourceGame>> =
     LazyLock::new(|| KeyedCache::new(DETAIL_TTL));
-static REFRESHED: AtomicBool = AtomicBool::new(false);
+static READY_CFG: LazyLock<RwLock<Option<crate::slipgate::Cfg>>> =
+    LazyLock::new(|| RwLock::new(None));
+static READINESS_REFRESH: LazyLock<tokio::sync::Mutex<()>> =
+    LazyLock::new(|| tokio::sync::Mutex::new(()));
 
 static RESULT_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"(?i)href="(https://online-fix\.me/(?:[a-z0-9_-]+/)*\d+-[a-z0-9-]+\.html)""#)
@@ -54,20 +57,43 @@ pub async fn search(q: &str, limit: usize) -> Vec<SourceGame> {
     SRC.search(q, limit).await
 }
 
-pub fn is_refreshed() -> bool {
-    REFRESHED.load(Ordering::Acquire)
+pub fn is_ready() -> bool {
+    let Some(cfg) = crate::slipgate::cfg() else {
+        return false;
+    };
+    READY_CFG.read().as_ref() == Some(&cfg)
+}
+
+pub fn invalidate() {
+    *READY_CFG.write() = None;
+}
+
+async fn refresh_readiness() -> Option<usize> {
+    let _guard = READINESS_REFRESH.lock().await;
+    invalidate();
+    let cfg = crate::slipgate::cfg()?;
+    let key = cfg.key.as_deref().unwrap_or("");
+    let (catalog, health) =
+        tokio::join!(SRC.refresh_live(), crate::slipgate::health(&cfg.base, key),);
+    let ready = catalog.is_some()
+        && health
+            .as_ref()
+            .map(crate::slipgate::fetch_usable)
+            .unwrap_or(false);
+    if ready {
+        *READY_CFG.write() = Some(cfg);
+        catalog
+    } else {
+        None
+    }
 }
 
 pub async fn refresh() -> Option<usize> {
-    let result = SRC.refresh().await;
-    REFRESHED.store(result.is_some(), Ordering::Release);
-    result
+    refresh_readiness().await
 }
 
 pub async fn prime() -> bool {
-    let ready = SRC.prime_direct().await;
-    REFRESHED.store(ready, Ordering::Release);
-    ready
+    refresh_readiness().await.is_some()
 }
 
 pub async fn get_detail(slug: &str) -> Option<SourceGame> {

@@ -217,6 +217,19 @@ fn steam_library_dirs() -> Vec<PathBuf> {
     dirs
 }
 
+pub(crate) fn steam_install_path(steam_appid: u64) -> Option<PathBuf> {
+    for library in steam_library_dirs() {
+        let manifest = library.join(format!("appmanifest_{steam_appid}.acf"));
+        let Ok(text) = std::fs::read_to_string(manifest) else {
+            continue;
+        };
+        if let Some((_, install_dir)) = vdf_pairs(&text).find(|(key, _)| key == "installdir") {
+            return Some(library.join("common").join(install_dir));
+        };
+    }
+    None
+}
+
 fn is_steam_tool(name: &str) -> bool {
     let n = name.to_lowercase();
     n.starts_with("proton")

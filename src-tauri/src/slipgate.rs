@@ -13,7 +13,7 @@ pub fn init(settings: Arc<SettingsStore>) {
     SETTINGS.set(settings).ok();
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct Cfg {
     pub base: String,
     pub key: Option<String>,
@@ -196,12 +196,23 @@ pub async fn health(base: &str, key: &str) -> Result<Value, String> {
         return Err(format!("HTTP {status}"));
     }
     let v: Value = serde_json::from_str(&text).map_err(|e| format!("bad response: {e}"))?;
+    if !v.get("ok").and_then(Value::as_bool).unwrap_or(false) {
+        return Err("unhealthy".to_string());
+    }
     Ok(json!({
         "ok": true,
         "version": v.get("version").and_then(|x| x.as_str()).unwrap_or(""),
         "flaresolverrOk": v.get("flaresolverr_ok").and_then(|x| x.as_bool()).unwrap_or(false),
         "recipes": v.get("recipes").cloned().unwrap_or_else(|| json!([])),
     }))
+}
+
+pub fn fetch_usable(status: &Value) -> bool {
+    status.get("ok").and_then(Value::as_bool).unwrap_or(false)
+        && status
+            .get("flaresolverrOk")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
 }
 
 #[cfg(test)]

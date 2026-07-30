@@ -66,3 +66,22 @@ fn resolved_download_replays_solver_session() {
         Some("cf_clearance=clear; session=ready")
     );
 }
+
+#[test]
+fn onlinefix_fetch_requires_live_solver_health_not_recipes() {
+    assert!(fetch_usable(&json!({
+        "ok": true,
+        "flaresolverrOk": true,
+        "recipes": [],
+    })));
+    assert!(!fetch_usable(&json!({
+        "ok": true,
+        "flaresolverrOk": false,
+        "recipes": ["datavaults"],
+    })));
+    assert!(!fetch_usable(&json!({
+        "ok": false,
+        "flaresolverrOk": true,
+        "recipes": ["datavaults"],
+    })));
+}

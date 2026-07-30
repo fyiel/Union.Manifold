@@ -6,7 +6,7 @@ import { GameLaunchFailedModal } from "@/components/GameLaunchFailedModal"
 import { GameLaunchPreflightModal, type LaunchPreflightResult } from "@/components/GameLaunchPreflightModal"
 import { getUnambiguousExecutable, hasOnlineMode, matchAdminExecutable, type GameExecutable } from "@/lib/utils"
 import { reportPlayEvent } from "@/lib/cloud-collections"
-import { recordGameLaunch, setRunningOptimistic, isRunningGameSync } from "@/hooks/use-running-games"
+import { setRunningOptimistic, isRunningGameSync } from "@/hooks/use-running-games"
 import { gameLogger } from "@/lib/logger"
 
 export type LaunchableGame = {
@@ -27,6 +27,22 @@ type GameLaunchValue = {
 const GameLaunchContext = createContext<GameLaunchValue | null>(null)
 
 const QUICK_EXIT_WINDOW_MS = 12_000
+const IS_LINUX = typeof navigator !== "undefined" && /linux/i.test(navigator.userAgent)
+const LINUX_GLOBAL_LAUNCH_SETTINGS = [
+  "linuxLaunchMode",
+  "linuxDefaultLaunchMode",
+  "linuxWinePath",
+  "linuxProtonPath",
+  "linuxWinePrefix",
+  "linuxProtonPrefix",
+  "linuxSteamPath",
+  "linuxExtraEnv",
+  "linuxGamemode",
+  "linuxMangohud",
+  "linuxDllOverrides",
+  "linuxSteamCompatibilityFixes",
+] as const
+
 
 export function GameLaunchProvider({ children }: { children: React.ReactNode }) {
   const [game, setGame] = useState<LaunchableGame | null>(null)
@@ -155,7 +171,6 @@ export function GameLaunchProvider({ children }: { children: React.ReactNode }) 
       if (res && res.ok) {
         void reportPlayEvent(g.appid, "play")
         await setSavedExe(g.appid, path)
-        setRunningOptimistic(g.appid, true)
         setPickerOpen(false)
         setShortcutOpen(false)
         setPreflightOpen(false)
@@ -287,28 +302,41 @@ export function GameLaunchProvider({ children }: { children: React.ReactNode }) 
     try {
       const savedExe = await getSavedExe(g.appid)
       if (g.appid.startsWith("steam-")) {
-        const [manifest, launchArgs, linuxConfig] = await Promise.all([
+        const globalLaunchSettingKeys = IS_LINUX ? LINUX_GLOBAL_LAUNCH_SETTINGS : []
+        const [manifest, launchArgs, linuxConfigResult, closeOnLaunch, ...globalLaunchSettings] = await Promise.all([
           window.ucDownloads?.getInstalledGlobal?.(g.appid),
           window.ucSettings?.get?.("gameLaunchArgs"),
-          window.ucSettings?.get?.(`gameLinux:${g.appid}`),
+          IS_LINUX ? window.ucLinux?.getGameConfig?.(g.appid) : undefined,
+          window.ucSettings?.get?.("closeOnGameLaunch"),
+          ...globalLaunchSettingKeys.map((key) => window.ucSettings?.get?.(key)),
         ])
         const configuredArgs = launchArgs && typeof launchArgs === "object"
           ? String((launchArgs as Record<string, string>)[g.appid] || "").trim()
           : ""
+        const linuxConfig = linuxConfigResult?.ok ? linuxConfigResult.config : undefined
         const configuredLinux = linuxConfig && typeof linuxConfig === "object"
-          ? Object.keys(linuxConfig as Record<string, unknown>).length > 0
+          ? Object.keys(linuxConfig).length > 0
           : false
+        const configuredGlobalLaunch = closeOnLaunch === true || globalLaunchSettings.some((value, index) =>
+          globalLaunchSettingKeys[index] === "linuxSteamCompatibilityFixes"
+            ? value !== false
+            : value === true || (typeof value === "string" && value.trim().length > 0),
+        )
         if (
           !savedExe
           && !configuredArgs
           && !configuredLinux
+          && !configuredGlobalLaunch
           && manifest?.installType === "steam"
           && typeof manifest.steamAppId === "number"
         ) {
-          const res = await window.ucSystem?.runSteamGame?.(manifest.steamAppId)
+          const res = await window.ucSystem?.runSteamGame?.(
+            g.appid,
+            manifest.steamAppId,
+            typeof manifest.installPath === "string" ? manifest.installPath : "",
+          )
           if (res?.ok) {
             void reportPlayEvent(g.appid, "play")
-            void recordGameLaunch(g.appid)
           }
           return
         }
