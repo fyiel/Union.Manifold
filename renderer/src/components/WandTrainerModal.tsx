@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { LoaderCircle, LogOut, WandSparkles, Zap } from "lucide-react"
+import { LoaderCircle, LogOut, TriangleAlert, WandSparkles, Zap } from "lucide-react"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 
 type Props = {
@@ -160,6 +160,11 @@ export function WandTrainerModal({ appid, title, steamAppid, onClose, onLaunch }
             )}
           </div>
         </DialogHeader>
+
+        <div role="status" className="flex items-center gap-2 border-b border-yellow-400/15 bg-yellow-400/[.06] px-6 py-2.5 font-mono text-[10px] leading-4 text-yellow-300/85">
+          <TriangleAlert className="h-3.5 w-3.5 shrink-0" />
+          Experimental: trainer attachment may fail or stop responding.
+        </div>
 
         <div className="mf-scroll min-h-0 flex-1 overflow-y-auto px-6 py-5">
           {loading ? (
