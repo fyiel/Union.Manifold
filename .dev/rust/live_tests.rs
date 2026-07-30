@@ -197,6 +197,19 @@ async fn live_every_source_returns_current_games() {
         );
         total += games.len();
     }
+    assert!(
+        representatives.len() >= 10,
+        "expected ten representative games, got {}",
+        representatives.len()
+    );
+    eprintln!(
+        "representative games: {}",
+        representatives[..10]
+            .iter()
+            .map(|(_, game)| game.title.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
     let mut options_by_host = HashMap::new();
     for (source_id, game) in &representatives {
         for option in &game.download_options {
