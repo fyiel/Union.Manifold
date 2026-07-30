@@ -66,10 +66,9 @@ body.uc-nav-collapsed .uc-aside { width: 64px; }
 /* collapsed: labels take NO space (width 0, not just faded) so the icon sits
    centered in the rail instead of being pushed by the still-laid-out label */
 body.uc-nav-collapsed .uc-navlabel { opacity: 0; width: 0; min-width: 0; margin: 0; overflow: hidden; pointer-events: none; }
-/* collapsed nav/settings rows center their lone icon. !important because navBase
-   sets gap/padding INLINE (inline styles otherwise beat these stylesheet rules),
-   which was leaving the gap + side padding in place and shoving the icon off-center. */
-body.uc-nav-collapsed .mf-navitem { justify-content: center !important; gap: 0 !important; padding-left: 0 !important; padding-right: 0 !important; }
+/* collapsed sidebar rows center their lone icon. Scope this to the app rail so
+   settings navigation keeps its own icon-and-label layout. */
+body.uc-nav-collapsed .uc-aside .mf-navitem { justify-content: center !important; gap: 0 !important; padding-left: 0 !important; padding-right: 0 !important; }
 /* nav icons keep their full size, flex must never compress the svg (which made
    the collapsed icons shrink to near-invisible) */
 .uc-aside .mf-navitem > svg { flex-shrink: 0; width: 16px; height: 16px; }
