@@ -3,7 +3,7 @@
 All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 
-## 3.4.18
+## 3.4.19
 
 ### Added
 
@@ -12,13 +12,18 @@ All notable changes to Union.Manifold. This project is a fork of
 
 ### Fixed
 
+- Linux AppImages now disable WebKitGTK's DMA-BUF renderer, preventing the
+  blank gray window seen on affected Fedora graphics stacks
+
+## 3.4.18
+
+### Fixed
+
 - GameBounty FileQ and DataVaults mirrors now open an in-app verification window,
   capture the resulting download, and queue it without falling back to a browser
 - OnlineFix games launched through Wine, Proton or UMU now stage the required
   local Steam overlay runtime in the active prefix and report missing Steam
   files before launch
-- Linux AppImages now disable WebKitGTK's DMA-BUF renderer, preventing the
-  blank gray window seen on affected Fedora graphics stacks
 
 ## 3.4.17
 
