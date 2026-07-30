@@ -9,6 +9,8 @@ All notable changes to Union.Manifold. This project is a fork of
 
 - Fedora-family release builds now include an RPM package, and the Linux
   installer selects it automatically when `dnf` is available
+- Project dependencies, development scripts, CI and release builds now use
+  Bun 1.3.14 instead of pnpm
 
 ### Fixed
 

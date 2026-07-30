@@ -126,23 +126,17 @@ jobs:
         with:
           workspaces: src-tauri
 
-      # pnpm version comes from packageManager in package.json
-      - uses: pnpm/action-setup@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: pnpm
+      - uses: oven-sh/setup-bun@v2
 
       - name: Install dependencies
-        run: pnpm install
+        run: bun install --frozen-lockfile
 
       - name: Fetch sidecars
-        run: pnpm fetch-sidecars ${{ matrix.sidecars }}
+        run: bun run fetch-sidecars ${{ matrix.sidecars }}
 
       - name: Build trainer host
         if: matrix.os == 'ubuntu-22.04'
-        run: pnpm build:trainer-host
+        run: bun run build:trainer-host
 
       - uses: tauri-apps/tauri-action@v0
         env:

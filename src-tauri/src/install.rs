@@ -240,7 +240,7 @@ pub(crate) async fn run_7z_pw(
 ) -> Result<()> {
     use tokio::io::AsyncReadExt;
     let bin = crate::bins::resolve_sidecar("7z").ok_or_else(|| {
-        crate::error::AppError::msg("7z binary not found, run pnpm fetch-sidecars")
+        crate::error::AppError::msg("7z binary not found, run bun run fetch-sidecars")
     })?;
     std::fs::create_dir_all(out_dir).ok();
     let mut cmd = tokio::process::Command::new(&bin);
@@ -321,7 +321,7 @@ pub(crate) async fn run_7z_pw(
 
 pub(crate) async fn run_7z_list(archive: &Path, password: Option<&str>) -> Result<Vec<String>> {
     let bin = crate::bins::resolve_sidecar("7z").ok_or_else(|| {
-        crate::error::AppError::msg("7z binary not found, run pnpm fetch-sidecars")
+        crate::error::AppError::msg("7z binary not found, run bun run fetch-sidecars")
     })?;
     let mut cmd = tokio::process::Command::new(&bin);
     cmd.arg("l")
