@@ -20,7 +20,7 @@ appusr=\"$appdir/usr\"
 # distributions. Prefer the system WebKitGTK stack when it is installed;
 # retain the bundled stack as a fallback for hosts without it.
 host_libs=\"/usr/lib64:/usr/lib/x86_64-linux-gnu:/usr/lib/aarch64-linux-gnu:/usr/lib\"
-host_webkit=\"[?25l\"
+host_webkit=
 for dir in /usr/lib64 /usr/lib/x86_64-linux-gnu /usr/lib/aarch64-linux-gnu /usr/lib; do
   if [ -f \"$dir/libwebkit2gtk-4.1.so.0\" ]; then
     host_webkit=1
