@@ -3,6 +3,16 @@
 All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 
+## 3.5.3
+
+### Fixed
+
+- Binaries built without the Tauri CLI (plain `cargo build`, distro
+  packages) no longer start in dev mode and load the embedded frontend
+  instead of showing a blank gray window
+- AppImage launcher correctly detects hosts without a system WebKitGTK
+  again and falls back to the bundled runtime
+
 ## 3.5.2
 
 ### Fixed
