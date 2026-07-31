@@ -3,6 +3,14 @@
 All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 
+## 3.5.1
+
+### Fixed
+
+- Linux AppImages now prefer the host WebKitGTK runtime when it is
+  available, avoiding blank windows caused by the bundled graphics stack on
+  Fedora and other distributions while retaining the bundled fallback
+
 ## 3.5.0
 
 ### Added
