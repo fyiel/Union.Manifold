@@ -3,19 +3,135 @@
 All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 
+## 3.5.0
+
+### Added
+
+- Installed games can now be updated directly from their current catalog source;
+  Manifold compares installed and catalog versions, exposes an Update action and
+  preserves the existing game until the replacement is fully downloaded,
+  extracted and committed
+- Updates use an isolated staging directory, atomically swap into the installed
+  location, merge the newest download metadata with existing library activity
+  and restore the previous installation if the final commit fails
+- The Add Games dialog can now import downloaded ZIP, RAR, 7z and supported
+  multipart archives directly into the library
+- Library cards and rows now show total play time alongside last-played time
+- Game activity is now tracked for direct, elevated and Steam URI launches,
+  including sessions that continue after close-on-launch hides Manifold
+- Game-detail screenshots now open in a full-size lightbox with backdrop,
+  close-button and Escape-key dismissal
+- Linux settings now include a global Steam compatibility-fixes toggle for Steam
+  API repair and local achievement-file preparation
+- Achievement detection and Wand trainer controls now carry explicit
+  experimental-state warnings
+
+### Changed
+
+- Steam imports now use the Steam URI only when no saved executable, launch
+  arguments, per-game Linux configuration or global Linux launch policy applies;
+  configured imports go through Manifold's normal launch pipeline
+- Saved per-game launch arguments now reach the backend launch plan. Windows
+  arguments follow Windows quoting and backslash rules, while Linux and macOS
+  continue to use POSIX-style parsing
+- Steam compatibility repair now respects its setting instead of running
+  unconditionally and remains enabled by default
+- Close-on-launch now hides both the main window and tray, keeps backend process
+  tracking alive and exits only after every direct, elevated or Steam-tracked
+  game has ended
+- Last-played, play-time, favorite and collection changes now use one serialized
+  backend merge per game, preventing concurrent metadata writes from overwriting
+  one another
+- Successful updates write the resolved source version only after installation
+  completes, refresh installed state immediately and retain activity, favorites
+  and other existing metadata
+- Persisted and resumed downloads retain update and install-metadata state so an
+  interrupted update continues through the same transactional path
+- Online-Fix availability and repair actions now require both a running Slipgate
+  resolver and a successful Online-Fix catalog refresh
+- Managed Slipgate start, stop, update and uninstall operations now invalidate
+  Online-Fix readiness and broadcast source changes to the renderer
+- Hydralinks-backed sources separately validate direct and Slipgate catalogs and
+  only become ready after a non-empty catalog has been stored
+- The Library subscribes to source-readiness and activity events, refreshing
+  actions, install state and activity without an application reload
+- Wand trainer sessions now stop the previous host, close its control socket,
+  wait for normal shutdown and force-kill only after a timeout
+- Project dependencies, development scripts, tests, CI and release builds now
+  use Bun 1.3.14 and a frozen `bun.lock` instead of pnpm
+- Build and sidecar scripts now live under `renderer/scripts`, keeping renderer
+  tooling together and removing the old pnpm workspace configuration
+
+### Fixed
+
+- Failed, cancelled or interrupted game updates no longer remove the working
+  installation from the Library or leave a partially replaced game behind
+- Update manifests now rewrite staged save paths to the final install directory
+  and preserve the canonical installed manifest until extraction succeeds
+- Steam URI launches now record start and exit events, elapsed time and
+  last-played timestamps instead of losing session activity
+- Windows launch arguments preserve drive-path backslashes, apostrophes, quoted
+  values and embedded quotes instead of being parsed with POSIX rules
+- Datanodes links now enter the in-app interactive verification flow rather than
+  being treated as ordinary direct downloads
+- Slipgate download results now replay resolver-provided Referer, User-Agent and
+  cookie state, including Cloudflare clearance and session cookies
+- Gated host resolvers reject results that return the original landing page
+  instead of a direct file, allowing normal browser fallback
+- Interactive verification now recognizes every gated recipe host covered by
+  the source registry rather than only the earlier subset
+- Online-Fix repair no longer appears or starts while its live dependencies are
+  unavailable, and stale readiness is cleared when Slipgate changes
+- The Wand trainer modal and theme editor now keep their headers fixed while
+  constraining content to the available viewport and scrolling the body
+- Collapsed sidebar styles are scoped to the application rail, so Settings
+  navigation keeps its icon-and-label layout while rail icons remain centered
+- Linux AppImages now launch bundled WebKitGTK subprocesses instead of mismatched
+  host binaries and disable unstable Wayland compositing and DMA-BUF renderer
+  paths, preventing blank gray windows on affected Fedora and GPU stacks
+
+### Packaging and supply chain
+
+- Sidecar archives, extracted executables, Windows companion DLLs and the CA
+  bundle are pinned and verified with SHA-256 before staging
+- Windows sidecars additionally require a valid Authenticode signature before
+  release packaging
+- Custom aria2 and 7-Zip versions remain possible, but require matching checksum
+  overrides or an explicit `SIDECAR_ALLOW_UNVERIFIED=1` opt-out
+- Provenance stamps bind every staged sidecar to its source URL, and cached files
+  are reused only when their output hash and companion resources still match
+- Packaged helpers now use `union-manifold-*` names across Tauri, AppImage, RPM,
+  pacman and runtime lookup paths, avoiding collisions with host executables
+- Linux release jobs install RPM tooling, upload a stable
+  `union-manifold-x86_64.rpm` asset and disable linuxdeploy's incompatible strip
+  pass for newer ELF sections
+- Release and CI workflows install the Bun version pinned by `packageManager`,
+  use `bun install --frozen-lockfile`, and pass actionlint and ShellCheck
+
+### Verification
+
+- Added live audits that require every enabled source to return current games,
+  exercise representative downloads and verify direct or browser fallback for
+  every observed host recipe
+- Added Slipgate coverage for resolver-session header, cookie and User-Agent
+  replay plus managed readiness transitions
+- Added installed-update coverage for successful replacement, metadata merging,
+  completion refresh and rollback after a failed commit
+- Added renderer coverage for manual archive import, update queuing, Steam launch
+  policy, close-on-launch behavior and running-game activity
+- Added settings concurrency coverage so activity and favorite writes must
+  preserve both fields
+
 ## 3.4.19
 
 ### Added
 
 - Fedora-family release builds now include an RPM package, and the Linux
   installer selects it automatically when `dnf` is available
-- Project dependencies, development scripts, CI and release builds now use
-  Bun 1.3.14 instead of pnpm
 
 ### Fixed
 
-- Linux AppImages now launch their bundled WebKitGTK subprocesses instead of
-  mismatched host binaries and disable unstable renderer paths, preventing the
+- Linux AppImages now disable WebKitGTK's DMA-BUF renderer, preventing the
   blank gray window seen on affected Fedora graphics stacks
 
 ## 3.4.18
