@@ -1,12 +1,13 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Union.Manifold",
-  "version": "3.5.0",
+  "version": "3.5.1",
   "identifier": "fyi.pumg.unionmanifold",
   "build": {
     "beforeDevCommand": "bun run dev:renderer",
     "devUrl": "http://localhost:5173",
     "beforeBuildCommand": "bun run build:renderer",
+    "beforeBundleCommand": "node ./scripts/prepare-appimage.mjs",
     "frontendDist": "../renderer/dist"
   },
   "app": {
@@ -54,6 +55,7 @@
   "bundle": {
     "active": true,
     "createUpdaterArtifacts": true,
+    "useLocalToolsDir": true,
     "targets": ["appimage", "nsis", "deb", "rpm", "dmg", "app"],
     "icon": [
       "icons/32x32.png",
@@ -68,6 +70,9 @@
     "linux": {
       "appimage": {
         "bundleMediaFramework": false
+      },
+      "rpm": {
+        "depends": ["gtk3", "webkit2gtk4.1", "libappindicator-gtk3", "librsvg2", "xdg-utils"]
       }
     },
     "windows": {
