@@ -3,6 +3,15 @@
 All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 
+## 3.5.4
+
+### Fixed
+
+- App no longer opens to a blank gray screen: the hand-rolled vendor chunk
+  split in the renderer build could put React and its dependents into
+  circular chunks that crash on startup (`useLayoutEffect` of undefined),
+  breaking every packaged build on all platforms
+
 ## 3.5.3
 
 ### Fixed
