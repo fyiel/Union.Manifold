@@ -3,6 +3,14 @@
 All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 
+## 3.5.2
+
+### Fixed
+
+- AppImage startup now locates Fedora's WebKitGTK helper processes under
+  `/usr/libexec/webkit2gtk-4.1` instead of falling back to an invalid bundled
+  helper directory
+
 ## 3.5.1
 
 ### Fixed

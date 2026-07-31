@@ -24,12 +24,17 @@ host_webkit=\"[?25l\"
 for dir in /usr/lib64 /usr/lib/x86_64-linux-gnu /usr/lib/aarch64-linux-gnu /usr/lib; do
   if [ -f \"$dir/libwebkit2gtk-4.1.so.0\" ]; then
     host_webkit=1
-    if [ -x \"$dir/webkit2gtk-4.1/WebKitWebProcess\" ]; then
-      export WEBKIT_EXEC_PATH=\"$dir/webkit2gtk-4.1\"
-    fi
     break
   fi
 done
+if [ -n "$host_webkit" ]; then
+  for dir in /usr/libexec/webkit2gtk-4.1 /usr/lib64/webkit2gtk-4.1 /usr/lib/x86_64-linux-gnu/webkit2gtk-4.1 /usr/lib/aarch64-linux-gnu/webkit2gtk-4.1 /usr/lib/webkit2gtk-4.1; do
+    if [ -x "$dir/WebKitWebProcess" ] && [ -x "$dir/WebKitNetworkProcess" ]; then
+      export WEBKIT_EXEC_PATH="$dir"
+      break
+    fi
+  done
+fi
 
 app_libs=\"$appusr/lib:$appusr/lib/x86_64-linux-gnu:$appusr/lib/aarch64-linux-gnu\"
 if [ -n \"$host_webkit\" ]; then
