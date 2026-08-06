@@ -229,7 +229,7 @@ pub const SOURCES: &[SourceMeta] = &[
 ];
 
 fn hidden_by_torrent_filter(source: &SourceMeta) -> bool {
-    source.torrent_only || source.id == "onlinefix"
+    source.torrent_only
 }
 
 pub fn capabilities_for(id: &str) -> Capabilities {
@@ -800,7 +800,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn torrent_filter_groups_onlinefix_without_relabeling_it() {
+    fn torrent_filter_keeps_onlinefix_independent() {
         let onlinefix = SOURCES
             .iter()
             .find(|source| source.id == "onlinefix")
@@ -811,7 +811,7 @@ mod tests {
             .find(|source| source.id == "steamrip")
             .unwrap();
 
-        assert!(hidden_by_torrent_filter(onlinefix));
+        assert!(!hidden_by_torrent_filter(onlinefix));
         assert!(!onlinefix.torrent_only);
         assert!(hidden_by_torrent_filter(gog));
         assert!(gog.torrent_only);

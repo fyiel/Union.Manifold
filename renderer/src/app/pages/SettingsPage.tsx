@@ -674,8 +674,8 @@ function SourcesTab() {
 
       <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 16px", border: "1px solid var(--mf-line)", borderRadius: 11, background: "var(--mf-panel-2)", marginBottom: 18 }}>
         <div style={{ minWidth: 0, flex: 1 }}>
-          <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--mf-t1)" }}>Hide torrent and Online-Fix sources</div>
-          <div style={{ fontFamily: MONO, fontSize: 10.5, color: "var(--mf-t5)", marginTop: 3, lineHeight: 1.5 }}>Hide Online-Fix plus GOG, EMPRESS and KaOsKrew from Browse, search and the sidebar. The latter three only surface magnet or torrent links.</div>
+          <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--mf-t1)" }}>Hide torrent sources</div>
+          <div style={{ fontFamily: MONO, fontSize: 10.5, color: "var(--mf-t5)", marginTop: 3, lineHeight: 1.5 }}>Hide GOG, EMPRESS and KaOsKrew from Browse, search and the sidebar. They only surface magnet or torrent links, which Manifold can't download. Online-Fix is a separate toggle above.</div>
         </div>
         <Toggle on={hideTorrent} onToggle={() => void toggleHideTorrent()} />
       </div>
