@@ -10,6 +10,7 @@ import {
   rememberGameAs,
   getSourceDetail,
   resolveInstalledGame,
+  hostFriendliness,
   loadSourcePriority,
   orderSourcesByPreference,
   pickPrimaryDownload,
@@ -462,7 +463,11 @@ export function SourceGamePage() {
               <>
                 <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 12 }}>
                   {ordered.map((src) => {
-                    const opts = [...(src.downloadOptions || [])].sort((a, b) => Number(Boolean(b.resolvable)) - Number(Boolean(a.resolvable)))
+                    const opts = [...(src.downloadOptions || [])].sort(
+      (a, b) =>
+        Number(Boolean(b.resolvable)) - Number(Boolean(a.resolvable)) ||
+        hostFriendliness(a.hostType) - hostFriendliness(b.hostType)
+    )
                     if (!opts.length) return null
                     const direct = sourceDirect(src.sourceId)
                     const upd = relTime(src.updatedAt)

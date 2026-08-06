@@ -8,7 +8,6 @@ pub mod gate;
 pub mod gofile;
 #[cfg(test)]
 mod installtest;
-pub mod interactive;
 #[cfg(test)]
 mod livetest;
 pub mod mediafire;
@@ -17,12 +16,34 @@ pub mod rootz;
 
 use crate::sources::schema::DownloadOption;
 use crate::sources::ResolveResult;
+use serde_json::json;
 
 fn hostname_of(url: &str) -> String {
     url::Url::parse(url)
         .ok()
         .and_then(|u| u.host_str().map(|s| s.to_lowercase()))
         .unwrap_or_default()
+}
+
+/// Map a URL to the Slipgate recipe key that can resolve it, for hosts whose
+/// native resolver may hit a Cloudflare gate or interactive captcha.
+fn slipgate_host(url: &str) -> Option<&'static str> {
+    if datanodes::matches(url) {
+        return Some("datanodes");
+    }
+    if datavaults::matches(url) {
+        return Some("datavaults");
+    }
+    None
+}
+
+fn not_resolvable(url: &str, reason: &str) -> ResolveResult {
+    ResolveResult {
+        resolvable: false,
+        open_url: Some(url.to_string()),
+        reason: Some(reason.to_string()),
+        ..Default::default()
+    }
 }
 
 pub fn detect_host_type(url: &str) -> String {
@@ -81,7 +102,6 @@ pub fn is_resolvable(url: &str) -> bool {
         || fileditch::matches(url)
         || filekeeper::matches(url)
         || (gate::matches(url) && crate::slipgate::cfg().is_some())
-        || interactive::matches(url)
 }
 
 pub async fn resolve_url(option: &DownloadOption) -> ResolveResult {
@@ -100,8 +120,9 @@ pub async fn resolve_url(option: &DownloadOption) -> ResolveResult {
     if gofile::matches(url) {
         return gofile::resolve(url).await;
     }
+    let mut result: Option<ResolveResult> = None;
     if datanodes::matches(url) {
-        return datanodes::resolve(url).await;
+        result = Some(datanodes::resolve(url).await);
     }
     if fuckingfast::matches(url) {
         return fuckingfast::resolve(url).await;
@@ -113,7 +134,7 @@ pub async fn resolve_url(option: &DownloadOption) -> ResolveResult {
         return rootz::resolve(url).await;
     }
     if datavaults::matches(url) {
-        return datavaults::resolve(url).await;
+        result = Some(datavaults::resolve(url).await);
     }
     if fileditch::matches(url) {
         return fileditch::resolve(url).await;
@@ -123,6 +144,46 @@ pub async fn resolve_url(option: &DownloadOption) -> ResolveResult {
     }
     if gate::matches(url) {
         return gate::resolve(url).await;
+    }
+
+    // datanodes/datavaults: when the native resolver hits a Cloudflare gate or
+    // interactive captcha, hand the page to Slipgate (which drives it through
+    // FlareSolverr). Without a Slipgate URL configured, fall through to the
+    // browser with the native reason.
+    if let Some(r) = result {
+        if r.resolvable {
+            return r;
+        }
+        if let Some(host) = slipgate_host(url) {
+            match crate::slipgate::cfg() {
+                Some(cfg) => {
+                    return match crate::slipgate::resolve(&cfg, host, url, json!({}), json!([]))
+                        .await
+                    {
+                        Ok(link) => ResolveResult {
+                            resolvable: true,
+                            url: Some(link.url),
+                            file_name: link.file_name,
+                            size_bytes: link.size_bytes,
+                            headers: (!link.headers.is_empty()).then_some(link.headers),
+                            ephemeral: true,
+                            ..Default::default()
+                        },
+                        Err(e) => not_resolvable(url, &format!("Slipgate: {e}")),
+                    };
+                }
+                None => {
+                    return not_resolvable(
+                        url,
+                        &format!(
+                            "{} \u{2014} set a Slipgate URL in Settings to resolve in-app",
+                            r.reason.as_deref().unwrap_or("host could not be resolved")
+                        ),
+                    )
+                }
+            }
+        }
+        return r;
     }
 
     let host = hostname_of(url);

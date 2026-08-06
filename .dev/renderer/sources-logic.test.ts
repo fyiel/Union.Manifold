@@ -45,16 +45,16 @@ function unified(over: Partial<UnifiedSourceGame> = {}): UnifiedSourceGame {
 }
 
 describe("host friendliness ordering", () => {
-  it("ranks pixeldrain friendliest and gofile last resort", () => {
-    expect(hostFriendliness("pixeldrain")).toBe(0)
+  it("ranks ucfiles friendliest, pixeldrain second, gofile third", () => {
+    expect(hostFriendliness("ucfiles")).toBe(0)
+    expect(hostFriendliness("pixeldrain")).toBeGreaterThan(hostFriendliness("ucfiles"))
     expect(hostFriendliness("gofile")).toBeGreaterThan(hostFriendliness("pixeldrain"))
-    expect(hostFriendliness("gofile")).toBeGreaterThan(hostFriendliness("buzzheavier"))
-    expect(hostFriendliness("gofile")).toBeGreaterThan(hostFriendliness("megadb"))
+    expect(hostFriendliness("gofile")).toBeLessThan(hostFriendliness("megadb"))
   })
 
   it("unknown hosts sit between natives and gated hosts", () => {
     const unknown = hostFriendliness("randomhost")
-    expect(unknown).toBeGreaterThan(hostFriendliness("pixeldrain"))
+    expect(unknown).toBeGreaterThan(hostFriendliness("gofile"))
     expect(unknown).toBeLessThan(hostFriendliness("megadb"))
   })
 })
