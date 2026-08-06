@@ -3,6 +3,17 @@
 All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 
+## 3.5.6
+
+### Added
+
+- Online-Fix is now a first-class, toggleable source: enable or disable it
+  from the right-click menu on any game in the Library instead of lumping it
+  in with the torrent-only sources. "Get Online-Fix repair" only appears once
+  the source is enabled, so the option stays hidden until you opt in. The
+  "Hide torrent and Online-Fix sources" setting now only covers the
+  torrent-only sources (GOG, EMPRESS, KaOsKrew).
+
 ## 3.5.5
 
 ### Added
