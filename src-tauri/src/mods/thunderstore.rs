@@ -760,6 +760,9 @@ pub async fn thunderstore_browse(
 ) -> Result<Value, String> {
     let res = async {
         let pkgs = load_packages(&state.paths, &community).await?;
+        // The frontend pages 1-based (page + 1); convert to the 0-based page
+        // filter_sort_page expects so the first page starts at offset 0.
+        let page = page.max(1) - 1;
         let (mods, has_more) = filter_sort_page(&pkgs, &sort, &period, page, &query, now_secs());
         Ok(json!({ "ok": true, "mods": mods, "hasMore": has_more }))
     }
