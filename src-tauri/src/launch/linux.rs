@@ -305,6 +305,11 @@ pub(crate) struct GlobalLaunchOpts {
     pub mangohud: bool,
     pub dll_overrides: Option<String>,
     pub proton_prefix: Option<String>,
+    pub gamescope: bool,
+    pub gamescope_fsr: bool,
+    pub gamescope_fps_limit: Option<String>,
+    pub gamescope_refresh_rate: Option<String>,
+    pub gamescope_sharpness: Option<String>,
 }
 
 fn parse_env_lines(s: &str) -> Vec<(String, String)> {
@@ -348,6 +353,28 @@ pub fn resolve_launch(state: &AppState, appid: &str, exe_path: &str) -> Result<L
             .settings
             .get_string("linuxProtonPrefix")
             .filter(|s| !s.is_empty()),
+        gamescope: state
+            .settings
+            .get("linuxGamescope")
+            .as_bool()
+            .unwrap_or(false),
+        gamescope_fsr: state
+            .settings
+            .get("linuxGamescopeFsr")
+            .as_bool()
+            .unwrap_or(false),
+        gamescope_fps_limit: state
+            .settings
+            .get_string("linuxGamescopeFpsLimit")
+            .filter(|s| !s.trim().is_empty()),
+        gamescope_refresh_rate: state
+            .settings
+            .get_string("linuxGamescopeRefreshRate")
+            .filter(|s| !s.trim().is_empty()),
+        gamescope_sharpness: state
+            .settings
+            .get_string("linuxGamescopeSharpness")
+            .filter(|s| !s.trim().is_empty()),
     };
     plan_launch_with(
         &cfg,
@@ -453,6 +480,51 @@ pub(crate) fn plan_launch(
     )
 }
 
+fn gamescope_args(globals: &GlobalLaunchOpts) -> Vec<String> {
+    let mut args = Vec::new();
+    if globals.gamescope_fsr {
+        args.push("-F".to_string());
+    }
+    if let Some(sharpness) = globals
+        .gamescope_sharpness
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        args.push("--sharpness".to_string());
+        args.push(sharpness.to_string());
+    }
+    if let Some(limit) = globals
+        .gamescope_fps_limit
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        args.push("--fps-limit".to_string());
+        args.push(limit.to_string());
+    }
+    if let Some(rate) = globals
+        .gamescope_refresh_rate
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        args.push("--force-refresh-rate".to_string());
+        args.push(rate.to_string());
+    }
+    args
+}
+
+fn wrap_gamescope(mut plan: LaunchPlan, globals: &GlobalLaunchOpts, gamescope: &str) -> LaunchPlan {
+    let mut args = gamescope_args(globals);
+    args.push("--".to_string());
+    args.push(plan.command.clone());
+    args.append(&mut plan.args);
+    plan.command = gamescope.to_string();
+    plan.args = args;
+    plan
+}
+
 fn apply_wrappers(mut plan: LaunchPlan, globals: &GlobalLaunchOpts) -> LaunchPlan {
     for tool in ["mangohud", "gamemoderun"] {
         let wanted =
@@ -465,6 +537,11 @@ fn apply_wrappers(mut plan: LaunchPlan, globals: &GlobalLaunchOpts) -> LaunchPla
             args.append(&mut plan.args);
             plan.command = path;
             plan.args = args;
+        }
+    }
+    if globals.gamescope {
+        if let Some(path) = which("gamescope") {
+            plan = wrap_gamescope(plan, globals, &path);
         }
     }
     plan
@@ -1103,5 +1180,71 @@ mod tests {
             proton_compat_prefix("/home/user/Games/compatdata/mewgenics/pfx"),
             "/home/user/Games/compatdata/mewgenics/pfx"
         );
+    }
+
+    #[test]
+    fn gamescope_args_map_options_to_flags() {
+        let globals = GlobalLaunchOpts {
+            gamescope: true,
+            gamescope_fsr: true,
+            gamescope_fps_limit: Some("144".into()),
+            gamescope_refresh_rate: Some("144".into()),
+            gamescope_sharpness: Some("5".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            gamescope_args(&globals),
+            [
+                "-F",
+                "--sharpness",
+                "5",
+                "--fps-limit",
+                "144",
+                "--force-refresh-rate",
+                "144",
+            ]
+        );
+    }
+
+    #[test]
+    fn gamescope_args_omit_blank_options() {
+        let globals = GlobalLaunchOpts {
+            gamescope: true,
+            gamescope_fsr: false,
+            gamescope_fps_limit: Some("  ".into()),
+            gamescope_refresh_rate: None,
+            gamescope_sharpness: Some("".into()),
+            ..Default::default()
+        };
+        assert!(gamescope_args(&globals).is_empty());
+    }
+
+    #[test]
+    fn gamescope_wraps_outermost_and_keeps_wrapped_command() {
+        let globals = GlobalLaunchOpts {
+            gamescope: true,
+            gamescope_fsr: true,
+            gamescope_fps_limit: Some("144".into()),
+            ..Default::default()
+        };
+        let plan = wrap_gamescope(
+            LaunchPlan {
+                command: "gamemoderun".into(),
+                args: vec!["game.exe".into()],
+                envs: vec![("GAMEID".into(), "umu-1".into())],
+            },
+            &globals,
+            "/usr/bin/gamescope",
+        );
+        assert_eq!(
+            plan.command,
+            "/usr/bin/gamescope",
+            "gamescope must be the outermost wrapper"
+        );
+        assert_eq!(
+            plan.args,
+            ["-F", "--fps-limit", "144", "--", "gamemoderun", "game.exe"]
+        );
+        assert_eq!(plan.envs, [("GAMEID".into(), "umu-1".into())]);
     }
 }

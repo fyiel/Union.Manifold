@@ -750,13 +750,18 @@ function LinuxSettingsTab() {
   const [proton, setProton] = useState<LinuxDetectionOption[]>([])
   const [gamemode, setGamemode] = useState(false)
   const [mangohud, setMangohud] = useState(false)
+  const [gamescope, setGamescope] = useState(false)
+  const [gamescopeFsr, setGamescopeFsr] = useState(false)
+  const [gamescopeFps, setGamescopeFps] = useState("")
+  const [gamescopeRefresh, setGamescopeRefresh] = useState("")
+  const [gamescopeSharpness, setGamescopeSharpness] = useState("")
   const [dllOverrides, setDllOverrides] = useState("")
   const [steamFixes, setSteamFixes] = useState(true)
 
   useEffect(() => {
     let alive = true
     void (async () => {
-      const [lm, pp, ppfx, env, detect, gm, mh, dll, fixes] = await Promise.all([
+      const [lm, pp, ppfx, env, detect, gm, mh, gs, gsFsr, gsFps, gsRefresh, gsSharp, dll, fixes] = await Promise.all([
         window.ucSettings?.get?.("linuxLaunchMode"),
         window.ucSettings?.get?.("linuxProtonPath"),
         window.ucSettings?.get?.("linuxProtonPrefix"),
@@ -764,6 +769,11 @@ function LinuxSettingsTab() {
         window.ucLinux?.detectProton?.(),
         window.ucSettings?.get?.("linuxGamemode"),
         window.ucSettings?.get?.("linuxMangohud"),
+        window.ucSettings?.get?.("linuxGamescope"),
+        window.ucSettings?.get?.("linuxGamescopeFsr"),
+        window.ucSettings?.get?.("linuxGamescopeFpsLimit"),
+        window.ucSettings?.get?.("linuxGamescopeRefreshRate"),
+        window.ucSettings?.get?.("linuxGamescopeSharpness"),
         window.ucSettings?.get?.("linuxDllOverrides"),
         window.ucSettings?.get?.("linuxSteamCompatibilityFixes"),
       ])
@@ -775,6 +785,11 @@ function LinuxSettingsTab() {
       if (detect?.ok && Array.isArray(detect.versions)) setProton(detect.versions as LinuxDetectionOption[])
       setGamemode(gm === true)
       setMangohud(mh === true)
+      setGamescope(gs === true)
+      setGamescopeFsr(gsFsr === true)
+      if (typeof gsFps === "string") setGamescopeFps(gsFps)
+      if (typeof gsRefresh === "string") setGamescopeRefresh(gsRefresh)
+      if (typeof gsSharp === "string") setGamescopeSharpness(gsSharp)
       if (typeof dll === "string") setDllOverrides(dll)
       setSteamFixes(fixes !== false)
     })()
@@ -828,6 +843,43 @@ function LinuxSettingsTab() {
       <Row title="MangoHud" desc="Show the MangoHud performance overlay in game, skipped when not installed">
         <Toggle on={mangohud} onToggle={() => { const v = !mangohud; setMangohud(v); persist2("linuxMangohud", v) }} />
       </Row>
+      <Row title="Gamescope" desc="Run the session through Gamescope for FSR upscaling and framerate control, skipped when not installed">
+        <Toggle on={gamescope} onToggle={() => { const v = !gamescope; setGamescope(v); persist2("linuxGamescope", v) }} />
+      </Row>
+      {gamescope ? (
+        <>
+          <Row title="FSR upscaling" desc="gamescope -F — AMD FidelityFX Super Resolution">
+            <Toggle on={gamescopeFsr} onToggle={() => { const v = !gamescopeFsr; setGamescopeFsr(v); persist2("linuxGamescopeFsr", v) }} />
+          </Row>
+          <Row title="FSR sharpness" desc="gamescope --sharpness, 0-20, higher is sharper">
+            <input
+              value={gamescopeSharpness}
+              onChange={(e) => setGamescopeSharpness(e.target.value)}
+              onBlur={() => persist("linuxGamescopeSharpness", gamescopeSharpness)}
+              placeholder="2"
+              style={{ width: 90, boxSizing: "border-box", height: 36, border: "1px solid var(--mf-line-2)", background: "var(--mf-panel)", borderRadius: 8, padding: "0 12px", fontFamily: MONO, fontSize: 12.5, color: "var(--mf-t1)", textAlign: "center", outline: "none" }}
+            />
+          </Row>
+          <Row title="Frame rate limit (FPS)" desc="gamescope --fps-limit — caps the session frame rate, e.g. 144">
+            <input
+              value={gamescopeFps}
+              onChange={(e) => setGamescopeFps(e.target.value)}
+              onBlur={() => persist("linuxGamescopeFpsLimit", gamescopeFps)}
+              placeholder="144"
+              style={{ width: 90, boxSizing: "border-box", height: 36, border: "1px solid var(--mf-line-2)", background: "var(--mf-panel)", borderRadius: 8, padding: "0 12px", fontFamily: MONO, fontSize: 12.5, color: "var(--mf-t1)", textAlign: "center", outline: "none" }}
+            />
+          </Row>
+          <Row title="Force refresh rate (Hz)" desc="gamescope --force-refresh-rate — spoofs the refresh rate games detect, e.g. 144">
+            <input
+              value={gamescopeRefresh}
+              onChange={(e) => setGamescopeRefresh(e.target.value)}
+              onBlur={() => persist("linuxGamescopeRefreshRate", gamescopeRefresh)}
+              placeholder="144"
+              style={{ width: 90, boxSizing: "border-box", height: 36, border: "1px solid var(--mf-line-2)", background: "var(--mf-panel)", borderRadius: 8, padding: "0 12px", fontFamily: MONO, fontSize: 12.5, color: "var(--mf-t1)", textAlign: "center", outline: "none" }}
+            />
+          </Row>
+        </>
+      ) : null}
       <Row title="Steam compatibility fixes" desc="Repair known Steam API DLL issues and add local achievement files before Proton or Wine launches">
         <Toggle on={steamFixes} onToggle={() => { const v = !steamFixes; setSteamFixes(v); persist2("linuxSteamCompatibilityFixes", v) }} />
       </Row>
