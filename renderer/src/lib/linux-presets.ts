@@ -16,6 +16,11 @@ export type LinuxGlobalSettings = {
   linuxProtonPrefix: string
   linuxSteamPath: string
   linuxExtraEnv: string
+  linuxGamescope?: boolean
+  linuxGamescopeFsr?: boolean
+  linuxGamescopeFpsLimit?: string
+  linuxGamescopeRefreshRate?: string
+  linuxGamescopeSharpness?: string
 }
 
 export type LinuxGameConfig = {
