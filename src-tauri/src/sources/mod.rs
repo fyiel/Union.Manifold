@@ -665,24 +665,15 @@ pub async fn sources_detail(_state: State<'_, AppState>, sources: Vec<Value>) ->
 
 #[tauri::command]
 pub async fn sources_resolve(
-    app: AppHandle,
+    _app: AppHandle,
     _state: State<'_, AppState>,
     source_id: String,
     option: schema::DownloadOption,
 ) -> Result<Value> {
-    let interactive_url = option
-        .url
-        .as_deref()
-        .or(option.page_url.as_deref())
-        .filter(|url| hosts::interactive::matches(url))
-        .map(str::to_string);
-    let file_name = option.file_name.clone();
-    let mut result = adapter_resolve(&source_id, &option).await;
-    if !result.resolvable {
-        if let Some(url) = interactive_url {
-            result = hosts::interactive::resolve(&app, &url, file_name).await;
-        }
-    }
+    // Non-unioncrax sources resolve through hosts::resolve_url, which falls
+    // back to Slipgate for gated hosts (datanodes/datavaults/gate) when the
+    // native resolver cannot clear the page.
+    let result = adapter_resolve(&source_id, &option).await;
     Ok(json!({ "ok": true, "result": result }))
 }
 

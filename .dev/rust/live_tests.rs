@@ -121,10 +121,6 @@ async fn live_gamebounty_datanodes_fileditch_and_gofile() {
             .get(host)
             .unwrap_or_else(|| panic!("no current {host} mirror"));
         eprintln!("{host}: page={:?}", option.url);
-        if hosts::interactive::matches(option.url.as_deref().unwrap_or("")) {
-            eprintln!("{host}: in-app verification window");
-            continue;
-        }
         let result = hosts::resolve_url(option).await;
         assert!(
             result.resolvable,
@@ -231,10 +227,6 @@ async fn live_every_source_returns_current_games() {
             eprintln!("{host}: external torrent client fallback");
             continue;
         }
-        if hosts::interactive::matches(page_url) {
-            eprintln!("{host}: in-app verification window");
-            continue;
-        }
         let result =
             tokio::time::timeout(Duration::from_secs(240), adapter_resolve(source_id, option))
                 .await
@@ -291,7 +283,6 @@ async fn live_current_akirabox_uses_verification() {
             continue;
         };
         let page_url = option.url.as_deref().expect("akirabox page url");
-        assert!(hosts::interactive::matches(page_url));
         let result = hosts::resolve_url(option).await;
         assert!(!result.resolvable);
         assert_eq!(result.open_url.as_deref(), Some(page_url));

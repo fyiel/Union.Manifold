@@ -276,25 +276,26 @@ export function orderSourcesByPreference<T extends { sourceId: string }>(
 export type DownloadEntry = { source: SourceGame; option: SourceDownloadOption }
 
 const HOST_FRIENDLINESS: Record<string, number> = {
-  pixeldrain: 0,
-  datanodes: 0,
-  fileditch: 0,
-  mediafire: 1,
-  rootz: 1,
-  fuckingfast: 2,
-  buzzheavier: 2,
-  filekeeper: 3,
-  datavaults: 3,
-  megadb: 5,
-  filecrypt: 5,
-  vikingfile: 5,
-  "1fichier": 5,
-  akirabox: 5,
-  qiwi: 5,
-  fileq: 5,
-  mocha: 5,
-  zerofs: 5,
-  gofile: 6,
+  ucfiles: 0, // UnionCrax.Direct — #1 (in-app, no gates)
+  pixeldrain: 1, // #2 (dedicated resolver, no gates)
+  gofile: 2, // #3 (API resolver; occasional temp-unavailable)
+  datanodes: 3, // direct; may hit Cloudflare (Slipgate fallback)
+  fileditch: 4, // direct
+  buzzheavier: 4, // direct
+  mediafire: 4, // direct
+  rootz: 4, // direct
+  fuckingfast: 4, // direct
+  filekeeper: 4, // direct
+  datavaults: 5, // gated page (Slipgate)
+  megadb: 6, // Slipgate-only
+  filecrypt: 6,
+  vikingfile: 6,
+  "1fichier": 6,
+  akirabox: 6,
+  qiwi: 6,
+  fileq: 6,
+  mocha: 6,
+  zerofs: 6,
 }
 
 export function hostFriendliness(hostType: string): number {
@@ -306,7 +307,9 @@ export function collectDownloadEntries(orderedSources: SourceGame[]): DownloadEn
   const entries: DownloadEntry[] = []
   for (const source of orderedSources) {
     const opts = [...(source.downloadOptions || [])].sort(
-      (a, b) => Number(Boolean(b.resolvable)) - Number(Boolean(a.resolvable))
+      (a, b) =>
+        Number(Boolean(b.resolvable)) - Number(Boolean(a.resolvable)) ||
+        hostFriendliness(a.hostType) - hostFriendliness(b.hostType)
     )
     for (const option of opts) entries.push({ source, option })
   }
