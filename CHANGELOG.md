@@ -3,6 +3,24 @@
 All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 
+## 3.5.5
+
+### Added
+
+- Linux settings now include global Gamescope options: FSR with adjustable
+  sharpness, a global frame-rate cap and a forced refresh rate, applied as
+  the outermost launch wrapper when Gamescope is available
+
+### Fixed
+
+- Online-Fix readiness is re-probed when the Slipgate configuration changes
+  instead of staying stale until the next manual refresh
+- Gated hosts (Datanodes, Datavaults and peers) now resolve through Slipgate
+  with automatic FlareSolverr fallback instead of opening an interactive
+  verification window
+- Thunderstore browse pages are no longer offset by one, skipping the first
+  page of mods
+
 ## 3.5.4
 
 ### Fixed
