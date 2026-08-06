@@ -127,6 +127,16 @@ pub fn setting_set(app: AppHandle, state: State<'_, AppState>, key: String, valu
         let aria2 = state.downloads.aria2();
         tauri::async_runtime::spawn(async move { aria2.set_proxy(url).await });
     }
+    if key == "slipgateUrl" || key == "slipgateKey" {
+        // Slipgate identity changed: drop the cached Online-Fix readiness and
+        // re-probe against the new endpoint, then let the frontend re-list.
+        crate::sources::adapters::onlinefix::invalidate();
+        let probe_app = app.clone();
+        tauri::async_runtime::spawn(async move {
+            crate::sources::adapters::onlinefix::refresh().await;
+            probe_app.emit("uc:sources-updated", json!({})).ok();
+        });
+    }
     app.emit("uc:setting-changed", json!({ "key": key, "value": value }))
         .ok();
     json!({ "ok": true })
