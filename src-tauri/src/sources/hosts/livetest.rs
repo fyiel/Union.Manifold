@@ -87,7 +87,7 @@ async fn host_resolvers_live() {
         *dist.entry(o.host_type.clone()).or_default() += 1;
     }
     let mut dist: Vec<(String, usize)> = dist.into_iter().collect();
-    dist.sort_by(|a, b| b.1.cmp(&a.1));
+    dist.sort_by_key(|x| std::cmp::Reverse(x.1));
     eprintln!("host distribution: {dist:?}\n");
 
     let mut verified: Vec<String> = Vec::new();
@@ -216,7 +216,7 @@ async fn catalog_coverage() {
         }
     );
     let mut oh: Vec<(String, usize)> = orphan_hosts.into_iter().collect();
-    oh.sort_by(|a, b| b.1.cmp(&a.1));
+    oh.sort_by_key(|x| std::cmp::Reverse(x.1));
     eprintln!("orphan reliance by host:  {oh:?}");
     eprintln!("---- sample browser-only-only games ----");
     for t in &orphan_titles {

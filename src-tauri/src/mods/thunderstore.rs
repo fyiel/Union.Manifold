@@ -473,7 +473,7 @@ async fn versions_for(
             .find(|p| p.full_name.eq_ignore_ascii_case(full_name))
         {
             let mut versions: Vec<&TsVersion> = p.versions.iter().collect();
-            versions.sort_by(|a, b| version_key(&b.version).cmp(&version_key(&a.version)));
+            versions.sort_by_key(|v| std::cmp::Reverse(version_key(&v.version)));
             return Ok(versions.into_iter().map(version_json).collect());
         }
     }

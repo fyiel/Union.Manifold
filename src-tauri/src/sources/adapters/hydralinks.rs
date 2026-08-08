@@ -219,7 +219,7 @@ async fn options_from_uris(uris: &[String]) -> Vec<DownloadOption> {
             ..Default::default()
         });
     }
-    options.sort_by(|a, b| (b.resolvable as u8).cmp(&(a.resolvable as u8)));
+    options.sort_by_key(|x| std::cmp::Reverse(x.resolvable as u8));
     options
 }
 
@@ -272,7 +272,7 @@ async fn zeilink_options(slug: &str) -> Vec<DownloadOption> {
             });
         }
     }
-    options.sort_by(|a, b| (b.resolvable as u8).cmp(&(a.resolvable as u8)));
+    options.sort_by_key(|x| std::cmp::Reverse(x.resolvable as u8));
     options
 }
 

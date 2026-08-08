@@ -66,8 +66,8 @@ async fn download_to(app: &AppHandle, appid: &str, url: &str, dest: &Path) -> Re
             .await
             .map_err(|e| AppError::msg(format!("repair write: {e}")))?;
         done += chunk.len() as u64;
-        if total > 0 {
-            let p = ((done * 100) / total) as u8;
+        if let Some(p) = done.saturating_mul(100).checked_div(total) {
+            let p = p as u8;
             if p != last {
                 last = p;
                 emit(app, appid, "downloading", Some(p), None);

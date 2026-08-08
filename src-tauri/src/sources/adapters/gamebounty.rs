@@ -194,7 +194,7 @@ fn mirrors_to_options(container: Option<&Value>) -> Vec<DownloadOption> {
             });
         }
     }
-    options.sort_by(|a, b| b.resolvable.cmp(&a.resolvable));
+    options.sort_by_key(|x| std::cmp::Reverse(x.resolvable));
     options
 }
 

@@ -120,7 +120,7 @@ fn sort_games(games: &mut [UnifiedGame], p: &QueryParams) {
     let order = p.order.as_deref();
     match sort {
         "title" => {
-            games.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
+            games.sort_by_key(|g| g.title.to_lowercase());
             if order == Some("desc") {
                 games.reverse();
             }
