@@ -35,8 +35,7 @@ fn file_name_of(direct: &str) -> Option<String> {
         );
     }
     u.path_segments()?
-        .filter(|s| !s.is_empty())
-        .next_back()
+        .rfind(|s| !s.is_empty())
         .map(|s| s.to_string())
 }
 

@@ -479,7 +479,8 @@ async fn install_one_game() {
             continue;
         }
 
-        let mut targets: Vec<(String, Option<HashMap<String, String>>, String)> = Vec::new();
+        type Target = (String, Option<HashMap<String, String>>, String);
+        let mut targets: Vec<Target> = Vec::new();
         if let Some(files) = &r.files {
             for (i, f) in files.iter().enumerate() {
                 targets.push((
@@ -588,7 +589,7 @@ async fn install_one_game() {
                 if !keep {
                     let _ = std::fs::remove_dir_all(&game_dir);
                     let _ = std::fs::remove_dir_all(&install_dir);
-                    let _ = std::fs::remove_dir_all(&out.join("compatdata"));
+                    let _ = std::fs::remove_dir_all(out.join("compatdata"));
                 }
                 return;
             }

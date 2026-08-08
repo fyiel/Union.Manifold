@@ -184,7 +184,8 @@ fn latest_of(p: &TsPackage) -> Option<&TsVersion> {
     p.versions.get(p.latest).or_else(|| p.versions.first())
 }
 
-static PKG_MEM: LazyLock<parking_lot::Mutex<HashMap<String, (Instant, Arc<Vec<TsPackage>>)>>> =
+type TsCacheEntry = (Instant, Arc<Vec<TsPackage>>);
+static PKG_MEM: LazyLock<parking_lot::Mutex<HashMap<String, TsCacheEntry>>> =
     LazyLock::new(|| parking_lot::Mutex::new(HashMap::new()));
 static PKG_LOCKS: LazyLock<parking_lot::Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>> =
     LazyLock::new(|| parking_lot::Mutex::new(HashMap::new()));
@@ -964,6 +965,7 @@ mod tests {
         assert!(!dst.join("BepInExPack_GTFO").exists());
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn mk_pkg(
         full: &str,
         name: &str,

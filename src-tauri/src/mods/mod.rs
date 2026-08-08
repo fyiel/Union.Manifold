@@ -1620,7 +1620,7 @@ pub(crate) async fn download_to_file(
 
 fn filename_from_url(url: &str) -> Option<String> {
     let u = url::Url::parse(url).ok()?;
-    let last = u.path_segments()?.last()?.to_string();
+    let last = u.path_segments()?.next_back()?.to_string();
     let decoded = percent_encoding::percent_decode_str(&last)
         .decode_utf8_lossy()
         .to_string();
@@ -3088,7 +3088,7 @@ mod tests {
         assert_eq!(n, 1);
         assert_eq!(read(&target.join("drift.txt")), "original");
         assert_eq!(read(&target.join("stay.txt")), "stay");
-        assert!(load_journal(&dir).files.get("drift.txt").is_none());
+        assert!(!load_journal(&dir).files.contains_key("drift.txt"));
 
         std::fs::remove_dir_all(dir.join("staging/nexus-1")).unwrap();
         let n = deploy_to(&dir, &target, &cfg).unwrap();

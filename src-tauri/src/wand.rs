@@ -959,6 +959,8 @@ fn trainer_host_command(
     ))
 }
 
+// All parameters come straight off the wand_launch command arguments.
+#[allow(clippy::too_many_arguments)]
 async fn start_host(
     app: &AppHandle,
     state: &AppState,

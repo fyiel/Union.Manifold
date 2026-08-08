@@ -20,7 +20,8 @@ const INSTALLING: &[&str] = &[
     "cancelled",
 ];
 
-static SCAN_CACHE: Mutex<Option<(Instant, String, Vec<(PathBuf, Value)>)>> = Mutex::new(None);
+type ScanSnapshot = (Instant, String, Vec<(PathBuf, Value)>);
+static SCAN_CACHE: Mutex<Option<ScanSnapshot>> = Mutex::new(None);
 static SCAN_GATE: Mutex<()> = Mutex::new(());
 const SCAN_TTL: Duration = Duration::from_millis(10_000);
 

@@ -39,9 +39,12 @@ impl<T: Clone> Cached<T> {
     }
 }
 
+type CacheCell<T> = (Instant, T);
+type KeyedCells<T> = parking_lot::Mutex<HashMap<String, Arc<Mutex<Option<CacheCell<T>>>>>>;
+
 pub struct KeyedCache<T: Clone> {
     ttl: Duration,
-    cells: parking_lot::Mutex<HashMap<String, Arc<Mutex<Option<(Instant, T)>>>>>,
+    cells: KeyedCells<T>,
 }
 
 impl<T: Clone> KeyedCache<T> {

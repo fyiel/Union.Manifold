@@ -64,11 +64,11 @@ fn split_windows_launch_args(raw: &str) -> Vec<String> {
                 backslashes += 1;
             }
             if chars.peek() != Some(&'"') {
-                arg.extend(std::iter::repeat_n('\\', backslashes));
+                arg.extend(std::iter::repeat('\\').take(backslashes));
                 continue;
             }
 
-            arg.extend(std::iter::repeat_n('\\', backslashes / 2));
+            arg.extend(std::iter::repeat('\\').take(backslashes / 2));
             chars.next();
             if backslashes % 2 == 1 {
                 arg.push('"');
@@ -395,6 +395,9 @@ fn finish_tracked_game(
     exit_after_game_if_requested(app.clone());
 }
 
+// Flat argv mirrors the Tauri command surface this helper feeds; bundling
+// into a struct would add ceremony for a single internal call site.
+#[allow(clippy::too_many_arguments)]
 fn spawn_and_track(
     app: &AppHandle,
     appid: &str,

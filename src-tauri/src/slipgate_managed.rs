@@ -312,23 +312,20 @@ async fn status_value(paths: &AppPaths) -> Value {
     let mut error = info.error.clone();
     let url = config.as_ref().and_then(ManagedConfig::url);
     if let (Some(config), Some(base)) = (&config, &url) {
-        match crate::slipgate::health(base, &config.key).await {
-            Ok(value) => {
-                running = true;
-                healthy = value.get("ok").and_then(Value::as_bool).unwrap_or(false);
-                version = value
-                    .get("version")
-                    .and_then(Value::as_str)
-                    .unwrap_or("")
-                    .to_string();
-                flaresolverr_ok = value
-                    .get("flaresolverrOk")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false);
-                recipes = value.get("recipes").cloned().unwrap_or_else(|| json!([]));
-                error = None;
-            }
-            Err(_) => {}
+        if let Ok(value) = crate::slipgate::health(base, &config.key).await {
+            running = true;
+            healthy = value.get("ok").and_then(Value::as_bool).unwrap_or(false);
+            version = value
+                .get("version")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string();
+            flaresolverr_ok = value
+                .get("flaresolverrOk")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            recipes = value.get("recipes").cloned().unwrap_or_else(|| json!([]));
+            error = None;
         }
     }
     json!({

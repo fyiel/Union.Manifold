@@ -206,14 +206,14 @@ pub fn year_from(s: &str) -> Option<i32> {
 pub fn merge_games(records: Vec<SourceGame>) -> Vec<UnifiedGame> {
     let n = records.len();
     let mut parent: Vec<usize> = (0..n).collect();
-    fn find(parent: &mut Vec<usize>, mut x: usize) -> usize {
+    fn find(parent: &mut [usize], mut x: usize) -> usize {
         while parent[x] != x {
             parent[x] = parent[parent[x]];
             x = parent[x];
         }
         x
     }
-    fn union(parent: &mut Vec<usize>, a: usize, b: usize) {
+    fn union(parent: &mut [usize], a: usize, b: usize) {
         let ra = find(parent, a);
         let rb = find(parent, b);
         if ra != rb {

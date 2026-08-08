@@ -351,7 +351,7 @@ pub async fn slipgate_check(url: String, key: String) -> Result<Value, String> {
 }
 
 fn parse_cookie_string(raw: &str) -> Vec<(String, String)> {
-    raw.split(|c| c == ';' || c == '\n' || c == '\r')
+    raw.split(|c| [';', '\n', '\r'].contains(&c))
         .filter_map(|part| {
             let mut part = part.trim();
             for label in ["Cookie:", "cookie:"] {

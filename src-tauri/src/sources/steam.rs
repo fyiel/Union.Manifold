@@ -51,11 +51,8 @@ pub async fn get_store_details(appid: u64) -> Option<StoreDetails> {
         Ok(v) => v,
         Err(_) => return None,
     };
-    let entry = json.get(appid.to_string());
-    if entry.is_none() {
-        return None;
-    }
-    let data = entry
+    let data = json
+        .get(appid.to_string())
         .filter(|v| v.get("success").and_then(|s| s.as_bool()).unwrap_or(false))
         .and_then(|v| v.get("data"));
     let out = data.map(|d| {

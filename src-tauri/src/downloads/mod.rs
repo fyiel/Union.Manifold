@@ -51,8 +51,8 @@ pub fn safe_folder_name(name: &str) -> String {
 
 fn sanitize_filename(name: &str) -> String {
     let base = name
-        .rsplit(|c| c == '/' || c == '\\')
-        .next()
+        .rsplit(|c| ['/', '\\'].contains(&c))
+        .next_back()
         .unwrap_or(name);
     let cleaned: String = base
         .chars()
@@ -62,7 +62,7 @@ fn sanitize_filename(name: &str) -> String {
             c => c,
         })
         .collect();
-    let trimmed = cleaned.trim().trim_end_matches(|c| c == '.' || c == ' ');
+    let trimmed = cleaned.trim().trim_end_matches(['.', ' ']);
     if trimmed.is_empty() {
         "download.archive".to_string()
     } else {
@@ -220,7 +220,7 @@ impl DownloadEngine {
             }
         }
         if let Ok(parsed) = url::Url::parse(url) {
-            if let Some(last) = parsed.path_segments().and_then(|s| s.last()) {
+            if let Some(last) = parsed.path_segments().and_then(|mut s| s.next_back()) {
                 let decoded = percent_encoding::percent_decode_str(last)
                     .decode_utf8_lossy()
                     .to_string();

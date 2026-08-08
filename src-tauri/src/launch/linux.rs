@@ -1045,7 +1045,7 @@ mod tests {
             envs: vec![("WINEPREFIX".into(), prefix.to_string_lossy().to_string())],
         };
 
-        prepare_onlinefix_runtime_from(&mut plan, &game.join("Game.exe"), &[steam.clone()])
+        prepare_onlinefix_runtime_from(&mut plan, &game.join("Game.exe"), std::slice::from_ref(&steam))
             .unwrap();
 
         let destination = prefix.join("drive_c/Program Files (x86)/Steam");
@@ -1081,7 +1081,7 @@ mod tests {
         };
 
         let error =
-            prepare_onlinefix_runtime_from(&mut plan, &game.join("Game.exe"), &[steam.clone()])
+            prepare_onlinefix_runtime_from(&mut plan, &game.join("Game.exe"), std::slice::from_ref(&steam))
                 .unwrap_err();
 
         assert!(error.contains("steamclient64.dll"), "{error}");

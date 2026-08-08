@@ -16,7 +16,8 @@ static NEG_CACHE: LazyLock<Mutex<HashMap<String, Instant>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 const NEG_TTL: Duration = Duration::from_secs(60);
 
-static MEM_CACHE: LazyLock<Mutex<HashMap<String, (Arc<Vec<u8>>, &'static str)>>> =
+type MemEntry = (Arc<Vec<u8>>, &'static str);
+static MEM_CACHE: LazyLock<Mutex<HashMap<String, MemEntry>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 const MEM_MAX: usize = 512;
 static INFLIGHT: LazyLock<Mutex<HashMap<String, Arc<AsyncMutex<()>>>>> =

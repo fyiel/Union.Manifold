@@ -265,7 +265,7 @@ fn extract_download_options(content: &str) -> Vec<DownloadOption> {
         };
         let inner_text = http::strip_tags(&cap[4]);
         let is_button = BUTTON_RE.is_match(&attrs) || DOWNLOAD_TEXT_RE.is_match(&inner_text);
-        if !FILE_HOSTS_RE.is_match(&host) && !(is_button && !STEAMRIP_HOST_RE.is_match(&host)) {
+        if !FILE_HOSTS_RE.is_match(&host) && (is_button || STEAMRIP_HOST_RE.is_match(&host)) {
             continue;
         }
         if EXCLUDE_HOST_RE.is_match(&host) {
