@@ -241,13 +241,21 @@ impl AchievementService {
                             .collect();
                         unlocks.extend(
                             next.achievements
-                                .iter()
+                                .iter_mut()
                                 .filter(|achievement| {
                                     achievement.unlocked
                                         && !previous_unlocks
                                             .contains(&achievement.api_name.to_lowercase())
                                 })
-                                .cloned(),
+                                .map(|achievement| {
+                                    // Pin the unlock time in the stored copy
+                                    // so the toast and the store agree and a
+                                    // later scan cannot lose the timestamp.
+                                    if achievement.unlocked_at.is_none() {
+                                        achievement.unlocked_at = Some(now_ms());
+                                    }
+                                    achievement.clone()
+                                }),
                         );
                     }
                     next.updated_at = now_ms();
@@ -320,7 +328,12 @@ fn merge_game(
         if let Some(old) = previous_by_id.get(&key) {
             if old.unlocked || !state_loaded {
                 achievement.unlocked = old.unlocked;
-                achievement.unlocked_at = old.unlocked_at;
+                // A real timestamp from the previous store wins, but a
+                // stored None (timestamp-less provider or an old bug) must
+                // not pin the fresh scan's timestamp to None forever.
+                if old.unlocked_at.is_some() {
+                    achievement.unlocked_at = old.unlocked_at;
+                }
             } else if achievement.unlocked && achievement.unlocked_at.is_none() {
                 achievement.unlocked_at = old.unlocked_at;
             }
@@ -1921,3 +1934,107 @@ mod tests {
         assert_eq!(loaded.list(), vec![expected]);
     }
 }
+    #[test]
+    fn merge_game_keeps_fresh_timestamp_when_previous_unlocked_at_is_none() {
+        let previous = AchievementGame {
+            appid: "g1".to_string(),
+            steam_app_id: None,
+            title: "Game".to_string(),
+            image: None,
+            provider: "CODEX".to_string(),
+            catalog_complete: true,
+            updated_at: 1,
+            achievements: vec![LocalAchievement {
+                api_name: "ACH_A".to_string(),
+                display_name: "A".to_string(),
+                description: String::new(),
+                hidden: false,
+                icon: None,
+                icon_locked: None,
+                unlocked: true,
+                unlocked_at: None,
+            }],
+        };
+        let current = AchievementGame {
+            achievements: vec![LocalAchievement {
+                api_name: "ACH_A".to_string(),
+                display_name: "A".to_string(),
+                description: String::new(),
+                hidden: false,
+                icon: None,
+                icon_locked: None,
+                unlocked: true,
+                unlocked_at: Some(500),
+            }],
+            ..previous.clone()
+        };
+
+        let merged = merge_game(&previous, current.clone(), true);
+        let achievement = merged
+            .achievements
+            .iter()
+            .find(|achievement| achievement.api_name == "ACH_A")
+            .unwrap();
+        assert_eq!(achievement.unlocked_at, Some(500));
+
+        let again = merge_game(&merged, current, true);
+        let achievement = again
+            .achievements
+            .iter()
+            .find(|achievement| achievement.api_name == "ACH_A")
+            .unwrap();
+        assert_eq!(achievement.unlocked_at, Some(500));
+    
+    #[test]
+    fn merge_game_keeps_fresh_timestamp_when_previous_unlocked_at_is_none() {
+        let previous = AchievementGame {
+            appid: "g1".to_string(),
+            steam_app_id: None,
+            title: "Game".to_string(),
+            image: None,
+            provider: "CODEX".to_string(),
+            catalog_complete: true,
+            updated_at: 1,
+            achievements: vec![LocalAchievement {
+                api_name: "ACH_A".to_string(),
+                display_name: "A".to_string(),
+                description: String::new(),
+                hidden: false,
+                icon: None,
+                icon_locked: None,
+                unlocked: true,
+                unlocked_at: None,
+            }],
+        };
+        let current = AchievementGame {
+            achievements: vec![LocalAchievement {
+                api_name: "ACH_A".to_string(),
+                display_name: "A".to_string(),
+                description: String::new(),
+                hidden: false,
+                icon: None,
+                icon_locked: None,
+                unlocked: true,
+                unlocked_at: Some(500),
+            }],
+            ..previous.clone()
+        };
+
+        let merged = merge_game(&previous, current.clone(), true);
+        let achievement = merged
+            .achievements
+            .iter()
+            .find(|achievement| achievement.api_name == "ACH_A")
+            .unwrap();
+        assert_eq!(achievement.unlocked_at, Some(500));
+
+        let again = merge_game(&merged, current, true);
+        let achievement = again
+            .achievements
+            .iter()
+            .find(|achievement| achievement.api_name == "ACH_A")
+            .unwrap();
+        assert_eq!(achievement.unlocked_at, Some(500));
+    }
+}
+
