@@ -363,6 +363,13 @@ impl Registry {
         source.id != "onlinefix"
     }
 
+    /// Whether an id names a source that the generic enable/disable surface
+    /// may touch. Unknown ids and sources behind their own toggle (Online-Fix)
+    /// are rejected so a stray call cannot silently desync the registry.
+    fn is_regular_source_id(id: &str) -> bool {
+        SOURCES.iter().any(|s| s.id == id && Self::is_regular_source(s))
+    }
+
     pub fn active_ids(&self, requested: &Option<Vec<String>>) -> Vec<String> {
         let slipgate = crate::slipgate::cfg().is_some();
         let hide_torrent = crate::settings::hide_torrent_sources();
@@ -587,6 +594,13 @@ pub fn sources_list(state: State<'_, AppState>) -> Value {
 
 #[tauri::command(async)]
 pub fn sources_set_enabled(state: State<'_, AppState>, id: String, enabled: bool) -> Value {
+    let regular = Registry::is_regular_source_id(&id);
+    if !regular {
+        return json!({
+            "ok": false,
+            "error": format!("{id} is not a regular source and cannot be toggled here")
+        });
+    }
     state.sources.set_enabled(&id, enabled);
     let disabled: Vec<String> = SOURCES
         .iter()
@@ -856,6 +870,14 @@ mod tests {
         assert!(listed.iter().any(|s| s.id == "gog"));
         let active = reg.active_ids(&None);
         assert!(!active.iter().any(|id| id == "onlinefix"));
+    }
+
+    #[test]
+    fn generic_enable_surface_rejects_onlinefix_and_unknown_ids() {
+        assert!(!Registry::is_regular_source_id("onlinefix"));
+        assert!(!Registry::is_regular_source_id("nope"));
+        assert!(Registry::is_regular_source_id("gog"));
+        assert!(Registry::is_regular_source_id("steamrip"));
     }
 
     #[test]
