@@ -441,15 +441,49 @@ fn scan_discovery(context: &GameContext, discovery: &Discovery) -> Option<Scanne
     let mut state = HashMap::new();
     let mut state_loaded = false;
     let mut provider = discovery.provider.clone();
-    for path in &discovery.states {
-        if !path.is_file() {
-            continue;
-        }
-        if let Some(parsed) = parse_state(path) {
-            state = parsed;
+    // Parse every state file and pick the richest: any entries beats an
+    // empty leftover file, then the newest mtime, then the earlier list
+    // position. The old first-parseable-wins loop let a stale empty state
+    // claim state_loaded, suppressing richer providers and dropping
+    // previously known unlocks in the merge.
+    struct Candidate {
+        entries: usize,
+        mtime: Option<std::time::SystemTime>,
+        index: usize,
+        state: HashMap<String, UnlockState>,
+        provider: String,
+    }
+    let chosen = discovery
+        .states
+        .iter()
+        .enumerate()
+        .filter_map(|(index, path)| {
+            if !path.is_file() {
+                return None;
+            }
+            let parsed = parse_state(path)?;
+            let mtime = std::fs::metadata(path)
+                .and_then(|metadata| metadata.modified())
+                .ok();
+            Some(Candidate {
+                entries: parsed.len(),
+                mtime,
+                index,
+                state: parsed,
+                provider: provider_for(path),
+            })
+        })
+        .max_by(|a, b| {
+            (a.entries > 0)
+                .cmp(&(b.entries > 0))
+                .then_with(|| a.mtime.cmp(&b.mtime))
+                .then_with(|| b.index.cmp(&a.index))
+        });
+    if let Some(candidate) = chosen {
+        if candidate.entries > 0 {
+            state = candidate.state;
             state_loaded = true;
-            provider = provider_for(path);
-            break;
+            provider = candidate.provider;
         }
     }
     let catalog_complete = !definitions.is_empty();
@@ -1984,4 +2018,59 @@ mod tests {
             .unwrap();
         assert_eq!(achievement.unlocked_at, Some(500));
     }
+
+    #[test]
+    fn scan_discovery_prefers_non_empty_state_over_stale_empty_one() {
+        let tmp = tempfile::tempdir().unwrap();
+        let stale = tmp.path().join("achievements.json");
+        std::fs::write(&stale, "{}").unwrap();
+        let fresh = tmp.path().join("gse-saves/steam_settings/achievements.json");
+        std::fs::create_dir_all(fresh.parent().unwrap()).unwrap();
+        std::fs::write(
+            &fresh,
+            r#"{"Achievements": {"ACH_WIN": {"achieved": 1}}}"#,
+        )
+        .unwrap();
+        let discovery = Discovery {
+            definitions: None,
+            states: vec![stale.clone(), fresh.clone()],
+            provider: "test".to_string(),
+        };
+        let context = GameContext {
+            appid: "g1".to_string(),
+            steam_app_id: None,
+            title: "Game".to_string(),
+            image: None,
+            install_dir: tmp.path().to_path_buf(),
+            exe_path: None,
+            prefixes: Vec::new(),
+        };
+        let scanned = scan_discovery(&context, &discovery).unwrap();
+        assert!(scanned.state_loaded);
+        assert!(scanned.game.achievements.iter().any(|a| a.api_name == "ach_win"));
+    }
+
+    #[test]
+    fn scan_discovery_only_empty_state_leaves_state_loaded_false() {
+        let tmp = tempfile::tempdir().unwrap();
+        let stale = tmp.path().join("achievements.json");
+        std::fs::write(&stale, "{}").unwrap();
+        let discovery = Discovery {
+            definitions: None,
+            states: vec![stale],
+            provider: "test".to_string(),
+        };
+        let context = GameContext {
+            appid: "g1".to_string(),
+            steam_app_id: None,
+            title: "Game".to_string(),
+            image: None,
+            install_dir: tmp.path().to_path_buf(),
+            exe_path: None,
+            prefixes: Vec::new(),
+        };
+        let scanned = scan_discovery(&context, &discovery).unwrap();
+        assert!(!scanned.state_loaded);
+    }
+
 }
