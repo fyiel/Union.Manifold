@@ -296,20 +296,45 @@ async fn install_replacement(
         tokio::fs::remove_file(&staged).await.ok();
         return Err("staged steam_api64.dll failed checksum verification".to_string());
     }
-    if !backup.is_file() {
-        tokio::fs::copy(current, &backup)
+    if backup.is_file() {
+        // A previous repair left the original here; the current DLL is the
+        // incompatible one being replaced again.
+        tokio::fs::remove_file(current)
+            .await
+            .map_err(|error| format!("replace incompatible steam_api64.dll: {error}"))?;
+    } else {
+        // Move the incompatible DLL aside with an atomic rename so the game
+        // directory never lacks a steam_api64.dll, not even for a moment.
+        tokio::fs::rename(current, &backup)
             .await
             .map_err(|error| format!("back up incompatible steam_api64.dll: {error}"))?;
     }
-    tokio::fs::remove_file(current)
-        .await
-        .map_err(|error| format!("replace incompatible steam_api64.dll: {error}"))?;
     if let Err(error) = tokio::fs::rename(&staged, current).await {
-        tokio::fs::copy(&backup, current).await.ok();
+        if backup.is_file() {
+            tokio::fs::copy(&backup, current).await.ok();
+        }
         tokio::fs::remove_file(&staged).await.ok();
         return Err(format!("install compatible steam_api64.dll: {error}"));
     }
     Ok(())
+}
+
+/// If the game's steam_api64.dll is missing but a repair backup exists, a
+/// previous repair crashed between the backup move and the install; restore
+/// the original. Returns whether the file was restored.
+async fn restore_backed_up_dll(steam_api: &Path) -> Result<bool, String> {
+    if steam_api.is_file() {
+        return Ok(false);
+    }
+    let backup = sibling_path(steam_api, "steam_api64.dll.manifold-backup")?;
+    if backup.is_file() {
+        tokio::fs::rename(&backup, steam_api)
+            .await
+            .map_err(|error| format!("restore steam_api64.dll from backup: {error}"))?;
+        Ok(true)
+    } else {
+        Ok(false)
+    }
 }
 
 pub async fn repair_if_needed(
@@ -329,7 +354,12 @@ pub async fn repair_if_needed(
     }
     let steam_api = sibling_path(executable, "steam_api64.dll")?;
     if !steam_api.is_file() {
-        return Ok(false);
+        // The restore mutates shared state (the backup is consumed), so it
+        // runs under the repair lock like every other mutation below.
+        let _guard = REPAIR_LOCK.lock().await;
+        if !restore_backed_up_dll(&steam_api).await? && !steam_api.is_file() {
+            return Ok(false);
+        }
     }
 
     let inspection = inspect_file(&steam_api).await?;
@@ -492,5 +522,55 @@ mod tests {
             tokio::fs::read(&catalog_path).await.unwrap(),
             b"custom catalog"
         );
+    }
+
+
+    #[tokio::test]
+    async fn replacement_replaces_again_without_clobbering_backup() {
+        let temp = tempfile::tempdir().unwrap();
+        let current = temp.path().join("steam_api64.dll");
+        let replacement = temp.path().join("replacement.dll");
+        tokio::fs::write(&current, b"old library").await.unwrap();
+        tokio::fs::write(&replacement, b"new library")
+            .await
+            .unwrap();
+        let expected = hex::encode(Sha256::digest(b"new library"));
+
+        install_replacement(&current, &replacement, &expected)
+            .await
+            .unwrap();
+        tokio::fs::write(&replacement, b"new library v2")
+            .await
+            .unwrap();
+        let expected_v2 = hex::encode(Sha256::digest(b"new library v2"));
+
+        install_replacement(&current, &replacement, &expected_v2)
+            .await
+            .unwrap();
+
+        assert_eq!(tokio::fs::read(&current).await.unwrap(), b"new library v2");
+        assert_eq!(
+            tokio::fs::read(temp.path().join("steam_api64.dll.manifold-backup"))
+                .await
+                .unwrap(),
+            b"old library"
+        );
+    }
+
+    #[tokio::test]
+    async fn missing_dll_with_backup_is_restored() {
+        let temp = tempfile::tempdir().unwrap();
+        let steam_api = temp.path().join("steam_api64.dll");
+        let backup = temp.path().join("steam_api64.dll.manifold-backup");
+        tokio::fs::write(&backup, b"original library").await.unwrap();
+
+        assert!(restore_backed_up_dll(&steam_api).await.unwrap());
+        assert_eq!(
+            tokio::fs::read(&steam_api).await.unwrap(),
+            b"original library"
+        );
+        assert!(!backup.exists());
+
+        assert!(!restore_backed_up_dll(&steam_api).await.unwrap());
     }
 }
