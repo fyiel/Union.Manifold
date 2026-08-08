@@ -156,11 +156,7 @@ pub fn run() {
             // to be lumped with the torrent-only sources) into the dedicated
             // onlineFixEnabled toggle before the registry is built.
             if settings.get("onlineFixEnabled").is_null() {
-                let was_disabled = settings
-                    .get("disabledSources")
-                    .as_array()
-                    .map(|a| a.iter().any(|v| v.as_str() == Some("onlinefix")))
-                    .unwrap_or(false);
+                let was_disabled = crate::settings::legacy_onlinefix_disabled(&settings);
                 settings.set("onlineFixEnabled", serde_json::json!(!was_disabled));
             }
             crate::http::set_proxy(settings.get_string("proxyUrl"));
