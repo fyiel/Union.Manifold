@@ -52,7 +52,7 @@ pub fn safe_folder_name(name: &str) -> String {
 fn sanitize_filename(name: &str) -> String {
     let base = name
         .rsplit(|c| ['/', '\\'].contains(&c))
-        .next_back()
+        .next()
         .unwrap_or(name);
     let cleaned: String = base
         .chars()
