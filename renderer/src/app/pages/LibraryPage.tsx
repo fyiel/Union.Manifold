@@ -221,7 +221,7 @@ export function LibraryPage() {
         const [value, gcValue, ofStatus] = await Promise.all([
           window.ucSettings?.get?.("libraryGameMeta"),
           window.ucSettings?.get?.(GAME_CACHE_KEY),
-          window.ucSources?.onlinefixStatus?.(),
+          window.ucSources?.onlinefixStatus?.().catch(() => undefined),
         ])
         const m = value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, LibraryGameMeta>) : {}
         const gc = gcValue && typeof gcValue === "object" && !Array.isArray(gcValue) ? (gcValue as Record<string, CachedGame>) : {}
@@ -460,7 +460,7 @@ export function LibraryPage() {
     const next = !onlineFixEnabled
     setOnlineFixEnabled(next)
     try { await window.ucSources?.onlinefixSetEnabled?.(next) } catch { }
-    const status = await window.ucSources?.onlinefixStatus?.()
+    const status = await window.ucSources?.onlinefixStatus?.().catch(() => undefined)
     setOnlineFixEnabled(Boolean(status?.enabled))
     setOnlineFixReady(Boolean(status?.available))
   }

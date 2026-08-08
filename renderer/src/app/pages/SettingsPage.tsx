@@ -423,7 +423,7 @@ function SourcesTab() {
       listSources(),
       loadDisabledSources(),
       sourceCapabilities(),
-      window.ucSources?.onlinefixStatus?.(),
+      window.ucSources?.onlinefixStatus?.().catch(() => undefined),
     ])
     setSources(list)
     setEnabled(Object.fromEntries(list.map((s) => [s.id, !disabled.includes(s.id)])))
