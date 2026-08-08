@@ -162,214 +162,33 @@ export interface ControllerSettings {
   overlayPosition: 'left' | 'right'
 }
 
-export const Xbox360ButtonLabels: Record<Xbox360Button, string> = {
-  [Xbox360Button.A]: 'A',
-  [Xbox360Button.B]: 'B',
-  [Xbox360Button.X]: 'X',
-  [Xbox360Button.Y]: 'Y',
-  [Xbox360Button.LB]: 'LB',
-  [Xbox360Button.RB]: 'RB',
-  [Xbox360Button.BACK]: 'Back',
-  [Xbox360Button.START]: 'Start',
-  [Xbox360Button.LS]: 'L3',
-  [Xbox360Button.RS]: 'R3',
-  [Xbox360Button.DPAD_UP]: 'D-Pad Up',
-  [Xbox360Button.DPAD_DOWN]: 'D-Pad Down',
-  [Xbox360Button.DPAD_LEFT]: 'D-Pad Left',
-  [Xbox360Button.DPAD_RIGHT]: 'D-Pad Right',
-}
-
-export const NativeButtonLabels: Record<NativeButton | NativeAxis, string> = {
-  [NativeButton.A]: 'Button A',
-  [NativeButton.B]: 'Button B',
-  [NativeButton.X]: 'Button X',
-  [NativeButton.Y]: 'Button Y',
-  [NativeButton.LB]: 'Left Bumper',
-  [NativeButton.RB]: 'Right Bumper',
-  [NativeButton.LT]: 'Left Trigger',
-  [NativeButton.RT]: 'Right Trigger',
-  [NativeButton.LS]: 'Left Stick Click',
-  [NativeButton.RS]: 'Right Stick Click',
-  [NativeButton.BACK]: 'Back',
-  [NativeButton.START]: 'Start',
-  [NativeButton.DPAD_UP]: 'D-Pad Up',
-  [NativeButton.DPAD_DOWN]: 'D-Pad Down',
-  [NativeButton.DPAD_LEFT]: 'D-Pad Left',
-  [NativeButton.DPAD_RIGHT]: 'D-Pad Right',
-  [NativeButton.GUIDE]: 'Guide',
-  [NativeButton.TOUCHPAD]: 'Touchpad',
-  [NativeButton.SHARE]: 'Share',
-  [NativeAxis.LEFT_X]: 'Left Stick X',
-  [NativeAxis.LEFT_Y]: 'Left Stick Y',
-  [NativeAxis.RIGHT_X]: 'Right Stick X',
-  [NativeAxis.RIGHT_Y]: 'Right Stick Y',
-  [NativeAxis.LEFT_TRIGGER]: 'Left Trigger',
-  [NativeAxis.RIGHT_TRIGGER]: 'Right Trigger',
-}
-
-export const ControllerPresets: Record<string, Partial<ControllerMapping>> = {
-  generic: {
-    id: 'generic',
-    name: 'Generic Controller',
-    sourceController: 'generic',
-    mappings: {},
-  },
-  xbox: {
-    id: 'xbox',
-    name: 'Xbox Controller',
-    sourceController: 'xbox',
-    mappings: {
-      [NativeButton.A]: Xbox360Button.A,
-      [NativeButton.B]: Xbox360Button.B,
-      [NativeButton.X]: Xbox360Button.X,
-      [NativeButton.Y]: Xbox360Button.Y,
-      [NativeButton.LB]: Xbox360Button.LB,
-      [NativeButton.RB]: Xbox360Button.RB,
-      [NativeButton.LS]: Xbox360Button.LS,
-      [NativeButton.RS]: Xbox360Button.RS,
-      [NativeButton.BACK]: Xbox360Button.BACK,
-      [NativeButton.START]: Xbox360Button.START,
-    },
-  },
-  playstation: {
-    id: 'playstation',
-    name: 'PlayStation Controller',
-    sourceController: 'playstation',
-    mappings: {
-      [NativeButton.A]: Xbox360Button.A,
-      [NativeButton.B]: Xbox360Button.B,
-      [NativeButton.X]: Xbox360Button.X,
-      [NativeButton.Y]: Xbox360Button.Y,
-      [NativeButton.LB]: Xbox360Button.LB,
-      [NativeButton.RB]: Xbox360Button.RB,
-      [NativeButton.LS]: Xbox360Button.LS,
-      [NativeButton.RS]: Xbox360Button.RS,
-      [NativeButton.BACK]: Xbox360Button.BACK,
-      [NativeButton.START]: Xbox360Button.START,
-    },
-  },
-  dualsense: {
-    id: 'dualsense',
-    name: 'DualSense Controller',
-    sourceController: 'dualsense',
-    mappings: {
-      [NativeButton.A]: Xbox360Button.A,
-      [NativeButton.B]: Xbox360Button.B,
-      [NativeButton.X]: Xbox360Button.X,
-      [NativeButton.Y]: Xbox360Button.Y,
-      [NativeButton.LB]: Xbox360Button.LB,
-      [NativeButton.RB]: Xbox360Button.RB,
-      [NativeButton.LT]: Xbox360Button.LB,
-      [NativeButton.RT]: Xbox360Button.RB,
-      [NativeButton.LS]: Xbox360Button.LS,
-      [NativeButton.RS]: Xbox360Button.RS,
-      [NativeButton.BACK]: Xbox360Button.BACK,
-      [NativeButton.START]: Xbox360Button.START,
-      [NativeButton.GUIDE]: Xbox360Button.START,
-      [NativeButton.TOUCHPAD]: Xbox360Button.BACK,
-      [NativeButton.SHARE]: Xbox360Button.BACK,
-    },
-  },
-  dualshock4: {
-    id: 'dualshock4',
-    name: 'DualShock 4 Controller',
-    sourceController: 'dualshock4',
-    mappings: {
-      [NativeButton.A]: Xbox360Button.A,
-      [NativeButton.B]: Xbox360Button.B,
-      [NativeButton.X]: Xbox360Button.X,
-      [NativeButton.Y]: Xbox360Button.Y,
-      [NativeButton.LB]: Xbox360Button.LB,
-      [NativeButton.RB]: Xbox360Button.RB,
-      [NativeButton.LT]: Xbox360Button.LB,
-      [NativeButton.RT]: Xbox360Button.RB,
-      [NativeButton.LS]: Xbox360Button.LS,
-      [NativeButton.RS]: Xbox360Button.RS,
-      [NativeButton.BACK]: Xbox360Button.BACK,
-      [NativeButton.START]: Xbox360Button.START,
-      [NativeButton.TOUCHPAD]: Xbox360Button.BACK,
-    },
-  },
-  xboxone: {
-    id: 'xboxone',
-    name: 'Xbox One Controller',
-    sourceController: 'xboxone',
-    mappings: {
-      [NativeButton.A]: Xbox360Button.A,
-      [NativeButton.B]: Xbox360Button.B,
-      [NativeButton.X]: Xbox360Button.X,
-      [NativeButton.Y]: Xbox360Button.Y,
-      [NativeButton.LB]: Xbox360Button.LB,
-      [NativeButton.RB]: Xbox360Button.RB,
-      [NativeButton.LS]: Xbox360Button.LS,
-      [NativeButton.RS]: Xbox360Button.RS,
-      [NativeButton.BACK]: Xbox360Button.BACK,
-      [NativeButton.START]: Xbox360Button.START,
-      [NativeButton.GUIDE]: Xbox360Button.START,
-    },
-  },
-  xboxseries: {
-    id: 'xboxseries',
-    name: 'Xbox Series X Controller',
-    sourceController: 'xboxseries',
-    mappings: {
-      [NativeButton.A]: Xbox360Button.A,
-      [NativeButton.B]: Xbox360Button.B,
-      [NativeButton.X]: Xbox360Button.X,
-      [NativeButton.Y]: Xbox360Button.Y,
-      [NativeButton.LB]: Xbox360Button.LB,
-      [NativeButton.RB]: Xbox360Button.RB,
-      [NativeButton.LS]: Xbox360Button.LS,
-      [NativeButton.RS]: Xbox360Button.RS,
-      [NativeButton.BACK]: Xbox360Button.BACK,
-      [NativeButton.START]: Xbox360Button.START,
-      [NativeButton.GUIDE]: Xbox360Button.START,
-      [NativeButton.SHARE]: Xbox360Button.BACK,
-    },
-  },
-}
-
-export function createDefaultKeyBinding(): KeyBinding {
-  return {
-    id: 'default',
-    name: 'Default',
-    profileName: 'Default',
-    enabled: true,
-    buttonMappings: {},
-    stickToMouse: {
-      leftStick: false,
-      rightStick: false,
-      mouseSpeed: 1.0,
-      mouseAcceleration: false,
-    },
-    triggerToScroll: {
-      leftTrigger: false,
-      rightTrigger: false,
-      scrollSpeed: 1.0,
-    },
-  }
-}
-
-export function createDefaultProfile(name: string = 'Default'): ControllerProfile {
+export function createDefaultControllerSettings(): ControllerSettings {
   const now = Date.now()
-  return {
+  const defaultProfile: ControllerProfile = {
     id: `profile_${now}`,
-    name,
+    name: 'Default',
     createdAt: now,
     updatedAt: now,
     mappingEnabled: true,
-    controllerMapping: ControllerPresets.generic as ControllerMapping,
+    controllerMapping: {
+      id: 'generic',
+      name: 'Generic',
+      sourceController: 'generic',
+      mappings: {},
+    },
     keyBindingEnabled: false,
-    keyBinding: createDefaultKeyBinding(),
+    keyBinding: {
+      id: 'default',
+      name: 'Default',
+      profileName: 'Default',
+      enabled: true,
+      buttonMappings: {},
+    },
     deadzone: 0.15,
     triggerDeadzone: 0.1,
     vibrationEnabled: true,
     vibrationIntensity: 1.0,
   }
-}
-
-export function createDefaultControllerSettings(): ControllerSettings {
-  const defaultProfile = createDefaultProfile('Default')
   return {
     enabled: false,
     controllerType: 'generic',
