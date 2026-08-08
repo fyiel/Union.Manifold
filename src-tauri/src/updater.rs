@@ -60,11 +60,49 @@ fn is_pacman_install() -> bool {
 async fn install_via_pacman(app: &AppHandle, new_version: &str) -> Result<(), String> {
     use std::io::Write;
 
-    let url = format!(
+    // The version comes from the plugin-verified update manifest, but the
+    // URL and file name interpolate it: only accept plain version shapes.
+    if !new_version
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '+' | '-'))
+    {
+        return Err("refusing to install: invalid version string".to_string());
+    }
+
+    let base = format!(
         "https://github.com/fyiel/Union.Manifold/releases/download/v{new_version}/union-manifold-{new_version}-1-x86_64.pkg.tar.zst"
     );
+    let dir = std::env::temp_dir();
+    let pkg_path = dir.join(format!("union-manifold-{new_version}-1-x86_64.pkg.tar.zst"));
+    let sig_path = dir.join(format!("union-manifold-{new_version}-1-x86_64.pkg.tar.zst.sig"));
+
+    // Fetch the detached PGP signature first so pacman can verify the
+    // package against the user's imported key; never install an unsigned
+    // package.
+    let sig = crate::http::fetch(
+        &format!("{base}.sig"),
+        &crate::http::FetchOpts {
+            timeout: Some(std::time::Duration::from_secs(60)),
+            ..Default::default()
+        },
+    )
+    .await
+    .map_err(|e| format!("signature download failed: {e}"))?;
+    if !sig.status().is_success() {
+        return Err(format!(
+            "signature download failed: http {}. install manually: sudo pacman -U {}",
+            sig.status(),
+            base
+        ));
+    }
+    let sig_bytes = sig
+        .bytes()
+        .await
+        .map_err(|e| format!("signature download failed: {e}"))?;
+    std::fs::write(&sig_path, &sig_bytes).map_err(|e| format!("write signature: {e}"))?;
+
     let mut resp = crate::http::fetch(
-        &url,
+        &base,
         &crate::http::FetchOpts {
             timeout: Some(std::time::Duration::from_secs(300)),
             ..Default::default()
@@ -77,8 +115,6 @@ async fn install_via_pacman(app: &AppHandle, new_version: &str) -> Result<(), St
     }
     let total = resp.content_length();
 
-    let dir = std::env::temp_dir();
-    let pkg_path = dir.join(format!("union-manifold-{new_version}-1-x86_64.pkg.tar.zst"));
     let mut file = std::fs::File::create(&pkg_path).map_err(|e| format!("write package: {e}"))?;
     let mut received: u64 = 0;
     let mut last_emit: u64 = 0;
@@ -138,6 +174,7 @@ async fn install_via_pacman(app: &AppHandle, new_version: &str) -> Result<(), St
     };
     if out.status.success() {
         std::fs::remove_file(&pkg_path).ok();
+        std::fs::remove_file(&sig_path).ok();
         return Ok(());
     }
     let detail: String = String::from_utf8_lossy(&out.stderr)
