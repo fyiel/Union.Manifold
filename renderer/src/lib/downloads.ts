@@ -223,7 +223,7 @@ export async function getPreferredDownloadHost(): Promise<PreferredDownloadHost>
   return "ucfiles"
 }
 
-export function setPreferredDownloadHost(host: PreferredDownloadHost) {
+function setPreferredDownloadHost(host: PreferredDownloadHost) {
   if (typeof window === "undefined") return
   if (!PREFERRED_HOSTS.includes(host)) return
 
@@ -319,7 +319,7 @@ function isUCFilesShareDownloadUrl(url: string): boolean {
   }
 }
 
-export async function resolveUCFilesDownload(url: string, signal?: AbortSignal): Promise<ResolvedDownload> {
+async function resolveUCFilesDownload(url: string, signal?: AbortSignal): Promise<ResolvedDownload> {
   if (!url) return { url, resolved: false }
 
   const sanitizedUrl = sanitizeUCFilesUrl(url)

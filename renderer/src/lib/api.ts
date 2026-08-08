@@ -134,7 +134,7 @@ export function resetApiReachability(): void {
   setServiceReachable(true)
 }
 
-export async function recheckApiReachability(): Promise<boolean> {
+async function recheckApiReachability(): Promise<boolean> {
   try {
     const response = await fetch(apiUrl("/api/health"), {
       method: "GET",
@@ -178,7 +178,7 @@ export function getApiConnectivitySnapshot(): ApiConnectivitySnapshot {
   return cachedConnectivitySnapshot
 }
 
-export function normalizeApiBaseUrl(url: string): string {
+function normalizeApiBaseUrl(url: string): string {
   const trimmed = String(url || "").trim()
   if (!trimmed) return ""
 
@@ -213,7 +213,7 @@ export function getApiBaseUrl(): string {
   return readCustomApiBaseUrl() || readDetectedApiBaseUrl() || DEFAULT_BASE_URL
 }
 
-export function setApiBaseUrl(url: string): void {
+function setApiBaseUrl(url: string): void {
   if (typeof window === "undefined") return
   const normalized = normalizeApiBaseUrl(url)
   try {
@@ -350,7 +350,7 @@ function base64ToUint8Array(base64: string): Uint8Array<ArrayBuffer> {
   return Uint8Array.from(atob(base64), (c) => c.charCodeAt(0))
 }
 
-export async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
+async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await apiFetch(path, init)
   if (!response.ok) {
     let detail = `${response.status}`

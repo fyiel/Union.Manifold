@@ -83,7 +83,7 @@ export function generateErrorCode(errorType: string, context?: string): string {
   return `${errorPrefix}-${contextHash}-${timestamp}`
 }
 
-export const ErrorTypes = {
+const ErrorTypes = {
   GAME_FETCH: "GAME",
   SEARCH_FETCH: "SRCH",
   STATS_FETCH: "STAT",
@@ -344,7 +344,7 @@ export function matchAdminExecutable(
   return byName[0] ?? null
 }
 
-export function scoreGameExecutable(exe: GameExecutable, gameName: string, baseFolder?: string | null) {
+function scoreGameExecutable(exe: GameExecutable, gameName: string, baseFolder?: string | null) {
   const nameLower = exe.name.toLowerCase()
   const pathLower = exe.path.toLowerCase()
   const gameToken = normalizeToken(gameName)
@@ -417,7 +417,7 @@ export function rankGameExecutables(exes: GameExecutable[], gameName: string, ba
     })
 }
 
-export function pickGameExecutable(exes: GameExecutable[], gameName: string, gameSource?: string, baseFolder?: string | null) {
+function pickGameExecutable(exes: GameExecutable[], gameName: string, gameSource?: string, baseFolder?: string | null) {
   const seen = new Set<string>()
   const unique: GameExecutable[] = []
   for (const exe of exes) {
@@ -455,7 +455,7 @@ export function pickGameExecutable(exes: GameExecutable[], gameName: string, gam
   return { pick: top || null, confident }
 }
 
-export function getCardImage(imageUrl: string): string {
+function getCardImage(imageUrl: string): string {
   return imageUrl
     .replace('/t_thumb/', '/t_cover_big_2x/')
     .replace('/t_cover_big/', '/t_cover_big_2x/')
@@ -486,7 +486,7 @@ export function hasInstalledVersionUpdate(
   return normalizedInstalled.length > 0 && !normalizedInstalled.includes(normalizedCatalog)
 }
 
-export function timeAgo(dateStr?: string | null): string {
+function timeAgo(dateStr?: string | null): string {
   if (!dateStr) return ""
   const date = new Date(dateStr)
   if (isNaN(date.getTime())) return ""
@@ -503,7 +503,7 @@ export function timeAgo(dateStr?: string | null): string {
   return `${Math.floor(months / 12)}y ago`
 }
 
-export function timeAgoLong(dateStr?: string | null): string {
+function timeAgoLong(dateStr?: string | null): string {
   if (!dateStr) return ""
   const date = new Date(dateStr)
   if (isNaN(date.getTime())) return ""
@@ -540,7 +540,7 @@ export function isGameVersionUpdate(game: { update_time?: string; release_time?:
   return updateDate.getTime() > postedDate.getTime() + 60000
 }
 
-export function formatVersion(version: string | undefined | null): string {
+function formatVersion(version: string | undefined | null): string {
   if (!version) return ""
   const trimmed = version.trim()
   if (/^[vvbb]/i.test(trimmed)) {

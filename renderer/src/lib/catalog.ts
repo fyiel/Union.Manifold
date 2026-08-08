@@ -6,7 +6,7 @@ export type CatalogGame = Game & {
   searchText?: string
 }
 
-export type CatalogSnapshot = {
+type CatalogSnapshot = {
   games: CatalogGame[]
   stats: GameStats
   updatedAt: number
@@ -19,7 +19,7 @@ type CatalogMemoryCache = CatalogSnapshot & {
   hydratePromise: Promise<CatalogSnapshot> | null
 }
 
-export const CATALOG_TTL_MS = 1000 * 60 * 60 * 6
+const CATALOG_TTL_MS = 1000 * 60 * 60 * 6
 export const CATALOG_STATS_TTL_MS = 1000 * 60 * 15
 
 const emptySnapshot = (): CatalogSnapshot => ({
@@ -51,7 +51,7 @@ function normalizeSearchText(text: string): string {
     .trim()
 }
 
-export function normalizeCatalogGame(game: any): CatalogGame {
+function normalizeCatalogGame(game: any): CatalogGame {
   const normalizedDescription = typeof game?.description === "string" ? game.description : ""
   const normalizedName = typeof game?.name === "string" && game.name ? game.name : String(game?.appid || "Unknown")
   const developer = game?.developer && game.developer !== "Unknown"

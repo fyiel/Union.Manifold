@@ -31,7 +31,7 @@ export async function setSourceEnabled(id: string, enabled: boolean): Promise<bo
   return Boolean(res?.ok)
 }
 
-export async function searchSources(query: string, limit = 24): Promise<UnifiedSourceGame[]> {
+async function searchSources(query: string, limit = 24): Promise<UnifiedSourceGame[]> {
   const q = query.trim()
   if (!q) return []
   const res = await api()?.search?.(q, limit)
@@ -42,7 +42,7 @@ export async function searchSources(query: string, limit = 24): Promise<UnifiedS
   return res.games || []
 }
 
-export async function browseSources(offset = 0, limit = 36): Promise<UnifiedSourceGame[]> {
+async function browseSources(offset = 0, limit = 36): Promise<UnifiedSourceGame[]> {
   const res = await api()?.catalog?.(offset, limit)
   if (!res?.ok) {
     if (res?.error) sourceLogger.warn("sources catalog failed", { data: res.error })
@@ -141,7 +141,7 @@ export function fetchSteamArt(appid?: number | null, name?: string): Promise<str
   return p
 }
 
-export async function sourceTags(): Promise<{ tags: string[]; bySource: Record<string, string[]> }> {
+async function sourceTags(): Promise<{ tags: string[]; bySource: Record<string, string[]> }> {
   const res = await api()?.tags?.()
   return res?.ok ? { tags: res.tags, bySource: res.bySource } : { tags: [], bySource: {} }
 }
@@ -218,7 +218,7 @@ export async function loadSourcePriority(): Promise<string[]> {
   return [...SOURCE_PRIORITY]
 }
 
-export async function saveSourcePriority(ids: string[]): Promise<void> {
+async function saveSourcePriority(ids: string[]): Promise<void> {
   try { await window.ucSettings?.set?.(SOURCE_PRIORITY_KEY, ids) } catch {  }
 }
 
@@ -366,7 +366,7 @@ function persistDownloadArt(): void {
   try { void window.ucSettings?.set?.(DOWNLOAD_ART_KEY, Object.fromEntries(_downloadArt)) } catch {  }
 }
 
-export function recordDownloadArt(appid: string, image?: string, title?: string): void {
+function recordDownloadArt(appid: string, image?: string, title?: string): void {
   _downloadArt.set(appid, { image, title })
   persistDownloadArt()
 }
@@ -391,7 +391,7 @@ export function downloadAppidFor(seed: string): string {
   return safeId(seed)
 }
 
-export function unifiedId(game: UnifiedSourceGame): string {
+function unifiedId(game: UnifiedSourceGame): string {
   return game.dedupKey
 }
 
@@ -415,7 +415,7 @@ export function unifiedToGame(game: UnifiedSourceGame): Game {
   } as Game
 }
 
-export type StartResult =
+type StartResult =
   | { ok: true; queued: true }
   | { ok: false; openUrl?: string; reason?: string; cancelled?: boolean }
 

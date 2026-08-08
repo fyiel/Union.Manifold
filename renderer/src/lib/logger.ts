@@ -84,7 +84,7 @@ export const logger = new Logger("App")
 export const apiLogger = new Logger("API")
 export const downloadLogger = new Logger("Download")
 export const gameLogger = new Logger("Game")
-export const authLogger = new Logger("Auth")
+const authLogger = new Logger("Auth")
 export const sourceLogger = new Logger("Sources")
 
 export default logger
