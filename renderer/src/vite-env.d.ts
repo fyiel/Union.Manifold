@@ -6,8 +6,6 @@ type DownloadUpdatePayload = {
   | "queued"
   | "downloading"
   | "paused"
-  | "verifying"
-  | "retrying"
   | "extracting"
   | "installing"
   | "install_ready"
@@ -27,32 +25,10 @@ type DownloadUpdatePayload = {
   gameName?: string | null
   url?: string
   error?: string | null
-  warning?: string | null
-  skippedFiles?: string[]
   partIndex?: number
   partTotal?: number
   update?: boolean
   installMetadata?: Record<string, unknown>
-  spaceCheck?: {
-    archiveBytes: number
-    estimatedExtractBytes: number
-    requiredBytes: number
-    freeBytes: number
-    shortfallBytes: number
-    targetPath: string
-    drives: Array<{ id: string; name: string; path: string; totalBytes: number; freeBytes: number }>
-    ok: boolean
-  } | null
-  resumeData?: {
-    urlChain?: string[]
-    mimeType?: string
-    etag?: string
-    lastModified?: string
-    startTime?: number
-    offset?: number
-    totalBytes?: number
-    savePath?: string
-  }
 }
 
 type GameLinuxConfig = {
@@ -75,7 +51,6 @@ declare global {
     hostType: string
     url?: string
     pageUrl?: string
-    fileName?: string
     sizeBytes?: number
     sizeText?: string
     resolvable: boolean
@@ -94,7 +69,6 @@ declare global {
     developer?: string
     releaseDate?: string
     releaseYear?: number | null
-    addedAt?: number | null
     updatedAt?: number | null
     version?: string
     sizeBytes?: number
@@ -157,12 +131,9 @@ declare global {
     image?: string | null
     provider: string
     catalogComplete: boolean
-    updatedAt: number
     achievements: LocalAchievement[]
   }
   type LocalAchievementUnlock = {
-    appid: string
-    steamAppId?: number | null
     gameTitle: string
     achievement: LocalAchievement
   }
@@ -251,25 +222,10 @@ declare global {
     availableAfterReservation: number
     mountRoot: string | null
     humanRequired?: string
-    humanFree?: string
     humanShortfall?: string
     humanAvailable?: string
-    error?: string
   }
 
-  type StorageSummaryResult = {
-    ok: boolean
-    mountRoot?: string | null
-    freeBytes?: number
-    reservedBytes?: number
-    reservedDownloadBytes?: number
-    reservedExtractBytes?: number
-    availableBytes?: number
-    humanFree?: string
-    humanReserved?: string
-    humanAvailable?: string
-    error?: string
-  }
 
   type SteamScannedApp = {
     steamAppId: number
@@ -282,7 +238,6 @@ declare global {
   type ModEntry = {
     id: string
     provider: "nexus" | "workshop" | "thunderstore"
-    remoteId: string
     fileId: number | null
     name: string
     version: string
@@ -326,15 +281,10 @@ declare global {
   type BrowseMod = {
     remoteId: string
     name: string
-    summary?: string | null
     author?: string
     picture?: string | null
     downloads?: number
     endorsements?: number
-    version?: string
-    updatedAt?: number
-    sizeBytes?: number
-    pageUrl?: string
     installed?: boolean
   }
 
@@ -353,7 +303,6 @@ declare global {
     name: string
     author?: string
     picture?: string | null
-    pageUrl?: string
   }
 
   type ThunderstoreCommunity = {
@@ -363,7 +312,6 @@ declare global {
 
   type ThunderstoreVersion = {
     version: string
-    downloads?: number
     sizeBytes?: number
     uploadedAt?: number
     dependencyCount?: number
@@ -471,7 +419,7 @@ declare global {
       loadPersistedState: () => Promise<{ ok: boolean; downloads: any[]; error?: string }>
       savePersistedState: (downloads: any[]) => Promise<{ ok: boolean; count?: number; error?: string }>
       loadCatalogState: () => Promise<{ ok: boolean; games: any[]; stats: Record<string, { downloads: number; views: number }>; updatedAt: number; gamesUpdatedAt: number; statsUpdatedAt: number; error?: string }>
-      saveCatalogState: (payload: { games: any[]; stats: Record<string, { downloads: number; views: number }>; gamesUpdatedAt?: number; statsUpdatedAt?: number }) => Promise<{ ok: boolean; games?: number; stats?: number; updatedAt?: number; gamesUpdatedAt?: number; statsUpdatedAt?: number; error?: string }>
+      saveCatalogState: (payload: { games: any[]; gamesUpdatedAt?: number }) => Promise<{ ok: boolean; games?: number; updatedAt?: number; error?: string }>
       listInstalled: () => Promise<any[]>
       getInstalled: (appid: string) => Promise<any | null>
       listInstalling: () => Promise<any[]>
@@ -633,7 +581,6 @@ declare global {
       list: () => Promise<{ ok: boolean; sources: SourceInfo[]; error?: string }>
       setEnabled: (id: string, enabled: boolean) => Promise<{ ok: boolean; error?: string }>
       search: (query: string, limit?: number) => Promise<{ ok: boolean; games: UnifiedSourceGame[]; error?: string }>
-      catalog: (offset?: number, limit?: number) => Promise<{ ok: boolean; games: UnifiedSourceGame[]; error?: string }>
       detail: (sources: Array<{ sourceId: string; sourceSlug: string }>) => Promise<{ ok: boolean; game: UnifiedSourceGame | null; error?: string }>
       resolve: (sourceId: string, option: SourceDownloadOption) => Promise<{ ok: boolean; result: SourceResolveResult; error?: string }>
       steamArt: (appid: number, name?: string) => Promise<{ ok: boolean; art: { header: string; background: string; cover?: string } }>
@@ -645,7 +592,6 @@ declare global {
       query: (params: SourceQueryParams, reqId?: number) => Promise<SourceQueryResult>
       onBrowsePartial: (cb: (payload: { reqId: number; games: UnifiedSourceGame[]; total: number; doneSources: string[] }) => void) => () => void
       capabilities: (sourceIds?: string[]) => Promise<{ ok: boolean; capabilities: SourceCapabilityReport; error?: string }>
-      tags: () => Promise<{ ok: boolean; tags: string[]; bySource: Record<string, string[]>; error?: string }>
       onlinefixStatus: () => Promise<{ ok: boolean; enabled: boolean; available: boolean; error?: string }>
       onlinefixSetEnabled: (enabled: boolean) => Promise<{ ok: boolean; error?: string }>
       onlinefixRepair: (appid: string, title: string) => Promise<{ ok: boolean; error?: string }>

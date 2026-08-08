@@ -5,14 +5,9 @@ import { validateTheme } from "@/lib/themes/validate"
 const LS_KEY = "uc_custom_themes"
 const EVENT_NAME = "uc_custom_themes_pref"
 
-export const MAX_CUSTOM_THEMES_FREE = 10
-export const MAX_CUSTOM_THEMES_UC_PLUS = 100
+const MAX_CUSTOM_THEMES_FREE = 10
+const MAX_CUSTOM_THEMES_UC_PLUS = 100
 
-export const MAX_CUSTOM_THEMES = MAX_CUSTOM_THEMES_UC_PLUS
-
-export function getMaxCustomThemes(isUcPlus: boolean): number {
-  return isUcPlus ? MAX_CUSTOM_THEMES_UC_PLUS : MAX_CUSTOM_THEMES_FREE
-}
 
 function readInitial(): ThemeDef[] {
   if (typeof window === "undefined") return []
@@ -50,7 +45,7 @@ export function useCustomThemes(options?: { isUcPlus?: boolean }): {
 } {
   const [customThemes, setCustomThemes] = useState<ThemeDef[]>(() => readInitial())
   const isUcPlus = Boolean(options?.isUcPlus)
-  const maxCustomThemes = useMemo(() => getMaxCustomThemes(isUcPlus), [isUcPlus])
+  const maxCustomThemes = useMemo(() => (isUcPlus ? 100 : 10), [isUcPlus])
 
   useEffect(() => {
     const onPref = () => setCustomThemes(readInitial())

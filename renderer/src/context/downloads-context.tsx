@@ -26,8 +26,6 @@ export type DownloadStatus =
   | "queued"
   | "downloading"
   | "paused"
-  | "verifying"
-  | "retrying"
   | "extracting"
   | "installing"
   | "install_ready"
@@ -36,17 +34,6 @@ export type DownloadStatus =
   | "extract_failed"
   | "failed"
   | "cancelled"
-
-type DownloadSpaceCheck = {
-  archiveBytes: number
-  estimatedExtractBytes: number
-  requiredBytes: number
-  freeBytes: number
-  shortfallBytes: number
-  targetPath: string
-  drives: Array<{ id: string; name: string; path: string; totalBytes: number; freeBytes: number }>
-  ok: boolean
-}
 
 export type DownloadItem = {
   id: string
@@ -67,23 +54,8 @@ export type DownloadItem = {
   etaSeconds: number | null
   extractProgress?: number | null
   savePath?: string
-  resumeData?: {
-    urlChain?: string[]
-    mimeType?: string
-    etag?: string
-    lastModified?: string
-    startTime?: number
-    offset?: number
-    totalBytes?: number
-    savePath?: string
-  }
   startedAt: number
-  completedAt?: number
   error?: string | null
-  warning?: string | null
-  skippedFiles?: string[]
-  spaceCheck?: DownloadSpaceCheck | null
-  queueOrder?: number
 }
 
 type DownloadUpdate = {
@@ -100,14 +72,10 @@ type DownloadUpdate = {
   gameName?: string | null
   url?: string
   error?: string | null
-  warning?: string | null
-  skippedFiles?: string[]
   partIndex?: number
   partTotal?: number
   update?: boolean
   installMetadata?: Record<string, unknown>
-  resumeData?: DownloadItem["resumeData"]
-  spaceCheck?: DownloadSpaceCheck | null
 }
 
 type ArchiveDeletionPrompt = {
@@ -163,7 +131,6 @@ type DownloadsContextValue = {
 
 type DownloadsActionsValue = {
   startGameDownload: (game: Game, preferredHost?: PreferredDownloadHost, config?: DownloadConfig) => Promise<void>
-  cancelDownload: (downloadId: string) => Promise<void>
   cancelGroup: (appid: string) => Promise<void>
   discardGroup: (appid: string) => Promise<void>
   pauseGroup: (appid: string) => Promise<void>
@@ -186,21 +153,13 @@ type DownloadsStore = {
 
 const DownloadsStoreContext = createContext<DownloadsStore | null>(null)
 const LEGACY_STORAGE_KEY = "uc_direct_downloads"
-const PAUSABLE_STATUSES: DownloadStatus[] = ["downloading", "retrying", "extracting", "installing", "verifying"]
+const PAUSABLE_STATUSES: DownloadStatus[] = ["downloading", "extracting", "installing"]
 
 function compareQueuePosition(
-  a: { queueOrder?: number; startedAt: number; partIndex?: number },
-  b: { queueOrder?: number; startedAt: number; partIndex?: number }
+  a: { startedAt: number; partIndex?: number },
+  b: { startedAt: number; partIndex?: number }
 ): number {
-  const ao = a.queueOrder
-  const bo = b.queueOrder
-  if (ao != null && bo != null) {
-    if (ao !== bo) return ao - bo
-  } else if (ao != null) {
-    return -1
-  } else if (bo != null) {
-    return 1
-  } else if (a.startedAt !== b.startedAt) {
+  if (a.startedAt !== b.startedAt) {
     return a.startedAt - b.startedAt
   }
   return (a.partIndex ?? 0) - (b.partIndex ?? 0)
@@ -225,20 +184,18 @@ function normalizePersistedDownloads(parsed: unknown, sourceLabel: string): Down
         ? { ...item, url: coercePersistedDownloadUrl(item.url) }
         : item
 
-      if (["downloading", "failed", "retrying", "verifying"].includes(String(safeItem.status || ""))) {
+      if (["downloading", "failed"].includes(String(safeItem.status || ""))) {
         return {
           ...(safeItem as DownloadItem),
           status: "paused" as DownloadStatus,
           error: safeItem.status === "failed"
             ? safeItem.error || "Download interrupted. Resume to continue."
             : "App restarted",
-          spaceCheck: safeItem.spaceCheck ?? null,
         }
       }
 
       return {
         ...(safeItem as DownloadItem),
-        spaceCheck: safeItem.spaceCheck ?? null,
       }
     })
 
@@ -328,14 +285,10 @@ function createSyntheticDownloadFromUpdate(update: DownloadUpdate): DownloadItem
     savePath: update.savePath,
     startedAt: Date.now(),
     error: update.error ?? null,
-    warning: update.warning ?? null,
-    skippedFiles: Array.isArray(update.skippedFiles) ? update.skippedFiles : undefined,
     partIndex: update.partIndex,
     partTotal: update.partTotal,
     update: update.update,
     installMetadata: update.installMetadata,
-    resumeData: update.resumeData,
-    spaceCheck: update.spaceCheck ?? null,
   }
 }
 
@@ -979,6 +932,10 @@ const resolveWithTimeout = useCallback(async (host: string, targetUrl: string) =
     [resolveWithTimeout]
   )
 
+  const openPath = useCallback(async (path: string) => {
+    if (window.ucDownloads?.openPath) await window.ucDownloads.openPath(path)
+  }, [])
+
   useEffect(() => {
     if (!window.ucDownloads?.onUpdate) return
     const unsubscribe = window.ucDownloads.onUpdate((update: DownloadUpdate) => {
@@ -1052,27 +1009,10 @@ const resolveWithTimeout = useCallback(async (host: string, targetUrl: string) =
           savePath: update.savePath ?? existing.savePath,
           url: update.url ?? existing.url,
           error: update.error !== undefined ? update.error : (finalStatus === "downloading" ? null : existing.error),
-          warning: update.warning !== undefined ? update.warning : (finalStatus === "downloading" ? null : existing.warning ?? null),
-          skippedFiles: update.skippedFiles !== undefined ? update.skippedFiles : existing.skippedFiles,
           partIndex: update.partIndex ?? existing.partIndex,
           partTotal: update.partTotal ?? existing.partTotal,
           update: update.update ?? existing.update,
           installMetadata: update.installMetadata ?? existing.installMetadata,
-          resumeData: update.resumeData ?? existing.resumeData,
-          spaceCheck:
-            update.spaceCheck !== undefined
-              ? update.spaceCheck
-              : finalStatus === "downloading" || finalStatus === "completed" || finalStatus === "extracted"
-                ? null
-                : existing.spaceCheck ?? null,
-          completedAt:
-            finalStatus === "completed" ||
-              finalStatus === "failed" ||
-              finalStatus === "cancelled" ||
-              finalStatus === "extracted" ||
-              finalStatus === "extract_failed"
-              ? Date.now()
-              : existing.completedAt,
         }
         const clone = [...prev]
         clone[idx] = next
@@ -1087,18 +1027,6 @@ const resolveWithTimeout = useCallback(async (host: string, targetUrl: string) =
         if (installFinished) {
           if (typeof window !== "undefined") {
             window.dispatchEvent(new CustomEvent("uc_game_installed", { detail: { appid: update.appid } }))
-
-            const skipped = update.skippedFiles
-            if (Array.isArray(skipped) && skipped.length > 0) {
-              const count = skipped.length
-              window.dispatchEvent(new CustomEvent("uc_toast", {
-                detail: {
-                  message: `Installed. ${count} incompatible ${count === 1 ? "file" : "files"} skipped (not needed on this platform).`,
-                  type: "info",
-                  duration: 7000,
-                },
-              }))
-            }
           }
           if (update.appid) {
             void reportPlayEvent(update.appid, "install")
@@ -1337,48 +1265,6 @@ const startGameDownload = useCallback(async (game: Game, preferredHostOverride?:
     }
   }, [startNextQueuedPart])
 
-  const cancelDownload = useCallback(async (downloadId: string) => {
-    const download = downloadsRef.current.find((d) => d.id === downloadId)
-    const appid = download?.appid
-    let cancelResult: Awaited<ReturnType<NonNullable<typeof window.ucDownloads>['cancel']>> | null = null
-    if (window.ucDownloads?.cancel) {
-      cancelResult = await window.ucDownloads.cancel(downloadId)
-    }
-    const becameInstallReady = cancelResult?.status === "install_ready"
-
-    if (appid && !becameInstallReady) {
-      const KEEPABLE_STATUSES = [
-        "downloading", "queued", "paused", "extracting", "installing",
-        "verifying", "retrying", "completed", "extracted", "install_ready",
-      ]
-      const otherLivePart = downloadsRef.current.some(
-        (d) => d.appid === appid && d.id !== downloadId && KEEPABLE_STATUSES.includes(String(d.status))
-      )
-      if (!otherLivePart) {
-        const next = downloadsRef.current.filter((item) => item.appid !== appid)
-        downloadsRef.current = next
-        setDownloads(next)
-        try { await window.ucDownloads?.deleteInstalling?.(appid) } catch { }
-        return
-      }
-    }
-
-    setDownloads((prev) =>
-      prev.map((item) =>
-        item.id === downloadId
-          ? {
-            ...item,
-            status: becameInstallReady ? "install_ready" : "cancelled",
-            error: cancelResult?.error || (becameInstallReady
-              ? "Installation stopped. Archive kept. Click Install to continue."
-              : "Cancelled"),
-            savePath: becameInstallReady ? (item.savePath || download?.savePath) : item.savePath,
-            completedAt: becameInstallReady ? Date.now() : item.completedAt,
-          }
-          : item
-      )
-    )
-  }, [])
 
   const cancelGroup = useCallback(async (appid: string) => {
     if (!appid) return
@@ -1413,7 +1299,6 @@ const startGameDownload = useCallback(async (game: Game, preferredHostOverride?:
             error: cancelResults.get(item.id)?.error || (cancelResults.get(item.id)?.status === "install_ready"
               ? "Installation stopped. Archive kept. Click Install to continue."
               : "Cancelled"),
-            completedAt: cancelResults.get(item.id)?.status === "install_ready" ? Date.now() : item.completedAt,
           }
           : item
       )
@@ -1470,7 +1355,7 @@ const startGameDownload = useCallback(async (game: Game, preferredHostOverride?:
       const target = downloadsRef.current.find((item) => item.id === downloadId)
       if (!target) return
 
-      downloadLogger.info("Resume attempt", { data: { downloadId, host: target.host, status: target.status, hasResumeData: Boolean(target.resumeData?.offset) } })
+      downloadLogger.info("Resume attempt", { data: { downloadId, host: target.host, status: target.status } })
 
       if (target.appid && window.ucDownloads) {
         try {
@@ -1738,11 +1623,6 @@ const startGameDownload = useCallback(async (game: Game, preferredHostOverride?:
     })
   }, [])
 
-  const openPath = useCallback(async (path: string) => {
-    if (window.ucDownloads?.openPath) {
-      await window.ucDownloads.openPath(path)
-    }
-  }, [])
 
   const clearCompleted = useCallback(() => {
     setDownloads((prev) =>
@@ -1825,7 +1705,6 @@ const startGameDownload = useCallback(async (game: Game, preferredHostOverride?:
   const actionsValue = useMemo<DownloadsActionsValue>(
     () => ({
       startGameDownload,
-      cancelDownload,
       cancelGroup,
       discardGroup,
       pauseGroup,
@@ -1838,7 +1717,7 @@ const startGameDownload = useCallback(async (game: Game, preferredHostOverride?:
       clearByAppid,
       clearCompleted,
     }),
-    [startGameDownload, cancelDownload, cancelGroup, discardGroup, pauseGroup, pauseAll, resumeDownload, resumeGroup, resumeAll, upsertDownload, openPath, clearByAppid, clearCompleted]
+    [startGameDownload, cancelGroup, discardGroup, pauseGroup, pauseAll, resumeDownload, resumeGroup, resumeAll, upsertDownload, openPath, clearByAppid, clearCompleted]
   )
 
   const dataValue = useMemo(() => ({ downloads }), [downloads])
@@ -1913,14 +1792,6 @@ const startGameDownload = useCallback(async (game: Game, preferredHostOverride?:
   )
 }
 
-export function useDownloads() {
-  const data = useContext(DownloadsContext)
-  const actions = useContext(DownloadsActionsContext)
-  if (!data || !actions) {
-    throw new Error("useDownloads must be used within DownloadsProvider")
-  }
-  return { downloads: data.downloads, ...actions }
-}
 
 export function useDownloadsActions() {
   const actions = useContext(DownloadsActionsContext)

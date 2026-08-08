@@ -4,7 +4,6 @@
 
 #define WIN32_LEAN_AND_MEAN
 #include <winsock2.h>
-#include <ws2tcpip.h>
 #include <windows.h>
 #include <tlhelp32.h>
 
@@ -82,19 +81,8 @@ std::wstring utf8_to_wide(const std::string& value) {
     return out;
 }
 
-std::string wide_to_utf8(const wchar_t* value, size_t size) {
-    if (size == 0) return {};
-    int bytes = WideCharToMultiByte(CP_UTF8, 0, value, static_cast<int>(size),
-                                    nullptr, 0, nullptr, nullptr);
-    if (bytes <= 0) return {};
-    std::string out(static_cast<size_t>(bytes), '\0');
-    WideCharToMultiByte(CP_UTF8, 0, value, static_cast<int>(size), out.data(),
-                        bytes, nullptr, nullptr);
-    return out;
-}
-
 std::wstring windows_path(std::wstring path) {
-    if (!path.empty() && path[0] == L'/') path.insert(path.begin(), L':'), path.insert(path.begin(), L'Z');
+    if (!path.empty() && path[0] == L'/') path.insert(0, L"Z:");
     std::replace(path.begin(), path.end(), L'/', L'\\');
     return path;
 }
@@ -296,7 +284,6 @@ void message_reader(HANDLE pipe) {
                 uint32_t request = 0, result = 0;
                 std::memcpy(&request, frame + 16, 4);
                 std::memcpy(&result, frame + 20, 4);
-                emit("SETRESULT\t" + std::to_string(request) + "\t" + std::to_string(result));
             }
             offset += size;
         }
@@ -323,9 +310,6 @@ void log_reader(HANDLE pipe) {
             uint32_t length = 0;
             std::memcpy(&length, pending.data() + offset + 8, 4);
             if (pending.size() - offset < 16 + length) break;
-            const wchar_t* text = reinterpret_cast<const wchar_t*>(pending.data() + offset + 16);
-            std::string utf8 = wide_to_utf8(text, length / sizeof(wchar_t));
-            emit("LOG\t" + hex_encode(utf8));
             offset += 16 + length;
         }
         if (offset) pending.erase(pending.begin(), pending.begin() + static_cast<std::ptrdiff_t>(offset));
@@ -424,7 +408,6 @@ int main(int argc, char** argv) {
         emit("ERROR\t" + hex_encode("Timed out waiting for the game process"));
         return 3;
     }
-    emit("PROCESS\t" + std::to_string(pid));
 
     const DWORD injection_pid =
         options.flags & USE_EXTERNAL_HOST ? GetCurrentProcessId() : pid;

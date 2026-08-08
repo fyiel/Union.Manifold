@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, HashMap};
+use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -289,7 +289,6 @@ pub fn capabilities() -> Capabilities {
     Capabilities {
         search: true,
         catalog: true,
-        bulk_browse: true,
         tags: true,
         release_date: true,
         size: true,
@@ -403,19 +402,6 @@ pub async fn get_detail(slug: &str) -> Option<SourceGame> {
             Some(normalize(&uc))
         })
         .await
-}
-
-pub async fn list_tags() -> Vec<String> {
-    let mut set: BTreeSet<String> = BTreeSet::new();
-    for uc in fetch_catalog().await.unwrap_or_default().iter() {
-        for g in coerce_genres(uc.get("genres")) {
-            let t = g.trim().to_string();
-            if !t.is_empty() {
-                set.insert(t);
-            }
-        }
-    }
-    set.into_iter().collect()
 }
 
 pub async fn resolve_download(option: &DownloadOption) -> ResolveResult {

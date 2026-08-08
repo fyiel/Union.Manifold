@@ -367,15 +367,10 @@ fn browse_mod(p: &TsPackage) -> Value {
     json!({
         "remoteId": p.full_name,
         "name": p.name,
-        "summary": latest.map(|v| v.description.trim()).unwrap_or(""),
         "author": p.owner,
         "picture": (!p.icon.is_empty()).then(|| p.icon.clone()),
         "downloads": latest.map(|v| v.downloads).unwrap_or(0),
         "endorsements": p.rating.max(0),
-        "version": latest.map(|v| v.version.as_str()).unwrap_or(""),
-        "updatedAt": p.updated_at,
-        "sizeBytes": latest.map(|v| v.size_bytes).unwrap_or(0),
-        "pageUrl": p.package_url,
     })
 }
 
@@ -449,7 +444,6 @@ async fn fetch_detail(owner: &str, name: &str) -> Result<Value, String> {
 fn version_json(v: &TsVersion) -> Value {
     json!({
         "version": v.version,
-        "downloads": v.downloads,
         "sizeBytes": v.size_bytes,
         "uploadedAt": v.uploaded_at,
         "dependencyCount": v.dependencies.len(),
@@ -463,7 +457,6 @@ fn version_json(v: &TsVersion) -> Value {
 fn version_json_from_value(latest: &Value) -> Value {
     json!({
         "version": latest.get("version_number").and_then(|x| x.as_str()).unwrap_or(""),
-        "downloads": latest.get("downloads").and_then(|x| x.as_u64()).unwrap_or(0),
         "sizeBytes": latest.get("file_size").and_then(|x| x.as_u64()).unwrap_or(0),
         "uploadedAt": iso_to_unix(latest.get("date_created").and_then(|x| x.as_str()).unwrap_or("")),
         "dependencyCount": latest.get("dependencies").and_then(|x| x.as_array()).map(|a| a.len()).unwrap_or(0),

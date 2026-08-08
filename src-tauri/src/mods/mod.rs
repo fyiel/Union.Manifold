@@ -142,6 +142,17 @@ pub(crate) fn join_rel(rel: &Path) -> String {
         .join("/")
 }
 
+
+fn enabled_mods(cfg: &GameMods) -> Vec<&ModEntry> {
+    let mut enabled: Vec<&ModEntry> = cfg
+        .mods
+        .iter()
+        .filter(|m| m.enabled && !m.deploy_blocked)
+        .collect();
+    enabled.sort_by_key(|m| m.order);
+    enabled
+}
+
 fn staging_root(game_dir: &Path) -> PathBuf {
     game_dir.join("staging")
 }
@@ -209,14 +220,7 @@ fn manifest_get<'a>(m: &'a Value, key: &str) -> Option<&'a Value> {
 
 fn rel_string(base: &Path, p: &Path) -> Option<String> {
     let rel = p.strip_prefix(base).ok()?;
-    let parts: Vec<String> = rel
-        .components()
-        .map(|c| c.as_os_str().to_string_lossy().to_string())
-        .collect();
-    if parts.is_empty() {
-        return None;
-    }
-    Some(parts.join("/"))
+    (!rel.as_os_str().is_empty()).then(|| join_rel(rel))
 }
 
 fn rel_to_path(base: &Path, rel: &str) -> PathBuf {
@@ -490,7 +494,7 @@ fn enabled_mewgenics_mod_paths(game_dir: &Path, cfg: &GameMods) -> Vec<PathBuf> 
     if cfg.steam_appid != Some(MEWGENICS_STEAM_APPID) {
         return Vec::new();
     }
-    let staging_root = game_dir.join("staging");
+    let staging_root = staging_root(game_dir);
     let mut enabled: Vec<&ModEntry> = cfg
         .mods
         .iter()
@@ -504,16 +508,11 @@ fn enabled_mewgenics_mod_paths(game_dir: &Path, cfg: &GameMods) -> Vec<PathBuf> 
 }
 
 pub(crate) fn deploy_to(game_dir: &Path, target: &Path, cfg: &GameMods) -> Result<usize, String> {
-    let staging_root = game_dir.join("staging");
+    let staging_root = staging_root(game_dir);
     let backup_root = backup_root(game_dir);
     let mewgenics_paths = enabled_mewgenics_mod_paths(game_dir, cfg);
 
-    let mut enabled: Vec<&ModEntry> = cfg
-        .mods
-        .iter()
-        .filter(|m| m.enabled && !m.deploy_blocked)
-        .collect();
-    enabled.sort_by_key(|m| m.order);
+    let enabled = enabled_mods(cfg);
     let mut desired: HashMap<String, PathBuf> = HashMap::new();
     for m in enabled {
         if cfg.steam_appid == Some(MEWGENICS_STEAM_APPID) {
@@ -785,7 +784,7 @@ pub(crate) fn deploy_to(game_dir: &Path, target: &Path, cfg: &GameMods) -> Resul
 }
 
 pub(crate) fn undeploy_from(game_dir: &Path, target: &Path) -> Result<(), String> {
-    let backup_root = game_dir.join("backup");
+    let backup_root = backup_root(game_dir);
     let journal = load_journal(game_dir);
     for (rel, entry) in &journal.files {
         if claimed_backup_missing(entry, &backup_root) {
@@ -2412,10 +2411,11 @@ pub async fn mods_game_set(
                 if let Ok(old) = deploy_target_dir(&state, &appid, &cfg) {
                     undeploy_from(&dir, &old)?;
                 }
-                // Validate before persisting: a bad target (e.g. one with a
-                // `..` segment) must not survive as the stored config.
-                let target = deploy_target_dir(&state, &appid, &cfg)?;
+                // Validate the NEW target before persisting: a bad target
+                // (e.g. one with a `..` segment) must not survive as the
+                // stored config.
                 cfg.deploy_target = new_target;
+                let target = deploy_target_dir(&state, &appid, &cfg)?;
                 refresh_deployment_plans(&state, &appid, &mut cfg);
                 deploy_to(&dir, &target, &cfg)?;
             }
@@ -2423,7 +2423,9 @@ pub async fn mods_game_set(
         Ok(())
     })();
 
-    save_config(&state.paths, &appid, &cfg);
+    if res.is_ok() {
+        save_config(&state.paths, &appid, &cfg);
+    }
     emit_changed(&app, &appid);
     Ok(fold(res.map(|_| json!({ "ok": true }))))
 }

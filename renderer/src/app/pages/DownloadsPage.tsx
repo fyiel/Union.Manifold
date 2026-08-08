@@ -7,8 +7,8 @@ import { getDownloadArt, getRememberedGame, hydrateDownloadArt } from "@/lib/sou
 import { proxyImageUrl } from "@/lib/utils"
 import { MONO, COVER_LINES, gbLabel, CenterState } from "@/app/manifold/ui"
 
-const ACTIVE: DownloadItem["status"][] = ["downloading", "extracting", "installing", "verifying", "retrying", "paused"]
-const PAUSABLE: DownloadItem["status"][] = ["downloading", "extracting", "installing", "verifying", "retrying"]
+const ACTIVE: DownloadItem["status"][] = ["downloading", "extracting", "installing", "paused"]
+const PAUSABLE: DownloadItem["status"][] = ["downloading", "extracting", "installing"]
 const DONE: DownloadItem["status"][] = ["completed", "extracted"]
 
 type Group = { appid: string; name: string; items: DownloadItem[] }
@@ -17,7 +17,7 @@ const has = (items: DownloadItem[], ...st: string[]) => items.some((i) => st.inc
 const every = (items: DownloadItem[], ...st: string[]) => items.every((i) => st.includes(i.status))
 
 function repStatus(items: DownloadItem[]): DownloadItem["status"] {
-  for (const s of ["downloading", "extracting", "installing", "verifying", "retrying", "paused", "install_ready", "queued", "completed", "extracted", "failed", "extract_failed"] as const) {
+  for (const s of ["downloading", "extracting", "installing", "paused", "install_ready", "queued", "completed", "extracted", "failed", "extract_failed"] as const) {
     if (has(items, s)) return s
   }
   return items[0]?.status || "queued"

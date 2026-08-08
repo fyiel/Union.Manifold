@@ -7,7 +7,6 @@ import { validateTheme } from "@/lib/themes/validate"
 const LS_KEY = "uc_active_theme"
 const EVENT_NAME = "uc_theme_pref"
 const CUSTOM_LS_KEY = "uc_custom_themes"
-const INSTALLED_LS_KEY = "uc_installed_community_themes"
 
 function readInitialThemeId(): string {
   try {
@@ -35,13 +34,8 @@ function readThemesFromStorage(key: string): ThemeDef[] {
   }
 }
 
-function resolveTheme(id: string, custom: ThemeDef[], installed: ThemeDef[]): ThemeDef {
-  return (
-    getPresetById(id) ??
-    custom.find((t) => t.id === id) ??
-    installed.find((t) => t.id === id) ??
-    PRESET_THEMES[0]
-  )
+function resolveTheme(id: string, custom: ThemeDef[]): ThemeDef {
+  return getPresetById(id) ?? custom.find((t) => t.id === id) ?? PRESET_THEMES[0]
 }
 
 export function useActiveTheme(): {
@@ -51,12 +45,11 @@ export function useActiveTheme(): {
 } {
   const [activeThemeId, setActiveThemeIdState] = useState<string>(() => readInitialThemeId())
   const [customThemes, setCustomThemes] = useState<ThemeDef[]>(() => readThemesFromStorage(CUSTOM_LS_KEY))
-  const [installedThemes, setInstalledThemes] = useState<ThemeDef[]>(() => readThemesFromStorage(INSTALLED_LS_KEY))
   const [previewTheme, setPreviewTheme] = useState<ThemeDef | null>(null)
 
   const activeTheme = useMemo(
-    () => resolveTheme(activeThemeId, customThemes, installedThemes),
-    [activeThemeId, customThemes, installedThemes],
+    () => resolveTheme(activeThemeId, customThemes),
+    [activeThemeId, customThemes],
   )
 
   useEffect(() => {
@@ -82,11 +75,9 @@ export function useActiveTheme(): {
       const next = readInitialThemeId()
       setActiveThemeIdState((prev) => (prev === next ? prev : next))
       setCustomThemes(readThemesFromStorage(CUSTOM_LS_KEY))
-      setInstalledThemes(readThemesFromStorage(INSTALLED_LS_KEY))
     }
     window.addEventListener(EVENT_NAME, refresh)
     window.addEventListener("uc_custom_themes_pref", refresh)
-    window.addEventListener("uc_installed_themes_pref", refresh)
     window.addEventListener("storage", refresh)
 
     let off: undefined | (() => void)
@@ -122,7 +113,6 @@ export function useActiveTheme(): {
     return () => {
       window.removeEventListener(EVENT_NAME, refresh)
       window.removeEventListener("uc_custom_themes_pref", refresh)
-      window.removeEventListener("uc_installed_themes_pref", refresh)
       window.removeEventListener("storage", refresh)
       if (typeof off === "function") off()
     }

@@ -395,7 +395,7 @@ export function unifiedToGame(game: UnifiedSourceGame): Game {
   } as Game
 }
 
-type StartResult =
+export type StartResult =
   | { ok: true; queued: true }
   | { ok: false; openUrl?: string; reason?: string; cancelled?: boolean }
 

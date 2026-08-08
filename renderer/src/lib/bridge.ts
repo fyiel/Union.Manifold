@@ -23,18 +23,6 @@ function call<T = any>(cmd: string, args?: Record<string, unknown>): Promise<T> 
 }
 
 
-function apiBaseUrl(): string {
-  try {
-    return (
-      localStorage.getItem("uc_custom_api_base_url") ||
-      localStorage.getItem("uc_detected_api_base_url") ||
-      "https://union-crax.xyz"
-    )
-  } catch {
-    return "https://union-crax.xyz"
-  }
-}
-
 export function installBridge(): void {
   const w = window as any
 
@@ -201,7 +189,6 @@ export function installBridge(): void {
     list: () => call("sources_list"),
     setEnabled: (id: string, enabled: boolean) => call("sources_set_enabled", { id, enabled }),
     search: (query: string, limit?: number) => call("sources_search", { query, limit }),
-    catalog: (offset?: number, limit?: number) => call("sources_catalog", { offset, limit }),
     detail: (sources: any[]) => call("sources_detail", { sources }),
     resolve: (sourceId: string, option: any) => call("sources_resolve", { sourceId, option }),
     steamArt: (appid: number, name?: string) => call("sources_steam_art", { appid, name }),
@@ -213,7 +200,6 @@ export function installBridge(): void {
     query: (params: any, reqId?: number) => call("sources_query", { params, reqId }),
     onBrowsePartial: (cb: Cb) => on("uc:browse-partial", cb),
     capabilities: (sourceIds?: string[]) => call("sources_capabilities", { sourceIds }),
-    tags: () => call("sources_tags"),
     onlinefixStatus: () => call("sources_onlinefix_status"),
     onlinefixSetEnabled: (enabled: boolean) => call("sources_onlinefix_set_enabled", { enabled }),
     onlinefixRepair: (appid: string, title: string) => call("onlinefix_repair", { appid, title }),

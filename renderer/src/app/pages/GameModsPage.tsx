@@ -293,7 +293,7 @@ export function GameModsPage() {
       if (p.phase === "done" || p.phase === "error") {
         setProgress((m) => { const next = new Map(m); next.delete(p.modId); return next })
         if (p.phase === "done") toast(`${p.name || "Mod"} installed`, "success")
-        else toast(`${p.name || "Mod"}: ${p.error || "install failed"}`, "error", 7000)
+        else toast(`${p.name || "Mod"}: ${p.error }`, "error", 7000)
         return
       }
       setProgress((m) => new Map(m).set(p.modId, p))
@@ -480,8 +480,6 @@ export function GameModsPage() {
           ? `Slipgate could not resolve this: ${r.slipgateError}. Falling back: click “Mod Manager Download” on the Nexus page.`
           : "Click “Mod Manager Download” on the Nexus page — the download will start here automatically"
         toast(base, r.slipgateError ? "error" : "info", r.slipgateError ? 14000 : 12000)
-      } else {
-        toast(`Downloading ${mod.name}…`, "info")
       }
     } catch (err) { toast(String(err), "error", 7000) } finally { setInstallingFileId(null) }
   }
@@ -567,7 +565,7 @@ export function GameModsPage() {
     setTsSaving(true)
     try {
       const r = await window.ucMods?.gameSet?.(appid, { thunderstoreCommunity: identifier })
-      if (r && !r.ok) toast(r.error || "could not set the Thunderstore community", "error")
+      if (r && !r.ok) toast(r.error || "failed", "error")
     } catch (err) { toast(String(err), "error") } finally { setTsSaving(false); void reload() }
   }
 
@@ -851,7 +849,7 @@ export function GameModsPage() {
                     name={mod.name}
                     author={mod.author}
                     metaLine={`${formatNumber(mod.downloads || 0)} downloads · ${formatNumber(mod.endorsements || 0)} endorsements`}
-                    installed={mod.installed || installedIds.has(`nexus-${mod.remoteId}`)}
+                    installed={installedIds.has(`nexus-${mod.remoteId}`)}
                     busy={filePick?.remoteId === mod.remoteId}
                     onInstall={() => void openFilePicker(mod)}
                   />
@@ -975,7 +973,7 @@ export function GameModsPage() {
                     name={mod.name}
                     author={mod.author}
                     metaLine={`${formatNumber(mod.downloads || 0)} downloads · ${formatNumber(mod.endorsements || 0)} rating`}
-                    installed={mod.installed || installedIds.has(`thunderstore-${mod.remoteId}`)}
+                    installed={installedIds.has(`thunderstore-${mod.remoteId}`)}
                     busy={tsVersionPick?.remoteId === mod.remoteId}
                     onInstall={() => void openTsVersions(mod)}
                   />

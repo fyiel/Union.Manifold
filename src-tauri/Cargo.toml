@@ -49,7 +49,6 @@ tauri-plugin-autostart = "2.5.1"
 tauri-plugin-notification = "2.3.3"
 
 [target.'cfg(windows)'.dependencies]
-winreg = "0.52"
 windows-sys = { version = "0.59", features = [
     "Win32_Foundation",
     "Win32_System_Registry",

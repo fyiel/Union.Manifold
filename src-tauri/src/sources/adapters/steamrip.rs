@@ -101,7 +101,6 @@ pub fn capabilities() -> Capabilities {
     Capabilities {
         search: true,
         catalog: true,
-        bulk_browse: true,
         tags: true,
         release_date: false,
         size: false,
@@ -538,13 +537,6 @@ pub async fn refresh() -> Option<usize> {
     } else {
         None
     }
-}
-
-pub async fn list_tags() -> Vec<String> {
-    let cats = load_category_map().await;
-    let mut items: Vec<(String, i64)> = cats.by_id.values().cloned().collect();
-    items.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
-    items.into_iter().map(|(name, _)| name).collect()
 }
 
 #[cfg(test)]

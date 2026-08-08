@@ -3,6 +3,7 @@ import { useLocation, useNavigate, useParams } from "react-router-dom"
 import { Bookmark, BookmarkCheck, Maximize2, TriangleAlert, X } from "lucide-react"
 import {
   SOURCE_PRIORITY,
+  type StartResult,
   collectDownloadEntries,
   downloadAppidFor,
   getRememberedGame,
@@ -207,26 +208,30 @@ export function SourceGamePage() {
   const updateAvailable = installed && hasInstalledVersionUpdate(game?.version, [installedVersion])
   const downloadBusy = Boolean(liveStatus && liveStatus !== "completed" && liveStatus !== "extracted")
 
-  const handleDownload = async (sourceId: string, option: SourceDownloadOption, optKey: string) => {
-    if (!game || (installed && !updateAvailable) || downloadBusy) return
-    setOptState((s) => ({ ...s, [optKey]: "working" }))
+  const runDownload = async (optKey: string, task: () => Promise<StartResult>) => {
+    setOptState((st) => ({ ...st, [optKey]: "working" }))
     setOptMsg((m) => ({ ...m, [optKey]: "" }))
     try {
-      const res = await startSourceDownload(game, sourceId, option, installed)
+      const res = await task()
       if (res.ok) {
-        setOptState((s) => ({ ...s, [optKey]: "queued" }))
+        setOptState((st) => ({ ...st, [optKey]: "queued" }))
       } else if (res.openUrl) {
         await window.ucSystem?.openExternal?.(res.openUrl)
-        setOptState((s) => ({ ...s, [optKey]: "opened" }))
+        setOptState((st) => ({ ...st, [optKey]: "opened" }))
         setOptMsg((m) => ({ ...m, [optKey]: res.reason || "opened in browser" }))
       } else {
-        setOptState((s) => ({ ...s, [optKey]: "error" }))
+        setOptState((st) => ({ ...st, [optKey]: "error" }))
         setOptMsg((m) => ({ ...m, [optKey]: res.reason || "could not start" }))
       }
     } catch (err) {
-      setOptState((s) => ({ ...s, [optKey]: "error" }))
+      setOptState((st) => ({ ...st, [optKey]: "error" }))
       setOptMsg((m) => ({ ...m, [optKey]: String(err) }))
     }
+  }
+
+  const handleDownload = async (sourceId: string, option: SourceDownloadOption, optKey: string) => {
+    if (!game || (installed && !updateAvailable) || downloadBusy) return
+    await runDownload(optKey, () => startSourceDownload(game, sourceId, option, installed))
   }
 
   const copyPrimary = async () => {
@@ -260,24 +265,7 @@ export function SourceGamePage() {
 
   const handlePrimaryDownload = async () => {
     if (!game || (installed && !updateAvailable) || downloadBusy || !primary) return
-    setOptState((s) => ({ ...s, [pk]: "working" }))
-    setOptMsg((m) => ({ ...m, [pk]: "" }))
-    try {
-      const res = await startBestDownload(game, entries, installed)
-      if (res.ok) {
-        setOptState((s) => ({ ...s, [pk]: "queued" }))
-      } else if (res.openUrl) {
-        await window.ucSystem?.openExternal?.(res.openUrl)
-        setOptState((s) => ({ ...s, [pk]: "opened" }))
-        setOptMsg((m) => ({ ...m, [pk]: res.reason || "opened in browser" }))
-      } else {
-        setOptState((s) => ({ ...s, [pk]: "error" }))
-        setOptMsg((m) => ({ ...m, [pk]: res.reason || "could not start" }))
-      }
-    } catch (err) {
-      setOptState((s) => ({ ...s, [pk]: "error" }))
-      setOptMsg((m) => ({ ...m, [pk]: String(err) }))
-    }
+    await runDownload(pk, () => startBestDownload(game, entries, installed))
   }
 
 

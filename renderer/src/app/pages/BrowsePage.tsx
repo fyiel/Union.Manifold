@@ -294,7 +294,6 @@ export function BrowsePage() {
             const st: SrcStatus = status[s.id] || "idle"
             const isSearching = st === "searching"
             const isFailed = st === "failed"
-            const searchOnly = !hasQuery && s.capabilities?.bulkBrowse === false
             return (
               <div
                 key={s.id}
@@ -317,7 +316,7 @@ export function BrowsePage() {
                   <span onClick={() => void runQuery(committed)} style={{ fontFamily: MONO, fontSize: 10, color: "#c98080", cursor: "pointer", textDecoration: "underline" }}>retry</span>
                 )}
                 {!isSearching && !isFailed && (
-                  <span style={{ fontFamily: MONO, fontSize: 10.5, color: "var(--mf-t4)" }} title={searchOnly ? "browser-only source — appears in search, not the catalog listing" : undefined}>{searchOnly ? "search" : (sourceCounts[s.id] ?? 0)}</span>
+                  <span style={{ fontFamily: MONO, fontSize: 10.5, color: "var(--mf-t4)" }}>{sourceCounts[s.id] ?? 0}</span>
                 )}
               </div>
             )

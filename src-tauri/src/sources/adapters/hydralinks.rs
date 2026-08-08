@@ -72,7 +72,6 @@ pub fn capabilities() -> Capabilities {
     Capabilities {
         search: true,
         catalog: true,
-        bulk_browse: true,
         tags: false,
         release_date: false,
         size: true,

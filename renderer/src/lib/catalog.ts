@@ -8,10 +8,8 @@ export type CatalogGame = Game & {
 
 type CatalogSnapshot = {
   games: CatalogGame[]
-  stats: GameStats
   updatedAt: number
   gamesUpdatedAt: number
-  statsUpdatedAt: number
 }
 
 type CatalogMemoryCache = CatalogSnapshot & {
@@ -24,10 +22,8 @@ export const CATALOG_STATS_TTL_MS = 1000 * 60 * 15
 
 const emptySnapshot = (): CatalogSnapshot => ({
   games: [],
-  stats: {},
   updatedAt: 0,
   gamesUpdatedAt: 0,
-  statsUpdatedAt: 0,
 })
 
 const memoryCache: CatalogMemoryCache = {
@@ -128,10 +124,8 @@ async function normalizeCatalogGamesChunked(games: unknown[]): Promise<CatalogGa
 export function getCatalogCache(): CatalogSnapshot {
   return {
     games: memoryCache.games,
-    stats: memoryCache.stats,
     updatedAt: memoryCache.updatedAt,
     gamesUpdatedAt: memoryCache.gamesUpdatedAt,
-    statsUpdatedAt: memoryCache.statsUpdatedAt,
   }
 }
 
@@ -139,24 +133,16 @@ function setCatalogCache(snapshot: Partial<CatalogSnapshot>) {
   if (Array.isArray(snapshot.games)) {
     memoryCache.games = snapshot.games
   }
-  if (snapshot.stats && typeof snapshot.stats === "object") {
-    memoryCache.stats = snapshot.stats
-  }
   if (snapshot.updatedAt !== undefined) memoryCache.updatedAt = Number(snapshot.updatedAt || 0)
   if (snapshot.gamesUpdatedAt !== undefined) memoryCache.gamesUpdatedAt = Number(snapshot.gamesUpdatedAt || 0)
-  if (snapshot.statsUpdatedAt !== undefined) memoryCache.statsUpdatedAt = Number(snapshot.statsUpdatedAt || 0)
 }
 
 export function hasUsableCatalogCache(): boolean {
-  return memoryCache.games.length > 0 || Object.keys(memoryCache.stats).length > 0
+  return memoryCache.games.length > 0
 }
 
 export function isCatalogGamesStale(now = Date.now()): boolean {
   return !memoryCache.gamesUpdatedAt || now - memoryCache.gamesUpdatedAt > CATALOG_TTL_MS
-}
-
-export function isCatalogStatsStale(now = Date.now()): boolean {
-  return !memoryCache.statsUpdatedAt || now - memoryCache.statsUpdatedAt > CATALOG_STATS_TTL_MS
 }
 
 export async function hydrateCatalogCache(): Promise<CatalogSnapshot> {
@@ -194,10 +180,8 @@ export async function hydrateCatalogCache(): Promise<CatalogSnapshot> {
         })
         setCatalogCache({
           games: await normalizeCatalogGamesChunked(cleaned),
-          stats: result.stats && typeof result.stats === "object" ? result.stats : {},
           updatedAt: result.updatedAt,
           gamesUpdatedAt: result.gamesUpdatedAt,
-          statsUpdatedAt: result.statsUpdatedAt,
         })
       }
     } catch (error) {
@@ -243,9 +227,7 @@ async function flushCatalogToDisk(): Promise<void> {
   try {
     const result = await window.ucDownloads?.saveCatalogState?.({
       games: memoryCache.games.map((game) => stripLocalMediaForPersistence(game)),
-      stats: memoryCache.stats,
       gamesUpdatedAt: memoryCache.gamesUpdatedAt,
-      statsUpdatedAt: memoryCache.statsUpdatedAt,
     })
     if (!result?.ok) {
       throw new Error(result?.error || "persist_catalog_failed")
@@ -267,17 +249,13 @@ function scheduleCatalogDiskFlush(): void {
 }
 
 export async function persistCatalogCache(snapshot: Partial<CatalogSnapshot>): Promise<void> {
-  const nextStats = snapshot.stats && typeof snapshot.stats === "object" ? snapshot.stats : memoryCache.stats
   const nextGamesUpdatedAt = Number(snapshot.gamesUpdatedAt ?? memoryCache.gamesUpdatedAt ?? Date.now())
-  const nextStatsUpdatedAt = Number(snapshot.statsUpdatedAt ?? memoryCache.statsUpdatedAt ?? Date.now())
-  const updatedAt = Math.max(nextGamesUpdatedAt, nextStatsUpdatedAt, Number(snapshot.updatedAt || 0))
+  const updatedAt = Math.max(nextGamesUpdatedAt, Number(snapshot.updatedAt || 0))
 
   setCatalogCache({
     games: Array.isArray(snapshot.games) ? await normalizeCatalogGamesChunked(snapshot.games) : undefined,
-    stats: nextStats,
     updatedAt,
     gamesUpdatedAt: nextGamesUpdatedAt,
-    statsUpdatedAt: nextStatsUpdatedAt,
   })
 
   scheduleCatalogDiskFlush()

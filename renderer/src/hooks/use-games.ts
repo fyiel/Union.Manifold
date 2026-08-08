@@ -4,12 +4,10 @@ import type { GameStats } from "@/lib/types"
 import { gameLogger } from "@/lib/logger"
 import {
   fetchCatalogGames,
-  fetchCatalogStats,
   getCatalogCache,
   hasUsableCatalogCache,
   hydrateCatalogCache,
   isCatalogGamesStale,
-  isCatalogStatsStale,
   mergeInstalledGames,
   persistCatalogCache,
   type CatalogGame,
@@ -17,7 +15,6 @@ import {
 
 type GamesDataState = {
   games: CatalogGame[]
-  stats: GameStats
   loading: boolean
   error: string | null
 }
@@ -27,7 +24,6 @@ export function useGamesData() {
   const initialCache = getCatalogCache()
   const [state, setState] = useState<GamesDataState>(() => ({
     games: initialCache.games,
-    stats: initialCache.stats,
     loading: !hasUsableCatalogCache(),
     error: null,
   }))
@@ -39,28 +35,16 @@ export function useGamesData() {
       const hydrated = await hydrateCatalogCache()
       if (cancelled) return
 
-      if (hydrated.games.length || Object.keys(hydrated.stats).length) {
-        setState({
-          games: hydrated.games,
-          stats: hydrated.stats,
-          loading: false,
-          error: null,
-        })
-      }
-
       const shouldRefreshGames = connectivity.isOnline
         ? (!hydrated.games.length || isCatalogGamesStale())
         : false
-      const shouldRefreshStats = connectivity.isOnline
-        ? isCatalogStatsStale()
-        : false
 
-      if (!shouldRefreshGames && !shouldRefreshStats) {
-        if (!hydrated.games.length && !Object.keys(hydrated.stats).length) {
+      if (!shouldRefreshGames) {
+        if (!hydrated.games.length) {
           try {
             const installed = await mergeInstalledGames([])
             if (!cancelled) {
-              setState({ games: installed, stats: {}, loading: false, error: null })
+              setState({ games: installed, loading: false, error: null })
             }
           } catch {
             if (!cancelled) {
@@ -73,39 +57,29 @@ export function useGamesData() {
 
       try {
         const now = Date.now()
-        const [games, stats] = await Promise.all([
-          shouldRefreshGames ? fetchCatalogGames() : Promise.resolve(getCatalogCache().games),
-          shouldRefreshStats ? fetchCatalogStats() : Promise.resolve(getCatalogCache().stats),
-        ])
+        const games = shouldRefreshGames ? await fetchCatalogGames() : getCatalogCache().games
         const mergedGames = await mergeInstalledGames(games)
         if (cancelled) return
 
-        setState({ games: mergedGames, stats, loading: false, error: null })
+        setState({ games: mergedGames, loading: false, error: null })
         void persistCatalogCache({
           games: mergedGames,
-          stats,
           gamesUpdatedAt: shouldRefreshGames ? now : getCatalogCache().gamesUpdatedAt,
-          statsUpdatedAt: shouldRefreshStats ? now : getCatalogCache().statsUpdatedAt,
         })
       } catch (error) {
         if (cancelled) return
 
         gameLogger.warn("useGamesData refresh failed", { data: { error: String(error) } })
 
-        if (hydrated.games.length || Object.keys(hydrated.stats).length) {
-          setState({
-            games: hydrated.games,
-            stats: hydrated.stats,
-            loading: false,
-            error: null,
-          })
+        if (hydrated.games.length) {
+          setState({ games: hydrated.games, loading: false, error: null })
           return
         }
 
         try {
           const installed = await mergeInstalledGames([])
           if (!cancelled) {
-            setState({ games: installed, stats: {}, loading: false, error: null })
+            setState({ games: installed, loading: false, error: null })
           }
         } catch {
           if (!cancelled) {

@@ -279,7 +279,6 @@ pub fn capabilities() -> Capabilities {
     Capabilities {
         search: true,
         catalog: true,
-        bulk_browse: true,
         tags: true,
         release_date: true,
         size: true,

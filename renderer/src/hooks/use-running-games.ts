@@ -24,7 +24,7 @@ function mergeGameActivity(
   return write
 }
 
-export function recordGameLaunch(appid: string, startedAt: number = Date.now()): Promise<void> {
+function recordGameLaunch(appid: string, startedAt: number = Date.now()): Promise<void> {
   if (!appid) return Promise.resolve()
   return mergeGameActivity(appid, { lastPlayedAt: startedAt })
 }
@@ -129,45 +129,6 @@ export function useRunningGame(appid: string | null | undefined): boolean {
   }, [appid])
 
   return running
-}
-
-export function useHasRunningGames(): boolean {
-  const [has, setHas] = useState<boolean>(() => cache.size > 0)
-
-  useEffect(() => {
-    ensurePresenceSubscription()
-    void hydrate()
-    const update = () => setHas(cache.size > 0)
-    listeners.add(update)
-    update()
-    return () => { listeners.delete(update) }
-  }, [])
-
-  return has
-}
-
-export type RunningSession = { appid: string; startedAt: number }
-
-export function useRunningGamesSessions(): RunningSession[] {
-  const [sessions, setSessions] = useState<RunningSession[]>(() =>
-    Array.from(cache).map((appid) => ({ appid, startedAt: sessionStartTimes.get(appid) ?? Date.now() }))
-  )
-
-  useEffect(() => {
-    ensurePresenceSubscription()
-    void hydrate()
-    const update = () =>
-      setSessions(Array.from(cache).map((appid) => ({ appid, startedAt: sessionStartTimes.get(appid) ?? Date.now() })))
-    listeners.add(update)
-    update()
-    return () => { listeners.delete(update) }
-  }, [])
-
-  return sessions
-}
-
-export function refreshRunningGames() {
-  return hydrate(true)
 }
 
 export function setRunningOptimistic(appid: string, running: boolean) {

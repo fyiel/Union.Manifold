@@ -93,7 +93,6 @@ pub fn capabilities() -> Capabilities {
     Capabilities {
         search: true,
         catalog: true,
-        bulk_browse: true,
         tags: true,
         release_date: false,
         size: false,
@@ -505,10 +504,6 @@ pub async fn get_detail(slug: &str) -> Option<SourceGame> {
             })
         })
         .await
-}
-
-pub async fn list_tags() -> Vec<String> {
-    GENRES.iter().map(|(_, n)| n.to_string()).collect()
 }
 
 #[cfg(test)]

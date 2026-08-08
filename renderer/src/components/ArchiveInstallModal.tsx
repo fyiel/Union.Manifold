@@ -191,7 +191,6 @@ export function ArchiveInstallModal({ open, game, installMetadata, onInstalled, 
       savePath: primaryFile?.path,
       startedAt: Date.now(),
       error: null,
-      spaceCheck: null,
     })
     setDownloadId(id)
     setStep("installing")
@@ -225,7 +224,6 @@ export function ArchiveInstallModal({ open, game, installMetadata, onInstalled, 
         savePath: primaryFile?.path,
         startedAt: Date.now(),
         error: result.error || "Failed to start installation",
-        spaceCheck: result.spaceCheck ?? null,
       })
       setErrorMsg(result.error || "Failed to start installation")
       setStep("error")

@@ -26,6 +26,14 @@ All notable changes to Union.Manifold. This project is a fork of
 
 ### Removed
 
+- The unused wand status command and dead trainer runtime frames (LOG,
+  SETRESULT, PROCESS) from the native trainer host
+- Dead bridge surface: sources_catalog/sources_tags commands, cloud
+  collection API (14 dead exports), controller preset/mapping enums,
+  user-history search/viewed tracking, browse mod fields the UI never
+  read, unused Tauri plugin/window permissions and radix-ui/react deps
+### Removed
+
 - Dead wire fields: popularity/nsfw/appid on game payloads, capability
   coverage/supports/scope maps, facet year/size ranges (renderer never
   read them), unused Nexus profileUrl/total/offset/summary/version fields,

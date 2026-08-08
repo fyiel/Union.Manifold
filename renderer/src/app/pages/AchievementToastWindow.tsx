@@ -30,6 +30,7 @@ export default function AchievementToastWindow() {
       timers.current.forEach(window.clearTimeout)
       document.documentElement.style.background = htmlBackground
       document.body.style.background = bodyBackground
+      document.body.style.overflow = ""
     }
   }, [])
 

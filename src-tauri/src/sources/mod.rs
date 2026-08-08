@@ -79,7 +79,6 @@ fn pool_sig(params: &QueryParams, ids: &[String]) -> String {
 pub struct Capabilities {
     pub search: bool,
     pub catalog: bool,
-    pub bulk_browse: bool,
     pub tags: bool,
     pub release_date: bool,
     pub size: bool,
@@ -284,15 +283,6 @@ async fn adapter_detail(id: &str, slug: &str) -> Option<SourceGame> {
         "empress" => adapters::empress::get_detail(slug).await,
         "kaoskrew" => adapters::kaoskrew::get_detail(slug).await,
         _ => None,
-    }
-}
-
-async fn adapter_tags(id: &str) -> Vec<String> {
-    match id {
-        "unioncrax" => adapters::unioncrax::list_tags().await,
-        "steamrip" => adapters::steamrip::list_tags().await,
-        "zeigames" => adapters::zeigames::list_tags().await,
-        _ => Vec::new(),
     }
 }
 
@@ -643,22 +633,6 @@ pub async fn sources_search(
 }
 
 #[tauri::command]
-pub async fn sources_catalog(
-    state: State<'_, AppState>,
-    offset: Option<usize>,
-    limit: Option<usize>,
-) -> Result<Value> {
-    let params = QueryParams {
-        offset: offset.unwrap_or(0),
-        limit: limit.unwrap_or(36),
-        balanced: true,
-        ..Default::default()
-    };
-    let res = run_query(&state.sources, params).await;
-    Ok(json!({ "ok": true, "games": res.games }))
-}
-
-#[tauri::command]
 pub async fn sources_detail(_state: State<'_, AppState>, sources: Vec<Value>) -> Result<Value> {
     let mut records: Vec<SourceGame> = Vec::new();
     for stub in &sources {
@@ -709,23 +683,6 @@ pub async fn sources_steam_meta(appid: u64) -> Result<Value> {
 #[tauri::command]
 pub async fn sources_protondb(appid: u64) -> Result<Value> {
     Ok(json!({ "ok": true, "data": protondb::summary(appid).await }))
-}
-
-#[tauri::command]
-pub async fn sources_tags(state: State<'_, AppState>) -> Result<Value> {
-    let ids = state.sources.active_ids(&None);
-    let mut by_source = serde_json::Map::new();
-    let mut all: HashSet<String> = HashSet::new();
-    for id in ids {
-        let tags = adapter_tags(&id).await;
-        for t in &tags {
-            all.insert(t.clone());
-        }
-        by_source.insert(id, json!(tags));
-    }
-    let mut tags: Vec<String> = all.into_iter().collect();
-    tags.sort();
-    Ok(json!({ "ok": true, "tags": tags, "bySource": by_source }))
 }
 
 #[tauri::command]

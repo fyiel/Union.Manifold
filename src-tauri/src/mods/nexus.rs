@@ -133,7 +133,7 @@ fn str_field(v: &Value, k: &str) -> String {
     v.get(k).and_then(|x| x.as_str()).unwrap_or("").to_string()
 }
 
-fn browse_mod_from_graphql(n: &Value, fallback_domain: &str) -> Option<Value> {
+fn browse_mod_from_graphql(n: &Value) -> Option<Value> {
     let id = n.get("modId")?.as_u64()?;
     let author = {
         let a = str_field(n, "author");
@@ -146,11 +146,6 @@ fn browse_mod_from_graphql(n: &Value, fallback_domain: &str) -> Option<Value> {
             a
         }
     };
-    let domain = n
-        .pointer("/game/domainName")
-        .and_then(|d| d.as_str())
-        .filter(|d| !d.is_empty())
-        .unwrap_or(fallback_domain);
     Some(json!({
         "remoteId": id.to_string(),
         "name": str_field(n, "name"),
@@ -158,7 +153,6 @@ fn browse_mod_from_graphql(n: &Value, fallback_domain: &str) -> Option<Value> {
         "picture": n.get("pictureUrl").and_then(|p| p.as_str()),
         "downloads": n.get("downloads").and_then(|d| d.as_u64()).unwrap_or(0),
         "endorsements": n.get("endorsements").and_then(|e| e.as_u64()).unwrap_or(0),
-        "pageUrl": mod_page_url(domain, id),
     }))
 }
 
@@ -170,7 +164,7 @@ const SEARCH_QUERY: &str = "query Mods($count: Int!, $offset: Int!, $filter: Mod
 const BROWSE_COUNT: u64 = 24;
 const BROWSE_QUERY: &str = "query($count:Int!,$offset:Int!,$filter:ModsFilter,$sort:[ModsSort!]){mods(count:$count,offset:$offset,filter:$filter,sort:$sort){totalCount nodes{modId name summary version author downloads endorsements fileSize pictureUrl updatedAt createdAt game{domainName} uploader{name}}}}";
 
-fn map_graphql_search(v: &Value, fallback_domain: &str, offset: u64) -> (Vec<Value>, bool) {
+fn map_graphql_search(v: &Value, offset: u64) -> (Vec<Value>, bool) {
     let total = v
         .pointer("/data/mods/totalCount")
         .and_then(|t| t.as_u64())
@@ -182,7 +176,7 @@ fn map_graphql_search(v: &Value, fallback_domain: &str, offset: u64) -> (Vec<Val
         .unwrap_or_default();
     let mods: Vec<Value> = nodes
         .iter()
-        .filter_map(|n| browse_mod_from_graphql(n, fallback_domain))
+        .filter_map(browse_mod_from_graphql)
         .collect();
     let has_more = !mods.is_empty() && offset + (mods.len() as u64) < total;
     (mods, has_more)
@@ -562,7 +556,7 @@ pub async fn nexus_browse(
             .unwrap_or_default();
         let mods: Vec<Value> = nodes
             .iter()
-            .filter_map(|n| browse_mod_from_graphql(n, &domain))
+            .filter_map(browse_mod_from_graphql)
             .collect();
         crate::logging::write_line(
             "info",
@@ -604,7 +598,7 @@ pub async fn nexus_search(domain: String, query: String, page: u32) -> Result<Va
             }
         });
         let v = graphql_post("search", body).await?;
-        let (mods, has_more) = map_graphql_search(&v, &domain, offset);
+        let (mods, has_more) = map_graphql_search(&v, offset);
         Ok(json!({ "ok": true, "mods": mods, "hasMore": has_more }))
     }
     .await;
@@ -985,7 +979,7 @@ mod tests {
             }"#,
         )
         .unwrap();
-        let (mods, has_more) = map_graphql_search(&v, "skyrimspecialedition", 0);
+        let (mods, has_more) = map_graphql_search(&v, 0);
         assert_eq!(mods.len(), 2);
         let m = &mods[0];
         assert_eq!(m["remoteId"], "266");
@@ -994,19 +988,13 @@ mod tests {
         assert_eq!(m["downloads"], 26722916);
         assert_eq!(m["endorsements"], 12345);
         assert_eq!(m["picture"], "https://staticdelivery.nexusmods.com/mod.jpg");
-        assert_eq!(
-            m["pageUrl"],
-            "https://www.nexusmods.com/skyrimspecialedition/mods/266"
-        );
+
         assert_eq!(mods[1]["author"], "someone");
-        assert_eq!(
-            mods[1]["pageUrl"],
-            "https://www.nexusmods.com/skyrimspecialedition/mods/42"
-        );
+
         assert!(has_more, "2 of 319 shown");
 
         let empty = json!({ "data": { "mods": { "totalCount": 1, "nodes": [] } } });
-        let (_, has_more_last) = map_graphql_search(&empty, "d", 40);
+        let (_, has_more_last) = map_graphql_search(&empty, 40);
         assert!(!has_more_last, "empty page ends pagination");
     }
 
@@ -1112,14 +1100,9 @@ mod tests {
             "updatedAt": "2026-01-02T03:04:05+00:00",
             "game": { "domainName": "stardewvalley" }
         });
-        let m = browse_mod_from_graphql(&node, "fallback").unwrap();
+        let m = browse_mod_from_graphql(&node).unwrap();
         assert_eq!(m["remoteId"], "100");
-        assert_eq!(
-            m["pageUrl"],
-            "https://www.nexusmods.com/stardewvalley/mods/100"
-        );
         let no_size = json!({ "modId": 7, "name": "x", "game": { "domainName": "" } });
-        let ms = browse_mod_from_graphql(&no_size, "dom").unwrap();
-        assert_eq!(ms["pageUrl"], "https://www.nexusmods.com/dom/mods/7");
+        let _ = browse_mod_from_graphql(&no_size).unwrap();
     }
 }

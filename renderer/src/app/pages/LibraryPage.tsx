@@ -473,7 +473,6 @@ export function LibraryPage() {
 
   return (
     <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column" }}>
-      {}
       <header style={{ flexShrink: 0, padding: "26px 36px 0" }}>
         <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", marginBottom: 20 }}>
           <div>
@@ -523,7 +522,6 @@ export function LibraryPage() {
         </div>
       </header>
 
-      {}
       <div className="mf-scroll" style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "22px 36px 40px" }}>
         <InstallingStrip installingMeta={installingMeta} installedIds={installedIds} filter={filter} query={query} />
 
@@ -719,7 +717,7 @@ const LibRow = memo(function LibRow({ game: g, hasUpdate, onOpen, onContextMenu,
 })
 
 function rectFromPoint(x: number, y: number): DOMRect {
-  return { x, y, left: x, top: y, right: x, bottom: y, width: 0, height: 0, toJSON() { return {} } } as DOMRect
+  return new DOMRect(x, y, 0, 0)
 }
 
 const listHead = { fontFamily: MONO, fontSize: 9.5, letterSpacing: "0.14em", textTransform: "uppercase" as const, color: "var(--mf-t5)" }

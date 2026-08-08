@@ -20,8 +20,7 @@ const ADV_PAGE = 60
 
 function capKeyForSort(sort: AdvSort): "title" | "size" | null {
   if (sort === "a-z") return "title"
-  if (sort === "size") return "size"
-  return null
+    return null
 }
 function toBackendSort(sort: AdvSort, hasText: boolean): SourceSortKey {
   if (sort === "a-z") return "title"
@@ -101,7 +100,7 @@ export function AdvancedSearchPage() {
       const id = ++reqId.current
       offsetRef.current = 0
       setLoading(true)
-      void querySources(buildParams(0))
+      void querySources(buildParams(0), id)
         .then((res) => {
           if (id !== reqId.current) return
           rememberGames(res.games)
@@ -125,7 +124,7 @@ export function AdvancedSearchPage() {
     setLoadingMore(true)
     const id = reqId.current
     try {
-      const res = await querySources(buildParams(offsetRef.current))
+      const res = await querySources(buildParams(offsetRef.current), id)
       if (id !== reqId.current) return
       rememberGames(res.games)
       setGames((prev) => {
@@ -172,7 +171,7 @@ export function AdvancedSearchPage() {
 
   const capBy = useMemo(() => {
     const m: Record<string, string[]> = {}
-    for (const p of caps?.perSource || []) m[p.id] = (p.sort || []) as string[]
+    for (const p of caps?.perSource || []) m[p.id] = (p.sort || [])
     return m
   }, [caps])
   const capKey = capKeyForSort(sort)
